@@ -15,11 +15,18 @@
 // draft, save, run (and the library's save and reset). Refusals come back as the backend's message and render
 // inline: another project kind (409), not saved or solved (422), a campus
 // file that does not build (422, naming the field).
-import { useEffect, useState } from 'react'
+//
+// A run is one synchronous request (seconds to minutes; `CAMPUS_RUN_TIMEOUT_MS`).
+// When it gets no answer (a timeout, a dropped connection) the backend may still
+// be running it and will save its results, so the panel never treats the results
+// it shows as the new run's: it re-reads the state, warns while the backend says
+// a run is going on (`run_in_progress`), and says once it ends whether the
+// results it saved are the run asked for.
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, RefreshCw, Save, Square, Wand2, Workflow } from 'lucide-react'
 import {
-  campusApi, errorText, isOtherKind,
+  campusApi, errorText, isNoAnswer, isOtherKind,
   type CampusSettings, type CampusState, type CheckStatus, type ComplianceRow, type InvestedComplianceRow,
   type MilpJobRecord,
 } from '../api/campusElectrical'
@@ -31,6 +38,16 @@ import CampusLibrarySection from './CampusLibrarySection'
 import { useCampusMilpJob } from './useCampusMilpJob'
 
 export const CAMPUS_KEY = (name: string) => ['campusElectrical', 'state', name] as const
+/** How often the state is re-read while a run goes on without an answer. */
+export const CAMPUS_RUN_POLL_MS = 1500
+
+/** A run whose request got no answer: what was asked, and why. */
+interface LostRun { settings: CampusSettings; why: string }
+
+function sameSettings(a: CampusSettings | null, b: CampusSettings): boolean {
+  if (a == null) return false
+  return (Object.keys(b) as (keyof CampusSettings)[]).every(k => a[k] === b[k])
+}
 
 const INPUT = 'px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20'
 const DEFAULT_SETTINGS: CampusSettings = {
@@ -80,7 +97,25 @@ export default function CampusElectricalPanel() {
 
 function CampusView({ name }: { name: string }) {
   const qc = useQueryClient()
-  const state = useQuery({ queryKey: CAMPUS_KEY(name), queryFn: () => campusApi.state(name), retry: false })
+  const [lost, setLost] = useState<LostRun | null>(null)
+  const [outcome, setOutcome] = useState<string | null>(null)
+  const state = useQuery({
+    queryKey: CAMPUS_KEY(name), queryFn: () => campusApi.state(name), retry: false,
+    refetchInterval: q => (lost != null || q.state.data?.run_in_progress ? CAMPUS_RUN_POLL_MS : false),
+  })
+  // Once a read made after the lost request (the effect runs on new data only) finds no run
+  // going on, the backend has ended: say whether what it saved is the run asked for.
+  const lostRef = useRef(lost)
+  lostRef.current = lost
+  useEffect(() => {
+    const l = lostRef.current
+    if (l == null || !state.data || state.data.run_in_progress) return
+    setOutcome(sameSettings(state.data.settings, l.settings)
+      ? 'The backend finished the run after the request went unanswered: the results below are that run\'s.'
+      : 'The backend saved no results for the run asked for: the results below, if any, are from an earlier run. '
+        + 'Run the study again.')
+    setLost(null)
+  }, [state.data, state.dataUpdatedAt])
 
   if (state.isError && isOtherKind(state.error)) {
     return (
@@ -104,6 +139,12 @@ function CampusView({ name }: { name: string }) {
   }
   const refresh = (data?: CampusState) =>
     data ? qc.setQueryData(CAMPUS_KEY(name), data) : qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })
+  const onRunStart = () => { setOutcome(null); setLost(null) }
+  const onRunLost = (settings: CampusSettings, why: string) => {
+    setLost({ settings, why })
+    void qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })
+  }
+  const pending = lost != null || state.data.run_in_progress === true
 
   return (
     <PageBody>
@@ -122,8 +163,11 @@ function CampusView({ name }: { name: string }) {
         onProfilesChanged={() => qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })}
       />
       <CampusLibrarySection name={name} onChanged={() => qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })} />
-      {state.data.campus_yaml && <RunSection name={name} state={state.data} onChange={refresh} />}
-      {state.data.results && <ResultsSection state={state.data} />}
+      {state.data.campus_yaml && (
+        <RunSection name={name} state={state.data} onChange={refresh} lost={lost} outcome={outcome} pending={pending}
+                    onRunStart={onRunStart} onRunLost={onRunLost} />
+      )}
+      {state.data.results && <ResultsSection state={state.data} pending={pending} />}
     </PageBody>
   )
 }
@@ -190,8 +234,16 @@ function CampusFileSection({ name, state, onChange }: {
   )
 }
 
-function RunSection({ name, state, onChange }: {
+function RunSection({ name, state, onChange, lost, outcome, pending, onRunStart, onRunLost }: {
   name: string; state: CampusState; onChange: (d?: CampusState) => unknown
+  /** The run whose request got no answer, while the panel waits for the backend. */
+  lost: LostRun | null
+  /** Once it ended: whether the backend saved the run asked for. */
+  outcome: string | null
+  /** A run is going on in the backend: no second one is asked for. */
+  pending: boolean
+  onRunStart: () => void
+  onRunLost: (settings: CampusSettings, why: string) => void
 }) {
   const initial = state.settings ?? DEFAULT_SETTINGS
   const [k, setK] = useState(String(initial.k))
@@ -215,10 +267,10 @@ function RunSection({ name, state, onChange }: {
     invest, pcc_switchgear_by_operator: byOperator, pcc_tap_control: tapsByOperator ? 'grid_operator' : 'campus',
   })
   const run = useMutation({
-    mutationFn: () => campusApi.run(name, settings()),
-    onMutate: () => setRefusal(null),
+    mutationFn: (s: CampusSettings) => campusApi.run(name, s),
+    onMutate: () => { setRefusal(null); onRunStart() },
     onSuccess: data => onChange(data),
-    onError: e => setRefusal(errorText(e)),
+    onError: (e, s) => (isNoAnswer(e) ? onRunLost(s, errorText(e)) : setRefusal(errorText(e))),
   })
   // The joint optimisation: a background job, polled while it runs; when it
   // ends the state is re-read so its results appear beside the least-cost ones.
@@ -226,10 +278,13 @@ function RunSection({ name, state, onChange }: {
   const hasLeastCost = state.results?.investment != null
   const startMilp = () => {
     setRefusal(null)
-    milp.start(settings()).catch(e => setRefusal(errorText(e)))
+    milp.start(settings()).catch(e => setRefusal(isNoAnswer(e)
+      ? `No answer from the backend to the start of the joint optimisation (${errorText(e)}). It may have started: `
+        + 'its progress is read again.'
+      : errorText(e)))
   }
   const cancelMilp = () => { milp.cancel().catch(e => setRefusal(errorText(e))) }
-  const busy = run.isPending || milp.isStarting || milp.isRunning
+  const busy = run.isPending || milp.isStarting || milp.isRunning || pending
 
   return (
     <PageSection title="Study settings" hint="Applies to the next run">
@@ -267,7 +322,7 @@ function RunSection({ name, state, onChange }: {
           <input type="checkbox" aria-label="PCC transformer taps held by the grid operator (at the campus file's position)"
                  checked={tapsByOperator} disabled={!invest} onChange={e => setTapsByOperator(e.target.checked)} />
         </Field>
-        <Btn variant="primary" onClick={() => run.mutate()} disabled={busy}>
+        <Btn variant="primary" onClick={() => run.mutate(settings())} disabled={busy}>
           <Play size={13} /> {run.isPending ? 'Running…' : 'Run study'}
         </Btn>
         <Btn
@@ -286,6 +341,13 @@ function RunSection({ name, state, onChange }: {
       </p>
       {milp.record && <MilpProgress record={milp.record} cancelling={milp.cancelling} onCancel={cancelMilp} />}
       {refusal && <p className="text-[12px] text-danger mt-2">{refusal}</p>}
+      {lost && (
+        <p data-testid="campus-run-lost" role="alert" className="text-[12px] text-warn mt-2">
+          No answer from the backend to the run ({lost.why}). It may still be running the study, and saves its
+          results when it ends; the panel reads them again until then.
+        </p>
+      )}
+      {outcome && <p data-testid="campus-run-outcome" className="text-[12px] mt-2">{outcome}</p>}
     </PageSection>
   )
 }
@@ -329,7 +391,7 @@ function StatusTag({ s }: { s: CheckStatus }) {
   return <Tag tone={STATUS_TONE[s]}>{STATUS_TEXT[s]}</Tag>
 }
 
-function ResultsSection({ state }: { state: CampusState }) {
+function ResultsSection({ state, pending }: { state: CampusState; pending: boolean }) {
   const r = state.results!
   const req = r.requirement
   // The investment's table re-solves every check with the assets in place; without it
@@ -338,6 +400,13 @@ function ResultsSection({ state }: { state: CampusState }) {
   const rows: ComplianceRow[] = r.compliance_invested ?? r.compliance
   return (
     <>
+      {pending && (
+        <p data-testid="campus-run-pending" role="status"
+           className="text-[12px] text-warn border border-warn/40 rounded px-3 py-2">
+          A study run is going on in the backend: the results below are from the previous run, not the one being
+          run. They are replaced when it ends.
+        </p>
+      )}
       {state.stale && (
         <p className="text-[12px] text-warn border border-warn/40 rounded px-3 py-2">
           The campus file or the project has changed since this run. Run the study again before using these numbers.

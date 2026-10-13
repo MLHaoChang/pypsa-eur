@@ -261,6 +261,83 @@ describe('CampusElectricalPanel', () => {
     expect(within(intro).getByText(/steady-state/i)).toBeTruthy()
   })
 
+  describe('a run that gets no answer (it timed out or the connection dropped)', () => {
+    const TIMEOUT = { code: 'ECONNABORTED', message: 'timeout of 900000ms exceeded' }
+    const asked = { k: 3, pf: 0.95, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true, invest: false,
+                    pcc_switchgear_by_operator: false, pcc_tap_control: 'campus' as const }
+
+    it('re-reads the state and never shows the previous results as the new run while the backend runs it', async () => {
+      api.state.mockResolvedValue(sized())
+      api.run.mockRejectedValue(TIMEOUT)
+      renderPanel()
+      await screen.findByTestId('compliance-pcc_reactive')
+      expect(screen.queryByTestId('campus-run-pending')).toBeNull()
+      const reads = api.state.mock.calls.length
+      api.state.mockResolvedValue({ ...sized(), run_in_progress: true })
+      await userEvent.click(screen.getByRole('button', { name: 'Run study' }))
+      await waitFor(() => expect(api.state.mock.calls.length).toBeGreaterThan(reads))
+      expect((await screen.findByTestId('campus-run-lost')).textContent).toMatch(/no answer.*timeout of 900000ms exceeded/i)
+      const pending = await screen.findByTestId('campus-run-pending')
+      expect(pending.textContent).toMatch(/previous run/)
+      expect((screen.getByRole('button', { name: 'Run study' }) as HTMLButtonElement).disabled).toBe(true)
+      // the backend finishes: the next read has the new run, saved with the settings asked for
+      const done = sized()
+      done.results!.compliance[0] = { ...done.results!.compliance[0], value: 12.5 }
+      api.state.mockResolvedValue({ ...done, settings: asked, run_in_progress: false })
+      await waitFor(() => expect(screen.queryByTestId('campus-run-pending')).toBeNull(), { timeout: 5000 })
+      expect(screen.getByTestId('compliance-pcc_reactive').textContent).toContain('12.5')
+      expect(screen.queryByTestId('campus-run-lost')).toBeNull()
+      expect(screen.getByTestId('campus-run-outcome').textContent).toMatch(/finished the run/)
+    })
+
+    it('says when the backend saved no run with the settings asked for', async () => {
+      api.state.mockResolvedValue(sized())
+      api.run.mockRejectedValue({ code: 'ERR_NETWORK', message: 'Network Error' })
+      renderPanel()
+      await screen.findByTestId('compliance-pcc_reactive')
+      await userEvent.clear(screen.getByLabelText('Hours per criterion'))
+      await userEvent.type(screen.getByLabelText('Hours per criterion'), '5')
+      await userEvent.click(screen.getByRole('button', { name: 'Run study' }))
+      // the backend is not running it (it failed, or never got it): the earlier run's settings stand
+      const outcome = await screen.findByTestId('campus-run-outcome', {}, { timeout: 5000 })
+      expect(outcome.textContent).toMatch(/no results for the run asked for/)
+      expect(outcome.textContent).toMatch(/earlier run/)
+    })
+
+    it('keeps reading while the backend cannot be reached, until it answers', async () => {
+      api.state.mockResolvedValue(sized())
+      api.run.mockRejectedValue({ code: 'ERR_NETWORK', message: 'Network Error' })
+      renderPanel()
+      await screen.findByTestId('compliance-pcc_reactive')
+      api.state.mockRejectedValue({ code: 'ERR_NETWORK', message: 'Network Error' })
+      await userEvent.click(screen.getByRole('button', { name: 'Run study' }))
+      expect(await screen.findByTestId('campus-run-lost')).toBeTruthy()
+      const reads = api.state.mock.calls.length
+      await waitFor(() => expect(api.state.mock.calls.length).toBeGreaterThan(reads + 1), { timeout: 5000 })
+      expect(screen.getByTestId('campus-run-pending')).toBeTruthy()
+      api.state.mockResolvedValue({ ...sized(), settings: asked })
+      expect((await screen.findByTestId('campus-run-outcome', {}, { timeout: 5000 })).textContent).toMatch(/finished the run/)
+    })
+
+    it('keeps a refusal the backend answered as a refusal, without re-reading', async () => {
+      api.state.mockResolvedValue(sized())
+      api.run.mockRejectedValue({ code: 'ERR_BAD_REQUEST', response: { status: 422, data: { detail: 'k is too big' } } })
+      renderPanel()
+      await screen.findByTestId('compliance-pcc_reactive')
+      const reads = api.state.mock.calls.length
+      await userEvent.click(screen.getByRole('button', { name: 'Run study' }))
+      expect(await screen.findByText('k is too big')).toBeTruthy()
+      expect(screen.queryByTestId('campus-run-lost')).toBeNull()
+      expect(api.state.mock.calls.length).toBe(reads)
+    })
+
+    it('shows the pending warning whenever the backend says a run is going on', async () => {
+      api.state.mockResolvedValue({ ...sized(), run_in_progress: true })
+      renderPanel()
+      expect((await screen.findByTestId('campus-run-pending')).textContent).toMatch(/previous run/)
+    })
+  })
+
   describe('the joint optimisation (MILP) job', () => {
     const MILP = 'Joint optimisation (MILP, slow — minutes)'
     const bought: InvestmentRow = {
@@ -338,6 +415,22 @@ describe('CampusElectricalPanel', () => {
       // the next poll sees the job ended
       await waitFor(() => expect(screen.getByTestId('milp-progress').textContent).toMatch(/was cancelled/), { timeout: 4000 })
       await waitFor(() => expect(api.state.mock.calls.length).toBeGreaterThan(reads))
+    })
+
+    it('re-reads the job and the state when its start gets no answer: it may have started', async () => {
+      api.state.mockResolvedValue(leastCost())
+      api.milpStatus.mockResolvedValue(null)
+      api.startMilp.mockRejectedValue({ code: 'ECONNABORTED', message: 'timeout of 900000ms exceeded' })
+      renderPanel()
+      const btn = await screen.findByRole('button', { name: MILP })
+      const reads = { state: api.state.mock.calls.length, milp: api.milpStatus.mock.calls.length }
+      api.milpStatus.mockResolvedValue(record({ iteration: null, max_iter: null, best_cost: null,
+                                                message: 'the least-cost run first' }))
+      await userEvent.click(btn)
+      expect(await screen.findByText(/no answer from the backend to the start of the joint optimisation/i)).toBeTruthy()
+      await waitFor(() => expect(api.milpStatus.mock.calls.length).toBeGreaterThan(reads.milp))
+      await waitFor(() => expect(api.state.mock.calls.length).toBeGreaterThan(reads.state))
+      expect((await screen.findByTestId('milp-progress')).textContent).toContain('the least-cost run first')
     })
 
     it('shows a failed job with its reason and a refused start inline', async () => {

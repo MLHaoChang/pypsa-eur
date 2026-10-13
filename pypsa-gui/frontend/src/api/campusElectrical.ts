@@ -341,6 +341,10 @@ export interface CampusState {
   owner_assets_unresolved?: number
   /** The joint optimisation's job and results (plan C12). */
   milp?: CampusMilp
+  /** A study run is going on in the backend now (its own request, another
+   *  tab's, the copilot's, or the joint optimisation's least-cost run): the
+   *  results are the previous run's until it ends. Absent from an older backend. */
+  run_in_progress?: boolean
 }
 
 /** The asset library: the project's copy, else the shipped default. */
@@ -428,6 +432,16 @@ export interface GridCodeDraft {
 }
 
 const quiet = { skipErrorToast: true } as const
+
+/** A study run is one synchronous request: seconds to minutes of AC load flows
+ *  (18 to 31 s on a realistic campus at 3 hours per criterion, growing with the
+ *  hours), and starting the joint optimisation makes that run first unless a
+ *  fresh one exists. The client's 30 s default would abandon the request while
+ *  the backend finishes and saves the run, so these calls override it, as the
+ *  bundle download and import do (`projects.ts`). */
+export const CAMPUS_RUN_TIMEOUT_MS = 900_000
+/** Drafting loads the whole saved network, as a bundle download does: its 180 s. */
+export const CAMPUS_DRAFT_TIMEOUT_MS = 180_000
 const base = (project: string) => `/campus-electrical/${encodeURIComponent(project)}`
 const codes = (project: string) => `${base(project)}/grid-codes`
 
@@ -438,7 +452,8 @@ export const campusApi = {
   /** Draft the campus file from the project's solved network. Refused (409)
    *  rather than overwrite an existing file unless `overwrite`. */
   draft: (project: string, overwrite = false) =>
-    client.post<{ campus_yaml: string; skipped: string[] }>(`${base(project)}/draft`, { overwrite }, quiet)
+    client.post<{ campus_yaml: string; skipped: string[] }>(`${base(project)}/draft`, { overwrite },
+      { ...quiet, timeout: CAMPUS_DRAFT_TIMEOUT_MS })
       .then(r => r.data),
 
   /** Save the user's campus file; the backend builds it and answers 422 naming
@@ -446,15 +461,18 @@ export const campusApi = {
   save: (project: string, yaml: string) =>
     client.put<{ campus_yaml: string }>(`${base(project)}/campus`, { yaml }, quiet).then(r => r.data),
 
-  /** Prepare, rank and size the campus; returns the new state. Seconds of CPU. */
+  /** Prepare, rank and size the campus; returns the new state. Seconds to
+   *  minutes of CPU: see `CAMPUS_RUN_TIMEOUT_MS`. */
   run: (project: string, settings: CampusSettings) =>
-    client.post<CampusState>(`${base(project)}/run`, settings, quiet).then(r => r.data),
+    client.post<CampusState>(`${base(project)}/run`, settings, { ...quiet, timeout: CAMPUS_RUN_TIMEOUT_MS })
+      .then(r => r.data),
 
   /** Start the joint optimisation (MILP, minutes) in the background. The
    *  least-cost run is made first unless a fresh one with these settings exists.
    *  409 while a job runs for any project. */
   startMilp: (project: string, settings: CampusSettings) =>
-    client.post<MilpJobRecord>(`${base(project)}/milp`, settings, quiet).then(r => r.data),
+    client.post<MilpJobRecord>(`${base(project)}/milp`, settings, { ...quiet, timeout: CAMPUS_RUN_TIMEOUT_MS })
+      .then(r => r.data),
 
   /** The job's record; null when no job has run since the backend started. */
   milpStatus: (project: string) =>
@@ -536,6 +554,15 @@ export const campusApi = {
 export function errorText(e: unknown): string {
   const detail = (e as { response?: { data?: { detail?: unknown } } } | null)?.response?.data?.detail
   return formatApiDetail(detail, (e as Error)?.message ?? 'Request failed')
+}
+
+/** The request got no answer: it timed out or the connection dropped. The
+ *  backend may still be running it (a study run saves its results when it
+ *  ends), unlike a refusal, which comes with a response. */
+export function isNoAnswer(err: unknown): boolean {
+  const e = err as { response?: unknown; code?: string } | null
+  if (e == null || e.response != null) return false
+  return e.code === 'ECONNABORTED' || e.code === 'ETIMEDOUT' || e.code === 'ERR_NETWORK'
 }
 
 export function isOtherKind(err: unknown): boolean {
