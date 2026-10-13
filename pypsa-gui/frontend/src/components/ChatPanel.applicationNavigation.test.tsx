@@ -5,7 +5,7 @@ import { useUIStore } from '../store/uiStore'
 const panels = [
   'timeseries', 'simparams', 'horizon', 'results', 'snapshots', 'issues',
   'overview', 'scenarios', 'capacityBounds', 'solveQueue', 'workspace',
-  'settings', 'gridspine', 'hubDesign', 'reports', 'campusElectrical',
+  'settings', 'gridspine', 'hubDesign', 'reports', 'campusElectrical', 'decision',
 ] as const
 const results = [
   'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'economics',

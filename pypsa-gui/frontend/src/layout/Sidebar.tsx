@@ -8,7 +8,7 @@ import {
   Camera, LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
   GitBranch as GitBranchIcon, ListChecks, FlaskConical,
-  MessageSquare, LayoutGrid, Users, FileText, Compass, Cable,
+  MessageSquare, LayoutGrid, Users, FileText, Compass, Cable, Scale,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
@@ -1217,6 +1217,13 @@ function StudiesSectionContent({ onCloseModal }: { onCloseModal?: () => void }) 
         title="Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word."
         active={activeSlidePanel === 'reports'}
         onClick={() => { setSlidePanel(activeSlidePanel === 'reports' ? null : 'reports'); onCloseModal?.() }}
+      />
+      {/* S8: the decision panel (guided investment study). It lists this
+          project's decision studies, or the one last opened. */}
+      <SItem icon={<Scale size={15} />} label="Decision study"
+        title="Answer an investment question (do I need a battery?) with a verdict, a size, a value and a report."
+        active={activeSlidePanel === 'decision'}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'decision' ? null : 'decision'); onCloseModal?.() }}
       />
     </div>
   )
