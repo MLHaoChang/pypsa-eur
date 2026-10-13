@@ -33,7 +33,7 @@ import {
 import { useUIStore } from '../store/uiStore'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
-import CampusInvestmentSection, { TableScroll, formatEur } from './CampusInvestmentSection'
+import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
 import CampusLibrarySection from './CampusLibrarySection'
 import { useCampusMilpJob } from './useCampusMilpJob'
 
@@ -339,7 +339,10 @@ function RunSection({ name, state, onChange, lost, outcome, pending, onRunStart,
         background; you can cancel it and keep the best choice found so far.
         {!hasLeastCost && ' It needs a least-cost run first: run the study with assets bought from the library.'}
       </p>
-      {milp.record && <MilpProgress record={milp.record} cancelling={milp.cancelling} onCancel={cancelMilp} />}
+      {milp.record && (
+        <MilpProgress record={milp.record} cancelling={milp.cancelling} onCancel={cancelMilp}
+                      stale={state.milp?.stale === true} />
+      )}
       {refusal && <p className="text-[12px] text-danger mt-2">{refusal}</p>}
       {lost && (
         <p data-testid="campus-run-lost" role="alert" className="text-[12px] text-warn mt-2">
@@ -353,18 +356,25 @@ function RunSection({ name, state, onChange, lost, outcome, pending, onRunStart,
 }
 
 /** The job's line: while it runs, its iteration and best cost against the
- *  least-cost one, with Cancel; once ended, how it ended. */
-function MilpProgress({ record, cancelling, onCancel }: {
+ *  least-cost one, with Cancel; once ended, how it ended, or that its result is
+ *  stale. Iteration 0 is the warm start (the least-cost choice re-solved), so it
+ *  is named, not counted: the counts agree with the summary and the history. */
+function MilpProgress({ record, cancelling, onCancel, stale }: {
   record: MilpJobRecord; cancelling: boolean; onCancel: () => void
+  /** The least-cost run the finished result came from has changed since. */
+  stale: boolean
 }) {
   if (record.state === 'running') {
     const started = record.iteration != null && record.max_iter != null
+    const best = `best ${formatEur(record.best_cost)}/a vs least cost ${formatEur(record.c8_cost)}/a`
     return (
       <div data-testid="milp-progress" className="flex items-center gap-3 mt-2 text-[12px]">
         <span className="tabular-nums">
-          {started
-            ? `Iteration ${record.iteration} of ${record.max_iter} · best ${formatEur(record.best_cost)}/a vs least cost ${formatEur(record.c8_cost)}/a`
-            : `Joint optimisation running: ${record.message}`}
+          {!started
+            ? `Joint optimisation running: ${record.message}`
+            : record.iteration === 0
+              ? `Warm start solved, 0 of ${record.max_iter} iterations · ${best}`
+              : `Iteration ${record.iteration} of ${record.max_iter} · ${best}`}
           {cancelling && <span className="text-muted"> · cancelling…</span>}
         </span>
         <Btn onClick={onCancel} disabled={cancelling}><Square size={12} /> Cancel</Btn>
@@ -378,11 +388,15 @@ function MilpProgress({ record, cancelling, onCancel }: {
       </p>
     )
   }
+  const ended = record.state === 'cancelled' ? 'The joint optimisation was cancelled' : 'The joint optimisation has finished'
   return (
-    <p data-testid="milp-progress" className="text-[12px] text-muted mt-2">
-      {record.state === 'cancelled'
-        ? 'The joint optimisation was cancelled; the best choice it had found is shown under Investment.'
-        : 'The joint optimisation has finished; its choice is shown under Investment.'}
+    <p data-testid="milp-progress" className={`text-[12px] mt-2 ${stale ? 'text-warn' : 'text-muted'}`}>
+      {stale
+        ? `${ended}, but the least-cost run it started from has changed since: its result is stale. Run it again `
+          + 'before using it.'
+        : record.state === 'cancelled'
+          ? `${ended}; the best choice it had found is shown under Joint optimisation.`
+          : `${ended}; its choice is shown under Joint optimisation.`}
     </p>
   )
 }
@@ -447,7 +461,11 @@ function ResultsSection({ state, pending }: { state: CampusState; pending: boole
                     <td data-testid={`compliance-worst-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums">
                       {num(value, 3)} {c.unit} <span className="text-muted">{at}</span>
                     </td>
-                    <td className="pr-3 whitespace-nowrap align-top tabular-nums text-muted">{num(c.limit, 3)} {c.unit}</td>
+                    <td data-testid={`compliance-limit-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums text-muted">
+                    {c.limit_min != null && c.limit_max != null
+                      ? `${num(c.limit_min, 3)}–${num(c.limit_max, 3)} ${c.unit}`
+                      : `${num(c.limit, 3)} ${c.unit}`}
+                  </td>
                     <td className="align-top">
                       <div>{detail}</div>
                       <div className="text-[11px] text-muted flex items-start gap-1.5 mt-0.5">

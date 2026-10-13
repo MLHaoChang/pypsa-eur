@@ -392,6 +392,22 @@ describe('compliance with the investment', () => {
       .toBe('112.500 % 2030 · h158 · N-1:TR1')
   })
 
+  it('shows the whole band as the limit of a voltage row, and the single limit otherwise', async () => {
+    const base = results()
+    api.state.mockResolvedValue(stateWith(results({
+      compliance_invested: base.compliance_invested!.map(c => (c.check === 'pcc_voltage'
+        ? { ...c, limit: 0.9, limit_min: 0.9, limit_max: 1.118 } : c)),
+    })))
+    renderPanel()
+    expect((await screen.findByTestId('compliance-limit-pcc_voltage')).textContent).toBe('0.900–1.118 pu')
+    expect(screen.getByTestId('compliance-limit-pcc_reactive').textContent).toBe('13.150 Mvar')
+  })
+
+  it('shows the single limit of a voltage row from a run before the band was kept', async () => {
+    renderPanel()
+    expect((await screen.findByTestId('compliance-limit-pcc_voltage')).textContent).toBe('0.900 pu')
+  })
+
   it('says in the header that the with-assets column is an AC re-solve', async () => {
     renderPanel()
     expect((await screen.findByText(/With the assets \(AC re-solved\)/))).toBeTruthy()
@@ -408,7 +424,7 @@ describe('the joint optimisation beside the least-cost choice', () => {
     compliance_invested: [],
     history: [
       { iteration: 0, cost: 261_526.96, feasible: true, accepted: true, choice: 'transformer GRID_IMPORT: 1 x TR63',
-        note: "C8's result, the warm start" },
+        note: 'the least-cost choice, re-solved as the warm start' },
       { iteration: 1, cost: 150_000, feasible: true, accepted: true, choice: 'transformer GRID_IMPORT: 1 x TR50', note: '' },
     ],
     comparison: [
@@ -438,7 +454,7 @@ describe('the joint optimisation beside the least-cost choice', () => {
     renderPanel()
     const block = await screen.findByTestId('campus-milp')
     expect(within(block).getByTestId('milp-summary').textContent)
-      .toMatch(/Joint optimisation €150,000\/a against least cost €261,527\/a, €111,527\/a less\. 1 iteration, converged/)
+      .toMatch(/Joint optimisation €150,000\/a against least cost €261,527\/a, €111,527\/a less\. 1 iteration after the warm start, converged/)
     const t = within(block).getByTestId('milp-compare-transformer GRID_IMPORT').textContent!
     expect(t).toContain('1 x TR_110_20_63')
     expect(t).toContain('€193,520')
@@ -461,7 +477,7 @@ describe('the joint optimisation beside the least-cost choice', () => {
   })
 
   it('labels a fallback to the least-cost choice with its reason', async () => {
-    const reason = "no AC-feasible point is cheaper than C8's (261,527 against 261,527 per year)"
+    const reason = 'no AC-feasible point is cheaper than the least-cost choice (261,527 against 261,527 per year)'
     api.state.mockResolvedValue(withMilp({ results: milpResults({
       fallback: reason, summary: { ...milpResults().summary, fallback: true, milp_cost: 261_526.96 } }) }))
     renderPanel()
@@ -489,10 +505,25 @@ describe('the joint optimisation beside the least-cost choice', () => {
     renderPanel()
     const details = (await screen.findByTestId('milp-history')) as HTMLDetailsElement
     expect(details.open).toBe(false)
-    expect(details.textContent).toContain('Iteration history (2)')
-    await userEvent.click(within(details).getByText('Iteration history (2)'))
+    expect(details.textContent).toContain('Iteration history (warm start + 1 iteration)')
+    await userEvent.click(within(details).getByText('Iteration history (warm start + 1 iteration)'))
     expect(details.open).toBe(true)
     expect(details.textContent).toContain('1. €150,000/a, AC-feasible, accepted — transformer GRID_IMPORT: 1 x TR50')
+    expect(details.textContent).toContain('Warm start: €261,527/a, AC-feasible, accepted')
+  })
+
+  it('counts a history without a warm start as iterations only', async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults({ history: [] }) }))
+    renderPanel()
+    expect((await screen.findByTestId('milp-history')).textContent).toContain('Iteration history (0 iterations)')
+  })
+
+  it('says nothing of an internal plan step in the summary, the fallback or the notes', async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults() }))
+    renderPanel()
+    const block = await screen.findByTestId('campus-milp')
+    await userEvent.click(within(block).getByText(/Iteration history/))
+    expect(block.textContent).not.toMatch(/\bC(8|11|12)\b/)
   })
 
   it('warns when the least-cost run it was based on has changed', async () => {
@@ -545,6 +576,15 @@ describe('investment: units added next to an existing transformer group (plan C1
     expect(within(add).getByTestId('invest-reason').textContent)
       .toBe('added in parallel with TR1, TR2 (existing); vector group assumed compatible (not given)')
     expect(within(keep).queryByTestId('invest-reason')).toBeNull()                 // nothing to say
+  })
+
+  it('shows why a group was replaced and what it replaced, with its commissioning year', async () => {
+    const reason = 'replaces GRID_IMPORT (in service since 2015): 1 x 50 MVA as is, 52.33 MVA a unit needed with '
+      + 'the 20 % design margin'
+    api.state.mockResolvedValue(stateWith(results({ investment: [row({ action: 'replace', reason })] })))
+    renderPanel()
+    const r = await screen.findByTestId('invest-transformer GRID_IMPORT')
+    expect(within(r).getByTestId('invest-reason').textContent).toBe(reason)
   })
 
   it('does not repeat an unresolved reason in the table: the alert lists it', async () => {

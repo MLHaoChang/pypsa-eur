@@ -41,6 +41,10 @@ export interface ComplianceRow {
   /** The case of the worst reading (`intact`, `N-1:<unit>`); null for the
    *  reactive exchange and the fault level, absent in an older run. */
   worst_case?: string | null
+  /** The band a voltage row's limit is an edge of; null for the other checks,
+   *  absent in an older run. */
+  limit_min?: number | null
+  limit_max?: number | null
   clause: string
   source: 'code' | 'assumed'
   detail: string

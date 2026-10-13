@@ -327,7 +327,15 @@ const STOP_TEXT: Record<MilpStop, string> = {
   cancelled: 'cancelled',
 }
 
-/** The joint optimisation's choice beside the least-cost one. */
+/** `1 iteration`, `3 iterations`. */
+export function iterationsText(n: number): string {
+  return n === 1 ? '1 iteration' : `${n} iterations`
+}
+
+/** The joint optimisation's choice beside the least-cost one. Its counts agree:
+ *  the engine's `iterations` (and the job's `iteration`) count the steps after
+ *  the warm start, which is the least-cost choice re-solved and the history's
+ *  row 0, so the warm start is named beside them rather than counted. */
 function MilpBlock({ milp, marginPct }: { milp: CampusMilp; marginPct: number }) {
   const m = milp.results!
   const s = m.summary
@@ -344,7 +352,7 @@ function MilpBlock({ milp, marginPct }: { milp: CampusMilp; marginPct: number })
         )}
         <p data-testid="milp-summary" className="text-[12px] mb-1">
           Joint optimisation {formatEur(s.milp_cost)}/a against least cost {formatEur(s.c8_cost)}/a
-          {saving > 1 ? `, ${formatEur(saving)}/a less` : ''}. {s.iterations === 1 ? '1 iteration' : `${s.iterations} iterations`},{' '}
+          {saving > 1 ? `, ${formatEur(saving)}/a less` : ''}. {iterationsText(s.iterations)} after the warm start,{' '}
           {STOP_TEXT[m.stop] ?? m.stop}.
         </p>
         {m.stop === 'cancelled' && (
@@ -395,13 +403,15 @@ function MilpBlock({ milp, marginPct }: { milp: CampusMilp; marginPct: number })
 }
 
 function MilpHistoryList({ rows }: { rows: MilpHistoryRow[] }) {
+  const steps = iterationsText(rows.filter(h => h.iteration > 0).length)
+  const count = rows.some(h => h.iteration === 0) ? `warm start + ${steps}` : steps
   return (
     <details data-testid="milp-history" className="mt-3 text-[12px]">
-      <summary className="cursor-pointer text-muted">Iteration history ({rows.length})</summary>
+      <summary className="cursor-pointer text-muted">Iteration history ({count})</summary>
       <ul className="mt-1 space-y-0.5">
         {rows.map(h => (
           <li key={h.iteration} className="tabular-nums">
-            {h.iteration}. {formatEur(h.cost)}/a, {h.feasible ? 'AC-feasible' : 'not AC-feasible'},{' '}
+            {h.iteration === 0 ? 'Warm start:' : `${h.iteration}.`} {formatEur(h.cost)}/a, {h.feasible ? 'AC-feasible' : 'not AC-feasible'},{' '}
             {h.accepted ? 'accepted' : 'not accepted'} — {h.choice}
             {h.note ? <span className="text-muted"> ({h.note})</span> : null}
           </li>

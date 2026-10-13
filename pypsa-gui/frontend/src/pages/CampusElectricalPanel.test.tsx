@@ -393,6 +393,35 @@ describe('CampusElectricalPanel', () => {
       expect((screen.getByRole('button', { name: 'Run study' }) as HTMLButtonElement).disabled).toBe(true)
     })
 
+    it('names the warm start rather than counting it as iteration 0', async () => {
+      api.state.mockResolvedValue(leastCost())
+      api.milpStatus.mockResolvedValue(record({ iteration: 0, best_cost: 95_000 }))
+      renderPanel()
+      const line = await screen.findByTestId('milp-progress')
+      expect(line.textContent).toContain('Warm start solved, 0 of 20 iterations · best €95,000/a vs least cost €95,000/a')
+      expect(line.textContent).not.toContain('Iteration 0')
+    })
+
+    it('says a finished result is stale once the least-cost run it came from has changed', async () => {
+      const s = leastCost()
+      for (const [state, stop] of [['done', 'converged'], ['cancelled', 'cancelled']] as const) {
+        api.state.mockResolvedValue({ ...s, milp: { status: null, results: null, stale: true } })
+        api.milpStatus.mockResolvedValue(record({ state, stop, finished_at: 2 }))
+        const view = renderPanel()
+        const line = await screen.findByTestId('milp-progress')
+        await waitFor(() => expect(line.textContent).toMatch(/stale/))
+        expect(line.textContent).not.toMatch(/shown under/)
+        view.unmount()
+      }
+    })
+
+    it('says where a fresh result is shown', async () => {
+      api.state.mockResolvedValue({ ...leastCost(), milp: { status: null, results: null, stale: false } })
+      api.milpStatus.mockResolvedValue(record({ state: 'done', stop: 'converged', finished_at: 2 }))
+      renderPanel()
+      expect((await screen.findByTestId('milp-progress')).textContent).toMatch(/shown under Joint optimisation/)
+    })
+
     it('says what it is doing before the first iteration', async () => {
       api.state.mockResolvedValue(leastCost())
       api.milpStatus.mockResolvedValue(record({ iteration: null, max_iter: null, best_cost: null,
