@@ -1298,6 +1298,8 @@ All the others are caught now. The redundancy rule has no code of its own for ad
 
 ### C14 as built (2026-10-12)
 
+**Owner confirmation (2026-10-13):** existing compensation entries with a `library_id` keep their zero-cost keep rows and are renewed at end of life, like transformers and cables ("Keep it").
+
 Branch `feat/gridspine-campus-replacement`, cut from C13's branch (`feat/gridspine-campus-add-units`) with master merged in. Built to the owner's answers (option (a) on every question). C15 (tap changers) was built in parallel on its own branch; C14 stays out of the re-check and the taps.
 
 **Where the plan proved wrong, and what was built instead.**
