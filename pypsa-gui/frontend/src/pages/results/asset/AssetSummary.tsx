@@ -68,6 +68,12 @@ export default function AssetSummary({ data }: { data: AssetResultsResponse }) {
   return (
     <div className="flex-1 min-h-0 overflow-auto px-2 py-2">
       <ScalarTable rows={headline} showSource caption="Key results" />
+      {(data.reading_notes?.length ?? 0) > 0 && (
+        <p className="mx-2 my-1 text-[11px] text-muted border border-border rounded px-2 py-1"
+           data-testid="asset-reading-notes">
+          {data.reading_notes!.join(' ')}
+        </p>
+      )}
       {headline.length === 0 && (
         <p className="px-2 py-1 text-[11px] text-muted">
           No headline results are defined for {asset.class}.

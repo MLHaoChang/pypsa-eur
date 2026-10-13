@@ -7,7 +7,9 @@ so this is the highest-consequence module in the package after `myopic`: a
 defect here moves numbers the frontend serves rather than lines in a log.
 
 Depends only on `services/solver/runtime.py` for `_safe_log`, and never on
-`solver_service`.
+`solver_service`. (The decision study's own
+demand-charge wrapper was deleted in U2 WP10: the study's demand charge is an
+Investment Case commercial term, `_wrap_with_commercial_bindings`.)
 """
 import math
 

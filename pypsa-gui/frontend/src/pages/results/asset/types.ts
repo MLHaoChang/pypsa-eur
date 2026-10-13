@@ -82,6 +82,9 @@ export interface AssetResultsResponse {
   scalars: Record<string, number | string | null | Record<string, number | null>>
   /** Populated only when `category === 'summary'`; `[]` on every other tab. */
   headline: HeadlineRow[]
+  /** Framing to show beside the headline, e.g. the zero-profit-by-construction
+   *  note for an interior optimum. Absent or `[]` when there is nothing to say. */
+  reading_notes?: string[]
   index: string[]
   periods: Array<number | string> | null
   pct_of_hours: number[] | null

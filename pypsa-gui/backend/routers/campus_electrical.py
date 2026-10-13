@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -87,6 +88,9 @@ class RunSettings(BaseModel):
     invest: bool = True
     #: The grid operator owns the PCC switchgear, so it is not bought or costed.
     pcc_switchgear_by_operator: bool = False
+    #: Who moves the PCC transformer's on-load taps (plan C15): the campus, or
+    #: the grid operator (they then stay at the campus file's position).
+    pcc_tap_control: Literal["campus", "grid_operator"] = "campus"
 
 
 class ExtractRequest(BaseModel):

@@ -702,196 +702,6 @@ class ExtraOwnerAsset:                  # the IC's, not ours
 
 **Tests.** 35 service cases for D1a and D2 in the IC's shape (most on hand-made run directories with known units, km and bays, plus the real runs), 3 router cases and 4 panel tests; 352 campus cases in the gate. The route inventory (`route_inventory_phase0.txt`) gains exactly the one new route; `/api/chat/workflows`, which the app has and the file lacks, is another PR's and was not added.
 
-**Mutations.** 39 by hand across the campus file, the dispatch and the selector. 26 were caught at once and one, mistyped in the first run, when re-run; tests were added for the 10 survivors (the trim back onto the edge, a saturated STATCOM, the intact margin, an existing pair short of the margin, the grid's bay, the sizing-rule escalation, the directional reactive escalation, the dispatch held in the re-solve, the reactive margin, the STATCOM's fault current), and all are caught now. Two are equivalent: `<` against `<=` on two equal non-zero step distances (an exact float tie), and the early break once the PCC is in the band (the scan cannot then find a better count).
-
-### C9: panel
-
-- **The library editor.** It edits the per-project copy, starting from the shipped default, with a reset.
-- **The investment table and cost summary.** The electrical cost per period is shown next to the hub's system cost from the solved project, and as a total.
-- **Chat tools**, which read and edit the library and read the investment.
-- **The bundle** carries the library used and the investment table.
-
-### C10: grid-code upload and extraction
-
-- **The upload route.** It takes a PDF only, with a size budget, and stores the file in the project.
-- **The extraction.** A service function calls the Anthropic API with the document and a strict output schema; the copilot tool calls the same function.
-- **The draft.** It is validated by the profile loader and saved as a *draft* profile.
-- **The review form.** Limits are confirmed one by one, with the quote shown beside each.
-- **Profiles listed.** Project profiles appear next to the shipped ones in the grid-code picker.
-- **Tests.** They mock the API. A live run happens in a session that has the key.
-
-### C11: MILP with successive linearisation
-
-- **Variables:**
-  - binaries for each discrete option (transformer n × size, STATCOM size, cable size, switchgear rating);
-  - integers for capacitor and reactor steps;
-  - continuous inverter Q per hour and case, inside a polygon of its capability circle.
-- **Linearisation**, per hour and case, around the current AC point:
-  - for continuous Q: sensitivities of bus voltage, PCC Q and branch loading, from the load-flow Jacobian;
-  - for each discrete option: its effect, by finite difference. One AC solve per option and hour is affordable, because options are few.
-- **Objective:** minimum annualised cost, built in linopy and solved with HiGHS (both already in the environment).
-- **The loop**, with an adaptive convergence rate:
-  1. Solve the MILP.
-  2. Apply the result, and re-solve AC at every hour and case.
-  3. Measure, per constraint, the **linearisation error**: AC minus linear.
-  4. **Tighten each limit** by a back-off β × that error. β grows while a violation persists and relaxes when there is ample slack.
-  5. **Bound the change in continuous Q** by a trust region Δ:
-     - Δ doubles when the predicted and actual changes agree (ratio ρ near 1);
-     - Δ halves when they disagree.
-  6. Re-linearise, and go back to 1.
-- **When it stops.** It stops when the AC check passes and the cost changes by less than a tolerance, or after a maximum number of iterations.
-- **The least-cost result (C8)** is the warm start and the upper bound.
-- **What is reported:** the iteration history (cost, worst violation, worst linearisation error, Δ, β), and MILP against least-cost.
-
-### C11 as built (2026-10-05, margin rule 2026-10-06)
-
-**Where.** `gridspine/static/campus_milp.py` (`select_assets_milp`), and `invest_campus(..., method="least_cost" | "milp")`, default `least_cost`. The MILP path writes C8's investment files from its own result, plus `campus_milp_history.csv` and `campus_milp_comparison.csv`. C8 gained `open_candidates`, `study_from`, `with_measures`, an `inspect` hook on `solve_cases`, and returns its final `state`, the warm start; its behaviour is unchanged.
-
-**The choices the plan left open:**
-- **Candidates.** C8's generators with a requirement of zero: "none" and every combination for the reactive need, every transformer size in 1..3 units (a redundant group stays redundant), every cable section in 1..3 runs, every switchgear rating. When C8's point is AC-feasible, a candidate dearer on its own than C8's whole set is pruned. Rated buses and cables that are not needs are held, not bought.
-- **Dispatch.** Per hour, held in every case, as in C8's re-check. Inverters as C8's dispatch would use them; capability an **inscribed** octagon with vertices on the axes (a hard limit the AC check cannot repair; at most 7.6 % of S lost, none at P = 0). C8's inverter Q is clipped into it for the warm start. STATCOM Q per hour within the chosen units; integer steps per bank and reactor candidate and hour.
-- **Constraints**, per hour and case class (intact; the worst outage of each group): voltages against the profile's bands, the PCC band (intact), transformer loading and the sizing rule with the margin (ratings inside `g`, so a candidate's rating is exact), cable current, Ik'' and ip per period. Each scaled to 1 % of its limit (0.01 pu for voltages), with a slack at a penalty ten times a bound on any set's cost.
-- **Sensitivities: the Jacobian**, rebuilt at the converged point from pandapower's internal `Ybus` (`dSbus_dV`; the stored `J` is from the last Newton iterate). One sparse solve per hour and case gives every quantity per Mvar at each control bus; checked against a finite-difference AC re-solve to 1e-4. A bank step enters as `q x V^2`.
-- **Discrete candidates: finite differences**, one AC solve per transformer or cable candidate, hour and case at the current dispatch, with IEC 60909 per period; compensation changes no load flow at zero dispatch, so it enters through its dispatch (and, with a STATCOM, its fault level, cached). Switchgear ratings enter exactly; its cost is per bay, the bays a linear function of the other choices, with exact products of binaries.
-- **The loop.** beta x1.5 when violated in AC (cap 8), x0.7 with more than 5 scale units of slack (floor 0.25). rho > 0.75 doubles Delta (cap 4 x Q_ref), rho < 0.25 halves it and rejects, keeping the point and its linearisation. Delta starts at 2 x Q_ref (a full swing), floor Delta_0 / 64. A tie-break of 1e-3 per Mvar moved keeps the dispatch put. Stop: an accepted AC-feasible point whose cost moved less than 1 a year; the MILP returning the current point; Delta at its floor; 20 iterations. A trial whose campus does not converge gets a no-good cut.
-- **A deviation, flagged.** The trust region binds only while every need keeps its current candidate. Literally applied, a rejected step that changed a candidate halves Delta around the old point, and the cheaper candidate can become unreachable. That was shown on a case the margin rule below has since closed; on every case tried after it, the literal and the relaxed trust region give the same result and count, so this is now a precaution without a demonstrating test (its mutation survives). **Owner decision (2026-10-06): C11 confirmed as built, this relaxed trust region included.** The surviving mutation is recorded here as a known, accepted gap rather than dead code.
-- **The result** is the best AC-feasible point seen; C8's own re-check (`_failures`) is the judge. If none is cheaper than C8 by more than 1 a year, C8's result is returned, flagged.
-- **The sizing margin is judged on C8's dispatch** (owner, 2026-10-06: no, keep the 20 % margin; it may not be met with dispatched inverter Q). Every point the loop solves is also re-solved with the dispatch C8's re-check gives the same assets (`reactive_need(residual=False)`: inverters, STATCOMs, steps, only as far as the PCC band needs). The margin constraint reads those flows, with no coefficient on the MILP's Q, and the AC judge sizes the transformers from them (`size_transformers`; `_failures` itself sizes from whatever flows it is given, so before this the MILP's own dispatch was used). The MILP's extra Q still serves the 100 % loading, the PCC band and the voltages. A candidate's effect on the margin is a finite difference with that dispatch re-run (a compensation candidate's only at hours where C8's dispatch reaches the compensation). The sizing the margin was judged by is returned (`sizing`), and the linearisation error per trial and constraint (`lin_errors`).
-
-**What it finds.**
-- **The joint optimum** (test campus, one dark hour, 25 MW at pf 0.85): C8 takes the cheapest transformer, 40 MVA at 14 %, whose reactive loss puts the PCC out of its band, then a 4 Mvar bank: 95.6 k a year. The MILP takes the 50 MVA, 10 % unit alone: 75.1 k, the brute-force minimum over all 24 combinations, solved independently in the test. Two iterations. It does not lean on Q for the margin (dark hour; C8's dispatch with T_B alone needs nothing).
-- **No margin from inverter Q** (38 MW, pf 0.85): a 50 MVA unit holds the margin only with about 15 Mvar from the battery; C8's dispatch gives none, so the MILP keeps C8's 63 MVA (flagged fallback, one iteration, the 50 MVA never proposed). Before the owner's rule it bought the 50 MVA.
-- **Adaptive against fixed rate.** On an outage relieved by the battery's Q (two 40 MVA units, N-1 sizing off, 38 MW: the margin holds on the intact share with C8's dispatch, the survivor needs Q to stay within 100 %), both rates reach the pair (81.9 k against C8's 88.8 k) in **4 iterations each**; beta grows on the survivor's loading. In a scan of 33 more cases (outage cases at 30-44 MW, voltage cases on 300-3000 MVA grids with 2-10 km cables; many end at C8's choice in one or two iterations) the counts were equal in 31, and adaptation took one iteration more in 2. **With the margin loophole closed, no case was found where adaptation saves an iteration.** The earlier 5 against 9 depended on the margin being met with the battery's Q.
-- **The Data Center hub** (one period, 14 hours, pf 0.95 agreement, shipped library): **1 x 63 MVA 132/33 kV, as C8**, everything else as C8: 610.3 k a year, flagged fallback, 1 iteration, 500 s (the reference dispatch is re-run for every candidate). Before the owner's rule the MILP took 50 MVA (574.3 k) on 1.8-3.8 Mvar of inverter Q.
-
-**Mutations.** 30 by hand. The first 28 (beta and Delta directions, caps and the rho thresholds, the best-point choice, three sensitivity signs, the polygon, the one-per-need constraint, the fallback, the back-off sign, the rejected point, the free switch, the step sign, the bay products, the PCC scope, the margin, the feasibility judge): 24 caught at once, tests added for 4. After the margin rule, two more: **the margin using dispatched Q** (both the constraint and the judge on the MILP's flows, with Q coefficients: caught) and the judge alone on the MILP's flows (caught once the sizing used is returned). Re-run on the new code, the tests written for the closed loophole no longer caught rho inverted, the margin dropped and the polygon; rho now has a unit test, the 38 MW test asserts the 50 MVA is never proposed, and the polygon test moved to the outage case. The free switch survives (above).
-
-### Order, PRs and agents
-
-| PR | increments | implementer |
-|---|---|---|
-| 1 | C7 + C8 (engine) | C7: Sonnet (patterned data and loader); C8: Opus (engineering judgement) |
-| 2 | C9 (panel, routes, chat tools) | Sonnet; Haiku for mechanical updates (snapshots, route inventory, packaging list) |
-| 3 | C10 (upload and extraction) | Opus for the schema, prompt and upload safety; Sonnet for the form |
-| 4 | C11 (MILP loop) | Opus |
-
-The coordinator writes each brief from this plan and reviews every diff. It also runs the gates and mutation checks before anything is pushed.
-
-## Part three: joining the one investment engine (plan note, 2026-10-06, no code yet)
-
-The coordinating session passed on a request, which it says the owner approved on 2026-10-06: there should be **one investment implementation** in pypsa-gui. The references are:
-- `docs/superpowers/plans/2026-10-05-one-investment-engine-two-faces.md`;
-- ADR-0004;
-- "Investment language" in `pypsa-gui/CONTEXT.md`.
-
-The campus asset library (C7), the least-cost pick (C8) and the MILP (C11) join it as a third participant. Nothing here changes the open PRs (#74, #79, #83, #84).
-
-**No code for D1 or D2 until** the engine's PRs #81 and #85 and the asset-schema PR #78 have merged. Words follow CONTEXT.md: *Overnight cost* (not capex), *Generic default* and *illustrative*.
-
-### D1: one source for equipment cost data
-
-- **gridspine stays free of pypsa-gui imports.** `campus_assets.yaml` remains the engine's input format and the test fixture library.
-- **On the pypsa-gui side**, `campus_electrical_service` seeds a project's campus library from the **generic defaults pack** (`services/library/defaults_pack`, PR #85), not from the shipped YAML. The fields map one to one:
-
-  | campus library | defaults pack |
-  |---|---|
-  | `capex_eur` | Overnight cost, lump per unit |
-  | `capex_eur_per_km` | Overnight cost, per km |
-  | switchgear `capex_eur` | Overnight cost, per bay |
-  | `opex_frac` | FOM share |
-  | `lifetime_a` | lifetime |
-  | `measured` / `datasheet` / `assumed` | provenance; `assumed` = illustrative |
-
-- **The rows themselves** (transformers, cables, capacitor banks, shunt reactors, STATCOMs, switchgear) are added to the pack. The engine session owns the pack, so the rows are agreed with it and it adds them, or approves a PR that does.
-- **The discount rate and price year** come from the project (its solver config or FinanceInputs `currency_year`), not from a library-level 0.07. The engine API is unchanged: `select_assets` already receives the library as data, and the service writes the project's rate into the library it hands over. The library's own `discount_rate` remains as a stand-alone default for gridspine-only use.
-- **Ratings and impedances stay in the campus library.** They are electrical data, not cost, and the pack has no field for them.
-
-### D2: the picks feed the investment case
-
-- **What is produced.** A solved campus study produces **extra owner assets**. Each item chosen by C8 (or C11) becomes one owner asset with its upfront parts, in the asset-schema `UpfrontPart` shape:
-  - name;
-  - Overnight cost × units (× km for a cable, × bays for switchgear);
-  - lifetime;
-  - FOM share.
-
-  Each asset also carries its investment period, its need (for example "transformer GRID_IMPORT") and its provenance. Existing (sunk) items are left out, and unresolved needs are never emitted.
-- **Who does what.** The engine session adds the input hook: a list of extra owner assets read by `results/finance_case.build_finance_case`. This side only produces the list, from the run directory (`campus_investment.csv` with `campus_invest_scope.json`), through one function in `campus_electrical_service`. **Do not edit `services/finance` or `results/finance_case.py`.** The shape is agreed with the engine session before any code.
-- **Consistent with the owner's decision of 2026-10-05.** Electrical cost is still not fed back into the capacity expansion. The PyPSA project is untouched; the equipment only joins the cash flows, NPV and report, next to the batteries and PV.
-
-### File ownership (one-engine plan §5)
-
-- **Ours:** `gridspine/*` and `campus_electrical_*`.
-- **Shared hot files:** `App.tsx`, `layout/*`, `uiStore.ts`, `chat_tools*.py`, `main.py`, `pypsa-gui.spec`, `tool-error-kinds.json`. Additive edits only, and merge master before each PR.
-
-## Part three as built (2026-10-07)
-
-### Owner decisions (2026-10-07)
-
-- **Grid-code review, a quote not found on its stated page:** warn and still allow Confirm (today's behaviour). The reviewer is the check; real documents often have small page offsets.
-- **The MILP in the panel:** as a run option ("Joint optimisation (MILP, slow)") executed as a background job with progress and cancel, its result shown beside the least-cost one. Planned as C12.
-
-The campus side of part three is built on `feat/gridspine-campus-ic-seam`. Words follow `pypsa-gui/CONTEXT.md` ("Investment language"): *Overnight cost*, *Generic default*, *illustrative*, *upfront part*. The engine's files (`services/finance/*`, `services/results/finance_case.py`, `services/library/*`, `services/asset_schema/*`, `models/finance.py`) are untouched.
-
-### D1a: done. The discount rate and the price year come from the project
-
-- **Rate.** When the run invests, the library handed to `invest_campus` has its `discount_rate` replaced by the **project's saved solver config** `discount_rate`, if the project's saved solver config file (`solver_config.json`) **states** a `discount_rate`. Without that file, or when the file has no `discount_rate` key (the loader's 0.07 default is not a rate the project stated), the library's own value is kept and labelled as the library's. The replacement is tagged `assumed`, with a note saying where it came from. A project rate outside [0, 1) is a 422 that names it; nothing is annualised on it.
-- **Price year.** The project's finance inputs are not a file of their own: they are `SolverConfig.finance`, the dict `PUT /api/simulation/finance` validated, kept in the same `solver_config.json`. If it carries a `currency_year`, that is the price year reported, and `price_year_mismatch` is true when it differs from the library's. **No money is converted.** The library's costs stay in the library's price year and no escalation is applied. The panel says so.
-- **The record.** `results.cost_basis` is `{discount_rate, discount_rate_from: "project solver config" | "asset library", price_year, price_year_from: "project finance inputs" | "asset library", library_price_year, price_year_mismatch, currency}`. It is written with the run (`run/campus_cost_basis.json`) and cleared with the other investment files, so it describes the run and not the project as it is now. `get_investment` (the copilot's summary) carries it too.
-- **Staleness.** The engine's copy, rate included, is what `run/campus_assets_used.yaml` keeps, byte for byte. The results are stale when the library a run would hand over now differs from that snapshot (so a change of the project's discount rate makes them stale) **or** when the cost basis differs (so a change of the finance inputs' `currency_year` does too, since the basis is shown). A solver-config change that touches neither (the solver name, say) does not. A library or a solver config that cannot be read now counts as stale: a rerun would not reproduce the run.
-- **Panel.** One plain line in the investment section: "Annualised at 7 % (from asset library); costs in 2026 money (from asset library)." When the project states another year, the line still names the library's year (those are the costs' money) and a warning says the project states another, with no escalation applied.
-
-### D2 producer: done. The chosen equipment as extra owner assets
-
-`campus_electrical_service.extra_owner_assets(project) -> list[dict]`, read only, from the last investment run: `campus_investment.csv`, `campus_assets_used.yaml` (the library the run bought from, not one saved since). Who owns the PCC switchgear (`campus_invest_scope.json`) is already settled in the table: with `grid_operator` the engine writes no row for it, so no entry appears. `GET /api/campus-electrical/{name}/owner-assets` returns `{"assets": [...], "source_hash": str | None, "stale": bool}` (`stale` is the results-stale flag of `get_state`), and `get_state` carries `owner_assets_count`. The assets are `[]` and `source_hash` is `None` when the project has no investment run.
-
-**One entry per purchased item that is neither existing nor unresolved**, in the contract below: agreed with the IC session, owner-approved 2026-10-07. The IC session adds the type (`services/finance/case.py ExtraOwnerAsset`) and the `extra_assets` hook in `build_finance_case`; the investment-case route calls `campus_electrical_service.extra_owner_assets` and refuses a stale study. This branch adds neither. The top-level keys of an entry are exactly the type's fields, so the IC can build it with `ExtraOwnerAsset(**{k: d[k] for k in fields})`; everything else is under `meta`.
-
-```python
-@dataclass(frozen=True)
-class ExtraOwnerAsset:                  # the IC's, not ours
-    name: str                       # unique in the case, e.g. "campus:TR_132_33_40#1"
-    kind: str                       # transformer | cable | capacitor_bank | shunt_reactor | statcom | switchgear
-    basis: str                      # lump | per_km | per_bay
-    quantity: float                 # units (lump), units x length_km (per_km), bays (per_bay)
-    parts: tuple[UpfrontPart, ...]  # asset_schema.access.UpfrontPart; upfront_per_unit is per basis unit
-    build_year: int                 # the campus invest_period
-    source: str                     # "campus_study"
-    source_hash: str                # sha256[:16] of the solved campus study that chose it
-```
-
-```json
-{
-  "name": "campus:TR_132_33_63#1",
-  "kind": "transformer",
-  "basis": "lump",
-  "quantity": 2.0,
-  "parts": [
-    {"name": "investment", "upfront_per_unit": 2500000.0, "lifetime": 40.0, "fom_share": 0.015}
-  ],
-  "build_year": 2030,
-  "source": "campus_study",
-  "source_hash": "3f9a1c5e07b2d864",
-  "meta": {
-    "need": "transformer GRID_IMPORT", "library_id": "TR_132_33_63", "units": 2, "length_km": null,
-    "currency": "EUR", "price_year": 2026, "provenance": "assumed", "illustrative": true
-  }
-}
-```
-
-- `name` is `campus:<library_id>#<k>`, k the 1-based occurrence of that library id among the entries, in the table's order: unique in the list.
-- `kind` is the investment table's item kind, mapped explicitly (`IC_KIND`): `transformer`, `cable`, `capacitor_bank`, `shunt_reactor`, `statcom` and `switchgear` are the six kinds the engine writes, and the IC's vocabulary is the same six; any other kind is a 422 that names it.
-- `basis` and `quantity`: a cable is `per_km` with quantity units × `length_km`; switchgear is `per_bay` with the table's units, which are the bays; everything else is a `lump` with quantity = units.
-- `parts` has one part, `investment`. `upfront_per_unit` is the library's Overnight cost **per basis unit** (`capex_eur_per_km` for a cable, `capex_eur` otherwise), not the total: `quantity × upfront_per_unit` is the total, the figure the first draft carried as `upfront`. `lifetime` and `fom_share` are the library's `lifetime_a` and `opex_frac`. Money is in the library's currency and price year; no escalation.
-- `build_year` is the investment period. `source` is `"campus_study"`.
-- `source_hash` is `campus_electrical_service.campus_study_hash(project)`: the first 16 hex characters of a sha256 over `run/campus_investment.csv`, `run/campus_assets_used.yaml`, `run/campus.yaml` and, when present, `run/campus_cost_basis.json`, in that order, each as its file name, a NUL byte and its bytes. The same for every entry of a run; `None` without an investment run. It changes when the campus, the library, the rate or the run does. The IC refuses a stale study (its owner default B) and a `build_year` after the case COD (default C).
-- `meta.price_year` is the library's: the money the cost is in. The project's money year, when it differs, is in `results.cost_basis`.
-- `meta.provenance` is the source tag of the cost in the library (`measured`, `datasheet` or `assumed`); `meta.illustrative` is true when it is `assumed`. The shipped library tags every cost `assumed`, so every entry is illustrative today.
-- A reactive need can give two entries (a capacitor bank and a reactor), each with its own investment period.
-
-### Checks
-
-**Tests.** 34 service cases (D1a and D2, most on hand-made run directories with known units, km and bays, plus three real runs), 3 router cases and 4 panel tests. The route inventory (`route_inventory_phase0.txt`) gains exactly the one new route; `/api/chat/workflows`, which the app has and the file lacks, is another PR's and was not added.
-
 **Mutations.** 20 by hand on the service for the first producer: the rate override ignored, a wrong source label, an out-of-range rate not refused, the cost basis not cleared with the investment, the snapshot not the engine's copy, the price-year mismatch flag (always false, always true when a year is stated), the project's year never used, existing items included, unresolved items included, units not multiplied, cable km not multiplied, switchgear bays not multiplied, the empty-run handling, `illustrative` always true, the provenance taken from the wrong tag, lifetime and FOM share swapped, the owner assets priced from the library as it is now instead of the run's, the count always 0, and both halves of the staleness test. 19 were caught at once. One was not by the new tests: the byte comparison of the library in the staleness test. For a rate change it is redundant, since the cost basis changes with the rate and the other half catches it; for a library edit the older library-staleness tests catch it. Three more on the panel line (the year shown, the mismatch warning, the rate format), all caught.
 
 For the IC shape, 18 more by hand, all caught: the name counter (always 1, global instead of per id), the basis of a cable and of switchgear, the quantity of a cable and of switchgear bays, `upfront_per_unit` as the total, the hash (file order, the campus file left out, the cost basis left out, no NUL framing, 15 characters), the stale flag always false, a kind dropped from the map, an unknown kind passed on, `meta` fields at the top level (two ways), `build_year`, `source_hash`.
@@ -1464,6 +1274,167 @@ Branch `feat/gridspine-campus-replacement`, cut from C13's branch (`feat/gridspi
 - Taps on the grid operator's side of the PCC.
 
 **Estimated size.** Large: about 450 lines of engine, 150 of service and panel, and 550 of tests. One to two sessions, Opus for the engine and the MILP.
+
+### C15 as built (2026-10-12)
+
+Branch `feat/gridspine-campus-taps`, cut from C13's branch (`feat/gridspine-campus-add-units`), with master (PRs #147, #148 and #152 included) and C13's re-merged branch merged in. The search is the new module `gridspine/static/campus_taps.py`.
+
+**Where the plan proved wrong, and what was built instead.**
+- **The walk's objective with two groups in series.** The plan's rule cannot pass its own two-group oracle. Under that rule each group walks to lower "the worst excursion of the buses fed through that group".
+  - The failing case: TR3 is wound 20/11 kV and sits at -9, so MV2 is low and LV1 high at the same hour.
+  - TR1 cannot raise MV2 without raising LV1, so under the plan's rule it does not move.
+  - TR3 then brings LV1 down, and MV2 stays low.
+  - The brute force finds both in band: TR1 lowered, TR3 raised.
+  - As built, each group walks on the key **(excursion of its own zone, excursion of every bus it feeds, |offset|)**, compared in that order. Its *zone* is the buses it feeds that no searched group further down feeds.
+  - An upstream changer so holds its own busbars first, and helps the buses behind another changer only as far as its own zone allows. With one group, the zone is every bus the group feeds, so the rule is the plan's.
+  - `test_an_upstream_group_holds_its_own_zone_first` pins this on two hours. The plan's rule fails both: it was planted as a mutation and checked.
+- **The neutral tie-break is part of the walk's key.** A step that keeps the excursion and moves toward neutral is taken. A walk that starts from a file tap away from neutral therefore ends at the in-band position nearest neutral, which is what the brute force over (excursion, |offset|) picks.
+  - A group whose buses are all in band does not walk, so an hour that passes keeps its file taps.
+- **A PCC voltage failure** still mapped to the reactive need, as in C8; the plan did not change that mapping. It therefore still cost one escalation before it was found not to shrink. **Superseded by the owner's decision of 2026-10-13** (below, "The PCC voltage, owner decision"): it is now reported at once, with nothing bought for it.
+  - Its unresolved reason is now "the grid set-point is outside the band: the operator's voltage, not a campus measure (the PCC voltage is never sent to the taps)".
+  - The PCC bus has no band in the tap search.
+- **Failure reasons.** Besides "range exhausted: TR1+TR2 at +9 (max), MV2 0.893 pu" and "TR3 has no on-load tap data", two more cases needed words:
+  - "TR1's taps are the grid operator's (pcc_tap_control)";
+  - a group not at its range end that a further step does not help (excursions in both directions).
+
+  Every group upstream of the worst bus is named, nearest first, followed by the bus, its voltage, the hour and the case.
+
+**The choices the plan left open.**
+- **Which groups move.** A group moves only when every unit has a tap block with `changer: on_load`. A group with an off-circuit unit, or with a unit without taps, stays as the file has it, and is reported as having no on-load tap data.
+- **The group's position and range.**
+  - The position is the master's (the first unit's, by name) offset from its neutral. Every unit sits at its own neutral plus that offset.
+  - The range is the offsets every unit reaches.
+  - Units the file puts at different offsets join the master's offset once the group moves.
+- **The PCC transformers** are those whose HV bus is the PCC (the definition `compensation_bus` uses).
+- **The order and the zones.** Top-down is breadth first by the depth of the group's HV bus from the PCC. The buses a group feeds are those reached from its LV bus without crossing its own units (the PCC excluded).
+- **The rounds.** At most `TAP_ROUNDS` = 3 tap changes. Each change is followed by a fresh C8 dispatch and a solve.
+  - If the taps would still move after the third change, the state with the smallest worst excursion is kept (the first on a tie) and the hour is flagged.
+  - The flag is written in the compliance detail ("taps still moving after 3 rounds at …"). The tap table's columns stay the plan's.
+- **Cases.** Each N-1 case starts from the intact case's taps, and the taps are put back after the case. The intact case's moved taps are the `ReactiveResult.taps` and the `trafo_tap` set-points, and only moved units are listed there. An hour where nothing moves has no tap set-point at all.
+- **The tap table** (`campus_invest_taps.csv`) lists every transformer with tap data, on-load or off-circuit, that is in service in the case. `ratio_pct` is the ratio at the tap against the rated one (100 × (1 + t s) for HV-side taps). `moved_by` is the change from the file's `tap.pos`. When no transformer has tap data, the file is a header only.
+- **The compliance detail** of the campus voltage gains a note only when a tap moved or an hour hunted. The note gives:
+  - the semantics (per hour and case, Q held in N-1);
+  - the searched groups' taps at the worst reading;
+  - the hours still hunting.
+
+  A study whose voltages pass reads as before.
+- **Part one** (`size_campus`) is unchanged: it solves at the file's taps.
+- **Run time.** Without a searched on-load changer, the re-check takes today's path, with no extra load flow. With one, the cost is:
+  - an hour in band: one extra solve per case (the in-band check);
+  - an hour out of band: about 2 + steps solves per searched group, plus one re-dispatch per tap change.
+- **The MILP.**
+  - `evaluate` searches every case, the intact case included, at the point's own Q, held.
+  - `reference` and the finite differences run C8's rounds.
+  - `select_assets_milp` and `invest_campus` take `pcc_tap_control`.
+  - A MILP point's tap table comes from its own evaluation.
+- **Backend, panel and copilot.**
+  - Run settings gain `pcc_tap_control` (`campus` | `grid_operator`, default `campus`). It is validated by the service (422) and by the route model (`Literal`), passed to the least-cost run and to the MILP job, and saved with the settings.
+  - The results, `campus_get_study` and `campus_get_investment` carry `taps` and `tap_hours_moved` (the critical hours where any case moved a tap). The MILP results carry their own `taps`.
+  - The panel has a checkbox "PCC transformer taps held by the grid operator (at the campus file's position)". Under the investment table it shows:
+    - the semantics of the taps;
+    - the count of hours that moved a tap;
+    - who moves the PCC taps;
+    - a collapsed table of every position, with moved taps in bold.
+  - The investment notes and the tool descriptions no longer say that tap changers are not optimised. `campus_run_study` takes `pcc_tap_control`, and the assistant inventory is regenerated: only that tool's schema changed.
+- **Changed expectations, amended rather than weakened:**
+  - `test_a_voltage_compensation_cannot_lift_is_unresolved_with_the_tap_change_named` now asserts "TR1 has no on-load tap data" and the bus, in place of "tap change". Its other assertions are kept.
+  - The scope dictionaries gain `pcc_tap_control`.
+  - The route and chat-tool argument tables gain the setting.
+  - The copilot description test now asserts the on-load taps instead of "not optimised".
+- **Not done:**
+  - The drafted campus files get no tap block. The producer's docstring says why. No line was added to the draft's `skipped` list, which names elements left out.
+  - The shipped library's tap data is the separate data commit (question 16), so the shipped library still has none.
+
+**Tests** (oracles that run no code under test), in `tests/gridspine/test_campus_taps.py` (39):
+- the tap sign of a `trafo_tap` set-point by hand (1/1.03 pu);
+- one group, intact and both N-1 cases, against the brute force over 19 positions (smallest excursion, then nearest neutral), from file taps at 0, 4, -8 and 5, with the solved voltages equal to a direct net's;
+- two groups in series, against the brute force over 19 × 19 positions, on eight hours: in band exactly when the brute force is;
+- the zone counter-example (two hours) and an upstream group helping a downstream one at its range end;
+- a lower group in band keeping its file tap;
+- each N-1 case of an unequal pair starting from the intact taps;
+- the range of a mixed-neutral group by hand;
+- the bands without the PCC;
+- the rounds' order, the settling and the hunting on stand-in steps;
+- the re-settle of Q, as the PCC on the band edge in a direct net at the reported tap and Q;
+- the re-solve of the reported tap on a direct net;
+- the regression, where an investment whose hours pass is frame for frame the same with on-load data or without, and has no tap set-point;
+- off-circuit taps, the grid operator's PCC taps and a PCC set-point out of band;
+- the MILP: with a STATCOM or a tap available, C8 and the MILP both take the tap, as a brute force over the options shows, each with the taps by brute force; the MILP's reference dispatch is tapped as a direct net says; the grid operator's PCC taps are never moved by the MILP.
+
+**Mutations.** 55 by hand:
+- **Engine, 39.** The first run caught 26.
+  - One survivor is equivalent: dropping the search's global "in band, nothing to do" exit, which the per-group check repeats.
+  - Tests were added for the other 12, and all 12 are caught now: the Q re-settle, the N-1 start, a group in band walking, the group exit on the zone instead of the fed buses, the range's upper end, the PCC in the bands, the moved-units-only set-point, and the four MILP wirings (C8's and the problem's `pcc_tap_control`, the evaluation's taps, the reference dispatch's taps).
+  - The plan's own rule (zone = fed), one of the 39, was caught by the zone test. It is now also caught by the counter-example.
+- **Backend, 10.** 9 caught. The tap-hours count by rows instead of hours survived, and is caught now by a test counted by hand.
+- **Panel, 6.** All 6 caught.
+
+**The Data Center template**, re-run on the same prepared and ranked run as in "C13 as built" (one period, pf 0.95, shipped library), with C13's branch merged with master (fad9c9212) and with this branch:
+- **Least cost.** The result is identical: the same 1 × 63 MVA 132/33 kV, 3 × 25 MVA 33/11 kV and switchgear, €6.891 M capex and €610.3 k a year. The investment, cost, invested file, re-checked compliance, dispatch and history files are byte for byte the same.
+- **The only differences** are `campus_invest_scope.json`, which gains `"pcc_tap_control": "campus"`, and the new `campus_invest_taps.csv`, which is a header only. The shipped library has no tap data, so no tap moves and the re-check takes today's path.
+- **Run time:** no change beyond noise. The least-cost pick took 6.3 and 5.6 s on the base and 5.8 and 5.9 s here (two runs each). The MILP took 483 s on the base and 472 s here (one run each), with the same result. Its files, the iteration history included, are byte for byte the same apart from the scope and the taps file. With no tap data, no tap hook is installed and the re-check makes no extra load flow.
+
+**Gates**, on the branch with master and C13's re-merged branch (75dbaff76) merged in, under the shared lock:
+- `tests/gridspine -k "campus or island"`: 1254 passed.
+- The backend campus, chat-tool, harness, bundle, assistant (inventory and navigation), IC-extra-asset and defaults-pack tests: 1731 passed, 7 skipped.
+- `tsc` clean, and the full `vitest`: 4604 passed in 395 files.
+
+#### Merged with master: C13 (#153) and C14 (#158) (2026-10-13)
+
+origin/master at d81128e89 was merged into the branch (merge commit af40ce151). Eleven files conflicted, all where both C14 and C15 extended the same line. Each was resolved keeping both behaviours:
+- **Signatures.** `select_assets` and `select_assets_milp` take both `pcc_tap_control` (C15) and `period_years` (C14). `invest_campus` passes both, and the MILP passes both on to C8.
+- **Results.** The scope carries `pcc_tap_control` and `horizon`, and the results carry `taps`. The MILP's result is `{**c8["scope"], "horizon": horizon}` plus its own `taps`.
+- **Words.** The docstrings (the driver's module, the selector, the MILP) name both. The copilot investment notes keep C15's tap text, C14's "bought from the first period that needs it" without "no replacement", and C14's renewal note. `InvestScope` has both optional keys. The panel's header comment and imports name both.
+- **Tests.** The scope assertions in `test_campus_invest`, `test_campus_milp`, `test_campus_study` and the backend service test check both keys: C14's `horizon` is checked on its own, then `pcc_tap_control` with the rest. The panel test keeps the C15 and the C14 describe blocks, each closed (checked line by line).
+- **Not conflicting.** `harness/catalogue.py` merged without conflict (master's changes there are guided mode's), and the assistant inventory test passes without a regeneration. This plan merged on its own, with the as-built sections in the order C13, C14, C15.
+
+#### The PCC voltage, owner decision (2026-10-13)
+
+**Decision.** A PCC voltage failure skips the reactive escalation. It is reported at once, and nothing extra is bought for it.
+
+**As built.**
+- In each re-check of `select_assets`, a `pcc_voltage` failure is taken out of the escalation.
+  - The reactive need is marked unresolved in the first re-check that sees the failure, at the candidate it already has. The reason is "pcc_voltage: <detail>; the grid set-point is outside the band: the operator's voltage, not a campus measure (the PCC voltage is never sent to the taps)".
+  - The history gets one row for it, with `from` equal to `to`. It is reported once.
+- The other failures go on escalating as before. The loop continues while any other check fails. When only the PCC voltage is left, it stops with no further re-check, because the study already in hand is the AC result.
+- The excursion that a voltage escalation must reduce (`_excursion`) now covers the campus voltages only. The PCC's excursion is constant, and it would hide a campus improvement smaller than it.
+- A later reason on the same need is added after the set-point reason, joined by " | ". Such a reason can be a campus voltage that taps and compensation cannot fix, a need with no further candidate, or the iteration cap. Before the decision, only one reason was ever set.
+- **The MILP has no escalation path.** The PCC voltage does not move with the campus's Q, so no point buys compensation for it. No point is feasible either, so the MILP returns C8's result, which now buys nothing for it. A test pins this. Unchanged: while the set-point is out of band, every MILP point stays infeasible, so the MILP cannot optimise the rest. That is an open question for the owner, not part of this decision.
+- The copilot investment notes add: "it is reported at once, with nothing bought for it". `harness/catalogue.py` is unchanged.
+
+**Tests** (in `tests/gridspine/test_campus_taps.py`, 5 new):
+- a PCC-only failure (set-point 1.13 pu, the campus voltages in band): one history row from "none" to "none", the reactive row unresolved with the set-point reason, no library id, no capex, no compensation in the invested file, and the PCC still failing with measures. Before the decision this case bought the STATCOM.
+- the set-point at 1.125 pu with a campus voltage that also fails: the PCC row, then the same campus-voltage escalations and the same STATCOM as the oracle run with the set-point in band (1.115 pu), and both reasons on the need.
+- the same case at `max_iter=1`: the cap's reason is added after the set-point's.
+- `_excursion` on a hand-made compliance frame: the PCC is left out.
+- the MILP on the PCC-only case: no point buys compensation, it returns C8's result, and nothing is bought.
+
+**Mutations.** 10 by hand, all caught:
+
+| mutation | caught by |
+|---|---|
+| the PCC left in the escalation | the PCC-only test |
+| the PCC back in `_excursion` | the excursion test |
+| the PCC report stops the loop | the other-failures test |
+| no history row for the PCC | the PCC-only test |
+| a later reason overwrites the set-point's | the other-failures test |
+| the PCC reported without marking the need unresolved | C15's set-point test |
+| the PCC reported in every re-check | the other-failures test |
+| the cap's reason skipped for a PCC-reported need | the cap test, written before the mutation run |
+| the PCC escalated once more | C15's set-point test |
+| the PCC given a campus-voltage reason | C15's set-point test |
+
+**The Data Center template.** The least-cost pick was re-run on C14's prepared run (one period, `period_years: {2030: 1}`, the same ranked selection, pf 0.95, shipped library) with three sources: master (d81128e89), the merge (af40ce151) and this branch.
+- All three give the same result: 1 × 63 MVA 132/33 kV, 3 × 25 MVA 33/11 kV and switchgear, €6.891 M capex and €610.3 k a year, with nothing unresolved.
+- The merge and this branch write every file byte for byte the same.
+- Against master, the only differences are the scope's `"pcc_tap_control": "campus"` and the header-only `campus_invest_taps.csv`.
+- `campus_investment.csv` is byte for byte the one from "C14 as built". The template's set-point is in band, so the decision does not apply to it.
+- **The MILP**, on the same run with master and with this branch (one run each, 453 s and 458 s), keeps the least-cost choice on both. Every file, the iteration history included, is byte for byte the same, apart from the scope and the taps file.
+
+**Gates**, on the merged branch with the decision (075bcd0c0), under the shared lock:
+- `tests/gridspine -k "campus or island"`: 1286 passed.
+- The backend campus, chat-tool, harness, guided, investment-case (`test_investment_case_campus_route.py` included), finance-case, defaults-pack, bundle and assistant-inventory tests (54 files): 1903 passed, 3 skipped (the two live grid-code probes, and the chat-tool import check whose known-broken list is empty).
+- `tsc` clean, and the full `vitest`: 4633 passed in 396 files.
 
 ### Order and dependencies
 
