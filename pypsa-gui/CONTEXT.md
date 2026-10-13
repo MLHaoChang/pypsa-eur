@@ -180,8 +180,8 @@ _Avoid_: the newest results, the live network, a saved snapshot
 **Discussed run**:
 The run id the current chat episode is talking about. `discuss_project_run`
 stores it on the session and, when a durable parent thread is bound, on
-`refs.discussed`. With the Results chrome open it selects that run by
-identifier. Resuming the parent copies the same identifiers onto the new
+`refs.discussed`. Unless called with `open_ui=false`, it opens the Results
+chrome and selects that run by identifier. Resuming the parent copies the same identifiers onto the new
 episode (`durable_conversation.resume_episode`). The binding leaves the live
 network's inputs in place.
 _Avoid_: the active solve, checked scope (the assurance binding)

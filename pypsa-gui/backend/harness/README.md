@@ -417,8 +417,10 @@ durable-task step resumption remains outside the checked-scope recovery tranche.
 
 These tools live in `services/run_evidence.py`, `services/loadflow_summary.py`,
 `services/experiments.py`, and `services/durable_conversation.py`. Each is a
-catalogue entry dispatched from `services/chat_tools.py`, and each name is in
-`toolsets.CONTROL_TOOLS`, so a reduced toolset still offers it. They require
+catalogue entry dispatched from `services/chat_tools.py`. Each name except
+`get_loadflow_summary` is in `toolsets.CONTROL_TOOLS`, so a reduced toolset
+still offers it; `get_loadflow_summary` reaches a reduced toolset only through
+the `results` domain (keyword `loadflow`). They require
 an activated saved project (`run_project_required` or
 `experiment_project_required` otherwise). The model supplies ids and typed
 fields. It does not supply filesystem paths, and it does not supply the
@@ -450,7 +452,7 @@ a recording failure does not fail the solve.
 | Foreground `run_simulation` / `run_ac_pf_stage` | `start_foreground_run`, then `publish_foreground_run` | `fg-<job hex>` |
 | Solve queue / GridSpine | `start_queue_run` on claim, `publish_queue_run` on terminal finish | `q-<job id, dashes removed>` |
 | Adequacy / study mesh | `watch_study_run` from `routers/results.py` `_publish_study` | `ad-<study key>-<nonce>` |
-| Report jobs | `publish_report_run` when the report job reaches a terminal status | `rpt-<report id>` |
+| Report jobs | `start_report_run` when the report job starts running, `publish_report_run` on terminal finish | `rpt-<report id>` |
 
 The study watcher polls for up to six hours. If the study is still running at
 the deadline, the running marker stays and no terminal status is invented.
