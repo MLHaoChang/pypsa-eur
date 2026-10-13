@@ -20,9 +20,7 @@ import { nk } from '../utils/queryKeys'
 import { appLog } from '../store/simulationStore'
 import { Dialog } from '../components/Dialog'
 import { gridspineApi } from '../api/gridspine'
-import { decisionStudiesApi } from '../api/decisionStudies'
-import { useDecisionStore } from '../pages/decision/decisionStore'
-import { errorCopy } from '../utils/decisionVocabulary'
+import { GUIDED_QUESTIONS, useDecisionEntry, type GuidedQuestion } from '../pages/decision/useDecisionEntry'
 import { useLocalSettings } from '../hooks/useLocalSettings'
 
 // NewProjectWizard — replaces the single-input NewProjectModal with a 4-tab
@@ -761,45 +759,20 @@ function StudyTab({ existingProjects, onClose }: { existingProjects: ProjectInfo
 
 
 // ── Tab: Decision study — question cards (guided investment study, plan S8) ──
-// A question-first study creates its OWN base project (plan S4 M0) and changes
-// none of the user's. Its intake is answered in the `decision` panel before
-// the study exists (creation needs the mandatory answers); the project the
-// POST names is only the authorisation and the place the load upload goes.
-// Where the backend refuses the study routes (multi-user mode) the card is
-// disabled with the reason; it never offers a dead end.
+// The questions, their availability and "Start" are `useDecisionEntry`'s,
+// shared with Guided's Start card (U3).
 function DecisionTab({ existingProjects, onClose, onStarted, onBlank }: {
   existingProjects: ProjectInfo[]
   onClose: () => void
   onStarted?: () => void
   onBlank: () => void
 }) {
-  const { authEnabled } = useAuthMode()
   const currentProject = useUIStore(s => s.currentProject)
-  const setSlidePanel = useUIStore(s => s.setSlidePanel)
-  const startDraft = useDecisionStore(s => s.startDraft)
   const path = existingProjects.find(p => p.name === currentProject)?.name ?? existingProjects[0]?.name ?? null
-  const avail = useQuery({
-    queryKey: ['decision', path ?? '', 'availability'],
-    queryFn: () => decisionStudiesApi.availability(path!),
-    enabled: !authEnabled && !!path,
-    retry: false,
-  })
-  let reason: string | null = null
-  if (authEnabled) {
-    const c = errorCopy('decision_studies_unavailable'); reason = `${c.title} ${c.action}`
-  } else if (!path) {
-    reason = 'Create or open a project first: the study needs one to authorise it (nothing in it is changed).'
-  } else if (avail.data && !avail.data.available) {
-    const c = errorCopy(avail.data.code); reason = `${c.title} ${c.action}`
-  } else if (avail.isError) {
-    reason = 'Could not check whether decision studies are available. Try again.'
-  }
-  const ready = !reason && avail.data?.available === true
+  const { reason, ready, start } = useDecisionEntry(path)
 
-  const start = () => {
-    if (!path || !ready) return
-    startDraft({ pathProject: path, name: 'Battery at my site', baseName: '' })
-    setSlidePanel('decision')
+  const startOne = (q: GuidedQuestion) => {
+    if (!start(q)) return
     onClose()
     onStarted?.()
   }
@@ -812,17 +785,16 @@ function DecisionTab({ existingProjects, onClose, onStarted, onBlank }: {
       </p>
       {reason && <p data-testid="decision-reason" className="text-[11px] text-warn">{reason}</p>}
       <div className="grid grid-cols-2 gap-3">
-        <div className="border border-border rounded-lg p-3.5 flex flex-col gap-2">
-          <span className="text-sm font-semibold text-text">Do I need a battery at my site?</span>
-          <span className="text-[11px] text-muted leading-relaxed">
-            From your load and your tariff: whether a battery pays for itself, what size to build, what it is worth,
-            and how sure that is. You get a yes/no, a size, a value and a report.
-          </span>
-          <button type="button" onClick={start} disabled={!ready} aria-label="Start: Do I need a battery at my site?"
-            className="self-start px-3 py-1.5 text-[12px] rounded bg-accent text-white disabled:opacity-40">
-            Start
-          </button>
-        </div>
+        {GUIDED_QUESTIONS.map(q => (
+          <div key={q.id} className="border border-border rounded-lg p-3.5 flex flex-col gap-2">
+            <span className="text-sm font-semibold text-text">{q.title}</span>
+            <span className="text-[11px] text-muted leading-relaxed">{q.blurb}</span>
+            <button type="button" onClick={() => startOne(q)} disabled={!ready} aria-label={`Start: ${q.title}`}
+              className="self-start px-3 py-1.5 text-[12px] rounded bg-accent text-white disabled:opacity-40">
+              Start
+            </button>
+          </div>
+        ))}
         <div className="border border-border rounded-lg p-3.5 flex flex-col gap-2">
           <span className="text-sm font-semibold text-text">Open a blank model</span>
           <span className="text-[11px] text-muted leading-relaxed">
