@@ -790,6 +790,130 @@ k largest gains:
   minimum-load fuel, by hand.
 - Mutations.
 
+### I2b as built (2026-10-13)
+
+**`services/solver/island.py`**, in the same wrapper and through the same
+`_wrap_with_island` path: opt-in, refused on rolling, SCOPF and myopic as
+they will run, passed through for a power flow, skipped on a dispatch-only
+solve. Nothing new in `solver_service.py`.
+- **ΔP⁺ is a linear expression** now, and the hook kept its name.
+  `delta_p_plus=None` (the default) builds it from the model; a number,
+  Series or callable still overrides it, for every `seamless` row. B(t)
+  takes max(ΔP⁺, 0) through a variable b ≥ ΔP⁺, b ≥ 0, which only tightens
+  the energy row it enters, so it settles at the max. It stays in the same
+  row as the sustained ride-through.
+- **The PCC** is the Links tagged `eh_role` `grid_import` (the
+  `POC_ROLES` spellings), less those tagged `grid_export`. `seamless`
+  without a tagged import Link is refused with the remedy.
+- **Late** is `walk_in_s` ≥ the slowest active genset's `start_s + sync_s`,
+  and needs a genset in the period (with none, nothing joins and a
+  transfer gives no relief). X_u is one variable per late UPS and period,
+  bounded by L_it,u (as its upper bound) and p_nom_u (a row), and used only
+  where it loosens.
+- **ΔP⁻ (owner, 2026-10-13).** At 0⁺ every transferring UPS has dropped its
+  IT load, early walk-in or late, so the 0⁺ rows (downward power, SoC room,
+  RoCoF) add every transferring UPS's L_it. The plan's late-only sum is kept
+  for the quasi-steady-state row, after the gensets have joined, when an
+  early walk-in's load is back. This changes the plan text above, on the
+  conservative side (B3).
+- **Every row of the matrix** is built, per period, over the gensets, GFM
+  storage and UPSs active in it. Each row is named (`Island-headroom-up`,
+  `-headroom-down`, `-soc-room`, `-mva-instant`, `-mva-steady`,
+  `-rocof-up/-down/-block`, `-qss-up/-down/-block`, `-pickup`,
+  `-min-load-<g>`) and listed in `facts["instant"]["rows"]`. The UPS bridge
+  now follows the matrix too: unplanned islanding only, none for `planned`.
+- **Readings the plan left implicit:** RoCoF reads the `transition` limits,
+  the qss band the `steady_island` ones. f0 is 50 Hz (the hub carries no
+  nominal frequency; ledgered). A genset's s_nom is p_nom/`cos_phi_r`, a
+  converter's p_nom/`pf_rated`. A Link genset counts its output
+  (efficiency·p). Spinning headroom uses `p_max_pu`. The k largest gains,
+  inertias and load steps are taken over genset units (k is the genset
+  redundancy), with heterogeneous H or ls handled by the max of the
+  product. Isochronous gensets add no droop gain (conservative). Several
+  scenarios in one sidecar get the union of their rows in one solve; I2c
+  splits them into separate solves.
+- **"Surplus not curtailable."** With no `gfl_fw` unit the SoC-room row is
+  not added, the facts say so, and `not_islandable_hours(n)` gives the
+  hours whose solved ΔP⁻ > 0.
+- **A row with no variable** (e.g. pickup blocks against fixed gensets in a
+  solve that sizes only storage) is checked, not handed to the LP: when it
+  holds it is dropped, and when it fails it is an `IslandRefusal` naming the
+  row, not an infeasible LP.
+
+**The Data Center template (owner, 2026-10-13).** With I2b, the template as
+shipped was infeasible in both scenarios:
+- `ups_bridged`: a 15 MW block at 1 Hz/s needs about 210 MW of H 1.5 s
+  gensets against the 80 MW the fleet can reach;
+- `seamless`: forming the island at 0⁺ needs about 54 MW of BESS against
+  the 30 MW cap, and the droop GFM's RoCoF needs p_nom ≥ 20·ΔP⁺.
+
+So the template ships `ups_bridged` only, with 11 × 5 MW pickup blocks
+(55 MW ≥ the 51.5 MW critical peak), and keeps Q2's 1 Hz/s. The RoCoF row on
+a 5 MW block binds:
+- genset_new 19.1 → 36.7 MW, by hand 250/3.75 − 30;
+- objective 3.882e7 → 3.981e7 (+2.6 %).
+
+For comparison, `seamless` with the BESS cap lifted runs the site on
+gensets: import about 2.7 MW, objective 6.87e7. It stays a sidecar option,
+and I2c compares the two.
+
+**Tests** (`tests/test_island_rows.py`, 80 collected, 38 of them I2b's): each row of the
+matrix on its own hand network, import and export, as the plan lists:
+- (b↑): no transfer, a late transfer, the walk-in exactly at the join, an
+  early walk-in, both branches of min(L_it, p_nom_u) for an extendable UPS;
+- spinning headroom and minimum load (in `seamless` and in `planned`);
+- (b↓): power, a late and an early transfer, SoC room with t_curt 2.5 s,
+  and "not curtailable" with its hours;
+- (b■): N+1 with unequal units, and the refusal;
+- (c): at 0⁺ with cold gensets, in the steady island, and the refusal with
+  no former;
+- (d): VSM 25 MVA, droop 80 MW, the export side, a spinning genset's
+  inertia, the block at N+1;
+- (e): both sides at N+1, the qss export step counting late transfers only,
+  and the block;
+- the bridge from I2b's own ΔP⁺ with relief, the matrix for `planned`, the
+  refusal without an import tag, import efficiency, two investment periods,
+  and the template's 36.67 MW;
+- a GFM store outside RT holding B in its own row, and a VSM's inertia on
+  its apparent power (both added after the mutation run, see below).
+
+The hand value for a spinning genset's inertia was corrected while
+building: its minimum load also carries part of the load, so the step
+falls to 2.8 MW (15.625 MVA, not 23.125). The I2a fixtures set the I2b
+limits slack (a 0 margin; RoCoF and qss at 1e6 in the two `seamless`
+cases), and the UPS-bridge case moved to `ups_bridged`, as the matrix
+requires.
+
+**Mutations.** Two kinds, each run against the whole file:
+- **Each named row deleted** (a pytest plugin that drops it):
+  `-min-load`, `-mva-steady`, `-pickup`, `-rocof-block`, `-qss-block`,
+  `-headroom-up`, `-headroom-down`, `-soc-room`, `-mva-instant`,
+  `-rocof-up`, `-rocof-down`, `-qss-up`, `-qss-down`, `-step-up`,
+  `-ups-relief-cap`, `-energy`, `-ups-bridge` and `-gfm-bridge`. Each was
+  caught by the test written for it, except `-gfm-bridge`. I2a's tests
+  never put GFM storage outside RT with a non-zero step, so a test was
+  added, and it catches the deletion.
+- **18 source edits:**
+  - a strict `>` for "late";
+  - late-only ΔP⁻ at 0⁺, and every transfer after the join;
+  - X without its L_it bound;
+  - min instead of max in the pickup row;
+  - N+k dropped from the block RoCoF and from ΣK;
+  - the import efficiency ignored;
+  - f0 60 Hz;
+  - the UPS bridge in `planned`;
+  - t_curt as the delay only;
+  - cold gensets forming at 0⁺;
+  - spinning headroom ignored;
+  - the droop GFM's inertia without 2R;
+  - the VSM's inertia on p, not s;
+  - the `seamless` rows run under `ups_bridged`;
+  - the bridge without UPS relief;
+  - a failing fixed row dropped instead of refused.
+
+  All were killed except the VSM-on-p edit, because the VSM test had
+  pf 1. A pf-0.8 VSM test was added, and it kills that edit.
+
 ### I2c: linearised UC, the two variants and the cost of island capability (M)
 
 **Linearised UC (Q7)**, when `linearised_uc` is on:
