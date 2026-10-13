@@ -103,7 +103,9 @@ A cable or bus that first fails in a re-check becomes a need then.
    cable loading > 100 %        that cable
    PCC reactive band            the reactive need, to the next candidate
                                 that adds Mvar in the short direction
-   PCC or campus voltage        the reactive need, to the next candidate
+   campus voltage               the reactive need, to the next candidate
+   PCC voltage                  none: reported at once on the reactive
+                                need, nothing bought (owner, 2026-10-13)
    switchgear (judge)           that bus
    ===========================  ===========================================
 
@@ -117,7 +119,11 @@ A cable or bus that first fails in a re-check becomes a need then.
    (``campus_taps.Taps.diagnose``: "range exhausted: TR1+TR2 at +9 (max),
    MV2 0.893 pu", "TR3 has no on-load tap data", or the grid operator's
    taps). A PCC voltage is the grid's set-point in this model: it is never
-   sent to the taps, and its reason says it is the operator's voltage.
+   sent to the taps nor escalated (owner, 2026-10-13). The reactive need is
+   reported unresolved in the re-check that first sees it, its reason
+   saying it is the operator's voltage, at the candidate it has; the other
+   failures go on escalating, and the excursion a voltage escalation must
+   reduce is the campus voltages' only.
 5. The loop stops when every check passes, when a need runs out of
    candidates (it is reported unresolved, with the failing check, and the
    state with its last candidate is re-checked once more so the report is
@@ -878,8 +884,9 @@ def _apply(spec, needs, lib_by_id):
 # --------------------------------------------------------------------------
 
 def _excursion(compliance):
-    rows = compliance[compliance["check"].isin(["pcc_voltage", "campus_voltage"])
-                      & (compliance["status_as_is"] == "fail")]
+    """The worst campus voltage excursion, pu. The PCC's is left out: it is
+    the grid's set-point, never escalated (owner, 2026-10-13)."""
+    rows = compliance[(compliance["check"] == "campus_voltage") & (compliance["status_as_is"] == "fail")]
     return max((abs(float(r.value) - float(r.limit)) for r in rows.itertuples(index=False)), default=0.0)
 
 
@@ -928,9 +935,10 @@ def _failures(study, compliance, needs, req, criteria):
 
 
 def _voltage_reason(check, study):
-    """Why a voltage that a reactive escalation did not reduce is
-    unresolved (plan C15): the PCC voltage is the grid's set-point; a
-    campus voltage is what the taps could not reach (``Taps.diagnose``)."""
+    """Why a voltage is unresolved (plan C15): the PCC voltage is the grid's
+    set-point, reported without an escalation (owner, 2026-10-13); a campus
+    voltage that a reactive escalation did not reduce is what the taps could
+    not reach (``Taps.diagnose``)."""
     if check == "pcc_voltage":
         return ("the grid set-point is outside the band: the operator's voltage, not a campus measure "
                 "(the PCC voltage is never sent to the taps)")
@@ -939,6 +947,13 @@ def _voltage_reason(check, study):
     if study.tapper is None:
         return why
     return f"{why}; taps: {study.tapper.diagnose(study.bus, study.taps)}"
+
+
+def _also(reason, more):
+    """An unresolved reason with ``more`` after the one already given (a
+    reactive need reported for the PCC's set-point, then for a campus
+    voltage)."""
+    return f"{reason} | {more}" if reason else more
 
 
 def _escalate(need, check, direction, lib_by_id):
@@ -1344,6 +1359,7 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
     skip = frozenset() if pcc_switchgear else frozenset({str(campus_spec["campus"]["pcc"]["bus"])})
     needs = _needs(campus_spec, base, library, criteria, periods, lib_by_id, skip, parallel)
     history, last_voltage, stop = [], None, any(n.unresolved for n in needs)
+    pcc_reported = {}                                   # need key -> its set-point reason
     for it in range(1, max_iter + 1):
         spec, added = _apply(campus_spec, needs, lib_by_id)
         study = _study(build_campus(spec), hours, rows_of, installed, req, criteria, recheck=True, profile=profile,
@@ -1351,13 +1367,25 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
         compliance = _compliance(study, req, profile)
         fails = [f for f in _failures(study, compliance, needs, req, criteria)
                  if f[1] != "switchgear" or f[0].split(" ", 1)[1] not in skip]
+        # owner, 2026-10-13: a PCC voltage is the grid's set-point. It is reported
+        # at once, on the reactive need, and never escalated; nothing is bought for it
+        for key, check, detail, _ in fails:
+            if check == "pcc_voltage" and key not in pcc_reported:
+                need = next(n for n in needs if n.key == key)
+                need.unresolved = _also(need.unresolved, f"{check}: {detail}; " + _voltage_reason(check, study))
+                pcc_reported[key] = need.unresolved
+                label = need.choice.label if need.choice is not None and need.pos >= 0 else "as described"
+                history.append({"iteration": it, "need": key, "from": label, "to": label, "check": check,
+                                "detail": detail})
+        fails = [f for f in fails if f[1] != "pcc_voltage"]
         if not fails or stop:
             break
         if it == max_iter:
             for key, check, detail, _ in fails:
                 for need in needs:
-                    if need.key == key and not need.unresolved:
-                        need.unresolved = f"{check}: {detail}; stopped at the iteration cap ({max_iter})"
+                    if need.key == key and (not need.unresolved or need.unresolved == pcc_reported.get(key)):
+                        need.unresolved = _also(need.unresolved,
+                                                f"{check}: {detail}; stopped at the iteration cap ({max_iter})")
             break
         by_key = {n.key: n for n in needs}
         if fails[0][1] == "load_flow":
@@ -1379,18 +1407,19 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
                 by_key[key] = need
             done.add(key)
             before = need.choice.label if need.choice is not None and need.pos >= 0 else "as described"
-            if check in ("pcc_voltage", "campus_voltage"):
+            if check == "campus_voltage":
                 now = _excursion(compliance)
                 if last_voltage is not None and now >= last_voltage - V_IMPROVE:
-                    need.unresolved = f"{check}: {detail}; " + _voltage_reason(check, study)
+                    need.unresolved = _also(need.unresolved, f"{check}: {detail}; " + _voltage_reason(check, study))
                     history.append({"iteration": it, "need": key, "from": before, "to": before, "check": check,
                                     "detail": detail})
                     stop = True
                     continue
                 last_voltage = now
             if not _escalate(need, check, extra if check == "pcc_reactive" else 0, lib_by_id):
-                need.unresolved = f"{check}: {detail}; no further candidate in the library" if need.candidates \
-                    else _no_candidate(need)
+                need.unresolved = _also(need.unresolved,
+                                        f"{check}: {detail}; no further candidate in the library" if need.candidates
+                                        else _no_candidate(need))
                 if need.pos < 0:
                     need.pos = 0
                 stop = True

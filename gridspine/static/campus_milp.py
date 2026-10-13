@@ -175,7 +175,11 @@ result is returned, flagged, with the reason.
 
 **Feasible** means C8's own re-check finds nothing (``_failures``), with
 the PCC's switchgear left out when the study gives it to the grid operator
-(``pcc_switchgear=False``, as C8). Then the PCC has no switchgear
+(``pcc_switchgear=False``, as C8). A PCC voltage out of its band is the
+grid's set-point: C8 reports it without an escalation and buys nothing for
+it (owner, 2026-10-13), and here no point buys for it either (the PCC
+voltage does not move with the campus's Q), but no point is feasible, so
+C8's result is returned. Then the PCC has no switchgear
 candidate and no ``ik``/``ip`` constraint either.
 
 **Taps** (plan C15, owner's question 15): the on-load taps are set by C8's

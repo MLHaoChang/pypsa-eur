@@ -487,7 +487,8 @@ INVESTMENT_NOTES = (
     "nearest neutral; the PCC transformer's only when scope.pcc_tap_control is campus. Off-circuit taps stay where "
     "the campus file puts them, and a transformer without tap data stays fixed. An excursion the taps and "
     "compensation cannot shrink is reported unresolved with the reason (range exhausted, or no on-load tap data); "
-    "the PCC voltage is the grid's set-point and never a campus measure. taps lists every position used.",
+    "the PCC voltage is the grid's set-point and never a campus measure: it is reported at once, with nothing "
+    "bought for it. taps lists every position used.",
     "A steady-state study at the critical hours, with an asset bought from the first period that needs it; "
     "unresolved needs are priced but not summed.",
     "An asset whose life ends inside the study horizon (the project's investment-period weightings, in "

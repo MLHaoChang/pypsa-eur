@@ -545,6 +545,117 @@ def test_a_pcc_voltage_out_of_band_is_the_grid_set_point_and_never_moves_a_tap(t
     assert "the grid set-point is outside the band: the operator's voltage, not a campus measure" in got["reason"]
 
 
+SET_POINT = "the grid set-point is outside the band: the operator's voltage, not a campus measure"
+
+
+def test_a_pcc_voltage_failure_is_reported_at_once_and_buys_nothing(tmp_path):
+    """Owner, 2026-10-13: a PCC voltage failure skips the reactive
+    escalation. The campus of the test above (the grid's set-point at
+    1.13 pu, every campus voltage in band, solved there): the reactive need
+    stays at its first candidate, no compensation, and is reported
+    unresolved with the set-point reason in the first re-check. Before
+    the decision it was escalated to the STATCOM first, then reported,
+    with the STATCOM priced."""
+    spec = single_spec()
+    spec["campus"]["pcc"]["vm_pu"] = t(1.13)
+    spec["campus"]["transformers"]["TR1"].update(sn_mva=t(80.0), existing=True, tap=oltc(pos=5))
+    lib = library(tmp_path, transformers=[tr("T60", 60.0, 1.0e6, tap=lib_oltc())],
+                  statcoms=[comp("statcoms", "ST10", 10.0, 400e3)])
+    table, sel = hourly((2030, 7, H7, {}))
+    out = select_assets(spec, table, sel, lib, WIDE, PROFILE)
+    h = out["history"]
+    assert len(h) == 1                                                        # no escalation round
+    assert (h.at[0, "iteration"], h.at[0, "need"], h.at[0, "check"]) == (1, "reactive", "pcc_voltage")
+    assert h.at[0, "from"] == h.at[0, "to"] == "none"
+    got = row(out, "reactive")
+    assert got["status"] == "unresolved" and got["reason"].startswith("pcc_voltage")
+    assert SET_POINT in got["reason"]
+    assert pd.isna(got["library_id"]) and got["capex_eur"] == 0.0           # nothing bought for it
+    assert not out["spec"]["campus"].get("statcoms") and not out["spec"]["campus"].get("capacitor_banks")
+    assert float(out["cost"]["capex_eur"].sum()) == 0.0
+    assert [u["need"] for u in out["unresolved"]] == ["reactive"]
+    assert out["compliance"].set_index("check").at["pcc_voltage", "status_with_measures"] == "fail"
+
+
+def test_a_pcc_voltage_failure_leaves_the_other_failures_to_escalate_as_before(tmp_path):
+    """The grid's set-point at 1.125 pu (above 1.118) with a campus voltage
+    that also fails once compensation is dispatched. The PCC is reported at
+    once; the campus voltage still takes its one reactive escalation and is
+    then reported with the taps' reason, as it is with the set-point in
+    band (1.115 pu, the oracle run here): the same escalations of the
+    campus voltage, the same purchase."""
+    lib = library(tmp_path, transformers=[tr("T60", 60.0, 1.0e6)],
+                  statcoms=[comp("statcoms", "ST4", 4.0, 200e3), comp("statcoms", "ST10", 10.0, 400e3)])
+    table, sel = hourly((2030, 7, H7, {}))
+
+    def run(vm):
+        spec = single_spec(pf=0.95)
+        spec["campus"]["pcc"]["vm_pu"] = t(vm)
+        spec["campus"]["transformers"]["TR1"].update(sn_mva=t(80.0), existing=True)
+        return select_assets(spec, table, sel, lib, ReactiveRequirement(3.0, "t", "assumed"), PROFILE)
+
+    in_band, out = run(1.115), run(1.125)
+    steps = ["iteration", "need", "from", "to", "check"]
+    campus = in_band["history"][steps]
+    assert list(campus["check"]) == ["campus_voltage", "campus_voltage"]   # the oracle escalates once
+    assert list(campus["to"]) == ["1 x ST4", "1 x ST4"]
+    h = out["history"][steps]
+    assert h[h["check"] == "pcc_voltage"].values.tolist() == [[1, "reactive", "none", "none", "pcc_voltage"]]
+    assert h[h["check"] != "pcc_voltage"].reset_index(drop=True).equals(campus)
+    assert row(out, "reactive")["library_id"] == row(in_band, "reactive")["library_id"] == "ST4"
+    reason = row(out, "reactive")["reason"]
+    assert reason.startswith("pcc_voltage") and SET_POINT in reason
+    assert "campus_voltage" in reason and "TR1 has no on-load tap data" in reason
+
+
+def test_a_need_reported_for_the_pcc_still_gets_the_iteration_cap_reason(tmp_path):
+    """The campus of the test above, stopped after one re-check: the PCC is
+    reported in it, and the campus voltage, which would have escalated,
+    adds the cap's reason to the same reactive need."""
+    lib = library(tmp_path, transformers=[tr("T60", 60.0, 1.0e6)],
+                  statcoms=[comp("statcoms", "ST4", 4.0, 200e3), comp("statcoms", "ST10", 10.0, 400e3)])
+    table, sel = hourly((2030, 7, H7, {}))
+    spec = single_spec(pf=0.95)
+    spec["campus"]["pcc"]["vm_pu"] = t(1.125)
+    spec["campus"]["transformers"]["TR1"].update(sn_mva=t(80.0), existing=True)
+    out = select_assets(spec, table, sel, lib, ReactiveRequirement(3.0, "t", "assumed"), PROFILE, max_iter=1)
+    assert list(out["history"]["check"]) == ["pcc_voltage"]
+    reason = row(out, "reactive")["reason"]
+    assert reason.startswith("pcc_voltage") and SET_POINT in reason
+    assert reason.endswith("stopped at the iteration cap (1)") and "| campus_voltage" in reason
+    assert pd.isna(row(out, "reactive")["library_id"])
+
+
+def test_the_voltage_excursion_judged_for_an_escalation_leaves_the_pcc_out():
+    """The excursion a reactive escalation must reduce is the campus
+    voltages' only: the PCC's is the grid's set-point, constant here, and
+    would hide a campus improvement smaller than it."""
+    from gridspine.static.campus_invest import _excursion
+    frame = pd.DataFrame({"check": ["pcc_voltage", "campus_voltage", "campus_voltage", "pcc_reactive"],
+                          "status_as_is": ["fail", "fail", "pass", "fail"],
+                          "value": [1.13, 0.895, 0.80, 50.0], "limit": [1.118, 0.90, 0.90, 3.0]})
+    assert _excursion(frame) == pytest.approx(0.005)
+    assert _excursion(frame.iloc[[0, 3]]) == 0.0
+
+
+def test_the_milp_buys_nothing_for_a_pcc_voltage_failure(tmp_path):
+    """The MILP has no escalation: the PCC voltage does not move with the
+    campus's Q (the grid's set-point), so no point buys compensation for it.
+    No point is feasible either, so the MILP returns C8's result, which
+    now buys nothing for it."""
+    spec = single_spec()
+    spec["campus"]["pcc"]["vm_pu"] = t(1.13)
+    spec["campus"]["transformers"]["TR1"].update(sn_mva=t(80.0), existing=True, tap=oltc(pos=5))
+    lib = library(tmp_path, transformers=[tr("T60", 60.0, 1.0e6, tap=lib_oltc())],
+                  statcoms=[comp("statcoms", "ST10", 10.0, 400e3)])
+    table, sel = hourly((2030, 7, H7, {}))
+    out = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE)
+    assert out["fallback"] == "no AC-feasible point was found"
+    assert all("reactive: none" in c for c in out["milp_history"]["choice"])
+    assert pd.isna(row(out, "reactive")["library_id"]) and float(out["cost"]["capex_eur"].sum()) == 0.0
+    assert SET_POINT in row(out, "reactive")["reason"]
+
+
 def test_the_q_dispatch_is_resettled_at_the_taps_it_ends_with(tmp_path):
     """An existing 80 MVA unit at tap +6 holds the 20 kV buses low; the
     battery holds the PCC on its 3 Mvar band edge. The taps move, the
