@@ -731,6 +731,46 @@ def get_chat_workflows(
     }
 
 
+def _skills_listing() -> dict[str, Any]:
+    from harness import skills
+
+    return {
+        "skills": [
+            {"name": s.name, "description": s.description, "source": s.source,
+             "model_invocable": s.model_invocable}
+            for s in skills.registry().values() if s.user_invocable
+        ],
+        "refused": skills.refusals(),
+    }
+
+
+@router.get("/skills")
+def get_chat_skills(user: User | None = Depends(optional_user)) -> dict[str, Any]:
+    """
+    The user-invocable skills (chat harness issue 14), for a future `/skill`
+    command in the panel: name, description and provenance (`package` |
+    `user`), never a body. `refused` names the user skills the last load
+    turned away (malformed, or named like a package skill) and why, so a user
+    who dropped a file in `<app data>/skills/` can see what happened to it.
+    Provenance is shown here and never in the prompt (owner decision Q16).
+    """
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return _skills_listing()
+
+
+@router.post("/skills/reload")
+def reload_chat_skills(user: User | None = Depends(optional_user)) -> dict[str, Any]:
+    """Re-read both skill roots (issue 14) so a skill dropped into
+    `<app data>/skills/` is picked up without a restart. Returns the listing."""
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    from harness import skills
+
+    skills.reload()
+    return _skills_listing()
+
+
 def _recover_pending_turn(ctx: Any) -> dict[str, Any] | None:
     """
     Resolve the WAL record left by an interrupted turn (#20), or None.

@@ -1,6 +1,6 @@
 # 14 — User-authored skills: discovery roots and invocation policy
 
-Status: ready-for-agent (Q16 decided; checked against master 2026-10-12, still as written)
+Status: ready-for-agent (done 2026-10-13: `<app data>/skills/` root, invocation flags, `/api/chat/skills` and reload)
 Type: task
 Blocked by: 05 (done)
 
@@ -47,3 +47,17 @@ contract rule 4 ("from this package only"), not only spec D12. Keep user
 skills out of `find_capabilities`' catalogue index
 (`services/assistant_tools.py`); `use_skill` is already in
 `toolsets.CONTROL_TOOLS`, so it stays visible in every toolset view.
+
+2026-10-13 (done): `harness/skills/registry.py` reads two roots, `package`
+then `user` (`<app data>/skills/`, via `app_paths.app_data_dir()`); `roots()`
+names exactly those two. Package files still raise `SkillError`; a user file
+that is malformed or named like a package skill is refused with a warning on
+`pypsa_gui.chat` and kept in `refusals()`. `Skill` carries `source`,
+`model_invocable`, `user_invocable`; the catalogue and `use_skill` see
+model-invocable skills only (`unknown_skill` otherwise). `GET
+/api/chat/skills` (signed in) lists user-invocable skills with
+`name`, `description`, `source`, `model_invocable` and the refusals, never a
+body; `POST /api/chat/skills/reload` re-reads both roots. User skills are not
+in `find_capabilities`' index (it indexes `TOOLS` only). Tests:
+`tests/test_harness_user_skills.py` (15, red first), plus a never-fail load at startup (`main._load_skills_at_startup`) so a refusal is logged when the app starts. Spec D12, harness README
+rule 4 and "Adding a skill", CHATBOT.md and CONTEXT.md amended.

@@ -1,0 +1,110 @@
+"""
+Price one asset from the generic defaults pack (IC S3 seeds; owner 2026-10-13).
+
+The one way a template or a redundancy scenario turns pack rows into an asset's costs, through the
+asset schema (plan §10): investment is overnight parts, annuitised at the pack's discount rate, never
+an annualised literal.
+
+  * a battery (StorageUnit) gets the pack's power and energy parts through `derive.apply_parts`, which
+    writes the derived two-annuity `capital_cost` and leaves `overnight_cost` empty;
+  * any other asset gets one `investment` part on PyPSA's own columns: `overnight_cost`, `lifetime`,
+    `fom_cost` (fom_share × overnight) and `discount_rate`, with `capital_cost` 0 (PyPSA annuitises
+    `overnight_cost` and would ignore it anyway);
+  * a Link's `p_nom` is its input, so a pack price per kW of output (the fuel cell) is scaled by the
+    Link's efficiency (PyPSA-Eur's convention).
+
+Each TYPED field it writes is stamped `default` through `asset_schema.provenance.record` (source
+`<pack id>@<version>#<hash16>`, the row's source year, money year, range and illustrative flag); a
+field the asset schema marks `derived` (`fields.fields_for`) is never recorded. A class the schema does
+not describe yet (Link) records everything it writes.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from services.library.defaults_pack.loader import load_defaults_pack
+
+BATTERY = "battery"
+_CLASS = {"generators": "Generator", "storage_units": "StorageUnit", "links": "Link",
+          "stores": "Store"}
+
+
+def _row(pack, key: str):
+    for row in pack.cost_values:
+        if row.key == key:
+            return row
+    raise KeyError(f"defaults pack {pack.version} has no row {key!r}")
+
+
+def _derived(component_class: str) -> set[str]:
+    from services.asset_schema import fields
+
+    try:
+        return {f.key for f in fields.fields_for(component_class) if f.derived}
+    except KeyError:              # not described yet: record what is written
+        return set()
+
+
+def _stamp(n, component_class: str, name: str, pack, entries: dict) -> None:
+    """`entries`: {field: (row or None, range scale)}; a row None is the finance discount rate."""
+    from services.asset_schema import provenance
+
+    source = f"{pack.pack_id}@{pack.version}#{pack.hash[:16]}"
+    skip = _derived(component_class)
+    for field, (row, scale) in entries.items():
+        if field in skip:
+            continue
+        src = pack.finance.discount_rate if row is None else row
+        rng = None if src.range is None else (src.range.low * scale, src.range.high * scale)
+        provenance.record(n, component_class, name, field, status="default", source=source,
+                          source_year=src.source_year,
+                          currency_year=getattr(src, "currency_year", None),
+                          range=rng, illustrative=bool(src.illustrative))
+
+
+def _value(pack, key: str) -> float:
+    for row in pack.cost_values:
+        if row.key == key:
+            return float("nan") if row.value is None else float(row.value)
+    raise KeyError(f"defaults pack {pack.version} has no row {key!r}")
+
+
+def price_from_pack(n, component: str, name: str, technology: str, *,
+                    version: str) -> dict[str, Any]:
+    """Write `technology`'s pack costs onto `n.<component>.loc[name]`; return what was written with
+    the pack's id, version and hash. Raises `KeyError` for a technology the pack does not price."""
+    pack = load_defaults_pack(version)
+    rate = float(pack.finance.discount_rate.value)
+    df = getattr(n, component)
+    stamp = {"technology": technology, "pack_id": pack.pack_id, "pack_version": pack.version,
+             "pack_hash": pack.hash, "discount_rate": rate}
+    if technology == BATTERY:
+        from services.asset_schema.derive import apply_parts
+
+        parts = {f"inv_{part}_{field}": _value(pack, f"battery.{part}.{field}")
+                 for part in ("power", "energy") for field in ("overnight", "lifetime", "fom_share")}
+        df.at[name, "discount_rate"] = rate
+        apply_parts(n, "StorageUnit", name, parts, discount_rate=rate)
+        _stamp(n, "StorageUnit", name, pack,
+               {**{f"inv_{part}_{field}": (_row(pack, f"battery.{part}.{field}"), 1.0)
+                   for part in ("power", "energy") for field in ("overnight", "lifetime", "fom_share")},
+                "discount_rate": (None, 1.0)})
+        return {**stamp, **parts, "capital_cost": float(df.at[name, "capital_cost"]),
+                "fom_cost": float(df.at[name, "fom_cost"])}
+    overnight = _value(pack, f"{technology}.investment.overnight")
+    scale = float(df.at[name, "efficiency"]) if component == "links" else 1.0
+    overnight *= scale
+    written = {"overnight_cost": overnight,
+               "lifetime": _value(pack, f"{technology}.investment.lifetime"),
+               "fom_cost": overnight * _value(pack, f"{technology}.investment.fom_share"),
+               "discount_rate": rate, "capital_cost": 0.0}
+    for col, v in written.items():
+        df.at[name, col] = v
+    over_row = _row(pack, f"{technology}.investment.overnight")
+    _stamp(n, _CLASS.get(component, component), name, pack,
+           {"overnight_cost": (over_row, scale),
+            "lifetime": (_row(pack, f"{technology}.investment.lifetime"), 1.0),
+            # FOM per MW: the overnight cost × the share's range
+            "fom_cost": (_row(pack, f"{technology}.investment.fom_share"), overnight),
+            "discount_rate": (None, 1.0)})   # capital_cost: derived on every class
+    return {**stamp, **written}
