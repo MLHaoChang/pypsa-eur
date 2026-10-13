@@ -210,3 +210,74 @@ A `ResultsLayer` inside the Canvas reads the map for the current snapshot and dr
 - The vintage breakdown is not invalidated by a finished solve (`useJobTerminalInvalidation` covers results, status, meta and the bundle); the 3D view refetches it itself, the schematic's asset-group capacities do not.
 - A component whose name contains "/" cannot be updated: `PUT /api/network/transformers/TR2%20110%2F33` answers 405 (the encoded slash splits the route), and the app's `updateTransformer` encodes names the same way (found at the WP6 gate).
 - `tests/test_chat_sse.py::test_invalid_decision_returns_400_and_preserves_token` fails only in the full backend run (409 on the retry; passes alone and with the chat modules): order-dependent state from another module (Phase 2 QA).
+
+## S2 amendment (2026-10-06) — placement rules and the placement check
+
+*Visual-layers plan 3 (`docs/superpowers/plans/2026-10-06-visual-layers-3-3d-site-view.md`) S2; owner decision O1 of 2026-10-06 ("placement carries meaning") supersedes decision 6 of 2026-09-28 ("positions cosmetic in v1"). This amends §4.1 and §6.4; everything above stands.*
+
+### The rule, on the library entry
+
+A `SiteAppearance` (§4.1's 3D half of a type; the match rules live in `utils/assetTypes.ts` since S1) gains an optional `placement`:
+
+```ts
+placement?: {
+  anchor?: 'yard' | 'between' | 'far'          // the object's origin: in its owner's yard zone (default), on the segment between its owner yard and its far bus's yard (branches), or just beyond the far yard
+  adjacentTo?: string[]                          // library type ids it should sit next to, in order of preference (greedy nearest free slot around them)
+  clearanceM?: number                            // minimum distance from any other object's footprint
+  keepOutM?: Array<{ from: string[]; m: number }> // minimum distance from the named types ('*' = every type)
+  orientation?: 'faceFar' | 'north' | 'any'      // which way the object's front (+north in its frame, the flow anchor's "to" side) turns
+}
+```
+
+Defaults (placeholders, each with a one-line source comment in `assetLibrary.ts`): **transformer** `between` + `faceFar`; **feeder** `yard` + `faceFar`; **bess** `adjacentTo: ['transformer', 'switchyard']`; **thermal** (engine gensets) and **gasTurbine** `keepOutM: [{ from: ['load'], m: 30 }]`; **h2store** `keepOutM: [{ from: ['*'], m: 50 }]`; **pv** `clearanceM: 10`; **load** (the data hall) no rule — it is what the others arrange around. `validateLibrary` refuses an id in `adjacentTo` or `from` the library does not define (except `'*'`), a negative or non-finite distance, and an unknown anchor or orientation. The packer's own numbers (gap 8 m, yard margin 12 m, shift step 4 m, reach 150 steps, the `between` tolerance 10 m and the facing tolerance 15°) are `PACKING` in the library, so `layout.ts` holds none; `templates.test.ts`'s guard (no type names, no colours, no module state in `layout.ts`) still holds.
+
+### The packer (`layout.ts`)
+
+Yards first, at their bus offset or placement. Then every unplaced object in three passes over the whole site: **anchored** objects — a `between` object at the midpoint of the segment from its owner yard's edge to its far yard's edge along their centre line, turned towards the far yard; several on one segment straddle it; when the far bus is not a member or the yards touch it falls back to its zone — then **neighbour-seeking** objects at the nearest free slot (one gap away, on any side, sliding along it) around a fixed object of a listed type that belongs to their bus, then the **rest** shelf-packed into their zones as in Phase 1. Overlap, clearance and keep-out are hard constraints against everything already standing (the pair requirement is symmetric: either object's rule naming the other counts); an object that would breach one is shifted outwards, smallest shift first (along its row, then away from the yard; across the segment for anchored objects), within a bounded reach; past it the object stays and is named in `SiteLayout.unresolved`. Placed objects are drawn verbatim and are obstacles. Rooftop PV is unchanged (the rooftop pass). Deterministic.
+
+**Arrange** writes the packed positions as placements, as before (the packed positions now follow the rules). **Arrange all** (new, after a confirm) rebuilds the layout with no placements and replaces every placement with it (`sitesStore.rearrangeAll`).
+
+Known limits, by design: `faceFar` faces the far bus, which for a transformer owned by its HV bus (PyPSA's `bus0` convention) is the LV bus; a transformer owned by its LV side faces the HV side. A `faceFar` object whose far bus is not a member faces north (no bearing is known). A BESS whose transformer connects to an off-site bus finds no fixed transformer when it looks (the transformer is zone-packed after it) and sits by the yard instead.
+
+### The check (`placementCheck.ts`), never a block
+
+`placementFindings(objects, library, { outside })` returns findings `{ key, kind, severity: 'warn' | 'info', message, other?, distanceM? }` with the message written for a user. Kinds: `outsideBoundary` (the fit check's keys; warn), `overlap` (warn), `keepOut` (warn; names the neighbour and the distance: "GEN is 10 m from HALL; it should keep 30 m away"), `clearance` (info), `notBetweenBuses` (info; a `between` object whose footprint is further than the tolerance from the line between its yards: "TR1 is 143 m from the line between the HV and MV yards; it should sit between its two buses"), `notFacingFar` (info; "TR1 faces 90° away from the MV yard; it should face it"). A pair is reported once, on the object whose rule it is; rooftop objects are exempt. `findingColor`: red for `outsideBoundary` and `keepOut`, amber for the rest.
+
+They show three ways, none of them blocking: the per-object emissive outline (red, then amber, under selection and hover — `emissiveFor` gains `warn`), the overlay's **Layout** section under the legend (count and list, collapsed when there are none, each line selecting its object, plus the packer's `unresolved` names), and a **Site layout** group in the Issues panel with the same View deep link as the preflight rows, fed by a small store (`placementFindingsStore`) the site view publishes to; the preflight counts and the sidebar badge are untouched. The user may leave an implausible layout and save it.
+
+### Still open from S2
+
+The owner check on the first real campus (a screenshot in the QA note) before the numbers are tuned; the rule numbers themselves (placeholders, sourced in the comments); the sidebar's Issues badge does not count layout findings.
+
+## S3 amendment (2026-10-06) — distances that reach the model
+
+*Visual-layers plan 3 S3; owner decision O1 ("placement carries meaning") and the opt-in of §7a decision 3 ("deriving lengths from geometry follows as an opt-in per project"). Builds on plan 2 M1 (`map_layout.json`) and M2 (length provenance, `POST /api/network/lengths/from_geometry`, the project setting `derive_lengths_from_geometry`). This amends §4.3 (the flow anchor) and §6.4 (the labels); S2's amendment and everything above stand.*
+
+### The distance rule (`site3d/siteDistances.ts`, pure)
+
+For every branch (Line, Link, Transformer) whose two buses are members of the open site — a branch whose far bus has no yard here has no site distance — one number, keyed as the map keys routes (`line:<name>` / `link:<name>` / `tr:<name>`):
+
+- **`route`** — the project's map document holds a route for the branch: its length from the owner bus's yard through the route's waypoints to the far bus's yard, on the site's tangent plane (`site3d/geo.ts`). That is how the map measures a route (bus0 → interior waypoints → bus1, `services/network_geometry.py::route_length_km`), so the site's number *is* the route's length and the two views never disagree (to the tangent-plane approximation; a yard the user moved off its bus's coordinate is the one case they can differ, and the site then shows what the user sees). The path is kept in site metres for the flow chevrons.
+- **`grid`** — no route: the Manhattan distance between the branch object's **connection anchor** and the far yard's origin, times **`ROUTING_FACTOR`**. The connection anchor is the far-side end of the object's flow anchor (templates draw it owner side → far side), turned by its heading, from its origin — where the cable leaves a transformer's LV side or a feeder bay's gantry; an object without a flow anchor measures from its origin. Cables on a campus run in orthogonal trenches and ducts, hence Manhattan rather than Euclidean.
+
+`ROUTING_FACTOR = 1.2` lives in `assetLibrary.ts` beside `PACKING` with its source comment: a placeholder from estimating practice (cable schedules add 10–20 % to the measured run for bends, risers, terminations and slack), the upper end because the grid distance is already the long way round; to be set from one published norm as the S2 numbers are. `layout.ts` never sees it (its source guards still hold).
+
+Shown on the branch's **flow-path label**: the hover label gains a line `TR1 → Campus 33 kV · 86 m` (`distanceLabel`; `fmtKm` from the map, so the two views read alike; the title says how it was measured), and the results readout ends a branch's line with ` · 86 m`. In the scene the branch's flow chevrons run **along the route** when one exists (`Anchors.flow` gains `via`, the route in the object's frame via `flowAnchorsAlong`; `resultsDecor.chevronPolyline` spaces them by arc length, one more chevron per 12 m up to 24, arrowheads capped at 3 m); without a route they stay on the object's own anchor. All of it is computed once per layout (a `useMemo` on the layout and the map document); nothing runs per frame beyond the chevron placement that already did.
+
+### Writing lengths, behind the project setting
+
+With **Derive lengths from geometry** on (M2's setting; off by default), a placement change that moves either end of a branch — a gizmo drag settling, **Arrange**, **Arrange all** — writes, for every affected member branch (the branch itself, or any branch at a moved yard) **that has no user route**, a straight two-point route into `map_layout.json`: the connection anchor and the far yard as `[lng, lat]`, with the new route source **`site`** (`ROUTE_SOURCES` and `RouteSource` gain it; `validate_map_layout` accepts it). Then `mapLayoutStore.queueLengthFromGeometry` queues the branch, so M2's `POST /api/network/lengths/from_geometry` goes out once the debounced PUT has landed — the server measures the route it holds — and the result reaches the same places a map edit's does (`utils/lengthsDerived.ts`: the Line/Link lists invalidated, the provenance mirrored, the log line, the impedance-rescale previews to the one `RescaleDialogHost`). A transformer gets the route (so the map shows it) and no length (PyPSA has none; the endpoint would skip it as `no-length`). The site route then measures as any route: the model's `length` = bus0 → anchor → far yard → bus1, which is the site's `route` number when the yards stand at their buses.
+
+With the setting **off**, nothing is written: the distance is shown only, and the map's discrepancy badge (M2) keeps saying where a stored length disagrees with its geometry.
+
+### The never-overwrite rule
+
+A route the user drew, imported or adopted from OSM (`source: 'user' | 'import' | 'osm'`) is **never** overwritten by the site: `mapLayoutStore.setSiteRoute` writes only when the branch has no route or a `site` route, and returns whether it wrote (`siteMayWriteRoute`). Its length is the route's, and the site shows that route's length. A user edit over a `site` route on the map makes it the user's (`source: 'user'`), and the site leaves it alone from then on; removing a route is the user's act (the site never writes an empty route). The site overwrites its own earlier route on every qualifying placement change.
+
+### Reaching the campus study
+
+`gridspine/producers/campus.py` reads `length` (1 km at zero) when it drafts cables, so a derived length flows into `length_km` with no gridspine change. `backend/tests/test_site_route_lengths.py` mirrors M2's end-to-end test: two member buses 200 m apart, a site document placing both yards and the feeder bay (heading 90, anchor 6 m on), the setting on, the site route PUT through the map_layout route, `apply_lengths_from_geometry`, a save, and the campus electrical draft's cable carrying the derived length (≈ 0.2 km, not the typed 1 km).
+
+### Still open from S3
+
+The routing factor and the connection anchor are placeholders (the anchor is the flow anchor's far end, not a bay's cable termination); a site route's ends are the branch's anchor and the far yard, not the far bus's bay (the far yard draws no bay for a branch it does not own); a yard moved off its bus's coordinate makes the site and the map measure a route from different ends; the chevrons along a long route stay at the anchor's height and ignore the terrain between the yards; the empty-state **Generate 3D site** (S4) arranges without noting a placement change, so its first arrangement writes no routes until the user arranges or drags.

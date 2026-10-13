@@ -2,7 +2,7 @@
 // vitest): when decorations must be rebuilt, the gauge bar, the chevron
 // path, and the result glow with its precedence.
 import { describe, expect, it } from 'vitest'
-import { anchorsSignature, gaugeBar, chevronPath, resultGlow } from './resultsDecor'
+import { anchorsSignature, gaugeBar, chevronPath, chevronPolyline, polylineLength, resultGlow } from './resultsDecor'
 
 describe('anchorsSignature', () => {
   it('changes when a gauge or flow anchor changes, not for rotors or emissive', () => {
@@ -52,5 +52,34 @@ describe('resultGlow', () => {
     expect(b.color).toBe('#16a34a'); expect(b.intensity).toBeGreaterThan(0); expect(b.intensity).toBeLessThan(0.2)
     expect(resultGlow(false, { color: '#dc2626', flow: { dir: 1, pct: 100 }, label: '' }, 0, '#475569')!.intensity).toBeCloseTo(0.45)
     expect(resultGlow(false, undefined, 0, '#123456')).toEqual({ color: '#000000', intensity: 0 })
+  })
+})
+
+describe('chevronPolyline (S3: flow along a route)', () => {
+  type V3 = [number, number, number]
+  // An L: 10 along −z, then 10 along +x; 20 in all.
+  const path: V3[] = [[0, 5, 0], [0, 5, -10], [10, 5, -10]]
+  it('spaces the chevrons by arc length and heads each along its segment', () => {
+    const p = chevronPolyline(path, 1, 0, 4)
+    expect(p.points).toEqual([[0, 5, 0], [0, 5, -5], [0, 5, -10], [5, 5, -10]])
+    expect(p.headings).toEqual([[0, 0, -1], [0, 0, -1], [0, 0, -1], [1, 0, 0]])
+  })
+  it('dir −1 runs the polyline backwards and the phase moves them along', () => {
+    const p = chevronPolyline(path, -1, 0.25, 2)
+    expect(p.points).toEqual([[5, 5, -10], [0, 5, -5]])
+    expect(p.headings).toEqual([[-1, 0, 0], [0, 0, 1]])
+  })
+  it('two points is chevronPath', () => {
+    const a = chevronPolyline([path[0], path[1]], 1, 0.1, 3), b = chevronPath(path[0], path[1], 1, 0.1, 3)
+    expect(a.points.map(q => q.map(v => +v.toFixed(9)))).toEqual(b.points.map(q => q.map(v => +v.toFixed(9))))
+    for (const h of a.headings) expect(h).toEqual(b.heading)
+  })
+  it('dir 0: none; a point: everything there', () => {
+    expect(chevronPolyline(path, 0, 0, 4).points).toEqual([])
+    expect(chevronPolyline([[1, 2, 3]], 1, 0.5, 2).points).toEqual([[1, 2, 3], [1, 2, 3]])
+  })
+  it('polylineLength sums the segments', () => {
+    expect(polylineLength(path)).toBe(20)
+    expect(polylineLength([])).toBe(0)
   })
 })

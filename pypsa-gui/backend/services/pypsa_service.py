@@ -1513,6 +1513,16 @@ class PyPSAService:
             return set(ctx.transient_rows.get(component_class, set()))
 
     @classmethod
+    def solve_target_context(cls) -> ProjectContext | None:
+        """
+        The context a solve on this thread belongs to: the one bound by
+        `solving_context()` (a background solve), else the active one; None
+        when there is none. Read-only, so a solve can find its own project's
+        sidecars (e.g. the island config) without touching the foreground.
+        """
+        return cls._transient_target(ensure=False)
+
+    @classmethod
     def has_any_transient_rows(cls) -> bool:
         """
         Cheap probe — True if the registry has any entries at all.

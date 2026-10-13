@@ -258,6 +258,16 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
     setOpen(true)
   }
 
+  // The schematic's asset-node double-click (plan 1 A2) asks for this
+  // editor; only the selected asset's detail view takes it (the LinkCard rule).
+  const editRequest = useUIStore(s => s.propertiesEditRequest)
+  useEffect(() => {
+    if (editRequest?.type !== 'Generator' || editRequest.name !== gen.name || mode !== 'detail') return
+    if (!open) startEdit()
+    useUIStore.getState().clearPropertiesEditRequest()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest, mode, gen.name])
+
   const isExt = form.p_nom_extendable === 'true'
   const isCommit = form.committable === 'true'
 
@@ -570,6 +580,15 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
 
   const isExt = form.p_nom_extendable === 'true'
 
+  // Asset-node double-click (plan 1 A2), as on the Generator card.
+  const editRequest = useUIStore(s => s.propertiesEditRequest)
+  useEffect(() => {
+    if (editRequest?.type !== 'StorageUnit' || editRequest.name !== su.name || mode !== 'detail') return
+    if (!open) startEdit()
+    useUIStore.getState().clearPropertiesEditRequest()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest, mode, su.name])
+
   const items: ExpandedItem[] = [
     { label: 'p_nom',          value: su.p_nom,                    unit: ' MW',    tip: docTip('storage_unit.p_nom') },
     { label: 'Max hours',      value: su.max_hours,                unit: ' h',     tip: docTip('storage_unit.max_hours') },
@@ -784,6 +803,15 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
   }
 
   const isH2Store = isH2Carrier(store.carrier)
+  // Asset-node double-click (plan 1 A2), as on the Generator card.
+  const editRequest = useUIStore(s => s.propertiesEditRequest)
+  useEffect(() => {
+    if (editRequest?.type !== 'Store' || editRequest.name !== store.name || mode !== 'detail') return
+    if (!open) startEdit()
+    useUIStore.getState().clearPropertiesEditRequest()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest, mode, store.name])
+
   const isExt = form.e_nom_extendable === 'true'
 
   const items: ExpandedItem[] = [
@@ -964,6 +992,15 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
     setForm(seedExtras(load, toFS(load, ['name', 'bus', 'carrier', 'p_set', 'q_set', 'sign']), loadExtras(editScope('Load'))))
     setOpen(true)
   }
+
+  // Asset-node double-click (plan 1 A2), as on the Generator card.
+  const editRequest = useUIStore(s => s.propertiesEditRequest)
+  useEffect(() => {
+    if (editRequest?.type !== 'Load' || editRequest.name !== load.name || mode !== 'detail') return
+    if (!open) startEdit()
+    useUIStore.getState().clearPropertiesEditRequest()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest, mode, load.name])
 
   const items: ExpandedItem[] = [
     { label: 'p_set (static)', value: load.p_set,        unit: ' MW',   tip: docTip('load.p_set') },

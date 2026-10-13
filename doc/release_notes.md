@@ -6,6 +6,8 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
+* Feat(pypsa-gui): Expand the checked-answer CI gate to 133 deterministic cases with varied load, weight, price and storage-efficiency oracles. Add offline blind review preparation and calibration reports requiring two agreeing independently attested reviewers, explicit unresolved/missing/error counts and conditional statistical intervals. Synthetic evidence cannot certify production error rates or confer domain approval.
+
 * Feat(pypsa-gui): Add a repeatable checked-answer pilot evaluation gate with independent generator, network and StorageUnit oracles across all five supported profiles. Fail on incomplete coverage, incorrect publication or missing useful results; record versioned denominators and source identity. Add optional live-model golden cases with shared pre-send resource ceilings. The backend CI job retains reports; finite-suite acceptance does not imply production calibration or engineering approval.
 
 * Feat(pypsa-gui): Add an explicit "Check answers" chat option for the bounded assurance pilot. Keep checking on retries, edits, clarification choices and queued/voice requests; withhold output until the server acknowledges the requested checks and approves the exact answer. Availability rollback cannot silently send an ordinary request. Preserve a conservative retry-policy hint for unavailable checked history; deployment defaults remain disabled.
@@ -105,6 +107,8 @@
   Solver lifecycle: a failed or aborted assumptions apply reverts itself, both solve claims clear every result key, and the queue releases what a job claimed on every exit path.
   Chat: a tool's project switch reaches the rest of the streamed turn, an import is a rebind (the panel clears the active project, so the autosave can no longer overwrite the previous project), one undo reverts the assistant's last turn, `/history` hands each user their own session, and `/stream` refuses another user's session.
   In server mode a raw import over HTTP is now what the next request sees; the session's active-project pointer was never moved.
+
+* Fix(pypsa-gui): A chat turn that stops before finishing (Stop, the tool-call cap, a project switch, a stream error, a closed tab) is now kept in the transcript and shown after a reload with a note, but never sent back to the model. The daily chat token cap now counts each turn once; it summed every session's running total, so it tripped early. The network-export tools' descriptions now say they write a file into the project's uploads.
 
 ## PyPSA-Eur v2026.02.0 (18th February 2026)
 

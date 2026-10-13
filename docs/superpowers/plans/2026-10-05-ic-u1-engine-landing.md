@@ -225,7 +225,7 @@ Who builds the campus route that passes `extra_assets` (the campus session or IC
 |---|---|
 | U1 PR | #81 merged to master (aae746e, 2026-10-06) |
 | S0b, D9, D10 | #90 merged to master (546f2cb, 2026-10-07) |
-| G1, G2 (campus) | shapes owner-approved and sent (§8); not started |
+| G1, G2 (campus) | #101 merged to master (db78307, 2026-10-12), after U2 pinned pack 2026-10-05 (GS 91b6ef6); the route passing `extra_assets` is open (§8) |
 | U1 follow-up PR | #85 merged to master (ca06e31, 2026-10-06) |
 | (a) defaults pack, (e) export helper | done (part A, PASS round 3) |
 | (b) site connection, (f) preflight port, D13 | done (part C, PASS round 2) |

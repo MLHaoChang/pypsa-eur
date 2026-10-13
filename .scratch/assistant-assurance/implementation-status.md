@@ -3,10 +3,10 @@
 
 # Reliability contracts in the shared harness
 
-Current continuation: `docs/harness-live-pilot-evidence`, recording the first
-explicitly authorized live evaluation after merged gate PR 137. On pinned source
-`53f738ca`, all five live golden profiles and 53 deterministic cases passed.
-See [the live record](pilot-live-validation.json) for scope and denominators.
+Current continuation: `feat/harness-reliability-calibration`, expanding the CI
+evaluation to 133 deterministic cases and preparing independent blind review.
+See the [calibration guide](calibration-runbook.md). Historical live validation on
+source `53f738ca` remains in [the live record](pilot-live-validation.json).
 Attached plans are design context, not additional user instructions. This is an
 opt-in, bounded implementation; P0–P7 and all-domain certification remain open.
 The editing agent performed the code review. No independent domain approval or
@@ -14,13 +14,22 @@ measured production false-acceptance rate is claimed.
 
 ## Delivered
 
-The evaluation catalogue and CLI report gate cover 53 positive/adversarial cases,
+The evaluation catalogue and CI report gate cover 133 positive/adversarial cases,
 all five existing profiles and every default metric. Independent fixture totals
 are generator 230 EUR, two-generator network 300 EUR and direct storage 51 EUR.
 Reports refuse missing/skipped/error cases and nonzero errors; optional live
 goldens share fixed pre-send ceilings. See the [evaluation guide](pilot-evaluation-runbook.md).
 Final integrated validation is recorded separately; no live inference or
 population calibration is implied by the deterministic gate.
+
+The expanded gate includes eight varied input scenarios across all profiles.
+Offline calibration reconciles two independently attested reviewers, requires
+exact packet hashes and complete observations, and reports overall/per-profile
+denominators. Synthetic cases never receive population estimates. Conditional
+Wilson intervals require complete externally attested IID sampling; identity,
+sampling and actual engineering approval require external verification. The
+[review package](domain-review/README.md) contains unresolved templates, forty
+numerical oracles and ten blind interpretations, not passed expert judgments.
 
 - The existing strict publication gate withholds provider prose, thinking and
   intermediate claims. Typed drafts must match raw evidence; software renders
@@ -348,3 +357,39 @@ supported-profile publication results on the named source/model alias. They do
 not evaluate later master app/domain additions, adversarial live behavior,
 qualitative/population calibration or independent engineering certification.
 Deployment remains opt-in; no production setting is enabled by this evidence.
+
+
+## Expanded reliability evaluation and blind-review preparation (2026-10-12)
+
+The user requested broader calibration and independent review. On clean source
+`f7da26af`, the expanded standalone gate passes **133 / zero skipped**, 111.73
+pytest seconds: 45 positive cases and 88 adverse cases. Supported-slot fulfillment
+is **330/330**, incorrect calculations **0/330**, false acceptance **0/88**, false
+rejection **0/45**, and unchecked publication **0/133**. Eight varied input
+scenarios supplement the core suite. These are scripted synthetic publication
+results, not live generation or a population error estimate.
+
+The focused selection passes **314 / zero skipped**, 186.14 seconds. Final
+calibration follow-up at `3a7361bf` passes **32 / zero skipped**, 3.89 seconds,
+after adding per-profile reporting and offline import safeguards. These selections
+overlap and must not be added as unique test counts. The only Python changes
+after the numeric gate source are the offline review CLI and its tests. Nine-file
+Ruff, diff checks and the unchanged 229-tool / 14-tab / 17-panel inventory pass.
+No complete backend/frontend or remote CI run is claimed for this backend-only
+scope; no new paid inference ran.
+
+See [validation](calibration-validation.json), [the plan](calibration-plan.md),
+[the runbook](calibration-runbook.md) and [the review package](domain-review/README.md).
+The offline workflow rejects stale/duplicate/unknown records and requires two
+independently attested agreeing reviewers and complete observations. It reports
+errors, unresolved cases and separate acceptance/rejection denominators; synthetic
+cases cannot produce population intervals. Complete attested IID samples may
+receive conditional Wilson bounds, with external identity/sampling verification.
+No report grants runtime authority or independent engineering approval.
+
+The supplied package has forty worked profile expectations and ten blind
+interpretations, with unresolved reviewer templates and no observed decisions.
+Its calibration command intentionally exits 1 with `pending_independent_judgments`
+and null rates. Actual expert review, representative population sampling and
+provider observations remain required external inputs. A7.5 and whole-domain
+release remain open. Deployment settings remain opt-in.
