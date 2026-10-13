@@ -2903,6 +2903,23 @@ def load_project(
             f"was interrupted). Project loaded from the previous good copy.",
         )
 
+    # A load REPLACES this project's resident context with the copy on disk,
+    # and the registration below must not write the displaced one back
+    # (OPEN-ITEMS 13): memory would hold the disk copy while disk held the
+    # displaced edit. When that context is the caller's own, the UI has asked
+    # before discarding it ("discard and reload"). When it is NOT — the caller
+    # is on another project and this one is merely resident, e.g. the clone
+    # wizard's `load(src)` — nobody chose to discard it, so persist its unsaved
+    # work FIRST and the read below picks it up: memory and disk then agree on
+    # the edited copy and nothing is lost.
+    displaced = PyPSAService._contexts.get(registry_id)
+    if (
+        displaced is not None
+        and displaced is not PyPSAService.get_active_context()
+        and (displaced.results_unsaved or len(displaced.undo.stack) > 0)
+    ):
+        PyPSAService._save_evicted_ctx(registry_id, displaced)
+
     # The loaded project gets its own empty undo stack and a clean dirty flag:
     # `reset_network()` builds a fresh context (P33b gate B-1), so the clears
     # below apply to IT. They used to run before the swap — on the project
@@ -3049,7 +3066,8 @@ def load_project(
             with PyPSAService.get_lock():
                 PyPSAService.reset_network()
             raise _queue_solve_conflict(name)
-        PyPSAService.register(registry_id, ctx)
+        # No write-back of the displaced context: see `displaced` above.
+        PyPSAService.register(registry_id, ctx, write_back=False)
     # Persist the pointer, mirroring activate_project. Written AFTER the swap
     # succeeds so a failed load does not leave the session pointing at a project
     # it never reached. Without this, `resolve_for_session` reads the stale
