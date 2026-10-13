@@ -15,6 +15,8 @@ type Props = {
   onProfiles: () => void
   liveOpen?: boolean
   liveCaption?: string
+  /** The user's last Live line, flashed above the input and then cleared. */
+  liveEcho?: string
   modelKeyMissing?: boolean
   onLiveSubmit?: (text: string) => void
   children?: ReactNode
@@ -35,15 +37,46 @@ function useReducedMotion(): boolean {
   return reduce
 }
 
+/**
+ * Live's presence: a grid node (a bus with its line ring). The CSS animates a
+ * part per presence: the halo breathes while listening, the sector turns while
+ * thinking, the ring pulses while speaking.
+ */
+function LiveNode({ lit }: { lit: boolean }) {
+  return (
+    <svg width="96" height="96" viewBox="0 0 96 96" fill="none" data-testid="companion-live-node">
+      <circle
+        className="companion-node-halo"
+        cx="48" cy="48" r="34"
+        stroke="var(--color-accent)" strokeOpacity={lit ? 0.35 : 0.18} strokeWidth="1.5"
+      />
+      <circle
+        className="companion-node-ring"
+        cx="48" cy="48" r="26"
+        stroke="var(--color-accent)" strokeOpacity={lit ? 0.75 : 0.4} strokeWidth="2"
+      />
+      <circle cx="48" cy="48" r="14" fill="var(--color-accent)" fillOpacity={lit ? 0.95 : 0.82} />
+      <path
+        className="companion-node-sector"
+        d="M48 34 A14 14 0 0 1 62 48"
+        stroke="var(--color-bg)" strokeWidth="2.5" strokeLinecap="round"
+      />
+      <circle cx="48" cy="48" r="3.5" fill="var(--color-bg)" fillOpacity="0.9" />
+    </svg>
+  )
+}
+
 export default function CompanionLauncher({
   presence = 'idle', profileLabel, onCompose, onSpeak, onLive, onProfiles,
-  liveOpen = false, liveCaption = '', modelKeyMissing = false, onLiveSubmit,
+  liveOpen = false, liveCaption = '', liveEcho = '', modelKeyMissing = false, onLiveSubmit,
   children,
 }: Props) {
   const reduce = useReducedMotion()
   const [hovered, setHovered] = useState(false)
   const [draft, setDraft] = useState('')
   const lit = presence !== 'idle'
+  const echo = liveEcho.trim()
+  const caption = liveCaption.trim()
   return (
     <div
       className="companion-launcher fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2"
@@ -73,15 +106,22 @@ export default function CompanionLauncher({
             setDraft('')
           }}
         >
-          <p className="text-sm font-medium leading-snug text-text" data-testid="companion-live-caption">
-            {liveCaption}
-          </p>
+          {echo ? (
+            <p className="companion-live-echo mb-2 text-[12px] leading-snug text-text" data-testid="companion-live-echo">
+              {echo}
+            </p>
+          ) : null}
+          {caption ? (
+            <p className="mb-2 text-[11px] leading-snug text-muted" data-testid="companion-live-caption">
+              {caption}
+            </p>
+          ) : null}
           {modelKeyMissing && (
-            <p className="mt-1 text-[10px] text-muted" data-testid="companion-live-key">
+            <p className="mb-2 text-[10px] text-muted" data-testid="companion-live-key">
               Model key is not configured. Tab changes still use the assistant&apos;s panel tool.
             </p>
           )}
-          <div className="mt-2 flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <input
               data-testid="companion-live-input"
               value={draft}
@@ -114,14 +154,17 @@ export default function CompanionLauncher({
         <div
           aria-hidden="true"
           data-testid="companion-character"
+          data-shape={liveOpen ? 'live-node' : 'character'}
           className={reduce ? '' : 'companion-idle'}
         >
-          <svg width="112" height="112" viewBox="0 0 72 72" fill="none">
-            <rect x="16" y="18" width="40" height="36" rx="14" fill="var(--color-accent)" />
-            <rect x="24" y="28" width="24" height="12" rx="6" fill="var(--color-bg)" />
-            <circle cx="32" cy="34" r="2" fill="var(--color-accent)" />
-            <circle cx="40" cy="34" r="2" fill="var(--color-accent)" />
-          </svg>
+          {liveOpen ? <LiveNode lit={lit} /> : (
+            <svg width="112" height="112" viewBox="0 0 72 72" fill="none">
+              <rect x="16" y="18" width="40" height="36" rx="14" fill="var(--color-accent)" />
+              <rect x="24" y="28" width="24" height="12" rx="6" fill="var(--color-bg)" />
+              <circle cx="32" cy="34" r="2" fill="var(--color-accent)" />
+              <circle cx="40" cy="34" r="2" fill="var(--color-accent)" />
+            </svg>
+          )}
         </div>
       </div>
       <div
@@ -155,9 +198,9 @@ export default function CompanionLauncher({
           onClick={onLive}
           data-testid="companion-live"
           aria-label="Start a live conversation on this page"
-          aria-pressed={lit}
+          aria-pressed={liveOpen}
           title="Talk with the assistant here. This stays on the current page."
-          className={`px-3 py-2 hover:text-accent ${lit ? 'text-accent' : 'text-text'}`}
+          className={`px-3 py-2 hover:text-accent ${liveOpen ? 'text-accent' : 'text-text'}`}
         >
           Live
         </button>

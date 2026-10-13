@@ -58,6 +58,13 @@ class PyPSAService:
     # stays the authoritative pointer for get_network() and uniquely handles the
     # UNBOUND (New Project) case the registry can't key (no project_id yet).
     _contexts: dict[str, ProjectContext] = {}
+    # Registry keys registered ON A DECISION STUDY'S BEHALF (gate S4 BC-S4-1):
+    # the study's base context and each option fork the queue solves. They
+    # neither count toward RESIDENT_CAP nor may be chosen as its victims, and
+    # registering one never runs the cap check — so a study can never evict,
+    # and so write back, a user's context. Bounded: the runner drops each fork
+    # after reading it and the base it registered when the run ends.
+    _study_owned: set[str] = set()
 
     # ── LRU eviction cap (B9) ─────────────────────────────────────────────────
     # Max number of RESIDENT bound contexts held in `_contexts`. Every
@@ -988,7 +995,9 @@ class PyPSAService:
     # to build-then-activate (the swap happens under get_lock() today), which
     # lands with B4. The netCDF I/O lock stays global forever (process-global HDF5).
     @classmethod
-    def register(cls, project_id: str, ctx: ProjectContext) -> list[str]:
+    def register(
+        cls, project_id: str, ctx: ProjectContext, *, write_back: bool = True,
+    ) -> list[str]:
         """
         Add/replace a bound resident context, stamp its LRU recency (registering
         counts as an interaction), and run the B9 cap check. Every registration
@@ -1015,6 +1024,12 @@ class PyPSAService:
         an eviction victim, because the outcome for that context is identical:
         it stops being reachable. `prior is not ctx` keeps a plain
         re-registration (the common case) from triggering a save.
+
+        `write_back=False` is for the one caller whose displaced context is NOT
+        merely becoming unreachable: `load_project` has just re-read the same
+        project off disk to REPLACE it (OPEN-ITEMS 13). Writing the displaced
+        copy back would put the edit the user chose to discard on disk while
+        memory holds the disk copy — the next save loses it, a restart revives it.
         """
         with cls._registry_lock:
             prior = cls._contexts.get(project_id)
@@ -1026,9 +1041,41 @@ class PyPSAService:
         # detach-then-save shape, as `_evict_if_over_cap`. The save takes
         # mutation_lock + the netCDF I/O lock, which must never nest under
         # `_registry_lock`.
-        if prior is not None and prior is not ctx:
+        if write_back and prior is not None and prior is not ctx:
             cls._save_evicted_ctx(project_id, prior)
+        if project_id in cls._study_owned:
+            # A study's registration never makes room (BC-S4-1).
+            return []
         return cls._evict_if_over_cap(protected_ids={project_id})
+
+    @classmethod
+    def mark_study_owned(cls, key: str) -> None:
+        """Exempt `key` from the resident cap (see `_study_owned`)."""
+        with cls._registry_lock:
+            cls._study_owned.add(key)
+
+    @classmethod
+    def unmark_study_owned(cls, key: str) -> None:
+        with cls._registry_lock:
+            cls._study_owned.discard(key)
+
+    @classmethod
+    def release_study_owned(cls, key: str, *, drop: bool) -> None:
+        """
+        Lift `key`'s cap exemption and, when `drop`, remove the context, in ONE
+        `_registry_lock` critical section (gate S6, BC-S6-v2-2). Done as two
+        calls, either order leaves a window: unmark-then-drop leaves a resident
+        context that is no longer exempt, so a concurrent registration at the
+        cap could evict it and write a study context back to disk; drop-then-
+        unmark leaves an exemption for a context no longer resident. The
+        eviction path reads `_study_owned` and `_contexts` under this lock, so
+        it sees both before or both after. `drop` itself takes no lock of its
+        own (`bind_project` only sets attributes), so nesting it is safe.
+        """
+        with cls._registry_lock:
+            cls._study_owned.discard(key)
+            if drop:
+                cls.drop(key)
 
     @classmethod
     def _session_active_keys(cls) -> set[str]:
@@ -1154,12 +1201,15 @@ class PyPSAService:
                         protected.add(pid)
                 except Exception:                             # noqa: BLE001
                     continue
-            while len(cls._contexts) > cls.RESIDENT_CAP:
+            # Study-owned contexts (BC-S4-1) are outside the cap: not counted,
+            # never a victim.
+            while (sum(1 for k in cls._contexts if k not in cls._study_owned)
+                   > cls.RESIDENT_CAP):
                 # Candidate victims = resident, not protected. Pick the smallest
                 # recency stamp (least-recently-interacted).
                 candidates = [
                     (pid, c) for pid, c in cls._contexts.items()
-                    if pid not in protected
+                    if pid not in protected and pid not in cls._study_owned
                 ]
                 if not candidates:
                     logger.warning(

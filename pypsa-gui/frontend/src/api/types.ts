@@ -653,6 +653,13 @@ export interface ProjectInfo {
   // column NULL for every pre-existing row). Bare string for the same reason
   // as `scenario_type`: an unknown kind shows no badge, it does not break.
   project_kind?: string | null
+  // A decision study's option or tornado fork (plan F1-F, F3): the backend
+  // verifies the owner keys AND the database parent (forks.is_study_owned).
+  // `owner_study_name` is null when the study record is gone. Optional: an
+  // older backend does not send them.
+  study_owned?: boolean
+  owner_study_id?: string | null
+  owner_study_name?: string | null
   // Per-project settings from metadata.json (plan M2). Absent on an older
   // backend; every field defaults off, so read through `projectSetting`.
   settings?: ProjectSettings

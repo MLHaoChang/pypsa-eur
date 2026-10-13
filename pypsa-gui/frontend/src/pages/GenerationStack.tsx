@@ -42,7 +42,7 @@ const genCols = [
   genHelper.accessor('p_nom', { header: 'p_nom (MW)', size: 110 }),
   genHelper.accessor('p_nom_extendable', { header: 'Extendable', size: 90, cell: i => i.getValue() ? '✓' : '' }),
   genHelper.accessor('marginal_cost', { header: 'MC (€/MWh)', size: 110 }),
-  genHelper.accessor('capital_cost', { header: 'CC (€/MW)', size: 110 }),
+  genHelper.accessor('capital_cost', { header: 'CC (€/MW/yr)', size: 110 }),
   genHelper.accessor('efficiency', { header: 'η', size: 70 }),
 ]
 
@@ -98,7 +98,7 @@ const suCols = [
   suHelper.accessor('max_hours', { header: 'Max hours', size: 90 }),
   suHelper.accessor('efficiency_store', { header: 'η store', size: 80 }),
   suHelper.accessor('efficiency_dispatch', { header: 'η dispatch', size: 90 }),
-  suHelper.accessor('capital_cost', { header: 'CC (€/MW)', size: 110 }),
+  suHelper.accessor('capital_cost', { header: 'CC (€/MW/yr)', size: 110 }),
 ]
 
 function StorageUnitsTab() {
@@ -130,7 +130,7 @@ const stCols = [
   stHelper.accessor('carrier', { header: 'Carrier', size: 100 }),
   stHelper.accessor('e_nom', { header: 'e_nom (MWh)', size: 110 }),
   stHelper.accessor('e_nom_extendable', { header: 'Extendable', size: 90, cell: i => i.getValue() ? '✓' : '' }),
-  stHelper.accessor('capital_cost', { header: 'CC (€/MWh)', size: 110 }),
+  stHelper.accessor('capital_cost', { header: 'CC (€/MWh/yr)', size: 110 }),
   stHelper.accessor('marginal_cost', { header: 'MC (€/MWh)', size: 110 }),
 ]
 

@@ -30,6 +30,7 @@ import WorkspacePanel from './pages/WorkspacePanel'
 import CompareView from './pages/CompareView'
 import SolveQueuePanel from './pages/SolveQueuePanel'
 import GridspinePanel from './pages/GridspinePanel'
+import DecisionPanel from './pages/decision/DecisionPanel'
 import ReportsPanel from './pages/ReportsPanel'
 import CampusElectricalPanel from './pages/CampusElectricalPanel'
 import { recoveryFor } from './utils/autoRecovery'
@@ -110,21 +111,24 @@ class AppErrorBoundary extends React.Component<
 // Properties + Bottom panels hide while a tab panel is active. A slim
 // breadcrumb header carries a Close affordance; Esc also closes (handled in
 // App's global key handler).
+// The eyebrow names the sidebar step the panel opens from (M2: BUILD, TIME,
+// RUN, RESULTS, STUDIES, REPORTS; the project's own panels say PROJECT).
 const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   overview:   { eyebrow: 'PROJECT',    title: 'Project info' },
-  snapshots:  { eyebrow: 'PROJECT',    title: 'Network snapshots' },
-  scenarios:  { eyebrow: 'PROJECT',    title: 'Scenarios' },
-  compare:    { eyebrow: 'PROJECT',    title: 'Compare scenarios' },
-  timeseries: { eyebrow: 'DATA',       title: 'Time series' },
-  simparams:  { eyebrow: 'SIMULATION', title: 'Solver settings' },
-  horizon:    { eyebrow: 'SIMULATION', title: 'Model horizon' },
-  capacityBounds: { eyebrow: 'SIMULATION', title: 'Capacity bounds' },
-  issues:     { eyebrow: 'SIMULATION', title: 'Issues' },
-  results:    { eyebrow: 'SIMULATION', title: 'Results' },
-  solveQueue: { eyebrow: 'SIMULATION', title: 'Solve queue' },
+  snapshots:  { eyebrow: 'REPORTS',    title: 'Network snapshots' },
+  scenarios:  { eyebrow: 'REPORTS',    title: 'Scenarios' },
+  compare:    { eyebrow: 'REPORTS',    title: 'Compare scenarios' },
+  timeseries: { eyebrow: 'TIME',       title: 'Time series' },
+  simparams:  { eyebrow: 'RUN',        title: 'Solver settings' },
+  horizon:    { eyebrow: 'TIME',       title: 'Model horizon' },
+  capacityBounds: { eyebrow: 'BUILD',  title: 'Capacity bounds' },
+  issues:     { eyebrow: 'RUN',        title: 'Issues' },
+  results:    { eyebrow: 'RESULTS',    title: 'Results' },
+  solveQueue: { eyebrow: 'RUN',        title: 'Solve queue' },
   gridspine:  { eyebrow: 'STUDIES',    title: 'Planning → dynamics' },
-  reports:    { eyebrow: 'STUDIES',    title: 'Reports' },
+  reports:    { eyebrow: 'REPORTS',    title: 'Reports' },
   campusElectrical: { eyebrow: 'STUDIES', title: 'Campus electrical' },
+  decision:   { eyebrow: 'STUDIES',    title: 'Decision study' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
   settings:   { eyebrow: 'APPLICATION', title: 'Settings' },
   hubDesign:  { eyebrow: 'GUIDED',     title: 'Hub design' },
@@ -133,7 +137,7 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
 // half-width panel beside the canvas — their charts, tables, and two-column
 // layouts need the full width.
-const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'reports', 'hubDesign', 'campusElectrical'])
+const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'reports', 'hubDesign', 'campusElectrical', 'decision'])
 
 function fullPageContent(panel: SlidePanel): React.ReactNode {
   switch (panel) {
@@ -153,6 +157,7 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'capacityBounds': return <CapacityBoundsEditor />
     case 'solveQueue': return <SolveQueuePanel />
     case 'gridspine':  return <GridspinePanel />
+    case 'decision':   return <DecisionPanel />
     case 'reports':    return <ReportsPanel />
     case 'campusElectrical': return <CampusElectricalPanel />
     case 'settings':   return <LocalSettings />

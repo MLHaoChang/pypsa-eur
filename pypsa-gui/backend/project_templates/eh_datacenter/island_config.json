@@ -57,10 +57,17 @@
     "pickup_blocks": {
       "source": "assumed",
       "value": [
-        15.0,
-        15.0,
-        15.0,
-        10.0
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0
       ]
     },
     "ride_through_storage": [
@@ -71,8 +78,7 @@
       "value": 500.0
     },
     "scenarios": [
-      "ups_bridged",
-      "seamless"
+      "ups_bridged"
     ],
     "sustained_h": {
       "source": "assumed",

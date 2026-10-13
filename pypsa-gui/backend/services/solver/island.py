@@ -1,7 +1,8 @@
 """
-Island ride-through, fuel and bridge reserve in the hub LP (campus island
-plan 2026-10-07, I2a), as an ``extra_functionality`` wrapper composed like
-``services/solver/adequacy.py``.
+Island ride-through, fuel and bridge reserve (I2a), the instant of
+islanding (I2b), and linearised UC and the variants (I2c) in the hub LP
+(campus island plan 2026-10-07), as an ``extra_functionality`` wrapper
+composed like ``services/solver/adequacy.py``.
 
 The study requirements come from the project's island sidecar
 (``island_config.json``, schema ``gridspine/schema/island.py``). The rows are
@@ -36,18 +37,64 @@ lifetime), as the reserve margin does.
 grid-forming storage also holds B(t) = ΔP⁺(t)·(start_s + sync_s)/3600, the
 energy until the slowest genset has joined. B enters (a)'s row for storage
 in both RT and the GFM set, so one MWh is not counted twice; otherwise it is
-its own row. ΔP⁺ is I2b's: until I2b lands it is passed in, and without it
-B is 0 and the facts say so.
+its own row. ΔP⁺ is I2b's step below, as a linear expression, unless a
+caller passes ``delta_p_plus``. B carries max(ΔP⁺, 0) through a variable
+b ≥ ΔP⁺, b ≥ 0 in the same row. The UPS bridge applies when islanding is
+unplanned (``seamless`` or ``ups_bridged``), not to a ``planned`` transfer.
 
 **(c) Fuel (Q1).** Where a genset is a Link fed from a bus with Stores:
 Σ e_nom ≥ L_c,peak·fuel_autonomy_h/η_genset (the draw at the critical peak,
 conservative). Gensets that are Generators have no fuel bus: "not checked".
 
+**The instant of islanding (I2b).** The PCC import, site side, is
+p_imp = η·p0 over the Links tagged ``eh_role=grid_import`` less p0 over
+those tagged ``grid_export``; ``seamless`` without a tagged import Link is
+refused. "Late" UPSs transfer and walk in no earlier than the slowest genset
+joins (``walk_in_s`` ≥ ``start_s + sync_s``):
+
+    ΔP⁺(t) = p_imp − Σ_late X_u,   0 ≤ X_u ≤ L_it,u,  X_u ≤ p_nom_u
+    ΔP⁻(t) = −p_imp + Σ_transferring L_it,u     (at 0⁺; owner, 2026-10-13)
+    ΔP⁻_j(t) = −p_imp + Σ_late L_it,u           (once the gensets have joined)
+
+X_u enters only rows a larger X loosens, so it settles at min(L_it, p_nom_u).
+By scenario (the plan's matrix): every scenario gets the steady-island GFM
+MVA row (GFM s_nom plus every genset's) and the spinning minimum load
+p_g ≥ p_min_pu·p_nom_g. ``seamless`` adds upward headroom (GFM storage plus
+spinning gensets ≥ ΔP⁺), downward power (GFM p_s + p_nom ≥ ΔP⁻), SoC room
+(GFM max_hours·p_nom − e(t−1) ≥ ΔP⁻·t_curt/3600, t_curt from the ``gfl_fw``
+units; none, and the exporting hours are reported by
+``not_islandable_hours`` instead), the GFM MVA at 0⁺ (GFM plus spinning
+gensets), RoCoF 2M ≥ f0·ΔP/RoCoF_max on both steps, and the quasi-steady
+state ΣK·Δf_qss ≥ ΔP⁺, ΔP⁻_j. ``ups_bridged`` adds the pickup row
+Σ ls·p_nom − k·max(ls·U) ≥ max block, RoCoF on the largest block from the
+gensets' inertia at N+k, and ΣK on that block. M sums H·s_nom over spinning
+gensets, H_v·s_nom over VSMs and τ_f·p_nom/(2R) over droop GFMs; ΣK sums
+p_nom/(R·f0) over GFMs and droop gensets, less the k largest genset units'.
+RoCoF reads the ``transition`` limits and the qss band the
+``steady_island`` ones; f0 is 50 Hz. A row with no variable that fails is a
+refusal naming it, not an infeasible LP.
+
 **Ledgered:** PV is left out (conservative); the site is a copperplate (the
 hub's one-way site transformer is not seen here; I4 catches it at the island
 hours); U_max over-subtracts when an extendable genset is not built
 (conservative); the occurrence derating is not applied, since N+k covers
-outages.
+outages. I2b: only ``spinning`` gensets are online at 0⁺, whatever they
+dispatch (linearised UC is I2c); isochronous gensets add no droop gain
+(conservative); the instantaneous RoCoF at 0⁺ is stricter than I6's window;
+f0 is fixed at 50 Hz.
+
+**Linearised UC (I2c, Q7).** With the sidecar's ``linearised_uc`` on, the
+fixed-size gensets are committed for the solve (``linearised_uc``: PyPSA's
+``linearized_unit_commitment``, u_g(t) continuous in [0, 1], and the
+sidecar's ``p_min_pu``), and u_g·p_nom_g replaces the ``spinning`` flag in
+the 0⁺ rows: headroom u·p_max_pu·η·p_nom − η·p, the GFM MVA and the RoCoF
+inertia. PyPSA's own p ≥ u·p_min_pu·p_nom is their minimum load. An
+extendable genset is not committed (big-M, so u·p_nom is bilinear) and
+keeps ``spinning``; the facts say so. u may be fractional: "linearised".
+
+**The variants (I2c, Q3).** ``island_study`` solves copies of the network
+without the rows and once per scenario, and reports the cost of island
+capability, the cost of seamless islanding and the binding rows' duals.
 
 **Dispatch-only solves skip the rows** (owner, 2026-10-12). They are a
 sizing standard (plan step 1): when nothing they can size (a genset, a
@@ -66,6 +113,7 @@ Every refusal, a sidecar that fails validation included, is an
 """
 from __future__ import annotations
 
+import contextlib
 import math
 import pathlib
 
@@ -142,6 +190,13 @@ def _wrap_with_island(network, user_fn, cfg, island=_UNSET, log_queue=None,
         return user_fn                      # skipped anyway; no sidecar read per re-solve
     why = strategy_refusal(**_effective_path(network, cfg))
     if why:
+        if island is _UNSET:
+            try:
+                island = load_project_island()
+            except IslandRefusal:
+                island = None
+        if island and island["requirements"].get("linearised_uc"):
+            why += "; linearised unit commitment (I2c) is refused with them"
         raise IslandRefusal(why)
     if island is _UNSET:
         island = load_project_island()
@@ -157,9 +212,9 @@ def _wrap_with_island(network, user_fn, cfg, island=_UNSET, log_queue=None,
 def island_extra_functionality(island, *, user_fn=None, delta_p_plus=None, emit=None):
     """The ``extra_functionality`` callback that adds the island rows.
 
-    ``delta_p_plus`` is the ``seamless`` step ΔP⁺ in MW (a number, a Series
-    on the snapshots, or ``callable(n, sns)`` returning either); None until
-    I2b supplies it."""
+    ``delta_p_plus`` overrides the ``seamless`` step ΔP⁺ in MW (a number, a
+    Series on the snapshots, or ``callable(n, sns)`` returning either); None,
+    the default, builds it from the PCC Links and the late UPSs (I2b)."""
     def fn(n, snapshots):
         if user_fn is not None:
             user_fn(n, snapshots)
@@ -284,6 +339,164 @@ def dispatch_only(n, island) -> str | None:
     return "dispatch-only: nothing the rows can size is extendable"
 
 
+# ── linearised unit commitment (I2c) ───────────────────────────────────────
+
+
+def uc_gensets(n, island, gensets=None) -> tuple[list[str], dict[str, str]]:
+    """(committed, {not committed: why}) under the sidecar's ``linearised_uc``.
+
+    Only fixed-size gensets are committed: PyPSA models a committable
+    *extendable* unit with big-M, so u·p_nom is bilinear and a fractional u
+    relaxes its minimum load almost completely. An extendable genset keeps
+    the ``spinning`` flag (I2b)."""
+    if not island["requirements"].get("linearised_uc"):
+        return [], {}
+    if gensets is None:
+        gensets = [u for u, s in island["units"].items() if s["kind"] == "genset"
+                   and (u in n.generators.index or u in n.links.index)]
+    committed, skipped = [], {}
+    for g in gensets:
+        frame = n.generators if g in n.generators.index else n.links
+        if bool(frame.at[g, "p_nom_extendable"]):
+            # Owner, 2026-10-13 (option A): never committed, not refused; it
+            # keeps I2b's spinning rule.
+            skipped[g] = "not committed: extendable (big-M bilinear)"
+        else:
+            committed.append(g)
+    return committed, skipped
+
+
+@contextlib.contextmanager
+def linearised_uc(n, island):
+    """Commit the sidecar's fixed-size gensets for one solve, and yield the
+    ``optimize`` keywords (``linearized_unit_commitment``). ``committable``
+    and the sidecar's ``p_min_pu`` are written for the solve and restored
+    after it, so the project is unchanged. A dispatch-only solve, which
+    skips the rows, commits nothing."""
+    if island is None or not island["requirements"].get("linearised_uc") \
+            or dispatch_only(n, island):
+        yield {}
+        return
+    committed, _ = uc_gensets(n, island)
+    saved = []
+    try:
+        for g in committed:
+            frame = n.generators if g in n.generators.index else n.links
+            p_min = island["units"][g]["values"].get("p_min_pu")
+            if p_min is None:
+                p_min = float(frame.at[g, "p_min_pu"])
+            if not p_min > 0:
+                raise IslandRefusal(
+                    f"genset {g!r} is committed under linearised_uc and needs p_min_pu above "
+                    "0 in the island sidecar, or its online headroom costs no fuel")
+            saved.append((frame, g, frame.at[g, "committable"], frame.at[g, "p_min_pu"]))
+            frame.at[g, "committable"] = True
+            frame.at[g, "p_min_pu"] = float(p_min)
+        yield {"linearized_unit_commitment": True} if committed else {}
+    finally:
+        for frame, g, was_committable, was_p_min in saved:
+            frame.at[g, "committable"] = was_committable
+            frame.at[g, "p_min_pu"] = was_p_min
+
+
+@contextlib.contextmanager
+def solve_uc(network, cfg, island=_UNSET):
+    """``linearised_uc`` for ``run_simulation``'s plain solve: active only
+    when the island rows are, read from the same sidecar."""
+    if (not getattr(cfg, "island_constraints", False) or getattr(cfg, "mode", "lopf") != "lopf"
+            or getattr(network, OPERATIONAL_ATTR, False)):
+        yield {}
+        return
+    if island is _UNSET:
+        island = load_project_island()
+    with linearised_uc(network, island) as kw:
+        yield kw
+
+
+# ── the variants and the cost of island capability (I2c) ──────────────────
+
+
+def _default_solve(n, extra_functionality, **kw):
+    return n.optimize(solver_name="highs", extra_functionality=extra_functionality, **kw)
+
+
+def binding_rows(n, tol=1e-6) -> list[dict]:
+    """The island rows whose dual is non-zero, after a solve: ``hours`` (None
+    for a static row) and ``duals`` at them, in objective units per unit of
+    the row."""
+    out = []
+    for name in n.model.constraints:
+        if not name.startswith("Island-"):
+            continue
+        dual = n.model.constraints[name].dual
+        if "snapshot" in dual.dims:
+            other = [d for d in dual.dims if d != "snapshot"]
+            series = (dual.sum(other) if other else dual).to_pandas()
+            hit = series[series.abs() > tol]
+            if len(hit):
+                out.append({"row": name, "hours": [str(h) for h in hit.index],
+                            "duals": [float(x) for x in hit]})
+        else:
+            value = float(dual.sum())
+            if abs(value) > tol:
+                out.append({"row": name, "hours": None, "duals": [value]})
+    return out
+
+
+def island_study(n, island, *, scenarios=None, solve=None, tol=1e-6) -> dict:
+    """The islanding variants as separate solves of copies of ``n`` (Q3):
+    a baseline with no island rows, and one solve per scenario (the
+    sidecar's, or ``scenarios``). Reports each objective (the annualised
+    cost), the **cost of island capability** (scenario − baseline), the
+    **cost of seamless islanding** (seamless − ups_bridged), and the binding
+    rows with their hours and duals. A refused or failed variant is recorded
+    with its reason and has no cost. ``solve(n, extra_functionality, **kw)``
+    returns (status, condition); HiGHS by default."""
+    import copy
+
+    solve = solve or _default_solve
+    scenarios = list(scenarios or island["requirements"]["scenarios"])
+    variants = {}
+
+    base = n.copy()
+    status, cond = solve(base, None)
+    variants["baseline"] = {"status": status, "condition": cond,
+                            "objective": float(base.objective) if status == "ok" else None}
+
+    for sc in scenarios:
+        one = copy.deepcopy(island)
+        one["requirements"]["scenarios"] = [sc]
+        if sc == "ups_bridged" and "pickup_blocks" not in one["requirements"]["values"]:
+            variants[sc] = {"status": "refused", "objective": None,
+                            "reason": "ups_bridged needs pickup_blocks in the sidecar"}
+            continue
+        c = n.copy()
+        try:
+            with linearised_uc(c, one) as kw:
+                status, cond = solve(c, island_extra_functionality(one), **kw)
+        except IslandRefusal as exc:
+            variants[sc] = {"status": "refused", "objective": None, "reason": str(exc)}
+            continue
+        if status != "ok":
+            variants[sc] = {"status": status, "condition": cond, "objective": None}
+            continue
+        variants[sc] = {"status": "ok", "condition": cond, "objective": float(c.objective),
+                        "binding": binding_rows(c, tol),
+                        "facts": getattr(c, "_island_facts", None)}
+
+    def obj(name):
+        v = variants.get(name)
+        return v["objective"] if v else None
+
+    base_obj = obj("baseline")
+    capability = {sc: obj(sc) - base_obj for sc in scenarios
+                  if obj(sc) is not None and base_obj is not None}
+    seamless = (obj("seamless") - obj("ups_bridged")
+                if obj("seamless") is not None and obj("ups_bridged") is not None else None)
+    return {"variants": variants, "cost_of_island_capability": capability,
+            "cost_of_seamless": seamless}
+
+
 # ── the rows ───────────────────────────────────────────────────────────────
 
 
@@ -330,11 +543,31 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
         emit(f"island_config.json names {missing}, which this network does not have; "
              "they are left out of the rows")
     k = int(vals["genset_redundancy_n"])
-    seamless = "seamless" in req["scenarios"]
+    scenarios = set(req["scenarios"])
+    committed, not_committed = uc_gensets(n, island, gensets)
+    for g in committed:
+        comp, _ = _genset_out(n, g)
+        if not bool(getattr(n, _LIST_NAMES[comp]).at[g, "committable"]) \
+                or f"{comp}-status" not in m.variables:
+            raise IslandRefusal(
+                f"linearised_uc is on, but genset {g!r} was not committed for this solve; "
+                "solve inside services.solver.island.linearised_uc(n, island)")
+    fw = present("gfl_fw", [u for u, s in units.items() if s.get("control") == "gfl_fw"],
+                 ("generators", "storage_units", "links"))
+    pcc = _pcc_links(n)
+    if "seamless" in scenarios and delta_p_plus is None and not pcc["import"]:
+        raise IslandRefusal(
+            "the seamless scenario reads the import at the PCC from the Link tagged "
+            "eh_role=grid_import, and this network tags none; tag the import Link")
 
     facts = {"n_plus_k": k, "ride_through_storage": rt, "critical_loads": critical,
              "truncated": False, "periods": {}, "fuel": {"status": "not checked"},
-             "seamless_bridge": None, "missing": missing}
+             "seamless_bridge": None, "missing": missing, "surplus": None,
+             "uc": ({"status": "linearised (u may be fractional)", "committed": committed,
+                     "not_committed": not_committed} if req.get("linearised_uc")
+                    else {"status": "off"}),
+             "instant": {"scenarios": sorted(scenarios), "f0_hz": F0_HZ, "rows": [],
+                         "late_ups": [], "pcc": pcc}}
 
     # The unit the N+k test takes out of each genset: its sidecar unit_mw
     # (a fleet modelled as one asset), else a fixed unit's own rating. An
@@ -352,8 +585,6 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
         else:
             eff = float(n.links.at[g, "efficiency"]) if comp == "Link" else 1.0
             unit_rating[g] = float(frame.at[g, "p_nom"]) * eff
-    joins_s = max((units[g]["values"]["start_s"] + units[g]["values"]["sync_s"]
-                   for g in gensets), default=0.0)
 
     def active(names, comp_of, period):
         label = "ALL" if period is None else period
@@ -414,46 +645,39 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
                 p_lhs = p_lhs - var
         m.add_constraints(p_lhs <= p_fixed, name=f"Island-power{tag}")
 
-        # B(t): the seamless GFM bridge.
-        bridge = pd.Series(0.0, index=sns_p)
-        if seamless and gfm_p:
-            if delta_p_plus is None:
-                facts["seamless_bridge"] = "zero until I2b supplies the islanding step"
-            else:
-                bridge = _as_series(delta_p_plus, n, sns_p).clip(lower=0.0) * joins_s / 3600.0
-                if bridge.gt(0).any():
-                    facts["seamless_bridge"] = "held"
-                elif facts["seamless_bridge"] is None:
-                    facts["seamless_bridge"] = "zero step"
+        # The instant of islanding (I2b): ΔP⁺ and ΔP⁻, and the rows the
+        # scenarios ask for. B(t) comes back as a linear quantity.
+        joins_p = max((units[g]["values"]["start_s"] + units[g]["values"]["sync_s"]
+                       for g in g_p), default=0.0)
+        bridge = _instant_rows(
+            n, m, sns, sns_p, coord, tag, period, island=island, gensets=g_p, gfm=gfm_p,
+            upss=ups_p, l_c=l_c, unit_rating=unit_rating, joins_s=joins_p, k=k,
+            links=pcc, fw_units=fw, delta_p_plus=delta_p_plus, facts=facts, active=active,
+            committed=committed)
 
         # (a) energy: Σ η·e(t−1) − Σ_window d·Δ ≥ B(t) for storage in RT ∩ GFM.
         cyclic_all = all(bool(n.storage_units.at[s, "cyclic_state_of_charge"]) for s in rt_p) \
             if rt_p else True
         if not cyclic_all and steps > 1:
             facts["truncated"] = True
-        e_lhs = -dt * _window_sum(d, steps, cyclic_all)
-        e_rhs = pd.Series(0.0, index=sns_p)
+        e_lhs = _Lin(sns_p).var(-dt * _window_sum(d, steps, cyclic_all))
         for s in rt_p:
-            eta = float(n.storage_units.at[s, "efficiency_dispatch"])
-            soc, init = _soc_before(n, sns, sns_p, s)
-            e_lhs = e_lhs + eta * soc
-            e_rhs.iloc[0] -= eta * init
+            _add_soc_before(e_lhs, n, sns, sns_p, s,
+                            float(n.storage_units.at[s, "efficiency_dispatch"]))
         in_row = [s for s in gfm_p if s in rt_p]
-        if in_row:
-            e_rhs = e_rhs + bridge
-        m.add_constraints(e_lhs >= xr_series(e_rhs, coord), name=f"Island-energy{tag}")
+        e_rhs = bridge if in_row else _Lin(sns_p)
+        _row(m, e_lhs, e_rhs, f"Island-energy{tag}", coord)
 
         # B(t) for GFM storage outside RT: its own row.
         own = [s for s in gfm_p if s not in rt_p]
-        if own and bridge.gt(0).any():
+        if own and not bridge.is_zero():
             _reserve_row(n, m, sns, sns_p, coord, own, bridge, f"Island-gfm-bridge{tag}")
 
-        # (b) every UPS holds its IT load for bridge_s.
-        for u in ups_p:
-            it = [x for x in units[u]["it_load"] if x in n.loads.index]
-            p_it = (_dense(n, "Load", "p_set", sns_p, it).sum(axis=1)
-                    if it else pd.Series(0.0, index=sns_p))
-            _reserve_row(n, m, sns, sns_p, coord, [u], p_it * vals["bridge_s"] / 3600.0,
+        # (b) every UPS holds its IT load for bridge_s, when islanding is
+        # unplanned (the matrix: a planned transfer needs no bridge).
+        for u in (ups_p if scenarios & {"seamless", "ups_bridged"} else ()):
+            need = _it_load(n, units, u, sns_p) * vals["bridge_s"] / 3600.0
+            _reserve_row(n, m, sns, sns_p, coord, [u], _Lin(sns_p).plus(need),
                          f"Island-ups-bridge-{u}{tag}")
 
         facts["periods"][str(period)] = {
@@ -464,7 +688,9 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
     facts["fuel"] = _fuel(n, m, sns, units, gensets, vals, critical)
     n._island_facts = facts
     emit(f"N+{k} ride-through over {vals['sustained_h']:g} h from every hour; "
-         f"storage {rt or 'none'}; fuel {facts['fuel']['status']}.")
+         f"storage {rt or 'none'}; fuel {facts['fuel']['status']}; islanding "
+         f"{'/'.join(sorted(scenarios))}: {len(facts['instant']['rows'])} instant rows"
+         + (f"; surplus {facts['surplus']['status']}" if facts["surplus"] else "") + ".")
     return facts
 
 
@@ -485,16 +711,410 @@ def xr_series(s: pd.Series, coord):
     return xr.DataArray(s.to_numpy(dtype=float), coords=[coord], dims=["snapshot"])
 
 
-def _reserve_row(n, m, sns, sns_p, coord, names, need: pd.Series, cname):
+class _Lin:
+    """A linear quantity Σ coef·variable + const, over one period's
+    snapshots (``idx``) or static (``idx`` None). Rows are built from these
+    so a side with no variable at all is seen, and checked, before linopy
+    gets it."""
+
+    def __init__(self, idx=None):
+        self.idx = idx
+        self.terms: list = []
+        self.const = pd.Series(0.0, index=idx) if idx is not None else 0.0
+
+    def var(self, v, coef=1.0, coord=None):
+        """Add ``coef``·``v`` (a linopy Variable or expression); a Series
+        ``coef`` needs the period's ``coord``."""
+        if isinstance(coef, pd.Series):
+            coef = xr_series(coef, coord)
+        elif coef == 0:
+            return self
+        self.terms.append(v * coef)
+        return self
+
+    def plus(self, c):
+        self.const = self.const + c
+        return self
+
+    def add(self, other, sign=1.0):
+        self.terms += [t * sign for t in other.terms]
+        self.const = self.const + sign * other.const
+        return self
+
+    def scaled(self, c):
+        out = _Lin(self.idx)
+        out.terms = [t * c for t in self.terms]
+        out.const = self.const * c
+        return out
+
+    def is_zero(self) -> bool:
+        return not self.terms and not np.any(np.asarray(self.const) != 0)
+
+
+def _row(m, lhs: _Lin, rhs: _Lin, name, coord, refuse=None, facts=None) -> bool:
+    """Add lhs ≥ rhs. A row with no variable on either side is a fixed
+    check: when it holds it is dropped, and when it fails nothing this solve
+    can size changes it, so it is an ``IslandRefusal`` (``refuse`` names the
+    row) rather than an infeasible LP."""
+    terms = lhs.terms + [t * -1 for t in rhs.terms]
+    const = rhs.const - lhs.const                     # Σ terms ≥ const
+    if not terms:
+        short = float(np.max(np.asarray(const, dtype=float))) if np.size(const) else 0.0
+        if short > 1e-6:
+            raise IslandRefusal(f"{refuse or name}: short by {short:.4g} with nothing this "
+                                "solve can size")
+        return False
+    expr = terms[0]
+    for t in terms[1:]:
+        expr = expr + t
+    rhs_c = xr_series(const, coord) if isinstance(const, pd.Series) else float(const)
+    m.add_constraints(expr >= rhs_c, name=name)
+    if facts is not None:
+        facts["instant"]["rows"].append(name)
+    return True
+
+
+def _add_soc_before(lin: _Lin, n, sns, sns_p, name, coef):
+    """lin += coef·e(t−1) for one StorageUnit (its initial SoC as a constant
+    where PyPSA starts from it)."""
+    soc, init = _soc_before(n, sns, sns_p, name)
+    lin.var(soc, coef)
+    lin.const.iloc[0] += coef * init
+    return lin
+
+
+def _reserve_row(n, m, sns, sns_p, coord, names, need: _Lin, cname):
     """Σ η·e(t−1) ≥ need(t) for the named StorageUnits."""
-    lhs, rhs = None, need.copy()
+    lhs = _Lin(sns_p)
     for s in names:
-        eta = float(n.storage_units.at[s, "efficiency_dispatch"])
-        soc, init = _soc_before(n, sns, sns_p, s)
-        term = eta * soc
-        lhs = term if lhs is None else lhs + term
-        rhs.iloc[0] -= eta * init
-    m.add_constraints(lhs >= xr_series(rhs, coord), name=cname)
+        _add_soc_before(lhs, n, sns, sns_p, s, float(n.storage_units.at[s, "efficiency_dispatch"]))
+    _row(m, lhs, need, cname, coord)
+
+
+def _it_load(n, units, u, sns_p) -> pd.Series:
+    """L_it,u(t): the IT load a UPS protects."""
+    it = [x for x in units[u]["it_load"] if x in n.loads.index]
+    return (_dense(n, "Load", "p_set", sns_p, it).sum(axis=1)
+            if it else pd.Series(0.0, index=sns_p))
+
+
+# ── the instant of islanding (I2b) ─────────────────────────────────────────
+
+#: The nominal frequency the RoCoF and droop rows use. The hub carries none;
+#: the templates are Continental European (ledgered).
+F0_HZ = 50.0
+
+#: ``eh_role`` tags of the PCC Links (``results.physical_quantities.POC_ROLES``
+#: for the import side; the export side is ``commercial.binding``'s tag).
+_IMPORT_ROLES = frozenset({"grid_import", "eh_import", "import"})
+_EXPORT_ROLES = frozenset({"grid_export"})
+
+
+def _pcc_links(n) -> dict:
+    """The Links at the PCC, by their ``eh_role`` tag."""
+    if "eh_role" not in n.links.columns:
+        return {"import": [], "export": []}
+    role = n.links["eh_role"].map(lambda r: "" if r is None or r != r else str(r).strip())
+    return {"import": [str(x) for x in n.links.index[role.isin(_IMPORT_ROLES)]],
+            "export": [str(x) for x in n.links.index[role.isin(_EXPORT_ROLES)]]}
+
+
+def _genset_out(n, g):
+    """(component, output-per-p_nom factor): a Link genset's p_nom is on its
+    fuel side, so its electrical output is efficiency·p."""
+    if g in n.generators.index:
+        return "Generator", 1.0
+    return "Link", float(n.links.at[g, "efficiency"])
+
+
+def _add_nominal(lin: _Lin, n, comp, name, coef):
+    """lin += coef·p_nom (a variable when extendable)."""
+    var, fixed = _nominal(n, comp, name)
+    if var is not None:
+        lin.var(var, coef)
+    return lin.plus(coef * fixed)
+
+
+def _instant_rows(n, m, sns, sns_p, coord, tag, period, *, island, gensets, gfm, upss, l_c,
+                  unit_rating, joins_s, k, links, fw_units, delta_p_plus, facts, active,
+                  committed=()):
+    """The rows of the islanding instant for one period (I2b), by the
+    scenario matrix; returns B(t), the seamless GFM bridge energy in MWh."""
+    units, req = island["units"], island["requirements"]
+    vals, scenarios = req["values"], set(req["scenarios"])
+    limits = req["frequency_limits"]
+    rocof_max = limits["transition"]["values"]["rocof_hz_per_s"]
+    df_qss = limits["steady_island"]["values"]["qss_band_hz"]
+    margin = 1.0 + vals["gfm_margin"]
+    seamless, bridged = "seamless" in scenarios, "ups_bridged" in scenarios
+    sv = lambda name: m.variables[name]                                  # noqa: E731
+
+    def spec(x):
+        return units[x]["values"]
+
+    # Linearised UC (I2c) replaces the spinning flag for the committed
+    # gensets: online at 0⁺ is u_g(t), and PyPSA's own p ≥ u·p_min_pu·p_nom
+    # is their minimum load.
+    online = [g for g in gensets if g in committed]
+    spinning = [g for g in gensets if units[g]["spinning"] and g not in committed]
+    droop_gensets = [g for g in gensets if units[g]["governor"] == "droop"]
+
+    def p_out(lin, g, coef):
+        comp, eta = _genset_out(n, g)
+        lin.var(sv(f"{comp}-p").sel(snapshot=sns_p, name=g), coef * eta)
+        return lin
+
+    def nom_out(lin, g, coef):
+        comp, eta = _genset_out(n, g)
+        return _add_nominal(lin, n, comp, g, coef * eta)
+
+    def p_store(lin, s, coef):
+        """lin += coef·(p_dispatch − p_store)."""
+        lin.var(sv("StorageUnit-p_dispatch").sel(snapshot=sns_p, name=s), coef)
+        lin.var(sv("StorageUnit-p_store").sel(snapshot=sns_p, name=s), -coef)
+        return lin
+
+    def on_out(lin, g, coef):
+        """lin += coef·(online output capacity at 0⁺): u_g·η·p_nom_g for a
+        committed genset (p_nom fixed, so linear), η·p_nom_g when spinning."""
+        if g not in online:
+            return nom_out(lin, g, coef)
+        comp, eta = _genset_out(n, g)
+        _, p_nom = _nominal(n, comp, g)
+        return lin.var(sv(f"{comp}-status").sel(snapshot=sns_p, name=g), coef * eta * p_nom)
+
+    # The spinning minimum load (every scenario): p_g ≥ p_min_pu·p_nom_g,
+    # so spinning headroom is never free.
+    for g in spinning:
+        lhs = p_out(_Lin(sns_p), g, 1.0)
+        rhs = nom_out(_Lin(sns_p), g, spec(g)["p_min_pu"])
+        _row(m, lhs, rhs, f"Island-min-load-{g}{tag}", coord, facts=facts)
+
+    # (c) GFM MVA in the steady island, every scenario: the GFMs and every
+    # genset once joined.
+    mva_steady = _Lin(sns_p)
+    for s in gfm:
+        _add_nominal(mva_steady, n, "StorageUnit", s, 1.0 / spec(s)["pf_rated"])
+    for g in gensets:
+        nom_out(mva_steady, g, 1.0 / spec(g)["cos_phi_r"])
+    _row(m, mva_steady, _Lin(sns_p).plus(margin * l_c), f"Island-mva-steady{tag}", coord,
+         refuse="grid-forming MVA in the steady island (GFM storage and gensets) below "
+                "(1 + gfm_margin) × the critical load", facts=facts)
+
+    # ΣK: the droop gains once the gensets have joined, less the k largest
+    # genset units' (K = P_n/(R·f0), R on P_n).
+    k_sum = _Lin()
+    for s in gfm:
+        _add_nominal(k_sum, n, "StorageUnit", s, 1.0 / (spec(s)["droop_pct"] / 100.0 * F0_HZ))
+    for g in droop_gensets:
+        nom_out(k_sum, g, 1.0 / (spec(g)["droop_pct"] / 100.0 * F0_HZ))
+    k_max = max((unit_rating[g] / (spec(g)["droop_pct"] / 100.0 * F0_HZ)
+                 for g in droop_gensets), default=0.0)
+    k_sum.plus(-k * k_max)
+
+    bridge = _Lin(sns_p)
+    if seamless:
+        bridge = _seamless_rows(
+            n, m, sns, sns_p, coord, tag, units=units, gensets=gensets, spinning=spinning,
+            gfm=gfm, upss=upss, l_c=l_c, joins_s=joins_s, links=links, fw_units=fw_units,
+            delta_p_plus=delta_p_plus, facts=facts, active=active, period=period,
+            p_out=p_out, nom_out=nom_out, on_out=on_out, online=online, p_store=p_store,
+            k_sum=k_sum, margin=margin,
+            rocof_max=rocof_max, df_qss=df_qss)
+
+    if bridged:
+        block = max(vals["pickup_blocks"])
+        # (b■) the started gensets pick up the largest block, at N+k.
+        ls = {g: spec(g)["load_step_max_pct"] / 100.0 for g in gensets}
+        pick = _Lin()
+        for g in gensets:
+            nom_out(pick, g, ls[g])
+        pick.plus(-k * max((ls[g] * unit_rating[g] for g in gensets), default=0.0))
+        _row(m, pick, _Lin().plus(block), f"Island-pickup{tag}", coord,
+             refuse="genset pickup blocks: the gensets' load step at N+k is below the "
+                    "largest pickup block", facts=facts)
+        # (d) RoCoF on the largest block: the started gensets' inertia, N+k.
+        inertia = _Lin()
+        for g in gensets:
+            nom_out(inertia, g, 2.0 * spec(g)["H_s"] / spec(g)["cos_phi_r"])
+        inertia.plus(-2.0 * k * max((spec(g)["H_s"] * unit_rating[g] / spec(g)["cos_phi_r"]
+                                     for g in gensets), default=0.0))
+        _row(m, inertia, _Lin().plus(F0_HZ * block / rocof_max), f"Island-rocof-block{tag}",
+             coord, refuse="RoCoF on the largest pickup block: the gensets' inertia at N+k "
+                           "is too small", facts=facts)
+        # (e) quasi-steady state on the largest block.
+        _row(m, k_sum.scaled(df_qss), _Lin().plus(block), f"Island-qss-block{tag}", coord,
+             refuse="quasi-steady-state frequency on the largest pickup block: the droop "
+                    "gain at N+k is too small", facts=facts)
+    return bridge
+
+
+def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gfm, upss, l_c,
+                   joins_s, links, fw_units, delta_p_plus, facts, active, period, p_out,
+                   nom_out, on_out, online, p_store, k_sum, margin, rocof_max, df_qss):
+    """The ``seamless`` rows: the steps ΔP⁺ and ΔP⁻, headroom both ways, the
+    MVA and inertia online at 0⁺, the droop gain, and B(t)."""
+    def spec(x):
+        return units[x]["values"]
+
+    # p_imp(t) = η·p0_imp − p0_exp, site side, positive when importing.
+    p_imp = _Lin(sns_p)
+    for name in active(links["import"], lambda _: "Link", period):
+        p_imp.var(m.variables["Link-p"].sel(snapshot=sns_p, name=name),
+                  float(n.links.at[name, "efficiency"]))
+    for name in active(links["export"], lambda _: "Link", period):
+        p_imp.var(m.variables["Link-p"].sel(snapshot=sns_p, name=name), -1.0)
+
+    # The UPSs that transfer and walk in only after the gensets have joined.
+    late = [u for u in upss if units[u]["transfers_on_islanding"] and gensets
+            and spec(u)["walk_in_s"] >= joins_s]
+    facts["instant"]["late_ups"] = sorted(set(facts["instant"]["late_ups"]) | set(late))
+
+    # ΔP⁺ = p_imp − Σ_late X_u, with X_u ≤ L_it,u, X_u ≤ p_nom_u, X_u ≥ 0. X
+    # appears only where a larger X loosens the row, so it settles at
+    # min(L_it, p_nom_u) wherever that matters.
+    if delta_p_plus is None:
+        dp_up = _Lin(sns_p).add(p_imp)
+        for u in late:
+            x = m.add_variables(lower=0.0, upper=xr_series(_it_load(n, units, u, sns_p), coord),
+                                coords=[coord], name=f"Island-ups-relief-{u}{tag}")
+            cap = _add_nominal(_Lin(), n, "StorageUnit", u, 1.0)
+            _row(m, cap, _Lin(sns_p).var(x), f"Island-ups-relief-cap-{u}{tag}", coord)
+            dp_up.var(x, -1.0)
+    else:
+        dp_up = _Lin(sns_p).plus(_as_series(delta_p_plus, n, sns_p))
+    # ΔP⁻ = −p_imp + Σ L_it,u: a transfer adds surplus, so the constant upper
+    # bound L_it ≥ min(L_it, p_nom_u) is taken (conservative). At 0⁺ every
+    # transferring UPS has dropped its load, early walk-in or late (owner,
+    # 2026-10-13); once the gensets have joined, only the late ones still have.
+    transferring = [u for u in upss if units[u]["transfers_on_islanding"]]
+    dp_down = _Lin(sns_p).add(p_imp, -1.0)
+    for u in transferring:
+        dp_down.plus(_it_load(n, units, u, sns_p))
+    dp_down_joined = _Lin(sns_p).add(p_imp, -1.0)
+    for u in late:
+        dp_down_joined.plus(_it_load(n, units, u, sns_p))
+
+    # (b↑) upward headroom at 0⁺: the GFM storage, and the gensets online
+    # (spinning, or committed: u·p_max_pu·η·p_nom − η·p).
+    up = _Lin(sns_p)
+    for s in gfm:
+        _add_nominal(up, n, "StorageUnit", s, 1.0)
+        p_store(up, s, -1.0)
+    for g in online:
+        comp, eta = _genset_out(n, g)
+        avail = _dense(n, comp, "p_max_pu", sns_p, [g])[g]
+        _, p_nom = _nominal(n, comp, g)
+        up.var(m.variables[f"{comp}-status"].sel(snapshot=sns_p, name=g),
+               avail * p_nom * eta, coord)
+        p_out(up, g, -1.0)
+    for g in spinning:
+        comp, _ = _genset_out(n, g)
+        avail = _dense(n, comp, "p_max_pu", sns_p, [g])[g]
+        var, fixed = _nominal(n, comp, g)
+        eta = _genset_out(n, g)[1]
+        if var is not None:
+            up.var(var, avail * eta, coord)
+        up.plus(avail * fixed * eta)
+        p_out(up, g, -1.0)
+    _row(m, up, dp_up, f"Island-headroom-up{tag}", coord, facts=facts)
+
+    # (b↓) downward power: the GFM storage absorbs the surplus.
+    down = _Lin(sns_p)
+    for s in gfm:
+        _add_nominal(down, n, "StorageUnit", s, 1.0)
+        p_store(down, s, 1.0)
+    _row(m, down, dp_down, f"Island-headroom-down{tag}", coord, facts=facts)
+
+    # (b↓) SoC room until frequency-watt has curtailed the surplus.
+    t_curt = max((spec(f)["fw_delay_s"] + spec(f)["fw_p_limit_mw"] / spec(f)["fw_ramp_mw_per_s"]
+                  for f in fw_units), default=None)
+    transfer_loads = sorted({x for u in transferring for x in units[u]["it_load"]
+                             if x in n.loads.index})
+    if t_curt is None:
+        facts["surplus"] = {"status": "not curtailable: no gfl_fw unit", "t_curt_s": None,
+                            "transfer_loads": transfer_loads}
+    else:
+        facts["surplus"] = {"status": "row", "t_curt_s": t_curt,
+                            "transfer_loads": transfer_loads}
+        room = _Lin(sns_p)
+        for s in gfm:
+            _add_nominal(room, n, "StorageUnit", s,
+                         float(n.storage_units.at[s, "max_hours"]))
+            _add_soc_before(room, n, sns, sns_p, s, -1.0)
+        _row(m, room, dp_down.scaled(t_curt / 3600.0), f"Island-soc-room{tag}", coord,
+             facts=facts)
+
+    # (c) GFM MVA at 0⁺: the GFM storage and the gensets online.
+    mva = _Lin(sns_p)
+    for s in gfm:
+        _add_nominal(mva, n, "StorageUnit", s, 1.0 / spec(s)["pf_rated"])
+    for g in spinning + online:
+        on_out(mva, g, 1.0 / spec(g)["cos_phi_r"])
+    _row(m, mva, _Lin(sns_p).plus(margin * l_c), f"Island-mva-instant{tag}", coord,
+         refuse="seamless islanding needs grid-forming MVA online at the instant (GFM "
+                "storage and spinning gensets) of (1 + gfm_margin) × the critical load",
+         facts=facts)
+
+    # (d) RoCoF at 0⁺, both steps: 2M ≥ f0·ΔP/RoCoF_max, with
+    # M = Σ_spin H·s_nom + Σ_VSM H_v·s_nom + Σ_droop GFM τ_f·p_nom/(2R).
+    two_m = _Lin()
+    for g in spinning + online:
+        on_out(two_m, g, 2.0 * spec(g)["H_s"] / spec(g)["cos_phi_r"])
+    for s in gfm:
+        if units[s]["control"] == "gfm_vsm":
+            coef = spec(s)["H_v_s"] / spec(s)["pf_rated"]
+        else:
+            coef = spec(s)["tau_f_s"] / (2.0 * spec(s)["droop_pct"] / 100.0)
+        _add_nominal(two_m, n, "StorageUnit", s, 2.0 * coef)
+    for side, dp in (("up", dp_up), ("down", dp_down)):
+        _row(m, _Lin(sns_p).add(two_m), dp.scaled(F0_HZ / rocof_max),
+             f"Island-rocof-{side}{tag}", coord, facts=facts)
+    # (e) quasi-steady state, both steps, once the gensets have joined.
+    for side, dp in (("up", dp_up), ("down", dp_down_joined)):
+        _row(m, _Lin(sns_p).add(k_sum.scaled(df_qss)), dp,
+             f"Island-qss-{side}{tag}", coord, facts=facts)
+
+    # B(t) = max(ΔP⁺, 0)·(start_s + sync_s)/3600: b ≥ ΔP⁺, b ≥ 0, and b
+    # only tightens the energy row it enters, so it settles at the max.
+    if not gfm:
+        return _Lin(sns_p)
+    if delta_p_plus is not None:
+        b = dp_up.const.clip(lower=0.0)
+        bridge = _Lin(sns_p).plus(b * joins_s / 3600.0)
+        held = bool(b.gt(0).any()) and joins_s > 0
+    else:
+        b = m.add_variables(lower=0.0, coords=[coord], name=f"Island-step-up{tag}")
+        _row(m, _Lin(sns_p).var(b), dp_up, f"Island-step-up{tag}", coord)
+        bridge = _Lin(sns_p).var(b, joins_s / 3600.0)
+        held = joins_s > 0
+    if held:
+        facts["seamless_bridge"] = "held"
+    elif facts["seamless_bridge"] is None:
+        facts["seamless_bridge"] = "zero step"
+    return bridge
+
+
+def not_islandable_hours(n) -> pd.Index:
+    """After the solve: the hours whose export step ΔP⁻ > 0 has no
+    frequency-watt unit to curtail it (I2b (b↓); no row was added for them).
+    Empty when the solve had a curtailment row or no seamless scenario."""
+    facts = getattr(n, "_island_facts", None) or {}
+    surplus = facts.get("surplus") or {}
+    if not str(surplus.get("status", "")).startswith("not curtailable"):
+        return pd.Index([])
+    pcc = facts["instant"]["pcc"]
+    p0 = n.links_t.p0
+    p_imp = pd.Series(0.0, index=n.snapshots)
+    for name in pcc["import"]:
+        p_imp += float(n.links.at[name, "efficiency"]) * p0[name]
+    for name in pcc["export"]:
+        p_imp -= p0[name]
+    loads = surplus["transfer_loads"]
+    extra = (n.get_switchable_as_dense("Load", "p_set")[loads].sum(axis=1)
+             if loads else 0.0)
+    dp_down = -p_imp + extra
+    return n.snapshots[(dp_down > 1e-6).to_numpy()]
 
 
 def _fuel(n, m, sns, units, gensets, vals, critical) -> dict:

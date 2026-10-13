@@ -337,14 +337,16 @@ def test_a_run_without_invest_has_no_investment_and_clears_the_previous_one(hub)
         assert res[key] is None, key
     assert res["compliance"] and out["settings"]["invest"] is False
     for name in (ce.cs.INVESTMENT_CSV, ce.cs.COST_CSV, ce.cs.INVESTED_YAML, ce.cs.COMPLIANCE_INVESTED_CSV,
-                 ce.cs.INVEST_HISTORY_CSV, ce.cs.INVEST_DISPATCH_CSV, ce.USED_LIBRARY_FILE):
+                 ce.cs.INVEST_HISTORY_CSV, ce.cs.INVEST_DISPATCH_CSV, ce.cs.INVEST_TAPS_CSV, ce.USED_LIBRARY_FILE):
         assert not (run_dir / name).exists(), name
+    assert res["taps"] is None and res["tap_hours_moved"] is None
     assert not out["stale"]
 
 
 def test_invest_defaults_to_on_and_the_operator_owns_no_switchgear_by_default():
     assert ce.DEFAULTS["invest"] is True
     assert ce.DEFAULTS["pcc_switchgear_by_operator"] is False
+    assert ce.DEFAULTS["pcc_tap_control"] == "campus"                  # plan C15: the campus moves its PCC taps
 
 
 def pcc_switchgear_rows(res):
@@ -359,11 +361,11 @@ def test_the_pcc_switchgear_is_costed_to_the_campus_unless_the_operator_owns_it(
     def scope(res):                                   # plan C14 adds the horizon, the hub's one period: one year
         assert res["results"]["scope"]["horizon"]["period_years"] == {"2030": 1}
         return {k: v for k, v in res["results"]["scope"].items() if k != "horizon"}
-    assert scope(mine) == {"pcc_switchgear": "campus", "parallel": rules}
+    assert scope(mine) == {"pcc_switchgear": "campus", "parallel": rules, "pcc_tap_control": "campus"}
     assert mine["settings"]["pcc_switchgear_by_operator"] is False
     assert [r["status"] for r in pcc_switchgear_rows(mine["results"])] == ["chosen"]
     theirs = ce.run(hub, {"k": 1, "pf": 0.95, "pcc_switchgear_by_operator": True})
-    assert scope(theirs) == {"pcc_switchgear": "grid_operator", "parallel": rules}
+    assert scope(theirs) == {"pcc_switchgear": "grid_operator", "parallel": rules, "pcc_tap_control": "campus"}
     assert theirs["settings"]["pcc_switchgear_by_operator"] is True
     assert not [r for r in pcc_switchgear_rows(theirs["results"]) if r["status"] == "chosen"]
     assert theirs["results"]["cost"][0]["capex_eur"] < mine["results"]["cost"][0]["capex_eur"]
@@ -379,6 +381,60 @@ def test_the_engine_is_told_who_buys_the_pcc_switchgear(hub, monkeypatch):
     ce.run(hub, {"k": 1, "pcc_switchgear_by_operator": True})
     assert seen == [True, False]
 
+
+def test_who_moves_the_pcc_taps_reaches_the_engine_and_is_saved_with_the_settings(hub, monkeypatch):
+    """Plan C15: ``pcc_tap_control`` is a run setting (campus by default),
+    passed to the engine, saved, and written to the scope; anything else
+    is a 422 before the engine runs."""
+    ce.draft(hub)
+    seen = []
+    real = ce.cs.invest_campus
+    monkeypatch.setattr(ce.cs, "invest_campus",
+                        lambda run_dir, library=None, **kw: seen.append(kw["pcc_tap_control"]) or real(run_dir, library, **kw))
+    mine = ce.run(hub, {"k": 1})
+    theirs = ce.run(hub, {"k": 1, "pcc_tap_control": "grid_operator"})
+    assert seen == ["campus", "grid_operator"]
+    assert mine["settings"]["pcc_tap_control"] == "campus"
+    assert theirs["settings"]["pcc_tap_control"] == "grid_operator"
+    assert theirs["results"]["scope"]["pcc_tap_control"] == "grid_operator"
+    with pytest.raises(HTTPException) as e:
+        ce.run(hub, {"k": 1, "pcc_tap_control": "operator"})
+    assert e.value.status_code == 422 and "pcc_tap_control" in e.value.detail
+    assert seen == ["campus", "grid_operator"]
+
+
+def test_the_hours_that_moved_a_tap_are_counted_once_each():
+    """Counted by hand: hour 7 moved two units in two cases, hour 19 one,
+    hour 3 none; a run that did not invest has no count."""
+    row = lambda h, case, unit, moved: {"period": 2030, "hour": h, "case": case, "transformer": unit,
+                                        "group": "TR1+TR2", "tap_pos": moved, "ratio_pct": 100.0, "moved_by": moved}
+    taps = [row(7, "intact", "TR1", -2), row(7, "intact", "TR2", -2), row(7, "N-1:TR1", "TR2", -4),
+            row(19, "intact", "TR1", 1), row(3, "intact", "TR1", 0)]
+    assert ce._tap_hours_moved(taps) == 2
+    assert ce._tap_hours_moved([]) == 0 and ce._tap_hours_moved(None) is None
+
+
+def test_the_taps_are_read_back_with_the_results_and_the_hours_that_moved_one_are_counted(hub):
+    """The drafted campus has no tap data: the taps table is empty and no
+    hour moved a tap. With on-load taps on every transformer, the table
+    lists them per hour and case, and the count is the hours where any
+    moved (by hand from the table)."""
+    ce.draft(hub)
+    res = ce.run(hub, {"k": 1})["results"]
+    assert res["taps"] == [] and res["tap_hours_moved"] == 0
+    d = ce.campus_dir(hub)
+    spec = yaml.safe_load((d / ce.CAMPUS_FILE).read_text())
+    for tr in spec["campus"]["transformers"].values():
+        tr["existing"] = True
+        tr["tap"] = {"changer": "on_load", "side": "hv", "neutral": 0, "min": -9, "max": 9,
+                     "step_percent": {"value": 1.5, "source": "assumed"}, "pos": 4}
+    ce.save_campus(hub, yaml.safe_dump(spec, sort_keys=False))
+    res = ce.run(hub, {"k": 1})["results"]
+    taps = res["taps"]
+    assert taps and set(taps[0]) == {"period", "hour", "case", "transformer", "group", "tap_pos", "ratio_pct",
+                                     "moved_by"}
+    moved = {(r["period"], r["hour"]) for r in taps if r["moved_by"] != 0}
+    assert res["tap_hours_moved"] == len(moved)
 
 def test_a_run_without_invest_has_no_scope(hub):
     ce.draft(hub)
@@ -546,13 +602,16 @@ def test_the_investment_summary_for_the_copilot_carries_the_caveats_with_the_num
     assert out["library_is_default"] is True and out["stale"] is False
     from gridspine.static.campus_invest import ParallelRules
     assert {k: v for k, v in out["scope"].items() if k != "horizon"} == {
-        "pcc_switchgear": "campus", "parallel": ParallelRules().scope()}
+        "pcc_switchgear": "campus", "parallel": ParallelRules().scope(), "pcc_tap_control": "campus"}
     # plan C14: the hub is one period, so the horizon is one year, said with the run
     h = out["scope"]["horizon"]
     assert h["period_years"] == {"2030": 1} and h["source"] == {"2030": "single period: one year"}
     assert any("not ranked" in n for n in h["notes"])
     text = " ".join(out["notes"])
     assert "placeholder" in text and "assumed" in text and "tap" in text
+    # plan C15: the taps act inside the re-check, per hour and case, and the notes say how
+    assert "on-load taps" in text and "pcc_tap_control" in text and "not optimised" not in text
+    assert out["taps"] == [] and out["tap_hours_moved"] == 0
     assert "scope.parallel" in text and "vector group" in text          # plan C13: additions and their rules
     assert "renew" in text and "scope.horizon" in text and "not ranked" in text and "no replacement" not in text
     ce.save_library(hub, library_with(scaled_capex(2)))
@@ -1214,13 +1273,14 @@ def test_the_source_hash_changes_when_the_run_changes(hub):
 def test_the_response_is_the_assets_the_hash_and_the_stale_flag(hub):
     fake_investment(hub, purchase_rows())
     out = ce.owner_assets_response(hub)
-    assert list(out) == ["assets", "source_hash", "stale", "study_method"]
+    assert list(out) == ["assets", "source_hash", "stale", "study_method", "unresolved"]
     assert out["assets"] == ce.extra_owner_assets(hub) and out["source_hash"] == ce.campus_study_hash(hub)
     assert out["stale"] is False and out["study_method"] == "least_cost"
 
 
 def test_an_empty_run_answers_no_assets_no_hash_and_not_stale(hub):
-    assert ce.owner_assets_response(hub) == {"assets": [], "source_hash": None, "stale": False, "study_method": None}
+    assert ce.owner_assets_response(hub) == {"assets": [], "source_hash": None, "stale": False, "study_method": None,
+                                             "unresolved": []}
 
 
 def test_the_response_is_stale_after_the_discount_rate_changes_and_fresh_after_a_rerun(hub):
@@ -1350,3 +1410,25 @@ def test_the_least_cost_total_is_what_the_selection_ranks_without_the_renewals(h
     run_dir = fake_c14(hub, rows)
     # the first purchases (rows 0 and 3) and the zero-cost keep rows (4 and 6) count; the renewals do not
     assert ce._least_cost_total(run_dir) == pytest.approx(1.0 + 1e3 + 1e4 + 1e6)
+
+
+def test_the_state_says_when_a_run_is_in_progress(hub):
+    """A run answers only when it ends, so a client whose request timed out
+    reads the state to learn whether the backend is still at it: the run's
+    lock is held for the whole run, and the state says so until it is freed."""
+    ce.draft(hub)
+    assert ce.get_state(hub)["run_in_progress"] is False
+    seen = []
+    real = ce.cs.rank_campus
+
+    def rank(*a, **kw):
+        seen.append(ce.get_state(hub)["run_in_progress"])
+        return real(*a, **kw)
+
+    ce.cs.rank_campus = rank
+    try:
+        ce.run(hub, {"k": 1, "invest": False})
+    finally:
+        ce.cs.rank_campus = real
+    assert seen == [True]
+    assert ce.get_state(hub)["run_in_progress"] is False

@@ -109,6 +109,10 @@ export const ISSUE_TITLES: Record<string, string> = {
   reserve_margin_unreachable: 'Reserve margin cannot be reached',
   reserve_margin_carrier_default_derating: 'Reserve margin uses default derating for some assets',
 
+  // Tariff sanity (decision study)
+  tariff_export_exceeds_import: 'Export pays more than import in some hours',
+  tariff_export_exceeds_import_via_storage: 'Export pays more than import after storage losses',
+
   // Outages and availability
   outage_params_implausible: 'Outage data looks implausible',
   profile_and_outage_modelled: 'Outages may be counted twice (profile and sampled outages)',

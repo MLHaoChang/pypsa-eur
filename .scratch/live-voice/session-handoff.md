@@ -7,6 +7,10 @@ Status: design published to master; phase A navigation/inventory slice implement
 and locally verified. Whole-application/live-voice implementation still pending.
 Date: 2026-10-10.
 
+**Codex / next-agent resume:** use [CODEX-HANDOFF.md](CODEX-HANDOFF.md) (2026-10-13).
+This file is the historical append-only log; the Codex handoff is the current
+“what landed / what remains / what to do next” map.
+
 Read [spec](spec.md), [coverage](application-coverage.md), [test plan](test-plan.md),
 [implementation plan](../../docs/superpowers/plans/2026-10-10-live-voice-conversation.md)
 and backend/harness/README.md. Design approval is not production certification.
@@ -173,6 +177,9 @@ acceptance + `resume_episode` discussed_refs rehydration. Pytest:
 
 Next runnable (no credentials / Moonshot): mocked issue 03/04 scaffolding;
 issue 10 case advancement adapters.
+
+2026-10-13: Codex resume map published as [CODEX-HANDOFF.md](CODEX-HANDOFF.md)
+on master. Prefer that file over this log for remaining-work triage.
 
 **Credential / release blockers (cannot close without external access):**
 LiveKit Build + hosted STT/TTS live probe (01/02/09 deployment smoke);

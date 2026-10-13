@@ -62,6 +62,20 @@ chat-staleness silent revert).
 _Avoid_: mutation (overloaded with React Query's `useMutation`), save (that's
 project persistence)
 
+**Decision study**:
+A guided investment question answered for one base Project ("Do I need a
+battery at my site?"): intake answers, assumptions ledger, options, findings
+and report, stored as the sidecar `studies/<study_id>.json` inside that
+Project's storage directory (`backend/services/study/store.py`) and served under
+`/api/projects/{name}/studies` (`backend/routers/studies.py`). Its option
+Projects are study-owned forks. Unqualified "study" already names two other
+things in this codebase, so always write **decision study** (ids and keys
+`decision_study`).
+_Avoid_: study, investment study, the gridspine study (the planning → dynamics
+pipeline, `backend/routers/gridspine.py`), the adequacy studies (frontier, mc,
+fmea_sweep, margin_loop, coupling_loop, eh_study; `STUDY_KEYS` in
+`backend/services/project_context.py`)
+
 **Vintage**:
 A per-investment-period capacity bound on a component
 (`backend/routers/vintage.py`). Multi-period work expands these transiently
@@ -159,7 +173,11 @@ _Avoid_: starter prompts, suggestions, quick actions
 A reusable procedure the assistant loads on demand: `harness/skills/<name>/SKILL.md`
 with `name` and `description` front matter, the same layout as the developer
 agents' `.claude/skills/`. The prompt carries only the catalogue line; the
-body arrives through the `use_skill` tool. `grill` is the first skill.
+body arrives through the `use_skill` tool. `grill` is the first skill. A
+**user skill** has the same layout under `<app data>/skills/`; it ranks after
+the package skills and is refused, never used, when a package skill has its
+name. Its provenance (`package` or `user`) is shown in the panel's listing,
+never in the prompt.
 _Avoid_: prompt template, macro, plugin
 
 **Choice card**:
@@ -171,6 +189,31 @@ It may carry a **detail** (Markdown under the question), allow several
 picks (**multi-select**: one Send button, the picks joined by "; "), or be a
 **plan review**: the detail is a plan and the card takes one verdict.
 _Avoid_: prompt, dialog, confirmation (that is the other card)
+
+**Run evidence**:
+The immutable record of one foreground solve, queued solve, adequacy study,
+or report, stored under `<project>/run_evidence/<run_id>/`
+(`backend/services/run_evidence.py`). Section files are hashed; the terminal
+`manifest.json` is written last and left unchanged. A missing or altered
+artifact is Unavailable for that run id.
+_Avoid_: the newest results, the live network, a saved snapshot
+
+**Discussed run**:
+The run id the current chat episode is talking about. `discuss_project_run`
+stores it on the session and, when a durable parent thread is bound, on
+`refs.discussed`. Unless called with `open_ui=false`, it opens the Results
+chrome and selects that run by identifier. Resuming the parent copies the same identifiers onto the new
+episode (`durable_conversation.resume_episode`). The binding leaves the live
+network's inputs in place.
+_Avoid_: the active solve, checked scope (the assurance binding)
+
+**Experiment plan**:
+A typed list of cases saved under `<project>/experiments/` by
+`start_experiment` (`backend/services/experiments.py`). Each case is 1–12
+typed changes. The record stays `planned` with `executed: false` until a
+later slice runs the cases through ordinary harness tools.
+_Avoid_: scenario (a Scenario is a Project), sensitivity sweep (that tool
+queues solves), task (a durable sequence of ordinary tool calls)
 
 ## Investment language
 

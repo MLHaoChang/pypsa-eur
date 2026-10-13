@@ -1,24 +1,20 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useId, useRef } from 'react'
 import {
-  ChevronLeft, ChevronRight, ChevronDown,
-  FolderOpen, Layers, Settings2, TrendingUp,
-  FilePlus, Save, Copy, BookOpen, Upload, FileDown,
-  BarChart2, Download, X, Check, Clock,
-  MousePointer, ZoomIn, ZoomOut, AlertTriangle,
-  Camera, LayoutDashboard,
+  ChevronLeft, ChevronRight,
+  FolderOpen, Save, Copy, Upload, FileDown,
+  Download, X, Check, Clock,
+  MousePointer, ZoomIn, ZoomOut,
+  LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
-  GitBranch as GitBranchIcon, ListChecks, FlaskConical,
-  MessageSquare, LayoutGrid, Users, FileText, Compass, Cable,
+  MessageSquare, LayoutGrid, Users, Compass, MoreHorizontal,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useUIStore } from '../store/uiStore'
-import { useAssetDrag } from '../hooks/useAssetDrag'
 import { networkApi } from '../api/network'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ioApi } from '../api/io'
 import { projectsApi } from '../api/projects'
-import { simulationApi } from '../api/simulation'
 import type { ImportSummary, ProjectInfo } from '../api/types'
 import { ImportZone } from '../pages/ImportExport'
 import { appLog, useSimulationStore } from '../store/simulationStore'
@@ -32,14 +28,12 @@ import {
 import { nk } from '../utils/queryKeys'
 import NewProjectWizard from './NewProjectWizard'
 import ProjectPicker from '../components/ProjectPicker'
-import { useSolveQueue } from '../hooks/useSolveQueue'
-import { isActive } from '../api/solveQueue'
 import { evaluateMutation } from '../utils/mutationGuard'
 import { mismatchSentence } from '../utils/projectMismatch'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
 import { flushPendingSitesToServer } from '../site3d/sitesStore'
-import { PALETTE_SECTIONS_DATA } from './paletteData'
-import { PALETTE_ICONS } from './paletteIcons'
+import { SItem, SectionHdr, SubHdr } from './sidebar/SidebarRows'
+import { STEPS, type StepId } from './sidebar/steps'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -47,146 +41,6 @@ const SIDEBAR_EXPANDED_W = 240
 const SIDEBAR_ICON_W = 48
 
 const slugify = slugifyName
-
-// ── Asset palette sections ─────────────────────────────────────────────────────
-// The data (ids, labels, sections) lives in `paletteData.ts`, the icons in
-// `paletteIcons.tsx`, keyed by item id.
-interface PaletteItem { id: string; label: string; subtitle: string; icon: React.ReactNode }
-interface PaletteSection { id: string; label: string; items: PaletteItem[] }
-
-
-const PALETTE_SECTIONS: PaletteSection[] = PALETTE_SECTIONS_DATA.map(section => ({
-  ...section,
-  items: section.items.map(item => ({ ...item, icon: PALETTE_ICONS[item.id] })),
-}))
-
-// ── Shared sidebar item row ────────────────────────────────────────────────────
-function SItem({
-  icon, label, hint, rightEl, onClick, active, title,
-}: {
-  icon: React.ReactNode; label: string; hint?: string; rightEl?: React.ReactNode
-  onClick?: () => void; active?: boolean; title?: string
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      className="flex items-center gap-3 w-full pl-6 pr-3 transition-colors text-left"
-      style={{
-        height: 36,
-        background: active ? 'var(--color-panel-2)' : undefined,
-        borderLeft: active ? '3px solid var(--color-accent)' : '3px solid transparent',
-      }}
-      onMouseEnter={e => { if (!active) (e.currentTarget as HTMLElement).style.background = 'var(--color-border)' }}
-      onMouseLeave={e => { if (!active) (e.currentTarget as HTMLElement).style.background = '' }}
-    >
-      <span className="shrink-0 text-ink-600" style={{ width: 16, display: 'flex', alignItems: 'center' }}>
-        {icon}
-      </span>
-      <span className="flex-1 text-[13px] font-medium text-text truncate min-w-0">{label}</span>
-      {hint && <span className="text-[10px] text-ink-400 font-mono ml-1 max-w-[6rem] truncate shrink">{hint}</span>}
-      {rightEl}
-    </button>
-  )
-}
-
-function SectionHdr({ title, open, onToggle, testId }: { title: string; open: boolean; onToggle: () => void; testId?: string }) {
-  return (
-    <button
-      onClick={onToggle}
-      data-testid={testId}
-      className="flex items-center justify-between w-full px-4 py-2 mt-1 text-left hover:bg-panel transition-colors"
-    >
-      <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-ink-400">{title}</span>
-      <ChevronDown size={11} className="text-ink-400 transition-transform duration-200 shrink-0"
-        style={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }} />
-    </button>
-  )
-}
-
-// SubHdr is the smaller, non-collapsible group label used inside a SectionHdr's
-// expanded body (e.g. "Quick actions", "Recent", "Workspace"). Visual hierarchy:
-// SectionHdr (bold, 10px) → SubHdr (medium, 9px) → SItem rows.
-function SubHdr({ title }: { title: string }) {
-  return (
-    <div className="px-6 pt-3 pb-1 text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-400">
-      {title}
-    </div>
-  )
-}
-
-// ── AssetPaletteInline ─────────────────────────────────────────────────────────
-function AssetPaletteInline() {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  // The pointer-drag gesture and its drop hit-test live in the hook — it is
-  // the single owner of "what is under the cursor", shared by the schematic
-  // and map canvases (spec D25). setCreationItem is still needed directly
-  // for the keyboard path below (Enter/Space), which is not a drag.
-  const { ghost, beginDrag } = useAssetDrag()
-  const setCreationItem = useUIStore(s => s.setCreationItem)
-  const toggle = (id: string) =>
-    setCollapsed(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
-
-  return (
-    <div>
-      {PALETTE_SECTIONS.map(section => (
-        <div key={section.id}>
-          <button
-            onClick={() => toggle(section.id)}
-            className="flex items-center gap-1.5 w-full pl-8 pr-3 py-1 hover:bg-panel transition-colors"
-          >
-            {collapsed.has(section.id)
-              ? <ChevronRight size={9} className="text-ink-400 shrink-0" />
-              : <ChevronDown  size={9} className="text-ink-400 shrink-0" />}
-            <span className="text-[9px] font-bold uppercase tracking-widest text-ink-400">
-              {section.label}
-            </span>
-          </button>
-          {!collapsed.has(section.id) && section.items.map(item => (
-            // role="button" + tabIndex makes this keyboard-accessible while
-            // still allowing pointer-event drag. <button> here would compete
-            // with the user-agent's native button mouse handling.
-            <div
-              key={item.id}
-              role="button"
-              tabIndex={0}
-              className="flex items-center gap-2.5 w-full pl-9 pr-3 py-1 text-left hover:bg-panel-2 transition-colors group cursor-grab active:cursor-grabbing"
-              style={{ height: 32 }}
-              onPointerDown={(e) => beginDrag(e, { id: item.id, label: item.label })}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  setCreationItem({ id: item.id, label: item.label })
-                }
-              }}
-              title={`Click to add ${item.label}, or drag onto the canvas to place at a specific point`}
-            >
-              <span className="text-muted group-hover:text-text transition-colors shrink-0"
-                style={{ width: 15, height: 15, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {item.icon}
-              </span>
-              <div className="min-w-0">
-                <div className="text-[11px] font-medium text-ink-700 truncate">{item.label}</div>
-                <div className="text-[9px] text-ink-400 truncate leading-tight">{item.subtitle}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ))}
-
-      {/* Drag ghost — z-[9999] beats every panel; pointer-events-none lets
-          the pointerup land on the real target underneath. */}
-      {ghost && (
-        <div
-          className="fixed z-[9999] pointer-events-none flex items-center gap-1.5 px-2 py-1 bg-accent text-white text-[11px] font-medium rounded shadow-lg"
-          style={{ left: ghost.x + 12, top: ghost.y + 12 }}
-        >
-          {ghost.label}
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ── IO Modal ───────────────────────────────────────────────────────────────────
 function IoModal({ onClose, initialTab = 'import', projectName }: {
@@ -452,13 +306,14 @@ function SaveNameModal({
   )
 }
 
-// ── Section content components (used in both expanded and flyout) ──────────────
-// Header card that sits at the top of the expanded PROJECT section. Shows
-// the active project's name + dirty dot + last-saved timestamp + autosave
-// indicator. Falls back to an empty-state hint when no project is loaded.
+// ── Project card and its actions (expanded footer, guided section, flyout) ─────
+// Header card for the open project. Shows the active project's name + dirty
+// dot + last-saved timestamp + autosave indicator. Falls back to an
+// empty-state hint when no project is loaded. With `menu`, the name row also
+// carries the button that opens the project's actions (the Expert footer).
 function ProjectHeaderCard({
   currentProject, lastSavedIso, dirty, autosaveEnabled, onToggleAutosave,
-  onRename,
+  onRename, menu,
 }: {
   currentProject: string | null
   lastSavedIso: string | null
@@ -466,6 +321,7 @@ function ProjectHeaderCard({
   autosaveEnabled: boolean
   onToggleAutosave: () => void
   onRename: () => void
+  menu?: { open: boolean; onToggle: () => void; controls: string }
 }) {
   // Tick once per minute so "Saved Xm ago" updates without polling the
   // backend. 60 s granularity is fine — the label only changes minute-to-minute.
@@ -478,9 +334,12 @@ function ProjectHeaderCard({
   if (!currentProject) {
     return (
       <div className="mx-3 mt-2 mb-2 p-3 rounded border border-[var(--color-border)] bg-panel">
-        <div className="text-[12px] font-semibold text-ink-600 mb-0.5">No project loaded</div>
+        <div className="flex items-start gap-1.5">
+          <div className="text-[12px] font-semibold text-ink-600 mb-0.5 flex-1 min-w-0">No project loaded</div>
+          {menu && <ProjectMenuButton {...menu} />}
+        </div>
         <div className="text-[10px] text-ink-400 leading-relaxed">
-          Start with New Project below, or open a recent one.
+          {menu ? 'Open a project from Projects home or a recent one.' : 'Start with New Project below, or open a recent one.'}
         </div>
       </div>
     )
@@ -491,64 +350,105 @@ function ProjectHeaderCard({
   const savedLine = relative
     ? (dirty ? `Unsaved · last save ${relative}` : `Saved ${relative}`)
     : (dirty ? 'Unsaved changes' : 'Saved')
+  const renameButton = (
+    <button
+      type="button"
+      onClick={onRename}
+      title="Rename project (header field)"
+      className="flex items-center gap-1.5 w-full text-left group"
+    >
+      <span
+        aria-hidden
+        className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+        style={{ background: dirty ? '#d97706' : '#16a34a' }}
+      />
+      <span className="text-[13px] font-semibold text-text truncate min-w-0 group-hover:underline">
+        {currentProject}
+      </span>
+    </button>
+  )
+
+  // The footer card (with `menu`) is one line shorter: the save state and the
+  // autosave switch share a row, so the steps above it keep their room.
+  const compact = !!menu
+  const autosaveToggle = (
+    <button
+      type="button"
+      onClick={onToggleAutosave}
+      className={`flex items-center gap-1.5 ${compact ? 'shrink-0' : 'mt-2'} text-[10px] text-muted hover:text-ink-700 transition-colors`}
+      title={`Autosave every 5 min: ${autosaveEnabled ? 'on' : 'off'}`}
+      aria-pressed={autosaveEnabled}
+    >
+      <span
+        className="shrink-0"
+        style={{
+          width: 24, height: 13, borderRadius: 7,
+          background: autosaveEnabled ? 'var(--color-accent)' : 'var(--color-border-2)',
+          display: 'inline-flex', alignItems: 'center', padding: '0 2px',
+          transition: 'background 200ms',
+        }}
+      >
+        <span style={{
+          width: 9, height: 9, borderRadius: '50%', background: '#fff',
+          transform: autosaveEnabled ? 'translateX(11px)' : 'translateX(0)',
+          transition: 'transform 200ms', display: 'block',
+        }} />
+      </span>
+      {compact ? 'Autosave' : `Autosave ${autosaveEnabled ? 'on · 5 min' : 'off'}`}
+    </button>
+  )
 
   return (
     <div
-      className="mx-3 mt-2 mb-2 p-3 rounded border bg-panel"
+      className={`${compact ? 'mx-2 my-2 px-3 py-2' : 'mx-3 mt-2 mb-2 p-3'} rounded border bg-panel`}
       style={{
         borderColor: dirty ? 'rgba(217,119,6,0.35)' : 'var(--color-border)',
       }}
     >
-      <button
-        type="button"
-        onClick={onRename}
-        title="Rename project (header field)"
-        className="flex items-center gap-1.5 w-full text-left group"
-      >
-        <span
-          aria-hidden
-          className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
-          style={{ background: dirty ? '#d97706' : '#16a34a' }}
-        />
-        <span className="text-[13px] font-semibold text-text truncate min-w-0 group-hover:underline">
-          {currentProject}
-        </span>
-      </button>
+      {menu ? (
+        <div className="flex items-center gap-1.5">
+          <div className="flex-1 min-w-0">{renameButton}</div>
+          <ProjectMenuButton {...menu} />
+        </div>
+      ) : renameButton}
       <div className="text-[10px] text-muted mt-1 leading-relaxed flex items-center gap-1.5">
-        <span className="truncate">{savedLine}</span>
+        <span className="truncate min-w-0 flex-1">{savedLine}</span>
+        {compact && autosaveToggle}
       </div>
-      <button
-        type="button"
-        onClick={onToggleAutosave}
-        className="flex items-center gap-1.5 mt-2 text-[10px] text-muted hover:text-ink-700 transition-colors"
-        title="Toggle autosave (5 min)"
-      >
-        <span
-          className="shrink-0"
-          style={{
-            width: 24, height: 13, borderRadius: 7,
-            background: autosaveEnabled ? 'var(--color-accent)' : 'var(--color-border-2)',
-            display: 'inline-flex', alignItems: 'center', padding: '0 2px',
-            transition: 'background 200ms',
-          }}
-        >
-          <span style={{
-            width: 9, height: 9, borderRadius: '50%', background: '#fff',
-            transform: autosaveEnabled ? 'translateX(11px)' : 'translateX(0)',
-            transition: 'transform 200ms', display: 'block',
-          }} />
-        </span>
-        Autosave {autosaveEnabled ? 'on · 5 min' : 'off'}
-      </button>
+      {!compact && autosaveToggle}
     </div>
+  )
+}
+
+function ProjectMenuButton({ open, onToggle, controls }: {
+  open: boolean; onToggle: () => void; controls: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label="Project menu"
+      title="Project actions: info, save, duplicate, export, recent projects"
+      aria-expanded={open}
+      aria-controls={controls}
+      data-testid="sidebar-project-menu"
+      className="shrink-0 flex items-center justify-center rounded text-ink-400 hover:text-text hover:bg-panel-2 transition-colors"
+      style={{ width: 20, height: 20 }}
+    >
+      <MoreHorizontal size={14} />
+    </button>
   )
 }
 
 function ProjectSectionContent({
   onCloseModal, projectName, saveStatus, setSaveStatus,
-  openIo, handleNewProject, guided = false,
+  openIo, handleNewProject, guided = false, variant = 'section',
 }: {
   onCloseModal?: () => void
+  // 'section': the card with its actions listed below it (Guided's PROJECT
+  // section, the icon strip's flyout). 'footer': the Expert sidebar's footer
+  // card, its actions behind the card's menu (M2, plan 2026-10-05 §11).
+  variant?: 'section' | 'footer'
   // Guided mode (spec §3.5): only the header card, Save, Recent and Projects
   // home. The hidden rows stay reachable via the palette and the assistant.
   guided?: boolean
@@ -580,6 +480,24 @@ function ProjectSectionContent({
   // Route back to the projects home (the workspace surface that now owns
   // create / import / duplicate).
   const navigate = useNavigate()
+
+  // The footer card's action menu (variant 'footer' only).
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuId = useId()
+  const footerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (footerRef.current && !footerRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
 
   // Phase D polish #1 — chat empty-state primer bridge. The chat panel
   // dispatches CustomEvents instead of reaching across the layout tree;
@@ -995,65 +913,8 @@ function ProjectSectionContent({
   // Recents minus the active project — that's already shown in the header card.
   const recentsToShow = recents.filter(r => r !== currentProject).slice(0, 5)
 
-  return (
-    <div>
-      {showNameModal && (
-        <SaveNameModal
-          initial={slugify(currentProject || pn)}
-          onSave={handleNameConfirm}
-          onClose={() => setShowNameModal(false)}
-        />
-      )}
-      {showCopyModal && (
-        <SaveNameModal
-          initial={slugify(`${currentProject || pn}_copy`)}
-          onSave={handleCopyConfirm}
-          onClose={() => setShowCopyModal(false)}
-        />
-      )}
-      {pendingReload && (
-        <ConfirmDialog
-          open
-          danger
-          title="Re-load from disk?"
-          message={pendingReload.depthKnown
-            ? `'${pendingReload.name}' will be re-read from disk. Unsaved changes in the current network are lost.`
-            : `Could not check '${pendingReload.name}' for unsaved changes — the backend did not answer. `
-              + 'Re-reading from disk will discard anything unsaved.'}
-          confirmLabel="Re-load"
-          onConfirm={() => {
-            const target = pendingReload.name
-            setPendingReload(null)
-            void handleOpenPick(target, { confirmed: true })
-          }}
-          onCancel={() => setPendingReload(null)}
-        />
-      )}
-      {showOpenModal && (
-        <OpenProjectModal
-          currentProject={currentProject}
-          onPick={handleOpenPick}
-          onPickFile={handleOpenFromFile}
-          onClose={() => setShowOpenModal(false)}
-        />
-      )}
-
-      <ProjectHeaderCard
-        currentProject={currentProject}
-        lastSavedIso={lastSavedIso}
-        dirty={dirty}
-        autosaveEnabled={autosaveEnabled}
-        onToggleAutosave={() => setAutosaveEnabled(!autosaveEnabled)}
-        // Rename: focuses the header's project-name button. The button's
-        // onFocus handler (`startEditName`) flips to edit mode and schedules
-        // `nameRef.current?.focus().select()` on the new <input>, so a single
-        // .focus() here is enough — no DOM-selection juggling needed.
-        onRename={() => {
-          const el = document.querySelector<HTMLElement>('[data-project-name-editor]')
-          el?.focus()
-        }}
-      />
-
+  const rows = (
+    <>
       {currentProject && (
         <>
           <SubHdr title="Quick actions" />
@@ -1076,27 +937,6 @@ function ProjectSectionContent({
             onClick={handleSave}
           />
           {!guided && (<>
-          <SItem
-            icon={<Camera size={15} />}
-            label="Snapshots"
-            active={activeSlidePanel === 'snapshots'}
-            onClick={() => {
-              // Toggle: if the snapshots panel is already open, clicking the
-              // sidebar entry again closes it (consistent with TimeSeries /
-              // Results behaviour).
-              setSlidePanel(activeSlidePanel === 'snapshots' ? null : 'snapshots')
-              onCloseModal?.()
-            }}
-          />
-          <SItem
-            icon={<GitBranchIcon size={15} />}
-            label="Scenarios"
-            active={activeSlidePanel === 'scenarios'}
-            onClick={() => {
-              setSlidePanel(activeSlidePanel === 'scenarios' ? null : 'scenarios')
-              onCloseModal?.()
-            }}
-          />
           <SItem
             icon={<Copy size={15} />}
             label="Duplicate project"
@@ -1154,161 +994,101 @@ function ProjectSectionContent({
         }}
       />
       )}
-    </div>
+    </>
   )
-}
 
-function DataSectionContent({ onCloseModal }: { onCloseModal?: () => void }) {
-  const [assetsOpen, setAssetsOpen] = useState(false)
-  const { setSlidePanel, activeSlidePanel } = useUIStore()
-  return (
-    <div>
-      <SItem
-        icon={<Layers size={15} />}
-        label="Assets"
-        rightEl={
-          <ChevronDown size={11} className="text-ink-400 shrink-0 transition-transform duration-200"
-            style={{ transform: assetsOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }} />
-        }
-        onClick={() => setAssetsOpen(o => !o)}
-      />
-      {assetsOpen && <AssetPaletteInline />}
-      <SItem icon={<BarChart2 size={15} />} label="Time Series"
-        active={activeSlidePanel === 'timeseries'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'timeseries' ? null : 'timeseries'); onCloseModal?.() }}
-      />
-    </div>
-  )
-}
-
-// ── Studies ────────────────────────────────────────────────────────────────────
-// The study tools that take a solved model further: the planning → dynamics
-// pipeline, the campus electrical design of a hub, and the written reports.
-// Grouped here rather than spread through Simulation, which is about setting
-// up and solving the model itself.
-function StudiesSectionContent({ onCloseModal }: { onCloseModal?: () => void }) {
-  const { setSlidePanel, activeSlidePanel, currentProject } = useUIStore()
-  // Planning → dynamics only works in a study project; in any other project
-  // its panel is a "not a study" dead end (UX assessment Q10). Hidden only
-  // when the project list says so: while the list is loading, or the open
-  // project is not in it, the row stays (unknown is not "not a study").
-  const { data: projects } = useQuery({
-    queryKey: ['projects'],
-    queryFn: projectsApi.list,
-    staleTime: 10_000,
-  })
-  const openProject = projects?.find(p => p.id === currentProject || p.name === currentProject)
-  const knownNotAStudy = !!openProject && openProject.project_kind !== 'planning_dynamics'
-  return (
-    <div className="pb-1">
-      {!knownNotAStudy && (
-        <SItem icon={<FlaskConical size={15} />} label="Planning → dynamics"
-          title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
-          active={activeSlidePanel === 'gridspine'}
-          onClick={() => { setSlidePanel(activeSlidePanel === 'gridspine' ? null : 'gridspine'); onCloseModal?.() }}
+  const modals = (
+    <>
+      {showNameModal && (
+        <SaveNameModal
+          initial={slugify(currentProject || pn)}
+          onSave={handleNameConfirm}
+          onClose={() => setShowNameModal(false)}
         />
       )}
-      <SItem icon={<Cable size={15} />} label="Campus electrical"
-        title="Take a solved hub to its electrical design: transformers, reactive compensation, short circuit and PCC grid-code compliance at the critical hours (AC load flow)."
-        active={activeSlidePanel === 'campusElectrical'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'campusElectrical' ? null : 'campusElectrical'); onCloseModal?.() }}
-      />
-      <SItem icon={<FileText size={15} />} label="Reports"
-        title="Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word."
-        active={activeSlidePanel === 'reports'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'reports' ? null : 'reports'); onCloseModal?.() }}
-      />
-    </div>
+      {showCopyModal && (
+        <SaveNameModal
+          initial={slugify(`${currentProject || pn}_copy`)}
+          onSave={handleCopyConfirm}
+          onClose={() => setShowCopyModal(false)}
+        />
+      )}
+      {pendingReload && (
+        <ConfirmDialog
+          open
+          danger
+          title="Re-load from disk?"
+          message={pendingReload.depthKnown
+            ? `'${pendingReload.name}' will be re-read from disk. Unsaved changes in the current network are lost.`
+            : `Could not check '${pendingReload.name}' for unsaved changes — the backend did not answer. `
+              + 'Re-reading from disk will discard anything unsaved.'}
+          confirmLabel="Re-load"
+          onConfirm={() => {
+            const target = pendingReload.name
+            setPendingReload(null)
+            void handleOpenPick(target, { confirmed: true })
+          }}
+          onCancel={() => setPendingReload(null)}
+        />
+      )}
+      {showOpenModal && (
+        <OpenProjectModal
+          currentProject={currentProject}
+          onPick={handleOpenPick}
+          onPickFile={handleOpenFromFile}
+          onClose={() => setShowOpenModal(false)}
+        />
+      )}
+    </>
   )
-}
 
-function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
-  onCloseModal?: () => void
-  requestBottomTab: (tab: string) => void
-}) {
-  const { setSlidePanel, activeSlidePanel, currentProject } = useUIStore()
-  void requestBottomTab
-  // Polls /preflight to surface the error+warning count as a badge on the
-  // Issues row. 30 s feels right for an out-of-view indicator — long enough
-  // not to thrash the backend, short enough that the badge stays roughly
-  // accurate after an edit. The panel itself polls more aggressively when
-  // open.
-  const { data: preflight, isError: preflightErrored } = useQuery({
-    queryKey: nk(currentProject, 'preflight'),
-    queryFn: simulationApi.preflight,
-    refetchInterval: 30_000,
-    staleTime: 15_000,
-  })
-  // ADR-0001: a failed preflight fetch must never render as "no issues" — a
-  // defaulted zero here is indistinguishable from a real clean result, so it
-  // would silently convert "we could not check" into "we checked and it's
-  // fine". `preflightErrored` (covers both isError and the resulting
-  // `data === undefined`) drives an explicit unavailable badge instead.
-  const issueCount = (preflight?.errors ?? 0) + (preflight?.warnings ?? 0)
-  const hasErrors = (preflight?.errors ?? 0) > 0
-  // Active (queued + running) solve-queue jobs, surfaced as a badge on the
-  // Solve queue row. Shares the ['solveQueue'] query — polls only while jobs
-  // are active (see useSolveQueue), so this idle-mounted consumer is cheap.
-  const { data: solveQueue } = useSolveQueue()
-  const activeQueueCount = (solveQueue?.jobs ?? []).filter(isActive).length
+  const headerCard = (
+    <ProjectHeaderCard
+      currentProject={currentProject}
+      lastSavedIso={lastSavedIso}
+      dirty={dirty}
+      autosaveEnabled={autosaveEnabled}
+      onToggleAutosave={() => setAutosaveEnabled(!autosaveEnabled)}
+      // Rename: focuses the header's project-name button. The button's
+      // onFocus handler (`startEditName`) flips to edit mode and schedules
+      // `nameRef.current?.focus().select()` on the new <input>, so a single
+      // .focus() here is enough — no DOM-selection juggling needed.
+      onRename={() => {
+        const el = document.querySelector<HTMLElement>('[data-project-name-editor]')
+        el?.focus()
+      }}
+      menu={variant === 'footer'
+        ? { open: menuOpen, onToggle: () => setMenuOpen(o => !o), controls: menuId }
+        : undefined}
+    />
+  )
+
+  if (variant === 'footer') {
+    return (
+      <div ref={footerRef} className="relative shrink-0 border-t border-border" data-testid="sidebar-project-card">
+        {modals}
+        {headerCard}
+        {menuOpen && (
+          // Opens upward over the steps. Any row closes it once it has acted.
+          <div
+            id={menuId}
+            data-testid="sidebar-project-menu-list"
+            className="absolute bottom-full left-2 right-2 mb-1 z-20 py-1 rounded border border-border bg-nav overflow-y-auto"
+            style={{ maxHeight: '60vh', boxShadow: '0 -4px 24px rgba(0,0,0,0.30)' }}
+            onClick={e => { if ((e.target as HTMLElement).closest('button')) setMenuOpen(false) }}
+          >
+            {rows}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div>
-      <SItem icon={<Settings2 size={15} />} label="Solver Settings"
-        title="Choose the solver, foresight mode (overnight / myopic / perfect), CO₂ price, discount rate and value-of-lost-load."
-        active={activeSlidePanel === 'simparams'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'simparams' ? null : 'simparams'); onCloseModal?.() }}
-      />
-      <SItem icon={<Clock size={15} />} label="Model Horizon"
-        title="Define the snapshots (time steps) and investment periods/years the optimisation plans over."
-        active={activeSlidePanel === 'horizon'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'horizon' ? null : 'horizon'); onCloseModal?.() }}
-      />
-      <SItem icon={<Layers size={15} />} label="Capacity Bounds"
-        title="Set per-technology minimum/maximum build limits, optionally different for each investment period (vintages)."
-        active={activeSlidePanel === 'capacityBounds'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'capacityBounds' ? null : 'capacityBounds'); onCloseModal?.() }}
-      />
-      <SItem
-        icon={<AlertTriangle size={15} />}
-        label="Issues"
-        active={activeSlidePanel === 'issues'}
-        rightEl={preflightErrored ? (
-          <span
-            className="shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded"
-            style={{ background: 'rgba(148,163,184,0.18)', color: '#94a3b8' }}
-            title="Could not check for issues — the preflight validation request failed"
-          >?</span>
-        ) : issueCount > 0 ? (
-          <span
-            className={`shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded ${
-              hasErrors ? 'bg-danger/15 text-danger' : 'bg-warn/15 text-warn'}`}
-            data-severity={hasErrors ? 'error' : 'warning'}
-            title={issueBadgeTitle(preflight?.errors ?? 0, preflight?.warnings ?? 0)}
-          >{issueCount}</span>
-        ) : undefined}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'issues' ? null : 'issues'); onCloseModal?.() }}
-      />
-      <SItem icon={<TrendingUp size={15} />} label="Results"
-        active={activeSlidePanel === 'results'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'results' ? null : 'results'); onCloseModal?.() }}
-      />
-      <SItem icon={<ListChecks size={15} />} label="Solve Queue"
-        title="Queue saved projects to solve sequentially in the background; results persist to disk."
-        active={activeSlidePanel === 'solveQueue'}
-        rightEl={activeQueueCount > 0 ? (
-          <span
-            className="shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded"
-            style={{ background: 'rgba(217,119,6,0.18)', color: '#f59e0b' }}
-          >{activeQueueCount}</span>
-        ) : undefined}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'solveQueue' ? null : 'solveQueue'); onCloseModal?.() }}
-      />
-      {/* The Assistant row used to live here, as the last of seven. It is not
-          a simulation feature — it answers questions about the network and
-          opens panels from all three sections — and a row inside a collapsible
-          section is not the "always-visible" affordance the design spec asks
-          for. It is now `AssistantNavButton`, pinned above the sections in
-          both sidebar modes. See Sidebar.assistant.test.tsx. */}
+      {modals}
+      {headerCard}
+      {rows}
     </div>
   )
 }
@@ -1598,7 +1378,7 @@ function PreferencesFooter({ small = false }: { small?: boolean }) {
 }
 
 // ── Icon strip section button ──────────────────────────────────────────────────
-type FlyoutSection = 'project' | 'data' | 'simulation' | 'studies'
+type FlyoutSection = 'project' | StepId
 
 function IconStripBtn({
   icon, label, sectionId, activeFlyout, onClick,
@@ -1630,19 +1410,15 @@ function IconStripBtn({
 
 // ── Flyout panel ───────────────────────────────────────────────────────────────
 function FlyoutPanel({
-  section, onClose, projectName, saveStatus, setSaveStatus, openIo, handleNewProject, requestBottomTab, guided = false,
+  section, onClose, projectName, saveStatus, setSaveStatus, openIo, handleNewProject, guided = false,
 }: {
   section: FlyoutSection; onClose: () => void; projectName: string
   guided?: boolean
   saveStatus: 'idle' | 'saved'; setSaveStatus: (s: 'idle' | 'saved') => void
   openIo: (tab: 'import' | 'export') => void; handleNewProject: () => void
-  requestBottomTab: (tab: string) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
-
-  const SECTION_LABELS: Record<FlyoutSection, string> = {
-    project: 'PROJECT', data: 'DATA', simulation: 'SIMULATION', studies: 'STUDIES',
-  }
+  const step = STEPS.find(s => s.id === section)
 
   // Close on outside click
   useEffect(() => {
@@ -1656,6 +1432,7 @@ function FlyoutPanel({
   return (
     <div
       ref={ref}
+      data-testid="sidebar-flyout"
       className="fixed z-[800] flex flex-col overflow-hidden"
       style={{
         left: SIDEBAR_ICON_W, top: 44,
@@ -1669,7 +1446,7 @@ function FlyoutPanel({
     >
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
         <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-ink-400">
-          {SECTION_LABELS[section]}
+          {step ? step.title : 'PROJECT'}
         </span>
         <button onClick={onClose} aria-label="Close" className="text-ink-400 hover:text-text transition-colors">
           <X size={12} />
@@ -1685,34 +1462,25 @@ function FlyoutPanel({
             guided={guided}
           />
         )}
-        {section === 'data' && <DataSectionContent onCloseModal={onClose} />}
-        {section === 'simulation' && (
-          <SimulationSectionContent onCloseModal={onClose} requestBottomTab={requestBottomTab} />
-        )}
-        {section === 'studies' && <StudiesSectionContent onCloseModal={onClose} />}
+        {step && <step.Content onCloseModal={onClose} />}
       </div>
     </div>
   )
 }
 
 // ── Main Sidebar ───────────────────────────────────────────────────────────────
-/** "2 errors · 1 warning": the Issues badge says what its number counts. */
-function issueBadgeTitle(errors: number, warnings: number): string {
-  const part = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
-  return [errors > 0 && part(errors, 'error'), warnings > 0 && part(warnings, 'warning')]
-    .filter(Boolean).join(' · ')
-}
-
 export default function Sidebar() {
   const {
     sidebarMode, setSidebarMode, toggleSidebar, canvasMode, setCanvasMode,
-    activeSlidePanel, projectName, requestBottomTab,
+    activeSlidePanel, projectName,
     setCurrentProject, setProjectName, currentProject, addTab,
     ioModalRequest, clearIoModalRequest, uiMode,
   } = useUIStore()
   // Guided (spec §3.5) is a render condition only — `sections` below is untouched.
   const guided = uiMode === 'guided'
-  const [sections, setSections] = useState({ project: true, data: true, simulation: true, studies: true })
+  const [sections, setSections] = useState<Record<FlyoutSection, boolean>>({
+    project: true, build: true, time: true, run: true, results: true, studies: true, reports: true,
+  })
   const [activeFlyout, setActiveFlyout] = useState<FlyoutSection | null>(null)
   const [ioOpen, setIoOpen] = useState(false)
   const [ioTab, setIoTab] = useState<'import' | 'export'>('import')
@@ -1771,7 +1539,7 @@ export default function Sidebar() {
     setIoTab(tab); setIoOpen(true)
   }, [])
 
-  const toggleSection = (k: keyof typeof sections) => setSections(s => ({ ...s, [k]: !s[k] }))
+  const toggleSection = (k: FlyoutSection) => setSections(s => ({ ...s, [k]: !s[k] }))
 
   const toggleFlyout = useCallback((section: FlyoutSection) => {
     setActiveFlyout(prev => prev === section ? null : section)
@@ -1853,14 +1621,16 @@ export default function Sidebar() {
             </div>
           )}
 
-          {/* Section icons */}
+          {/* The steps, in the order of the work, then the project (the
+              expanded sidebar keeps it in its footer). Guided shows only the
+              project (spec §3.5). */}
           <div className="flex-1 flex flex-col w-full">
-            <IconStripBtn icon={<FolderOpen size={18} />}  label="Project"    sectionId="project"    activeFlyout={activeFlyout} onClick={() => toggleFlyout('project')} />
-            {!guided && (<>
-            <IconStripBtn icon={<Layers size={18} />}       label="Data"       sectionId="data"       activeFlyout={activeFlyout} onClick={() => toggleFlyout('data')} />
-            <IconStripBtn icon={<Settings2 size={18} />}   label="Simulation" sectionId="simulation" activeFlyout={activeFlyout} onClick={() => toggleFlyout('simulation')} />
-            <IconStripBtn icon={<FlaskConical size={18} />} label="Studies"    sectionId="studies"    activeFlyout={activeFlyout} onClick={() => toggleFlyout('studies')} />
-            </>)}
+            {!guided && STEPS.map(step => (
+              <IconStripBtn key={step.id} icon={step.icon} label={step.label} sectionId={step.id}
+                activeFlyout={activeFlyout} onClick={() => toggleFlyout(step.id)} />
+            ))}
+            <IconStripBtn icon={<FolderOpen size={18} />} label="Project" sectionId="project"
+              activeFlyout={activeFlyout} onClick={() => toggleFlyout('project')} />
           </div>
 
           {/* Mode switcher */}
@@ -1878,7 +1648,6 @@ export default function Sidebar() {
             saveStatus={saveStatus} setSaveStatus={setSaveStatus}
             openIo={openIo}
             handleNewProject={handleNewProject}
-            requestBottomTab={requestBottomTab}
             guided={guided}
           />
         )}
@@ -1936,31 +1705,36 @@ export default function Sidebar() {
             </div>
           )}
 
-          <SectionHdr title="PROJECT" open={sections.project} onToggle={() => toggleSection('project')} testId="sidebar-section-project" />
-          {sections.project && (
-            <ProjectSectionContent
-              projectName={projectName}
-              saveStatus={saveStatus} setSaveStatus={setSaveStatus}
-              openIo={openIo}
-              handleNewProject={handleNewProject}
-              guided={guided}
-            />
-          )}
-
-          {!guided && (<>
-          <SectionHdr title="DATA" open={sections.data} onToggle={() => toggleSection('data')} testId="sidebar-section-data" />
-          {sections.data && <DataSectionContent />}
-
-          <SectionHdr title="SIMULATION" open={sections.simulation} onToggle={() => toggleSection('simulation')} testId="sidebar-section-simulation" />
-          {sections.simulation && (
-            <SimulationSectionContent requestBottomTab={requestBottomTab} />
-          )}
-
-          <SectionHdr title="STUDIES" open={sections.studies} onToggle={() => toggleSection('studies')} testId="sidebar-section-studies" />
-          {sections.studies && <StudiesSectionContent />}
-          </>)}
+          {/* Guided keeps its PROJECT section in the body (spec §3.5); Expert
+              moves the project to the footer card and lists the steps. */}
+          {guided ? (<>
+            <SectionHdr title="PROJECT" open={sections.project} onToggle={() => toggleSection('project')} testId="sidebar-section-project" />
+            {sections.project && (
+              <ProjectSectionContent
+                projectName={projectName}
+                saveStatus={saveStatus} setSaveStatus={setSaveStatus}
+                openIo={openIo}
+                handleNewProject={handleNewProject}
+                guided
+              />
+            )}
+          </>) : STEPS.map(step => (
+            <section key={step.id} aria-label={step.label} data-testid={`sidebar-group-${step.id}`}>
+              <SectionHdr title={step.title} open={sections[step.id]} onToggle={() => toggleSection(step.id)} testId={`sidebar-section-${step.id}`} />
+              {sections[step.id] && <step.Content />}
+            </section>
+          ))}
         </div>
 
+        {!guided && (
+          <ProjectSectionContent
+            variant="footer"
+            projectName={projectName}
+            saveStatus={saveStatus} setSaveStatus={setSaveStatus}
+            openIo={openIo}
+            handleNewProject={handleNewProject}
+          />
+        )}
         {!guided && <ModeSwitcher />}
         <PreferencesFooter />
       </aside>

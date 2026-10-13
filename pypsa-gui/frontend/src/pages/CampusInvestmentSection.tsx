@@ -16,6 +16,11 @@
 // part of each period's capex that buys again, and a line states the study
 // horizon, flagging an assumed span, with the run's notes.
 //
+// The on-load taps (plan C15) are stated under the table: how they act (per
+// critical hour and per case, an N-1 case after the tap changers act with the
+// reactive dispatch held), how many critical hours moved one, who moves the PCC
+// transformer's, and every position used in a collapsed table.
+//
 // The joint optimisation (plan C12) is a block of its own beside it, when a job
 // has finished: what it buys and its cost against the least-cost choice, need by
 // need, whether it kept the least-cost choice or was cancelled, and its
@@ -26,8 +31,10 @@
 // its own choice, else the least-cost one), so the switch is never silent.
 import {
   type CampusMilp, type CampusState, type CostBasis, type CostRow, type HistoryRow, type HorizonScope, type HubCost,
-  type InvestmentRow, type InvestStatus, type MilpHistoryRow, type MilpStop, type ParallelScope,
+  type InvestmentRow, type InvestStatus, type MilpHistoryRow, type MilpStop, type ParallelScope, type PccTapControl,
+  type TapRow,
 } from '../api/campusElectrical'
+import type { ReactNode } from 'react'
 import { PageSection, Tag } from '../components/PageKit'
 
 const STATUS_TEXT: Record<InvestStatus, string> = {
@@ -35,6 +42,13 @@ const STATUS_TEXT: Record<InvestStatus, string> = {
 }
 const STATUS_TONE: Record<InvestStatus, 'ok' | 'err' | 'neutral' | 'accent'> = {
   chosen: 'ok', kept: 'accent', not_needed: 'neutral', unresolved: 'err',
+}
+
+/** A wide table scrolls sideways inside its section, as the gridspine panel's
+ *  hours table does: a page section clips its overflow, so a table wider than
+ *  the panel (the assistant dock open) would otherwise lose its last columns. */
+export function TableScroll({ children }: { children: ReactNode }) {
+  return <div data-testid="campus-table-scroll" className="overflow-x-auto">{children}</div>
 }
 
 /** Euro with thousands separators; millions as `€6.89 M`. */
@@ -54,6 +68,63 @@ const SCOPE_TEXT = {
   campus: 'PCC switchgear: costed to the campus',
   grid_operator: 'PCC switchgear: owned by the grid operator, not costed',
 } as const
+
+const TAP_SCOPE_TEXT: Record<PccTapControl, string> = {
+  campus: 'PCC transformer taps: moved by the campus',
+  grid_operator: "PCC transformer taps: held by the grid operator at the campus file's position",
+}
+
+/** How the on-load taps acted in the re-check (plan C15), and every position
+ *  used, collapsed. Absent for a run from before taps were modelled. */
+function TapsBlock({ taps, moved, hours, control }: {
+  taps: TapRow[]; moved: number | null | undefined; hours: number; control: PccTapControl | undefined
+}) {
+  return (
+    <div className="mt-3">
+      <p data-testid="invest-taps-summary" className="text-[12px]">
+        {taps.length === 0
+          ? "No transformer has on-load tap data: every tap stays at the campus file's position."
+          : `On-load taps: set per critical hour and per case (an N-1 case after the tap changers act, the reactive `
+            + `dispatch held), parallel units together, nearest neutral; ${moved ?? 0} of the ${hours} critical `
+            + `hours moved a tap. Off-circuit taps stay at the campus file's position.`}
+      </p>
+      {control && <p data-testid="invest-tap-scope" className="text-[12px]">{TAP_SCOPE_TEXT[control]}</p>}
+      {taps.length > 0 && (
+        <details data-testid="invest-taps" className="mt-1 text-[12px]">
+          <summary className="cursor-pointer text-muted">Tap positions ({taps.length})</summary>
+          <TableScroll>
+            <table className="w-full text-[12px] mt-1">
+              <thead>
+                <tr className="text-left text-muted">
+                  <th className="font-normal pr-3">Period</th><th className="font-normal pr-3">Hour</th>
+                  <th className="font-normal pr-3">Case</th><th className="font-normal pr-3">Transformer</th>
+                  <th className="font-normal pr-3">Group</th><th className="font-normal pr-3 text-right">Tap</th>
+                  <th className="font-normal pr-3 text-right">Ratio</th><th className="font-normal text-right">Moved by</th>
+                </tr>
+              </thead>
+              <tbody>
+                {taps.map(t => (
+                  <tr key={`${t.period}-${t.hour}-${t.case}-${t.transformer}`}
+                      data-testid={`tap-${t.period}-${t.hour}-${t.case}-${t.transformer}`}
+                      className={`border-t border-border ${t.moved_by !== 0 ? 'font-medium' : ''}`}>
+                    <td className="py-1 pr-3 tabular-nums">{t.period}</td>
+                    <td className="pr-3 tabular-nums">{t.hour}</td>
+                    <td className="pr-3 whitespace-nowrap">{t.case}</td>
+                    <td className="pr-3">{t.transformer}</td>
+                    <td className="pr-3">{t.group}</td>
+                    <td className="pr-3 tabular-nums text-right">{t.tap_pos}</td>
+                    <td className="pr-3 tabular-nums text-right">{Number(t.ratio_pct.toFixed(2))} %</td>
+                    <td className="tabular-nums text-right">{t.moved_by}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableScroll>
+        </details>
+      )}
+    </div>
+  )
+}
 
 /** `0.07` as `7 %`, `0.035` as `3.5 %`. */
 function ratePercent(rate: number): string {
@@ -150,6 +221,19 @@ function IcSourceLine({ state }: { state: CampusState }) {
   )
 }
 
+/** Owner decision 2026-10-13: the needs the run the case uses could not meet are passed to the
+ *  investment case, which flags the case. Said only when there are any. */
+function IcUnresolvedLine({ count }: { count: number }) {
+  if (!(count > 0)) return null
+  return (
+    <p data-testid="invest-ic-unresolved" className="text-[12px] text-warn mb-2">
+      {count === 1
+        ? '1 unresolved need is passed to the investment case as a flag: the case is not compliant without it.'
+        : `${count} unresolved needs are passed to the investment case as a flag: the case is not compliant without them.`}
+    </p>
+  )
+}
+
 /** The hub's cost to set beside one electrical period, or null when it has none there. */
 function hubFor(hub: HubCost | null, period: number, periods: number): number | null {
   if (!hub) return null
@@ -177,6 +261,7 @@ export default function CampusInvestmentSection({ state }: { state: CampusState 
           an order of magnitude and not a quote.
         </p>
         <IcSourceLine state={state} />
+        <IcUnresolvedLine count={state.owner_assets_unresolved ?? 0} />
         {r.cost_basis && <CostBasisLine basis={r.cost_basis} />}
         {r.scope && (
           <p data-testid="invest-scope" className="text-[12px] mb-2">{SCOPE_TEXT[r.scope.pcc_switchgear]}</p>
@@ -195,6 +280,10 @@ export default function CampusInvestmentSection({ state }: { state: CampusState 
               ))}
             </ul>
           </div>
+        )}
+        {r.taps != null && (
+          <TapsBlock taps={r.taps} moved={r.tap_hours_moved} hours={r.selection.length}
+                     control={r.scope?.pcc_tap_control} />
         )}
         <HistoryList rows={history} />
       </PageSection>
@@ -238,7 +327,15 @@ const STOP_TEXT: Record<MilpStop, string> = {
   cancelled: 'cancelled',
 }
 
-/** The joint optimisation's choice beside the least-cost one. */
+/** `1 iteration`, `3 iterations`. */
+export function iterationsText(n: number): string {
+  return n === 1 ? '1 iteration' : `${n} iterations`
+}
+
+/** The joint optimisation's choice beside the least-cost one. Its counts agree:
+ *  the engine's `iterations` (and the job's `iteration`) count the steps after
+ *  the warm start, which is the least-cost choice re-solved and the history's
+ *  row 0, so the warm start is named beside them rather than counted. */
 function MilpBlock({ milp, marginPct }: { milp: CampusMilp; marginPct: number }) {
   const m = milp.results!
   const s = m.summary
@@ -255,7 +352,7 @@ function MilpBlock({ milp, marginPct }: { milp: CampusMilp; marginPct: number })
         )}
         <p data-testid="milp-summary" className="text-[12px] mb-1">
           Joint optimisation {formatEur(s.milp_cost)}/a against least cost {formatEur(s.c8_cost)}/a
-          {saving > 1 ? `, ${formatEur(saving)}/a less` : ''}. {s.iterations === 1 ? '1 iteration' : `${s.iterations} iterations`},{' '}
+          {saving > 1 ? `, ${formatEur(saving)}/a less` : ''}. {iterationsText(s.iterations)} after the warm start,{' '}
           {STOP_TEXT[m.stop] ?? m.stop}.
         </p>
         {m.stop === 'cancelled' && (
@@ -275,27 +372,29 @@ function MilpBlock({ milp, marginPct }: { milp: CampusMilp; marginPct: number })
           by extra inverter reactive power; the optimisation may use inverter Q only for the 100 % loading, the PCC band
           and the voltages. Costs are the asset library's placeholders, not quotes.
         </p>
-        <table data-testid="milp-comparison" className="w-full text-[12px] mb-3">
-          <thead>
-            <tr className="text-left text-muted">
-              <th className="font-normal pr-3">Need</th>
-              <th className="font-normal pr-3">Least cost</th><th className="font-normal pr-3 text-right">€/a</th>
-              <th className="font-normal pr-3">Joint</th><th className="font-normal text-right">€/a</th>
-            </tr>
-          </thead>
-          <tbody>
-            {comparison.map(c => (
-              <tr key={c.need} data-testid={`milp-compare-${c.need}`}
-                  className={`border-t border-border ${c.c8_choice !== c.milp_choice ? 'font-medium' : ''}`}>
-                <td className="py-1 pr-3 whitespace-nowrap">{c.need}</td>
-                <td className="pr-3">{c.c8_choice}</td>
-                <td className="pr-3 tabular-nums text-right">{formatEur(c.c8_annualised_eur_per_a)}</td>
-                <td className="pr-3">{c.milp_choice}</td>
-                <td className="tabular-nums text-right">{formatEur(c.milp_annualised_eur_per_a)}</td>
+        <TableScroll>
+          <table data-testid="milp-comparison" className="w-full text-[12px] mb-3">
+            <thead>
+              <tr className="text-left text-muted">
+                <th className="font-normal pr-3">Need</th>
+                <th className="font-normal pr-3">Least cost</th><th className="font-normal pr-3 text-right">€/a</th>
+                <th className="font-normal pr-3">Joint</th><th className="font-normal text-right">€/a</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {comparison.map(c => (
+                <tr key={c.need} data-testid={`milp-compare-${c.need}`}
+                    className={`border-t border-border ${c.c8_choice !== c.milp_choice ? 'font-medium' : ''}`}>
+                  <td className="py-1 pr-3 whitespace-nowrap">{c.need}</td>
+                  <td className="pr-3">{c.c8_choice}</td>
+                  <td className="pr-3 tabular-nums text-right">{formatEur(c.c8_annualised_eur_per_a)}</td>
+                  <td className="pr-3">{c.milp_choice}</td>
+                  <td className="tabular-nums text-right">{formatEur(c.milp_annualised_eur_per_a)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
         {m.investment && <InvestmentTable rows={m.investment} testid="milp-invest" />}
         <MilpHistoryList rows={m.history ?? []} />
       </PageSection>
@@ -304,13 +403,15 @@ function MilpBlock({ milp, marginPct }: { milp: CampusMilp; marginPct: number })
 }
 
 function MilpHistoryList({ rows }: { rows: MilpHistoryRow[] }) {
+  const steps = iterationsText(rows.filter(h => h.iteration > 0).length)
+  const count = rows.some(h => h.iteration === 0) ? `warm start + ${steps}` : steps
   return (
     <details data-testid="milp-history" className="mt-3 text-[12px]">
-      <summary className="cursor-pointer text-muted">Iteration history ({rows.length})</summary>
+      <summary className="cursor-pointer text-muted">Iteration history ({count})</summary>
       <ul className="mt-1 space-y-0.5">
         {rows.map(h => (
           <li key={h.iteration} className="tabular-nums">
-            {h.iteration}. {formatEur(h.cost)}/a, {h.feasible ? 'AC-feasible' : 'not AC-feasible'},{' '}
+            {h.iteration === 0 ? 'Warm start:' : `${h.iteration}.`} {formatEur(h.cost)}/a, {h.feasible ? 'AC-feasible' : 'not AC-feasible'},{' '}
             {h.accepted ? 'accepted' : 'not accepted'} — {h.choice}
             {h.note ? <span className="text-muted"> ({h.note})</span> : null}
           </li>
@@ -322,46 +423,48 @@ function MilpHistoryList({ rows }: { rows: MilpHistoryRow[] }) {
 
 function InvestmentTable({ rows, testid = 'invest' }: { rows: InvestmentRow[]; testid?: string }) {
   return (
-    <table className="w-full text-[12px]">
-      <thead>
-        <tr className="text-left text-muted">
-          <th className="font-normal pr-3">Need</th><th className="font-normal pr-3">Action</th>
-          <th className="font-normal pr-3">Asset</th>
-          <th className="font-normal pr-3">Units</th><th className="font-normal pr-3">Bought</th>
-          <th className="font-normal pr-3">Invest period</th>
-          <th className="font-normal pr-3 text-right">Capex</th><th className="font-normal pr-3 text-right">Annualised cost</th>
-          <th className="font-normal pr-3">Existing</th><th className="font-normal">Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((x, i) => (
-          <tr
-            key={`${x.need}-${x.library_id ?? ''}-${x.action ?? ''}-${x.purchase ?? ''}-${i}`}
-            data-testid={`${testid}-${x.need}`}
-            className={`border-t border-border ${x.status === 'unresolved' ? 'bg-danger/10 text-danger' : ''}`}
-          >
-            <td className="py-1 pr-3">
-              <div className="whitespace-nowrap">{x.need}</div>
-              {x.reason && x.status !== 'unresolved' && (
-                <div data-testid="invest-reason" className="text-[11px] text-muted">{x.reason}</div>
-              )}
-            </td>
-            <td data-testid="invest-action" className="pr-3 whitespace-nowrap">{x.action || '—'}</td>
-            <td className="pr-3 whitespace-nowrap">
-              {x.library_id ?? '—'}
-              {x.length_km != null && <span className="text-muted"> · {x.length_km} km</span>}
-            </td>
-            <td className="pr-3 tabular-nums">{x.units}</td>
-            <td data-testid="invest-bought" className="pr-3 tabular-nums whitespace-nowrap">{boughtText(x)}</td>
-            <td className="pr-3 tabular-nums">{x.library_id == null ? '—' : (x.invest_period ?? '—')}</td>
-            <td className="pr-3 tabular-nums text-right">{formatEur(x.capex_eur)}</td>
-            <td className="pr-3 tabular-nums text-right">{formatEur(x.annualised_eur_per_a)}</td>
-            <td className="pr-3">{x.existing ? 'yes' : 'no'}</td>
-            <td><Tag tone={STATUS_TONE[x.status]}>{STATUS_TEXT[x.status] ?? x.status}</Tag></td>
+    <TableScroll>
+      <table className="w-full text-[12px]">
+        <thead>
+          <tr className="text-left text-muted">
+            <th className="font-normal pr-3">Need</th><th className="font-normal pr-3">Action</th>
+            <th className="font-normal pr-3">Asset</th>
+            <th className="font-normal pr-3">Units</th><th className="font-normal pr-3">Bought</th>
+            <th className="font-normal pr-3">Invest period</th>
+            <th className="font-normal pr-3 text-right">Capex</th><th className="font-normal pr-3 text-right">Annualised cost</th>
+            <th className="font-normal pr-3">Existing</th><th className="font-normal">Status</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((x, i) => (
+            <tr
+              key={`${x.need}-${x.library_id ?? ''}-${x.action ?? ''}-${x.purchase ?? ''}-${i}`}
+              data-testid={`${testid}-${x.need}`}
+              className={`border-t border-border ${x.status === 'unresolved' ? 'bg-danger/10 text-danger' : ''}`}
+            >
+              <td className="py-1 pr-3">
+                <div className="whitespace-nowrap">{x.need}</div>
+                {x.reason && x.status !== 'unresolved' && (
+                  <div data-testid="invest-reason" className="text-[11px] text-muted">{x.reason}</div>
+                )}
+              </td>
+              <td data-testid="invest-action" className="pr-3 whitespace-nowrap">{x.action || '—'}</td>
+              <td className="pr-3 whitespace-nowrap">
+                {x.library_id ?? '—'}
+                {x.length_km != null && <span className="text-muted"> · {x.length_km} km</span>}
+              </td>
+              <td className="pr-3 tabular-nums">{x.units}</td>
+              <td data-testid="invest-bought" className="pr-3 tabular-nums whitespace-nowrap">{boughtText(x)}</td>
+              <td className="pr-3 tabular-nums">{x.library_id == null ? '—' : (x.invest_period ?? '—')}</td>
+              <td className="pr-3 tabular-nums text-right">{formatEur(x.capex_eur)}</td>
+              <td className="pr-3 tabular-nums text-right">{formatEur(x.annualised_eur_per_a)}</td>
+              <td className="pr-3">{x.existing ? 'yes' : 'no'}</td>
+              <td><Tag tone={STATUS_TONE[x.status]}>{STATUS_TEXT[x.status] ?? x.status}</Tag></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </TableScroll>
   )
 }
 
@@ -388,39 +491,41 @@ function HistoryList({ rows }: { rows: HistoryRow[] }) {
 function CostTable({ cost, hub }: { cost: CostRow[]; hub: HubCost | null }) {
   const renewals = cost.some(c => c.capex_replacement_eur != null)        // plan C14; absent before it
   return (
-    <table className="w-full text-[12px]">
-      <thead>
-        <tr className="text-left text-muted">
-          <th className="font-normal pr-3">Period</th>
-          <th className="font-normal pr-3 text-right">Capex invested</th>
-          {renewals && <th className="font-normal pr-3 text-right">of which bought again</th>}
-          <th className="font-normal pr-3 text-right">Electrical, annualised</th>
-          <th className="font-normal pr-3 text-right">Hub system cost</th>
-          <th className="font-normal pr-3 text-right">Together</th>
-          <th className="font-normal text-right">Electrical share</th>
-        </tr>
-      </thead>
-      <tbody>
-        {cost.map(c => {
-          const h = hubFor(hub, c.period, cost.length)
-          const sum = h == null ? null : c.annualised_eur_per_a + h
-          return (
-            <tr key={c.period} data-testid={`cost-${c.period}`} className="border-t border-border">
-              <td className="py-1 pr-3 tabular-nums">{c.period}</td>
-              <td className="pr-3 tabular-nums text-right">{formatEur(c.capex_eur)}</td>
-              {renewals && (
-                <td data-testid="cost-replacement" className="pr-3 tabular-nums text-right">
-                  {formatEur(c.capex_replacement_eur)}
-                </td>
-              )}
-              <td className="pr-3 tabular-nums text-right">{formatEur(c.annualised_eur_per_a)}</td>
-              <td className="pr-3 tabular-nums text-right">{formatEur(h)}</td>
-              <td className="pr-3 tabular-nums text-right">{formatEur(sum)}</td>
-              <td className="tabular-nums text-right">{sum == null || sum === 0 ? '—' : percent(c.annualised_eur_per_a / sum)}</td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
+    <TableScroll>
+      <table className="w-full text-[12px]">
+        <thead>
+          <tr className="text-left text-muted">
+            <th className="font-normal pr-3">Period</th>
+            <th className="font-normal pr-3 text-right">Capex invested</th>
+            {renewals && <th className="font-normal pr-3 text-right">of which bought again</th>}
+            <th className="font-normal pr-3 text-right">Electrical, annualised</th>
+            <th className="font-normal pr-3 text-right">Hub system cost</th>
+            <th className="font-normal pr-3 text-right">Together</th>
+            <th className="font-normal text-right">Electrical share</th>
+          </tr>
+        </thead>
+        <tbody>
+          {cost.map(c => {
+            const h = hubFor(hub, c.period, cost.length)
+            const sum = h == null ? null : c.annualised_eur_per_a + h
+            return (
+              <tr key={c.period} data-testid={`cost-${c.period}`} className="border-t border-border">
+                <td className="py-1 pr-3 tabular-nums">{c.period}</td>
+                <td className="pr-3 tabular-nums text-right">{formatEur(c.capex_eur)}</td>
+                {renewals && (
+                  <td data-testid="cost-replacement" className="pr-3 tabular-nums text-right">
+                    {formatEur(c.capex_replacement_eur)}
+                  </td>
+                )}
+                <td className="pr-3 tabular-nums text-right">{formatEur(c.annualised_eur_per_a)}</td>
+                <td className="pr-3 tabular-nums text-right">{formatEur(h)}</td>
+                <td className="pr-3 tabular-nums text-right">{formatEur(sum)}</td>
+                <td className="tabular-nums text-right">{sum == null || sum === 0 ? '—' : percent(c.annualised_eur_per_a / sum)}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </TableScroll>
   )
 }

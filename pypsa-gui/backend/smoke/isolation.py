@@ -92,7 +92,9 @@ def _sqlite_path(url: str) -> str | None:
     return rest
 
 
-def require_isolated_environment(env: dict[str, str] | None = None) -> None:
+def require_isolated_environment(
+    env: dict[str, str] | None = None, *, require_database_url: bool = True,
+) -> None:
     """
     Refuse to continue unless app-data, projects AND the database are all
     pointed somewhere disposable.
@@ -100,10 +102,36 @@ def require_isolated_environment(env: dict[str, str] | None = None) -> None:
     Raises IsolationError rather than asserting, so it still fires under
     `python -O`, where `assert` is compiled out — the previous per-harness
     guards would have silently vanished.
+
+    `require_database_url=False` is for ONE caller, `accept_coldstart.py`, and
+    the two requirements were flatly contradictory until it existed. That
+    harness exists to prove `launcher.build_environment` pins `DATABASE_URL`
+    itself — and `build_environment` leaves an explicitly exported
+    `DATABASE_URL` alone (launcher.py:129), so pre-setting the variable routes
+    the run down the operator branch and the pin under test is never executed.
+    Requiring it here therefore made the harness refuse to start
+    (`IsolationError`) while its own `assert not os.environ.get("DATABASE_URL")`
+    refused the other way: unrunnable in every environment, in every commit
+    since 4ba89699 introduced both halves together.
+
+    Isolation is not weakened by the exemption, it is relocated. With the
+    variable unset, `app_paths.default_database_url()` puts the database under
+    `PYPSAGUI_APP_DATA_DIR`, which this function has already forced to a
+    throwaway directory — so the "stray auth_dev.db in the repo" this check
+    guards against cannot happen. `accept_coldstart.py` then asserts the file
+    the engine ACTUALLY opened is inside that directory, which is a stronger
+    statement than any check on the URL string: it is the thing the URL was
+    only ever a proxy for.
+
+    Every other caller keeps the requirement, and the default is unchanged, so
+    a new harness has to opt out deliberately.
     """
     env = os.environ if env is None else env
 
-    for name in REQUIRED:
+    required = REQUIRED if require_database_url else tuple(
+        name for name in REQUIRED if name != "DATABASE_URL"
+    )
+    for name in required:
         if not (env.get(name) or "").strip():
             _refuse(f"{name} is unset — point it at a throwaway location")
 
@@ -122,6 +150,11 @@ def require_isolated_environment(env: dict[str, str] | None = None) -> None:
         if path == real_projects or real_projects in path.parents:
             _refuse(f"{label} is the real projects tree ({path})")
         _reject_if_under_documents(label, path)
+
+    if not require_database_url and not (env.get("DATABASE_URL") or "").strip():
+        # Nothing to police: the app pins it, and the pin lands under the
+        # app-data directory already checked above.
+        return
 
     raw = _sqlite_path(env["DATABASE_URL"])
     if raw is None:

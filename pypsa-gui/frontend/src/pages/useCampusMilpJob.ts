@@ -9,9 +9,14 @@
 // `running` (→ `done` / `cancelled` / `failed`) `onFinished` is called once, so
 // the panel re-reads its state and shows the results. A record already
 // terminal at first read (the last job of an earlier visit) is a baseline.
+//
+// A start that gets no answer (a timeout, a dropped connection) may have
+// started the job all the same: the backend makes the least-cost run first, in
+// the request. The record is then re-read, and `onStarted` called so the panel
+// re-reads its state, rather than taking the job as never started.
 import { useCallback, useEffect, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { campusApi, type CampusSettings, type MilpJobRecord } from '../api/campusElectrical'
+import { campusApi, isNoAnswer, type CampusSettings, type MilpJobRecord } from '../api/campusElectrical'
 
 export const CAMPUS_MILP_KEY = (project: string) => ['campusElectrical', 'milp', project] as const
 export const CAMPUS_MILP_POLL_MS = 1500
@@ -61,6 +66,11 @@ export function useCampusMilpJob(
     onSuccess: (rec) => {
       cancelMutation.reset()
       qc.setQueryData(CAMPUS_MILP_KEY(project), rec)
+      options.onStarted?.()
+      void refresh()
+    },
+    onError: (e) => {
+      if (!isNoAnswer(e)) return
       options.onStarted?.()
       void refresh()
     },

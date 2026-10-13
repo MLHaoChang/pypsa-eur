@@ -158,3 +158,45 @@ def test_the_happy_path_still_returns_a_working_restore():
     # ...and reverted on request, exactly as before.
     restore()
     _assert_restored(n, before, "a normal restore()")
+
+
+# ── The registry itself ──────────────────────────────────────────────────────
+# The control test above failed on the macOS runner (2026-10-13) with the
+# network's `fom_cost` never scaled: the allocator had handed it an address a
+# registration whose revert never ran still named, so the fill read it as
+# already scaled, skipped the work, and `revert()` (which only discards what
+# it registered) left the stale entry in place. The registry now holds a weak
+# reference beside the id and checks identity, so a dead network's entry can
+# never speak for a live one.
+
+
+def test_a_registration_dies_with_its_network():
+    import gc
+
+    from services.solver import periodized_costs as pc
+
+    n = _network()
+    revert = pc.fill_periodized_cost_defaults(n, _cfg())  # noqa: F841 — deliberately never called
+    assert pc.fom_is_scaled(n)
+    stale_id = id(n)
+    del n, revert
+    gc.collect()
+    with pc._FOM_SCALED_LOCK:
+        assert pc._FOM_SCALED.get(stale_id) is None, (
+            "a registration outlived its network; a later network allocated "
+            "at the same address would read as already scaled"
+        )
+
+
+def test_a_fill_that_raises_after_scaling_reverts_and_unregisters(monkeypatch):
+    from services.solver import periodized_costs as pc
+
+    def boom(*_a, **_k):
+        raise _Boom("forced inside the fill")
+
+    monkeypatch.setattr(pc, "_fill_overnight_defaults", boom)
+    n = _network()
+    before = _snapshot(n)
+    with pytest.raises(_Boom):
+        pc.fill_periodized_cost_defaults(n, _cfg())
+    _assert_restored(n, before, "a raise inside the fill")
