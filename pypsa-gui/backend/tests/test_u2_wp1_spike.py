@@ -1149,8 +1149,8 @@ def test_q2_q3_q4_q6_engine_shapes_on_master():
     follow-up's defaults-pack loader, flat export series helper and
     `binding.bind_commercial_on_context` exist and are pinned by
     `tests/test_engine_facade_frozen.py`. `binding.bind_commercial` (what C6
-    uses on an unloaded fork's network) is NOT in the frozen list (engine ask
-    Q15).
+    uses on an unloaded fork's network) is frozen too since IC engine ask 3
+    (2026-10-13), which answered Q15.
     """
     import typing
 
@@ -1185,4 +1185,4 @@ def test_q2_q3_q4_q6_engine_shapes_on_master():
             "services.commercial.binding.bind_commercial_on_context",
             "services.finance.case.scale_capex",
             "services.finance.case.effective_parts"} <= frozen
-    assert "services.commercial.binding.bind_commercial" not in frozen
+    assert "services.commercial.binding.bind_commercial" in frozen      # Q15, IC ask 3

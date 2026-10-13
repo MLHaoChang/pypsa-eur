@@ -23,25 +23,27 @@ function afterLastUser<T extends { role: string }>(messages: readonly T[]): read
   return messages.slice(lastUser + 1)
 }
 
+/**
+ * Live is presence-led: the assistant's sentence belongs in the console
+ * transcript. This surface keeps only what a closed console cannot offer, the
+ * current turn's download. Confirmations ride ConfirmationCard beside it.
+ */
 export default function CompanionOutcome({ hidden = false }: Props) {
   const messages = useChatStore((s) => s.messages)
-  const latest = [...messages].reverse().find((m) => m.role === 'assistant')
   const download = [...afterLastUser(messages)].reverse()
     .map((m) => downloadHref(m.tool_result))
     .find((hit) => hit) ?? null
-  if (!latest || hidden) return null
+  if (!download || hidden) return null
   return (
-    <div className="z-40 pointer-events-auto max-w-xs rounded-xl bg-surface px-3 py-2 text-sm text-text shadow-lg" data-no-panel-close>
-      <p data-testid="companion-outcome">{latest.content}</p>
-      {download ? (
-        <a
-          data-testid="companion-download"
-          href={download.href}
-          {...(typeof download.filename === 'string' ? { download: download.filename ?? '' } : {})}
-        >
-          Download
-        </a>
-      ) : null}
+    <div className="z-40 pointer-events-auto max-w-xs" data-no-panel-close>
+      <a
+        data-testid="companion-download"
+        href={download.href}
+        {...(typeof download.filename === 'string' ? { download: download.filename } : {})}
+        className="inline-flex rounded-full border border-border bg-bg-2 px-3 py-1.5 text-[11px] font-medium text-text shadow-lg hover:text-accent"
+      >
+        Download
+      </a>
     </div>
   )
 }

@@ -10,13 +10,13 @@ One PR per item unless two are trivially small. The owner, or the gatekeeper on 
 
 | # | Item | Retires | Status |
 |---|---|---|---|
-| 1 | `series_store.delete_series` / `pinned_by` (+ `list_series`) in the facade; the study deletes through them | C3e (3 `ALLOWED_EXCEPTIONS`) | PR open |
-| 2 | Per-part `finance.case.scale_capex(case, f, *, asset=, part=)`; U2 switches; tornado figures pinned | the C5 "Per-part CAPEX bounds" workaround | next |
-| 3 | Freeze every engine field the study reads (`test_engine_facade_frozen.py`) | the WP7 freeze and N15 exceptions | |
-| 4 | Unrounded FOM / CAPEX / OPEX statistics | the `fom_rounded_by_pypsa_statistics` rows of `tests/fixtures/u2_deltas.json` | |
-| 5 | A public "record a solve" helper | `tests/study_s4_support.record_engine_solve` writing `lp_bindings` internals | |
-| 6 | A hand-typed price on a grid Link the tariff also prices: warn, show both, numbers unchanged | | |
-| 7 | S3 seeds: templates and Energy Hub placeholders from the generic defaults pack (before U4) | hard-coded template costs | |
+| 1 | `series_store.delete_series` / `pinned_by` (+ `list_series`) in the facade; the study deletes through them | C3e (3 `ALLOWED_EXCEPTIONS`) | #173 |
+| 2 | Per-part `finance.case.scale_capex(case, f, *, asset=, part=)`; U2 switches; tornado figures pinned | the C5 "Per-part CAPEX bounds" workaround | #174 |
+| 3 | Freeze every engine field the study reads (`test_engine_facade_frozen.py`) | the WP7 freeze, N15 and Q15 exceptions | this PR (stacked on #173) |
+| 4 | Unrounded FOM / CAPEX / OPEX statistics | the `fom_rounded_by_pypsa_statistics` rows of `tests/fixtures/u2_deltas.json` | #175 |
+| 5 | A public "record a solve" helper | `tests/study_s4_support.record_engine_solve` writing `lp_bindings` internals | #176 |
+| 6 | A hand-typed price on a grid Link the tariff also prices: warn, show both, numbers unchanged | | #177 |
+| 7 | S3 seeds: templates and Energy Hub placeholders from the generic defaults pack (before U4) | hard-coded template costs | owner questions Q1/Q2 sent 2026-10-13 |
 
 ## 1. `delete_series` / `pinned_by`
 
@@ -48,3 +48,43 @@ One PR per item unless two are trivially small. The owner, or the gatekeeper on 
 - **7.** The defaults pack (`services/library/defaults_pack/versions/2026-10-07`) holds battery, solar and campus
   equipment; `project_templates/eh_templates.py` hard-codes annualised costs (genset, BESS, fuel cell, electrolyser)
   and `_build.py` marginal costs. No test ties them to the pack. Gas genset, H2 and fuel cell have no pack rows.
+
+## 2. Per-part `scale_capex` (#174)
+
+`scale_capex(case, f, *, asset=None, part=None)`: the whole-case form unchanged; `asset=` scales that asset (parts,
+total, its own fixed replacement entries); `asset=` + `part=` scales one part of `effective_parts` with the total as
+the parts' sum. Refusals: `scale_capex_part_without_asset`, `_unknown_asset`, `_unknown_part`,
+`_part_fixed_replacement`. FOM lines are never touched (the study keeps its own FOM-line scaling). The tornado's
+CAPEX-bound figures are pinned from master 47d9dda2 (`tests/fixtures/u2_capex_bound_pins.json`, rel 1e-12).
+
+## 3. The freeze (this PR)
+
+Every engine name the study's seams use is a facade name (`ALLOWED_EXCEPTIONS` is empty), the scan covers
+`models.commercial` / `models.finance`, and the fields and dict keys the study reads are pinned as subsets
+(`FIELDS_READ`, `RESULT_KEYS_READ`, `CONSTANTS`, `EXCEPTIONS`, a live probe of the commercial terms). Out of scope:
+the non-engine results modules the study also reads (`asset_economics`, `economics_caveats`, `sizing`,
+`cost_breakdown`, `objective_decomposition`, `emissions`, `line_duals`).
+
+## 4. Unrounded statistics (#175)
+
+`value_flows._asset_costs` reads `n.statistics.*(round=0)`; the five rounding deltas are gone. `qa_value_flows`
+scenario I compares amounts to rel 1e-12 (a netCDF round trip can move one OPEX line by one ulp).
+
+## 5. `record_dispatch_as_solve` (#176)
+
+The demand and capacity readers read `links_t.p0` when recording (shared `_demand_record`, `_capacity_built`);
+billed demand is the rule value (max of peak and ratchet rows). Energy tiers and a missing flow are refused. Equal to
+a real solve of the same dispatch, a binding ratchet and demand tiers included.
+
+## 6. `commercial.link_price_and_tariff` (#177)
+
+A preflight warning per metered Link with its own non-zero `marginal_cost` that the tariff also prices per MWh,
+naming both prices and their sum. Numbers unchanged.
+
+## 7. S3 seeds: open owner questions
+
+Pack-derived (7 %, technology-data v0.14.0) vs today's literals, €/MW/yr: gas genset 60.2k / 62k, diesel 50.6k /
+45k, onwind 128.3k / 120k, utility PV 48.1k / 45k, BESS 2h 63.8k / 48k, BESS 4h 96.3k / 48k, fuel cell 283k / 90k.
+Q1 scope (a: a pack version with genset, diesel, onwind, fuel cell, electrolysis rows, everything derived; b: only
+what the pack covers; c: a comparison test only). Q2 (a: accept the moved template results and re-pin; b: scale to
+today's literals).
