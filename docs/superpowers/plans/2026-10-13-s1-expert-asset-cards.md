@@ -1,0 +1,66 @@
+# Plan: S1, Expert asset cards rendered from the schema
+
+**Date:** 2026-10-13. **Owner:** coordinating session (owner decision S1a, 13 Oct). **Parent:**
+`2026-10-05-one-investment-engine-two-faces.md` §10 (S1 row) and §11 (M4). **Spec:**
+`docs/superpowers/assessments/2026-10-05-uniform-asset-parameterisation.md` §3–§4 and its S1 row (:433).
+**Lands:** after M2 (#171), in slices; S1b before U3's "Open in Expert".
+
+## Why
+
+Each Expert card hand-writes up to four lists that must agree: the read-out rows, the `startEdit` keys,
+the save payload and the edit inputs. In all there are 226 literal labels in `PropertiesPanel.tsx`, with
+units baked into strings. `CreationForm`, `BottomPanel`'s `COL_LABELS` and `GenerationStack` each carry
+their own copies. They drift. `COL_LABELS.capital_cost = 'CC (€/MW/yr)'` is applied to Stores, which are
+€/MWh/yr. The battery card still offers `capital_cost` as a typed field although S0 derives it from the
+parts, so a typed value on a battery with parts is silently dropped on save (`network_crud._update_component`
+→ `apply_parts`). The frontend cannot show or edit the parts at all.
+
+## Shape
+
+One descriptor per field, served by the backend, rendered by one card renderer. The vocabulary is the
+study's `LedgerRow` (`label`, `technical_name`, `help`, `unit`, `range`, `status`, `provenance`), so S2's
+guided ledger is a projection of these descriptors, not a translation.
+
+```text
+GET /api/network/asset_schema/{component}?carrier=…
+  → { component, carrier, groups: [
+        { id: identity|size|investment|fom|variable|performance|replacement|provenance,
+          fields: [ { key, technical_name, label, help, unit_display, unit_storage, scale,
+                      kind: number|bool|enum|bus|text, options?, required, key_param,
+                      derived: bool, reveal_when?, part? } ] } ] }
+```
+
+- **Group order** is fixed on every screen (plan §10).
+- **`derived: true`** rows (`capital_cost`, the annualised and upfront totals) render read-only, with "ⓘ how computed".
+- **`scale`** converts between display and storage units. The canonical case is ×1000 for kW↔MW (§3.4).
+- **`reveal_when`** replaces the D22 rules in `utils/attributeCatalog.ts`.
+- **Provenance** per field is `{source, source_year, currency_year, range, status: default|customised|measured}`,
+  stored in `n.meta["asset_params"][class][name][field]` (rule 7). An Expert edit sets `customised`.
+
+## Slices (one PR each)
+
+| Slice | Content | Size | Gate |
+|---|---|---|---|
+| S1a | Backend: the descriptor module (`asset_schema/fields.py`) with Generator and StorageUnit; `GET /api/network/asset_schema/{component}`; the provenance store (`asset_schema/provenance.py`): a changed field is stamped `customised` on update, re-keyed on rename, dropped by every removal; `GET …/{component}/provenance/{name}` | ~450 backend, ~280 tests | Descriptor, route and provenance tests; no card field lost; capability matrix and inventory checks pass |
+| S1b | `AssetCard` renderer and edit form, used by the **StorageUnit** and **Generator** cards; parts editing; `capital_cost` read-only; vintage clone copies the parts; fixes the silent drop | ~600 FE, ~200 tests | Today's units tests pass or are regenerated with a reason; the battery edit round-trips its parts; the typed-annuity field is gone |
+| S1c | Descriptors and cards for Store, Link, Load, Line (per-km part), Transformer; the old per-card lists deleted | ~500 FE net negative | Expert snapshot reviewed field by field |
+| S1d | `CreationForm` field specs, `BottomPanel` columns and `GenerationStack` headers from the descriptors; `propertyDocs` tips folded in; the chat tool `create_component` documents its attrs from the descriptors (read the harness README first); the Store €/MWh/yr label fixed | ~400 FE | Units tests; no `COL_LABELS` unit strings left |
+
+U3 needs only S1a + S1b, for the guided question's two assets (spec :442).
+
+## Rules
+
+- No typed annuity field anywhere (spec :484-485), and no "upfront typed into the annuity field" preflight.
+- An asset typed the old way (a bare `capital_cost`, no parts) keeps working. `access.upfront_parts`
+  back-calculates its part and flags it `derived_from_capital_cost`; the card shows that flag.
+- Labels follow `pypsa-gui/CONTEXT.md`: "Overnight cost", never "CAPEX"; "Capital cost" always carries its period.
+- Out of scope: M1's inspector (deferred), the Economics section (S2 in the UX doc's numbering, a different series), M5's
+  catalogue-driven forms for non-asset components, and Store+Link batteries (S4).
+
+## Open points to settle in S1a (no owner decision needed unless noted)
+
+1. Provenance storage lives in S1a, because Expert edits are what set `customised`. S2 reads it and does not write
+   its own (sent to the coordinator 13 Oct; GS is archived, so the next U3 session inherits this). A pack or study
+   that writes defaults stamps them through `provenance.record`.
+2. The route sits in `routers/network.py` beside `/catalog/{component}` and is cached the same way (project-free).
+   `carrier` only changes defaults and reveal rules, never the field set.

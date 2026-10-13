@@ -1,0 +1,1 @@
+* CI(pypsa-gui): The "GUI backend" job now runs the backend suite as four parallel shards (`pytest --num-shards/--shard-id`, split by file and balanced by test count), with the pilot evaluation gate and the QA drivers in one job beside them and an aggregate "GUI backend" check that needs all of them. Each shard uploads its JUnit XML and full log as an artifact on every run.

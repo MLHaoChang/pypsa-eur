@@ -4,6 +4,15 @@
 
 Ask every question as an interactive choice (the `AskUserQuestion` tool): 2–4 concrete answers, each with its consequence, your recommended answer first and marked "(Recommended)", and the reason in its description. The owner picks or types their own.
 
+## Release notes
+
+Release notes: add a new file under `doc/release-notes.d/`; never edit `doc/release_notes.md` directly.
+See `doc/release-notes.d/README.md` for the file name and format.
+
+## Pull requests
+
+Opening or driving a PR: read `.claude/skills/steward/SKILL.md` first; it holds the owner's merge, CI and reporting rules.
+
 ## Agent skills
 
 The skills from mattpocock/skills are vendored in `.claude/skills/` (see `.claude/skills/MATTPOCOCK-SKILLS.md`).

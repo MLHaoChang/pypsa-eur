@@ -1,7 +1,7 @@
 // S8: the wizard's `decision` tab (question cards). The existing 'study' tab
 // (gridspine) and 'blank' default are untouched (their own tests). The card
 // degrades to a stated reason where the backend refuses the study routes
-// (multi-user mode, OPEN-ITEMS 1; the flag off) and never crashes.
+// (multi-user mode) and never crashes.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -60,10 +60,10 @@ describe('the decision tab', () => {
     expect(availability).not.toHaveBeenCalled()
   })
 
-  it('is disabled with the reason when the flag is off', async () => {
-    availability.mockResolvedValue({ available: false, code: 'decision_studies_disabled', message: 'off' })
+  it('is disabled with the reason when the backend refuses the study routes', async () => {
+    availability.mockResolvedValue({ available: false, code: 'decision_studies_unavailable', message: 'off' })
     show()
-    expect((await screen.findByTestId('decision-reason')).textContent).toContain('PYPSAGUI_DECISION_STUDIES=1')
+    expect((await screen.findByTestId('decision-reason')).textContent).toContain(ERROR_COPY.decision_studies_unavailable.title)
   })
 
   it('needs a project to authorise the study, and says so', () => {

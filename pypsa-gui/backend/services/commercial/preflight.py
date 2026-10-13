@@ -29,6 +29,11 @@ stated before any solver time is spent.
     demand charge against part of a month's operation (spec §5.2).
   * `commercial.tariff_out_of_validity` (warning): modelled dates (or a later
     investment period's year) outside the tariff's `valid_from` / `valid_to`.
+  * `commercial.link_price_and_tariff` (warning, IC engine ask 6): a metered
+    Link with its own non-zero `marginal_cost` that the tariff also prices
+    per MWh; the solve pays both (the tariff is added to the Link's cost),
+    and the message names the Link's price, the tariff's and their sum. The
+    numbers are not changed (owner decision 2026-10-13).
   * `commercial.group_fee_bypass` (warning): a capacity fee on `poc_link`
     while another group member is extendable (it takes capacity fee-free).
   * `commercial.meter_bypass` (warning, P2 WP2.2c round 2): a grid-side bus
@@ -163,6 +168,8 @@ def _warnings(n, cfg, adders, price, demand) -> list[tuple[str, str, str, str, s
         if cross is not None:
             out.append(cross)
 
+    out += _link_price_and_tariff(n, cfg, adders, price)
+
     fee = cfg.connection.capacity_fee if cfg.connection is not None else None
     if fee is not None and cfg.group_members:
         free = [m for m in cfg.group_members
@@ -201,6 +208,39 @@ def _warnings(n, cfg, adders, price, demand) -> list[tuple[str, str, str, str, s
             out.append(("warning", "commercial.tariff_out_of_validity", "", tariff.id,
                         f"{where} fall outside tariff {tariff.id!r}'s validity "
                         f"{tariff.valid_from}..{tariff.valid_to or 'open'}."))
+    return out
+
+
+def _span(values: np.ndarray) -> str:
+    lo, hi = float(np.min(values)), float(np.max(values))
+    return f"{lo:.2f}" if np.isclose(lo, hi) else f"{lo:.2f}–{hi:.2f}"
+
+
+def _link_price_and_tariff(n, cfg, adders, price) -> list[tuple[str, str, str, str, str]]:
+    """IC engine ask 6 (owner 2026-10-13: warn, show both prices, the numbers
+    unchanged): a metered Link with its own non-zero `marginal_cost` that the
+    tariff also prices per MWh pays both (`lp_bindings` adds the tariff to the
+    Link's cost). The import side's tariff price is the energy adders plus the
+    first convex tier; the export side's is the export fees net of the export
+    price (negative = a credit)."""
+    out: list[tuple[str, str, str, str, str]] = []
+    members = _lp.import_links(cfg)
+    sides = [(m, adders["import"] + _lp.tier_floor_eur_per_mwh(cfg)) for m in members]
+    if cfg.export_link is not None:
+        sides.append((cfg.export_link,
+                      adders["export"] - (price if price is not None else 0.0)))
+    links = [link for link, _tariff in sides]
+    own = n.get_switchable_as_dense("Link", "marginal_cost", inds=pd.Index(links))
+    for link, tariff in sides:
+        tariff = np.broadcast_to(np.asarray(tariff, dtype=float), (len(n.snapshots),))
+        mine = own[link].to_numpy(dtype=float)
+        if not (np.any(mine != 0.0) and np.any(tariff != 0.0)):
+            continue
+        out.append(("warning", "commercial.link_price_and_tariff", "Link", link,
+                    f"Link {link!r} has its own marginal cost of {_span(mine)} €/MWh, and the "
+                    f"tariff also prices it at {_span(tariff)} €/MWh: the solve and the costs "
+                    f"count both, {_span(mine + tariff)} €/MWh. Nothing is changed; remove the "
+                    "Link's own cost if the tariff already covers it."))
     return out
 
 
