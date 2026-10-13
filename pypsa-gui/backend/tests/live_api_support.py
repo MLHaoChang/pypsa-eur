@@ -52,11 +52,16 @@ class TokenBudget:
     def settle(self, record, usage):
         if not usage or record["usage_reported"]:
             return  # keep reservation on missing usage or duplicate settlement
-        actual = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+        # `input_tokens` is uncached input (owner decision 2026-10-12); the
+        # whole prompt is uncached + cache reads + cache writes. Every input
+        # token is still priced at the uncached rate: a conservative bound.
+        prompt = (usage.get("input_tokens", 0) + usage.get("cache_read_tokens", 0)
+                  + usage.get("cache_create_tokens", 0))
+        actual = prompt + usage.get("output_tokens", 0)
         self.charged += actual - record["charged"]
         if self.dollar_limit is not None:
             input_rate, output_rate = self.rates[record["model"]]
-            actual_cost = usage.get("input_tokens", 0) * input_rate + usage.get("output_tokens", 0) * output_rate
+            actual_cost = prompt * input_rate + usage.get("output_tokens", 0) * output_rate
             self.cost_nanodollars += actual_cost - record["charged_cost_nanodollars"]
             record["charged_cost_nanodollars"] = actual_cost
         record.update(charged=actual, usage_reported=True, usage=usage)

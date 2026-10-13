@@ -28,7 +28,7 @@ harness/
   workflows/      the start menu and the step-by-step flows (Markdown + front matter)
   skills/         procedures the model loads on demand (<name>/SKILL.md)
   prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
-  providers/      anthropic, openai_compat, openai_responses, fake, and wiring (profile → provider, tools payload, history portability) — the only place a wire is named
+  providers/      anthropic, openai_compat, openai_responses, usage (one token-usage meaning for both OpenAI wires), fake, and wiring (profile → provider, tools payload, history portability) — the only place a wire is named
   loop.py         the turn loop: the stream seam and tool dispatch (the former services/chat_service.py)
   solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call
   job_adapters.py foreground (fg:…) and later domain job handles for wait_for_job without holding the turn
@@ -41,11 +41,12 @@ harness/
   sse.py          the SSE framing of a yielded (event, payload)
   fence.py        the untrusted-content delimiters and the neutraliser
   results.py      tool-result shaping: coercion, truncation, the per-turn result budget, error content
+  spill.py        oversized results kept whole per owner and session; the model gets a preview and a locator for `read_result`
   history.py      the in-memory trim and turn summary, chat.jsonl persistence, the pending-turn WAL, lineage
   metrics.py      the process-wide chat metrics behind GET /api/chat/metrics
 ```
 
-Borrowed designs under consideration: `docs/superpowers/assessments/2026-10-06-deepseek-harness-adoption-assessment.md` (issues 13–20). Spec: `.scratch/harness/spec.md`. Plan:
+Borrowed designs (phase 5): `docs/superpowers/assessments/2026-10-06-deepseek-harness-adoption-assessment.md`; issues 13–20 under `.scratch/harness/issues/` (20 and 15 done, the rest re-scoped against the modules above on 2026-10-12, plan §9). Spec: `.scratch/harness/spec.md`. Plan:
 `docs/superpowers/plans/2026-10-05-chat-harness.md`. Vocabulary:
 `pypsa-gui/CONTEXT.md` (Harness, Workflow, Skill, Choice card, Start menu).
 
@@ -163,10 +164,16 @@ before extending adapters.
 
 Read-tier tools exist only for the harness (catalogue banner "Harness"):
 `ask_user` (a Choice card; the pick is the next user message, the turn does
-not block), `use_skill` (a skill's body on demand), `start_workflow`,
+not block; optional `multi_select`, a Markdown `detail`, and `intent`
+`choice` or `plan_review`), `use_skill` (a skill's body on demand), `start_workflow`,
 `advance_workflow`, `end_workflow` (the session's `{id, step}`; the current
 step's body rides each turn as per-turn user content, after the context
-block and outside the untrusted fence). `use_toolset` changes the session's
+block and outside the untrusted fence), `read_result` (pages a result that
+was too large to show whole: `spill.py` keeps it under the app-data dir per
+owner and session and gives the model a preview and a locator; never in a
+checked turn, never for a tool with its own `offset`/`page`/`cursor`, whose
+cut names that argument instead; a control tool, so every toolset view and
+the OpenAI tool selection keep it). `use_toolset` changes the session's
 catalogue view for the next model request, including within the same turn.
 These controls do not change project access or confirmation rules.
 
@@ -275,9 +282,11 @@ It is a run checkpoint, not a persistent substitute for regression tests after
 changing their schemas, prompts, fixtures or relevant implementation.
 
 `backend/smoke/run_chat_smoke.py --workflow --profile <id>` drives the same
-battery (start menu, one Choice card, a workflow started and ended) on any
-profile; `docs/superpowers/runbooks/harness-parity-probe.md` has the recipe
-and the runs. Run it on every wire you can reach before calling a harness
+battery (start menu, a single-pick and a multi-select Choice card, a
+workflow started and ended, one reasoning prompt) on any profile and prints each turn's usage, with the same
+meaning on every wire, and whether it showed reasoning;
+`docs/superpowers/runbooks/harness-parity-probe.md` has the recipe and the
+runs. Run it on every wire you can reach before calling a harness
 change done.
 
 ## Adding a workflow
