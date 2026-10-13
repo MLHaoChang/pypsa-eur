@@ -738,3 +738,23 @@ export function assistQuestion(step: AssistStep): string {
     case 'report': return 'What is in the decision report, and who is it for?'
   }
 }
+
+// ── U3: the key-parameter list (owner decision 4) ─────────────────────────
+
+export const KEY_PARAMETER_LABELS = {
+  siteHeading: 'Your site and choices',
+  zone: 'Price zone',
+  connection: 'Grid connection',
+  load: 'Consumption',
+  tariff: 'Tariff',
+  tariffDefault: 'not chosen: the defaults’ illustrative tariff',
+  pv: 'Solar PV',
+  pvOff: 'Off',
+  pvOn: (kind: string) => `On (${kind})`,
+  loadUpload: (file: string) => `your meter file (${file})`,
+  loadProfile: (profile: string, mwh: number | null) =>
+    `${profile.replace(/_/g, ' ')} profile${mwh != null ? `, ${mwh.toLocaleString('en-US')} MWh a year` : ''}`,
+  notAnswered: 'not answered yet',
+  changedHeading: 'Other values you changed or that need a look',
+  defaultsSummary: (n: number, version: string) => `${n} more, from the generic defaults (${version})`,
+}
