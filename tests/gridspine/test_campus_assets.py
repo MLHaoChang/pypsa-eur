@@ -299,6 +299,70 @@ def test_a_cable_priced_per_bay_and_a_transformer_priced_per_km_are_refused(tmp_
     refused(tmp_path, d, rf"transformers\[{t['id']}\].*capex_eur_per_km")
 
 
+# --------------------------------------------------------------------------
+# the `literature` tag: a cost read from a published, cited reference
+# --------------------------------------------------------------------------
+#
+# A cost may be tagged `literature`: a reference value read from a cited
+# publication (a regulator's catalogue, say), not a quote. A rating may not:
+# the investment copies a bought item's ratings into the campus file, whose
+# tags are measured | datasheet | assumed, so a `literature` rating would make
+# the invested campus file unreadable.
+
+@pytest.mark.parametrize("kind, field", [(k, f) for k in FIELDS for f in COST[k]])
+def test_a_cost_may_be_tagged_literature(tmp_path, kind, field):
+    d = raw()
+    e = entry(d, kind, 1)
+    e[field]["source"] = "literature"
+    lib = load_asset_library(write(tmp_path, d))
+    assert lib[kind][1][field] == e[field]
+
+
+def test_the_discount_rate_may_be_tagged_literature(tmp_path):
+    d = raw()
+    d["discount_rate"] = {"value": 0.05, "source": "literature", "note": "a published WACC"}
+    assert load_asset_library(write(tmp_path, d))["discount_rate"]["source"] == "literature"
+
+
+@pytest.mark.parametrize("kind, field", [(k, f) for k in FIELDS for f in FIELDS[k]])
+def test_a_rating_tagged_literature_is_refused_naming_entry_and_field(tmp_path, kind, field):
+    d = raw()
+    e = entry(d, kind, 1)
+    e[field]["source"] = "literature"
+    refused(tmp_path, d, rf"{kind}\[{e['id']}\]\.{field}.*'literature'.*only a cost")
+
+
+def test_the_unknown_source_message_lists_literature_for_a_cost_and_not_for_a_rating(tmp_path):
+    d = raw()
+    entry(d, "transformers")["capex_eur"]["source"] = "guessed"
+    refused(tmp_path, d, r"capex_eur.*allowed \['assumed', 'datasheet', 'literature', 'measured'\]")
+    d = raw()
+    entry(d, "transformers")["s_mva"]["source"] = "guessed"
+    refused(tmp_path, d, r"s_mva.*allowed \['assumed', 'datasheet', 'measured'\]")
+
+
+def test_a_literature_cost_is_still_checked_as_a_number(tmp_path):
+    d = raw()
+    e = entry(d, "cables")
+    e["capex_eur_per_km"] = {"value": -1, "source": "literature"}
+    refused(tmp_path, d, rf"cables\[{e['id']}\].*capex_eur_per_km.*positive")
+    e["capex_eur_per_km"] = {"value": float("nan"), "source": "literature"}
+    refused(tmp_path, d, rf"cables\[{e['id']}\].*capex_eur_per_km.*finite number")
+
+
+def test_annualised_cost_does_not_depend_on_the_tag(tmp_path):
+    d = raw()
+    a = load_asset_library(write(tmp_path, d))
+    for kind in FIELDS:
+        for f in COST[kind]:
+            entry(d, kind)[f]["source"] = "literature"
+    d["discount_rate"]["source"] = "literature"
+    b = load_asset_library(write(tmp_path, d))
+    for kind in FIELDS:
+        km = 1.5 if kind == "cables" else None
+        assert annualised_cost(b[kind][0], b, km) == annualised_cost(a[kind][0], a, km)
+
+
 def test_a_tagged_value_with_an_unknown_key_is_refused(tmp_path):
     d = raw()
     e = entry(d, "cables")
@@ -468,3 +532,96 @@ def test_a_filter_on_an_unknown_kind_or_field_is_refused_not_empty():
         library_entries(LIB, "inverters")
     with pytest.raises(ValueError, match="colour"):
         library_entries(LIB, "cables", colour=1)
+
+
+# --------------------------------------------------------------------------
+# optional transformer fields (plan C13): vector group and tap changer
+# --------------------------------------------------------------------------
+
+def tap(**over):
+    block = {"changer": "on_load", "side": "hv", "neutral": 0, "min": -9, "max": 9,
+             "step_percent": {"value": 1.5, "source": "assumed", "note": "pandapower 110/20 kV std types"}}
+    block.update(over)
+    return block
+
+
+def test_a_transformer_may_carry_a_tagged_vector_group_and_a_tap_block(tmp_path):
+    d = raw()
+    t = entry(d, "transformers")
+    t["vector_group"] = {"value": "Dyn11", "source": "assumed", "note": "typical"}
+    t["tap"] = tap()
+    lib = load_asset_library(write(tmp_path, d))
+    got = lib["transformers"][0]
+    assert got["vector_group"] == {"value": "Dyn11", "source": "assumed", "note": "typical"}
+    assert got["tap"]["step_percent"]["value"] == 1.5 and got["tap"]["min"] == -9
+    # an entry without them still loads, as before
+    assert "vector_group" not in lib["transformers"][1] and "tap" not in lib["transformers"][1]
+
+
+@pytest.mark.parametrize("group", ["Dyn11", "YNd5", "YNyn0", "Yy0", "Dd6", "Dy1", "Dyn10"])
+def test_a_vector_group_in_the_campus_notation_is_accepted(tmp_path, group):
+    d = raw()
+    entry(d, "transformers")["vector_group"] = {"value": group, "source": "datasheet"}
+    assert load_asset_library(write(tmp_path, d))
+
+
+@pytest.mark.parametrize("bad", ["Dyn12", "dyn11", "Dyn", "DYN11", "Xyn11", "Dyn011", "", 11, None])
+def test_a_malformed_vector_group_is_refused_naming_entry_and_field(tmp_path, bad):
+    d = raw()
+    t = entry(d, "transformers")
+    t["vector_group"] = {"value": bad, "source": "assumed"}
+    refused(tmp_path, d, rf"transformers\[{t['id']}\]\.vector_group")
+
+
+def test_a_vector_group_must_be_tagged_with_a_known_source(tmp_path):
+    d = raw()
+    t = entry(d, "transformers")
+    t["vector_group"] = "Dyn11"
+    refused(tmp_path, d, rf"transformers\[{t['id']}\]\.vector_group.*value.*source")
+    d = raw()
+    t = entry(d, "transformers")
+    t["vector_group"] = {"value": "Dyn11", "source": "guessed"}
+    refused(tmp_path, d, rf"transformers\[{t['id']}\]\.vector_group.*source")
+
+
+@pytest.mark.parametrize("field, bad, match", [
+    ("changer", "motorised", r"tap\.changer"),
+    ("side", "mv", r"tap\.side"),
+    ("neutral", 0.5, r"tap\.neutral.*whole"),
+    ("min", True, r"tap\.min.*whole"),
+    ("max", "9", r"tap\.max.*whole"),
+    ("min", 1, r"tap.*min.*neutral.*max"),
+    ("max", -1, r"tap.*min.*neutral.*max"),
+    ("step_percent", 1.5, r"tap\.step_percent.*value.*source"),
+    ("step_percent", {"value": 0.0, "source": "assumed"}, r"tap\.step_percent.*positive"),
+    ("step_percent", {"value": -1.5, "source": "assumed"}, r"tap\.step_percent.*positive"),
+    ("pos", 0, r"tap.*unknown.*pos"),                 # a library type has no position; a campus unit has
+    ("speed", 1, r"tap.*unknown.*speed"),
+])
+def test_a_malformed_tap_block_is_refused_naming_entry_and_field(tmp_path, field, bad, match):
+    d = raw()
+    t = entry(d, "transformers")
+    t["tap"] = tap(**{field: bad})
+    refused(tmp_path, d, rf"transformers\[{t['id']}\]\.{match}")
+
+
+@pytest.mark.parametrize("missing", ["changer", "side", "neutral", "min", "max", "step_percent"])
+def test_a_tap_block_needs_every_field(tmp_path, missing):
+    d = raw()
+    t = entry(d, "transformers")
+    t["tap"] = tap()
+    del t["tap"][missing]
+    refused(tmp_path, d, rf"transformers\[{t['id']}\]\.tap.*missing {missing}")
+
+
+def test_the_tap_range_may_be_one_sided_and_the_neutral_at_an_end(tmp_path):
+    d = raw()
+    entry(d, "transformers")["tap"] = tap(neutral=0, min=0, max=4, changer="off_circuit", side="lv")
+    assert load_asset_library(write(tmp_path, d))
+
+
+def test_vector_group_and_tap_are_transformer_fields_only(tmp_path):
+    d = raw()
+    c = entry(d, "cables")
+    c["vector_group"] = {"value": "Dyn11", "source": "assumed"}
+    refused(tmp_path, d, rf"cables\[{c['id']}\].*vector_group")

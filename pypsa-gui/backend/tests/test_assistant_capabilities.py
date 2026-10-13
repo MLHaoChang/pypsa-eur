@@ -2,6 +2,7 @@
 import hashlib
 import io
 import json
+import threading
 import uuid
 import zipfile
 
@@ -33,6 +34,20 @@ def dispatch(session, name, args, decision='approve'):
 
 def output(frames):
     return next(d['result'] for e, d in frames if e == 'tool_result')
+
+
+def solve_to_completion(session):
+    result = output(dispatch(session, 'run_simulation', {}))
+    assert result['status'] == 'started'
+    ctx = PyPSAService.get_active_context()
+    with ctx.solver_state_lock:
+        worker = ctx.solver_state.get('thread')
+    assert isinstance(worker, threading.Thread)
+    worker.join(timeout=10)
+    assert not worker.is_alive(), 'The real solve did not finish within the test deadline'
+    with ctx.solver_state_lock:
+        assert ctx.solver_state['status'] == 'completed'
+    return result
 
 
 def plan():
@@ -361,7 +376,7 @@ def test_default_args_match_and_stale_parameter_chart_is_refused(session):
         {'id': 'chart', 'tool': 'create_chart', 'args': {'component': 'Generator', 'attribute': 'marginal_cost', 'names': ['G1']}}])
     result = output(dispatch(session, 'create_chart', {'component': 'Generator', 'attribute': 'marginal_cost', 'names': ['G1'], 'source': 'input'}))
     assert result['_task']['status'] == 'completed'
-    output(dispatch(session, 'run_simulation', {}))
+    solve_to_completion(session)
     from services.workflow_tools import _network_input_fingerprint
     network = PyPSAService.get_network()
     model = network._model
@@ -460,8 +475,7 @@ def test_native_dynamic_roundtrip_solves_and_persists_evidence(baseline, session
     assert n.snapshot_weightings.objective.tolist() == [2, 3]
     name = 'Dynamic Roundtrip ' + format
     output(dispatch(session, 'save_project_as', {'name': name}))
-    solved = dispatch(session, 'run_simulation', {})
-    assert not [d for e, d in solved if e == 'tool_error'], solved
+    solve_to_completion(session)
     # 10 currency/MWh * (5 MW * 2 hours + 7 MW * 3 hours).
     assert PyPSAService.get_network().objective == pytest.approx(310)
     output(dispatch(session, 'save_project', {'name': name}))

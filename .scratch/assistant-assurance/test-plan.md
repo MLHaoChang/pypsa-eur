@@ -128,3 +128,45 @@ Publish test commands, baseline commit, mode/case count, red/green/skip reasons,
 JUnit/log paths and provenance in the handoff after each slice. Proposed latency
 limits in the spec require environment/model-specific measured results. Full
 release is blocked by any unmapped family or unresolved required negative case.
+
+## Bounded StorageUnit dispatch acceptance
+
+`test_storage_assurance.py` extends A0.4/A1.7/A2.8–A2.10/A6.6/A7.7 with an
+independent HiGHS LP (10/4/−6 MWh; states 8/4/0), differing storage/generator/
+objective weights, exact windows and raw chronological validity. It rejects
+missing prior states, impossible balance/net power/bounds, invalid durations,
+unsupported cyclic/inflow/spill sources and fabricated model quantities/units/
+formulas. Retained JSON/ZIP, current-source invalidation and native restart
+recovery exercise the existing public seam. UI cases verify digest-approved
+storage text/voice and unavailable-cost completeness. Broader storage economics,
+all-domain adapters and independent review remain pending.
+
+## Bounded StorageUnit economics acceptance
+
+`test_storage_cost_assurance.py` uses independent literals from a real LP:
+20 EUR discharge, 16 EUR holding and 15 EUR allocated fixed cost give 51 EUR
+direct cost; an exact middle window gives 39 EUR. Distinct storage/generator/
+objective weights, static/dynamic prices, signed costs, solved extendable power,
+simultaneous operation, missing dependencies, unsupported cost models and
+overflow exercise the numerical boundary. Zero-baseline and same-basis retained
+comparisons, exports/replay, current-source invalidation, typed cost choices,
+previous distinct runs and native restart recovery exercise public shared paths.
+Fabricated numbers/units/formulas/omitted slots/narrative stay withheld. UI
+digest approval, voice and incomplete unsupported-NPV slots use the same receipt.
+The adapter is opt-in; independent review and broader economics remain pending.
+
+## User-facing checked pilot acceptance
+
+`ChatPanel.checkedOptIn.test.tsx`, `api/reliability.test.ts` and
+`test_checked_answer_pilot.py` exercise explicit admission, ordinary companion
+behavior, required strict mode, malformed/unavailable capabilities, rollback,
+pre-ack suppression, digest/voice publication, absent/downgraded/duplicate
+acknowledgement and conservative retry/edit/clarification/queue/Live policy.
+History unavailable hints cannot grant approved badges. A round-trip project
+change during an asynchronous rewind cannot clear/resend another conversation.
+
+`scripts/smoke-checked-answers.mjs` uses native Chromium, the real chat UI and
+fetch/SSE/digest path with mocked HTTP responses. It checks keyboard opt-in,
+approved publication, suppression, HTTP rollback and choice/draft preservation,
+then explicit ordinary opt-out. Real backend numeric/auth paths are separate
+pytest gates; no paid model call or whole-device/domain certificate is implied.

@@ -986,6 +986,12 @@ class SolveQueue:
             solve_job_store.record_status(job)
         except Exception:  # noqa: BLE001
             logger.exception("solve_queue: could not persist job %s", job.id)
+        # Issue 06 — running marker under the project's storage_dir.
+        try:
+            from services import run_evidence as _re
+            _re.start_queue_run(job)
+        except Exception:  # noqa: BLE001 — evidence must never stall the queue
+            logger.exception("solve_queue: run evidence start failed for %s", job.id)
         return "claimed"
 
     def _finish(self, job: SolveJob, status: str, *, error: str | None = None) -> None:
@@ -1000,6 +1006,11 @@ class SolveQueue:
             solve_job_store.record_status(job)
         except Exception:  # noqa: BLE001
             logger.exception("solve_queue: could not persist job %s", job.id)
+        try:
+            from services import run_evidence as _re
+            _re.publish_queue_run(job)
+        except Exception:  # noqa: BLE001
+            logger.exception("solve_queue: run evidence publish failed for %s", job.id)
 
     def _run_gridspine_job(self, job: SolveJob) -> None:
         """Run one planning → dynamics study.
@@ -1443,6 +1454,13 @@ class SolveQueue:
                     solve_job_store.record_status(job)
                 except Exception:  # noqa: BLE001 — bookkeeping must not fail a solve
                     logger.exception("solve_queue: could not persist job %s", job.id)
+                try:
+                    from services import run_evidence as _re
+                    _re.publish_queue_run(job)
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "solve_queue: run evidence publish failed for %s", job.id,
+                    )
                 # Close the SSE log stream for this job so the foreground consumer's
                 # `done` event fires (run_simulation pushes None on its own success
                 # path, but the abort/error paths above may not have).

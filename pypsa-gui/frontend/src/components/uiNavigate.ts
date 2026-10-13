@@ -65,8 +65,14 @@ export function applyUiNavigate(d: {
   period?: number | null
   category?: string
   metrics?: string[]
-  mode?: 'chronological' | 'duration' | 'monthly'
+  mode?: 'chronological' | 'duration' | 'monthly' | string
   chart?: boolean
+  run_id?: string
+  section?: string
+  baseline_run_id?: string
+  status?: string
+  fingerprint?: string
+  evidence_available?: boolean
 }) {
   const ui = useUIStore.getState()
   if (d.kind === 'select_component' && d.component_class && d.name) {
@@ -80,8 +86,21 @@ export function applyUiNavigate(d: {
       name: d.name,
       category: d.category,
       metrics: d.metrics,
-      mode: d.mode,
+      mode: d.mode as 'chronological' | 'duration' | 'monthly' | undefined,
       chart: d.chart,
+    })
+    return
+  }
+  if (d.kind === 'open_run_result' && d.run_id) {
+    ui.requestRunResult({
+      runId: d.run_id,
+      status: d.status,
+      resultsTab: d.results_tab,
+      section: d.section,
+      baselineRunId: d.baseline_run_id,
+      mode: typeof d.mode === 'string' ? d.mode : undefined,
+      fingerprint: d.fingerprint,
+      evidenceAvailable: d.evidence_available,
     })
     return
   }

@@ -3,7 +3,7 @@
 
 # Whole-application capability, parameter and navigation coverage
 
-Status: ready-for-agent
+Status: claimed
 Type: task
 
 Read [the plan](../../../docs/superpowers/plans/2026-10-10-live-voice-conversation.md)
@@ -30,3 +30,26 @@ inputs, proves provider-neutral discovery/offer/continuation and adds regenerata
 source inventory plus CI drift checks. See [handoff](../session-handoff.md) for
 red/green commands/counts. Editable-control mapping, eligibility-aware UI targeting
 and all-family behavioral fixtures remain open; this issue is not complete.
+
+2026-10-11: Control/parameter matrix slice landed. `smoke/assistant_control_matrix.py`
+reads CreationForm `FIELD_MAP` + `attributeCatalog` editability/closed sets without
+site packages; writes/checks `.scratch/live-voice/capability-matrix.json` (165 creation
+controls, 3 editability overrides, 3 closed sets). AR maps to Asset Reliability /
+adequacy+FMEA inventory IDs (not a invented module). All 14 coverage families have
+`pending:issue-05-*` journey assignments. CI:
+`.github/workflows/assistant-control-matrix.yaml`. Tests:
+`tests/test_assistant_control_matrix.py` (9 passed). Remaining for issue 08 close-out:
+behavioral fixtures on issue 05, any still-missing typed tools over services, and an
+explicit full-coverage limitation block — do not mark the whole-application claim done.
+
+2026-10-11: Full-coverage limitation block landed. `capability-matrix.json` now carries
+`full_coverage` (`claimed: false`, `status: not_established`, 14 of 14 family journeys
+pending, one blocker per `pending:issue-05-*` journey plus standing blockers for pending
+behavioral fixtures, unaudited UI-control/tool parity and hosted gates), and
+`application-coverage.md` has a matching "Full-coverage limitation block" section.
+`assistant_control_matrix.py --check` fails if the matrix claims coverage while any journey is
+pending or any blocker remains, or if `journeys_pending` drifts; passing journeys alone do
+not flip the claim because standing blockers need an explicit edit. Tests:
+`tests/test_assistant_control_matrix.py` (17 passed, 8 new). Issue 08 stays `claimed`: it is
+done only when issue 05 journeys pass and the blockers are cleared with evidence.
+

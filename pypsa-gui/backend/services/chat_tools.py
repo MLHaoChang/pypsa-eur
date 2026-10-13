@@ -2365,7 +2365,9 @@ def solve_ppa_price(target_irr: float, target_year: int,
     from pydantic import ValidationError
 
     from models.finance import SolvePpa
-    from routers.results import _dispatch_ready, _ic_build_case, _study_mesh_blocker
+    from routers.results import (
+        _dispatch_ready, _ic_build_case, _ic_read_campus, _study_mesh_blocker,
+    )
     from routers.simulation import _state as sim_state
     from services.finance.case import FinanceRefused
     from services.finance.engine import solve_ppa
@@ -2395,7 +2397,10 @@ def solve_ppa_price(target_irr: float, target_year: int,
     if owner is not None and (not isinstance(owner, str) or not owner.strip()):
         _ic_raise(422, "investment_case_request_invalid", "owner must be a non-empty string")
     owner = owner if owner is not None else _ic_default_owner(sim_state)
-    build = _ic_build_case(n, cfg, owner=owner, lost_load=sim_state.get("last_lost_load"))
+    # IC G3 R-2: the campus study read the way the route reads it, so the solved
+    # price and the report value the same case.
+    build = _ic_build_case(n, cfg, owner=owner, lost_load=sim_state.get("last_lost_load"),
+                           campus=_ic_read_campus(raw))
     try:
         case = build()
     except FinanceRefused as exc:
@@ -2438,7 +2443,10 @@ def solve_ppa_price(target_irr: float, target_year: int,
         "target_irr": target_irr, "target_year": target_year,
         "equity_post_tax_irr_at_target_year": _ne(out.get("solved_equity_irr_at_target_year"), 6),
         "owner": _cut(case.owner),
-        "flags": [_cut(f, 160) for f in out.get("solve_ppa_flags") or []],
+        # IC G3 gate C1: the case's campus flags too, so a price solved without the
+        # campus extras (a stale study, no engine, an unsaved network) says so.
+        "flags": [_cut(f, 160) for f in [*(out.get("solve_ppa_flags") or []),
+                                         *(f for f in case.flags if f.startswith("campus_study_"))]],
         "basis": ("post-tax equity IRR on the incremental cash against the counterfactual "
                   "supply cost, over operating years 1..target_year (SAM ppa_soln_mode=0)"),
         "stored_inputs_changed": False,
@@ -3438,6 +3446,14 @@ def campus_get_investment(project_id: str) -> dict:
         return _h(_gridspine_project(db, user, project_id))
 
 
+def campus_get_milp(project_id: str) -> dict:
+    # Read only, on purpose: the joint optimisation runs for minutes and is
+    # started and cancelled in the panel (plan C12).
+    from services.campus_electrical_service import get_milp as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
 def campus_list_grid_codes(project_id: str) -> dict:
     from services.campus_grid_code_service import list_grid_codes as _h
     with _acting() as (db, user):
@@ -4315,6 +4331,143 @@ def ui_open_panel(
 def ui_set_snapshot(snapshot_iso: str, period: int | None = None) -> dict:
     return {"_ui_event": True, "kind": "set_snapshot",
             "snapshot_iso": snapshot_iso, "period": period}
+
+
+def discuss_project_run(
+    run_id: str,
+    results_tab: str | None = None,
+    section: str | None = None,
+    baseline_run_id: str | None = None,
+    open_ui: bool = True,
+) -> dict:
+    """
+    Bind conversation follow-ups to a recorded run and optionally open it in
+    the Results chrome. Emits ``open_run_result`` (kind) when ``open_ui``;
+    never restores historical inputs onto the live network.
+    """
+    from harness.catalogue import RESULTS_TAB_ENUM
+    from services import durable_conversation as dc
+    from services import run_evidence as re_
+
+    if results_tab is not None and (
+        not isinstance(results_tab, str) or results_tab not in RESULTS_TAB_ENUM
+    ):
+        raise HTTPException(400, detail={
+            "error_kind": "invalid_navigation",
+            "field": "results_tab",
+            "message": "Choose a supported results_tab from the tool schema.",
+        })
+    if open_ui is not True and open_ui is not False:
+        raise HTTPException(422, detail={
+            "error_kind": "invalid_discussed_run",
+            "message": "open_ui must be true or false.",
+        })
+
+    session = chat_session()
+    if session is None:
+        raise HTTPException(409, detail={
+            "error_kind": "no_chat_session",
+            "message": "Discussing a run requires an active chat session.",
+        })
+
+    summary = re_.get_run_evidence(run_id)
+    if baseline_run_id is not None:
+        re_.get_run_evidence(baseline_run_id)
+
+    root, project_id, _owner = re_._authority()
+    del root  # authority revalidated; project_id is the discussed scope
+    discussed = {
+        "project_id": project_id,
+        "run_id": run_id,
+        "status": summary.get("status"),
+        "mode": summary.get("mode"),
+        "fingerprint": summary.get("fingerprint"),
+        "evidence_available": bool(summary.get("evidence_available")),
+    }
+    if results_tab:
+        discussed["source"] = results_tab
+    if section:
+        discussed["section"] = section
+    if baseline_run_id:
+        discussed["baseline_run_id"] = baseline_run_id
+
+    with session._lock:
+        session.discussed_refs = dict(discussed)
+
+    thread_id = dc.find_thread_for_episode(session.session_id)
+    if thread_id:
+        thread = dc.get_thread(thread_id)
+        dc.set_discussed_run(
+            thread_id,
+            generation=int(thread["generation"]),
+            run_id=run_id,
+            project_id=project_id,
+            baseline_run_id=baseline_run_id,
+            section=section,
+            source=results_tab,
+            clear_baseline=baseline_run_id is None,
+        )
+
+    if not open_ui:
+        return {"ok": True, "discussed": discussed, "ui_navigated": False}
+
+    event: dict[str, Any] = {
+        "_ui_event": True,
+        "kind": "open_run_result",
+        "run_id": run_id,
+        "status": summary.get("status"),
+        "mode": summary.get("mode"),
+        "fingerprint": summary.get("fingerprint"),
+        "evidence_available": bool(summary.get("evidence_available")),
+        "discussed": discussed,
+    }
+    if results_tab:
+        event["results_tab"] = results_tab
+    if section:
+        event["section"] = section
+    if baseline_run_id:
+        event["baseline_run_id"] = baseline_run_id
+    return event
+
+
+def export_run_evidence(
+    run_id: str | None = None,
+    section: str | None = None,
+) -> dict:
+    """
+    Export immutable evidence for a named run, or the session's discussed run
+    when ``run_id`` is omitted. Never substitutes another/newer run.
+    """
+    import json as _json
+
+    from services import run_evidence as re_
+
+    resolved = run_id
+    if resolved is None:
+        session = chat_session()
+        refs = getattr(session, "discussed_refs", None) if session is not None else None
+        if not isinstance(refs, dict) or not refs.get("run_id"):
+            raise HTTPException(409, detail={
+                "error_kind": "discussed_run_required",
+                "message": (
+                    "No run_id was given and no discussed run is bound. "
+                    "Call discuss_project_run or pass run_id from list_project_runs."
+                ),
+            })
+        resolved = str(refs["run_id"])
+
+    evidence = re_.get_run_evidence(resolved, section=section)
+    filename = (
+        f"run_{resolved}_{section}.json" if section else f"run_{resolved}.json"
+    )
+    payload = _json.dumps(evidence, allow_nan=False, sort_keys=True, indent=2).encode("utf-8")
+    meta = _save_agent_export(payload, filename, "application/json")
+    return {
+        **meta,
+        "run_id": resolved,
+        "section": section,
+        "note": "Exported the named (or discussed) run only; current network results were not substituted.",
+    }
 
 
 # ── Harness: ask the user (chat harness issue 04) ──────────────────────────
@@ -5694,6 +5847,12 @@ def export_preview_png(filename: str, png_bytes_b64: str) -> dict:
     return _save_agent_export(payload, filename, "image/png")
 
 
+def _interrupted_reason(turn: dict) -> str:
+    """The recorded end of an interrupted turn, for a summary line."""
+    from services import chat_service
+    return str(turn.get(chat_service.INTERRUPTED_REASON_KEY) or "unknown")
+
+
 def export_chat_summary(
     format: str = "md",
     since_turn: int | None = None,
@@ -5712,6 +5871,7 @@ def export_chat_summary(
     `filename`: override the auto-generated `chat_summary_<ts>.<ext>` name.
     """
     import time as _time
+    from services import chat_service
     fmt = format.lower()
     if fmt not in {"md", "txt"}:
         raise HTTPException(
@@ -5744,6 +5904,8 @@ def export_chat_summary(
                     assistant_text += f"\n_[tool: {b.get('name','?')}]_\n"
             if assistant_text.strip():
                 lines.append(f"\n**Assistant**: {assistant_text.rstrip()}\n")
+            if chat_service.is_interrupted_turn(t):
+                lines.append(f"\n_(interrupted: {_interrupted_reason(t)})_\n")
     else:  # txt
         for i, t in enumerate(turns):
             user = (t.get("user") or "").strip()
@@ -5756,6 +5918,8 @@ def export_chat_summary(
                     assistant_text += str(b.get("text", "")) + "\n"
             if assistant_text.strip():
                 lines.append(f"Assistant: {assistant_text.rstrip()}")
+            if chat_service.is_interrupted_turn(t):
+                lines.append(f"(interrupted: {_interrupted_reason(t)})")
             lines.append("")
     payload = "\n".join(lines).encode("utf-8")
     target = filename or f"chat_summary_{int(_time.time())}.{fmt}"
@@ -6914,11 +7078,24 @@ from services.workflow_tools import (
     project_readiness, wait_for_job, get_study_evidence, run_sensitivity_sweep, use_toolset,
 )
 
+from services.run_evidence import list_project_runs, get_run_evidence, compare_project_runs
+# discuss_project_run is defined above with the UI-control tools.
+from services.loadflow_summary import get_loadflow_summary
+from services.experiments import start_experiment, list_experiments, get_experiment
 from services.assistant_tasks import list_tasks, start_task, get_task, resume_task, cancel_task, resolve_task_step
 from services.assistant_tools import (find_capabilities, get_file_delivery, inspect_import, import_uploaded_network,
                                       preview_project_changes, apply_project_changes, create_chart, build_delivery)
 
 DISPATCHERS: dict[str, Any] = {
+    "list_project_runs": list_project_runs,
+    "get_run_evidence": get_run_evidence,
+    "compare_project_runs": compare_project_runs,
+    "discuss_project_run": discuss_project_run,
+    "export_run_evidence": export_run_evidence,
+    "get_loadflow_summary": get_loadflow_summary,
+    "start_experiment": start_experiment,
+    "list_experiments": list_experiments,
+    "get_experiment": get_experiment,
     "list_tasks": list_tasks,
     "find_capabilities": find_capabilities,
     "start_task": start_task,
@@ -7094,6 +7271,7 @@ DISPATCHERS: dict[str, Any] = {
     "campus_get_library": campus_get_library,
     "campus_set_library": campus_set_library,
     "campus_get_investment": campus_get_investment,
+    "campus_get_milp": campus_get_milp,
     # campus grid codes (2): no publish tool, by design (plan C10)
     "campus_list_grid_codes": campus_list_grid_codes,
     "campus_extract_grid_code": campus_extract_grid_code,

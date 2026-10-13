@@ -6,6 +6,38 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
+* Feat(pypsa-gui): Expand the checked-answer CI gate to 133 deterministic cases with varied load, weight, price and storage-efficiency oracles. Add offline blind review preparation and calibration reports requiring two agreeing independently attested reviewers, explicit unresolved/missing/error counts and conditional statistical intervals. Synthetic evidence cannot certify production error rates or confer domain approval.
+
+* Feat(pypsa-gui): Add a repeatable checked-answer pilot evaluation gate with independent generator, network and StorageUnit oracles across all five supported profiles. Fail on incomplete coverage, incorrect publication or missing useful results; record versioned denominators and source identity. Add optional live-model golden cases with shared pre-send resource ceilings. The backend CI job retains reports; finite-suite acceptance does not imply production calibration or engineering approval.
+
+* Feat(pypsa-gui): Add an explicit "Check answers" chat option for the bounded assurance pilot. Keep checking on retries, edits, clarification choices and queued/voice requests; withhold output until the server acknowledges the requested checks and approves the exact answer. Availability rollback cannot silently send an ordinary request. Preserve a conservative retry-policy hint for unavailable checked history; deployment defaults remain disabled.
+
+* Fix(pypsa-gui): Rehydrate discussed run references onto a new chat episode when resuming a durable parent thread, so export and follow-ups still target the discussed run after restart instead of requiring a fresh `discuss_project_run`.
+
+* Feat(pypsa-gui): Persist typed cross-domain experiment plans from chat (`start_experiment` / `list_experiments` / `get_experiment`) without executing cases or hidden solves. Cases stay `executed=false` until a later slice advances them through ordinary harness tools and approvals.
+
+* Feat(pypsa-gui): Add opt-in checked direct StorageUnit economics in the shared harness. Verify raw trajectories and objective-weighted discharge/holding expenditure, require a declared EUR price year and fixed-charge allocation, and preserve checked values through comparison, restart recovery and JSON/ZIP export. Missing or unsupported costs remain unavailable; charging purchases, revenues, annuity/FOM derivation and other storage models stay outside the contract.
+
+* Fix(pypsa-gui): Keep asset type bound to the checked calculation profile during cost clarification and rendering. A generator named `network` cannot silently become a network-wide cost request.
+
+* Fix(pypsa-gui): Capture typed contract-draft prices before deferred state updates and verify successive edits in the application’s StrictMode. Preserve the latest value before saving contracts.
+
+* Fix(pypsa-gui): Remove a duplicate worker-pin error-manifest entry so its declared banner surface agrees with the chat UI.
+
+* Feat(pypsa-gui): Add opt-in checked StorageUnit key results to the shared chat harness. Validate raw charging/discharging, duration weights, power/state bounds and chronological energy balance before publishing six exact-window metrics. Missing prior states, unsupported storage models and fabricated model claims fail closed; owned evidence, exports and restart recovery reuse the existing contracts. Storage costs and independent engineering certification remain unsupported.
+
+* Feat(pypsa-gui): Recover bounded checked-result scope and pending cost clarification from owned private checkpoints after native chat-history rehydration. Revalidate exact sources and bindings; durably revoke context before new strict turns, rewind and parent resume/rebind so interrupted or failed publication cannot revive old scope. Imported/copied/stale history cannot grant recovery; deployment remains opt-in.
+
+* Fix(pypsa-gui): Require a terminal solver outcome before sequential durable tasks advance to chart/export, with a bounded deadline and cancellation. Solver start or contradictory still-running receipts cannot complete a task; ordinary foreground solves remain detached.
+
+* Fix(pypsa-gui): Resolve a queued correction's checked result scope independently instead of reusing the preceding utterance's explicit scope. Additional unsupported constraints require software clarification; safe repeat requests retain validated context.
+
+* Feat(pypsa-gui): Preserve exact checked result scope across bounded chat follow-ups and compare with the previous distinct compatible run. Clarify cost quantity and basis in software without a model call; refuse stale bindings and missing context, retain historical selections, and show clarification without a checked-results badge. Context remains live-session and opt-in.
+
+* Fix(pypsa-gui): Keep pending tagging-tour target polling bound to its original document so teardown cannot cause an uncaught timer error.
+
+* Feat(pypsa-gui): Extend opt-in checked chat with scoped calculation and cost profiles, required-result coverage, immutable retained evidence and same-basis comparisons in the shared harness. Add separately enabled confirmed static-input writes with durable deduplication/read-back, issued mounted-view acknowledgements, bounded qualitative review, checked JSON/ZIP exports, evidence cards and rollback/shadow controls. Unsupported domains remain unavailable; deployment defaults stay disabled.
+
 * Feat(pypsa-gui): Add multilingual AI dictation independently of the selected chat provider, with automatic or manual language selection, microphone selection and metering, pause/resume, terminology hints and editable transcript review. Retain browser dictation with selectable language. Bound temporary audio requests, sanitize authentication/service errors and stop microphones on cancellation or context changes. Add recorder/UI/backend regressions, a real Chromium smoke and an opt-in live transcription test.
 
 * Feat(pypsa-gui): Add chatbot project readiness checks, bounded local job waits with progress, cached and filtered study evidence, baseline-preserving queued sensitivity sweeps with solved-case reuse, and dynamic toolset views. Catalogue eligibility refreshes after project activation within a turn while preserving confirmations and dispatch allowlists. Add a project-refinement skill and real workflow/API regression coverage.
@@ -75,6 +107,8 @@
   Solver lifecycle: a failed or aborted assumptions apply reverts itself, both solve claims clear every result key, and the queue releases what a job claimed on every exit path.
   Chat: a tool's project switch reaches the rest of the streamed turn, an import is a rebind (the panel clears the active project, so the autosave can no longer overwrite the previous project), one undo reverts the assistant's last turn, `/history` hands each user their own session, and `/stream` refuses another user's session.
   In server mode a raw import over HTTP is now what the next request sees; the session's active-project pointer was never moved.
+
+* Fix(pypsa-gui): A chat turn that stops before finishing (Stop, the tool-call cap, a project switch, a stream error, a closed tab) is now kept in the transcript and shown after a reload with a note, but never sent back to the model. The daily chat token cap now counts each turn once; it summed every session's running total, so it tripped early. The network-export tools' descriptions now say they write a file into the project's uploads.
 
 ## PyPSA-Eur v2026.02.0 (18th February 2026)
 

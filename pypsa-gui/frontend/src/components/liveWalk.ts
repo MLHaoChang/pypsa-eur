@@ -52,7 +52,7 @@ export function startKeyResultsWalk(opts?: {
   // Results render all become due together and only the last tab paints.
   const stops: Array<() => void> = []
   const schedule = opts?.schedule ?? ((fn: () => void, ms: number) => {
-    stops.push(scheduleStep(fn, ms, opts.onPaceMiss))
+    stops.push(scheduleStep(fn, ms, opts?.onPaceMiss))
     return 0
   })
   const stepMs = opts?.stepMs ?? KEY_RESULT_STEP_MS

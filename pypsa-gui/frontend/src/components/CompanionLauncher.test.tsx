@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import CompanionLauncher from './CompanionLauncher'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 function mockMotion(matches: boolean) {
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
@@ -100,5 +102,22 @@ describe('CompanionLauncher', () => {
     expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('listening')
     expect(screen.getByTestId('companion-live').getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByTestId('companion-speak').getAttribute('aria-pressed')).toBeNull()
+  })
+
+  it('keeps every decorative animation and transition behind prefers-reduced-motion: no-preference', () => {
+    const indexCss = readFileSync(resolve(__dirname, '../index.css'), 'utf8')
+    const start = indexCss.indexOf('.companion-actions {')
+    const end = indexCss.indexOf('@keyframes companion-react')
+    const block = indexCss.slice(start, end)
+    const gate = block.indexOf('@media (prefers-reduced-motion: no-preference)')
+    expect(gate).toBeGreaterThan(-1)
+    const outside = block.slice(0, gate)
+    expect(outside).not.toMatch(/animation\s*:/)
+    expect(outside).not.toMatch(/transition\s*:/)
+    // Under reduced motion the actions stay visible rather than hiding until hover.
+    expect(outside).toMatch(/\.companion-actions\s*\{[^}]*opacity:\s*1/)
+    const gated = block.slice(gate)
+    expect(gated).toMatch(/\.companion-idle\s*\{[^}]*animation:/)
+    expect(gated).toMatch(/transition:/)
   })
 })

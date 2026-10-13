@@ -9,6 +9,8 @@ import { authEnabled } from '../auth/config'
 import { lockStateFromAcquire, WRITABLE, type LockInfo, type LockAcquireOutcome } from './lockState'
 import { nk } from './queryKeys'
 import { flushPendingEdgeDeletes } from './pendingEdgeDeletes'
+import { flushPendingSitesToServer } from '../site3d/sitesStore'
+import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
 
 // Query keys invalidated by any operation that swaps the underlying PyPSA
 // network in memory (load, restore, import). Includes:
@@ -634,8 +636,26 @@ export async function saveProjectQuietly(name: string, clearUndo = false): Promi
       } else if (r.status === 'local') {
         appLog('WARN', `Layout server write failed — kept ${r.nodes} node(s) + ${r.edges} edge(s) in localStorage`)
       }
+
     } catch (e) {
       appLog('WARN', `Layout flush failed for '${name}': ${String((e as Error)?.message ?? e)}`)
+    }
+    // The 3D site sidecar flushes beside the layout, same reasons, same
+    // debounce: a Save-As re-homes the pending document to the new name.
+    try {
+      const sr = await flushPendingSitesToServer(name, { previousProject: name })
+      if (sr.status === 'local') appLog('WARN', 'Sites server write failed — kept the site document in localStorage')
+    } catch (e) {
+      appLog('WARN', `Sites flush failed: ${e instanceof Error ? e.message : String(e)}`)
+    }
+    // The map's sidecar (routes + bubbles) flushes beside the layout for the
+    // same reason: a drag inside its debounce window must not be lost when
+    // the tab closes right after an autosave.
+    try {
+      const mr = await flushPendingMapLayoutToServer(name)
+      if (mr.status === 'local') appLog('WARN', 'Map layout server write failed — kept the routes in localStorage')
+    } catch (e) {
+      appLog('WARN', `Map layout flush failed for '${name}': ${e instanceof Error ? e.message : String(e)}`)
     }
     // Stamp the saved-time so the Recents row / StatusBar reflect the
     // background save even when the caller (project-switch flow, tab-switch)

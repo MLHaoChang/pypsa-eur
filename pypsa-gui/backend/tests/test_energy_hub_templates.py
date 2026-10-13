@@ -144,6 +144,21 @@ def test_eh_templates_build_on_demand_when_network_nc_is_missing(
 
 
 @pytest.mark.parametrize("tid", IDS)
+def test_template_buses_start_unplaced(tid):
+    """
+    Visual layers plan 2, M4: a template campus opens with every bus
+    UNPLACED (PyPSA's (0, 0) default, which the map reads as "no location")
+    so it appears in the map's UnplacedBusesPanel and places itself around
+    the user's first click — never at a placeholder in the Gulf of Guinea.
+    """
+    from services.network_geometry import _bus_coord
+    n = T.BUILDERS[tid]()
+    assert len(n.buses) >= 2
+    for bus in n.buses.index:
+        assert _bus_coord(n, str(bus)) is None, f"{tid}: bus {bus!r} has a real coordinate"
+
+
+@pytest.mark.parametrize("tid", IDS)
 def test_templates_validate_without_gen_zero_costs(tid):
     """P30 (B5): the preflight (`validate_for_run`, what POST
     /api/simulation/preflight runs) raises no `gen_zero_costs` on a template:
@@ -154,3 +169,46 @@ def test_templates_validate_without_gen_zero_costs(tid):
     cfg = SolverConfig(**T.SOLVER_CONFIG)
     codes = [i.code for i in validate_for_run(T.BUILDERS[tid](), cfg)]
     assert "gen_zero_costs" not in codes, codes
+
+
+# ── S0 (plan 2026-10-07 campus island): storage integrates physical hours ──
+
+@pytest.mark.parametrize("tid", IDS)
+def test_storage_integrates_physical_hours_while_costs_still_scale_to_a_year(tid):
+    """A representative week stands for a year in COST and ENERGY (objective
+    and generators weightings 8760/168), but a battery's state of charge moves
+    by one hour of power per hourly snapshot. PyPSA uses the ``stores``
+    weighting as elapsed hours in the SoC balance, so it must be 1."""
+    n = T.BUILDERS[tid]()
+    assert abs(float(n.snapshot_weightings["objective"].sum()) - 8760.0) < 1e-6
+    assert abs(float(n.snapshot_weightings["generators"].sum()) - 8760.0) < 1e-6
+    # pinned directly: a template whose storage happens to sit idle in the
+    # solve below would otherwise pass the behavioural check vacuously
+    assert (n.snapshot_weightings["stores"] == 1.0).all()
+    if n.storage_units.empty:
+        return
+    probe = n.copy()
+    status, cond = probe.optimize(solver_name="highs")
+    assert (status, cond) == ("ok", "optimal")
+    su_t = probe.storage_units_t
+    for s in probe.storage_units.index:
+        eff_in = float(probe.storage_units.at[s, "efficiency_store"])
+        eff_out = float(probe.storage_units.at[s, "efficiency_dispatch"])
+        soc = su_t.state_of_charge[s].to_numpy()
+        step = (eff_in * su_t.p_store[s] - su_t.p_dispatch[s] / eff_out).to_numpy()
+        prev = soc[:-1]
+        # one hour of power per snapshot (index 0 wraps cyclically; skip it)
+        assert abs(soc[1:] - prev - step[1:]).max() < 1e-4, s
+
+
+def test_the_datacenter_ups_carries_the_it_load_it_protects():
+    """Owner decision (plan S0): 40 MW for about 36 MW of IT, with a realistic
+    15-minute autonomy that still covers the island plan's 600 s bridge."""
+    n = T.BUILDERS["eh_datacenter"]()
+    ups = n.storage_units.loc["ups_battery"]
+    it_peak = float(n.loads_t.p_set["it_load"].max())
+    assert float(ups["p_nom"]) >= it_peak
+    assert float(ups["max_hours"]) == 0.25
+    bridge_s = T.ISLAND_CONFIG["eh_datacenter"]["requirements"]["bridge_s"]["value"]
+    energy = float(ups["p_nom"]) * float(ups["max_hours"]) * float(ups["efficiency_dispatch"])
+    assert energy >= it_peak * bridge_s / 3600.0

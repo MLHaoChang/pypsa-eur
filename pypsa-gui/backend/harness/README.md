@@ -12,12 +12,26 @@ harness/
   toolsets.py     ordered provider-neutral catalogue views and always-available controls
   events.py       the closed vocabulary of frames the turn loop yields to the UI
   assurance.py    opt-in checked input/result drafts and publication gate
+  assurance_scope.py  typed requested metrics, windows, cost basis and retained/comparison IDs
+  assurance_conversation.py  bounded checked-scope carryover, cost clarification and previous-run selection
+  assurance_recovery.py  private owned checkpoints, durable invalidation and native history recovery
+  calculations.py  bounded formula/unit registry, raw masks and cost dependencies
+  storage_calculations.py  raw StorageUnit power, state and chronological balance checks
+  storage_costs.py  declared-basis direct StorageUnit discharge, holding and fixed costs
+  durable.py      bounded network locks and cross-process owner-store transactions
+  effects.py      exact confirmed input-write reservations, read-back and reconciliation
+  navigation.py   issued view actions and owner/project/turn/generation-bound browser ACKs
+  reviewer.py     optional single bounded read-only review of qualitative interpretations
+  publication.py  JSON/ZIP from the same validated answer, facts and evidence
+  rollout.py      capabilities, profile/effect rollback and bounded shadow observation
+  pilot_evaluation.py  independent finite-suite cases, release scoring and live resource ceilings
   workflows/      the start menu and the step-by-step flows (Markdown + front matter)
   skills/         procedures the model loads on demand (<name>/SKILL.md)
   prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
   providers/      anthropic, openai_compat, openai_responses, fake, and wiring (profile → provider, tools payload, history portability) — the only place a wire is named
   loop.py         the turn loop: the stream seam and tool dispatch (the former services/chat_service.py)
   solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call
+  job_adapters.py foreground (fg:…) and later domain job handles for wait_for_job without holding the turn
   compose.py      the system prompt for a turn, the live network line, and the per-turn ui-context / Guided / workflow-step blocks
   budget.py       the per-turn / per-session / daily caps, the retry schedule, the per-tool timeout, the budget gate
   stub.py         the scripted stub loop behind StreamRequest.script
@@ -72,22 +86,78 @@ Borrowed designs under consideration: `docs/superpowers/assessments/2026-10-06-d
 
 ## The harness tools
 
-### Checked-answer pilot
+### Checked-answer contracts
 
 `PYPSA_GUI_ANSWER_ASSURANCE_MODE=strict` withholds model prose/thinking and gates
-publication through `assurance.py`. Only whitelisted static component inputs are
-checked against raw project data and rendered in software. A bounded generator
-key-results profile additionally recalculates weighted energy, marginal
-expenditure and peak dispatch with explicit full/partial coverage. Unsupported requests
-receive a limited fallback; effects are blocked except existing panel navigation,
-which is reported as submitted. The default is `disabled`; `pilot` admits an
-explicit version-1 strict request. Chart downloads/delivery separately verify exact data/render/byte bindings.
-Other result profiles, completed effects and arbitrary full-request coverage
-remain unsupported. See the
+publication through `assurance.py`; the default remains `disabled`. `pilot`
+admits an explicit version-1 strict request. The chat's **Check answers** option
+uses the shared harness when the server enables pilot
+mode. Checking defaults off for new pilot chats and project bindings; strict
+server mode requires it. Browser publication is armed before dispatch and refuses
+an omitted/downgraded acknowledgement. Retries, edits and clarification choices
+preserve checked policy, including a conservative history hint when an earlier
+answer is unavailable. That hint is never approval. Read the
+[pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
+The repeatable CI pilot evaluation runs 133 independent positive/adversarial cases
+and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
+writes a versioned report; optional live generation has fixed pre-send ceilings.
+See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
+This finite-suite result does not confer production or independent domain approval.
+Offline `review_calibration.py` prepares blind interpretation judgments and
+reconciles two independently attested domain reviewers. Incomplete/disputed
+labels and provider errors prevent complete measurement. Synthetic cases cannot
+produce population error estimates; identity and sampling attestations require
+external verification. See the [calibration and review guide](../../../.scratch/assistant-assurance/calibration-runbook.md).
+Shared scope and calculation modules own project/entity/window/metric constraints, required-slot dispositions, units,
+formulas and coverage. Five bounded profiles support generator dispatch,
+declared-basis generator costs, a linear network subset, StorageUnit dispatch
+and declared-basis direct StorageUnit costs.
+The storage profile validates separate charging/discharging power and the complete
+predecessor state chain before calculating exact-window energy, peaks and final
+stored energy. It uses storage duration weights and refuses cyclic units,
+nonzero inflow/spill. The separate storage-cost profile uses objective weights
+for discharge and end-of-snapshot holding expenditure, and an explicit allocation
+of the annual installed-power charge. It excludes charging-electricity purchases,
+revenues, overnight/FOM derivations, nonlinear costs and other storage models.
+Missing cost basis,
+unsupported components and quantities receive unavailable slots. Software renders
+exact checked values; a model cannot replace them with narrative or its own numbers.
+
+Live sessions retain at most two distinct checked run references for bounded
+repeat/window/comparison follow-ups. Material cost ambiguity prompts a software
+question with no provider call; only successfully checked results seed context.
+Project/generation/selection changes, rewind, expiration or missing context
+require a fresh explicit scope. Historical repeats keep their retained run.
+A freshly recreated session can recover the same bounded scope from a private
+owned checkpoint tied to its latest native approved history record. Recovery
+revalidates every retained reference and admits one new browser generation;
+subsequent generation changes retain the ordinary refusal. Imported histories,
+gaps, source drift, unavailable checkpoints and unmatched anchors cannot resume
+scope. Strict admission revokes the old checkpoint before execution; rewind
+revokes it before dropping messages. Existing live history reads do not replace
+context. Default/shadow modes do not recover checked context.
+Queued corrections resolve their own checked scope; the previous utterance's
+explicit scope is never forwarded to silently discard new constraints.
+
+Immutable retained evidence and exact same-basis comparison IDs support replay
+without rerunning a model. Optional qualitative interpretations need one bounded
+read-only review; quantitative prose is withheld before review. The separately
+opt-in effect adapter requires an exact confirmed static-input update contract,
+durable ID reservation and independent input read-back. Live/uncertain writes
+never silently retry. Supported navigation stays submitted until an issued,
+current browser mounted-view ACK arrives. Authenticated JSON/ZIP exports and the
+evidence card consume the same answer/receipt; existing PNG integrity is separate.
+
+Profile rollback, effect rollback and bounded shadow observations live in the
+shared harness. No new stream vocabulary or provider-specific guard path is used.
+The actor-owned record store uses bounded cross-process transactions, but the live
+project runtime still supports one application worker. These checks do not certify
+all engineering domains, arbitrary request completeness or independent expert
+approval. Unmapped strict tools fail closed; deployment remains opt-in. Read the
+[implemented API and settings](../../../.scratch/assistant-assurance/harness-contracts.md),
 [implementation boundary](../../../.scratch/assistant-assurance/implementation-status.md)
-and [reliability contract](../../../.scratch/assistant-assurance/reliability-contract.md)
-before extending adapters. Approved records live in the bounded, actor-owned
-`services/assurance_records.py` store and are revalidated for public replay.
+and [reliability design](../../../.scratch/assistant-assurance/reliability-contract.md)
+before extending adapters.
 
 ### Existing workflow controls
 
@@ -336,3 +406,9 @@ the normal confirmation gate. Interactive `ask_user` answers are user messages,
 so choice requests run outside durable action steps. Preview application
 confirmation includes the immutable old/new/unit diff while the actual handler
 still receives only its catalogue arguments; chat renders the preview table.
+
+Sequential durable tasks wait for a terminal solver outcome before advancing
+chart/export steps, bounded by the per-tool deadline and cancellation. Ordinary
+foreground solver calls retain the detached start receipt. A start or
+contradictory still-running receipt cannot complete a task; fully asynchronous
+durable-task step resumption remains outside the checked-scope recovery tranche.

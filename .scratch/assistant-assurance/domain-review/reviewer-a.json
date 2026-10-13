@@ -1,0 +1,48 @@
+{
+  "version": "qualitative-review-calibration/1",
+  "packet_sha256": "7d3605bcf4cf1d6ab84d5d8cd57ad9509960a7ad87cd7c6ebece47bc1d86e4cb",
+  "reviewer_id": "replace-with-reviewer-a",
+  "independent_domain_reviewer": false,
+  "judgments": [
+    {
+      "case_id": "interpretation-01",
+      "verdict": "unresolved"
+    },
+    {
+      "case_id": "interpretation-02",
+      "verdict": "unresolved"
+    },
+    {
+      "case_id": "interpretation-03",
+      "verdict": "unresolved"
+    },
+    {
+      "case_id": "interpretation-04",
+      "verdict": "unresolved"
+    },
+    {
+      "case_id": "interpretation-05",
+      "verdict": "unresolved"
+    },
+    {
+      "case_id": "interpretation-06",
+      "verdict": "unresolved"
+    },
+    {
+      "case_id": "interpretation-07",
+      "verdict": "unresolved"
+    },
+    {
+      "case_id": "interpretation-08",
+      "verdict": "unresolved"
+    },
+    {
+      "case_id": "interpretation-09",
+      "verdict": "unresolved"
+    },
+    {
+      "case_id": "interpretation-10",
+      "verdict": "unresolved"
+    }
+  ]
+}
