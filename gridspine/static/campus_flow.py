@@ -20,9 +20,11 @@ sized from.
 
 ``solve_cases(..., setpoints=...)`` first puts a reactive dispatch on the
 hour: ``{"sgen_q": {name: Q}, "shunt_step": {name: step}}``, the form
-``ReactiveResult.setpoints`` gives (plan C8). The same dispatch is held in
-every N-1 case: the case is the steady state right after the outage,
-before any controller has re-dispatched. Every ``HourFlow`` also carries
+``ReactiveResult.setpoints`` gives (plan C8), and with taps set by the
+study (plan C15) ``"trafo_tap": {name: tap_pos}``. The same Q dispatch is
+held in every N-1 case: the case is the steady state right after the
+outage, before any controller has re-dispatched Q. Only the on-load tap
+changers may act in a case (``retap``, plan C15). Every ``HourFlow`` also carries
 each cable's loading (``line``: ``cable``, ``i_ka``, ``loading_pct``).
 
 ``size_transformers(flows, campus, criteria)`` gives, per transformer
@@ -154,9 +156,11 @@ def _solve(net) -> HourFlow:
 
 
 def apply_setpoints(net, setpoints) -> None:
-    """Put a reactive dispatch on ``net`` (mutates it): Q on named sgens and
-    steps on named shunts. A name the net does not have is refused."""
-    for table, col, key in (("sgen", "q_mvar", "sgen_q"), ("shunt", "step", "shunt_step")):
+    """Put a dispatch on ``net`` (mutates it): Q on named sgens, steps on
+    named shunts and (plan C15) tap positions on named transformers
+    (``trafo_tap``). A name the net does not have is refused."""
+    for table, col, key in (("sgen", "q_mvar", "sgen_q"), ("shunt", "step", "shunt_step"),
+                            ("trafo", "tap_pos", "trafo_tap")):
         idx = dict(zip(net[table]["name"].astype(str), net[table].index))
         for name, v in (setpoints.get(key) or {}).items():
             if name not in idx:
@@ -164,12 +168,17 @@ def apply_setpoints(net, setpoints) -> None:
             net[table].at[idx[name], col] = v
 
 
-def solve_cases(campus, rows: pd.DataFrame, setpoints=None, inspect=None) -> dict:
+def solve_cases(campus, rows: pd.DataFrame, setpoints=None, inspect=None, retap=None) -> dict:
     """``{"intact": HourFlow, "N-1:<trafo>": HourFlow, ...}`` for one hour,
     with an optional reactive dispatch in place (module docstring). Works on
     a copy; ``campus.net`` is not changed. ``inspect(case, net)``, if given,
     is called on the solved net of every converged case (the MILP reads its
-    Jacobian there, ``campus_milp``)."""
+    Jacobian there, ``campus_milp``).
+
+    ``retap(case, net)``, if given (plan C15, ``campus_taps.Taps.hook``), is
+    called on each case's net before it is solved, and may set its taps:
+    the case is then solved, and inspected, at those taps. Every N-1 case
+    starts from the intact case's taps, which are put back after it."""
     work = copy.copy(campus)
     work.net = copy.deepcopy(campus.net)
     apply_hour(work, rows)
@@ -178,6 +187,8 @@ def solve_cases(campus, rows: pd.DataFrame, setpoints=None, inspect=None) -> dic
         apply_setpoints(net, setpoints)
 
     def run(case):
+        if retap is not None:
+            retap(case, net)
         out[case] = _solve(net)
         if inspect is not None and out[case].converged:
             inspect(case, net)
@@ -189,9 +200,12 @@ def solve_cases(campus, rows: pd.DataFrame, setpoints=None, inspect=None) -> dic
         if len(members) < 2:
             continue
         for name in members:
+            taps = net.trafo["tap_pos"].copy() if retap is not None else None
             net.trafo.at[idx[name], "in_service"] = False
             run(f"N-1:{name}")
             net.trafo.at[idx[name], "in_service"] = True
+            if taps is not None:
+                net.trafo["tap_pos"] = taps
     return out
 
 

@@ -1,0 +1,123 @@
+{
+ "base_project": "f6c991f6-7fe9-464d-bfb8-d6bf2e6ef47e",
+ "basis": {
+  "subsidy": "excl",
+  "tax": "pre",
+  "terms": "real"
+ },
+ "budget": {
+  "solves_max": 4,
+  "solves_used": 4
+ },
+ "created_at": "2026-09-30T02:29:36.813451Z",
+ "created_by": "0ddb09b1-8370-48de-8707-a0d2eb45d38f",
+ "currency_year": 2020,
+ "fidelity_last_run": "quick_screen",
+ "findings_ref": "studies/5cb04667fcc64915acbb6e9704d204d1.findings.json",
+ "honesty_notes": [],
+ "intake": {
+  "load": {
+   "annual_mwh": 4000.0,
+   "profile": "commercial_office",
+   "source": "sector_profile"
+  },
+  "pv": {
+   "enabled": false
+  },
+  "site": {
+   "connection_mw": 2.0,
+   "zone": "DE"
+  },
+  "tariff": {
+   "custom": {
+    "billing_period": "month",
+    "currency": "EUR",
+    "currency_year": 2020,
+    "demand_charge": {
+     "price_per_mw_per_period": 9000.0
+    },
+    "energy_bands": [
+     {
+      "applies": {
+       "hours": [
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19
+       ],
+       "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+       ]
+      },
+      "label": "peak",
+      "price_per_mwh": 160.0
+     },
+     {
+      "applies": {},
+      "label": "off-peak",
+      "price_per_mwh": 90.0
+     }
+    ],
+    "export": {
+     "price_per_mwh": 30.0
+    },
+    "fixed_charge_per_period": 100.0,
+    "honesty_notes": [
+     "tariff_illustrative"
+    ],
+    "name": "Two bands and a demand charge",
+    "source": "test",
+    "source_year": 2026,
+    "tariff_id": "tou_dc_test"
+   }
+  }
+ },
+ "ledger": null,
+ "ledger_version": "technology-data v0.14.0",
+ "maturity": {
+  "accuracy_band": {
+   "high_pct": 100.0,
+   "high_pct_narrow": 30.0,
+   "low_pct": -50.0,
+   "low_pct_narrow": -20.0,
+   "reference": "AACE International RP 18R-97 (indicative analogy, Class 5)"
+  },
+  "class": "screening",
+  "reasons": [
+   "battery_inverter_eur_per_kw: default (library)",
+   "battery_storage_eur_per_kwh: default (library)",
+   "discount_rate: default (library)",
+   "load: synthetic (upload metered load to raise maturity)"
+  ],
+  "status": "ok",
+  "unavailable": {}
+ },
+ "name": "Site battery",
+ "option_projects": [
+  "6c539996-2327-4d4d-846b-848b5bceae69",
+  "d8558488-93c4-418d-a289-bc82a8206351",
+  "7b59d1ba-5822-4a15-aba0-ed18ec70068e",
+  "cd74bb8b-a04d-49f2-9bf9-d599e0632c93"
+ ],
+ "pack_project": "f6c991f6-7fe9-464d-bfb8-d6bf2e6ef47e",
+ "perspective": "site_owner",
+ "question_id": "bess_at_site",
+ "report_ref": null,
+ "schema_version": 1,
+ "stale": false,
+ "stale_reasons": [],
+ "study_id": "5cb04667fcc64915acbb6e9704d204d1",
+ "updated_at": "2026-09-30T02:29:43.638002Z"
+}

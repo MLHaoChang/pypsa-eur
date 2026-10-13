@@ -28,6 +28,7 @@ vi.mock('../api/campusElectrical', async () => {
 })
 
 const YAML = 'campus:\n  pcc: {bus: GRID}\n'
+const PCC_TAPS = "PCC transformer taps held by the grid operator (at the campus file's position)"
 
 const empty: CampusState = {
   campus_yaml: null, skipped: [], profiles: { eu_rfg_dcc_ce: 'EU RfG (2016/631) and DCC (2016/1388), Continental Europe' },
@@ -39,7 +40,7 @@ const sized = (): CampusState => ({
   campus_yaml: YAML,
   skipped: ['storage unit bess_new: built at 0 MW'],
   settings: { k: 3, pf: 0.95, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true, invest: false,
-              pcc_switchgear_by_operator: false },
+              pcc_switchgear_by_operator: false, pcc_tap_control: 'campus' },
   results: {
     selection: [{ period: 2030, hour: 158, reasons: ['max_consumption_mw', 'max_trafo_SITE_TRANSFO_mw'] }],
     transformers: [{
@@ -139,7 +140,7 @@ describe('CampusElectricalPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Run study' }))
     await waitFor(() => expect(api.run).toHaveBeenCalledWith('Hub A', {
       k: 2, pf: 0.95, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true,
-      invest: true, pcc_switchgear_by_operator: false,
+      invest: true, pcc_switchgear_by_operator: false, pcc_tap_control: 'campus',
     }))
   })
 
@@ -165,6 +166,37 @@ describe('CampusElectricalPanel', () => {
     await waitFor(() => expect(api.run).toHaveBeenCalledWith('Hub A', expect.objectContaining({
       invest: true, pcc_switchgear_by_operator: true,
     })))
+  })
+
+  it('lets the campus move the PCC transformer taps by default, and sends the operator setting when ticked', async () => {
+    api.state.mockResolvedValue({ ...empty, campus_yaml: YAML })
+    api.run.mockResolvedValue(sized())
+    renderPanel()
+    const box = (await screen.findByLabelText(PCC_TAPS)) as HTMLInputElement
+    expect(box.checked).toBe(false)
+    await userEvent.click(box)
+    await userEvent.click(screen.getByRole('button', { name: 'Run study' }))
+    await waitFor(() => expect(api.run).toHaveBeenCalledWith('Hub A', expect.objectContaining({
+      invest: true, pcc_tap_control: 'grid_operator',
+    })))
+  })
+
+  it('takes the PCC tap setting from the last run, and a run saved before it existed means the campus', async () => {
+    api.state.mockResolvedValue({
+      ...empty, campus_yaml: YAML,
+      settings: { k: 3, pf: null, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true, invest: true,
+                  pcc_switchgear_by_operator: false, pcc_tap_control: 'grid_operator' },
+    })
+    const first = renderPanel()
+    expect(((await screen.findByLabelText(PCC_TAPS)) as HTMLInputElement).checked).toBe(true)
+    first.unmount()
+    api.state.mockResolvedValue({
+      ...empty, campus_yaml: YAML,
+      settings: { k: 3, pf: null, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true, invest: true,
+                  pcc_switchgear_by_operator: false } as never,
+    })
+    renderPanel()
+    expect(((await screen.findByLabelText(PCC_TAPS)) as HTMLInputElement).checked).toBe(false)
   })
 
   it('takes the checkboxes from the last run, and a run saved before they existed means the defaults', async () => {
@@ -266,7 +298,7 @@ describe('CampusElectricalPanel', () => {
       await userEvent.click(btn)
       await waitFor(() => expect(api.startMilp).toHaveBeenCalledWith('Hub A', {
         k: 3, pf: 0.95, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true, invest: false,
-        pcc_switchgear_by_operator: false,
+        pcc_switchgear_by_operator: false, pcc_tap_control: 'campus',
       }))
       const line = await screen.findByTestId('milp-progress')
       await waitFor(() => expect(line.textContent).toContain('Iteration 2 of 20 · best €80,000/a vs least cost €95,000/a'))

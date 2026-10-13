@@ -37,7 +37,7 @@ def test_written_inventory_is_complete_and_explicit_about_unverified_behavior(tm
     assert data['result_tabs_not_in_tool_enum'] == []
     assert data['slide_panels_not_in_tool_enum'] == []
     assert {t['id'] for t in data['result_tabs']} >= {'adequacy', 'fmea', 'loadflow', 'investment'}
-    assert len(data['result_tabs']) == 14 and len(data['slide_panels']) == 17
+    assert len(data['result_tabs']) == 14 and len(data['slide_panels']) == 18
     assert 'pending' in data['status']
 
 

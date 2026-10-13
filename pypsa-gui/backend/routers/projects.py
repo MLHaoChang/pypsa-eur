@@ -142,12 +142,26 @@ _BUNDLE_CAMPUS_FILES = (
 # because the source and destination ARE the same dir. The legacy bundle-file
 # loop already handles the small files; bundling dirs separately keeps it
 # robust to growth (e.g. agent_export PNGs accumulating in uploads/).
+#
+# `studies/` holds the decision-study sidecars, `studies/<study_id>.json`
+# (`services/study/store.py`). A DIRECTORY, so it belongs here and never in
+# `_BUNDLE_FILES`, whose every consumer reads bytes (review v2 BC-4). Bundles,
+# Save-As and snapshots carry it; the study option forks of S4 do not — see the
+# note in `_create_scenario_db`.
+#
 # Study reports (`reports/<report_id>/{meta.json, v<N>.json, figures/}`,
 # services/reports/store.py) joined the tuple with the same semantics: always a
 # COPY on save-as, replaced wholesale on snapshot restore, walked recursively
 # into the bundle zip and extracted from it. `sites/` is the 3D site view's
 # cached site context (services/site_context.py), one directory per site id.
-_BUNDLE_DIRS = ("uploads", "reports", "sites")
+_BUNDLE_DIRS = ("uploads", "reports", "studies", "sites")
+
+# The metadata keys a decision-study option fork carries (S4), and a tornado's
+# throw-away fork (S6: `owner_variant_id`, `throwaway`). Literals, like
+# `_BUNDLE_FILES`, to keep the router free of a services.study import;
+# `tests/test_study_forks.py` pins them equal to `forks.OWNER_KEYS`.
+_STUDY_FORK_META_KEYS = ("owner_study_id", "owner_base_project", "owner_option_id",
+                         "owner_variant_id", "throwaway")
 
 # The bundle files `_save_context` writes itself on every save. `_carry_sidecars_on_move`
 # copies every OTHER `_BUNDLE_FILES` entry from the source project; these it must
@@ -778,8 +792,34 @@ def _project_info_db(db, project) -> ProjectInfo:
     if project.parent_project_id is not None:
         parent = db.get(_Project, project.parent_project_id)
         parent_name = parent.name if parent is not None else None
+        if parent is not None:
+            _mark_study_owned(info, d, parent)
     info.parent_project = parent_name
     return info
+
+
+def _mark_study_owned(info: ProjectInfo, project_dir: pathlib.Path, parent) -> None:
+    """
+    Flag a decision study's fork in the list (plan F1-F, F3). The rule is
+    `services/study/forks.py::is_study_owned`: the owner keys in the fork's
+    metadata AND the database parent being the base they name. The study's
+    name is read from the base's sidecar; a gone or unreadable record leaves
+    it None, never fails the list.
+    """
+    meta = _read_meta(project_dir)
+    study_id = meta.get("owner_study_id")
+    if not study_id or meta.get("owner_base_project") != str(parent.id):
+        return
+    from services import project_registry
+    from services.study import store as study_store
+
+    info.study_owned = True
+    info.owner_study_id = str(study_id)
+    try:
+        info.owner_study_name = study_store.load_study(
+            project_registry.project_dir(parent), str(study_id)).name
+    except (study_store.StudyNotFound, study_store.StudyUnreadable, OSError):
+        info.owner_study_name = None
 
 
 def _serialize_registry_project(project) -> dict[str, str | None]:
@@ -1847,6 +1887,23 @@ def _carry_sidecars_on_move(
 
 
 
+def _saves_its_own_directory(bound_dir, loaded: str | None, name: str,
+                             dest: pathlib.Path) -> bool:
+    """
+    True when a save writes a network back into the directory it was bound
+    to before the save: the context's storage directory is ``dest``, or (a
+    legacy name-only binding with no directory) its project name is
+    ``name``. A first save of an unbound network and a save of another
+    project's network over ``dest`` are not.
+    """
+    if bound_dir:
+        try:
+            return pathlib.Path(bound_dir).resolve() == pathlib.Path(dest).resolve()
+        except OSError:
+            return False
+    return loaded is not None and loaded == name
+
+
 def _check_save_allowed(
     ctx,
     name: str,
@@ -2086,6 +2143,11 @@ def _save_context(
         # None` (fresh / unbound network) falls through — the claim at the end
         # of this block establishes the binding.
         loaded = ctx.loaded_project
+        # Which DIRECTORY the network belongs to, read with `loaded` and
+        # before the claim below can rebind it: decides whether this save
+        # writes a project's own network back (its study-fork ownership
+        # round-trips) or another network over it (it does not).
+        bound_dir = getattr(ctx, "storage_dir", None)
         n = _check_save_allowed(
             ctx, name,
             loaded=loaded, expect=expect, force=force, rebind=rebind,
@@ -2321,6 +2383,18 @@ def _save_context(
             "parent_project": new_parent,
             "scenario_description": new_desc,
             "scenario_type": new_type,
+            # Decision-study fork ownership (S4, `services/study/forks.py`):
+            # round-tripped from THIS directory's metadata, and only when the
+            # network being written is this directory's own — a fork's own
+            # saves (the queue's post-solve save, the Expert view's Ctrl+S)
+            # keep it. A save into another directory never gains it, and a
+            # forced Save-As / Save-a-Copy of ANOTHER network over a fork's
+            # directory drops it (gate S4 [N], S9): the directory now holds
+            # the user's work, which a re-run or the study's delete would
+            # otherwise remove as the study's.
+            **({k: existing_meta[k] for k in _STUDY_FORK_META_KEYS
+                if k in existing_meta}
+               if _saves_its_own_directory(bound_dir, loaded, name, dest) else {}),
             # Per-project settings (plan M2) round-trip from the existing file:
             # `PATCH /{name}/settings` is their only writer, and a save that
             # dropped the key would silently reset the user's choice.
@@ -3128,6 +3202,11 @@ def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> Proj
             src_file = base_dir / fname
             if src_file.exists():
                 atomic_write_bytes(child_dir / fname, src_file.read_bytes())
+        # A user-created scenario is a whole copy of its base, studies/
+        # included. S4's study option forks (`services/study/forks.py`) must
+        # NOT copy this way: they walk the bundle themselves and SKIP
+        # `studies/` and `results_state.pkl`, or every option fork would
+        # carry the study that owns it (review v1 B7, review v2 BC-4).
         _copy_bundle_dirs(base_dir, child_dir)
         # The conversation travels with the branch, which is what
         # `SAVE_LINEAGE_SCENARIO_COPY` documents for the legacy path — this
