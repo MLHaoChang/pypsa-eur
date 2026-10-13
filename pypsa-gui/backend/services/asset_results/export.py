@@ -202,11 +202,22 @@ def build_workbook(
             h.get("formula", ""),
         ])
 
+    # S0 carry (plan S7): the headline net profit leaves the screen with the
+    # same zero-profit-by-construction sentence Asset Detail shows beside it
+    # (one string, one classifier: `services/results/economics_caveats.py`),
+    # on the page a reader opens first and in the provenance.
+    from services.results.economics_caveats import interior_optimum_notes
+
+    reading_notes = interior_optimum_notes(n, {component_class: [name]})
+    for note in reading_notes:
+        headline_rows.append(["Reading note", None, "", "Summary", note, ""])
+
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xl:
         about = _about_rows(first_resp, scope=scope, project=project,
                             from_iso=from_iso, to_iso=to_iso, period=period,
                             omitted=omitted)
+        about += [["Reading note", note] for note in reading_notes]
         pd.DataFrame(about, columns=["Field", "Value"]).to_excel(
             xl, sheet_name="About", index=False, header=False)
         pd.DataFrame(headline_rows[1:], columns=headline_rows[0]).to_excel(

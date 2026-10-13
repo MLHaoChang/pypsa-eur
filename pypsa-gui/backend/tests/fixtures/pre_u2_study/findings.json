@@ -1,0 +1,634 @@
+{
+ "available": true,
+ "baseline": {
+  "bill": 615259.0103164111,
+  "case_ref": null,
+  "project_ref": "5a4b74a7-45fe-4e5d-8f6d-2166e5120192",
+  "solve_status": "ok",
+  "unavailable": {}
+ },
+ "battery_attribution": [
+  {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "battery_npv": 3531384.450723247,
+   "battery_p_nom_mw": 0.3,
+   "battery_payback_simple": 0.38206819155478505,
+   "currency_year": 2020,
+   "engine": "cash_flow_expander",
+   "fidelity": "quick_screen",
+   "method": "battery_only",
+   "notes": [
+    "battery_value_is_the_option_value"
+   ],
+   "option_id": "bess_1h",
+   "option_npv": 3531384.450723247,
+   "reference_npv": null,
+   "status": "ok",
+   "unavailable": {
+    "reference_npv": "not_applicable_battery_only"
+   }
+  },
+  {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "battery_npv": 3474426.1507232473,
+   "battery_p_nom_mw": 0.3,
+   "battery_payback_simple": 0.5617161435336112,
+   "currency_year": 2020,
+   "engine": "cash_flow_expander",
+   "fidelity": "quick_screen",
+   "method": "battery_only",
+   "notes": [
+    "battery_value_is_the_option_value"
+   ],
+   "option_id": "bess_2h",
+   "option_npv": 3474426.1507232473,
+   "reference_npv": null,
+   "status": "ok",
+   "unavailable": {
+    "reference_npv": "not_applicable_battery_only"
+   }
+  },
+  {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "battery_npv": 3360509.550723247,
+   "battery_p_nom_mw": 0.3,
+   "battery_payback_simple": 0.9210120474912635,
+   "currency_year": 2020,
+   "engine": "cash_flow_expander",
+   "fidelity": "quick_screen",
+   "method": "battery_only",
+   "notes": [
+    "battery_value_is_the_option_value"
+   ],
+   "option_id": "bess_4h",
+   "option_npv": 3360509.550723247,
+   "reference_npv": null,
+   "status": "ok",
+   "unavailable": {
+    "reference_npv": "not_applicable_battery_only"
+   }
+  }
+ ],
+ "completeness": {
+  "battery_attribution": "ok",
+  "explain": "ok",
+  "options": "ok",
+  "robustness": "ok",
+  "value_streams": "ok",
+  "verdict": "ok"
+ },
+ "explain": [
+  {
+   "asset": {
+    "buses": [
+     "site"
+    ],
+    "carrier": "battery",
+    "component_class": "StorageUnit",
+    "name": "battery"
+   },
+   "asset_kpis": [
+    {
+     "category": "capacity",
+     "id": "p_nom_opt",
+     "label": "Optimised power",
+     "status": "ok",
+     "unit": "MW",
+     "value": 0.3
+    },
+    {
+     "category": "capacity",
+     "id": "energy_capacity",
+     "label": "Energy capacity",
+     "status": "ok",
+     "unit": "MWh",
+     "value": 0.3
+    },
+    {
+     "category": "dispatch",
+     "id": "energy_discharged_mwh",
+     "label": "Energy discharged",
+     "reason": "not produced by this solve",
+     "status": "blocked",
+     "unit": "MWh"
+    },
+    {
+     "category": "storage",
+     "id": "full_cycles",
+     "label": "Equivalent full cycles",
+     "reason": "not produced by this solve",
+     "status": "blocked",
+     "unit": ""
+    },
+    {
+     "category": "storage",
+     "id": "round_trip_efficiency",
+     "label": "Realised round-trip efficiency",
+     "reason": "not produced by this solve",
+     "status": "blocked",
+     "unit": "pu"
+    },
+    {
+     "category": "prices",
+     "id": "captured_spread",
+     "label": "Captured spread",
+     "reason": "not produced by this solve",
+     "status": "blocked",
+     "unit": "EUR/MWh"
+    },
+    {
+     "category": "economics",
+     "id": "net_profit_eur",
+     "label": "Net profit",
+     "reason": "not produced by this solve",
+     "status": "blocked",
+     "unit": "EUR"
+    },
+    {
+     "category": "economics",
+     "id": "lcos_eur_per_mwh",
+     "label": "LCOS",
+     "reason": "not produced by this solve",
+     "status": "blocked",
+     "unit": "EUR/MWh"
+    }
+   ],
+   "component_class": "StorageUnit",
+   "dispatch_state": {
+    "mismatched_classes": [],
+    "state": "fresh"
+   },
+   "name": "battery",
+   "option_id": "bess_1h",
+   "reading_notes": [
+    "This payload is EVIDENCE, not a verdict. Narrate only numbers that appear in it, and name the field you used.",
+    "Zero-profit equilibrium: an extendable asset at an interior optimum earns approximately zero net profit BY CONSTRUCTION \u2014 the LP builds until the marginal MW breaks even. A near-zero net profit here is the expected result, not a fault.",
+    "Read system_signals.congestion.note before concluding anything from an empty `lines` list: it says whether nothing binds, the duals were never captured, or the corridor is simply out of scope."
+   ],
+   "sizing": {
+    "added": 0.3,
+    "binding_constraint": "interior",
+    "capacity_column": "p_nom",
+    "existing": 0.0,
+    "explanation": "the LP stopped between the bounds, so this size IS the economic answer: the marginal MW broke even against everything else on the system",
+    "extendable": true,
+    "headroom": 3.7,
+    "lower_bound": 0.0,
+    "optimised": 0.3,
+    "upper_bound": 4.0
+   },
+   "system_signals": {
+    "bus_prices": {
+     "site": {
+      "bus_load_weighted_price": 131.69889917021206,
+      "bus_price_max": 160.0,
+      "bus_price_mean": 115.02739726027397,
+      "bus_price_min": 90.0
+     }
+    },
+    "co2_caps": [],
+    "congestion": {
+     "lines": [],
+     "note": "no line connects to this asset's buses, so line congestion does not apply here \u2014 links and transformers are out of scope either way"
+    }
+   },
+   "unavailable_kpis": []
+  }
+ ],
+ "hashes": {
+  "base_network_hash": "423541773d5f6d94",
+  "intake_hash": "4910b1f6e1f85623",
+  "ledger_hash": "4189813f2ef9fcfd",
+  "option_network_hashes": {
+   "2a5c212e-f388-4e5f-bd27-8cc0f1a1daf1": "28041731b9095190",
+   "5a4b74a7-45fe-4e5d-8f6d-2166e5120192": "2fb075fa2d619c62",
+   "8bbd363d-40b2-4502-a15b-e9e71aceeece": "6c958afb819095f6",
+   "985f9b18-7b23-42ed-9c76-60773f7448b9": "9af809c1460a7d5e"
+  }
+ },
+ "honesty_notes": [
+  "tornado_method_redispatch_fixed_sizes",
+  "perfect_foresight_dispatch",
+  "demand_charge_perfect_foresight",
+  "npv_nonnegative_at_optimum_by_construction",
+  "irr_and_discounted_payback_bounded_at_optimum_by_construction"
+ ],
+ "options": [
+  {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "bill": 615259.0103164111,
+   "case_ref": null,
+   "currency_year": 2020,
+   "delta_vs_baseline": {
+    "capex": null,
+    "co2": null,
+    "npv": null,
+    "payback": null,
+    "unavailable": {
+     "capex": "computed_by_the_pro_forma_s5",
+     "co2": "not_modelled_mvp1",
+     "npv": "computed_by_the_pro_forma_s5",
+     "payback": "computed_by_the_pro_forma_s5"
+    }
+   },
+   "engine": "lp",
+   "fidelity": "quick_screen",
+   "label": "Without (grid only)",
+   "option_id": "none",
+   "project_ref": "5a4b74a7-45fe-4e5d-8f6d-2166e5120192",
+   "sizes": [],
+   "solve_status": "ok",
+   "system_cost": 1001.0,
+   "unavailable": {}
+  },
+  {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "bill": 297987.3048633603,
+   "case_ref": null,
+   "currency_year": 2020,
+   "delta_vs_baseline": {
+    "capex": null,
+    "co2": null,
+    "npv": null,
+    "payback": null,
+    "unavailable": {
+     "capex": "computed_by_the_pro_forma_s5",
+     "co2": "not_modelled_mvp1",
+     "npv": "computed_by_the_pro_forma_s5",
+     "payback": "computed_by_the_pro_forma_s5"
+    }
+   },
+   "engine": "lp",
+   "fidelity": "quick_screen",
+   "label": "Battery, 1 hour",
+   "option_id": "bess_1h",
+   "project_ref": "985f9b18-7b23-42ed-9c76-60773f7448b9",
+   "sizes": [
+    {
+     "asset": "battery",
+     "e_nom_opt": 0.3,
+     "p_nom_opt": 0.3,
+     "unavailable": {}
+    }
+   ],
+   "solve_status": "ok",
+   "system_cost": 1002.0,
+   "unavailable": {}
+  },
+  {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "bill": 297987.3048633603,
+   "case_ref": null,
+   "currency_year": 2020,
+   "delta_vs_baseline": {
+    "capex": null,
+    "co2": null,
+    "npv": null,
+    "payback": null,
+    "unavailable": {
+     "capex": "computed_by_the_pro_forma_s5",
+     "co2": "not_modelled_mvp1",
+     "npv": "computed_by_the_pro_forma_s5",
+     "payback": "computed_by_the_pro_forma_s5"
+    }
+   },
+   "engine": "lp",
+   "fidelity": "quick_screen",
+   "label": "Battery, 2 hours",
+   "option_id": "bess_2h",
+   "project_ref": "8bbd363d-40b2-4502-a15b-e9e71aceeece",
+   "sizes": [
+    {
+     "asset": "battery",
+     "e_nom_opt": 0.6,
+     "p_nom_opt": 0.3,
+     "unavailable": {}
+    }
+   ],
+   "solve_status": "ok",
+   "system_cost": 1003.0,
+   "unavailable": {}
+  },
+  {
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "bill": 297987.3048633603,
+   "case_ref": null,
+   "currency_year": 2020,
+   "delta_vs_baseline": {
+    "capex": null,
+    "co2": null,
+    "npv": null,
+    "payback": null,
+    "unavailable": {
+     "capex": "computed_by_the_pro_forma_s5",
+     "co2": "not_modelled_mvp1",
+     "npv": "computed_by_the_pro_forma_s5",
+     "payback": "computed_by_the_pro_forma_s5"
+    }
+   },
+   "engine": "lp",
+   "fidelity": "quick_screen",
+   "label": "Battery, 4 hours",
+   "option_id": "bess_4h",
+   "project_ref": "2a5c212e-f388-4e5f-bd27-8cc0f1a1daf1",
+   "sizes": [
+    {
+     "asset": "battery",
+     "e_nom_opt": 1.2,
+     "p_nom_opt": 0.3,
+     "unavailable": {}
+    }
+   ],
+   "solve_status": "ok",
+   "system_cost": 1004.0,
+   "unavailable": {}
+  }
+ ],
+ "options_status": "ok",
+ "pending_options": [],
+ "robustness": {
+  "breakevens": [],
+  "dotplot": null,
+  "method": "redispatch_fixed_sizes",
+  "note": null,
+  "npv_centre": 3531384.450723247,
+  "option_id": "bess_1h",
+  "option_map": null,
+  "pending": [],
+  "skipped": {},
+  "solves_charged": 4,
+  "status": "ok",
+  "tornado": [
+   {
+    "centre_value": 0.07,
+    "evaluation": "rate_only",
+    "high_value": 0.091,
+    "key": "discount_rate",
+    "label": "Discount rate (real, pre-tax)",
+    "low_value": 0.049,
+    "notes": [],
+    "npv_high": 2934407.871335937,
+    "npv_low": 4338981.878427579,
+    "swing": 1404574.007091642,
+    "unavailable": {},
+    "unit": "per unit"
+   },
+   {
+    "centre_value": 9000.0,
+    "evaluation": "redispatch",
+    "high_value": 11700.0,
+    "key": "demand_charge_price",
+    "label": "Demand charge on peak import",
+    "low_value": 6300.0,
+    "notes": [],
+    "npv_high": 3644657.279215873,
+    "npv_low": 3418111.622230622,
+    "swing": 226545.65698525123,
+    "unavailable": {},
+    "unit": "EUR/MW/month"
+   },
+   {
+    "centre_value": 213.9279,
+    "evaluation": "capex_only",
+    "high_value": 278.1063,
+    "key": "battery_inverter_eur_per_kw",
+    "label": "Battery inverter cost (2030 projection)",
+    "low_value": 149.7495,
+    "notes": [],
+    "npv_high": 3498681.597772309,
+    "npv_low": 3564087.3036741856,
+    "swing": 65405.70590187656,
+    "unavailable": {},
+    "unit": "EUR/kW"
+   },
+   {
+    "centre_value": 189.861,
+    "evaluation": "capex_only",
+    "high_value": 246.8193,
+    "key": "battery_storage_eur_per_kwh",
+    "label": "Battery storage (energy) cost (2030 projection)",
+    "low_value": 132.9027,
+    "notes": [],
+    "npv_high": 3514296.9607232474,
+    "npv_low": 3548471.9407232474,
+    "swing": 34174.97999999998,
+    "unavailable": {},
+    "unit": "EUR/kWh"
+   },
+   {
+    "centre_value": 1.0,
+    "evaluation": "redispatch",
+    "high_value": 1.3,
+    "key": "energy_price_level",
+    "label": "Energy price level (multiplier on the tariff's energy bands around their time-weighted mean)",
+    "low_value": 0.7,
+    "notes": [],
+    "npv_high": 3548320.3946354347,
+    "npv_low": 3514448.5068110614,
+    "swing": 33871.88782437332,
+    "unavailable": {},
+    "unit": "multiplier"
+   }
+  ]
+ },
+ "value_streams": [
+  {
+   "annual_value": 32399.999999999993,
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "engine": "bill_calculator",
+   "key": "demand_charge_reduction",
+   "label": "Demand-charge reduction",
+   "share": 0.10212067273296285,
+   "unavailable": {}
+  },
+  {
+   "annual_value": 284871.70545305085,
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "engine": "bill_calculator",
+   "key": "energy_shift",
+   "label": "Energy time-shift",
+   "share": 0.8978793272670371,
+   "unavailable": {}
+  },
+  {
+   "annual_value": 0.0,
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "engine": "bill_calculator",
+   "key": "export_credit",
+   "label": "Export credit",
+   "share": 0.0,
+   "unavailable": {}
+  },
+  {
+   "annual_value": 0.0,
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "engine": "bill_calculator",
+   "key": "fixed",
+   "label": "Fixed charges",
+   "share": 0.0,
+   "unavailable": {}
+  }
+ ],
+ "value_streams_basis": "baseline",
+ "value_streams_option": "bess_1h",
+ "value_streams_status": "ok",
+ "verdict": {
+  "class": "recommended",
+  "disclosures": [
+   "npv_nonnegative_at_optimum_by_construction",
+   "irr_and_discounted_payback_bounded_at_optimum_by_construction"
+  ],
+  "drivers": [
+   "discount_rate",
+   "demand_charge_price",
+   "battery_inverter_eur_per_kw"
+  ],
+  "facts": {
+   "battery_max_hours": {
+    "basis": null,
+    "currency_year": null,
+    "engine": "ledger",
+    "fidelity": null,
+    "key": "battery_max_hours",
+    "label": "Hours of storage",
+    "unavailable": null,
+    "unit": "h",
+    "value": 1.0
+   },
+   "battery_npv": {
+    "basis": {
+     "subsidy": "excl",
+     "tax": "pre",
+     "terms": "real"
+    },
+    "currency_year": 2020,
+    "engine": "cash_flow_expander",
+    "fidelity": "quick_screen",
+    "key": "battery_npv",
+    "label": "Battery NPV",
+    "unavailable": null,
+    "unit": "EUR",
+    "value": 3531384.450723247
+   },
+   "battery_p_nom_mw": {
+    "basis": null,
+    "currency_year": null,
+    "engine": "lp",
+    "fidelity": "quick_screen",
+    "key": "battery_p_nom_mw",
+    "label": "Battery power",
+    "unavailable": null,
+    "unit": "MW",
+    "value": 0.3
+   },
+   "battery_payback_simple": {
+    "basis": {
+     "subsidy": "excl",
+     "tax": "pre",
+     "terms": "real"
+    },
+    "currency_year": 2020,
+    "engine": "cash_flow_expander",
+    "fidelity": "quick_screen",
+    "key": "battery_payback_simple",
+    "label": "Battery simple payback",
+    "unavailable": null,
+    "unit": "years",
+    "value": 0.38206819155478505
+   }
+  },
+  "headline_kpis": [
+   {
+    "basis": {
+     "subsidy": "excl",
+     "tax": "pre",
+     "terms": "real"
+    },
+    "currency_year": 2020,
+    "engine": "cash_flow_expander",
+    "fidelity": "quick_screen",
+    "key": "battery_npv",
+    "label": "Battery NPV",
+    "unavailable": null,
+    "unit": "EUR",
+    "value": 3531384.450723247
+   },
+   {
+    "basis": null,
+    "currency_year": null,
+    "engine": "lp",
+    "fidelity": "quick_screen",
+    "key": "battery_p_nom_mw",
+    "label": "Battery power",
+    "unavailable": null,
+    "unit": "MW",
+    "value": 0.3
+   },
+   {
+    "basis": {
+     "subsidy": "excl",
+     "tax": "pre",
+     "terms": "real"
+    },
+    "currency_year": 2020,
+    "engine": "cash_flow_expander",
+    "fidelity": "quick_screen",
+    "key": "battery_payback_simple",
+    "label": "Battery simple payback",
+    "unavailable": null,
+    "unit": "years",
+    "value": 0.38206819155478505
+   }
+  ],
+  "main_caveat": "perfect_foresight_dispatch",
+  "option_id": "bess_1h",
+  "reasons": [],
+  "sentence": "Recommended: a battery of {{battery_p_nom_mw}} MW with {{battery_max_hours}} hours of storage has a positive battery NPV of {{battery_npv}} at the centre and at every tornado bound.",
+  "sentence_template": "recommended",
+  "status": "ok"
+ }
+}

@@ -1,0 +1,22 @@
+technology,parameter,value,unit,currency_year,source
+battery inverter,FOM,0.3375,%/year,2020.0,"Danish Energy Agency, inputs/technology_data_catalogue_for_energy_storage.xlsx"
+battery inverter,efficiency,0.96,per unit,2020.0,"Danish Energy Agency, inputs/technology_data_catalogue_for_energy_storage.xlsx"
+battery inverter,investment,213.9279,EUR/kW,2020.0,"Danish Energy Agency, inputs/technology_data_catalogue_for_energy_storage.xlsx"
+battery inverter,lifetime,10.0,years,2020.0,"Danish Energy Agency, inputs/technology_data_catalogue_for_energy_storage.xlsx, Note K."
+battery storage,investment,189.861,EUR/kWh,2020.0,"Danish Energy Agency, inputs/technology_data_catalogue_for_energy_storage.xlsx"
+battery storage,lifetime,25.0,years,2020.0,"Danish Energy Agency, inputs/technology_data_catalogue_for_energy_storage.xlsx"
+home battery inverter,FOM,0.3375,%/year,2020.0,"Global Energy System based on 100% Renewable Energy, Energywatchgroup/LTU University, 2019, Danish Energy Agency, inputs/technology_data_catalogue_for_energy_st"
+home battery inverter,efficiency,0.96,per unit,2020.0,"Global Energy System based on 100% Renewable Energy, Energywatchgroup/LTU University, 2019, Danish Energy Agency, inputs/technology_data_catalogue_for_energy_st"
+home battery inverter,investment,304.9271,EUR/kW,2020.0,"Global Energy System based on 100% Renewable Energy, Energywatchgroup/LTU University, 2019, Danish Energy Agency, inputs/technology_data_catalogue_for_energy_st"
+home battery inverter,lifetime,10.0,years,2020.0,"Global Energy System based on 100% Renewable Energy, Energywatchgroup/LTU University, 2019, Danish Energy Agency, inputs/technology_data_catalogue_for_energy_st"
+home battery storage,investment,271.2908,EUR/kWh,2020.0,"Global Energy System based on 100% Renewable Energy, Energywatchgroup/LTU University, 2019, Danish Energy Agency, inputs/technology_data_catalogue_for_energy_st"
+home battery storage,lifetime,25.0,years,2020.0,"Global Energy System based on 100% Renewable Energy, Energywatchgroup/LTU University, 2019, Danish Energy Agency, inputs/technology_data_catalogue_for_energy_st"
+solar,FOM,1.9495,%/year,2020.0,Calculated. See 'further description'.
+solar,investment,683.1462,EUR/kW_e,2020.0,Calculated. See 'further description'.
+solar,lifetime,40.0,years,2020.0,Calculated. See 'further description'.
+solar-rooftop,FOM,1.4234,%/year,2020.0,Calculated. See 'further description'.
+solar-rooftop,investment,883.8138,EUR/kW_e,2020.0,Calculated. See 'further description'.
+solar-rooftop,lifetime,40.0,years,2020.0,Calculated. See 'further description'.
+solar-utility,FOM,2.4757,%/year,2020.0,"Danish Energy Agency, inputs/technology_data_for_el_and_dh.xlsx"
+solar-utility,investment,482.4785,EUR/kW_e,2020.0,"Danish Energy Agency, inputs/technology_data_for_el_and_dh.xlsx"
+solar-utility,lifetime,40.0,years,2020.0,"Danish Energy Agency, inputs/technology_data_for_el_and_dh.xlsx"

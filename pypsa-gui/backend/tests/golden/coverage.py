@@ -47,6 +47,23 @@ SURFACES = (
     "compare_curtailment",
     "compare_lost_load",
     "compare_storage_cycling",
+    # ── Plan S5 (guided investment study): the investment case, JSON and
+    # XLSX (since U2 the Investment Case engine's: `engine_adapter.option_case`
+    # / `case_workbook`). Checked against the SITE golden fixture
+    # (`tests/golden/site_fixture.py`, `tests/test_engine_adapter_case_golden.py`),
+    # not the multi-period one: the case is
+    # an upfront-cost cash flow of one flat year, a different quantity from
+    # the annuitised horizon CAPEX the generic loop compares.
+    "investment_case",
+    "investment_case_xlsx",
+    # ── Plan S6: the findings (the battery's value per option, the verdict,
+    # the value streams, the fixed-size tornado). Built on investment_case;
+    # checked on the site fixture by tests/test_study_tornado_lp.py.
+    "decision_findings",
+    # ── Plan S7: the decision report (JSON, HTML, DOCX, XLSX). Its figures are
+    # the findings' verdict facts and the named option's investment_case KPIs,
+    # copied, never recomputed; checked by tests/test_study_report_routes.py.
+    "decision_report",
 )
 
 FIXTURE_CLASSES = frozenset({"Generator", "Line", "Link", "StorageUnit"})
@@ -151,6 +168,25 @@ COVERAGE: dict[str, set[str]] = {
     # routers/compare.py::_compute_storage_cycling_summary(). Walks
     # `n.storage_units` / `n.storage_units_t.p` only.
     "compare_storage_cycling": {"StorageUnit"},
+    # routers/studies.py::get_option_case -> services/study/engine_adapter.py::
+    # option_case (U2 WP7; the pro forma was deleted in WP10). Asset-scoped:
+    # the option's battery StorageUnit (its two upfront parts, C1; FOM from the
+    # engine's asset lines, market revenue from asset_economics) and its PV
+    # Generator (overnight cost).
+    "investment_case":         {"Generator", "StorageUnit"},
+    # routers/studies.py::get_option_case_xlsx -> services/study/
+    # engine_adapter.py::case_workbook over the same case (U2 WP9).
+    "investment_case_xlsx":    {"Generator", "StorageUnit"},
+    # routers/studies.py::get_findings -> services/study/findings.py::
+    # assemble_findings. The battery StorageUnit (its NPV, alone or against a
+    # PV-only reference) and the PV Generator (whose rows cancel in that
+    # attribution) of each option's case.
+    "decision_findings":       {"Generator", "StorageUnit"},
+    # routers/studies.py::assemble_report / get_report / get_report_{html,
+    # docx,xlsx} -> services/study/report.py::assemble_decision_report over
+    # decision_findings and each option's investment_case: the battery
+    # StorageUnit and the PV Generator of the named option.
+    "decision_report":         {"Generator", "StorageUnit"},
 }
 
 EXCLUSIONS: dict[tuple[str, str], str] = {
@@ -343,5 +379,44 @@ EXCLUSIONS: dict[tuple[str, str], str] = {
     ("compare_storage_cycling", "Link"): (
         "Same reasoning as Generator: this surface never reads `n.links` — "
         "cycling is a storage-only concept."
+    ),
+    ("investment_case", "Line"): (
+        "The investment case is asset-scoped to the option's own battery and PV "
+        "(services/study/engine_adapter.py::option_case); the site pack "
+        "has no Line, and a line's cost is never an asset the site owner buys."
+    ),
+    ("investment_case", "Link"): (
+        "The site's only Links are grid_import / grid_export, the connection "
+        "the tariff prices: their energy is costed by the tariff engine's bills "
+        "(savings = bill_baseline - bill_option), never as an asset CAPEX or "
+        "OPEX line, which would count the grid bill twice."
+    ),
+    ("investment_case_xlsx", "Line"): (
+        "Same case as investment_case written to a workbook "
+        "(services/study/engine_adapter.py::case_workbook); asset-scoped, no Line in the pack."
+    ),
+    ("investment_case_xlsx", "Link"): (
+        "Same case as investment_case: the grid links are priced by the tariff "
+        "engine's bills, not booked as an asset of the case."
+    ),
+    ("decision_findings", "Line"): (
+        "The findings are built on investment_case (services/study/findings.py"
+        "::assemble_findings), asset-scoped to the option's battery and PV; the "
+        "site pack has no Line."
+    ),
+    ("decision_findings", "Link"): (
+        "The grid links are the tariff's connection: their energy reaches the "
+        "findings only through the tariff engine's bills (value streams and "
+        "savings), never as an asset of an option."
+    ),
+    ("decision_report", "Line"): (
+        "The report copies the findings and the named option's investment_case "
+        "(services/study/report.py::build_decision_report), asset-scoped to the "
+        "option's battery and PV; the site pack has no Line."
+    ),
+    ("decision_report", "Link"): (
+        "The grid links are the tariff's connection: the report shows their energy "
+        "only as the tariff engine's savings and value streams, never as an "
+        "asset of an option."
     ),
 }

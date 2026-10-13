@@ -64,6 +64,17 @@ if not FRONTEND_DIST.is_dir():
 datas = [
     (str(BACKEND / "project_templates"), "project_templates"),
     (str(BACKEND / "templates" / "matpower.jinja2"), "templates"),
+    # The decision study (guided investment study MVP-1, S9). Both are read
+    # `__file__`-relative, like `presets.json` below: `services/study/
+    # render_html.py` resolves `parents[2] / "templates"` and `services/study/
+    # packs.py` resolves `parents[2] / "study_library" / "load_profiles"`,
+    # i.e. _MEIPASS root under `pathex=[str(BACKEND)]`. Since U2 WP10 the
+    # study's defaults are the generic defaults pack (below); of the old
+    # vendored library only the sector load profiles remain (Q7). The runtime
+    # never downloads them. `tests/test_packaging_requirements.py` rebuilds
+    # this layout and loads both modules from it.
+    (str(BACKEND / "templates" / "decision_report.html.j2"), "templates"),
+    (str(BACKEND / "study_library" / "load_profiles"), "study_library/load_profiles"),
     # `local_bootstrap` runs `alembic upgrade head` on every launch and points
     # `script_location` at `<backend>/alembic`, so both must ship.
     (str(BACKEND / "alembic"), "alembic"),
@@ -126,7 +137,14 @@ datas += collect_data_files("pypsa", includes=["**/*.csv", "**/*.yaml"])
 # python-docx opens its bundled `templates/default.docx` (and the part
 # templates beside it) on every `Document()`; the report writer
 # (`services/reports/`) does that for the built-in report template.
-datas += collect_data_files("docx", includes=["templates/*"])
+# The decision report's DOCX (`services/study/render_docx.py`): python-docx's
+# `Document()` opens `docx/templates/default.docx` `__file__`-relative, and
+# `docx/parts/*.py` read `parts/../templates/*.xml` — the same
+# `optimization/../data` shape as pypsa, hence `pyz+py` below as well
+# (gate S9 [S3]). Without them `report.docx` 500s in the frozen app only.
+# One call covers both: the whole package's data is a superset of
+# `includes=["templates/*"]`.
+datas += collect_data_files("docx")
 
 # ── the planning → dynamics pipeline (gridspine; increment 6) ───────────────
 #
@@ -191,6 +209,12 @@ hiddenimports = [
     # spelled out so a future change to that guard cannot drop the package
     # from the bundle without a build error.
     "cloudpickle",
+    # The decision report's charts (`services/study/report_charts.py`) pick
+    # Agg by NAME (`matplotlib.use("Agg")`) and `Figure.savefig(format="png")`
+    # finds its canvas through a string table, so no import of the backend is
+    # visible to static analysis. PyInstaller's matplotlib hook detects the
+    # `use()` call today; declared here so the report does not depend on it.
+    "matplotlib.backends.backend_agg",
     "gridspine.drivers.study", "gridspine.drivers.status",
     # `gridspine_service` imports `check_external` from it inside the gridspine
     # guard; the packaging test derives the guarded imports and this was the
@@ -272,6 +296,8 @@ a = Analysis(                              # noqa: F821 - injected
         # pandapower's `networks` opens `pp_dir/networks/...json`.
         "gridspine": "pyz+py",
         "pandapower": "pyz+py",
+        # `docx/parts/*.py` open `parts/../templates/…` (see `datas`).
+        "docx": "pyz+py",
     },
 )
 
