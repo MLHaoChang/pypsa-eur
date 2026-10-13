@@ -7,6 +7,7 @@ SPDX-PackageDownloadLocation = "https://github.com/pypsa/pypsa-eur"
 path = [
     "doc/data_inventory.csv",
     "doc/img/*",
+    "doc/release-notes.d/*.md",
     "test/test_data/*",
 ]
 SPDX-FileCopyrightText = "The PyPSA-Eur Authors"
