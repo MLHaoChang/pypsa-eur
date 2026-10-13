@@ -203,3 +203,16 @@ def test_the_milp_read_dispatcher_resolves_the_project_and_calls_get_milp(hub, m
     assert chat_tools.DISPATCHERS["campus_get_milp"](project_id="Chat Hub") == {"ok": True}
     (call,) = calls
     assert isinstance(call[0], Project) and call[0].name == "Chat Hub" and len(call) == 1
+
+
+def test_the_copilot_quotes_a_re_checked_value_with_its_own_hour_and_case():
+    desc = {t["name"]: t["description"] for t in TOOLS}["campus_get_investment"]
+    for field in ("worst_period_with_measures", "worst_hour_with_measures", "worst_case_with_measures"):
+        assert field in desc
+    assert "not the as-is worst hour" in desc
+
+
+def test_the_copilot_says_least_cost_choice_rather_than_the_plans_step_name():
+    desc = {t["name"]: t["description"] for t in TOOLS}["campus_get_milp"]
+    assert "call it the least-cost choice, not C8" in desc
+    assert "after the warm start" in desc
