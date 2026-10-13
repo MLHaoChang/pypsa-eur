@@ -2365,7 +2365,9 @@ def solve_ppa_price(target_irr: float, target_year: int,
     from pydantic import ValidationError
 
     from models.finance import SolvePpa
-    from routers.results import _dispatch_ready, _ic_build_case, _study_mesh_blocker
+    from routers.results import (
+        _dispatch_ready, _ic_build_case, _ic_read_campus, _study_mesh_blocker,
+    )
     from routers.simulation import _state as sim_state
     from services.finance.case import FinanceRefused
     from services.finance.engine import solve_ppa
@@ -2395,7 +2397,10 @@ def solve_ppa_price(target_irr: float, target_year: int,
     if owner is not None and (not isinstance(owner, str) or not owner.strip()):
         _ic_raise(422, "investment_case_request_invalid", "owner must be a non-empty string")
     owner = owner if owner is not None else _ic_default_owner(sim_state)
-    build = _ic_build_case(n, cfg, owner=owner, lost_load=sim_state.get("last_lost_load"))
+    # IC G3 R-2: the campus study read the way the route reads it, so the solved
+    # price and the report value the same case.
+    build = _ic_build_case(n, cfg, owner=owner, lost_load=sim_state.get("last_lost_load"),
+                           campus=_ic_read_campus(raw))
     try:
         case = build()
     except FinanceRefused as exc:
@@ -2438,7 +2443,10 @@ def solve_ppa_price(target_irr: float, target_year: int,
         "target_irr": target_irr, "target_year": target_year,
         "equity_post_tax_irr_at_target_year": _ne(out.get("solved_equity_irr_at_target_year"), 6),
         "owner": _cut(case.owner),
-        "flags": [_cut(f, 160) for f in out.get("solve_ppa_flags") or []],
+        # IC G3 gate C1: the case's campus flags too, so a price solved without the
+        # campus extras (a stale study, no engine, an unsaved network) says so.
+        "flags": [_cut(f, 160) for f in [*(out.get("solve_ppa_flags") or []),
+                                         *(f for f in case.flags if f.startswith("campus_study_"))]],
         "basis": ("post-tax equity IRR on the incremental cash against the counterfactual "
                   "supply cost, over operating years 1..target_year (SAM ppa_soln_mode=0)"),
         "stored_inputs_changed": False,

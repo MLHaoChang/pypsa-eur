@@ -356,12 +356,16 @@ def _extra_assets_block(case) -> list[dict[str, Any]]:
     fin = case.inputs
     assets = {a.name: a for a in case.assets}
     if fin.currency_year is not None:
-        money = (f"upfront costs in the case's money, {fin.currency_year} {fin.currency}: the "
-                 "caller converted them from the campus library's currency and price year")
+        # IC G3 gate C3: nothing is converted; the investment-case route refuses a
+        # campus study in another currency or price year.
+        money = (f"upfront costs in the case's money, {fin.currency_year} {fin.currency}, as "
+                 "passed: the investment-case route refuses a campus study in another currency "
+                 "or price year")
     else:
         # IC G2 gate r1 note 5 (flag `extra_asset_money_year_unstated`): nothing to claim.
         money = (f"upfront costs as passed, read as {fin.currency}; the case's currency year is "
-                 "not stated, so their money year is not checked against it")
+                 "not stated, so their price year is not checked against it (the "
+                 "investment-case route still checks their currency)")
     out = []
     for e in getattr(case, "extra_assets", ()) or ():
         a = assets.get(e.name)
