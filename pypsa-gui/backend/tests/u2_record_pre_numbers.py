@@ -309,9 +309,22 @@ def run_driver(timeout: float = 1800.0) -> dict:
         proc = subprocess.run([sys.executable, str(DRIVER)], cwd=_BACKEND, env=env,
                               capture_output=True, text=True, timeout=timeout)
         if proc.returncode != 0 or not out.is_file():
-            tail = "\n".join((proc.stdout + proc.stderr).splitlines()[-40:])
-            raise RuntimeError(f"qa_decision_study.py exited {proc.returncode}:\n{tail}")
+            raise RuntimeError(f"qa_decision_study.py exited {proc.returncode}:\n"
+                               + _failure_tail(proc.stdout, proc.stderr))
         return json.loads(out.read_text(encoding="utf-8"))
+
+
+def _failure_tail(stdout: str, stderr: str) -> str:
+    """
+    What a failed driver run says: its FAIL steps, then the last 40 lines of
+    its output without the per-request httpx log lines. A poll that ran out its
+    timeout used to fill the whole tail with `GET .../run` lines, hiding the
+    failed step and the logged exception (CI, 13 Oct).
+    """
+    lines = [*stdout.splitlines(), *stderr.splitlines()]
+    fails = [ln for ln in lines if "[FAIL]" in ln]
+    rest = [ln for ln in lines if "HTTP Request:" not in ln][-40:]
+    return "\n".join([*fails, "--- last lines ---", *rest])
 
 
 def driver_section(ev: dict) -> dict:
