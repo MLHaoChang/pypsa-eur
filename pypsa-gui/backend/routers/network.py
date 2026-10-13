@@ -22,6 +22,9 @@ from db.models import Session as SessionRow
 from db.session import get_db
 from deps import current_session
 from services import active_project, attribute_catalog
+from services.asset_schema import fields as asset_fields
+from services.asset_schema import provenance as asset_provenance
+from services.asset_schema.schema import CLASS_ATTR
 from services.transient_rows import filter_transient_names
 # Phase 12f's write-path guards live in `services/user_timeseries.py` beside
 # the `_user_ts` machinery they protect, so `routers/network_time_axis.py`
@@ -737,6 +740,36 @@ def get_attribute_catalog(component: str) -> dict:
             f"{', '.join(attribute_catalog.known_components())}.",
         )
     return {"component": component, "attributes": attributes}
+
+
+@router.get("/asset_schema/{component}")
+def get_asset_schema(component: str) -> dict:
+    """
+    The field descriptors an asset card renders, grouped in the fixed order
+    (S1, plan 2026-10-13-s1-expert-asset-cards.md). Class-level like the
+    catalog above, so the client caches it the same way. The logic lives in
+    services/asset_schema/fields.py.
+    """
+    try:
+        return asset_fields.schema_payload(component)
+    except KeyError:
+        raise HTTPException(
+            400,
+            f"No asset schema for '{component}'. Expected one of: "
+            f"{', '.join(asset_fields.known_components())}.",
+        )
+
+
+@router.get("/asset_schema/{component}/provenance/{name}")
+def get_asset_provenance(component: str, name: str) -> dict:
+    """Per-field provenance of one asset (`n.meta["asset_params"]`); fields never recorded are absent."""
+    attr = CLASS_ATTR.get(component)
+    if attr is None:
+        raise HTTPException(400, f"No asset schema for '{component}'.")
+    n = PyPSAService.get_network()
+    if name not in getattr(n, attr).index:
+        raise HTTPException(404, f"{component} '{name}' not found")
+    return {"component": component, "name": name, "fields": asset_provenance.get(n, component, name)}
 
 
 # ── Time Series ───────────────────────────────────────────────────────────────
