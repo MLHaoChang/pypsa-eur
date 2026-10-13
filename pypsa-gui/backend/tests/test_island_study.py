@@ -174,7 +174,7 @@ def test_an_extendable_genset_is_not_committed():
     n = _solve_uc(n, _uc(units))
     uc = n._island_facts["uc"]
     assert uc["committed"] == ["g"]
-    assert "extendable" in uc["not_committed"]["gx"]
+    assert uc["not_committed"]["gx"] == "not committed: extendable (big-M bilinear)"
     assert "Island-min-load-gx" in n.model.constraints
     assert not bool(n.generators.at["gx", "committable"])
 
