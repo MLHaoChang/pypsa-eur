@@ -1,6 +1,6 @@
 # 15 — `ask_user`: multi-select, a detail body, and presentation intents
 
-Status: ready-for-agent
+Status: ready-for-agent (done 2026-10-07: multi_select, detail, intent; W5 in the parity battery)
 Type: task
 Blocked by: 04 (done)
 
@@ -42,3 +42,19 @@ FakeProvider scripts for each intent yield `tool_request → tool_running →
 choice_request → tool_result → turn_done`; vitest covers the three card
 shapes; the parity battery passes 4/4 on the stub and live Anthropic wires;
 `tool-error-kinds.json` unchanged.
+
+## Comments
+
+2026-10-07 (done). One change from the spec above: a `plan_review` card
+takes the options the model gives (the tool description suggests Approve and
+Revise) instead of forcing exactly two; what the validator enforces is that
+it has a detail and is single-pick, since a review is one verdict. The model
+also receives `multi_select` and an `answer_format` in the `presented`
+result, so it knows a reply may be several labels joined by "; ". The detail
+keeps its line breaks (it is Markdown) and is capped at 2,000 characters;
+the panel renders it with the chat's Markdown renderer in a scrolling box.
+The frame handler normalises an older or malformed frame to a plain
+single-pick card. Tests: 10 backend (red first), 5 card and 2 frame-handler
+tests in the panel, a stub branch and a battery prompt (W5) with its check.
+Parity: stub 5/5, live Anthropic 5/5. Gates: the full chat regression 3834
+passed, 0 failed; the frontend 291 files / 3372 tests, tsc clean.

@@ -89,38 +89,29 @@ own cookie policy through configuration. The CSRF double-submit check
 (`main.py:645`) currently carries the load for those sessions. Source: gap 5 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
 
-### 10b. An edit after a hub study is not tracked (owner-approved: P33b)
+### 12. `/api/io/import/*` under a session pointer imports into a context the next request never reads
 
-Added 2026-09-30 (P28 gate, owner decision O1). The EH review's `stale`
-flag is true only when a later foreground solve cleared the stored report
-(`services/adequacy/eh_review.py:455-460`). An edit to the network after a
-finished study leaves the Guided greeting and the Hub design Results card
-unaware. P28 softened the greeting's wording so that it claims nothing about
-the current network. The fix is a backend network-revision marker on the
-study record (e.g. `network_changed`), read by both surfaces. It is scheduled
-as P33b in `plans/2026-09-28-guided-mode-deferred.md` §3.
+Added 2026-10-06, found while scoping P33b step 0 (spec §0a). The four io
+imports (`routers/io.py:191` `_reset_with_ts_clear` → `reset_network`) run
+inside a session-bound request, so the fresh **unbound** ctx they import into
+lands in `scratch:<session>`; unlike `POST /api/network/reset`
+(`routers/network.py:633-635`) they never clear the session's active-project
+pointer, so `resolve_for_session` hands the next request the project's
+resident ctx again. Reproduced on `bb8b2e7b8` with the suite's fixtures: with
+a 1-bus project active, `POST /api/io/import/netcdf` of a 7-bus file returns
+200 `{"buses": 7, …}` and the next `GET /api/network/buses` returns 1 bus; the
+registry holds `org:uuid → (project, 1 bus)` and `scratch:<session> → (None,
+7 buses)`. The user sees an import that appears not to happen. The fix is the
+"New" rule (clear the pointer, as `/api/network/reset` does), not P33b's
+re-keying, so it is outside step 0. (The related note about `import_bundle` and
+`create_from_template` never registering their new ctx is resolved by P33b step
+4b, `_register_created_context` in `routers/projects.py`: in local mode it was
+lossy — the next project switch dropped the unregistered ctx.) Severity: High
+(a write that is silently not read back). Server only.
 
-### 10c. Two narrow project-lock races have correct guards but no test
+### 13. Re-loading the open project with unsaved edits leaves memory and disk disagreeing
 
-Added 2026-09-30 (P28 re-gate, mutants R4 and R7). In `moveProjectLock`, a
-stale 409 re-acquire that fails after a fresh acquire of the same project
-(R4), and a stale failed acquire in an X→Y→Z switch (R7), are both ignored
-by the generation guard. Removing either check leaves every test green. Add
-one test for each so the guard stays pinned.
-
-### 10a. Re-activating a project does not restore its hub study record
-
-Added 2026-09-30, from the P28 smoke. A project whose Energy Hub study
-finished, and which is then left and re-activated
-(`POST /api/projects/<p>/activate`), answers `GET /api/results/eh_study`
-with no study. The Guided hub rail opens at Site again, and the greeting says
-"No study has run yet". The Guided "study done" state is lost for a user who
-re-opens a project. Where the record is stored was not traced. The P28 smoke
-part (C) works around it by re-running the study. Sources: the plan's "P28
-phase note" (contract drift 3) and
-`qa/2026-09-30-guided-mode-deferred-gate-P28.md`.
-
----
+Added 2026-10-06, found at the P33b re-gate (`qa/2026-10-06-guided-p33b-gate.md`, RN-1; pre-existing, identical on `240b2a00e` and after P33b). Under sessions, with project A resident and an unsaved edit in memory (bus x 0 → 1), `GET /api/projects/A` (load) reads the disk: memory holds x = 0 and the undo stack is empty. `load_project` then calls `PyPSAService.register(key, ctx)` (`routers/projects.py`, the registration after the import), which displaces the resident A ctx and writes it back through `_save_evicted_ctx` — so **disk** now holds the edited copy (x = 1) while **memory** holds the disk copy (x = 0). The next save or autosave overwrites the edit silently; a restart instead brings it back. Probe: `scratchpad/qa33b/test_qa_regate.py::test_reload_same_project`. Fix direction: a load of the project the caller is already on must not write the displaced context back (it is the copy the user chose to discard), or must ask first; the same displacement mechanism is why P33b's deviation 1 rejected registering `prev` inside `reset_network`. Severity: Medium (a deliberate "discard and reload" is undone on the next restart, or an edit is lost on the next save, depending on order). Server only.
 
 ## Closed since the 2026-09-12 pass
 

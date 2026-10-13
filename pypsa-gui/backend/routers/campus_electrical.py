@@ -19,9 +19,11 @@ the request, unless a fresh one with these settings exists), ``GET
 started) and ``POST /{name}/milp/cancel`` asks it to stop, keeping its best
 point (404 when none has run). Starting and cancelling check the edit lock.
 
-``GET /{name}/owner-assets`` (part three D2) lists what the last investment run
+``GET /{name}/owner-assets`` (part three D2) lists what the investment run
 bought as the extra owner assets of the investment case, with the study's
-``source_hash`` and a ``stale`` flag: ``{assets, source_hash, stale}``. Read only.
+``source_hash``, a ``stale`` flag and the run's ``study_method`` (the joint
+optimisation when it is fresh with a choice of its own, else least cost; owner
+decision 2026-10-12): ``{assets, source_hash, stale, study_method}``. Read only.
 
 The project's own grid codes (plan C10) are under ``/{name}/grid-codes``,
 wrapping ``services/campus_grid_code_service.py``:
@@ -238,10 +240,10 @@ def reset_library(
 
 @router.get("/{name}/owner-assets")
 def owner_assets(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
-    """What the last investment run bought, as the extra owner assets of the
-    investment case: ``{"assets": [...], "source_hash": str | None, "stale": bool}``
-    (``owner_assets_response``); no assets and no hash before an investment run.
-    Read only."""
+    """What the investment run bought, as the extra owner assets of the
+    investment case: ``{"assets": [...], "source_hash": str | None, "stale": bool,
+    "study_method": "milp" | "least_cost" | None}`` (``owner_assets_response``);
+    no assets, no hash and no method before an investment run. Read only."""
     return ce.owner_assets_response(_row(proj, db))
 
 
