@@ -289,6 +289,7 @@ on all four.
 | Q15 | The session event log is adopted as the source of truth; `chat.jsonl` stays as a projection for one release so `/history`, lineage and every test see no change (issue 13). |
 | Q16 | One extra skills root under the app data directory, never a project folder or bundle; same-name shadowing refused; provenance shown in the panel, never in the prompt (issue 14; D12 amended accordingly). |
 | Q17 | Goals may run unattended rounds: default 5, ceiling 20, no tier changes, every card still blocks, only a human resumes a paused or blocked goal; after issue 13 (issue 17). |
+| Q19 | (2026-10-12, asked when master's PR #102 and issue 20 disagreed) `input_tokens` means input NOT served from cache on every wire, as on Anthropic; cache reads and writes are reported beside it. One mapping for both OpenAI wires (`harness/providers/usage.py`); master's cache tests, its Responses adapter and the paid-test cost meter follow it, the meter still pricing every prompt token at the uncached rate. |
 | Q18 | The MCP client is specified later, in one spec with issue 11 (exposure, Q8): admin-only, zero servers by default, write tier unless marked read-only, descriptions capped and results fenced (issue 19 stays deferred). |
 
 The questions as asked, with the recommendations:
