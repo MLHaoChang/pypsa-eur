@@ -186,6 +186,31 @@ picks (**multi-select**: one Send button, the picks joined by "; "), or be a
 **plan review**: the detail is a plan and the card takes one verdict.
 _Avoid_: prompt, dialog, confirmation (that is the other card)
 
+**Run evidence**:
+The immutable record of one foreground solve, queued solve, adequacy study,
+or report, stored under `<project>/run_evidence/<run_id>/`
+(`backend/services/run_evidence.py`). Section files are hashed; the terminal
+`manifest.json` is written last and left unchanged. A missing or altered
+artifact is Unavailable for that run id.
+_Avoid_: the newest results, the live network, a saved snapshot
+
+**Discussed run**:
+The run id the current chat episode is talking about. `discuss_project_run`
+stores it on the session and, when a durable parent thread is bound, on
+`refs.discussed`. Unless called with `open_ui=false`, it opens the Results
+chrome and selects that run by identifier. Resuming the parent copies the same identifiers onto the new
+episode (`durable_conversation.resume_episode`). The binding leaves the live
+network's inputs in place.
+_Avoid_: the active solve, checked scope (the assurance binding)
+
+**Experiment plan**:
+A typed list of cases saved under `<project>/experiments/` by
+`start_experiment` (`backend/services/experiments.py`). Each case is 1–12
+typed changes. The record stays `planned` with `executed: false` until a
+later slice runs the cases through ordinary harness tools.
+_Avoid_: scenario (a Scenario is a Project), sensitivity sweep (that tool
+queues solves), task (a durable sequence of ordinary tool calls)
+
 ## Investment language
 
 Shared by the expert workbench and the guided investment path, which run on one
