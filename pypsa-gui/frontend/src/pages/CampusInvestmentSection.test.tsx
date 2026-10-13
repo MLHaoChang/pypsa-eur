@@ -626,6 +626,8 @@ describe('investment: replacement at the end of life (plan C14)', () => {
     expect(within(t).getByTestId('invest-bought').textContent).toBe('2030')
     expect(screen.queryByTestId('invest-horizon')).toBeNull()
     expect(within(screen.getByTestId('cost-2030')).queryByTestId('cost-replacement')).toBeNull()
+  })
+})
 
 // Owner decision 2026-10-12: the investment case takes the joint optimisation when it is
 // fresh and found its own choice, else the least-cost run. The switch is never silent.
