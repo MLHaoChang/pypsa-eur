@@ -1,7 +1,7 @@
 // S1b: the pure form logic behind the schema-rendered asset cards.
 import { describe, expect, it } from 'vitest'
 import type { AssetFieldSpec } from '../api/assetSchema'
-import { buildPatch, displayValue, isRevealed, seedForm } from './assetForm'
+import { annuity, buildPatch, derivedStored, displayValue, isRevealed, seedForm } from './assetForm'
 
 function spec(key: string, over: Partial<AssetFieldSpec> = {}): AssetFieldSpec {
   return {
@@ -89,5 +89,28 @@ describe('displayValue', () => {
     expect(displayValue(CAPEX, 95_712)).toBe(95.712)
     expect(displayValue(CAPEX, null)).toBeNull()
     expect(displayValue(CAPEX, NaN)).toBeNull()
+  })
+})
+
+describe('derivedStored: the capital cost PyPSA charges', () => {
+  it('annuity matches the backend\'s (periodized_costs._annuity)', () => {
+    expect(annuity(0.07, 25)).toBeCloseTo(0.0858105, 6)
+    expect(annuity(0, 20)).toBe(0.05)
+    expect(annuity(0.07, 0)).toBe(0)
+  })
+
+  it('a single-part asset priced by an overnight cost: overnight × annuity, whatever the column holds', () => {
+    // A pack-priced template generator (IC S3 seeds) stores capital_cost 0.
+    const gen = { overnight_cost: 581_394.9, lifetime: 25, discount_rate: 0.07, capital_cost: 0 }
+    expect(derivedStored('capital_cost', gen)).toBeCloseTo(581_394.9 * annuity(0.07, 25), 6)
+    // …and a stale column after the overnight cost was edited.
+    expect(derivedStored('capital_cost', { ...gen, capital_cost: 1 })).toBeCloseTo(49_890, -1)
+  })
+
+  it('the column stands without a rate, without an overnight cost, and for any other derived field', () => {
+    expect(derivedStored('capital_cost', { overnight_cost: 500_000, lifetime: 25, capital_cost: 42 })).toBe(42)
+    expect(derivedStored('capital_cost', { overnight_cost: null, capital_cost: 95_712, lifetime: 25,
+      discount_rate: 0.07 })).toBe(95_712)
+    expect(derivedStored('lifetime', { lifetime: 25, overnight_cost: 1, discount_rate: 0.07 })).toBe(25)
   })
 })

@@ -6,7 +6,7 @@
 import { Fragment, type ReactNode } from 'react'
 import type { AssetFieldSpec, AssetSchema } from '../../api/assetSchema'
 import type { Bus, Carrier } from '../../api/types'
-import { displayValue, isRevealed } from '../../utils/assetForm'
+import { derivedStored, displayValue, isRevealed } from '../../utils/assetForm'
 import {
   BusSelect, CarrierGroupSelect, ChkInput, InfoTip, NumInput, SectionHdr, TxtInput,
   type ExpandedItem, type FS, type SetFS,
@@ -35,7 +35,7 @@ export function assetReadoutItems(schema: AssetSchema | undefined, asset: Record
   const out: ExpandedItem[] = []
   for (const f of schemaFields(schema)) {
     if (f.group === 'identity' || hidden.has(f.key) || !isRevealed(f, fs)) continue
-    const v = asset[f.key]
+    const v = f.derived ? derivedStored(f.key, asset) : asset[f.key]
     if (f.kind === 'bool') {
       if (v === true) out.push({ label: f.label, value: true, tip: f.help })
       continue
@@ -177,7 +177,7 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                     {parts.map(p => <Fragment key={p.key}>{after?.[p.key]}</Fragment>)}
                   </>
                 )
-                  : f.derived ? <DerivedRow spec={f} value={current[f.key]} />
+                  : f.derived ? <DerivedRow spec={f} value={derivedStored(f.key, current)} />
                   : f.kind === 'bool' ? <ChkInput label={f.label} k={f.key} fs={fs} set={set} tip={f.help} onCheck={onCheck?.[f.key]} />
                   : f.kind === 'bus' ? <BusSelect k={f.key} fs={fs} set={set} buses={buses} tip={f.help} label={f.label} />
                   : f.kind === 'carrier' ? <CarrierGroupSelect k={f.key} fs={fs} set={set} carriers={carriers} tip={f.help} />

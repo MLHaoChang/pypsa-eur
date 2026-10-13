@@ -150,8 +150,8 @@ GENERATOR: tuple[FieldSpec, ...] = (
               "build year plus lifetime.", "years", "years", key_param=True),
     *_investment_common(),
     _money_per_mw_yr("capital_cost", "investment", "Capital cost (annualised)", "Derived: overnight cost × annuity("
-                     "discount rate, lifetime) + fixed O&M. The optimiser pays it on every MW it adds, for the share of "
-                     "a year your snapshots represent.", derived=True),
+                     "discount rate, lifetime); fixed O&M is charged on top. The optimiser pays it on every MW it adds, "
+                     "for the share of a year your snapshots represent.", derived=True),
     _money_per_mw_yr("fom_cost", "fom", "Fixed O&M", "Fixed operation and maintenance per installed unit per year, "
                      "paid on the whole capacity whatever the dispatch."),
     FieldSpec("marginal_cost", "variable", "Marginal cost", "Variable cost per MWh dispatched: fuel plus variable "
@@ -213,7 +213,7 @@ STORAGE_UNIT: tuple[FieldSpec, ...] = (
               "with.", "years", "years", derived=True),
     _money_per_mw_yr("capital_cost", "investment", "Capital cost (annualised)", "Derived from both parts: each "
                      "part's overnight cost annualised over its own lifetime, the energy part scaled by the "
-                     "duration, plus fixed O&M. Per kW of power.", derived=True),
+                     "duration; fixed O&M is charged on top. Per kW of power.", derived=True),
     _share("inv_power_fom_share", "fom", "Power part: fixed O&M", "Fixed O&M of the power part, as a share of its "
            "overnight cost per year.", part="power"),
     _share("inv_energy_fom_share", "fom", "Energy part: fixed O&M", "Fixed O&M of the storage block, as a share "

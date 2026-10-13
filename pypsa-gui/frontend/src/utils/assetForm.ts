@@ -21,6 +21,32 @@ export function displayValue(spec: AssetFieldSpec, stored: unknown): number | nu
   return finite(stored) ? Number((stored * spec.scale).toPrecision(12)) : null
 }
 
+/** The annuity (capital recovery) factor, as `periodized_costs._annuity`: r(1+r)^L / ((1+r)^L − 1). */
+export function annuity(rate: number, lifetime: number): number {
+  if (lifetime <= 0) return 0
+  if (rate === 0) return 1 / lifetime
+  const f = (1 + rate) ** lifetime
+  return rate * f / (f - 1)
+}
+
+/**
+ * The stored value a derived row shows. A single-part asset priced by an
+ * overnight cost is charged `overnight × annuity(rate, lifetime)` by PyPSA,
+ * whatever its `capital_cost` column holds (0 for a pack-priced template, or
+ * stale after the overnight cost is edited), so that is its capital cost. A
+ * battery's parts keep `overnight_cost` empty and its `capital_cost` derived
+ * on every write, so it reads the column. Without a rate the column stands:
+ * the solve fills the global rate in.
+ */
+export function derivedStored(key: string, asset: Record<string, unknown>): unknown {
+  if (key !== 'capital_cost') return asset[key]
+  const { overnight_cost: overnight, lifetime, discount_rate: rate } = asset
+  if (finite(overnight) && overnight > 0 && finite(lifetime) && lifetime > 0 && finite(rate)) {
+    return overnight * annuity(rate, lifetime)
+  }
+  return asset.capital_cost
+}
+
 /** The edit form's starting strings, for the typed (non-derived) fields only. */
 export function seedForm(specs: AssetFieldSpec[], asset: Record<string, unknown>): FS {
   const out: FS = {}

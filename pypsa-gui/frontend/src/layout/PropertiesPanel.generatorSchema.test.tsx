@@ -71,6 +71,13 @@ describe('a generator is priced by its overnight cost', () => {
     expect(screen.getByTestId('asset-derived-capital_cost').textContent).toContain('48.1')
   })
 
+  it('a pack-priced unit (capital_cost 0) shows the capital cost PyPSA charges', async () => {
+    await openEdit({ ...(GAS as object), overnight_cost: 581_394.9, lifetime: 25, discount_rate: 0.07,
+      capital_cost: 0, fom_cost: 10_346 })
+    // 581.39 €/kW × annuity(7 %, 25 y) = 49.89 €/kW/yr, not the column's 0.
+    expect(screen.getByTestId('asset-derived-capital_cost').textContent).toContain('49.89')
+  })
+
   it('saves the overnight cost per MW', async () => {
     await openEdit(PV)
     fireEvent.change(inputOf('Overnight cost (€/kW)'), { target: { value: '500' } })
