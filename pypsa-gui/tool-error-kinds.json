@@ -47,6 +47,10 @@
       "surface": "inline",
       "why": "The user pressed stop. Announcing their own action in a banner is noise."
     },
+    "approval_unavailable": {
+      "surface": "banner",
+      "why": "The approval of a confirmed (or policy auto-approved) action could not be written to the approval log, so the action did not run: approvals fail closed (chat harness issue 18). Usually the app-data directory is full or not writable."
+    },
     "baseline_has_no_case": {
       "surface": "inline",
       "why": "Decision study (S5): the investment case was asked for the grid-only baseline, which every case is measured against. Route-only today; a client-side slip, nothing for the user to fix."
@@ -66,6 +70,10 @@
     "confirmation_denied": {
       "surface": "inline",
       "why": "The user denied the card. Their own decision, already visible on the card."
+    },
+    "confirmation_revoked": {
+      "surface": "inline",
+      "why": "The card was withdrawn because the conversation's scope changed (durable_conversation.rebind_scope); the action did not happen. Recorded as approval/decided revoked (chat harness issue 18)."
     },
     "confirmation_expired": {
       "surface": "banner",

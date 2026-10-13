@@ -37,6 +37,7 @@ harness/
   stub.py         the scripted stub loop behind StreamRequest.script
   session.py      ChatSession, PendingConfirmation, the session registry with its TTL and cap
   confirm.py      the confirmation gate: tiers, the Guided write rule, auto-approve, parallel-destructive
+  approvals.py    every card's asked/decided record per owner and session; an approval that cannot be recorded does not run
   ratelimit.py    the /stream token bucket
   sse.py          the SSE framing of a yielded (event, payload)
   fence.py        the untrusted-content delimiters and the neutraliser

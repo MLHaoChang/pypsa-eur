@@ -336,6 +336,19 @@ If the TTL elapses without a decision the stream emits a `tool_error` with
 token. Approving an expired token via the REST endpoint returns 409
 `error_kind='confirmation_expired'`.
 
+Every card is recorded (`harness/approvals.py`, chat harness issue 18): an
+`approval/asked` line when it is shown, and an `approval/decided` line with
+the outcome (`approved`, `rejected`, `expired`, `aborted`, `revoked` or
+`unavailable`) and who decided (`user`, `ttl`, `session`, `system`, or
+`policy` for a tier in `PYPSA_GUI_CHAT_AUTO_APPROVE_TIERS`, which records a
+decision with no card). The log never repeats the tool's arguments; it links
+a preview's `preview_id` and a checked turn's `operation_id`. It lives under
+the app-data directory (`chat-approvals/`, per user and chat, kept 90 days).
+Approvals fail closed: if the record cannot be written, the action does not
+run and the stream emits `error_kind='approval_unavailable'`. A card
+withdrawn because the conversation's scope changed ends at once with
+`error_kind='confirmation_revoked'` instead of waiting for its timeout.
+
 ## Error flows
 
 The error banner above the message list recognises:
