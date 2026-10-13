@@ -993,6 +993,33 @@ def _clear_investment(run_dir: Path) -> None:
         (run_dir / name).unlink(missing_ok=True)
 
 
+def _write_island_tables(project, run_dir: Path, spec: dict, nc: Path) -> None:
+    """The I3a island hourly tables beside ``campus_hourly.csv`` (campus
+    island plan; owner option A): gridspine's contracts, valued by
+    ``services/solver/island.island_hourly`` from the saved project. Written
+    only when the project has an island sidecar; otherwise an earlier run's
+    tables are removed, so nothing stale is read as this run's."""
+    from gridspine.schema.island import ISLAND_HOURLY_CSV, ISLAND_UNIT_HOURLY_CSV
+
+    from services.adequacy.island_config import SIDECAR_NAME, load_island_config
+    from services.solver.island import IslandRefusal, island_hourly
+
+    paths = (run_dir / ISLAND_UNIT_HOURLY_CSV, run_dir / ISLAND_HOURLY_CSV)
+    island = load_island_config(project_registry.project_dir(project) / SIDECAR_NAME)
+    if island is None:
+        for path in paths:
+            path.unlink(missing_ok=True)
+        return
+    ids = {u["pypsa_name"]: uid for uid, u in (spec.get("campus") or {}).get("units", {}).items()
+           if u.get("pypsa_name")}
+    try:
+        tables = island_hourly(cs.load_solved_network(nc), island, unit_ids=ids)
+    except IslandRefusal as exc:
+        raise ContractError(str(exc)) from exc
+    for path, df in zip(paths, tables):
+        path.write_text(df.to_csv(index=False))
+
+
 def run(project, settings: dict) -> dict:
     """Prepare, rank and size the campus, then buy the electrical assets from
     the library (``invest``, default on); returns ``get_state``."""
@@ -1011,6 +1038,7 @@ def run(project, settings: dict) -> dict:
         try:
             with _netcdf_lock():
                 cs.prepare_campus(run_dir, spec, nc)
+                _write_island_tables(project, run_dir, spec, nc)
             cs.rank_campus(run_dir, k=s["k"])
             cs.size_campus(run_dir, criteria, profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs)
             _clear_investment(run_dir)               # the earlier run's purchases belong to its sizing, not this one's
