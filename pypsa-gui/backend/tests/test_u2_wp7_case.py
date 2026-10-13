@@ -409,7 +409,7 @@ def _assert_same(got, want, path=""):
 def test_the_capex_bound_figures_did_not_move(pin):
     """
     IC engine ask 2: the tornado's CAPEX-bound figures (KPIs, every year,
-    every asset's parts) recorded from the C5 WORKAROUND on master 47d9dda2
+    every asset's parts) recorded from the C5 WORKAROUND on master 9a8ae987 (re-recorded there: #175 unrounded the FOM statistics)
     stay put after the switch to `scale_capex(case, f, asset=, part=)`.
     """
     bound = _A().bound_case(_bundle(pin["option"]), pin["variant"], kind="capex")
