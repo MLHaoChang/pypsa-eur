@@ -6,6 +6,8 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
+* Feat(pypsa-gui): Make the companion's Live mode a presence-led grid node. The user's line flashes and clears, the node follows the stream through listening, thinking and speaking, and the answer stays in the console transcript instead of beside the companion. Confirmation and download chips remain; the console chat is unchanged.
+
 * Fix(pypsa-gui): Treat coupling and margin loop verdicts `met` and `unreachable` as finished study outcomes. `wait_for_job` no longer times out after a completed unreachable search, and a target that was met counts as success. Run evidence publishes the unreachable verdict instead of leaving a running marker.
 
 * Docs(pypsa-gui): Document immutable run evidence, discussed-run resume, current load-flow summaries, and persisted experiment plans in the chat harness contract and the pypsa-gui glossary.
