@@ -111,20 +111,22 @@ class AppErrorBoundary extends React.Component<
 // Properties + Bottom panels hide while a tab panel is active. A slim
 // breadcrumb header carries a Close affordance; Esc also closes (handled in
 // App's global key handler).
+// The eyebrow names the sidebar step the panel opens from (M2: BUILD, TIME,
+// RUN, RESULTS, STUDIES, REPORTS; the project's own panels say PROJECT).
 const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   overview:   { eyebrow: 'PROJECT',    title: 'Project info' },
-  snapshots:  { eyebrow: 'PROJECT',    title: 'Network snapshots' },
-  scenarios:  { eyebrow: 'PROJECT',    title: 'Scenarios' },
-  compare:    { eyebrow: 'PROJECT',    title: 'Compare scenarios' },
-  timeseries: { eyebrow: 'DATA',       title: 'Time series' },
-  simparams:  { eyebrow: 'SIMULATION', title: 'Solver settings' },
-  horizon:    { eyebrow: 'SIMULATION', title: 'Model horizon' },
-  capacityBounds: { eyebrow: 'SIMULATION', title: 'Capacity bounds' },
-  issues:     { eyebrow: 'SIMULATION', title: 'Issues' },
-  results:    { eyebrow: 'SIMULATION', title: 'Results' },
-  solveQueue: { eyebrow: 'SIMULATION', title: 'Solve queue' },
+  snapshots:  { eyebrow: 'REPORTS',    title: 'Network snapshots' },
+  scenarios:  { eyebrow: 'REPORTS',    title: 'Scenarios' },
+  compare:    { eyebrow: 'REPORTS',    title: 'Compare scenarios' },
+  timeseries: { eyebrow: 'TIME',       title: 'Time series' },
+  simparams:  { eyebrow: 'RUN',        title: 'Solver settings' },
+  horizon:    { eyebrow: 'TIME',       title: 'Model horizon' },
+  capacityBounds: { eyebrow: 'BUILD',  title: 'Capacity bounds' },
+  issues:     { eyebrow: 'RUN',        title: 'Issues' },
+  results:    { eyebrow: 'RESULTS',    title: 'Results' },
+  solveQueue: { eyebrow: 'RUN',        title: 'Solve queue' },
   gridspine:  { eyebrow: 'STUDIES',    title: 'Planning → dynamics' },
-  reports:    { eyebrow: 'STUDIES',    title: 'Reports' },
+  reports:    { eyebrow: 'REPORTS',    title: 'Reports' },
   campusElectrical: { eyebrow: 'STUDIES', title: 'Campus electrical' },
   decision:   { eyebrow: 'STUDIES',    title: 'Decision study' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },

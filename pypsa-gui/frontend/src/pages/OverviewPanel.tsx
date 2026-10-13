@@ -19,7 +19,7 @@ import type { Bus, Generator, StorageUnit, Load, Link, ProjectInfo } from '../ap
 // StatCards (buses / lines+transformers / installed capacity / last solve), and
 // a two-column body of Capacity mix (bar list) + Recent activity.
 //
-// Rendered as a full-page tab from the sidebar's PROJECT section.
+// Rendered as a full-page tab from the sidebar's project card menu.
 export default function OverviewPanel() {
   const currentProject = useUIStore(s => s.currentProject)
   const lastSavedByProject = useUIStore(s => s.lastSavedByProject)

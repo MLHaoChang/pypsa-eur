@@ -1410,3 +1410,25 @@ def test_the_least_cost_total_is_what_the_selection_ranks_without_the_renewals(h
     run_dir = fake_c14(hub, rows)
     # the first purchases (rows 0 and 3) and the zero-cost keep rows (4 and 6) count; the renewals do not
     assert ce._least_cost_total(run_dir) == pytest.approx(1.0 + 1e3 + 1e4 + 1e6)
+
+
+def test_the_state_says_when_a_run_is_in_progress(hub):
+    """A run answers only when it ends, so a client whose request timed out
+    reads the state to learn whether the backend is still at it: the run's
+    lock is held for the whole run, and the state says so until it is freed."""
+    ce.draft(hub)
+    assert ce.get_state(hub)["run_in_progress"] is False
+    seen = []
+    real = ce.cs.rank_campus
+
+    def rank(*a, **kw):
+        seen.append(ce.get_state(hub)["run_in_progress"])
+        return real(*a, **kw)
+
+    ce.cs.rank_campus = rank
+    try:
+        ce.run(hub, {"k": 1, "invest": False})
+    finally:
+        ce.cs.rank_campus = real
+    assert seen == [True]
+    assert ce.get_state(hub)["run_in_progress"] is False
