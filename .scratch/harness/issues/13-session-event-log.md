@@ -1,8 +1,8 @@
 # 13 — The session event log: "model-visible means logged", replay and fork
 
-Status: ready-for-agent (Q15 decided 2026-10-06: adopt, `chat.jsonl` kept as a projection for one release)
+Status: ready-for-agent (Q15 decided; re-scoped 2026-10-12 against master's checked answers and durable thread, see Comments)
 Type: task
-Blocked by: 08 (done), PR MLHaoChang/pypsa-eur#86 merged
+Blocked by: 08 (done), PR MLHaoChang/pypsa-eur#86 merged (done)
 
 Source: `docs/superpowers/assessments/2026-10-06-deepseek-harness-adoption-assessment.md`
 (design 1). The borrowed idea is DeepSeek Harness's append-only `SessionEvent`
@@ -71,3 +71,29 @@ the projection is proven. Gate: the full chat regression as in issue 08
 (`tests/test_chat*.py test_llm*.py test_tool_*.py test_guided*.py
 test_harness*.py test_report*.py` plus the files named in the issue 08
 comments), then both parity runs. Model tiering per plan §4 rule 7.
+
+## Comments
+
+2026-10-12 (re-scoped against master after 143 commits; nothing of this issue exists there yet):
+master has no event log, `derive_messages`, fork or replay tool; `history.py`
+still writes `chat.jsonl` with the pending-turn WAL, and the turn record now
+also carries `answer_id`, `receipt` and `owner_user_id`. Build on, do not
+break:
+- `rewind_session` cuts `session.messages` but leaves `chat.jsonl` alone, so
+  the log needs a `rewind` (shadow) event, and `derive_messages` must equal
+  the history the provider is actually sent, not raw `session.messages`.
+- Checked answers: `append_history_message` replaces tool-result content in
+  checked turns and messages carry a private `_approved_answer_id`
+  (`harness/assurance.py` history seed). Add `checked_answer {answer_id,
+  receipt}` and `checkpoint_revoked` events.
+- `chat.jsonl` stays a projection with byte-identical records, `answer_id`
+  and `receipt` included: `services/assurance_records.history_projection` and
+  `harness/assurance_recovery.candidate` read its latest native record.
+- A strict turn revokes its checkpoint before the WAL is written; keep that
+  order (`.scratch/assistant-assurance/harness-contracts.md`).
+- Persist with an existing pattern: the owner store
+  (`assurance_records.save`: app-data, sha256 envelope, directory fsync) or
+  the project-dir tmp + fsync + replace used by tasks and the durable thread.
+- `tests/fixtures` holds no recorded sessions: record a corpus first, as the
+  identity test's input.
+- A fork must not inherit assurance checkpoints, approvals or task tickets.
