@@ -12,15 +12,15 @@ No second store, no direct writes to `n.meta["asset_params"]`.
 
 | # | Slice | Needs | Status |
 |---|---|---|---|
-| A | Drop `PYPSAGUI_DECISION_STUDIES`; the auth-mode refusal stays, reworded (it no longer cites OPEN-ITEMS 1) | — | PR #183 |
+| A | Drop `PYPSAGUI_DECISION_STUDIES`; the auth-mode refusal stays, reworded (it no longer cites OPEN-ITEMS 1) | — | merged (#183, `5e125d1e`) |
 | — | W4 refusal fix (mark post-U2 networks, refuse only unmarked ones, the user-typed price test) and the gate's four U3 one-line records | — | already on master (`96b7b6ef`); re-run green on `8776f4a6` |
-| B | Decision-study entry in Guided's Start card: "Is my site reliable?" beside "Is this investment worth it?" (owner decision 5) | A | branch `claude/u3-start-card` |
-| C | The six study chat tools with Guided confirmation tiers and `delegate()` steps | B | branch `claude/u3-chat-tools` |
-| D | The key-parameter list view | C | branch `claude/u3-key-params` |
-| E | M7 (Guided shell) and M8 (Guided without an API key) | D | branch `claude/u3-guided-shell` |
-| F | "Open in Expert" lands on the study's project (today's cards; switch to the S1b cards when they merge) | S1b for the final form | part 1 on branch `claude/u3-open-in-expert` |
+| B | Decision-study entry in Guided's Start card: "Is my site reliable?" beside "Is this investment worth it?" (owner decision 5) | A | combined PR, branch `claude/u3-guided-face` |
+| C | The six study chat tools with Guided confirmation tiers and `delegate()` steps | B | combined PR, branch `claude/u3-guided-face` |
+| D | The key-parameter list view | C | combined PR, branch `claude/u3-guided-face` |
+| E | M7 (Guided shell) and M8 (Guided without an API key) | D | combined PR, branch `claude/u3-guided-face` |
+| F | "Open in Expert" lands on the study's project (today's cards; switch to the S1b cards when they merge) | S1b for the final form | combined PR, branch `claude/u3-guided-face` |
 | H | Open the study routes in multi-user mode, with a cross-tenant test of every study route, the study-created base project and its forks (owner, 2026-10-13: a later slice) | — | later |
-| R | The question-first rail of the decision study in Guided (§11 "Guided shell") | F | branch `claude/u3-question-rail` |
+| R | The question-first rail of the decision study in Guided (§11 "Guided shell") | F | combined PR, branch `claude/u3-guided-face` |
 | G | S2: ledger rows as a view of the provenance store; pack defaults written through `provenance.record`; Expert edits mark ledger rows | S1a | waits for S1a |
 
 ## A — the flag
