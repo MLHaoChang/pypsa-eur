@@ -315,24 +315,27 @@ def test_the_study_can_compare_scenarios_the_sidecar_does_not_ship():
 
 def test_the_template_cost_of_island_capability():
     """The Data Center template ships ups_bridged. With no island rows it
-    solves at 3.754e7 and buys no genset_new; with the ups_bridged rows
-    genset_new is 36.7 MW and the objective 3.981e7 (I2b as built; its
-    3.882e7 was the I2a rows alone, which is the planned variant)."""
+    solves at 3.754e7 and buys no genset_new; with the ups_bridged rows it
+    buys genset_new and the objective is 3.975e7 (I2b as built; its 3.882e7
+    was the I2a rows alone, which is the planned variant). Re-pinned for IC S3
+    seeds (owner 2026-10-13, Q2 a): genset_new is priced from defaults pack
+    2026-10-13 (gas-genset), not the old literal; it was 3.981e7."""
     island = validate_island_config(T.ISLAND_CONFIG["eh_datacenter"])
     out = island_study(T.build_eh_datacenter(), island)
     v = out["variants"]
     assert v["baseline"]["objective"] == pytest.approx(3.754e7, rel=1e-3)
-    assert v["ups_bridged"]["objective"] == pytest.approx(3.981e7, rel=1e-3)
+    assert v["ups_bridged"]["objective"] == pytest.approx(3.975e7, rel=1e-3)
     assert out["cost_of_island_capability"]["ups_bridged"] == pytest.approx(
         v["ups_bridged"]["objective"] - v["baseline"]["objective"])
     assert "Island-rocof-block" in {r["row"] for r in v["ups_bridged"]["binding"]}
 
 
 def test_the_template_cost_of_seamless_with_the_bess_cap_lifted():
-    """seamless runs the site on its gensets: about 6.87e7 against 3.981e7."""
+    """seamless runs the site on its gensets: about 7.128e7 against 3.975e7
+    (6.87e7 against 3.981e7 before genset_new was pack-priced, IC S3 seeds)."""
     n = T.build_eh_datacenter()
     n.storage_units.at["bess_new", "p_nom_max"] = 1e4
     island = validate_island_config(T.ISLAND_CONFIG["eh_datacenter"])
     out = island_study(n, island, scenarios=("ups_bridged", "seamless"))
-    assert out["variants"]["seamless"]["objective"] == pytest.approx(6.87e7, rel=5e-3)
-    assert out["cost_of_seamless"] == pytest.approx(6.87e7 - 3.981e7, rel=1e-2)
+    assert out["variants"]["seamless"]["objective"] == pytest.approx(7.128e7, rel=5e-3)
+    assert out["cost_of_seamless"] == pytest.approx(7.128e7 - 3.975e7, rel=1e-2)

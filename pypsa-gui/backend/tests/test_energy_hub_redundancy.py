@@ -77,7 +77,7 @@ def test_apply_n1_generation_adds_spare_and_undo_restores():
     before = set(n.generators.index)
     undo, mut = R.apply_redundancy_scenario(n, "n1_generation")
     assert "eh_spare_gen" in n.generators.index
-    assert mut["cost_basis"] == "synthetic_placeholder"
+    assert mut["cost_basis"] == R.REDUNDANCY_COST_BASIS          # IC S3: from the pack
     assert mut["applied"]
     undo()
     assert set(n.generators.index) == before
@@ -409,3 +409,66 @@ def test_compare_stamps_effective_voll():
     assert table["voll_defaulted"] is True
     assert table["options"][0]["effective_voll"] == 150.0
     assert table["options"][0]["voll_defaulted"] is True
+
+
+# ── IC S3 seeds (owner 2026-10-13): the placeholders come from the defaults pack ──
+
+
+def _pack_value(key):
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    pack = load_defaults_pack(R.REDUNDANCY_PACK_VERSION)
+    return next(v.value for v in pack.cost_values if v.key == key), pack
+
+
+def test_scenario_costs_name_the_defaults_pack():
+    n = _network()
+    for sid in ("n1_generation", "parallel_storage", "n1_conversion"):
+        undo, mut = R.apply_redundancy_scenario(n, sid)
+        assert mut["cost_basis"] == "defaults_pack:2026-10-13" == R.REDUNDANCY_COST_BASIS, sid
+        undo()
+
+
+def test_the_spare_generator_is_a_pack_gas_genset():
+    n = _network()
+    undo, mut = R.apply_redundancy_scenario(n, "n1_generation")
+    overnight, pack = _pack_value("gas-genset.investment.overnight")
+    row = n.generators.loc["eh_spare_gen"]
+    assert row["overnight_cost"] == pytest.approx(overnight) and row["capital_cost"] == 0.0
+    assert row["discount_rate"] == pack.finance.discount_rate.value
+    rec = next(a for a in mut["applied"] if a["name"] == "eh_spare_gen")
+    assert rec["pricing"]["technology"] == "gas-genset"
+    assert rec["pricing"]["pack_hash"] == pack.hash
+    undo()
+
+
+@pytest.mark.parametrize("trains", [1, 3])
+def test_the_spare_storage_is_the_packs_4h_battery_whatever_the_trains(trains):
+    from services.solver.periodized_costs import _annuity
+
+    n = _network()
+    undo, mut = R.apply_redundancy_scenario(n, f"parallel_storage@{trains}")
+    power, pack = _pack_value("battery.power.overnight")
+    energy, _ = _pack_value("battery.energy.overnight")
+    rate = pack.finance.discount_rate.value
+    row = n.storage_units.loc["eh_spare_storage"]
+    want = power * _annuity(rate, 10.0) + energy * 4.0 * _annuity(rate, 25.0)
+    assert row["max_hours"] == 4.0
+    assert row["capital_cost"] == pytest.approx(want, rel=1e-12)       # no × trains
+    assert row["p_nom_max"] == pytest.approx(40.0 * trains)            # trains scale the size
+    rec = next(a for a in mut["applied"] if a["name"] == "eh_spare_storage")
+    assert rec["capital_cost"] == pytest.approx(want, rel=1e-12)
+    assert rec["pricing"]["technology"] == "battery"
+    undo()
+
+
+def test_the_invented_spare_conversion_is_a_pack_fuel_cell():
+    n = _network()  # no conversion link
+    undo, mut = R.apply_redundancy_scenario(n, "n1_conversion")
+    overnight, _ = _pack_value("fuel-cell.investment.overnight")
+    row = n.links.loc["eh_spare_conversion"]
+    assert row["overnight_cost"] == pytest.approx(overnight * 0.95)   # per MW of input
+    assert row["capital_cost"] == 0.0
+    rec = next(a for a in mut["applied"] if a["name"] == "eh_spare_conversion")
+    assert rec["pricing"]["technology"] == "fuel-cell"
+    undo()
