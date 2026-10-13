@@ -1176,7 +1176,7 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
     point = _warm_start(prob, state)
     cur = prob.evaluate(point, linearise=True)
     if not cur.converged:
-        return _fallback(c8, prob, [], "C8's point does not converge in the MILP's re-solve", c8_cost)
+        return _fallback(c8, prob, [], "the least-cost choice does not converge in the joint optimisation's re-solve", c8_cost)
     delta, d_cap, d_floor = DELTA_START * prob.q_ref, DELTA_CAP * prob.q_ref, DELTA_FLOOR * prob.q_ref
     best = cur if cur.feasible else None
     stop, cuts, lin_rows = "max_iter", [], []
@@ -1199,7 +1199,7 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
     report({"iteration": 0, "cost": cur.cost, "feasible": cur.feasible, "worst_violation": v_worst,
             "worst_lin_error": 0.0, "delta": delta, "beta_mean": 1.0, "beta_max": 1.0, "beta_up": "",
             "rho": math.nan, "accepted": True, "point_cost": cur.cost, "slack": 0.0, "slack_on": "",
-            "choice": _label(prob, point), "fd_solves": fd0, "note": "C8's result, the warm start"})
+            "choice": _label(prob, point), "fd_solves": fd0, "note": "the least-cost choice, re-solved as the warm start"})
     beta = {k: BETA0 for k in (lin.keys if lin is not None else [])}
     err = {k: 0.0 for k in beta}
     for it in range(1, max_iter + 1):
@@ -1284,7 +1284,8 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
     hist = pd.DataFrame(history, columns=HISTORY_COLUMNS)
     if best is None or (state.feasible and best.cost >= c8_cost - COST_TOL):
         why = ("no AC-feasible point was found" if best is None else
-               f"no AC-feasible point is cheaper than C8's ({best.cost:,.0f} against {c8_cost:,.0f} per year)")
+               f"no AC-feasible point is cheaper than the least-cost choice ({best.cost:,.0f} against "
+               f"{c8_cost:,.0f} per year)")
         if stop == "cancelled":
             why = f"cancelled after {len(history) - 1} iteration(s): {why}"
         out = _fallback(c8, prob, hist, why, c8_cost, stop)

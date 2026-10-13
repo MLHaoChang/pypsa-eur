@@ -354,6 +354,60 @@ describe('compliance with the investment', () => {
     await waitFor(() => expect(screen.queryByTestId('compliance-cable_loading')).toBeNull())
   })
 
+  it('shows each re-solved value with its own worst hour and case, never the as-is hour', async () => {
+    // the browser run's case: as is worst at h158, re-checked worst at h117 in the outage of SITE_TRANSFO
+    const base = results()
+    api.state.mockResolvedValue(stateWith(results({
+      compliance_invested: [...base.compliance_invested!, {
+        check: 'campus_voltage', status_as_is: 'fail', status_with_measures: 'pass', value: 0.884, limit: 0.9,
+        unit: 'pu', worst_period: 2030, worst_hour: 158, worst_case: 'N-1:SITE_TRANSFO', clause: 'design',
+        source: 'assumed', detail: 'as is', value_with_measures: 0.9003, detail_with_measures: 'worst at IT_BUS',
+        worst_period_with_measures: 2030, worst_hour_with_measures: 117, worst_case_with_measures: 'N-1:SITE_TRANSFO',
+      }],
+    })))
+    renderPanel()
+    const cell = await screen.findByTestId('compliance-worst-campus_voltage')
+    expect(cell.textContent).toBe('0.900 pu 2030 · h117 · N-1:SITE_TRANSFO')
+    expect(cell.textContent).not.toContain('h158')
+  })
+
+  it('gives no hour beside a re-solved value from a run that did not keep it', async () => {
+    renderPanel()
+    const cell = await screen.findByTestId('compliance-worst-pcc_reactive')
+    expect(cell.textContent).toContain('11.93')
+    expect(cell.textContent).not.toContain('h158')
+  })
+
+  it('shows the as-is value with its own hour and case when the run did not invest', async () => {
+    const base = results()
+    api.state.mockResolvedValue(stateWith(results({
+      compliance: [...base.compliance, {
+        check: 'transformer_loading', status_as_is: 'fail', status_with_measures: 'pass', value: 112.5, limit: 100,
+        unit: '%', worst_period: 2030, worst_hour: 158, worst_case: 'N-1:TR1', clause: 'equipment rating',
+        source: 'assumed', detail: 'worst TR2 (N-1:TR1)' }],
+      investment: null, cost: null, compliance_invested: null, history: null, unresolved: null, scope: null,
+    })))
+    renderPanel()
+    expect((await screen.findByTestId('compliance-worst-transformer_loading')).textContent)
+      .toBe('112.500 % 2030 · h158 · N-1:TR1')
+  })
+
+  it('shows the whole band as the limit of a voltage row, and the single limit otherwise', async () => {
+    const base = results()
+    api.state.mockResolvedValue(stateWith(results({
+      compliance_invested: base.compliance_invested!.map(c => (c.check === 'pcc_voltage'
+        ? { ...c, limit: 0.9, limit_min: 0.9, limit_max: 1.118 } : c)),
+    })))
+    renderPanel()
+    expect((await screen.findByTestId('compliance-limit-pcc_voltage')).textContent).toBe('0.900–1.118 pu')
+    expect(screen.getByTestId('compliance-limit-pcc_reactive').textContent).toBe('13.150 Mvar')
+  })
+
+  it('shows the single limit of a voltage row from a run before the band was kept', async () => {
+    renderPanel()
+    expect((await screen.findByTestId('compliance-limit-pcc_voltage')).textContent).toBe('0.900 pu')
+  })
+
   it('says in the header that the with-assets column is an AC re-solve', async () => {
     renderPanel()
     expect((await screen.findByText(/With the assets \(AC re-solved\)/))).toBeTruthy()
@@ -370,7 +424,7 @@ describe('the joint optimisation beside the least-cost choice', () => {
     compliance_invested: [],
     history: [
       { iteration: 0, cost: 261_526.96, feasible: true, accepted: true, choice: 'transformer GRID_IMPORT: 1 x TR63',
-        note: "C8's result, the warm start" },
+        note: 'the least-cost choice, re-solved as the warm start' },
       { iteration: 1, cost: 150_000, feasible: true, accepted: true, choice: 'transformer GRID_IMPORT: 1 x TR50', note: '' },
     ],
     comparison: [
@@ -400,7 +454,7 @@ describe('the joint optimisation beside the least-cost choice', () => {
     renderPanel()
     const block = await screen.findByTestId('campus-milp')
     expect(within(block).getByTestId('milp-summary').textContent)
-      .toMatch(/Joint optimisation €150,000\/a against least cost €261,527\/a, €111,527\/a less\. 1 iteration, converged/)
+      .toMatch(/Joint optimisation €150,000\/a against least cost €261,527\/a, €111,527\/a less\. 1 iteration after the warm start, converged/)
     const t = within(block).getByTestId('milp-compare-transformer GRID_IMPORT').textContent!
     expect(t).toContain('1 x TR_110_20_63')
     expect(t).toContain('€193,520')
@@ -423,7 +477,7 @@ describe('the joint optimisation beside the least-cost choice', () => {
   })
 
   it('labels a fallback to the least-cost choice with its reason', async () => {
-    const reason = "no AC-feasible point is cheaper than C8's (261,527 against 261,527 per year)"
+    const reason = 'no AC-feasible point is cheaper than the least-cost choice (261,527 against 261,527 per year)'
     api.state.mockResolvedValue(withMilp({ results: milpResults({
       fallback: reason, summary: { ...milpResults().summary, fallback: true, milp_cost: 261_526.96 } }) }))
     renderPanel()
@@ -451,10 +505,25 @@ describe('the joint optimisation beside the least-cost choice', () => {
     renderPanel()
     const details = (await screen.findByTestId('milp-history')) as HTMLDetailsElement
     expect(details.open).toBe(false)
-    expect(details.textContent).toContain('Iteration history (2)')
-    await userEvent.click(within(details).getByText('Iteration history (2)'))
+    expect(details.textContent).toContain('Iteration history (warm start + 1 iteration)')
+    await userEvent.click(within(details).getByText('Iteration history (warm start + 1 iteration)'))
     expect(details.open).toBe(true)
     expect(details.textContent).toContain('1. €150,000/a, AC-feasible, accepted — transformer GRID_IMPORT: 1 x TR50')
+    expect(details.textContent).toContain('Warm start: €261,527/a, AC-feasible, accepted')
+  })
+
+  it('counts a history without a warm start as iterations only', async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults({ history: [] }) }))
+    renderPanel()
+    expect((await screen.findByTestId('milp-history')).textContent).toContain('Iteration history (0 iterations)')
+  })
+
+  it('says nothing of an internal plan step in the summary, the fallback or the notes', async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults() }))
+    renderPanel()
+    const block = await screen.findByTestId('campus-milp')
+    await userEvent.click(within(block).getByText(/Iteration history/))
+    expect(block.textContent).not.toMatch(/\bC(8|11|12)\b/)
   })
 
   it('warns when the least-cost run it was based on has changed', async () => {
@@ -507,6 +576,15 @@ describe('investment: units added next to an existing transformer group (plan C1
     expect(within(add).getByTestId('invest-reason').textContent)
       .toBe('added in parallel with TR1, TR2 (existing); vector group assumed compatible (not given)')
     expect(within(keep).queryByTestId('invest-reason')).toBeNull()                 // nothing to say
+  })
+
+  it('shows why a group was replaced and what it replaced, with its commissioning year', async () => {
+    const reason = 'replaces GRID_IMPORT (in service since 2015): 1 x 50 MVA as is, 52.33 MVA a unit needed with '
+      + 'the 20 % design margin'
+    api.state.mockResolvedValue(stateWith(results({ investment: [row({ action: 'replace', reason })] })))
+    renderPanel()
+    const r = await screen.findByTestId('invest-transformer GRID_IMPORT')
+    expect(within(r).getByTestId('invest-reason').textContent).toBe(reason)
   })
 
   it('does not repeat an unresolved reason in the table: the alert lists it', async () => {
@@ -697,6 +775,38 @@ describe('investment: replacement at the end of life (plan C14)', () => {
 
 // Owner decision 2026-10-12: the investment case takes the joint optimisation when it is
 // fresh and found its own choice, else the least-cost run. The switch is never silent.
+describe('wide tables scroll sideways instead of being clipped', () => {
+  // A page section clips its overflow (rounded corners): at 1440 px with the
+  // assistant open the investment table (about 880 px) sat in a 714 px section
+  // and lost its Existing and Status columns, the tap table its Moved by.
+  const scrolls = (el: HTMLElement) => {
+    const wrap = el.closest('table')!.parentElement!
+    expect(wrap.getAttribute('data-testid')).toBe('campus-table-scroll')
+    expect(wrap.className).toContain('overflow-x-auto')
+  }
+
+  it('wraps the investment, tap, cost, comparison and joint-choice tables', async () => {
+    const res = results({
+      taps: [{ period: 2030, hour: 158, case: 'intact', transformer: 'TR1', group: 'TR1', tap_pos: -1,
+               ratio_pct: 98.5, moved_by: -1 }],
+      tap_hours_moved: 1,
+    })
+    api.state.mockResolvedValue(stateWith(res, { milp: { status: null, stale: false, results: {
+      investment: [row({ library_id: 'TR_110_20_50' })], cost: [], compliance_invested: [], history: [],
+      comparison: [{ need: 'transformer GRID_IMPORT', c8_choice: 'a', milp_choice: 'b', c8_annualised_eur_per_a: 1,
+                     milp_annualised_eur_per_a: 1 }],
+      summary: { method: 'milp', fallback: false, reason: '', stop: 'converged', c8_cost: 2, milp_cost: 1,
+                 c8_feasible: true, iterations: 1 },
+      fallback: null, stop: 'converged' } } }))
+    renderPanel()
+    scrolls(await screen.findByTestId('invest-transformer GRID_IMPORT'))
+    scrolls(screen.getByTestId('tap-2030-158-intact-TR1'))
+    scrolls(screen.getByTestId('cost-2030'))
+    scrolls(screen.getByTestId('milp-compare-transformer GRID_IMPORT'))
+    scrolls(screen.getByTestId('milp-invest-transformer GRID_IMPORT'))
+  })
+})
+
 describe('which result feeds the investment case', () => {
   const milpOf = (over: Partial<MilpResults> = {}): MilpResults => ({
     investment: [], cost: [], compliance_invested: [], history: [], comparison: [],

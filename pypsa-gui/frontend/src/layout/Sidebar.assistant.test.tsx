@@ -26,7 +26,7 @@ import Sidebar from './Sidebar'
 //      "always-visible".
 //
 // These tests pin the fix as behaviour rather than as markup position: the
-// Assistant control survives collapsing SIMULATION, and it exists in the icon
+// Assistant control survives collapsing a section, and it exists in the icon
 // strip without opening a flyout first.
 
 vi.mock('../api/network', () => ({
@@ -90,13 +90,14 @@ describe('the Assistant nav entry', () => {
     expect(screen.getByTestId('sidebar-assistant')).toBeTruthy()
   })
 
-  // The load-bearing one. A row inside SimulationSectionContent disappears
-  // with the section; a top-level row does not. Collapsing the section is the
-  // cheapest way to ask "is this filed under SIMULATION?" without asserting on
-  // DOM ancestry, which would go stale the moment the markup is reshuffled.
-  it('survives collapsing the SIMULATION section', () => {
+  // The load-bearing one. A row inside a step section disappears with the
+  // section; a top-level row does not. Collapsing the section is the
+  // cheapest way to ask "is this filed under RUN?" (SIMULATION before M2)
+  // without asserting on DOM ancestry, which would go stale the moment the
+  // markup is reshuffled.
+  it('survives collapsing the RUN section', () => {
     renderSidebar()
-    fireEvent.click(screen.getByText('SIMULATION'))
+    fireEvent.click(screen.getByText('RUN'))
 
     // Sanity: the section really did collapse.
     expect(screen.queryByText('Solve Queue')).toBeNull()

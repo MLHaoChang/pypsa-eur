@@ -117,7 +117,7 @@ Each package's table is in the plan's status block; all ran on scratch copies, e
 - **N15:** the asset schema's `derive.apply_parts` / `has_parts` (S0's).
 - `scale_capex(case, f, *, asset=, part=)`, so the per-part CAPEX bound needs no WORKAROUND (X6).
 - Unrounded `n.statistics` FOM, CAPEX and OPEX.
-- A public test helper that records a written dispatch as an engine solve (GS's fakes read `lp_bindings` internals).
+- A public test helper that records a written dispatch as an engine solve (landed 2026-10-13, ask 5: `lp_bindings.record_dispatch_as_solve`; GS's fakes no longer read `lp_bindings` internals).
 - `put_flat_export_series(label=…)`; an inactive `poc_link` refused typed at bind.
 - One public structure for the engine's cash identity terms (WP9's wish).
 
