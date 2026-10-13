@@ -18,6 +18,10 @@ import Sidebar from './Sidebar'
 // and check the diff is exactly the entry that was added.
 // The Studies group (2026-10-05) moved Planning → dynamics, Campus electrical
 // and Reports out of Simulation under their own header: owner's request.
+// M2 (2026-10-13, plan 2026-10-05 §11) re-recorded both: the Expert sidebar
+// lists the steps in the order of the work (BUILD, TIME, RUN, RESULTS,
+// STUDIES, REPORTS) and the project moved to a footer card with a menu. The
+// rows are the same rows; Sidebar.taskOrder.test.tsx pins where each one went.
 const NEW_TEST_IDS = /\s?data-testid="(sidebar-section-(project|data|simulation)|sidebar-mode-switcher)"/g
 function normalise(html: string): string {
   return html.replace(NEW_TEST_IDS, '')

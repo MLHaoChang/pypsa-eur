@@ -184,6 +184,17 @@ def work():
 
         out["path_after_open"] = js(window, "location.pathname", "loc0")
 
+        # Expert sidebar (M2): Project info sits behind the footer card's
+        # menu. Open it first, in its own step so React renders the rows.
+        out["open_project_menu"] = js(window, """
+          (function () {
+            var menu = document.querySelector('[data-testid="sidebar-project-menu"]');
+            if (!menu) return 'no-menu';
+            if (menu.getAttribute('aria-expanded') === 'false') menu.click();
+            return 'open';
+          })()
+        """, "project_menu")
+        time.sleep(1)
         out["click_project_info"] = js(window, """
           (function () {
             var els = [].slice.call(document.querySelectorAll('button,[role=button],a,div'));
@@ -214,6 +225,17 @@ def work():
             .length
         """, "count")
         if ACTION == "blob":
+            # The sidebar's Export bundle is behind the project menu (M2),
+            # which closed when Project info was clicked: reopen it.
+            out["reopen_project_menu"] = js(window, """
+              (function () {
+                var menu = document.querySelector('[data-testid="sidebar-project-menu"]');
+                if (!menu) return 'no-menu';
+                if (menu.getAttribute('aria-expanded') === 'false') menu.click();
+                return 'open';
+              })()
+            """, "reopen_menu")
+            time.sleep(1)
             # A REAL `URL.createObjectURL` + `a.download` site — Sidebar.tsx's
             # export modal. The claim that 13 sites need no change rests on
             # the audit page until one of the real ones is exercised in the

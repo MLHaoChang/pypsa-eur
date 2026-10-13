@@ -8,6 +8,8 @@
 
 * Fix(pypsa-gui): Treat coupling and margin loop verdicts `met` and `unreachable` as finished study outcomes. `wait_for_job` no longer times out after a completed unreachable search, and a target that was met counts as success. Run evidence publishes the unreachable verdict instead of leaving a running marker.
 
+* Docs(pypsa-gui): Document immutable run evidence, discussed-run resume, current load-flow summaries, and persisted experiment plans in the chat harness contract and the pypsa-gui glossary.
+
 * Fix(CI): Publish development images in the repository owner's lowercase registry namespace using the workflow token. Include editable package sources in the locked image and validate builds before merge. Build when the environment image is missing, reuse it when available, and keep manual builds and failure handling from publishing incorrect tags.
 
 * Test(pypsa-gui): Isolate owned assurance records between backend test cases so long suites do not exhaust a shared user's 512-record quota. Add regressions for case isolation and refusal to publish from a full store; production storage limits and within-case recovery remain unchanged.
