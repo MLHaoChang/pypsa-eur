@@ -758,3 +758,17 @@ export const KEY_PARAMETER_LABELS = {
   changedHeading: 'Other values you changed or that need a look',
   defaultsSummary: (n: number, version: string) => `${n} more, from the generic defaults (${version})`,
 }
+
+// ── U3: the question-first rail (UX assessment §4.3) ──────────────────────
+
+export type RailStep = 'question' | 'site' | 'keyChoices' | 'run' | 'verdict' | 'improve' | 'report'
+export const RAIL_LABELS: Record<RailStep, string> = {
+  question: 'Question',
+  site: 'Site',
+  keyChoices: 'Key choices',
+  run: 'Run',
+  verdict: 'Verdict',
+  improve: 'Improve',
+  report: 'Report',
+}
+export const RAIL_NAV_LABEL = 'Decision study steps'
