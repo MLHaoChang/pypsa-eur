@@ -299,6 +299,70 @@ def test_a_cable_priced_per_bay_and_a_transformer_priced_per_km_are_refused(tmp_
     refused(tmp_path, d, rf"transformers\[{t['id']}\].*capex_eur_per_km")
 
 
+# --------------------------------------------------------------------------
+# the `literature` tag: a cost read from a published, cited reference
+# --------------------------------------------------------------------------
+#
+# A cost may be tagged `literature`: a reference value read from a cited
+# publication (a regulator's catalogue, say), not a quote. A rating may not:
+# the investment copies a bought item's ratings into the campus file, whose
+# tags are measured | datasheet | assumed, so a `literature` rating would make
+# the invested campus file unreadable.
+
+@pytest.mark.parametrize("kind, field", [(k, f) for k in FIELDS for f in COST[k]])
+def test_a_cost_may_be_tagged_literature(tmp_path, kind, field):
+    d = raw()
+    e = entry(d, kind, 1)
+    e[field]["source"] = "literature"
+    lib = load_asset_library(write(tmp_path, d))
+    assert lib[kind][1][field] == e[field]
+
+
+def test_the_discount_rate_may_be_tagged_literature(tmp_path):
+    d = raw()
+    d["discount_rate"] = {"value": 0.05, "source": "literature", "note": "a published WACC"}
+    assert load_asset_library(write(tmp_path, d))["discount_rate"]["source"] == "literature"
+
+
+@pytest.mark.parametrize("kind, field", [(k, f) for k in FIELDS for f in FIELDS[k]])
+def test_a_rating_tagged_literature_is_refused_naming_entry_and_field(tmp_path, kind, field):
+    d = raw()
+    e = entry(d, kind, 1)
+    e[field]["source"] = "literature"
+    refused(tmp_path, d, rf"{kind}\[{e['id']}\]\.{field}.*'literature'.*only a cost")
+
+
+def test_the_unknown_source_message_lists_literature_for_a_cost_and_not_for_a_rating(tmp_path):
+    d = raw()
+    entry(d, "transformers")["capex_eur"]["source"] = "guessed"
+    refused(tmp_path, d, r"capex_eur.*allowed \['assumed', 'datasheet', 'literature', 'measured'\]")
+    d = raw()
+    entry(d, "transformers")["s_mva"]["source"] = "guessed"
+    refused(tmp_path, d, r"s_mva.*allowed \['assumed', 'datasheet', 'measured'\]")
+
+
+def test_a_literature_cost_is_still_checked_as_a_number(tmp_path):
+    d = raw()
+    e = entry(d, "cables")
+    e["capex_eur_per_km"] = {"value": -1, "source": "literature"}
+    refused(tmp_path, d, rf"cables\[{e['id']}\].*capex_eur_per_km.*positive")
+    e["capex_eur_per_km"] = {"value": float("nan"), "source": "literature"}
+    refused(tmp_path, d, rf"cables\[{e['id']}\].*capex_eur_per_km.*finite number")
+
+
+def test_annualised_cost_does_not_depend_on_the_tag(tmp_path):
+    d = raw()
+    a = load_asset_library(write(tmp_path, d))
+    for kind in FIELDS:
+        for f in COST[kind]:
+            entry(d, kind)[f]["source"] = "literature"
+    d["discount_rate"]["source"] = "literature"
+    b = load_asset_library(write(tmp_path, d))
+    for kind in FIELDS:
+        km = 1.5 if kind == "cables" else None
+        assert annualised_cost(b[kind][0], b, km) == annualised_cost(a[kind][0], a, km)
+
+
 def test_a_tagged_value_with_an_unknown_key_is_refused(tmp_path):
     d = raw()
     e = entry(d, "cables")

@@ -10,8 +10,14 @@
 // solved project's, per year for a multi-period project; a single-period
 // project has only its total as solved, and a project whose cost cannot be
 // computed has none, which is said rather than shown as zero.
+//
+// The joint optimisation (plan C12) is a block of its own beside it, when a job
+// has finished: what it buys and its cost against the least-cost choice, need by
+// need, whether it kept the least-cost choice or was cancelled, and its
+// iteration history.
 import {
-  type CampusState, type CostBasis, type CostRow, type HistoryRow, type HubCost, type InvestmentRow, type InvestStatus,
+  type CampusMilp, type CampusState, type CostBasis, type CostRow, type HistoryRow, type HubCost, type InvestmentRow,
+  type InvestStatus, type MilpHistoryRow, type MilpStop,
 } from '../api/campusElectrical'
 import { PageSection, Tag } from '../components/PageKit'
 
@@ -115,6 +121,10 @@ export default function CampusInvestmentSection({ state }: { state: CampusState 
         <HistoryList rows={history} />
       </PageSection>
 
+      {state.milp?.results && (
+        <MilpBlock milp={state.milp} marginPct={Math.round((state.settings?.margin ?? 0.2) * 100)} />
+      )}
+
       <PageSection title="Cost per period" hint="the electrical annualised cost, per year, beside the hub's system cost">
         <CostTable cost={cost} hub={hub} />
         <p className="text-[11px] text-muted mt-2">
@@ -142,7 +152,97 @@ export default function CampusInvestmentSection({ state }: { state: CampusState 
   )
 }
 
-function InvestmentTable({ rows }: { rows: InvestmentRow[] }) {
+const STOP_TEXT: Record<MilpStop, string> = {
+  converged: 'converged',
+  stalled: 'stalled: the MILP proposed nothing better',
+  delta_floor: 'stopped: the trust region shrank to its floor',
+  max_iter: 'stopped at the iteration cap',
+  cancelled: 'cancelled',
+}
+
+/** The joint optimisation's choice beside the least-cost one. */
+function MilpBlock({ milp, marginPct }: { milp: CampusMilp; marginPct: number }) {
+  const m = milp.results!
+  const s = m.summary
+  const comparison = m.comparison ?? []
+  const saving = s.c8_cost - s.milp_cost
+  return (
+    <div data-testid="campus-milp">
+      <PageSection title="Joint optimisation" hint="every asset chosen together (MILP), beside the least-cost choice">
+        {milp.stale && (
+          <p data-testid="milp-stale" className="text-[12px] text-warn border border-warn/40 rounded px-3 py-2 mb-2">
+            The least-cost run this was based on has changed since. Run the joint optimisation again before using
+            these numbers.
+          </p>
+        )}
+        <p data-testid="milp-summary" className="text-[12px] mb-1">
+          Joint optimisation {formatEur(s.milp_cost)}/a against least cost {formatEur(s.c8_cost)}/a
+          {saving > 1 ? `, ${formatEur(saving)}/a less` : ''}. {s.iterations === 1 ? '1 iteration' : `${s.iterations} iterations`},{' '}
+          {STOP_TEXT[m.stop] ?? m.stop}.
+        </p>
+        {m.stop === 'cancelled' && (
+          <p data-testid="milp-cancelled" className="text-[12px] text-warn mb-1">
+            Cancelled before it finished: {m.fallback == null
+              ? 'the best choice found so far is shown, AC-checked.'
+              : 'it had found nothing cheaper, so the least-cost choice is kept.'}
+          </p>
+        )}
+        {m.fallback != null && (
+          <p data-testid="milp-fallback" className="text-[12px] mb-1">
+            <Tag tone="neutral">least-cost choice kept</Tag> {m.fallback}
+          </p>
+        )}
+        <p className="text-[11.5px] text-muted mb-2">
+          The {marginPct} % design margin is the owner's rule: it is judged on the least-cost dispatch and is never met
+          by extra inverter reactive power; the optimisation may use inverter Q only for the 100 % loading, the PCC band
+          and the voltages. Costs are the asset library's placeholders, not quotes.
+        </p>
+        <table data-testid="milp-comparison" className="w-full text-[12px] mb-3">
+          <thead>
+            <tr className="text-left text-muted">
+              <th className="font-normal pr-3">Need</th>
+              <th className="font-normal pr-3">Least cost</th><th className="font-normal pr-3 text-right">€/a</th>
+              <th className="font-normal pr-3">Joint</th><th className="font-normal text-right">€/a</th>
+            </tr>
+          </thead>
+          <tbody>
+            {comparison.map(c => (
+              <tr key={c.need} data-testid={`milp-compare-${c.need}`}
+                  className={`border-t border-border ${c.c8_choice !== c.milp_choice ? 'font-medium' : ''}`}>
+                <td className="py-1 pr-3 whitespace-nowrap">{c.need}</td>
+                <td className="pr-3">{c.c8_choice}</td>
+                <td className="pr-3 tabular-nums text-right">{formatEur(c.c8_annualised_eur_per_a)}</td>
+                <td className="pr-3">{c.milp_choice}</td>
+                <td className="tabular-nums text-right">{formatEur(c.milp_annualised_eur_per_a)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {m.investment && <InvestmentTable rows={m.investment} testid="milp-invest" />}
+        <MilpHistoryList rows={m.history ?? []} />
+      </PageSection>
+    </div>
+  )
+}
+
+function MilpHistoryList({ rows }: { rows: MilpHistoryRow[] }) {
+  return (
+    <details data-testid="milp-history" className="mt-3 text-[12px]">
+      <summary className="cursor-pointer text-muted">Iteration history ({rows.length})</summary>
+      <ul className="mt-1 space-y-0.5">
+        {rows.map(h => (
+          <li key={h.iteration} className="tabular-nums">
+            {h.iteration}. {formatEur(h.cost)}/a, {h.feasible ? 'AC-feasible' : 'not AC-feasible'},{' '}
+            {h.accepted ? 'accepted' : 'not accepted'} — {h.choice}
+            {h.note ? <span className="text-muted"> ({h.note})</span> : null}
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
+function InvestmentTable({ rows, testid = 'invest' }: { rows: InvestmentRow[]; testid?: string }) {
   return (
     <table className="w-full text-[12px]">
       <thead>
@@ -157,7 +257,7 @@ function InvestmentTable({ rows }: { rows: InvestmentRow[] }) {
         {rows.map(x => (
           <tr
             key={`${x.need}-${x.library_id ?? ''}`}
-            data-testid={`invest-${x.need}`}
+            data-testid={`${testid}-${x.need}`}
             className={`border-t border-border ${x.status === 'unresolved' ? 'bg-danger/10 text-danger' : ''}`}
           >
             <td className="py-1 pr-3 whitespace-nowrap">{x.need}</td>

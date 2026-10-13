@@ -14,9 +14,9 @@ has to remember to extend:
 Each of those denies by omission. A new route or tool that no list mentions
 is ungated, and nothing fails. That has now happened at least five times in
 the handler family alone: `uploads` twice, `worksheet` and `stress_scenarios`
-(`68e5f62`), `asset_health` (OPEN-ITEMS item 12, ungated for 20 days). On the
+(`68e5f62`), `asset_health` (OPEN-ITEMS item 16, ungated for 20 days). On the
 chat seam it happened again: seven tools write the upload store with no check
-(item 13, found while writing this file), excluded by a docstring
+(item 17, found while writing this file), excluded by a docstring
 justification that went stale when the HTTP upload routes gained their check.
 
 This file turns "nobody remembered" into a failing test. Every write route
@@ -268,16 +268,16 @@ TOOL_POLICY: dict[str, tuple[str, str]] = {
 
 # Recorded, reproduced, open defects. Each MUST still be a gap. When one is
 # fixed, `test_every_known_gap_is_still_a_gap` fails until its line is deleted.
-_ITEM_14 = (
-    "OPEN-ITEMS item 14: calls the campus service directly, skipping the "
+_ITEM_18 = (
+    "OPEN-ITEMS item 18: calls the campus service directly, skipping the "
     "`_check_lock` its HTTP handler runs. "
     "findings/2026-10-06-campus-chat-tools-bypass-the-lock-check.md"
 )
 KNOWN_GAPS: dict[str, str] = {
-    "campus_draft_campus": _ITEM_14,
-    "campus_run_study": _ITEM_14,
-    "campus_extract_grid_code": _ITEM_14,  # #84, same shape, found the day it merged
-    "campus_set_library": _ITEM_14,  # #91, replaces the project's asset library
+    "campus_draft_campus": _ITEM_18,
+    "campus_run_study": _ITEM_18,
+    "campus_extract_grid_code": _ITEM_18,  # #84, same shape, found the day it merged
+    "campus_set_library": _ITEM_18,  # #91, replaces the project's asset library
 }
 
 
@@ -462,7 +462,7 @@ def test_the_verifier_sees_through_helpers():
     assert _lock_check_path(routes[("POST", "/api/projects/{name}/reports")]), "local helper `_check_lock`"
     assert _lock_check_path(routes[("POST", "/api/projects/{name}/reports/generate")]), "cross-module helper"
     assert _lock_check_path(routes[("DELETE", "/api/projects/{name}")]), "`_delete_project_db`"
-    assert _lock_check_path(routes[("PUT", "/api/projects/{name}/asset_health")]), "OPEN-ITEMS item 12"
+    assert _lock_check_path(routes[("PUT", "/api/projects/{name}/asset_health")]), "OPEN-ITEMS item 16"
 
 
 # ── chat tools ──────────────────────────────────────────────────────────────
@@ -489,7 +489,7 @@ def _tool_is_covered(name, chat_tools, TOOL_ROUTES, gated) -> bool:
     # in-body check as a fix, while this function did not count it as a
     # decision. That only surfaced with the first real in-body fixes: #76's
     # `_check_foreign_lock("export")` inside `_save_agent_export`, then
-    # OPEN-ITEMS 14's `_gridspine_project_for_write`. Until then every
+    # OPEN-ITEMS 18's `_gridspine_project_for_write`. Until then every
     # covered tool was either seam-gated or routed.
     if _lock_check_path(chat_tools.DISPATCHERS[name]) is not None:
         return True
