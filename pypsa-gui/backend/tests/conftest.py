@@ -133,6 +133,19 @@ def _reset_backend_state() -> None:
     # so undo/changelog state can't bleed across tests.
     sim_router._state_update(thread=None, stop_event=None, log_queue=None)
     undo_service.clear()
+    # The assistant's assurance store (`services/assurance_records.py`) writes
+    # under the SESSION-WIDE app-data dir pinned above and caps each owner at
+    # `MAX_RECORDS` (512), answering 409 `assurance_storage_full` past it. The
+    # seeded identity is the same owner in every test, so the full suite
+    # accumulates records across tests — one assurance-heavy subset alone left
+    # 371 — and the reliability tests that run late in the alphabet failed on
+    # CI (Test run 38315412784, 34 failures) and in the macOS build's gate while
+    # passing alone. Each test starts from an empty store.
+    import shutil
+
+    import app_paths
+
+    shutil.rmtree(app_paths.app_data_dir() / "assistant_assurance", ignore_errors=True)
     # Drain the multi-project solve queue so jobs (and the dispatcher's view of
     # "current") can't bleed across tests. The daemon dispatcher thread stays
     # parked on the now-empty queue — it's reused by the next test that enqueues.
