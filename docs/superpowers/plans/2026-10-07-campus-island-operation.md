@@ -1234,6 +1234,73 @@ hours per period.
 - an empty island config adds nothing;
 - mutations.
 
+### I3b as built (2026-10-13)
+
+**Where it lives.** It is in gridspine, as the plan says (coordinator,
+2026-10-13; additive edits to `ranking/campus.py` and
+`drivers/campus_study.py`). Under I3a's option A the criteria read the I3a
+CSVs, so no formula is coded twice.
+
+**`gridspine/ranking/campus.py`.**
+- `island_metrics(hourly, unit, island, campus)` gives one row per (period,
+  hour):
+  - the worst ΔP⁺ and ΔP⁻ over the scenarios;
+  - `island_inertia_short_mws`, (max − M) of the lowest M over the
+    scenarios;
+  - `island_gfm_headroom_short_mw`, (max − x) of the upward headroom summed
+    over the bess whose campus `island.control` is GFM;
+  - `island_load_mw`;
+  - `island_gfl_share`, grid-following PV and wind over the campus
+    consumption, which is highest at low load;
+  - `island_energy_short_mwh`, (max − x) of e(t−1) summed over every bess.
+- `ISLAND_CRITERIA` names these seven criteria. `select_campus_hours` ranks
+  them with the base criteria when the columns are present: one top-k
+  union, with ties spread as before.
+- **(max − x) is per period.** Within a period a global max would only add a
+  constant, which leaves the ranking unchanged. A flat period would then be
+  positive and pick hours, though. Per period it is 0 and picks nothing.
+- **The module's cage is kept.** Its engine-free test allows only the
+  campus schema. `island_metrics` therefore takes tables already validated,
+  and the driver validates them.
+
+**`gridspine/drivers/campus_study.py`.**
+- `rank_campus` reads `island_unit_hourly.csv` and `island_hourly.csv`
+  when the run has them, validates them, and joins `island_metrics` into
+  the metrics. One table without the other is refused.
+- `prepare_campus` drops an earlier solve's island tables. pypsa-gui writes
+  them after it, so a gridspine-only re-prepare cannot rank stale ones.
+- Without island tables the metrics and the selection are exactly as
+  before (regression test).
+
+**Tests** (`tests/gridspine/test_campus_island_ranking.py`, 21):
+- each maximum and each minimum criterion picks its hand-worked hour;
+- the GFL share at low load, with a GFM PV not counted;
+- only GFM bess count for headroom, and every bess counts for energy;
+- the worst scenario, for the steps and for M;
+- the (max − x) values, per period, and a flat period picks nothing;
+- a constant series picks nothing;
+- ties;
+- the base selection unchanged without island columns;
+- through the driver: island hours join the base ones, a run without
+  tables is unchanged, a half pair is refused, and a re-prepare drops the
+  tables.
+
+**Mutations.** 14 edits:
+- the steps taken as a mean, or dropped;
+- the load dropped;
+- M taken as a max, or negated;
+- the global (max − x);
+- GFM headroom over every bess, and energy over GFM bess only;
+- the share counting a GFM PV, or not normalised;
+- the criteria not added;
+- the driver ignoring the tables, allowing a half pair, or keeping stale
+  ones.
+
+12 were killed on the first run. The mean survived because both scenarios
+carried the same series. The global transform survived because no test had
+a flat period beside a varying one. Two tests were added, and both edits
+are now killed.
+
 ### I4: island steady state by control mode — step 3a (M)
 
 **New module: `static/island_flow.py`.** The hand fixture campus from I1 lets

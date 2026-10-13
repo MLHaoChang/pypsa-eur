@@ -128,9 +128,15 @@ def test_stored_energy_sums_every_bess():
 
 
 def test_the_steps_take_the_worst_scenario():
-    """Two scenarios with the same step; the max is per hour across them."""
-    assert _picks(_series(dp_up=_bump(9.0, 3, 5.0)),
-                  scenarios=("seamless", "ups_bridged"))["max_island_dp_up"] == [3]
+    """seamless steps 20 MW at hour 1 and 10 at hour 3; ups_bridged 18 at
+    hour 3. The worst per hour is 20 at hour 1 (a mean would pick hour 3)."""
+    campus_hourly, unit, hourly = _tables(_series(dp_up=[0.0] * HOURS),
+                                          scenarios=("seamless", "ups_bridged"))
+    for sc, hour, mw in (("seamless", 1, 20.0), ("seamless", 3, 10.0), ("ups_bridged", 3, 18.0)):
+        hourly.loc[(hourly["scenario"] == sc) & (hourly["hour"] == hour), "dp_up_mw"] = mw
+    sel = select_campus_hours(_metrics(campus_hourly, unit, hourly), k=1)
+    assert [int(h) for h, rs in zip(sel["hour"], sel["reasons"])
+            if "max_island_dp_up" in rs] == [1]
 
 
 def test_the_minimum_inertia_takes_the_worst_scenario():
@@ -152,6 +158,21 @@ def test_a_minimum_criterion_is_transformed_to_max_minus_x():
     assert m["island_inertia_short_mws"].tolist() == pytest.approx(
         [0.0, 20.0, 10.0, 0.0, 0.0, 5.0])
     assert (m[[c for _, c in ISLAND_CRITERIA]] >= 0).all().all()
+
+
+def test_a_flat_period_picks_nothing_even_when_another_varies():
+    """2030's inertia is flat at 50; 2040 dips to 30. Per period, 2030 is 0
+    throughout and picks nothing; against a global max it would not be."""
+    a, b, c = _tables(_series())
+    a2, b2, c2 = _tables(_series(inertia=_bump(30.0, 4, 100.0)))
+    for df in (a2, b2, c2):
+        df["period"] = 2040
+    m = _metrics(pd.concat([a, a2]), pd.concat([b, b2]), pd.concat([c, c2]))
+    assert m.loc[2030, "island_inertia_short_mws"].eq(0.0).all()
+    sel = select_campus_hours(m, k=1)
+    picked = {(int(p), int(h)) for p, h, rs in zip(sel["period"], sel["hour"], sel["reasons"])
+              if "min_island_inertia" in rs}
+    assert picked == {(2040, 4)}
 
 
 def test_the_transform_is_per_period():
