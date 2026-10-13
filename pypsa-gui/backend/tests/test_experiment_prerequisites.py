@@ -291,6 +291,7 @@ def test_authenticated_stream_uses_new_tool_without_execution(baseline, client, 
         assert results and results[0]["preflight"]["status"] == "validated"
         assert results[0]["executed"] is False
         assert workflow_tools._network_input_fingerprint(ctx) == before
+        assert not ctx.results_unsaved
     finally:
         for session_id in harness.session_ids:
             chat_service.drop_session(session_id)
