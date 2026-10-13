@@ -79,6 +79,8 @@ SAFETY_PANEL_ENUM = [
     "Workspace", "workspace", "Settings", "settings",
     "GridSpine", "gridspine", "Reports", "reports",
     "CampusElectrical", "campusElectrical",
+    # The guided investment study panel (frontend normalises both to 'decision').
+    "DecisionStudy", "decision",
 ]
 RESULTS_TAB_ENUM = [
     "overview", "capex", "dispatch", "loadflow", "prices", "economics",
