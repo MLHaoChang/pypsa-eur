@@ -40,6 +40,11 @@ function renderSidebar() {
   )
 }
 
+// Save sits behind the footer card's menu in the Expert sidebar (M2).
+async function openProjectMenu() {
+  await userEvent.click(screen.getByTestId('sidebar-project-menu'))
+}
+
 beforeEach(() => {
   // `vi.spyOn` on an already-spied method does not clear prior call history —
   // without this, a toast.error call from an EARLIER test survives into a
@@ -59,6 +64,7 @@ describe("Sidebar's Save action names the SOLVING reason, not the edit-lock one"
     useUIStore.getState().setSolvingReadOnly(true)
     renderSidebar()
 
+    await openProjectMenu()
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(vi.mocked(toast.error)).toHaveBeenCalledWith(SOLVING_MUTATION_MESSAGE)
@@ -71,6 +77,7 @@ describe("Sidebar's Save action names the SOLVING reason, not the edit-lock one"
     })
     renderSidebar()
 
+    await openProjectMenu()
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(vi.mocked(toast.error)).toHaveBeenCalledWith(READ_ONLY_MUTATION_MESSAGE)
@@ -80,6 +87,7 @@ describe("Sidebar's Save action names the SOLVING reason, not the edit-lock one"
   it('saves normally (no toast) while writable', async () => {
     renderSidebar()
 
+    await openProjectMenu()
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(vi.mocked(toast.error)).not.toHaveBeenCalledWith(SOLVING_MUTATION_MESSAGE)
