@@ -276,6 +276,8 @@ export default function SnapshotPicker() {
             value={idx}
             onChange={(e) => { setPlaying(false); setResultsSnapshotIdx(Number(e.target.value)) }}
             disabled={!resultsOverlayEnabled}
+            aria-label="Snapshot"
+            aria-valuetext={stamp ? `${stamp.slice(0, 16).replace('T', ' ')} (${localIdx + 1} of ${windowLen})` : `${localIdx + 1} of ${windowLen}`}
             style={{ width: 140, height: 12 }}
           />
 

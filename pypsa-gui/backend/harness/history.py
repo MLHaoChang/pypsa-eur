@@ -241,11 +241,117 @@ def _today_token_spend(ctx: ProjectContext) -> int:
             continue
         if rec_date != today:
             continue
-        usage = rec.get("usage")
+        # The turn's own spend when recorded; else the legacy running total.
+        usage = rec.get(TURN_USAGE_KEY)
+        if not isinstance(usage, dict):
+            usage = rec.get("usage")
         if isinstance(usage, dict):
             total += int(usage.get("input_tokens", 0) or 0)
             total += int(usage.get("output_tokens", 0) or 0)
     return total
+
+
+# ── Turn record fields beyond the five `/chat/import` requires ──────────────
+
+# What THIS turn spent. `usage` on a record is `session.usage_acc` — the
+# session's running total, which is what the panel's token footer shows — so
+# summing `usage` over records counts turn 1 once per later turn of its
+# session, and the daily cap tripped at a fraction of its limit (three 30-token
+# turns read as 180). Records written before this key existed have only the
+# running total; `_today_token_spend` falls back to it, over-counting them as
+# before rather than guessing.
+TURN_USAGE_KEY = "turn_usage"
+
+# A turn that produced model output and then ended without `turn_done` (an
+# abort, the tool-call cap, a mid-turn project switch, a stream error, a
+# client disconnect). Recorded so a reload shows what ran — its tools changed
+# the network — but for DISPLAY ONLY: GET /history never replays it to the
+# model. Its assistant half is what the user saw (streamed text, and the names
+# of the tools it requested), not provider messages; an interrupted step can
+# end on a `tool_use` with no `tool_result`, which would make every later turn
+# of the session invalid to the provider.
+INTERRUPTED_KEY = "interrupted"
+INTERRUPTED_REASON_KEY = "interrupted_reason"
+
+_USAGE_FIELDS = ("input_tokens", "output_tokens",
+                 "cache_read_tokens", "cache_create_tokens")
+
+
+def usage_since(now: dict[str, Any], start: dict[str, Any]) -> dict[str, int]:
+    """The per-turn usage: `usage_acc` now minus `usage_acc` at turn start."""
+    return {k: max(0, int(now.get(k, 0) or 0) - int(start.get(k, 0) or 0))
+            for k in _USAGE_FIELDS}
+
+
+def is_interrupted_turn(rec: dict[str, Any]) -> bool:
+    return rec.get(INTERRUPTED_KEY) is True
+
+
+class TurnTrace:
+    """
+    What a turn showed, read off its frames by `run_turn`.
+
+    Built from the frames rather than from provider messages because the
+    record is for display: a stream cut off mid-text has deltas the user saw
+    and no final message, and a provider message is exactly what the record
+    must never be mistaken for.
+    """
+
+    def __init__(self) -> None:
+        self.blocks: list[dict[str, Any]] = []
+        self._text: list[str] = []
+        self.model_spoke = False
+        self.completed = False
+        self._done_reason: str | None = None
+        self._error_kind: str | None = None
+        self.profile_id: str | None = None
+
+    def note(self, event: str, payload: Any) -> None:
+        if not isinstance(payload, dict):
+            return
+        if event == "token":
+            self.model_spoke = True
+            self._text.append(str(payload.get("delta") or ""))
+        elif event == "thinking":
+            self.model_spoke = True
+        elif event == "tool_request":
+            self.model_spoke = True
+            self._flush_text()
+            self.blocks.append({"type": "tool_use",
+                                "name": str(payload.get("tool_name") or "?")})
+        elif event == "session_init":
+            self.profile_id = payload.get("profile_id") or self.profile_id
+        elif event == "turn_done":
+            self.completed = True
+        elif event == "error":
+            self._error_kind = payload.get("error_kind") or self._error_kind
+        elif event == "session_done":
+            self._done_reason = payload.get("reason") or self._done_reason
+
+    def _flush_text(self) -> None:
+        text = "".join(self._text)
+        self._text = []
+        if text.strip():
+            self.blocks.append({"type": "text", "text": text})
+
+    def interrupted_record(self, *, ended_by: str | None) -> dict[str, Any] | None:
+        """
+        The fields of an interrupted-turn record, or None when there is none
+        to write: the turn completed (its own record was written), or the model
+        never produced anything (a refusal before the first token: nothing ran,
+        and the error frame already said why).
+        """
+        if self.completed or not self.model_spoke:
+            return None
+        self._flush_text()
+        return {
+            "assistant": list(self.blocks),
+            INTERRUPTED_KEY: True,
+            # The turn's own account of how it ended wins; `ended_by` is for
+            # an end it never got to report (a disconnect, an exception).
+            INTERRUPTED_REASON_KEY: (self._done_reason or self._error_kind
+                                     or ended_by or "unknown"),
+        }
 
 
 def append_turn(ctx: ProjectContext, turn: dict[str, Any]) -> None:

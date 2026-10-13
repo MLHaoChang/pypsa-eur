@@ -143,6 +143,11 @@ def build_workbook(report: InvestmentCaseReport, *, project: str | None = None) 
         # The terminal value's method (IC S0b plan S6); its terms are on the project sheet.
         ["Terminal value method", (project_payload.get("terminal_value") or {}).get("method")],
     ]
+    # Campus equipment bought as owner capex (IC G2 plan G-10), one row each.
+    for e in project_payload.get("extra_assets") or []:
+        rows.append(["Extra asset", f"{e.get('name')}: {e.get('kind')}, {e.get('quantity')} "
+                     f"{e.get('basis')}, overnight {e.get('overnight_cost')}, built "
+                     f"{e.get('build_year')}, source {e.get('source')} ({e.get('source_hash')})"])
     for jur, h in sorted(report.packs.items()):
         rows.append([f"Pack {jur}", h])
     for name in IC_REPORT_SECTIONS:
