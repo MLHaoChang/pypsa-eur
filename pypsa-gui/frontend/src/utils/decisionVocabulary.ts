@@ -304,11 +304,7 @@ export interface ErrorCopy { title: string; action: string; rerun?: boolean }
 export const ERROR_COPY: Record<string, ErrorCopy> = {
   decision_studies_unavailable: {
     title: 'Decision studies are not available in multi-user mode yet.',
-    action: 'They need a fix to how time series are stored per user (OPEN-ITEMS 1). Use the desktop app for now.',
-  },
-  decision_studies_disabled: {
-    title: 'Decision studies are switched off.',
-    action: 'Start the desktop app with PYPSAGUI_DECISION_STUDIES=1 to switch them on.',
+    action: 'Use the desktop app for now.',
   },
   study_running: { title: 'The study is running.', action: 'Wait for it to finish, or stop it on the Run page.' },
   solver_in_flight: { title: 'Another solve is using this study’s project.', action: 'Wait for it to finish, then try again.' },

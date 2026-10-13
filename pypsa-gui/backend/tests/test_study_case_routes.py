@@ -139,7 +139,6 @@ def test_a_case_handler_called_as_a_plain_function_refuses_in_auth_mode(monkeypa
     from fastapi import HTTPException
 
     monkeypatch.setattr(local_mode, "is_local_mode", lambda: False)
-    monkeypatch.setenv("PYPSAGUI_DECISION_STUDIES", "1")
     project = SimpleNamespace(uuid=str(uuid.uuid4()), name="p", directory=None)
     for fn in (studies_router.get_option_case, studies_router.get_option_case_xlsx):
         with pytest.raises(HTTPException) as exc:
