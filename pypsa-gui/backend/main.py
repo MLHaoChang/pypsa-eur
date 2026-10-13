@@ -82,6 +82,7 @@ from routers import (
     compare,
     gridspine,
     campus_electrical,
+    geocode,
     guides,
     io,
     library,
@@ -780,6 +781,10 @@ async def undo_snapshot_middleware(request: Request, call_next):
                 if session_row is not None:
                     ctx, slot = active_project.resolve_for_session(db, session_row)
                     PyPSAService.bind_request_context(ctx)
+                    # P33b: shared with the handler's context copy, so the
+                    # edit-counter bump below lands on the ctx the request
+                    # ENDED on (see `PyPSAService._request_ctx_box`).
+                    PyPSAService.bind_request_box([ctx])
                     PyPSAService.bind_request_slot(slot)
                     PyPSAService.bind_request_scratch(
                         active_project.scratch_key(session_row)
@@ -1028,6 +1033,27 @@ async def undo_snapshot_middleware(request: Request, call_next):
 
     response = await call_next(request)
 
+    # ★ P33b B1: an accepted write under the undo prefixes is an EDIT — bump
+    # the project's edit counter (`ProjectContext.network_revision`). Undo IS
+    # an edit (it is in `_UNDO_EXCLUDE` only so it never captures itself);
+    # `/undo/info` is a read. A refused write (4xx/5xx) never bumps. The bump
+    # goes to the ctx the request ended on — after an undo that is the re-keyed
+    # project ctx (step 0); after "New" or an io import it is the fresh draft,
+    # never the project the user left.
+    if (
+        is_write
+        and 200 <= response.status_code < 300
+        and path != "/api/network/undo/info"
+        and any(path.startswith(p) for p in _UNDO_PREFIXES)
+    ):
+        try:
+            from services import dirty_state
+            from services.pypsa_service import PyPSAService
+            box = PyPSAService._request_ctx_box.get()
+            dirty_state.bump_revision(box[0] if box else None)
+        except Exception:  # noqa: BLE001 — never fail an applied edit
+            logger.exception("could not bump the network revision")
+
     # Rollback the snapshot if the mutation was rejected by the server.
     if pushed and response.status_code >= 400:
         try:
@@ -1236,6 +1262,9 @@ app.include_router(
 )
 # In-app guides (P21): static tour / field-help catalogue, read-only.
 app.include_router(guides.router, prefix="/api/guides", tags=["guides"])
+# Address lookup for the map's click-to-place mode (visual layers plan 2,
+# M3): a proxy over `PYPSAGUI_GEOCODER_URL`, 503 until it is set.
+app.include_router(geocode.router, prefix="/api/geocode", tags=["geocode"])
 # Desktop-only. Every route 404s in web mode; see routers/local_settings.py.
 app.include_router(
     local_settings.router, prefix="/api/local-settings", tags=["local-settings"],

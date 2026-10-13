@@ -15,7 +15,7 @@ import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 import local_mode
@@ -27,7 +27,9 @@ from models.schemas import (
     ImportFolderRequest,
     ImportSummary,
     ProjectInfo,
+    ProjectSettings,
     RenameProjectRequest,
+    UpdateProjectSettingsRequest,
     UpdateScenarioRequest,
 )
 from services import active_project, change_log_service
@@ -97,6 +99,15 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  # SIDECAR_NAME under services/adequacy/ so a fourth sidecar
                  # cannot repeat this.
                  "asset_health.json",
+                 # The 3D site view's sidecar (sites, boundaries, placements).
+                 # services/site_service.py owns it; its cached context lives
+                 # under the `sites/` dir below.
+                 "sites.json",
+                 # The map view's user geometry: routed branches and dragged
+                 # asset bubbles (visual layers plan 2, M1).
+                 # services/map_layout_service.py owns it; `test_map_layout_routes`
+                 # pins it equal to MAP_LAYOUT_FILE.
+                 "map_layout.json",
                  # The island sidecar (plan 2026-10-07 campus island, I1):
                  # control modes, unit dynamics and island requirements.
                  "island_config.json",
@@ -134,8 +145,14 @@ _BUNDLE_CAMPUS_FILES = (
 # Study reports (`reports/<report_id>/{meta.json, v<N>.json, figures/}`,
 # services/reports/store.py) joined the tuple with the same semantics: always a
 # COPY on save-as, replaced wholesale on snapshot restore, walked recursively
-# into the bundle zip and extracted from it.
-_BUNDLE_DIRS = ("uploads", "reports")
+# into the bundle zip and extracted from it. `sites/` is the 3D site view's
+# cached site context (services/site_context.py), one directory per site id.
+_BUNDLE_DIRS = ("uploads", "reports", "sites")
+
+# The bundle files `_save_context` writes itself on every save. `_carry_sidecars_on_move`
+# copies every OTHER `_BUNDLE_FILES` entry from the source project; these it must
+# not touch, or it would overwrite the freshly written network with the source's.
+_SAVE_WRITTEN_FILES = frozenset({"network.nc", "metadata.json", "solver_config.json", "user_ts.json", "results_state.pkl"})
 
 # Cap on the serialized blank-canvas layout document. Even a large network's
 # schematic is a few hundred KB of coordinates; 4 MB bounds a malformed or
@@ -436,6 +453,58 @@ def _unwrap_results_state(raw: object) -> dict | None:
     return raw
 
 
+def _map_eh_study_mirror(state: dict) -> None:
+    """
+    P33b D-1: put a restored FINISHED EH study record back on ``eh_study``.
+
+    The mirror (``eh_study_record``) is mapped only when the ctx holds no
+    ``eh_study`` of its own (an in-memory record is newer than the disk one),
+    with ``thread`` / ``stop_event`` None so ``record_is_running`` reads it as
+    finished. The mirror key is then ASSIGNED None, never popped: it is a
+    declared field and the live dict keeps the declared key set.
+    """
+    rec = state.get("eh_study_record")
+    if isinstance(rec, dict) and state.get("eh_study") is None:
+        state["eh_study"] = {**rec, "thread": None, "stop_event": None}
+    state["eh_study_record"] = None
+
+
+def _restore_network_revision(ctx, project_dir: pathlib.Path) -> None:
+    """P33b: the project's edit counter from metadata.json (0 when absent — an
+    older save; a restored record then reads edited, the safe direction)."""
+    try:
+        ctx.network_revision = int(_read_meta(project_dir).get("network_revision") or 0)
+    except (TypeError, ValueError):
+        ctx.network_revision = 0
+
+
+def _register_created_context() -> None:
+    """
+    P33b 10a: make a just-created project's ctx RESIDENT under its own key.
+
+    Template create and bundle import bind the fresh ctx but never registered
+    it. Under a session the next request then hydrated a SECOND copy from the
+    files the handler had just written (the first was orphaned in the scratch
+    slot); with no session at all (local mode — the desktop build) the ctx
+    lived only in the process foreground, so the next project switch dropped
+    it, with every unsaved edit and the finished study record it held, and a
+    re-activation hydrated a stale copy from disk. `load_project` registers
+    (`PyPSAService.register`); this does the same, then moves the ctx out of
+    the session's scratch slot (`rekey_context`, as undo and restore do).
+    A fresh project row has no prior resident context, so no write-back runs.
+    """
+    ctx = PyPSAService.get_active_context()
+    key = ctx.registry_key
+    if key is None:
+        return
+    # Re-key FIRST (out of the scratch slot, under its own key), then register:
+    # registering first left the ctx under both slots during the cap check,
+    # which counted it twice and evicted an unrelated project a create early
+    # (P33b gate N-3). `register` then sees `prior is ctx` — no write-back.
+    PyPSAService.rekey_context(ctx)
+    PyPSAService.register(key, ctx)
+
+
 def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None:
     """
     Reset and (if present) restore `_state` side-results from
@@ -452,6 +521,10 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
     # old and new state during the restore window.
     from routers.simulation import _state_update as _sim_state_update
     _sim_state_update(**{k: None for k in _RESULTS_STATE_KEYS})
+    # P33b: the edit counter travels with the record it is compared against.
+    # Every caller (load, bundle import, Saved-snapshot restore) restores the
+    # active ctx from these files, so both are set here, together.
+    _restore_network_revision(PyPSAService.get_active_context(), project_dir)
     results_path = project_dir / "results_state.pkl"
     if not results_path.exists():
         return
@@ -474,6 +547,8 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
         applied = {k: v for k, v in data.items() if k in _RESULTS_STATE_KEYS}
         if applied:
             _sim_state_update(**applied)
+        with PyPSAService.get_solver_state_lock():
+            _map_eh_study_mirror(PyPSAService.get_solver_state())
     except Exception as exc:
         change_log_service.log(
             "warn", "Project", project_name,
@@ -634,8 +709,24 @@ def _project_info(project_dir: pathlib.Path) -> ProjectInfo:
         objective=meta.get("objective"),
         has_orphan_tmp=has_orphan,
         parent_project=meta.get("parent_project"),
+        settings=_settings_from_meta(meta),
         **_scenario_fields_from_meta(meta),
     )
+
+
+def _settings_from_meta(meta: dict) -> ProjectSettings:
+    """
+    The `settings` table of a metadata.json as the DTO, defaults for anything
+    missing or malformed — the same tolerance `services/project_settings.py`
+    applies on the read side the network routes use.
+    """
+    from services import project_settings
+
+    table = meta.get(project_settings.SETTINGS_KEY)
+    if not isinstance(table, dict):
+        return ProjectSettings()
+    known = {k: v for k, v in table.items() if k in ProjectSettings.model_fields and isinstance(v, bool)}
+    return ProjectSettings(**known)
 
 
 def _project_info_db(db, project) -> ProjectInfo:
@@ -1102,10 +1193,13 @@ async def import_bundle(
         # refused before anything is swapped (review 0b #2).
         raise HTTPException(422, f"bus names starting 'ic:' are reserved: {reserved[:5]}")
     from services import dirty_state, undo_service
-    undo_service.clear()
-    dirty_state.clear()  # memory and disk now agree
     with PyPSAService.get_lock():
+        # A different project: a fresh context (own undo, counter 0, no result
+        # state of the project being left — P33b gate B-1). The clears apply
+        # to the new context, never to the resident one being left.
         PyPSAService.reset_network()
+        undo_service.clear()
+        dirty_state.clear()  # memory and disk now agree
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
             PyPSAService.import_network_from_netcdf(n, nc_path)
@@ -1114,6 +1208,7 @@ async def import_bundle(
         project_registry.bind_context(
             PyPSAService.get_active_context(), _imported_project
         )
+    _register_created_context()
 
     # Persist the pointer, mirroring activate_project. Written AFTER the swap
     # succeeds so a failed import does not leave the session pointing at a
@@ -1423,10 +1518,13 @@ def create_from_template(
 
     # Reset + load, mirroring import_bundle / load_project.
     from services import dirty_state, undo_service
-    undo_service.clear()
-    dirty_state.clear()  # memory and disk now agree
     with PyPSAService.get_lock():
+        # A different project: a fresh context (own undo, counter 0, no result
+        # state of the project being left — P33b gate B-1). The clears apply
+        # to the new context, never to the resident one being left.
         PyPSAService.reset_network()
+        undo_service.clear()
+        dirty_state.clear()  # memory and disk now agree
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
             PyPSAService.import_network_from_netcdf(n, dest / "network.nc")
@@ -1434,6 +1532,7 @@ def create_from_template(
         project_registry.bind_context(
             PyPSAService.get_active_context(), _created_project
         )
+    _register_created_context()
 
     # Persist the pointer, mirroring activate_project. Written AFTER the swap
     # succeeds so a failed create does not leave the session pointing at a
@@ -1478,6 +1577,9 @@ def create_from_template(
         "condition": None,
         "solve_time": None,
         "user_ts_count": 0,
+        # P33b gate S-4: a fresh project's edit counter, on disk from creation
+        # (the new context starts at 0; a cold hydrate then agrees with memory).
+        "network_revision": int(PyPSAService.get_active_context().network_revision or 0),
         "parent_project": None,
         "scenario_description": None,
     })
@@ -1632,13 +1734,25 @@ def _carry_sidecars_on_move(
     """
     Carry a project's sidecars when a save's TARGET differs from its binding.
 
-    Two sidecars, travelling differently:
+    Three kinds of sidecar, travelling differently:
 
     * `chat.jsonl` — MOVED on `rebind=True` (Save-As claims the new name, so the
-      conversation goes with it), COPIED otherwise (Save-a-Copy /
-      create_scenario must leave the original's thread intact).
-    * `uploads/` — ALWAYS copied. Reference material a user may want in both
-      projects, not a per-conversation thread.
+      conversation goes with it), COPIED otherwise (Save-a-Copy must leave the
+      original's thread intact).
+    * `uploads/` and every other `_BUNDLE_DIRS` entry — ALWAYS copied.
+      Reference material a user may want in both projects.
+    * Every `_BUNDLE_FILES` sidecar the save does not write itself
+      (`layout.json`, `sites.json`, the adequacy sidecars, …) — ALWAYS copied,
+      REPLACING whatever the destination holds: a forced Save-As over an
+      existing project must not keep the overwritten project's schematic.
+      The five files `_save_context` writes (`network.nc`, `metadata.json`,
+      `solver_config.json`, `user_ts.json`, `results_state.pkl`) are excluded
+      because the save has already written the correct ones. Before this loop
+      only chat and uploads travelled, so Save-As, Save-a-Copy and the Clone
+      wizard silently lost `layout.json`.
+
+    Callers: `_save_context` only. `create_scenario` copies the bundle tuples
+    directly and never calls this.
 
     `loaded` is the PRE-rebind name and must be passed explicitly:
     `ctx.loaded_project` has already been re-bound to `name` by the time this
@@ -1715,6 +1829,21 @@ def _carry_sidecars_on_move(
             _copy_bundle_dirs(src_dir, dest)
         except Exception:  # noqa: BLE001 — best-effort, never abort save
             logger.exception("save: _copy_bundle_dirs(%s → %s) failed", loaded, name)
+
+        # The bundle-file sidecars the save itself does not write. Copy-and-
+        # replace, one file at a time, each best-effort: a failure on one
+        # must not stop the rest (a missing layout is a nuisance; a missing
+        # worksheet is lost user work).
+        for fname in _BUNDLE_FILES:
+            if fname in _SAVE_WRITTEN_FILES:
+                continue
+            src_file = src_dir / fname
+            if not src_file.is_file():
+                continue
+            try:
+                shutil.copy2(src_file, dest / fname)
+            except OSError:
+                logger.exception("save: sidecar copy %s (%s → %s) failed", fname, loaded, name)
 
 
 
@@ -2065,6 +2194,12 @@ def _save_context(
     # the .nc itself, so disk overhead is acceptable.
     import pickle
     results_state = {k: ctx.solver_state.get(k) for k in _RESULTS_STATE_KEYS}
+    # P33b D-1: the finished EH study record's mirror, derived from the LIVE
+    # record (never from the always-None mirror key), compared against the
+    # `network_revision` written to metadata.json below when it is restored.
+    from services.study_state import finished_study_record
+    results_state["eh_study_record"] = finished_study_record(
+        ctx.solver_state.get("eh_study"))
     results_path = dest / "results_state.pkl"
     if any(v is not None for v in results_state.values()):
         # Versioned envelope so a future shape change can be detected on load
@@ -2181,9 +2316,16 @@ def _save_context(
             "condition":   ctx.solver_state.get("condition") if has_dispatch else None,
             "solve_time":  ctx.solver_state.get("solve_time") if has_dispatch else None,
             "user_ts_count": len(user_ts_data),
+            # P33b: the edit counter the saved EH study record is compared to.
+            "network_revision": int(ctx.network_revision or 0),
             "parent_project": new_parent,
             "scenario_description": new_desc,
             "scenario_type": new_type,
+            # Per-project settings (plan M2) round-trip from the existing file:
+            # `PATCH /{name}/settings` is their only writer, and a save that
+            # dropped the key would silently reset the user's choice.
+            **({"settings": existing_meta["settings"]}
+               if isinstance(existing_meta.get("settings"), dict) else {}),
         })
     ts_columns_saved = len(user_ts_data) if isinstance(user_ts_data, dict) else 0
     # Flat-count the leaves of the nested {comp: {attr: {col: ...}}} structure.
@@ -2455,6 +2597,7 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str, *, allow_netwo
                 for k, v in data.items():
                     if k in _RESULTS_STATE_KEYS:
                         ctx.solver_state[k] = v
+            _map_eh_study_mirror(ctx.solver_state)
         except Exception as exc:
             change_log_service.log(
                 "warn", "Project", name,
@@ -2462,6 +2605,9 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str, *, allow_netwo
                 f"({type(exc).__name__}: {exc}). The netcdf still carries the "
                 f"dispatch; only side-results are affected.",
             )
+
+    ctx.solver_state["eh_study_record"] = None
+    _restore_network_revision(ctx, src)
 
     try:
         ctx.network.name = name
@@ -2757,14 +2903,16 @@ def load_project(
             f"was interrupted). Project loaded from the previous good copy.",
         )
 
-    # Clear undo history — snapshots from a previous project are meaningless
-    # after loading a different one.
+    # The loaded project gets its own empty undo stack and a clean dirty flag:
+    # `reset_network()` builds a fresh context (P33b gate B-1), so the clears
+    # below apply to IT. They used to run before the swap — on the project
+    # being left, whose resident context then read clean and lost its history.
     from services import dirty_state, undo_service
-    undo_service.clear()
-    dirty_state.clear()  # memory and disk now agree
 
     with PyPSAService.get_lock():
         PyPSAService.reset_network()
+        undo_service.clear()
+        dirty_state.clear()  # memory and disk now agree
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
             PyPSAService.import_network_from_netcdf(n, nc_path)
@@ -3140,6 +3288,66 @@ def update_scenario_metadata(
         f"Scenario metadata updated on '{project.name}'"
         + (f" · type={project.scenario_type}" if project.scenario_type else "")
         + (f" · {project.scenario_description[:60]}" if project.scenario_description else ""),
+    )
+    return _project_info_db(db, project)
+
+
+@router.patch("/{name}/settings")
+def update_project_settings(
+    name: str,
+    req: UpdateProjectSettingsRequest,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> ProjectInfo:
+    """
+    Edit the project's settings table in `metadata.json` (plan M2: "Derive
+    lengths from geometry"). PARTIAL like `/scenario`: only the keys present
+    are written, so a one-flag PATCH cannot reset its future siblings.
+
+    The file is the only store — there is no DB column — so the project must
+    have a storage directory (it has been saved at least once; 409 otherwise).
+    A metadata.json that is missing or unreadable is NOT invented here: the
+    save path owns the dozen other keys, and writing `{"settings": …}` alone
+    over a lost file would hide the loss `save_project` warns about. The
+    setting changes how edits behave, so it is a write edge: the lock is
+    ENFORCED (acquired) as for the scenario labels.
+
+    Errors: 404 no such project (or not yours); 409 locked by another user,
+    or never saved; 422 a non-boolean flag.
+    """
+    from services import project_registry, project_settings
+
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, name)
+    submitted = req.model_dump(exclude_unset=True)
+    if not submitted:
+        return _project_info_db(db, project)
+    _enforce_project_lock(db, project, user)
+
+    project_dir = project_registry.project_dir(project)
+    if not project_dir.is_dir():
+        raise HTTPException(409, f"Save '{project.name}' before changing its settings.")
+    meta = _read_meta(project_dir)
+    if not meta:
+        raise HTTPException(
+            409,
+            f"metadata.json for '{project.name}' is missing or unreadable; save the project and retry.",
+        )
+    table = meta.get(project_settings.SETTINGS_KEY)
+    if not isinstance(table, dict):
+        table = {}
+    for key, value in submitted.items():
+        if value is None:
+            table.pop(key, None)       # null = back to the default
+        else:
+            table[key] = value
+    meta[project_settings.SETTINGS_KEY] = table
+    _write_meta(project_dir, meta)
+
+    changed = ", ".join(f"{k}={v}" for k, v in submitted.items())
+    change_log_service.log(
+        "update_settings", "Project", project.name,
+        f"Project settings updated on '{project.name}' · {changed}",
     )
     return _project_info_db(db, project)
 
@@ -3590,6 +3798,431 @@ def put_layout(
         )
     _atomic_write_text(dest / "layout.json", serialized)
     return {"saved": name}
+
+
+@router.get("/{name}/sites")
+def get_sites(
+    name: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    The project's 3D site document (`sites.json`): sites, boundaries, bus
+    membership and asset placements. Same degrade rules as `/layout`:
+    missing or corrupt → the empty document; a permission denial is surfaced,
+    never reported as "no sites". See services/site_service.py.
+    """
+    from services import site_service
+
+    src, name = _resolve_project_src(name, db, user)
+    if not src.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    try:
+        return site_service.read_sites(src)
+    except PermissionError as exc:
+        raise _access_denied(src / site_service.SITES_FILE) from exc
+
+
+@router.put("/{name}/sites")
+def put_sites(
+    name: str,
+    sites: dict,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    Persist the site document. Validated (422 names the field), capped like
+    the layout (413), lock-CHECKED like the layout (409, never acquiring —
+    the canvas writes on drag-settle). The one side effect: a `sites/<id>/`
+    context cache whose site is no longer in the document is removed.
+    """
+    from services import project_registry, site_service
+
+    dest, name = _resolve_project_src(name, db, user)
+    if not dest.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    lock_project = project_registry.find_project(db, user, name)
+    _check_project_lock(db, lock_project, user)
+    try:
+        site_service.validate_sites(sites)
+    except site_service.SitesInvalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+    try:
+        site_service.write_sites(dest, sites)
+    except site_service.SitesTooLarge as exc:
+        raise HTTPException(413, str(exc)) from exc
+    # The document is on disk; a problem listing or removing orphan context
+    # caches must not turn that success into a 500.
+    try:
+        site_service.prune_site_dirs(dest, sites, rmtree=_force_rmtree)
+    except OSError:
+        logger.warning("sites: orphan context prune failed for %s", name, exc_info=True)
+    return {"saved": name, "sites": len(sites["sites"])}
+
+
+def _site_context_dir(dest: pathlib.Path, site_id: str) -> tuple[pathlib.Path, dict]:
+    """
+    `<project>/sites/<id>` for a site that is in the document. An id that
+    fails `site_dir`'s containment check is 404 BEFORE any I/O, the same
+    answer as an unknown id, so a traversal probe learns nothing.
+    """
+    from services import site_service
+
+    try:
+        target = site_service.site_dir(dest, site_id)
+    except site_service.SitesInvalid as exc:
+        raise HTTPException(404, f"Site '{site_id}' not found") from exc
+    try:
+        doc = site_service.read_sites(dest)
+    except PermissionError as exc:
+        raise _access_denied(dest / site_service.SITES_FILE) from exc
+    for site in doc["sites"]:
+        if site.get("id") == site_id:
+            return target, site
+    raise HTTPException(404, f"Site '{site_id}' not found")
+
+
+@router.get("/{name}/sites/{site_id}/context")
+def get_site_context(
+    name: str,
+    site_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    The cached site context (OSM footprints + terrain) for one site. Never
+    fetches: 404 on a cache miss, so the canvas decides when to spend the
+    upstream call (POST below). Reads are never lock-gated.
+    """
+    from services import site_context
+
+    src, name = _resolve_project_src(name, db, user)
+    if not src.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    target, _site = _site_context_dir(src, site_id)
+    doc = site_context.read_cached(target)
+    if doc is None:
+        raise HTTPException(404, f"No cached context for site '{site_id}'")
+    return doc
+
+
+@router.post("/{name}/sites/{site_id}/context")
+def fetch_site_context(
+    name: str,
+    site_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    Fetch the context for the site's boundary from Overpass + the terrain
+    tiles, cache it as `sites/<id>/context.json` and return it. 502 with the
+    upstream's actionable message when a source refuses; lock-CHECKED like
+    every other project-dir write (409, never acquiring).
+    """
+    from services import project_registry, site_context
+
+    dest, name = _resolve_project_src(name, db, user)
+    if not dest.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    lock_project = project_registry.find_project(db, user, name)
+    _check_project_lock(db, lock_project, user)
+    target, site = _site_context_dir(dest, site_id)
+    try:
+        doc = site_context.fetch_context(site["boundary"])
+    except site_context.SiteContextTooLarge as exc:
+        # The request is the problem (a district-sized boundary), not the upstream.
+        raise HTTPException(422, str(exc)) from exc
+    except site_context.SiteContextUnavailable as exc:
+        raise HTTPException(502, str(exc)) from exc
+    try:
+        site_context.write_cached(target, doc)
+    except OSError:
+        # The document is in hand; a cache that cannot be written costs the
+        # next open another fetch, not this one its answer.
+        logger.warning("site context: cache write failed for %s/%s", name, site_id, exc_info=True)
+    return doc
+
+
+@router.delete("/{name}/sites/{site_id}/context")
+def delete_site_context(
+    name: str,
+    site_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """Drop the cached context so the next open refetches (lock-CHECKED)."""
+    from services import project_registry, site_context
+
+    dest, name = _resolve_project_src(name, db, user)
+    if not dest.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    lock_project = project_registry.find_project(db, user, name)
+    _check_project_lock(db, lock_project, user)
+    target, _site = _site_context_dir(dest, site_id)
+    return {"cleared": site_context.clear_cached(target)}
+
+
+@router.get("/{name}/sites/{site_id}/thumbnail")
+def get_site_thumbnail(
+    name: str,
+    site_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    The site's last capture from the 3D view (`sites/<id>/thumb.png`, plan 3
+    S5), inline PNG; 404 when none was taken. Reads are never lock-gated.
+    `no-store`: the canvas replaces it after every fresh solve and the hub
+    card must show the new one.
+    """
+    from fastapi import Response
+
+    from services import site_service
+
+    src, name = _resolve_project_src(name, db, user)
+    if not src.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    target, _site = _site_context_dir(src, site_id)
+    data = site_service.read_thumbnail(target)
+    if data is None:
+        raise HTTPException(404, f"No thumbnail for site '{site_id}'")
+    return Response(content=data, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.put("/{name}/sites/{site_id}/thumbnail")
+async def put_site_thumbnail(
+    name: str,
+    site_id: str,
+    request: Request,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    Store the capture the 3D view took of this site (raw PNG body,
+    `Content-Type: image/png`). 415 for any other content type, 413 over
+    `MAX_THUMB_BYTES`, 422 when the bytes are not a PNG; lock-CHECKED like
+    every other project-dir write (409, never acquiring). The site must be
+    in the document (404 otherwise, the same answer as a traversal probe).
+    """
+    from services import project_registry, site_service
+
+    dest, name = _resolve_project_src(name, db, user)
+    if not dest.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if content_type != "image/png":
+        raise HTTPException(415, "thumbnail must be sent as image/png")
+    lock_project = project_registry.find_project(db, user, name)
+    _check_project_lock(db, lock_project, user)
+    target, _site = _site_context_dir(dest, site_id)
+    data = await request.body()
+    try:
+        site_service.validate_thumbnail(data)
+    except site_service.ThumbnailTooLarge as exc:
+        raise HTTPException(413, str(exc)) from exc
+    except site_service.ThumbnailInvalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+    site_service.write_thumbnail(target, data)
+    return {"saved": name, "site": site_id, "bytes": len(data)}
+
+
+@router.get("/{name}/map_layout")
+def get_map_layout(
+    name: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    The project's map document (`map_layout.json`): routed branches and
+    dragged asset bubbles. Same degrade rules as `/layout`: missing or
+    corrupt → the empty document; a permission denial is surfaced, never
+    reported as "no routes". See services/map_layout_service.py.
+    """
+    from services import map_layout_service
+
+    src, name = _resolve_project_src(name, db, user)
+    if not src.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    try:
+        return map_layout_service.read_map_layout(src)
+    except PermissionError as exc:
+        raise _access_denied(src / map_layout_service.MAP_LAYOUT_FILE) from exc
+
+
+@router.put("/{name}/map_layout")
+def put_map_layout(
+    name: str,
+    layout: dict,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    Persist the map document. Unlike `/layout` the shape is validated (422
+    names the field; unknown keys are kept), capped like the layout (413,
+    the same `_MAX_LAYOUT_BYTES`), lock-CHECKED like the layout (409, never
+    acquiring — the map writes on every waypoint drag-settle).
+    """
+    from services import map_layout_service, project_registry
+
+    dest, name = _resolve_project_src(name, db, user)
+    if not dest.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    lock_project = project_registry.find_project(db, user, name)
+    _check_project_lock(db, lock_project, user)
+    try:
+        map_layout_service.validate_map_layout(layout)
+    except map_layout_service.MapLayoutInvalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+    try:
+        map_layout_service.write_map_layout(dest, layout, max_bytes=_MAX_LAYOUT_BYTES)
+    except map_layout_service.MapLayoutTooLarge as exc:
+        raise HTTPException(413, str(exc)) from exc
+    return {"saved": name, "routes": len(layout["routes"]), "bubbles": len(layout["bubbles"])}
+
+
+def _require_active_project(dest: pathlib.Path, name: str) -> None:
+    """
+    The geometry import and the OSM suggestions read the LIVE network (bus
+    coordinates, branch names) — that is the active project's. A project
+    that is not the one open answers 409 rather than a report against the
+    wrong network.
+    """
+    from services import network_lengths
+
+    active = network_lengths.active_project_dir()
+    if active is None or os.path.realpath(active) != os.path.realpath(dest):
+        raise HTTPException(409, f"Open project '{name}' first: geometry is matched against the loaded network.")
+
+
+def _placed_buses_and_branches(n) -> tuple[dict[str, tuple[float, float]], list]:
+    from services.map_geometry_import import Branch
+    from services.network_geometry import _bus_coord
+
+    buses: dict[str, tuple[float, float]] = {}
+    for b in n.buses.index:
+        c = _bus_coord(n, str(b))
+        if c is not None:
+            buses[str(b)] = c
+    branches = []
+    for kind, attr in (("line", "lines"), ("link", "links"), ("tr", "transformers")):
+        df = getattr(n, attr, None)
+        if df is None or df.empty:
+            continue
+        for nm in df.index:
+            branches.append(Branch(kind, str(nm), str(df.at[nm, "bus0"]), str(df.at[nm, "bus1"])))
+    return buses, branches
+
+
+@router.post("/{name}/map_layout/import")
+async def import_map_geometry(
+    name: str,
+    request: Request,
+    apply: bool = False,
+    tolerance_m: float = 50.0,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    Adopt routes and site boundaries from a GeoJSON FeatureCollection or a
+    KML document (plan 2, M3). The body is the file itself (JSON) or a
+    multipart upload under `file`. LineStrings match a branch by `name`, else
+    by their ends snapping to two placed buses within `tolerance_m`; Polygons
+    become sites. The answer is the MATCH REPORT and nothing is written
+    unless `apply=true`: then routes land with `source: 'import'`, sites are
+    appended, and — with "Derive lengths from geometry" on — the applied
+    Lines and Links get their length from the geometry, the rescale previews
+    coming back under `lengths`. Lock-CHECKED on apply (409), 413 over the
+    cap, 422 on malformed GeoJSON/KML.
+    """
+    from services import map_geometry_import as mgi
+    from services import map_layout_service, network_lengths, project_registry, project_settings, site_service
+
+    dest, name = _resolve_project_src(name, db, user)
+    if not dest.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    if not (0 < tolerance_m <= mgi.MAX_TOLERANCE_M):
+        raise HTTPException(422, f"tolerance_m must be between 0 and {mgi.MAX_TOLERANCE_M:g} m")
+    cap_msg = f"Geometry upload exceeds the {mgi.MAX_IMPORT_BYTES // (1024 * 1024)} MB cap."
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > mgi.MAX_IMPORT_BYTES:
+        raise HTTPException(413, cap_msg)
+    filename: str | None = None
+    if request.headers.get("content-type", "").startswith("multipart/form-data"):
+        form = await request.form()
+        upload = form.get("file")
+        if upload is None or not hasattr(upload, "read"):
+            raise HTTPException(422, "Multipart body needs a `file` part holding GeoJSON or KML.")
+        data = await upload.read()
+        filename = getattr(upload, "filename", None)
+    else:
+        data = await request.body()
+    if len(data) > mgi.MAX_IMPORT_BYTES:
+        raise HTTPException(413, cap_msg)
+    try:
+        features = mgi.parse_features(data, filename)
+    except mgi.GeometryImportInvalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if apply:
+        # The lock is checked BEFORE anything is matched: a refusal must not
+        # depend on whose network happens to be loaded.
+        lock_project = project_registry.find_project(db, user, name)
+        _check_project_lock(db, lock_project, user)
+
+    _require_active_project(dest, name)
+    n = PyPSAService.get_network()
+    with PyPSAService.get_lock():
+        buses, branches = _placed_buses_and_branches(n)
+    try:
+        existing_ids = {s.get("id") for s in site_service.read_sites(dest)["sites"] if isinstance(s, dict)}
+    except PermissionError as exc:
+        raise _access_denied(dest / site_service.SITES_FILE) from exc
+    report = mgi.match_features(features, branches, buses, tolerance_m=tolerance_m, existing_site_ids=existing_ids)
+    report["applied"] = False
+    if not apply:
+        return report
+    try:
+        written = mgi.apply_report(dest, report)
+    except (map_layout_service.MapLayoutInvalid, site_service.SitesInvalid) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    report["applied"] = True
+    report["written"] = written
+    change_log_service.log(
+        "import", "MapLayout", name,
+        f"Imported geometry: {len(written['routes'])} route(s), {len(written['sites'])} site(s)",
+    )
+    length_keys = [k for k in written["routes"] if k.split(":", 1)[0] in network_lengths.LENGTH_KINDS]
+    if length_keys and project_settings.derive_lengths_enabled(dest):
+        report["lengths"] = network_lengths.apply_lengths_from_geometry(length_keys)
+    return report
+
+
+@router.get("/{name}/map_layout/osm_suggestions")
+def osm_suggestions(
+    name: str,
+    bbox: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    OSM power ways and substations in `bbox` (`min_lng,min_lat,max_lng,max_lat`)
+    for the map's suggestion layer (plan 2, M3). Read-only — the suggestions
+    live in memory with a TTL, never in the project. 422 for a malformed or
+    district-sized bbox; a refusal upstream answers 429 (rate limited) or 504
+    (timed out) with the setting to change, else 502.
+    """
+    from services import osm_suggestions as osm
+
+    src, name = _resolve_project_src(name, db, user)
+    if not src.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    try:
+        box = osm.parse_bbox(bbox)
+    except osm.OsmBboxInvalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+    try:
+        return osm.fetch_suggestions(box)
+    except osm.OsmUnavailable as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
 
 
 def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:

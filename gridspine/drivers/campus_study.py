@@ -17,7 +17,12 @@ From these it prepares a run directory that the ranking (C3) and the sizing
     The hourly tables (``gridspine.schema.campus``).
 ``campus_manifest.json``
     Both inputs by sha256, the periods and the unit count. A later stage can
-    then recognise a run whose project or campus has changed since.
+    then recognise a run whose project or campus has changed since. Also the
+    study horizon (plan C14): ``period_weightings``, the project's
+    investment-period weightings in years (null where it gives none),
+    ``period_years``, the span of each period they give
+    (``campus_invest.period_spans``: a missing one is the gap between
+    periods; a single period spans one year), and ``period_years_source``.
 
 ``rank_campus`` then ranks the prepared hours (``gridspine.ranking.campus``).
 It writes ``campus_metrics.csv`` and ``campus_selected.csv``, one row per
@@ -51,11 +56,24 @@ prepared and ranked run, with the same profile and power factor as
 files. It writes:
 
 ``campus_investment.csv``
-    One row per need and asset: library id, kind, units, length, the period
-    it is invested in, capex, opex and annualised cost, existing, status
-    (``chosen``, ``kept``, ``not_needed``, ``unresolved``) and the reason.
+    One row per need and purchase: library id, kind, units, length, the
+    period it is invested in, capex, opex and annualised cost, existing,
+    status (``chosen``, ``kept``, ``not_needed``, ``unresolved``), the reason
+    and the ``action`` (``buy``, ``add``, ``keep``, ``replace``; plan C13;
+    ``renew``, plan C14). Units added next to an existing transformer group
+    give two rows: the kept units (``keep``) and the new ones (``add``),
+    whose reason names the units they join and any assumption (an unknown
+    vector group). Plan C14: an asset whose life ends inside the horizon is
+    bought again like for like (``renew`` rows), an existing one from its
+    ``commissioning_year`` (or mid-life at the first period, assumed);
+    ``purchase`` (0 for a kept existing asset), ``build_year``,
+    ``service_to``, ``replaces`` and ``lineage`` tie the purchases of one
+    asset together, and ``commissioned`` / ``commissioned_source`` say when
+    an existing one went into service and how that is known.
 ``campus_cost.csv``
-    The capex invested and the annualised electrical cost, per period.
+    The capex invested and the annualised electrical cost, per period; the
+    capex is every purchase made in the period's span, and
+    ``capex_replacement_eur`` the part of it that buys again (plan C14).
 ``campus_invested.yaml``
     The campus file with the chosen assets, valid for ``load_campus``.
 ``campus_compliance_invested.csv``
@@ -65,6 +83,14 @@ files. It writes:
     Every escalation: iteration, need, from, to, the failing check.
 ``campus_invest_dispatch.csv``
     The reactive dispatch per selected hour: inverters, STATCOMs, steps.
+``campus_invest_scope.json``
+    Who buys the PCC switchgear (``pcc_switchgear``), the rules a unit
+    added next to existing transformers had to meet (``parallel``,
+    ``ParallelRules.scope``: tolerances tagged assumed) and the study
+    horizon (``horizon``, plan C14: the span of each period, where it came
+    from, the horizon's end and the notes: assumed spans and commissioning
+    years, overdue and unpriced replacements, and that replacements are
+    reported, not ranked).
 
 ``invest_campus(..., method="milp")`` chooses the assets jointly instead
 (plan C11, ``gridspine.static.campus_milp``), warm-started from the
@@ -108,7 +134,7 @@ import pandas as pd
 import yaml
 
 from gridspine.ingest.campus import Campus, build_campus
-from gridspine.producers.campus import CampusDraft, campus_hourly, draft_campus, is_solved
+from gridspine.producers.campus import CampusDraft, campus_hourly, draft_campus, is_solved, period_weightings
 from gridspine.producers.pypsa_nodal import load_solved_network
 from gridspine.ranking.campus import campus_metrics, select_campus_hours
 from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, validate_pcc
@@ -116,7 +142,7 @@ from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
 from gridspine.static.campus_reactive import reactive_need, requirement_from, size_compensation
 from gridspine.static.campus_compliance import campus_compliance
-from gridspine.static.campus_invest import select_assets
+from gridspine.static.campus_invest import ParallelRules, period_spans, select_assets
 from gridspine.static.campus_milp import select_assets_milp
 from gridspine.static.campus_sc import campus_fault_levels
 from gridspine.templates.campus_assets import DEFAULT_PATH as ASSET_LIBRARY_PATH  # noqa: F401  (the backend's seam)
@@ -209,6 +235,8 @@ def prepare_campus(run_dir, campus: dict, network_path) -> dict:
     n = load_solved_network(network_path)
     hourly, pcc = campus_hourly(n, campus)
     periods = sorted(int(p) for p in pcc["period"].unique())
+    weightings = period_weightings(n)
+    spans, span_source = period_spans(periods, weightings)
     campus_text = yaml.safe_dump(campus, sort_keys=False)
     manifest = {
         "campus_sha256": hashlib.sha256(campus_text.encode()).hexdigest(),
@@ -217,6 +245,9 @@ def prepare_campus(run_dir, campus: dict, network_path) -> dict:
         "periods": periods,
         "units": int(hourly["unit_id"].nunique()),
         "hours_per_period": int(pcc.groupby("period").size().max()),
+        "period_weightings": {str(p): weightings.get(p) for p in periods},
+        "period_years": {str(p): w for p, w in spans.items()},
+        "period_years_source": {str(p): src for p, src in span_source.items()},
     }
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -339,7 +370,8 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
 
 def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,
                   pf: float | None = None, profile_dirs=(), pcc_switchgear: bool = True,
-                  method: str = "least_cost") -> dict:
+                  method: str = "least_cost", progress=None, should_stop=None,
+                  parallel: ParallelRules = ParallelRules()) -> dict:
     """Least-cost electrical assets for a ranked run, AC-checked (module
     docstring). ``library`` is a path, or None for the shipped library;
     ``profile`` may be a project profile in ``profile_dirs``, as for
@@ -352,9 +384,20 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     ``method="milp"`` chooses jointly (plan C11, ``campus_milp``), starting
     from the least-cost pick, and also writes ``campus_milp_history.csv``
     and ``campus_milp_comparison.csv``; its result adds ``milp_history``,
-    ``comparison``, ``summary`` and ``fallback``."""
+    ``comparison``, ``summary`` and ``fallback``. ``progress`` and
+    ``should_stop`` go to the MILP's loop (``select_assets_milp``): one call
+    per iteration, and a cancel that ends the loop with
+    ``summary["stop"] == "cancelled"``, its best point still written; the
+    least-cost pick takes neither.
+
+    ``parallel`` are the rules for adding units next to existing
+    transformers (plan C13, ``campus_invest.ParallelRules``); the defaults
+    are the owner's, all assumed, and are written to
+    ``campus_invest_scope.json`` with the PCC switchgear setting."""
     if method not in METHODS:
         raise ContractError(f"unknown investment method {method!r}; allowed {list(METHODS)}")
+    if method != "milp" and (progress is not None or should_stop is not None):
+        raise ContractError("progress and should_stop belong to method='milp'; the least-cost pick takes neither")
     run_dir = Path(run_dir)
     hourly, pcc = campus_tables(run_dir)
     selection = selected_hours(run_dir)
@@ -363,8 +406,11 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     p_ref, _ = _p_ref(build_campus(spec), pcc)
     grid_code = load_grid_code(profile, extra_dirs=profile_dirs)
     choose = select_assets_milp if method == "milp" else select_assets
+    hooks = {"progress": progress, "should_stop": should_stop} if method == "milp" else {}
+    manifest = json.loads(_require(run_dir, CAMPUS_MANIFEST).read_text())
     out = choose(spec, hourly, selection, lib, requirement_from(grid_code, p_ref, pf=pf), grid_code, criteria,
-                 pcc_switchgear=pcc_switchgear)
+                 pcc_switchgear=pcc_switchgear, parallel=parallel, period_years=manifest.get("period_weightings"),
+                 **hooks)
     build_campus(out["spec"])                                # the invested file must build before it is written
     _write_text_atomic(run_dir / INVESTMENT_CSV, out["investment"].to_csv(index=False))
     _write_text_atomic(run_dir / COST_CSV, out["cost"].to_csv(index=False))

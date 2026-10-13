@@ -971,6 +971,12 @@ def chat_history(limit: int = 200,
                     if not sess._turn_in_flight and (not session_was_freshly_minted or fresh_and_idle):
                         sess.messages.clear()
                         for rec in turns:
+                            # Display only: an interrupted turn's assistant half
+                            # is what the user saw, not provider messages, and
+                            # the step it stopped in can end on an unanswered
+                            # tool_use.
+                            if chat_service.is_interrupted_turn(rec):
+                                continue
                             user_text = rec.get("user")
                             assistant_blocks = rec.get("assistant")
                             if user_text is not None:

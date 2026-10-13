@@ -29,7 +29,7 @@ from gridspine.static.campus_flow import (
     solve_cases,
     trafo_groups,
 )
-from tests.gridspine.test_campus import campus_spec, direct_net
+from tests.gridspine.test_campus import campus_spec, direct_net, t
 
 HOUR = {"DC_LOAD": -45.0, "BESS1": -10.0, "PV1": 12.0, "GEN1": 0.0}
 
@@ -184,3 +184,103 @@ def test_an_hour_can_be_solved_with_a_reactive_dispatch_in_place():
         pp.create_shunt(ref, ref.bus.index[ref.bus["name"] == "MV1"][0], q_mvar=-3.0, step=2, max_step=3)
         pp.runpp(ref)
         assert cases[case].pcc_q_mvar == pytest.approx(float(ref.res_ext_grid["q_mvar"].iloc[0]), abs=1e-7)
+
+
+# --------------------------------------------------------------------------
+# per-unit sizing (plan C13): each unit against its own rating
+# --------------------------------------------------------------------------
+
+#: Two unequal units with equal X/R (vkr in proportion to vk), no magnetising
+#: branch and equal ratios: the share of each is S_r/uk over the sum.
+MIXED = {"TR1": (40.0, 10.0, 0.40), "TR2": (63.0, 11.0, 0.44)}
+
+
+def mixed_spec(units=MIXED):
+    spec = campus_spec()
+    trafos = spec["campus"]["transformers"]
+    for name, (s, vk, vkr) in units.items():
+        trafos[name] = dict(trafos["TR1"], sn_mva=t(s), vk_percent=t(vk), vkr_percent=t(vkr), vn_lv_kv=t(20.0),
+                            pfe_kw=t(0.0), i0_percent=t(0.0))
+    for name in set(trafos) - set(units):
+        del trafos[name]
+    return spec
+
+
+def mixed_net(hour, units=MIXED, out=()):
+    """The mixed campus written directly in pandapower."""
+    net = oracle(hour, run=False)
+    net.trafo.drop(net.trafo.index, inplace=True)
+    for name, (s, vk, vkr) in units.items():
+        pp.create_transformer_from_parameters(net, 0, 1, sn_mva=s, vn_hv_kv=110.0, vn_lv_kv=20.0, vkr_percent=vkr,
+                                              vk_percent=vk, pfe_kw=0.0, i0_percent=0.0, name=name,
+                                              in_service=name not in out)
+    pp.runpp(net)
+    return {str(n): math.hypot(net.res_trafo.at[i, "p_hv_mw"], net.res_trafo.at[i, "q_hv_mvar"])
+            for i, n in zip(net.trafo.index, net.trafo["name"]) if net.trafo.at[i, "in_service"]}
+
+
+def test_parallel_units_share_by_rating_over_impedance_by_hand_and_in_a_direct_net():
+    share_40 = (40.0 / 10.0) / (40.0 / 10.0 + 63.0 / 11.0)
+    assert share_40 == pytest.approx(0.411, abs=5e-4)                         # the plan's 41.1 %
+    hand = mixed_net(HOUR)
+    assert hand["TR1"] / (hand["TR1"] + hand["TR2"]) == pytest.approx(share_40, rel=1e-6)
+    camp = build_campus(mixed_spec())
+    got = solve_cases(camp, rows())["intact"].trafo.set_index("trafo")["s_mva"]
+    assert got.to_dict() == pytest.approx(hand, rel=1e-9)
+
+
+@pytest.mark.parametrize("margin, n1", [(0.0, True), (0.2, True), (0.6, True), (0.2, False), (0.9, False)])
+def test_for_identical_units_the_per_unit_rule_is_the_identical_unit_rule(margin, n1):
+    camp = build_campus(campus_spec())
+    hours = [rows(h=7), rows(hour=dict(HOUR, DC_LOAD=-30.0, PV1=0.0, BESS1=0.0), h=19)]
+    flows = {(2030, int(r["hour"].iloc[0])): solve_cases(camp, r) for r in hours}
+    got = size_transformers(flows, camp, SizingCriteria(margin=margin, n_minus_1=n1)).iloc[0]
+    # the old rule, restated: max(intact total / n, largest survivor) x (1 + m) against the rating
+    need = 0.0
+    for cases in flows.values():
+        total = cases["intact"].trafo["s_mva"].sum()
+        surv = max(cases[c].trafo["s_mva"].max() for c in ("N-1:TR1", "N-1:TR2")) if n1 else 0.0
+        need = max(need, total / 2, surv)
+    assert bool(got["adequate"]) == (40.0 >= need * (1 + margin) - 1e-9)
+    assert got["utilisation"] == pytest.approx(need * (1 + margin) / 40.0, rel=1e-9)
+    assert got["worst_unit"] in ("TR1", "TR2")
+    assert got["required_unit_mva"] == pytest.approx(need * (1 + margin))       # kept as before
+
+
+def test_a_mixed_group_is_judged_unit_by_unit_against_each_own_rating():
+    """N-1 off, 70 MW: the identical-unit rule asks 35 MVA x 1.2 = 42 MVA of
+    the smaller 40 MVA unit and calls the pair inadequate. By impedance the
+    40 MVA unit carries 41 % of the flow, so each unit holds with the margin."""
+    hour = dict(HOUR, DC_LOAD=-70.0, BESS1=0.0, PV1=0.0)
+    camp = build_campus(mixed_spec())
+    flows = {(2030, 7): solve_cases(camp, rows(hour=hour))}
+    got = size_transformers(flows, camp, SizingCriteria(margin=0.2, n_minus_1=False)).iloc[0]
+    s = mixed_net(hour)
+    util = {n: s[n] * 1.2 / MIXED[n][0] for n in s}
+    assert got["utilisation"] == pytest.approx(max(util.values()), rel=1e-9)
+    assert got["worst_unit"] == max(util, key=util.get)
+    assert bool(got["adequate"]) and max(util.values()) <= 1.0
+    total = sum(s.values())
+    assert total / 2 * 1.2 > 40.0                                              # the old rule would refuse it
+    assert got["required_unit_mva"] == pytest.approx(total / 2 * 1.2, rel=1e-9)
+
+
+def test_with_n_minus_1_every_survivor_is_judged_against_its_own_rating():
+    """Three units, 40 + 40 MVA at 12 % and 20 MVA at 10 %: the small unit's
+    lower impedance makes it carry more than its share, most of all with a 40
+    out. The worst over the intact case and every outage, each survivor
+    against its own rating, read from direct nets."""
+    units = {"TR1": (40.0, 12.0, 0.4), "TR2": (40.0, 12.0, 0.4), "TR3": (20.0, 10.0, 0.4 * 10 / 12)}
+    hour = dict(HOUR, DC_LOAD=-30.0, BESS1=0.0, PV1=0.0)
+    camp = build_campus(mixed_spec(units))
+    flows = {(2030, 7): solve_cases(camp, rows(hour=hour))}
+    got = size_transformers(flows, camp, SizingCriteria(margin=0.2)).iloc[0]
+    util = {}
+    for out in ((), ("TR1",), ("TR2",), ("TR3",)):
+        for n, s in mixed_net(hour, units, out).items():
+            util[(out, n)] = s * 1.2 / units[n][0]
+    worst = max(util, key=util.get)
+    assert got["utilisation"] == pytest.approx(util[worst], rel=1e-9)
+    assert got["worst_unit"] == worst[1]
+    assert worst[0] != () and worst[1] == "TR3" and bool(got["adequate"]) == (util[worst] <= 1.0)
+    assert got["unit_rating_mva"] == 20.0

@@ -270,6 +270,7 @@ tsam = "==2.3.9"
 # pywebview is absent, and `test_desktop_environment.py` asserts this task
 # stays here.
 gui-tests = { cmd = "python -m pytest", cwd = "pypsa-gui/backend" }
+gui-pilot-evaluation = { cmd = "python tools/run_pilot_evaluation.py --expanded --report pilot-evaluation.json", cwd = "pypsa-gui/backend" }
 
 # The `qa_*.py` drivers, which `gui-tests` does NOT cover: `pytest.ini` sets
 # `python_files = test_*.py`, so pytest never collects them. That is a

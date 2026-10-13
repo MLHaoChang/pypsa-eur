@@ -10,6 +10,19 @@ its project's `user_ts.json`, and an adequacy-sweep test that could not fail for
 its own regression). Their findings carry the detail. Nothing else was re-verified
 on that date, so the entries below still date from 2026-09-12.
 
+**2026-10-06:** items 12–14 added from the 3D site view branch's full-product
+browser E2E (`notes/2026-09-29-3d-site-view-phase2-qa.md` §7), re-verified in
+source on master that day. Its defect D (a second project from the same
+template → 409) is not listed: master's `_unique_project_name` already fixes it.
+
+**2026-10-06 (later):** two items closed and removed per the convention —
+item 7 (blank-canvas node positions reverting; the load now takes the newest
+of server / memory / localStorage by `savedAt` and a failed `PUT /layout`
+surfaces once, `findings/2026-07-31-blank-canvas-node-drags-revert.md` carries
+the detail) and item 14 (a three-port Link dropping `bus2` / `efficiency2`;
+`_drop_unknown_extras` admits PyPSA's per-port columns by regex). Both are
+increments A1 and A4 of `plans/2026-10-06-visual-layers-1-abstract-canvas.md`.
+
 This file exists because GitHub Issues is **disabled** on this repository, so
 there is nowhere else to keep a queue. It is deliberately thin: one entry per
 open item, with the anchor and the source document. The analysis lives in
@@ -102,21 +115,6 @@ has the opposite default. Worth a test that fails when a route is mounted under
 a prefix no mechanism covers — the omission is what needs to become loud.
 Source: finding 3 of the same audit.
 
-### 7. Node positions revert on the blank canvas
-
-User-reported 2026-07-31; diagnosed, never fixed. Two facts still hold:
-`PUT /layout` 404s until the project directory exists on disk, and on load the
-server wins unconditionally — `TopologyCanvas.tsx:2004` still resolves
-`ps ?? layoutMemCache.get(...) ?? loadDiagramState(...) ?? null`. `persistLayoutFor`'s
-`.catch()` falls back to localStorage, which is *third* in that chain, so a
-failed PUT leaves a newer local layout that the next load discards for an older
-`layout.json`. Both ends are silent. `PersistedState` carries `savedAt` and
-nothing compares it.
-
-The user's exact sequence was never reproduced, so the trigger for the failing
-PUT is still unidentified — the finding lists the candidates in the order worth
-testing. Source: `findings/2026-07-31-blank-canvas-node-drags-revert.md`.
-
 ### 8. Component names are not validated at the edge
 
 Names flow from request bodies into the network, into filenames and into
@@ -151,38 +149,29 @@ own cookie policy through configuration. The CSRF double-submit check
 (`main.py:645`) currently carries the load for those sessions. Source: gap 5 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
 
-### 10b. An edit after a hub study is not tracked (owner-approved: P33b)
+### 12. `/api/io/import/*` under a session pointer imports into a context the next request never reads
 
-Added 2026-09-30 (P28 gate, owner decision O1). The EH review's `stale`
-flag is true only when a later foreground solve cleared the stored report
-(`services/adequacy/eh_review.py:455-460`). An edit to the network after a
-finished study leaves the Guided greeting and the Hub design Results card
-unaware. P28 softened the greeting's wording so that it claims nothing about
-the current network. The fix is a backend network-revision marker on the
-study record (e.g. `network_changed`), read by both surfaces. It is scheduled
-as P33b in `plans/2026-09-28-guided-mode-deferred.md` §3.
+Added 2026-10-06, found while scoping P33b step 0 (spec §0a). The four io
+imports (`routers/io.py:191` `_reset_with_ts_clear` → `reset_network`) run
+inside a session-bound request, so the fresh **unbound** ctx they import into
+lands in `scratch:<session>`; unlike `POST /api/network/reset`
+(`routers/network.py:633-635`) they never clear the session's active-project
+pointer, so `resolve_for_session` hands the next request the project's
+resident ctx again. Reproduced on `bb8b2e7b8` with the suite's fixtures: with
+a 1-bus project active, `POST /api/io/import/netcdf` of a 7-bus file returns
+200 `{"buses": 7, …}` and the next `GET /api/network/buses` returns 1 bus; the
+registry holds `org:uuid → (project, 1 bus)` and `scratch:<session> → (None,
+7 buses)`. The user sees an import that appears not to happen. The fix is the
+"New" rule (clear the pointer, as `/api/network/reset` does), not P33b's
+re-keying, so it is outside step 0. (The related note about `import_bundle` and
+`create_from_template` never registering their new ctx is resolved by P33b step
+4b, `_register_created_context` in `routers/projects.py`: in local mode it was
+lossy — the next project switch dropped the unregistered ctx.) Severity: High
+(a write that is silently not read back). Server only.
 
-### 10c. Two narrow project-lock races have correct guards but no test
+### 13. Re-loading the open project with unsaved edits leaves memory and disk disagreeing
 
-Added 2026-09-30 (P28 re-gate, mutants R4 and R7). In `moveProjectLock`, a
-stale 409 re-acquire that fails after a fresh acquire of the same project
-(R4), and a stale failed acquire in an X→Y→Z switch (R7), are both ignored
-by the generation guard. Removing either check leaves every test green. Add
-one test for each so the guard stays pinned.
-
-### 10a. Re-activating a project does not restore its hub study record
-
-Added 2026-09-30, from the P28 smoke. A project whose Energy Hub study
-finished, and which is then left and re-activated
-(`POST /api/projects/<p>/activate`), answers `GET /api/results/eh_study`
-with no study. The Guided hub rail opens at Site again, and the greeting says
-"No study has run yet". The Guided "study done" state is lost for a user who
-re-opens a project. Where the record is stored was not traced. The P28 smoke
-part (C) works around it by re-running the study. Sources: the plan's "P28
-phase note" (contract drift 3) and
-`qa/2026-09-30-guided-mode-deferred-gate-P28.md`.
-
----
+Added 2026-10-06, found at the P33b re-gate (`qa/2026-10-06-guided-p33b-gate.md`, RN-1; pre-existing, identical on `240b2a00e` and after P33b). Under sessions, with project A resident and an unsaved edit in memory (bus x 0 → 1), `GET /api/projects/A` (load) reads the disk: memory holds x = 0 and the undo stack is empty. `load_project` then calls `PyPSAService.register(key, ctx)` (`routers/projects.py`, the registration after the import), which displaces the resident A ctx and writes it back through `_save_evicted_ctx` — so **disk** now holds the edited copy (x = 1) while **memory** holds the disk copy (x = 0). The next save or autosave overwrites the edit silently; a restart instead brings it back. Probe: `scratchpad/qa33b/test_qa_regate.py::test_reload_same_project`. Fix direction: a load of the project the caller is already on must not write the displaced context back (it is the copy the user chose to discard), or must ask first; the same displacement mechanism is why P33b's deviation 1 rejected registering `prev` inside `reset_network`. Severity: Medium (a deliberate "discard and reload" is undone on the next restart, or an edit is lost on the next save, depending on order). Server only.
 
 ## Verification / CI
 
@@ -227,3 +216,33 @@ suite carries **124 pre-existing failures**, all from `No module named
 'gridspine'`. "The suite is green" is false locally; the only sound gate is
 *the failing set is unchanged*. Source: gap 6 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
+
+### 12. A network reset while a project is open lands in the session's scratch slot
+
+**Undo reports success and changes nothing; a raw import is silently lost or
+ignored.** `PyPSAService.reset_network()` publishes the new, unbound network
+context into `scratch:<sid>`, but while `sessions.active_project_id` is set the
+next request re-resolves the *project's* registry slot
+(`services/active_project.resolve_for_session`) and never sees it. Affected: raw
+imports (`.nc`, CSV, Excel, MATPOWER in `routers/io.py`), undo
+(`services/network_undo.apply_undo`), snapshot restore (`routers/snapshots.py`),
+and template create / bundle import (`routers/projects.py`), which re-bind but
+leave a stale bound copy in scratch that is written back over the project's
+saved edits when evicted. Reproduces through the API alone. The backend tests
+miss it because `install_network` (`tests/conftest.py`) clears
+`active_project_id`, so every test runs with the pointer unset. **Data-loss
+class.** A proposed fix (clear the pointer after a raw import; `rekey_context`
+after re-binding; pass the acting session through the chat import wrappers) and
+five regression tests sit unapplied in `notes/2026-09-30-full-e2e/`; the diff
+targets the 2026-09-30 tree and needs porting to today's `routers/io.py`.
+Source: `notes/2026-09-29-3d-site-view-phase2-qa.md` §7, defects A–C.
+
+### 13. `login.html` prefills and prints a review credential
+
+`frontend/public/login.html:391-402` ships `admin@example.com` /
+`admin-pass-123` as the input values and in a visible "Review account" line, and
+auth mode serves that page (`static_gate.decide_route` passes `/login.html`
+through). Fine for a review build; a credential in a shipped page otherwise. One
+decision (strip before release, or gate the prefill on a build flag) and a test
+that the served page carries no password value. Source: the same E2E, "Other
+findings".

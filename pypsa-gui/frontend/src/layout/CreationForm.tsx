@@ -9,28 +9,19 @@ import { useCatalog } from '../hooks/useCatalog'
 import { creationScope, loadExtras, saveExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
 import BusAutocomplete from '../components/BusAutocomplete'
+import { useSitesStore } from '../site3d/sitesStore'
+import { primaryBus } from '../site3d/siteModel'
+import { fromLocal } from '../site3d/geo'
+import { PLACEABLE_CLASSES } from '../site3d/types'
 import toast from 'react-hot-toast'
 import type { Bus, Line, Link, Generator, Load, StorageUnit, Store, Transformer } from '../api/types'
+import { PALETTE_COMPONENT_TYPE } from './paletteData'
+import { carrierMatches, type BusFilter } from '../utils/busCarriers'
+import { busLatLng, haversineKm } from '../utils/geo'
 
-// Carrier classification used by the bus-picker filters. Lower-case match.
-const H2_CARRIERS   = new Set(['h2', 'hydrogen', 'h2 pipeline', 'h2_pipeline'])
-const HEAT_CARRIERS = new Set(['heat', 'heat-low', 'heat-high', 'urban heat', 'rural heat',
-  'urban central heat', 'urban decentral heat', 'rural heat'])
-const GAS_CARRIERS  = new Set(['gas', 'natural gas', 'biomass', 'biogas', 'oil', 'fuel'])
-const ELEC_CARRIERS = new Set(['ac', 'dc', 'electricity'])
-
-type BusCarrier = 'h2' | 'non-h2' | 'electricity' | 'heat' | 'gas'
-
-function carrierMatches(busCarrier: string, want: BusCarrier): boolean {
-  const c = (busCarrier ?? '').toLowerCase()
-  switch (want) {
-    case 'h2':           return H2_CARRIERS.has(c)
-    case 'non-h2':       return !H2_CARRIERS.has(c)
-    case 'electricity':  return ELEC_CARRIERS.has(c) || c === '' // unset carrier defaults to AC
-    case 'heat':         return HEAT_CARRIERS.has(c) || c.includes('heat')
-    case 'gas':          return GAS_CARRIERS.has(c) || c.includes('gas') || c.includes('biomass')
-  }
-}
+// Carrier classification used by the bus-picker filters lives in
+// utils/busCarriers.ts (shared with the 3D asset library).
+type BusCarrier = BusFilter
 
 // ── Field definitions ─────────────────────────────────────────────────────────
 
@@ -94,7 +85,7 @@ function truncate(text: string, n: number): string {
   return `${(lastSpace > n * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`
 }
 
-const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
+export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
   bus: [
     { key: 'name',    label: 'Name',       type: 'text',   required: true },
     { key: 'v_nom',   label: 'Voltage',    type: 'number', defaultValue: '1',  unit: 'kV',  half: true },
@@ -267,6 +258,21 @@ const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
  * they are unreachable from the live UI and are deleted in the same change as
  * AssetPalette.tsx (spec D29).
  */
+/** The placed bus nearest a map point (great circle), or null when none is placed. */
+export function nearestPlacedBus(
+  at: { lat: number; lng: number },
+  buses: ReadonlyArray<{ name: string; x?: number | null; y?: number | null }>,
+): string | null {
+  let best: string | null = null, bestKm = Infinity
+  for (const b of buses) {
+    const ll = busLatLng({ x: b.x, y: b.y })
+    if (!ll) continue
+    const km = haversineKm([at.lat, at.lng], ll)
+    if (km < bestKm) { best = b.name; bestKm = km }
+  }
+  return best
+}
+
 export const TERMINAL_FIELD: Record<string, 'bus' | 'bus0'> = {
   line: 'bus0', transformer: 'bus0',
   electrolyzer: 'bus0', fuel_cell: 'bus0', power_to_heat: 'bus0', chp: 'bus0',
@@ -296,16 +302,8 @@ const QUERY_KEY: Record<string, string> = {
   load_elec: 'loads', load_h2: 'loads', load_heat: 'loads',
 }
 
-const COMPONENT_TYPE: Record<string, string> = {
-  bus: 'Bus', line: 'Line', transformer: 'Transformer',
-  thermal: 'Generator', renewable: 'Generator',
-  battery: 'StorageUnit', psh: 'StorageUnit', hydrogen: 'StorageUnit',
-  caes: 'StorageUnit', flywheel: 'StorageUnit',
-  electrolyzer: 'Link', fuel_cell: 'Link',
-  power_to_heat: 'Link', chp: 'Link',
-  thermal_storage: 'Store',
-  load_elec: 'Load', load_h2: 'Load', load_heat: 'Load',
-}
+// The class each palette item creates lives with the rest of the palette data.
+const COMPONENT_TYPE: Record<string, string> = PALETTE_COMPONENT_TYPE
 
 type CreateFn = (p: Record<string, unknown>) => Promise<unknown>
 
@@ -387,8 +385,14 @@ const DEPENDENT_DEFAULTS: Record<string, (key: string, value: string) => Partial
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function CreationForm({ item }: { item: CreationRequest }) {
-  const { setCreationItem, setSelectedComponent, setPendingNodePosition } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
+  // A drop onto the 3D site view (D16): the site restricts the terminal
+  // bus to its members (offered AND validated), prefills the primary one,
+  // seeds a dropped bus's coordinates from the ground point, and the
+  // created asset is placed there. A live subscription: a site deleted
+  // mid-form degrades to a plain drop.
+  const dropSite = useSitesStore(s => (item.dropSite ? s.siteById(currentProject, item.dropSite.siteId) : null))
+  const { setCreationItem, setSelectedComponent, setPendingNodePosition } = useUIStore()
   const qc = useQueryClient()
   const solveMode = useSolveMode()
   // Attributes the user has added to THIS palette type (spec D23). The scope
@@ -404,7 +408,7 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
   const prefix = AUTO_PREFIX[item.id] ?? 'Asset'
 
   const allBuses = useMemo(
-    () => qc.getQueryData<Array<{ name: string; carrier?: string }>>(nk(currentProject, 'buses')) ?? [],
+    () => qc.getQueryData<Array<{ name: string; carrier?: string; x?: number | null; y?: number | null }>>(nk(currentProject, 'buses')) ?? [],
     [qc, currentProject],
   )
   const busNames = useMemo(() => allBuses.map(b => b.name).sort(), [allBuses])
@@ -438,6 +442,41 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
         init[terminal] = item.dropBusName
       }
     }
+    // A map drop (plan M4): the point under the pointer is a real geographic
+    // position. A dropped BUS lands there; any other asset dropped on empty
+    // map gets the nearest PLACED bus as its terminal (a drop on a marker
+    // already prefilled it above, and wins).
+    if (item.dropLatLng && !item.dropSite) {
+      if (item.id === 'bus') {
+        init.x = String(Math.round(item.dropLatLng.lng * 1e6) / 1e6)
+        init.y = String(Math.round(item.dropLatLng.lat * 1e6) / 1e6)
+      } else if (terminal && !init[terminal]) {
+        const spec = fields.find(f => f.key === terminal) as BusFieldSpec | undefined
+        const allowed = new Set(filteredBusNames(spec?.busCarrierFilter))
+        const nearest = nearestPlacedBus(item.dropLatLng, allBuses.filter(b => allowed.has(b.name)))
+        if (nearest) init[terminal] = nearest
+      }
+    }
+    if (dropSite && item.dropSite) {
+      // Site drop: the primary bus first, else the first member that passes
+      // the field's carrier filter; nothing if none does (the mismatch line
+      // explains, as for a bus drop).
+      if (terminal) {
+        const spec = fields.find(f => f.key === terminal) as BusFieldSpec | undefined
+        const allowed = spec ? filteredBusNames(spec.busCarrierFilter) : []
+        const candidates = [primaryBus(dropSite), ...dropSite.buses].filter((b): b is string => !!b)
+        const pick = candidates.find(b => allowed.includes(b))
+        if (pick) init[terminal] = pick
+      }
+      // A dropped BUS is placed on the map where it landed: the ground point
+      // is a real geographic position (metres from the site origin), unlike
+      // a schematic drop's flow-space pixels (D28).
+      if (item.id === 'bus') {
+        const ll = fromLocal(dropSite.origin, item.dropSite.ground)
+        init.x = String(Math.round(ll.lng * 1e6) / 1e6)
+        init.y = String(Math.round(ll.lat * 1e6) / 1e6)
+      }
+    }
     return init
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -460,6 +499,11 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
     fields.forEach(f => {
       if (f.required && f.type === 'bus' && !form[f.key]?.trim()) {
         // bus field not strictly required for line/link (can connect later)
+      }
+      // A site drop may only attach to the site's own buses (D16): a typed
+      // outsider would create the asset off-site and leave an orphan placement.
+      if (dropSite && f.type === 'bus' && form[f.key]?.trim() && !dropSite.buses.includes(form[f.key].trim())) {
+        errs[f.key] = `Not a bus of ${dropSite.name}`
       }
       if (f.type === 'number' && form[f.key] !== '' && isNaN(parseFloat(form[f.key] ?? ''))) {
         errs[f.key] = 'Must be a number'
@@ -527,6 +571,21 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
       if (item.dropPosition && item.id === 'bus') {
         setPendingNodePosition({ name, position: item.dropPosition })
       }
+      // Site drop (D16): place the new asset where it landed. An orphan for
+      // the instant before the query refetches is harmless (D14). A new bus
+      // also joins the site.
+      if (item.dropSite) {
+        const { siteId, ground } = item.dropSite
+        const cls = COMPONENT_TYPE[item.id] ?? item.id
+        const store = useSitesStore.getState()
+        // Only a placeable class gets a placement; the asset exists either
+        // way, so this must never throw after the create succeeded.
+        if (PLACEABLE_CLASSES.has(cls)) store.setPlacement(proj, siteId, `${cls}:${name}`, { x: ground.x, y: ground.y, heading: 0 })
+        if (item.id === 'bus') {
+          const site = store.siteById(proj, siteId)
+          if (site && !site.buses.includes(name)) store.setSiteBuses(proj, siteId, [...site.buses, name])
+        }
+      }
       setCreationItem(null)
       setSelectedComponent({ type: COMPONENT_TYPE[item.id] ?? item.id, name })
       toast.success(`${item.label} "${name}" added`)
@@ -583,8 +642,12 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
 
             if (f.type === 'bus') {
               const bf = f as BusFieldSpec
-              const availBuses = filteredBusNames(bf.busCarrierFilter)
-              const noMatch = bf.busCarrierFilter !== undefined && availBuses.length === 0
+              // A site drop offers only the site's own buses (D16).
+              const inNetwork = filteredBusNames(bf.busCarrierFilter)
+              const availBuses = dropSite ? inNetwork.filter(b => dropSite.buses.includes(b)) : inNetwork
+              const noMatch = bf.busCarrierFilter !== undefined && inNetwork.length === 0
+              // The network has one, the site does not: a different remedy.
+              const noMatchInSite = !!dropSite && bf.busCarrierFilter !== undefined && inNetwork.length > 0 && availBuses.length === 0
               const warnLabel = ({
                 'h2': 'H₂', 'non-h2': 'non-H₂', 'electricity': 'electricity',
                 'heat': 'heat', 'gas': 'gas/biomass',
@@ -596,12 +659,19 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
                     value={form[f.key] ?? ''}
                     onChange={v => set(f.key, v)}
                     buses={availBuses}
+                    allowUnknown={!dropSite}
                     placeholder="Select bus…"
                   />
                   {noMatch && (
                     <p className="flex items-center gap-1 text-[9px] text-warn mt-0.5">
                       <AlertTriangle size={10} />
                       No {warnLabel} bus in network — add one first
+                    </p>
+                  )}
+                  {noMatchInSite && (
+                    <p className="flex items-center gap-1 text-[9px] text-warn mt-0.5">
+                      <AlertTriangle size={10} />
+                      No {warnLabel} bus in site {dropSite!.name} — add one to the site first (Satellite view → Edit buses)
                     </p>
                   )}
                   {error && <p className={errCls}>{error}</p>}

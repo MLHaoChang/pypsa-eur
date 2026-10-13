@@ -15,7 +15,11 @@ bound on cost.
 * One binary per candidate of every need, exactly one chosen per need. The
   candidates are C8's generators without C8's adequacy filters
   (``campus_invest.open_candidates``): the reactive need also gets "none",
-  transformers every size in 1..3 units (a redundant group stays redundant),
+  transformers every size in 1..3 units (a redundant group stays redundant)
+  and, next to a group with existing units, every compatible addition of
+  1..3 units (plan C13: C13's parallel rules, not its adequacy estimate;
+  each is one more binary, and its effect a finite difference like any
+  transformer candidate's, so the AC sharing is in the linearisation),
   cables every section in 1..3 runs, switchgear every rating at the bus's
   voltage. Adequacy is decided by the linearised AC constraints instead.
   When C8's point is AC-feasible, a candidate dearer on its own than C8's
@@ -55,12 +59,14 @@ key            g <= limit                                  scale
                ``campus_voltage`` band or the code band
                elsewhere), upper and lower
 ``q``          PCC Q within +- the band, intact only        1 % of it
-``tl``         worst unit of each group: loading x rating   1 % of
-               minus rating (MVA), every class              rating
-``ts``         worst unit: S x (1 + margin) minus rating,   1 % of
-               on C8's dispatch (below): intact; and the    rating
-               survivors in the group's own N-1 class when
-               N-1 is on
+``tl``         worst unit of each group: loading x rating   1 % of the
+               minus rating (MVA), every class              smallest
+                                                            rating in
+                                                            the group
+``ts``         worst unit: S x (1 + margin) minus its own   as ``tl``
+               rating, on C8's dispatch (below): intact;
+               and the survivors in the group's own N-1
+               class when N-1 is on
 ``cl``         every cable: current minus its capacity      1 % of it
                (runs x rating), every class
 ``ik``/``ip``  per period, every rated bus (or switchgear   1 % of
@@ -158,7 +164,9 @@ it is needed.
 7. **Stop** when an accepted point passes the AC check and its cost moved
    less than ``COST_TOL``; when the MILP returns the current point (it
    predicts nothing better); when ``Delta`` falls below its floor; or at
-   ``max_iter``.
+   ``max_iter``. A caller's ``should_stop()`` (plan C12, the panel's
+   cancel) ends it too, before an iteration or between two
+   finite-difference solves: ``stop == "cancelled"``.
 
 The result is the best AC-feasible point seen, accepted or not (lowest
 cost, the first on a tie), never a linear prediction. **Fallback:** when no
@@ -189,8 +197,9 @@ from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_compliance import Q_TOL
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
 from gridspine.static.campus_invest import (
-    _apply, _bays, _compliance, _dispatch_table, _failures, _investment, _pcc_table, open_candidates, select_assets,
-    study_from, with_measures,
+    ParallelRules, _apply, _bays, _compliance, _dispatch_table, _failures, _investment, _pcc_table, open_candidates,
+    ranked_annual,
+    select_assets, study_from, with_measures,
 )
 from gridspine.static.campus_reactive import _SUPPLIERS, ALWAYS_ON, ReactiveResult, compensation_bus, reactive_need
 from gridspine.static.campus_sc import PEAK_FACTOR, campus_fault_levels
@@ -416,6 +425,15 @@ class _Eval:
     ref_r: dict = dataclasses.field(default_factory=dict)      # C8's dispatch per hour, for the margin
 
 
+def _smallest(group_of, rating):
+    """``{group: its smallest unit rating}``: a group's ``tl`` and ``ts`` rows
+    are scaled to 1 % of it, whatever order its units come in (plan C13)."""
+    out = {}
+    for t, gk in group_of.items():
+        out[gk] = min(out.get(gk, math.inf), rating[t])
+    return out
+
+
 class _Problem:
     """Everything that stays fixed through the loop."""
 
@@ -453,7 +471,7 @@ class _Problem:
             cands = open_candidates(need, self.library, self.lib_by_id, self.criteria, self.f_hz)
             want = c8_choice_items[j]
             self.c8_labels.append(need.choice.label if want is not None else "as described")
-            cur = next((i for i, c in enumerate(cands) if (c.items, c.existing) == want), None)
+            cur = next((i for i, c in enumerate(cands) if (c.items, c.existing, c.keep) == want), None)
             if cur is None and want is not None:
                 cands = [need.choice, *cands]
                 cur = 0
@@ -606,6 +624,7 @@ class _Problem:
             gk = f"{name_bus[int(net.trafo.at[i, 'hv_bus'])]}/{name_bus[int(net.trafo.at[i, 'lv_bus'])]}"
             group_of[str(net.trafo.at[i, "name"])] = gk
             rating[str(net.trafo.at[i, "name"])] = float(net.trafo.at[i, "sn_mva"])
+        smallest = _smallest(group_of, rating)
         cap = {str(net.line.at[i, "name"]): float(net.line.at[i, "max_i_ka"]) * float(net.line.at[i, "df"])
                * float(net.line.at[i, "parallel"]) for i in net.line.index}
         pcc_bus = name_bus[int(net.ext_grid["bus"].iloc[0])]
@@ -657,7 +676,7 @@ class _Problem:
                     for t, load in zip(f.trafo["trafo"], f.trafo["loading_pct"]):
                         gk, r = group_of[t], rating[t]
                         put(("tl", key, cls, gk, 1), (float(load) / 100.0 - 1.0) * r, 0.0, key, case,
-                            [(("trafo_load", t), 1.0)], 0.01 * r)
+                            [(("trafo_load", t), 1.0)], 0.01 * smallest[gk])
                     for cb, ika in zip(f.line["cable"], f.line["i_ka"]):
                         put(("cl", key, cls, cb, 1), float(ika) - cap[cb], 0.0, key, case, [(("line_i", cb), 1.0)],
                             0.01 * cap[cb])
@@ -685,6 +704,7 @@ class _Problem:
                 f"{name_bus[int(net.trafo.at[i, 'hv_bus'])]}/{name_bus[int(net.trafo.at[i, 'lv_bus'])]}"
             rating[str(net.trafo.at[i, "name"])] = float(net.trafo.at[i, "sn_mva"])
         m, n1 = self.criteria.margin, self.criteria.n_minus_1
+        smallest = _smallest(group_of, rating)
         out = {}
         for key, cases in ref.items():
             by_cls = {}
@@ -702,7 +722,7 @@ class _Problem:
                         val = float(s_mva) * (1 + m) - r
                         if k not in out or val > out[k]:
                             out[k] = val
-                        self.limit.setdefault(k, (0.0, 0.01 * r))
+                        self.limit.setdefault(k, (0.0, 0.01 * smallest[gk]))
         return out
 
     def fault_only(self, point):
@@ -747,8 +767,17 @@ class _Linear:
     fd_solves: int
 
 
+class _Cancelled(Exception):
+    """``should_stop`` answered True between two finite-difference solves."""
+
+    def __init__(self, solves):
+        super().__init__("cancelled")
+        self.solves = solves
+
+
 def _linearise(prob, ev):
     keys = sorted(ev.g, key=str)
+    stop = getattr(prob, "should_stop", None)
     row = {k: i for i, k in enumerate(keys)}
     g0 = np.array([ev.g[k] for k in keys])
     D = np.zeros((len(keys), len(prob.options)))
@@ -766,6 +795,8 @@ def _linearise(prob, ev):
         for k in idx:
             if k == cur[j]:
                 continue
+            if stop is not None and kind != "switchgear" and stop():
+                raise _Cancelled(solves)
             o = prob.options[k]
             trial = dataclasses.replace(ev.point, choice=tuple(k if i == j else c for i, c in enumerate(cur)))
             if kind in ("transformer", "cable"):
@@ -1071,10 +1102,28 @@ def _label(prob, point):
 
 def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
                        criteria: SizingCriteria = SizingCriteria(), max_iter: int = MAX_ITER,
-                       pcc_switchgear: bool = True, adaptive: bool = True, c8=None) -> dict:
+                       pcc_switchgear: bool = True, adaptive: bool = True, c8=None,
+                       progress=None, should_stop=None, parallel: ParallelRules = ParallelRules(),
+                       period_years=None) -> dict:
     """The joint asset choice (module docstring). ``adaptive=False`` holds
     ``beta`` at 1 and ``Delta`` at its start, for comparison. ``c8`` is
-    C8's result if already computed.
+    C8's result if already computed; else C8 runs with ``parallel``, the
+    rules for adding units next to existing transformers (plan C13), which
+    the MILP's open candidates then follow too. ``period_years`` are the
+    project's investment-period weightings (plan C14), passed to C8; the
+    purchases and their renewals are written as C8 writes them, and the
+    ranking, as C8's, leaves the renewals out (``ranked_annual``).
+
+    ``progress(iteration, max_iter, summary)``, when given, is called once
+    per row of the history (the warm start is iteration 0), in order;
+    ``summary`` is ``{"cost", "feasible", "accepted", "best_cost",
+    "c8_cost", "delta", "choice"}``, ``best_cost`` the cheapest AC-feasible
+    point so far (None while there is none). ``should_stop()``, when given,
+    is asked before every iteration and between the finite-difference
+    solves of a linearisation; once it answers True the loop ends with
+    ``stop == "cancelled"`` and the result is built as at any other stop:
+    the best AC-feasible point seen, or C8's result, flagged. Neither
+    changes the loop otherwise.
 
     Returns C8's shapes (``investment``, ``cost``, ``compliance``,
     ``dispatch``, ``spec``, ``history`` (C8's escalations), ``unresolved``,
@@ -1086,13 +1135,14 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
     result is returned)."""
     if c8 is None:
         c8 = select_assets(campus_spec, hourly, selection, library, req, profile, criteria,
-                           pcc_switchgear=pcc_switchgear)
+                           pcc_switchgear=pcc_switchgear, parallel=parallel, period_years=period_years)
     state = c8["state"]
     prob = _Problem(campus_spec, hourly, library, req, criteria, state)
-    c8_items = [((n.choice.items, n.choice.existing) if n.choice is not None and n.pos >= 0 else None)
+    prob.should_stop = should_stop
+    c8_items = [((n.choice.items, n.choice.existing, n.choice.keep) if n.choice is not None and n.pos >= 0 else None)
                 for n in prob.needs]
     inv = c8["investment"]
-    c8_cost = float(inv.loc[inv["status"].isin(["chosen", "kept"]), "annualised_eur_per_a"].sum())
+    c8_cost = ranked_annual(inv)
     upper = c8_cost if state.feasible else math.inf
     prob.build_options(c8_items, upper)
     prob.q_ref = max([s for (_, s) in prob.avail.values()] + [o.q_stat for o in prob.options] + [1.0])
@@ -1101,18 +1151,35 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
     cur = prob.evaluate(point, linearise=True)
     if not cur.converged:
         return _fallback(c8, prob, [], "C8's point does not converge in the MILP's re-solve", c8_cost)
-    lin = _linearise(prob, cur)
     delta, d_cap, d_floor = DELTA_START * prob.q_ref, DELTA_CAP * prob.q_ref, DELTA_FLOOR * prob.q_ref
-    beta = {k: BETA0 for k in lin.keys}
-    err = {k: 0.0 for k in lin.keys}
     best = cur if cur.feasible else None
-    v_tot, v_worst = _violation(prob, cur.g)
-    history = [{"iteration": 0, "cost": cur.cost, "feasible": cur.feasible, "worst_violation": v_worst,
-                "worst_lin_error": 0.0, "delta": delta, "beta_mean": 1.0, "beta_max": 1.0, "beta_up": "",
-                "rho": math.nan, "accepted": True, "point_cost": cur.cost, "slack": 0.0, "slack_on": "", "choice": _label(prob, point),
-                "fd_solves": lin.fd_solves, "note": "C8's result, the warm start"}]
     stop, cuts, lin_rows = "max_iter", [], []
+    try:
+        lin = _linearise(prob, cur)
+        fd0 = lin.fd_solves
+    except _Cancelled as c:
+        lin, fd0, stop = None, c.solves, "cancelled"
+    history = []
+
+    def report(row):
+        history.append(row)
+        if progress is not None:
+            progress(int(row["iteration"]), max_iter,
+                     {"cost": row["cost"], "feasible": bool(row["feasible"]), "accepted": bool(row["accepted"]),
+                      "best_cost": None if best is None else best.cost, "c8_cost": c8_cost, "delta": row["delta"],
+                      "choice": row["choice"]})
+
+    v_tot, v_worst = _violation(prob, cur.g)
+    report({"iteration": 0, "cost": cur.cost, "feasible": cur.feasible, "worst_violation": v_worst,
+            "worst_lin_error": 0.0, "delta": delta, "beta_mean": 1.0, "beta_max": 1.0, "beta_up": "",
+            "rho": math.nan, "accepted": True, "point_cost": cur.cost, "slack": 0.0, "slack_on": "",
+            "choice": _label(prob, point), "fd_solves": fd0, "note": "C8's result, the warm start"})
+    beta = {k: BETA0 for k in (lin.keys if lin is not None else [])}
+    err = {k: 0.0 for k in beta}
     for it in range(1, max_iter + 1):
+        if lin is None or (should_stop is not None and should_stop()):
+            stop = "cancelled"
+            break
         backoff = np.array([beta.setdefault(k, BETA0) * abs(err.get(k, 0.0)) for k in lin.keys])
         trial_pt, pred, sigma = _solve_milp(prob, lin, cur.point, backoff, delta, penalty, cuts)
         slack_on = sorted((k for k, s in sigma.items() if s > 1e-6), key=lambda k: -sigma[k])
@@ -1124,7 +1191,7 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
                        worst_lin_error=0.0, beta_mean=float(np.mean(list(beta.values()))),
                        beta_max=float(max(beta.values())), rho=math.nan, accepted=False, point_cost=cur.cost,
                        choice=_label(prob, cur.point), note="the MILP returns the current point")
-            history.append(row)
+            report(row)
             stop = "converged" if cur.feasible else "stalled"
             break
         trial = prob.evaluate(trial_pt, linearise=True)
@@ -1170,15 +1237,21 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
             row["point_cost"] = trial.cost
             moved = abs(trial.cost - cur.cost)
             cur = trial
-            lin = _linearise(prob, cur)
+            try:
+                lin = _linearise(prob, cur)
+            except _Cancelled as c:
+                row["fd_solves"] = c.solves
+                report(row)
+                stop = "cancelled"
+                break
             row["fd_solves"] = lin.fd_solves
-            history.append(row)
+            report(row)
             if cur.feasible and moved < COST_TOL:
                 stop = "converged"
                 break
         else:
             row["point_cost"] = cur.cost                       # the previous point is kept
-            history.append(row)
+            report(row)
         if delta < d_floor:
             stop = "delta_floor"
             break
@@ -1186,6 +1259,8 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
     if best is None or (state.feasible and best.cost >= c8_cost - COST_TOL):
         why = ("no AC-feasible point was found" if best is None else
                f"no AC-feasible point is cheaper than C8's ({best.cost:,.0f} against {c8_cost:,.0f} per year)")
+        if stop == "cancelled":
+            why = f"cancelled after {len(history) - 1} iteration(s): {why}"
         out = _fallback(c8, prob, hist, why, c8_cost, stop)
     else:
         out = _result(c8, prob, best, hist, c8_cost, stop)
@@ -1204,7 +1279,7 @@ def _comparison(c8, prob, best):
     inv = c8["investment"]
     rows = []
     for j, need in enumerate(prob.needs):
-        c8_rows = inv[inv["need"] == need.key]
+        c8_rows = inv[(inv["need"] == need.key) & (inv["action"] != "renew")]       # plan C14: not ranked
         c8_cost = float(c8_rows["annualised_eur_per_a"].sum())
         c8_label = prob.c8_labels[j]
         o = prob.options[best.point.choice[j]] if best is not None else None
@@ -1231,12 +1306,13 @@ def _fallback(c8, prob, hist, why, c8_cost, stop="fallback"):
 def _result(c8, prob, best, hist, c8_cost, stop):
     needs, spec, added = prob.realise(best.point)
     study = best.study
-    investment, cost = _investment(needs, added, spec, study, prob.library, prob.lib_by_id, prob.st.periods)
+    investment, cost, horizon = _investment(needs, added, spec, study, prob.library, prob.lib_by_id,
+                                            prob.st.periods, *prob.st.horizon)
     final = with_measures(prob.st.as_is, best.compliance)
     summary = {"method": "milp", "fallback": False, "reason": "", "stop": stop, "c8_cost": c8_cost,
                "milp_cost": best.cost, "c8_feasible": bool(prob.st.feasible),
                "iterations": int(hist["iteration"].max())}
     return {"investment": investment.drop(columns=["lifetime_a"]), "cost": cost, "compliance": final,
             "dispatch": _dispatch_table(study), "spec": spec, "history": c8["history"], "unresolved": [],
-            "pcc": _pcc_table(study), "short_circuit": study.short_circuit, "scope": c8["scope"],
+            "pcc": _pcc_table(study), "short_circuit": study.short_circuit, "scope": {**c8["scope"], "horizon": horizon},
             "milp_history": hist, "comparison": _comparison(c8, prob, best), "fallback": None, "summary": summary}

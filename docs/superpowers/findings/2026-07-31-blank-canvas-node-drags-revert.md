@@ -1,5 +1,14 @@
 # Blank-canvas node drags revert — diagnosis handover
 
+**Fixed 2026-10-06** (increment A4 of `plans/2026-10-06-visual-layers-1-abstract-canvas.md`):
+the load takes the newest of server, memory cache and localStorage by `savedAt`
+and pushes a newer local copy back (`topologyLayoutStore.loadLayoutNewestWins`);
+a `PUT /layout` 404 before the first project save keeps the layout in the memory
+cache for the save flows that already order layout-after-network and says so
+once ("Layout will be saved with the project"); any other failed PUT surfaces
+once. Regression tests in `topologyLayoutStore.test.tsx` ("A4" block) replay the
+sequence below. The text under this line is the diagnosis as written.
+
 **Date:** 2026-07-31
 **Reported by:** the user — "dragging the map in the blank canvas does not save its topology";
 on follow-up, confirmed as **node positions reverting**, not the camera.
