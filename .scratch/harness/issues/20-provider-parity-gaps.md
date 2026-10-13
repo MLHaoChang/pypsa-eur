@@ -1,6 +1,6 @@
 # 20 — Provider parity gaps: cache token accounting and reasoning on the OpenAI wire
 
-Status: ready-for-agent
+Status: ready-for-agent (done 2026-10-06: usage with Anthropic meaning on the OpenAI wire; W4 and per-turn usage in the parity battery)
 Type: task
 Blocked by: 07 (done)
 
@@ -36,3 +36,34 @@ adapters report.
 
 The parity battery reports usage on both wires, thinking shows on the
 OpenAI wire in the panel, and the frame recording is unchanged.
+
+## Comments
+
+2026-10-06 (done): two findings changed the plan. Reasoning already streamed
+as `thinking` on this wire (`_REASONING_KEYS`, pinned by
+`test_openai_compat_streams_text_tools_reasoning_and_usage`), so item 2 became
+a test that it reaches the panel and is never replayed. The usage gap was
+larger than "cache reads read as 0": every OpenAI-compatible vendor counts
+cached input inside `prompt_tokens`, so this wire charged a cached prefix as
+fresh input to the daily cap and the metrics. `_usage_from` in
+`harness/providers/openai_compat.py` now reports all four keys with the
+Anthropic meaning, reading OpenAI's and Kimi's
+`prompt_tokens_details.cached_tokens` (Kimi's `cache_write_tokens` and
+top-level `cached_tokens` too) and DeepSeek's `prompt_cache_hit_tokens`, each
+checked against the vendor's API reference, and clamps an inconsistent report
+at zero. The stub reports a cache read on every reply and gained a reasoning
+branch; the battery gained W4 and fails a wire that reports no usage.
+Tests: `tests/test_harness_provider_parity.py` (13, red first), two stub
+tests, one seam pin updated to the four-key shape. Parity: stub 4/4, live
+Anthropic 4/4 (runbook). Gate: the full chat regression, 3822 passed, 7
+skipped, 0 failed.
+
+2026-10-12 (merge with master): master's PR #102 had added its own partial
+mapping (cache reads reported, but kept inside `input_tokens`) on chat
+completions and in the new Responses adapter, pinned by
+`tests/test_openai_cache_accounting.py`. The owner chose this issue's meaning
+for every wire (spec Q19). Both OpenAI paths now call one function,
+`harness/providers/usage.py:usage_from`; the two cache tests, the Responses
+seam pin and the paid-test meter (`tests/live_api_support.py`, which now
+prices uncached + cached + written input at the uncached rate, the same
+conservative bound as before) were updated with it.
