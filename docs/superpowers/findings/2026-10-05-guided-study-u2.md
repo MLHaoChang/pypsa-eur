@@ -125,9 +125,18 @@ Each package's table is in the plan's status block; all ran on scratch copies, e
 
 ## Open items
 
-- **Master's red packaging test** (`tools/pilot_evaluation_plugin.py` imports `pytest` unguarded; red on `fceb886e` too): not U2's, but it fails the PR's CI; the owner names who fixes it.
-- **C3e** — the owner's explicit acceptance of the IC internals the export-series delete reads until `delete_series` / `pinned_by` land.
-- **X6** — the parent plan's C5 amendment (the per-part CAPEX bound WORKAROUND), the coordinating session's.
-- The engine asks above.
-- **U3** — the guided face inside Guided mode (the plan's U3 outline): the start card, the study chat tools, "Open in Expert", rule 5.
-- Smaller, recorded in the plan: a "defaults updated" offer for legacy ledgers; row 30 non-zero and row 31 `eu_de`; the pre-WP9 ledger CSV header for the MVP-2 importer; W2's reading of the parent's report-workbook row.
+**Owner decisions (2026-10-13, relayed to #154 by the coordinating session):**
+- **C3e: accepted for now, and tracked.** The study keeps reading the engine internals the export-series delete needs (`bundle_pins`, `series_store.list_series`, `LibraryItem`) until the engine adds `delete_series` / `pinned_by`, then switches to them.
+- **Engine asks approved and commissioned from the engine:** per-part `scale_capex`, unrounded FOM statistics, a frozen engine interface, and a public "record a solve" helper. Each is adopted in a follow-up PR once it lands; #154 does not wait on them.
+- **A hand-typed price on a grid Link:** the engine warns and shows both prices, with no change to the numbers. This is commissioned from the engine side; the study changes nothing.
+- **The report workbook (WP9 decision W2):** accepted. The engine's sheets stay in each option's own case workbook.
+- **X6: closed** by #155, where the parent plan's C5 records the per-part CAPEX workaround.
+
+**Still open:**
+- **Master's CI:** master's packaging test is fixed by #148, which is merged into #154. Master's 33 reliability tests from #145 are cleared by #156, which merges first.
+- **The engine asks above,** until they land.
+- **U3:** the guided face inside Guided mode (the plan's U3 outline): the start card, the study chat tools, "Open in Expert", and rule 5. It builds on M2, the task-ordered Expert sidebar.
+- **Smaller items, recorded in the plan:**
+  - a "defaults updated" offer for legacy ledgers;
+  - row 30 non-zero, and row 31 `eu_de`;
+  - the pre-WP9 ledger CSV header for the MVP-2 importer.

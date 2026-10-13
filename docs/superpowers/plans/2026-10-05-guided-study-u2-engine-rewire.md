@@ -646,7 +646,7 @@ Adapt in place (WP3–WP8 as their code moves): `test_study_pack.py` (36: no pri
 - **The report workbook (`report_xlsx`).**
   - `report.assemble_decision_report` takes each centre case's bundle (`findings.centre_bundles`, the bundle `_case` kept, identity-matched to the view). The POST stores `engine_cash = {option: cash_series}` with the record. `_report_record` returns it, and `GET report.xlsx` passes it on.
   - Per option, `Cash flows <option>` / `KPIs <option>` are the case workbook's own sheets over that series, row for row (pinned).
-  - **Decision W2: the report does not repeat `build_workbook`'s sheets per option.** The parent's "report_xlsx reuses its sheets" is met through the shared view module. The engine's own sheets are in each option's case workbook. The report renders from its stored record without the `FinanceResult`, and storing IC's whole report per option would press on the 1 MB record cap.
+  - **Decision W2 (accepted by the owner 2026-10-13, relayed by the coordinating session): the report does not repeat `build_workbook`'s sheets per option.** The parent's "report_xlsx reuses its sheets" is met through the shared view module. The engine's own sheets are in each option's case workbook. The report renders from its stored record without the `FinanceResult`, and storing IC's whole report per option would press on the 1 MB record cap.
   - A series is used only for its own case (same `case_id`, engine `finance_engine`).
 - **Which paths still reach `proforma_xlsx`.**
   - `write_proforma_xlsx`: no route since WP9; only `test_proforma_xlsx`.
