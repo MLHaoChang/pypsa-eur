@@ -10,6 +10,15 @@ its project's `user_ts.json`, and an adequacy-sweep test that could not fail for
 its own regression). Their findings carry the detail. Nothing else was re-verified
 on that date, so the entries below still date from 2026-09-12.
 
+**The High authorization family was re-verified on 2026-09-30** (against
+`a9a1f5b`). Items 2, 3 and 4 were found already fixed — see "Closed since the
+2026-09-12 pass" — and the re-verification turned up a fourth instance of item
+2's defect, entered below as item 16.
+
+**2026-10-13:** that item is renumbered **16**. Master assigned 12–14 to the
+3D site view on 2026-10-06 while this branch was unmerged. Commits and
+findings written before 2026-10-13 cite it as item 12.
+
 **2026-10-06:** items 12–14 added from the 3D site view branch's full-product
 browser E2E (`notes/2026-09-29-3d-site-view-phase2-qa.md` §7), re-verified in
 source on master that day. Its defect D (a second project from the same
@@ -23,7 +32,8 @@ the detail) and item 14 (a three-port Link dropping `bus2` / `efficiency2`;
 `_drop_unknown_extras` admits PyPSA's per-port columns by regex). Both are
 increments A1 and A4 of `plans/2026-10-06-visual-layers-1-abstract-canvas.md`.
 
-**2026-10-13:** items 12 and 13 closed and removed per the convention. Item 12
+**2026-10-13:** the P33b-era items 12 and 13 closed (see "Closed since the
+2026-09-12 pass"; the open 3D-site-view items 12 and 13 are different). Item 12
 (an io import under a session pointer landing in a context the next request
 never reads) was already fixed on master by `e049c25e`: `routers/io.py::_unbind_session`
 clears the pointer on a successful import, as `/network/reset` does. The only
@@ -52,64 +62,9 @@ verification record.
 
 ## High
 
-### 2. `worksheet` and `stress_scenarios` PUTs ignore a foreign edit lock
-
-`routers/adequacy_worksheet.py:43-51` and `:65-71` carry `ProjectAccessDep` (ACL)
-only — no lock check. They are mounted under `/api/projects`, which is
-deliberately absent from the middleware's prefix list because that family is
-covered by in-handler enforcement; these two handlers never got it. Verified: with
-A holding the lock, `PUT .../layout` and `POST .../uploads` are refused 409 while
-`PUT .../worksheet` and `PUT .../stress_scenarios` return 200, replacing the
-sidecar wholesale and bumping `version` so A's client treats B's content as
-authoritative. Both files are in `_BUNDLE_FILES`, so the write propagates into
-bundles and snapshots. Fix: `_check_project_lock(db, _lock_target(project), user)`
-on both, as `routers/uploads.py:182,308` does. Server only.
-
-### 3. `/api/chat/{id}/rewind` and `/abort` perform no authorization
-
-`routers/chat.py:1299-1332` declare no user dependency and consult no owner, org
-or project; `_SESSIONS` is a process-global whose `ChatSession` has no owner
-field. Verified cross-org: a different organization's user called
-`POST /api/chat/<victim>/rewind {"turns":2}` → `200 {"dropped":4}`, emptying the
-victim's session, and `/abort` → 200 with the victim's `abort_event` set. The
-session id is not secret either — `GET /api/chat/history` returns
-`last_session_id` to any co-member who activates the project. (`/confirm` is the
-same family, practically shielded by a uuid4 token: defence by accident.)
-Server only.
-
-### 4. `/api/changelog/` is unscoped for a caller with no OrgMembership
-
-`routers/changelog.py:15-17` returns `None` for a membership-less caller, and
-`change_log_service` reads `org_id=None` as "no filter" and, on DELETE, "clear
-EVERYTHING" — contradicting both its own docstring and the route's. Verified: an
-orgless user reads every tenant's entries and `DELETE /api/changelog/` → 204
-destroys org1's audit trail. Membership-less users are the normal case for the
-shipped first user: `tools/bootstrap_super_admin.py` creates it with no
-OrgMembership. The predicate should be "is a super-admin", not "has no
-membership". Server only.
-
+*(Nothing open at this severity.)*
 
 ## Medium
-
-### 5. Chat sessions have no owner, so the confirmation gate rests on id secrecy
-
-`ChatSession` (`services/chat_service.py:474`) has no user field and
-`get_session` (`:745`) is a plain lookup in a process-global dict, so nothing
-compares the caller to the session. `POST /api/chat/{session_id}/confirm` can
-therefore supply the approval for **another account's** pending
-destructive-tool confirmation — and that approval is the whole protection the
-safety tiers give destructive and execution tools. `abort` and `rewind` are
-reachable the same way.
-
-**Not currently exploitable:** `session_id` is `uuid.uuid4().hex` (122 bits),
-and greps found it neither logged nor persisted into `chat.jsonl`. It is a strong
-capability-style secret.
-
-The problem is that this is load-bearing and undeclared. The day a session id
-becomes visible — a support endpoint, a debug log line, an error body, a
-screenshot — the gate is forgeable with no code change and no review step that
-would catch it. An owner field and one comparison removes the dependency.
-Source: finding 2 of the same audit.
 
 ### 6. `ProjectAccessDep` is adopted by 6 of 23 routers
 
@@ -127,6 +82,21 @@ by default, silently, with nothing failing. A dependency declared on the route
 has the opposite default. Worth a test that fails when a route is mounted under
 a prefix no mechanism covers — the omission is what needs to become loud.
 Source: finding 3 of the same audit.
+
+**Fresh evidence, 2026-09-30: item 16 is the fourth miss in one router family.**
+`tests/test_worksheet_foreign_lock.py` already called the fix it guards "the
+third instance of one miss"; `put_asset_health` makes four, and it was ungated
+for 20 days with nothing failing. The proposed test now has a concrete shape to
+aim at, because enumerating write routes in the five routers under
+`/api/projects` and flagging those matched by no lock mechanism is exactly how
+item 16 was found — by hand, in one pass. Two of the four misses would have been
+red the day they landed.
+
+Item 16 being CLOSED does not weaken this. The class is closed in that one
+router family — all three sidecar PUTs now carry the check — but the mechanism
+that let a route ship ungated for 20 days with nothing failing is untouched, and
+it is the same mechanism for every other prefix. Four hand-caught misses is the
+argument for the test, not against it.
 
 ### 8. Component names are not validated at the edge
 
@@ -161,6 +131,65 @@ preview environment, not as a permanent rule — the deployment should decide it
 own cookie policy through configuration. The CSRF double-submit check
 (`main.py:645`) currently carries the load for those sessions. Source: gap 5 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
+
+## Closed since the 2026-09-12 pass
+
+Listed once, with the closing commit, because the drift this file exists to
+prevent was statuses reading *open* for things fixed weeks earlier. Numbering is
+NOT reused or compacted — other findings and assessments cite these numbers.
+
+* **2** — `worksheet` / `stress_scenarios` PUTs ignore a foreign edit lock.
+  Closed by `68e5f62` (+ `2ede7a4`, tolerating a project with no real uuid).
+  Tripwire: `tests/test_worksheet_foreign_lock.py`, which asserts the two
+  subjects AND two lock-checked controls. Mutation-verified 2026-09-30: removing
+  both guard blocks turns exactly the two subject tests red. **The class is not
+  closed — see item 16.**
+* **3** — `/api/chat/{id}/rewind` and `/abort` perform no authorization. Closed
+  by `be4d5ed`, which gave `ChatSession` an `owner_user_id` and a fail-closed
+  `session_owner_allows`. Tripwire: `tests/test_chat_session_ownership.py`.
+  Mutation-verified 2026-09-30: stubbing `session_owner_allows` to `return True`
+  turns the `/rewind`, `/abort` and owner-less tests red — but NOT the `/confirm`
+  test, which posted a fresh `uuid4()` and so was satisfied by token lookup
+  failing before ownership was ever consulted. The guard was real; its tripwire
+  was not. Repaired 2026-09-30 to mint a live token and assert the property
+  (still pending, no decision recorded, owner can still spend it).
+* **4** — `/api/changelog/` is unscoped for a caller with no OrgMembership.
+  Closed by `6f5e170`, which made the predicate `is_super_admin` rather than
+  "has no membership", and kept read and destroy at different privileges: a
+  super-admin still reads across tenants, and nobody clears across them through
+  this route. Tripwire: `tests/test_changelog_scoping.py`, six tests including
+  both halves of the super-admin distinction.
+* **16** — `PUT /{name}/asset_health` ignores a foreign edit lock. Opened and
+  closed on 2026-09-30: recorded first as a defect outside items 2-4, then fixed
+  by `4eca8d2` on a separate instruction. The fourth instance of item 2's defect
+  and the second in that file; ungated for 20 days because it landed two days
+  before the commit that fixed its two siblings, so it was never in the audit's
+  route list. Tripwire: `tests/test_asset_health_foreign_lock.py`, written
+  before the fix, red on the property rather than a status code, and
+  mutation-verified after. **This closes the class in this router family — all
+  three sidecar PUTs now carry the check** — but not the shape that produced it,
+  which is item 6.
+* **5** — chat sessions have no owner, so the confirmation gate rests on id
+  secrecy. Closed by the same commit as item 3: `owner_user_id` plus one
+  comparison is exactly the fix this item asked for, so `/confirm` no longer
+  depends on the session id being unguessable.
+
+* **12 (P33b entry, 2026-10-06; not the open item 12 below)** — `/api/io/import/*`
+  under a session pointer imported into a context
+  the next request never read. Already closed on master by `e049c25e`
+  (`routers/io.py::_unbind_session` clears the pointer on a successful import).
+  Tripwire widened by `9c99daa0` (PR #170):
+  `test_every_http_import_is_what_the_next_request_sees` covers all four
+  imports, and all four fail with the un-pointing removed.
+* **13 (P33b entry, 2026-10-06; not the open item 13 below)** — re-loading the
+  open project with unsaved edits left memory and disk
+  disagreeing. Closed by `9c99daa0` (PR #170): `load_project` registers with
+  `write_back=False`, and a displaced copy belonging to a project the caller is
+  not on is saved before the disk read. Tripwire:
+  `tests/test_reload_same_project.py`, red on the old code in server and local
+  mode.
+
+---
 
 ## Verification / CI
 
@@ -225,6 +254,12 @@ after re-binding; pass the acting session through the chat import wrappers) and
 five regression tests sit unapplied in `notes/2026-09-30-full-e2e/`; the diff
 targets the 2026-09-30 tree and needs porting to today's `routers/io.py`.
 Source: `notes/2026-09-29-3d-site-view-phase2-qa.md` §7, defects A–C.
+**2026-10-13:** the raw-import part is closed: `e049c25e` clears the pointer
+after a successful import, and PR #170's
+`test_every_http_import_is_what_the_next_request_sees` runs all four formats
+with the pointer SET (the `on_project_x` fixture activates a project). Undo,
+snapshot restore and template / bundle import were not re-verified for this
+note.
 
 ### 13. `login.html` prefills and prints a review credential
 

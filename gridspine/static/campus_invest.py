@@ -193,7 +193,7 @@ from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.network import MAX_NAME_LEN
 from gridspine.schema.transformer import check_tap, check_vector_group, ratio as tap_ratio
-from gridspine.static.campus_compliance import CHECKS, Q_TOL, campus_compliance
+from gridspine.static.campus_compliance import ADDED, CHECKS, Q_TOL, campus_compliance
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases, trafo_groups
 from gridspine.static.campus_reactive import compensation_bus, reactive_need, size_compensation
 from gridspine.static.campus_sc import campus_fault_levels, judge
@@ -444,10 +444,11 @@ def _compliance(study, req, profile) -> pd.DataFrame:
         status = "fail" if peak > 100.0 + 1e-9 else "pass"
         where, detail = (int(line.at[j, "period"]), int(line.at[j, "hour"])), \
             f"worst {line.at[j, 'cable']} ({line.at[j, 'case']})"
+        case = str(line.at[j, "case"])
     else:
-        peak, status, where, detail = math.nan, "pass", (None, None), "no cable"
+        peak, status, where, detail, case = math.nan, "pass", (None, None), "no cable", None
     cable = {"check": "cable_loading", "status_as_is": status, "status_with_measures": status, "value": peak,
-             "limit": 100.0, "unit": "%", "worst_period": where[0], "worst_hour": where[1],
+             "limit": 100.0, "unit": "%", "worst_period": where[0], "worst_hour": where[1], "worst_case": case,
              "clause": "equipment rating (not a grid-code clause)", "source": "assumed", "detail": detail}
     return pd.concat([out, pd.DataFrame([cable])], ignore_index=True)
 
@@ -660,6 +661,24 @@ def open_candidates(need, library, lib_by_id, criteria, f_hz):
     return []
 
 
+def _in_service(name, spec) -> tuple:
+    """``(name, commissioning year or None, its source tag)`` of a campus-file asset."""
+    given = spec.get("commissioning_year")
+    return (str(name), None, "") if given is None else (str(name), int(given["value"]), str(given["source"]))
+
+
+def _replace_reason(target) -> str:
+    """What a ``replace`` row replaces and why: the existing units with their
+    commissioning year when the campus file gives one, then what failed as is
+    (``target["failed"]``, set with the need)."""
+    names = []
+    for name, year, src in target.get("replaced", []):
+        names.append(f"{name} (commissioning year not given)" if year is None else
+                     f"{name} (in service since {year}{', assumed' if src.startswith('assumed') else ''})")
+    what = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return f"replaces {what}: {target['failed']}" if names else ""
+
+
 def _cable_need(name, study, library, criteria, spec):
     rows = study.line[study.line["cable"] == name]
     i_ka = float(rows["i_ka"].max())
@@ -669,7 +688,9 @@ def _cable_need(name, study, library, criteria, spec):
         study.campus.net.line["name"] == name, "from_bus"].iloc[0]), "vn_kv"])
     length = float(cs["length_km"]["value"])
     return Need(f"cable {name}", "cable", {"cable": name, "i_ka": i_ka, "kv": kv, "length_km": length,
-                                           "existing": bool(cs.get("existing"))},
+                                           "existing": bool(cs.get("existing")),
+                                           "replaced": [_in_service(name, cs)] if cs.get("existing") else [],
+                                           "failed": f"loaded to {float(rows['loading_pct'].max()):.1f} % as is"},
                 _cable_candidates(library, kv, length, i_ka, criteria), int(bad["period"].min()))
 
 
@@ -726,9 +747,20 @@ def _needs(spec, study, library, criteria, periods, lib_by_id, skip_buses=frozen
         whole = len(existing) == len(members)
         if whole and bool(r.adequate) and not peak > 100.0 + 1e-9:
             cands = [Candidate("keep (existing)", (), 0.0, existing=True), *cands]
+        # what a replacement of the existing units would say failed (``_replace_reason``)
+        if not bool(r.adequate):
+            failed = (f"{int(r.units)} x {r.unit_rating_mva:g} MVA as is, {r.required_unit_mva:.2f} MVA a unit "
+                      f"needed with the {criteria.margin * 100:g} % design margin")
+        elif peak > 100.0 + 1e-9:
+            failed = f"loaded to {peak:.1f} % as is"
+        elif not whole:
+            failed = "part of the group is not built yet, and a new group was the cheapest that passes"
+        else:
+            failed = "keeping it failed the AC re-check with the other assets (see the escalation history)"
         needs.append(Need(f"transformer {r.group}", "transformer",
                           {"members": members, "hv_bus": hv, "lv_bus": lv, "s_tot": s_tot, "s_n1": s_n1,
-                           "n_old": int(r.units), "kv": (kv[hv], kv[lv]), "existing": existing, "parallel": parallel},
+                           "n_old": int(r.units), "kv": (kv[hv], kv[lv]), "existing": existing, "parallel": parallel,
+                           "replaced": [_in_service(m, u) for m, u in existing.items()], "failed": failed},
                           cands, _fail_period(r.group, members, study, criteria, periods) if whole else first))
     comp = study.compensation.set_index("direction")
     cap_need = float(comp.at["capacitive", "required_mvar"]) * (1 + criteria.margin)
@@ -985,7 +1017,7 @@ SPAN_SINGLE = "single period: one year"
 MID_LIFE = "assumed: mid-life at the first period"
 RANKING_NOTE = ("Replacements are reported, not ranked: candidates are ranked by annualised cost, which a "
                 "like-for-like replacement leaves the same, and keeping an existing unit is ranked at zero although "
-                "its replacement is costed later (plan C14).")
+                "its replacement is costed later.")
 
 
 def _positive(v):
@@ -1227,6 +1259,8 @@ def _investment(needs, added, spec, study, library, lib_by_id, periods, spans=No
         t = need.target
         base["action"] = ("add" if cand.keep else "replace" if t.get("existing") and need.kind in ("transformer", "cable")
                           else "buy")
+        if base["action"] == "replace":
+            base["reason"] = "; ".join(x for x in (need.unresolved, _replace_reason(t)) if x)
         names = iter(added.get(need.key, []))
         for kind, lid, n in cand.items:
             e = lib_by_id[lid]
@@ -1285,12 +1319,19 @@ def _cost(inv, hz):
 
 def with_measures(as_is, compliance) -> pd.DataFrame:
     """The as-is compliance with the re-checked one as its "with measures"
-    columns."""
+    columns: status, value and detail, and where that value was read
+    (``worst_period_with_measures``, ``worst_hour_with_measures``,
+    ``worst_case_with_measures``), which need not be the as-is worst hour.
+    The columns added later (``campus_compliance.ADDED``) and the
+    where-columns come after the columns that were in use first."""
     after = compliance.set_index("check")
     final = as_is.copy()
     final["status_with_measures"] = final["check"].map(after["status_as_is"])
     final["value_with_measures"] = final["check"].map(after["value"])
     final["detail_with_measures"] = final["check"].map(after["detail"])
+    final = final[[c for c in final.columns if c not in ADDED] + [c for c in ADDED if c in final.columns]]
+    for col in ("worst_period", "worst_hour", "worst_case"):
+        final[f"{col}_with_measures"] = final["check"].map(after[col])
     return final
 
 

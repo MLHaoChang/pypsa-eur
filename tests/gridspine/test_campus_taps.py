@@ -801,3 +801,59 @@ def test_the_milp_leaves_the_grid_operators_pcc_taps_alone(tmp_path):
                              max_iter=2)
     assert out["scope"]["pcc_tap_control"] == "grid_operator"
     assert out["fallback"] is None and len(out["taps"]) and set(out["taps"]["moved_by"]) == {0}
+
+
+# --------------------------------------------------------------------------
+# the tap note when the worst case is the outage of a group's first unit
+# --------------------------------------------------------------------------
+
+def _first_unit_out():
+    """The pair, TR2 at its own neutral 1 (-6..12): the group's offsets are
+    -7..9, its position read on TR1's scale (neutral 0). The worst campus
+    reading is in the outage of TR1, the group's first unit, where only TR2
+    has a position: 1 - 3 = -2, offset -3 from its neutral, so the group
+    stands at -3 (worked by hand). Intact both units sit at the file's taps."""
+    from gridspine.static.campus_taps import tap_table
+    spec = pair_spec(pos=0)
+    spec["campus"]["transformers"]["TR2"]["tap"] = oltc(pos=1, neutral=1, lo=-6, hi=12)
+    tapper = Taps(build_campus(spec), PROFILE)
+    taps = tap_table([
+        {"period": 2030, "hour": 7, "case": "intact", "transformer": "TR1", "group": "TR1+TR2", "tap_pos": 0,
+         "ratio_pct": 100.0, "moved_by": 0},
+        {"period": 2030, "hour": 7, "case": "intact", "transformer": "TR2", "group": "TR1+TR2", "tap_pos": 1,
+         "ratio_pct": 100.0, "moved_by": 0},
+        {"period": 2030, "hour": 7, "case": "N-1:TR1", "transformer": "TR2", "group": "TR1+TR2", "tap_pos": -2,
+         "ratio_pct": 95.5, "moved_by": -3}])
+    return tapper, taps
+
+
+def test_the_tap_note_gives_the_groups_position_when_its_first_unit_is_the_one_out():
+    from gridspine.static.campus_taps import compliance_note
+    tapper, taps = _first_unit_out()
+    assert [g.name for g in tapper.searched] == ["TR1+TR2"]
+    bus = pd.DataFrame([{"period": 2030, "hour": 7, "case": "intact", "bus": "MV2", "vm_pu": 0.97},
+                        {"period": 2030, "hour": 7, "case": "N-1:TR1", "bus": "MV2", "vm_pu": 0.905}])
+    assert "taps at (2030, 7) (N-1:TR1): TR1+TR2 -3" in compliance_note(tapper, bus, taps)
+    # with the first unit in service the note reads it, as before
+    bus.loc[0, "vm_pu"] = 0.901
+    assert "taps at (2030, 7) (intact): TR1+TR2 +0" in compliance_note(tapper, bus, taps)
+
+
+def test_the_reason_gives_the_groups_position_when_its_first_unit_is_the_one_out():
+    """Out of band in the outage of TR1: the reason reads the group at -3
+    (TR2's position on TR1's scale), not TR1's file position."""
+    tapper, taps = _first_unit_out()
+    bus = pd.DataFrame([{"period": 2030, "hour": 7, "case": "N-1:TR1", "bus": "MV2", "vm_pu": 0.885}])
+    why = tapper.diagnose(bus, taps)
+    assert "TR1+TR2 at -3: a further step does not reduce the excursion" in why
+    assert "MV2 0.885 pu at (2030, 7) (N-1:TR1)" in why
+
+
+def test_with_its_first_unit_in_service_the_group_reads_that_unit_even_when_another_sits_elsewhere():
+    """A unit the file puts at another offset (TR2 at +4, offset +3) does not
+    speak for the group while the first unit is in service: the note reads TR1."""
+    from gridspine.static.campus_taps import compliance_note
+    tapper, taps = _first_unit_out()
+    taps.loc[(taps["case"] == "intact") & (taps["transformer"] == "TR2"), "tap_pos"] = 4
+    bus = pd.DataFrame([{"period": 2030, "hour": 7, "case": "intact", "bus": "MV2", "vm_pu": 0.901}])
+    assert "taps at (2030, 7) (intact): TR1+TR2 +0" in compliance_note(tapper, bus, taps)
