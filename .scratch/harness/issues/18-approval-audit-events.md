@@ -1,6 +1,6 @@
 # 18 — Confirmation decisions as durable, fail-closed events
 
-Status: ready-for-agent (re-scoped 2026-10-12: no longer blocked by 13, see Comments)
+Status: ready-for-agent (done 2026-10-13: harness/approvals.py, fail-closed gate, revoked cards released at once)
 Type: task
 Blocked by: none
 
@@ -51,3 +51,24 @@ issue said `confirmation_request`). Changes:
   reserves after confirmation) and the task `attempt_id` when present.
 - For preview confirmations (`assistant_tools.preview_confirmation`) record
   the `preview_id`, not the diff.
+
+2026-10-13 (done): `harness/approvals.py` appends `approval/asked
+{call_id, tool, tier, token6}` and `approval/decided {call_id, tool, tier,
+outcome, by}` to `<app data>/chat-approvals/<sha(owner)>/<sha(session)>.jsonl`
+(0700/0600, fsynced under `durable.transaction`, files swept after 90 days).
+Outcomes: `approved | rejected | expired | aborted | revoked | unavailable`;
+`by`: `user | ttl | session | system | policy`. The gate
+(`confirm._confirm_destructive_tool`) writes both; `AUTO_APPROVE_TIERS`
+records `decided {by: policy}` with no `asked`. Fail closed (owner question
+sent 2026-10-13, built with the recommended answer): an approval that cannot
+be recorded does not run (`approval_unavailable`), and a card whose `asked`
+cannot be written is never shown; a denial that cannot be recorded still
+denies. `ChatSession.revoke_confirmations()` releases open cards as
+`revoked` at once, and `durable_conversation.rebind_scope` now calls it
+(before, a cleared card left its turn to time out as `expired`). Links:
+`preview_id` for preview confirmations and the checked turn's
+`operation_id`; never the arguments. Not linked: the task `attempt_id`,
+which `assistant_tasks.begin_step` creates after the gate. Not changed: the
+stub loop's own card (`harness/stub.py`), and the frames on the ordinary
+paths. Tests: `tests/test_harness_approvals.py` (16 tests, one parametrized over approve and deny; red first). Replay of
+decisions beside tool calls waits for issue 13.

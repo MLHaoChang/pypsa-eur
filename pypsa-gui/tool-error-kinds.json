@@ -47,6 +47,10 @@
       "surface": "inline",
       "why": "The user pressed stop. Announcing their own action in a banner is noise."
     },
+    "approval_unavailable": {
+      "surface": "banner",
+      "why": "The approval of a confirmed (or policy auto-approved) action could not be written to the approval log, so the action did not run: approvals fail closed (chat harness issue 18). Usually the app-data directory is full or not writable."
+    },
     "baseline_has_no_case": {
       "surface": "inline",
       "why": "Decision study (S5): the investment case was asked for the grid-only baseline, which every case is measured against. Route-only today; a client-side slip, nothing for the user to fix."
@@ -66,6 +70,10 @@
     "confirmation_denied": {
       "surface": "inline",
       "why": "The user denied the card. Their own decision, already visible on the card."
+    },
+    "confirmation_revoked": {
+      "surface": "inline",
+      "why": "The card was withdrawn because the conversation's scope changed (durable_conversation.rebind_scope); the action did not happen. Recorded as approval/decided revoked (chat harness issue 18)."
     },
     "confirmation_expired": {
       "surface": "banner",
@@ -543,9 +551,13 @@
       "surface": "inline",
       "why": "Raised by the chat route for a session id it does not hold. Route-only; a turn cannot be running under a session that does not exist."
     },
+    "unknown_decision": {
+      "surface": "inline",
+      "why": "The confirmation gate got a decision outside approve/deny/expired/aborted/revoked. Defensive: /confirm only accepts approve or deny, so this should not arrive; the action did not run, and the approval log records it as unavailable (chat harness issue 18)."
+    },
     "unknown_skill": {
       "surface": "inline",
-      "why": "use_skill named a skill that is not in harness/skills. The model reads the message (it lists nothing; the catalogue is in its instructions) and corrects within the turn (chat harness issue 05)."
+      "why": "use_skill named a skill that is not in the registry (harness/skills or the install's <app data>/skills), or one marked model_invocable: false. The model reads the message (it lists nothing; the catalogue is in its instructions) and corrects within the turn (chat harness issues 05 and 14)."
     },
     "unknown_step_kind": {
       "surface": "inline",

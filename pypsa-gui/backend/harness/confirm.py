@@ -154,36 +154,93 @@ def _confirm_destructive_tool(
     Phase E of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`;
     see `tests/test_chat_confirmation_gate_seam.py`.
     """
-    if tier in _confirm_tiers(guided) and tier not in AUTO_APPROVE_TIERS:
-        pc = session.issue_confirmation(
-            tool_name=tool_name, args=args, safety_tier=tier,
-        )
-        yield "tool_pending_confirmation", {
-            "tool_use_id": tool_use_id,
-            "tool_name": tool_name,
-            "args": args,
-            "safety_tier": tier,
-            "confirmation_token": pc.token,
-            "ttl_seconds": harness_session.CONFIRMATION_TTL_SECONDS,
-        }
-        decision = session.wait_for_decision(pc.token)
-        if decision != "approve":
-            error_kind = {
-                "deny": "confirmation_denied",
-                "expired": "confirmation_expired",
-                "aborted": "aborted",
-            }.get(decision, "unknown_decision")
-            yield "tool_error", {
-                "tool_use_id": tool_use_id,
-                "tool_name": tool_name,
-                "error_kind": error_kind,
-                "message": f"{decision} on confirmation for {tool_name!r}",
-            }
-            tool_results_collector.append({
-                "type": "tool_result",
-                "tool_use_id": tool_use_id,
-                "is_error": True,
-                "content": error_kind,
-            })
-            return False
-    return True
+    if tier not in _confirm_tiers(guided):
+        return True
+    from harness import approvals
+
+    link = approvals.links(session, args)
+    if tier in AUTO_APPROVE_TIERS:
+        # Issue 18: the log says why no card appeared, and an approval that
+        # cannot be put on record does not run (fail closed).
+        if approvals.decided(session, call_id=tool_use_id, tool=tool_name, tier=tier,
+                             outcome="approved", by="policy", link=link):
+            return True
+        yield from _deny(tool_use_id, tool_name, _UNAVAILABLE["error_kind"],
+                         f"approval for {tool_name!r} could not be recorded",
+                         tool_results_collector)
+        return False
+
+    pc = session.issue_confirmation(
+        tool_name=tool_name, args=args, safety_tier=tier,
+    )
+    if not approvals.asked(session, call_id=tool_use_id, tool=tool_name, tier=tier,
+                           token=pc.token):
+        # A card nobody can audit is never shown.
+        session.withdraw_confirmation(pc.token)
+        yield from _deny(tool_use_id, tool_name, _UNAVAILABLE["error_kind"],
+                         f"approval for {tool_name!r} could not be recorded",
+                         tool_results_collector)
+        return False
+    yield "tool_pending_confirmation", {
+        "tool_use_id": tool_use_id,
+        "tool_name": tool_name,
+        "args": args,
+        "safety_tier": tier,
+        "confirmation_token": pc.token,
+        "ttl_seconds": harness_session.CONFIRMATION_TTL_SECONDS,
+    }
+    decision = session.wait_for_decision(pc.token)
+    outcome, by = _DECISION_OUTCOMES.get(decision, ("unavailable", "system"))
+    recorded = approvals.decided(session, call_id=tool_use_id, tool=tool_name, tier=tier,
+                                 outcome=outcome, by=by, link=link)
+    if decision == "approve" and recorded:
+        return True
+    if decision == "approve":
+        error_kind = _UNAVAILABLE["error_kind"]
+        message = f"approval for {tool_name!r} could not be recorded"
+    else:
+        error_kind = _REFUSALS.get(decision, _UNKNOWN)["error_kind"]
+        message = f"{decision} on confirmation for {tool_name!r}"
+    yield from _deny(tool_use_id, tool_name, error_kind, message, tool_results_collector)
+    return False
+
+
+# The refusal each decision ends in. Written as `{"error_kind": ...}` literals
+# so tests/test_tool_error_kind_manifest.py sees every kind this gate emits.
+_REFUSALS: dict[str, dict[str, str]] = {
+    "deny": {"error_kind": "confirmation_denied"},
+    "expired": {"error_kind": "confirmation_expired"},
+    "aborted": {"error_kind": "aborted"},
+    "revoked": {"error_kind": "confirmation_revoked"},      # issue 18
+}
+_UNKNOWN: dict[str, str] = {"error_kind": "unknown_decision"}
+# Issue 18: an approval that could not be put on record does not run.
+_UNAVAILABLE: dict[str, str] = {"error_kind": "approval_unavailable"}
+
+# Issue 18: what `wait_for_decision` returned, as (outcome, by) for the log.
+_DECISION_OUTCOMES: dict[str, tuple[str, str]] = {
+    "approve": ("approved", "user"),
+    "deny": ("rejected", "user"),
+    "expired": ("expired", "ttl"),
+    "aborted": ("aborted", "session"),
+    "revoked": ("revoked", "system"),
+}
+
+
+def _deny(tool_use_id: str, tool_name: str, error_kind: str, message: str,
+          tool_results_collector: list[dict[str, Any]],
+          ) -> Generator[tuple[str, dict[str, Any]], None, None]:
+    """The refusal: a `tool_error` frame and the paired `is_error` result
+    (Anthropic requires one result per `tool_use`)."""
+    yield "tool_error", {
+        "tool_use_id": tool_use_id,
+        "tool_name": tool_name,
+        "error_kind": error_kind,
+        "message": message,
+    }
+    tool_results_collector.append({
+        "type": "tool_result",
+        "tool_use_id": tool_use_id,
+        "is_error": True,
+        "content": error_kind,
+    })

@@ -127,6 +127,11 @@ _R_LLM_SETTINGS = (
     "LLM provider settings: instance/user scope, `_require_super_admin`-gated "
     "where they are instance-wide. Not project data."
 )
+_R_SKILL_REGISTRY = (
+    "re-reads the assistant's skill files from the package and the install's "
+    "`<app data>/skills/` into the in-process registry (chat harness issue 14). "
+    "Writes nothing to disk and touches no project. Not project data."
+)
 _R_LOCAL = "desktop-only (`reject_unless_local_mode` on the router); one identity, no holder."
 _R_CHAT_OWNED = (
     "acts on a chat SESSION, authorized by its owner (`session_owner_allows`, "
@@ -233,6 +238,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/chat/{session_id}/rewind"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/abort"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/import"): (CHAT_SESSION, _R_CHAT_HISTORY),
+    ("POST", "/api/chat/skills/reload"): (NOT_PROJECT_DATA, _R_SKILL_REGISTRY),
     ("POST", "/api/durable-conversations"): (CHAT_SESSION, _R_DURABLE_THREAD),
     ("POST", "/api/durable-conversations/{thread_id}/checkpoint"): (CHAT_SESSION, _R_DURABLE_THREAD),
     ("POST", "/api/durable-conversations/{thread_id}/resume"): (CHAT_SESSION, _R_DURABLE_THREAD),
