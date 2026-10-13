@@ -464,5 +464,9 @@ def review_latest(store: dict, record: dict | None, *,
     out = review_report(body, record)
     out["source"] = source
     out["stale"] = stale
+    # P33b 10b: independent of `stale` (both can be true). Copied from the
+    # wire record (`GET /eh_study` derives it), so the route and the chat
+    # tool carry the same value; null when the record cannot say.
+    out["edited_since_study"] = (record or {}).get("edited_since_study")
     out["status"] = "ok"
     return out

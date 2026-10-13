@@ -98,9 +98,10 @@ export interface Requirement {
 export type InvestStatus = 'chosen' | 'kept' | 'not_needed' | 'unresolved'
 
 /** What a row does (plan C13): a new asset, units added next to existing ones,
- *  existing units kept, or a group or cable bought where existing ones stood.
+ *  existing units kept, or a group or cable bought where existing ones stood;
+ *  plan C14: `renew`, an asset bought again at the end of its life.
  *  Absent in a run from before it, and empty for a need that needs nothing. */
-export type InvestAction = 'buy' | 'add' | 'keep' | 'replace'
+export type InvestAction = 'buy' | 'add' | 'keep' | 'replace' | 'renew'
 
 /** One need and the asset bought for it (`campus_investment.csv`). `library_id`
  *  and `invest_period` are null for a need that needs nothing. */
@@ -118,10 +119,33 @@ export interface InvestmentRow {
   status: InvestStatus
   reason: string | null
   action?: InvestAction | '' | null
+  // Plan C14, one row per purchase; absent in a run from before it.
+  /** 0 for a kept existing asset, 1 for the first buy, k for later ones. */
+  purchase?: number | null
+  /** The year bought (an existing asset's: its commissioning year). */
+  build_year?: number | null
+  /** The year its successor starts, or the horizon's end. */
+  service_to?: number | null
+  /** The row it replaces, as `lineage|purchase`. */
+  replaces?: string | null
+  lineage?: string | null
+  commissioned?: number | null
+  /** How the commissioning year is known: a source tag, or `assumed: ...`. */
+  commissioned_source?: string | null
 }
 
-/** The electrical cost of one investment period (`campus_cost.csv`). */
-export interface CostRow { period: number; capex_eur: number; annualised_eur_per_a: number }
+/** The electrical cost of one investment period (`campus_cost.csv`);
+ *  `capex_replacement_eur` (plan C14) is the part bought again. */
+export interface CostRow { period: number; capex_eur: number; annualised_eur_per_a: number; capex_replacement_eur?: number }
+
+/** The study horizon (plan C14): each period's span in years and where it came
+ *  from (`project`, or `assumed: ...`), the horizon's end and the run's notes. */
+export interface HorizonScope {
+  period_years: Record<string, number>
+  source: Record<string, string>
+  horizon_end: number
+  notes: string[]
+}
 
 /** The compliance table re-solved with the assets: `status_with_measures` and
  *  `value_with_measures` are an AC result, not a recommendation. */
@@ -147,12 +171,14 @@ export interface ParallelScope {
 }
 
 /** Who buys the PCC switchgear, and (plan C13; absent in older runs) the rules
- *  for adding units in parallel, and (plan C15; absent in older runs) who moves
- *  the PCC transformer's taps. */
+ *  for adding units in parallel, (plan C15; absent in older runs) who moves
+ *  the PCC transformer's taps, and (plan C14; absent in older runs) the study
+ *  horizon. */
 export interface InvestScope {
   pcc_switchgear: 'campus' | 'grid_operator'
   parallel?: ParallelScope
   pcc_tap_control?: PccTapControl
+  horizon?: HorizonScope
 }
 
 /** One transformer's tap in one hour and case of the re-check (plan C15,

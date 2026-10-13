@@ -615,6 +615,86 @@ describe('investment: on-load taps set per hour and case (plan C15)', () => {
   })
 })
 
+describe('investment: replacement at the end of life (plan C14)', () => {
+  const horizon = {
+    period_years: { '2030': 10, '2040': 10, '2050': 10 },
+    source: { '2030': 'project', '2040': 'project', '2050': 'assumed: the gap from the previous period' },
+    horizon_end: 2060,
+    notes: [
+      'Replacements are reported, not ranked: candidates are ranked by annualised cost.',
+      'TR1 (transformer K): no commissioning year; assumed: mid-life at the first period (commissioned 2010)',
+    ],
+  }
+  const renewed = () => results({
+    investment: [
+      row({ need: 'transformer T1', library_id: 'TR_110_20_63', units: 2, capex_eur: 4_300_000, action: 'buy',
+            purchase: 1, build_year: 2030, service_to: 2055, lineage: 'transformer T1|TR_110_20_63', replaces: null }),
+      row({ need: 'transformer T1', library_id: 'TR_110_20_63', units: 2, capex_eur: 4_300_000, action: 'renew',
+            invest_period: 2050, purchase: 2, build_year: 2055, service_to: 2060,
+            lineage: 'transformer T1|TR_110_20_63', replaces: 'transformer T1|TR_110_20_63|1' }),
+      row({ need: 'transformer K', library_id: 'TR_110_20_40', kind: 'keep', units: 1, capex_eur: 0,
+            annualised_eur_per_a: 0, existing: true, status: 'kept', action: 'keep', purchase: 0, build_year: 2010,
+            commissioned: 2010, commissioned_source: 'assumed: mid-life at the first period', service_to: 2050 }),
+      row({ need: 'transformer K', library_id: 'TR_110_20_40', units: 1, capex_eur: 950_000, action: 'renew',
+            invest_period: 2050, purchase: 1, build_year: 2050, service_to: 2060, reason: '',
+            commissioned: 2010, commissioned_source: 'assumed: mid-life at the first period' }),
+    ],
+    cost: [
+      { period: 2030, capex_eur: 4_300_000, capex_replacement_eur: 0, annualised_eur_per_a: 300_000 },
+      { period: 2040, capex_eur: 0, capex_replacement_eur: 0, annualised_eur_per_a: 300_000 },
+      { period: 2050, capex_eur: 5_250_000, capex_replacement_eur: 5_250_000, annualised_eur_per_a: 380_000 },
+    ],
+    scope: { pcc_switchgear: 'campus', horizon },
+  })
+  const perPeriodHub = { basis: 'per_period' as const, per_period: { '2030': 1e6, '2040': 1e6, '2050': 1e6 }, total: 3e7 }
+
+  it('lists one row per purchase with the year it is bought, a renewal saying so', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const [first, again] = await screen.findAllByTestId('invest-transformer T1')
+    expect(within(first).getByTestId('invest-action').textContent).toBe('buy')
+    expect(within(first).getByTestId('invest-bought').textContent).toBe('2030')
+    expect(within(again).getByTestId('invest-action').textContent).toBe('renew')
+    expect(within(again).getByTestId('invest-bought').textContent).toBe('2055')
+    expect(again.textContent).toContain('€4.30 M')
+  })
+
+  it('says when a kept existing asset went into service, and that the year is assumed', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const [keep, renew] = await screen.findAllByTestId('invest-transformer K')
+    expect(within(keep).getByTestId('invest-bought').textContent).toBe('in service since 2010 (assumed)')
+    expect(within(renew).getByTestId('invest-bought').textContent).toBe('2050')
+  })
+
+  it('shows the replacement part of each period capex', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const p2050 = await screen.findByTestId('cost-2050')
+    expect(within(p2050).getByTestId('cost-replacement').textContent).toBe('€5.25 M')
+    expect(within(screen.getByTestId('cost-2030')).getByTestId('cost-replacement').textContent).toBe('€0')
+  })
+
+  it('states the horizon, flags an assumed span and lists the notes', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const line = (await screen.findByTestId('invest-horizon')).textContent ?? ''
+    expect(line).toContain('to 2060')
+    expect(line).toContain('2030: 10 years')
+    expect(line).toContain('2050: 10 years (assumed)')
+    const notes = within(screen.getByTestId('invest-horizon-notes')).getAllByRole('listitem')
+    expect(notes.map(n => n.textContent)).toEqual(horizon.notes)
+  })
+
+  it('reads a run from before it: no horizon line, no replacement column, the period as the year', async () => {
+    renderPanel()
+    const t = await screen.findByTestId('invest-transformer GRID_IMPORT')
+    expect(within(t).getByTestId('invest-bought').textContent).toBe('2030')
+    expect(screen.queryByTestId('invest-horizon')).toBeNull()
+    expect(within(screen.getByTestId('cost-2030')).queryByTestId('cost-replacement')).toBeNull()
+  })
+})
+
 // Owner decision 2026-10-12: the investment case takes the joint optimisation when it is
 // fresh and found its own choice, else the least-cost run. The switch is never silent.
 describe('which result feeds the investment case', () => {

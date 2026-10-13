@@ -64,14 +64,26 @@ def test_undo_is_independent_per_resident_context():
     assert a.undo.stack is not b.undo.stack
 
 
-def test_undo_carried_forward_across_reset_network():
-    # Single-resident byte-identical behaviour: the old global undo deque
-    # survived a network swap, so the carried-forward _UndoState must too.
+def test_undo_across_reset_network_follows_the_carry_mode():
+    # P33b gate B-1 (changed assertion): the old global deque survived EVERY
+    # swap, and carrying the same _UndoState object into another project's
+    # context let Undo in A apply B's network. Only an in-place replace of the
+    # same project (undo: carry="same") shares the stack; an io import into the
+    # open workspace (carry="copy") gets an independent copy; every other swap
+    # (the default, "fresh": load, template, import, restore, New) starts empty.
     undo_service.clear()
     undo_service.push(b"x", {})
+    before = PyPSAService.get_active_context().undo
+    PyPSAService.reset_network(carry="same")
+    assert PyPSAService.get_active_context().undo is before
+    assert undo_service.depth() == 1
+    PyPSAService.reset_network(carry="copy")
+    copied = PyPSAService.get_active_context().undo
+    assert copied is not before and copied.stack is not before.stack
     assert undo_service.depth() == 1
     PyPSAService.reset_network()
-    assert undo_service.depth() == 1  # carried forward, not reset
+    assert undo_service.depth() == 0
+    assert copied.stack and before.stack   # neither earlier stack was touched
 
 
 def test_undo_carried_forward_across_set_network():

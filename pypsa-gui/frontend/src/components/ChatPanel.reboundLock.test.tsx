@@ -61,13 +61,29 @@ const lockedByOther = new Set<string>()
 // P28 gate N-a / N-b: hold one reply so it lands out of order.
 let holdHeartbeat: Promise<void> | null = null
 let holdY: Promise<void> | null = null
+// P33b (10c): per-project answers to successive ACQUIRES (`post
+// /projects/{p}/lock`, never the heartbeat), consumed in order: 'ok' grants,
+// 'hold-409' waits on `holdLock` and then refuses. An exhausted queue falls
+// back to the `lockedByOther` rule.
+const lockReplies = new Map<string, Array<'ok' | 'hold-409'>>()
+let holdLock: Promise<void> | null = null
+const conflict = (config: InternalAxiosRequestConfig) =>
+  Promise.reject(Object.assign(new Error('Request failed with status code 409'), {
+    config, response: { status: 409, data: { detail: { lock: { holder_email: 'bob@x' } } } },
+  }))
 const adapter = vi.fn<AxiosAdapter>(async (config: InternalAxiosRequestConfig) => {
   const url = config.url ?? ''
   seen.push(`${config.method} ${url}`)
   if (holdHeartbeat && url.endsWith('/X/lock/heartbeat')) await holdHeartbeat
   if (holdY && url === '/projects/Y/lock' && config.method === 'post') await holdY
   const m = /^\/projects\/([^/]+)\/lock(\/heartbeat)?$/.exec(url)
-  if (m && config.method === 'post' && lockedByOther.has(decodeURIComponent(m[1]))) {
+  const queued = m && !m[2] && config.method === 'post'
+    ? lockReplies.get(decodeURIComponent(m[1]))?.shift() : undefined
+  if (queued === 'hold-409') {
+    if (holdLock) await holdLock
+    return conflict(config)
+  }
+  if (queued !== 'ok' && m && config.method === 'post' && lockedByOther.has(decodeURIComponent(m[1]))) {
     return Promise.reject(Object.assign(new Error('Request failed with status code 409'), {
       config, response: { status: 409, data: { detail: { lock: { holder_email: 'bob@x' } } } },
     }))
@@ -86,6 +102,8 @@ type Frame = { event: string; data: Record<string, unknown> }
 
 beforeEach(async () => {
   lockedByOther.clear()
+  lockReplies.clear()
+  holdLock = null
   holdHeartbeat = null
   holdY = null
   setAuthEnabled(true)
@@ -274,5 +292,70 @@ describe('lock replies that arrive after a later move are ignored (P28 gate N-a,
     release(); holdHeartbeat = null
     await new Promise(r => setTimeout(r, 50))
     expect(seen.slice(n)).not.toContain('post /projects/X/lock')
+  })
+})
+
+
+// P33b 10c (OPEN-ITEMS 10c): two lock-race guards in `projectActions.ts` that
+// were correct but unpinned (P28 re-gate mutants R4 / R7). Both tests are
+// green on arrival by design; the one-line mutants are the proof.
+describe('lock races R4 / R7 (P33b 10c)', () => {
+  it('R4: a heartbeat 409 re-acquire for X that fails after a fresh acquire of X leaves X held and heart-beating', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    stopLockHeartbeat(); await acquireProjectLock('X'); seen.length = 0
+    let release!: () => void
+    holdLock = new Promise<void>(r => { release = r })
+    lockReplies.set('X', ['hold-409', 'ok'])
+    lockedByOther.add('X')            // only the heartbeat meets this: acquires consult lockReplies first
+    await vi.advanceTimersByTimeAsync(LOCK_HEARTBEAT_MS + 10)
+    await waitFor(() => expect(seen).toContain('post /projects/X/lock'))
+    // The heartbeat has 409'd; drop X from the set so the restarted heartbeat
+    // (step 4) cannot 409 again and consume lockReplies by timing (review S-6).
+    lockedByOther.delete('X')
+    expect(await acquireProjectLock('X')).toBe(false)   // consumes 'ok', bumps the generation
+    release(); holdLock = null
+    await new Promise(r => setTimeout(r, 50))
+    expect(useUIStore.getState().readOnly).toBe(false)
+    expect(useUIStore.getState().readOnlyReason).not.toBe('locked-by-user')
+    expect(lastHeldLockProject()).toBe('X')
+    lockedByOther.delete('X')         // a no-op since step 3, kept for clarity
+    const n = seen.length
+    await vi.advanceTimersByTimeAsync(LOCK_HEARTBEAT_MS + 10)
+    await waitFor(() => expect(seen.slice(n)).toContain('post /projects/X/lock/heartbeat'))
+  })
+
+  it("R7: X → Y → Z in one turn with Y's acquire *refused* last: the tab stays writable on Z and Z's heartbeat survives", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    let release!: () => void
+    holdY = new Promise<void>(r => { release = r })
+    lockedByOther.add('Y')
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={qc}><ChatPanel /></QueryClientProvider>)
+    vi.mocked(createChatStream).mockImplementation((_req, onFrame) => {
+      for (const f of [
+        { event: 'session_init', data: { session_id: 's1' } },
+        { event: 'project_rebound', data: { from: 'X', to: 'Y', via_tool: 'create_project_from_template' } },
+        { event: 'project_rebound', data: { from: 'Y', to: 'Z', via_tool: 'save_project_as' } },
+        { event: 'turn_done', data: {} },
+      ] as Frame[]) onFrame(f as never)
+      return () => {}
+    })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await user.type(screen.getByTestId('chat-input'), 'go')
+    await user.click(screen.getByTestId('chat-send'))
+    await waitFor(() => expect(seen).toContain('post /projects/Z/lock'))
+    await new Promise(r => setTimeout(r, 30))
+    const n = seen.length
+    release(); holdY = null
+    await new Promise(r => setTimeout(r, 50))
+    expect(useUIStore.getState().readOnly).toBe(false)
+    expect(useUIStore.getState().readOnlyReason).not.toBe('locked-by-user')
+    expect(lastHeldLockProject()).toBe('Z')
+    expect(useUIStore.getState().currentProject).toBe('Z')
+    // A refused acquire holds nothing to give back (distinguishes R7 from N-b).
+    expect(seen.slice(n)).not.toContain('delete /projects/Y/lock')
+    const m = seen.length
+    await vi.advanceTimersByTimeAsync(LOCK_HEARTBEAT_MS + 10)
+    await waitFor(() => expect(seen.slice(m)).toContain('post /projects/Z/lock/heartbeat'))
   })
 })

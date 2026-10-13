@@ -207,6 +207,7 @@ from gridspine.static.campus_compliance import Q_TOL
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
 from gridspine.static.campus_invest import (
     ParallelRules, _apply, _bays, _compliance, _dispatch_table, _failures, _investment, _pcc_table, open_candidates,
+    ranked_annual,
     select_assets, study_from, taps_dispatch, with_measures,
 )
 from gridspine.static.campus_reactive import _SUPPLIERS, ALWAYS_ON, ReactiveResult, compensation_bus
@@ -1122,13 +1123,17 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
                        criteria: SizingCriteria = SizingCriteria(), max_iter: int = MAX_ITER,
                        pcc_switchgear: bool = True, adaptive: bool = True, c8=None,
                        progress=None, should_stop=None, parallel: ParallelRules = ParallelRules(),
-                       pcc_tap_control: str = "campus") -> dict:
+                       pcc_tap_control: str = "campus", period_years=None) -> dict:
     """The joint asset choice (module docstring). ``adaptive=False`` holds
     ``beta`` at 1 and ``Delta`` at its start, for comparison. ``c8`` is
     C8's result if already computed; else C8 runs with ``parallel``, the
     rules for adding units next to existing transformers (plan C13), which
-    the MILP's open candidates then follow too, and ``pcc_tap_control``
-    (plan C15): the taps are set by C8's rule inside every AC evaluation.
+    the MILP's open candidates then follow too, ``pcc_tap_control``
+    (plan C15): the taps are set by C8's rule inside every AC evaluation,
+    and ``period_years``, the project's investment-period weightings (plan
+    C14), passed to C8; the purchases and their renewals are written as C8
+    writes them, and the ranking, as C8's, leaves the renewals out
+    (``ranked_annual``).
 
     ``progress(iteration, max_iter, summary)``, when given, is called once
     per row of the history (the warm start is iteration 0), in order;
@@ -1151,14 +1156,15 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
     result is returned)."""
     if c8 is None:
         c8 = select_assets(campus_spec, hourly, selection, library, req, profile, criteria,
-                           pcc_switchgear=pcc_switchgear, parallel=parallel, pcc_tap_control=pcc_tap_control)
+                           pcc_switchgear=pcc_switchgear, parallel=parallel, pcc_tap_control=pcc_tap_control,
+                           period_years=period_years)
     state = c8["state"]
     prob = _Problem(campus_spec, hourly, library, req, criteria, state, pcc_tap_control)
     prob.should_stop = should_stop
     c8_items = [((n.choice.items, n.choice.existing, n.choice.keep) if n.choice is not None and n.pos >= 0 else None)
                 for n in prob.needs]
     inv = c8["investment"]
-    c8_cost = float(inv.loc[inv["status"].isin(["chosen", "kept"]), "annualised_eur_per_a"].sum())
+    c8_cost = ranked_annual(inv)
     upper = c8_cost if state.feasible else math.inf
     prob.build_options(c8_items, upper)
     prob.q_ref = max([s for (_, s) in prob.avail.values()] + [o.q_stat for o in prob.options] + [1.0])
@@ -1295,7 +1301,7 @@ def _comparison(c8, prob, best):
     inv = c8["investment"]
     rows = []
     for j, need in enumerate(prob.needs):
-        c8_rows = inv[inv["need"] == need.key]
+        c8_rows = inv[(inv["need"] == need.key) & (inv["action"] != "renew")]       # plan C14: not ranked
         c8_cost = float(c8_rows["annualised_eur_per_a"].sum())
         c8_label = prob.c8_labels[j]
         o = prob.options[best.point.choice[j]] if best is not None else None
@@ -1322,12 +1328,14 @@ def _fallback(c8, prob, hist, why, c8_cost, stop="fallback"):
 def _result(c8, prob, best, hist, c8_cost, stop):
     needs, spec, added = prob.realise(best.point)
     study = best.study
-    investment, cost = _investment(needs, added, spec, study, prob.library, prob.lib_by_id, prob.st.periods)
+    investment, cost, horizon = _investment(needs, added, spec, study, prob.library, prob.lib_by_id,
+                                            prob.st.periods, *prob.st.horizon)
     final = with_measures(prob.st.as_is, best.compliance)
     summary = {"method": "milp", "fallback": False, "reason": "", "stop": stop, "c8_cost": c8_cost,
                "milp_cost": best.cost, "c8_feasible": bool(prob.st.feasible),
                "iterations": int(hist["iteration"].max())}
     return {"investment": investment.drop(columns=["lifetime_a"]), "cost": cost, "compliance": final,
             "dispatch": _dispatch_table(study), "spec": spec, "history": c8["history"], "unresolved": [],
-            "pcc": _pcc_table(study), "short_circuit": study.short_circuit, "scope": c8["scope"], "taps": study.taps,
+            "pcc": _pcc_table(study), "short_circuit": study.short_circuit, "scope": {**c8["scope"], "horizon": horizon},
+            "taps": study.taps,
             "milp_history": hist, "comparison": _comparison(c8, prob, best), "fallback": None, "summary": summary}
