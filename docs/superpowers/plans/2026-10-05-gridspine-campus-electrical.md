@@ -1465,7 +1465,7 @@ Branch `feat/gridspine-campus-taps`, cut from C13's branch (`feat/gridspine-camp
   - `test_an_upstream_group_holds_its_own_zone_first` pins this on two hours. The plan's rule fails both: it was planted as a mutation and checked.
 - **The neutral tie-break is part of the walk's key.** A step that keeps the excursion and moves toward neutral is taken. A walk that starts from a file tap away from neutral therefore ends at the in-band position nearest neutral, which is what the brute force over (excursion, |offset|) picks.
   - A group whose buses are all in band does not walk, so an hour that passes keeps its file taps.
-- **A PCC voltage failure** still maps to the reactive need, as in C8; the plan does not change that mapping. It therefore still costs one escalation before it is found not to shrink.
+- **A PCC voltage failure** still mapped to the reactive need, as in C8; the plan did not change that mapping. It therefore still cost one escalation before it was found not to shrink. **Superseded by the owner's decision of 2026-10-13** (below, "The PCC voltage, owner decision"): it is now reported at once, with nothing bought for it.
   - Its unresolved reason is now "the grid set-point is outside the band: the operator's voltage, not a campus measure (the PCC voltage is never sent to the taps)".
   - The PCC bus has no band in the tap search.
 - **Failure reasons.** Besides "range exhausted: TR1+TR2 at +9 (max), MV2 0.893 pu" and "TR3 has no on-load tap data", two more cases needed words:
@@ -1553,6 +1553,63 @@ Branch `feat/gridspine-campus-taps`, cut from C13's branch (`feat/gridspine-camp
 - `tests/gridspine -k "campus or island"`: 1254 passed.
 - The backend campus, chat-tool, harness, bundle, assistant (inventory and navigation), IC-extra-asset and defaults-pack tests: 1731 passed, 7 skipped.
 - `tsc` clean, and the full `vitest`: 4604 passed in 395 files.
+
+#### Merged with master: C13 (#153) and C14 (#158) (2026-10-13)
+
+origin/master at d81128e89 was merged into the branch (merge commit af40ce151). Eleven files conflicted, all where both C14 and C15 extended the same line. Each was resolved keeping both behaviours:
+- **Signatures.** `select_assets` and `select_assets_milp` take both `pcc_tap_control` (C15) and `period_years` (C14). `invest_campus` passes both, and the MILP passes both on to C8.
+- **Results.** The scope carries `pcc_tap_control` and `horizon`, and the results carry `taps`. The MILP's result is `{**c8["scope"], "horizon": horizon}` plus its own `taps`.
+- **Words.** The docstrings (the driver's module, the selector, the MILP) name both. The copilot investment notes keep C15's tap text, C14's "bought from the first period that needs it" without "no replacement", and C14's renewal note. `InvestScope` has both optional keys. The panel's header comment and imports name both.
+- **Tests.** The scope assertions in `test_campus_invest`, `test_campus_milp`, `test_campus_study` and the backend service test check both keys: C14's `horizon` is checked on its own, then `pcc_tap_control` with the rest. The panel test keeps the C15 and the C14 describe blocks, each closed (checked line by line).
+- **Not conflicting.** `harness/catalogue.py` merged without conflict (master's changes there are guided mode's), and the assistant inventory test passes without a regeneration. This plan merged on its own, with the as-built sections in the order C13, C14, C15.
+
+#### The PCC voltage, owner decision (2026-10-13)
+
+**Decision.** A PCC voltage failure skips the reactive escalation. It is reported at once, and nothing extra is bought for it.
+
+**As built.**
+- In each re-check of `select_assets`, a `pcc_voltage` failure is taken out of the escalation.
+  - The reactive need is marked unresolved in the first re-check that sees the failure, at the candidate it already has. The reason is "pcc_voltage: <detail>; the grid set-point is outside the band: the operator's voltage, not a campus measure (the PCC voltage is never sent to the taps)".
+  - The history gets one row for it, with `from` equal to `to`. It is reported once.
+- The other failures go on escalating as before. The loop continues while any other check fails. When only the PCC voltage is left, it stops with no further re-check, because the study already in hand is the AC result.
+- The excursion that a voltage escalation must reduce (`_excursion`) now covers the campus voltages only. The PCC's excursion is constant, and it would hide a campus improvement smaller than it.
+- A later reason on the same need is added after the set-point reason, joined by " | ". Such a reason can be a campus voltage that taps and compensation cannot fix, a need with no further candidate, or the iteration cap. Before the decision, only one reason was ever set.
+- **The MILP has no escalation path.** The PCC voltage does not move with the campus's Q, so no point buys compensation for it. No point is feasible either, so the MILP returns C8's result, which now buys nothing for it. A test pins this. Unchanged: while the set-point is out of band, every MILP point stays infeasible, so the MILP cannot optimise the rest. That is an open question for the owner, not part of this decision.
+- The copilot investment notes add: "it is reported at once, with nothing bought for it". `harness/catalogue.py` is unchanged.
+
+**Tests** (in `tests/gridspine/test_campus_taps.py`, 5 new):
+- a PCC-only failure (set-point 1.13 pu, the campus voltages in band): one history row from "none" to "none", the reactive row unresolved with the set-point reason, no library id, no capex, no compensation in the invested file, and the PCC still failing with measures. Before the decision this case bought the STATCOM.
+- the set-point at 1.125 pu with a campus voltage that also fails: the PCC row, then the same campus-voltage escalations and the same STATCOM as the oracle run with the set-point in band (1.115 pu), and both reasons on the need.
+- the same case at `max_iter=1`: the cap's reason is added after the set-point's.
+- `_excursion` on a hand-made compliance frame: the PCC is left out.
+- the MILP on the PCC-only case: no point buys compensation, it returns C8's result, and nothing is bought.
+
+**Mutations.** 10 by hand, all caught:
+
+| mutation | caught by |
+|---|---|
+| the PCC left in the escalation | the PCC-only test |
+| the PCC back in `_excursion` | the excursion test |
+| the PCC report stops the loop | the other-failures test |
+| no history row for the PCC | the PCC-only test |
+| a later reason overwrites the set-point's | the other-failures test |
+| the PCC reported without marking the need unresolved | C15's set-point test |
+| the PCC reported in every re-check | the other-failures test |
+| the cap's reason skipped for a PCC-reported need | the cap test, written before the mutation run |
+| the PCC escalated once more | C15's set-point test |
+| the PCC given a campus-voltage reason | C15's set-point test |
+
+**The Data Center template.** The least-cost pick was re-run on C14's prepared run (one period, `period_years: {2030: 1}`, the same ranked selection, pf 0.95, shipped library) with three sources: master (d81128e89), the merge (af40ce151) and this branch.
+- All three give the same result: 1 × 63 MVA 132/33 kV, 3 × 25 MVA 33/11 kV and switchgear, €6.891 M capex and €610.3 k a year, with nothing unresolved.
+- The merge and this branch write every file byte for byte the same.
+- Against master, the only differences are the scope's `"pcc_tap_control": "campus"` and the header-only `campus_invest_taps.csv`.
+- `campus_investment.csv` is byte for byte the one from "C14 as built". The template's set-point is in band, so the decision does not apply to it.
+- **The MILP**, on the same run with master and with this branch (one run each, 453 s and 458 s), keeps the least-cost choice on both. Every file, the iteration history included, is byte for byte the same, apart from the scope and the taps file.
+
+**Gates**, on the merged branch with the decision (075bcd0c0), under the shared lock:
+- `tests/gridspine -k "campus or island"`: 1286 passed.
+- The backend campus, chat-tool, harness, guided, investment-case (`test_investment_case_campus_route.py` included), finance-case, defaults-pack, bundle and assistant-inventory tests (54 files): 1903 passed, 3 skipped (the two live grid-code probes, and the chat-tool import check whose known-broken list is empty).
+- `tsc` clean, and the full `vitest`: 4633 passed in 396 files.
 
 ### Order and dependencies
 
