@@ -175,7 +175,7 @@ Every phase runs the parent spec §8 gate unchanged: row 1 full backend suite (`
 | **P31 — Cosmetics** | C2, C3, C4, C5 | Lowest value, zero risk | `P31` = P26 (toast ∩ Send = ∅) + `--self-test` | S |
 | **P32 (scheduled after P27a)** | D1 | D-8 = (a); needs the deferred spec's P32 section in full and a §10 addendum | `P32` = P25 | S |
 | **P33 (optional)** | D2 | Needs D-9 and a spec | new | L |
-| **P33b — study honesty after an edit (owner-approved, to schedule)** | O1 follow-up (P28 gate): a backend network-revision marker on the EH study record — e.g. `network_changed: bool` computed from a revision counter bumped on every live-network write after the study finished — read by both the Guided greeting and the Hub design Results card, so "the network changed since the study" is said only when it is true | O1 (owner, 2026-09-30): P28 softens the wording now ("The last study’s results are in Hub design."; live `dispatch === 'stale'` → the stale sentence); real tracking is this phase. Additive backend field; one source for both surfaces | `P33b` = P26 + edit one bus after a study → the greeting and the Results card both say the network changed | M |
+| **P33b — study honesty after an edit (owner-approved, to schedule)** | O1 follow-up (P28 gate): a backend network-revision marker on the EH study record — e.g. `network_changed: bool` computed from a revision counter bumped on every live-network write after the study finished — read by both the Guided greeting and the Hub design Results card, so "the network changed since the study" is said only when it is true | O1 (owner, 2026-09-30): P28 softens the wording now ("The last study’s results are in Hub design."; live `dispatch === 'stale'` → the stale sentence); real tracking is this phase. Additive backend field; one source for both surfaces | `P33b` = **P28** (which carries P26) with part (C) reordered Solve-before-edit, plus the edit, undo, Expert and save-restart checks — spec §5; **specified 2026-10-06** in `../specs/2026-10-06-guided-p33b-study-freshness.md` (see "P33b plan" below) | M |
 | **P34 (optional)** | D3 | Needs D-10 | `P34` = P23 | M |
 
 Test-first in every phase: each item's red test is written and seen failing before the fix; changed assertions carry a one-line justification here.
@@ -571,6 +571,8 @@ Deferred spec §3 (A3, A4, C6, C10), plus the items carried in: P32 N1, P32 N6 a
 No processes are left running.
 
 **P28 gate follow-up, O1 (owner, 2026-09-30): soften now, track later.** The Guided "done" greeting no longer claims the results describe the current network. It now reads "The last study’s results are in Hub design.". With the hub study done and live `dispatch === 'stale'`, the stale sentence shows again; this is the pre-P28 precedence and gate probe Q16, now pinned. The Hub design Results card makes no such claim ("These results are from an earlier study; the network was solved since…" appears only when `stale` is set), so it is unchanged. Real edit tracking is **P33b** in §3 (owner-approved, to schedule) and OPEN-ITEMS 10b.
+
+**Later changes by P33b (2026-10-06, see the P33b phase note):** the P33b smoke reorder (Solve before any edit in P28 (C)) removed P28's own bus-edit step and its `info` line "after the bus edit: eh_review.stale=false … (the review flags a later solve, not an edit)" from both `--phase P28` and `--phase P33b`. The P28 gate record's "Precedence is unchanged from the owner's O1 decision" (`qa/2026-09-30-guided-mode-deferred-gate-P28.md:190`) is superseded for one combination only — hub done ∧ review stale ∧ live dispatch stale — which now reads the solved-since sentence (owner decision D-3).
 
 ## P28 result: GO at re-gate on `ac6960ebd` + R-1 fix, 2026-09-30
 - **First gate:** NO-GO on B1 (the stale sentence claimed the network changed when it had been solved). The re-gate also found N-a/N-b (lock replies racing a later move) and N-c (`/history` reported the wrong fallback binding).
@@ -1033,3 +1035,277 @@ No `chat_tools_schema.TOOLS`, tool description or system-prompt change (row 2's 
 No processes are left running.
 
 **P31 gate fixes** (gate record `docs/superpowers/qa/2026-10-05-guided-mode-deferred-gate-P31.md`, GO): S-1 — `test_eh_review_route.py::test_a_study_clears_an_earlier_stored_report_so_a_raised_study_is_204` stores a report (review 200), runs the real `run_eh_study` made to raise right after its clear (`redundancy._detach_solver_model` patched), and asserts `/eh_review` → 204; it kills the gate's M-C5 mutant (the clear without `EH_REPORT_STORE_KEY`), green on arrival since the code was right. N-6 — pinned as the code is (correct): `fmtMwhNumber` keeps the sign (`-0.500`, grouped `-1,500.50`, `-0` → `0`, NaN → `—`) and a missing ΔEUE cell reads `—` (`EhReferenceDesignPanel.formatting.test.tsx`); both gate mutants (F2, F7) killed. Rows: row 2 785 passed + 17 skipped (`row2-gate.log`); tsc 0; vitest 245 files / 2838 passed (`row4-gate.log`); no rendered output changed, so no smoke.
+
+## P33b plan (2026-10-06)
+
+**Spec:** [`../specs/2026-10-06-guided-p33b-study-freshness.md`](../specs/2026-10-06-guided-p33b-study-freshness.md) (anchors verified on `c99c255f3`; amended 2026-10-06 after the review [`../qa/2026-10-06-guided-p33b-spec-review.md`](../qa/2026-10-06-guided-p33b-spec-review.md), amended anchors on `bb8b2e7b8`). **Items:** OPEN-ITEMS 10b (the P33b marker, owner decision O1), 10a (the hub study record on re-activation), 10c (lock races R4 / R7); opens OPEN-ITEMS 12. **Base:** the P31 GO commit's successor on `origin/master` at the time of implementation; the phase note re-verifies the spec's anchors on it. **Size:** M (step 0 S, backend S+S, frontend S, smoke S, two tests XS — M still holds: B-1 adds XS to step 2, B-3 is XS in step 4).
+
+**Step 0 first (owner decision D-5, review B-2).** Under session routing an HTTP undo re-imports into a ctx that lands in `scratch:<session>` and is never re-keyed, so the next request reads the pre-undo ctx from `org:uuid` (spec §0a; reproduced on `bb8b2e7b8`: `PUT` x → x+2.5, undo 200, `GET` still x+2.5). Saved-snapshot restore has the same defect. Step 0 adds `PyPSAService.rekey_context(...)` after the binding is put back at both sites, with HTTP read-back red tests, and the P33b undo claims (the undo rule, the `+2` assertions, smoke (C4)) build on it. Load already registers (`projects.py:2793`); "New" clears the pointer; there is no redo; `/api/io/import/*` is a different class (OPEN-ITEMS 12).
+
+**Design in one paragraph.** A per-ctx edit counter (`ProjectContext.network_revision`), bumped at the three edit seams — the HTTP undo-prefix chokepoint on a 2xx, the chat dispatch site for tools whose `TOOL_ROUTES` write under those prefixes plus the five pinned service-call network writers, and `set_network` — is captured on the EH study record when the study starts (in the worker, under the ctx lock) and compared at read time into `edited_since_study: true | false | null` on `/eh_study` and `/eh_review` (one source, so `review_eh_study` carries it too). A Solve, the study's private copy and the solver's transient rows never cross a seam, so neither can false-positive. The FE learns of an edit from `network_revision` on the already-polled `/undo/info` (3 s) and invalidates the two hub queries; the Guided greeting and the Results card then say "edited since" — never "changed" or "differs", because that is all a counter carries. 10a is a one-line reorder (`reset_network` clears the study keys on the **copy**, not on the resident outgoing ctx), undo capturing and restoring finished records, and — owner decision D-1 — the finished record persisted in `results_state.pkl` with the counter in `metadata.json`, so a re-opened or restarted project still knows its study and reads it honestly against the saved counter.
+
+**Sequencing** (test-first at every step; each step leaves rows 1–4 green):
+
+| Step | What | Size | Red tests seen failing first |
+|---|---|---|---|
+| **0** | **D-5:** `apply_undo` and `restore_snapshot` call `PyPSAService.rekey_context(PyPSAService.get_active_context())` after the binding is put back, inside the lock (`network_undo.py:134`, `snapshots.py:690`) | S | `test_undo_rekeys_the_session_context.py` (new): HTTP undo → the next `GET` reads the pre-edit value and the registry holds one ctx for the project; chat `undo_last`; Saved-snapshot restore (same project, and another resident project); an undo on an unbound draft stays in scratch. `test_active_pointer_paths.py`, `test_unsaved_results.py` stay green |
+| 1 | 10a (a): `reset_network` copy-then-clear; undo captures / restores finished records (onto the re-keyed ctx) | S | `test_eh_study_record_survives_reactivation.py` (the three swap cases, undo), `test_adequacy_study_scoping.py` stays green |
+| 2 | Counter: field, `dirty_state.bump_revision` / `revision`, B1 (middleware), B2 (chat, in the `mark_dirty` block; `tool_edits_network` = `TOOL_ROUTES`-derived or `_SERVICE_CALL_NETWORK_WRITES`, with `_SERVICE_CALL_NON_NETWORK_WRITES` as its pinned complement), B3 (`set_network`); `/undo/info.network_revision` | S | `test_eh_study_edited_since.py` bump / no-bump / refused / undo (`+2` on a fresh request) / chat through the real dispatch site incl. `batch_create_components` / raise-and-timeout / derived-predicate / classified-exactly-once cases |
+| 3 | Capture on the record in the worker under the ctx lock; `study_state.edited_since`; the field on `/eh_study`, `/eh_review`, the tool; Unavailable as `null` | S | the two-routes, independence, edit-during-running and `null` cases; the fake-run `done` case asserts `is False`; the one-line addition in `test_eh_review_route.py` (`live_solve`) |
+| 4 | Persistence (D-1): `metadata.json` counter on save and all four restore paths; `eh_study_record` as a **declared field** in `RESULT_STATE_KEYS`, derived at save, mapped at hydrate and assigned `None` (never popped); the `project_context.py:468` comment and the `test_project_state.py:42-52` docstring rewritten; unpickler round trip | S | `…saved_and_restored_cold`, `…reads_edited_when_the_saved_network_moved_on`, failed/aborted, legacy pkl, `…survives_save_and_reload`; `test_project_state.py` stays green |
+| 5 | FE types; `useNetworkRevisionInvalidation`; greeting arm and precedence; Results card banner; `HubDesignPanel` hook call | S | greeting (6), card (3), hook (4), panel (1) cases; Expert snapshots untouched |
+| 6 | 10c: harness `lockReplies`; R4 and R7 tests; mutants R4 / R7 run and seen red, existing suite green | XS | the two tests are green on arrival by design — the mutants are the proof |
+| 7 | Smoke: `PHASES` + dispatcher; `phaseP28(browser, { p33b })`; (C0)–(C5), (E2); P28 kept runnable with (C) reordered Solve-before-edit | S | `--phase P33b` PASS; `--phase P28` PASS with its constants unchanged |
+| 8 | Phase note here (anchor drift, deviations, changed assertions with one line each, mutants, rows with commands and cwd); one line in the P28 phase note that the (C) reorder removed P28's own edit step; the P28 record's "precedence unchanged" line noted as superseded for review-stale ∧ dispatch-stale (D-3); OPEN-ITEMS 10a / 10b / 10c closed | XS | — |
+
+**0 → 1, 2**: steps 1 and 2 wait for step 0 and are then independent of each other; 3 needs 2; 4 needs 1 and 3; 5 needs 3; 6 is independent; 7 needs 0–5.
+
+**What the gate must prove** (deferred spec §0.2 rows, with the spec's §5 additions):
+- **Step 0 (D-5):** `tests/test_undo_rekeys_the_session_context.py` seen red on the base and green after the two one-line edits; `PUT` → undo → `GET` reads the pre-edit value over HTTP with sessions; `PyPSAService._contexts` holds exactly one ctx for the project afterwards; the same for a Saved-snapshot restore; `test_active_pointer_paths.py:109` (the pointer follows a restore) stays green. Mutant: the `rekey_context` line removed at either site → that site's tests red.
+- Rows 1–2: zero failures outside the baseline; row 2 = the 14-file set plus the spec's eleven additions.
+- Row 4s ×10 on `ChatPanel.reboundLock`, `ChatLaunchGreeting`, `pages/hubDesign`, the new hook.
+- Row 5 `--phase P33b`: on the H2 project, the record is `done` on re-activation with no re-run (10a); after a Solve the greeting says "solved since" (P28's sentence, unchanged); after one bus edit, **without a reload and within 5 s**, the greeting and the Results card both say "edited since", the card shows one banner, and `/eh_study`, `/eh_review` and `/undo/info` agree on the numbers; an undo is read back by the next request (step 0) and keeps the record; Expert shows nothing new; after save + backend restart + activate the study is still known and still reads edited (D-1).
+- Row 6: an independent QA gate that re-runs the spec's mutation list (§0a, §1.6, §2.3, §3) and reads the smoke's screenshots for the two sentences side by side (the B1 lesson: one screen, two surfaces, one truth).
+- Row 7: no new product `uiMode` branch beyond the hook's `enabled` flags.
+
+**Owner decisions — all decided 2026-10-06 (spec §8):** D-1 persist the finished record (yes); D-2 the two sentences as written; D-3 precedence edited > solved-since > dispatch-stale with one banner, recorded as an owner-approved change from O1 for the hub-done case (no existing test's expectation moves; one new case pins the changed combination); D-4 Expert panel unchanged; D-5 step 0 first, scoped to undo and Saved-snapshot restore. No step waits on a decision.
+
+### P33b phase note (implementation, 2026-10-06, base `240b2a00e`)
+
+Spec `specs/2026-10-06-guided-p33b-study-freshness.md` (amended), steps 0–8 of the "P33b plan (2026-10-06)" above. OPEN-ITEMS 10a, 10b and 10c are closed (removed from `OPEN-ITEMS.md`, which lists open items only); item 12 stays open, with its "related" note updated (deviation 1). Logs, mutation scripts and smoke output: `scratchpad/p33b/` (`mut.py`, `fmut.py`, `mutations.log`, `row*.log`, `smoke-*`).
+
+**Commits** (branch `claude/epic-allen-k2t1c4`):
+- `dfc84f5e8` step 0: HTTP undo and Saved-snapshot restore re-key the session ctx (D-5);
+- `f47d86b0c` step 1: 10a (a), `reset_network` copy-then-clear; undo keeps finished records;
+- `a2f9a6c66` step 2: the edit counter at the three seams; `/undo/info.network_revision`;
+- `89e8231d6` step 3: the capture in the worker; `edited_since_study` on `/eh_study`, `/eh_review`, `review_eh_study`;
+- `595c141f2` step 5: FE types, `useNetworkRevisionInvalidation`, greeting, Results card, panel;
+- `7a6a61e0b` step 6: the R4 / R7 lock-race tests (10c);
+- `a358a65b7` step 4: persistence (D-1): `eh_study_record` and the counter in `metadata.json`;
+- `efa584a74` step 4b: a created project's ctx is resident under its key (found by the first P33b smoke; deviation 1);
+- `1de694220` step 7: smoke `--phase P33b`;
+- `c2cd3bd8b` smoke B4 recovery expects the step the flow names (found by the P31 regression smoke; changed assertion);
+- plus this note.
+
+Step 5 was committed before step 4 (5 needs only 3; the plan's dependency line allows it).
+
+**Anchor drift** (re-checked on `240b2a00e`; `git diff bb8b2e7b8 240b2a00e -- pypsa-gui` is empty, so the spec's amended anchors hold):
+- `network_undo.py` `set_binding` is at `:133` (spec `:134`);
+- `ChatLaunchGreeting.tsx` done arm at `:67` (spec `:69`);
+- every other cited line matched: `snapshots.py:690`, `pypsa_service.py:445` / `:513`, `chat_service.py:4751`, `main.py:1018`, `eh_study_runner.py:361`, `projects.py:2282`, `smoke-guided.mjs:177`, `projectActions.ts:311`.
+
+**What changed, per step:**
+
+- **Step 0 (D-5)** — `services/network_undo.py` `apply_undo` and `routers/snapshots.py` `restore_snapshot` call `PyPSAService.rekey_context(PyPSAService.get_active_context())` inside the lock, right after the binding is put back. Test file `tests/test_undo_rekeys_the_session_context.py` (5 tests): HTTP undo, chat `undo_last` (driven through `_dispatch_real_tool_call` under the client's session binding, destructive auto-approved), Saved-snapshot restore, restore of another resident project (A's ctx untouched, B re-keyed, one ctx per project), and an undo on an unbound draft stays in scratch. Four were red on the base; the draft case is green on the base by design.
+- **Step 1 (10a a)** — `services/pypsa_service.py` `reset_network` copies `prev.solver_state` first and clears the finished study keys on the copy; the outgoing resident ctx keeps its record. `apply_undo` captures the finished records before `reset_network()` and restores them onto the re-keyed ctx under the solver-state lock. Tests: `tests/test_eh_study_record_survives_reactivation.py` (template create, load, "New", the fresh ctx has no study, a running record is still shared, undo).
+- **Step 2 (10b counter)**:
+  - `ProjectContext.network_revision`, owned by `dirty_state.bump_revision` / `revision`. It is carried forward by both `_publish_active(ProjectContext(...))` calls in `reset_network` (the prev branch) and by `set_network`, which bumps it to prev + 1 (B3).
+  - B1 is in `main.undo_snapshot_middleware`, after `call_next`. It bumps on a 2xx write under `_UNDO_PREFIXES`, `/undo/info` excluded and undo included. See deviation 2 for which ctx it bumps.
+  - B2 is at the dispatch site, in the `mark_dirty` block before the handler, gated by `chat_tools_schema.tool_edits_network` (TOOL_ROUTES-derived or `_SERVICE_CALL_NETWORK_WRITES`). `_SERVICE_CALL_NON_NETWORK_WRITES` is the pinned complement: on HEAD, 5 + 17 = the 22 service-call write / destructive tools. `NETWORK_EDIT_PREFIXES` is pinned equal to `main._UNDO_PREFIXES`. `TOOLS` is untouched.
+  - `/api/network/undo/info` gains `network_revision`.
+- **Step 3** — the record is published with `network_revision: None`. The worker writes `dirty_state.revision(study_ctx)` under `lock` immediately before `run_eh_study`; `study_ctx` is the request's ctx, captured on the request thread. `study_state.edited_since(record)` is `null` for a non-dict, running or revision-less record, and `!=` otherwise. `GET /eh_study` adds `edited_since_study`; `review_latest` copies it beside `stale`, so the route and the chat tool are deep-equal. `study_state.finished_study_record` was added here for step 4.
+- **Step 4 (D-1)**:
+  - `ProjectSolverState.eh_study_record` is a declared field in `RESULT_STATE_KEYS`.
+  - `_save_context` derives it from the live record (`finished_study_record`) and writes `metadata.json["network_revision"]`.
+  - `_map_eh_study_mirror` maps the mirror onto `eh_study` only when the ctx has none (thread / stop event `None`), then **assigns** `None`. `_restore_network_revision` reads the counter.
+  - Both run in `_hydrate_context_from_disk`, which covers its four callers, including `active_project.py:121` (E2's path). They also run in `_restore_results_state`, which covers load, bundle import and Saved-snapshot restore. The counter assignment was folded into `_restore_results_state` rather than repeated after each of its three callers.
+  - The `project_context.py` study-records comment and the `test_project_state.py` docstring now state the one exception.
+- **Step 4b (found by the smoke; deviation 1)** — `routers/projects.py` `_register_created_context()` runs after the bind in `create_from_template` and `import_bundle`. It calls `PyPSAService.register(key, ctx)`, as `load_project` does, then `rekey_context` (out of the scratch slot).
+- **Step 5** — FE:
+  - `api/network.ts` `undoInfo.network_revision?`; `api/simulation.ts` `EhStudyPayload.network_revision?` / `edited_since_study?`, and the `EhReview` ok arm `edited_since_study?` (deviation 4).
+  - `hooks/useNetworkRevisionInvalidation.ts` (new): the same `nk(project,'undoInfo')` key, a 3 s poll, a single `prev` per project, and two invalidations.
+  - `ChatLaunchGreeting.tsx`: precedence edited > solved-since > dispatch-stale > done (D-3); the hook is enabled on `guided && !!currentProject`.
+  - `ResultsCard.tsx`: `EDITED_TEXT`, `hub-results-edited`, one banner.
+  - `HubDesignPanel.tsx`: the hook with `enabled = uiMode === 'guided'`.
+- **Step 6 (10c)** — `ChatPanel.reboundLock.test.tsx`: `lockReplies` / `holdLock` harness control, then the R4 and R7 tests as specified (S-6's `lockedByOther.delete('X')` after the held send). Green on arrival; each mutant turns exactly its test red with the other 15 green.
+- **Step 7** — `smoke-guided.mjs`:
+  - `PHASES` gains `P33b`, and `phaseP33b` = `phaseP28(browser, { p33b: true })`.
+  - (C) is reordered so the Solve comes before any edit, in both phases; P28's own edit step and its info line are removed.
+  - P33b adds (C0)–(C5) and (E2) as the spec lists. The bus edit is a full-row Asset write (`{...bus, x: x + 0.001}`), not P28's `{name, x}`.
+  - The constants are `P33B_EDITED` and `P33B_EDITED_CARD`.
+- **Step 8** — this note. The P28 phase note has one paragraph appended: the (C) reorder removed P28's edit step, and the P28 record's "precedence unchanged" line is superseded for review-stale ∧ dispatch-stale (D-3). OPEN-ITEMS 10a / 10b / 10c are removed and 12 is updated.
+
+**Deviations (with reasons):**
+1. **Step 4b is new: template create and bundle import now register their ctx.** The first `--phase P33b` run failed (C0): the H2 record was gone on re-activation.
+   - Cause: the smoke backend runs in **local mode with no session at all**. `deps.resolve_request_session` reads a cookie and local mode issues none, so every request, the browser's and the script's, uses the process foreground `_active`. The spec (§0a, §5 (C4)) and the review (B-2) say the smoke "runs with sessions"; that is not true on this tree.
+   - Effect: a template-created project's ctx was bound but never registered, so creating the microgrid project dropped H2's ctx, and activate hydrated a stale copy from disk. 10a's premise, "the outgoing ctx is the resident, registered one", held only under sessions. The same path dropped any unsaved edits on that project.
+   - Rejected fix: registering `prev` inside `reset_network`. A later `register` of a reload of the same project would then write the stale in-memory copy over the disk (`_save_evicted_ctx` on displacement).
+   - Chosen fix: register the created ctx where it is created, exactly as `load_project` does.
+   - Pinned by `test_local_mode_template_project_keeps_its_study_across_a_switch`, which reproduces the smoke's path in local mode, and by `test_a_created_project_is_resident_under_its_own_key` (sessions: one ctx per project, no scratch copy).
+   - This touches the "related, not lossy" note under OPEN-ITEMS 12 (it was lossy in local mode). Item 12's own defect, the `/api/io/import/*` pointer, is **not** touched.
+2. **B1 bumps the ctx the request ENDED on, through a shared request box** (`PyPSAService._request_ctx_box`, bound in the middleware beside the ctx and updated by `_publish_active` / `activate_context` / `set_active`). A handler's `_request_ctx.set(...)` happens in a copied context, so after `call_next` the middleware still sees the pre-request ctx. As written (`dirty_state.bump_revision()` in the middleware), B1 would bump the **pre-undo** ctx: `+1`, not `+2`, on the next request. It would also bump the project the user left on "New" and on an io import, so that project's study would read "edited" when nothing touched it. Pinned by `test_undo_bumps_on_the_context_later_requests_read` and `test_a_new_network_does_not_bump_the_project_it_left`; the mutant "bump the middleware ctx" kills both. With no session (local mode) the box is unset and the bump goes to the foreground, which `_publish_active` has already moved.
+3. **The step-0 smoke claim does not exercise step 0.** Since the smoke has no session (deviation 1), (C4)'s read-back passes with or without step 0. Step 0 is proven by its backend tests over sessions; the smoke proves the local-mode path.
+4. **`EhReview.edited_since_study` is optional on the ok arm** (`?:`). Making it required would have forced edits to unrelated fixtures (`headline.test.ts`, `testFixtures.ts`), and an older backend omits it. Every reader compares `=== true`.
+5. **Step-0 mutant "rekey before `set_binding`"** was applied per site (two mutants, M0c / M0d), not as one mutant at both sites. Each kills its site's two tests; together they cover the spec's "all four".
+6. **`_restore_results_state` restores the counter itself**, rather than an assignment after it at load / import / restore. It is the same three callers and one line instead of three.
+
+**Changed assertions (one line each):**
+- `tests/test_eh_review_route.py::test_done_route_equals_tool_and_stale_follows_the_stored_report` (`live_solve`): `+ assert body["edited_since_study"] is False`. The new field is pinned on the real pipeline. The solver-independent pin is `…carries_the_revision_and_reads_unedited`.
+- `smoke-guided.mjs` `b4StudyReadFailure`: after Retry it waits for `hub-card-results` when the record has results, else `hub-card-site`. The old expectation (always Site) encoded the 10a loss: P26's data-center project now keeps its study across re-activation, so the recovered hub opens at Results (§5.4). This is shared by P24 / P30 / P31.
+- `smoke-guided.mjs` P28 (C):
+  - the "run the study if not done" fallback stays in `--phase P28` and becomes a `check` in `--phase P33b` (C0);
+  - the Solve-before-edit reorder removes P28's own edit step, and `P28_STALE` is asserted unchanged;
+  - with 10a in the tree, `--phase P28` now logs "(C) the H2 study record survived re-activation".
+- `ChatLaunchGreeting.solvedState.test.tsx`: the `../api/network` mock gains `undoInfo: vi.fn()`, the hook's fetcher. No existing expectation moved, which confirms §1.4's claim that `:205`, `:224` and `:240` keep their sentences.
+
+**Mutants — 47 of 47 killed** (`scratchpad/p33b/mutations.log`; backend via `mut.py`, frontend via `fmut.py`, two two-edit mutants by hand):
+- **Step 0 (4):** rekey dropped in `apply_undo`; dropped in `restore_snapshot`; rekey before `set_binding`; rekey before `bind_project`.
+- **Step 1 (3):** clear-before-copy (the base code); undo does not restore; the copy shares a finished record.
+- **Step 2 (11):**
+  - B1: bumps on 4xx; excludes `/api/network/undo`; prefix widened to `/api/simulation/`; bumps the middleware ctx, not the box.
+  - B2: bumps every non-read tool; no pre-handler bump; bump moved after the handler returns (the spec mutant).
+  - Predicate: `tool_edits_network` as a hand list without `undo_last`; `_SERVICE_CALL_NETWORK_WRITES` drops `apply_demand_from_excel`; drops `batch_create_components`; a tool in both lists.
+- **Step 3 (6):** capture dropped; capture from `solver_state`; capture after `run_eh_study` returns (the spec mutant, killed by `…edit_during_a_running_study…`); no revision reads `False`; `review_latest` drops the field; running reads non-null.
+- **Step 4 (7):** counter not written; counter not restored; save pickles the live record; hydrate maps over an in-memory record; mirror popped not assigned `None`; restored record reads as running; record not persisted. "Popped" **survived** the first run (reads used `.get`). `_assert_declared_keys` was then added (the B-3 invariant: the live dict's key set equals the dataclass fields) on the load and cold-activate paths, and the re-run killed it.
+- **Step 4b (3):** template create not registered; bundle import not registered; registered but left in the scratch slot.
+- **Step 5 (11):**
+  - greeting: edited arm dropped; edited below solved-since; `null` as edited; O1 order kept; hook call dropped;
+  - card: both banners; `null` renders the banner;
+  - hook: invalidates on the first sample; ignores `enabled`; invalidates on a project switch;
+  - panel: hook call dropped.
+- **Step 6 (2):** R4 (`gen !== _lockGen` removed from the re-acquire `.catch`); R7 (removed from `acquireProjectLock`'s `catch`). Each fails only its new test.
+
+Not mutated (window too small to pin): the S-2 request-thread capture. Its direction (over-report) is argued in the spec, and `…edit_during_a_running_study…` pins the after-return variant.
+
+**Gate rows** (logs in `scratchpad/p33b/`):
+
+| Row | Command (cwd) | Result |
+|---|---|---|
+| 1 | `PYTHONPATH=/home/user/pypsa-eur:/home/user/pypsa-eur/pypsa-gui/backend /tmp/claude-0/venv/bin/python -m pytest tests/ -m "not slow" -p no:cacheprovider -W ignore -q -o addopts=""` (`pypsa-gui/backend`, HEAD `1de694220`; the backend is unchanged after `efa584a74`) | **9504 passed, 31 skipped, 11 deselected, 0 failed** in 1 h 52 min (`row1.log`; slowed by two smokes running alongside). A first run on `a358a65b7` was stopped at 8 % (0 failures) when step 4b changed the backend |
+| 2 | same interpreter, `-m pytest <the 14-file set> tests/test_undo_rekeys_the_session_context.py tests/test_eh_study_edited_since.py tests/test_eh_study_record_survives_reactivation.py tests/test_adequacy_study_scoping.py tests/test_unsaved_results.py tests/test_chat_edits_are_captured.py tests/test_project_locks.py tests/test_solver_run_api.py tests/test_project_state.py tests/test_active_pointer_paths.py -p no:cacheprovider -W ignore -q -o addopts=""` (`pypsa-gui/backend`, HEAD `c2cd3bd8b`) | **1255 passed, 17 skipped** (`row2.log`). The spec's eleven additions are the ten files plus `test_chat_tools_endpoint_map.py`, which is already in the 14-file set. The parametrized classification tests account for ~370 of the new cases |
+| 3 | `npx tsc --noEmit -p .` (`pypsa-gui/frontend`, HEAD `1de694220`) | 0 errors |
+| 4 | `npx vitest run` (`pypsa-gui/frontend`, HEAD `1de694220`) | **278 files / 3263 passed** (`row4.log`). The four `*.expertUnchanged` snapshots pass unchanged |
+| 4s | `for i in $(seq 10); do npx vitest run src/components/ChatPanel.reboundLock src/components/ChatLaunchGreeting src/pages/hubDesign src/hooks/useNetworkRevisionInvalidation; done` (`pypsa-gui/frontend`) | **10 / 10 green**, 225 tests each (`row4s.log`) |
+| 5 | `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs --phase P33b --out <scratchpad>/p33b/smoke-p33b-final` (`pypsa-gui/frontend`, HEAD `c2cd3bd8b`) | **PASS**, 47 screenshots. (C0) done without a re-run. (C1) `edited_since_study=false`, rev0 = 0. (C2) Solve: rev unchanged, `P28_STALE` 0.0 s after the reload. (C3) both surfaces "edited since" **2.1 s** after the edit, no reload (2.6 s on the first passing run); one banner; `/eh_study`, `/eh_review` (stale ∧ edited) and `/undo/info` = rev0 + 1 agree. (C4) undo read back (x = pre-edit), record kept, rev0 + 2, greeting still edited. (C5) Expert: no `hub-results-edited`, no "edited since". (E2) restart → `done`, edited, rev0 + 2, rail at Results, both surfaces edited; a Goal-card re-run → `false`, no banner, the O1 done sentence. The first run FAILED at (C0) → deviation 1 / step 4b |
+| 5 | same, `--phase P28 --out <scratchpad>/p33b/smoke-p28` (regression, HEAD `1de694220`) | **PASS**, 43 screenshots; `P28_STALE` 0.0 s after the reload; (C) logs that the H2 record survived re-activation |
+| 5 | same, `--phase P31 --out <scratchpad>/p33b/smoke-p31` (regression, HEAD `c2cd3bd8b`) | **PASS**, 43 screenshots: toast ∩ Send = ∅ on all three templates; B4 recovers to `hub-card-results` (record `done`); 0 failing `eh_study` responses after recovery. The first run on `1de694220` FAILED waiting for `hub-card-site` → the changed B4 assertion above |
+| 7 | `git diff 240b2a00e -- 'pypsa-gui/frontend/src/**' \| grep -c uiMode` | **11**: ten test-store setups, and one product read, the `HubDesignPanel` hook's `enabled` flag (`useUIStore(s => s.uiMode) === 'guided'`). The greeting's hook flag reuses its existing `guided` variable. No new product `uiMode` branch |
+
+No `chat_tools_schema.TOOLS` entry, tool description or system-prompt change (row 2's `test_guided_mode_prompt.py` green). The four `*.expertUnchanged` snapshots pass unchanged.
+
+**Every sentence, under every sequence the spec lists** (what the smoke and tests show):
+- **Edit then undo:** "edited since" stays (monotonic, +2), and it is true: an edit happened. The undo is read back by the next request.
+- **Edit during a running study:** the greeting shows "running"; on `done` it shows "edited since". This is true, because the claim is "since the study started".
+- **Restart:** the saved counter is compared with the saved record, and both are written by one `_save_context` (E2: still "edited" after the restart, then "results are in Hub design" after a re-run).
+- **Re-activation:** pointer swap (resident) or hydrate (cold): the record is back (C0, E2).
+- **A Solve:** "solved since", never "edited" (C2: revision unchanged).
+- **Expert:** nothing new (C5).
+
+**Known limitations:**
+- **Monotonic counter.** An edit then its undo reads "edited since" (the spec's accepted limitation; (C4) logs it).
+- **Non-network study inputs** (`solver_config.voll`, finance, stress scenarios, …) do not bump (§6, by design).
+- **Multi-replica:** the counter is per process (sticky sessions assumed).
+- **One clustering is +2** (B3 plus the seam).
+- **Local mode** has no session routing, so step 0's fix is inert there (the foreground path never had the defect).
+- **A metadata without `network_revision`** (an older save) hydrates to 0; a record restored beside it then reads `true` (the safe direction) only if it carries a non-zero revision. A record from before this phase has none and reads `null`.
+
+**What the reviewer should probe:**
+- **Deviation 1 (step 4b):** registering at template create / bundle import changes residency in both modes.
+  - Projects created from a template now count toward `RESIDENT_CAP` immediately, and eviction write-back now applies to them.
+  - Under sessions the next request no longer hydrates a second copy.
+  - Probe the template wizard with 5+ projects, and a bundle import while another session has the same project resident.
+- **Deviation 2 (the request box):** any handler that swaps the ctx without `_publish_active` / `activate_context` / `set_active` would leave the box stale. `rekey_context` does not change the ctx object.
+- **The local-mode finding:** the spec and review assumed the smoke has sessions. Is anything else in earlier gates built on that assumption?
+- **Two tabs, one project:** both hooks invalidate on one edit (duplicates are harmless). Is there a request storm on many tabs?
+- **Expert → edit → Guided:** the greeting hook re-arms and invalidates once (unit-tested). Is it visible in a real session?
+- **`_save_evicted_ctx` with a mapped record:** eviction writes the mirror back, and a later cold activate maps it. Covered indirectly by the cold tests, not by an eviction test.
+- **The shared B4 smoke change:** `--phase P24` / `P30` were not re-run in this phase. They call the same `b4StudyReadFailure`, whose new expectation follows the record.
+- **The screenshots:** `p33b-c3-edited-greeting-and-card.png` shows both sentences side by side on one screen (the B1 lesson). The header breadcrumb "Unnamed Network" is visible there and is pre-existing (also in `p28-c-guided-stale.png`).
+
+No processes are left running.
+
+**P33b gate fixes** (gate record `qa/2026-10-06-guided-p33b-gate.md`, NO-GO on B-1; fixes in `9f34e0e81`, test-first; the gate's probes `qa33b/test_qa_bleed*.py` and `test_qa_restore_collision.py` are now suite tests).
+
+- **B-1 (blocker): no per-project state crosses a project switch.**
+  - *Cause:* `reset_network` handed the outgoing project's `_UndoState` **object** to the next project's ctx. With steps 4b and 0, Undo in A applied B's network, and a save wrote it into A's files.
+  - *Fix:* `reset_network(carry=…)` in `services/pypsa_service.py`:
+    - `"same"` for undo (shared stack, counter and results kept);
+    - `"copy"` for an io import into the open workspace (a copy of the stack, so the import stays undoable, plus the counter);
+    - `"fresh"` (the default) for load, template, bundle import, Saved-snapshot restore, "New" and the load refusal (own empty stack, counter 0, and `RESULT_STATE_KEYS` nulled, so a template project no longer inherits the previous project's stored report).
+  - *Audit:*
+    - The `undo_service.clear()` / `dirty_state.clear()` that load, template, import and restore ran **before** the swap acted on the project being left: a resident A with unsaved edits read clean and lost its own undo history. They now run after the swap, on the new ctx.
+    - `chat_state` stays carried, by design.
+    - `mutation_lock` / `solver_state_lock` stay shared (coarse, never wrong).
+    - `rekey_context` / `_register_created_context` build nothing from `prev`.
+  - *Tests (`tests/test_project_switch_isolation.py`):* local-mode template, and sessions via template / load / another project's restore / bundle import. Each checks depth 0 on A, undo 409, A unchanged in memory **and on disk** after save and a cold activate. Also: the project left keeps its own undo history and unsaved flag; an io import copies, rather than shares, the stack (coalescing disabled for exact depths).
+- **S-1:** a restore of a snapshot without `results_state.pkl` now deletes the project's later pkl (`routers/snapshots.py`), so its study record is not mapped onto a network it does not describe. Test `test_a_snapshot_without_results_does_not_bring_back_a_later_study` (the gate's collision sequence) now reads 204.
+- **S-2:** three pins, green on arrival; the gate's surviving mutants now die:
+  - `test_load_and_import_restore_the_projects_own_counter` (Q4a: a cross-project load / import compares against that project's saved counter);
+  - `test_a_counter_below_the_captured_one_reads_edited` (Q3a: `!=` over `>`; metadata without the counter beside a record captured at N > 0);
+  - `test_an_io_import_is_an_edit` (Q2a).
+  - The hook already invalidated on a backwards move (`!==`). This is intended: a restore moves the counter back. It is now pinned (F5a killed).
+- **S-3:** `useNetworkRevisionInvalidation.test.tsx` "a project switch…" answers B's fetch with the planted value and awaits it. 30 / 30 isolated runs green; the project-switch mutant is still killed.
+- **S-4:** a template project starts at counter 0 (`"fresh"`), and `create_from_template` writes `network_revision` into `metadata.json` at creation.
+- **N-3 (fixed):** `_register_created_context` now re-keys before it registers, so the cap check no longer counts the ctx twice. Test `test_template_create_does_not_evict_early` (cap 3, three creates, no eviction).
+- **N-2 (claim corrected, window left open):** the chat seam bumps before the handler, so a study whose worker captures and copies inside that window under-reports. The spec §1.3 now says so. Closing it with a second bump after the handler would make every chat edit +2 and still miss a timed-out orphan. Added to the known limitations.
+- **N-6** (the B4 smoke oracle is self-referential) is accepted as noted: 10a is pinned by P26 / P28 (C0) and the backend tests.
+- **Unchanged and noted:** a "New" draft starts at counter 0 and is bumped to 1 by the request (fresh), so saving that draft as a new project starts it at a small counter. That is harmless: there is no record to compare.
+
+**Changed assertion (gate fixes):** `tests/test_undo_per_project.py::test_undo_carried_forward_across_reset_network` → `test_undo_across_reset_network_follows_the_carry_mode`. The old test pinned "the undo stack survives every swap", which is the B-1 defect. It now pins `same` (the same object), `copy` (an independent copy) and the default (empty), and checks that neither earlier stack was touched.
+
+**Mutants (gate fixes):**
+- Killed, 14 of 14:
+  - B-1 fresh swap shares `prev.undo`;
+  - copy mode shares `prev.undo`, killed once the io-import test existed (it survived the first batch, see below);
+  - the fresh swap carries the counter;
+  - the fresh swap carries result state;
+  - template clears undo / dirty before the swap;
+  - S-1 restore keeps the later pkl;
+  - N-3 register before rekey;
+  - S-4 template metadata without the counter;
+  - the gate's Q2a, Q3a, Q4a;
+  - F5a (hook fires only on an increasing revision);
+  - the hook project-switch mutant after the de-flake.
+- Survived in the first batch: copy mode shares `prev.undo` (no io-import isolation test). The test was added, and the re-run killed it.
+- Log: `scratchpad/p33b/mutations.log` (lines starting `gate`).
+
+**Rows after the fixes** (HEAD `9f34e0e81`):
+
+| Row | Command (cwd) | Result |
+|---|---|---|
+| 1 | the row-1 command (`pypsa-gui/backend`) | **9516 passed, 1 failed, 31 skipped, 11 deselected** in 1 h 51 min (`row1g.log`, HEAD `9f34e0e81`). The one failure was `test_undo_per_project.py::test_undo_carried_forward_across_reset_network`, which pinned the B-1 defect itself (every reset carries the stack forward). It was rewritten as a changed assertion in the follow-up commit and the file then passed 7 / 7; no other test changed, so row 1 was not re-run in full |
+| 2 | the row-2 command plus `tests/test_project_switch_isolation.py` (`pypsa-gui/backend`) | **1268 passed, 17 skipped** (`row2g.log`) |
+| 3 | `npx tsc --noEmit -p .` (`pypsa-gui/frontend`) | 0 errors |
+| 4 | `npx vitest run` (`pypsa-gui/frontend`) | **278 files / 3264 passed** (`row4g.log`) |
+| 4s | the four touched suites ×10 (`pypsa-gui/frontend`) | **10 / 10**, 226 tests each (`row4sg.log`); the hook file alone 30 / 30 (`hook30.log`) |
+| 5 | `--phase P33b` / `P28` / `P30`, one at a time (`pypsa-gui/frontend`) | **PASS** 47 / PASS 43 / PASS 61 screenshots (`smokeg-*.log`). P33b: (C0) done, (C3) both surfaces 2.1 s after the edit, (C4) rev0 + 2, (E2) done + edited after the restart |
+| 7 | unchanged: no frontend `src` product change in the fixes (only the hook test) | 11, as before |
+
+**P33b re-gate follow-up (GO, `qa/2026-10-06-guided-p33b-gate.md` §Re-gate):**
+- **RS-1:** the "project left keeps its undo history and unsaved flag" rule now has load, another project's restore, bundle import and io import variants in `tests/test_project_switch_isolation.py`. The reviewer's G5 (restore clears before the swap) and G5b (load) are killed, as is the same mutant in `import_bundle` (G5c).
+- **RN-1** (pre-existing: re-loading the open project with unsaved edits writes the displaced edited copy to disk while memory holds the disk copy) is recorded as OPEN-ITEMS 13.
+- **RN-2:** "New" and an io import still push the middleware's pre-request capture onto the outgoing project's own stack (the push runs before the swap). It restores that project's own pre-request network: redundant but valid, and harmless. The io-import variant asserts that depth (edit + capture = 2).
+- Rows run: `tests/test_project_switch_isolation.py tests/test_undo_per_project.py` 20 passed; row 2 (the 14-file set + additions + `test_project_switch_isolation.py`, `pypsa-gui/backend`, HEAD `ce36e9ca6`) **1272 passed, 17 skipped** (`scratchpad/p33b/row2r.log`). The full backend suite on `1b6be6311` is the coordinator's run (`scratchpad/p33b/row1-final.log`).
+
+
+### P33b master merge (2026-10-06)
+
+`origin/master` (`68de65ecf`: #86 chat harness, #71 per-context user time series, #88, #89 campus stack, #91 C9 investment panel, #92 MILP) merged into the P33b branch (`160221a06`).
+
+- **Conflicts.** `services/chat_service.py` and `services/chat_tools_schema.py` are shims on master (`sys.modules` aliases of `harness.loop` / `harness.catalogue`); the branch's only change to each was ported to the new home: the B2 `bump_revision` after `mark_dirty` at the dispatch site (`harness/loop.py`), and `NETWORK_EDIT_PREFIXES`, `_SERVICE_CALL_NETWORK_WRITES`, `_SERVICE_CALL_NON_NETWORK_WRITES`, `tool_edits_network` (`harness/catalogue.py`). `services/pypsa_service.py`: both sides kept — `network_revision` and master's `user_ts` in `reset_network` and `set_network`.
+- **User time series and `carry`.** `reset_network` copies the store for `carry="same"` (undo) and `"copy"` (io import into the open draft) and starts it empty for `"fresh"` (another project or a blank draft, like its undo stack, counter and result state; every fresh caller then restores the new project's own `user_ts.json` or `{}`). `set_network` copies it (master) and bumps the counter (B3). Pinned by `test_user_ts_tenancy.py::test_reset_network_carries_the_store_only_within_the_same_workspace` (three modes; master's unconditional copy fails the `fresh` case).
+- **Failures found by the merge, fixed test-first.**
+  1. `test_every_service_call_writer_is_classified_exactly_once` was red for master's four new campus write tools (`campus_draft_campus`, `campus_run_study`, `campus_set_library`, `campus_extract_grid_code`). They read the SAVED `network.nc` and write files under the project directory, never the live network, so they join `_SERVICE_CALL_NON_NETWORK_WRITES`. No other new tool needed a class: all other new write tools derive from `TOOL_ROUTES`. Master already updated the Guided start-only phrase test to read `harness/catalogue.py`; it passes.
+  2. `test_chat_edit_tools_bump_and_execution_and_read_tools_do_not` and `test_a_chat_edit_tool_that_raises_or_times_out_still_bumps` monkeypatched `chat_service.AUTO_APPROVE_TIERS` / `PER_TOOL_TIMEOUT_SECONDS`. Since issue 08 these tunables live in `harness.confirm` / `harness.budget` and are forwarded, not copied, so the patch had no effect: the confirmation gate held `run_eh_study`, and the per-tool deadline never fired. The tests now patch the owning modules, which is master's idiom in `test_chat_e2e.py`. The same change was made in `test_undo_rekeys_the_session_context.py`.
+- No new deps (`gui-requirements.txt`, `package-lock.json` unchanged). No new master code builds a context from `prev`, calls `reset_network`, or writes the live network outside the three seams. The campus routes read and write project files only. Master added no `RESULT_STATE_KEYS` member.
+- **Row 2 on the merge result** (`pypsa-gui/backend`): the 14-file set, the P33b additions, `test_project_switch_isolation.py`, `test_undo_per_project.py`, every `test_chat*.py`, `test_harness*.py`, `test_*user_ts*.py` and `test_timeseries*.py` (97 files, run in two halves) gave **2602 passed, 19 skipped**, exit 0 (`scratchpad/merge2/row2_a{a,b}.log`). `npx tsc --noEmit` was clean. The full `npx vitest run` gave 3428 / 3430 while a backend run shared the CPU: two `BottomPanel.test.tsx` 5 s timeouts and one teardown `document is not defined` from `EhReferenceDesignPanel.taggingTour.test.tsx`. All three files pass alone (79 / 79 and 4 / 4), and neither file changed on the branch.
+- **Smokes on `6f667a757`:** `--phase P33b` PASS (47 screenshots; (C0) done without a re-run, (C3) both surfaces 1.7 s after the edit, (C4) rev0 + 2, (E2) done and edited after the restart) and `--phase P31` PASS (43 screenshots), run one at a time (`scratchpad/merge2/smoke-p33b.log`, `smoke-p31.log`).
+
+**Second master merge (2026-10-12).** `origin/master` `89898b7cc` (161 commits: the assistant tools and tasks, run evidence, experiments, the checked-answer pilot, durable conversations, dictation, campus island) was merged into `6f667a757`.
+- **Conflicts.**
+  - `harness/loop.py`: master moved `tool_running`, the dirty mark and the dispatch into a `try` block. The mark now runs only for a fresh effect (`harness.effects.reserve`) and skips a list of task, preview, chart and delivery tools, and master added a turn-undo capture. Master's block was kept, and the B2 `bump_revision` sits inside the mark's condition, still before the handler. It does not bump for a replayed, already-completed operation, which edits nothing.
+  - `services/pypsa_service.py`, four hunks: master replaced the raw `_request_ctx` reads and writes with `_scoped()` / `_set_scoped()` (the chat turn cell). Each write site keeps both `_set_scoped(ctx)` and P33b's `_note_request_ctx(ctx)` (the middleware's box). `reset_network` keeps the `carry` contract and validation, and reads `prev` through `_scoped()`.
+- **Interactions.**
+  - New `_SERVICE_CALL` writers are classified. `import_uploaded_network` (through the `/api/io` import handlers) and `apply_project_changes` (execution tier, through `set_network`) are network writes. `start_task`, `resume_task`, `cancel_task`, `resolve_task_step`, `start_experiment`, `preview_project_changes` (built on a `build_context` side copy), `create_chart`, `build_delivery` and `export_run_evidence` are non-network writes. The classification test now allows an execution-tier tool in the network list, and a new test pins the four predicates.
+  - The Guided start-phrase test passes (169 / 169).
+  - There is no new `ProjectContext` state. `cleared_result_state()` nulls `eh_study_record`, which is always None in memory.
+  - Master's io import now unbinds the session (the import is a scratch draft). The P33b `carry="copy"` contract is unchanged.
+  - No new live-network writer bypasses the seams.
+  - New test-only deps: `tests/live-api-requirements.txt` (jsonschema, tiktoken) were installed into the venv, because `test_chat_download_tools.py` and `test_harness_reliability.py` import jsonschema at collection.
+- **Failure found by the merge, fixed test-first.** Master's run evidence (`services/run_evidence.py`) puts a `_run_evidence` worker token on a running study record, and the token's `root` is a `PosixPath`. `finished_study_record` copied the token into the `eh_study_record` mirror, so on load the restricted unpickler refused the whole `results_state.pkl`. That dropped the finished study and every other side result. Seven tests in `test_eh_study_record_survives_reactivation.py` and three in `test_eh_study_edited_since.py` were red. The round-trip test now also asserts that no private key is mirrored, and the fix is that the mirror drops every `_`-prefixed key.
+- **Row 2 on the second merge** (107 files: the first merge's set plus master's new `test_chat*.py` / `test_harness*.py`, two halves): **2842 passed, 19 skipped**, exit 0 (`scratchpad/merge2/row3_a{a,b}.log`). `npx tsc --noEmit` clean.
+- **Gate on `2d8cddb71` (the second merge):**
+  - Full `npx vitest run`: **314 files, 3710 / 3710**.
+  - `--phase P33b` **PASS**, 47 screenshots: (C0) done without a re-run; (C3) both surfaces 2.1 s after the edit.
+  - `--phase P31` **PASS**, 43 screenshots. The two smokes ran one at a time.
+  - Full backend suite `tests/ -m "not slow"`: **12137 passed, 282 skipped, 11 deselected**, exit 0, 1 h 36 m (`scratchpad/merge2/row1.log`, `vitest3.log`, `smoke3-*.log`).

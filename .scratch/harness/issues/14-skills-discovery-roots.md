@@ -1,6 +1,6 @@
 # 14 — User-authored skills: discovery roots and invocation policy
 
-Status: ready-for-agent (Q16 decided 2026-10-06: the app-data root only; D12 to be amended in the same change)
+Status: ready-for-agent (Q16 decided; checked against master 2026-10-12, still as written)
 Type: task
 Blocked by: 05 (done)
 
@@ -37,3 +37,13 @@ A skill dropped into the app-data root appears in the catalogue after a
 restart (and after `POST /api/chat/skills/reload`), `use_skill` loads it, a
 same-named skill is refused with a logged reason, and D12 in the spec is
 amended to name the one extra root and why project folders are excluded.
+
+## Comments
+
+2026-10-12 (re-scoped against master after 143 commits; nothing of this issue exists there yet):
+`harness/skills/registry.py` is unchanged (package-only); master added a
+second package skill, `project-refinement`. Also amend `harness/README.md`
+contract rule 4 ("from this package only"), not only spec D12. Keep user
+skills out of `find_capabilities`' catalogue index
+(`services/assistant_tools.py`); `use_skill` is already in
+`toolsets.CONTROL_TOOLS`, so it stays visible in every toolset view.

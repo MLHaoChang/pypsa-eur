@@ -11,13 +11,22 @@
 // project has only its total as solved, and a project whose cost cannot be
 // computed has none, which is said rather than shown as zero.
 //
+// Plan C14: the table has one row per purchase (an asset bought again at the end
+// of its life is a `renew` row), the year each is bought, the cost table the
+// part of each period's capex that buys again, and a line states the study
+// horizon, flagging an assumed span, with the run's notes.
+//
 // The joint optimisation (plan C12) is a block of its own beside it, when a job
 // has finished: what it buys and its cost against the least-cost choice, need by
 // need, whether it kept the least-cost choice or was cancelled, and its
 // iteration history.
+//
+// One line under Investment says which of the two feeds the investment case
+// (owner decision 2026-10-12: the joint optimisation when it is fresh and found
+// its own choice, else the least-cost one), so the switch is never silent.
 import {
-  type CampusMilp, type CampusState, type CostBasis, type CostRow, type HistoryRow, type HubCost, type InvestmentRow,
-  type InvestStatus, type MilpHistoryRow, type MilpStop,
+  type CampusMilp, type CampusState, type CostBasis, type CostRow, type HistoryRow, type HorizonScope, type HubCost,
+  type InvestmentRow, type InvestStatus, type MilpHistoryRow, type MilpStop, type ParallelScope,
 } from '../api/campusElectrical'
 import { PageSection, Tag } from '../components/PageKit'
 
@@ -51,6 +60,53 @@ function ratePercent(rate: number): string {
   return `${Number((rate * 100).toFixed(2))} %`
 }
 
+/** The rules a unit added next to existing transformers had to meet (plan C13),
+ *  as the run wrote them: every tolerance is assumed. */
+function ParallelLine({ rules }: { rules: ParallelScope }) {
+  const vg = rules.unknown_vector_group === 'refuse'
+    ? 'an unknown vector group is refused'
+    : 'an unknown vector group is assumed compatible and flagged'
+  return (
+    <p data-testid="invest-parallel" className="text-[11.5px] text-muted mb-2">
+      Units added beside existing transformers: impedance within ±{ratePercent(rules.uk_tol.value)} and no-load
+      ratio within ±{ratePercent(rules.ratio_tol.value)} of each existing unit, tap steps within{' '}
+      {Number(rules.step_tol_pct.value.toFixed(3))} point, the same vector-group clock ({vg}); no limit on the
+      rating ratio. These tolerances are assumed, not taken from a standard.
+    </p>
+  )
+}
+
+/** The study horizon (plan C14), as the run wrote it: each period's span, an
+ *  assumed one flagged, and the notes (assumed commissioning years, overdue and
+ *  unpriced replacements, and that replacements are reported, not ranked). */
+function HorizonLine({ horizon }: { horizon: HorizonScope }) {
+  const spans = Object.entries(horizon.period_years).map(([p, w]) =>
+    `${p}: ${w} ${w === 1 ? 'year' : 'years'}${horizon.source[p]?.startsWith('assumed') ? ' (assumed)' : ''}`)
+  return (
+    <>
+      <p data-testid="invest-horizon" className="text-[12px] mb-1">
+        Study horizon to {horizon.horizon_end}: {spans.join(', ')}. An asset whose life ends before then is bought
+        again like for like.
+      </p>
+      {horizon.notes.length > 0 && (
+        <ul data-testid="invest-horizon-notes" className="text-[11.5px] text-muted mb-2 list-disc pl-4">
+          {horizon.notes.map(n => <li key={n}>{n}</li>)}
+        </ul>
+      )}
+    </>
+  )
+}
+
+/** The year a row is bought (plan C14), or when an existing asset went into service. */
+function boughtText(x: InvestmentRow): string {
+  if (x.existing) {
+    if (x.commissioned == null) return '—'
+    return `in service since ${x.commissioned}${x.commissioned_source?.startsWith('assumed') ? ' (assumed)' : ''}`
+  }
+  if (x.library_id == null) return '—'
+  return String(x.build_year ?? x.invest_period ?? '—')
+}
+
 /** The one plain line of what the costs stand on. The library's costs are in the
  *  library's price year even when the project states another one: no escalation
  *  is applied, so the year named here is the library's and the mismatch is said
@@ -72,6 +128,25 @@ function CostBasisLine({ basis }: { basis: CostBasis }) {
         </p>
       )}
     </>
+  )
+}
+
+/** Which result the investment case's extra owner assets come from, as the backend
+ *  chose it (`owner_assets_method`), and, when it is the least cost beside a joint
+ *  optimisation, why. Nothing when the case takes no assets. */
+function IcSourceLine({ state }: { state: CampusState }) {
+  const method = state.owner_assets_method
+  if (method !== 'milp' && method !== 'least_cost') return null
+  const milp = state.milp?.results ? state.milp : null
+  let why = ''
+  if (method === 'least_cost' && milp) {
+    if (milp.stale) why = ' The joint optimisation is stale; run it again to use it.'
+    else if (milp.results!.fallback != null) why = ' The joint optimisation kept the least-cost choice.'
+  }
+  return (
+    <p data-testid="invest-ic-source" className="text-[12px] mb-2">
+      Investment case uses: {method === 'milp' ? 'joint optimisation (MILP)' : 'least cost'}.{why}
+    </p>
   )
 }
 
@@ -101,10 +176,13 @@ export default function CampusInvestmentSection({ state }: { state: CampusState 
           Prices come from the asset library; every cost in the shipped library is one of the assumed placeholders,
           an order of magnitude and not a quote.
         </p>
+        <IcSourceLine state={state} />
         {r.cost_basis && <CostBasisLine basis={r.cost_basis} />}
         {r.scope && (
           <p data-testid="invest-scope" className="text-[12px] mb-2">{SCOPE_TEXT[r.scope.pcc_switchgear]}</p>
         )}
+        {r.scope?.parallel && <ParallelLine rules={r.scope.parallel} />}
+        {r.scope?.horizon && <HorizonLine horizon={r.scope.horizon} />}
         <InvestmentTable rows={r.investment} />
         {unresolved.length > 0 && (
           <div data-testid="unresolved" role="alert" className="mt-3 rounded border border-danger/50 bg-danger/5 px-3 py-2">
@@ -247,25 +325,34 @@ function InvestmentTable({ rows, testid = 'invest' }: { rows: InvestmentRow[]; t
     <table className="w-full text-[12px]">
       <thead>
         <tr className="text-left text-muted">
-          <th className="font-normal pr-3">Need</th><th className="font-normal pr-3">Asset</th>
-          <th className="font-normal pr-3">Units</th><th className="font-normal pr-3">Invest period</th>
+          <th className="font-normal pr-3">Need</th><th className="font-normal pr-3">Action</th>
+          <th className="font-normal pr-3">Asset</th>
+          <th className="font-normal pr-3">Units</th><th className="font-normal pr-3">Bought</th>
+          <th className="font-normal pr-3">Invest period</th>
           <th className="font-normal pr-3 text-right">Capex</th><th className="font-normal pr-3 text-right">Annualised cost</th>
           <th className="font-normal pr-3">Existing</th><th className="font-normal">Status</th>
         </tr>
       </thead>
       <tbody>
-        {rows.map(x => (
+        {rows.map((x, i) => (
           <tr
-            key={`${x.need}-${x.library_id ?? ''}`}
+            key={`${x.need}-${x.library_id ?? ''}-${x.action ?? ''}-${x.purchase ?? ''}-${i}`}
             data-testid={`${testid}-${x.need}`}
             className={`border-t border-border ${x.status === 'unresolved' ? 'bg-danger/10 text-danger' : ''}`}
           >
-            <td className="py-1 pr-3 whitespace-nowrap">{x.need}</td>
+            <td className="py-1 pr-3">
+              <div className="whitespace-nowrap">{x.need}</div>
+              {x.reason && x.status !== 'unresolved' && (
+                <div data-testid="invest-reason" className="text-[11px] text-muted">{x.reason}</div>
+              )}
+            </td>
+            <td data-testid="invest-action" className="pr-3 whitespace-nowrap">{x.action || '—'}</td>
             <td className="pr-3 whitespace-nowrap">
               {x.library_id ?? '—'}
               {x.length_km != null && <span className="text-muted"> · {x.length_km} km</span>}
             </td>
             <td className="pr-3 tabular-nums">{x.units}</td>
+            <td data-testid="invest-bought" className="pr-3 tabular-nums whitespace-nowrap">{boughtText(x)}</td>
             <td className="pr-3 tabular-nums">{x.library_id == null ? '—' : (x.invest_period ?? '—')}</td>
             <td className="pr-3 tabular-nums text-right">{formatEur(x.capex_eur)}</td>
             <td className="pr-3 tabular-nums text-right">{formatEur(x.annualised_eur_per_a)}</td>
@@ -299,12 +386,14 @@ function HistoryList({ rows }: { rows: HistoryRow[] }) {
 }
 
 function CostTable({ cost, hub }: { cost: CostRow[]; hub: HubCost | null }) {
+  const renewals = cost.some(c => c.capex_replacement_eur != null)        // plan C14; absent before it
   return (
     <table className="w-full text-[12px]">
       <thead>
         <tr className="text-left text-muted">
           <th className="font-normal pr-3">Period</th>
           <th className="font-normal pr-3 text-right">Capex invested</th>
+          {renewals && <th className="font-normal pr-3 text-right">of which bought again</th>}
           <th className="font-normal pr-3 text-right">Electrical, annualised</th>
           <th className="font-normal pr-3 text-right">Hub system cost</th>
           <th className="font-normal pr-3 text-right">Together</th>
@@ -319,6 +408,11 @@ function CostTable({ cost, hub }: { cost: CostRow[]; hub: HubCost | null }) {
             <tr key={c.period} data-testid={`cost-${c.period}`} className="border-t border-border">
               <td className="py-1 pr-3 tabular-nums">{c.period}</td>
               <td className="pr-3 tabular-nums text-right">{formatEur(c.capex_eur)}</td>
+              {renewals && (
+                <td data-testid="cost-replacement" className="pr-3 tabular-nums text-right">
+                  {formatEur(c.capex_replacement_eur)}
+                </td>
+              )}
               <td className="pr-3 tabular-nums text-right">{formatEur(c.annualised_eur_per_a)}</td>
               <td className="pr-3 tabular-nums text-right">{formatEur(h)}</td>
               <td className="pr-3 tabular-nums text-right">{formatEur(sum)}</td>

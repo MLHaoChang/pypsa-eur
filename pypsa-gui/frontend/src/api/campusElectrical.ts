@@ -92,6 +92,12 @@ export interface Requirement {
 
 export type InvestStatus = 'chosen' | 'kept' | 'not_needed' | 'unresolved'
 
+/** What a row does (plan C13): a new asset, units added next to existing ones,
+ *  existing units kept, or a group or cable bought where existing ones stood;
+ *  plan C14: `renew`, an asset bought again at the end of its life.
+ *  Absent in a run from before it, and empty for a need that needs nothing. */
+export type InvestAction = 'buy' | 'add' | 'keep' | 'replace' | 'renew'
+
 /** One need and the asset bought for it (`campus_investment.csv`). `library_id`
  *  and `invest_period` are null for a need that needs nothing. */
 export interface InvestmentRow {
@@ -107,10 +113,34 @@ export interface InvestmentRow {
   existing: boolean
   status: InvestStatus
   reason: string | null
+  action?: InvestAction | '' | null
+  // Plan C14, one row per purchase; absent in a run from before it.
+  /** 0 for a kept existing asset, 1 for the first buy, k for later ones. */
+  purchase?: number | null
+  /** The year bought (an existing asset's: its commissioning year). */
+  build_year?: number | null
+  /** The year its successor starts, or the horizon's end. */
+  service_to?: number | null
+  /** The row it replaces, as `lineage|purchase`. */
+  replaces?: string | null
+  lineage?: string | null
+  commissioned?: number | null
+  /** How the commissioning year is known: a source tag, or `assumed: ...`. */
+  commissioned_source?: string | null
 }
 
-/** The electrical cost of one investment period (`campus_cost.csv`). */
-export interface CostRow { period: number; capex_eur: number; annualised_eur_per_a: number }
+/** The electrical cost of one investment period (`campus_cost.csv`);
+ *  `capex_replacement_eur` (plan C14) is the part bought again. */
+export interface CostRow { period: number; capex_eur: number; annualised_eur_per_a: number; capex_replacement_eur?: number }
+
+/** The study horizon (plan C14): each period's span in years and where it came
+ *  from (`project`, or `assumed: ...`), the horizon's end and the run's notes. */
+export interface HorizonScope {
+  period_years: Record<string, number>
+  source: Record<string, string>
+  horizon_end: number
+  notes: string[]
+}
 
 /** The compliance table re-solved with the assets: `status_with_measures` and
  *  `value_with_measures` are an AC result, not a recommendation. */
@@ -122,8 +152,22 @@ export interface InvestedComplianceRow extends ComplianceRow {
 export interface HistoryRow { iteration: number; need: string; from: string; to: string; check: string; detail: string }
 export interface UnresolvedNeed { need: string; reason: string }
 
-/** Who buys the PCC switchgear. */
-export interface InvestScope { pcc_switchgear: 'campus' | 'grid_operator' }
+/** A tolerance of the parallel rules, tagged as every engine figure is. */
+export interface TaggedRule { value: number; source: string; note?: string }
+
+/** The rules a unit added next to existing transformers had to meet (plan C13),
+ *  written with the run; the panel shows them and does not edit them. */
+export interface ParallelScope {
+  ratio_tol: TaggedRule
+  uk_tol: TaggedRule
+  step_tol_pct: TaggedRule
+  unknown_vector_group: 'assume_compatible' | 'refuse'
+  rating_ratio: string
+}
+
+/** Who buys the PCC switchgear, and (plan C13; absent in older runs) the rules
+ *  for adding units in parallel. */
+export interface InvestScope { pcc_switchgear: 'campus' | 'grid_operator'; parallel?: ParallelScope; horizon?: HorizonScope }
 
 /** The solved hub's own system cost. `per_period` is EUR per year for a
  *  multi-period project; a single-period project has only `total`, as solved. */
@@ -258,6 +302,10 @@ export interface CampusState {
   hub_cost_reason: string | null
   /** How many purchased items the last investment run offers as extra owner assets. */
   owner_assets_count?: number
+  /** Which result those owner assets come from (owner decision 2026-10-12): the joint
+   *  optimisation when it is fresh and found its own choice, else the least-cost run;
+   *  null when there are none. */
+  owner_assets_method?: 'milp' | 'least_cost' | null
   /** The joint optimisation's job and results (plan C12). */
   milp?: CampusMilp
 }
