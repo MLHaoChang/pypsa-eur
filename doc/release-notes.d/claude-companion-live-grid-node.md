@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Make the companion's Live mode a presence-led grid node. The user's line flashes and clears, the node follows the stream through listening, thinking and speaking, and the answer stays in the console transcript instead of beside the companion. Confirmation and download chips remain; the console chat is unchanged.
