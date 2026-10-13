@@ -1157,7 +1157,7 @@ with the reason. The panel and report reading is I9's.
 
 **Tests:**
 - `tests/gridspine/test_island_hourly_contract.py` (18): each refusal.
-- `tests/test_island_hourly.py` (19), with hand values on a two-hour
+- `tests/test_island_hourly.py` (23), with hand values on a two-hour
   network whose results are set by hand:
   - ΔP⁺ 6/−7 with the late relief, 10/−3 with an early walk-in;
   - ΔP⁻ −4/9;
@@ -1173,6 +1173,37 @@ with the reason. The panel and report reading is I9's.
   cross-checks the producer against the LP.
 - `tests/test_campus_island_tables.py` (3): the run writes the tables keyed
   like `campus_hourly.csv`, removes stale ones, and refuses a bad sidecar.
+
+**Mutations.** 25 source edits:
+- the late relief dropped, or taken as L_it;
+- a strict `>` for "late";
+- ΔP⁻ over late UPSs only;
+- the import efficiency ignored;
+- the export not subtracted;
+- u ignored, and the spinning flag ignored;
+- the droop GFM's inertia without 2R;
+- the VSM's inertia on p;
+- N+k dropped from the `ups_bridged` M and from ΣK;
+- the GFMs dropped from ΣK;
+- e(t−1) from the wrong end, cyclic and not, and always within a period;
+- the bess headroom sign;
+- the genset's p_min_pu and availability ignored;
+- the id mapping ignored;
+- stale tables kept;
+- four validator relaxations.
+
+The first run counted collection errors as kills. The backend and the repo
+root both have a `tests` package, so the gridspine contract test cannot be
+collected in the backend's run. The runner was fixed to run the two
+separately, checked against a clean baseline, and moved to a scratch git
+worktree. On the honest run 21 were killed and 4 survived:
+- the walk-in at the join;
+- the import efficiency;
+- the VSM on p;
+- the availability.
+
+The fixture had pf 1, η 1 and p_max_pu 1, and no walk-in at the boundary.
+A test was added for each, and each now kills its edit.
 
 ### I3b: island critical hours — step 2 (S)
 
