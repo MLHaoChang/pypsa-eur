@@ -256,7 +256,8 @@ def test_hub_design_carries_the_guided_rules_as_its_preamble():
 @pytest.mark.parametrize("context,expect_present,expect_absent", [
     ("unbound", {"open-project"}, {"build-network", "hub-design"}),
     ("expert", {"build-network", "explain-results", "hub-design"}, {"open-project"}),
-    ("guided", {"hub-design", "explain-results"}, {"open-project", "build-network"}),
+    ("guided", {"hub-design", "explain-results", "investment-decision"},
+     {"open-project", "build-network"}),
 ])
 def test_menu_per_context(context, expect_present, expect_absent):
     from harness import workflows
@@ -264,7 +265,8 @@ def test_menu_per_context(context, expect_present, expect_absent):
     ids = [wf.id for wf in workflows.menu(context)]
     assert expect_present <= set(ids)
     assert not (expect_absent & set(ids))
-    assert "investment-decision" not in ids, "planned workflows are never offered"
+    assert all(workflows.get(i).status == "active" for i in ids), \
+        "planned workflows are never offered"
     assert ids == sorted(ids, key=lambda i: (workflows.get(i).order, i))
 
 
@@ -400,3 +402,32 @@ def test_the_loop_has_no_bare_read_of_a_moved_tunable():
     tree = ast.parse((HARNESS / "loop.py").read_text(encoding="utf-8"))
     bare = sorted({n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id in MOVED_TUNABLES})
     assert bare == []
+
+
+def _plan_one(monkeypatch, reg):
+    """
+    Serve `reg` from both places the registry is read: the package
+    attribute (`start_workflow`) and the module global (`menu`).
+    """
+    import sys
+
+    from harness import workflows
+
+    monkeypatch.setattr(workflows, "registry", lambda: reg)
+    monkeypatch.setattr(sys.modules["harness.workflows.registry"], "registry", lambda: reg)
+
+
+def test_a_planned_workflow_is_never_offered(monkeypatch):
+    """
+    No workflow is `planned` since U3 activated `investment-decision`; the
+    rule still holds for the next one.
+    """
+    import dataclasses
+
+    from harness import workflows
+
+    reg = dict(workflows.registry())
+    reg["investment-decision"] = dataclasses.replace(reg["investment-decision"], status="planned")
+    _plan_one(monkeypatch, reg)
+    for context in ("expert", "guided"):
+        assert "investment-decision" not in [wf.id for wf in workflows.menu(context)]

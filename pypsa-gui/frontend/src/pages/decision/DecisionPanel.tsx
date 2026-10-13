@@ -37,6 +37,7 @@ import TariffStep from './TariffStep'
 import FinanceStep from './FinanceStep'
 import LedgerReview, { type LedgerEditOut } from './LedgerReview'
 import RunStep from './RunStep'
+import StudyAssist from './StudyAssist'
 import Verdict from './Verdict'
 import WhyHow from './WhyHow'
 import Robust from './Robust'
@@ -309,6 +310,9 @@ function StudyView({ at, pollMs }: { at: StudyRef; pollMs: number }) {
       )}
       {expertMsg && <div className="px-5 pt-3"><Banner tone="warn" title={expertMsg} /></div>}
       <div className="flex-1 min-h-0 overflow-y-auto p-5">
+        {runsPack(s) && (current === 'ledger' || current === 'run' || current === 'verdict' || current === 'report') && (
+          <StudyAssist step={current} project={project} studyId={studyId} />
+        )}
         {!runsPack(s) && current !== 'hub' && current !== 'ledger' && current !== 'finance' ? (
           <Refusal error={{ status: 409, code: 'study_not_runnable', message: '' }} />
         ) : current === 'hub' ? (

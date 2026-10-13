@@ -3201,6 +3201,98 @@ TOOLS: list[dict[str, Any]] = [
         {"detail": {"type": "string", "enum": ["summary", "full"]}},
         [],
     ),
+    # ── Decision study (6) — U3: the guided face's question, by chat ─────
+    _t(
+        "start_decision_study",
+        "Create a decision study for one question (question_id 'bess_at_site': 'Do I need a "
+        "battery at my site?'). Creates the study's OWN base project (named "
+        "base_project_name, default `name`) with the question's baseline network and its "
+        "assumptions ledger seeded from the generic defaults pack; `project` is the "
+        "project open now, which only authorises the call and is NOT changed. `intake`: "
+        "{site: {zone (bidding zone, e.g. 'DE'), connection_mw (> 0), year? (not a leap "
+        "year)}, load: {source: 'sector_profile', profile, annual_mwh} or {source: "
+        "'upload', upload_id, unit: 'kW'|'MW'}, tariff?: {tariff_id} (omitted: the "
+        "defaults' illustrative tariff, disclosed), pv?: {enabled, kind: "
+        "'rooftop'|'utility'}}. Ask the user for site, connection and load; never invent "
+        "them. Returns {study_id, project (the study's base project: pass it to the other "
+        "study tools), maturity, budget}. Refusals: intake_invalid, tariff_invalid, "
+        "leap_year_unsupported, load_upload_invalid, 409 when the project name exists, "
+        "decision_studies_unavailable (multi-user mode). Safety: write.",
+        {"project": {"type": "string"},
+         "question_id": {"type": "string", "enum": ["bess_at_site"]},
+         "name": {"type": "string", "minLength": 1, "maxLength": 120},
+         "intake": {"type": "object"},
+         "base_project_name": {"type": "string", "minLength": 1, "maxLength": 48}},
+        ["project", "question_id", "name", "intake"],
+    ),
+    _t(
+        "set_study_parameter",
+        "Set one assumption of a decision study's ledger (a key parameter such as "
+        "battery_storage_eur_per_kwh, battery_inverter_eur_per_kw, demand_charge_price, "
+        "energy_price_level or discount_rate). `unit` is required and must be the row's "
+        "own unit (a mismatch is refused, never converted); `source` says where the value "
+        "comes from. The row becomes provenance 'user', status 'customised', and the last "
+        "run no longer matches: run the study again. `project` is the study's base "
+        "project. Returns {row, maturity}. A 422 names an unknown key, a wrong unit or a "
+        "value outside the row's domain. Safety: write.",
+        {"project": {"type": "string"},
+         "study_id": {"type": "string"},
+         "key": {"type": "string", "maxLength": 128},
+         "value": {"type": "number"},
+         "unit": {"type": "string", "maxLength": 64},
+         "source": {"type": "string", "maxLength": 500}},
+        ["project", "study_id", "key", "value", "unit"],
+    ),
+    _t(
+        "run_decision_study",
+        "Run a decision study in the background. stage='options' (default) solves every "
+        "option of the question (no battery, battery sizes, battery with PV) on the "
+        "study's own forks; stage='tornado' then re-dispatches the best option at each key "
+        "assumption's low and high value. The verdict needs both. Returns at once with "
+        "{stage, run: {status, options, solved, pending, solves_charged}}; poll "
+        "get_study_findings. Refusals: study_running, solver_in_flight, "
+        "campaign_budget_exhausted, study_not_runnable, baseline_not_solved, "
+        "findings_* (tornado before a finished run). Safety: execution_long_running.",
+        {"project": {"type": "string"},
+         "study_id": {"type": "string"},
+         "stage": {"type": "string", "enum": ["options", "tornado"]},
+         "fidelity": {"type": "string", "enum": ["quick_screen", "full_study"]}},
+        ["project", "study_id"],
+    ),
+    _t(
+        "get_study_findings",
+        "Read a decision study's result. While the options or the tornado still run: "
+        "{running: {status, solved, pending}}. Afterwards: {available, verdict: {status, "
+        "class: recommended|marginal|not_recommended, sentence (with its figures), "
+        "headline, not_established_because}, options: [{option_id, solve_status, sizes_mw, "
+        "battery_npv}], robustness, value_streams, completeness, next_step}. A figure that "
+        "reads 'not established' or null was not computed: NEVER report it as 0. 409 when "
+        "the ledger changed since the run (run again). Safety: read.",
+        {"project": {"type": "string"}, "study_id": {"type": "string"}},
+        ["project", "study_id"],
+    ),
+    _t(
+        "explain_verdict",
+        "Explain a decision study's verdict in plain words: the sentence, the drivers "
+        "(and which turn the battery's NPV negative at a bound), the main caveat, the "
+        "disclosures that hold by construction, why it is not established when it is not, "
+        "and the sizing notes of the option it names. Each code comes with its sentence "
+        "from the report; quote them rather than paraphrasing numbers. Safety: read.",
+        {"project": {"type": "string"}, "study_id": {"type": "string"}},
+        ["project", "study_id"],
+    ),
+    _t(
+        "generate_study_report",
+        "Assemble a decision study's report from its last run (no solve) and hand it to "
+        "the user as a download: format 'docx' (default), 'xlsx' (the live-formula "
+        "workbook) or 'html'. Returns {file, title, available, stale, stale_reasons}; a "
+        "stale report must be called stale. Refusals: findings_* (no finished run), "
+        "study_running, report prose errors. Safety: write.",
+        {"project": {"type": "string"},
+         "study_id": {"type": "string"},
+         "format": {"type": "string", "enum": ["docx", "xlsx", "html"]}},
+        ["project", "study_id"],
+    ),
 ]
 
 
@@ -3636,6 +3728,19 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_ppa_price": [("GET", "/api/simulation/finance")],
     "explain_cashflow": [("GET", "/api/results/investment_case"),
                          ("GET", "/api/results/investment_case/report")],
+    # decision study (6) — U3: `routers/studies.py`, in process through `_route`.
+    "start_decision_study": [("POST", "/api/projects/{name}/studies/")],
+    "set_study_parameter": [("PUT", "/api/projects/{name}/studies/{study_id}/ledger")],
+    "run_decision_study": [("POST", "/api/projects/{name}/studies/{study_id}/run"),
+                           ("POST", "/api/projects/{name}/studies/{study_id}/findings/tornado")],
+    "get_study_findings": [("GET", "/api/projects/{name}/studies/{study_id}/run"),
+                           ("GET", "/api/projects/{name}/studies/{study_id}/findings/tornado"),
+                           ("GET", "/api/projects/{name}/studies/{study_id}/findings")],
+    "explain_verdict": [("GET", "/api/projects/{name}/studies/{study_id}/findings")],
+    "generate_study_report": [("POST", "/api/projects/{name}/studies/{study_id}/report"),
+                              ("GET", "/api/projects/{name}/studies/{study_id}/report.docx"),
+                              ("GET", "/api/projects/{name}/studies/{study_id}/report.xlsx"),
+                              ("GET", "/api/projects/{name}/studies/{study_id}/report.html")],
 }
 
 

@@ -699,3 +699,42 @@ export const TESTED_RANGE_LABELS = {
   tested: 'Range the robustness check tested',
   recentred: 'Re-centred on your value',
 } as const
+
+// ── U3: the decision panel's hand-offs to the assistant ───────────────────
+//
+// `delegate` sends (the user's own click; every write and run still shows a
+// confirmation card in Guided), `ask` only prefills the composer. The tool
+// names in the sent text are the study chat tools of `harness/catalogue.py`.
+
+export type AssistStep = 'ledger' | 'run' | 'verdict' | 'report'
+
+export const ASSIST_LABELS: Record<AssistStep, { delegate: string; ask: string }> = {
+  ledger: { delegate: 'Go through the key parameters with the assistant', ask: 'Ask about the assumptions' },
+  run: { delegate: 'Let the assistant run the study', ask: 'Ask what the run does' },
+  verdict: { delegate: 'Let the assistant explain the verdict', ask: 'Ask about the verdict' },
+  report: { delegate: 'Let the assistant write the report', ask: 'Ask about the report' },
+}
+
+/** The request each step sends; `project` is the study's base project. */
+export function assistText(step: AssistStep, project: string, studyId: string): string {
+  const ref = `the decision study ${studyId} in project "${project}"`
+  switch (step) {
+    case 'ledger':
+      return `For ${ref}: go through its key parameters with me one at a time, offering each default with its source, and set the ones I change with set_study_parameter.`
+    case 'run':
+      return `Run ${ref}: run_decision_study for the options, wait for it with get_study_findings, then run_decision_study with stage tornado and wait again. Then tell me the verdict in plain words.`
+    case 'verdict':
+      return `Explain the verdict of ${ref} in plain words with explain_verdict: what it says, which assumption could change it, and what was not established.`
+    case 'report':
+      return `Write the report of ${ref} with generate_study_report (Word) and tell me which generic defaults it relies on.`
+  }
+}
+
+export function assistQuestion(step: AssistStep): string {
+  switch (step) {
+    case 'ledger': return 'In my decision study, which assumptions matter most, and where do the defaults come from?'
+    case 'run': return 'What does running my decision study do, and how long will it take?'
+    case 'verdict': return 'What does the verdict of my decision study mean for me?'
+    case 'report': return 'What is in the decision report, and who is it for?'
+  }
+}
