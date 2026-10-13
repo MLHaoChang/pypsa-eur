@@ -73,6 +73,22 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "user_timeseries.py": (2, "annual HOURLY reference for representative-week sampling; the "
                               "sampler refuses sub-hourly axes (not_supported_for_freq)"),
     "validation_service.py": (4, "prose + the Σ weight × hours ≈ 8760 sanity message"),
+    # The guided investment study (GS branch, merged in U2 WP0). Its site pack
+    # IS hourly by design (MVP-1: one non-leap year of 8760 hourly steps,
+    # weights 1, a leap year refused); `study/tariff.py` went in U2 WP10.
+    "study/packs.py": (7, "the site pack's own axis: 8760 hourly steps of one non-leap year "
+                          "(HOURS, the date_range and the uploaded-load check against it), a "
+                          "leap year refused, and prose — a declared hourly model, not an "
+                          "assumption about someone else's axis"),
+    "study/runner.py": (2, "prose: each option is one 8760 h LP (deadline sizing, fidelity)"),
+    "study/compile.py": (1, "with no snapshot axis given, an hourly calendar of one non-leap "
+                            "year enumerates every (month, weekday, hour) a tariff band can "
+                            "key on, to refuse unpriced hours; band rules read the hour of day "
+                            "only, so the check is complete at any resolution — an enumeration, "
+                            "not a step (U2 WP4)"),
+    "study/engine_adapter.py": (1, "a bill is annual when Σ objective weights (hours at any "
+                                   "resolution) is a 365- or 366-day year, 8760 or 8784 h — a "
+                                   "unit, not a step (GS's annual-bill rule, U2 WP5)"),
 }
 
 
@@ -95,6 +111,7 @@ def test_every_hourly_assumption_site_is_listed_with_a_reason():
 
 
 def test_the_inventory_is_pinned():
-    assert sum(c for c, _ in ALLOWED.values()) == 61
-    assert len(ALLOWED) == 30
+    # U2 WP10: GS's `study/tariff.py` (3 sites) is deleted.
+    assert sum(c for c, _ in ALLOWED.values()) == 72
+    assert len(ALLOWED) == 34
     assert all(reason for _, reason in ALLOWED.values())

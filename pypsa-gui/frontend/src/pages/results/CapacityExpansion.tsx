@@ -61,6 +61,15 @@ function buildYear(obj: object): number | '' {
 // MUST go through this, never bare `fmtCurrency`, or an unresolved asset
 // prints "—" (shared.tsx's existing "does not apply" marker — wrong word) or
 // silently renders whatever `fmtCurrency`'s own non-finite fallback is.
+type CostMode = 'annual' | 'lifetime'
+
+// The per-unit CAPEX column's heading. In annualised mode the cell is the
+// asset's annual fixed cost (annuitised investment + FOM, `costPerUnit`), a
+// per-year figure; in total-investment mode it is the upfront overnight
+// cost (PV), which is not.
+const perUnitCapexLabel = (mode: CostMode) =>
+  mode === 'annual' ? 'CAPEX €/MW/yr' : 'CAPEX €/MW'
+
 const fmtCapexCell = (v: number, digits = 1) =>
   Number.isFinite(v) ? fmtCurrency(v, digits) : COST_UNAVAILABLE
 
@@ -171,7 +180,7 @@ export default function CapacityExpansion() {
   //                       own discount_rate. For year-0 builds the PV
   //                       factor is 1, so the displayed number matches the
   //                       nominal overnight × Δcapacity that users expect.
-  const [costMode, setCostMode] = useState<'annual' | 'lifetime'>('annual')
+  const [costMode, setCostMode] = useState<CostMode>('annual')
   // Per-asset cost lookup. In lifetime mode we return the PV-adjusted
   // overnight value so the table / chart / KPIs all show today's-money
   // capex for assets the optimiser placed in future years.
@@ -1235,7 +1244,7 @@ export default function CapacityExpansion() {
         ) : (
           <>
             {visibleGens.length > 0 && (
-              <GenerationTable rows={visibleGens} />
+              <GenerationTable rows={visibleGens} costMode={costMode} />
             )}
             {visibleLines.length > 0 && (
               <LinesTable rows={visibleLines} />
@@ -1271,7 +1280,7 @@ export default function CapacityExpansion() {
               {' · saves '}{fmtCapexCell(totalRetirementSavings, 2)}
             </span>
           </div>
-          {visibleRetiredGens.length > 0       && <RetirementGenerationTable rows={visibleRetiredGens} />}
+          {visibleRetiredGens.length > 0       && <RetirementGenerationTable rows={visibleRetiredGens} costMode={costMode} />}
           {visibleRetiredLines.length > 0      && <RetirementLinesTable rows={visibleRetiredLines} />}
           {visibleRetiredTransformers.length > 0 && <RetirementTransformersTable rows={visibleRetiredTransformers} />}
           {visibleRetiredStorage.length > 0    && <RetirementStorageTable rows={visibleRetiredStorage} />}
@@ -1350,7 +1359,7 @@ const RowBg = ({ i, children }: { i: number; children: React.ReactNode }) => (
 // Combined conventional + renewable in one table; a `Type` column tells them
 // apart so the user can sort/scan by category without splitting into two
 // sub-tables (which would inflate vertical space for small networks).
-function GenerationTable({ rows }: { rows: SizedRowBase[] }) {
+function GenerationTable({ rows, costMode }: { rows: SizedRowBase[]; costMode: CostMode }) {
   type GenKey = 'name' | 'type' | 'carrier' | 'initial' | 'delta' | 'optimal' | 'build_year' | 'capital_cost' | 'capex'
   const ft = useFilterableTable<SizedRowBase, GenKey>({
     rows,
@@ -1392,7 +1401,7 @@ function GenerationTable({ rows }: { rows: SizedRowBase[] }) {
           <SortHeader columnKey="delta"        label="Built"       sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('delta')}        className="px-2" align="right" />
           <SortHeader columnKey="optimal"      label="Total"       sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('optimal')}      className="px-2" align="right" />
           <SortHeader columnKey="build_year"   label="Build year"  sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('build_year')}   className="px-2" align="right" />
-          <SortHeader columnKey="capital_cost" label="CAPEX €/MW"  sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('capital_cost')} className="px-2" align="right" />
+          <SortHeader columnKey="capital_cost" label={perUnitCapexLabel(costMode)} sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('capital_cost')} className="px-2" align="right" />
           <SortHeader columnKey="capex"        label="CAPEX"       sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('capex')}        className="px-2" align="right" />
         </tr>
       </thead>
@@ -1653,7 +1662,7 @@ function LinksTable({ rows }: { rows: SizedRowBase[] }) {
 
 const RETIRED_COLOR = '#dc2626'  // danger red — applies to all retirement table headers
 
-function RetirementGenerationTable({ rows }: { rows: RetiredRowBase[] }) {
+function RetirementGenerationTable({ rows, costMode }: { rows: RetiredRowBase[]; costMode: CostMode }) {
   const exportCSV = () => downloadCSV(
     'results_generation_retired.csv',
     ['name', 'type', 'carrier', 'initial_MW', 'optimal_MW', 'retired_MW',
@@ -1673,7 +1682,7 @@ function RetirementGenerationTable({ rows }: { rows: RetiredRowBase[] }) {
           <Th>Name</Th><Th>Type</Th><Th>Carrier</Th>
           <Th align="right">Initial</Th><Th align="right">Retired</Th><Th align="right">Remaining</Th>
           <Th align="right">Build year</Th>
-          <Th align="right">CAPEX €/MW</Th><Th align="right">Savings</Th>
+          <Th align="right">{perUnitCapexLabel(costMode)}</Th><Th align="right">Savings</Th>
         </tr>
       </thead>
       <tbody>

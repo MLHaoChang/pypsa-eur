@@ -1,0 +1,12 @@
+{
+ "bill": {
+  "error_kind": "load_not_established",
+  "message": "the bill needs the load; see the load's reason",
+  "status": "not_established"
+ },
+ "load": {
+  "error_kind": "load_upload_unit_unknown",
+  "message": "the file's header names no unit; say whether the values are kW or MW",
+  "status": "not_established"
+ }
+}

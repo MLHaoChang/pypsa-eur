@@ -18,6 +18,7 @@ import SettingsButton from './SettingsButton'
 import type { Bus, FailureInfo, Generator, Line, Link, Load, StorageUnit } from '../api/types'
 import toast from 'react-hot-toast'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
+import DecisionRunWatcher from '../pages/decision/DecisionRunWatcher'
 import { flushPendingSitesToServer } from '../site3d/sitesStore'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
 
@@ -849,6 +850,9 @@ export default function AppHeader() {
 
   return (
     <header data-no-panel-close className="h-11 flex items-center gap-2 px-3 bg-bg border-b border-border shrink-0 z-10">
+      {/* S8: when a watched decision-study run ends, open its verdict and toast
+          the class. Renders nothing; polls the run status route only. */}
+      <DecisionRunWatcher />
 
       {/* Breadcrumb back to the workspace. The workbench used to be a dead end
           — the only route out was the browser Back button — which is why
