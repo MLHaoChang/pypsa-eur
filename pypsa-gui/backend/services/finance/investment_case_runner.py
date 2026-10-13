@@ -22,8 +22,10 @@ an aborted run stores nothing.
 
 Staleness (WP4.6b): the report's `assumptions_hash` is `assumptions_digest` of
 the finance inputs, the value flows, the rest of the commercial config, the
-dispatch digest of the solve and the pack hashes. The router recomputes it for
-`GET /results/investment_case`; a difference marks the report stale.
+dispatch digest of the solve, the pack hashes and (IC G3) the owner assets'
+investment columns and the campus study's extra owner assets. The router
+recomputes it for `GET /results/investment_case`; a difference marks the report
+stale.
 """
 from __future__ import annotations
 
@@ -105,7 +107,8 @@ def pack_versions(fin: FinanceInputs | None, *, load_pack=None) -> dict[str, str
 
 
 def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatch: str | None,
-                       packs: dict[str, str], solver: dict | None = None
+                       packs: dict[str, str], solver: dict | None = None,
+                       owner_assets: str | None = None, extra_assets: str | None = None
                        ) -> tuple[str, dict[str, Any]]:
     """(hash, parts): the report's staleness key and the per-input digests
     (so `GET /results/investment_case` can say WHICH input changed).
@@ -114,7 +117,12 @@ def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatc
     their own parts): the case reads its discount / inflation rates, the VOLL
     and DSR settings and the investment periods at build time, not only at the
     solve (WP4.6b review B1). The whole config is digested — a field that
-    only matters to a solve marks the report stale too, which errs safe."""
+    only matters to a solve marks the report stale too, which errs safe.
+
+    `owner_assets` (IC G3 F-2) is the digest of the owner assets' own
+    investment columns (`finance_case.owner_assets_digest`); `extra_assets`
+    (IC G3 R-4) the digest of the campus study the case takes its extra owner
+    assets from, None when no study applies. Both parts are always present."""
     commercial = commercial if isinstance(commercial, dict) else None
     parts = {
         "solver_config": json_digest(None if solver is None else
@@ -126,6 +134,8 @@ def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatc
                                   {k: v for k, v in commercial.items() if k != "value_flows"}),
         "dispatch": dispatch,
         "packs": dict(sorted(packs.items())),
+        "owner_assets": owner_assets,
+        "extra_assets": extra_assets,
     }
     return json_digest(parts), parts
 

@@ -305,6 +305,28 @@ def test_figures_are_referenced_only_when_their_png_was_passed():
     assert referenced == set(with_pngs.figures)
 
 
+def test_the_site_figure_closes_the_executive_summary_only_when_its_png_was_passed():
+    """Visual-layers plan 3 S5: the 3D site capture is a figure of the summary, after the tables."""
+    from services.reports.assemble import SITE_FIGURE_ID
+
+    without, _ = _doc(eh=_populated())
+    assert SITE_FIGURE_ID not in without.figures
+    with_site, _ = _doc(eh=_populated(), figure_pngs={SITE_FIGURE_ID: _PNG})
+    assert with_site.figures[SITE_FIGURE_ID].png_file == f"figures/{SITE_FIGURE_ID}.png"
+    assert "3D" in (with_site.figures[SITE_FIGURE_ID].caption or "")
+    summary = with_site.sections[0]
+    assert summary.section_id == "executive_summary"
+    refs = [b for b in summary.blocks if isinstance(b, FigureRef)]
+    assert [b.figure_id for b in refs] == [SITE_FIGURE_ID]
+    # After everything numeric: the last block of the summary.
+    assert summary.blocks[-1] is refs[0]
+    assert all(not isinstance(b, FigureRef) or b.figure_id != SITE_FIGURE_ID
+               for s in with_site.sections[1:] for b in s.blocks)
+    # With no evidence at all the picture still closes the summary.
+    bare, _ = _doc(eh=None, figure_pngs={SITE_FIGURE_ID: _PNG})
+    assert isinstance(bare.sections[0].blocks[-1], FigureRef)
+
+
 def test_a_png_for_an_unestablished_section_is_not_referenced():
     doc, _ = _doc(eh=_skeleton(), figure_pngs={"fmea_pareto": _PNG})
     assert not any(isinstance(b, FigureRef) for s in doc.sections for b in s.blocks)

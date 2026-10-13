@@ -1,12 +1,13 @@
-import { createContext, useContext, useMemo, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { networkApi } from '../api/network'
 import { resultsApi, type TSRange, type ResultSource } from '../api/simulation'
 import { chooseChunk, chunkBounds, horizonOf, localRow } from '../pages/results/chunking'
-import type { Generator, Load, Line as LineT, Link as LinkT, StorageUnit, Store } from '../api/types'
+import type { Generator, Load, Line as LineT, Link as LinkT, StorageUnit, Store, Transformer as TransformerT } from '../api/types'
 import { isRenewableCarrier, type TSPayload } from '../pages/results/shared'
+import { periodAt, periodEffectiveCap, type VintageResults } from '../site3d/capacity'
 
 // ── Per-snapshot results overlay context ──────────────────────────────────────
 // One provider, one shape, two consumers (BusNode and EditableEdge).
@@ -41,6 +42,13 @@ interface OverlayData {
   // p0 is active power (MW), q0 is reactive (MVAr) — null when not loaded.
   // EditableEdge picks `kind === 'q' ? q0 : p0` for the display value.
   byLine: Map<string, { p0: number; q0: number | null; loadingPct: number; sNom: number }>
+  // Per-transformer p0 (MW at bus0) and loading against s_nom(_opt), from
+  // `/results/transformers` (plan 1 A3; the 3D view fetches the same series
+  // under the same query key, so the cache is shared). Same shape as byLine
+  // (q0 always null — no reactive series is served for transformers) so the
+  // edge chip is one code path. Transformers used to be looked up in the
+  // Lines map and never showed their flow.
+  byTransformer: Map<string, { p0: number; q0: number | null; loadingPct: number; sNom: number }>
   // Per-Link active flow at this snapshot. `p0` is signed MW at bus0
   // (positive = flowing bus0 → bus1, i.e. consume at bus0, produce at
   // bus1 × efficiency). `loadingPct` = |p0| / p_nom × 100 (using
@@ -77,16 +85,34 @@ interface OverlayData {
   // aggregated horizon-end value) when vintage_results aren't available
   // or the snapshot index isn't multi-period.
   byAssetGroupCapacity: Map<string, number>
+  // Per COMPONENT, what the group maps say per group (plan 1 A2: the
+  // schematic's individual asset nodes). Key `${Class}:${name}` — the key
+  // the 3D view's states use too. Built from the same chunks, no new
+  // endpoint. `dispatchMW` follows the per-class sign convention above (a
+  // Link: p0, positive = drawing from bus0); `socPct` only for storage with
+  // a known energy capacity; `capacity` is the period-effective p_nom (a
+  // Store: e_nom), the number the node label shows instead of the installed
+  // sizing figure.
+  byAsset: Map<string, AssetOverlay>
+}
+
+export interface AssetOverlay {
+  cls: 'Generator' | 'Load' | 'StorageUnit' | 'Store' | 'Link'
+  dispatchMW: number | null
+  socPct: number | null
+  capacity: number | null
 }
 
 const EMPTY: OverlayData = {
   enabled: false, idx: 0, iso: '', kind: 'p',
-  byBus: new Map(), byLine: new Map(), byLink: new Map(),
+  byBus: new Map(), byLine: new Map(), byLink: new Map(), byTransformer: new Map(),
   byAssetGroup: new Map(), byAssetGroupSoC: new Map(),
-  byAssetGroupCapacity: new Map(),
+  byAssetGroupCapacity: new Map(), byAsset: new Map(),
 }
 
-const CanvasResultsContext = createContext<OverlayData>(EMPTY)
+/** Exported for component tests that render one overlay consumer with a hand-built value. */
+export const CanvasResultsContext = createContext<OverlayData>(EMPTY)
+export type { OverlayData }
 export const useCanvasResults = () => useContext(CanvasResultsContext)
 
 // Backend's ts_payload returns `periods` as a separate int[] alongside
@@ -131,24 +157,20 @@ const PROBE: TSRange = { from: 0, to: 0 }
  * `generators`, and one shared size would size every request by whichever
  * series happened to be probed first.
  */
-function useChunkedSeries(
+function useChunkedSeriesQuery(
   name: string,
   fetch: (source: ResultSource, range?: TSRange) => Promise<TSPayload | null>,
-  opts: {
-    project: string | null
-    source: ResultSource
-    idx: number
-    enabled: boolean
-  },
-): TSPayload | null | undefined {
-  const { project, source, idx, enabled } = opts
+  opts: ChunkedSeriesOpts,
+) {
+  const { project, source, idx, enabled, prefetchNext = false } = opts
 
-  const { data: probe } = useQuery({
+  const probeQuery = useQuery({
     queryKey: nk(project, 'results', name, source, 'probe'),
     queryFn: () => fetch(source, PROBE),
     enabled,
     staleTime: Infinity,
   })
+  const probe = probeQuery.data
 
   const total = probe?.range?.total ?? 0
   const chunk = useMemo(
@@ -186,14 +208,69 @@ function useChunkedSeries(
     return chunkBounds(clampedIdx, chunk, total)
   }, [idx, chunk, total])
 
-  const { data } = useQuery({
-    // `bounds.from` is what makes the cache work: identical for every index
-    // inside a chunk, different across a boundary.
-    queryKey: nk(project, 'results', name, source, bounds.from),
+  // `bounds.from` is what makes the cache work: identical for every index
+  // inside a chunk, different across a boundary.
+  const queryKey = nk(project, 'results', name, source, bounds.from)
+  const query = useQuery({
+    queryKey,
     queryFn: () => fetch(source, bounds),
     enabled: enabled && total > 0,
   })
-  return data
+
+  // Opt-in (the 3D view): fetch the next chunk while the scrubber is in the
+  // last tenth of this one, so playback does not stall at the boundary.
+  const qc = useQueryClient()
+  const nearEnd = prefetchNext && enabled && total > 0 && bounds.to < total - 1 &&
+    Math.max(0, Math.min(idx, total - 1)) >= bounds.to - Math.max(1, Math.floor((bounds.to - bounds.from + 1) / 10))
+  useEffect(() => {
+    if (!nearEnd) return
+    const next = chunkBounds(bounds.to + 1, chunk, total)
+    void qc.prefetchQuery({ queryKey: nk(project, 'results', name, source, next.from), queryFn: () => fetch(source, next) })
+  }, [nearEnd, bounds.to, chunk, total, project, name, source, fetch, qc])
+  return { query, probeQuery, queryKey, bounds, total }
+}
+
+interface ChunkedSeriesOpts {
+  project: string | null
+  source: ResultSource
+  idx: number
+  enabled: boolean
+  /** Prefetch the next chunk near this one's end (default off: the schematic's behaviour is unchanged). */
+  prefetchNext?: boolean
+}
+
+/** One result series' chunk around the scrubber (the canvases' overlay). Reads only `data`, so a fetch-state change does not re-render the caller. */
+export function useChunkedSeries(
+  name: string,
+  fetch: (source: ResultSource, range?: TSRange) => Promise<TSPayload | null>,
+  opts: ChunkedSeriesOpts,
+): TSPayload | null | undefined {
+  return useChunkedSeriesQuery(name, fetch, opts).query.data
+}
+
+export interface ChunkedSeriesMeta {
+  data: TSPayload | null | undefined
+  /** When the chunk was fetched (ms); 0 before. */
+  dataUpdatedAt: number
+  isFetching: boolean
+  isError: boolean
+  queryKey: unknown[]
+  bounds: { from: number; to: number }
+  /** The series' horizon (0 before the probe answers). */
+  total: number
+  /** The probe answered with no series (204) or failed: there is nothing to fetch. */
+  absent: boolean
+}
+
+/** The same chunk and cache, plus when it was fetched (the 3D view rejects chunks older than a re-solve, spec §6.3). */
+export function useChunkedSeriesMeta(
+  name: string,
+  fetch: (source: ResultSource, range?: TSRange) => Promise<TSPayload | null>,
+  opts: ChunkedSeriesOpts,
+): ChunkedSeriesMeta {
+  const { query, probeQuery, queryKey, bounds, total } = useChunkedSeriesQuery(name, fetch, opts)
+  const absent = !probeQuery.isFetching && (probeQuery.isError || (probeQuery.isSuccess && total === 0))
+  return { data: query.data, dataUpdatedAt: query.dataUpdatedAt, isFetching: query.isFetching, isError: query.isError, queryKey, bounds, total, absent }
 }
 
 export function CanvasResultsProvider({ children }: { children: ReactNode }) {
@@ -229,6 +306,9 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
   // alongside the line flows the canvas already animates. Enabled on the
   // same gate; no extra round-trip when the overlay is off.
   const linksTS = useChunkedSeries('links',             resultsApi.getLinkResults,            common)
+  // Transformer p0 (A3). The series name is the query-key segment, the same
+  // one site3d/useSiteResults uses, so the two views share one cache entry.
+  const trsTS   = useChunkedSeries('transformers',      resultsApi.getTransformerResults,     common)
   // Storage / store dispatch — same shape as the other TS payloads
   // (index/columns/data). Sign: positive = discharge (injection), negative
   // = charge (consumption). State of charge is fetched separately below so
@@ -268,6 +348,10 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
     queryKey: nk(currentProject, 'links'), queryFn: networkApi.getLinks,
     enabled: enableQueries,
   })
+  const { data: transformers = [] } = useQuery({
+    queryKey: nk(currentProject, 'transformers'), queryFn: networkApi.getTransformers,
+    enabled: enableQueries,
+  })
   const { data: storageUnits = [] } = useQuery({
     queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits,
     enabled: enableQueries,
@@ -294,7 +378,8 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
     const lts = (loadTS as TSPayload | null) ?? null
     const lints = (linesTS as TSPayload | null) ?? null
     const lkts = (linksTS as TSPayload | null) ?? null
-    if (!enableQueries || (!ts && !lts && !lints && !lkts)) return EMPTY
+    const trts = (trsTS as TSPayload | null) ?? null
+    if (!enableQueries || (!ts && !lts && !lints && !lkts && !trts)) return EMPTY
 
     // `horizonOf` (pages/results/chunking.ts) is the HORIZON — the series'
     // true snapshot count — as opposed to `data.length`, which is only the
@@ -304,7 +389,7 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
     // 167 and render row 167's flows labelled as snapshot 5000's. Pull from
     // whichever TS payload arrived first — handles link-only networks (no
     // Lines or Generators) gracefully.
-    const horizon = horizonOf([ts, lts, lints, lkts])
+    const horizon = horizonOf([ts, lts, lints, lkts, trts])
     if (horizon === 0) return EMPTY
     const idx = Math.max(0, Math.min(resultsSnapshotIdx, horizon - 1))
 
@@ -317,7 +402,7 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
     // snapshot's label.
     const localIdx = (p: TSPayload | null) => localRow(p, idx)
     const iso = ts?.index[localIdx(ts)] ?? lts?.index[localIdx(lts)]
-      ?? lints?.index[localIdx(lints)] ?? lkts?.index[localIdx(lkts)] ?? ''
+      ?? lints?.index[localIdx(lints)] ?? lkts?.index[localIdx(lkts)] ?? trts?.index[localIdx(trts)] ?? ''
 
     const gMap = rowMap(ts, localIdx(ts))
     const lMap = rowMap(lts, localIdx(lts))
@@ -430,7 +515,7 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
         const soc = socMap.get(s.name)
         if (soc == null) continue
         // p_nom_opt is set after solve when extendable; fall back to p_nom.
-        const pNom = ((s as unknown as { p_nom_opt?: number }).p_nom_opt
+        const pNom = (s.p_nom_opt
           ?? s.p_nom ?? 0)
         const cap = (s.max_hours ?? 0) * pNom
         bumpSoC(s.bus, soc, cap)
@@ -440,7 +525,7 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
       for (const s of stores as Store[]) {
         const e = eMap.get(s.name)
         if (e == null) continue
-        const cap = ((s as unknown as { e_nom_opt?: number }).e_nom_opt
+        const cap = (s.e_nom_opt
           ?? s.e_nom ?? 0)
         bumpSoC(s.bus, e, cap)
       }
@@ -460,12 +545,27 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
         const p0 = linMap.get(ln.name)
         if (p0 == null) continue
         const q0 = qMap ? (qMap.get(ln.name) ?? null) : null
-        const sNomOpt = (ln as unknown as { s_nom_opt?: number }).s_nom_opt
+        const sNomOpt = ln.s_nom_opt
         const sNom = (sNomOpt && Number.isFinite(sNomOpt) && sNomOpt > 0)
           ? sNomOpt
           : (ln.s_nom ?? 0)
         const loadingPct = sNom > 0 ? Math.abs(p0) / sNom * 100 : 0
         byLine.set(ln.name, { p0, q0, loadingPct, sNom })
+      }
+    }
+
+    // Per-transformer (A3): p0 and loading against s_nom_opt (post-solve) or
+    // s_nom. Keyed by name like byLine; EditableEdge and the map's
+    // transformer EditableLine read it instead of the Lines map.
+    const trMap = rowMap(trts, localIdx(trts))
+    const byTransformer = new Map<string, { p0: number; q0: number | null; loadingPct: number; sNom: number }>()
+    if (trMap) {
+      for (const tr of transformers as TransformerT[]) {
+        const p0 = trMap.get(tr.name)
+        if (p0 == null) continue
+        const sNomOpt = tr.s_nom_opt
+        const sNom = (sNomOpt && Number.isFinite(sNomOpt) && sNomOpt > 0) ? sNomOpt : (tr.s_nom ?? 0)
+        byTransformer.set(tr.name, { p0, q0: null, loadingPct: sNom > 0 ? Math.abs(p0) / sNom * 100 : 0, sNom })
       }
     }
 
@@ -486,7 +586,7 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
       for (const lk of links as LinkT[]) {
         const p0 = linkMap.get(lk.name)
         if (p0 == null) continue
-        const pNomOpt = (lk as unknown as { p_nom_opt?: number }).p_nom_opt
+        const pNomOpt = lk.p_nom_opt
         const pNom = (pNomOpt && Number.isFinite(pNomOpt) && pNomOpt > 0)
           ? pNomOpt
           : (lk.p_nom ?? 0)
@@ -523,33 +623,11 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
     // see shared.tsx), but PyPSA's own convention is year-as-int, and
     // `ts_payload` always emits ints when it can parse them. Cast rather
     // than re-litigate the union here.
-    const periodFromIso: number | null = (
-      tsAny?.periods && tsAnyLocalIdx >= 0 && tsAnyLocalIdx < tsAny.periods.length
-        ? (tsAny.periods[tsAnyLocalIdx] as number)
-        : null
-    )
-    const vrAll = (vintageResultsRaw?.results ?? {}) as Record<string, Record<string, {
-      initial_capacity: number
-      periods: Array<{ build_year: number; p_nom_opt: number }>
-    }>>
-    const effectiveCapForAsset = (cls: string, name: string, fallback: number): number => {
-      const entry = vrAll?.[cls]?.[name]
-      if (!entry) return fallback
-      const initial = entry.initial_capacity ?? fallback
-      if (periodFromIso == null) {
-        // Single-period or flat — sum every vintage on top of initial.
-        return (entry.periods ?? []).reduce(
-          (s, p) => s + (p.p_nom_opt ?? 0), initial,
-        )
-      }
-      let total = initial
-      for (const p of entry.periods ?? []) {
-        if (p.build_year != null && p.build_year <= periodFromIso) {
-          total += p.p_nom_opt ?? 0
-        }
-      }
-      return total
-    }
+    const periodFromIso = periodAt(tsAny, tsAnyLocalIdx)
+    const vrAll = vintageResultsRaw?.results as VintageResults | undefined
+    // The period-effective rule lives in site3d/capacity.ts (shared with the 3D view).
+    const effectiveCapForAsset = (cls: string, name: string, fallback: number): number =>
+      periodEffectiveCap(vrAll, cls, name, periodFromIso, fallback)
 
     const byAssetGroupCapacity = new Map<string, number>()
     const bumpCap = (busName: string, category: string, mw: number) => {
@@ -557,36 +635,69 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
       byAssetGroupCapacity.set(k, (byAssetGroupCapacity.get(k) ?? 0) + mw)
     }
     for (const g of generators as Generator[]) {
-      const fallback = ((g as unknown as { p_nom_opt?: number }).p_nom_opt
+      const fallback = (g.p_nom_opt
         ?? g.p_nom ?? 0)
       const cap = effectiveCapForAsset('Generator', g.name, fallback)
       bumpCap(g.bus, isRenewableCarrier(g.carrier) ? 'Renewables' : 'Thermal', cap)
     }
     for (const s of storageUnits as StorageUnit[]) {
-      const fallback = ((s as unknown as { p_nom_opt?: number }).p_nom_opt
+      const fallback = (s.p_nom_opt
         ?? s.p_nom ?? 0)
       const cap = effectiveCapForAsset('StorageUnit', s.name, fallback)
       bumpCap(s.bus, 'Storage', cap)
     }
     for (const s of stores as Store[]) {
-      const fallback = ((s as unknown as { e_nom_opt?: number }).e_nom_opt
+      const fallback = (s.e_nom_opt
         ?? s.e_nom ?? 0)
       const cap = effectiveCapForAsset('Store', s.name, fallback)
       bumpCap(s.bus, 'Storage', cap)
     }
     // Loads have no capacity expansion — skip.
 
+    // ── Per component (A2's asset nodes) — the same rows, one entry each ──
+    const byAsset = new Map<string, AssetOverlay>()
+    const soc = (energy: number | undefined, cap: number): number | null =>
+      energy != null && Number.isFinite(energy) && cap > 0 ? (energy / cap) * 100 : null
+    for (const g of generators as Generator[]) {
+      byAsset.set(`Generator:${g.name}`, {
+        cls: 'Generator', dispatchMW: gMap?.get(g.name) ?? null, socPct: null,
+        capacity: effectiveCapForAsset('Generator', g.name, g.p_nom_opt ?? g.p_nom ?? 0),
+      })
+    }
+    for (const ld of loads as Load[]) {
+      byAsset.set(`Load:${ld.name}`, { cls: 'Load', dispatchMW: lMap?.get(ld.name) ?? null, socPct: null, capacity: null })
+    }
+    for (const s of storageUnits as StorageUnit[]) {
+      const pNom = effectiveCapForAsset('StorageUnit', s.name, s.p_nom_opt ?? s.p_nom ?? 0)
+      byAsset.set(`StorageUnit:${s.name}`, {
+        cls: 'StorageUnit', dispatchMW: sdMap?.get(s.name) ?? null,
+        socPct: soc(socMap?.get(s.name), (s.max_hours ?? 0) * pNom), capacity: pNom,
+      })
+    }
+    for (const s of stores as Store[]) {
+      const eNom = effectiveCapForAsset('Store', s.name, s.e_nom_opt ?? s.e_nom ?? 0)
+      byAsset.set(`Store:${s.name}`, {
+        cls: 'Store', dispatchMW: stMap?.get(s.name) ?? null, socPct: soc(eMap?.get(s.name), eNom), capacity: eNom,
+      })
+    }
+    for (const lk of links as LinkT[]) {
+      byAsset.set(`Link:${lk.name}`, {
+        cls: 'Link', dispatchMW: linkMap?.get(lk.name) ?? null, socPct: null,
+        capacity: effectiveCapForAsset('Link', lk.name, lk.p_nom_opt ?? lk.p_nom ?? 0),
+      })
+    }
+
     return {
       enabled: true,
       idx, iso,
       kind: flowOverlayKind,
-      byBus, byLine, byLink, byAssetGroup, byAssetGroupSoC,
-      byAssetGroupCapacity,
+      byBus, byLine, byLink, byTransformer, byAssetGroup, byAssetGroupSoC,
+      byAssetGroupCapacity, byAsset,
     }
   }, [
-    enableQueries, resultsSnapshotIdx, gensTS, loadTS, linesTS, linksTS, linesReactiveTS,
+    enableQueries, resultsSnapshotIdx, gensTS, loadTS, linesTS, linksTS, trsTS, linesReactiveTS,
     storageDispatchTS, storeDispatchTS, storageSoCTS, storeEnergyTS,
-    generators, loads, lines, links, storageUnits, stores, flowOverlayKind,
+    generators, loads, lines, links, transformers, storageUnits, stores, flowOverlayKind,
     vintageResultsRaw,
   ])
 
@@ -609,5 +720,13 @@ export function fmtMW(mw: number, digits = 1): string {
 export function loadingColor(pct: number): string {
   if (pct >= 90) return '#dc2626'
   if (pct >= 50) return '#d97706'
+  return '#16a34a'
+}
+
+// Color band for storage state of charge (%): red below 20, amber below 80,
+// green above — the BESS health bands the schematic's storage cards use.
+export function socColor(pct: number): string {
+  if (pct < 20) return '#dc2626'
+  if (pct < 80) return '#d97706'
   return '#16a34a'
 }

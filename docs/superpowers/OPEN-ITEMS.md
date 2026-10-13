@@ -13,7 +13,25 @@ on that date, so the entries below still date from 2026-09-12.
 **The High authorization family was re-verified on 2026-09-30** (against
 `a9a1f5b`). Items 2, 3 and 4 were found already fixed — see "Closed since the
 2026-09-12 pass" — and the re-verification turned up a fourth instance of item
-2's defect, entered below as item 12.
+2's defect, entered below as item 16.
+
+**2026-10-13:** that item is renumbered **16**, and this pass's 13 and 14 become
+**17** and **18**. Master assigned 12–14 to the 3D site view on 2026-10-06
+while these branches were unmerged. Commits, findings and tests written
+before 2026-10-13 cite them as 12, 13 and 14.
+
+**2026-10-06:** items 12–14 added from the 3D site view branch's full-product
+browser E2E (`notes/2026-09-29-3d-site-view-phase2-qa.md` §7), re-verified in
+source on master that day. Its defect D (a second project from the same
+template → 409) is not listed: master's `_unique_project_name` already fixes it.
+
+**2026-10-06 (later):** two items closed and removed per the convention —
+item 7 (blank-canvas node positions reverting; the load now takes the newest
+of server / memory / localStorage by `savedAt` and a failed `PUT /layout`
+surfaces once, `findings/2026-07-31-blank-canvas-node-drags-revert.md` carries
+the detail) and item 14 (a three-port Link dropping `bus2` / `efficiency2`;
+`_drop_unknown_extras` admits PyPSA's per-port columns by regex). Both are
+increments A1 and A4 of `plans/2026-10-06-visual-layers-1-abstract-canvas.md`.
 
 This file exists because GitHub Issues is **disabled** on this repository, so
 there is nowhere else to keep a queue. It is deliberately thin: one entry per
@@ -36,20 +54,6 @@ verification record.
 
 ## Medium
 
-### 7. Node positions revert on the blank canvas
-
-User-reported 2026-07-31; diagnosed, never fixed. Two facts still hold:
-`PUT /layout` 404s until the project directory exists on disk, and on load the
-server wins unconditionally — `TopologyCanvas.tsx:2004` still resolves
-`ps ?? layoutMemCache.get(...) ?? loadDiagramState(...) ?? null`. `persistLayoutFor`'s
-`.catch()` falls back to localStorage, which is *third* in that chain, so a
-failed PUT leaves a newer local layout that the next load discards for an older
-`layout.json`. Both ends are silent. `PersistedState` carries `savedAt` and
-nothing compares it.
-
-The user's exact sequence was never reproduced, so the trigger for the failing
-PUT is still unidentified — the finding lists the candidates in the order worth
-testing. Source: `findings/2026-07-31-blank-canvas-node-drags-revert.md`.
 
 ### 8. Component names are not validated at the edge
 
@@ -129,7 +133,7 @@ NOT reused or compacted — other findings and assessments cite these numbers.
   Tripwire: `tests/test_worksheet_foreign_lock.py`, which asserts the two
   subjects AND two lock-checked controls. Mutation-verified 2026-09-30: removing
   both guard blocks turns exactly the two subject tests red. **The class is not
-  closed — see item 12.**
+  closed — see item 16.**
 * **3** — `/api/chat/{id}/rewind` and `/abort` perform no authorization. Closed
   by `be4d5ed`, which gave `ChatSession` an `owner_user_id` and a fail-closed
   `session_owner_allows`. Tripwire: `tests/test_chat_session_ownership.py`.
@@ -145,7 +149,7 @@ NOT reused or compacted — other findings and assessments cite these numbers.
   super-admin still reads across tenants, and nobody clears across them through
   this route. Tripwire: `tests/test_changelog_scoping.py`, six tests including
   both halves of the super-admin distinction.
-* **12** — `PUT /{name}/asset_health` ignores a foreign edit lock. Opened and
+* **16** — `PUT /{name}/asset_health` ignores a foreign edit lock. Opened and
   closed on 2026-09-30: recorded first as a defect outside items 2-4, then fixed
   by `4eca8d2` on a separate instruction. The fourth instance of item 2's defect
   and the second in that file; ungated for 20 days because it landed two days
@@ -161,7 +165,7 @@ NOT reused or compacted — other findings and assessments cite these numbers.
   `plans/2026-10-05-item-6-write-surface-lock-policy.md`.
   - LOCK half, `a266dd5`: `tests/test_write_surface_lock_policy.py` fails on
     any write route or non-read chat tool with no edit-lock decision. Writing
-    it found item 13.
+    it found item 17.
   - ACL half, `828094e`: `tests/test_project_route_acl_policy.py` fails on any
     project-naming route or tool that does not reach
     `project_acl.ensure_project_access` (`find_project` alone is scoped to the
@@ -173,7 +177,7 @@ NOT reused or compacted — other findings and assessments cite these numbers.
   tenancy tests hold that). Three product questions the lock table states
   rather than settles (gridspine studies, chat-history import, adequacy
   campaigns) are in the plan. #76 settles two of them.
-* **14** — the campus-electrical chat tools bypassed the edit-lock check.
+* **18** — the campus-electrical chat tools bypassed the edit-lock check.
   Four tools: `campus_draft_campus` and `campus_run_study` (#79),
   `campus_extract_grid_code` (#84) and `campus_set_library` (#91). The
   write-surface test caught each one on the day it landed. Each was reproduced
@@ -184,7 +188,7 @@ NOT reused or compacted — other findings and assessments cite these numbers.
   and stay open. Tripwire: `tests/test_campus_tools_foreign_lock.py`,
   written first and red for the right reason ("did not raise"). The ratchet
   then required deleting the four `KNOWN_GAPS` entries.
-* **13** — chat tools that wrote a project's upload store bypassed its lock
+* **17** — chat tools that wrote a project's upload store bypassed its lock
   check (`clear_uploads` and six `export_*` tools). Found and reproduced
   2026-10-05 while doing item 6. Fixed independently by #76 (`e36c041`), which
   merged on 2026-10-07: it gates the tools at the seam and checks every export
@@ -244,3 +248,33 @@ suite carries **124 pre-existing failures**, all from `No module named
 'gridspine'`. "The suite is green" is false locally; the only sound gate is
 *the failing set is unchanged*. Source: gap 6 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
+
+### 12. A network reset while a project is open lands in the session's scratch slot
+
+**Undo reports success and changes nothing; a raw import is silently lost or
+ignored.** `PyPSAService.reset_network()` publishes the new, unbound network
+context into `scratch:<sid>`, but while `sessions.active_project_id` is set the
+next request re-resolves the *project's* registry slot
+(`services/active_project.resolve_for_session`) and never sees it. Affected: raw
+imports (`.nc`, CSV, Excel, MATPOWER in `routers/io.py`), undo
+(`services/network_undo.apply_undo`), snapshot restore (`routers/snapshots.py`),
+and template create / bundle import (`routers/projects.py`), which re-bind but
+leave a stale bound copy in scratch that is written back over the project's
+saved edits when evicted. Reproduces through the API alone. The backend tests
+miss it because `install_network` (`tests/conftest.py`) clears
+`active_project_id`, so every test runs with the pointer unset. **Data-loss
+class.** A proposed fix (clear the pointer after a raw import; `rekey_context`
+after re-binding; pass the acting session through the chat import wrappers) and
+five regression tests sit unapplied in `notes/2026-09-30-full-e2e/`; the diff
+targets the 2026-09-30 tree and needs porting to today's `routers/io.py`.
+Source: `notes/2026-09-29-3d-site-view-phase2-qa.md` §7, defects A–C.
+
+### 13. `login.html` prefills and prints a review credential
+
+`frontend/public/login.html:391-402` ships `admin@example.com` /
+`admin-pass-123` as the input values and in a visible "Review account" line, and
+auth mode serves that page (`static_gate.decide_route` passes `/login.html`
+through). Fine for a review build; a credential in a shipped page otherwise. One
+decision (strip before release, or gate the prefill on a build flag) and a test
+that the served page carries no password value. Source: the same E2E, "Other
+findings".
