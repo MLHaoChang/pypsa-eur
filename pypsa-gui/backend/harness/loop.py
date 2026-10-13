@@ -2343,7 +2343,12 @@ def _dispatch_real_tool_call(
                 "type": "tool_result",
                 "tool_use_id": tool_use_id,
                 "is_error": True,
-                "content": problem,
+                # The fifth is_error site. Validators interpolate the
+                # caller-supplied name with `!r`, which does not escape the
+                # fence delimiter, so a hostile name the model read from an
+                # earlier result came back here unfenced. Same builder as the
+                # other four sites.
+                "content": _error_result_content(problem, None, "invalid_tool_args"),
             })
             return
 
