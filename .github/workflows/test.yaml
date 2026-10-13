@@ -98,13 +98,21 @@ jobs:
   # lives in `[feature.test.tasks]` — see the comment on it in pixi.toml. That
   # environment is the one carrying pywebview, without which the two
   # desktop-download tests SKIP and a green suite means nothing.
-  gui-backend-tests:
-    name: GUI backend
+  #
+  # Four jobs, because one serial run of the ~14,000 tests took ~2 h:
+  #   gui-backend-changes  the paths filter, once; the others read its output
+  #   gui-backend-tests    the pytest suite, split by file into 4 shards
+  #                        (`--num-shards`/`--shard-id`, tests/_shard.py)
+  #   gui-backend-qa       the pilot evaluation gate and the qa_*.py drivers,
+  #                        once, beside the shards
+  #   gui-backend          "GUI backend", the check branch protection and the
+  #                        sessions look for: green only if every job above is,
+  #                        and green on its own when no backend file changed
+  gui-backend-changes:
+    name: GUI backend changes
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        shell: bash -l {0}
+    outputs:
+      run: ${{ steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
 
     steps:
     - uses: actions/checkout@v7
@@ -119,12 +127,68 @@ jobs:
             - 'pixi.lock'
             - '.github/workflows/test.yaml'
 
-    - name: Skip - no backend changes
-      if: steps.filter.outputs.gui != 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-      run: echo "Skipping tests because no pypsa-gui/backend changes detected"
+  gui-backend-tests:
+    name: GUI backend shard ${{ matrix.shard }}/4
+    needs: gui-backend-changes
+    if: needs.gui-backend-changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 1-based here for the job name; pytest's --shard-id is 0-based.
+        shard: [1, 2, 3, 4]
+
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+    - uses: actions/checkout@v7
 
     - name: Setup Pixi
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      uses: prefix-dev/setup-pixi@v0.10.0
+      with:
+        pixi-version: v0.68.1
+        cache: true
+        cache-write: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
+
+    # The full output goes to a log file and the artifact below, so a failure
+    # can be read whole instead of from under the job log's tail.
+    - name: Run backend tests
+      run: |
+        set -o pipefail
+        mkdir -p pypsa-gui/backend/test-results
+        pixi run gui-tests \
+          --num-shards=4 --shard-id=$(( ${{ matrix.shard }} - 1 )) \
+          --junitxml=test-results/junit.xml --durations=30 \
+          2>&1 | tee pypsa-gui/backend/test-results/pytest.log
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: gui-backend-shard-${{ matrix.shard }}-of-4
+        path: pypsa-gui/backend/test-results/
+        if-no-files-found: warn
+
+  # Once, not per shard. In parallel with the shards rather than after them:
+  # the qa_*.py drivers are excluded from pytest collection by pytest.ini and
+  # so are invisible to the shards, and a broken suite still shows up as its
+  # own red shard. ~2 min.
+  gui-backend-qa:
+    name: GUI backend pilot gate and QA drivers
+    needs: gui-backend-changes
+    if: needs.gui-backend-changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup Pixi
       uses: prefix-dev/setup-pixi@v0.10.0
       with:
         pixi-version: v0.68.1
@@ -132,11 +196,10 @@ jobs:
         cache-write: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
 
     - name: Run checked pilot evaluation gate
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       run: pixi run gui-pilot-evaluation
 
     - name: Upload checked pilot evaluation report
-      if: always() && (steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: checked-pilot-evaluation
@@ -145,18 +208,32 @@ jobs:
           pypsa-gui/backend/pilot-evaluation.json.log
         if-no-files-found: error
 
-    - name: Run backend tests
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-      run: |
-        pixi run gui-tests
-
-    # The qa_*.py drivers are excluded from pytest collection by pytest.ini and
-    # so are invisible to the step above. Runs after it, because a broken suite
-    # is the more informative failure of the two. ~2 min.
+    # Runs even when the gate fails, so one push reports both.
     - name: Run backend QA drivers
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      if: success() || failure()
       run: |
         pixi run gui-qa-drivers
+
+  gui-backend:
+    name: GUI backend
+    needs: [gui-backend-changes, gui-backend-tests, gui-backend-qa]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Skip - no backend changes
+      if: needs.gui-backend-changes.result == 'success' && needs.gui-backend-changes.outputs.run != 'true'
+      run: echo "Skipping tests because no pypsa-gui/backend changes detected"
+
+    - name: Require every shard and the QA job
+      if: needs.gui-backend-changes.result != 'success' || needs.gui-backend-changes.outputs.run == 'true'
+      env:
+        CHANGES: ${{ needs.gui-backend-changes.result }}
+        TESTS: ${{ needs.gui-backend-tests.result }}
+        QA: ${{ needs.gui-backend-qa.result }}
+      run: |
+        echo "changes=$CHANGES shards=$TESTS qa=$QA"
+        [ "$CHANGES" = success ] && [ "$TESTS" = success ] && [ "$QA" = success ]
 
   # The pypsa-gui FRONTEND suite (vitest) and type-check. Until this job
   # existed no workflow ran `npm`/`vitest` at all, so the ~1,900 frontend tests

@@ -645,7 +645,8 @@ def _abort_mid_run() -> str | None:
     rec = _poll(_study_url(ABORT_BASE, sid, "/run"), timeout=600)
     _step("the aborted run says so and names the options it did not reach",
           rec.get("status") == "aborted" and rec.get("pending"),
-          f"status={rec.get('status')} solved={rec.get('solved')} pending={rec.get('pending')}")
+          f"status={rec.get('status')} solved={rec.get('solved')} pending={rec.get('pending')}"
+          f" error={rec.get('error')} fork_removal_refused={rec.get('fork_removal_refused')}")
     EVIDENCE["abort"] = {"solved": rec.get("solved"), "pending": rec.get("pending")}
     names = _all_projects()
     unsolved = [o for o in OPTIONS if o not in (rec.get("solved") or [])]
@@ -654,6 +655,11 @@ def _abort_mid_run() -> str | None:
     _step("the unsolved forks are removed, the solved ones kept",
           left == [] and kept == list(rec.get("solved") or []), f"left={left} kept={kept}")
     study = c.get(_study_url(ABORT_BASE, sid)).json()
+    if study.get("findings_ref") is None:
+        # A FAIL, not a TypeError below (CI, 13 Oct). Not a step on success:
+        # the recorded check count (`u2_record_pre_numbers`) stays as frozen.
+        _step("the aborted run wrote its findings", False, f"run={rec}")
+        return sid
     findings = qa_support.project_dir(ABORT_BASE) / study["findings_ref"]
     import json
 

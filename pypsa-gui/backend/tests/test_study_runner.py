@@ -274,6 +274,73 @@ def test_abort_after_the_first_solve_names_the_rest_and_removes_their_forks(
     assert r.status_code == 200 and r.json()["aborting"] is False
 
 
+# ── an accepted run never reads as "never run" ───────────────────────────
+#
+# CI, 13 Oct (#177, #164): `qa_decision_study` aborted its second run, and
+# `GET /run` then answered 404 `study_never_run` until the driver gave up, with
+# no findings. The run had been accepted (202), so the only way to that state
+# is a `_finish` that raised: the worker published its fallback "failed" on the
+# live record (which `GET /run` only serves while running) and nothing was
+# written to disk. Removing an unsolved fork caught `ForkError` alone, so any
+# other error there (an `OSError` from the tree removal, a locked database)
+# sank the whole record.
+
+def _abort_after_the_first_solve(client, api_project, monkeypatch, registry_key_for, base):
+    from services import solver_service
+
+    holder = {}
+
+    def after(k):
+        if k == 1:
+            ctx = PyPSAService.get_context(holder["key"])
+            ctx.solver_state["decision_study"]["stop_event"].set()
+
+    monkeypatch.setattr(solver_service, "run_simulation", FakeSolver(on_call=after))
+    sid = _setup(client, api_project, base)
+    holder["key"] = registry_key_for(base)
+    assert client.post(f"/api/projects/{base}/studies/{sid}/run", json={}).status_code == 202
+    return sid
+
+
+def test_a_fork_that_will_not_go_away_does_not_sink_the_runs_record(
+        client, api_project, studies_on, monkeypatch, project_storage_dir, registry_key_for):
+    import routers.projects as projects_router
+
+    def stuck(target):
+        raise OSError(39, "Directory not empty", str(target))
+
+    monkeypatch.setattr(projects_router, "_force_rmtree", stuck)
+    sid = _abort_after_the_first_solve(client, api_project, monkeypatch, registry_key_for,
+                                       "rm-stuck")
+    rec = wait_run(client, "rm-stuck", sid)
+    assert rec["status"] == "aborted"
+    assert rec["pending"] == OPTIONS[1:]
+    assert rec["fork_removal_refused"] == ["fork_removal_failed:OSError"] * len(OPTIONS[1:])
+    study = client.get(f"/api/projects/rm-stuck/studies/{sid}").json()
+    assert study["findings_ref"] is not None
+    findings = json.loads((project_storage_dir("rm-stuck") / study["findings_ref"]).read_text())
+    assert findings["pending_options"] == OPTIONS[1:]
+
+
+def test_a_run_whose_finish_fails_reads_failed_not_never_run(
+        client, api_project, studies_on, monkeypatch, registry_key_for):
+    def boom(*_a, **_k):
+        raise RuntimeError("the findings could not be built")
+
+    monkeypatch.setattr(R.run_hashes, "intake_hash", boom)
+    sid = _abort_after_the_first_solve(client, api_project, monkeypatch, registry_key_for,
+                                       "fin-fails")
+    rec = wait_run(client, "fin-fails", sid)
+    assert rec["status"] == "failed"
+    assert "finishing the run failed" in rec["error"]
+    assert "the findings could not be built" in rec["error"]
+    assert rec["solved"] == ["none"] and rec["pending"] == OPTIONS[1:]
+    # The abort route reads the same record: the run is over, not unknown.
+    r = client.post(f"/api/projects/fin-fails/studies/{sid}/run/abort")
+    assert r.status_code == 200 and r.json() == {"status": "failed", "aborting": False}
+    assert PyPSAService._study_owned == set(), sorted(PyPSAService._study_owned)
+
+
 # ── re-run, mesh, delete ─────────────────────────────────────────────────
 
 def test_a_rerun_replaces_the_forks_without_a_409(

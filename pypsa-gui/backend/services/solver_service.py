@@ -99,6 +99,7 @@ from services.solver.island import (  # noqa: F401  (re-exported)
     IslandRefusal,
     _wrap_with_island,
 )
+from services.solver.island import solve_uc as _island_solve_uc
 # Edge Investment Case commercial layer (spec §5.1): the PoC price writer and
 # the LP-terms wrapper, re-exported with the rest of the solver seams.
 from services.commercial.lp_bindings import (  # noqa: F401
@@ -1089,21 +1090,26 @@ def run_simulation(
                         tl_kwarg = _compute_loss_atol(network) if config.transmission_losses else False
                         if isinstance(tl_kwarg, dict):
                             phase(f"Transmission losses: secants, atol={tl_kwarg['atol']:.2e} MW (auto-scaled for smallest line)")
-                        status, condition = network.optimize(
-                            solver_name=config.solver_name,
-                            transmission_losses=tl_kwarg,
-                            multi_investment_periods=config.multi_investment_periods,
-                            extra_functionality=extra_fn,
-                            log_fn=str(tmp_log),
-                            solver_options=merged_solver_options,
-                            # Surface ALL constraint duals (not just the
-                            # placeholder set). Without this, line / transformer
-                            # capacity duals (mu_upper / mu_lower) are computed
-                            # but discarded — the /results/line_duals endpoint
-                            # then has nothing to report. ~negligible solver
-                            # cost; just extra DataFrame writes after the solve.
-                            assign_all_duals=True,
-                        )
+                        # Linearised unit commitment for the island's fixed
+                        # gensets (campus island I2c): the plain solve only,
+                        # committed for this solve and restored after it.
+                        with _island_solve_uc(network, config) as uc_kwargs:
+                            status, condition = network.optimize(
+                                solver_name=config.solver_name,
+                                transmission_losses=tl_kwarg,
+                                multi_investment_periods=config.multi_investment_periods,
+                                extra_functionality=extra_fn,
+                                log_fn=str(tmp_log),
+                                solver_options=merged_solver_options,
+                                # Surface ALL constraint duals (not just the
+                                # placeholder set). Without this, line / transformer
+                                # capacity duals (mu_upper / mu_lower) are computed
+                                # but discarded — the /results/line_duals endpoint
+                                # then has nothing to report. ~negligible solver
+                                # cost; just extra DataFrame writes after the solve.
+                                assign_all_duals=True,
+                                **uc_kwargs,
+                            )
                         _capture_extendable_p_nom_opt_to_frozen_store(network, phase)
                         # Reverse user_objective_scale on n.objective + LP duals
                         # so the post-solve diagnostics below (and every
