@@ -150,6 +150,19 @@ function IcSourceLine({ state }: { state: CampusState }) {
   )
 }
 
+/** Owner decision 2026-10-13: the needs the run the case uses could not meet are passed to the
+ *  investment case, which flags the case. Said only when there are any. */
+function IcUnresolvedLine({ count }: { count: number }) {
+  if (!(count > 0)) return null
+  return (
+    <p data-testid="invest-ic-unresolved" className="text-[12px] text-warn mb-2">
+      {count === 1
+        ? '1 unresolved need is passed to the investment case as a flag: the case is not compliant without it.'
+        : `${count} unresolved needs are passed to the investment case as a flag: the case is not compliant without them.`}
+    </p>
+  )
+}
+
 /** The hub's cost to set beside one electrical period, or null when it has none there. */
 function hubFor(hub: HubCost | null, period: number, periods: number): number | null {
   if (!hub) return null
@@ -177,6 +190,7 @@ export default function CampusInvestmentSection({ state }: { state: CampusState 
           an order of magnitude and not a quote.
         </p>
         <IcSourceLine state={state} />
+        <IcUnresolvedLine count={state.owner_assets_unresolved ?? 0} />
         {r.cost_basis && <CostBasisLine basis={r.cost_basis} />}
         {r.scope && (
           <p data-testid="invest-scope" className="text-[12px] mb-2">{SCOPE_TEXT[r.scope.pcc_switchgear]}</p>

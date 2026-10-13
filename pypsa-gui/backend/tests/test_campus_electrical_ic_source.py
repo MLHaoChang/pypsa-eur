@@ -103,7 +103,8 @@ def test_without_assets_there_is_no_method(hub):
     assert ce.owner_assets_response(hub)["study_method"] is None
     assert ce.get_state(hub)["owner_assets_method"] is None
     ce.run(hub, {**SETTINGS, "invest": False})
-    assert ce.owner_assets_response(hub) == {"assets": [], "source_hash": None, "stale": False, "study_method": None}
+    assert ce.owner_assets_response(hub) == {"assets": [], "source_hash": None, "stale": False, "study_method": None,
+                                             "unresolved": []}
     assert ce.get_state(hub)["owner_assets_method"] is None
 
 
@@ -120,7 +121,7 @@ def test_a_fresh_milp_feeds_the_case_with_its_rows_and_says_so(hub, monkeypatch)
     assert tr["quantity"] == 2.0 and tr["parts"][0]["upfront_per_unit"] == 2_500_000.0 and tr["basis"] == "lump"
     assert assets[1]["basis"] == "per_bay" and assets[1]["quantity"] == 3.0
     out = ce.owner_assets_response(hub)
-    assert list(out) == ["assets", "source_hash", "stale", "study_method"]
+    assert list(out) == ["assets", "source_hash", "stale", "study_method", "unresolved"]
     assert out["study_method"] == "milp" and out["stale"] is False and out["assets"] == assets
     assert out["source_hash"] == ce.campus_study_hash(hub) == assets[0]["source_hash"] == assets[1]["source_hash"]
     state = ce.get_state(hub)
