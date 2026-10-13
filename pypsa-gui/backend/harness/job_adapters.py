@@ -25,7 +25,12 @@ STUDY_PREFIX = 'ad:'
 STUDY_FAMILY = 'adequacy_study'
 _STUDY_TERMINAL = frozenset({
     'done', 'failed', 'aborted', 'refused', 'met', 'budget_exhausted',
+    # Coupling and margin loops finish here when no plan meets the target.
+    # Leaving it non-terminal makes wait_for_job time out on a finished study.
+    'unreachable',
 })
+# `done` is the sweep/MC/frontier success label; `met` is the loop success label.
+_STUDY_SUCCESS = frozenset({'done', 'met'})
 
 REPORT_PREFIX = 'rpt:'
 REPORT_FAMILY = 'report_job'
@@ -422,7 +427,7 @@ def wait_study_job(
             return {
                 'job': view,
                 'terminal': terminal,
-                'completed': status == 'done',
+                'completed': status in _STUDY_SUCCESS,
                 'timed_out': not terminal and not cancelled,
                 'wait_cancelled': cancelled,
                 'waited_seconds': round(time.monotonic() - started, 3),

@@ -135,6 +135,9 @@ GROUP_NET_PRICE_ATTR = "ic_group_net_price"   # links_t: €/MWh on net import, 
 GROUP_NET_SPEC_ATTR = "_ic_group_net_spec"    # transient: set by apply, read by the LP wrapper
 GROUP_NET_BUILT_ATTR = "_ic_group_net_built"  # transient: set by the LP wrapper
 TIER_BUILT_ATTR = "_ic_tier_built"
+# transient: set by `record_dispatch_as_solve`; the solution readers then read
+# the written dispatch (`links_t.p0`) instead of an LP model.
+RECORDED_DISPATCH_ATTR = "_ic_recorded_dispatch"
 _KWH_PER_MWH = 1000.0
 
 
@@ -1400,7 +1403,13 @@ def add_demand_terms(n) -> None:
 
 
 def _read_demand_solution(n, spec: dict) -> dict | None:
-    """The solved peaks, read from `n.model` while it still exists."""
+    """The solved peaks, read from `n.model` while it still exists (or, for
+    `record_dispatch_as_solve`, from the written dispatch)."""
+    if getattr(n, RECORDED_DISPATCH_ATTR, False):
+        p0 = n.links_t.p0
+        flow = p0[spec["import_links"]].sum(axis=1).to_numpy(dtype=float)
+        exp = p0[spec["export_link"]].to_numpy(dtype=float) if spec["export_link"] else None
+        return _demand_record(n, spec, flow, exp, billed=None, solved_peak=lambda _key: 0.0)
     model = getattr(n, "model", None)
     if not getattr(n, DEMAND_BUILT_ATTR, False) or model is None:
         return None
@@ -1418,11 +1427,22 @@ def _read_demand_solution(n, spec: dict) -> dict | None:
         exp = (link_p.sel(name=spec["export_link"]).values if spec["export_link"] else None)
     except Exception:  # noqa: BLE001
         return None
+    return _demand_record(n, spec, flow, exp, billed=lambda key: float(billed.loc[key]),
+                          solved_peak=lambda key: float(sol.loc[key]))
+
+
+def _demand_record(n, spec: dict, flow, exp, *, billed, solved_peak) -> dict | None:
+    """The demand record from an import flow (and the export Link's, for net
+    items). `billed(key)` is the LP's billed demand; None (a recorded
+    dispatch, no LP) records every key's billed demand as the rule's value,
+    the max of its peak and its ratchet rows, which is what the LP's billed
+    variable settles at. `solved_peak(key)` stands in when no interval has a
+    weight to read."""
     w_all = n.snapshot_weightings.objective.to_numpy(dtype=float)
     out = {}
     peaks_now: dict[str, float] = {}
     for k in spec["keys"]:
-        b = float(billed.loc[k["key"]])
+        b = float(billed(k["key"])) if billed is not None else 0.0
         pos, group = k["positions"], k["group"]
         f = flow[pos] - (exp[pos] if k["net"] and exp is not None else 0.0)
         if group.max() + 1 == len(pos):
@@ -1435,7 +1455,7 @@ def _read_demand_solution(n, spec: dict) -> dict | None:
             means = np.bincount(group, weights=f * w_all[pos])[ok] / wsum[ok]
         top = float(means.max()) if len(means) else float("nan")
         if not np.isfinite(top):
-            top = float(sol.loc[k["key"]])  # nothing to read: the solved variable
+            top = float(solved_peak(k["key"]))  # nothing to read: the solved variable
         v = max(0.0, top)
         # A floor is the month's running peak from earlier windows (P6 hook).
         v = max(v, float(spec.get("floors", {}).get(k["key"], 0.0)))
@@ -1450,6 +1470,8 @@ def _read_demand_solution(n, spec: dict) -> dict | None:
             out[k["key"]]["tiers"] = [
                 {"width_mw": float(sg["width_mw"]) if np.isfinite(sg["width_mw"]) else None,
                  "eur_per_mw": float(sg["eur_per_mw"])} for sg in k["tiers"]]
+            peaks_now[k["key"]] = v
+        elif billed is None:
             peaks_now[k["key"]] = v
     # A tiered key's billed demand is free inside a 0-rate segment: record the
     # rule's value (max of the peak and its ratchet rows), which the bill uses
@@ -1658,33 +1680,44 @@ def _capacity_spec(n, cfg: CommercialConfig) -> dict | None:
 # before it is not active and is not charged (the record lists the periods).
 
 
+def _capacity_built(n, spec: dict) -> tuple[dict, list]:
+    """The contracted-capacity part of the record (and each extendable-PoC
+    item's objective coefficient on `p_nom`): an extendable PoC records its
+    €/MW per period, a fixed PoC the constant charge the LP cannot change —
+    reported outside the reconciled total (as a fixed connection fee)."""
+    from services.commercial import connection  # lazy: connection imports this module
+
+    link = spec["link"]
+    built = {"contracted": {}, "fixed": {}, "peaks": bool(spec["peaks"])}
+    coefs = []
+    extendable = bool(n.links.at[link, "p_nom_extendable"])
+    for c in spec["contracted"]:
+        coef, by_period = connection.capacity_fee_coefficient(n, link, c["eur_per_mw_year"])
+        if extendable:
+            coefs.append(coef)
+            built["contracted"][c["item"]] = {"link": link, "eur_per_mw_by_period": by_period}
+        else:
+            p_nom = float(n.links.at[link, "p_nom"])
+            built["fixed"][c["item"]] = {"link": link, "p_nom_mw": p_nom,
+                                         "eur_by_period": {k: v * p_nom
+                                                           for k, v in by_period.items()}}
+    return built, coefs
+
+
 def add_capacity_terms(n) -> None:
     """objective += Σ contracted coef · p_nom[PoC] (extendable PoC) and
     Σ w_obj · €/MW · ic_capacity_peak[key], ic_capacity_peak ≥ each interval's
     mean import. Called from the LP wrapper."""
     import xarray as xr
 
-    from services.commercial import connection  # lazy: connection imports this module
-
     spec = getattr(n, CAPACITY_SPEC_ATTR, None)
     if not spec:
         return
     m = n.model
     link = spec["link"]
-    built = {"contracted": {}, "fixed": {}, "peaks": bool(spec["peaks"])}
-    extendable = bool(n.links.at[link, "p_nom_extendable"])
-    for c in spec["contracted"]:
-        coef, by_period = connection.capacity_fee_coefficient(n, link, c["eur_per_mw_year"])
-        if extendable:
-            m.objective += coef * m["Link-p_nom"].sel(name=link)
-            built["contracted"][c["item"]] = {"link": link, "eur_per_mw_by_period": by_period}
-        else:
-            # A fixed PoC: the charge is a constant the LP cannot change —
-            # reported outside the reconciled total (as a fixed connection fee).
-            p_nom = float(n.links.at[link, "p_nom"])
-            built["fixed"][c["item"]] = {"link": link, "p_nom_mw": p_nom,
-                                         "eur_by_period": {k: v * p_nom
-                                                           for k, v in by_period.items()}}
+    built, coefs = _capacity_built(n, spec)
+    for coef in coefs:
+        m.objective += coef * m["Link-p_nom"].sel(name=link)
     if spec["peaks"]:
         names = [k["key"] for k in spec["peaks"]]
         peak = m.add_variables(lower=0, name="ic_capacity_peak",
@@ -1722,14 +1755,17 @@ def _read_capacity_solution(n, spec: dict) -> dict | None:
     (interval means, as billed)."""
     built = getattr(n, CAPACITY_BUILT_ATTR, None)
     model = getattr(n, "model", None)
-    if built is None or model is None:
+    recorded = getattr(n, RECORDED_DISPATCH_ATTR, False)
+    if built is None or (model is None and not recorded):
         return None
     out = {"contracted": built["contracted"], "fixed": built["fixed"], "peaks": {},
            "items_hash": spec["items_hash"], "hash_version": spec["hash_version"]}
     if spec["peaks"]:
         try:
-            flow = model.variables["Link-p"].solution.sel(
-                name=spec["import_links"]).sum("name").values
+            flow = (n.links_t.p0[spec["import_links"]].sum(axis=1).to_numpy(dtype=float)
+                    if recorded else
+                    model.variables["Link-p"].solution.sel(
+                        name=spec["import_links"]).sum("name").values)
         except Exception:  # noqa: BLE001 — unsolved: nothing to commit
             return None
         w_all = n.snapshot_weightings.objective.to_numpy(dtype=float)
@@ -2419,3 +2455,57 @@ def energy_cost_rows(n, commercial: dict | None) -> dict | None:
             out["simultaneous_snapshots"] = int(both.sum())
     out["flags"] = flags
     return out
+
+
+# ── a recorded dispatch as an engine solve (IC engine ask 5) ───────────────
+
+
+def record_dispatch_as_solve(n, commercial: dict | CommercialConfig) -> pd.DataFrame:
+    """Leave on `n`, whose dispatch is already written (`links_t.p0` of every
+    metered Link), what a successful engine solve of that dispatch leaves:
+    the PoC prices materialised, undone and COMMITTED as `run_simulation`
+    does (`ic_poc_links`, `ic_energy_price`, the group and PPA records), and
+    the demand and capacity records read from the written dispatch by the
+    solve's own readers (interval means; ratchet and demand-tier billed
+    demand at the rule's value; fixed-PoC capacity charges). For test fakes
+    and replays that write a dispatch without an LP.
+
+    Returns the priced `marginal_cost` of each priced Link while the prices
+    were applied (what a fake writes as the bus price). Refused
+    (`CommercialBindingError`, nothing recorded, the network as it was):
+    `record_dispatch_tiers_need_lp` (energy tiers are an LP allocation, not
+    readable from a dispatch), `record_dispatch_missing_flow` (a demand or
+    capacity record to read and a metered Link without a written
+    `links_t.p0` column)."""
+    cfg = _parse(commercial)
+    applied = materialise_poc_prices(n, cfg)
+    try:
+        if getattr(n, TIER_SPEC_ATTR, None):
+            raise CommercialBindingError(
+                "record_dispatch_tiers_need_lp: energy tiers are allocated by the LP; "
+                "a written dispatch cannot say which tier each MWh fell in")
+        demand = getattr(n, DEMAND_SPEC_ATTR, None)
+        capacity = getattr(n, CAPACITY_SPEC_ATTR, None)
+        metered = set(import_links(cfg)) | ({cfg.export_link} if cfg.export_link else set())
+        missing = sorted(link for link in metered if link not in n.links_t.p0.columns)
+        if missing and (demand or capacity):
+            raise CommercialBindingError(
+                f"record_dispatch_missing_flow: no written dispatch (links_t.p0) for {missing}")
+        mc = n.links_t.marginal_cost
+        priced = mc[[c for c in sorted(metered) if c in mc.columns]].copy()
+        setattr(n, RECORDED_DISPATCH_ATTR, True)
+        if capacity:
+            setattr(n, CAPACITY_BUILT_ATTR, _capacity_built(n, capacity)[0])
+        if getattr(n, GROUP_NET_SPEC_ATTR, None):
+            setattr(n, GROUP_NET_BUILT_ATTR, True)
+    except Exception:
+        applied.undo()
+        if hasattr(n, RECORDED_DISPATCH_ATTR):
+            delattr(n, RECORDED_DISPATCH_ATTR)
+        raise
+    try:
+        applied.undo()          # the readers run here, before their specs go
+        applied.commit()
+    finally:
+        delattr(n, RECORDED_DISPATCH_ATTR)
+    return priced

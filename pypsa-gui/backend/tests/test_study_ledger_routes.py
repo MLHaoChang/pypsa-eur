@@ -208,7 +208,6 @@ def test_the_ledger_handlers_refuse_when_called_as_plain_functions(monkeypatch):
     from types import SimpleNamespace
 
     monkeypatch.setattr(local_mode, "is_local_mode", lambda: False)
-    monkeypatch.setenv("PYPSAGUI_DECISION_STUDIES", "1")
     project = SimpleNamespace(uuid="u", name="p", directory=None)
     calls = {
         "get": lambda: studies_router.get_ledger("x", project=project),

@@ -1231,14 +1231,14 @@ def island_hourly(n, island, unit_ids=None):
     ΣK over the GFMs and droop gensets less the k largest genset unit's.
     Per unit: e(t−1), online (u under linearised UC, else the spinning flag),
     headroom both ways, and a UPS's IT load."""
-    from gridspine.schema.island import (
+    from services.adequacy.activity import active_mask
+    # gridspine's contracts, through the guarded seam (a build without it says so).
+    from services.adequacy.island_config import (
+        GFM_CONTROLS,
         ISLAND_UNIT_HOURLY_COLUMNS,
         validate_island_hourly,
         validate_island_unit_hourly,
     )
-
-    from services.adequacy.activity import active_mask
-    from services.adequacy.island_config import GFM_CONTROLS
 
     units, req = island["units"], island["requirements"]
     vals = req["values"]
