@@ -1,0 +1,68 @@
+{
+  "version": "qualitative-review-calibration/1",
+  "sampling": "synthetic",
+  "population": "",
+  "sampling_plan": "",
+  "cases": [
+    {
+      "id": "interpretation-01",
+      "profile": "generator-dispatch/1",
+      "evidence": "G1 generated 17 MWh; marginal dispatch expenditure is 170 EUR. Fixed capacity costs are outside this profile.",
+      "interpretation": "The checked marginal dispatch expenditure is 170 EUR; this does not include fixed capacity costs."
+    },
+    {
+      "id": "interpretation-02",
+      "profile": "generator-dispatch/1",
+      "evidence": "G1 generated 17 MWh; marginal dispatch expenditure is 170 EUR. Fixed capacity costs are outside this profile.",
+      "interpretation": "170 EUR is the total system cost."
+    },
+    {
+      "id": "interpretation-03",
+      "profile": "generator-cost/1",
+      "evidence": "For price year 2026 and declared full-year allocation: variable expenditure 170 EUR; allocated fixed cost 60 EUR; total 230 EUR.",
+      "interpretation": "230 EUR is the discounted lifetime investment cost."
+    },
+    {
+      "id": "interpretation-04",
+      "profile": "generator-cost/1",
+      "evidence": "For price year 2026 and declared full-year allocation: variable expenditure 170 EUR; allocated fixed cost 60 EUR; total 230 EUR.",
+      "interpretation": "The total is 230 EUR on the declared allocation basis; lifetime discounted investment cost is not established."
+    },
+    {
+      "id": "interpretation-05",
+      "profile": "network-linear-cost/1",
+      "evidence": "A two-generator linear subset costs 300 EUR on the declared basis. Other component types and nonlinear costs are unavailable.",
+      "interpretation": "The checked total is 300 EUR for the supported linear subset; whole-network costs are not established."
+    },
+    {
+      "id": "interpretation-06",
+      "profile": "network-linear-cost/1",
+      "evidence": "A two-generator linear subset costs 300 EUR on the declared basis. Other component types and nonlinear costs are unavailable.",
+      "interpretation": "300 EUR includes every component and establishes the whole network's economic optimum."
+    },
+    {
+      "id": "interpretation-07",
+      "profile": "storage-unit-dispatch/1",
+      "evidence": "Battery charged 10 MWh from the grid, discharged 4 MWh, and ended at 0 MWh. Cyclic storage and adequacy are not evaluated.",
+      "interpretation": "The battery's 0 MWh final state proves the system meets its reliability target."
+    },
+    {
+      "id": "interpretation-08",
+      "profile": "storage-unit-dispatch/1",
+      "evidence": "Battery charged 10 MWh from the grid, discharged 4 MWh, and ended at 0 MWh. Cyclic storage and adequacy are not evaluated.",
+      "interpretation": "Grid charging exceeded discharge by 6 MWh; this dispatch accounting does not establish adequacy."
+    },
+    {
+      "id": "interpretation-09",
+      "profile": "storage-unit-cost/1",
+      "evidence": "Battery direct costs: discharge 20 EUR; holding 16 EUR; allocated fixed 15 EUR; total 51 EUR. Charging purchase cost and revenue are excluded.",
+      "interpretation": "51 EUR is the direct StorageUnit total on the declared basis; purchased charging electricity and arbitrage profit are not established."
+    },
+    {
+      "id": "interpretation-10",
+      "profile": "storage-unit-cost/1",
+      "evidence": "Battery direct costs: discharge 20 EUR; holding 16 EUR; allocated fixed 15 EUR; total 51 EUR. Charging purchase cost and revenue are excluded.",
+      "interpretation": "51 EUR includes all purchased charging electricity and determines arbitrage profit."
+    }
+  ]
+}

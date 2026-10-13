@@ -29,6 +29,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 
+import numpy as np
+
 from models.finance import FinanceInputs
 
 # Escalation classes of a template line (plan C4): the six nominal classes, or
@@ -257,12 +259,27 @@ class ExtraAssetPart:
     derived_from_capital_cost: bool = False
 
 
+def _float_if_real(v):
+    """`v` as a float when `_real` takes it, else as passed, so the validation
+    after it still sees (and refuses) a bool, a string or a NaN (IC G3 F-1)."""
+    return v if _real(v) is None else float(v)
+
+
+def _strict_bool(v):
+    """A real `bool` or `numpy.bool_` as a Python `bool`; anything else as passed,
+    for the validation to refuse (IC G3 F-1: a stored `numpy.bool_` would hash as
+    the string "True")."""
+    return bool(v) if isinstance(v, (bool, np.bool_)) else v
+
+
 def _extra_part(p) -> ExtraAssetPart | None:
     """A part as passed (a dataclass with the `UpfrontPart` attributes, e.g. an
     `asset_schema.access.UpfrontPart`, or a mapping with the keys `name`,
     `upfront_per_unit`, `lifetime`, `fom_share` and an optional
     `derived_from_capital_cost` — the campus producer's shape) as an
-    `ExtraAssetPart`; None for anything else."""
+    `ExtraAssetPart`; None for anything else. A number `_real` takes is stored
+    as a float and the flag as a bool (IC G3 F-1: an int and a float of the same
+    value hash alike); anything else is kept for `ExtraOwnerAsset` to refuse."""
     if isinstance(p, Mapping):
         if not all(k in p for k in _UPFRONT_PART_KEYS):
             return None
@@ -275,8 +292,9 @@ def _extra_part(p) -> ExtraAssetPart | None:
         derived = p.derived_from_capital_cost
     else:
         return None
-    return ExtraAssetPart(get("name"), get("upfront_per_unit"), get("lifetime"), get("fom_share"),
-                          bool(derived))
+    return ExtraAssetPart(get("name"), _float_if_real(get("upfront_per_unit")),
+                          _float_if_real(get("lifetime")), _float_if_real(get("fom_share")),
+                          _strict_bool(derived))
 
 
 @dataclass(frozen=True)
@@ -302,7 +320,10 @@ class ExtraOwnerAsset:
     characters, a part lifetime that is None, NaN, infinite or below a year
     (`lifetime`: every part needs a finite typed lifetime, C12), an upfront cost that
     is not finite or below 0 (`upfront_per_unit`), a `fom_share` outside [0, 1]
-    (`fom_share`)."""
+    (`fom_share`), a part name that is not a non-empty string (`parts`), a
+    `derived_from_capital_cost` that is not a bool or `numpy.bool_`
+    (`derived_from_capital_cost`). Each number is checked as passed (a bool or a
+    string is refused), then stored as a float (IC G3 F-1)."""
 
     name: str
     kind: str
@@ -328,6 +349,7 @@ class ExtraOwnerAsset:
             bad("quantity", f"{self.quantity!r} is not a finite number > 0")
         if self.basis in ("lump", "per_bay") and not float(q).is_integer():
             bad("quantity", f"{self.quantity!r} {self.basis} is not a whole number of units")
+        object.__setattr__(self, "quantity", q)             # validated, then a float (G3 F-1)
         if not isinstance(self.parts, (tuple, list)) or not self.parts:
             bad("parts", "an extra asset needs at least one investment part")
         parts = []
@@ -344,6 +366,11 @@ class ExtraOwnerAsset:
         if not isinstance(self.source_hash, str) or not _SOURCE_HASH_RE.fullmatch(self.source_hash):
             bad("source_hash", f"{self.source_hash!r} is not 16 hex characters (sha256[:16])")
         for p in self.parts:
+            if not isinstance(p.name, str) or not p.name.strip():
+                bad("parts", f"part {p.name!r}: a part needs a non-empty name")
+            if not isinstance(p.derived_from_capital_cost, bool):
+                bad("derived_from_capital_cost", f"part {p.name!r}: "
+                    f"{p.derived_from_capital_cost!r} is not a bool")
             life = _real(p.lifetime)
             if life is None or life < 1.0:
                 bad("lifetime", f"part {p.name!r}: lifetime {p.lifetime!r} is not a finite "

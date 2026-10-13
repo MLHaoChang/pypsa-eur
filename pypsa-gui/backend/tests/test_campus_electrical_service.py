@@ -1031,6 +1031,29 @@ def test_the_cost_tag_of_the_library_is_the_provenance_and_assumed_alone_is_illu
     assert by_id["CB_33_AL240"]["provenance"] == "assumed" and by_id["CB_33_AL240"]["illustrative"] is True
 
 
+def test_a_literature_cost_is_cited_so_it_is_not_illustrative(hub):
+    """A cost read from a cited publication (tag `literature`) is a reference value, not a quote. It is
+    still not `illustrative`: in the generic defaults pack's sense that flag means "not taken from a cited
+    source" (catalogue rows such as the DEA's are false), and the investment case reads it in that sense.
+    That it is a reference value, not a quote, is what `provenance` says."""
+    def cited(data):
+        for e in data["transformers"]:
+            if e["id"] == "TR_132_33_63":
+                e["capex_eur"] = {"value": 1_650_000, "source": "literature", "note": "a regulator's catalogue"}
+        for e in data["cables"]:
+            if e["id"] == "CB_33_AL240":
+                e["capex_eur_per_km"]["source"] = "literature"
+    fake_investment(hub, purchase_rows(), library_text=library_with(cited))
+    by_id = {a["meta"]["library_id"]: a for a in ce.extra_owner_assets(hub)}
+    assert by_id["TR_132_33_63"]["meta"]["provenance"] == "literature"
+    assert by_id["TR_132_33_63"]["meta"]["illustrative"] is False
+    assert by_id["TR_132_33_63"]["parts"][0]["upfront_per_unit"] == 1_650_000.0
+    assert by_id["CB_33_AL240"]["meta"]["provenance"] == "literature"
+    assert by_id["CB_33_AL240"]["meta"]["illustrative"] is False
+    assert by_id["SG_132_31p5"]["meta"]["provenance"] == "assumed"
+    assert by_id["SG_132_31p5"]["meta"]["illustrative"] is True
+
+
 def test_a_cable_takes_the_provenance_of_its_per_km_cost(hub):
     def change(data):
         for e in data["cables"]:

@@ -9,6 +9,7 @@ router. Never imports ``routers.*``.
 from __future__ import annotations
 
 import math
+import re
 from functools import lru_cache
 from typing import Any
 
@@ -150,6 +151,42 @@ def _meta_payload(n: Any, loaded_project: str | None) -> dict:
         "snapshot_count": len(n.snapshots),
         "bus_count": len(n.buses),
     }
+# PyPSA's multi-port Link columns: `bus2`, `bus3`, … and the matching
+# `efficiency2`, `efficiency3`, …. Mirrors `pypsa.constants.RE_PORTS_GE_2`
+# (`^bus((?:[2-9]|[1-9]\d+))$`) with the efficiency family added — these are
+# the only per-port Input attributes PyPSA honours (`optimize.py` reads
+# `bus{i}` and `efficiency{i}`; `p{i}` is an Output it writes). Spelled as a
+# regex, not a list, so a fourth port is admitted without a code change.
+_LINK_PORT_RE = re.compile(r"^(bus|efficiency)((?:[2-9]|[1-9]\d+))$")
+
+
+def _link_port_extras(kwargs: dict) -> dict:
+    """
+    The multi-port keys of a Link body that name a SET port (A1).
+
+    PyPSA does not list `bus2` / `efficiency2` in the Link catalog — the
+    columns appear on first use — so on a network with no multi-port Link yet
+    the catalog + existing-column test below drops them, and a CHP created
+    from the palette silently loses its heat port. This arm admits them.
+
+    A port counts as set when its `bus{i}` is not empty ("" or None); its
+    `efficiency{i}` rides along. `LinkCreate` declares `bus3` / `bus4` /
+    `efficiency3` with "" / 1.0 defaults and the create route dumps the whole
+    model, so an unset port must NOT survive — a `bus3` column of empty
+    strings would make PyPSA treat every Link as three-ported.
+    """
+    set_ports = {
+        m.group(2)
+        for k, v in kwargs.items()
+        if (m := _LINK_PORT_RE.match(k)) and m.group(1) == "bus"
+        and v not in ("", None)
+    }
+    return {
+        k: v for k, v in kwargs.items()
+        if (m := _LINK_PORT_RE.match(k)) and m.group(2) in set_ports
+    }
+
+
 # The request model each component class is created and updated through. The
 # fields those models DECLARE are the API's published surface, so they are part
 # of the whitelist below — see `_declared_attributes`.
@@ -214,6 +251,14 @@ def _drop_unknown_extras(component_class: str, attr: str, kwargs: dict) -> dict:
     A declared field is by definition something this API intends to persist,
     so the model is the right authority — and the whitelist stays a whitelist:
     an undeclared, uncatalogued key is still dropped.
+
+    A fourth arm, Link only (A1): a multi-port column names a SET port — see
+    `_link_port_extras`. The declared arm already admits `bus2`/`efficiency2`
+    by name; what the port arm adds is the inverse rule, that an UNSET port's
+    keys must not survive: `LinkCreate` declares `bus3`/`bus4`/`efficiency3`
+    with "" / 1.0 defaults and the create route dumps the whole model, so
+    without it a `bus3` column of empty strings would appear on the first
+    Link created and make PyPSA treat every Link as three-ported.
     """
     from services.adequacy.eh_columns import coerce_eh_value, eh_columns_for
 
@@ -232,9 +277,14 @@ def _drop_unknown_extras(component_class: str, attr: str, kwargs: dict) -> dict:
         return {**kwargs, **out_eh}
     columns = set(getattr(n, attr).columns)
     declared = _declared_attributes(component_class)
+    if component_class == "Link":
+        set_ports = _link_port_extras(kwargs)
+        unset_ports = {k for k in kwargs if _LINK_PORT_RE.match(k) and k not in set_ports}
+    else:
+        set_ports, unset_ports = {}, set()
     kept = {
         k: v for k, v in kwargs.items()
-        if k in allowed or k in columns or k in declared
+        if (k in allowed or k in columns or k in declared or k in set_ports) and k not in unset_ports
     }
     return {**kept, **out_eh}
 
@@ -577,11 +627,31 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
             # lost on the next save+reload (re-apply skips entries whose
             # column is no longer in the network DataFrame).
             _user_ts_rename_asset(attr, name, new_name)
+            # The 3D site view keys placements by "<Class>:<name>"; re-key the
+            # sidecar so the asset keeps its position (D14). Best-effort: a
+            # sidecar problem never fails a rename the model already did.
+            _rename_site_placement(component_class, name, new_name)
+            # The map view keys a branch's route by "<kind>:<name>" in the
+            # `map_layout.json` sidecar; re-key it so a renamed Line / Link /
+            # Transformer keeps its route. Best-effort: a sidecar problem
+            # never fails a rename the model already did.
+            _rename_map_route(component_class, name, new_name)
         _normalise_flag_column(n, attr)
     desc = (f"Renamed {component_class.lower()} '{name}' → '{new_name}'"
             if new_name != name else f"Updated {component_class.lower()} '{name}'")
     change_log_service.log("update", component_class, new_name, desc)
     return {"name": new_name}
+
+
+def _rename_map_route(component_class: str, old: str, new: str) -> None:
+    """Re-key the active project's `map_layout.json` route; no-op for a scratch network."""
+    from services import map_layout_service
+
+    try:
+        storage_dir = getattr(PyPSAService.get_active_context(), "storage_dir", None)
+    except Exception:  # noqa: BLE001 — no active context is a no-op, not an error
+        storage_dir = None
+    map_layout_service.rename_component_on_disk(storage_dir, component_class, old, new)
 
 
 def purge_component_side_data(n, component_class: str, attr: str, name: str) -> None:
@@ -616,3 +686,14 @@ def _delete_component(component_class: str, attr: str, name: str) -> None:
         n.remove(component_class, name)
         purge_component_side_data(n, component_class, attr, name)
     change_log_service.log("delete", component_class, name, f"Deleted {component_class.lower()} '{name}'")
+
+
+def _rename_site_placement(component_class: str, old: str, new: str) -> None:
+    """Re-key the active project's `sites.json` placement; no-op for a scratch network."""
+    from services import site_service
+
+    try:
+        storage_dir = getattr(PyPSAService.get_active_context(), "storage_dir", None)
+    except Exception:  # noqa: BLE001 — no active context is a no-op, not an error
+        storage_dir = None
+    site_service.rename_component_on_disk(storage_dir, component_class, old, new)

@@ -234,14 +234,28 @@ def test_assumptions_digest_moves_with_each_part():
     base = dict(finance={"a": 1}, commercial={"poc_link": "x", "value_flows": {"p": 1}},
                 dispatch="d0", packs={"us_federal": "h1"})
     h0, parts = assumptions_digest(**base)
+    # IC G3 (R-4, F-2): `owner_assets` and `extra_assets` are always present (None unstated).
     assert set(parts) == {"finance", "value_flows", "commercial", "solver_config",
-                          "dispatch", "packs"}
+                          "dispatch", "packs", "owner_assets", "extra_assets"}
+    assert parts["owner_assets"] is None and parts["extra_assets"] is None
     assert assumptions_digest(**base)[0] == h0                       # deterministic
     for key, val in (("finance", {"a": 2}), ("dispatch", "d1"), ("packs", {"us_federal": "h2"}),
                      ("commercial", {"poc_link": "y", "value_flows": {"p": 1}}),
                      ("commercial", {"poc_link": "x", "value_flows": {"p": 2}})):
         assert assumptions_digest(**{**base, key: val})[0] != h0, key
     assert finance_digest(None) != finance_digest({})
+
+
+def test_g3_the_owner_assets_and_extra_assets_parts_move_the_key_and_are_named():
+    """IC G3 R-4 / F-2: each new part is its own entry, so `staleness` names it."""
+    base = dict(finance={"a": 1}, commercial=None, dispatch="d0", packs={})
+    h0, parts = assumptions_digest(**base)
+    for key in ("owner_assets", "extra_assets"):
+        h, p = assumptions_digest(**base, **{key: "x" * 32})
+        assert h != h0 and p[key] == "x" * 32, key
+        stored = refused_finance_report("x", assumptions_hash=h0).model_dump(mode="json")
+        stored["sections"]["project"]["payload"] = {"provenance": {"inputs": parts}}
+        assert staleness(stored, (h, p))["changed"] == [key]
 
 
 def test_staleness_is_never_silently_current():
@@ -343,8 +357,9 @@ def test_b1_the_solver_config_is_part_of_the_staleness_key():
     base = dict(finance={"a": 1}, commercial=None, dispatch="d0", packs={},
                 solver={"discount_rate": 0.07, "finance": {"a": 1}, "commercial": None})
     h0, parts = assumptions_digest(**base)
+    # IC G3: the two new parts (R-4, F-2) are in every key.
     assert set(parts) == {"finance", "value_flows", "commercial", "solver_config", "dispatch",
-                          "packs"}
+                          "packs", "owner_assets", "extra_assets"}
     for field, val in (("discount_rate", 0.05), ("inflation_rate", 0.02),
                        ("auto_discount_periods", True), ("voll", 5000.0),
                        ("dsr_price_eur_per_mwh", 300.0), ("dsr_share_of_load", 0.1),

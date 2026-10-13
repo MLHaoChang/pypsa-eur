@@ -1,7 +1,7 @@
 import axios from 'axios'
 import client, { formatApiDetail } from './client'
 import type {
-  ProjectInfo, ImportSummary, SaveResult, BundleImportResult,
+  ProjectInfo, ProjectSettings, ImportSummary, SaveResult, BundleImportResult,
   CompareState, ResultsSummary,
 } from './types'
 
@@ -215,6 +215,16 @@ export const projectsApi = {
   ) =>
     client.patch<ProjectInfo>(
       `/projects/${encodeURIComponent(name)}/scenario`,
+      patch,
+      { skipErrorToast: true },
+    ).then(r => r.data),
+  // Plan M2: the per-project settings table in metadata.json. PARTIAL like
+  // `updateScenario` — only the keys present are written. 409 when the
+  // project has never been saved (the file is the only store) or is locked by
+  // another user; the caller renders both inline.
+  updateSettings: (name: string, patch: ProjectSettings) =>
+    client.patch<ProjectInfo>(
+      `/projects/${encodeURIComponent(name)}/settings`,
       patch,
       { skipErrorToast: true },
     ).then(r => r.data),

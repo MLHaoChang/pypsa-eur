@@ -2370,7 +2370,9 @@ def solve_ppa_price(target_irr: float, target_year: int,
     from pydantic import ValidationError
 
     from models.finance import SolvePpa
-    from routers.results import _dispatch_ready, _ic_build_case, _study_mesh_blocker
+    from routers.results import (
+        _dispatch_ready, _ic_build_case, _ic_read_campus, _study_mesh_blocker,
+    )
     from routers.simulation import _state as sim_state
     from services.finance.case import FinanceRefused
     from services.finance.engine import solve_ppa
@@ -2400,7 +2402,10 @@ def solve_ppa_price(target_irr: float, target_year: int,
     if owner is not None and (not isinstance(owner, str) or not owner.strip()):
         _ic_raise(422, "investment_case_request_invalid", "owner must be a non-empty string")
     owner = owner if owner is not None else _ic_default_owner(sim_state)
-    build = _ic_build_case(n, cfg, owner=owner, lost_load=sim_state.get("last_lost_load"))
+    # IC G3 R-2: the campus study read the way the route reads it, so the solved
+    # price and the report value the same case.
+    build = _ic_build_case(n, cfg, owner=owner, lost_load=sim_state.get("last_lost_load"),
+                           campus=_ic_read_campus(raw))
     try:
         case = build()
     except FinanceRefused as exc:
@@ -2443,7 +2448,10 @@ def solve_ppa_price(target_irr: float, target_year: int,
         "target_irr": target_irr, "target_year": target_year,
         "equity_post_tax_irr_at_target_year": _ne(out.get("solved_equity_irr_at_target_year"), 6),
         "owner": _cut(case.owner),
-        "flags": [_cut(f, 160) for f in out.get("solve_ppa_flags") or []],
+        # IC G3 gate C1: the case's campus flags too, so a price solved without the
+        # campus extras (a stale study, no engine, an unsaved network) says so.
+        "flags": [_cut(f, 160) for f in [*(out.get("solve_ppa_flags") or []),
+                                         *(f for f in case.flags if f.startswith("campus_study_"))]],
         "basis": ("post-tax equity IRR on the incremental cash against the counterfactual "
                   "supply cost, over operating years 1..target_year (SAM ppa_soln_mode=0)"),
         "stored_inputs_changed": False,
@@ -3439,6 +3447,14 @@ def campus_set_library(project_id: str, yaml: str) -> dict:
 
 def campus_get_investment(project_id: str) -> dict:
     from services.campus_electrical_service import get_investment as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def campus_get_milp(project_id: str) -> dict:
+    # Read only, on purpose: the joint optimisation runs for minutes and is
+    # started and cancelled in the panel (plan C12).
+    from services.campus_electrical_service import get_milp as _h
     with _acting() as (db, user):
         return _h(_gridspine_project(db, user, project_id))
 
@@ -5844,6 +5860,12 @@ def export_preview_png(filename: str, png_bytes_b64: str) -> dict:
     return _save_agent_export(payload, filename, "image/png")
 
 
+def _interrupted_reason(turn: dict) -> str:
+    """The recorded end of an interrupted turn, for a summary line."""
+    from services import chat_service
+    return str(turn.get(chat_service.INTERRUPTED_REASON_KEY) or "unknown")
+
+
 def export_chat_summary(
     format: str = "md",
     since_turn: int | None = None,
@@ -5862,6 +5884,7 @@ def export_chat_summary(
     `filename`: override the auto-generated `chat_summary_<ts>.<ext>` name.
     """
     import time as _time
+    from services import chat_service
     fmt = format.lower()
     if fmt not in {"md", "txt"}:
         raise HTTPException(
@@ -5894,6 +5917,8 @@ def export_chat_summary(
                     assistant_text += f"\n_[tool: {b.get('name','?')}]_\n"
             if assistant_text.strip():
                 lines.append(f"\n**Assistant**: {assistant_text.rstrip()}\n")
+            if chat_service.is_interrupted_turn(t):
+                lines.append(f"\n_(interrupted: {_interrupted_reason(t)})_\n")
     else:  # txt
         for i, t in enumerate(turns):
             user = (t.get("user") or "").strip()
@@ -5906,6 +5931,8 @@ def export_chat_summary(
                     assistant_text += str(b.get("text", "")) + "\n"
             if assistant_text.strip():
                 lines.append(f"Assistant: {assistant_text.rstrip()}")
+            if chat_service.is_interrupted_turn(t):
+                lines.append(f"(interrupted: {_interrupted_reason(t)})")
             lines.append("")
     payload = "\n".join(lines).encode("utf-8")
     target = filename or f"chat_summary_{int(_time.time())}.{fmt}"
@@ -7257,6 +7284,7 @@ DISPATCHERS: dict[str, Any] = {
     "campus_get_library": campus_get_library,
     "campus_set_library": campus_set_library,
     "campus_get_investment": campus_get_investment,
+    "campus_get_milp": campus_get_milp,
     # campus grid codes (2): no publish tool, by design (plan C10)
     "campus_list_grid_codes": campus_list_grid_codes,
     "campus_extract_grid_code": campus_extract_grid_code,
