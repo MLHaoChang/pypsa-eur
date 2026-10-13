@@ -4473,6 +4473,8 @@ def export_run_evidence(
 # ── Harness: ask the user (chat harness issue 04) ──────────────────────────
 
 ASK_USER_MAX_OPTIONS = 8
+ASK_USER_MAX_DETAIL = 2000
+ASK_USER_INTENTS = ("choice", "plan_review")
 
 
 def ask_user(
@@ -4480,6 +4482,9 @@ def ask_user(
     question: str,
     options: list[dict],
     allow_free_text: bool = True,
+    multi_select: bool = False,
+    detail: str | None = None,
+    intent: str = "choice",
 ) -> dict:
     """
     Present a structured question. Non-blocking by design (owner decision
@@ -4489,6 +4494,12 @@ def ask_user(
 
     Validation is strict and typed (`invalid_tool_args`) because a half-built
     card — no options, two recommendations — is worse than none.
+
+    Issue 15: `multi_select` lets several options go out together (one
+    message, labels joined by "; "); `detail` is Markdown shown under the
+    question, line breaks kept, capped at ASK_USER_MAX_DETAIL; `intent`
+    changes the presentation only — a `plan_review` card shows `detail` as
+    the plan and takes one verdict, so it needs a detail and is single-pick.
     """
     def bad(message: str) -> HTTPException:
         return HTTPException(status_code=422, detail={
@@ -4523,6 +4534,16 @@ def ask_user(
         clean.append(entry)
     if sum(1 for o in clean if o.get("recommended")) > 1:
         raise bad("mark at most one option as recommended")
+    if intent not in ASK_USER_INTENTS:
+        raise bad(f"intent must be one of {', '.join(ASK_USER_INTENTS)}")
+    if detail is not None and not isinstance(detail, str):
+        raise bad("detail must be a string of Markdown")
+    body = (detail or "").strip()[:ASK_USER_MAX_DETAIL] or None
+    if intent == "plan_review":
+        if body is None:
+            raise bad("a plan_review needs the plan in detail")
+        if multi_select:
+            raise bad("a plan_review takes one verdict; multi_select must be false")
     return {
         "_ui_event": True,
         "kind": "choice",
@@ -4530,6 +4551,9 @@ def ask_user(
         "question": " ".join(question.split())[:800],
         "options": clean,
         "allow_free_text": bool(allow_free_text),
+        "multi_select": bool(multi_select),
+        "detail": body,
+        "intent": intent,
     }
 
 
@@ -4545,6 +4569,108 @@ def set_chat_session(session: Any) -> None:
 
 def chat_session() -> Any:
     return _CHAT_SESSION.get()
+
+
+# ── Harness: page a spilled result (chat harness issue 16) ─────────────────
+
+READ_RESULT_CAP = 3500          # a page must fit the model-facing result cap
+READ_RESULT_MAX_LIMIT = 500
+
+
+def read_result(locator: str, pointer: str | None = None,
+                offset: int = 0, limit: int = 50) -> dict:
+    """
+    Page a tool result that was too large for the model and kept whole
+    (`harness/spill.py`). `pointer` is a JSON pointer ("/rows", "/rows/3/p");
+    a list is sliced by `offset`/`limit`, a large object is described by its
+    keys, a long string is sliced by characters. Every response fits
+    READ_RESULT_CAP: a page is shrunk until it does.
+
+    Bound to the calling chat: the locator resolves only inside this
+    session's and owner's spill directory, so another user's or another
+    chat's locator is `result_unavailable`, as is any read during a checked
+    answer. A malformed locator or pointer is `invalid_tool_args`.
+    """
+    from harness import spill
+
+    def bad(message: str) -> HTTPException:
+        return HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args", "message": f"read_result: {message}"})
+
+    def gone(message: str) -> HTTPException:
+        return HTTPException(status_code=404, detail={
+            "error_kind": "result_unavailable", "message": f"read_result: {message}"})
+
+    if not spill.valid_locator(locator):
+        raise bad("locator must be the 32-character id from a spill block")
+    session = chat_session()
+    if session is None:
+        raise gone("no chat is bound to this call")
+    if getattr(session, "assurance_turn", None) is not None:
+        raise gone("kept results are not readable during a checked answer")
+    path = spill.path_for(session, locator)
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise gone("that result has expired or belongs to another chat") from None
+
+    if pointer in (None, ""):
+        tokens: list[str] = []
+    elif not isinstance(pointer, str) or not pointer.startswith("/"):
+        raise bad("pointer must be empty or start with '/', e.g. /rows")
+    else:
+        tokens = [t.replace("~1", "/").replace("~0", "~") for t in pointer[1:].split("/")]
+    value: Any = doc
+    for tok in tokens:
+        if isinstance(value, dict):
+            if tok not in value:
+                raise bad(f"no key {tok!r} at that pointer")
+            value = value[tok]
+        elif isinstance(value, list):
+            if not tok.isdigit() or int(tok) >= len(value):
+                raise bad(f"{tok!r} is not an index of a list of {len(value)}")
+            value = value[int(tok)]
+        else:
+            raise bad("the pointer goes past a single value")
+
+    try:
+        offset = max(int(offset or 0), 0)
+        limit = min(max(int(limit or 50), 1), READ_RESULT_MAX_LIMIT)
+    except (TypeError, ValueError):
+        raise bad("offset and limit must be integers") from None
+    where = pointer or ""
+
+    def fits(payload: dict) -> bool:
+        return len(json.dumps(payload, default=str)) <= READ_RESULT_CAP
+
+    if isinstance(value, list):
+        items = value[offset:offset + limit]
+        page = {"pointer": where, "total": len(value), "offset": offset, "items": items}
+        while not fits(page) and len(items) > 1:
+            items = items[: max(1, len(items) // 2)]
+            page["items"] = items
+        if not fits(page):
+            return {"pointer": where, "total": len(value), "offset": offset,
+                    "too_large": True, "shape": spill.describe(items[0]) if items else "nothing",
+                    "hint": f"narrow with a pointer into the item, e.g. {where}/{offset}/<key>"}
+        end = offset + len(items)
+        page["next_offset"] = end if end < len(value) else None
+        return page
+    if isinstance(value, dict):
+        whole = {"pointer": where, "value": value}
+        if fits(whole):
+            return whole
+        keys = list(value)
+        return {"pointer": where, "keys": keys[:200], "total_keys": len(keys),
+                "shape": {str(k): spill.describe(value[k]) for k in keys[:40]},
+                "hint": f"add a key to the pointer, e.g. {where}/{keys[0]}" if keys else ""}
+    if isinstance(value, str) and len(value) > READ_RESULT_CAP - 200:
+        chunk = READ_RESULT_CAP - 200
+        part = value[offset:offset + chunk]
+        end = offset + len(part)
+        return {"pointer": where, "total_chars": len(value), "offset": offset,
+                "value": part, "next_offset": end if end < len(value) else None}
+    return {"pointer": where, "value": value}
 
 
 def use_skill(name: str) -> dict:
@@ -7289,6 +7415,7 @@ DISPATCHERS: dict[str, Any] = {
     "explain_cashflow": explain_cashflow,
     # project_mgmt (21)
     "list_projects": list_projects,
+    "read_result": read_result,
     "load_project": load_project,
     "activate_project": activate_project,
     "save_project": save_project,
