@@ -16,7 +16,7 @@
 The item's own remedy was the right one: *"a test that fails when a route is
 mounted under a prefix no mechanism covers. The omission is what needs to
 become loud."* Migrating 171 routes to a dependency would not have caught
-item 12, which was in a router that already used `ProjectAccessDep`.
+item 16, which was in a router that already used `ProjectAccessDep`.
 
 ## Ground truth on `24ed0b8`
 
@@ -31,7 +31,7 @@ item 12, which was in a router that already used `ProjectAccessDep`.
 
 Chat seam: 97 non-read tools. 47 are seam-gated, 30 inherit the decision of
 the HTTP write route they map to, 13 have their own written decision, and
-**7 are real gaps** (item 13). Both tables sum exactly; computed from the test
+**7 are real gaps** (item 17). Both tables sum exactly; computed from the test
 module, not counted by hand.
 
 ## Step 1: the policy test (done)
@@ -41,12 +41,12 @@ must be gated, verifiably holder-checked, carry a written policy entry, or be a
 `KNOWN_GAPS` entry pointing at an open item (a ratchet). Mutation-tested against
 seven ways the gap comes back; see the `a266dd5` commit message.
 
-## Step 2: fix item 13
+## Step 2: fix item 17
 
 Gate the seven upload-store tools at the chat seam. Delete their `KNOWN_GAPS`
 lines; the ratchet forces this. Rename or split `_LOCK_GATE_SERVICE_CALL_MUTATORS`,
 whose name says "network", and correct the stale docstring line that let it
-through. Fix criteria are in the item 13 finding.
+through. Fix criteria are in the item 17 finding.
 
 ## Step 3: the same ratchet for the ACL dimension
 

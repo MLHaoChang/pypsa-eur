@@ -80,11 +80,11 @@ and the tool reached `save_library` with the intruder's YAML.
 
 ## Why it keeps happening
 
-This is the fifth occurrence of one shape (now with four tools in this item alone) (items 12 and 13, the stress and
+This is the fifth occurrence of one shape (now with four tools in this item alone) (items 16 and 17, the stress and
 worksheet PUTs in `68e5f62`, and now this one). A REST handler is the only
 place that checks the lock, and a second caller of the same service skips
 the handler. The chat tools are that second caller every time. #76's
-`e36c041` gated the item 13 tools one by one. It could not have covered
+`e36c041` gated the item 17 tools one by one. It could not have covered
 these, which did not exist yet. Gating per tool will keep missing new tools,
 and that is why the write-surface test exists: it caught this one on the day
 it landed.
