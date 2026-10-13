@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useEffect } from 'react'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
@@ -51,9 +51,16 @@ describe('AssistantDock', () => {
   beforeEach(() => {
     localStorage.clear()
     useUIStore.setState({ assistantDockOpen: false, assistantEntry: null })
-    useChatStore.setState({ pending: null, durableThreadId: null, utteranceGeneration: 1 })
+    useChatStore.setState({
+      pending: null, durableThreadId: null, utteranceGeneration: 1,
+      streaming: false, messages: [],
+    })
     chatPanelMounts.current = 0
     ensureLiveDurableThread.mockClear()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('shows the launcher when collapsed', () => {
@@ -226,8 +233,67 @@ describe('assistant dock prominence', () => {
     await user.click(screen.getByTestId('companion-live-send'))
     expect(useUIStore.getState().assistantDockOpen).toBe(false)
     expect(heard).toEqual(['List the generators'])
-    expect(screen.getByTestId('companion-live-caption').textContent).toContain('Sent to the assistant.')
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('thinking')
+    expect(screen.getByTestId('companion-live-echo').textContent).toBe('List the generators')
+    expect(screen.queryByTestId('companion-live-caption')).toBeNull()
+    expect(screen.queryByTestId('companion-outcome')).toBeNull()
     window.removeEventListener('companion:live-utterance', onUtterance)
+  })
+
+  it('moves the node through thinking and speaking with the stream, then clears the echo', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    render(<AssistantDock />)
+    await user.click(screen.getByTestId('companion-live'))
+    await user.type(screen.getByTestId('companion-live-input'), 'List the generators')
+    await user.click(screen.getByTestId('companion-live-send'))
+    const launcher = () => screen.getByTestId('companion-launcher')
+    await act(async () => { useChatStore.setState({ streaming: true }) })
+    expect(launcher().getAttribute('data-presence')).toBe('thinking')
+    await act(async () => {
+      useChatStore.setState({
+        streaming: false,
+        messages: [
+          { id: 'u1', role: 'user', content: 'List the generators', ts: 1 },
+          { id: 'a1', role: 'assistant', content: 'There is one generator.', ts: 2 },
+        ],
+      })
+    })
+    expect(launcher().getAttribute('data-presence')).toBe('speaking')
+    // The answer itself stays in the console transcript, not beside Live.
+    expect(screen.queryByText('There is one generator.')).toBeNull()
+    expect(screen.queryByTestId('companion-outcome')).toBeNull()
+    await act(async () => { vi.advanceTimersByTime(5_000) })
+    expect(screen.queryByTestId('companion-live-echo')).toBeNull()
+    expect(launcher().getAttribute('data-presence')).toBe('listening')
+  })
+
+  it('keeps the download chip for a Live turn that produced a file', async () => {
+    const user = userEvent.setup()
+    render(<AssistantDock />)
+    await user.click(screen.getByTestId('companion-live'))
+    await act(async () => {
+      useChatStore.setState({
+        messages: [
+          { id: 'u1', role: 'user', content: 'Export the chart', ts: 1 },
+          { id: 'a1', role: 'assistant', content: 'The chart is ready.', ts: 2 },
+          {
+            id: 't1', role: 'tool', content: '→ build_delivery', ts: 3,
+            tool_result: { download_url: '/api/projects/Demo/uploads/0123456789abcdef/blob', filename: 'chart.png' },
+          },
+        ],
+      })
+    })
+    expect(screen.getByTestId('companion-download').getAttribute('download')).toBe('chart.png')
+    expect(screen.queryByText('The chart is ready.')).toBeNull()
+  })
+
+  it('leaves the node idle when a console turn streams while Live is closed', async () => {
+    render(<AssistantDock />)
+    await act(async () => { useChatStore.setState({ streaming: true }) })
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('idle')
+    await act(async () => { useChatStore.setState({ streaming: false }) })
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('idle')
   })
 
   it('queues a live sentence while the assistant is already streaming without opening the console', async () => {
