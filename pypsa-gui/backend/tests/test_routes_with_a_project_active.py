@@ -1,7 +1,7 @@
 """
 Network-replacing routes must be what the NEXT request reads while the session
-has a project active (OPEN-ITEMS, the 3D-site-view item "a network reset while
-a project is open lands in the session's scratch slot").
+has a project active (OPEN-ITEMS item 19, "a network reset while a project is open
+lands in the session's scratch slot"; numbered 12 until 2026-10-13).
 
 `reset_network()` publishes a fresh UNBOUND context into the session's
 `scratch:<sid>` slot, but `resolve_for_session` resolves the next request by

@@ -57,7 +57,7 @@ Two failures found and fixed before the full run: `test_sites_routes.py::test_co
 
 ## 5. Ledgered, not fixed here
 
-`OPEN-ITEMS.md` items 12–14: the scratch-slot network reset (defects A–C of the branch's full-product E2E, data-loss class, patch and tests kept in `notes/2026-09-30-full-e2e/`), the review credential in `login.html`, and the three-port Link `bus2` drop. Defect D (template → 409) is already fixed on master by `_unique_project_name`.
+`OPEN-ITEMS.md` items 12–14 (renumbered 19 and 20 on 2026-10-13; 14 and 19 are closed): the scratch-slot network reset (defects A–C of the branch's full-product E2E, data-loss class, patch and tests kept in `notes/2026-09-30-full-e2e/`), the review credential in `login.html`, and the three-port Link `bus2` drop. Defect D (template → 409) is already fixed on master by `_unique_project_name`.
 
 ## 6. Open, needs hardware or network this container lacks
 
