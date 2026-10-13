@@ -1425,7 +1425,9 @@ export default function ChatPanel() {
             assistantText += `\n[tool: ${name}]`
           }
         }
-        if (assistantText.trim()) {
+        // An interrupted turn always gets a bubble, even with no text: the
+        // note on it is what explains tools that ran without an answer.
+        if (assistantText.trim() || t.interrupted) {
           seeded.push({
             id: `replay-a-${counter++}`,
             role: 'assistant',
@@ -1433,6 +1435,7 @@ export default function ChatPanel() {
             answer_id: t.answer_id,
             receipt: t.receipt,
             ts: Math.round((t.ts || 0) * 1000),
+            ...(t.interrupted ? { interrupted: t.interrupted_reason || 'unknown' } : {}),
           })
         }
       }
@@ -3302,6 +3305,12 @@ export default function ChatPanel() {
                   onRequest={(text) => useChatStore.getState().sendRequest(text, { source: 'assistant-task' })} />
                 <ToolProgressDetails toolUseId={m.tool_use_id} />
               </>
+            )}
+            {m.role === 'assistant' && m.interrupted && (
+              <div className="mt-1 text-[11px] text-amber-400" data-testid="chat-interrupted-note">
+                This turn did not finish ({m.interrupted.replace(/_/g, ' ')}). It is
+                shown for reference; the assistant does not see it on later turns.
+              </div>
             )}
             {m.role === 'user' && m.attachment_file_ids && m.attachment_file_ids.length > 0 && (
               <ReplayAttachmentChips fileIds={m.attachment_file_ids} />

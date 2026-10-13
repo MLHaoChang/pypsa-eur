@@ -79,6 +79,8 @@ frame payloads held.
 | 2026-10-06 | same | `anthropic-sonnet` (live) | **4/4** in 31 s; W1 `in=1359 cached=95062 written=47531`, W4 `in=34 cached=50612`; thinking shown on W1–W3, not on W4 |
 | 2026-10-07 | 158d03b (PR #76: chat undo per turn, turn cell, per-user `/history`, import rebind, ported into `harness/*`) | `stub-openai` | **3/3** |
 | 2026-10-07 | 5cce846 (same changes, on the merged head) | `anthropic-sonnet` (live, `claude-sonnet-5`) | **3/3** in 21 s; repeated **3/3** in 18 s, where W2 again followed the `orient` step on its own (`get_meta`, `list_components` ×5, an `ask_user` card). No errors in the backend log |
+| 2026-10-07 | the #76 follow-up (interrupted-turn record, per-turn `turn_usage`; `run_turn` now iterates the body by hand instead of `yield from`) | `stub-openai` | **3/3** |
+| 2026-10-07 | same | `anthropic-sonnet` (live, `claude-sonnet-5`) | **3/3** in 24 s; W2 again took the `orient` step on its own (8 tools). No errors in the backend log |
 | 2026-10-07 | issue 15 (W5 added) | `stub-openai` | **5/5** |
 | 2026-10-07 | same | `anthropic-sonnet` (live) | **5/5** in 26 s; W5: the model called `ask_user` with `multi_select: true` from the tool description alone |
 | 2026-10-12 | phase-5 branch with 143 master commits merged (checked answers, durable tasks, toolsets, Responses adapter) | `stub-openai` | **5/5** |

@@ -108,6 +108,26 @@ def test_default_report_does_not_claim_live_calibration():
     assert not value["independent_domain_approval"]
 
 
+def test_expanded_gate_requires_every_additional_case_and_versions_its_manifest():
+    from harness.reliability_cases import CASES as STRESS_CASES
+
+    results = passing_results()
+    partial = report(results, expanded=True)
+    assert not partial["passed"]
+    assert len(partial["missing_cases"]) == len(STRESS_CASES) == 80
+    assert partial["required_cases"] == 133
+    assert partial["manifest_sha256"] != report(results)["manifest_sha256"]
+    for case in STRESS_CASES:
+        frames, answer = observation(case)
+        value = score(case, frames, answer)
+        assert not value["failures"]
+        value.update(mode="deterministic", execution="passed")
+        results.append(value)
+    assert report(results, expanded=True)["passed"]
+    results[-1]["incorrect_calculations"] = 1
+    assert not report(results, expanded=True)["passed"]
+
+
 def test_unavailable_receipt_cannot_hide_a_published_numerical_claim():
     case = next(case for case in CASES if case.fault == "value")
     frames, answer = observation(case)

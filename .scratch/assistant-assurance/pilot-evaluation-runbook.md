@@ -1,12 +1,14 @@
 # Run the bounded checked-answer evaluation
 
-The gate evaluates 53 versioned requests through the authenticated public stream
+The CI gate evaluates 133 versioned requests through the authenticated public stream
 and owned answer API in disposable projects. Every current default metric in all
 five profiles has an independently specified positive expectation. Network
 aggregation uses two generators (300 EUR), generator economics uses one
 (230 EUR), and the StorageUnit trajectory/accounting oracle totals 51 EUR.
 See the [plan](pilot-evaluation-plan.md) and the hand-worked comments in
 [the catalogue](../../pypsa-gui/backend/harness/pilot_evaluation.py).
+The additional 80 stress cases cover eight varied numerical scenarios across
+all five profiles; see the [calibration guide](calibration-runbook.md).
 
 ## Deterministic gate
 
@@ -19,7 +21,7 @@ pixi run gui-pilot-evaluation
 Or from `pypsa-gui/backend`, using the configured test Python environment:
 
 ```sh
-python tools/run_pilot_evaluation.py --report /tmp/pilot-evaluation.json
+python tools/run_pilot_evaluation.py --expanded --report /tmp/pilot-evaluation.json
 ```
 
 The CI backend job runs this before ordinary backend tests and uploads the JSON
@@ -67,9 +69,12 @@ by the selected model, but only five supported golden cases run live; adverse
 drafts and source defects remain deterministic. Live failure/incomplete execution
 fails the gate, with raw output, prompts and exceptions omitted from the report.
 Without `--live`, live evaluation is explicitly `pending_opt_in`.
+The standalone command without `--expanded` retains the 53-case core suite.
 
 This is a finite-suite acceptance gate, not a population error estimate,
 qualitative calibration or independent engineering approval. Broader language,
 domain/browser/voice/report coverage and production release remain pending.
 
 See the committed [validation record](pilot-evaluation-validation.json) for the first integrated run and its explicit remaining scope.
+
+The first user-approved live run passed five goldens (33 result slots) alongside the 53 deterministic cases on pinned source `53f738ca`. See [the live validation](pilot-live-validation.json). This is finite acceptance evidence, not live adverse/population calibration; future paid runs still require their own opt-in.

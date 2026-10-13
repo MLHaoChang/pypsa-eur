@@ -1355,7 +1355,8 @@ TOOLS: list[dict[str, Any]] = [
         "has_solver_config, bus_count, snapshot_count, objective, "
         "has_orphan_tmp, missing, parent_project, scenario_description, "
         "scenario_type, project_kind (null = capacity_expansion; "
-        "'planning_dynamics' for a gridspine study) (per "
+        "'planning_dynamics' for a gridspine study), settings (the per-project "
+        "settings table: derive_lengths_from_geometry) (per "
         "schemas.py:467-491). `id` is the DB-registry UUID when multi-user "
         "auth is enabled and null in single-user mode. Each entry is "
         "augmented with `resident: bool` "
@@ -1464,8 +1465,8 @@ TOOLS: list[dict[str, Any]] = [
         "list_projects filtered to entries where parent_project == name. Each "
         "entry is a ProjectInfo {name, id, created_at, has_solver_config, "
         "bus_count, snapshot_count, objective, has_orphan_tmp, missing, "
-        "parent_project, scenario_description, scenario_type, project_kind} per "
-        "schemas.py:467-491. "
+        "parent_project, scenario_description, scenario_type, project_kind, "
+        "settings} per schemas.py:467-491. "
         "Safety: read.",
         {"name": {"type": "string"}},
         ["name"],
@@ -1658,27 +1659,39 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "export_network_nc",
-        "Export the active network as PyPSA netCDF. Saves a downloadable file in "
-        "the chat file strip and returns its metadata {file_id, filename, size}. "
+        "Export the active network as PyPSA netCDF and return the new file's "
+        "metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
         "Requires a loaded project. Safety: read.",
     ),
     _empty(
         "export_csv_bundle",
-        "Export the active network as a CSV bundle (zip). Saves a downloadable file "
-        "and returns its metadata {file_id, filename, size}. Requires a loaded "
-        "project. Safety: read.",
+        "Export the active network as a CSV bundle (zip) and return the new "
+        "file's metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
+        "Requires a loaded project. Safety: read.",
     ),
     _empty(
         "export_excel",
-        "Export the active network to an .xlsx workbook. Saves a downloadable file "
-        "and returns its metadata {file_id, filename, size}. Requires a loaded "
-        "project. Safety: read.",
+        "Export the active network to an .xlsx workbook and return the new "
+        "file's metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
+        "Requires a loaded project. Safety: read.",
     ),
     _empty(
         "export_matpower",
-        "Export the active network in MATPOWER case format. Saves a downloadable "
-        "file and returns its metadata {file_id, filename, size}. Requires a "
-        "loaded project. Safety: read.",
+        "Export the active network in MATPOWER case format and return the new "
+        "file's metadata {file_id, filename, size}. "
+        "Writes the file into the project's uploads (shown in the chat file "
+        "strip, counted toward the uploads quota, refused while another user "
+        "holds the project lock); the network and the project are unchanged. "
+        "Requires a loaded project. Safety: read.",
     ),
 
     # ── Audit / Undo (4) ───────────────────────────────────────────────────
@@ -2797,7 +2810,8 @@ TOOLS: list[dict[str, Any]] = [
         "project buys from: {yaml (the library as text: transformers, cables, "
         "capacitor banks, shunt reactors, STATCOMs and switchgear, each with "
         "its ratings, capex, fixed opex fraction and lifetime, every number "
-        "tagged measured|datasheet|assumed), is_default}. is_default is true "
+        "tagged measured|datasheet|assumed, and a cost also literature: a "
+        "reference value from a cited publication, not a quote), is_default}. is_default is true "
         "until the user saves a copy for the project. Every cost in the shipped "
         "library is an assumed placeholder. 409 for a project of another kind. "
         "Safety: read.",
@@ -2813,7 +2827,9 @@ TOOLS: list[dict[str, Any]] = [
         "(422, naming the entry and the field; 413 over 1 MB) and nothing is "
         "saved. Start from campus_get_library, change only what the user "
         "asked, and keep every value's source tag honest: a price from a quote "
-        "is datasheet or measured, a guess stays assumed. You must ask before replacing "
+        "is datasheet or measured, a cost read from a cited publication is "
+        "literature (only a cost may be; say the reference in its note), a "
+        "guess stays assumed. You must ask before replacing "
         "a library the user already edited (is_default false), because that "
         "discards their copy. Results of an earlier run turn stale. "
         "Safety: write.",
@@ -2836,7 +2852,9 @@ TOOLS: list[dict[str, Any]] = [
         "was costed to the campus or left to the grid operator, say which), "
         "library_is_default, stale, notes}. Say these with the numbers: costs "
         "are placeholders tagged assumed unless the user replaced them with "
-        "quotes, so quote them as orders of magnitude; tap changers are not "
+        "quotes (datasheet or measured) or cited reference values "
+        "(literature, still not quotes), so quote assumed ones as orders of "
+        "magnitude; tap changers are not "
         "optimised, so a voltage excursion compensation cannot shrink is "
         "reported unresolved, not fixed; and when stale is true the campus, "
         "the project or the library changed since the run. Never add the "
@@ -2844,6 +2862,27 @@ TOOLS: list[dict[str, Any]] = [
         "it is reported alongside, and the PyPSA project is unchanged. "
         "investment is null with a reason before a run or after a run with "
         "invest off. 409 for a project of another kind. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "campus_get_milp",
+        "The joint optimisation (MILP) of a campus study: {status (the background "
+        "job's record: state running|done|cancelled|failed, iteration, max_iter, "
+        "best_cost and c8_cost in EUR per year, message, error; null when no job "
+        "has run since the backend started), summary (c8_cost, milp_cost, "
+        "iterations, stop, fallback), stop (converged|stalled|delta_floor|"
+        "max_iter|cancelled), fallback (why the least-cost choice was kept, or "
+        "null), comparison (per need: c8_choice, milp_choice and each one's "
+        "annualised cost), stale, notes}. You cannot start or cancel it: it "
+        "takes minutes and runs from the panel's Joint optimisation button, so "
+        "tell the user to start it there. Say these with the numbers: the "
+        "design margin is the owner's rule, judged on the least-cost dispatch "
+        "and never met by extra inverter reactive power; costs are placeholder "
+        "figures tagged assumed unless replaced by quotes; a fallback keeps the "
+        "least-cost choice; a cancelled job keeps the best choice it had; when "
+        "stale is true the least-cost run it was based on has changed. 409 for "
+        "a project of another kind. Safety: read.",
         {"project_id": {"type": "string"}},
         ["project_id"],
     ),
@@ -3539,6 +3578,8 @@ TOOL_ROUTES: dict[str, list] = {
     "campus_get_library": _SERVICE_CALL,
     "campus_set_library": _SERVICE_CALL,
     "campus_get_investment": _SERVICE_CALL,
+    # the joint optimisation (1, plan C12) — a read; no start or cancel tool
+    "campus_get_milp": _SERVICE_CALL,
     # campus grid codes (2) — service calls; no publish tool (plan C10)
     "campus_list_grid_codes": _SERVICE_CALL,
     "campus_extract_grid_code": _SERVICE_CALL,

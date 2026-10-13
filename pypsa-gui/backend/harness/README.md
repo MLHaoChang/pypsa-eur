@@ -99,11 +99,16 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable pilot evaluation runs 53 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 133 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
 This finite-suite result does not confer production or independent domain approval.
+Offline `review_calibration.py` prepares blind interpretation judgments and
+reconciles two independently attested domain reviewers. Incomplete/disputed
+labels and provider errors prevent complete measurement. Synthetic cases cannot
+produce population error estimates; identity and sampling attestations require
+external verification. See the [calibration and review guide](../../../.scratch/assistant-assurance/calibration-runbook.md).
 Shared scope and calculation modules own project/entity/window/metric constraints, required-slot dispositions, units,
 formulas and coverage. Five bounded profiles support generator dispatch,
 declared-basis generator costs, a linear network subset, StorageUnit dispatch

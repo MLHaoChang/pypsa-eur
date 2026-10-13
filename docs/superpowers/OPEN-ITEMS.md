@@ -10,6 +10,19 @@ its project's `user_ts.json`, and an adequacy-sweep test that could not fail for
 its own regression). Their findings carry the detail. Nothing else was re-verified
 on that date, so the entries below still date from 2026-09-12.
 
+**2026-10-06:** items 12–14 added from the 3D site view branch's full-product
+browser E2E (`notes/2026-09-29-3d-site-view-phase2-qa.md` §7), re-verified in
+source on master that day. Its defect D (a second project from the same
+template → 409) is not listed: master's `_unique_project_name` already fixes it.
+
+**2026-10-06 (later):** two items closed and removed per the convention —
+item 7 (blank-canvas node positions reverting; the load now takes the newest
+of server / memory / localStorage by `savedAt` and a failed `PUT /layout`
+surfaces once, `findings/2026-07-31-blank-canvas-node-drags-revert.md` carries
+the detail) and item 14 (a three-port Link dropping `bus2` / `efficiency2`;
+`_drop_unknown_extras` admits PyPSA's per-port columns by regex). Both are
+increments A1 and A4 of `plans/2026-10-06-visual-layers-1-abstract-canvas.md`.
+
 This file exists because GitHub Issues is **disabled** on this repository, so
 there is nowhere else to keep a queue. It is deliberately thin: one entry per
 open item, with the anchor and the source document. The analysis lives in
@@ -101,21 +114,6 @@ by default, silently, with nothing failing. A dependency declared on the route
 has the opposite default. Worth a test that fails when a route is mounted under
 a prefix no mechanism covers — the omission is what needs to become loud.
 Source: finding 3 of the same audit.
-
-### 7. Node positions revert on the blank canvas
-
-User-reported 2026-07-31; diagnosed, never fixed. Two facts still hold:
-`PUT /layout` 404s until the project directory exists on disk, and on load the
-server wins unconditionally — `TopologyCanvas.tsx:2004` still resolves
-`ps ?? layoutMemCache.get(...) ?? loadDiagramState(...) ?? null`. `persistLayoutFor`'s
-`.catch()` falls back to localStorage, which is *third* in that chain, so a
-failed PUT leaves a newer local layout that the next load discards for an older
-`layout.json`. Both ends are silent. `PersistedState` carries `savedAt` and
-nothing compares it.
-
-The user's exact sequence was never reproduced, so the trigger for the failing
-PUT is still unidentified — the finding lists the candidates in the order worth
-testing. Source: `findings/2026-07-31-blank-canvas-node-drags-revert.md`.
 
 ### 8. Component names are not validated at the edge
 
@@ -227,3 +225,33 @@ suite carries **124 pre-existing failures**, all from `No module named
 'gridspine'`. "The suite is green" is false locally; the only sound gate is
 *the failing set is unchanged*. Source: gap 6 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
+
+### 12. A network reset while a project is open lands in the session's scratch slot
+
+**Undo reports success and changes nothing; a raw import is silently lost or
+ignored.** `PyPSAService.reset_network()` publishes the new, unbound network
+context into `scratch:<sid>`, but while `sessions.active_project_id` is set the
+next request re-resolves the *project's* registry slot
+(`services/active_project.resolve_for_session`) and never sees it. Affected: raw
+imports (`.nc`, CSV, Excel, MATPOWER in `routers/io.py`), undo
+(`services/network_undo.apply_undo`), snapshot restore (`routers/snapshots.py`),
+and template create / bundle import (`routers/projects.py`), which re-bind but
+leave a stale bound copy in scratch that is written back over the project's
+saved edits when evicted. Reproduces through the API alone. The backend tests
+miss it because `install_network` (`tests/conftest.py`) clears
+`active_project_id`, so every test runs with the pointer unset. **Data-loss
+class.** A proposed fix (clear the pointer after a raw import; `rekey_context`
+after re-binding; pass the acting session through the chat import wrappers) and
+five regression tests sit unapplied in `notes/2026-09-30-full-e2e/`; the diff
+targets the 2026-09-30 tree and needs porting to today's `routers/io.py`.
+Source: `notes/2026-09-29-3d-site-view-phase2-qa.md` §7, defects A–C.
+
+### 13. `login.html` prefills and prints a review credential
+
+`frontend/public/login.html:391-402` ships `admin@example.com` /
+`admin-pass-123` as the input values and in a visible "Review account" line, and
+auth mode serves that page (`static_gate.decide_route` passes `/login.html`
+through). Fine for a review build; a credential in a shipped page otherwise. One
+decision (strip before release, or gate the prefill on a build flag) and a test
+that the served page carries no password value. Source: the same E2E, "Other
+findings".
