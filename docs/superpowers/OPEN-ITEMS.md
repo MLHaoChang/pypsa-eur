@@ -15,9 +15,10 @@ on that date, so the entries below still date from 2026-09-12.
 2026-09-12 pass" — and the re-verification turned up a fourth instance of item
 2's defect, entered below as item 16.
 
-**2026-10-13:** that item is renumbered **16**. Master assigned 12–14 to the
-3D site view on 2026-10-06 while this branch was unmerged. Commits and
-findings written before 2026-10-13 cite it as item 12.
+**2026-10-13:** that item is renumbered **16**, and this pass's 13 and 14 become
+**17** and **18**. Master assigned 12–14 to the 3D site view on 2026-10-06
+while these branches were unmerged. Commits, findings and tests written
+before 2026-10-13 cite them as 12, 13 and 14.
 
 **2026-10-06:** items 12–14 added from the 3D site view branch's full-product
 browser E2E (`notes/2026-09-29-3d-site-view-phase2-qa.md` §7), re-verified in
@@ -62,41 +63,48 @@ verification record.
 
 ## High
 
-*(Nothing open at this severity.)*
+### 18. The campus-electrical chat tools bypass the edit-lock check
+
+`services/chat_tools.py`, added by #79 (merged 2026-10-06). The HTTP routes in
+`routers/campus_electrical.py` call `_check_lock` before the service. The chat
+tools `campus_draft_campus` and `campus_run_study` call the service directly,
+and `_gridspine_project` resolves access but not the lock. Reproduced on
+`af69613`: the HTTP draft returned 409 for a non-holder, while
+`campus_draft_campus(overwrite=True)` and `campus_run_study` both reached the
+write path. #84 added a third, `campus_extract_grid_code` (it can add a grid-code draft but not overwrite one), reproduced the same way. #91 added a fourth, `campus_set_library` (it replaces the project's asset library), also reproduced. This is the fifth instance of the "a second caller skips the
+handler" shape. `tests/test_write_surface_lock_policy.py` caught it on the day
+it landed, by going red on #80 merged with the new master. Note for the fix:
+these tools take a `project_id`, so the seam's active-project predicate would
+test the wrong lock. Check the lock of the resolved project. Full analysis:
+`findings/2026-10-06-campus-chat-tools-bypass-the-lock-check.md`. Server only.
 
 ## Medium
 
-### 6. `ProjectAccessDep` is adopted by 6 of 23 routers
+### 6. Authorization denies by omission: lock dimension done, ACL dimension open
 
-`routers/deps.py:100` defines the right primitive — a per-route dependency that
-resolves the project named by the request and checks the caller's access. It is
-used by `compare`, `adequacy_worksheet`, `uploads`, `snapshots`, `gridspine` and
-`deps`, and NOT by the five routers carrying most of the surface: `network` (81
-routes), `results` (48), `chat` (20), `simulation` (14), `io` (8) — 171 of 267.
-Those rely on the path-prefix middleware instead.
+**Narrowed 2026-10-05.** The original entry ("`ProjectAccessDep` is adopted by
+6 of 23 routers") was partly stale and partly mis-framed: `/api/results/` has
+since been lock-gated; the count missed `ProjectDep`, a second ACL dependency
+on the same `resolve_project`; and the five large routers act on the ACTIVE
+project, which no path-param dependency can resolve. The item's own remedy was
+the right one: make the omission fail loudly.
 
-This is the structural cause of the route-scoping defects above, and it is a
-shape rather than a one-off:
-a prefix list denies by omission, so a new router under a new prefix is ungated
-by default, silently, with nothing failing. A dependency declared on the route
-has the opposite default. Worth a test that fails when a route is mounted under
-a prefix no mechanism covers — the omission is what needs to become loud.
-Source: finding 3 of the same audit.
+**Lock dimension: done** in `a266dd5`. `tests/test_write_surface_lock_policy.py`
+fails on any write route or non-read chat tool that is not gated, not
+verifiably holder-checked (calls are followed, not source-scanned), and not
+given a written reason. Mutation-tested seven ways; undoing item 16's fix turns
+it red naming that exact route. Writing it found item 17.
 
-**Fresh evidence, 2026-09-30: item 16 is the fourth miss in one router family.**
-`tests/test_worksheet_foreign_lock.py` already called the fix it guards "the
-third instance of one miss"; `put_asset_health` makes four, and it was ungated
-for 20 days with nothing failing. The proposed test now has a concrete shape to
-aim at, because enumerating write routes in the five routers under
-`/api/projects` and flagging those matched by no lock mechanism is exactly how
-item 16 was found — by hand, in one pass. Two of the four misses would have been
-red the day they landed.
+**Still open:**
+* the **ACL** dimension ("may this caller SEE this project") has the same shape
+  and no omission test. Nothing has been found there, and nothing has looked
+  systematically either;
+* three product questions the policy table now states rather than settles:
+  should gridspine studies, chat-history import/clear, and adequacy campaigns
+  respect the edit lock?
 
-Item 16 being CLOSED does not weaken this. The class is closed in that one
-router family — all three sidecar PUTs now carry the check — but the mechanism
-that let a route ship ungated for 20 days with nothing failing is untouched, and
-it is the same mechanism for every other prefix. Four hand-caught misses is the
-argument for the test, not against it.
+Plan and ground-truth counts:
+`plans/2026-10-05-item-6-write-surface-lock-policy.md`.
 
 ### 8. Component names are not validated at the edge
 
@@ -169,6 +177,16 @@ NOT reused or compacted — other findings and assessments cite these numbers.
   mutation-verified after. **This closes the class in this router family — all
   three sidecar PUTs now carry the check** — but not the shape that produced it,
   which is item 6.
+* **17** — chat tools that wrote a project's upload store bypassed its lock
+  check (`clear_uploads` and six `export_*` tools). Found and reproduced
+  2026-10-05 while doing item 6. Fixed independently by #76 (`e36c041`), which
+  merged on 2026-10-07: it gates the tools at the seam and checks every export
+  through `_check_foreign_lock("export")` in `_save_agent_export`. On merge,
+  the write-surface ratchet failed on exactly the 7 `KNOWN_GAPS` entries and
+  on the 3 `TOOL_POLICY` entries #76 also gated (`clear_chat_history`,
+  `start_campaign`, `end_campaign`). That is the same 10 a trial merge
+  predicted two days earlier, and all are now deleted. #76 also settled two of
+  the three product questions item 6 recorded.
 * **5** — chat sessions have no owner, so the confirmation gate rests on id
   secrecy. Closed by the same commit as item 3: `owner_user_id` plus one
   comparison is exactly the fix this item asked for, so `/confirm` no longer

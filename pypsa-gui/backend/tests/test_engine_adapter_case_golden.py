@@ -119,14 +119,15 @@ def test_inverter_replacements_land_at_its_lifetime_inside_the_horizon(bundles):
 @pytest.mark.parametrize("option", OPTIONS)
 def test_fixed_om_reconciles_to_asset_economics_and_cost_breakdown(bundles, option):
     """
-    The engine's FOM line is `n.statistics.fom`, which PyPSA rounds to five
-    decimals: equal to WP0 within half a unit of the fifth decimal (the
-    recorded delta `fom_rounded_by_pypsa_statistics`).
+    The engine's FOM line is `n.statistics.fom` read unrounded (IC engine ask
+    4): equal to WP0 to 1e-12, with no recorded delta (the retired
+    `fom_rounded_by_pypsa_statistics`).
     """
-    assert abs(bundles[option].view.years[1].opex_fixed - _gold(option)["fom_annual"]) <= 5e-6
+    assert bundles[option].view.years[1].opex_fixed == pytest.approx(
+        _gold(option)["fom_annual"], rel=1e-12)
     rows = [r for r in json.loads((FIXTURES / "u2_deltas.json").read_text())["deltas"]
             if r.get("figure") == f"golden_s5.{option}.fom_annual"]
-    assert rows and rows[0]["cause"] == "fom_rounded_by_pypsa_statistics"
+    assert rows == []
 
 
 def test_variable_opex_is_the_assets_own_vom_never_the_system_opex(bundles):
