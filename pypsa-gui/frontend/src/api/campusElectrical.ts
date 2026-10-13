@@ -92,6 +92,11 @@ export interface Requirement {
 
 export type InvestStatus = 'chosen' | 'kept' | 'not_needed' | 'unresolved'
 
+/** What a row does (plan C13): a new asset, units added next to existing ones,
+ *  existing units kept, or a group or cable bought where existing ones stood.
+ *  Absent in a run from before it, and empty for a need that needs nothing. */
+export type InvestAction = 'buy' | 'add' | 'keep' | 'replace'
+
 /** One need and the asset bought for it (`campus_investment.csv`). `library_id`
  *  and `invest_period` are null for a need that needs nothing. */
 export interface InvestmentRow {
@@ -107,6 +112,7 @@ export interface InvestmentRow {
   existing: boolean
   status: InvestStatus
   reason: string | null
+  action?: InvestAction | '' | null
 }
 
 /** The electrical cost of one investment period (`campus_cost.csv`). */
@@ -122,8 +128,22 @@ export interface InvestedComplianceRow extends ComplianceRow {
 export interface HistoryRow { iteration: number; need: string; from: string; to: string; check: string; detail: string }
 export interface UnresolvedNeed { need: string; reason: string }
 
-/** Who buys the PCC switchgear. */
-export interface InvestScope { pcc_switchgear: 'campus' | 'grid_operator' }
+/** A tolerance of the parallel rules, tagged as every engine figure is. */
+export interface TaggedRule { value: number; source: string; note?: string }
+
+/** The rules a unit added next to existing transformers had to meet (plan C13),
+ *  written with the run; the panel shows them and does not edit them. */
+export interface ParallelScope {
+  ratio_tol: TaggedRule
+  uk_tol: TaggedRule
+  step_tol_pct: TaggedRule
+  unknown_vector_group: 'assume_compatible' | 'refuse'
+  rating_ratio: string
+}
+
+/** Who buys the PCC switchgear, and (plan C13; absent in older runs) the rules
+ *  for adding units in parallel. */
+export interface InvestScope { pcc_switchgear: 'campus' | 'grid_operator'; parallel?: ParallelScope }
 
 /** The solved hub's own system cost. `per_period` is EUR per year for a
  *  multi-period project; a single-period project has only `total`, as solved. */

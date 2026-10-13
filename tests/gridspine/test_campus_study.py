@@ -278,9 +278,15 @@ def test_the_pcc_switchgear_scope_is_a_study_setting_and_is_written(tmp_path, pr
     pcc = draft_from_project(project).spec["campus"]["pcc"]["bus"]
     by_operator = invest_campus(run, pcc_switchgear=False)
     assert f"switchgear {pcc}" not in set(by_operator["investment"]["need"])
-    assert json.loads((run / INVEST_SCOPE_JSON).read_text()) == {"pcc_switchgear": "grid_operator"}
+    from gridspine.static.campus_invest import ParallelRules
+    rules = ParallelRules().scope()
+    assert json.loads((run / INVEST_SCOPE_JSON).read_text()) == {"pcc_switchgear": "grid_operator", "parallel": rules}
     invest_campus(run)
-    assert json.loads((run / INVEST_SCOPE_JSON).read_text()) == {"pcc_switchgear": "campus"}
+    assert json.loads((run / INVEST_SCOPE_JSON).read_text()) == {"pcc_switchgear": "campus", "parallel": rules}
+    # the rules for adding units next to existing ones are passed on and written with the run (plan C13)
+    invest_campus(run, parallel=ParallelRules(uk_tol=0.075))
+    written = json.loads((run / INVEST_SCOPE_JSON).read_text())["parallel"]
+    assert written == ParallelRules(uk_tol=0.075).scope() and written["uk_tol"]["value"] == 0.075
 
 
 def test_investing_by_milp_writes_c8s_files_and_the_milp_history(tmp_path, project):

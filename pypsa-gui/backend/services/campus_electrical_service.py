@@ -470,6 +470,10 @@ INVESTMENT_NOTES = (
     "optimised, and an excursion that compensation cannot shrink is reported unresolved.",
     "A steady-state study at the critical hours, with an asset bought from the first period that needs it and "
     "no replacement; unresolved needs are priced but not summed.",
+    "Each row's action says what it does: buy, add (units added next to existing transformers, beside a keep row "
+    "for the existing units kept at zero cost), keep or replace. A unit is added only when it can run in parallel "
+    "with the existing ones under the tolerances in scope.parallel, which are assumed, not from a standard; a "
+    "vector group that is not given is assumed compatible and the row says so.",
 )
 
 
@@ -611,7 +615,7 @@ def extra_owner_assets(project) -> list:
          "source": "campus_study",
          "source_hash": str,  # campus_study_hash(project): the same for every entry
          "meta": {"need", "library_id", "units", "length_km", "currency", "price_year",
-                  "provenance", "illustrative", "study_method"}}
+                  "provenance", "illustrative", "study_method", "action"}}
 
     ``quantity x upfront_per_unit`` is the item's total overnight cost in the
     library's currency, in the library's price year (no escalation).
@@ -622,8 +626,10 @@ def extra_owner_assets(project) -> list:
     when it is ``assumed``, and ``study_method`` is the run's method. A
     ``literature`` cost is a cited reference value, not a quote, and is not
     illustrative: in the defaults pack's sense that flag means "not taken from
-    a cited source". An engine kind that ``IC_KIND`` does not list is refused
-    with 422 naming it.
+    a cited source". ``action`` is the table's (plan C13: ``buy``, ``add`` for
+    units added next to existing ones, ``replace``; None for a table written
+    before it). Kept units are existing, so they are not here. An engine kind
+    that ``IC_KIND`` does not list is refused with 422 naming it.
 
     Read from that run directory: ``campus_investment.csv`` (the items, their
     units, cable length and investment period) and ``campus_assets_used.yaml``
@@ -680,7 +686,8 @@ def _owner_assets(method: str, run_dir: Path) -> list:
                      "length_km": float(length) if basis == "per_km" else None,
                      "currency": lib["currency"], "price_year": lib["price_year"],
                      "provenance": source, "illustrative": source == "assumed",
-                     "study_method": method},
+                     "study_method": method,
+                     "action": r["action"] if isinstance(r.get("action"), str) and r["action"] else None},
         })
     return out
 
