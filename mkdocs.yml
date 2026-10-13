@@ -8,6 +8,9 @@ repo_url: https://github.com/pypsa/pypsa-eur
 repo_name: pypsa/pypsa-eur
 
 docs_dir: doc
+# Fragments are folded into release_notes.md by doc/hooks.py, not built as pages.
+exclude_docs: |
+  release-notes.d/
 
 theme:
   name: material
