@@ -2755,7 +2755,9 @@ TOOLS: list[dict[str, Any]] = [
         "short_circuit (IEC 60909 per bus and period against the switchgear "
         "rating), compliance (per check: status_as_is, status_with_measures, "
         "value, limit, worst hour, clause and its code|assumed tag), "
-        "requirement (the PCC reactive band applied and where P_ref came from)}. "
+        "requirement (the PCC reactive band applied and where P_ref came from), "
+        "and after an investing run taps (the on-load tap positions per hour and "
+        "case) and tap_hours_moved (how many critical hours moved a tap)}. "
         "owner_assets_count is how many bought items the investment case takes as "
         "extra owner assets and owner_assets_method (milp|least_cost, null when "
         "none) which result they come from: the joint optimisation when it is "
@@ -2797,6 +2799,9 @@ TOOLS: list[dict[str, Any]] = [
         "with campus_get_investment. pcc_switchgear_by_operator (default "
         "false) says the grid operator owns the PCC switchgear, so it is "
         "neither bought nor costed: ask the user who owns it before assuming. "
+        "pcc_tap_control (campus|grid_operator, default campus) says who moves "
+        "the on-load taps of the transformers at the PCC; with grid_operator "
+        "they stay at the campus file's position. "
         "422 without a campus file or for a bad "
         "setting. Safety: write.",
         {
@@ -2808,6 +2813,7 @@ TOOLS: list[dict[str, Any]] = [
             "n_minus_1": {"type": "boolean"},
             "invest": {"type": "boolean"},
             "pcc_switchgear_by_operator": {"type": "boolean"},
+            "pcc_tap_control": {"type": "string", "enum": ["campus", "grid_operator"]},
         },
         ["project_id"],
     ),
@@ -2856,7 +2862,10 @@ TOOLS: list[dict[str, Any]] = [
         "(each escalation to a dearer candidate and the check that forced it), "
         "compliance_invested (the compliance table re-solved with the assets), "
         "scope ({pcc_switchgear: campus|grid_operator}: whether the PCC switchgear "
-        "was costed to the campus or left to the grid operator, say which), "
+        "was costed to the campus or left to the grid operator, say which; "
+        "pcc_tap_control: campus|grid_operator, who moves the PCC transformer's "
+        "taps), taps and tap_hours_moved (the on-load tap positions the re-check "
+        "used per hour and case, and how many hours moved one), "
         "library_is_default, stale, owner_assets_method (milp|least_cost: which "
         "result the investment case's extra owner assets come from; the joint "
         "optimisation's when it is fresh and found its own choice, else this "
@@ -2864,9 +2873,11 @@ TOOLS: list[dict[str, Any]] = [
         "are placeholders tagged assumed unless the user replaced them with "
         "quotes (datasheet or measured) or cited reference values "
         "(literature, still not quotes), so quote assumed ones as orders of "
-        "magnitude; tap changers are not "
-        "optimised, so a voltage excursion compensation cannot shrink is "
-        "reported unresolved, not fixed; and when stale is true the campus, "
+        "magnitude; the on-load taps act "
+        "inside the re-check (per hour and case, an N-1 case after the tap "
+        "changers act), so a voltage excursion still unresolved is one neither "
+        "the taps nor compensation could shrink, and its reason says why; and "
+        "when stale is true the campus, "
         "the project or the library changed since the run. Never add the "
         "electrical cost to the hub's as if it were in the hub's optimisation: "
         "it is reported alongside, and the PyPSA project is unchanged. "

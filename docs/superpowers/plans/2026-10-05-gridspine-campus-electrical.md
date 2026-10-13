@@ -1465,6 +1465,167 @@ Branch `feat/gridspine-campus-replacement`, cut from C13's branch (`feat/gridspi
 
 **Estimated size.** Large: about 450 lines of engine, 150 of service and panel, and 550 of tests. One to two sessions, Opus for the engine and the MILP.
 
+### C15 as built (2026-10-12)
+
+Branch `feat/gridspine-campus-taps`, cut from C13's branch (`feat/gridspine-campus-add-units`), with master (PRs #147, #148 and #152 included) and C13's re-merged branch merged in. The search is the new module `gridspine/static/campus_taps.py`.
+
+**Where the plan proved wrong, and what was built instead.**
+- **The walk's objective with two groups in series.** The plan's rule cannot pass its own two-group oracle. Under that rule each group walks to lower "the worst excursion of the buses fed through that group".
+  - The failing case: TR3 is wound 20/11 kV and sits at -9, so MV2 is low and LV1 high at the same hour.
+  - TR1 cannot raise MV2 without raising LV1, so under the plan's rule it does not move.
+  - TR3 then brings LV1 down, and MV2 stays low.
+  - The brute force finds both in band: TR1 lowered, TR3 raised.
+  - As built, each group walks on the key **(excursion of its own zone, excursion of every bus it feeds, |offset|)**, compared in that order. Its *zone* is the buses it feeds that no searched group further down feeds.
+  - An upstream changer so holds its own busbars first, and helps the buses behind another changer only as far as its own zone allows. With one group, the zone is every bus the group feeds, so the rule is the plan's.
+  - `test_an_upstream_group_holds_its_own_zone_first` pins this on two hours. The plan's rule fails both: it was planted as a mutation and checked.
+- **The neutral tie-break is part of the walk's key.** A step that keeps the excursion and moves toward neutral is taken. A walk that starts from a file tap away from neutral therefore ends at the in-band position nearest neutral, which is what the brute force over (excursion, |offset|) picks.
+  - A group whose buses are all in band does not walk, so an hour that passes keeps its file taps.
+- **A PCC voltage failure** still mapped to the reactive need, as in C8; the plan did not change that mapping. It therefore still cost one escalation before it was found not to shrink. **Superseded by the owner's decision of 2026-10-13** (below, "The PCC voltage, owner decision"): it is now reported at once, with nothing bought for it.
+  - Its unresolved reason is now "the grid set-point is outside the band: the operator's voltage, not a campus measure (the PCC voltage is never sent to the taps)".
+  - The PCC bus has no band in the tap search.
+- **Failure reasons.** Besides "range exhausted: TR1+TR2 at +9 (max), MV2 0.893 pu" and "TR3 has no on-load tap data", two more cases needed words:
+  - "TR1's taps are the grid operator's (pcc_tap_control)";
+  - a group not at its range end that a further step does not help (excursions in both directions).
+
+  Every group upstream of the worst bus is named, nearest first, followed by the bus, its voltage, the hour and the case.
+
+**The choices the plan left open.**
+- **Which groups move.** A group moves only when every unit has a tap block with `changer: on_load`. A group with an off-circuit unit, or with a unit without taps, stays as the file has it, and is reported as having no on-load tap data.
+- **The group's position and range.**
+  - The position is the master's (the first unit's, by name) offset from its neutral. Every unit sits at its own neutral plus that offset.
+  - The range is the offsets every unit reaches.
+  - Units the file puts at different offsets join the master's offset once the group moves.
+- **The PCC transformers** are those whose HV bus is the PCC (the definition `compensation_bus` uses).
+- **The order and the zones.** Top-down is breadth first by the depth of the group's HV bus from the PCC. The buses a group feeds are those reached from its LV bus without crossing its own units (the PCC excluded).
+- **The rounds.** At most `TAP_ROUNDS` = 3 tap changes. Each change is followed by a fresh C8 dispatch and a solve.
+  - If the taps would still move after the third change, the state with the smallest worst excursion is kept (the first on a tie) and the hour is flagged.
+  - The flag is written in the compliance detail ("taps still moving after 3 rounds at …"). The tap table's columns stay the plan's.
+- **Cases.** Each N-1 case starts from the intact case's taps, and the taps are put back after the case. The intact case's moved taps are the `ReactiveResult.taps` and the `trafo_tap` set-points, and only moved units are listed there. An hour where nothing moves has no tap set-point at all.
+- **The tap table** (`campus_invest_taps.csv`) lists every transformer with tap data, on-load or off-circuit, that is in service in the case. `ratio_pct` is the ratio at the tap against the rated one (100 × (1 + t s) for HV-side taps). `moved_by` is the change from the file's `tap.pos`. When no transformer has tap data, the file is a header only.
+- **The compliance detail** of the campus voltage gains a note only when a tap moved or an hour hunted. The note gives:
+  - the semantics (per hour and case, Q held in N-1);
+  - the searched groups' taps at the worst reading;
+  - the hours still hunting.
+
+  A study whose voltages pass reads as before.
+- **Part one** (`size_campus`) is unchanged: it solves at the file's taps.
+- **Run time.** Without a searched on-load changer, the re-check takes today's path, with no extra load flow. With one, the cost is:
+  - an hour in band: one extra solve per case (the in-band check);
+  - an hour out of band: about 2 + steps solves per searched group, plus one re-dispatch per tap change.
+- **The MILP.**
+  - `evaluate` searches every case, the intact case included, at the point's own Q, held.
+  - `reference` and the finite differences run C8's rounds.
+  - `select_assets_milp` and `invest_campus` take `pcc_tap_control`.
+  - A MILP point's tap table comes from its own evaluation.
+- **Backend, panel and copilot.**
+  - Run settings gain `pcc_tap_control` (`campus` | `grid_operator`, default `campus`). It is validated by the service (422) and by the route model (`Literal`), passed to the least-cost run and to the MILP job, and saved with the settings.
+  - The results, `campus_get_study` and `campus_get_investment` carry `taps` and `tap_hours_moved` (the critical hours where any case moved a tap). The MILP results carry their own `taps`.
+  - The panel has a checkbox "PCC transformer taps held by the grid operator (at the campus file's position)". Under the investment table it shows:
+    - the semantics of the taps;
+    - the count of hours that moved a tap;
+    - who moves the PCC taps;
+    - a collapsed table of every position, with moved taps in bold.
+  - The investment notes and the tool descriptions no longer say that tap changers are not optimised. `campus_run_study` takes `pcc_tap_control`, and the assistant inventory is regenerated: only that tool's schema changed.
+- **Changed expectations, amended rather than weakened:**
+  - `test_a_voltage_compensation_cannot_lift_is_unresolved_with_the_tap_change_named` now asserts "TR1 has no on-load tap data" and the bus, in place of "tap change". Its other assertions are kept.
+  - The scope dictionaries gain `pcc_tap_control`.
+  - The route and chat-tool argument tables gain the setting.
+  - The copilot description test now asserts the on-load taps instead of "not optimised".
+- **Not done:**
+  - The drafted campus files get no tap block. The producer's docstring says why. No line was added to the draft's `skipped` list, which names elements left out.
+  - The shipped library's tap data is the separate data commit (question 16), so the shipped library still has none.
+
+**Tests** (oracles that run no code under test), in `tests/gridspine/test_campus_taps.py` (39):
+- the tap sign of a `trafo_tap` set-point by hand (1/1.03 pu);
+- one group, intact and both N-1 cases, against the brute force over 19 positions (smallest excursion, then nearest neutral), from file taps at 0, 4, -8 and 5, with the solved voltages equal to a direct net's;
+- two groups in series, against the brute force over 19 × 19 positions, on eight hours: in band exactly when the brute force is;
+- the zone counter-example (two hours) and an upstream group helping a downstream one at its range end;
+- a lower group in band keeping its file tap;
+- each N-1 case of an unequal pair starting from the intact taps;
+- the range of a mixed-neutral group by hand;
+- the bands without the PCC;
+- the rounds' order, the settling and the hunting on stand-in steps;
+- the re-settle of Q, as the PCC on the band edge in a direct net at the reported tap and Q;
+- the re-solve of the reported tap on a direct net;
+- the regression, where an investment whose hours pass is frame for frame the same with on-load data or without, and has no tap set-point;
+- off-circuit taps, the grid operator's PCC taps and a PCC set-point out of band;
+- the MILP: with a STATCOM or a tap available, C8 and the MILP both take the tap, as a brute force over the options shows, each with the taps by brute force; the MILP's reference dispatch is tapped as a direct net says; the grid operator's PCC taps are never moved by the MILP.
+
+**Mutations.** 55 by hand:
+- **Engine, 39.** The first run caught 26.
+  - One survivor is equivalent: dropping the search's global "in band, nothing to do" exit, which the per-group check repeats.
+  - Tests were added for the other 12, and all 12 are caught now: the Q re-settle, the N-1 start, a group in band walking, the group exit on the zone instead of the fed buses, the range's upper end, the PCC in the bands, the moved-units-only set-point, and the four MILP wirings (C8's and the problem's `pcc_tap_control`, the evaluation's taps, the reference dispatch's taps).
+  - The plan's own rule (zone = fed), one of the 39, was caught by the zone test. It is now also caught by the counter-example.
+- **Backend, 10.** 9 caught. The tap-hours count by rows instead of hours survived, and is caught now by a test counted by hand.
+- **Panel, 6.** All 6 caught.
+
+**The Data Center template**, re-run on the same prepared and ranked run as in "C13 as built" (one period, pf 0.95, shipped library), with C13's branch merged with master (fad9c9212) and with this branch:
+- **Least cost.** The result is identical: the same 1 × 63 MVA 132/33 kV, 3 × 25 MVA 33/11 kV and switchgear, €6.891 M capex and €610.3 k a year. The investment, cost, invested file, re-checked compliance, dispatch and history files are byte for byte the same.
+- **The only differences** are `campus_invest_scope.json`, which gains `"pcc_tap_control": "campus"`, and the new `campus_invest_taps.csv`, which is a header only. The shipped library has no tap data, so no tap moves and the re-check takes today's path.
+- **Run time:** no change beyond noise. The least-cost pick took 6.3 and 5.6 s on the base and 5.8 and 5.9 s here (two runs each). The MILP took 483 s on the base and 472 s here (one run each), with the same result. Its files, the iteration history included, are byte for byte the same apart from the scope and the taps file. With no tap data, no tap hook is installed and the re-check makes no extra load flow.
+
+**Gates**, on the branch with master and C13's re-merged branch (75dbaff76) merged in, under the shared lock:
+- `tests/gridspine -k "campus or island"`: 1254 passed.
+- The backend campus, chat-tool, harness, bundle, assistant (inventory and navigation), IC-extra-asset and defaults-pack tests: 1731 passed, 7 skipped.
+- `tsc` clean, and the full `vitest`: 4604 passed in 395 files.
+
+#### Merged with master: C13 (#153) and C14 (#158) (2026-10-13)
+
+origin/master at d81128e89 was merged into the branch (merge commit af40ce151). Eleven files conflicted, all where both C14 and C15 extended the same line. Each was resolved keeping both behaviours:
+- **Signatures.** `select_assets` and `select_assets_milp` take both `pcc_tap_control` (C15) and `period_years` (C14). `invest_campus` passes both, and the MILP passes both on to C8.
+- **Results.** The scope carries `pcc_tap_control` and `horizon`, and the results carry `taps`. The MILP's result is `{**c8["scope"], "horizon": horizon}` plus its own `taps`.
+- **Words.** The docstrings (the driver's module, the selector, the MILP) name both. The copilot investment notes keep C15's tap text, C14's "bought from the first period that needs it" without "no replacement", and C14's renewal note. `InvestScope` has both optional keys. The panel's header comment and imports name both.
+- **Tests.** The scope assertions in `test_campus_invest`, `test_campus_milp`, `test_campus_study` and the backend service test check both keys: C14's `horizon` is checked on its own, then `pcc_tap_control` with the rest. The panel test keeps the C15 and the C14 describe blocks, each closed (checked line by line).
+- **Not conflicting.** `harness/catalogue.py` merged without conflict (master's changes there are guided mode's), and the assistant inventory test passes without a regeneration. This plan merged on its own, with the as-built sections in the order C13, C14, C15.
+
+#### The PCC voltage, owner decision (2026-10-13)
+
+**Decision.** A PCC voltage failure skips the reactive escalation. It is reported at once, and nothing extra is bought for it.
+
+**As built.**
+- In each re-check of `select_assets`, a `pcc_voltage` failure is taken out of the escalation.
+  - The reactive need is marked unresolved in the first re-check that sees the failure, at the candidate it already has. The reason is "pcc_voltage: <detail>; the grid set-point is outside the band: the operator's voltage, not a campus measure (the PCC voltage is never sent to the taps)".
+  - The history gets one row for it, with `from` equal to `to`. It is reported once.
+- The other failures go on escalating as before. The loop continues while any other check fails. When only the PCC voltage is left, it stops with no further re-check, because the study already in hand is the AC result.
+- The excursion that a voltage escalation must reduce (`_excursion`) now covers the campus voltages only. The PCC's excursion is constant, and it would hide a campus improvement smaller than it.
+- A later reason on the same need is added after the set-point reason, joined by " | ". Such a reason can be a campus voltage that taps and compensation cannot fix, a need with no further candidate, or the iteration cap. Before the decision, only one reason was ever set.
+- **The MILP has no escalation path.** The PCC voltage does not move with the campus's Q, so no point buys compensation for it. No point is feasible either, so the MILP returns C8's result, which now buys nothing for it. A test pins this. Unchanged: while the set-point is out of band, every MILP point stays infeasible, so the MILP cannot optimise the rest. That is an open question for the owner, not part of this decision.
+- The copilot investment notes add: "it is reported at once, with nothing bought for it". `harness/catalogue.py` is unchanged.
+
+**Tests** (in `tests/gridspine/test_campus_taps.py`, 5 new):
+- a PCC-only failure (set-point 1.13 pu, the campus voltages in band): one history row from "none" to "none", the reactive row unresolved with the set-point reason, no library id, no capex, no compensation in the invested file, and the PCC still failing with measures. Before the decision this case bought the STATCOM.
+- the set-point at 1.125 pu with a campus voltage that also fails: the PCC row, then the same campus-voltage escalations and the same STATCOM as the oracle run with the set-point in band (1.115 pu), and both reasons on the need.
+- the same case at `max_iter=1`: the cap's reason is added after the set-point's.
+- `_excursion` on a hand-made compliance frame: the PCC is left out.
+- the MILP on the PCC-only case: no point buys compensation, it returns C8's result, and nothing is bought.
+
+**Mutations.** 10 by hand, all caught:
+
+| mutation | caught by |
+|---|---|
+| the PCC left in the escalation | the PCC-only test |
+| the PCC back in `_excursion` | the excursion test |
+| the PCC report stops the loop | the other-failures test |
+| no history row for the PCC | the PCC-only test |
+| a later reason overwrites the set-point's | the other-failures test |
+| the PCC reported without marking the need unresolved | C15's set-point test |
+| the PCC reported in every re-check | the other-failures test |
+| the cap's reason skipped for a PCC-reported need | the cap test, written before the mutation run |
+| the PCC escalated once more | C15's set-point test |
+| the PCC given a campus-voltage reason | C15's set-point test |
+
+**The Data Center template.** The least-cost pick was re-run on C14's prepared run (one period, `period_years: {2030: 1}`, the same ranked selection, pf 0.95, shipped library) with three sources: master (d81128e89), the merge (af40ce151) and this branch.
+- All three give the same result: 1 × 63 MVA 132/33 kV, 3 × 25 MVA 33/11 kV and switchgear, €6.891 M capex and €610.3 k a year, with nothing unresolved.
+- The merge and this branch write every file byte for byte the same.
+- Against master, the only differences are the scope's `"pcc_tap_control": "campus"` and the header-only `campus_invest_taps.csv`.
+- `campus_investment.csv` is byte for byte the one from "C14 as built". The template's set-point is in band, so the decision does not apply to it.
+- **The MILP**, on the same run with master and with this branch (one run each, 453 s and 458 s), keeps the least-cost choice on both. Every file, the iteration history included, is byte for byte the same, apart from the scope and the taps file.
+
+**Gates**, on the merged branch with the decision (075bcd0c0), under the shared lock:
+- `tests/gridspine -k "campus or island"`: 1286 passed.
+- The backend campus, chat-tool, harness, guided, investment-case (`test_investment_case_campus_route.py` included), finance-case, defaults-pack, bundle and assistant-inventory tests (54 files): 1903 passed, 3 skipped (the two live grid-code probes, and the chat-tool import check whose known-broken list is empty).
+- `tsc` clean, and the full `vitest`: 4633 passed in 396 files.
+
 ### Order and dependencies
 
 | step | what | depends on | notes |
