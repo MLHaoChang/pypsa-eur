@@ -1218,7 +1218,7 @@ async def import_bundle(
         active_project.set_active_project(db, session, _imported_project)
 
     cfg_path = dest / "solver_config.json"
-    from routers.simulation import _state, user_code_authorized
+    from routers.simulation import _state
     stripped_fields: list[str] = []
     if cfg_path.exists():
         cfg_data = json.loads(cfg_path.read_text())
@@ -1227,22 +1227,33 @@ async def import_bundle(
         # set it for a non-admin. A bundle is a SECOND writer of the same field
         # (`_solver_config_from_dict` keeps every live SolverConfig key), so
         # without this an unprivileged member reached the identical capability by
-        # uploading a zip -- verified end to end before this fix.
+        # uploading a zip -- verified end to end.
         #
-        # Stripped from the FILE as well as the loaded config, not just the
-        # loaded config: leaving it on disk plants it in a project an ADMIN may
-        # later open, and `load_project` would then hand it to a solve. That is
-        # the same escalation one session removed.
+        # STRIPPED UNCONDITIONALLY, for every importer including an org admin.
+        # Gating on `user_code_authorized(db, user)` asks "is the importer
+        # privileged", but the security question is "did the importer AUTHOR
+        # this code", and a bundle cannot answer it. An admin who imports a
+        # .pypsaproj.zip a colleague sent them got that colleague's Python
+        # exec()-ed, and `_compile_extra_functionality` runs the MODULE BODY,
+        # so side effects fire at compile time. `results_state.pkl` in the same
+        # archive already goes through the restricted unpickler for every
+        # importer; this field gets the same rule.
+        #
+        # Cost: an admin moving their OWN project by bundle loses the field and
+        # re-sets it through the gated PUT. `stripped` keeps that from being silent.
+        #
+        # Stripped from the FILE as well as the loaded config: leaving it on
+        # disk plants it in a project an admin may later open, and
+        # `load_project` would then hand it to a solve.
         #
         # Stripped and reported rather than 403-ing the whole import: the bundle
         # is already extracted by this point, and refusing here would leave a
         # half-imported project. The response names the field so this is never
         # a silent difference between what was uploaded and what was imported.
         if str(cfg_data.get("extra_functionality_code") or "").strip():
-            if not user_code_authorized(db, user):
-                cfg_data.pop("extra_functionality_code", None)
-                stripped_fields.append("extra_functionality_code")
-                cfg_path.write_text(json.dumps(cfg_data, indent=2))
+            cfg_data.pop("extra_functionality_code", None)
+            stripped_fields.append("extra_functionality_code")
+            cfg_path.write_text(json.dumps(cfg_data, indent=2))
         # Shared legacy-tolerant loader (filter unknown keys + coerce removed
         # enum values) — same path load_project uses, so a bundle from an older
         # GUI version imports instead of 500-ing on an unexpected key.
