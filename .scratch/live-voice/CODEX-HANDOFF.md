@@ -22,6 +22,12 @@ Do **not** claim whole-application coverage or live voice done. Issue 12 (compan
 
 Plans: `docs/superpowers/plans/2026-10-10-live-voice-conversation.md`, companion plan `docs/superpowers/plans/2026-10-10-assistant-companion.md`.
 
+Continuation plan: [remaining assistant implementation](../../docs/superpowers/plans/2026-10-13-assistant-remaining-work.md).
+The first bounded prerequisite slice adds `prepare_experiment`, typed caps and
+exact input preflight digests while retaining `execution_available=false`.
+See [its contract](experiment-prerequisites.md). Case advancement remains the next
+scope; this metadata tranche does not complete issue 10 or external release gates.
+
 ---
 
 ## Inventory / env snapshot

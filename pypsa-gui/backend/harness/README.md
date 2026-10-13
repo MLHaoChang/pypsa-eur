@@ -362,6 +362,15 @@ Discovery is advisory: dispatch still checks the exact catalogue offered to
 that model request. Metadata searches cache the catalogue index; normal tool
 selection keeps original catalogue order for prefix reuse.
 
+`start_experiment` persists bounded version-2 plans without executing cases.
+`prepare_experiment` checks current static network targets, schema units/ranges,
+private candidate validity and authorized baseline evidence, then stores an exact
+input preflight digest. Corrupt checkpoints and changed-payload request retries
+refuse. Legacy plans remain readable; unsupported domains stay persistence-only.
+Preparation is not execution approval: `execution_available` remains false and
+Guided write confirmation still applies. See the
+[prerequisite contract](../../../.scratch/live-voice/experiment-prerequisites.md).
+
 `start_task(title, steps, request_id)` persists an owner/project-scoped plan
 with 1–12 ordinary calls. Create/activate/import a project first: rebinding
 and task-control tools cannot be steps. `list_tasks`, `get_task` and

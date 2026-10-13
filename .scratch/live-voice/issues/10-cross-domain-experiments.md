@@ -37,3 +37,14 @@ Catalogue/dispatcher/route/toolset/inventory. Tests:
 `tests/test_experiments_persist.py`. Still open: advance cases through ordinary
 tools/queues, partial failure, compare, cancel/resume, commercial/reliability/
 GridSpine execution adapters.
+
+2026-10-13: Bounded prerequisite continuation adds normalized case/attempt/time/
+cost caps, owner-scoped canonical request deduplication, bounded fail-closed
+checkpoint reads and explicit `prepare_experiment`. The network adapter validates
+actual static targets/units/ranges and private candidates, binds authorized run
+evidence and exact current/candidate input digests, and leaves execution unavailable.
+Legacy plans remain readable; unsupported domains remain persistence-only.
+See [the contract](../experiment-prerequisites.md) and
+[remaining implementation plan](../../../docs/superpowers/plans/2026-10-13-assistant-remaining-work.md).
+Case advancement, effect reconciliation, comparison/cancel/resume and additional
+domain recipes remain open. This is input preflight, not domain or release approval.
