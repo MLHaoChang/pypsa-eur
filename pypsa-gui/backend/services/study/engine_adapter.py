@@ -976,18 +976,16 @@ def _variant_values(variant) -> dict[str, float]:
 def _capex_case(case, centre_values: Mapping[str, float], variant: Mapping[str, float]):
     """
     The case at a battery cost bound: each changed ledger cost row moves its
-    part's cost (× new / old), the asset's `overnight_cost` with it, and the
-    asset's own FOM line by the change of Σ part cost × FOM share (the pack
-    ties FOM to the inverter investment). Replacements (`part_lifetimes`)
-    and the remaining-life terminal value follow the parts in the engine.
-
-    WORKAROUND (engine ask: `finance.case.scale_capex(case, f, *, asset=,
-    part=)`): `scale_capex` scales EVERY asset's every part by one factor, but
-    a guided CAPEX row prices ONE part of ONE asset (a battery bound must not
-    move the inverter with the storage block, nor PV). The part and the
-    asset's sum are replaced together, so `AssetFinance`'s parts check holds.
+    part's cost (× new / old) through the engine's `scale_capex(case, f,
+    asset=, part=)` (the asset's `overnight_cost` follows as the parts' sum),
+    and the asset's own FOM line by the change of Σ part cost × FOM share
+    (the pack ties FOM to the inverter investment). Replacements
+    (`part_lifetimes`) and the remaining-life terminal value follow the parts
+    in the engine.
     """
     import dataclasses as dc
+
+    from services.finance.case import FinanceRefused, scale_capex
 
     factors: dict[tuple[str, str], float] = {}
     for key, value in variant.items():
@@ -998,24 +996,23 @@ def _capex_case(case, centre_values: Mapping[str, float], variant: Mapping[str, 
         if old is None or old == 0.0:
             raise EngineRefused("bound_row_not_supported", f"{key!r} has no centre value")
         factors[CAPEX_ROW_PART[key]] = float(value) / float(old)
-    assets, fom_factor = [], {}
-    for a in case.assets:
-        mine = {part: f for (asset, part), f in factors.items() if asset == a.name}
-        if not mine:
-            assets.append(a)
+    centre = {a.name: a for a in case.assets}
+    scaled = case
+    for (asset, part), f in factors.items():
+        if asset not in centre:
+            continue                     # an option without that asset: the row moves nothing
+        try:
+            scaled = scale_capex(scaled, f, asset=asset, part=part)
+        except FinanceRefused as exc:
+            raise EngineRefused("bound_row_not_supported", f"{asset}/{part}: {exc.code}") from exc
+    fom_factor = {}
+    for a in scaled.assets:
+        old_parts = centre[a.name].parts
+        if a.parts == old_parts:
             continue
-        names = {p.name for p in a.parts}
-        if not set(mine) <= names:
-            raise EngineRefused("bound_row_not_supported",
-                                f"{a.name} has no part {sorted(set(mine) - names)}")
-        parts = tuple(dc.replace(p, overnight_cost=None if p.overnight_cost is None
-                                 else p.overnight_cost * mine.get(p.name, 1.0)) for p in a.parts)
-        costs = [p.overnight_cost for p in parts]
-        total = None if any(c is None for c in costs) else float(sum(costs))
-        fom_old = sum((p.overnight_cost or 0.0) * (p.fom_share or 0.0) for p in a.parts)
-        fom_new = sum((p.overnight_cost or 0.0) * (p.fom_share or 0.0) for p in parts)
+        fom_old = sum((p.overnight_cost or 0.0) * (p.fom_share or 0.0) for p in old_parts)
+        fom_new = sum((p.overnight_cost or 0.0) * (p.fom_share or 0.0) for p in a.parts)
         fom_factor[a.name] = fom_new / fom_old if fom_old else 1.0
-        assets.append(dc.replace(a, overnight_cost=total, parts=parts))
 
     def line(ln):
         f = next((fom_factor[a] for a in fom_factor
@@ -1026,8 +1023,8 @@ def _capex_case(case, centre_values: Mapping[str, float], variant: Mapping[str, 
         return dc.replace(ln, amount=ln.amount * f)
 
     templates = tuple(dc.replace(t, lines=tuple(line(ln) for ln in t.lines))
-                      for t in case.templates)
-    return dc.replace(case, assets=tuple(assets), templates=templates)
+                      for t in scaled.templates)
+    return dc.replace(scaled, templates=templates)
 
 
 def _rate_case(case, rate: float):

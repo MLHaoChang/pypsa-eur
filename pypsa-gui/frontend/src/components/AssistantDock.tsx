@@ -11,6 +11,16 @@ import { KEY_RESULT_TABS, keyResultsWalkRequested, openProjectList, openProjectR
 import { ErrorBoundary } from './ErrorBoundary'
 import { ensureLiveDurableThread } from '../api/durableConversations'
 
+// Matches the companion-echo-fade animation in index.css.
+const LIVE_ECHO_MS = 1_600
+// How long the node stays on 'speaking' after a Live turn's stream closes.
+const LIVE_SPEAK_MS = 1_800
+
+function clearTimer(timer: { current: number | null }) {
+  if (timer.current != null) window.clearTimeout(timer.current)
+  timer.current = null
+}
+
 /**
  * The assistant's own column, mounted beside the main area rather than inside
  * the SlidePanel slot.
@@ -40,12 +50,21 @@ export default function AssistantDock() {
 
   const profilesQuery = useChatProfiles()
   const { effectiveProfileId, ready } = useChatReadiness()
+  const streaming = useChatStore((s) => s.streaming)
   const [presence, setPresence] = useState<CompanionPresence>('idle')
   const [liveOpen, setLiveOpen] = useState(false)
   const [liveCaption, setLiveCaption] = useState('')
+  const [liveEcho, setLiveEcho] = useState('')
   const [walking, setWalking] = useState(false)
   const walkCancel = useRef<(() => void) | null>(null)
-  useEffect(() => () => { walkCancel.current?.() }, [])
+  const echoTimer = useRef<number | null>(null)
+  const speakTimer = useRef<number | null>(null)
+  const sawStream = useRef(false)
+  useEffect(() => () => {
+    walkCancel.current?.()
+    clearTimer(echoTimer)
+    clearTimer(speakTimer)
+  }, [])
 
   const stopWalk = useCallback(() => {
     walkCancel.current?.()
@@ -53,14 +72,46 @@ export default function AssistantDock() {
     setWalking(false)
   }, [])
 
+  const flashEcho = useCallback((text: string) => {
+    clearTimer(echoTimer)
+    setLiveEcho(text)
+    echoTimer.current = window.setTimeout(() => {
+      setLiveEcho('')
+      echoTimer.current = null
+    }, LIVE_ECHO_MS)
+  }, [])
+
+  // Live is presence-led: the transcript stays in the console. While Live is
+  // open the node thinks for as long as the stream runs and speaks briefly
+  // when it closes, then goes back to listening.
+  useEffect(() => {
+    if (!liveOpen || walking) return
+    if (streaming) {
+      sawStream.current = true
+      clearTimer(speakTimer)
+      setPresence('thinking')
+      return
+    }
+    if (!sawStream.current) return
+    sawStream.current = false
+    setPresence('speaking')
+    clearTimer(speakTimer)
+    speakTimer.current = window.setTimeout(() => {
+      setPresence((current) => (current === 'speaking' ? 'listening' : current))
+      speakTimer.current = null
+    }, LIVE_SPEAK_MS)
+  }, [streaming, liveOpen, walking])
+
   const forwardToHarness = useCallback((text: string) => {
     if (ready !== true) return
     window.dispatchEvent(new CustomEvent('companion:live-utterance', { detail: text }))
   }, [ready])
 
   const onLiveSubmit = useCallback((text: string) => {
+    clearTimer(speakTimer)
     if (keyResultsWalkRequested(text)) {
       stopWalk()
+      setLiveEcho('')
       setWalking(true)
       setPresence('thinking')
       setLiveCaption('Opening each results tab.')
@@ -81,6 +132,7 @@ export default function AssistantDock() {
     }
     if (openProjectRequested(text)) {
       stopWalk()
+      setLiveEcho('')
       openProjectList()
       setPresence('speaking')
       setLiveCaption('Opening the project list.')
@@ -108,14 +160,15 @@ export default function AssistantDock() {
         return
       }
       stopWalk()
+      setLiveCaption('')
+      flashEcho(text)
       setPresence('thinking')
-      setLiveCaption('Sent to the assistant.')
       forwardToHarness(text)
       return
     }
     setPresence('listening')
     setLiveCaption('Add an API key for the assistant first. Tab changes and opening a project still work without one.')
-  }, [forwardToHarness, ready, stopWalk])
+  }, [flashEcho, forwardToHarness, ready, stopWalk])
   const profileLabel =
     profilesQuery.data?.profiles.find((p) => p.id === effectiveProfileId)?.label
     ?? profilesQuery.data?.profiles.find((p) => p.id === profilesQuery.data.active_profile_id)?.label
@@ -238,6 +291,7 @@ export default function AssistantDock() {
           profileLabel={profileLabel}
           liveOpen={liveOpen}
           liveCaption={liveCaption}
+          liveEcho={liveEcho}
           modelKeyMissing={ready === false}
           onLiveSubmit={onLiveSubmit}
           onCompose={() => {
@@ -255,9 +309,13 @@ export default function AssistantDock() {
             // chat harness; without one, the walk still calls applyUiNavigate.
             if (liveOpen) {
               stopWalk()
+              clearTimer(echoTimer)
+              clearTimer(speakTimer)
+              sawStream.current = false
               setLiveOpen(false)
               setPresence('idle')
               setLiveCaption('')
+              setLiveEcho('')
               return
             }
             setLiveOpen(true)

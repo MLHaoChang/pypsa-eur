@@ -35,25 +35,27 @@ STUDY = BACKEND / "services" / "study"
 SEAMS = {"services/study/engine_adapter.py", "services/study/compile.py"}
 ENGINE = ("services.commercial", "services.finance", "services.library",
           "services.asset_schema", "services.results.finance_case",
-          "services.results.billing", "services.results.value_flows")
+          "services.results.billing", "services.results.value_flows",
+          # The engine's models (IC engine ask 3): their names are frozen too.
+          "models.commercial", "models.finance")
 
 #: Engine names outside the frozen facade the seams use, each a WORKAROUND
 #: with the engine ask (to IC through the owner) that would retire it.
 ALLOWED_EXCEPTIONS: dict[str, str] = {
-    # Q15: the pure binder and the Library series resolver are not frozen
-    # (only `bind_commercial_on_context`, which binds a LOADED context).
-    "services.commercial.binding.bind_commercial": "Q15",
-    "services.commercial.binding.BindingRefusal": "Q15",
-    "services.library.series_store.resolve": "Q15",
-    "services.library.series_store.LibraryRefNotFound": "Q15",
-    "services.library.series_store.LibraryRefStale": "Q15",
-    # WP7 freeze ask: names `engine_adapter` reads outside the facade.
-    "services.finance.engine.wacc_gate": "WP7 freeze (wacc_gate)",
-    "services.commercial.lp_bindings.META_LINKS": "WP7 freeze (META_LINKS)",
-    # WP7 N15: the asset schema's writer and reader (S0's, not frozen).
-    "services.asset_schema.derive.apply_parts": "N15 (derive.apply_parts)",
-    "services.asset_schema.derive.has_parts": "N15 (derive.has_parts)",
+    # Empty since IC engine ask 3 (2026-10-13): Q15, the WP7 freeze and N15
+    # are frozen in the facade; C3e retired with ask 1.
 }
+
+#: Engine modules the study MAY use, anywhere, without a facade pin: standing
+#: permissions, not workarounds (so not required to be in use). Every name
+#: under the module is accepted.
+PERMITTED_MODULES: dict[str, str] = {
+    "services.asset_schema.provenance": "S2 reads provenance (owner 13 Oct)",
+}
+
+
+def _permitted(dotted: str) -> bool:
+    return any(dotted == m or dotted.startswith(m + ".") for m in PERMITTED_MODULES)
 
 
 def _study_sources() -> list[tuple[str, pathlib.Path]]:
@@ -103,7 +105,8 @@ def _engine_names(path: pathlib.Path) -> list[tuple[int, str]]:
 def _facade() -> set[str]:
     from tests import test_engine_facade_frozen as F
 
-    return set(F.SIGNATURES) | set(F.DATACLASS_FIELDS)
+    return (set(F.SIGNATURES) | set(F.DATACLASS_FIELDS) | set(F.FIELDS_READ)
+            | set(F.MODEL_FIELDS) | set(F.CONSTANTS) | set(F.EXCEPTIONS))
 
 
 def test_the_study_reaches_the_engine_only_through_its_two_seams():
@@ -111,10 +114,10 @@ def test_the_study_reaches_the_engine_only_through_its_two_seams():
     for rel, path in _study_sources():
         if rel in SEAMS:
             continue
-        names = _engine_names(path)
+        names = [(ln, x) for ln, x in _engine_names(path) if not _permitted(x)]
         tree = ast.parse(path.read_text(encoding="utf-8"))
         mods = [f"{n.lineno}:{n.module}" for n in ast.walk(tree)
-                if isinstance(n, ast.ImportFrom) and n.module
+                if isinstance(n, ast.ImportFrom) and n.module and not _permitted(n.module)
                 and (n.module.startswith(ENGINE) or any(
                     f"{n.module}.{a.name}".startswith(ENGINE) for a in n.names))]
         if names or mods:
@@ -129,12 +132,24 @@ def test_the_seams_use_only_facade_names_or_listed_workarounds():
     for rel in sorted(SEAMS):
         for line, name in _engine_names(BACKEND / rel):
             used.add(name)
-            if name not in facade and name not in ALLOWED_EXCEPTIONS:
+            if name not in facade and name not in ALLOWED_EXCEPTIONS and not _permitted(name):
                 unlisted.setdefault(rel, []).append(f"{line}:{name}")
     assert unlisted == {}
     # Every listed exception is still used (a retired WORKAROUND leaves the list).
     assert sorted(set(ALLOWED_EXCEPTIONS) - used) == []
     assert all(ALLOWED_EXCEPTIONS.values())
+
+
+def test_a_permitted_module_is_accepted_and_nothing_else_slips_through(tmp_path):
+    """The gatekeeper's standing permission (S2 reads provenance) covers its
+    module only; a sibling asset-schema module still needs a facade pin."""
+    probe = tmp_path / "probe.py"
+    probe.write_text("from services.asset_schema.provenance import record\n"
+                     "from services.asset_schema import provenance as pv\n"
+                     "from services.asset_schema.fields import FIELDS\n"
+                     "def f(n):\n    return pv.read(n), record, FIELDS\n", encoding="utf-8")
+    names = {x for _l, x in _engine_names(probe) if not _permitted(x)}
+    assert names == {"services.asset_schema.fields.FIELDS"}
 
 
 def test_the_scan_reads_the_import_forms_the_seams_use(tmp_path):

@@ -765,8 +765,7 @@ function StudyTab({ existingProjects, onClose }: { existingProjects: ProjectInfo
 // none of the user's. Its intake is answered in the `decision` panel before
 // the study exists (creation needs the mandatory answers); the project the
 // POST names is only the authorisation and the place the load upload goes.
-// Where the backend refuses the study routes — multi-user mode until
-// OPEN-ITEMS 1 is closed, or `PYPSAGUI_DECISION_STUDIES` unset — the card is
+// Where the backend refuses the study routes (multi-user mode) the card is
 // disabled with the reason; it never offers a dead end.
 function DecisionTab({ existingProjects, onClose, onStarted, onBlank }: {
   existingProjects: ProjectInfo[]

@@ -20,7 +20,6 @@ OPTIONS = ["none", "bess_1h", "bess_2h", "bess_4h", "bess_pv_2h"]
 
 def enable_studies(monkeypatch):
     """Generator body of each test module's `studies_on` fixture."""
-    monkeypatch.setenv("PYPSAGUI_DECISION_STUDIES", "1")
     dep = studies_router.require_decision_studies_enabled
     main.app.dependency_overrides[dep] = lambda: None
     monkeypatch.setattr(studies_router, "require_decision_studies_enabled", lambda: None)

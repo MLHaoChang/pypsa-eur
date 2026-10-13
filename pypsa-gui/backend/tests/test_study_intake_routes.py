@@ -66,12 +66,11 @@ def test_the_library_lists_tariffs_with_their_honesty_sentences_and_the_profiles
     assert body["load_units"] == ["kW", "MW"]
 
 
-def test_the_library_route_is_off_without_the_flag(client, api_project):
+def test_the_library_route_is_off_in_multi_user_mode(client, api_project):
     name = api_project("s8-lib-off")
     r = client.get(f"/api/projects/{name}/studies/library")
     assert r.status_code == 404
-    assert r.json()["detail"]["code"] in ("decision_studies_unavailable",
-                                          "decision_studies_disabled")
+    assert r.json()["detail"]["code"] == "decision_studies_unavailable"
 
 
 # ── the preview: the load as the pack reads it, and the bill today ───────

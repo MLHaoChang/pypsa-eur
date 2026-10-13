@@ -22,10 +22,11 @@ write never touches the resident network, and the gate reads the ACTIVE
 project, which need not be this one. Neither middleware prefix list names
 them.
 
-Availability (review v2 BC-6): in auth (multi-user) mode every route refuses
-unconditionally until OPEN-ITEMS 1 is closed. ``PYPSAGUI_DECISION_STUDIES=1``
-enables them in local mode only. The refusal is a router dependency, so it
-runs before the project is resolved and cannot serve as an existence oracle.
+Availability: on in local (single-user) mode, refused in auth (multi-user)
+mode (``services.study.decision_studies_enabled``). The env flag that once
+also had to be set was dropped in U3, after OPEN-ITEMS 1 closed. The refusal
+is a router dependency, so it runs before the project is resolved and cannot
+serve as an existence oracle.
 """
 from __future__ import annotations
 
@@ -40,7 +41,6 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.orm import Session as DBSession
 
-import local_mode
 from db.models import User
 from db.session import get_db
 from deps import optional_user
@@ -55,7 +55,7 @@ from models.study import (
 )
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services.http_filenames import content_disposition
-from services.study import FLAG_ENV, flag_set, store
+from services.study import decision_studies_enabled, store
 from services.study import ledger as study_ledger
 from services.study import library as study_library
 from services.study import forks as study_forks
@@ -66,34 +66,22 @@ from services.study import runner as study_runner
 
 logger = logging.getLogger(__name__)
 
-OPEN_ITEMS_1 = (
-    "OPEN-ITEMS 1 (docs/superpowers/OPEN-ITEMS.md, item 1: the user-timeseries "
-    "store is a process global shared across tenants)"
-)
-
-
 def require_decision_studies_enabled() -> None:
     """
-    Router dependency: refuse unless local mode AND the flag.
+    Router dependency: refuse unless local mode.
 
     404, consistent with the non-member answer and with
     ``local_mode.reject_unless_local_mode``: where the surface is off it does
-    not exist. The ``code`` tells the client which of the two reasons applies.
+    not exist.
     """
-    if not local_mode.is_local_mode():
+    if not decision_studies_enabled():
         raise HTTPException(status_code=404, detail={
             "code": "decision_studies_unavailable",
             "message": (
-                "Decision studies are not available in multi-user mode until "
-                f"{OPEN_ITEMS_1} is closed. {FLAG_ENV} does not change this."
-            ),
-        })
-    if not flag_set():
-        raise HTTPException(status_code=404, detail={
-            "code": "decision_studies_disabled",
-            "message": (
-                f"Decision studies are off. Set {FLAG_ENV}=1 to enable them "
-                "in the desktop app."
+                "Decision studies are not available in multi-user mode yet: a "
+                "study builds and solves its own projects in the background, "
+                "and that has not been reviewed for several users sharing one "
+                "server. Use the desktop app."
             ),
         })
 
