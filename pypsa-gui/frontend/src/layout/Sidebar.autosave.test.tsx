@@ -121,6 +121,8 @@ describe('manual Save', () => {
   it('while mismatched: the Save button says why, and nothing is posted', async () => {
     useUIStore.setState({ projectMismatch: { tab: 'demo', backend: 'other' } })
     renderSidebar()
+    // Save sits behind the footer card's menu (M2).
+    await userEvent.click(screen.getByTestId('sidebar-project-menu'))
     const save = screen.getByText('Save').closest('button')!
     expect(save.getAttribute('title')).toBe(SENTENCE)
     await userEvent.click(save)
@@ -134,6 +136,7 @@ describe('manual Save', () => {
     vi.mocked(projectsApi.save).mockRejectedValue(
       reject409({ error_kind: 'study_in_flight', study: 'fmea_sweep', message }))
     renderSidebar()
+    await userEvent.click(screen.getByTestId('sidebar-project-menu'))
     await userEvent.click(screen.getByText('Save').closest('button')!)
     await waitFor(() => expect(toast.error).toHaveBeenCalled())
     const shown = vi.mocked(toast.error).mock.calls.map(c => String(c[0]))
