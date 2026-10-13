@@ -960,6 +960,88 @@ it replaces nothing.
   difference equals the hand-worked cost of the extra BESS headroom.
 - Mutations.
 
+### I2c as built (2026-10-13)
+
+**`services/solver/island.py`**, in the same wrapper.
+- **Linearised UC (Q7).** It is on when the sidecar's
+  `requirements.linearised_uc` is on, and it applies only where the island
+  rows apply: opt-in, the plain solve, a sizing solve.
+  - `linearised_uc(n, island)` is a context manager. For the solve it sets
+    `committable` and the sidecar's `p_min_pu` on the fixed-size genset
+    Generators and Links, restores both afterwards, and yields
+    `linearized_unit_commitment=True` for `optimize`.
+  - `run_simulation` calls it on the plain solve only, through
+    `solve_uc(network, cfg)`. SCOPF, rolling and myopic are already refused
+    by the island rows, and the refusal now names linearised UC too.
+- **Extendable gensets are not committed** (option A, sent to the
+  coordinator 2026-10-13; not yet answered when this was written). PyPSA's
+  committable-extendable unit is big-M. Such a genset keeps `spinning`, and
+  the facts list it under `uc.not_committed` with the reason. The template's
+  4 × 10 MW fleet can therefore be committed while genset_new stays
+  extendable.
+- **u_g(t) replaces the spinning flag** for the committed gensets in the 0⁺
+  rows that count units online:
+  - (b↑) headroom, u·p_max_pu·η·p_nom − η·p;
+  - (c) the GFM MVA at 0⁺;
+  - (d) RoCoF, as H·u·η·p_nom/cos φ_r.
+
+  PyPSA's own p ≥ u·p_min_pu·p_nom replaces I2b's `Island-min-load` row for
+  them. (e) is unchanged, because it already counts every genset once
+  joined. The facts say "linearised (u may be fractional)".
+- **Refusals:**
+  - a committed genset with no positive `p_min_pu` (sidecar, else the
+    network's), because its online headroom would cost no fuel (review B4);
+  - `linearised_uc` on with a fixed genset that was not committed for the
+    solve, which is a refusal rather than a silent fall-back to `spinning`.
+- **`island_study(n, island, scenarios=None, solve=None)`** solves copies
+  of the network:
+  - a baseline with no island rows;
+  - one solve per scenario, with the sidecar narrowed to that scenario
+    (`scenarios` can name one the sidecar does not ship).
+
+  It returns each variant's status and objective, the **cost of island
+  capability** (variant − baseline), the **cost of seamless islanding**
+  (seamless − ups_bridged), and `binding_rows`: every `Island-` row with a
+  non-zero dual, its hours (None for a static row) and its duals, in
+  objective units. A refused variant is recorded with its reason and has no
+  cost. The default solve is HiGHS. The endpoint, panel and copilot tools
+  are I9's.
+
+**The Data Center template.**
+- With no island rows it solves at **3.754e7** and buys no genset_new.
+- ups_bridged gives 3.981e7, so the cost of island capability is
+  **2.27e6 (+6.1 %)**.
+- I2b's "3.882e7" was the I2a rows alone, which is the `planned` variant.
+- `seamless`, with bess_new's cap lifted, gives 6.87e7, so the cost of
+  seamless islanding is **2.89e7**.
+
+**Tests** (`tests/test_island_study.py`, 23):
+- UC buys exactly the online capacity each 0⁺ row needs, by hand:
+  - (b↑) u = 1/2. Each MW of minimum load also leaves the import, so the
+    step falls with it, and the row is 7 + 6u − p ≥ 10 − p.
+  - with p_max_pu 0.5, u = 2/3;
+  - (d) u = 8/75;
+  - (c) u = 2/3;
+  - a Link genset, through η.
+- Without UC, the cold genset must run 3 MW to cut the step. UC is cheaper
+  by 4·2.1·990.
+- The minimum load comes from PyPSA, not the spinning row. `p_min_pu` and
+  `committable` are restored after the solve.
+- The refusals: no minimum load, an uncommitted genset, and
+  rolling/SCOPF/myopic.
+- An extendable genset is not committed and keeps `spinning`.
+- `run_simulation` passes UC through and restores the network.
+- The cost of seamless equals the hand-worked 10 MW of BESS at 100/MW. The
+  cost of island capability equals the I2a reserve (2000).
+- The binding rows: the headroom duals sum to the BESS capital cost, and the
+  pickup row's dual is 1/ls. The LP may put a degenerate dual on one hour.
+- A refused variant; a scenario the sidecar does not ship; both template
+  figures.
+
+The first hand values for UC (u = 5/7, 8/15) left out that the committed
+genset's minimum load displaces import, the same correction I2b recorded for
+spinning inertia. The LP was right and the tests were corrected.
+
 ### I3a: the hourly island contract (S–M)
 
 I3b and I6 need data the hourly table does not carry. This increment adds
