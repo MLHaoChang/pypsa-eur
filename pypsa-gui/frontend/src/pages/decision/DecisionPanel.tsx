@@ -38,6 +38,7 @@ import FinanceStep from './FinanceStep'
 import LedgerReview, { type LedgerEditOut } from './LedgerReview'
 import RunStep from './RunStep'
 import StudyAssist from './StudyAssist'
+import QuestionRail from './QuestionRail'
 import Verdict from './Verdict'
 import WhyHow from './WhyHow'
 import Robust from './Robust'
@@ -141,6 +142,8 @@ const NAV: DecisionView[] = ['hub', 'intake', 'options', 'tariff', 'finance', 'l
 function StudyView({ at, pollMs }: { at: StudyRef; pollMs: number }) {
   const { project, studyId } = at
   const qc = useQueryClient()
+  // U3: Guided walks the question-first rail; Expert keeps the section nav.
+  const guided = useUIStore(s => s.uiMode) === 'guided'
   const view = useDecisionStore(s => s.view)
   const setView = useDecisionStore(s => s.setView)
   const setWatch = useDecisionStore(s => s.setWatch)
@@ -296,6 +299,9 @@ function StudyView({ at, pollMs }: { at: StudyRef; pollMs: number }) {
           {UI_LABELS.expertView}
         </Button>
       </div>
+      {guided ? (
+        <QuestionRail current={current} statuses={statuses} robust={f?.robustness.status === 'ok'} onOpen={setView} />
+      ) : (
       <nav aria-label="Decision study sections" className="flex flex-wrap gap-1 px-5 py-1.5 border-b border-border">
         {NAV.filter(v => runsPack(s) || !['intake', 'options', 'tariff', 'run', 'verdict', 'why', 'robust', 'report'].includes(v)).map(v => (
           <button key={v} type="button" aria-current={v === current ? 'page' : undefined} onClick={() => setView(v)}
@@ -304,6 +310,7 @@ function StudyView({ at, pollMs }: { at: StudyRef; pollMs: number }) {
           </button>
         ))}
       </nav>
+      )}
       {expertFor && (
         <div className="px-5 pt-3">
           <Banner tone="warn" testId="expert-warning" title={`Open ${OPTION_LABELS[expertFor] ?? expertFor} in the Expert view?`}>

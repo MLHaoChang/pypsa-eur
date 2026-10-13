@@ -20,6 +20,7 @@ No second store, no direct writes to `n.meta["asset_params"]`.
 | E | M7 (Guided shell) and M8 (Guided without an API key) | D | branch `claude/u3-guided-shell` |
 | F | "Open in Expert" lands on the study's project (today's cards; switch to the S1b cards when they merge) | S1b for the final form | part 1 on branch `claude/u3-open-in-expert` |
 | H | Open the study routes in multi-user mode, with a cross-tenant test of every study route, the study-created base project and its forks (owner, 2026-10-13: a later slice) | — | later |
+| R | The question-first rail of the decision study in Guided (§11 "Guided shell") | F | branch `claude/u3-question-rail` |
 | G | S2: ledger rows as a view of the provenance store; pack defaults written through `provenance.record`; Expert edits mark ledger rows | S1a | waits for S1a |
 
 ## A — the flag
@@ -103,3 +104,21 @@ switch leaves the mode and the panel as they were.
 Part 2 waits for S1b and S2: "defaults flagged" on the Expert cards. The S1b StorageUnit and Generator cards
 read `provenance.get`, so the pack defaults the study records through `provenance.record` show up there as
 defaults. The Investment editors' chips by `LedgerRow.engine_path` need an IC hook.
+
+## R — the question-first rail
+
+In Guided, the decision panel's section nav is replaced by the rail of UX assessment §4.3. Each step opens one
+view, and its state comes from the hub's own section statuses:
+
+| Step | View | Done when |
+|---|---|---|
+| Question | hub | always |
+| Site | intake | site and demand are settled |
+| Key choices | ledger | the assumptions are settled |
+| Run | run | the run is settled |
+| Verdict | verdict | the findings are settled |
+| Improve | robust | the tornado ran |
+| Report | report | the report is settled |
+
+The views the rail doesn't name (options, tariff, finance, why) stay one click away on the hub. Expert keeps
+the full nav.
