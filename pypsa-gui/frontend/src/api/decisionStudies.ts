@@ -9,10 +9,11 @@
 // * Sections carry `status: ok | not_established | skipped`.
 //
 // Every route lives under `/api/projects/{project}/studies`. In auth
-// (multi-user) mode, and in local mode without `PYPSAGUI_DECISION_STUDIES=1`,
-// EVERY route answers 404 with `detail.code` `decision_studies_unavailable`
-// or `decision_studies_disabled` (OPEN-ITEMS 1; review v2 BC-6) — before the
-// project is resolved, so `availability()` can probe with any project name.
+// (multi-user) mode EVERY route answers 404 with `detail.code`
+// `decision_studies_unavailable` (review v2 BC-6) — before the project is
+// resolved, so `availability()` can probe with any project name. In the
+// desktop app they are always on (U3 dropped the `PYPSAGUI_DECISION_STUDIES`
+// flag).
 import axios from 'axios'
 import client from './client'
 
@@ -532,7 +533,7 @@ export type Availability =
   | { available: false; code: string; message: string }
 
 export const decisionStudiesApi = {
-  /** Whether the study routes answer at all (flag and mode), probed with a
+  /** Whether the study routes answer at all (multi-user mode), probed with a
    * list call on `project`: the refusal fires before project resolution. */
   async availability(project: string): Promise<Availability> {
     try {
@@ -540,7 +541,7 @@ export const decisionStudiesApi = {
       return { available: true }
     } catch (e) {
       const err = studyError(e)
-      if (err.code === 'decision_studies_unavailable' || err.code === 'decision_studies_disabled') {
+      if (err.code === 'decision_studies_unavailable') {
         return { available: false, code: err.code, message: err.message }
       }
       throw e

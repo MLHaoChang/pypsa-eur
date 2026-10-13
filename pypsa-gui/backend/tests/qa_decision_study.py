@@ -116,11 +116,10 @@ def _step(label: str, ok: bool, msg: str = "") -> bool:
 
 def _enable_studies() -> None:
     """
-    The study routes refuse in multi-user mode until OPEN-ITEMS 1 is closed
-    (BC-6), and the qa sandbox is multi-user; the suite enables them the same
-    way (`tests/study_s4_support.enable_studies`).
+    The study routes refuse in multi-user mode, and the qa sandbox is
+    multi-user; the suite enables them the same way
+    (`tests/study_s4_support.enable_studies`).
     """
-    os.environ["PYPSAGUI_DECISION_STUDIES"] = "1"
     dep = studies_router.require_decision_studies_enabled
     main.app.dependency_overrides[dep] = lambda: None
     studies_router.require_decision_studies_enabled = lambda: None

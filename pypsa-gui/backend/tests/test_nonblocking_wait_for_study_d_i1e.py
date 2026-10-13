@@ -73,6 +73,38 @@ def test_wait_for_job_observes_study_completion(
     assert out['job']['status'] == 'done'
 
 
+@pytest.mark.parametrize(
+    ('status', 'completed'),
+    [('met', True), ('unreachable', False)],
+)
+def test_wait_for_job_treats_loop_verdicts_as_terminal(
+    tmp_projects_dir, install_network, seeded_identity, status, completed,
+):
+    """Coupling/margin success is `met`; a finished negative verdict is `unreachable`."""
+    from harness import job_adapters as ja
+
+    ctx = _publish_running_study(install_network, key='coupling_loop')
+    with ctx.solver_state_lock:
+        ctx.solver_state['coupling_loop']['status'] = status
+    owner = str(seeded_identity['user_id'])
+    job_id = ja.register_study_job(
+        study_key='coupling_loop',
+        tool_name='run_coupling_loop',
+        tool_use_id='tu-loop',
+        owner_user_id=owner,
+        project_uuid=getattr(ctx, 'project_uuid', None),
+    )
+    session = chat_service.ChatSession(owner_user_id=owner)
+    chat_tools.set_chat_session(session)
+    t0 = time.monotonic()
+    out = chat_tools.wait_for_job(job_id, 2)
+    assert time.monotonic() - t0 < 1.5
+    assert out['terminal'] is True
+    assert out['completed'] is completed
+    assert out['timed_out'] is False
+    assert out['job']['status'] == status
+
+
 def test_wait_for_job_study_timeout_leaves_study_running(
     tmp_projects_dir, install_network, seeded_identity,
 ):

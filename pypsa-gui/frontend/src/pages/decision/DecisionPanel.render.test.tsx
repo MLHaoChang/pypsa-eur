@@ -77,10 +77,10 @@ describe('availability', () => {
     expect(api.get).not.toHaveBeenCalled()
   })
 
-  it('with the flag off says how to switch it on', async () => {
-    api.list.mockRejectedValue(axErr(404, { code: 'decision_studies_disabled', message: 'Set PYPSAGUI_DECISION_STUDIES=1' }))
+  it('when the backend refuses the routes says why', async () => {
+    api.list.mockRejectedValue(axErr(404, { code: 'decision_studies_unavailable', message: 'multi-user' }))
     renderPanel()
-    expect((await screen.findByTestId('decision-unavailable')).textContent).toContain('PYPSAGUI_DECISION_STUDIES=1')
+    expect((await screen.findByTestId('decision-unavailable')).textContent).toContain(ERROR_COPY.decision_studies_unavailable.title)
   })
 })
 

@@ -205,6 +205,9 @@ Ownership is by files, so the sessions never edit the same module in parallel.
 loader and the flat export series helper (new in U1), `commercial.cost_rows.commercial_cost_terms`, and the
 `CommercialConfig` / `FinanceInputs` field names the ledger compiles to.
 
+**Additions (2026-10-13, IC engine asks, `2026-10-13-ic-engine-asks.md`):** `library.series_store.delete_series`,
+`pinned_by`, `list_series` and the result types `SeriesPin` / `SeriesDeleted` (ask 1; retires the study's C3e).
+
 ## 7. Coordination protocol
 
 - Each session reads this file from `origin/claude/determined-tesla-np09ww` (later from master) and

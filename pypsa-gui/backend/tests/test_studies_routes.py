@@ -12,9 +12,9 @@ Decision-study routes (MVP-1 S1; review v1 B7, review v2 S3-v2 / S7-v2).
   pattern (BC-3): a study write never touches the resident network, so the
   active project solving must not 409 it — while every other `/api/projects/`
   write stays gated exactly as before;
-* in auth (multi-user) mode the routes refuse unconditionally until
-  OPEN-ITEMS 1 closes (BC-6). `PYPSAGUI_DECISION_STUDIES=1` enables them in
-  local mode only; it is not an operator override. The functional tests below
+* in auth (multi-user) mode the routes refuse unconditionally (BC-6); in
+  local mode they are on (the `PYPSAGUI_DECISION_STUDIES` flag was dropped in
+  U3, after OPEN-ITEMS 1 closed). The functional tests below
   run in auth mode (that is where membership and locks exist), so they
   replace the refusal through FastAPI's `dependency_overrides` — the "in
   tests" door, which no deployment can open.
@@ -42,7 +42,6 @@ BODY = {"question_id": "bess_site", "name": "Site A battery",
 
 @pytest.fixture
 def studies_on(monkeypatch):
-    monkeypatch.setenv("PYPSAGUI_DECISION_STUDIES", "1")
     dep = studies_router.require_decision_studies_enabled
     main.app.dependency_overrides[dep] = lambda: None
     # The in-handler repeat of the same check (SB-3) looks the function up on
@@ -354,7 +353,7 @@ def test_study_router_is_mounted_under_the_project_path_with_the_fs_guard():
         assert calls.index(gate) < calls.index(require_project_access), path
 
 
-# ── auth-mode refusal (BC-6, OPEN-ITEMS 1) ───────────────────────────────
+# ── auth-mode refusal (BC-6; the flag dropped in U3) ────────────────────
 
 def _all_routes(client, name):
     base = f"/api/projects/{name}/studies"
@@ -367,6 +366,7 @@ def _all_routes(client, name):
 @pytest.mark.parametrize("flag", [None, "1"])
 def test_auth_mode_refuses_unconditionally(client, api_project, monkeypatch,
                                            project_storage_dir, flag):
+    # The retired flag, if an operator still sets it, opens nothing.
     if flag is None:
         monkeypatch.delenv("PYPSAGUI_DECISION_STUDIES", raising=False)
     else:
@@ -377,16 +377,17 @@ def test_auth_mode_refuses_unconditionally(client, api_project, monkeypatch,
         assert r.status_code == 404, (r.request.method, r.status_code, r.text)
         detail = r.json()["detail"]
         assert detail["code"] == "decision_studies_unavailable"
-        assert "OPEN-ITEMS 1" in detail["message"]
+        assert "multi-user mode" in detail["message"]
+        # OPEN-ITEMS 1 is closed; the refusal must not cite it as the reason.
+        assert "OPEN-ITEMS" not in detail["message"]
     assert not (project_storage_dir(name) / "studies").exists()
 
 
-def test_auth_mode_refusal_is_not_an_existence_oracle(client, monkeypatch):
+def test_auth_mode_refusal_is_not_an_existence_oracle(client):
     """
     The refusal fires before project resolution: a name that exists
     nowhere reads exactly like one that exists.
     """
-    monkeypatch.setenv("PYPSAGUI_DECISION_STUDIES", "1")
     r = client.get("/api/projects/no-such-project-anywhere/studies/")
     assert r.status_code == 404
     assert r.json()["detail"]["code"] == "decision_studies_unavailable"
@@ -416,25 +417,24 @@ def _local_project(local_client, install_network, name):
     return name
 
 
-def test_local_mode_with_the_flag_serves_the_routes(local_client,
-                                                    install_network,
-                                                    monkeypatch):
-    monkeypatch.setenv("PYPSAGUI_DECISION_STUDIES", "1")
-    name = _local_project(local_client, install_network, "st-local-on")
+@pytest.mark.parametrize("flag", [None, "0"])
+def test_local_mode_serves_the_routes_without_any_flag(local_client,
+                                                       install_network,
+                                                       monkeypatch, flag):
+    """
+    U3: the `PYPSAGUI_DECISION_STUDIES` flag is gone; unset or off, the
+    desktop app serves the study routes.
+    """
+    if flag is None:
+        monkeypatch.delenv("PYPSAGUI_DECISION_STUDIES", raising=False)
+    else:
+        monkeypatch.setenv("PYPSAGUI_DECISION_STUDIES", flag)
+    name = _local_project(local_client, install_network, f"st-local-{flag or 'unset'}")
     r = local_client.post(f"/api/projects/{name}/studies/", json=BODY)
     assert r.status_code == 201, r.text
     sid = r.json()["study_id"]
     assert local_client.get(
         f"/api/projects/{name}/studies/{sid}").status_code == 200
-
-
-def test_local_mode_without_the_flag_refuses(local_client, install_network,
-                                             monkeypatch):
-    monkeypatch.delenv("PYPSAGUI_DECISION_STUDIES", raising=False)
-    name = _local_project(local_client, install_network, "st-local-off")
-    for r in _all_routes(local_client, name):
-        assert r.status_code == 404, (r.request.method, r.status_code, r.text)
-        assert r.json()["detail"]["code"] == "decision_studies_disabled"
 
 
 # ── Gate S1 binding conditions ─────────────────────────────────────────────
@@ -450,7 +450,6 @@ def test_a_handler_called_as_a_plain_function_still_refuses_in_auth_mode(monkeyp
     from fastapi import HTTPException
 
     monkeypatch.setattr(local_mode, "is_local_mode", lambda: False)
-    monkeypatch.setenv("PYPSAGUI_DECISION_STUDIES", "1")
     project = SimpleNamespace(uuid=str(_uuid.uuid4()), name="p", directory=None)
     calls = {
         "list": lambda: studies_router.list_studies(project=project),
