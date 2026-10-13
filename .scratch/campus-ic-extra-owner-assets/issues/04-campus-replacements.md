@@ -2,8 +2,9 @@
 
 Status: ready-for-agent
 Type: task
-Blocked by: issue 01 (the IC route passes the campus extra assets). Numbered 04 after 01-03 on
-`feat/gridspine-campus-ic-source` (master has no issues in this directory yet).
+Blocked by: none. The IC route that passes the campus extra assets (issue 01) is on master (#148,
+`routers/results.py`, `tests/test_investment_case_campus_route.py`); it calls `owner_assets_response(project)`,
+the default list described below. Numbered 04 after 01-03.
 
 This edits IC-owned files (`services/finance/*`, `services/results/finance_case.py`, `models/finance.py`). If you
 are not the IC session, confirm with the owner before you start. The campus side is done and read only here.
@@ -18,7 +19,9 @@ its life is bought again (in the first period, flagged overdue); a multi-period 
 `campus_investment.csv` now has one row per purchase (`action == "renew"` for a replacement, with `purchase`,
 `build_year`, `service_to`, `replaces`, `lineage`, `commissioned`, `commissioned_source`).
 
-The producer `campus_electrical_service.extra_owner_assets(project, replacements=False)`:
+The producer `campus_electrical_service.extra_owner_assets(project, replacements=False)` (and
+`owner_assets_response(project, replacements=False)`; the run is the MILP's or the least-cost one as `_owner_source`
+picks, `meta.study_method` says which):
 
 - **default (`replacements=False`)**: exactly the list before C14, the first purchases only, same names, same
   `build_year`. `meta` gains `purchase` (1), `lineage`, `replaces` (None), `service_to` and
@@ -62,7 +65,9 @@ Checked in the code on 2026-10-12:
    to its own convention, point 3, or takes it as given). First purchases keep today's COD rule.
 3. Flag a campus asset whose `meta.service_to` falls inside the IC's analysis horizon with no successor entry
    (`campus_life_ends_unreplaced:<name>`), since with point 1 the IC adds nothing for it.
-4. Until 1-3 land, keep calling the producer with the default (`replacements=False`), as issue 01 does.
+4. Then call `owner_assets_response(project, replacements=True)` from the route. Until 1-3 land, keep the
+   default (`replacements=False`), as the route on master does: it is unchanged by C14 (its tests pass on the
+   C14 branch).
 
 ## Acceptance tests (write them first)
 
