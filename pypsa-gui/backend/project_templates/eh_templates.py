@@ -490,8 +490,13 @@ ISLAND_CONFIG: dict[str, dict] = {
         },
         "requirements": {
             "bridge_s": _a(600.0), "sustained_h": _a(24.0), "fuel_autonomy_h": _a(24.0),
-            "genset_redundancy_n": _a(1), "scenarios": ["ups_bridged", "seamless"],
-            "pickup_blocks": _a([15.0, 15.0, 15.0, 10.0]),
+            # ups_bridged only, in 5 MW blocks (owner, 2026-10-13, campus island
+            # I2b): 15 MW blocks need ~210 MW of H 1.5 s gensets to hold 1 Hz/s,
+            # and seamless at 30 MW of BESS cannot form the island at 0⁺. The
+            # 4 × 10 MW fleet plus genset_new holds a 5 MW block; seamless stays
+            # a sidecar option, and I2c compares the two.
+            "genset_redundancy_n": _a(1), "scenarios": ["ups_bridged"],
+            "pickup_blocks": _a([5.0] * 11),
             "frequency_limits": {"transition": dict(_LIMITS), "steady_island": dict(_LIMITS)},
             "rocof_window_ms": _a(500.0), "gfm_margin": _a(0.1), "ride_through_storage": ["bess_new"],
         },
