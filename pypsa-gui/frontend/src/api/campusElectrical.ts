@@ -166,6 +166,86 @@ export interface CampusResults {
   cost_basis?: CostBasis | null
 }
 
+// ── the joint optimisation (MILP) as a background job (plan C12) ────────────
+// `POST /{name}/milp` starts it (202 with the record), `GET /{name}/milp` is the
+// record (null when no job has run since the backend started), `POST
+// /{name}/milp/cancel` asks it to stop, keeping the best point found so far.
+
+export type MilpJobState = 'running' | 'done' | 'cancelled' | 'failed'
+/** Why the loop ended (`summary.stop`). */
+export type MilpStop = 'converged' | 'stalled' | 'delta_floor' | 'max_iter' | 'cancelled'
+
+/** The job's record (`campus_electrical_service.start_milp_job`). `iteration`,
+ *  `max_iter` and `best_cost` are null until the loop's warm start is solved;
+ *  `best_cost` is the cheapest AC-feasible point so far, `c8_cost` the least-cost pick's. */
+export interface MilpJobRecord {
+  state: MilpJobState
+  project: string
+  started_at: number
+  finished_at: number | null
+  iteration: number | null
+  max_iter: number | null
+  best_cost: number | null
+  c8_cost: number | null
+  stop: MilpStop | null
+  error: string | null
+  message: string
+}
+
+/** One iteration of the loop (`campus_milp_history.csv`). Iteration 0 is the warm start. */
+export interface MilpHistoryRow {
+  iteration: number
+  cost: number
+  feasible: boolean
+  accepted: boolean
+  worst_violation?: number | null
+  worst_lin_error?: number | null
+  delta?: number | null
+  rho?: number | null
+  choice: string
+  note?: string | null
+}
+
+/** Per need, the least-cost choice against the joint one (`campus_milp_comparison.csv`). */
+export interface MilpComparisonRow {
+  need: string
+  c8_choice: string
+  milp_choice: string
+  c8_annualised_eur_per_a: number
+  milp_annualised_eur_per_a: number
+}
+
+export interface MilpSummary {
+  method: 'milp'
+  fallback: boolean
+  reason: string
+  stop: MilpStop
+  c8_cost: number
+  milp_cost: number
+  c8_feasible: boolean
+  iterations: number
+}
+
+/** What the last finished job chose (`run_milp/`). `fallback` is the reason the
+ *  least-cost choice was kept, or null. */
+export interface MilpResults {
+  investment: InvestmentRow[] | null
+  cost: CostRow[] | null
+  compliance_invested: InvestedComplianceRow[] | null
+  history: MilpHistoryRow[] | null
+  comparison: MilpComparisonRow[] | null
+  summary: MilpSummary
+  fallback: string | null
+  stop: MilpStop
+}
+
+export interface CampusMilp {
+  status: MilpJobRecord | null
+  results: MilpResults | null
+  /** The least-cost run it was made from has changed since. */
+  stale: boolean
+}
+
 export interface CampusState {
   campus_yaml: string | null
   skipped: string[]
@@ -178,6 +258,8 @@ export interface CampusState {
   hub_cost_reason: string | null
   /** How many purchased items the last investment run offers as extra owner assets. */
   owner_assets_count?: number
+  /** The joint optimisation's job and results (plan C12). */
+  milp?: CampusMilp
 }
 
 /** The asset library: the project's copy, else the shipped default. */
@@ -286,6 +368,21 @@ export const campusApi = {
   /** Prepare, rank and size the campus; returns the new state. Seconds of CPU. */
   run: (project: string, settings: CampusSettings) =>
     client.post<CampusState>(`${base(project)}/run`, settings, quiet).then(r => r.data),
+
+  /** Start the joint optimisation (MILP, minutes) in the background. The
+   *  least-cost run is made first unless a fresh one with these settings exists.
+   *  409 while a job runs for any project. */
+  startMilp: (project: string, settings: CampusSettings) =>
+    client.post<MilpJobRecord>(`${base(project)}/milp`, settings, quiet).then(r => r.data),
+
+  /** The job's record; null when no job has run since the backend started. */
+  milpStatus: (project: string) =>
+    client.get<MilpJobRecord | null>(`${base(project)}/milp`, quiet).then(r => r.data ?? null),
+
+  /** Ask the running job to stop; it keeps the best point found so far. */
+  cancelMilp: (project: string) =>
+    client.post<{ state: MilpJobState; cancelling: boolean }>(`${base(project)}/milp/cancel`, undefined, quiet)
+      .then(r => r.data),
 
   /** The asset library a study buys from. */
   library: (project: string) =>

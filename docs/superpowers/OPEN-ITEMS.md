@@ -13,7 +13,24 @@ on that date, so the entries below still date from 2026-09-12.
 **The High authorization family was re-verified on 2026-09-30** (against
 `a9a1f5b`). Items 2, 3 and 4 were found already fixed — see "Closed since the
 2026-09-12 pass" — and the re-verification turned up a fourth instance of item
-2's defect, entered below as item 12.
+2's defect, entered below as item 16.
+
+**2026-10-13:** that item is renumbered **16**. Master assigned 12–14 to the
+3D site view on 2026-10-06 while this branch was unmerged. Commits and
+findings written before 2026-10-13 cite it as item 12.
+
+**2026-10-06:** items 12–14 added from the 3D site view branch's full-product
+browser E2E (`notes/2026-09-29-3d-site-view-phase2-qa.md` §7), re-verified in
+source on master that day. Its defect D (a second project from the same
+template → 409) is not listed: master's `_unique_project_name` already fixes it.
+
+**2026-10-06 (later):** two items closed and removed per the convention —
+item 7 (blank-canvas node positions reverting; the load now takes the newest
+of server / memory / localStorage by `savedAt` and a failed `PUT /layout`
+surfaces once, `findings/2026-07-31-blank-canvas-node-drags-revert.md` carries
+the detail) and item 14 (a three-port Link dropping `bus2` / `efficiency2`;
+`_drop_unknown_extras` admits PyPSA's per-port columns by regex). Both are
+increments A1 and A4 of `plans/2026-10-06-visual-layers-1-abstract-canvas.md`.
 
 This file exists because GitHub Issues is **disabled** on this repository, so
 there is nowhere else to keep a queue. It is deliberately thin: one entry per
@@ -52,35 +69,20 @@ has the opposite default. Worth a test that fails when a route is mounted under
 a prefix no mechanism covers — the omission is what needs to become loud.
 Source: finding 3 of the same audit.
 
-**Fresh evidence, 2026-09-30: item 12 is the fourth miss in one router family.**
+**Fresh evidence, 2026-09-30: item 16 is the fourth miss in one router family.**
 `tests/test_worksheet_foreign_lock.py` already called the fix it guards "the
 third instance of one miss"; `put_asset_health` makes four, and it was ungated
 for 20 days with nothing failing. The proposed test now has a concrete shape to
 aim at, because enumerating write routes in the five routers under
 `/api/projects` and flagging those matched by no lock mechanism is exactly how
-item 12 was found — by hand, in one pass. Two of the four misses would have been
+item 16 was found — by hand, in one pass. Two of the four misses would have been
 red the day they landed.
 
-Item 12 being CLOSED does not weaken this. The class is closed in that one
+Item 16 being CLOSED does not weaken this. The class is closed in that one
 router family — all three sidecar PUTs now carry the check — but the mechanism
 that let a route ship ungated for 20 days with nothing failing is untouched, and
 it is the same mechanism for every other prefix. Four hand-caught misses is the
 argument for the test, not against it.
-
-### 7. Node positions revert on the blank canvas
-
-User-reported 2026-07-31; diagnosed, never fixed. Two facts still hold:
-`PUT /layout` 404s until the project directory exists on disk, and on load the
-server wins unconditionally — `TopologyCanvas.tsx:2004` still resolves
-`ps ?? layoutMemCache.get(...) ?? loadDiagramState(...) ?? null`. `persistLayoutFor`'s
-`.catch()` falls back to localStorage, which is *third* in that chain, so a
-failed PUT leaves a newer local layout that the next load discards for an older
-`layout.json`. Both ends are silent. `PersistedState` carries `savedAt` and
-nothing compares it.
-
-The user's exact sequence was never reproduced, so the trigger for the failing
-PUT is still unidentified — the finding lists the candidates in the order worth
-testing. Source: `findings/2026-07-31-blank-canvas-node-drags-revert.md`.
 
 ### 8. Component names are not validated at the edge
 
@@ -160,7 +162,7 @@ NOT reused or compacted — other findings and assessments cite these numbers.
   Tripwire: `tests/test_worksheet_foreign_lock.py`, which asserts the two
   subjects AND two lock-checked controls. Mutation-verified 2026-09-30: removing
   both guard blocks turns exactly the two subject tests red. **The class is not
-  closed — see item 12.**
+  closed — see item 16.**
 * **3** — `/api/chat/{id}/rewind` and `/abort` perform no authorization. Closed
   by `be4d5ed`, which gave `ChatSession` an `owner_user_id` and a fail-closed
   `session_owner_allows`. Tripwire: `tests/test_chat_session_ownership.py`.
@@ -176,7 +178,7 @@ NOT reused or compacted — other findings and assessments cite these numbers.
   super-admin still reads across tenants, and nobody clears across them through
   this route. Tripwire: `tests/test_changelog_scoping.py`, six tests including
   both halves of the super-admin distinction.
-* **12** — `PUT /{name}/asset_health` ignores a foreign edit lock. Opened and
+* **16** — `PUT /{name}/asset_health` ignores a foreign edit lock. Opened and
   closed on 2026-09-30: recorded first as a defect outside items 2-4, then fixed
   by `4eca8d2` on a separate instruction. The fourth instance of item 2's defect
   and the second in that file; ungated for 20 days because it landed two days
@@ -236,3 +238,33 @@ suite carries **124 pre-existing failures**, all from `No module named
 'gridspine'`. "The suite is green" is false locally; the only sound gate is
 *the failing set is unchanged*. Source: gap 6 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
+
+### 12. A network reset while a project is open lands in the session's scratch slot
+
+**Undo reports success and changes nothing; a raw import is silently lost or
+ignored.** `PyPSAService.reset_network()` publishes the new, unbound network
+context into `scratch:<sid>`, but while `sessions.active_project_id` is set the
+next request re-resolves the *project's* registry slot
+(`services/active_project.resolve_for_session`) and never sees it. Affected: raw
+imports (`.nc`, CSV, Excel, MATPOWER in `routers/io.py`), undo
+(`services/network_undo.apply_undo`), snapshot restore (`routers/snapshots.py`),
+and template create / bundle import (`routers/projects.py`), which re-bind but
+leave a stale bound copy in scratch that is written back over the project's
+saved edits when evicted. Reproduces through the API alone. The backend tests
+miss it because `install_network` (`tests/conftest.py`) clears
+`active_project_id`, so every test runs with the pointer unset. **Data-loss
+class.** A proposed fix (clear the pointer after a raw import; `rekey_context`
+after re-binding; pass the acting session through the chat import wrappers) and
+five regression tests sit unapplied in `notes/2026-09-30-full-e2e/`; the diff
+targets the 2026-09-30 tree and needs porting to today's `routers/io.py`.
+Source: `notes/2026-09-29-3d-site-view-phase2-qa.md` §7, defects A–C.
+
+### 13. `login.html` prefills and prints a review credential
+
+`frontend/public/login.html:391-402` ships `admin@example.com` /
+`admin-pass-123` as the input values and in a visible "Review account" line, and
+auth mode serves that page (`static_gate.decide_route` passes `/login.html`
+through). Fine for a review build; a credential in a shipped page otherwise. One
+decision (strip before release, or gate the prefill on a build flag) and a test
+that the served page carries no password value. Source: the same E2E, "Other
+findings".

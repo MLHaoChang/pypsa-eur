@@ -11,6 +11,14 @@ The asset library the investment step buys from (plan C9) is under
 ``/{name}/library``: ``GET``, ``PUT`` (validated by the engine's loader; 422
 names the entry and field, 413 over 1 MB) and ``POST /library/reset``.
 
+The joint optimisation (plan C12, the MILP of C11) is a background job:
+``POST /{name}/milp`` starts it with the run settings (202 with its record;
+409 while a job runs for any project; the least-cost run is made first, in
+the request, unless a fresh one with these settings exists), ``GET
+/{name}/milp`` is its record (``null`` when none has run since the backend
+started) and ``POST /{name}/milp/cancel`` asks it to stop, keeping its best
+point (404 when none has run). Starting and cancelling check the edit lock.
+
 ``GET /{name}/owner-assets`` (part three D2) lists what the last investment run
 bought as the extra owner assets of the investment case, with the study's
 ``source_hash`` and a ``stale`` flag: ``{assets, source_hash, stale}``. Read only.
@@ -161,6 +169,38 @@ async def run(
     electrical assets from the library unless ``invest`` is false."""
     _check_lock(proj, db, user)
     return await run_in_threadpool(ce.run, _row(proj, db), body.model_dump())
+
+
+# ── the joint optimisation (MILP) as a background job (plan C12) ────────────
+
+@router.post("/{name}/milp", status_code=202)
+async def start_milp(
+    body: RunSettings,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Start the joint optimisation (MILP, minutes) with these run settings;
+    poll ``GET /{name}/milp``."""
+    _check_lock(proj, db, user)
+    return await run_in_threadpool(ce.start_milp_job, _row(proj, db), body.model_dump())
+
+
+@router.get("/{name}/milp")
+def milp_status(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """The job's record: state, iteration, best cost against the least-cost one."""
+    return ce.milp_job_status(_row(proj, db))
+
+
+@router.post("/{name}/milp/cancel")
+def cancel_milp(
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Ask the running job to stop; it keeps the best point found so far."""
+    _check_lock(proj, db, user)
+    return ce.cancel_milp_job(_row(proj, db))
 
 
 # ── the asset library (plan C9) ────────────────────────────────────────────

@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-11",
+  "generated_at": "2026-10-12",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 229,
+  "tool_count": 230,
   "tools": [
     {
       "name": "list_components",
@@ -4312,6 +4312,24 @@
     },
     {
       "name": "campus_get_investment",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_get_milp",
       "toolsets": [
         "gridspine"
       ],

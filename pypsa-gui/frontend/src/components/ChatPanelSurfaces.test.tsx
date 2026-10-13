@@ -208,6 +208,32 @@ it('says so when part of the transcript could not be read', async () => {
   expect(banner.textContent).toMatch(/3/)
 })
 
+it('replays a turn that did not finish with a note saying so', async () => {
+  // Its tools ran, so it belongs in the conversation the user sees; the note
+  // is what explains a turn with tool tags and no answer.
+  vi.mocked(getChatHistory).mockResolvedValue({
+    turns: [{
+      ts: 1_754_000_000, session_id: 's1', model: 'claude-sonnet-5',
+      user: 'raise G1',
+      assistant: [{ type: 'tool_use', name: 'update_component' }],
+      usage: {
+        input_tokens: 1, output_tokens: 1,
+        cache_read_tokens: 0, cache_create_tokens: 0,
+      },
+      interrupted: true, interrupted_reason: 'tool_call_cap_exceeded',
+    }],
+    last_session_id: 's1', bound_project: 'Demo',
+    history_gap: 0, pending_turn: null,
+  } as never)
+
+  renderPanel()
+
+  const note = await screen.findByTestId('chat-interrupted-note')
+  expect(note.textContent).toContain('tool call cap exceeded')
+  expect(note.closest('[data-testid="chat-message"]')?.textContent)
+    .toContain('[tool: update_component]')
+})
+
 it('shows no damage notices on a clean reload', async () => {
   renderPanel()
   await waitFor(() => expect(vi.mocked(getChatHistory)).toHaveBeenCalled())
