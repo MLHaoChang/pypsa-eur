@@ -1706,13 +1706,23 @@ def _zero_cost_generators(n) -> list[str]:
     variable renewable, whose output the weather fixes). A fixed
     dispatchable unit at zero cost still counts: its dispatch is
     indeterminate.
+
+    Also exempt (decision study S4, review v2 N2-v2): a site's grid supply
+    is a zero-cost Generator BY DESIGN — since U2 WP6 the tariff lives in the
+    solver config's commercial block, and the engine prices it on the meter
+    Links for each solve only (`lp_bindings.materialise_poc_prices`; nothing
+    is stored on the Links) — so a Generator tagged `eh_role=grid_supply` is
+    not an indeterminate cost-less unit.
     """
     g = n.generators
     if g.empty or "capital_cost" not in g.columns or "marginal_cost" not in g.columns:
         return []
     oc = g["overnight_cost"].fillna(0) if "overnight_cost" in g.columns \
         else pd.Series(0.0, index=g.index)
-    mask = (g["capital_cost"].fillna(0) == 0) & (g["marginal_cost"].fillna(0) == 0) & (oc == 0)
+    grid_supply = (g["eh_role"].astype(str) == "grid_supply") if "eh_role" in g.columns \
+        else pd.Series(False, index=g.index)
+    mask = ((g["capital_cost"].fillna(0) == 0) & (g["marginal_cost"].fillna(0) == 0)
+            & (oc == 0) & ~grid_supply)
     series = set(n.generators_t.marginal_cost.columns) | set(n.generators_t.p_max_pu.columns)
     return [str(name) for name in g.index[mask] if name not in series]
 
@@ -2497,6 +2507,14 @@ def validate_for_run(n, solver_config) -> list[Issue]:
         # but mislead (arbitrage loop, demand resolution / partial months,
         # tariff validity).
         issues += _check_commercial(n, solver_config)
+        # A decision-study network written before the study moved onto the
+        # Investment Case engine (U2 WP10, gate WP6 W4): its tariff sits in
+        # the meter Links' prices and its demand charge in a setting that no
+        # longer exists, so a solve would drop the charge. Refused.
+        from services.study.pre_u2 import preflight_findings as _pre_u2_findings
+
+        issues += [Issue(severity=sev, code=code, component_class=cls, name=name, message=msg)
+                   for sev, code, cls, name, msg in _pre_u2_findings(n)]
     else:
         issues.append(_err("unknown_mode", "", "",
             f"Solver mode '{mode}' not recognised (expected lopf/pf)."))

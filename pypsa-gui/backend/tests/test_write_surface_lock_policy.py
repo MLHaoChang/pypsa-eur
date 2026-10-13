@@ -148,6 +148,12 @@ _R_STUDY = (
     "(`require_planning`). Whether studies should join the lock is an open "
     "product question, not a gap in a control that exists."
 )
+_R_READ_ONLY_PREVIEW = (
+    "a POST only to carry a body: it computes and returns, and writes nothing. "
+    "`studies.preview_intake` reads the PATH project's uploads behind "
+    "`ProjectAccessDep`, builds a throwaway site network (never the live one) "
+    "and prices its baseline bill."
+)
 _R_NO_PROJECT = (
     "transcribes the caller's audio and returns the text; it resolves no "
     "project and stores nothing."
@@ -218,6 +224,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("PUT", "/api/local-settings/anthropic-key"): (NOT_PROJECT_DATA, _R_LOCAL),
     ("POST", "/api/local-settings/reveal-log"): (NOT_PROJECT_DATA, _R_LOCAL),
     ("POST", "/api/dictation/transcribe"): (NOT_PROJECT_DATA, _R_NO_PROJECT),
+    ("POST", "/api/projects/{name}/studies/preview"): (NOT_PROJECT_DATA, _R_READ_ONLY_PREVIEW),
     ("POST", "/api/chat/operations/{operation_id}/reconcile"): (NOT_PROJECT_DATA, _R_ASSURANCE),
     ("POST", "/api/chat/ui-ack"): (NOT_PROJECT_DATA, _R_ASSURANCE),
     # chat session

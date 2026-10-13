@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { FolderOpen, TriangleAlert } from 'lucide-react'
 import { projectsApi } from '../api/projects'
 import type { ProjectInfo } from '../api/types'
+import { STUDY_FORK_LABELS } from '../utils/decisionVocabulary'
 
 /**
  * Filterable list of the projects saved on the backend.
@@ -109,6 +110,13 @@ export default function ProjectPicker({
                         {p.name}
                         {isCurrent && <span className="ml-1.5 text-[9px] font-normal opacity-70">(current)</span>}
                         {!isCurrent && isOpen && <span className="ml-1.5 text-[9px] font-normal opacity-70">(open)</span>}
+                        {/* Plan F1-F, F3: a decision study's own fork. */}
+                        {p.study_owned && (
+                          <span data-testid="study-fork-badge" title={STUDY_FORK_LABELS.badgeTitle(p.owner_study_name ?? null)}
+                            className="ml-1.5 px-1 py-px rounded border border-border text-[9px] font-medium text-muted">
+                            {STUDY_FORK_LABELS.badge}
+                          </span>
+                        )}
                       </p>
                       <p className="text-[10px] text-muted truncate">
                         {missing

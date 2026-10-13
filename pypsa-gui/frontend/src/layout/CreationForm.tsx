@@ -50,7 +50,7 @@ const genFields = (carrier: string): FieldSpec[] => [
   { key: 'p_nom_min',        label: 'P nom min',      type: 'number',   defaultValue: '0',    unit: 'MW',     half: true },
   { key: 'p_nom_max',        label: 'P nom max',      type: 'number',                         unit: 'MW',     half: true },
   { key: 'marginal_cost',    label: 'Marginal cost',  type: 'number',   defaultValue: '0',    unit: '€/MWh',  half: true },
-  { key: 'capital_cost',     label: 'Capital cost',   type: 'number',   defaultValue: '0',    unit: '€/MW',   half: true },
+  { key: 'capital_cost',     label: 'Capital cost',   type: 'number',   defaultValue: '0',    unit: '€/MW/yr',   half: true },
 ]
 
 const storFields = (carrier: string, hours = '4'): FieldSpec[] => [
@@ -68,7 +68,7 @@ const storFields = (carrier: string, hours = '4'): FieldSpec[] => [
   { key: 'p_nom_min',           label: 'P nom min',       type: 'number', defaultValue: '0',    unit: 'MW',    half: true },
   { key: 'p_nom_max',           label: 'P nom max',       type: 'number',                       unit: 'MW',    half: true },
   { key: 'marginal_cost',       label: 'Marginal cost',   type: 'number', defaultValue: '0',    unit: '€/MWh', half: true },
-  { key: 'capital_cost',        label: 'Capital cost',    type: 'number', defaultValue: '0',    unit: '€/MW',  half: true },
+  { key: 'capital_cost',        label: 'Capital cost',    type: 'number', defaultValue: '0',    unit: '€/MW/yr', half: true },
 ]
 
 // Bus-picker fields carry metadata so the renderer can restrict by carrier.
@@ -124,7 +124,7 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'tap_ratio',    label: 'Tap ratio',      type: 'number', defaultValue: '1.0',              half: true },
     { key: 'phase_shift',  label: 'Phase shift',    type: 'number', defaultValue: '0.0', unit: '°',   half: true },
     { key: 's_nom_extendable', label: 'Extendable', type: 'checkbox', defaultValue: 'false' },
-    { key: 'capital_cost', label: 'Capital cost',   type: 'number', defaultValue: '0', unit: '€/MVA' },
+    { key: 'capital_cost', label: 'Capital cost',   type: 'number', defaultValue: '0', unit: '€/MVA/yr' },
   ],
   line: [
     { key: 'name',             label: 'Name',         type: 'text',     required: true },
@@ -150,7 +150,7 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'efficiency',   label: 'Efficiency (η)',          type: 'number', defaultValue: '0.70',               half: true },
     { key: 'p_min_pu',     label: 'p_min_pu',               type: 'number', defaultValue: '0',                  half: true },
     { key: 'p_nom_extendable', label: 'Extendable',         type: 'checkbox', defaultValue: 'false' },
-    { key: 'capital_cost', label: 'Capital cost',           type: 'number', defaultValue: '0', unit: '€/MW',   half: true },
+    { key: 'capital_cost', label: 'Capital cost',           type: 'number', defaultValue: '0', unit: '€/MW/yr',   half: true },
     { key: 'marginal_cost',label: 'Marginal cost',          type: 'number', defaultValue: '0', unit: '€/MWh',  half: true },
   ],
   fuel_cell: [
@@ -161,7 +161,7 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'p_nom',        label: 'P nom (H₂ in)',          type: 'number', defaultValue: '50',  unit: 'MW',   half: true },
     { key: 'efficiency',   label: 'Efficiency (η)',          type: 'number', defaultValue: '0.55',              half: true },
     { key: 'p_nom_extendable', label: 'Extendable',         type: 'checkbox', defaultValue: 'false' },
-    { key: 'capital_cost', label: 'Capital cost',           type: 'number', defaultValue: '0', unit: '€/MW',  half: true },
+    { key: 'capital_cost', label: 'Capital cost',           type: 'number', defaultValue: '0', unit: '€/MW/yr',  half: true },
     { key: 'marginal_cost',label: 'Marginal cost',          type: 'number', defaultValue: '0', unit: '€/MWh', half: true },
   ],
   thermal:   genFields('gas'),
@@ -187,7 +187,7 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'p_nom',        label: 'P nom (elec in)',         type: 'number', defaultValue: '50',  unit: 'MW',    half: true },
     { key: 'efficiency',   label: 'η / COP',                 type: 'number', defaultValue: '3.5',                half: true },
     { key: 'p_nom_extendable', label: 'Extendable',          type: 'checkbox', defaultValue: 'false' },
-    { key: 'capital_cost', label: 'Capital cost',            type: 'number', defaultValue: '0',   unit: '€/MW',  half: true },
+    { key: 'capital_cost', label: 'Capital cost',            type: 'number', defaultValue: '0',   unit: '€/MW/yr',  half: true },
     { key: 'marginal_cost',label: 'Marginal cost',           type: 'number', defaultValue: '0',   unit: '€/MWh', half: true },
   ],
   // CHP: Link from a fuel bus → electricity (efficiency) + heat (efficiency2).
@@ -206,7 +206,7 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'efficiency',   label: 'η electrical',            type: 'number', defaultValue: '0.4',                half: true },
     { key: 'efficiency2',  label: 'η thermal',               type: 'number', defaultValue: '0.4',                half: true },
     { key: 'p_nom_extendable', label: 'Extendable',          type: 'checkbox', defaultValue: 'false' },
-    { key: 'capital_cost', label: 'Capital cost',            type: 'number', defaultValue: '0',   unit: '€/MW',  half: true },
+    { key: 'capital_cost', label: 'Capital cost',            type: 'number', defaultValue: '0',   unit: '€/MW/yr',  half: true },
     { key: 'marginal_cost',label: 'Marginal cost',           type: 'number', defaultValue: '0',   unit: '€/MWh', half: true },
   ],
   // Thermal storage: PyPSA Store on a heat bus (e_nom only — power capacity
@@ -219,7 +219,7 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'e_nom',            label: 'Energy capacity',type: 'number', defaultValue: '100', unit: 'MWh', half: true },
     { key: 'e_nom_extendable', label: 'Extendable',     type: 'checkbox', defaultValue: 'false', half: true },
     { key: 'e_cyclic',         label: 'Cyclic state-of-charge', type: 'checkbox', defaultValue: 'true' },
-    { key: 'capital_cost',     label: 'Capital cost',   type: 'number', defaultValue: '0',   unit: '€/MWh' },
+    { key: 'capital_cost',     label: 'Capital cost',   type: 'number', defaultValue: '0',   unit: '€/MWh/yr' },
   ],
   // Carrier-specific demand entries. The bus picker is filtered so the user
   // can't accidentally attach (e.g.) a hydrogen load to an AC bus.

@@ -176,10 +176,10 @@ describe('P29: the Results header', () => {
     expect(header().textContent).toContain('HUB DESIGN · RESULTS')
     expect(header().textContent).not.toContain('Optimization results')
   })
-  it('Expert: SIMULATION · RESULTS / Optimization results', async () => {
+  it('Expert: RESULTS · OPTIMIZATION / Optimization results', async () => {
     useUIStore.setState({ uiMode: 'expert' })
     await renderResults()
     expect(header().querySelector('h1')!.textContent).toBe('Optimization results')
-    expect(header().textContent).toContain('SIMULATION · RESULTS')
+    expect(header().textContent).toContain('RESULTS · OPTIMIZATION')
   })
 })

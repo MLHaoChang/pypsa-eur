@@ -1471,7 +1471,7 @@ export default function TimeSeriesManager() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader
-        eyebrow="DATA · TIME SERIES"
+        eyebrow="TIME · TIME SERIES"
         title="Time series library"
         subtitle="Hourly profiles attached to network components, organized by category."
       />

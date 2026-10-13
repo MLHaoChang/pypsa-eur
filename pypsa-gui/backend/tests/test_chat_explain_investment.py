@@ -20,6 +20,7 @@ from fastapi import HTTPException
 from services import chat_service
 from services import chat_tools as T
 from services import chat_tools_schema as S
+from services.results.sizing import BINDING_EXPLANATIONS
 
 
 def _sizing_network(*, solve: bool = True, co2_cap: float | None = None) -> pypsa.Network:
@@ -92,7 +93,7 @@ def test_binding_constraint_classification(name, expected, install_network):
     install_network(_sizing_network())
     out = T.explain_investment("Generator", name)
     assert out["sizing"]["binding_constraint"] == expected
-    assert out["sizing"]["explanation"] == T._BINDING_EXPLANATIONS[expected]
+    assert out["sizing"]["explanation"] == BINDING_EXPLANATIONS[expected]
 
 
 def test_ceiling_is_detected_at_solver_tolerance(install_network):
