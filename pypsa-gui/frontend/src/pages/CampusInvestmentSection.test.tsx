@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { CampusState, CampusResults, CostBasis, InvestmentRow } from '../api/campusElectrical'
+import type { CampusMilp, CampusState, CampusResults, CostBasis, InvestmentRow, MilpResults } from '../api/campusElectrical'
 import CampusElectricalPanel from './CampusElectricalPanel'
 import { formatEur } from './CampusInvestmentSection'
 
@@ -24,6 +24,7 @@ vi.mock('../store/uiStore', () => ({
 const api = vi.hoisted(() => ({
   state: vi.fn(), draft: vi.fn(), save: vi.fn(), run: vi.fn(), gridCodes: vi.fn(),
   library: vi.fn(), saveLibrary: vi.fn(), resetLibrary: vi.fn(),
+  startMilp: vi.fn(), milpStatus: vi.fn(), cancelMilp: vi.fn(),
 }))
 vi.mock('../api/campusElectrical', async () => {
   const real = await vi.importActual<typeof import('../api/campusElectrical')>('../api/campusElectrical')
@@ -91,6 +92,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   api.state.mockResolvedValue(stateWith(results()))
   api.gridCodes.mockResolvedValue({ shipped: {}, published: [], drafts: [], documents: [], extraction_available: false })
+  api.milpStatus.mockResolvedValue(null)
   api.library.mockResolvedValue({ yaml: 'x: 1', is_default: true })
 })
 afterEach(() => cleanup())
@@ -355,5 +357,324 @@ describe('compliance with the investment', () => {
   it('says in the header that the with-assets column is an AC re-solve', async () => {
     renderPanel()
     expect((await screen.findByText(/With the assets \(AC re-solved\)/))).toBeTruthy()
+  })
+})
+
+
+describe('the joint optimisation beside the least-cost choice', () => {
+  const milpResults = (over: Partial<MilpResults> = {}): MilpResults => ({
+    investment: [row({ library_id: 'TR_110_20_50', capex_eur: 1_800_000, annualised_eur_per_a: 150_000 }),
+                 row({ need: 'reactive', library_id: null, kind: 'none', units: 0, capex_eur: 0,
+                       annualised_eur_per_a: 0, status: 'not_needed' })],
+    cost: [{ period: 2030, capex_eur: 1_800_000, annualised_eur_per_a: 150_000 }],
+    compliance_invested: [],
+    history: [
+      { iteration: 0, cost: 261_526.96, feasible: true, accepted: true, choice: 'transformer GRID_IMPORT: 1 x TR63',
+        note: "C8's result, the warm start" },
+      { iteration: 1, cost: 150_000, feasible: true, accepted: true, choice: 'transformer GRID_IMPORT: 1 x TR50', note: '' },
+    ],
+    comparison: [
+      { need: 'transformer GRID_IMPORT', c8_choice: '1 x TR_110_20_63', milp_choice: '1 x TR_110_20_50',
+        c8_annualised_eur_per_a: 193_519.65, milp_annualised_eur_per_a: 150_000 },
+      { need: 'reactive', c8_choice: 'none', milp_choice: 'none', c8_annualised_eur_per_a: 0,
+        milp_annualised_eur_per_a: 0 },
+    ],
+    summary: { method: 'milp', fallback: false, reason: '', stop: 'converged', c8_cost: 261_526.96,
+               milp_cost: 150_000, c8_feasible: true, iterations: 1 },
+    fallback: null,
+    stop: 'converged',
+    ...over,
+  })
+  const withMilp = (milp: Partial<CampusMilp> & { results: MilpResults | null }) =>
+    stateWith(results(), { milp: { status: null, stale: false, ...milp } })
+
+  it('is absent before a joint optimisation has finished', async () => {
+    api.state.mockResolvedValue(withMilp({ results: null }))
+    renderPanel()
+    await screen.findByTestId('campus-investment')
+    expect(screen.queryByTestId('campus-milp')).toBeNull()
+  })
+
+  it('shows its cost against the least cost, need by need, and its purchases', async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults() }))
+    renderPanel()
+    const block = await screen.findByTestId('campus-milp')
+    expect(within(block).getByTestId('milp-summary').textContent)
+      .toMatch(/Joint optimisation €150,000\/a against least cost €261,527\/a, €111,527\/a less\. 1 iteration, converged/)
+    const t = within(block).getByTestId('milp-compare-transformer GRID_IMPORT').textContent!
+    expect(t).toContain('1 x TR_110_20_63')
+    expect(t).toContain('€193,520')
+    expect(t).toContain('1 x TR_110_20_50')
+    expect(t).toContain('€150,000')
+    expect(within(block).getByTestId('milp-invest-transformer GRID_IMPORT').textContent).toContain('TR_110_20_50')
+    // the least-cost table is untouched
+    expect(screen.getByTestId('invest-transformer GRID_IMPORT').textContent).toContain('TR_110_20_63')
+    expect(within(block).queryByTestId('milp-fallback')).toBeNull()
+    expect(within(block).queryByTestId('milp-cancelled')).toBeNull()
+  })
+
+  it("says the margin rule is the owner's, never met by inverter Q, and that costs are placeholders", async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults() }))
+    renderPanel()
+    const block = await screen.findByTestId('campus-milp')
+    expect(block.textContent).toMatch(/20 % design margin is the owner's rule/)
+    expect(block.textContent).toMatch(/never met\s+by extra inverter reactive power/)
+    expect(block.textContent).toMatch(/placeholders/)
+  })
+
+  it('labels a fallback to the least-cost choice with its reason', async () => {
+    const reason = "no AC-feasible point is cheaper than C8's (261,527 against 261,527 per year)"
+    api.state.mockResolvedValue(withMilp({ results: milpResults({
+      fallback: reason, summary: { ...milpResults().summary, fallback: true, milp_cost: 261_526.96 } }) }))
+    renderPanel()
+    const fb = await screen.findByTestId('milp-fallback')
+    expect(fb.textContent).toContain('least-cost choice kept')
+    expect(fb.textContent).toContain(reason)
+    expect(screen.getByTestId('milp-summary').textContent).not.toMatch(/less/)
+  })
+
+  it('labels a cancelled job, with the best choice found or the least-cost one kept', async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults({ stop: 'cancelled',
+      summary: { ...milpResults().summary, stop: 'cancelled' } }) }))
+    const first = renderPanel()
+    expect((await screen.findByTestId('milp-cancelled')).textContent).toMatch(/best choice found so far/)
+    expect(screen.getByTestId('milp-summary').textContent).toMatch(/cancelled/)
+    first.unmount()
+    api.state.mockResolvedValue(withMilp({ results: milpResults({ stop: 'cancelled', fallback: 'cancelled after 0 iteration(s)',
+      summary: { ...milpResults().summary, stop: 'cancelled', fallback: true } }) }))
+    renderPanel()
+    expect((await screen.findByTestId('milp-cancelled')).textContent).toMatch(/least-cost choice is kept/)
+  })
+
+  it('keeps the iteration history collapsed, with its count, until opened', async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults() }))
+    renderPanel()
+    const details = (await screen.findByTestId('milp-history')) as HTMLDetailsElement
+    expect(details.open).toBe(false)
+    expect(details.textContent).toContain('Iteration history (2)')
+    await userEvent.click(within(details).getByText('Iteration history (2)'))
+    expect(details.open).toBe(true)
+    expect(details.textContent).toContain('1. €150,000/a, AC-feasible, accepted — transformer GRID_IMPORT: 1 x TR50')
+  })
+
+  it('warns when the least-cost run it was based on has changed', async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults(), stale: true }))
+    renderPanel()
+    expect((await screen.findByTestId('milp-stale')).textContent).toMatch(/has changed since/)
+  })
+})
+
+describe('investment: units added next to an existing transformer group (plan C13)', () => {
+  const added = () => results({
+    investment: [
+      row({ need: 'transformer TR1+TR2', library_id: null, kind: 'keep', units: 2, capex_eur: 0,
+            annualised_eur_per_a: 0, existing: true, status: 'kept', reason: '', action: 'keep' }),
+      row({ need: 'transformer TR1+TR2', library_id: 'TR_110_20_20', units: 1, capex_eur: 550_000,
+            annualised_eur_per_a: 37_550, action: 'add',
+            reason: 'added in parallel with TR1, TR2 (existing); vector group assumed compatible (not given)' }),
+      row({ need: 'transformer TR3', library_id: 'TR_110_20_63', units: 2, action: 'replace' }),
+      row({ need: 'reactive', library_id: null, kind: 'none', units: 0, capex_eur: 0, annualised_eur_per_a: 0,
+            status: 'not_needed', action: null }),
+    ],
+    scope: {
+      pcc_switchgear: 'campus',
+      parallel: {
+        ratio_tol: { value: 0.005, source: 'assumed', note: 'n' }, uk_tol: { value: 0.1, source: 'assumed', note: 'n' },
+        step_tol_pct: { value: 0.1, source: 'assumed', note: 'n' }, unknown_vector_group: 'assume_compatible',
+        rating_ratio: 'not limited',
+      },
+    },
+  })
+
+  it('shows what each row does: the kept units and the added ones, beside a replacement', async () => {
+    api.state.mockResolvedValue(stateWith(added()))
+    renderPanel()
+    const [keep, add] = await screen.findAllByTestId('invest-transformer TR1+TR2')
+    expect(within(keep).getByTestId('invest-action').textContent).toBe('keep')
+    expect(keep.textContent).toContain('yes')
+    expect(within(add).getByTestId('invest-action').textContent).toBe('add')
+    expect(add.textContent).toContain('TR_110_20_20')
+    expect(add.textContent).toContain('€550,000')
+    expect(within(screen.getByTestId('invest-transformer TR3')).getByTestId('invest-action').textContent)
+      .toBe('replace')
+    expect(within(screen.getByTestId('invest-reactive')).getByTestId('invest-action').textContent).toBe('—')
+  })
+
+  it('shows the reason of an added unit, its assumption included', async () => {
+    api.state.mockResolvedValue(stateWith(added()))
+    renderPanel()
+    const [keep, add] = await screen.findAllByTestId('invest-transformer TR1+TR2')
+    expect(within(add).getByTestId('invest-reason').textContent)
+      .toBe('added in parallel with TR1, TR2 (existing); vector group assumed compatible (not given)')
+    expect(within(keep).queryByTestId('invest-reason')).toBeNull()                 // nothing to say
+  })
+
+  it('does not repeat an unresolved reason in the table: the alert lists it', async () => {
+    api.state.mockResolvedValue(stateWith(results({
+      investment: [row({ status: 'unresolved', reason: 'no library transformer', action: 'buy' })],
+      unresolved: [{ need: 'transformer GRID_IMPORT', reason: 'no library transformer' }],
+    })))
+    renderPanel()
+    const r = await screen.findByTestId('invest-transformer GRID_IMPORT')
+    expect(within(r).queryByTestId('invest-reason')).toBeNull()
+    expect(screen.getByTestId('unresolved').textContent).toContain('no library transformer')
+  })
+
+  it('states the rules a unit added in parallel had to meet, all assumed', async () => {
+    api.state.mockResolvedValue(stateWith(added()))
+    renderPanel()
+    const line = (await screen.findByTestId('invest-parallel')).textContent ?? ''
+    expect(line).toContain('impedance within ±10 %')
+    expect(line).toContain('no-load ratio within ±0.5 %')
+    expect(line).toContain('tap steps within 0.1 point')
+    expect(line).toContain('an unknown vector group is assumed compatible and flagged')
+    expect(line).toContain('no limit on the rating ratio')
+    expect(line).toMatch(/assumed/)
+  })
+
+  it('says a vector group that is not given is refused when the rules say so', async () => {
+    const res = added()
+    res.scope = { ...res.scope!, parallel: { ...res.scope!.parallel!, unknown_vector_group: 'refuse' } }
+    api.state.mockResolvedValue(stateWith(res))
+    renderPanel()
+    expect((await screen.findByTestId('invest-parallel')).textContent)
+      .toContain('an unknown vector group is refused')
+  })
+
+  it('reads a run from before these rules: no action, no rules line', async () => {
+    renderPanel()
+    const t = await screen.findByTestId('invest-transformer GRID_IMPORT')
+    expect(within(t).getByTestId('invest-action').textContent).toBe('—')
+    expect(screen.queryByTestId('invest-parallel')).toBeNull()
+  })
+})
+
+describe('investment: replacement at the end of life (plan C14)', () => {
+  const horizon = {
+    period_years: { '2030': 10, '2040': 10, '2050': 10 },
+    source: { '2030': 'project', '2040': 'project', '2050': 'assumed: the gap from the previous period' },
+    horizon_end: 2060,
+    notes: [
+      'Replacements are reported, not ranked: candidates are ranked by annualised cost.',
+      'TR1 (transformer K): no commissioning year; assumed: mid-life at the first period (commissioned 2010)',
+    ],
+  }
+  const renewed = () => results({
+    investment: [
+      row({ need: 'transformer T1', library_id: 'TR_110_20_63', units: 2, capex_eur: 4_300_000, action: 'buy',
+            purchase: 1, build_year: 2030, service_to: 2055, lineage: 'transformer T1|TR_110_20_63', replaces: null }),
+      row({ need: 'transformer T1', library_id: 'TR_110_20_63', units: 2, capex_eur: 4_300_000, action: 'renew',
+            invest_period: 2050, purchase: 2, build_year: 2055, service_to: 2060,
+            lineage: 'transformer T1|TR_110_20_63', replaces: 'transformer T1|TR_110_20_63|1' }),
+      row({ need: 'transformer K', library_id: 'TR_110_20_40', kind: 'keep', units: 1, capex_eur: 0,
+            annualised_eur_per_a: 0, existing: true, status: 'kept', action: 'keep', purchase: 0, build_year: 2010,
+            commissioned: 2010, commissioned_source: 'assumed: mid-life at the first period', service_to: 2050 }),
+      row({ need: 'transformer K', library_id: 'TR_110_20_40', units: 1, capex_eur: 950_000, action: 'renew',
+            invest_period: 2050, purchase: 1, build_year: 2050, service_to: 2060, reason: '',
+            commissioned: 2010, commissioned_source: 'assumed: mid-life at the first period' }),
+    ],
+    cost: [
+      { period: 2030, capex_eur: 4_300_000, capex_replacement_eur: 0, annualised_eur_per_a: 300_000 },
+      { period: 2040, capex_eur: 0, capex_replacement_eur: 0, annualised_eur_per_a: 300_000 },
+      { period: 2050, capex_eur: 5_250_000, capex_replacement_eur: 5_250_000, annualised_eur_per_a: 380_000 },
+    ],
+    scope: { pcc_switchgear: 'campus', horizon },
+  })
+  const perPeriodHub = { basis: 'per_period' as const, per_period: { '2030': 1e6, '2040': 1e6, '2050': 1e6 }, total: 3e7 }
+
+  it('lists one row per purchase with the year it is bought, a renewal saying so', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const [first, again] = await screen.findAllByTestId('invest-transformer T1')
+    expect(within(first).getByTestId('invest-action').textContent).toBe('buy')
+    expect(within(first).getByTestId('invest-bought').textContent).toBe('2030')
+    expect(within(again).getByTestId('invest-action').textContent).toBe('renew')
+    expect(within(again).getByTestId('invest-bought').textContent).toBe('2055')
+    expect(again.textContent).toContain('€4.30 M')
+  })
+
+  it('says when a kept existing asset went into service, and that the year is assumed', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const [keep, renew] = await screen.findAllByTestId('invest-transformer K')
+    expect(within(keep).getByTestId('invest-bought').textContent).toBe('in service since 2010 (assumed)')
+    expect(within(renew).getByTestId('invest-bought').textContent).toBe('2050')
+  })
+
+  it('shows the replacement part of each period capex', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const p2050 = await screen.findByTestId('cost-2050')
+    expect(within(p2050).getByTestId('cost-replacement').textContent).toBe('€5.25 M')
+    expect(within(screen.getByTestId('cost-2030')).getByTestId('cost-replacement').textContent).toBe('€0')
+  })
+
+  it('states the horizon, flags an assumed span and lists the notes', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const line = (await screen.findByTestId('invest-horizon')).textContent ?? ''
+    expect(line).toContain('to 2060')
+    expect(line).toContain('2030: 10 years')
+    expect(line).toContain('2050: 10 years (assumed)')
+    const notes = within(screen.getByTestId('invest-horizon-notes')).getAllByRole('listitem')
+    expect(notes.map(n => n.textContent)).toEqual(horizon.notes)
+  })
+
+  it('reads a run from before it: no horizon line, no replacement column, the period as the year', async () => {
+    renderPanel()
+    const t = await screen.findByTestId('invest-transformer GRID_IMPORT')
+    expect(within(t).getByTestId('invest-bought').textContent).toBe('2030')
+    expect(screen.queryByTestId('invest-horizon')).toBeNull()
+    expect(within(screen.getByTestId('cost-2030')).queryByTestId('cost-replacement')).toBeNull()
+  })
+})
+
+// Owner decision 2026-10-12: the investment case takes the joint optimisation when it is
+// fresh and found its own choice, else the least-cost run. The switch is never silent.
+describe('which result feeds the investment case', () => {
+  const milpOf = (over: Partial<MilpResults> = {}): MilpResults => ({
+    investment: [], cost: [], compliance_invested: [], history: [], comparison: [],
+    summary: { method: 'milp', fallback: false, reason: '', stop: 'converged', c8_cost: 2, milp_cost: 1,
+               c8_feasible: true, iterations: 1 },
+    fallback: null, stop: 'converged', ...over,
+  })
+
+  it('says the joint optimisation feeds it', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'milp', milp: { status: null, stale: false, results: milpOf() } }))
+    renderPanel()
+    const line = await screen.findByTestId('invest-ic-source')
+    expect(line.textContent).toMatch(/^Investment case uses: joint optimisation \(MILP\)\.$/)
+  })
+
+  it('says the least cost feeds it when there is no joint optimisation', async () => {
+    api.state.mockResolvedValue(stateWith(results(), { owner_assets_count: 2, owner_assets_method: 'least_cost' }))
+    renderPanel()
+    const line = await screen.findByTestId('invest-ic-source')
+    expect(line.textContent).toMatch(/^Investment case uses: least cost\.$/)
+  })
+
+  it('says why the least cost feeds it when a joint optimisation is stale', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'least_cost', milp: { status: null, stale: true, results: milpOf() } }))
+    renderPanel()
+    expect((await screen.findByTestId('invest-ic-source')).textContent)
+      .toBe('Investment case uses: least cost. The joint optimisation is stale; run it again to use it.')
+  })
+
+  it('says why the least cost feeds it when the joint optimisation kept the least-cost choice', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'least_cost',
+      milp: { status: null, stale: false, results: milpOf({ fallback: 'no AC-feasible point is cheaper' }) } }))
+    renderPanel()
+    expect((await screen.findByTestId('invest-ic-source')).textContent)
+      .toBe('Investment case uses: least cost. The joint optimisation kept the least-cost choice.')
+  })
+
+  it('shows no line when there is nothing for the investment case', async () => {
+    api.state.mockResolvedValue(stateWith(results(), { owner_assets_count: 0, owner_assets_method: null }))
+    renderPanel()
+    await screen.findByTestId('campus-investment')
+    expect(screen.queryByTestId('invest-ic-source')).toBeNull()
   })
 })

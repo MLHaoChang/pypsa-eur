@@ -354,12 +354,26 @@ def start_eh_study(
         "error": None,
         "started_at": time.time(),
         "finished_at": None,
+        # P33b 10b: the project's edit counter when the study STARTED —
+        # captured in the worker below, under the ctx lock, right before the
+        # study copies the network. `edited_since_study` compares against it.
+        "network_revision": None,
         "thread": None,
         "stop_event": stop_event,
     }
+    from services import dirty_state
+    study_ctx = PyPSAService.get_active_context()
 
     def worker():
         try:
+            # ★ Captured HERE, not on the request thread: an edit completing
+            # between the request and the private copy (including an HTTP
+            # edit whose bump lands after `call_next`) would otherwise be IN
+            # the copy and still read "edited". Not inside `run_eh_study`
+            # either — the suite's fake runs replace it. The window left
+            # (lock released here, re-taken for the copy) only over-reports.
+            with lock:
+                record["network_revision"] = dirty_state.revision(study_ctx)
             report = run_eh_study(
                 n,
                 pack,

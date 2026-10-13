@@ -11,7 +11,9 @@ One version is one directory, ``versions/<YYYY-MM-DD>/``, holding:
 * ``manifest.json``: pack id, version, what it was seeded from, and the load profiles
   (file, sha256 of its LF-normalised bytes, synthetic / illustrative flags, source, unit);
 * ``values.csv``: technology values in the asset schema's part vocabulary (S0:
-  ``power`` per_MW, ``energy`` per_MWh, single-part ``investment``). Each row is
+  ``power`` per_MW, ``energy`` per_MWh, single-part ``investment``; from 2026-10-07 the
+  campus equipment on ``lump``, ``per_km`` and ``per_bay``, IC G1). Each row states its
+  own money year (``currency``, ``currency_year``). Each row is
   transcribed in the CATALOGUE's unit (``original_value``, ``original_unit``) and the
   loader converts it to the pack unit through the closed :data:`UNIT_CONVERSIONS`
   table, so the source number and its conversion are both on the row;
@@ -151,6 +153,12 @@ UNIT_CONVERSIONS: Mapping[tuple[str, str], float] = {
     ("%/full cycle", "share/full cycle"): 0.01,
     ("years", "years"): 1.0,
     ("per unit", "per unit"): 1.0,
+    # Campus equipment (IC G1, plan G-2): the campus library states capex per unit, per km
+    # or per bay and `opex_frac` already as a share of capex per year.
+    ("EUR", "EUR/unit"): 1.0,
+    ("EUR/km", "EUR/km"): 1.0,
+    ("EUR/bay", "EUR/bay"): 1.0,
+    ("share/year", "share/year"): 1.0,
 }
 
 # (seed tariff unit, IC TariffItem.unit) -> factor. IC rate = seed price x factor.
@@ -161,7 +169,12 @@ TARIFF_CONVERSIONS: Mapping[tuple[str, str], float] = {
     ("EUR/month", "per_month"): 1.0,
 }
 
-_BASIS_UNIT = {"per_MW": "EUR/MW", "per_MWh": "EUR/MWh", "per_km": "EUR/km"}
+# A part's basis and the unit its overnight cost must be in. `lump` (one unit: a
+# transformer, a capacitor bank, a reactor, a STATCOM) and `per_bay` (switchgear) are the
+# campus equipment's bases (IC G1, plan G-2).
+_BASIS_UNIT = {"per_MW": "EUR/MW", "per_MWh": "EUR/MWh", "per_km": "EUR/km",
+               "lump": "EUR/unit", "per_bay": "EUR/bay"}
+Basis = Literal["per_MW", "per_MWh", "per_km", "lump", "per_bay"]
 
 
 # ── models ──────────────────────────────────────────────────────────────────
@@ -191,7 +204,7 @@ class PackValue(BaseModel):
     label: str
     technology: str | None = None
     part: str | None = None
-    basis: Literal["per_MW", "per_MWh", "per_km"] | None = None
+    basis: Basis | None = None
     source_technology: str | None = None
     parameter: str
     value: float | None
@@ -223,7 +236,7 @@ class CostPart(BaseModel):
     model_config = _FROZEN
     technology: str
     part: Literal["power", "energy", "investment"]
-    basis: Literal["per_MW", "per_MWh", "per_km"]
+    basis: Basis
     source_technology: str
     overnight: PackValue
     lifetime: PackValue | None = None
