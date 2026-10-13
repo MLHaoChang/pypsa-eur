@@ -10,7 +10,7 @@ import LedgerReview from './LedgerReview'
 import TariffStep from './TariffStep'
 import { ledger, library, previewUpload, study } from './__fixtures__/payloads'
 import type { LedgerPayload } from '../../api/decisionStudies'
-import { KEY_PARAMETER_LABELS, ROW_MEANING } from '../../utils/decisionVocabulary'
+import { CHANGED_IN_EXPERT_LABEL, KEY_PARAMETER_LABELS, ROW_MEANING, helpFor } from '../../utils/decisionVocabulary'
 
 afterEach(() => cleanup())
 
@@ -132,5 +132,21 @@ describe('the tariff step', () => {
     render(<LedgerReview payload={edited} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
     expect(screen.getByTestId('ledger-defaults').contains(row('pv_rooftop_eur_per_kw'))).toBe(false)
     expect(screen.getByTestId('ledger-changed').contains(row('pv_rooftop_eur_per_kw'))).toBe(true)
+  })
+
+  // U3 rule 5: a value an Expert changed on an option fork shows on its row,
+  // and the note reads as a sentence, not a code.
+  it('marks a row an Expert changed on a fork, and explains the note', () => {
+    const edited = { ...ledger, ledger: { ...ledger.ledger,
+      rows: ledger.ledger.rows.map(r => r.key === 'battery_inverter_eur_per_kw'
+        ? { ...r, status: 'customised' as const, changed_by: 'expert' } : r),
+      honesty_notes: [...ledger.ledger.honesty_notes, 'changed_in_expert:battery_inverter_eur_per_kw:bess_2h'] } }
+    render(<LedgerReview payload={edited} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
+    expect(within(row('battery_inverter_eur_per_kw')).getByTestId('ledger-changed-in-expert').textContent)
+      .toBe(CHANGED_IN_EXPERT_LABEL)
+    expect(within(row('battery_storage_eur_per_kwh')).queryByTestId('ledger-changed-in-expert')).toBeNull()
+    const sentence = helpFor('changed_in_expert:battery_inverter_eur_per_kw:bess_2h')
+    expect(sentence.source).toBe('study')
+    expect(screen.getByText(sentence.text)).toBeTruthy()
   })
 })

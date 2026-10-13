@@ -532,6 +532,11 @@ export const KIND_COPY: Record<
   project_exists: { title: 'Project name already exists' },
   descendants_exist: { title: 'Project has descendants' },
   confirmation_expired: { title: 'Confirmation expired' },
+  // Chat harness issue 18: approvals fail closed when they cannot be recorded.
+  approval_unavailable: {
+    title: 'Approval could not be recorded',
+    body: 'The action did not run. The app could not write its approval log, usually because its data folder is full or not writable.',
+  },
   rate_limited: { title: 'Rate limited' },
   unauthorized: { title: 'API key rejected' },
   // Fix round 1 (Task 14) — body left unset here on purpose: it's computed
@@ -656,7 +661,7 @@ export const KIND_COPY: Record<
  */
 export const TOOL_ERROR_BANNER_KINDS = new Set([
   'project_exists', 'descendants_exist',
-  'confirmation_expired', 'rate_limited',
+  'confirmation_expired', 'approval_unavailable', 'rate_limited',
   'unauthorized', 'missing_api_key',
   'inactive_acting_user',
   'solver_in_flight', 'parallel_destructive_not_allowed',

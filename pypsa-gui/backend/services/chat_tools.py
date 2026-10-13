@@ -4814,6 +4814,8 @@ def use_skill(name: str) -> dict:
     key = str(name or "").strip().lower()
     try:
         skill = skills.get(key)
+        if not skill.model_invocable:      # issue 14: a user-only skill
+            raise KeyError(key)
     except KeyError:
         raise HTTPException(status_code=404, detail={
             "error_kind": "unknown_skill",

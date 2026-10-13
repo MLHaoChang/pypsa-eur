@@ -193,7 +193,13 @@ and `harness/skills`; `smoke/check_bundle.py` checks they are present.
 
 ### D12. Security
 
-Workflow and skill files are read from the package directory only. Their
+Workflow and skill files are read from the package directory, plus one
+extra root for skills: `<app data>/skills/` (owner decision Q16, issue 14).
+That root belongs to the install, so the person who wrote a skill is the
+person whose assistant follows it. Project folders and bundles are never a
+root, because a project can arrive from someone else and a skill is
+instructions the model obeys. A user skill named like a package skill is
+refused with a logged reason, never shadowing it. Their
 bodies are instructions and are placed outside the `<untrusted_data>` fence;
 the fence rules are unchanged. `ask_user` option labels sent back by the
 client are user text and go through the same path as any typed message.
