@@ -15,6 +15,12 @@ name: Desktop app (macOS)
 # repository's CI does not hold. So this proves the bundle builds and runs on
 # macOS, not that Gatekeeper will accept it.
 #
+# The .app is uploaded as the "PyPSA-Studio-macOS-app" artifact once the smoke
+# has passed, for acceptance testing on a real Mac. Being unsigned, a downloaded
+# copy carries the quarantine flag: on macOS 15 the first launch is refused and
+# "Open Anyway" in System Settings -> Privacy & Security lets it through (or
+# `xattr -dr com.apple.quarantine "PyPSA Studio.app"` before the first launch).
+#
 # Not on every push: the gate alone is the full backend suite, and the whole
 # job is well over an hour of macOS runner time. It runs on demand, and on
 # pushes to the branch that carries packaging changes.
@@ -89,6 +95,27 @@ jobs:
     - name: Stop the app
       if: always()
       run: pkill -f "PyPSA Studio" || true
+
+    - name: Zip the .app
+      # Only after the smoke passed (the default `if: success()`): an .app that
+      # did not run a study is not worth downloading. ditto, not `zip` and not
+      # upload-artifact's own packing — both drop the symlinks and permissions
+      # a bundle's frameworks rely on; ditto keeps them (and a signature, when
+      # one day there is one). The artifact store wraps this zip in its own
+      # zip on download, hence compression-level 0 below.
+      run: |
+        /usr/bin/ditto -c -k --keepParent "pypsa-gui/dist-app/PyPSA Studio.app" \
+          "$RUNNER_TEMP/PyPSA-Studio-macOS.zip"
+        ls -lh "$RUNNER_TEMP/PyPSA-Studio-macOS.zip"
+
+    - name: Upload the .app
+      uses: actions/upload-artifact@v7
+      with:
+        name: PyPSA-Studio-macOS-app
+        path: ${{ runner.temp }}/PyPSA-Studio-macOS.zip
+        compression-level: 0
+        if-no-files-found: error
+        retention-days: 14
 
     - name: Upload logs and the study bundle
       if: always()
