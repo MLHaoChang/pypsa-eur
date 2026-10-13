@@ -1325,6 +1325,8 @@ Branch `feat/gridspine-campus-replacement`, cut from C13's branch (`feat/gridspi
 
 **Mutations.** 50 by hand: 33 in the engine, the MILP and the driver, 9 in the producer, 8 in the panel. 44 were caught on the first run. Of the 6 others: three (the share weighting dropped, existing cables left out, a renewal keeping the existing flag) were caught by `test_kept_existing_assets_are_renewed_from_their_commissioning_year` once the runner's test selection included it; two (the ranked total and the least-cost total including the renewals) were not valid mutations as first written (an emptied `if` body, a syntax error counted as caught) and, rewritten, are caught; one (existing compensation left out) was a real survivor and got `test_an_existing_compensation_entry_with_a_library_id_is_kept_and_renewed`. All 50 are caught now.
 
+**Gates**, on the branch with master (#147, #148, #152) and C13's re-merged branch merged in: `tests/gridspine -k "campus or island"` 1241 passed; the backend campus, bundle, IC (`test_finance_case*`, `test_investment_case*`, the campus route included), defaults-pack, assistant-inventory and engine-facade tests 766 passed, 2 skipped; the chat-tool and harness tests 1084 passed, 1 skipped; `tsc` clean and the full `vitest` 4602 passed. `harness/catalogue.py` is unchanged here, so the inventory was not regenerated.
+
 
 ### C15: on-load tap changer optimisation
 
