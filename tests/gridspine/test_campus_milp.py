@@ -268,7 +268,7 @@ def test_the_milp_finds_the_joint_optimum_that_c8s_greedy_choice_misses(tmp_path
     comp_ = out["compliance"].set_index("check")
     assert set(comp_["status_with_measures"]) <= {"pass", "not_rated"}
     h = out["milp_history"]
-    assert h.iloc[0]["note"].startswith("C8") and h.iloc[0]["cost"] == pytest.approx(c8_cost)
+    assert h.iloc[0]["note"].startswith("the least-cost choice") and h.iloc[0]["cost"] == pytest.approx(c8_cost)
     assert bool(h["feasible"].iloc[-1]) and h["cost"].iloc[-1] == pytest.approx(best[0])
     # one discrete change (the transformer) and one switched step out: the
     # linear model predicted the AC flows to within a scale unit. Not the
