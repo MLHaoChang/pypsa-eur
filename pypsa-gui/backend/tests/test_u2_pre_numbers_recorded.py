@@ -287,6 +287,21 @@ def test_the_three_month_toy_reproduces_on_the_engine():
     assert _reproduces("toy_3month", TOY_TEST_ID, got) == []
 
 
+def test_a_failed_driver_run_shows_its_fail_steps_not_its_polls():
+    # CI, 13 Oct: a poll that ran out its timeout filled the 40-line tail with
+    # `GET .../run` lines; the failed step and the logged exception were lost.
+    poll = 'INFO:httpx:HTTP Request: GET http://testserver/x/run "HTTP/1.1 404 Not Found"'
+    stdout = "\n".join(["  [PASS] one", "  [FAIL] the abort is accepted mid-run — HTTP 404",
+                        *[poll] * 100, "  [FAIL] the aborted run wrote its findings"])
+    stderr = "\n".join(["ERROR:services.study.runner:finishing the run failed",
+                        "OSError: [Errno 39] Directory not empty", *[poll] * 100])
+    tail = REC._failure_tail(stdout, stderr).splitlines()
+    assert tail[:2] == ["  [FAIL] the abort is accepted mid-run — HTTP 404",
+                        "  [FAIL] the aborted run wrote its findings"]
+    assert "OSError: [Errno 39] Directory not empty" in tail
+    assert not any("HTTP Request:" in ln for ln in tail)
+
+
 @pytest.mark.slow
 @pytest.mark.live_solve
 def test_the_driver_evidence_reproduces():
