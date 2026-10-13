@@ -140,6 +140,38 @@ describe('the Expert view', () => {
     await waitFor(() => expect(switchToProject).toHaveBeenCalledWith(fork, expect.anything()))
     expect(switchToProject).not.toHaveBeenCalledWith(study.base_project, expect.anything())
   })
+
+  // U3 ("Open in Expert"): the fork opens in Expert mode on Results ->
+  // Investment, the tab that carries its investment case.
+  it('lands in Expert on the Investment tab of the fork', async () => {
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'decision', resultsTabRequest: null })
+    useDecisionStore.setState({ active: REF, view: 'verdict' })
+    renderPanel()
+    await screen.findByTestId('verdict-class')
+    const btn = screen.getByTestId('expert-view')
+    await waitFor(() => expect((btn as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(btn)
+    fireEvent.click(screen.getByRole('button', { name: 'Open anyway' }))
+    await waitFor(() => expect(useUIStore.getState().uiMode).toBe('expert'))
+    expect(useUIStore.getState().uiModeExplicit).toBe(true)
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    expect(useUIStore.getState().resultsTabRequest).toBe('investment')
+  })
+
+  it('stays where it is when the switch is refused', async () => {
+    switchToProject.mockResolvedValueOnce({ status: 'dirty' } as never)
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'decision', resultsTabRequest: null })
+    useDecisionStore.setState({ active: REF, view: 'verdict' })
+    renderPanel()
+    await screen.findByTestId('verdict-class')
+    const btn = screen.getByTestId('expert-view')
+    await waitFor(() => expect((btn as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(btn)
+    fireEvent.click(screen.getByRole('button', { name: 'Open anyway' }))
+    await waitFor(() => expect(switchToProject).toHaveBeenCalled())
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().activeSlidePanel).toBe('decision')
+  })
 })
 
 describe('a changed intake', () => {

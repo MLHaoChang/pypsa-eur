@@ -18,7 +18,7 @@ No second store, no direct writes to `n.meta["asset_params"]`.
 | C | The six study chat tools with Guided confirmation tiers and `delegate()` steps | B | branch `claude/u3-chat-tools` |
 | D | The key-parameter list view | C | branch `claude/u3-key-params` |
 | E | M7 (Guided shell) and M8 (Guided without an API key) | D | branch `claude/u3-guided-shell` |
-| F | "Open in Expert" lands on the study's project (today's cards; switch to the S1b cards when they merge) | S1b for the final form | |
+| F | "Open in Expert" lands on the study's project (today's cards; switch to the S1b cards when they merge) | S1b for the final form | part 1 on branch `claude/u3-open-in-expert` |
 | H | Open the study routes in multi-user mode, with a cross-tenant test of every study route, the study-created base project and its forks (owner, 2026-10-13: a later slice) | — | later |
 | G | S2: ledger rows as a view of the provenance store; pack defaults written through `provenance.record`; Expert edits mark ledger rows | S1a | waits for S1a |
 
@@ -93,3 +93,13 @@ the list does not change shape for that.
     panel's buttons too).
   - The dock's start-menu chips wait for the key.
   - Unknown readiness changes nothing.
+
+## F — "Open in Expert", part 1
+
+Once the switch to the verdict's option fork succeeds, the decision panel sets Expert mode (explicit, since the
+user clicked) and opens Results → Investment, the tab that carries the fork's investment case. A refused
+switch leaves the mode and the panel as they were.
+
+Part 2 waits for S1b and S2: "defaults flagged" on the Expert cards. The S1b StorageUnit and Generator cards
+read `provenance.get`, so the pack defaults the study records through `provenance.record` show up there as
+defaults. The Investment editors' chips by `LedgerRow.engine_path` need an IC hook.

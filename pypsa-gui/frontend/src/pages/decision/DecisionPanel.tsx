@@ -247,8 +247,15 @@ function StudyView({ at, pollMs }: { at: StudyRef; pollMs: number }) {
     setExpertFor(null)
     if (!target) return
     const res = await switchToProject(target.projectRef, qc)
-    if (res.status === 'switched' || res.status === 'noop') useUIStore.getState().setSlidePanel(null)
-    else setExpertMsg(EXPERT_REFUSAL[res.status] ?? EXPERT_REFUSAL_FALLBACK)
+    if (res.status === 'switched' || res.status === 'noop') {
+      // U3 "Open in Expert": the fork opens in Expert mode on Results ->
+      // Investment, the tab that carries its investment case. The user's
+      // own click, so the mode choice is explicit.
+      const ui = useUIStore.getState()
+      ui.setUiMode('expert', { explicit: true })
+      ui.setSlidePanel('results')
+      ui.requestResultsTab('investment')
+    } else setExpertMsg(EXPERT_REFUSAL[res.status] ?? EXPERT_REFUSAL_FALLBACK)
   }
 
   if (studyErr) {
