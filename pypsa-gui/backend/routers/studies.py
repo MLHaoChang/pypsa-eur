@@ -986,13 +986,73 @@ def _ledger_out(study: DecisionStudy, ledger, stored: bool, maturity=None) -> di
     }
 
 
+# U3 rule 5: per fork file (path, mtime, size), the little the ledger view
+# reads from it (`asset_view.asset_snapshot`), so a ledger read does not
+# re-import every option network. A saved Expert edit rewrites the file, which
+# changes the key.
+_SNAPSHOTS: dict[tuple[str, int, int], Any] = {}
+_SNAPSHOTS_MAX = 64
+
+
+def _fork_snapshot(row):
+    from services import project_registry
+    from services.study import asset_view
+
+    path = project_registry.project_dir(row) / "network.nc"
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    snap = _SNAPSHOTS.get(key)
+    if snap is None:
+        try:
+            n, _hash = study_runner.fork_network_from_disk(row)
+        except Exception:  # noqa: BLE001 — an unreadable fork shows no edit, never a 500
+            logger.warning("rule 5: could not read fork %s", row.name, exc_info=True)
+            return None
+        snap = asset_view.asset_snapshot(n)
+        if len(_SNAPSHOTS) >= _SNAPSHOTS_MAX:
+            _SNAPSHOTS.pop(next(iter(_SNAPSHOTS)))
+        _SNAPSHOTS[key] = snap
+    return snap
+
+
+def _with_expert_edits(study: DecisionStudy, ledger, project: AuthorizedProject,
+                       db: DBSession, user: User | None):
+    """
+    Rule 5 (parent plan §3): the ledger as the guided face shows it. A field
+    an Expert changed on an option fork (S1a's provenance store says
+    `customised` and the value moved) marks its row `customised` by `expert`.
+    A view: the stored ledger is not rewritten (`services/study/asset_view`).
+    """
+    from services.study import asset_view
+
+    edits = {}
+    for row in _owned_fork_rows(study, project, db, user):
+        snap = _fork_snapshot(row)
+        if snap is None:
+            continue
+        found = asset_view.expert_edits(snap, ledger)
+        if found:
+            edits[snap.option_id or row.name] = found
+    return asset_view.mark_expert_edits(ledger, edits)
+
+
 @router.get("/{study_id}/ledger")
 def get_ledger(study_id: str,
-               project: AuthorizedProject = ProjectAccessDep) -> dict:
+               project: AuthorizedProject = ProjectAccessDep,
+               db: DBSession = Depends(get_db),
+               user: User | None = Depends(optional_user)) -> dict:
     _refuse_unless_enabled()
     study = _load(project, study_id)
     ledger, stored = _current_ledger(study)
-    return _ledger_out(study, ledger, stored)
+    # Maturity is the study's own: an Expert edit to a fork does not make the
+    # study's inputs any better known, so it is read from the stored ledger.
+    maturity = study_ledger.maturity_from_ledger(
+        ledger, study_ledger.load_provenance(study.intake))
+    return _ledger_out(study, _with_expert_edits(study, ledger, project, db, user), stored,
+                       maturity)
 
 
 @router.put("/{study_id}/ledger")

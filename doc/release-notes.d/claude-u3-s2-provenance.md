@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The decision study stamps the battery and PV parameters it writes in the per-field provenance store (default from the generic defaults pack, or the user's own value), and a value an Expert changes on a study option now shows on the study's assumptions as "Changed in Expert".
