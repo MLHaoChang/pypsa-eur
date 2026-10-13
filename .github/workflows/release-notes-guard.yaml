@@ -1,0 +1,44 @@
+name: Release notes guard
+
+# Fails a PR that edits doc/release_notes.md directly. Changes add a fragment
+# under doc/release-notes.d/ instead; only a collate run (which deletes
+# fragments) may touch the collated file. See doc/release-notes.d/README.md.
+
+on:
+  pull_request:
+    branches:
+    - master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Release notes guard
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Check doc/release_notes.md is only changed by a collate run
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        mb=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+        changes=$(git diff --name-status --no-renames "$mb" "$HEAD_SHA")
+        if ! grep -qP '^[AMD]\tdoc/release_notes\.md$' <<<"$changes"; then
+          echo "doc/release_notes.md unchanged."
+          exit 0
+        fi
+        if grep -qP '^D\tdoc/release-notes\.d/' <<<"$changes"; then
+          echo "doc/release_notes.md changed by a collate run (fragments deleted)."
+          exit 0
+        fi
+        echo "::error file=doc/release_notes.md::Add a fragment file under doc/release-notes.d/ instead of editing doc/release_notes.md. See doc/release-notes.d/README.md."
+        exit 1
