@@ -48,9 +48,11 @@ The functions:
   optimisation's (``run_milp/``) when it is fresh and has a point of its own,
   else the least-cost one (owner decision 2026-10-12); ``meta.study_method``
   says which. ``campus_study_hash`` identifies the study they come from;
-  ``owner_assets_response`` is the route's body (assets, hash, stale, method).
-  Read only; ``get_state`` carries only the count and the method,
-  ``owner_assets_count`` and ``owner_assets_method``.
+  ``owner_assets_response`` is the route's body (assets, hash, stale, method,
+  and the needs that run could not meet, ``unresolved``; owner decision
+  2026-10-13). Read only; ``get_state`` carries only the counts and the
+  method, ``owner_assets_count``, ``owner_assets_unresolved`` and
+  ``owner_assets_method``.
 * ``start_milp_job``, ``milp_job_status``, ``cancel_milp_job``: the joint
   optimisation (plan C11's MILP) as a background job, in the report job's
   shape (``services/reports/report_job.py``): one job at a time on a daemon
@@ -80,6 +82,7 @@ import shutil
 import tempfile
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 import pandas as pd
@@ -248,6 +251,52 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+#: ``_file_digest``'s memo: ``{(real path, st_mtime_ns, st_size, st_ino): sha256}``, least recently used
+#: first, one entry per path. Owner decision 2026-10-13.
+_DIGEST_CACHE: OrderedDict = OrderedDict()
+_DIGEST_CACHE_MAX = 32
+_DIGEST_GUARD = threading.Lock()
+
+
+def _file_key(path) -> tuple:
+    st = os.stat(path)
+    return os.path.realpath(path), st.st_mtime_ns, st.st_size, st.st_ino
+
+
+def _file_digest(path) -> str:
+    """``_sha256_file(path)``, memoised in-process for the staleness checks
+    (owner decision 2026-10-13): every investment-case status poll with a
+    stored report hashes the saved ``network.nc`` through ``_stale``, and
+    ``get_state`` does it up to three times.
+
+    The key is the real path, ``st_mtime_ns``, ``st_size`` and ``st_ino``, so
+    a file written again or replaced (an atomic save is another inode) is
+    hashed again; a file that changed while it was read (its key before and
+    after differ) is not kept. One entry per path (a new version drops the
+    old one), at most ``_DIGEST_CACHE_MAX`` paths, the least recently used
+    evicted. The lock guards the memo only: the MILP job thread and the
+    request threads may both call this, and two that miss together both hash.
+
+    Limit: a file rewritten in place with the same size inside one tick of the
+    filesystem's timestamps, with no stat in between, keeps its old key."""
+    key = _file_key(path)
+    with _DIGEST_GUARD:
+        digest = _DIGEST_CACHE.get(key)
+        if digest is not None:
+            _DIGEST_CACHE.move_to_end(key)
+            return digest
+    digest = _sha256_file(path)
+    if _file_key(path) != key:                             # it changed while it was read
+        return digest
+    with _DIGEST_GUARD:
+        for old in [k for k in _DIGEST_CACHE if k[0] == key[0]]:
+            del _DIGEST_CACHE[old]
+        _DIGEST_CACHE[key] = digest
+        while len(_DIGEST_CACHE) > _DIGEST_CACHE_MAX:
+            _DIGEST_CACHE.popitem(last=False)
+    return digest
+
+
 def _effective_library(d: Path) -> Path:
     """The library a run now would use: the project's copy, else the shipped one."""
     own = d / LIBRARY_FILE
@@ -360,7 +409,7 @@ def _stale(project, d: Path) -> bool:
     m = json.loads(manifest.read_text())
     text = yaml.safe_dump(yaml.safe_load(campus.read_text()), sort_keys=False)
     return (hashlib.sha256(text.encode()).hexdigest() != m.get("campus_sha256")
-            or _sha256_file(nc) != m.get("network_sha256")
+            or _file_digest(nc) != m.get("network_sha256")
             or _library_stale(project, d))
 
 
@@ -450,6 +499,7 @@ def get_state(project) -> dict:
     owner_assets = _owner_assets(method, source)
     return {
         "owner_assets_count": len(owner_assets),
+        "owner_assets_unresolved": len(_owner_unresolved(source)),
         "owner_assets_method": method if owner_assets else None,
         "campus_yaml": campus.read_text() if campus.is_file() else None,
         "skipped": json.loads(notes.read_text()) if notes.is_file() else [],
@@ -555,6 +605,30 @@ def _owner_source(project) -> tuple:
     if _milp_has_own_result(milp_dir) and not _milp_stale(project, d):
         return "milp", milp_dir
     return "least_cost", d / "run"
+
+
+def _owner_unresolved(run_dir: Path) -> list:
+    """The needs the investment run in ``run_dir`` could not meet, for the
+    investment case (owner decision 2026-10-13: "report them; the IC flags the
+    case"): ``[{"need": str, "reason": str}]``, one per distinct need and
+    reason among the ``status == "unresolved"`` rows of its
+    ``campus_investment.csv``, in table order (one need can have several rows,
+    one per item or kept unit; a kept unit's reason adds its own note). The
+    reason is the table's (an empty one is ``""``). ``[]`` when there are none,
+    and when the run has no investment: no table, or no library it bought from
+    (the same rule as the assets and the hash)."""
+    table, used = run_dir / cs.INVESTMENT_CSV, run_dir / USED_LIBRARY_FILE
+    if not table.is_file() or not used.is_file():
+        return []
+    out, seen = [], set()
+    for r in _records(pd.read_csv(table)):
+        if r["status"] != "unresolved":
+            continue
+        entry = (str(r["need"]), r["reason"] if isinstance(r["reason"], str) else "")
+        if entry not in seen:
+            seen.add(entry)
+            out.append({"need": entry[0], "reason": entry[1]})
+    return out
 
 
 def _study_hash(method: str, run_dir: Path):
@@ -759,14 +833,21 @@ def owner_assets_response(project, replacements: bool = False) -> dict:
     when there are no assets. The assets of a stale study are still listed,
     flagged: the IC refuses to build a case on them. ``replacements`` is
     ``extra_owner_assets``'s (plan C14; off by default, so the IC route gets
-    the first purchases only)."""
+    the first purchases only).
+
+    ``unresolved`` (owner decision 2026-10-13, additive) lists the needs that
+    same run could not meet, ``[{"need", "reason"}]`` (``_owner_unresolved``):
+    the case is not compliant without them, so the IC flags it. ``[]`` when
+    there are none or the run has no investment. It is read from
+    ``campus_investment.csv``, which ``source_hash`` already covers, so the
+    list never changes without the hash changing."""
     require_capacity_expansion(project)
     d = campus_dir(project)
     method, run_dir = _owner_source(project)
     assets = _owner_assets(method, run_dir, replacements=replacements)
     stale = False if method == "milp" else bool(_results(d / "run")) and _stale(project, d)
     return {"assets": assets, "source_hash": _study_hash(method, run_dir), "stale": stale,
-            "study_method": method if assets else None}
+            "study_method": method if assets else None, "unresolved": _owner_unresolved(run_dir)}
 
 
 def draft(project, overwrite: bool = False) -> dict:
@@ -1030,7 +1111,7 @@ def _milp_stale(project, d: Path) -> bool:
             return True
         for name, digest in basis["inputs"].items():
             path = d / "run" / name
-            if (_sha256_file(path) if path.is_file() else None) != digest:
+            if (_file_digest(path) if path.is_file() else None) != digest:
                 return True
     except Exception:                                          # noqa: BLE001 - see the docstring
         return True

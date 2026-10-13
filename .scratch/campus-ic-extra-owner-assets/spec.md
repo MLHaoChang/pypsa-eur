@@ -19,6 +19,15 @@ produced it.
 Issue 01 (the route) is **resolved** by the IC session in PR #148 (IC G3). Issues 02 (the Investment tab shows the
 campus equipment) and 03 (a defaults-pack version with the cited campus costs) remain open.
 
+Issue 04 (the campus replacements without buying them twice) and **issue 05** (the IC flags a campus study with
+unresolved needs, `campus_needs_unresolved`; owner decision 2026-10-13) are open. For 05 the producer already
+returns an additive top-level `unresolved: [{"need", "reason"}]` in `owner_assets_response` (branch
+`feat/gridspine-campus-unresolved`); the IC route ignores it until 05 lands.
+
+**Contract changes:** per the IC session's closing note, the contact for any change to the producer contract
+(`owner_assets_response`, the entry fields, `meta`, names, hash) is the coordinating session,
+session_01Fz66v1SpJnjGHky1RbUuqC.
+
 ## Open ownership question (state it, do not guess)
 
 The IC session's findings say who builds the route "is the campus session's answer" (U1 landing plan §8; findings
@@ -49,7 +58,9 @@ Plan references: `docs/superpowers/plans/2026-10-05-gridspine-campus-electrical.
 Call, with the project's DB row (`db.models.Project`), all in `services.campus_electrical_service`:
 
 - `owner_assets_response(project) -> {"assets": [...], "source_hash": str | None, "stale": bool,
-  "study_method": "milp" | "least_cost" | None}`. **Use this one** in the route: one call, one consistent snapshot.
+  "study_method": "milp" | "least_cost" | None, "unresolved": [{"need": str, "reason": str}]}`. **Use this one**
+  in the route: one call, one consistent snapshot. `unresolved` (added 2026-10-13, issue 05) lists the needs the
+  same run could not meet; `[]` when none or no investment run.
 - `extra_owner_assets(project) -> list[dict]` and `campus_study_hash(project) -> str | None` are its parts.
 - Every function refuses a project that is not a capacity-expansion (hub) project with `HTTPException(409)`, and
   answers 503 when the build has no gridspine engine. **The route must not call them for other projects** (check

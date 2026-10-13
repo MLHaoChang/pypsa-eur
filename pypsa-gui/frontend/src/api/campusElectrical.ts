@@ -306,6 +306,9 @@ export interface CampusState {
    *  optimisation when it is fresh and found its own choice, else the least-cost run;
    *  null when there are none. */
   owner_assets_method?: 'milp' | 'least_cost' | null
+  /** How many needs that same run could not meet; they are passed to the investment case,
+   *  which flags the case (owner decision 2026-10-13). */
+  owner_assets_unresolved?: number
   /** The joint optimisation's job and results (plan C12). */
   milp?: CampusMilp
 }

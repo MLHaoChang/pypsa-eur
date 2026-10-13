@@ -126,7 +126,8 @@ def test_the_owner_assets_are_a_read_that_a_lock_does_not_refuse_and_a_write_ver
 def test_the_owner_assets_of_a_project_with_no_run_are_empty_with_no_hash_over_http(client, hub):
     resp = client.get("/api/campus-electrical/Router Hub/owner-assets")
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"assets": [], "source_hash": None, "stale": False, "study_method": None}
+    assert resp.json() == {"assets": [], "source_hash": None, "stale": False, "study_method": None,
+                           "unresolved": []}
 
 
 # ── the joint optimisation as a background job (plan C12) ──────────────────

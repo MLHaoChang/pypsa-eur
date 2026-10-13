@@ -2760,6 +2760,9 @@ TOOLS: list[dict[str, Any]] = [
         "extra owner assets and owner_assets_method (milp|least_cost, null when "
         "none) which result they come from: the joint optimisation when it is "
         "fresh and found its own choice, else the least-cost run; say which. "
+        "owner_assets_unresolved is how many needs that same run could not meet; "
+        "when it is above 0 they are passed to the investment case as a flag "
+        "(the case is not compliant without them): say so. "
         "When stale is true the campus or the project changed since the run: say "
         "so before quoting numbers. It is a steady-state study, not a compliance "
         "certificate. 409 for a project of another kind. Safety: read.",
