@@ -7,6 +7,7 @@ module never imports ``routers.*``.
 """
 from __future__ import annotations
 
+import contextlib
 import contextvars as _contextvars
 import logging
 import math
@@ -150,7 +151,7 @@ def start_coupling_loop(
         snapshot_inputs,
     )
     from services.adequacy.metrics import horizon_years, resolve_time_basis
-    from services.adequacy.sweep import _solve_once
+    from services.adequacy.sweep import _solve_once, preserve_bus_topology
 
     # ── the synchronous 422 set ───────────────────────────────────────────
     target = getattr(body, "target_lole_h", None)
@@ -548,7 +549,7 @@ def start_coupling_loop(
         return ("The study did not complete. The iterates recorded below are "
                 "what it managed before it stopped.")
 
-    def worker():
+    def _worker(topology) -> None:
         res: dict | None = None
         err: str | None = None
         try:
@@ -571,6 +572,10 @@ def start_coupling_loop(
             except BaseException:                             # noqa: BLE001
                 logger.exception("coupling loop: the restore itself raised")
                 base_restored = False
+            # P22.9 bug 3: every solve of this study ran on the LIVE network,
+            # the closing one included — put the Bus topology columns back
+            # now, BEFORE the record below tells a poller the study is over.
+            topology.close()
             iterations = (res or {}).get("iterations")
             if iterations is None:
                 iterations = record["iterations"]
@@ -613,6 +618,13 @@ def start_coupling_loop(
     # (post_mc's pattern), so it cannot be redirected by a context switch at
     # all; post_frontier's in-thread `solver_state["frontier"].update(...)` is the
     # anti-pattern this deliberately does not copy.
+    def worker():
+        # The outer stack is the every-path guarantee (a raise before the
+        # explicit close in `_worker`); closing it twice is a no-op.
+        with contextlib.ExitStack() as topology:
+            topology.enter_context(preserve_bus_topology(n, lock))
+            _worker(topology)
+
     _ctx = _contextvars.copy_context()
     t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
                           name="adequacy-coupling-loop")

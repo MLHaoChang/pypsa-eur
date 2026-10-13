@@ -94,7 +94,7 @@ def test_stress_registry_round_trips_and_validates(
         client, install_network, tmp_projects_dir):
     install_network(_network(), name="WS3")
     client.post("/api/projects/WS3", params={"force": True, "rebind": True})
-    assert client.get("/api/projects/WS3/stress_scenarios").json() == {"scenarios": []}
+    assert client.get("/api/projects/WS3/stress_scenarios").json() == {"scenarios": [], "error": None}
     good = {"id": "cold_snap", "name": "1-in-20", "kind": "parametric",
             "frequency_per_year": 0.05,
             "electrical_load_multiplier": 1.3,

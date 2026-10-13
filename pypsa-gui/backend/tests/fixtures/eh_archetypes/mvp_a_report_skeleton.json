@@ -6,6 +6,7 @@
   "achieved_ens_permyriad": null,
   "achieved_shed_hours": null,
   "mc_lole_h": null,
+  "certified": null,
   "cost_at_target_eur": null,
   "period_basis": null,
   "excludes_shed_cost": true,
@@ -153,5 +154,6 @@
     "aborted": false
   },
   "tea": null,
-  "gates": null
+  "gates": null,
+  "notes": []
 }

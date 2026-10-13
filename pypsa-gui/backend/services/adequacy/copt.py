@@ -67,6 +67,7 @@ from services.adequacy.occurrence import (
     _as_float,
     rate_is_usable,
 )
+from services.adequacy.worksheet import zero_reason
 
 
 @dataclass(frozen=True)
@@ -321,8 +322,16 @@ def mixture_hourly(dist: CapacityDistribution, residual, mixed=(),
     # for a doubled mixture. `nan`-free by construction — `_availability_mw`
     # is built from a clamped profile — but a non-finite row is left in the
     # enumeration rather than guessed at.
+    # The test is EXACT zero, not `max() <= 0`. A weaker test also matches an
+    # availability that is negative in every hour, and that unit is NOT
+    # capacity-neutral: freezing it applies its negative contribution with
+    # probability 1 instead of `1 − q_i`, which is simply a different (wrong)
+    # answer. Negative availabilities should not reach here at all — both
+    # branches of `_fleet_units` clip at 0 — but the collapse is only sound
+    # under its own premise, so it asserts that premise rather than assuming
+    # the upstream clip.
     silent = {i for i in range(len(mixed))
-              if np.isfinite(avail[i]).all() and float(avail[i].max()) <= 0.0}
+              if np.isfinite(avail[i]).all() and not np.any(avail[i])}
     free = [i for i in range(len(mixed))
             if i not in fixed_up and i not in silent]
     for bits in itertools.product((0, 1), repeat=len(free)):
@@ -569,7 +578,15 @@ def _occurrence_profile(p_max_pu_t, g, snapshots) -> np.ndarray | None:
         return np.zeros_like(vals)
     if not series_is_informative(vals):
         return None
-    return np.where(finite, vals, 0.0)
+    # Clip at 0, the same rule the must-take branch applies (IEEE 39-bus
+    # review, F6). F6 was closed on that branch only, so a negative
+    # `p_max_pu` on an OCCURRENCE-bearing unit still reached the mixture as
+    # a negative availability — a farm that consumes, subtracting from the
+    # residual in the engines while the LP dispatches nothing from it. An
+    # availability is a fraction of nameplate; below zero it is not a weaker
+    # one, it is meaningless. Informativeness is still judged on the column
+    # as given, so clipping cannot turn an ignored column into a read one.
+    return np.clip(np.where(finite, vals, 0.0), 0.0, None)
 
 
 def static_fold_factor(gens, p_max_pu_t, g) -> float | None:
@@ -1164,6 +1181,10 @@ def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
         }
         if u.source == "carrier_default" and u.library_citation:
             fm["library_citation"] = u.library_citation
+        # P29 (B3): why a €0 row is €0 — additive, no number changes.
+        fm["zero_reason"] = zero_reason(
+            severity_eur=severity, delta_eue_mwh=delta_eue,
+            occurrence_per_year=occ, in_metric_scope=True, voll=voll)
         row = {
             "name": u.name,
             "delta_eue_mwh": delta_eue,
@@ -1277,6 +1298,11 @@ def screening_analysis(units, residual_load: pd.Series, *, weights: pd.Series,
         occ = float(fm.get("occurrence_per_year") or 0.0)
         fm["criticality_eur_per_year"] = crit
         fm["severity_eur"] = crit / occ if occ > 0 else 0.0
+        # P29 (B3): re-derived from the merged numbers.
+        fm["zero_reason"] = zero_reason(
+            severity_eur=fm["severity_eur"], delta_eue_mwh=m["delta_eue_mwh"],
+            occurrence_per_year=occ,
+            in_metric_scope=bool(fm.get("in_metric_scope", True)), voll=voll)
     rows = sorted(merged.values(), key=lambda r: (-r["delta_eue_mwh"], r["name"]))
 
     # The merged split describes the fleet that was actually EVALUATED: a

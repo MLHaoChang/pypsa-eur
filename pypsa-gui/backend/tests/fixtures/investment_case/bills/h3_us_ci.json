@@ -1,0 +1,267 @@
+{
+ "_working": [
+  "H3 — US commercial & industrial, summer quarter 2030-06-01 to 2030-08-31, America/New_York (EDT throughout), 15-min interval data. Self-authored; illustrative rates in the shape of a URDB tariff, not a published schedule. No holiday calendar: July 4 (a Thursday) is a weekday here, as in URDB schedules.",
+  "Load: 300 kW flat, plus one quarter-hour each at 800 kW Tue 06-04 03:00, 650 kW Wed 06-05 09:00, 700 kW Wed 06-05 18:00, 550 kW Thu 06-06 14:00, 750 kW Tue 07-09 10:00 (local).",
+  "energy — a 3-tier windowed tariff with URDB semantics: the month's TOTAL kWh positions the tiers (0-100,000, 100,000-200,000, above; cumulative thresholds), and each period's kWh is split into the tiers in proportion to the total. Periods: peak Mon-Fri 12:00-20:00 (Jun-Sep) at 0.20 / 0.23 / 0.26 USD/kWh by tier, off (everything else) at 0.08 / 0.10 / 0.12.",
+  "weekdays: June 20, July 23, August 22; peak kWh = 300 x weekdays x 8 (+ the 18:00 and 14:00 June spikes, 100 + 62.5): June 48,162.5, July 55,200.0, August 52,800.0; off kWh = 300 x (hours - weekdays x 8) (+ the 03:00, 09:00 and July 10:00 spikes, 125 + 87.5 and 112.5): June 168,212.5, July 168,112.5, August 170,400.0",
+  "energy 2030-06: E = 216,375.0; tier volumes 100,000 / 100,000 / 16,375.0; share of peak s = 48,162.5 / 216,375.0; cost = sum over tiers of volume x (s x peak rate + (1 - s) x off rate) = 26,039.9857",
+  "energy 2030-07: E = 223,312.5; tier volumes 100,000 / 100,000 / 23,312.5; share of peak s = 55,200.0 / 223,312.5; cost = sum over tiers of volume x (s x peak rate + (1 - s) x off rate) = 27,783.9383",
+  "energy 2030-08: E = 223,200.0; tier volumes 100,000 / 100,000 / 23,200.0; share of peak s = 52,800.0 / 223,200.0; cost = sum over tiers of volume x (s x peak rate + (1 - s) x off rate) = 27,466.3226",
+  "energy = 81,290.2466 -> 81,290.25",
+  "facility — all-hours monthly 15-min peak at 9.00 USD/kW with an 11-month ratchet at 80 % of the highest ACTUAL peak of the 11 months before (meter history seeds July 2029-May 2030: 500 kW, except September 2029 at 900 kW).",
+  "June: actual 800, floor 0.8 x 900 = 720 -> 800; July: actual 750, floor 0.8 x max(900, June 800) = 720 -> 750; August: actual 300, floor 720 -> 720.",
+  "facility = 9.00 x (800 + 750 + 720) = 20,430.00",
+  "tou_demand — windowed demand with a SPLIT-PEAK period: on_peak is ONE window of two fragments, Mon-Fri 08:00-12:00 and 17:00-21:00 (Jun-Sep), at 12.00 USD/kW on the single monthly peak across both fragments; mid_peak Mon-Fri 12:00-17:00 at 4.00 USD/kW. Hours outside both windows are not measured.",
+  "on_peak: June max(650 at 09:00, 700 at 18:00) = 700 (one peak, not 650 + 700); July 750; August 300. mid_peak: June 550; July 300; August 300.",
+  "tou_demand = 12 x (700 + 750 + 300) + 4 x (550 + 300 + 300) = 21,000 + 4,600 = 25,600.00",
+  "customer — fixed 9.8630 USD/day: 92 days = 907.3960 -> 907.40; June 30 x 9.863 = 295.89, July and August 31 x 9.863 = 305.753 -> 305.75",
+  "total = 128,227.6426 -> 128,227.64"
+ ],
+ "timezone": "America/New_York",
+ "tariff": {
+  "id": "h3_us_ci",
+  "name": "H3 US C&I summer",
+  "jurisdiction": "US",
+  "valid_from": "2030-01-01",
+  "items": [
+   {
+    "id": "energy",
+    "kind": "energy",
+    "unit": "per_kwh",
+    "tiers": [
+     {
+      "threshold": 0.0,
+      "rate": 0.0
+     },
+     {
+      "threshold": 100000.0,
+      "rate": 0.0
+     },
+     {
+      "threshold": 200000.0,
+      "rate": 0.0
+     }
+    ],
+    "periods": [
+     {
+      "name": "peak",
+      "rate": 0.0,
+      "months": [
+       6,
+       7,
+       8,
+       9
+      ],
+      "weekdays": [
+       0,
+       1,
+       2,
+       3,
+       4
+      ],
+      "start_hour": 12,
+      "end_hour": 20,
+      "tier_rates": [
+       0.2,
+       0.23,
+       0.26
+      ]
+     },
+     {
+      "name": "off",
+      "rate": 0.0,
+      "tier_rates": [
+       0.08,
+       0.1,
+       0.12
+      ]
+     }
+    ]
+   },
+   {
+    "id": "facility",
+    "kind": "demand",
+    "unit": "per_kw_month",
+    "periods": [
+     {
+      "name": "all",
+      "rate": 9.0
+     }
+    ],
+    "ratchet": {
+     "lookback_months": 11,
+     "share": 0.8
+    }
+   },
+   {
+    "id": "tou_demand",
+    "kind": "demand",
+    "unit": "per_kw_month",
+    "periods": [
+     {
+      "name": "on_peak",
+      "rate": 12.0,
+      "months": [
+       6,
+       7,
+       8,
+       9
+      ],
+      "weekdays": [
+       0,
+       1,
+       2,
+       3,
+       4
+      ],
+      "start_hour": 8,
+      "end_hour": 12
+     },
+     {
+      "name": "mid_peak",
+      "rate": 4.0,
+      "months": [
+       6,
+       7,
+       8,
+       9
+      ],
+      "weekdays": [
+       0,
+       1,
+       2,
+       3,
+       4
+      ],
+      "start_hour": 12,
+      "end_hour": 17
+     },
+     {
+      "name": "on_peak",
+      "rate": 12.0,
+      "months": [
+       6,
+       7,
+       8,
+       9
+      ],
+      "weekdays": [
+       0,
+       1,
+       2,
+       3,
+       4
+      ],
+      "start_hour": 17,
+      "end_hour": 21
+     }
+    ]
+   },
+   {
+    "id": "customer",
+    "kind": "fixed",
+    "unit": "per_day",
+    "periods": [
+     {
+      "name": "all",
+      "rate": 9.863
+     }
+    ]
+   }
+  ]
+ },
+ "dispatch_range": {
+  "start": "2030-06-01 00:00",
+  "end": "2030-08-31 23:45",
+  "freq": "15min",
+  "import_mw": 0.3,
+  "export_mw": 0.0,
+  "overrides": [
+   {
+    "start": "2030-06-04 03:00",
+    "end": "2030-06-04 03:15",
+    "import_mw": 0.8
+   },
+   {
+    "start": "2030-06-05 09:00",
+    "end": "2030-06-05 09:15",
+    "import_mw": 0.65
+   },
+   {
+    "start": "2030-06-05 18:00",
+    "end": "2030-06-05 18:15",
+    "import_mw": 0.7
+   },
+   {
+    "start": "2030-06-06 14:00",
+    "end": "2030-06-06 14:15",
+    "import_mw": 0.55
+   },
+   {
+    "start": "2030-07-09 10:00",
+    "end": "2030-07-09 10:15",
+    "import_mw": 0.75
+   }
+  ]
+ },
+ "meter_history": {
+  "2029-07": 500.0,
+  "2029-08": 500.0,
+  "2029-09": 900.0,
+  "2029-10": 500.0,
+  "2029-11": 500.0,
+  "2029-12": 500.0,
+  "2030-01": 500.0,
+  "2030-02": 500.0,
+  "2030-03": 500.0,
+  "2030-04": 500.0,
+  "2030-05": 500.0
+ },
+ "step_hours": 0.25,
+ "expected": {
+  "per_item": {
+   "energy": 81290.25,
+   "facility": 20430.0,
+   "tou_demand": 25600.0,
+   "customer": 907.4
+  },
+  "monthly": {
+   "2030-06": {
+    "energy": 26039.99,
+    "facility": 7200.0,
+    "tou_demand": 10600.0,
+    "customer": 295.89
+   },
+   "2030-07": {
+    "energy": 27783.94,
+    "facility": 6750.0,
+    "tou_demand": 10200.0,
+    "customer": 305.75
+   },
+   "2030-08": {
+    "energy": 27466.32,
+    "facility": 6480.0,
+    "tou_demand": 4800.0,
+    "customer": 305.75
+   }
+  },
+  "demand_billed_kw": {
+   "facility": {
+    "2030-06": 800.0,
+    "2030-07": 750.0,
+    "2030-08": 720.0
+   },
+   "tou_demand:on_peak": {
+    "2030-06": 700.0,
+    "2030-07": 750.0,
+    "2030-08": 300.0
+   },
+   "tou_demand:mid_peak": {
+    "2030-06": 550.0,
+    "2030-07": 300.0,
+    "2030-08": 300.0
+   }
+  },
+  "total": 128227.64
+ }
+}

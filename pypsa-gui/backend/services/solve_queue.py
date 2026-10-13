@@ -72,6 +72,11 @@ logger = logging.getLogger(__name__)
 # rather than a silent change to everyone's queue.
 MAX_CONCURRENT_SOLVES: int = int(os.environ.get("PYPSA_GUI_MAX_CONCURRENT_SOLVES", "1"))
 
+#: How long `reset_for_tests` waits for aborted jobs to unwind. A test solve
+#: aborts in well under a second; the bound only stops a job that ignores its
+#: stop event from hanging the suite.
+_RESET_JOIN_TIMEOUT_S = 30.0
+
 
 def _row_epoch(value: Any) -> float:
     """
@@ -613,6 +618,13 @@ class SolveQueue:
         the table (usually the same ids, since a normal solve mirrors its
         terminal status to both — but not always, e.g. a job whose row lagged
         behind a status forced directly in memory).
+
+        "Actually" is enforced, not assumed. `delete_jobs` swallows database
+        errors, and this used to return the union whether or not the delete
+        landed — so on a failure the super-admin was told the table had been
+        cleared while the rows survived and the next poll pulled them back.
+        A failed delete now reports only what left MEMORY, which is the part
+        that is true.
         """
         with self._lock:
             removed = [jid for jid in self._order
@@ -631,9 +643,16 @@ class SolveQueue:
 
             to_delete |= {row["id"] for row in solve_job_store.load_by_status(_TERMINAL)}
             if to_delete:
-                solve_job_store.delete_jobs(to_delete)
+                deleted = solve_job_store.delete_jobs(to_delete)
+                if deleted is None:
+                    # The rows are still there and the next listing will pull
+                    # them back, so report only what LEFT MEMORY. Reporting
+                    # `len(to_delete)` here told a super-admin the table had
+                    # been cleared when it had not.
+                    return len(removed)
         except Exception:  # noqa: BLE001 — bookkeeping must not fail the clear
             logger.exception("solve_queue: could not delete persisted jobs %s", to_delete)
+            return len(removed)
         return len(to_delete)
 
     def dismiss(self, job_id, user_id) -> bool:
@@ -699,11 +718,15 @@ class SolveQueue:
         thread parked on an empty queue (it is a daemon; killing it is neither
         possible nor necessary). Used by the pytest harness between tests.
 
-        Best-effort: signals the stop_event of EVERY job currently mid-solve (a
-        pool can have more than one) so each aborts (run_simulation returns
-        "aborted" -> no save) rather than bleeding its solve into the next test.
-        Doesn't join — a sub-second test solve will unwind on its own; the next
-        test's reset + reset_network() supersede it.
+        Signals the stop_event of EVERY job currently mid-solve (a pool can
+        have more than one) so each aborts (run_simulation returns "aborted" ->
+        no save) rather than bleeding its solve into the next test — and then
+        WAITS, bounded, for those jobs to unwind. Signalling alone was not
+        enough: an aborted job still runs its status write, which opens
+        `db.session.SessionLocal` at call time, and returning early let that
+        write land after the next test had patched `SessionLocal` onto its own
+        single-connection engine. On macOS it rolled back the next test's
+        seeding and surfaced as a 404 two tests away.
         """
         events = []
         with self._lock:
@@ -732,6 +755,25 @@ class SolveQueue:
                 ev.set()
             except Exception:
                 pass
+        # Every popped job ends in the dispatcher's `task_done()` (the drain
+        # above balanced its own), so the queue's counter reaching zero means
+        # every in-flight job has finished its finally-block writes. Several
+        # tests swap `_q` for a stand-in that swallows work; nothing is
+        # dispatched from one, so there is nothing to wait for.
+        all_done = getattr(self._q, "all_tasks_done", None)
+        if all_done is None:
+            return
+        deadline = time.monotonic() + _RESET_JOIN_TIMEOUT_S
+        with all_done:
+            while self._q.unfinished_tasks:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.warning(
+                        "solve_queue.reset_for_tests: %d job(s) still unwinding after %ss",
+                        self._q.unfinished_tasks, _RESET_JOIN_TIMEOUT_S,
+                    )
+                    break
+                all_done.wait(remaining)
 
     def restore(self, row: dict) -> tuple[SolveJob, bool]:
         """
@@ -910,17 +952,30 @@ class SolveQueue:
         else:
             self._run_solve_job(job)
 
-    def _claim(self, job: SolveJob, stop_event, log_queue) -> bool:
-        """Flip a popped job to `running` and publish its handles. False when an
-        abort landed in the pop→claim window.
+    def _claim(self, job: SolveJob, stop_event, log_queue) -> str:
+        """Flip a popped job to `running` and publish its handles.
 
-        Extracted from `_run_solve_job` so both runners claim identically: the
-        re-check, the single critical section for status + handles, and the
-        `running` row that boot reconciliation reads.
+        Returns ``"claimed"``, ``"cancelled"`` (an abort landed in the
+        pop->claim window) or ``"parked"`` (a desktop quit is draining the
+        queue; the job stays `queued`, row untouched, and boot re-enqueues it).
+        A tri-state, not a bool: a parked job must NOT be finished, and a
+        `False` would have sent it down the abort path, which records a
+        terminal status and loses it.
+
+        This docstring used to say it was "extracted from `_run_solve_job` so
+        both runners claim identically". `_run_solve_job` never called it — it
+        kept its own inline claim, and the drain check landed only there — so
+        a gridspine job popped after `stop_dispatching()` claimed and started
+        under a process that was exiting, and `interrupted` jobs are never
+        resumed. The check below is the inline one's, placed the same way and
+        for the same reason: in the SAME critical section as the status flip,
+        so either we see the flag or the quit thread's job snapshot sees us.
         """
         with self._lock:
             if job.cancelled:
-                return False
+                return "cancelled"
+            if self._draining.is_set():
+                return "parked"
             job.status = "running"
             job.started_at = time.time()
             job.stop_event = stop_event
@@ -931,7 +986,13 @@ class SolveQueue:
             solve_job_store.record_status(job)
         except Exception:  # noqa: BLE001
             logger.exception("solve_queue: could not persist job %s", job.id)
-        return True
+        # Issue 06 — running marker under the project's storage_dir.
+        try:
+            from services import run_evidence as _re
+            _re.start_queue_run(job)
+        except Exception:  # noqa: BLE001 — evidence must never stall the queue
+            logger.exception("solve_queue: run evidence start failed for %s", job.id)
+        return "claimed"
 
     def _finish(self, job: SolveJob, status: str, *, error: str | None = None) -> None:
         """Record a terminal state once, the same way for both runners."""
@@ -945,6 +1006,11 @@ class SolveQueue:
             solve_job_store.record_status(job)
         except Exception:  # noqa: BLE001
             logger.exception("solve_queue: could not persist job %s", job.id)
+        try:
+            from services import run_evidence as _re
+            _re.publish_queue_run(job)
+        except Exception:  # noqa: BLE001
+            logger.exception("solve_queue: run evidence publish failed for %s", job.id)
 
     def _run_gridspine_job(self, job: SolveJob) -> None:
         """Run one planning → dynamics study.
@@ -965,7 +1031,12 @@ class SolveQueue:
 
         stop_event = threading.Event()
         log_queue = sim.BufferedLogQueue()
-        if not self._claim(job, stop_event, log_queue):
+        claim = self._claim(job, stop_event, log_queue)
+        if claim == "parked":
+            # Left `queued` for boot to re-enqueue — NOT finished. No consumer
+            # ever saw this log queue, so there is no stream to close.
+            return
+        if claim == "cancelled":
             self._finish(job, "aborted")
             return
 
@@ -975,12 +1046,16 @@ class SolveQueue:
             # that needs parsing prose would break the moment the wording did.
             log_queue.put(f"gridspine {stage} {done}/{total}")
 
-        if not job.storage_dir:
-            self._finish(job, "failed", error="gridspine job has no authorized storage directory")
-            return
-
         status, error = "failed", None
         try:
+            # Inside the `try`, so the `finally` closes the stream. This check
+            # used to sit between `_claim` — which had already PUBLISHED the
+            # log queue — and the `try`, and returned through `_finish` alone:
+            # anything streaming the job's log waited for an end-of-stream
+            # sentinel that was never sent.
+            if not job.storage_dir:
+                error = "gridspine job has no authorized storage directory"
+                return
             log_queue.put(f"gridspine study starting for {job.project_id!r}")
             gridspine_service.run_study_dir(
                 pathlib.Path(job.storage_dir) / gridspine_service.GRIDSPINE_SUBDIR,
@@ -1032,6 +1107,7 @@ class SolveQueue:
             _safe_project_dir,
             _save_context,
         )
+        from services.project_context import may_rewrite_user_ts
         from services.pypsa_service import PyPSAService
         from services.solver_service import run_simulation
 
@@ -1200,6 +1276,7 @@ class SolveQueue:
             # cannot slip between the check and the claim.
             from services.project_context import (
                 STUDY_LABELS as _STUDY_LABELS,
+                cleared_result_state,
                 running_study_key as _running_study_key,
             )
             with ctx.solver_state_lock:
@@ -1228,16 +1305,13 @@ class SolveQueue:
                 # — it is not; only `solve_queue.abort` can stop it — and it
                 # would be counted a second time by `solves_in_flight()`.
                 kind="queue",
-                # Merged 2026-09-10: `adequacy_report` / `last_reserve_margin`
-                # arrive with the FMEA work on master and must be cleared on a
-                # new claim like every other per-solve result, or a queued run
-                # inherits the previous project's adequacy verdict.
-                last_lost_load=None, adequacy_report=None,
-                last_reserve_margin=None,
-                lopf_results=None, ac_pf_results=None,
-                ac_pf_convergence=None, ac_pf_convergence_list=None,
-                ac_pf_slack_bus_used=None, ac_pf_stripped_voll_slacks=None,
-                ac_pf_converged_count=None, ac_pf_total_snapshots=None,
+                # Every per-solve result, DERIVED — see `cleared_result_state`.
+                # This list was typed out here and drifted from `/run`'s: it was
+                # missing all five `eh_*` keys, so a queued re-solve kept the
+                # previous plan's energy-hub tables and persisted them beside
+                # the new dispatch. The comment this replaces stated the very
+                # invariant the omission broke.
+                **cleared_result_state(),
                 ))
 
             # 3. Solve (synchronous; honours stop_event). Writes LOPF dispatch
@@ -1254,7 +1328,13 @@ class SolveQueue:
             # Price with THIS job's config, not the foreground's — the myopic
             # branch reads capital_cost defaults (overnight_cost / discount_rate
             # fills) off it, and this runs outside `solving_context(ctx)`.
-            objective = sim._compute_run_objective(n, config)
+            # Only for a solve that actually produced one. PyPSA assigns
+            # `n._objective` on a SUCCESSFUL solve alone and it survives in the
+            # netcdf, so after a failure or an abort it still holds the
+            # PREVIOUS run's value — which the queue was publishing onto the
+            # job row and the context, showing a cost for an infeasible run.
+            objective = (sim._compute_run_objective(n, config)
+                         if status in ("ok", "optimal") else None)
             if status == "aborted":
                 final_status = "aborted"
             elif status in ("ok", "optimal"):
@@ -1301,22 +1381,15 @@ class SolveQueue:
                 #    results_state.pkl carries AC-PF + lost-load (built from
                 #    ctx.solver_state). expect=project_id arms the identity guard.
                 if final_status == "completed":
-                    # persist_user_ts ONLY when this ctx IS the foreground
-                    # (resident solve-in-place): `_serialize_user_ts()` reads the
-                    # foreground's module-global `_user_ts`, so writing it for a
-                    # BACKGROUND project would clobber that project's own
-                    # user_ts.json with the foreground's profiles. The background
-                    # project's on-disk profiles + the netcdf's baked profiles are
-                    # already correct, so we leave user_ts.json untouched there.
                     _save_context(
                         ctx, project_id, expect=project_id,
-                        # `_user_ts` is still a module GLOBAL belonging to the
-                        # process foreground. Persist it only when the context
-                        # being solved IS that foreground; for anything else,
-                        # writing it would stamp one project's profiles onto
-                        # another's `user_ts.json`. Not writing it is safe — the
-                        # netcdf already carries the profiles.
-                        persist_user_ts=(ctx is PyPSAService._active),
+                        # THIS job's config — the snapshot it actually solved
+                        # with — so `solver_config.json` describes the solve
+                        # that `network.nc` holds. Without it the two files
+                        # disagreed whenever the context's config had moved on.
+                        solver_config_override=config,
+                        # The solved project's own series; see `may_rewrite_user_ts`.
+                        persist_user_ts=may_rewrite_user_ts(ctx),
                         storage_dir=(
                             pathlib.Path(job.storage_dir) if job.storage_dir else None
                         ),
@@ -1339,6 +1412,26 @@ class SolveQueue:
             except Exception:
                 pass
         finally:
+            # Release the context if we still own it. The `except Exception`
+            # above releases it on the error path and `ctx_state_update` on the
+            # success path, so reaching here still holding it means a
+            # BaseException escaped — `SystemExit` from admin-enabled user code,
+            # or the abort watcher's injected interrupt landing after `disarm()`.
+            # `_dispatch_loop` catches BaseException and carries on, which is
+            # right for the DISPATCHER and fatal for the CONTEXT: `thread` would
+            # stay pointed at the dispatcher, which never exits, so
+            # `_solver_in_flight_ctx` read True forever and every save,
+            # activate and load of the project 409'd until a restart.
+            if ctx is not None:
+                try:
+                    with ctx.solver_state_lock:
+                        if ctx.solver_state.get("thread") is me:
+                            ctx.solver_state.update(
+                                status="failed", condition="queue_error",
+                                thread=None, kind=None,
+                            )
+                except Exception:  # noqa: BLE001 — never mask the original
+                    pass
             # A PARKED job (quit-time drain, see the claim block) skips all of
             # this: it is still `queued`, not terminal — writing `final_status`
             # would turn the park into a bogus `failed` — and no consumer ever
@@ -1361,6 +1454,13 @@ class SolveQueue:
                     solve_job_store.record_status(job)
                 except Exception:  # noqa: BLE001 — bookkeeping must not fail a solve
                     logger.exception("solve_queue: could not persist job %s", job.id)
+                try:
+                    from services import run_evidence as _re
+                    _re.publish_queue_run(job)
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "solve_queue: run evidence publish failed for %s", job.id,
+                    )
                 # Close the SSE log stream for this job so the foreground consumer's
                 # `done` event fires (run_simulation pushes None on its own success
                 # path, but the abort/error paths above may not have).

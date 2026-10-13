@@ -32,7 +32,9 @@
  * 2,200-line component: untestable in isolation, and invisible to whoever
  * adds the next panel and needs to decide whether it belongs here.
  */
+import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
+import { useHubDesignStore, type HubStep } from '../pages/hubDesign/hubDesignStore'
 
 export interface UiContext {
   panel?: string
@@ -40,6 +42,14 @@ export interface UiContext {
   selected_component?: { class: string; name: string }
   compare_rail_open?: boolean
   snapshot_index?: number
+  // Guided-mode spec §6.2 — present ONLY in Guided (review B9): an Expert
+  // context carries neither key, so its request body is unchanged.
+  ui_mode?: 'guided'
+  guided_step?: HubStep
+  // Chat harness issue 06 — only while a workflow is active: lets the
+  // backend rebind a session that lost its state. Absent otherwise, so a
+  // context without a workflow is byte-identical to before.
+  workflow?: { id: string; step: string }
 }
 
 export function buildUiContext(): UiContext | null {
@@ -67,6 +77,17 @@ export function buildUiContext(): UiContext | null {
   // which changes what a question about "this bus" is likely to mean.
   const interesting = Object.keys(ctx).length > 0
   if (interesting || s.canvasView !== 'blank') ctx.canvas_view = s.canvasView
+
+  // After the canvas rule, so being in Guided does not by itself make the
+  // default canvas worth reporting. The backend adds the Guided rules for
+  // the turn from this key (chat_service._format_ui_context).
+  if (s.uiMode === 'guided') {
+    ctx.ui_mode = 'guided'
+    if (s.activeSlidePanel === 'hubDesign') ctx.guided_step = useHubDesignStore.getState().step
+  }
+
+  const wf = useChatStore.getState().workflow
+  if (wf) ctx.workflow = { id: wf.id, step: wf.step }
 
   return Object.keys(ctx).length > 0 ? ctx : null
 }

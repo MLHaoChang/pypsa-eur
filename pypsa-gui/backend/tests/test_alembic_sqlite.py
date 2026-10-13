@@ -243,8 +243,12 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
     # carries both forms and asserts whichever one the head migration uses. A
     # column migration also changes what "byte-identical rows" can mean: see
     # NEW_COLUMN below.
-    NEW_TABLE_NAME = None                       # 0007 adds no table
-    NEW_COLUMN = ("solve_jobs", "kind")         # (table, column) or None
+    #
+    # 0008_library (Edge Investment Case WP1.1a) adds a TABLE again, so the
+    # table form is the one exercised; `solve_jobs` stays in the seeded set
+    # because its rows must still come through 0008 byte-identical.
+    NEW_TABLE_NAME = "library_items"            # 0008 adds the Library table
+    NEW_COLUMN = None                           # (table, column) or None
     # `solve_jobs` joined this list with 0007: the column under test is on it,
     # and a QUEUED job row surviving the migration is the thing that matters —
     # a restart restores those rows into the in-memory queue.

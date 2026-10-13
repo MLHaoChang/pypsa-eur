@@ -237,6 +237,9 @@ export default function ProjectTabs() {
       await resetBackendNetwork()
       try { await projectsApi.save(target, true) }
       catch (e) { appLog('WARN', `Could not seed empty project '${target}': ${String((e as Error)?.message ?? e)}`) }
+      // G4 (guided-mode spec §3.4 + §10 addendum): a new project starts
+      // Guided unless the user chose a mode explicitly.
+      useUIStore.getState().noteNewProjectCreated('blank')
       invalidateNetworkQueries(qc, target)
       addTab(target)
       setCurrentProject(target)

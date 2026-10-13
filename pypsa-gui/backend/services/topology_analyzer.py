@@ -33,15 +33,17 @@ refuse a network that solves.
 from __future__ import annotations
 
 import math
+import re
 
-# Branch frames and their bus columns. `bus2`..`bus4` on multi-port links are
-# added dynamically — an electrolyser's heat port connects buses too.
-_BRANCHES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("lines", ("bus0", "bus1")),
-    ("transformers", ("bus0", "bus1")),
-    ("links", ("bus0", "bus1")),
-)
-_EXTRA_LINK_BUSES = ("bus2", "bus3", "bus4")
+import pandas as pd
+
+# Branch frames. Every `busN` column is a port — `bus0`/`bus1` on lines and
+# transformers, and on a multi-port link however many further outputs it has
+# (a CHP's heat port, an electrolyser's heat and oxygen ports, and PyPSA sets
+# no upper limit on N). Matched exactly, so a column that merely starts with
+# "bus" is never mistaken for a port.
+_BRANCH_FRAMES = ("lines", "transformers", "links")
+_PORT = re.compile(r"bus\d+")
 
 # Assets that can inject into a bus, and the column holding their nameplate.
 _SUPPLY: tuple[tuple[str, str], ...] = (
@@ -86,61 +88,100 @@ def _as_float(value, default: float = 0.0) -> float:
     return out if math.isfinite(out) else default
 
 
-def _peak_load(n, buses: set[str]) -> float:
+def _ports(df) -> list[str]:
+    """The frame's bus-port columns, `bus0` first."""
+    return sorted((c for c in df.columns
+                   if isinstance(c, str) and _PORT.fullmatch(c)),
+                  key=lambda c: int(c[3:]))
+
+
+def _port_bus(value) -> str | None:
+    """A port's bus name, or None for an unused port (empty or NaN)."""
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return None
+    name = str(value)
+    return name or None
+
+
+def _peak_loads(n, island_of: dict[str, int], count: int) -> list[float]:
     """
-    The island's highest simultaneous demand over the horizon.
+    Each island's highest simultaneous demand over the horizon.
 
     Time-varying `p_set` wins over the static column where it exists — that is
     what PyPSA reads — and the sum is taken PER SNAPSHOT before the max, so
     two loads peaking in different hours do not add into a peak that never
-    happens.
+    happens. One pass over the loads for every island at once: preflight and
+    the chat tool both call this on networks with hundreds of islands.
     """
-    if n.loads.empty:
-        return 0.0
-    names = [str(name) for name in n.loads.index
-             if str(n.loads.at[name, "bus"]) in buses]
-    if not names:
-        return 0.0
+    peaks = [0.0] * count
+    loads = getattr(n, "loads", None)
+    if loads is None or loads.empty or "bus" not in loads.columns:
+        return peaks
 
     frame = getattr(n.loads_t, "p_set", None)
-    dynamic = [name for name in names
-               if frame is not None and name in getattr(frame, "columns", [])]
-    static = [name for name in names if name not in dynamic]
+    profiled = set(getattr(frame, "columns", []))
+    static = loads["p_set"] if "p_set" in loads.columns else None
+    dynamic: dict[int, list] = {}
+    for name, bus in loads["bus"].items():
+        island = island_of.get(str(bus))
+        if island is None:
+            continue                          # a dangling ref; not our finding
+        if name in profiled:
+            dynamic.setdefault(island, []).append(name)
+        elif static is not None:
+            peaks[island] += _as_float(static.at[name])
 
-    peak = sum(_as_float(n.loads.at[name, "p_set"]) for name in static)
-    if dynamic:
+    for island, names in dynamic.items():
         try:
-            series = frame[dynamic].sum(axis=1)
+            series = frame[names].sum(axis=1)
             finite = series[series.notna()]
             if not finite.empty:
-                peak += float(finite.max())
+                peaks[island] += float(finite.max())
         except (KeyError, TypeError, ValueError):
             pass
-    return peak
+    return peaks
 
 
-def _supply(n, buses: set[str]) -> dict:
-    """Nameplate injection capacity in an island, and whether it can grow."""
-    nameplate, extendable = 0.0, False
+def _supplies(n, island_of: dict[str, int], count: int) -> list[dict]:
+    """
+    Per island: nameplate injection capacity, whether it can grow, and whether
+    any supply asset sits there at all.
+
+    `has_supply_asset` is the plain presence test — any Generator,
+    StorageUnit or Store, whatever its size — and is kept separate from the
+    nameplate on purpose: "nothing here can inject" and "what is here is too
+    small" are different findings, and the chat tool reports the first.
+    """
+    out = [{"nameplate_mw": 0.0, "extendable": False, "has_supply_asset": False}
+           for _ in range(count)]
     for frame_name, nom_col in _SUPPLY:
         df = getattr(n, frame_name, None)
         if df is None or df.empty or "bus" not in df.columns:
             continue
-        for name in df.index:
-            if str(df.at[name, "bus"]) not in buses:
+        noms = df[nom_col] if nom_col in df.columns else None
+        ext_col = f"{nom_col}_extendable"
+        exts = df[ext_col] if ext_col in df.columns else None
+        for name, bus in df["bus"].items():
+            island = island_of.get(str(bus))
+            if island is None:
                 continue
-            nameplate += _as_float(df.at[name, nom_col])
-            ext_col = f"{nom_col}_extendable"
-            if ext_col in df.columns and bool(df.at[name, ext_col]):
-                extendable = True
+            row = out[island]
+            row["has_supply_asset"] = True
+            if noms is not None:
+                row["nameplate_mw"] += _as_float(noms.at[name])
+            if exts is not None and bool(exts.at[name]):
+                row["extendable"] = True
     # A Store discharges into its bus too. It cannot be a standing source over
     # a horizon — it must be charged first — so it never counts toward the
     # nameplate, but its presence is enough to withdraw the shortfall claim.
     stores = getattr(n, "stores", None)
     if stores is not None and not stores.empty and "bus" in stores.columns:
-        if any(str(stores.at[name, "bus"]) in buses for name in stores.index):
-            extendable = True
-    return {"nameplate_mw": nameplate, "extendable": extendable}
+        for bus in stores["bus"]:
+            island = island_of.get(str(bus))
+            if island is not None:
+                out[island]["extendable"] = True
+                out[island]["has_supply_asset"] = True
+    return out
 
 
 def _verdict(peak_load: float, supply: dict) -> tuple[str, str]:
@@ -172,7 +213,14 @@ def analyse_topology(n) -> dict:
     Islands, their supply/demand balance, and the buses connected to nothing.
 
     Pure and cheap: one pass over the branch frames, one over the asset
-    frames. Safe to call from preflight, which runs before every solve.
+    frames. Safe to call from preflight, which runs before every solve, and
+    the one bus-graph walk in the backend — the chat tool `diagnose_network`
+    reads its islands rather than walking the graph a second time.
+
+    `isolated_buses` means degree zero: no branch port names the bus at all.
+    That is narrower than "an island of one", which also covers a bus whose
+    only branch is a self-loop or points at a bus that does not exist;
+    callers wanting the island reading take the one-bus islands.
     """
     buses = [str(name) for name in getattr(n, "buses").index]
     if not buses:
@@ -182,15 +230,15 @@ def analyse_topology(n) -> dict:
 
     union = _Union(buses)
     degree = dict.fromkeys(buses, 0)
-    for frame_name, cols in _BRANCHES:
+    for frame_name in _BRANCH_FRAMES:
         df = getattr(n, frame_name, None)
         if df is None or df.empty:
             continue
-        columns = cols + (_EXTRA_LINK_BUSES if frame_name == "links" else ())
-        present = [c for c in columns if c in df.columns]
-        for name in df.index:
-            attached = [str(df.at[name, c]) for c in present]
-            attached = [b for b in attached if b in degree]
+        ports = _ports(df)
+        if not ports:
+            continue
+        for row in df[ports].itertuples(index=False):
+            attached = [bus for bus in map(_port_bus, row) if bus in degree]
             for bus in attached:
                 degree[bus] += 1
             for other in attached[1:]:
@@ -200,14 +248,17 @@ def analyse_topology(n) -> dict:
     for bus in buses:
         grouped.setdefault(union.find(bus), []).append(bus)
 
-    islands = []
     # Sorted by size then by first bus name: a stable id across calls matters,
     # because these ids appear in messages a user reads twice.
-    for index, members in enumerate(
-            sorted(grouped.values(), key=lambda m: (-len(m), m[0]))):
-        member_set = set(members)
-        peak_load = _peak_load(n, member_set)
-        supply = _supply(n, member_set)
+    ordered = sorted(grouped.values(), key=lambda m: (-len(m), m[0]))
+    island_of = {bus: index for index, members in enumerate(ordered)
+                 for bus in members}
+    peaks = _peak_loads(n, island_of, len(ordered))
+    supplies = _supplies(n, island_of, len(ordered))
+
+    islands = []
+    for index, members in enumerate(ordered):
+        peak_load, supply = peaks[index], supplies[index]
         verdict, reason = _verdict(peak_load, supply)
         islands.append({
             "id": index,
@@ -216,6 +267,7 @@ def analyse_topology(n) -> dict:
             "peak_load_mw": peak_load,
             "nameplate_mw": supply["nameplate_mw"],
             "extendable": supply["extendable"],
+            "has_supply_asset": supply["has_supply_asset"],
             "verdict": verdict,
             "reason": reason,
         })

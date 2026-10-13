@@ -298,12 +298,25 @@ def test_the_confirm_dialog_is_skipped_when_nothing_is_solving():
 # ── flushing every resident context ─────────────────────────────────────────
 
 
-def test_the_active_context_persists_its_time_series_and_others_do_not():
+def test_each_context_persists_its_own_time_series_or_none():
     """
-    Constraint #8, and it is asymmetric for a reason: `_serialize_user_ts`
-    reads a PROCESS-GLOBAL store belonging to the foreground. Copying
-    `persist_user_ts=True` to every context stamps the foreground's series onto
-    all of them; copying False loses the active project's.
+    Constraint #8, restated once the premise under it went away.
+
+    It used to read "the ACTIVE context persists its time series and others do
+    not", and was asymmetric because `_serialize_user_ts` read a PROCESS-GLOBAL
+    store belonging to the foreground: `True` for everything stamped the
+    foreground's series onto every project. That store is per-`ProjectContext`
+    now and `_save_context` serialises the context it is saving, so the
+    asymmetry protects nothing — while `ctx is active` had stopped meaning "the
+    open project" at Step 0b and answered False for everything, which is how
+    the flush came to leave every `user_ts.json` stale.
+
+    The constraint the test defends is unchanged: a flush must not write one
+    project's series into another's file. What satisfies it is now each context
+    being judged on its OWN state, which is what this asserts: a context
+    rewrites its own sidecar (an empty store unlinks a stale one) unless that
+    sidecar could not be read. `tests/test_shutdown_persists_user_ts.py` carries
+    the rest, including the on-disk case.
     """
     saved: list[tuple[str, bool]] = []
 
@@ -316,17 +329,25 @@ def test_the_active_context_persists_its_time_series_and_others_do_not():
         # saved" string.
         def __init__(self, name): self.loaded_project = name
 
-    active, other = _Ctx("active"), _Ctx("other")
+    import pandas as _pd
+
+    with_series, without, unreadable = (
+        _Ctx("with_series"), _Ctx("without"), _Ctx("unreadable"))
+    with_series.user_ts = {("loads", "p_set", "L1"): _pd.Series([1.0])}
+    without.user_ts = {}
+    unreadable.user_ts = {}
+    unreadable.user_ts_unreadable = True
 
     shutdown_service.flush_all(
-        contexts=[active, other],
-        active=active,
+        contexts=[with_series, without, unreadable],
         save=lambda ctx, persist_user_ts: saved.append((ctx.loaded_project, persist_user_ts)),
         flush_chat=lambda: None,
         safe=True,
     )
 
-    assert saved == [("active", True), ("other", False)], saved
+    assert saved == [
+        ("with_series", True), ("without", True), ("unreadable", False),
+    ], saved
 
 
 def test_one_context_failing_does_not_strand_the_others():
@@ -349,7 +370,7 @@ def test_one_context_failing_does_not_strand_the_others():
         saved.append(ctx.loaded_project)
 
     problems = shutdown_service.flush_all(
-        contexts=[a, b, c], active=a, save=save, flush_chat=lambda: None, safe=True,
+        contexts=[a, b, c], save=save, flush_chat=lambda: None, safe=True,
     )
 
     assert saved == ["a", "c"], saved
@@ -371,7 +392,7 @@ def test_a_409_is_caught_specifically_and_reported():
         raise HTTPException(status_code=409, detail="solver in flight")
 
     problems = shutdown_service.flush_all(
-        contexts=[_Ctx()], active=None, save=save, flush_chat=lambda: None, safe=False,
+        contexts=[_Ctx()], save=save, flush_chat=lambda: None, safe=False,
     )
 
     assert len(problems) == 1
@@ -400,7 +421,7 @@ def test_a_non_409_failure_reads_differently_from_a_409():
         raise HTTPException(status_code=500, detail="something else entirely")
 
     problems = shutdown_service.flush_all(
-        contexts=[_Ctx()], active=None, save=save, flush_chat=lambda: None, safe=True,
+        contexts=[_Ctx()], save=save, flush_chat=lambda: None, safe=True,
     )
 
     assert "still running" not in problems[0], problems
@@ -417,7 +438,7 @@ def test_the_chat_transcript_is_flushed_even_though_it_is_a_no_op_today():
     called: list[str] = []
 
     shutdown_service.flush_all(
-        contexts=[], active=None, save=lambda ctx, persist_user_ts: None,
+        contexts=[], save=lambda ctx, persist_user_ts: None,
         flush_chat=lambda: called.append("chat"), safe=True,
     )
 
@@ -1242,7 +1263,7 @@ def test_an_unsaved_context_is_named_readably_not_by_its_repr():
         raise RuntimeError("disk full")
 
     problems = shutdown_service.flush_all(
-        contexts=[ctx], active=None, save=save, flush_chat=lambda: None, safe=True,
+        contexts=[ctx], save=save, flush_chat=lambda: None, safe=True,
     )
 
     assert len(problems) == 1
@@ -1496,7 +1517,7 @@ def test_a_never_saved_draft_with_work_in_it_is_REPORTED_not_silently_dropped():
     draft = _Draft()
 
     problems = shutdown_service.flush_all(
-        contexts=[draft], active=draft,
+        contexts=[draft],
         save=lambda ctx, persist: None, flush_chat=lambda: None, safe=True,
     )
 
@@ -1511,7 +1532,7 @@ def test_a_fresh_empty_scratch_context_is_not_reported():
     the user on every clean quit, which trains them to ignore the report.
     """
     problems = shutdown_service.flush_all(
-        contexts=[_Draft(empty=True)], active=None,
+        contexts=[_Draft(empty=True)],
         save=lambda ctx, persist: None, flush_chat=lambda: None, safe=True,
     )
 
@@ -1535,7 +1556,7 @@ def test_a_409_reports_the_reason_it_was_given_not_an_assumed_one():
         raise HTTPException(409, "refusing to overwrite a 40-bus project with an empty network")
 
     problems = shutdown_service.flush_all(
-        contexts=[ctx], active=ctx,
+        contexts=[ctx],
         save=refuse, flush_chat=lambda: None, safe=True,
     )
 

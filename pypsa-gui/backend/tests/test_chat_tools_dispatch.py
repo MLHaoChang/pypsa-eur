@@ -130,6 +130,151 @@ def test_update_component_bus_rename_routes_to_rename_bus(install_network):
     assert n.lines.at["L1", "bus0"] == "B1_renamed"
 
 
+def _install_bus_with_dependents(install_network):
+    n = _install_minimal_network(install_network)
+    n.add("Generator", "G1", bus="B1", p_nom=10.0)
+    n.add("Load", "D1", bus="B1", p_set=5.0)
+    return n
+
+
+def test_update_component_bus_rename_via_attrs_name(install_network):
+    """
+    `attrs={"name": new}` is a rename, as in the PUT body — it used to pass
+    `name` to BusCreate twice (TypeError). It takes the PUT path, so every
+    component referring to the bus is re-pointed.
+    """
+    n = _install_bus_with_dependents(install_network)
+
+    result = chat_tools.update_component("Bus", "B1", attrs={"name": "B1_new"})
+
+    assert result["name"] == "B1_new"
+    assert "B1_new" in n.buses.index
+    assert "B1" not in n.buses.index
+    assert n.lines.at["L1", "bus0"] == "B1_new"
+    assert n.generators.at["G1", "bus"] == "B1_new"
+    assert n.loads.at["D1", "bus"] == "B1_new"
+
+
+def test_update_component_bus_rename_via_attrs_name_with_other_attrs(install_network):
+    """A rename alongside other attrs applies both in one update."""
+    n = _install_bus_with_dependents(install_network)
+
+    chat_tools.update_component(
+        "Bus", "B1", attrs={"name": "B1_new", "v_nom": 220.0},
+    )
+
+    assert float(n.buses.at["B1_new", "v_nom"]) == 220.0
+    assert n.lines.at["L1", "bus0"] == "B1_new"
+    assert n.generators.at["G1", "bus"] == "B1_new"
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"attrs": {"name": "ic:B1"}},
+    {"new_name": "ic:B1"},
+    {"attrs": {"v_nom": 220.0}, "new_name": "ic:B1"},
+])
+def test_update_component_bus_rename_refuses_reserved_ic_prefix(
+    install_network, kwargs,
+):
+    """`ic:` bus names are reserved on every rename route; nothing changes."""
+    from fastapi import HTTPException
+    n = _install_bus_with_dependents(install_network)
+
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.update_component("Bus", "B1", **kwargs)
+
+    assert exc.value.status_code == 422
+    assert "bus names starting 'ic:' are reserved" in exc.value.detail
+    assert "B1" in n.buses.index
+    assert "ic:B1" not in n.buses.index
+    assert n.lines.at["L1", "bus0"] == "B1"
+    assert n.generators.at["G1", "bus"] == "B1"
+    assert float(n.buses.at["B1", "v_nom"]) == 1.0
+
+
+def test_update_component_bus_rename_refuses_occupied_name(install_network):
+    from fastapi import HTTPException
+    n = _install_bus_with_dependents(install_network)
+
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.update_component("Bus", "B1", attrs={"name": "B2"})
+
+    assert exc.value.status_code == 409
+    assert n.generators.at["G1", "bus"] == "B1"
+
+
+def test_update_component_rename_rejects_conflicting_targets(install_network):
+    from fastapi import HTTPException
+    n = _install_minimal_network(install_network)
+
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.update_component(
+            "Bus", "B1", attrs={"name": "X"}, new_name="Y",
+        )
+
+    assert exc.value.status_code == 400
+    assert "B1" in n.buses.index
+
+
+@pytest.mark.parametrize("component_class,attr,add_kwargs,attrs", [
+    ("Generator", "generators", {"bus": "B1", "p_nom": 10.0}, {}),
+    ("Load", "loads", {"bus": "B1", "p_set": 5.0}, {}),
+    ("Line", "lines", {"bus0": "B1", "bus1": "B2", "x": 0.1}, {}),
+    ("Link", "links", {"bus0": "B1", "bus1": "B2", "p_nom": 10.0}, {}),
+    ("StorageUnit", "storage_units", {"bus": "B1", "p_nom": 10.0}, {}),
+    ("Store", "stores", {"bus": "B1", "e_nom": 10.0}, {}),
+    ("Transformer", "transformers", {"bus0": "B1", "bus1": "B2", "x": 0.1},
+     {"bus0": "B1", "bus1": "B2"}),
+    ("GlobalConstraint", "global_constraints",
+     {"type": "primary_energy", "sense": "<=", "constant": 5.0,
+      "carrier_attribute": "co2_emissions"}, {}),
+])
+def test_update_component_rename_via_attrs_name_other_classes(
+    install_network, component_class, attr, add_kwargs, attrs,
+):
+    """
+    Every Create schema was built as `Schema(name=name, **attrs)`, so
+    `attrs={"name": ...}` was a TypeError on every class, not only Bus.
+    """
+    n = _install_minimal_network(install_network)
+    n.add(component_class, "C1", **add_kwargs)
+
+    result = chat_tools.update_component(
+        component_class, "C1", attrs={**attrs, "name": "C1_new"},
+    )
+
+    assert result["name"] == "C1_new"
+    df = getattr(n, attr)
+    assert "C1_new" in df.index
+    assert "C1" not in df.index
+
+
+@pytest.mark.parametrize("component_class,attr,add_kwargs", [
+    ("GlobalConstraint", "global_constraints",
+     {"type": "primary_energy", "sense": "<=", "carrier_attribute": "co2_emissions"}),
+    ("Generator", "generators", {"bus": "B1"}),
+])
+def test_update_component_rename_onto_an_occupied_name_is_refused(
+    install_network, component_class, attr, add_kwargs,
+):
+    """P2 gate assessor round 2: a rename onto an existing name is a 409 and
+    changes nothing. GlobalConstraint removed the source and re-added it
+    under the target, silently replacing the existing constraint."""
+    from fastapi import HTTPException
+    n = _install_minimal_network(install_network)
+    key = "constant" if component_class == "GlobalConstraint" else "p_nom"
+    n.add(component_class, "C1", **add_kwargs, **{key: 5.0})
+    n.add(component_class, "C2", **add_kwargs, **{key: 7.0})
+
+    for kwargs in ({"attrs": {"name": "C2"}}, {"new_name": "C2"}):
+        with pytest.raises(HTTPException) as exc:
+            chat_tools.update_component(component_class, "C1", **kwargs)
+        assert exc.value.status_code == 409, kwargs
+        df = getattr(n, attr)
+        assert {"C1", "C2"} <= set(df.index)
+        assert float(df.at["C1", key]) == 5.0 and float(df.at["C2", key]) == 7.0
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # (b) update_component({Bus, B1, control:'PV'}) — no coord change ⇒ no recompute
 # ─────────────────────────────────────────────────────────────────────────────
@@ -860,3 +1005,139 @@ def test_solve_queue_abort_tool_is_not_lock_gated(
             chat_tools.DISPATCHERS["solve_queue_abort"](job_id=str(_uuid.uuid4()))
     assert exc.value.status_code == 404
     assert exc.value.status_code != 409
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# CH-4 — write edges that bypass the REST handler must still meet the lock
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _lock_refusal(ctx, tool_name, *args, **kwargs):
+    """Run the tool as the seam runs it, and report whether it was refused.
+
+    Two things this has to get right, both of which the first cut got wrong
+    and both of which made a CORRECT fix look broken:
+
+      * THROUGH `DISPATCHERS`, because the gate works by replacing entries in
+        that dict (`DISPATCHERS.update({name: _lock_gated(...)})`) — which is
+        what `chat_service` dispatches. The module-level function is ungated
+        by construction.
+      * INSIDE `_bound_to(ctx)`, because `_check_foreign_lock` resolves the
+        ACTIVE project from the request context. Unbound, it finds no project,
+        passes through, and the tool runs.
+    """
+    from fastapi import HTTPException
+
+    call = chat_tools.DISPATCHERS[tool_name]
+    try:
+        with _bound_to(ctx):
+            call(*args, **kwargs)
+    except HTTPException as exc:
+        detail = exc.detail
+        return isinstance(detail, dict) and detail.get("error_kind") == "project_locked"
+    return False
+
+
+def test_upload_tools_are_refused_under_a_foreign_lock(
+    foreign_locked_active_project, second_identity
+):
+    """
+    `delete_upload` and `clear_uploads` call `upload_service` directly, so they
+    never reach `routers/uploads.py`, whose DELETE route refuses a non-holder
+    and calls that case "the sharp end of the gap this router had: a non-holder
+    deleting a file another session is actively referencing (e.g. mid
+    multimodal turn)". The chat gate had them listed as deliberately ungated on
+    the grounds that they "write artifacts, not network state" — the two paths
+    disagreed about the same bytes.
+    """
+    _name, project_id, ctx, session_local = foreign_locked_active_project
+    _hold_foreign_lock(session_local, project_id, second_identity["user_id"])
+
+    assert _lock_refusal(ctx, "delete_upload", "some-file-id"), (
+        "a non-holder deleted an upload from a foreign-locked project"
+    )
+    assert _lock_refusal(ctx, "clear_uploads"), (
+        "a non-holder purged EVERY upload from a foreign-locked project"
+    )
+
+
+def test_clear_chat_history_is_refused_under_a_foreign_lock(
+    foreign_locked_active_project, second_identity
+):
+    """It unlinks the project's chat.jsonl and its rotation. There is no REST
+    equivalent, so there was no handler-level check to inherit either."""
+    _name, project_id, ctx, session_local = foreign_locked_active_project
+    _hold_foreign_lock(session_local, project_id, second_identity["user_id"])
+
+    assert _lock_refusal(ctx, "clear_chat_history"), (
+        "a non-holder wiped the holder's conversation"
+    )
+
+
+def test_campaign_tools_are_refused_under_a_foreign_lock(
+    foreign_locked_active_project, second_identity
+):
+    """Both mutate the campaign record in the SHARED resident context's
+    solver_state — a non-holder could set a solve budget on the holder's
+    context, or close the campaign they are running."""
+    _name, project_id, ctx, session_local = foreign_locked_active_project
+    _hold_foreign_lock(session_local, project_id, second_identity["user_id"])
+
+    assert _lock_refusal(ctx, "start_campaign", "steal the budget", 1), (
+        "a non-holder opened a campaign on a foreign-locked project"
+    )
+    assert _lock_refusal(ctx, "end_campaign", None), (
+        "a non-holder closed the holder's campaign"
+    )
+
+
+def test_an_agent_export_is_refused_under_a_foreign_lock(
+    foreign_locked_active_project, second_identity
+):
+    """
+    The discriminating case for the chokepoint. `export_network_nc` is tiered
+    `read`, so the DERIVED gate skips it no matter what the mutator set says —
+    yet it writes a file into the project's uploads directory, which
+    `post_upload` refuses under a foreign lock because it is "a write edge into
+    `project.directory` same as save/rename/delete". The check therefore lives
+    in `_save_agent_export`, the one helper every `export_*` tool reaches.
+    """
+    _name, project_id, ctx, session_local = foreign_locked_active_project
+    _hold_foreign_lock(session_local, project_id, second_identity["user_id"])
+
+    from services.chat_tools_schema import safety_tier_for
+
+    assert safety_tier_for("export_network_nc") == "read", (
+        "export_network_nc is no longer `read`; this test's premise (that the "
+        "derived gate cannot cover it) needs rechecking"
+    )
+    assert _lock_refusal(ctx, "export_network_nc"), (
+        "a non-holder wrote an export into a foreign-locked project"
+    )
+
+
+def test_none_of_them_is_refused_without_a_foreign_lock(
+    foreign_locked_active_project
+):
+    """
+    The control, and it is load-bearing: the gate is CHECK-ONLY, so the
+    acting user's own lock (which `_save_and_bind_project`'s save acquires)
+    must pass straight through. A gate that refused here would break every
+    ordinary chat export and upload delete.
+    """
+    _name, _project_id, ctx, _session_local = foreign_locked_active_project
+
+    assert not _lock_refusal(ctx, "clear_uploads")
+    assert not _lock_refusal(ctx, "delete_upload", "no-such-id")
+    assert not _lock_refusal(ctx, "export_network_nc")
+    assert not _lock_refusal(ctx, "start_campaign", "mine", 1)
+    assert not _lock_refusal(ctx, "end_campaign", None)
+
+
+def test_the_gate_lists_every_one_of_them(foreign_locked_active_project):
+    """Pins the mutator-set membership so a future edit that drops one is a
+    failure here and not a silent reopening."""
+    gated = chat_tools._lock_gated_tool_names()
+    for name in ("delete_upload", "clear_uploads", "clear_chat_history",
+                 "start_campaign", "end_campaign"):
+        assert name in gated, f"{name} is no longer lock-gated"

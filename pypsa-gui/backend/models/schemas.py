@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictBool, field_validator
+
+from models.commercial import CommercialConfig
 
 # Frontend Edit-card UX sends `null` for blanked optional bounds (so the
 # spread-then-override idiom can actually un-set a previously-typed value).
@@ -158,6 +160,16 @@ class ImpedanceRescaleEntry(BaseModel):
 
 class ImpedanceRescaleRequest(BaseModel):
     lines: list[ImpedanceRescaleEntry]
+
+
+class LengthsFromGeometryRequest(BaseModel):
+    """
+    Body for POST /api/network/lengths/from_geometry (plan M2). `keys` are the
+    map's branch ids, `line:<name>` / `link:<name>`; None means every Line and
+    Link. A key of another kind, or an unknown name, is reported as skipped.
+    """
+
+    keys: list[str] | None = None
 
 
 class LinkCreate(BaseModel):
@@ -343,6 +355,18 @@ class StorageUnitCreate(BaseModel):
     discount_rate: float | None = None
     build_year: int = 0
     lifetime: _NoneToPosInf = Field(default=float("inf"))
+    # ── Investment parts (asset parameter schema, services/asset_schema) ──
+    # A battery's power part (inverter, EUR/MW) and energy part (storage
+    # block, EUR/MWh) with their own lifetimes and FOM shares. When either is
+    # priced, `capital_cost`, `fom_cost` and `lifetime` are DERIVED from them
+    # and `overnight_cost` stays empty (PyPSA would otherwise ignore
+    # `capital_cost`). Custom columns, netCDF round-trip for free.
+    inv_power_overnight: float | None = None
+    inv_power_lifetime: float | None = None
+    inv_power_fom_share: float | None = None
+    inv_energy_overnight: float | None = None
+    inv_energy_lifetime: float | None = None
+    inv_energy_fom_share: float | None = None
 
 
 class StoreCreate(BaseModel):
@@ -569,6 +593,8 @@ class SolverConfigSchema(BaseModel):
     # 1500 % margin, which is not a margin, and a plan sized against it is a
     # fiction the LP would spend an hour building.
     reserve_margin: float | None = Field(default=None, ge=0, le=5)
+    # Island ride-through rows (campus island I2a), opt-in per project (Q5).
+    island_constraints: bool = False
     # Peak-coincidence window (snapshots) for must-take VRE credit; None ⇒ the
     # spec §2.3 scaling rule. `ge=1`: a window of zero snapshots has no mean.
     prm_peak_hours: int | None = Field(default=None, ge=1)
@@ -679,6 +705,15 @@ class SolverConfigSchema(BaseModel):
     # 0.01 = stop within 1 % of optimal. mip_time_limit_s = 0 disables the cap.
     mip_gap: float = 0.01
     mip_time_limit_s: float = 0
+    # Edge Investment Case commercial layer (P1 WP1.3): typed here, a plain
+    # dict on the `SolverConfig` dataclass (`update_solver_config` dumps it).
+    # Explicit null clears it.
+    commercial: CommercialConfig | None = None
+    # IC P4 WP4.6b: the finance inputs are owned by `PUT /api/simulation/finance`.
+    # Here only so a client echoing the whole config is accepted: an unchanged
+    # echo is ignored, a change is refused (422 `finance_via_dedicated_route`).
+    # A plain dict, compared as stored (the dedicated route validates it).
+    finance: dict[str, Any] | None = None
 
 
 class ImportSummary(BaseModel):
@@ -704,6 +739,28 @@ class ImportFolderRequest(BaseModel):
 
     path: str
     apply: bool = False
+
+
+class ProjectSettings(BaseModel):
+    """
+    The per-project settings table of `metadata.json` (`settings`), read by
+    `services/project_settings.py`. Every field has a default so a pre-M2
+    metadata file (no `settings` key) is the default, not an error.
+    """
+
+    # Plan M2: when on, a bus drag, a route edit or an import rewrites the
+    # length of the affected Lines and Links from the map geometry (the route
+    # when one exists, else the chord) and offers the impedance rescale.
+    derive_lengths_from_geometry: bool = False
+
+
+class UpdateProjectSettingsRequest(BaseModel):
+    """
+    Body for PATCH /api/projects/{name}/settings. Partial, like the scenario
+    PATCH: only the keys present are written, read via `exclude_unset`.
+    """
+
+    derive_lengths_from_geometry: StrictBool | None = None
 
 
 class ProjectInfo(BaseModel):
@@ -746,7 +803,7 @@ class ProjectInfo(BaseModel):
     # Free-form one-line label describing the scenario's purpose. Only
     # populated for scenarios (set at creation); root projects leave it None.
     scenario_description: str | None = None
-    # Scenario category: 'baseline' | 'scenario' | 'stress', or None when the
+    # Scenario category: 'baseline' | 'scenario' | 'stress' | 'sensitivity', or None when the
     # project has never been categorised. Was a `[type]` prefix on the
     # description until migration 0004; see `Project.scenario_type`.
     scenario_type: str | None = None
@@ -756,6 +813,9 @@ class ProjectInfo(BaseModel):
     # 0006): the DTO carries the raw column and the client resolves the default,
     # so an old row and a row that chose the default look the same, as they are.
     project_kind: str | None = None
+    # Per-project settings from `metadata.json` (plan M2). Defaults when the
+    # project has never been saved or its metadata predates the table.
+    settings: ProjectSettings = Field(default_factory=ProjectSettings)
 
     @field_validator("parent_project", "scenario_description", "scenario_type", "project_kind", mode="before")
     @classmethod

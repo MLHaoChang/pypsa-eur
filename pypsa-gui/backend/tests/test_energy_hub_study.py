@@ -103,10 +103,11 @@ def test_run_marks_not_established_when_required_mc_missing():
     mc_rec = next(s for s in report.pipeline.stages if s.stage == "mc_certify")
     assert mc_rec.status == "skipped"
     assert mc_rec.note and "required" in mc_rec.note
-    # 2026-09-26: the missing certification is reported on its own section;
-    # gates is the dynamics field only (the legacy fallback there is retired).
+    # P11: missing required certification is reported on its own section;
+    # `gates` is the SCR dynamics gate only (skipped outside weak_flexible).
     assert report.completeness["certification"] == "not_established"
     assert "required" in (report.sections["certification"].note or "")
+    assert report.certified is None
     assert report.completeness["gates"] == "skipped"
 
 
@@ -127,10 +128,13 @@ def test_default_stages_never_leave_unimplemented_pending():
     )
     for rec in report.pipeline.stages:
         assert rec.status != "pending", rec
-    # 2026-09-26: the frontier is wired (plan eh-wire-skipped-stages WP2) —
-    # on the default pipeline it RUNS; it may still be not_established on a
-    # fixture where fewer than three points solve, but it is never skipped.
-    assert report.completeness["frontier"] in ("ok", "not_established")
+    # P12: strong_grid's default pipeline runs the frontier (spec §3), with
+    # the pack target among the swept points.
+    assert report.completeness["frontier"] == "ok"
+    fr = report.sections["frontier"].payload
+    assert 1000.0 in [pt["target_permyriad"] for pt in fr["points"]]
+    # Master 2026-09-26 (eh-wire-skipped-stages WP2): the stage RUNS on the
+    # default pipeline — it is never skipped there.
     frontier = next(s for s in report.pipeline.stages if s.stage == "frontier")
     assert frontier.status == "run"
     assert report.completeness["cost"] == "ok"

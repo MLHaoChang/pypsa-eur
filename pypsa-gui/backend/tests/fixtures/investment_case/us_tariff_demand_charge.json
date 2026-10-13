@@ -1,0 +1,23 @@
+{
+  "id": "us_ci_demand_2026",
+  "name": "US C&I TOU + monthly demand charge with ratchet (illustrative)",
+  "jurisdiction": "US",
+  "dso_or_retailer": "illustrative utility",
+  "valid_from": "2026-01-01",
+  "valid_to": "2026-12-31",
+  "items": [
+    {"id": "energy_tou", "kind": "energy", "unit": "per_kwh",
+     "periods": [
+       {"name": "on_peak", "rate": 0.14, "months": [6,7,8,9], "weekdays": [0,1,2,3,4], "start_hour": 16, "end_hour": 21},
+       {"name": "off_peak", "rate": 0.07}
+     ],
+     "settlement": "15min", "measured_on": "import", "direction": "cost"},
+    {"id": "demand_monthly", "kind": "demand", "unit": "per_kw_month",
+     "periods": [{"name": "all", "rate": 18.5}],
+     "ratchet": {"lookback_months": 11, "share": 0.8},
+     "settlement": "15min", "measured_on": "peak_import", "direction": "cost"},
+    {"id": "customer_charge", "kind": "fixed", "unit": "per_month",
+     "periods": [{"name": "all", "rate": 400.0}],
+     "settlement": "15min", "measured_on": "import", "direction": "cost"}
+  ]
+}

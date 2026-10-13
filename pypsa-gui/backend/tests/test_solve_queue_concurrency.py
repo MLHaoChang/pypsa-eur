@@ -214,3 +214,39 @@ def test_a_freed_slot_wakes_a_worker_parked_on_the_cap(monkeypatch):
     finally:
         release.set()
         solve_queue.reset_for_tests()
+
+
+def test_reset_for_tests_returns_only_after_the_aborted_job_has_unwound(monkeypatch):
+    """
+    Signalling is not enough: an aborted job still runs its `finally` — the
+    status write through `solve_job_store`, which opens `db.session.
+    SessionLocal` AT CALL TIME. Returned early, reset let that write land after
+    the NEXT test had patched `SessionLocal` onto its own StaticPool engine,
+    where the dispatcher's session ROLLBACK on the one shared connection could
+    fall between that test's seeding INSERT and COMMIT. Seen on macOS as a
+    404 on `/activate` in `test_abort_is_not_refused_by_active_project_foreign_lock`,
+    which runs right after a test that enqueues a real solve.
+    """
+    solve_queue.reset_for_tests()
+    started, unwound = threading.Event(), threading.Event()
+
+    def slow_to_unwind(job):
+        started.set()
+        job.stop_event.wait(10)
+        time.sleep(0.5)        # the abort path's own teardown and status write
+        unwound.set()
+
+    monkeypatch.setattr(solve_queue, "_run_job", slow_to_unwind)
+    jid = uuid.uuid4()
+    with solve_queue._lock:
+        job = SolveJob(id=jid, project_id="Live", enqueued_at=0.0)
+        job.stop_event = threading.Event()
+        solve_queue._jobs[jid] = job
+        solve_queue._order.append(jid)
+        solve_queue._ensure_dispatcher_locked()
+        solve_queue._q.put(jid)
+    assert started.wait(10), "the dispatcher never picked the job up"
+
+    solve_queue.reset_for_tests()
+
+    assert unwound.is_set(), "reset returned while the aborted job was still unwinding"

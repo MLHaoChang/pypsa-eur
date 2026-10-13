@@ -1,5 +1,9 @@
 # Nine economic surfaces, cross-checked against a solved golden network
 
+**Status: CLOSED.** Both wrong-number defects were fixed under Task 9 (2026-08-03);
+see FINAL STATUS below. Kept as the cross-check record for the nine economic surfaces.
+Added 2026-09-12 by a triage pass — this file had no status line.
+
 **Date:** 2026-08-01 (opened) — **2026-08-03 (closed out, Task 9)**
 **Method:** `pypsa-gui/backend/tests/golden/fixture.py`'s golden network
 (Generator `gas` [overnight_cost], Generator `solar` [direct capital_cost],

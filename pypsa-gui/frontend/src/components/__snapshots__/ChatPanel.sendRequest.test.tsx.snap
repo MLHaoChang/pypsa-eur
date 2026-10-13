@@ -1,0 +1,9 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`P29: Guided tool lines > Expert renders the raw three lines 1`] = `
+[
+  "<div class="px-3 py-1.5 text-[13px] leading-relaxed tracking-[-0.005em] text-muted font-mono text-[11px] tracking-normal leading-snug" data-role="tool" data-testid="chat-message"><span class="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">… preparing run_eh_study</span></div>",
+  "<div class="px-3 py-1.5 text-[13px] leading-relaxed tracking-[-0.005em] text-muted font-mono text-[11px] tracking-normal leading-snug" data-role="tool" data-testid="chat-message"><span class="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">→ run_eh_study</span></div>",
+  "<div class="px-3 py-1.5 text-[13px] leading-relaxed tracking-[-0.005em] text-muted font-mono text-[11px] tracking-normal leading-snug" data-role="tool" data-testid="chat-message"><span class="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">✓ run_eh_study</span></div>",
+]
+`;

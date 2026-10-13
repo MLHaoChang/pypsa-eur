@@ -12,6 +12,8 @@
  * the on-disk chat.jsonl history is preserved separately.
  */
 import { create } from 'zustand'
+import { useUIStore } from './uiStore'
+import type { AnswerReceipt } from '../utils/answerAssurance'
 
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system'
 
@@ -25,15 +27,51 @@ export interface ChatMessage {
   // produced this row so confirmation cards / progress can attach.
   tool_use_id?: string
   tool_name?: string
+  // Bounded structured result metadata for task state and authenticated files.
+  tool_result?: unknown
   // Phase D — file_ids that were attached to this user turn (for replay).
   // Read-only chip strip renders below the message bubble.
   attachment_file_ids?: string[]
+  // P25 gate B2 — what the transcript shows for a card-sent request; the
+  // sent text (`content`) stays the history and sits in a collapsed Details.
+  // Not persisted: a reloaded transcript falls back to `content`.
+  display?: string
   // Task 13 — accumulated `thinking` SSE deltas for this assistant turn.
   // Rendered as a collapsible block above the answer; absent (not empty
   // string) on every turn the model didn't emit extended thinking for, so
   // the UI can gate the `<details>` on presence rather than length.
   thinking?: string
+  answer_id?: string
+  receipt?: AnswerReceipt
+  /** Retrying a checked question must not silently become ordinary chat. */
+  requiresChecked?: boolean
+  // Replayed from an interrupted turn record: why it ended. Shown under the
+  // bubble; the assistant does not see this turn on later ones.
+  interrupted?: string
   ts: number
+}
+
+/** The live Choice card (`ask_user`, chat harness issue 04). One at a
+ *  time, like the confirmation card; cleared when the next turn starts or
+ *  when the user picks. */
+/** The session's workflow step (chat harness issue 06), shown as a strip
+ *  above the composer and sent back as `ui_context.workflow`. */
+export interface WorkflowState {
+  id: string
+  title: string
+  step: string
+  step_title: string
+  step_index: number
+  step_count: number
+}
+
+export interface PendingChoiceCard {
+  requiresChecked?: boolean
+  tool_use_id?: string
+  title: string
+  question: string
+  options: { label: string; description?: string; recommended?: boolean }[]
+  allow_free_text: boolean
 }
 
 export interface PendingConfirmationCard {
@@ -76,6 +114,26 @@ export interface ChatErrorState {
 // counts, which are exact. Do not reintroduce a price table without a live
 // rate source.
 
+/** A request a panel (the hub-design cards) sends to the assistant
+ *  (guided-mode spec §6.1). ChatPanel dispatches it through the typed-message
+ *  path; nothing here talks to the backend. */
+export interface QueuedRequest {
+  requiresChecked?: boolean
+  id: string
+  text: string
+  source?: string
+  queuedAt: number
+  /** What the transcript shows instead of the sent text (P25 gate B2);
+   *  the sent text stays in a collapsed "Details". */
+  label?: string
+  /** Requests from one card click (Improve: one per action). A denial of
+   *  one drops the rest of its group (P25 gate). */
+  group?: string
+}
+
+/** Identical text within this window is a double click, not a new request. */
+export const REQUEST_DEDUPE_MS = 2000
+
 interface ChatState {
   // Identity
   sessionId: string | null
@@ -87,6 +145,14 @@ interface ChatState {
   // re-asserts a stale choice over an admin's `set_active_profile` or an A8
   // fallback. See `ChatStreamRequest.profile_id` in `api/chat.ts`.
   profileId: string | null
+  // P28 A3 (deferred spec 2026-09-28 §3.1) — the profile the RESUMED session
+  // is bound to, from `GET /chat/history.bound_profile_id` on hydrate (and a
+  // turn's `session_init.profile_id`). A turn that names no profile runs on
+  // it (`/stream` keeps a bound session's binding), so the Send gate and the
+  // greeting's key offer read `profileId ?? boundProfileId ?? active`. Never
+  // sent: it is a fact about the session, not a choice. Cleared with the
+  // session (project switch, New chat).
+  boundProfileId: string | null
   // Task 13 — one-shot flag set by `startNewChat`. The chat.jsonl hydration
   // effect in ChatPanel consumes (reads + clears) it via
   // `consumeSuppressHydrationOnce` before deciding whether to replay
@@ -112,6 +178,10 @@ interface ChatState {
   // card at a time (M7 — parallel destructives are rejected at the agent
   // layer, so the UI never has to handle two).
   pending: PendingConfirmationCard | null
+  /** The live Choice card, or null. */
+  choice: PendingChoiceCard | null
+  /** The active workflow step, or null. */
+  workflow: WorkflowState | null
   // Live tool-progress (the latest tool_progress payload per tool_use_id).
   toolProgress: Record<string, { kind: string; line: string }[]>
   // Usage (token count) meter
@@ -119,6 +189,14 @@ interface ChatState {
   // Stream state
   streaming: boolean
   error: ChatErrorState | null
+  // Issue 02 / 09 — Live utterance admission generation. Starts at 1; bumped
+  // when a durable rebind advances the parent thread so stale Live streams
+  // cannot admit. Typed/card sends do not read this field.
+  utteranceGeneration: number
+  setUtteranceGeneration: (n: number) => void
+  /** Parent durable thread id when one is bound for Live/rebind (issue 09). */
+  durableThreadId: string | null
+  setDurableThreadId: (id: string | null) => void
   // The cleanup function returned by createChatStream. Set when a stream
   // is open; cleared (and called) on abort/close/project switch.
   streamCleanup: (() => void) | null
@@ -144,6 +222,33 @@ interface ChatState {
   uploadBatches: Record<string, UploadBatch>
 
   // Actions
+  /** Text another panel asks to place in the composer (P22) — shown, never
+   * auto-sent: the user stays the one who sends. Consumed by ChatPanel. */
+  composerSeed: string | null
+  seedComposer: (text: string | null) => void
+  /** Guided-mode spec §6.1 — FIFO of requests a card SENDS ("Let the
+   * assistant do this": the user's own click). ChatPanel's effect takes one
+   * at a time, only while no turn streams and no confirmation card is
+   * pending, and sends it exactly as a typed message without attachments.
+   * Write tools still confirm. Not persisted; cleared on project switch. */
+  requestQueue: QueuedRequest[]
+  /** Dedupe memory (queue only): set on every accepted send and every take. */
+  lastRequest: { text: string; at: number } | null
+  /** Queue `text` and open the dock (unless `openDock: false`). Returns the
+   * id, or null when the text is blank or repeats the last request within
+   * REQUEST_DEDUPE_MS. Live busy corrections pass `openDock: false` so the
+   * console stays closed. */
+  sendRequest: (text: string,
+    opts?: { source?: string; label?: string; group?: string; openDock?: boolean; requiresChecked?: boolean }) => string | null
+  /** ChatPanel only: remove and return the oldest queued request; it
+   *  becomes `activeRequest`. */
+  takeNextRequest: () => QueuedRequest | null
+  /** The queued request whose turn is (or was last) running; null after a
+   *  typed send. */
+  activeRequest: QueuedRequest | null
+  setActiveRequest: (r: QueuedRequest | null) => void
+  /** Drop every queued request of `group` (a denial ends that card's run). */
+  dropRequestGroup: (group: string) => void
   setSessionId: (id: string | null) => void
   setProfileId: (id: string | null) => void
   appendMessage: (msg: Omit<ChatMessage, 'id' | 'ts'>) => void
@@ -167,6 +272,8 @@ interface ChatState {
    */
   setMessages: (msgs: ChatMessage[]) => void
   setPending: (c: PendingConfirmationCard | null) => void
+  setChoice: (c: PendingChoiceCard | null) => void
+  setWorkflow: (w: WorkflowState | null) => void
   appendToolProgress: (toolUseId: string, frame: { kind: string; line: string }) => void
   accrueUsage: (delta: Partial<ChatUsageAcc>) => void
   setStreaming: (v: boolean) => void
@@ -211,6 +318,7 @@ interface ChatState {
 
   // Lifecycle: clear UI-side conversation state on a project switch.
   resetForProjectSwitch: () => void
+  setBoundProfileId: (id: string | null) => void
   /**
    * Task 13 — begin a fresh conversation WITHOUT a project switch (the
    * cross-wire profile-switch confirm, and any future explicit "New chat"
@@ -256,7 +364,7 @@ export interface UploadMetaUI {
   filename: string
   mime: string
   size: number
-  kind: 'user_upload' | 'agent_export'
+  kind: import('../api/uploads').UploadKind
   uploaded_at: number
   // Phase D polish #4 — PDF page count + truncation flag. Server-stamped
   // on upload; rendered as a badge in the chip strip.
@@ -273,11 +381,18 @@ function newMessageId() {
 
 export const useChatStore = create<ChatState>((set, get) => ({
   sessionId: null,
+  composerSeed: null,
+  requestQueue: [],
+  lastRequest: null,
+  activeRequest: null,
   profileId: null,
+  boundProfileId: null,
   suppressHydrationOnce: false,
   newChatSeq: 0,
   messages: [],
   pending: null,
+  choice: null,
+  workflow: null,
   toolProgress: {},
   usage: {
     input_tokens: 0,
@@ -288,6 +403,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   streaming: false,
   error: null,
+  utteranceGeneration: 1,
+  setUtteranceGeneration: (n) => set({ utteranceGeneration: Math.max(1, Math.floor(n)) }),
+  durableThreadId: null,
+  setDurableThreadId: (id) => set({ durableThreadId: id }),
   streamCleanup: null,
   uploads: [],
   attachedFileIds: [],
@@ -295,7 +414,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
   uploadBatches: {},
 
   setSessionId: (id) => set({ sessionId: id }),
+  seedComposer: (text) => set({ composerSeed: text }),
+  sendRequest: (raw, opts) => {
+    const text = raw.trim()
+    if (!text) return null
+    const now = Date.now()
+    const last = get().lastRequest
+    if (last && last.text === text && now - last.at < REQUEST_DEDUPE_MS) return null
+    const id = globalThis.crypto?.randomUUID?.() ?? String(now + Math.random())
+    const req: QueuedRequest = { id, text, source: opts?.source, queuedAt: now }
+    if (opts?.label) req.label = opts.label
+    if (opts?.group) req.group = opts.group
+    if (opts?.requiresChecked) req.requiresChecked = true
+    const openDock = opts?.openDock !== false
+    set((s) => {
+      // Live: at most one pending correction (latest wins), matching the
+      // backend utterance admission capacity of one.
+      const base = opts?.source === 'live'
+        ? s.requestQueue.filter((r) => r.source !== 'live')
+        : s.requestQueue
+      return {
+        requestQueue: [...base, req],
+        lastRequest: { text, at: now },
+      }
+    })
+    if (openDock) useUIStore.getState().setAssistantDockOpen(true)
+    return id
+  },
+  takeNextRequest: () => {
+    const [next, ...rest] = get().requestQueue
+    if (!next) return null
+    set({ requestQueue: rest, lastRequest: { text: next.text, at: Date.now() },
+      activeRequest: next })
+    return next
+  },
+  setActiveRequest: (r) => set({ activeRequest: r }),
+  dropRequestGroup: (group) => set((s) => ({
+    requestQueue: s.requestQueue.filter(r => r.group !== group),
+  })),
   setProfileId: (id) => set({ profileId: id }),
+  setBoundProfileId: (id) => set({ boundProfileId: id }),
   appendMessage: (msg) => set((s) => ({
     messages: [...s.messages, { ...msg, id: newMessageId(), ts: Date.now() }],
   })),
@@ -333,6 +491,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   }),
   setPending: (c) => set({ pending: c }),
+  setChoice: (c) => set({ choice: c }),
+  setWorkflow: (w) => set({ workflow: w }),
   appendToolProgress: (toolUseId, frame) => set((s) => {
     const prev = s.toolProgress[toolUseId] ?? []
     // Cap retained lines so long solves (PHASE/VALIDATION spam) cannot
@@ -438,8 +598,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try { cleanup?.() } catch { /* idempotent */ }
     set({
       sessionId: null,
+      boundProfileId: null,
       messages: [],
       pending: null,
+      choice: null,
+      workflow: null,
       toolProgress: {},
       usage: {
         input_tokens: 0, output_tokens: 0,
@@ -448,10 +611,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streaming: false,
       error: null,
       streamCleanup: null,
+      utteranceGeneration: 1,
+      durableThreadId: null,
       uploads: [],
       attachedFileIds: [],
       unseenExportCount: 0,
       uploadBatches: {},
+      requestQueue: [],
+      activeRequest: null,
     })
   },
 
@@ -461,10 +628,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // disabled while streaming, so there is no live turn to interrupt here.
     set((s) => ({
       sessionId: null,
+      boundProfileId: null,
       messages: [],
       pending: null,
+      choice: null,
+      workflow: null,
       toolProgress: {},
       error: null,
+      utteranceGeneration: 1,
+      durableThreadId: null,
       usage: {
         input_tokens: 0, output_tokens: 0,
         cache_read_tokens: 0, cache_create_tokens: 0, reported: false,

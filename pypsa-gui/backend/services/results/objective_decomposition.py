@@ -93,8 +93,11 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
         under auto-discount). Applied to what the LP charges: OPEX and the
         extendable fixed cost.
       * ``residual_gap_eur`` — whatever those do not explain: custom LP terms
-        (the curtailment-subsidy wrapper, VOLL slacks, an objective scale not
-        yet reverted). Zero on a plain solve.
+        (the curtailment-subsidy wrapper, VOLL slacks, the DSR slack
+        generators the `dsr_price_eur_per_mwh` tier adds — price × Σ w·p of
+        the shed load; a design solve records it per bus in
+        `buses_t["ic_dsr_p"]` — and an objective scale not yet reverted).
+        Zero on a plain solve.
 
     `lp_basis_total` is the reported cost re-expressed on the LP's basis, so
     `residual_gap_eur = lp_total − lp_basis_total`.

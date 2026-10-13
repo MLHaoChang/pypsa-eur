@@ -91,8 +91,26 @@ from services.validation_service import has_errors, validate_for_run
 from services.solver.adequacy import (  # noqa: F401
     _prm_margin,
     _wrap_with_ens_cap,
+    _wrap_with_import_energy_cap,
     _wrap_with_reserve_margin,
     reserve_margin_facts,
+)
+from services.solver.island import (  # noqa: F401  (re-exported)
+    IslandRefusal,
+    _wrap_with_island,
+)
+# Edge Investment Case commercial layer (spec §5.1): the PoC price writer and
+# the LP-terms wrapper, re-exported with the rest of the solver seams.
+from services.commercial.lp_bindings import (  # noqa: F401
+    META_DEMAND as _IC_META_DEMAND,
+    META_GROUP as _IC_META_GROUP,
+    effective_strategy as _ic_effective_strategy,
+    CommercialBindingError,
+    _wrap_with_commercial_bindings,
+    materialise_poc_prices,
+)
+from services.commercial.connection import (  # noqa: F401
+    apply_commercial_for_solve,
 )
 # ── The branch's own dependencies ────────────────────────────────────────────
 # The adequacy standards below (`reserve_margin_facts`, the ENS-cap and
@@ -162,12 +180,24 @@ class SolverConfig:
     # Per-zone ceiling as a multiple of the system target, applied to each
     # zone's OWN demand (zone = bus `country`). None = no zone ceilings.
     ens_zone_cap_multiple: float | None = None
+    # ── Energy import cap (EH spec §6 P17 amendment) ─────────────────────
+    # PACK-ONLY: set by `archetypes.solver_config_patch_with_preflight` from a
+    # weak_flexible pack, never a user global — absent from
+    # SolverConfigSchema and stripped by projects._solver_config_from_dict.
+    # Per period: Σ w·η·p0 over the grid→hub Links ≤ E × Σw / 8760.
+    import_energy_cap_mwh_per_year: float | None = None
+    import_energy_links: list = field(default_factory=list)
     # ── Planning reserve margin (Phase 8 spec §1) ─────────────────────────
     # Firm-capacity standard as a FRACTION (0.15 == 15 %). None/0 = off.
     # Enforced per active investment period by `_wrap_with_reserve_margin`:
     #   Σ d_g·P_g (extendable) + Σ d_g·p_nom_g (fixed) ≥ (1 + m) · peak_P
     # Bounds live on `SolverConfigSchema` — this dataclass validates nothing.
     reserve_margin: float | None = None
+    # ── Island ride-through (campus island plan 2026-10-07, I2a) ──────────
+    # Opt-in per project (owner Q5): the ride-through, bridge and fuel rows of
+    # `services/solver/island.py`, read from the project's island_config.json.
+    # Plain solve only; rolling horizon, SCOPF and myopic are refused.
+    island_constraints: bool = False
     # How many of the period's highest-demand snapshots define the
     # peak-coincidence window used for must-take VRE credit. None ⇒ the
     # spec §2.3 rule, N = min(100, max(1, round(0.01 · |P_snapshots|))), with
@@ -376,6 +406,16 @@ class SolverConfig:
     lf_period_length_h: int = 168           # 168 = weekly; 24 = daily
     lf_cluster_method: str = "hierarchical"  # tsam: hierarchical | k_means | k_medoids
     lf_include_extreme: bool = True         # append peak-load + renewable-drought period
+    # Edge Investment Case commercial layer (spec §5.1). A plain dict here;
+    # the typed `CommercialConfig` lives on the API schema (P1 WP1.3). Any
+    # Library ref nested in it is pinned by `services/library/bundle_pins`
+    # at save (WP1.1c). None = no commercial layer: the LP is unchanged.
+    commercial: dict | None = None
+    # Edge Investment Case finance inputs (IC P4 WP4.6b): the `FinanceInputs`
+    # JSON, validated and set ONLY by `PUT /api/simulation/finance` (If-Match);
+    # the solver-config PUT keeps it. Nothing at solve time reads it, and it is
+    # in no solve fingerprint (a finance edit never makes a dispatch stale).
+    finance: dict | None = None
 
     def __post_init__(self):
         # ── Sanitize solver_options ───────────────────────────────────────
@@ -493,9 +533,21 @@ def run_simulation(
         # Reliability target: per-period ENS cap (+ per-zone ceilings) on the
         # involuntary slack dispatch. Adds work only when a target is set.
         extra_fn = _wrap_with_ens_cap(network, extra_fn, config, log_queue=log_queue)
+        # Energy import cap (EH pack only). Adds work only when set.
+        extra_fn = _wrap_with_import_energy_cap(
+            network, extra_fn, config, log_queue=log_queue)
         # Firm-capacity standard: a per-period planning reserve margin on
         # derated installed capacity. Adds work only when a margin is set.
         extra_fn = _wrap_with_reserve_margin(
+            network, extra_fn, config, log_queue=log_queue)
+        # Island ride-through, bridge and fuel rows (campus island I2a).
+        # Opt-in; refused, with the reason, on a path that is not the plain
+        # LOPF as it will actually run (see `_wrap_with_island`).
+        extra_fn = _wrap_with_island(network, extra_fn, config, log_queue=log_queue)
+        # Edge Investment Case LP-level commercial terms (peaks, ratchets,
+        # tiers, group caps; spec §5.1). After the reserve margin, before the
+        # objective scale, which must stay last.
+        extra_fn = _wrap_with_commercial_bindings(
             network, extra_fn, config, log_queue=log_queue)
         # User-supplied numerical-conditioning scale on the LP objective.
         # Multiplies model.objective by a positive constant right before
@@ -570,18 +622,25 @@ def run_simulation(
             # The reapply helper handles all 4 cases (flat↔multi, with
             # broadcasting via level-1 timestep match) and is idempotent.
             # Imported here to avoid a circular top-level import.
-            # GATED on "is this the FOREGROUND/active network?" — `_user_ts` is a
-            # process-global store that belongs to the ACTIVE project (B6-writes
-            # deferred → no per-ctx _user_ts yet). For a foreground solve (/run, or
-            # the dispatcher solving the resident foreground in-place) `network IS`
-            # the active network → reapply (byte-identical to pre-B4). For a
-            # BACKGROUND ctx solve (B4.3 dispatcher on a non-active project) the
-            # active `_user_ts` is a DIFFERENT project's store; reapplying it would
-            # overlay the foreground's uploaded profiles onto this project's network
-            # wherever an asset name collides (corrupting its LP + persisted
-            # dispatch). Skip it — the background netcdf already carries baked,
+            # GATED on "is this the FOREGROUND/active network?", because this
+            # call passes a network but NOT a store, so it reapplies whatever
+            # store the calling thread resolves. `/run` copies the request's
+            # context into its worker (`contextvars.copy_context()`), so there
+            # `network IS` the resolved network and the store is that project's
+            # own — reapply. The QUEUE dispatcher thread carries no request
+            # context and resolves the process foreground instead, which is a
+            # DIFFERENT project (or a fresh empty context): reapplying there would
+            # overlay another project's uploaded profiles onto this network
+            # wherever an asset name collides, corrupting its LP and its persisted
+            # dispatch. Skip it — the background netcdf already carries baked,
             # solve-ready profiles (`_hydrate_context_from_disk`). Closes the C2
             # end-to-end QA `_user_ts` cross-talk finding.
+            #
+            # The store is per-`ProjectContext` now, so the sound fix is to pass
+            # the solved context's own store (`_reapply_user_ts_to_network` takes
+            # `store=`). That needs `run_simulation` to receive the ctx, not just
+            # its network; until it does, this gate is what keeps the pairing
+            # honest.
             try:
                 from services.pypsa_service import PyPSAService as _PS
                 _is_foreground = network is _PS.get_network()
@@ -619,8 +678,8 @@ def run_simulation(
                       "profiles would overwrite it).")
             else:
                 phase("Skipped _user_ts reapply (background project solve — netcdf "
-                      "carries baked profiles; the active _user_ts belongs to the "
-                      "foreground project).")
+                      "carries baked profiles; the store this thread resolves "
+                      "belongs to a different project).")
             # Belt-and-suspenders index sync: makes sure every _t DataFrame's
             # row index matches n.snapshots before the LP. Catches stale
             # MultiIndex residue from a previous multi-period solve that
@@ -712,7 +771,41 @@ def run_simulation(
                 # writes originals and re-solves don't double-apply.
                 # `captured` collects solve-only data (VOLL slack dispatch)
                 # that the restore step would otherwise wipe.
-                _real_restore, captured = _apply_modelling_assumptions(network, config, phase)
+                # Edge Investment Case (WP1.4a): the connection agreement is a
+                # transient transform like the modelling assumptions. Applied
+                # first, undone LAST (chained after their restore), so the
+                # assumptions snapshot and restore the agreement's state.
+                # WP1.3 PoC prices are transient too (spec §5.1; re-review #1/#2):
+                # the user's marginal_cost is never modified on disk. Runs with
+                # no commercial config as well — its commit clears stale frames.
+                try:
+                    # The strategy that will actually RUN (rolling falls back to
+                    # full with SCLOPF or multi-period; WP1.5a review #7).
+                    _ic_strategy = _ic_effective_strategy(
+                        getattr(config, "solve_strategy", "full"), sclopf=use_sclopf,
+                        multi_period=bool(config.multi_investment_periods))
+                    _ic_conn = apply_commercial_for_solve(
+                        network, getattr(config, "commercial", None),
+                        log=lambda m: _safe_log(log_queue, m),
+                        solve_strategy=_ic_strategy,
+                        multi_period=bool(config.multi_investment_periods))
+                except CommercialBindingError as exc:
+                    log_queue.put(f"[COMMERCIAL] ERROR: {exc}")
+                    phase("Commercial binding failed. Aborting.")
+                    status, condition = "error", "commercial_binding_failed"
+                    return status, condition
+                try:
+                    _real_restore, captured = _apply_modelling_assumptions(network, config, phase)
+                except BaseException:
+                    _ic_conn.undo()
+                    raise
+                _assumptions_restore = _real_restore
+
+                def _real_restore() -> None:
+                    try:
+                        _assumptions_restore()
+                    finally:
+                        _ic_conn.undo()
                 # Once-guarded restore wrapper. The network now carries the LP
                 # transforms; restore MUST run exactly once before the network
                 # can be serialised. The solve try/finally below calls this on
@@ -726,8 +819,15 @@ def run_simulation(
                 def _guarded_restore() -> None:
                     if _restore_done["v"]:
                         return
-                    _restore_done["v"] = True
                     _real_restore()
+                    # Marked AFTER the restore, not before. The defensive second
+                    # call in the KeyboardInterrupt handler exists for exactly
+                    # one case — an interrupt landing mid-restore — and with the
+                    # flag set first, that call found it already True and did
+                    # nothing, leaving the network half-restored. Re-running is
+                    # safe: `_run_undo_actions` guards every entry and is
+                    # documented idempotent.
+                    _restore_done["v"] = True
 
                 restore_modelling = _guarded_restore
                 # Clear any stale loss DataFrames from a previous solve. PyPSA
@@ -1053,6 +1153,22 @@ def run_simulation(
                         except Exception as exc:
                             phase(f"Myopic restore: skipped one entry ({exc})")
                     restore_modelling()
+                # Persist the commercial price frame only for a solve that
+                # produced a dispatch (re-review #5: no rows mixing one run's
+                # prices with another run's dispatch).
+                if status in ("ok", "optimal"):
+                    _ic_conn.commit()
+                    # The DSR dispatch record (IC P2 WP2.2-0): committed, or
+                    # cleared, only after a successful non-operational solve.
+                    from services.commercial.settlement_inputs import commit_dsr
+                    commit_dsr(network, captured.get("dsr_t"), captured.get("dsr_total_mwh"))
+                    # Published only after a successful solve, like the commit
+                    # (WP1.5a review #6); None after a plain successful solve.
+                    _emit_state(last_commercial_terms=(
+                        {**_ic_conn.facts,
+                         "demand_peaks": network.meta.get(_IC_META_DEMAND),
+                         "group": network.meta.get(_IC_META_GROUP)}
+                        if _ic_conn.facts.get("poc_link") else None))
                 # Adequacy report — emitted whenever a target was enforced
                 # AND the solve actually produced a dispatch, INCLUDING the
                 # nothing-shed case (achieved 0, binding=voll).
@@ -1294,6 +1410,15 @@ def run_simulation(
                     for line in tb_str.rstrip().split("\n"):
                         log_queue.put(f"TRACEBACK: {line}")
                     condition = f"{condition}; ac_pf_failed: {exc}"
+            if status in ("ok", "optimal"):
+                # Persist input provenance with results under the SAME solve
+                # lock. Axis alignment alone cannot detect parameter edits.
+                try:
+                    from services.workflow_tools import _record_solve_inputs
+                    _record_solve_inputs(network, config)
+                except Exception as exc:
+                    network.meta.pop("assistant_solve_input_fingerprint", None)
+                    phase(f"Result input provenance unavailable: {type(exc).__name__}")
     except KeyboardInterrupt:
         # The abort watcher injected this to cancel the native HiGHS solve mid-
         # iteration (linopy caught it → h.cancelSolve() → PyPSA returned, then
@@ -1325,6 +1450,16 @@ def run_simulation(
                 log_queue.put(f"[PHASE] WARN: modelling restore after abort failed: {_rexc}")
         log_queue.put(f"[PHASE] Aborted by user at: {exc}. Modelling assumptions reverted.")
         status, condition = "aborted", f"user_aborted:{exc}"
+    except IslandRefusal as exc:
+        # A refusal, not a crash (campus island I2a): the rows cannot be
+        # built as configured. Nothing was applied yet, but restore anyway.
+        if restore_modelling is not None:
+            try:
+                restore_modelling()
+            except Exception as _rexc:
+                log_queue.put(f"[PHASE] WARN: modelling restore after refusal failed: {_rexc}")
+        log_queue.put(f"[PHASE] Refused: {exc}")
+        status, condition = "error", f"island_refused: {exc}"
     except ValidationRefused as exc:
         # Phase 12f: a refusal, not a failure. Same restore as the generic
         # handler (the network must not autosave carrying the run's vintage
@@ -1450,11 +1585,28 @@ _USER_CODE_GATE_ENV = "PYPSA_GUI_ALLOW_USER_CODE"
 def user_code_enabled() -> bool:
     """
     True iff the operator has explicitly opted in to executing user-supplied
-    Python via the `extra_functionality_code` field. Off by default — this
-    field is `exec()`-ed in-process with full FS / network privileges, and
-    the GUI has no auth layer, so allowing it implicitly is a footgun. Set
-    `PYPSA_GUI_ALLOW_USER_CODE=1` (or `true`/`yes`) to enable for trusted
-    single-user / localhost deployments.
+    Python via the `extra_functionality_code` field. Off by default — the field
+    is `exec()`-ed in-process with full FS / network privileges. Set
+    `PYPSA_GUI_ALLOW_USER_CODE=1` (or `true`/`yes`) to enable.
+
+    THIS FLAG IS NOT THE WHOLE GATE, and the reasoning it used to carry was
+    wrong. It said "the GUI has no auth layer" and described deployments as
+    "single-user / localhost": both were true when written and neither is now.
+    `main.py` refuses any unauthenticated `/api/*` request, and the product has
+    organizations and memberships. Corrected here because a reader who believes
+    the risk was "no auth" concludes it is solved and relaxes the gate.
+
+    What the flag actually is: the DEPLOYMENT's kill switch, process-wide, which
+    cannot be granted per project or per org. Authorization is enforced
+    separately and at the edge by `routers/simulation._gate_user_code`, which
+    additionally requires an org admin (or super-admin) to SET the field — being
+    a project's lock holder is not a privilege level. Both conditions must hold;
+    admin does not override an operator who never opted in. Local mode is exempt
+    from the admin half: the desktop build has one seeded identity and no org.
+
+    The compile-time check below is defence in depth, not the primary gate: the
+    solve worker has no request context, so it can test this flag and nothing
+    about the caller.
     """
     import os
     val = os.environ.get(_USER_CODE_GATE_ENV, "").strip().lower()

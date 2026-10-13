@@ -120,3 +120,27 @@ describe('Generator save payload — behaviour as of 54a5b3c0', () => {
     }
   })
 })
+
+// A1-FE (carried from the P27a gate, deviation 3): during a live-network study
+// the backend refuses the edit with the structured `study_in_flight` 409.
+// `study_in_flight` is a quiet code in the axios interceptor, so the card's own
+// onError is the ONE toast — and it read axios' "Request failed with status
+// code 409". It now carries the backend's sentence (via `blockerMessage`).
+describe('a refused edit toasts the backend sentence (A1-FE)', () => {
+  it('Save refused with study_in_flight → "Save failed: <the sentence>"', async () => {
+    const toast = (await import('react-hot-toast')).default
+    const shown = vi.spyOn(toast, 'error').mockImplementation(() => '')
+    const message = 'Cannot edit the network while a FMEA sweep is running — it re-solves the '
+      + 'in-memory network between its own iterates. Wait for it to finish, or abort it, and retry.'
+    vi.mocked(networkApi.updateGenerator).mockRejectedValueOnce(Object.assign(
+      new Error('Request failed with status code 409'),
+      { response: { status: 409, data: { detail: { error_kind: 'study_in_flight', study: 'fmea_sweep', message } } } },
+    ))
+    await openEdit()
+    await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    await waitFor(() => expect(shown).toHaveBeenCalled())
+    // (jsdom has no backend: an unrelated query's "Network Error" may toast too.)
+    expect(shown.mock.calls.map(c => String(c[0])).filter(t => t.startsWith('Save failed')))
+      .toEqual([`Save failed: ${message}`])
+  })
+})

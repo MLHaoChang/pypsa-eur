@@ -209,22 +209,17 @@ def test_a_healthy_connected_network_is_silent():
 
 # ── The tool that reads it ─────────────────────────────────────────────────
 #
-# The chat-facing `diagnose_network` is master's (backlog 15, shipped on the
-# base branch with its own contract and tests in test_chat_tools_diagnose.py).
-# This module is NOT that tool: it backs the preflight warnings and the study
-# report's evidence gaps, which the tool does not do. Both walk the bus graph,
-# and unifying them is a follow-up on the shipped tool rather than something
-# to smuggle into a merge — recorded here so the duplication is deliberate and
-# visible rather than discovered later.
+# The chat-facing `diagnose_network` (contract in test_chat_tools_diagnose.py)
+# no longer walks the graph itself: it reshapes this module's islands. These
+# pin the shared walk — island count, and the fields the tool reads.
 
 
 def test_the_shipped_tool_and_this_module_agree_on_island_count(install_network):
     """
-    The one property the two implementations MUST share. They differ on peak
-    load (this one sums per snapshot, the tool sums each load's own maximum)
-    and on the shortfall claim, but if they ever disagreed about how many
-    islands there are, one of them would be telling the user a different
-    network.
+    The one property the two views MUST share: if they ever disagreed about
+    how many islands there are, one of them would be telling the user a
+    different network. With one walk behind both this is structural, and the
+    test stays as the guard against a second walk creeping back in.
     """
     from services import chat_tools
 
@@ -232,6 +227,51 @@ def test_the_shipped_tool_and_this_module_agree_on_island_count(install_network)
     install_network(n)
     assert chat_tools.diagnose_network()["island_count"] == \
         A.analyse_topology(n)["n_islands"]
+
+
+def test_ports_beyond_bus4_connect():
+    """PyPSA puts no ceiling on a link's ports; neither may the walk."""
+    n = pypsa.Network()
+    for bus in ("elec", "h2", "heat", "o2", "water", "far"):
+        n.add("Bus", bus)
+    n.add("Link", "plant", bus0="elec", bus1="h2", bus2="heat", bus3="o2",
+          bus4="water", bus5="far", p_nom=50.0)
+    report = A.analyse_topology(n)
+    assert report["n_islands"] == 1
+    assert report["isolated_buses"] == []
+
+
+def test_unused_ports_are_not_buses():
+    """An empty `bus2` on a two-port link is no port at all."""
+    n = pypsa.Network()
+    for bus in ("a", "b", "c"):
+        n.add("Bus", bus)
+    n.add("Link", "multi", bus0="a", bus1="b", bus2="c", p_nom=1.0)
+    n.add("Link", "plain", bus0="b", bus1="a", p_nom=1.0)
+    assert n.links.at["plain", "bus2"] == ""
+    n.links["bus3"] = float("nan")            # a port column left as NaN
+    report = A.analyse_topology(n)
+    assert report["n_islands"] == 1
+
+
+def test_supply_asset_presence_is_reported_regardless_of_size():
+    """
+    `has_supply_asset` is presence, not nameplate: a 0 MW generator or a Store
+    is still something that can inject, which is what the chat tool reports.
+    """
+    n = _two_islands(supply_on_b=False)
+    n.add("Bus", "c1")
+    n.add("Generator", "zero", bus="c1", p_nom=0.0)
+    n.add("Bus", "d1")
+    n.add("Store", "tank", bus="d1", e_nom=10.0)
+    n.add("Bus", "e1")
+    by_bus = {i["buses"][0]: i for i in A.analyse_topology(n)["islands"]}
+    assert by_bus["a1"]["has_supply_asset"] is True
+    assert by_bus["b1"]["has_supply_asset"] is False
+    assert by_bus["c1"]["has_supply_asset"] is True
+    assert by_bus["c1"]["nameplate_mw"] == 0
+    assert by_bus["d1"]["has_supply_asset"] is True
+    assert by_bus["e1"]["has_supply_asset"] is False
 
 
 def test_the_infeasibility_decoder_routes_here():

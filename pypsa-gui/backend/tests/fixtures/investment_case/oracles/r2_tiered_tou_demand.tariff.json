@@ -1,0 +1,52 @@
+{
+ "id": "r2",
+ "name": "REopt tiered_tou_demand (hand-translated)",
+ "jurisdiction": "US",
+ "valid_from": "2017-01-01",
+ "items": [
+  {
+   "id": "energy",
+   "kind": "energy",
+   "unit": "per_kwh",
+   "settlement": "h",
+   "periods": [
+    {
+     "name": "0",
+     "rate": 0.0
+    }
+   ],
+   "tiers": [
+    {
+     "threshold": 0,
+     "rate": 0.1
+    },
+    {
+     "threshold": 40000.0,
+     "rate": 0.12
+    }
+   ]
+  },
+  {
+   "id": "demand",
+   "kind": "demand",
+   "unit": "per_kw_month",
+   "settlement": "15min",
+   "periods": [
+    {
+     "name": "0",
+     "rate": 0.0
+    }
+   ],
+   "tiers": [
+    {
+     "threshold": 0,
+     "rate": 0.0
+    },
+    {
+     "threshold": 50.0,
+     "rate": 12.0
+    }
+   ]
+  }
+ ]
+}

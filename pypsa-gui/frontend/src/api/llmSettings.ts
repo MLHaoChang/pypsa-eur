@@ -127,7 +127,10 @@ export interface TestResult {
 
 /** The member-level payload that feeds the chat dropdown. */
 export interface ChatProfilesPayload {
-  profiles: Array<{ id: string; label: string; wire: 'anthropic' | 'openai' }>
+  /** `chat_ready` (P28 A3): `/health`'s readiness rule applied to this
+   *  profile (a bearer profile has its key; any other is ready). Optional:
+   *  older backends omit it, and readiness is then unknown for that profile. */
+  profiles: Array<{ id: string; label: string; wire: 'anthropic' | 'openai'; chat_ready?: boolean }>
   active_profile_id: string
 }
 

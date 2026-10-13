@@ -102,13 +102,18 @@ def _reset_backend_state() -> None:
     # into the next test and the failure surfaced far from its cause.
     PyPSAService.reset_network(allow_during_study=True)
     PyPSAService._contexts.clear()  # B2 registry: no resident ctxs bleed across tests
-    # `_user_ts` is a PROCESS-GLOBAL time-series store in routers.network (keyed
-    # by (component, attr, name)), NOT a per-context field — so reset_network()
-    # doesn't touch it. Only POST /network/reset clears it (which tests don't
-    # hit). Without this, a profile captured by one test (e.g. test_solve_queue's
-    # Load "L1" p_set) reapplies into the next test's same-named component and
-    # silently overrides its static value — making an intended-infeasible/shed
-    # network feasible. Mirror the route handler's clear.
+    # `_user_ts` is the user time-series store, keyed by (component, attr, name).
+    # It is per-ProjectContext now, and `reset_network()` CARRIES IT FORWARD as a
+    # copy (see ProjectContext.user_ts) — so a profile captured by one test (e.g.
+    # test_solve_queue's Load "L1" p_set) would otherwise ride the carry into the
+    # next test's same-named component and silently override its static value,
+    # making an intended-infeasible/shed network feasible.
+    #
+    # Two lines do the work between them, and BOTH are needed: `_contexts.clear()`
+    # above drops every resident context (a test that drove the app over HTTP left
+    # its store on the session's adopted scratch context, not on the process
+    # foreground), and the clear below empties the foreground store `reset_network`
+    # just carried into — mirroring the `POST /network/reset` handler.
     with net_router._user_ts_lock:
         net_router._user_ts.clear()
     # The campaign budget lives in the context's `solver_state`, beside the
@@ -416,7 +421,10 @@ def _reset_tenant_tables(_auth_db):
 
     yield
     with engine.begin() as conn:
-        for table in ("project_locks", "project_memberships", "projects", "solve_jobs"):
+        # `library_items` (Edge Investment Case WP1.1a): per-org Library rows
+        # must not leak a version number from one test into the next.
+        for table in ("project_locks", "project_memberships", "projects", "solve_jobs",
+                      "library_items"):
             conn.execute(text(f"DELETE FROM {table}"))
 
 @pytest.fixture(autouse=True)
@@ -670,6 +678,13 @@ def install_network_into_backend(n: pypsa.Network, name: str | None = None) -> p
     """
     PyPSAService.set_network(n)
     sim_router._state["solver_config"] = SolverConfig()
+    # The previous install's user time series are process-global; the real
+    # "New Project" route clears them (`routers/network.reset_network`), so a
+    # later save must not write them into this network's project (P1 gate).
+    from services.user_timeseries import _user_ts, _user_ts_lock
+
+    with _user_ts_lock:
+        _user_ts.clear()
     if name is not None:
         n.name = name
         PyPSAService.set_loaded_project(name)

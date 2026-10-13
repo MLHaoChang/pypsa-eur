@@ -21,6 +21,7 @@ the previous file byte-identical (atomic write, validation before write).
 from __future__ import annotations
 
 import json
+import math
 import pathlib
 
 from pydantic import ValidationError
@@ -118,3 +119,58 @@ def save_worksheet(project_dir: pathlib.Path, *, manual_rows: list[dict],
     atomic_write_text(project_dir / SIDECAR_NAME,
                       json.dumps(state, indent=2, sort_keys=True))
     return state
+
+
+# ── P29 (B3): why a computed row costs €0 ────────────────────────────────────
+
+ZERO_REASONS = ("no_shortfall", "no_outage_data", "unpriced", "out_of_scope")
+
+
+def zero_reason(*, severity_eur: float, delta_eue_mwh: float | None,
+                occurrence_per_year: float, in_metric_scope: bool,
+                voll: float) -> str | None:
+    """The one rule for why an FMEA row's severity is €0, or ``None``.
+
+    Set on ``failure_mode["zero_reason"]`` by the three engines — COPT class A
+    (and its block merge), the class-B link sweep and the class-C stress
+    sweep — and forwarded unchanged by ``per_mode``. Additive: no number is
+    changed by it. Class-D (expert) rows carry ``None`` (set client-side).
+
+    Order matters:
+
+    * ``None`` when the row is priced (``severity_eur > 0``).
+    * ``out_of_scope`` is tested before ``no_outage_data`` because the class-B
+      sweep computes ``occ`` in both branches (``sweep.py``: an out-of-scope
+      link keeps its occurrence and is zeroed by design).
+    * ``no_outage_data`` (occurrence ≤ 0 or not finite — e.g. MTTR 0) before
+      ``unpriced`` and ``no_shortfall``: a unit with no occurrence is not
+      evidence that the site copes without it.
+    * ``unpriced`` when VOLL ≤ 0. Reachable on the COPT path only — the sweep
+      refuses to start without a VOLL.
+    * ``no_shortfall`` when the measured ΔEUE is exactly 0.
+    * else ``None``. A class-C row with ``frequency_per_year == 0`` and a
+      shortfall has ``severity > 0`` (severity = ΔEUE × VOLL per event) and
+      correctly gets ``None``.
+    """
+    try:
+        if float(severity_eur) > 0:
+            return None
+    except (TypeError, ValueError):
+        pass
+    if not in_metric_scope:
+        return "out_of_scope"
+    try:
+        occ = float(occurrence_per_year)
+    except (TypeError, ValueError):
+        occ = math.nan
+    if not (math.isfinite(occ) and occ > 0):
+        return "no_outage_data"
+    try:
+        v = float(voll)
+    except (TypeError, ValueError):
+        v = 0.0
+    if not v > 0:
+        return "unpriced"
+    if delta_eue_mwh is not None and float(delta_eue_mwh) == 0.0:
+        return "no_shortfall"
+    return None

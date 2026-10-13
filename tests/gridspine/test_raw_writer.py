@@ -405,3 +405,27 @@ def test_sgen_one_sided_q_limit_collapses_to_fixed_q(tmp_path):
         assert float(srec[4]) == pytest.approx(0.0)     # QT = QG
         assert float(srec[5]) == pytest.approx(0.0)     # QB = QG
         assert float(srec[4]) >= float(srec[5])         # never QT < QB
+
+
+def test_case39_res_mbase_is_the_installed_rating_whatever_the_hour_dispatches(tmp_path):
+    # Found reading real bundles: once a snapshot is applied, `_apply_res`
+    # overwrites sgen `p_mw` with the HOUR'S output, and with no `sn_mva` on
+    # the row the p_mw fallback made MBASE follow dispatch — W_BUS_33 (600 MW)
+    # was exported at MBASE 449.994 in one hour and 352.569 in another, and a
+    # curtailed solar site at the 100 MVA system base. Everything a .dyr puts
+    # on MBASE (an inverter's current limits, its ramp rates) would then be
+    # scaled to that hour's weather. The rating is the installed capacity.
+    from gridspine.ingest.pandapower_source import RES_LEDGER
+
+    net = load_case39_res()
+    installed = {e["name"]: e["p_mw"] for e in RES_LEDGER}
+    for i in net.sgen.index:             # what `_apply_res` does to an hour
+        name = net.sgen.at[i, "name"]
+        curtailed = name.startswith("S_")
+        net.sgen.at[i, "p_mw"] = 0.0 if curtailed else 33.186
+        net.sgen.at[i, "in_service"] = not curtailed
+    write_raw(net, tmp_path / "c39r.raw")
+    gens = _records((tmp_path / "c39r.raw").read_text(), 3)
+    sgen_recs = gens[-len(net.sgen):]    # sgen records are written last
+    for (_, s), rec in zip(net.sgen.iterrows(), sgen_recs):
+        assert float(rec[8]) == pytest.approx(installed[s["name"]]), s["name"]

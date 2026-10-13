@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 from services import chat_service
+from harness import results as harness_results
 
 
 def test_apply_turn_budget_passes_until_exhausted():
     budget = {"used": 0}
     # Force a tiny cap for the test.
-    chat_service.MAX_TOOL_RESULT_CHARS_PER_TURN = 50
+    harness_results.MAX_TOOL_RESULT_CHARS_PER_TURN = 50
     try:
         first = chat_service._apply_turn_tool_result_budget("x" * 40, budget)
         assert first == "x" * 40
@@ -24,7 +25,7 @@ def test_apply_turn_budget_passes_until_exhausted():
         assert "_omitted" in third or "omitted" in third.lower()
         assert "40" in third  # original length reported
     finally:
-        chat_service.MAX_TOOL_RESULT_CHARS_PER_TURN = 40_000
+        harness_results.MAX_TOOL_RESULT_CHARS_PER_TURN = 40_000
 
 
 def test_apply_turn_budget_omits_when_already_at_cap():

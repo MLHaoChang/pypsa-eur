@@ -18,6 +18,7 @@ import { useUIStore } from '../store/uiStore'
 import { WRITABLE } from '../utils/lockState'
 import { projectsApi } from '../api/projects'
 import { networkApi } from '../api/network'
+import { simulationApi } from '../api/simulation'
 import type { ProjectInfo } from '../api/types'
 
 vi.mock('../hooks/useSolveQueue', () => ({
@@ -65,6 +66,12 @@ beforeEach(() => {
   // did. Previously it got that by accident: `undoInfo` was unmocked, and the
   // old code defaulted a failed probe to depth 0.
   vi.spyOn(networkApi, 'undoInfo').mockResolvedValue({ depth: 0, unsaved: false } as never)
+  // The Sidebar also mounts the network-meta and preflight queries. Left
+  // unmocked they hit jsdom's absent network and the client interceptor
+  // raises a "Network Error" toast for each. On a slow runner those could
+  // land AFTER the 409 toast this test reads last (seen in CI on PR #60).
+  vi.spyOn(networkApi, 'getMeta').mockResolvedValue({} as never)
+  vi.spyOn(simulationApi, 'preflight').mockResolvedValue({ errors: [], warnings: [] } as never)
 })
 
 describe('reopening the current project while a queue job owns it', () => {
@@ -93,6 +100,9 @@ describe('reopening the current project while a queue job owns it', () => {
 
     await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalled())
     const calls = vi.mocked(toast.error).mock.calls
+    // The refusal must be the ONLY error toast: nothing else in this render
+    // talks to a network, so any other toast is a leak worth failing on.
+    expect(calls.map(c => String(c[0]))).toHaveLength(1)
     const shown = String(calls[calls.length - 1]?.[0])
     expect(shown).toContain('is being solved by the queue right now')
     expect(shown).not.toBe("Could not open 'demo'")

@@ -230,7 +230,7 @@ export default function SnapshotPicker() {
             </>
           )}
 
-          <button
+          <button aria-label="Previous snapshot"
             type="button"
             onClick={() => { setPlaying(false); setResultsSnapshotIdx(Math.max(activeRange.start, idx - 1)) }}
             disabled={idx <= activeRange.start}
@@ -238,7 +238,7 @@ export default function SnapshotPicker() {
             title="Previous snapshot"
           ><ChevronLeft size={12} /></button>
 
-          <button
+          <button aria-label={playing ? 'Pause' : 'Play through snapshots'}
             type="button"
             onClick={togglePlay}
             title={playing ? 'Pause' : 'Play through snapshots'}
@@ -249,7 +249,7 @@ export default function SnapshotPicker() {
             {playing ? <Pause size={10} /> : <Play size={10} />}
           </button>
 
-          <button
+          <button aria-label="Next snapshot"
             type="button"
             onClick={() => { setPlaying(false); setResultsSnapshotIdx(Math.min(activeRange.end, idx + 1)) }}
             disabled={idx >= activeRange.end}
@@ -276,6 +276,8 @@ export default function SnapshotPicker() {
             value={idx}
             onChange={(e) => { setPlaying(false); setResultsSnapshotIdx(Number(e.target.value)) }}
             disabled={!resultsOverlayEnabled}
+            aria-label="Snapshot"
+            aria-valuetext={stamp ? `${stamp.slice(0, 16).replace('T', ' ')} (${localIdx + 1} of ${windowLen})` : `${localIdx + 1} of ${windowLen}`}
             style={{ width: 140, height: 12 }}
           />
 

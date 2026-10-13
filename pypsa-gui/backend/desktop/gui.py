@@ -328,7 +328,6 @@ def _wire_close_handler(state: dict) -> None:
 
     def flush(*, safe: bool):
         contexts = shutdown_service.resident_contexts()
-        active = _active_context()
 
         from services import chat_service
 
@@ -342,8 +341,7 @@ def _wire_close_handler(state: dict) -> None:
                 chat_service.flush_to_disk(ctx)
 
         return shutdown_service.flush_all(
-            contexts=contexts, active=active, save=save,
-            flush_chat=flush_chat, safe=safe,
+            contexts=contexts, save=save, flush_chat=flush_chat, safe=safe,
         )
 
     def run():
@@ -360,12 +358,6 @@ def _wire_close_handler(state: dict) -> None:
     handler = shutdown_service.CloseHandler(run=run, destroy=window.destroy)
     window.events.closing += handler.on_closing
     state["close_handler"] = handler
-
-
-def _active_context():
-    from services.pypsa_service import PyPSAService
-
-    return PyPSAService._active
 
 
 def _abort_everything() -> bool:

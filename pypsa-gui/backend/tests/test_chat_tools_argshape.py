@@ -69,6 +69,10 @@ CHAT_TOOLS = pathlib.Path(__file__).resolve().parents[1] / "services" / "chat_to
 # Empty today: every argument-passing delegation binds.
 WAIVERS: dict[tuple[str, str], str] = {}
 
+# Wrappers that call their first argument with the rest (plus the injected
+# db / user / session), so `_route(_h, x)` is a delegation to `_h(x)`.
+_ROUTERS = ("_route", "_library_call", "_value_flow_call")
+
 
 class _Sentinel:
     """Stands in for an argument value. Binding cares about shape, not type."""
@@ -97,6 +101,24 @@ def _delegated_calls() -> list[tuple[int, str, str, int, tuple[str, ...]]]:
                 for a in node.names:
                     aliases[a.asname or a.name] = (node.module, a.name)
         for node in ast.walk(fn):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in _ROUTERS
+                and node.args
+                and isinstance(node.args[0], ast.Name)
+                and node.args[0].id in aliases
+            ):
+                # `_route(_h, *a, **k)` / `_library_call(_h, …)` calls `_h(*a,
+                # **k)` plus the injected identity (WP2.4c review M5).
+                if any(isinstance(a, ast.Starred) for a in node.args) or any(
+                    k.arg is None for k in node.keywords
+                ):
+                    continue
+                mod, name = aliases[node.args[0].id]
+                kwargs = tuple(k.arg for k in node.keywords if k.arg is not None)
+                out.append((node.lineno, mod, name, len(node.args) - 1, kwargs))
+                continue
             if (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)

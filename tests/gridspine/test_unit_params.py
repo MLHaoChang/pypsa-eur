@@ -170,7 +170,10 @@ def test_default_res_units_carry_fault_parameters_and_ledger_capacities():
         assert row["mbase_mva"] == cap[unit_id]
         assert not row["include_in_inertia"]
     p = t.params[t.params["unit_id"].isin(cap)]
-    assert set(p["param"]) == set(MODEL_PARAMS["inverter"]) == {"k_sc", "rx_sc"}
+    assert set(MODEL_PARAMS["inverter"]) == {"k_sc", "rx_sc"}
+    # Increment 8: the shipped sites also carry the REGCA1/REECA1 group — its
+    # own tests are at the end of this file.
+    assert set(p["param"]) == {"k_sc", "rx_sc"} | set(IBR_PARAMS)
 
 
 def test_default_classic_dataset_physics_ordering_holds():
@@ -376,3 +379,134 @@ def test_an_overlay_that_breaks_the_physics_is_refused_at_load():
     caught here and never reaches a `.dyr`."""
     with pytest.raises(ContractError):
         load_unit_templates(overlay={_OVERLAY_UNIT: {"h_s": {"value": -1.0, "source": "assumed"}}})
+
+
+# ===========================================================================
+# Increment 8 — inverter dynamics: the REGCA1 + REECA1 parameter group
+# ===========================================================================
+#
+# An inverter's IBR group is OPTIONAL but ALL-OR-NOTHING. Without it the unit
+# is a valid template and the .dyr omits it (ledgered, as before increment 8).
+# A partial group is refused: the missing CONs would import as zero, and a
+# converter with a zero current limit is a plausible, wrong machine.
+
+from gridspine.templates.unit_params import IBR_FLAGS, IBR_PARAMS, ibr_params
+
+_IBR_GENERIC = {
+    "regc_lvplsw": 1, "regc_tg": 0.02, "regc_rrpwr": 10.0, "regc_brkpt": 0.9,
+    "regc_zerox": 0.4, "regc_lvpl1": 1.22, "regc_volim": 1.2, "regc_lvpnt1": 0.8,
+    "regc_lvpnt0": 0.4, "regc_iolim": -1.3, "regc_tfltr": 0.02, "regc_khv": 0.7,
+    "regc_iqrmax": 99.0, "regc_iqrmin": -99.0, "regc_accel": 0.7,
+    "reec_pfflag": 0, "reec_vflag": 0, "reec_qflag": 0, "reec_pflag": 0,
+    "reec_pqflag": 0,
+    "reec_vdip": 0.9, "reec_vup": 1.1, "reec_trv": 0.02, "reec_dbd1": -0.05,
+    "reec_dbd2": 0.05, "reec_kqv": 2.0, "reec_iqh1": 1.05, "reec_iql1": -1.05,
+    "reec_vref0": 0.0, "reec_iqfrz": 0.0, "reec_thld": 0.0, "reec_thld2": 0.0,
+    "reec_tp": 0.02, "reec_qmax": 0.436, "reec_qmin": -0.436, "reec_vmax": 1.1,
+    "reec_vmin": 0.9, "reec_kqp": 0.0, "reec_kqi": 0.1, "reec_kvp": 0.0,
+    "reec_kvi": 40.0, "reec_vbias": 0.0, "reec_tiq": 0.02, "reec_dpmax": 99.0,
+    "reec_dpmin": -99.0, "reec_pmax": 1.0, "reec_pmin": 0.0, "reec_imax": 1.1,
+    "reec_tpord": 0.02,
+    "reec_vq1": 0.2, "reec_iq1": 1.1, "reec_vq2": 0.5, "reec_iq2": 1.1,
+    "reec_vq3": 0.8, "reec_iq3": 1.1, "reec_vq4": 1.0, "reec_iq4": 1.1,
+    "reec_vp1": 0.2, "reec_ip1": 1.1, "reec_vp2": 0.5, "reec_ip2": 1.1,
+    "reec_vp3": 0.8, "reec_ip3": 1.1, "reec_vp4": 1.0, "reec_ip4": 1.1,
+}
+
+
+def _ibr_unit(drop=(), **over):
+    params = {"k_sc": 1.2, "rx_sc": 0.1, **_IBR_GENERIC, **over}
+    for name in drop:
+        params.pop(name)
+    return {
+        "model": "inverter", "mbase_mva": 600.0, "include_in_inertia": False,
+        "params": {k: {"value": v, "source": "assumed"} for k, v in params.items()},
+    }
+
+
+def test_the_ibr_group_is_the_65_fields_of_the_two_records():
+    # REGCA1: 1 ICON + 14 CONs. REECA1: 5 of 6 ICONs (BUSR is a RAW bus
+    # number, authored by the writer, not the template) + 45 CONs.
+    assert len(IBR_PARAMS) == 65 == len(set(IBR_PARAMS))
+    assert set(IBR_PARAMS) == set(_IBR_GENERIC)
+    assert IBR_FLAGS == {"regc_lvplsw", "reec_pfflag", "reec_vflag",
+                         "reec_qflag", "reec_pflag", "reec_pqflag"}
+
+
+def test_default_inverters_carry_a_complete_generic_ibr_group_all_assumed():
+    t = load_unit_templates()
+    inv = t.units.index[t.units["model"] == "inverter"]
+    assert len(inv) == N_RES
+    p = t.params[t.params["unit_id"].isin(inv) & t.params["param"].isin(IBR_PARAMS)]
+    # One row per (unit, param): the YAML anchor that shares the generic set
+    # must still expand to a full, per-unit, per-field ledger.
+    assert len(p) == N_RES * len(IBR_PARAMS)
+    assert (p["source"] == "assumed").all(), "generic values are not datasheet values"
+    wide = ibr_params(t)
+    assert set(wide.index) == set(inv)
+    assert (wide["mbase_mva"] == t.units.loc[wide.index, "mbase_mva"]).all()
+
+
+def test_a_complete_ibr_group_round_trips(tmp_path):
+    t = load_unit_templates(_write(tmp_path, {"W_X": _ibr_unit()}))
+    wide = ibr_params(t)
+    assert wide.at["W_X", "reec_imax"] == pytest.approx(1.1)
+    assert wide.at["W_X", "regc_iolim"] == pytest.approx(-1.3)
+
+
+def test_an_inverter_without_the_group_loads_and_is_absent_from_the_ibr_view(tmp_path):
+    u = _ibr_unit(drop=IBR_PARAMS)
+    t = load_unit_templates(_write(tmp_path, {"W_X": u}))
+    assert "W_X" in t.units.index
+    assert ibr_params(t).empty
+
+
+@pytest.mark.parametrize("missing", ["regc_tg", "reec_imax", "reec_ip4", "reec_pqflag"])
+def test_a_partial_ibr_group_is_refused_and_names_what_is_missing(tmp_path, missing):
+    with pytest.raises(ContractError, match=missing):
+        load_unit_templates(_write(tmp_path, {"W_X": _ibr_unit(drop=[missing])}))
+
+
+@pytest.mark.parametrize("flag, value", [("regc_lvplsw", 2), ("reec_pqflag", 0.5),
+                                         ("reec_vflag", -1)])
+def test_an_ibr_flag_must_be_0_or_1(tmp_path, flag, value):
+    with pytest.raises(ContractError, match=flag):
+        load_unit_templates(_write(tmp_path, {"W_X": _ibr_unit(**{flag: value})}))
+
+
+@pytest.mark.parametrize("over, match", [
+    ({"regc_tg": 0.0}, "regc_tg"),
+    ({"reec_imax": 0.0}, "reec_imax"),
+    ({"regc_iqrmax": -1.0}, "regc_iqrmax"),
+    ({"regc_iqrmin": 1.0}, "regc_iqrmin"),
+    ({"regc_iolim": 0.5}, "regc_iolim"),
+    ({"regc_lvpnt0": 0.9}, "regc_lvpnt0"),
+    ({"regc_zerox": 0.95}, "regc_zerox"),
+    ({"reec_vdip": 1.2}, "reec_vdip"),
+    ({"reec_dbd1": 0.1}, "reec_dbd1"),
+    ({"reec_iql1": 2.0}, "reec_iql1"),
+    ({"reec_qmin": 0.5}, "reec_qmin"),
+    ({"reec_vmin": 1.2}, "reec_vmin"),
+    ({"reec_pmin": 1.5}, "reec_pmin"),
+    ({"reec_dpmin": 100.0}, "reec_dpmin"),
+    ({"reec_vq3": 0.4}, "reec_vq"),
+    ({"reec_vp2": 0.1}, "reec_vp"),
+    ({"reec_trv": -0.01}, "reec_trv"),
+])
+def test_an_impossible_ibr_group_is_refused_at_load(tmp_path, over, match):
+    # Each of these imports cleanly into a dynamics engine and produces a
+    # plausible, wrong response — so the loader is the place to stop them.
+    with pytest.raises(ContractError, match=match):
+        load_unit_templates(_write(tmp_path, {"W_X": _ibr_unit(**over)}))
+
+
+def test_an_overlay_edits_an_ibr_value_and_its_provenance():
+    t = load_unit_templates(overlay={"W_BUS_33": {"reec_imax": {"value": 1.2, "source": "datasheet"}}})
+    assert ibr_params(t).at["W_BUS_33", "reec_imax"] == pytest.approx(1.2)
+    row = t.params[(t.params["unit_id"] == "W_BUS_33") & (t.params["param"] == "reec_imax")]
+    assert row.iloc[0]["source"] == "datasheet"
+
+
+def test_an_overlay_that_makes_an_ibr_group_impossible_is_refused():
+    with pytest.raises(ContractError, match="reec_imax"):
+        load_unit_templates(overlay={"W_BUS_33": {"reec_imax": {"value": 0.0, "source": "assumed"}}})

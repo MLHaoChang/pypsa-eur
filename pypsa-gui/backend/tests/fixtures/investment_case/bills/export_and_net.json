@@ -1,0 +1,23 @@
+{
+  "_comment": "Hand-rated. Interval 1: import 3 MW, export 1 MW; interval 2: import 0, export 2 MW (15 min each). Export revenue 0.05 EUR/kWh on export: (250 + 500) kWh -> 37.50 revenue = -37.50. Network energy 0.01 EUR/kWh on NET import: interval 1 net 2 MW = 500 kWh -> 5.00; interval 2 net -2 MW -> net import floored at 0 -> 0.00. Total -32.50.",
+  "timezone": "Europe/Berlin",
+  "tariff": {
+    "id": "exp_test", "name": "export test", "jurisdiction": "DE", "valid_from": "2030-01-01",
+    "items": [
+      {"id": "export_rev", "kind": "energy", "unit": "per_kwh", "periods": [{"name": "all", "rate": 0.05}],
+       "settlement": "15min", "measured_on": "export", "direction": "revenue"},
+      {"id": "net_energy", "kind": "energy", "unit": "per_kwh", "periods": [{"name": "all", "rate": 0.01}],
+       "settlement": "15min", "measured_on": "net", "direction": "cost"}
+    ]
+  },
+  "dispatch": [
+    ["2030-03-04 12:00", 3.0, 1.0],
+    ["2030-03-04 12:15", 0.0, 2.0]
+  ],
+  "step_hours": 0.25,
+  "expected": {
+    "per_interval": {"export_rev": [-12.50, -25.00], "net_energy": [5.00, 0.00]},
+    "per_item": {"export_rev": -37.50, "net_energy": 5.00},
+    "total": -32.50
+  }
+}

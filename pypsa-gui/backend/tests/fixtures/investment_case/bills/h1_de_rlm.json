@@ -1,0 +1,133 @@
+{
+ "_working": [
+  "H1 — Germany, industrial customer on the medium-voltage grid, calendar year 2030, Europe/Berlin, 15-min metering (RLM). Self-authored; illustrative prices, not a published price sheet.",
+  "Load: 400 kW flat all year, plus 1,000 kW for one hour on Tue 2030-02-05 08:00-09:00 and 1,200 kW for one quarter-hour on Wed 2030-07-10 11:00-11:15 (local).",
+  "Local month hours (DST): March 743 h (spring forward 2030-03-31), October 745 h (fall back 2030-10-27), the year 8,760 h; the 15-min axis has 35,040 intervals.",
+  "Energy V = 400 x 8,760 + (1,000-400) x 1 h + (1,200-400) x 0.25 h = 3,504,000 + 600 + 200 = 3,504,800 kWh.",
+  "Annual 15-min peak (Jahreshöchstleistung) = 1,200 kW. Benutzungsdauer = V / peak = 2,920.67 h >= 2,500 h, so the >= 2,500 h price pair applies: Leistungspreis 98.52 EUR/kW-a, Arbeitspreis 0.0291 EUR/kWh (the < 2,500 h pair is 18.20 EUR/kW-a and 0.0612 EUR/kWh, not used). The engine does not choose the pair; the tariff states the applicable one.",
+  "arbeitspreis = 3,504,800 x 0.0291 = 101,989.6800 -> 101,989.68",
+  "leistungspreis = 98.52 x 1,200 = 118,224.00; billed once on the annual peak and spread over the months by hours / 8,760: February 98.52 x 1,200 x 672 / 8,760 = 9,069.2384, March x 743 / 8,760 = 10,027.4466, October x 745 / 8,760 = 10,054.4384",
+  "stromsteuer = 3,504,800 x 0.0205 = 71,848.40",
+  "konzessionsabgabe = 3,504,800 x 0.0011 = 3,855.2800 -> 3,855.28",
+  "messstellenbetrieb = 12 x 45.00 = 540.00",
+  "monthly arbeitspreis: February (400 x 672 + 600) x 0.0291 = 7,839.5400; March 400 x 743 x 0.0291 = 8,648.5200; July (400 x 744 + 200) x 0.0291 = 8,665.9800; October 400 x 745 x 0.0291 = 8,671.8000",
+  "total = 296,457.3600 -> 296,457.36",
+  "Documented non-support: §19 Abs. 2 StromNEV individual network charges (atypical use or >= 7,000 h and >= 10 GWh) are a regulator agreement per customer, not a tariff item; they are not modelled, and a tariff that needs them must name them in `unsupported_fields` (the bill then has no total). The §19 StromNEV surcharge on consumption (now the Aufschlag für besondere Netznutzung) is an ordinary per-kWh levy and could be one more tax_levy item."
+ ],
+ "timezone": "Europe/Berlin",
+ "tariff": {
+  "id": "h1_de_rlm",
+  "name": "H1 DE medium voltage RLM",
+  "jurisdiction": "DE",
+  "valid_from": "2030-01-01",
+  "items": [
+   {
+    "id": "arbeitspreis",
+    "kind": "energy",
+    "unit": "per_kwh",
+    "periods": [
+     {
+      "name": "all",
+      "rate": 0.0291
+     }
+    ],
+    "measured_on": "import"
+   },
+   {
+    "id": "leistungspreis",
+    "kind": "capacity",
+    "unit": "per_kw_year",
+    "periods": [
+     {
+      "name": "all",
+      "rate": 98.52
+     }
+    ],
+    "measured_on": "peak_import"
+   },
+   {
+    "id": "stromsteuer",
+    "kind": "tax_levy",
+    "unit": "per_kwh",
+    "periods": [
+     {
+      "name": "all",
+      "rate": 0.0205
+     }
+    ],
+    "measured_on": "import"
+   },
+   {
+    "id": "konzessionsabgabe",
+    "kind": "tax_levy",
+    "unit": "per_kwh",
+    "periods": [
+     {
+      "name": "all",
+      "rate": 0.0011
+     }
+    ],
+    "measured_on": "import"
+   },
+   {
+    "id": "messstellenbetrieb",
+    "kind": "fixed",
+    "unit": "per_month",
+    "periods": [
+     {
+      "name": "all",
+      "rate": 45.0
+     }
+    ]
+   }
+  ]
+ },
+ "dispatch_range": {
+  "start": "2030-01-01 00:00",
+  "end": "2030-12-31 23:45",
+  "freq": "15min",
+  "import_mw": 0.4,
+  "export_mw": 0.0,
+  "overrides": [
+   {
+    "start": "2030-02-05 08:00",
+    "end": "2030-02-05 09:00",
+    "import_mw": 1.0
+   },
+   {
+    "start": "2030-07-10 11:00",
+    "end": "2030-07-10 11:15",
+    "import_mw": 1.2
+   }
+  ]
+ },
+ "step_hours": 0.25,
+ "expected": {
+  "per_item": {
+   "arbeitspreis": 101989.68,
+   "leistungspreis": 118224.0,
+   "stromsteuer": 71848.4,
+   "konzessionsabgabe": 3855.28,
+   "messstellenbetrieb": 540.0
+  },
+  "monthly": {
+   "2030-02": {
+    "leistungspreis": 9069.24,
+    "arbeitspreis": 7839.54,
+    "messstellenbetrieb": 45.0
+   },
+   "2030-03": {
+    "leistungspreis": 10027.45,
+    "arbeitspreis": 8648.52
+   },
+   "2030-07": {
+    "arbeitspreis": 8665.98
+   },
+   "2030-10": {
+    "leistungspreis": 10054.44,
+    "arbeitspreis": 8671.8
+   }
+  },
+  "total": 296457.36
+ }
+}

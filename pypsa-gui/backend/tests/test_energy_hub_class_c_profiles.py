@@ -6,7 +6,7 @@ Design: stress.py — profiles are whole-scenario profile swaps (not parametric
 multipliers); occurrence_basis ``scenario:profiles``; real climate packs
 remain optional behind data availability.
 
-Synthetic packs live under tests/fixtures/eh_class_c/ and are also loadable
+Synthetic packs ship under backend/data/eh_class_c/ (P15) and are loadable
 via ``profile_pack`` for in-process demos.
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ from services.solver_service import SolverConfig
 WEIGHT = 3.0
 N = 2
 VOLL = 3000.0
-FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures" / "eh_class_c"
+FIXTURES = pathlib.Path(__file__).resolve().parents[1] / "data" / "eh_class_c"
 
 
 def _network_with_wind() -> pypsa.Network:

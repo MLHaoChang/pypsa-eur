@@ -9,7 +9,7 @@
 // could match stale nodes left by earlier tests. Dialog.test.tsx was the
 // first file to call `render()` more than once per file and is what
 // surfaced this.
-import { afterEach } from 'vitest'
+import { afterEach, beforeAll } from 'vitest'
 import { cleanup } from '@testing-library/react'
 
 afterEach(() => {
@@ -137,3 +137,29 @@ if (jsdomWindow && typeof jsdomWindow.localStorage?.clear === 'function') {
     writable: true,
   })
 }
+
+// Guided-mode spec §3.2 / §9. `uiStore` decides the initial Guided/Expert mode
+// ONCE, at import, from what is already in localStorage — and jsdom starts
+// every test file with an empty store, which is exactly a first-time user, who
+// gets Guided. Every suite written before Guided mode existed describes the
+// Expert workbench, so the environment models an existing user who chose
+// Expert: this runs before the test file's own imports (setup files are
+// evaluated first), so the store module sees it when it loads. The keys are
+// cleared by the afterEach above like any other storage; the in-memory store
+// keeps `expert`. Suites that test the mode itself (uiStore.uiMode.test.ts,
+// uiStore.firstRunOrder.test.ts) clear storage and re-import a fresh store,
+// and component suites that need Guided set `uiMode` on the store directly.
+try {
+  localStorage.setItem('network-diagram:ui-mode', 'expert')
+  localStorage.setItem('network-diagram:ui-mode-explicit', '1')
+} catch { /* a storage-less environment has no store to seed */ }
+// The seed has done its job once the test file's imports (collected before
+// any hook runs) have loaded the store. Drop it before the first test so that
+// storage, which uiStore also re-reads at runtime (noteNewProjectCreated's
+// multi-tab check), starts empty like every later test after afterEach.
+beforeAll(() => {
+  try {
+    localStorage.removeItem('network-diagram:ui-mode')
+    localStorage.removeItem('network-diagram:ui-mode-explicit')
+  } catch { /* noop */ }
+})

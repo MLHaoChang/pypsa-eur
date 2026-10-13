@@ -21,7 +21,7 @@ from fastapi import HTTPException
 
 from tests.conftest import build_network
 from routers.projects import _safe_unpickle_results
-from services.upload_guard import read_capped, safe_extract
+from services.upload_guard import UploadBudget, read_capped, safe_extract
 
 
 # ── Restricted unpickler ──────────────────────────────────────────────────────
@@ -177,3 +177,34 @@ def test_read_capped_rejects_oversize():
 def test_read_capped_under_limit_returns_bytes():
     out = asyncio.run(read_capped(_FakeUpload(b"y" * 50), max_bytes=100))
     assert out == b"y" * 50
+
+
+# ── Per-request budget ───────────────────────────────────────────────────────
+# `read_capped` bounds ONE file. An endpoint taking several (the PowerFactory
+# read-back's bus + branch CSVs, a client's dispatch + loads) would otherwise
+# buffer N x the cap in one request. `UploadBudget` is one cap for all of them.
+
+def test_budget_refuses_files_that_fit_alone_but_not_together():
+    budget = UploadBudget(max_bytes=100)
+    assert asyncio.run(budget.read(_FakeUpload(b"a" * 60))) == b"a" * 60
+    with pytest.raises(HTTPException) as ei:
+        asyncio.run(budget.read(_FakeUpload(b"b" * 60)))
+    assert ei.value.status_code == 413
+    assert "together" in ei.value.detail
+
+
+def test_budget_passes_files_that_fit_together():
+    budget = UploadBudget(max_bytes=100)
+    a = asyncio.run(budget.read(_FakeUpload(b"a" * 50)))
+    b = asyncio.run(budget.read(_FakeUpload(b"b" * 50)))
+    assert (a, b) == (b"a" * 50, b"b" * 50)
+
+
+def test_budget_default_follows_the_process_cap(monkeypatch):
+    # Resolved when the budget is made, not when the module was imported, so
+    # the env override and a test's monkeypatch both reach it.
+    import services.upload_guard as ug
+
+    monkeypatch.setattr(ug, "_DEFAULT_MAX_UPLOAD_BYTES", 10)
+    with pytest.raises(HTTPException):
+        asyncio.run(UploadBudget().read(_FakeUpload(b"x" * 11)))

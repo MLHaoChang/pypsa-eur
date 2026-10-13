@@ -93,6 +93,9 @@ CLAUDE.md
 !.claude/hooks/
 .claude/hooks/*
 !.claude/hooks/session-start.sh
+# ...and the vendored agent skills (see .claude/skills/MATTPOCOCK-SKILLS.md)
+!.claude/skills/
+!.claude/CLAUDE.md
 .github/copilot-instructions.md
 CLAUDE.local.md
 # generated DAGs for docs
@@ -127,3 +130,9 @@ doc/img/intro-workflow.svg
 # whether someone else is mid-edit. One permanent line of noise in a signal
 # everyone is checking.
 .DS_Store
+
+# Session tooling installs a root node_modules (SessionStart hook); never part of the repo.
+node_modules/
+pypsa-gui/backend/pilot-evaluation.json
+pypsa-gui/backend/pilot-evaluation.json.log
+pypsa-gui/backend/pilot-evaluation.json.tmp

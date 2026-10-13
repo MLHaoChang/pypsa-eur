@@ -13,6 +13,7 @@
 // red while the data tests stay green, which is the exact regression.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
@@ -211,5 +212,18 @@ describe('AdequacyTab ordering', () => {
     for (let i = 1; i < order.length; i++) {
       expect(order[i]).toBeGreaterThan(order[i - 1])
     }
+  })
+})
+
+describe('AdequacyTab — Reports button (WP7b)', () => {
+  it('navigates to the Reports panel with generation pre-armed', async () => {
+    useUIStore.setState({ activeSlidePanel: null, reportGenerateRequest: false })
+    const user = userEvent.setup()
+    renderTab()
+    await user.click(await screen.findByTestId('adequacy-open-reports'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('reports')
+    expect(useUIStore.getState().reportGenerateRequest).toBe(true)
+    useUIStore.getState().clearReportGenerateRequest()
+    expect(useUIStore.getState().reportGenerateRequest).toBe(false)
   })
 })

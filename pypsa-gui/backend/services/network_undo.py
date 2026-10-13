@@ -86,6 +86,10 @@ def get_undo_info():
         "memory_bytes": undo_service.memory_bytes(),
         "max_bytes": undo_service.MAX_BYTES,
         "max_steps": undo_service.MAX_STEPS,
+        # P33b: the per-project edit counter. Polled here (every 3 s by three
+        # always-mounted readers) so the Guided hub surfaces learn of an edit
+        # without a poll of their own.
+        "network_revision": dirty_state.revision(),
     }
 
 
@@ -126,11 +130,35 @@ def apply_undo():
             # cross-org collision Step 0a removed.
             prev_binding = PyPSAService.get_binding()
             prev_loaded = prev_binding["name"]
-            PyPSAService.reset_network()
+            # ★ P33b 10a: undo is an in-place edit of the same project, so a
+            # FINISHED study record survives it. `reset_network()` clears the
+            # finished keys on the fresh copy (the right rule for a project
+            # switch); capture them here and put them back on the re-keyed
+            # ctx below. A running record is carried by reference already.
+            from services.project_context import STUDY_KEYS, record_is_running
+            prev_state = PyPSAService.get_solver_state()
+            finished = {
+                k: prev_state.get(k) for k in STUDY_KEYS
+                if prev_state.get(k) is not None
+                and not record_is_running(prev_state.get(k))
+            }
+            PyPSAService.reset_network(carry="same")  # same project, in place
             n = PyPSAService.get_network()
             with PyPSAService.get_netcdf_io_lock():
                 PyPSAService.import_network_from_netcdf(n, tmp)
             PyPSAService.set_binding(prev_binding)
+            # ★ P33b step 0 (D-5): under session routing `reset_network()`
+            # published the re-imported ctx into the session's SCRATCH slot
+            # (`_publish_active` routes an unbound ctx there) and
+            # `set_binding` stamps identity without re-keying — so the
+            # project's `org:uuid` slot kept the PRE-undo ctx and the next
+            # request read the edit back. Move the ctx to the slot its
+            # identity implies, inside the lock. An unbound draft has no key
+            # and stays in scratch (`rekey_context` is a no-op).
+            PyPSAService.rekey_context(PyPSAService.get_active_context())
+            if finished:
+                with PyPSAService.get_solver_state_lock():
+                    PyPSAService.get_solver_state().update(finished)
             if prev_loaded:
                 try:
                     n.name = prev_loaded

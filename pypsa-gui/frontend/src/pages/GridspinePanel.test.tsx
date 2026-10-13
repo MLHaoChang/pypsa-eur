@@ -7,11 +7,12 @@
 // no open project, and a capacity-expansion project's 409 — render as guidance
 // rather than as an error toast per poll.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, cleanup, waitFor, within } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { Ledger, RankedSnapshot, StageStatus, StudyConfig } from '../api/gridspine'
+import type { CapacityRow, CapacityTable, ConnectionRow, Ledger, RankedSnapshot, StageStatus, StudyConfig } from '../api/gridspine'
 import GridspinePanel from './GridspinePanel'
+import toast from 'react-hot-toast'
 
 const store = vi.hoisted(() => ({ currentProject: 'Study A' as string | null }))
 
@@ -38,8 +39,13 @@ const api = vi.hoisted(() => ({
   config: vi.fn(),
   updateConfig: vi.fn(),
   uploadReadback: vi.fn(),
+  uploadExternalDispatch: vi.fn(),
   readback: vi.fn(),
   figure: vi.fn(),
+  capacity: vi.fn(),
+  computeCapacity: vi.fn(),
+  connection: vi.fn(),
+  assessConnection: vi.fn(),
 }))
 const projectsList = vi.hoisted(() => vi.fn())
 vi.mock('../api/projects', async () => {
@@ -82,6 +88,27 @@ const config: StudyConfig = {
   from_network: null, from_project: null,
 }
 
+const capRow = (over: Partial<CapacityRow>): CapacityRow => ({
+  bus: 'BUS_16', hour: 19, kind: 'load', capacity_mw: null, dc_estimate_mw: 455.2,
+  binding_kind: 'thermal_n1', binding_element: 'BUS_16-BUS_17-1', binding_contingency: 'BUS_16-BUS_19-1',
+  binding_preexisting: false, method: 'dc', ...over,
+})
+
+const capacityTable = (rows?: CapacityRow[]): CapacityTable => {
+  const all = rows ?? [
+    capRow({}),
+    capRow({ bus: 'BUS_03', dc_estimate_mw: 12.5, binding_kind: 'thermal_intact',
+             binding_element: 'BUS_02-BUS_03-1', binding_contingency: null }),
+    capRow({ bus: 'BUS_16', kind: 'generation', dc_estimate_mw: 2000, binding_kind: 'none_up_to_cap',
+             binding_element: null, binding_contingency: null }),
+    capRow({ bus: 'BUS_03', kind: 'generation', dc_estimate_mw: 906.5 }),
+    capRow({ bus: 'BUS_16', hour: 7, dc_estimate_mw: 300 }),
+    capRow({ bus: 'BUS_03', hour: 7, dc_estimate_mw: 44 }),
+  ]
+  return { rows: all, hours: [...new Set(all.map(r => r.hour))].sort((a, b) => a - b),
+           buses: [...new Set(all.map(r => r.bus))].sort() }
+}
+
 const project = (name: string, extra: Record<string, unknown> = {}) => ({
   id: name, name, created_at: '2026-09-01T00:00:00Z', has_solver_config: false,
   bus_count: 39, snapshot_count: 24, objective: 1.0, parent_project: null, ...extra,
@@ -113,6 +140,8 @@ beforeEach(() => {
   api.status.mockResolvedValue(completed)
   api.snapshots.mockResolvedValue(snapshots)
   api.ledger.mockResolvedValue(ledger)
+  api.capacity.mockResolvedValue(capacityTable())
+  api.connection.mockResolvedValue({ rows: [] })
   api.run.mockResolvedValue({ id: 'job-1', project_id: 'Study A', kind: 'gridspine', status: 'queued', position: 1 })
 })
 afterEach(() => cleanup())
@@ -228,6 +257,215 @@ describe('GridspinePanel', () => {
     await waitFor(() => expect(screen.getByTestId('dispatch-source-current').textContent).toContain('the solved network of Solved 39'))
   })
 
+  it('takes the client\u2019s own tables as a fourth source, both files, and reports what was read', async () => {
+    api.uploadExternalDispatch.mockResolvedValue({
+      external: '/p/Study A/gridspine/uploads/external/market_dispatch.csv',
+      external_sha256: 'a'.repeat(64),
+      loads: '/p/Study A/gridspine/uploads/external/market_loads.csv',
+      loads_sha256: 'b'.repeat(64),
+      hours: 24, units: 10,
+    })
+    api.config.mockResolvedValueOnce(config).mockResolvedValue({
+      ...config,
+      from_external: '/p/Study A/gridspine/uploads/external/market_dispatch.csv',
+      from_external_loads: '/p/Study A/gridspine/uploads/external/market_loads.csv',
+      from_external_name: 'market_dispatch.csv',
+      from_external_loads_name: 'market_loads.csv',
+    })
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+
+    const apply = screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement
+    expect(apply.disabled).toBe(true)                    // no file chosen yet
+
+    const dispatch = new File(['unit_id,hour,p_mw,q_mvar,status\n'], 'market_dispatch.csv', { type: 'text/csv' })
+    const loads = new File(['bus,hour,p_mw,q_mvar\n'], 'market_loads.csv', { type: 'text/csv' })
+    await userEvent.upload(screen.getByLabelText(/dispatch table/i), dispatch)
+    // A CSV dispatch cannot carry the demand, so Apply waits for the second file
+    // rather than sending one the backend would refuse.
+    expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.upload(screen.getByLabelText(/demand table/i), loads)
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(api.uploadExternalDispatch).toHaveBeenCalledWith('Study A', dispatch, loads))
+    await waitFor(() => expect(screen.getByTestId('dispatch-source-current').textContent)
+      .toContain('market_dispatch.csv'))
+  })
+
+  it('lets one workbook stand for both tables, and sends no demand file for it', async () => {
+    // A whole summary, not {hours, units}: the mock is untyped, so a partial one
+    // let the success path render undefined fields with tsc none the wiser.
+    api.uploadExternalDispatch.mockResolvedValue({
+      external: '/p/Study A/gridspine/uploads/external/both.xlsx',
+      external_sha256: 'c'.repeat(64),
+      loads: '/p/Study A/gridspine/uploads/external/both.xlsx',
+      loads_sha256: 'c'.repeat(64),
+      hours: 24, units: 10,
+    })
+    api.config.mockResolvedValueOnce(config).mockResolvedValue({
+      ...config,
+      from_external: '/p/Study A/gridspine/uploads/external/both.xlsx',
+      from_external_name: 'both.xlsx',
+    })
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+    const book = new File(['PK'], 'both.xlsx', { type: 'application/vnd.ms-excel' })
+    await userEvent.upload(screen.getByLabelText(/dispatch table/i), book)
+    // An Excel dispatch MAY carry both sheets, so Apply is live with one file.
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(false))
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(api.uploadExternalDispatch).toHaveBeenCalledWith('Study A', book, null))
+    // What the engineer sees is the point: the source line now names their file.
+    await waitFor(() => expect(screen.getByTestId('dispatch-source-current').textContent)
+      .toContain('both.xlsx'))
+  })
+
+  it('forgets the files when the source mode changes, so Apply cannot send what the inputs no longer show', async () => {
+    // The file inputs are unmounted when the mode changes and remount EMPTY,
+    // while the React state survived: both inputs read "No file chosen", Apply
+    // was live, and one click re-uploaded the invisible pair.
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+    await userEvent.upload(screen.getByLabelText(/dispatch table/i),
+                           new File(['x'], 'march_dispatch.csv', { type: 'text/csv' }))
+    await userEvent.upload(screen.getByLabelText(/demand table/i),
+                           new File(['x'], 'march_loads.csv', { type: 'text/csv' }))
+    expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(false)
+
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'generate')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+
+    expect((screen.getByLabelText(/dispatch table/i) as HTMLInputElement).files).toHaveLength(0)
+    expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    expect(api.uploadExternalDispatch).not.toHaveBeenCalled()
+  })
+
+  it('lets the demand file be taken back off, so a workbook is not sent with a stale CSV', async () => {
+    // With a demand file attached, a workbook dispatch goes down the TWO-FILE
+    // path on the server and its sheet 0 is read as the dispatch — which may be
+    // the loads sheet, producing a refusal about columns the workbook has. The
+    // label said "optional", which reads as "ignored", and there was no way to
+    // un-choose it.
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+    await userEvent.upload(screen.getByLabelText(/dispatch table/i),
+                           new File(['x'], 'd.csv', { type: 'text/csv' }))
+    await userEvent.upload(screen.getByLabelText(/demand table/i),
+                           new File(['x'], 'l.csv', { type: 'text/csv' }))
+    await userEvent.click(screen.getByRole('button', { name: /clear the demand table/i }))
+    expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('clears a refusal once a different source has been applied', async () => {
+    api.uploadExternalDispatch.mockRejectedValue({
+      response: { status: 422, data: { detail: "external loads do not map to the detailed grid's demand buses: missing ['BUS_39'], unknown []" } },
+    })
+    api.setDispatchSource.mockResolvedValue({ ...config, from_dispatch: null, from_network: null })
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+    await userEvent.upload(screen.getByLabelText(/dispatch table/i), new File(['x'], 'd.xlsx'))
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    await screen.findByTestId('external-refusal')
+
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'generate')
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(api.setDispatchSource).toHaveBeenCalled())
+    expect(screen.queryByTestId('external-refusal')).toBeNull()
+  })
+
+  it('refuses a file type the server does not read, before uploading it', async () => {
+    // `accept` is advisory — drag-and-drop and "All files" in the OS dialog both
+    // ignore it. The server then RENAMES an unrecognised suffix to `dispatch.csv`
+    // and the producer reads it as text, so the engineer gets a refusal naming a
+    // filename they never used.
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+    // `fireEvent`, not `userEvent.upload`: user-event honours the `accept`
+    // attribute and drops the file without firing a change, which is precisely
+    // the browser behaviour this guard exists for the cases that DON'T — a drop,
+    // or "All files" in the OS dialog. The component must refuse it itself.
+    const input = screen.getByLabelText(/dispatch table/i) as HTMLInputElement
+    fireEvent.change(input, {
+      target: { files: [new File(['x'], 'dispatch.ods', { type: 'application/vnd.oasis.opendocument.spreadsheet' })] },
+    })
+    const shown = await screen.findByTestId('external-refusal')
+    expect(shown.textContent).toContain('.ods')
+    expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(api.uploadExternalDispatch).not.toHaveBeenCalled()
+  })
+
+  it('surfaces the producer\u2019s refusal inline, because that message is the actionable part', async () => {
+    // Inline rather than only a toast: the refusal names the units or columns
+    // that disagree, and an engineer reads it against their file. A toast that
+    // vanishes after three seconds is the wrong home for a list of ids.
+    api.uploadExternalDispatch.mockRejectedValue({
+      response: { status: 422, data: { detail: "external dispatch does not map to the detailed grid's units: missing [], unknown ['G99']" } },
+    })
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+    await userEvent.upload(screen.getByLabelText(/dispatch table/i), new File(['x'], 'd.xlsx'))
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    const shown = await screen.findByTestId('external-refusal')
+    expect(shown.textContent).toContain("unknown ['G99']")
+  })
+
+  it('says the upload is too large, not unreadable, when the pair is over the size cap', async () => {
+    // Found in the browser: two 33 MiB tables over the shared 64 MiB cap came
+    // back 413 and toasted "That dispatch could not be read" — which sends the
+    // engineer to look for a fault in files the server never read. The inline
+    // line already carried the server's own sentence; the toast now agrees.
+    const err = vi.spyOn(toast, 'error').mockImplementation(() => '')
+    api.uploadExternalDispatch.mockRejectedValue({
+      response: { status: 413, data: { detail: 'The files in this upload exceed the 64 MB limit together.' } },
+    })
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+    await userEvent.upload(screen.getByLabelText(/dispatch table/i), new File(['x'], 'd.xlsx'))
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    const shown = await screen.findByTestId('external-refusal')
+    expect(shown.textContent).toContain('exceed the 64 MB limit together')
+    expect(err).toHaveBeenCalledWith('Those files are too large to upload')
+    expect(err).not.toHaveBeenCalledWith('That dispatch could not be read')
+    err.mockRestore()
+  })
+
+  it('greys out the generation-only fields when the source brings its own hours', async () => {
+    // Found in the browser: a study fed 3 hours of the client's own tables
+    // showed "Hours 8760", "UC window 168" and "UC overlap 24" — editable, and
+    // describing nothing, since only a year GENERATED here uses them. An
+    // engineer reading "8760" beside a 3-hour file would reasonably believe the
+    // study covers a year.
+    api.config.mockResolvedValue({
+      ...config,
+      from_external: '/p/Study A/gridspine/uploads/external/d.csv',
+      from_external_name: 'd.csv',
+    })
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    for (const label of ['Hours', 'UC window (h)', 'UC overlap (h)']) {
+      expect((screen.getByLabelText(label) as HTMLInputElement).disabled).toBe(true)
+    }
+    // k, the prune threshold and screening still apply to any source.
+    expect((screen.getByLabelText('k (hours per criterion)') as HTMLInputElement).disabled).toBe(false)
+    expect(screen.getByTestId('config-source-hours').textContent).toMatch(/own hours/i)
+  })
+
+  it('keeps the generation fields editable when the year is generated here', async () => {
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    expect((screen.getByLabelText('Hours') as HTMLInputElement).disabled).toBe(false)
+    expect(screen.queryByTestId('config-source-hours')).toBeNull()
+  })
+
   it('shows the current source by project name when the config already names one', async () => {
     api.config.mockResolvedValue({ ...config, from_network: '/projects/Solved 39/network.nc', from_project: 'Solved 39' })
     renderPanel()
@@ -278,5 +516,174 @@ describe('GridspinePanel', () => {
     renderPanel()
     expect(screen.getByText(/open a planning → dynamics project/i)).toBeTruthy()
     expect(api.status).not.toHaveBeenCalled()
+  })
+})
+
+
+// ── Connection capacity (increment 9) ─────────────────────────────────────
+//
+// The study writes a DC estimate for every bus; the engineer asks for the AC
+// answer at the buses they care about. The section shows which figure is
+// which, and what binds, in words an engineer can act on.
+
+describe('connection capacity', () => {
+  it('lists every bus for the chosen hour and kind, DC figures marked as estimates', async () => {
+    renderPanel()
+    const section = await screen.findByTestId('capacity-section')
+    // earliest selected hour first; load by default
+    const row16 = await within(section).findByTestId('capacity-row-BUS_16')
+    expect(row16.textContent).toContain('≈ 300.0 MW')
+    await userEvent.selectOptions(await within(section).findByLabelText('Capacity hour'), '19')
+    expect(within(section).getByTestId('capacity-row-BUS_16').textContent).toContain('≈ 455.2 MW')
+    expect(within(section).getByTestId('capacity-row-BUS_16').textContent)
+      .toContain('overload of BUS_16-BUS_17-1 after losing BUS_16-BUS_19-1')
+    expect(within(section).getByTestId('capacity-row-BUS_03').textContent).toContain('overload of BUS_02-BUS_03-1')
+    expect(within(section).getByTestId('capacity-row-BUS_03').textContent).not.toContain('after losing')
+  })
+
+  it('switches to generation, and reports "nothing binds" as at least the cap, never infinity', async () => {
+    renderPanel()
+    const section = await screen.findByTestId('capacity-section')
+    await userEvent.selectOptions(await within(section).findByLabelText('Capacity hour'), '19')
+    await userEvent.selectOptions(within(section).getByLabelText('Connection kind'), 'generation')
+    const row = within(section).getByTestId('capacity-row-BUS_16')
+    expect(row.textContent).toContain('≥ 2000.0 MW')
+    expect(row.textContent).toContain('nothing binds up to the cap')
+  })
+
+  it('computes the AC answer for one bus and shows it as AC once the table refreshes', async () => {
+    api.computeCapacity.mockResolvedValue({ rows: [] })
+    renderPanel()
+    const section = await screen.findByTestId('capacity-section')
+    await userEvent.selectOptions(await within(section).findByLabelText('Capacity hour'), '19')
+    api.capacity.mockResolvedValue(capacityTable([
+      capRow({ method: 'ac', capacity_mw: 412.3 }),
+      capRow({ bus: 'BUS_03', dc_estimate_mw: 12.5 }),
+      capRow({ bus: 'BUS_16', hour: 7, method: 'ac', capacity_mw: 280.1, dc_estimate_mw: 300 }),
+    ]))
+    await userEvent.click(within(section).getByRole('button', { name: 'Compute AC capacity at BUS_16' }))
+    await waitFor(() => expect(api.computeCapacity).toHaveBeenCalledWith('Study A', 'BUS_16', 'load'))
+    const row = await within(section).findByText('412.3 MW')
+    expect(row.closest('[data-testid="capacity-row-BUS_16"]')?.textContent).toContain('AC')
+  })
+
+  it('marks a limit set by an existing overload so it is not read as headroom', async () => {
+    // Found in the browser run: 13.8 MW at BUS_16 was the worsening tolerance
+    // over an N-1 overload that existed before anything connected.
+    api.capacity.mockResolvedValue(capacityTable([
+      capRow({ method: 'ac', capacity_mw: 13.8, binding_element: 'BUS_02-BUS_03-1',
+               binding_contingency: 'BUS_25-BUS_26-1', binding_preexisting: true }),
+      capRow({ bus: 'BUS_03', dc_estimate_mw: 90.0 }),
+    ]))
+    renderPanel()
+    const section = await screen.findByTestId('capacity-section')
+    const row = await within(section).findByTestId('capacity-row-BUS_16')
+    expect(row.textContent).toContain('already overloaded before connection')
+    expect(within(section).getByTestId('capacity-row-BUS_03').textContent).not.toContain('already')
+  })
+
+  it('says why there is no table instead of failing silently', async () => {
+    api.capacity.mockRejectedValue({
+      response: { status: 404, data: { detail: 'this run has no capacity table; run the study with screening on' } },
+    })
+    renderPanel()
+    const section = await screen.findByTestId('capacity-section')
+    expect(await within(section).findByText(/run the study with screening on/)).toBeTruthy()
+  })
+
+  it('cannot start an AC search while a study for the project is queued or running', async () => {
+    queue.activeJob = { id: 'job-9' }
+    renderPanel()
+    const section = await screen.findByTestId('capacity-section')
+    const btn = await within(section).findByRole('button', { name: 'Compute AC capacity at BUS_16' })
+    expect((btn as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+
+// ── Connection-point assessment (increment 10) ────────────────────────────
+
+const connRow = (over: Partial<ConnectionRow>): ConnectionRow => ({
+  assessment_id: 'a1', hour: 7, bus: 'BUS_16', load_mw: 300, load_pf: 0.98, onsite_mw: 100,
+  onsite_converter: true, profile: 'eu_rfg_dcc_ce', check: 'load_trip', status: 'fail', value: 0.69,
+  unit: '%', limit: 3, detail: 'high voltage at BUS_19; high voltage at BUS_26',
+  clause: 'not set by RfG/DCC; IEC TR 61000-3-7 … 3 % used', source: 'assumed', ...over,
+})
+
+const assessed = (): ConnectionRow[] => [
+  connRow({ check: 'connection', status: 'pass', value: 0, unit: 'violations', limit: null,
+            detail: 'no new or worsened violation', clause: 'no new or worsened violation …', source: 'code' }),
+  connRow({ check: 'energisation', status: 'pass', value: -0.73, detail: 'voltage step -0.73 % at BUS_16' }),
+  connRow({}),
+  connRow({ check: 'q_lead', status: 'fail', value: 1.043, unit: 'pu', limit: 1.05,
+            detail: 'facility injecting 144.0 Mvar at BUS_16 (0.48 x 300.0 MW); high voltage at BUS_19',
+            clause: 'DCC Art. 15(1)(a): not wider than 48 percent …', source: 'code' }),
+  connRow({ check: 'scr_onsite', status: 'reported', value: 90, unit: '', limit: null,
+            detail: "Sk''min 9000 MVA / on-site converter 100 MVA: strong", source: 'assumed' }),
+  connRow({ hour: 19, check: 'load_trip', status: 'pass', value: 1.2, detail: 'voltage step +1.20 % at BUS_16' }),
+]
+
+describe('connection-point assessment', () => {
+  it('assesses a facility entered from a capacity row and shows each check with its clause', async () => {
+    api.assessConnection.mockResolvedValue({ assessment_id: 'a1', rows: assessed() })
+    renderPanel()
+    const cap = await screen.findByTestId('capacity-section')
+    await userEvent.click(await within(cap).findByRole('button', { name: 'Assess a facility at BUS_16' }))
+    const section = await screen.findByTestId('connection-section')
+    expect((within(section).getByLabelText('Facility bus') as HTMLInputElement).value).toBe('BUS_16')
+    await userEvent.clear(within(section).getByLabelText('Load (MW)'))
+    await userEvent.type(within(section).getByLabelText('Load (MW)'), '300')
+    await userEvent.clear(within(section).getByLabelText('On-site unit (MW)'))
+    await userEvent.type(within(section).getByLabelText('On-site unit (MW)'), '100')
+    api.connection.mockResolvedValue({ rows: assessed() })
+    await userEvent.click(within(section).getByRole('button', { name: 'Assess' }))
+    await waitFor(() => expect(api.assessConnection).toHaveBeenCalledWith('Study A', {
+      bus: 'BUS_16', load_mw: 300, load_pf: 0.98, onsite_mw: 100, onsite_converter: true,
+    }))
+    const trip = await within(section).findByTestId('connection-check-load_trip')
+    expect(trip.textContent).toContain('Load trip (on-site unit stays)')
+    expect(trip.textContent).toContain('fail')
+    expect(trip.textContent).toContain('+0.69 %')
+    expect(trip.textContent).toContain('high voltage at BUS_19')
+    expect(trip.textContent).toContain('assumed')
+    const q = within(section).getByTestId('connection-check-q_lead')
+    expect(q.textContent).toContain('1.043 pu')
+    expect(q.textContent).toContain('≤ 1.05 pu')
+    expect(q.textContent).toContain('DCC Art. 15(1)(a)')
+    expect(within(section).getByTestId('connection-check-scr_onsite').textContent).toContain('reported')
+  })
+
+  it('switches hours within an assessment', async () => {
+    api.connection.mockResolvedValue({ rows: assessed() })
+    renderPanel()
+    const section = await screen.findByTestId('connection-section')
+    await userEvent.selectOptions(await within(section).findByLabelText('Assessment hour'), '19')
+    expect((await within(section).findByTestId('connection-check-load_trip')).textContent).toContain('+1.20 %')
+  })
+
+  it('says it is a screen, not a certificate', async () => {
+    renderPanel()
+    const section = await screen.findByTestId('connection-section')
+    expect(section.textContent).toContain('not a compliance certificate')
+  })
+
+  it('cannot assess while a study for the project is queued or running', async () => {
+    queue.activeJob = { id: 'job-9' }
+    renderPanel()
+    const section = await screen.findByTestId('connection-section')
+    // A complete facility, so only the lock can be what disables it.
+    await userEvent.type(within(section).getByLabelText('Facility bus'), 'BUS_16')
+    await userEvent.type(within(section).getByLabelText('Load (MW)'), '50')
+    expect((within(section).getByRole('button', { name: 'Assess' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('shows the reason when an assessment is refused', async () => {
+    api.assessConnection.mockRejectedValue({ response: { status: 422, data: { detail: "unknown bus 'BUS_99'" } } })
+    renderPanel()
+    const section = await screen.findByTestId('connection-section')
+    await userEvent.type(within(section).getByLabelText('Facility bus'), 'BUS_99')
+    await userEvent.type(within(section).getByLabelText('Load (MW)'), '50')
+    await userEvent.click(within(section).getByRole('button', { name: 'Assess' }))
+    expect(await within(section).findByText(/unknown bus 'BUS_99'/)).toBeTruthy()
   })
 })

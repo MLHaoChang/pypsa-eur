@@ -44,14 +44,11 @@ _PLACEHOLDER_STORAGE_MW = 40.0
 
 # Positive conversion identity only. Never treat bare AC/electricity as
 # conversion — those match grid-import Links on weak_flexible packs.
-_CONVERSION_ROLES = (
-    "eh_conversion",
-    "conversion",
-    "electrolyser",
-    "fuel_cell",
-)
+from models.energy_hub import EH_CONVERSION_ROLES, EH_IMPORT_ROLES  # noqa: E402
+
+_CONVERSION_ROLES = EH_CONVERSION_ROLES
 _CONVERSION_CARRIERS = ("H2", "heat", "methanol", "ammonia")
-_IMPORT_ROLES = frozenset({"grid_import", "eh_import", "import"})
+_IMPORT_ROLES = frozenset(EH_IMPORT_ROLES)
 
 
 class RedundancyScenarioError(ValueError):
@@ -512,11 +509,14 @@ def compare_redundancy_scenarios(
     pack_hash: str | None = None,
     assumptions_hash: str | None = None,
     select: bool = True,
+    max_solves: int | None = None,
 ) -> dict[str, Any]:
     """Solve each scenario at a fixed ENS target; return comparison table.
 
     Certify method for P3a is **ENS**. Sub-solves use a private sink (N2).
     Pass ``pack_hash`` / ``assumptions_hash`` for staleness detection (N4).
+    ``max_solves`` is the caller's remaining LP budget (EH study ceiling):
+    the loop stops before exceeding it and flags ``budget_exhausted``.
     """
     from services.solver_service import SolverConfig, run_simulation
 
@@ -540,11 +540,15 @@ def compare_redundancy_scenarios(
     options: list[dict[str, Any]] = []
     solves_attempted = 0
     aborted = False
+    budget_exhausted = False
     effective_voll_used: float | None = None
     voll_was_defaulted = False
     for sid in scenarios:
         if stop_event.is_set():
             aborted = True
+            break
+        if max_solves is not None and solves_attempted >= max_solves:
+            budget_exhausted = True
             break
         _detach_solver_model(network)
         nn = network.copy()
@@ -640,11 +644,23 @@ def compare_redundancy_scenarios(
         "options": options,
         "solves_attempted": solves_attempted,
         "aborted": aborted,
+        "budget_exhausted": budget_exhausted,
         "comparable_solved": len(solved),
         "effective_voll": effective_voll_used,
         "voll_defaulted": voll_was_defaulted,
+        # P11 (plan R3): the pinned cadence says finalists are MC-certified,
+        # but the EH study certifies only the ENS plan. Disclosed here rather
+        # than by changing the pinned cadence value.
+        "finalists_mc_certified": False,
+        "finalists_mc_note": (
+            "redundancy options are compared and selected on ENS only; MC "
+            "LOLE certification covers the ENS plan, not each finalist"),
     }
-    if select and not aborted:
+    if select and budget_exhausted:
+        out["selection"] = None
+        out["selection_error"] = (
+            "budget_solves exhausted before every option was solved")
+    elif select and not aborted:
         try:
             out["selection"] = select_redundancy_option(out)
         except RedundancyScenarioError as exc:
@@ -662,6 +678,9 @@ def redundancy_section_status(table: dict[str, Any]) -> tuple[str, str | None]:
     """Map a comparison table to (section_status, note) — assessor D3 honesty."""
     if table.get("aborted"):
         return "not_established", "redundancy compare aborted mid-loop"
+    if table.get("budget_exhausted"):
+        return ("not_established",
+                "budget_solves exhausted mid-compare; options are partial")
     options = table.get("options") or []
     solved = [
         o for o in options

@@ -74,6 +74,72 @@ def _approx(a: float, b: float, rel: float = 1e-6, abs_eps: float = 1e-6) -> boo
     return abs(a - b) / max(abs(b), 1e-12) <= rel
 
 
+_IC_REPORT = {
+    "case_id": "qa", "reference_design_id": None, "assumptions_hash": "0123456789abcdef",
+    "completeness": {k: "not_established" for k in (
+        "design", "commercial", "dispatch_modes", "participants", "project",
+        "debt", "tax", "tax_equity", "uncertainty", "gates")},
+}
+_IC_BILLING = pd.DataFrame({"quantity": [1.0, 2.0], "amount": [0.1, 0.2]},
+                           index=pd.date_range("2025-01-01", periods=2, freq="15min"))
+_IC_TERMS = {"ic_peak_import": {"2025-01": 12.5}}
+
+
+def _assert_ic_result_state_round_trip() -> None:
+    st = sim_router._state
+    _step("IC: investment_case_report restored",
+          st.get("investment_case_report", {}).get("case_id") == "qa",
+          repr(st.get("investment_case_report"))[:120])
+    frames = st.get("billing_frames") or {}
+    ok = "energy_tou" in frames and frames["energy_tou"].equals(_IC_BILLING)
+    _step("IC: billing_frames restored (DataFrame through restricted unpickler)", ok)
+    _step("IC: last_commercial_terms restored",
+          st.get("last_commercial_terms") == _IC_TERMS, repr(st.get("last_commercial_terms")))
+
+
+def _library_ref():
+    """Put one series into the QA org's Library and return its ref."""
+    from services.library import series_store
+
+    idx = pd.date_range("2025-01-01", periods=4, freq="h", tz="UTC")
+    with qa_support.db_session() as db:
+        return series_store.put_series(
+            db, qa_support.org_id(), "qa_export_price",
+            pd.Series([40.0, 41.0, 42.0, 43.0], index=idx), {"source": "qa driver"})
+
+
+def _load(name: str) -> dict:
+    with qa_support.db_session() as db:
+        return projects_router.load_project(
+            name, db=db, user=qa_support.user(), session=qa_support.session_row(db))
+
+
+def _assert_library_pins(cfg_before: SolverConfig, first_load: dict) -> None:
+    import json
+
+    from db.models import LibraryItem
+    from services.library import bundle_pins
+
+    ref = cfg_before.commercial["export_price_ref"]
+    side = qa_support.project_dir(PROJECT_NAME) / bundle_pins.SIDECAR_NAME
+    pins = json.loads(side.read_text())["refs"] if side.exists() else None
+    _step("IC: library_refs.json pins the referenced version",
+          pins == [{"id": ref["id"], "version": ref["version"], "hash": ref["hash"]}], repr(pins))
+    _step("IC: intact Library reloads with no library issue",
+          first_load.get("library_issues") == [], repr(first_load.get("library_issues")))
+    with qa_support.db_session() as db:
+        db.query(LibraryItem).filter(LibraryItem.org_id == qa_support.org_id()).delete()
+        db.commit()
+    _wipe_in_memory()
+    second = _load(PROJECT_NAME)
+    reasons = [i.get("reason") for i in second.get("library_issues") or []]
+    _step("IC: a removed Library item reloads as a library_ref_stale 'missing' issue",
+          reasons == ["missing"], repr(second.get("library_issues")))
+    after = sim_router._state["solver_config"].commercial or {}
+    _step("IC: the config still names the pinned version (no silent substitution)",
+          after.get("export_price_ref") == ref, repr(after.get("export_price_ref")))
+
+
 def _build_pre_save_state() -> SolverConfig:
     """Populate the in-memory network + SolverConfig with every new extension."""
     n = pypsa.Network()
@@ -123,8 +189,16 @@ def _build_pre_save_state() -> SolverConfig:
         capex_budget_per_period={"2025": 1e9, "2030": 5e8},
         user_objective_scale=1e-3,
         presolve_enabled=True,
+        # Edge Investment Case (P1 WP1.1c): a Library ref in the commercial
+        # block must be pinned in library_refs.json and re-checked on load.
+        commercial={"export_price_ref": _library_ref().model_dump()},
     )
     sim_router._state["solver_config"] = cfg
+    # Edge Investment Case (P0 WP0.5): the three result-state keys must ride
+    # results_state.pkl through the restricted unpickler.
+    sim_router._state["investment_case_report"] = _IC_REPORT
+    sim_router._state["billing_frames"] = {"energy_tou": _IC_BILLING}
+    sim_router._state["last_commercial_terms"] = _IC_TERMS
     return cfg
 
 
@@ -245,6 +319,8 @@ def test_round_trip() -> None:
     cfg_after = sim_router._state["solver_config"]
     _assert_cfg_round_trip(cfg_before, cfg_after)
     _assert_network_round_trip()
+    _assert_ic_result_state_round_trip()
+    _assert_library_pins(cfg_before, summary)
 
 
 def _cleanup() -> None:

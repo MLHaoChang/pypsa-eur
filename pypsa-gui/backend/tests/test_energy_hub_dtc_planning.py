@@ -171,11 +171,13 @@ def test_default_pipeline_skips_dtc_planning_unless_pack_flag():
 
 
 def test_claim_wipe_includes_eh_dtc_planning():
-    from pathlib import Path
-    text = Path("routers/simulation.py").read_text()
-    idx = text.find('status="running"')
-    chunk = text[idx:idx + 1200]
-    assert "eh_dtc_planning=None" in chunk
+    """Property, not source text — see the sibling in
+    `tests/test_energy_hub_redundancy.py` for why the text form could not see
+    that the two claims had drifted."""
+    from services.project_context import cleared_result_state
+
+    wipe = cleared_result_state()
+    assert "eh_dtc_planning" in wipe and wipe["eh_dtc_planning"] is None
 
 
 def test_run_dtc_planning_refuses_missing_ens_cap():
@@ -198,3 +200,21 @@ def test_run_dtc_planning_refuses_missing_ens_cap():
             dtc=dtc,
         )
 
+
+
+def test_planning_note_names_each_contingency_condition():
+    """P20 finding: 'no DtC planning contingency solved' gave no reason. An
+    infeasible islanded plan must say which contingency and what to change."""
+    table = {"contingencies": [
+        {"contingency": "grid_import", "status": "warning",
+         "condition": "infeasible"},
+        {"contingency": "tie_b", "status": "error", "condition": "boom"}]}
+    status, note = D.dtc_planning_section_status(table)
+    assert status == "not_established"
+    assert "grid_import: infeasible" in note and "tie_b: boom" in note
+    assert "p_nom_max" in note and "ENS target" in note
+    stress = {"contingencies": [
+        {"contingency": "grid_import", "status": "warning",
+         "condition": "infeasible"}]}
+    status, note = D.dtc_section_status(stress)
+    assert "grid_import: infeasible" in note

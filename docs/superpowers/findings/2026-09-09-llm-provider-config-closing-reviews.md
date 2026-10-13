@@ -1,5 +1,8 @@
 # The two closing reviews the LLM provider config plan never got
 
+**Status: CLOSED.** All three findings were fixed in the same commit as this record
+(see Verdict below). Added 2026-09-12 by a triage pass — this file had no status line.
+
 **Ran:** 2026-09-09, against `claude/llm-provider-config-handover-m6adr7`.
 **Why:** the handover
 (`docs/superpowers/handovers/2026-09-01-llm-provider-config-handover.md`)

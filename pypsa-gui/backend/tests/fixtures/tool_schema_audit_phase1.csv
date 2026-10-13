@@ -57,6 +57,7 @@ list_projects,ProjectInfo,parent_project,parent_project,True
 list_projects,ProjectInfo,scenario_description,scenario_description,True
 list_projects,ProjectInfo,scenario_type,scenario_type,True
 list_projects,ProjectInfo,project_kind,project_kind,True
+list_projects,ProjectInfo,settings,settings,True
 list_scenarios,ProjectInfo,name,name,True
 list_scenarios,ProjectInfo,id,id,True
 list_scenarios,ProjectInfo,created_at,created_at,True
@@ -70,3 +71,16 @@ list_scenarios,ProjectInfo,parent_project,parent_project,True
 list_scenarios,ProjectInfo,scenario_description,scenario_description,True
 list_scenarios,ProjectInfo,scenario_type,scenario_type,True
 list_scenarios,ProjectInfo,project_kind,project_kind,True
+list_scenarios,ProjectInfo,settings,settings,True
+list_library_items,LibraryItemRef,kind,kind,True
+list_library_items,LibraryItemRef,id,id,True
+list_library_items,LibraryItemRef,version,version,True
+list_library_items,LibraryItemRef,hash,hash,True
+get_library_item,LibraryItemRef,kind,kind,True
+get_library_item,LibraryItemRef,id,id,True
+get_library_item,LibraryItemRef,version,version,True
+get_library_item,LibraryItemRef,hash,hash,True
+import_urdb_tariff,UrdbImportOut,ref,ref,True
+import_urdb_tariff,UrdbImportOut,notes,notes,True
+import_urdb_tariff,UrdbImportOut,refusals,refusals,True
+import_urdb_tariff,UrdbImportOut,unsupported_fields,unsupported_fields,True

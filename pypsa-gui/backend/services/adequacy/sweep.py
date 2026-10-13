@@ -33,12 +33,15 @@ requirement, satisfied by integrating rather than sampling).
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import logging
 import math
 import queue
 import threading
 from typing import Callable
+
+from services.adequacy.worksheet import zero_reason
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +62,114 @@ _CAPACITY_ATTRS = (
 )
 
 
-def freeze_capacities(n) -> Callable[[], None]:
+# Every column PyPSA's topology pass writes, on whichever component carries
+# it (PyPSA 1.1.2, checked against an optimize): `control` (Bus via
+# `find_bus_controls`, Generator via `find_slack_bus`; StorageUnit carries the
+# column too), `sub_network` (Bus and every passive branch — Line,
+# Transformer) and `generator` (Bus).
+_TOPOLOGY_COLS = ("control", "sub_network", "generator")
+
+
+def _topology_tables(n) -> dict:
+    """``{class: (static table, [topology columns it carries])}`` for every
+    component except ``SubNetwork`` itself — found through PyPSA's own
+    component registry, not a hard-coded list."""
+    out = {}
+    for c in n.components:
+        if c.name == "SubNetwork":
+            continue
+        df = c.static
+        cols = [col for col in _TOPOLOGY_COLS if col in df.columns]
+        if cols:
+            out[c.name] = (df, cols)
+    return out
+
+
+def _restore_topology(n, saved: dict, saved_index: list) -> bool:
+    """The write-back half of ``preserve_bus_topology``; True when every
+    saved table reads back equal."""
+    before = set(saved_index)
+    added = [s for s in n.sub_networks.index if s not in before]
+    if added:
+        n.remove("SubNetwork", added)
+    tables = _topology_tables(n)
+    same = True
+    for cls, old in saved.items():
+        df = tables.get(cls, (None, None))[0]
+        if df is None:
+            same = False
+            continue
+        cols = list(old.columns)
+        # Rows cannot change inside a study (mutations are undone), but align
+        # on the saved index so a surprise never becomes a crash.
+        idx = old.index.intersection(df.index)
+        df.loc[idx, cols] = old.loc[idx, cols]
+        same = same and df[cols].equals(old)
+    return same
+
+
+@contextlib.contextmanager
+def preserve_bus_topology(n, lock=None):
+    """
+    Put back what a solve's topology pass writes on the LIVE network (P22.9,
+    bug 3). PyPSA's optimize post-processing runs
+    ``determine_network_topology()`` when the network has no ``SubNetwork``,
+    and that writes ``buses.control`` (one Slack per sub-network),
+    ``buses.sub_network``, ``buses.generator``, ``generators.control`` (the
+    sub-network's slack generator becomes Slack, extra ones PV) and
+    ``sub_network`` on every passive branch (Line, Transformer), and adds
+    ``SubNetwork`` rows. A study that solves the user's own network in place
+    restored dispatch and capacities afterwards, never these — so after an
+    FMEA sweep every bus in the Buses table had changed.
+
+    On exit — every path, exceptions and the stop event included — every
+    ``_TOPOLOGY_COLS`` column on every component that carries one is written
+    back and every ``SubNetwork`` row that was not there before is removed. It
+    must enclose the study's CLOSING re-solve too: that solve is itself an
+    optimize and would re-apply the columns. A mismatch after the restore is
+    logged, never raised; the study's own answer stands.
+
+    ``lock`` (P27a, A1) is the runner's own lock, captured at request time —
+    never ``PyPSAService.get_lock()`` fetched here, on the worker. When given,
+    the whole write-back (every table and the ``SubNetwork`` removal) runs
+    inside ``with lock:`` so a foreground request that holds the lock cannot
+    interleave with it. ``None`` keeps the unlocked behaviour, for a caller
+    that works on a private copy (``dtc``).
+    """
+    try:
+        saved = {cls: df[cols].copy()
+                 for cls, (df, cols) in _topology_tables(n).items()}
+        saved_index = sorted(n.sub_networks.index)
+    except (AttributeError, TypeError):
+        # Not a PyPSA network (a test double with no component registry):
+        # there is no topology to protect, and the guard must never stop the
+        # study.
+        yield
+        return
+    try:
+        yield
+    finally:
+        try:
+            with (lock if lock is not None else contextlib.nullcontext()):
+                same = _restore_topology(n, saved, saved_index)
+            if not (same and sorted(n.sub_networks.index) == saved_index):
+                logger.warning(
+                    "preserve_bus_topology: the topology columns or the "
+                    "SubNetwork rows still differ after the restore")
+        except Exception:                                     # noqa: BLE001
+            logger.exception(
+                "preserve_bus_topology: restoring the topology columns "
+                "FAILED — the component tables may show solver-written "
+                "values")
+
+
+def freeze_capacities(n, lock=None) -> Callable[[], None]:
     """Pin every extendable capacity to its solved size by clamping
     ``*_nom_min = *_nom_max = size`` (``*_nom_opt`` where finite, else the
-    current ``*_nom``), KEEPING extendability on.
+    current ``*_nom``), KEEPING extendability on. NOTE: PyPSA holds
+    ``*_nom_opt = 0`` (finite) before any solve, so on an unsolved network
+    this pins at 0 — callers that may see one must set ``*_nom_opt`` first
+    (see ``dtc._plan_is_nameplate``).
 
     Why bounds rather than flipping ``*_nom_extendable`` off: preflight
     rightly rejects a fixed asset with zero capacity
@@ -73,7 +180,10 @@ def freeze_capacities(n) -> Callable[[], None]:
     most a micro-MW above the solved size — orders of magnitude below every
     tolerance in the sweep — and the (near-)constant capital term is the
     same in the base and in every contingency, cancelling out of every
-    ΔEUE. Returns an undo closure restoring both bound columns exactly."""
+    ΔEUE. Returns an undo closure restoring both bound columns exactly.
+
+    ``lock`` (P27a, A1): the runner's captured lock; when given, the undo
+    runs inside ``with lock:``. ``None`` (a private copy) stays unlocked."""
     undo_ops: list[Callable[[], None]] = []
     for attr, nom in _CAPACITY_ATTRS:
         df = getattr(n, attr, None)
@@ -112,9 +222,22 @@ def freeze_capacities(n) -> Callable[[], None]:
         df.loc[idx, min_col] = size
         df.loc[idx, max_col] = size + 1e-6
 
+    # Edge Investment Case: tell the commercial layer this is an OPERATIONAL
+    # solve, so a connection agreement pins the designed connection instead of
+    # re-sizing it per contingency (WP1.4 review round 2 #1). Set LAST, once
+    # the pins are in place, so a raise above can never leave it behind.
+    setattr(n, "_ic_operational", True)
+
+    def _clear_operational(n=n):
+        if hasattr(n, "_ic_operational"):
+            delattr(n, "_ic_operational")
+
+    undo_ops.append(_clear_operational)
+
     def undo_all() -> None:
-        for op in reversed(undo_ops):
-            op()
+        with (lock if lock is not None else contextlib.nullcontext()):
+            for op in reversed(undo_ops):
+                op()
 
     return undo_all
 
@@ -267,7 +390,8 @@ def _restore_base_guarded(network, lock, cfg, log_queue, final_state_update):
 
 def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
                           log_queue=None,
-                          final_state_update=None, stop_event=None) -> dict:
+                          final_state_update=None, stop_event=None,
+                          restore_base: bool = True) -> dict:
     """
     ``contingencies``: ``[{id, mutate(n) -> undo(), meta}, ...]``. Returns
     ``{"base": {eue_mwh, status}, "contingencies": {id: {delta_eue_mwh,
@@ -275,6 +399,10 @@ def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
     back optimal are reported with ``status`` — an infeasible contingency is
     a DISTINCT outcome (a starved transit bus has no slack, spec §6.3),
     never silently a zero.
+
+    ``restore_base=False`` skips the closing re-solve — ONLY for a caller
+    that passes a disposable private copy (Energy Hub study, plan P12 / Q4).
+    Every HTTP route keeps the default (pinned by a test).
     """
     if len(contingencies) > MAX_CONTINGENCIES:
         raise SweepBudgetError(
@@ -298,72 +426,88 @@ def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
         cfg, ens_cap_permyriad=None, ens_zone_cap_multiple=None,
         reserve_margin=None)
 
-    unfreeze = freeze_capacities(network)
-    results: dict = {"base": {}, "contingencies": {}, "aborted": False,
-                     "base_restored": False}
-    try:
-        base_sink: dict = {}
-        _solve_once(sweep_cfg, network, lock, log_queue, base_sink)
-        if base_sink.get("_status") not in ("ok", "optimal"):
-            raise RuntimeError(
-                f"base operational solve failed: {base_sink.get('_condition')}")
-        base_eue = _electrical_eue_mwh(base_sink.get("last_lost_load"), network)
-        results["base"] = {"eue_mwh": base_eue,
-                           "status": base_sink.get("_status")}
-        for c in contingencies:
-            # Phase 12e: checked BETWEEN contingencies and acted on with a
-            # `break`, never an exception — the closing re-solve below sits
-            # outside the `finally`, so an exception here would skip the
-            # restore and leave the network on the last contingency.
-            if stop_event is not None and stop_event.is_set():
-                results["aborted"] = True
-                break
-            undo = c["mutate"](network)
-            sink: dict = {}
-            # Tell the solver not to re-broadcast `_user_ts` over this
-            # mutation. Every contingency here works by rewriting the same
-            # `_t` tables that reapply restores, and the solve runs on the
-            # FOREGROUND network, so without this marker the uploaded
-            # profiles were reinstated before the LP was built: the
-            # contingency solved an unmutated network and reported a ΔEUE of
-            # zero. Set per-contingency and cleared in the same `finally` as
-            # the undo, so a mutation and its suppression can never outlive
-            # each other — and so the base and closing solves, which must see
-            # the real uploaded profiles, still get the reapply.
-            network._adequacy_transient_profiles = True
-            try:
-                _solve_once(sweep_cfg, network, lock, log_queue, sink)
-            finally:
+    # P22.9 bug 3: OUTERMOST, around the closing re-solve as well — that
+    # solve is an optimize too, so a restore inside the `unfreeze` finally
+    # would run before it and the columns would come straight back.
+    with preserve_bus_topology(network, lock):
+        unfreeze = freeze_capacities(network, lock)
+        results: dict = {"base": {}, "contingencies": {}, "aborted": False,
+                         "base_restored": False}
+        try:
+            base_sink: dict = {}
+            _solve_once(sweep_cfg, network, lock, log_queue, base_sink)
+            if base_sink.get("_status") not in ("ok", "optimal"):
+                raise RuntimeError(
+                    f"base operational solve failed: {base_sink.get('_condition')}")
+            base_eue = _electrical_eue_mwh(base_sink.get("last_lost_load"), network)
+            results["base"] = {"eue_mwh": base_eue,
+                               "status": base_sink.get("_status")}
+            # Edge Investment Case: the operational pin disclosed a design that was
+            # not solved with the current connection agreement — surface it
+            # (WP1.4 round 4 condition 2).
+            _conn_facts = ((base_sink.get("last_commercial_terms") or {})
+                           .get("connection") or {})
+            if _conn_facts.get("operational_design_mismatch"):
+                results["base"]["commercial_flags"] = ["operational_design_mismatch"]
+            for c in contingencies:
+                # Phase 12e: checked BETWEEN contingencies and acted on with a
+                # `break`, never an exception — the closing re-solve below sits
+                # outside the `finally`, so an exception here would skip the
+                # restore and leave the network on the last contingency.
+                if stop_event is not None and stop_event.is_set():
+                    results["aborted"] = True
+                    break
+                undo = c["mutate"](network)
+                sink: dict = {}
+                # Tell the solver not to re-broadcast `_user_ts` over this
+                # mutation. Every contingency here works by rewriting the same
+                # `_t` tables that reapply restores, and the solve runs on the
+                # FOREGROUND network, so without this marker the uploaded
+                # profiles were reinstated before the LP was built: the
+                # contingency solved an unmutated network and reported a ΔEUE of
+                # zero. Set per-contingency and cleared in the same `finally` as
+                # the undo, so a mutation and its suppression can never outlive
+                # each other — and so the base and closing solves, which must see
+                # the real uploaded profiles, still get the reapply.
+                network._adequacy_transient_profiles = True
                 try:
-                    del network._adequacy_transient_profiles
-                except AttributeError:
-                    pass
-                undo()
-            status = sink.get("_status")
-            eue = _electrical_eue_mwh(sink.get("last_lost_load"), network)
-            results["contingencies"][c["id"]] = {
-                "status": status,
-                "eue_mwh": eue if status in ("ok", "optimal") else None,
-                "delta_eue_mwh": (max(eue - base_eue, 0.0)
-                                  if status in ("ok", "optimal") else None),
-                "meta": c.get("meta", {}),
-            }
-    finally:
-        unfreeze()
-    # Closing UNFROZEN base re-solve with the user's ORIGINAL config: leaves
-    # dispatch (and, if the caller wires the real state sink, the foreground
-    # results) exactly as the user's own solve would.
-    #
-    # Phase 12e: GUARDED, like the frontier's `_restore_base` — which since
-    # the shipped-code review's finding 13 also returns `(ok, status)`, so the
-    # two studies now report their closing re-solve in the same shape.
-    # Unguarded, a
-    # restore that raises destroyed `results` entirely — including the partial
-    # rows an abort exists to keep — and surfaced as an opaque `failed`.
-    # `base_restored` records whether the re-solve RAN, and carries its solver
-    # status: `True` never meant "the plan is back", only "it did not raise".
-    results["base_restored"], results["base_restore_status"] = _restore_base_guarded(
-        network, lock, cfg, log_queue, final_state_update)
+                    _solve_once(sweep_cfg, network, lock, log_queue, sink)
+                finally:
+                    try:
+                        del network._adequacy_transient_profiles
+                    except AttributeError:
+                        pass
+                    undo()
+                status = sink.get("_status")
+                eue = _electrical_eue_mwh(sink.get("last_lost_load"), network)
+                results["contingencies"][c["id"]] = {
+                    "status": status,
+                    "eue_mwh": eue if status in ("ok", "optimal") else None,
+                    "delta_eue_mwh": (max(eue - base_eue, 0.0)
+                                      if status in ("ok", "optimal") else None),
+                    "meta": c.get("meta", {}),
+                }
+        finally:
+            unfreeze()
+        # Closing UNFROZEN base re-solve with the user's ORIGINAL config: leaves
+        # dispatch (and, if the caller wires the real state sink, the foreground
+        # results) exactly as the user's own solve would.
+        #
+        # Phase 12e: GUARDED, like the frontier's `_restore_base` — which since
+        # the shipped-code review's finding 13 also returns `(ok, status)`, so the
+        # two studies now report their closing re-solve in the same shape.
+        # Unguarded, a
+        # restore that raises destroyed `results` entirely — including the partial
+        # rows an abort exists to keep — and surfaced as an opaque `failed`.
+        # `base_restored` records whether the re-solve RAN, and carries its solver
+        # status: `True` never meant "the plan is back", only "it did not raise".
+        if restore_base:
+            results["base_restored"], results["base_restore_status"] = (
+                _restore_base_guarded(network, lock, cfg, log_queue,
+                                      final_state_update))
+        else:
+            results["base_restored"] = None
+            results["base_restore_status"] = "skipped_private_copy"
     return results
 
 
@@ -452,7 +596,8 @@ def class_b_contingencies(n) -> list[dict]:
 
 def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
                       final_state_update=None,
-                      stop_event=None) -> tuple[list[dict], dict]:
+                      stop_event=None,
+                      restore_base: bool = True) -> tuple[list[dict], dict]:
     """
     Class-B rows: sweep every eligible link outage and price it first-order
     (see the module docstring's severity semantics):
@@ -479,7 +624,8 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)
     swept = run_contingency_sweep(
         network, lock, cfg, contingencies, stop_event=stop_event,
-        log_queue=log_queue, final_state_update=final_state_update)
+        log_queue=log_queue, final_state_update=final_state_update,
+        restore_base=restore_base)
     rows: list[dict] = []
     for c in contingencies:
         # Phase 12e: an ABORTED sweep carries only the contingencies it got
@@ -528,6 +674,11 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
                 "in_metric_scope": in_scope,
                 "engine": "lp_proxy",
                 "fidelity": "deterministic_scenario",
+                # P29 (B3): why a €0 row is €0 — additive.
+                "zero_reason": zero_reason(
+                    severity_eur=severity, delta_eue_mwh=delta,
+                    occurrence_per_year=occ, in_metric_scope=in_scope,
+                    voll=voll),
             },
             "meta": meta,
         })

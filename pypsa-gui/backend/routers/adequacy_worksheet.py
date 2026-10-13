@@ -15,6 +15,15 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+import uuid
+from types import SimpleNamespace
+
+from fastapi import Depends
+from sqlalchemy.orm import Session as DBSession
+
+from db.models import User
+from db.session import get_db
+from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services.adequacy.asset_health import (
     AssetHealthValidationError,
@@ -23,7 +32,8 @@ from services.adequacy.asset_health import (
 )
 from services.adequacy.stress import (
     StressValidationError,
-    load_scenarios,
+    list_profile_packs,
+    load_scenarios_checked,
     save_scenarios,
 )
 from services.adequacy.worksheet import (
@@ -40,6 +50,33 @@ class WorksheetPut(BaseModel):
     overlays: dict[str, dict] = Field(default_factory=dict)
 
 
+def _lock_target(project: AuthorizedProject) -> SimpleNamespace | None:
+    """
+    Adapt an `AuthorizedProject` into the shape `_check_project_lock` needs.
+
+    Third copy of this adapter (`routers/uploads.py`, `routers/snapshots.py` have
+    the other two), kept local for the same reason they are: a sibling router
+    should not import a private helper from another. That there are now three is
+    a signal about `ProjectAccessDep`-only routers, tracked separately — not a
+    reason to hold up a cross-user write fix.
+    """
+    try:
+        return SimpleNamespace(id=uuid.UUID(project.uuid), name=project.name)
+    except (TypeError, ValueError):
+        # Not a real project uuid, so there is no row in the lock table to check
+        # and nothing to enforce. `require_project_access` always resolves a real
+        # DB project, whose id IS a uuid, so this can only be an in-process or
+        # unit-test caller constructing an AuthorizedProject by hand (three tests
+        # in tests/test_adequacy_worksheet.py and tests/test_adequacy_stress.py
+        # pass uuid="u-1" and call the handler directly with no db/user, which is
+        # how the first cut of this guard broke them with a ValueError).
+        #
+        # Same reasoning `routers/projects.put_layout` documents for a legacy
+        # flat-storage project with no DB row: no registry entry, no lock to
+        # speak of. NOT a bypass -- an attacker cannot choose this value.
+        return None
+
+
 @router.get("/{name}/worksheet")
 def get_worksheet(project: AuthorizedProject = ProjectAccessDep) -> dict:
     return load_worksheet(project.directory)
@@ -47,7 +84,25 @@ def get_worksheet(project: AuthorizedProject = ProjectAccessDep) -> dict:
 
 @router.put("/{name}/worksheet")
 def put_worksheet(body: WorksheetPut,
-                  project: AuthorizedProject = ProjectAccessDep) -> dict:
+                  project: AuthorizedProject = ProjectAccessDep,
+                  db: DBSession = Depends(get_db),
+                  user: User | None = Depends(optional_user)) -> dict:
+    # A live FOREIGN edit lock refuses this write. `ProjectAccessDep` answers
+    # "may this caller SEE this project", which is not "may they write it while
+    # someone else holds the edit lock" — and `save_worksheet` REPLACES the
+    # sidecar wholesale and bumps `version`, which the holder's client reads as
+    # last-write-wins, so a non-holder's write silently became the holder's
+    # authoritative copy. The file is also in `projects._BUNDLE_FILES`, so it
+    # propagated into later bundles and snapshots.
+    #
+    # `/api/projects/` is deliberately outside the middleware's gated prefixes
+    # because this family enforces in-handler; these two PUTs never got it.
+    # Check-only, not acquire: editing a sidecar is not claiming the project.
+    from routers.projects import _check_project_lock
+
+    _lock = _lock_target(project)
+    if _lock is not None:
+        _check_project_lock(db, _lock, user)
     try:
         return save_worksheet(project.directory,
                               manual_rows=body.manual_rows,
@@ -63,17 +118,55 @@ class StressScenariosPut(BaseModel):
 @router.get("/{name}/stress_scenarios")
 def get_stress_scenarios(project: AuthorizedProject = ProjectAccessDep) -> dict:
     """Class-C stress-scenario registry (adequacy Phase 4 Task 3) — same
-    sidecar pattern and authorization as the worksheet."""
-    return {"scenarios": load_scenarios(project.directory)}
+    sidecar pattern and authorization as the worksheet. ``error`` is set
+    when an existing file cannot be read (the list then reads empty)."""
+    scenarios, error = load_scenarios_checked(project.directory)
+    return {"scenarios": scenarios, "error": error}
 
 
 @router.put("/{name}/stress_scenarios")
 def put_stress_scenarios(body: StressScenariosPut,
-                         project: AuthorizedProject = ProjectAccessDep) -> dict:
+                         project: AuthorizedProject = ProjectAccessDep,
+                         db: DBSession = Depends(get_db),
+                         user: User | None = Depends(optional_user)) -> dict:
+    # Same reasoning as `put_worksheet` above: whole-document replace of a
+    # bundled sidecar, so a foreign lock must refuse it. Check-only.
+    from routers.projects import _check_project_lock
+
+    _lock = _lock_target(project)
+    if _lock is not None:
+        _check_project_lock(db, _lock, user)
     try:
         return {"scenarios": save_scenarios(project.directory, body.scenarios)}
     except StressValidationError as exc:
         raise HTTPException(422, str(exc))
+
+
+@router.get("/{name}/stress_profile_packs")
+def get_stress_profile_packs(project: AuthorizedProject = ProjectAccessDep) -> dict:
+    """The shipped synthetic profile packs a ``kind="profiles"`` scenario can
+    name as ``profile_pack`` (P15 editor picker). Global data; served under
+    the project with the registry it feeds, same authorization."""
+    return {"packs": list_profile_packs()}
+
+
+@router.get("/{name}/eh_template")
+def get_eh_template(project: AuthorizedProject = ProjectAccessDep):
+    """The Energy Hub template metadata a project was created from (P19):
+    recommended archetype, pack overrides, stages, DtC attribution and study
+    notes. 204 for a project not made from an EH template."""
+    import json
+
+    from fastapi import Response
+
+    path = project.directory / "eh_template.json"
+    if not path.is_file():
+        return Response(status_code=204)
+    try:
+        raw = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return Response(status_code=204)
+    return raw if isinstance(raw, dict) else Response(status_code=204)
 
 
 class AssetHealthPut(BaseModel):
@@ -98,7 +191,27 @@ def get_asset_health(project: AuthorizedProject = ProjectAccessDep) -> dict:
 
 @router.put("/{name}/asset_health")
 def put_asset_health(body: AssetHealthPut,
-                     project: AuthorizedProject = ProjectAccessDep) -> dict:
+                     project: AuthorizedProject = ProjectAccessDep,
+                     db: DBSession = Depends(get_db),
+                     user: User | None = Depends(optional_user)) -> dict:
+    # Same foreign-lock refusal its two siblings above carry, and missed by
+    # the sweep that added them — this handler did not even accept `db` /
+    # `user`, so it could not have checked. `save_asset_health` REPLACES the
+    # sidecar the same way `save_worksheet` does.
+    #
+    # `asset_health.json` is the outage-rate PROVENANCE ledger, and it is in
+    # `projects._BUNDLE_FILES` for the reason recorded there: without it
+    # `study_report._evidence_gaps` reports every asset-level rate as
+    # `unsourced`. So a non-holder's write does not merely lose the holder's
+    # entries — it travels into every later bundle and snapshot and changes
+    # what the study says about its own evidence.
+    #
+    # Check-only, not acquire: editing a sidecar is not claiming the project.
+    from routers.projects import _check_project_lock
+
+    _lock = _lock_target(project)
+    if _lock is not None:
+        _check_project_lock(db, _lock, user)
     try:
         return save_asset_health(project.directory, body.entries)
     except AssetHealthValidationError as exc:

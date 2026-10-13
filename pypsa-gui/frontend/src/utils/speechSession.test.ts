@@ -47,6 +47,13 @@ function handlers(): SpeechSessionHandlers & {
 }
 
 describe('SpeechSession', () => {
+  it.each(['de-DE', 'zh-CN', 'fr-FR'])('uses the selected browser language %s', language => {
+    const { MockRecognition, instances } = mockCtor()
+    const session = new SpeechSession(MockRecognition as unknown as new () => SpeechRecognition, handlers(), language)
+    session.start()
+    expect(instances[0].lang).toBe(language)
+    session.stop()
+  })
   it('start configures en-US continuous recognition and reports listening', () => {
     const { MockRecognition, instances } = mockCtor()
     const h = handlers()

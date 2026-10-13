@@ -43,7 +43,7 @@ from gridspine.static.contingency_set import (
     unit_contingencies,
 )
 from gridspine.static.loadflow import LFResult, apply_snapshot, run_lf
-from gridspine.templates.unit_params import load_unit_params, load_unit_templates
+from gridspine.templates.unit_params import UnitTemplates, load_unit_params, load_unit_templates
 
 HOUR = 0
 RES_CF = 0.3
@@ -228,9 +228,30 @@ def test_readme_refuses_an_input_that_dropped_the_slack_exclusion(tmp_path):
         write_ledger_readme(entries, load_unit_templates(), _measurements(), tmp_path / "l.md")
 
 
-def test_readme_lists_the_dyr_omission_of_inverters(tmp_path):
+def test_readme_states_the_converter_models_and_what_they_leave_out(tmp_path):
+    # Increment 8: every shipped inverter carries REGCA1 + REECA1, so the
+    # ledger names the model pair and its assumptions, lists no inverter as
+    # missing a record, and still says what is NOT modelled.
     text = write_ledger_readme(_entries(), load_unit_templates(), _measurements(), tmp_path / "l.md")
-    assert "no .dyr record" in text and "W_BUS_33" in text
+    section = text.split("## Converter dynamics", 1)[1].split("\n## ", 1)[0]
+    assert "REGCA1" in section and "REECA1" in section
+    assert "Type 4" in section and "assumed" in section
+    for e in RES_LEDGER:
+        assert e["name"] in section
+    omissions = text.split("## Omissions", 1)[1]
+    assert "no .dyr record" in omissions and "Units affected: none." in omissions
+    assert "REPCA1" in omissions
+
+
+def test_readme_names_an_inverter_that_has_no_converter_record(tmp_path):
+    t = load_unit_templates()
+    no_group = t.params["param"].str.startswith(("regc_", "reec_")) & (t.params["unit_id"] == "S_BUS_36")
+    t = UnitTemplates(units=t.units, params=t.params[~no_group].reset_index(drop=True))
+    text = write_ledger_readme(_entries(), t, _measurements(), tmp_path / "l.md")
+    omissions = text.split("## Omissions", 1)[1]
+    assert "Units affected: S_BUS_36." in omissions
+    section = text.split("## Converter dynamics", 1)[1].split("\n## ", 1)[0]
+    assert "S_BUS_36" not in section
 
 
 # --------------------------------------------------------------------------
@@ -250,8 +271,7 @@ def test_bundle_manifest_lists_real_files_and_the_hour(bundle):
     for name in m["files"]:
         assert (bundle / name).exists(), name
     assert set(BUNDLE_FILES) <= set(m["files"])
-    assert m["dyr_units_written"] == 10 and sorted(m["dyr_units_omitted"]) == sorted(
-        e["name"] for e in RES_LEDGER)
+    assert m["dyr_units_written"] == 10 + len(RES_LEDGER) and m["dyr_units_omitted"] == []
 
 
 def test_bundle_raw_and_dyr_agree_on_bus_numbers(bundle):
@@ -263,7 +283,10 @@ def test_bundle_raw_and_dyr_agree_on_bus_numbers(bundle):
     stop = next(i for i, ln in enumerate(lines) if "END OF GENERATOR DATA" in ln)
     for ln in lines[start:stop]:
         raw_buses.add(int(ln.split(",")[0]))
-    dyr_buses = {int(ln.split()[0]) for ln in dyr.splitlines() if ln.strip()}
+    # Record headers only: a converter record wraps, and its continuation
+    # lines carry CONs, not a bus number. Every inverter sits on a bus that
+    # also carries a synchronous machine, so the bus set stays 10.
+    dyr_buses = {int(ln.split()[0]) for ln in dyr.splitlines() if "'" in ln}
     assert dyr_buses <= raw_buses and len(dyr_buses) == 10
 
 

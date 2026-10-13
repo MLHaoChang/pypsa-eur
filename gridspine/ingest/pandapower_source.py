@@ -42,6 +42,12 @@ def load_case39_res():
     sgen is the right component: these are PQ injections with no voltage
     setpoint and no slack duty, unlike `gen` (PV) or `ext_grid` (slack). Adding
     them as `gen` would hand each site voltage control it does not have.
+
+    Each site's rating is written as ``sn_mva`` (installed MW read as MVA — the
+    ledgered assumption the RAW writer and the unit templates already make).
+    It cannot be left to ``p_mw``: applying a snapshot overwrites ``p_mw`` with
+    the hour's OUTPUT, and the RAW writer's ``p_mw`` fallback would then export
+    an MBASE that follows the weather.
     """
     net = load_case39()
     bus_idx = {name: idx for idx, name in net.bus["name"].items()}
@@ -50,6 +56,7 @@ def load_case39_res():
             net,
             bus=bus_idx[entry["bus"]],
             p_mw=entry["p_mw"],
+            sn_mva=entry["p_mw"],
             q_mvar=0.0,
             name=entry["name"],
             in_service=True,

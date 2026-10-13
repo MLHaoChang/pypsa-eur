@@ -1,0 +1,17 @@
+{
+  "description": "50 MW hyperscale campus behind a weak 40 MW grid connection: critical IT with UPS battery, gas genset fleet, rooftop PV, genset/battery expansion candidates. Tagged and ready for an Energy Hub study.",
+  "dtc_attribution": "per_load",
+  "id": "eh_datacenter",
+  "name": "Data Center Energy Hub",
+  "pack_overrides": {
+    "import_p_nom_mw": 40.0
+  },
+  "provenance": "synthetic illustrative data (P19 template) \u2014 representative week, public-catalogue-range costs; replace with project data before any decision",
+  "recommended_archetype": "weak_flexible",
+  "stages": null,
+  "study_notes": [
+    "IT load is critical (it_bus); cooling and offices are not.",
+    "The grid import carries its own outage data, so the MC can credit it as a firm unit (decision 6).",
+    "Try the energy import budget (Pack settings \u2192 Import energy) to see a capped-import plan."
+  ]
+}

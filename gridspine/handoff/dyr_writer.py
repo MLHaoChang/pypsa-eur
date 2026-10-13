@@ -1,6 +1,7 @@
 """PSS/E .dyr writer — the handoff contract's dynamics half.
 
-One record per synchronous machine, model class from the template::
+One record per synchronous machine, model class from the template, and a
+REGCA1 + REECA1 pair per converter that has a group (below)::
 
     I 'GENROU' ID  T'do T''do T'qo T''qo H D Xd Xq X'd X'q X''d Xl S(1.0) S(1.2) /
     I 'GENSAL' ID  T'do T''do T''qo H D Xd Xq X'd X''d Xl S(1.0) S(1.2) /
@@ -23,24 +24,45 @@ H silently would produce a plausible, wrong swing curve, and the template is
 the ledger — if the base is wrong, the ledger is wrong, and that is the thing
 to fix.
 
-Inverters (``model: inverter``) get NO record: no IBR dynamic model
-(REGC/REEC) is in scope yet. They are omitted rather than handed a
-synchronous record, and they are absent from the returned mapping so the
-caller can ledger the omission. Legacy H-only units cannot be written either
-— a GENROU built from H alone would be invented.
+Inverters (``model: inverter``) get the WECC second-generation pair,
+``REGCA1`` (converter interface) then ``REECA1`` (electrical controls), when
+their template carries the REGCA1/REECA1 group (``ibr_params``)::
+
+    I 'REGCA1' ID  Lvplsw  Tg Rrpwr Brkpt ... Accel /                 1 ICON, 14 CONs
+    I 'REECA1' ID  BUSR PFFLAG VFLAG QFLAG PFLAG PQFLAG  Vdip ... Ip4 / 6 ICONs, 45 CONs
+
+ICONs precede CONs, both in ``unit_params``' tuple order, which IS the PSS/E
+library layout. BUSR is written 0 (regulate the unit's own terminal): it is a
+RAW bus number, and no template can author one. The two records are wrapped,
+five CONs to a line — REECA1 is 51 values — and are otherwise free-format as
+PSS/E reads them. Their base is the same MBASE rule as a synchronous
+machine's: ``raw_writer.sgen_mbase`` is the one function both files use.
+
+An inverter WITHOUT the group, or any inverter when no ``ibr`` frame is
+passed, is omitted rather than handed a synchronous record, and is absent
+from the returned mapping so the caller can ledger the omission. Legacy
+H-only units cannot be written either — a GENROU built from H alone would be
+invented.
 
 Nothing named reaches the file: records carry numbers and counter IDs only,
 so the canonical-charset guard has no work to do here.
 
-Record order follows the RAW's machine records (gen table, then ext_grid),
-not bus-number order, so a reader can walk the two files side by side.
+Record order follows the RAW's machine records (gen table, then ext_grid,
+then sgen), not bus-number order, so a reader can walk the two files side by
+side.
 """
 import math
 
 import pandas as pd
 
-from gridspine.handoff.raw_writer import SBASE_MVA, _bus_numbers, _IdCounter
+from gridspine.handoff.raw_writer import SBASE_MVA, _bus_numbers, _IdCounter, sgen_mbase
 from gridspine.schema.contracts import ContractError
+from gridspine.templates.unit_params import (
+    REECA1_CONS,
+    REECA1_ICONS,
+    REGCA1_CONS,
+    REGCA1_ICONS,
+)
 
 #: PSS/E v33 CON order per model, in template field names.
 DYR_CONS = {
@@ -73,17 +95,68 @@ def _machines(net):
     sgen = getattr(net, "sgen", None)
     if sgen is not None:
         for _, s in sgen.iterrows():
-            # Counted so the IDs stay the RAW's; never written (see docstring).
             num = nums[name_of.at[s["bus"]]]
-            out.append((s["name"], num, ids.next(num), float("nan"), False))
+            out.append((s["name"], num, ids.next(num), sgen_mbase(s), False))
     return out
 
 
-def write_dyr(net, unit_params: pd.DataFrame, path) -> dict:
-    """Write the .dyr; return unit_id -> bus_number for every machine written."""
+#: Converter record layout: (model, ICON fields, CON fields). REECA1's leading
+#: BUSR ICON is written by the writer, not read from the template.
+IBR_RECORDS = (
+    ("REGCA1", REGCA1_ICONS, REGCA1_CONS),
+    ("REECA1", REECA1_ICONS, REECA1_CONS),
+)
+_CONS_PER_LINE = 5
+
+
+def _ibr_lines(unit_id, num, mid, row):
+    lines = []
+    for model, icon_names, con_names in IBR_RECORDS:
+        values = {}
+        for name in icon_names + con_names:
+            v = row.get(name)
+            if v is None or pd.isna(v):
+                raise ContractError(
+                    f"unit {unit_id} ({model}): {name} is missing; a zero here is "
+                    "a plausible wrong converter"
+                )
+            values[name] = float(v)
+        icons = ([0] if model == "REECA1" else []) + [int(values[n]) for n in icon_names]
+        head = f"{num:>6d} '{model}' '{mid:<2s}'" + "".join(f"{i:6d}" for i in icons)
+        cons = [values[n] for n in con_names]
+        body = [
+            "  " + "".join(f"{c:10.5f}" for c in cons[k:k + _CONS_PER_LINE])
+            for k in range(0, len(cons), _CONS_PER_LINE)
+        ]
+        body[-1] += " /"
+        lines += [head] + body
+    return lines
+
+
+def _check_base(unit_id, template_base, mbase):
+    if not math.isclose(float(template_base), mbase):
+        raise ContractError(
+            f"unit {unit_id}: template mbase_mva {float(template_base)} does not match the "
+            f"RAW MBASE {mbase}; H, reactances and converter limits are on machine "
+            "base and are not rescaled"
+        )
+
+
+def write_dyr(net, unit_params: pd.DataFrame, path, ibr: pd.DataFrame = None) -> dict:
+    """Write the .dyr; return unit_id -> bus_number for every machine written.
+
+    ``ibr`` is ``unit_params.ibr_params(templates)``: the inverters that get
+    REGCA1 + REECA1 records. An inverter not in it is omitted (see module
+    docstring)."""
     lines, written = [], {}
     for unit_id, num, mid, mbase, synchronous in _machines(net):
         if not synchronous:
+            if ibr is None or unit_id not in ibr.index:
+                continue
+            row = ibr.loc[unit_id]
+            _check_base(unit_id, row["mbase_mva"], mbase)
+            lines += _ibr_lines(unit_id, num, mid, row)
+            written[unit_id] = num
             continue
         if unit_id not in unit_params.index:
             raise ContractError(f"machine {unit_id} has no unit-parameter template row")
@@ -98,13 +171,7 @@ def write_dyr(net, unit_params: pd.DataFrame, path) -> dict:
             raise ContractError(
                 f"unit {unit_id}: no .dyr layout for model {model!r}; known {sorted(DYR_CONS)}"
             )
-        template_base = float(row["mbase_mva"])
-        if not math.isclose(template_base, mbase):
-            raise ContractError(
-                f"unit {unit_id}: template mbase_mva {template_base} does not match the "
-                f"RAW MBASE {mbase}; H and reactances are on machine base and are "
-                "not rescaled"
-            )
+        _check_base(unit_id, row["mbase_mva"], mbase)
         cons = []
         for name in DYR_CONS[model]:
             v = row.get(name)

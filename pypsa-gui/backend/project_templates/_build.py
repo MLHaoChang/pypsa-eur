@@ -248,11 +248,22 @@ def build_ieee39() -> pypsa.Network | None:
 
 
 def main() -> None:
+    # Loaded by file path, as routers/projects.py does: this directory is
+    # shipped as data, not as a package.
+    import importlib.util  # noqa: PLC0415
+
+    spec = importlib.util.spec_from_file_location(
+        "_eh_templates", HERE / "eh_templates.py"
+    )
+    eh_templates = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(eh_templates)
+
     builders = (
         ("3bus", build_3bus),
         ("ieee14", build_ieee14),
         ("belgium", build_belgium),
         ("ieee39", build_ieee39),
+        *eh_templates.BUILDERS.items(),
     )
     for template_id, builder in builders:
         n = builder()
@@ -260,6 +271,10 @@ def main() -> None:
             continue
         _verify_feasible(n, template_id)
         _export(n, template_id)
+        if template_id in eh_templates.TEMPLATE_META:
+            # P19: metadata, stress registry and solver settings the
+            # from_template route copies into the new project.
+            eh_templates.write_sidecars(HERE / template_id, template_id)
     print("done.")
 
 

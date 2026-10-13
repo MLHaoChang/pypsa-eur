@@ -21,6 +21,7 @@ is on for the progress fixture (it is the only run that asserts the screening
 and handoff stages) and off for the abort runs, which never reach them.
 """
 import json
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -225,3 +226,35 @@ def test_the_resume_path_also_reports_progress_and_stops(tmp_path, full_run):
                   progress=rec, stop_event=stop)
     assert rec.stages()[:2] == ["ingest", "ranking"]     # no dispatch stage on a resume
     assert pd.read_csv(out / "dispatch.csv").equals(pd.read_csv(full_out / "dispatch.csv"))
+
+
+def test_a_previous_runs_error_artifact_does_not_survive_into_this_run(tmp_path, monkeypatch):
+    """`stage_status` reads `error_<stage>.json` as THE state of the run, and
+    nothing ever removed one. The run directory is per project and reused, so a
+    study that failed at its dispatch stage made the NEXT, successful run of the
+    same project report `status: failed`, `dispatch: failed` and
+    `handoff: pending` over a complete manifest and real bundles — a finished
+    study hidden behind a week-old error.
+
+    The artifacts describe a run, so clearing them is the first thing a run does.
+    Stubbing the first stage keeps this a statement about `run_study`'s order and
+    not another 15-minute study.
+    """
+    import gridspine.drivers.study as ds
+
+    out = tmp_path / "reused"
+    out.mkdir()
+    (out / "error_dispatch.json").write_text(
+        '{"stage": "dispatch", "element_ids": [], "cause": "ContractError(\'last week\')"}'
+    )
+    (out / "error_ranking.json").write_text('{"stage": "ranking", "cause": "x"}')
+    seen = {}
+
+    def fake_dispatch_year(outdir, **kw):
+        seen["errors"] = sorted(p.name for p in Path(outdir).glob("error_*.json"))
+        raise RuntimeError("far enough")
+
+    monkeypatch.setattr(ds, "dispatch_year", fake_dispatch_year)
+    with pytest.raises(RuntimeError, match="far enough"):
+        run_study(_config(out))
+    assert seen["errors"] == []

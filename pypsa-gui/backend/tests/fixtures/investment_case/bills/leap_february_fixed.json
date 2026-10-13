@@ -1,0 +1,20 @@
+{
+  "_comment": "Hand-rated. A 300.00 EUR/month fixed charge pro-rated by days covered: dispatch covers 1-15 Feb 2032 (leap year, 29 days): 300 x 15/29 = 155.1724... -> 155.17. Energy: 1 MW for every quarter-hour of 15 days = 15 x 24 MWh = 360 MWh = 360000 kWh x 0.02 = 7200.00. Total 7355.17.",
+  "timezone": "Europe/Berlin",
+  "tariff": {
+    "id": "fixed_test", "name": "fixed test", "jurisdiction": "DE", "valid_from": "2030-01-01",
+    "items": [
+      {"id": "meter", "kind": "fixed", "unit": "per_month", "periods": [{"name": "all", "rate": 300.0}],
+       "settlement": "15min", "measured_on": "import", "direction": "cost"},
+      {"id": "levy", "kind": "energy", "unit": "per_kwh", "periods": [{"name": "all", "rate": 0.02}],
+       "settlement": "15min", "measured_on": "import", "direction": "cost"}
+    ]
+  },
+  "dispatch_range": {"start": "2032-02-01 00:00", "end": "2032-02-15 23:45", "freq": "15min", "import_mw": 1.0, "export_mw": 0.0},
+  "step_hours": 0.25,
+  "expected": {
+    "per_item": {"meter": 155.17, "levy": 7200.00},
+    "monthly": {"2032-02": {"meter": 155.17, "levy": 7200.00}},
+    "total": 7355.17
+  }
+}

@@ -164,3 +164,12 @@ Stated plainly so a future reader can check rather than trust:
 
 None of those is a hypothetical worth pre-empting in code today; each is worth
 knowing is the trigger.
+
+## Addendum 2026-09-29: three more `py/stack-trace-exposure` alerts on PR #60
+
+These are the stress-scenario registry (`adequacy_worksheet.py:124`), the
+profile-pack listing (`:150`) and `/results/eh_readiness` (`results.py`). None
+could be dismissed on the argument above: the first two wrapped `OSError` text
+(a server path), and the third echoed any `ValueError`, including numpy's. All
+three are fixed and test-pinned. The dispositions are in
+`2026-09-29-codeql-stack-trace-exposure-pr60.md`.

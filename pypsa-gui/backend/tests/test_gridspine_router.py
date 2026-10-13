@@ -222,3 +222,239 @@ def test_a_read_back_upload_reaches_the_service_with_both_files_and_their_names(
                        files={"bus": ("b.csv", b"bus_name,vm_pu,va_degree\n", "text/csv")})
     assert resp.status_code == 200, resp.text
     assert seen["branches"] is None and seen["branch_name"] is None
+
+
+def _running_on_the_event_loop() -> bool:
+    """True when the caller is executing on a thread that is running an asyncio
+    event loop — i.e. the service call was made directly from an `async def`
+    handler rather than handed to a worker thread. A precise discriminator: a
+    thread from Starlette's threadpool has no running loop, so the answer is
+    False there whichever thread the test harness happens to use for the loop.
+    """
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
+
+
+def test_an_upload_is_parsed_off_the_event_loop(client, study, monkeypatch):
+    """A client's workbook is parsed by openpyxl, whose cost the CLIENT chooses.
+
+    The handler is `async`, so anything synchronous in it runs ON the event loop:
+    for as long as `pd.read_excel` is chewing through an attacker-sized sheet,
+    every other request to this process — health checks, the SSE log and queue
+    streams, other engineers' work — waits. A 4.5 MB `.xlsx` decompressing to
+    400k rows measured 14 s; the upload cap permits ~115x that. The fix is to
+    hand the synchronous service call to a worker thread, and the observable
+    property is exactly this: it does not run on the main thread.
+    """
+    seen = {}
+
+    def fake(project, dispatch_bytes, dispatch_name=None, loads_bytes=None, loads_name=None):
+        seen["on_the_loop"] = _running_on_the_event_loop()
+        return {"hours": 2, "units": 2}
+
+    monkeypatch.setattr(gs, "upload_external_dispatch", fake)
+    resp = client.post(
+        "/api/gridspine/Router Study/dispatch-source/external",
+        files={"dispatch": ("d.csv", b"unit_id,hour,p_mw,q_mvar,status\n", "text/csv"),
+               "loads": ("l.csv", b"bus,hour,p_mw,q_mvar\n", "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert seen["on_the_loop"] is False
+
+
+def test_a_readback_upload_is_parsed_off_the_event_loop(client, study, monkeypatch):
+    """The same for the read-back upload: it compares a client CSV against the
+    bundle, and it is the other endpoint that parses attacker-sized files."""
+    seen = {}
+    monkeypatch.setattr(
+        gs, "upload_readback",
+        lambda *a, **k: seen.update(on_the_loop=_running_on_the_event_loop()) or {"ok": True},
+    )
+    resp = client.post(
+        "/api/gridspine/Router Study/readback/19",
+        files={"bus": ("b.csv", b"bus_name,vm_pu,va_degree\n", "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert seen["on_the_loop"] is False
+
+
+def test_an_external_dispatch_upload_reaches_the_service_with_both_files(client, study, monkeypatch):
+    """Increment 7: two tables, or one workbook. The router's only jobs are the
+    size cap and passing the client's filenames through — the suffix matters,
+    because the producer picks its reader from it."""
+    seen = {}
+
+    def fake(project, dispatch_bytes, dispatch_name=None, loads_bytes=None, loads_name=None):
+        seen.update(dispatch=dispatch_bytes, dispatch_name=dispatch_name,
+                    loads=loads_bytes, loads_name=loads_name)
+        return {"hours": 2, "units": 2}
+
+    monkeypatch.setattr(gs, "upload_external_dispatch", fake)
+    resp = client.post(
+        "/api/gridspine/Router Study/dispatch-source/external",
+        files={"dispatch": ("market_dispatch.csv", b"unit_id,hour,p_mw,q_mvar,status\n", "text/csv"),
+               "loads": ("market_loads.csv", b"bus,hour,p_mw,q_mvar\n", "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"hours": 2, "units": 2}
+    assert seen["dispatch_name"] == "market_dispatch.csv"
+    assert seen["loads_name"] == "market_loads.csv"
+    assert seen["dispatch"].startswith(b"unit_id") and seen["loads"].startswith(b"bus,")
+
+    # One workbook carrying both sheets: the loads part is genuinely absent, not
+    # an empty file the producer would then refuse for the wrong reason.
+    resp = client.post(
+        "/api/gridspine/Router Study/dispatch-source/external",
+        files={"dispatch": ("both.xlsx", b"PK\x03\x04", "application/vnd.ms-excel")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert seen["loads"] is None and seen["loads_name"] is None
+    assert seen["dispatch_name"] == "both.xlsx"
+
+
+def test_a_table_over_the_cap_is_refused_before_it_is_parsed(client, study, monkeypatch):
+    """Both parts are capped, and at a TABLE's budget rather than the 512 MB a
+    clustered `network.nc` needs: two parts at the process-wide cap buffer ~2 GB
+    between them before a byte is validated, and nothing limits how many such
+    requests arrive at once. The cap is lowered here rather than a 64 MB body
+    being generated, which is the same code path at a size a test can afford."""
+    import routers.gridspine as router
+
+    monkeypatch.setattr(router, "TABLE_MAX_BYTES", 1024)
+    called = []
+    monkeypatch.setattr(gs, "upload_external_dispatch", lambda *a, **k: called.append(1))
+    resp = client.post(
+        "/api/gridspine/Router Study/dispatch-source/external",
+        files={"dispatch": ("big.csv", b"x" * 4096, "text/csv"),
+               "loads": ("l.csv", b"bus,hour,p_mw,q_mvar\n", "text/csv")},
+    )
+    assert resp.status_code == 413, resp.text
+    assert called == []
+
+
+def test_the_two_tables_share_one_cap(client, study, monkeypatch):
+    """Each part fits the table cap alone; together they do not. A request is
+    one budget, so two tables cannot buffer twice what one may."""
+    import routers.gridspine as router
+
+    monkeypatch.setattr(router, "TABLE_MAX_BYTES", 1024)
+    called = []
+    monkeypatch.setattr(gs, "upload_external_dispatch", lambda *a, **k: called.append(1))
+    resp = client.post(
+        "/api/gridspine/Router Study/dispatch-source/external",
+        files={"dispatch": ("d.csv", b"x" * 600, "text/csv"),
+               "loads": ("l.csv", b"y" * 600, "text/csv")},
+    )
+    assert resp.status_code == 413, resp.text
+    assert called == []
+
+
+# --------------------------------------------------------------------------
+# connection capacity (increment 9)
+# --------------------------------------------------------------------------
+
+def test_get_capacity_calls_the_service_with_its_filters(client, study, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(gs, "get_capacity", lambda project, bus=None, kind=None, hour=None:
+                        seen.update(name=project.name, bus=bus, kind=kind, hour=hour) or {"rows": []})
+    resp = client.get("/api/gridspine/Router Study/capacity")
+    assert resp.status_code == 200, resp.text
+    assert seen == {"name": "Router Study", "bus": None, "kind": None, "hour": None}
+    resp = client.get("/api/gridspine/Router Study/capacity", params={"bus": "BUS_16", "kind": "load", "hour": 19})
+    assert resp.status_code == 200, resp.text
+    assert seen == {"name": "Router Study", "bus": "BUS_16", "kind": "load", "hour": 19}
+
+
+@pytest.mark.parametrize("params", [{"kind": "storage"}, {"hour": -1}, {"bus": "B" * 200}])
+def test_get_capacity_refuses_a_malformed_filter(client, study, monkeypatch, params):
+    monkeypatch.setattr(gs, "get_capacity", lambda *a, **k: {"rows": []})
+    assert client.get("/api/gridspine/Router Study/capacity", params=params).status_code == 422
+
+
+def test_post_capacity_passes_bus_and_kind_and_runs_off_the_event_loop(client, study, monkeypatch):
+    # An AC search is seconds of CPU per request: on the loop it would stall
+    # every other request the process serves.
+    seen = {}
+
+    def fake(project, bus, kind):
+        seen.update(name=project.name, bus=bus, kind=kind, on_the_loop=_running_on_the_event_loop())
+        return {"rows": []}
+
+    monkeypatch.setattr(gs, "compute_capacity", fake)
+    resp = client.post("/api/gridspine/Router Study/capacity", json={"bus": "BUS_16", "kind": "generation"})
+    assert resp.status_code == 200, resp.text
+    assert seen == {"name": "Router Study", "bus": "BUS_16", "kind": "generation", "on_the_loop": False}
+
+
+@pytest.mark.parametrize("body", [
+    {"bus": "BUS_16", "kind": "storage"},
+    {"bus": "", "kind": "load"},
+    {"bus": "B" * 200, "kind": "load"},
+    {"kind": "load"},
+])
+def test_post_capacity_refuses_a_malformed_request_before_the_service(client, study, monkeypatch, body):
+    called = []
+    monkeypatch.setattr(gs, "compute_capacity", lambda *a: called.append(1))
+    resp = client.post("/api/gridspine/Router Study/capacity", json=body)
+    assert resp.status_code == 422, resp.text
+    assert called == []
+
+
+def test_another_orgs_capacity_is_404(other_org_client, study):
+    assert other_org_client.get("/api/gridspine/Router Study/capacity").status_code == 404
+    resp = other_org_client.post("/api/gridspine/Router Study/capacity", json={"bus": "BUS_16", "kind": "load"})
+    assert resp.status_code == 404
+
+
+# --------------------------------------------------------------------------
+# connection-point assessment (increment 10)
+# --------------------------------------------------------------------------
+
+def test_post_connection_passes_the_facility_and_runs_off_the_event_loop(client, study, monkeypatch):
+    seen = {}
+
+    def fake(project, spec):
+        seen.update(name=project.name, spec=spec, on_the_loop=_running_on_the_event_loop())
+        return {"assessment_id": "abc", "rows": []}
+
+    monkeypatch.setattr(gs, "assess_facility", fake)
+    body = {"bus": "BUS_16", "load_mw": 300, "onsite_mw": 100}
+    resp = client.post("/api/gridspine/Router Study/connection", json=body)
+    assert resp.status_code == 200, resp.text
+    assert seen["on_the_loop"] is False and seen["name"] == "Router Study"
+    assert seen["spec"] == {"bus": "BUS_16", "load_mw": 300.0, "load_pf": 0.98, "onsite_mw": 100.0,
+                            "onsite_converter": True, "profile": "eu_rfg_dcc_ce"}
+
+
+@pytest.mark.parametrize("body", [
+    {"bus": "BUS_16", "load_mw": -1},
+    {"bus": "BUS_16", "load_mw": 100, "load_pf": 1.5},
+    {"bus": "BUS_16", "load_mw": 1e7},
+    {"bus": "", "load_mw": 100},
+    {"load_mw": 100},
+])
+def test_post_connection_refuses_a_malformed_facility_before_the_service(client, study, monkeypatch, body):
+    called = []
+    monkeypatch.setattr(gs, "assess_facility", lambda *a: called.append(1))
+    assert client.post("/api/gridspine/Router Study/connection", json=body).status_code == 422
+    assert called == []
+
+
+def test_get_connection_calls_the_service_with_its_filters(client, study, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(gs, "get_connection", lambda project, assessment_id=None, hour=None:
+                        seen.update(aid=assessment_id, hour=hour) or {"rows": []})
+    assert client.get("/api/gridspine/Router Study/connection",
+                      params={"assessment_id": "abc", "hour": 3}).status_code == 200
+    assert seen == {"aid": "abc", "hour": 3}
+
+
+def test_another_orgs_connection_is_404(other_org_client, study):
+    assert other_org_client.get("/api/gridspine/Router Study/connection").status_code == 404
+    resp = other_org_client.post("/api/gridspine/Router Study/connection", json={"bus": "BUS_16", "load_mw": 10})
+    assert resp.status_code == 404

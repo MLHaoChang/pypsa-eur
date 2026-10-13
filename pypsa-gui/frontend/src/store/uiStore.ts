@@ -1,12 +1,20 @@
 import { create } from 'zustand'
 import { effectiveLockState, type LockState, type ReadOnlyReason } from '../utils/lockState'
+import { readActiveSite } from '../site3d/activeSite'
+import type { SizingMode } from '../site3d/sizing'
 // Floor for the docked comparison rail width — keeps both the rail and the
 // live Results pane usable when the splitter is dragged to an extreme. Single
 // definition, shared with the rail's own width arithmetic: this store and
 // Results.tsx enforcing the same number independently is how they can drift.
 import { RAIL_MIN_W } from '../pages/results/railWidth'
+import { appLog } from './simulationStore'
+import type { ProjectMismatch } from '../utils/projectMismatch'
 
 interface SelectedComponent { type: string; name: string }
+// The classes whose Properties card can be asked to open its editor: the
+// tagging tour (Bus, Link) and the schematic's asset-node double-click
+// (plan 1 A2: Generator, StorageUnit, Store, Load, Link).
+export interface PropertiesEditRequest { type: 'Bus' | 'Link' | 'Generator' | 'StorageUnit' | 'Store' | 'Load'; name: string }
 // CreationRequest is set when the user wants to add a new asset to the network.
 // Two entry points:
 //   • Click in AssetPalette → setCreationItem({id, label}) → renders as
@@ -26,6 +34,16 @@ export interface CreationRequest {
   // canvas — dropping onto nothing must stay exactly as permissive as it is
   // today, so this is optional and never validated here.
   dropBusName?: string
+  // A drop onto the map (plan M4, reverting spec D26): the geographic point
+  // under the pointer. CreationForm places a dropped BUS there (x/y seeded),
+  // and prefills any other asset's terminal with the nearest placed bus when
+  // the drop missed a marker.
+  dropLatLng?: { lat: number; lng: number }
+  // A drop onto the 3D site view (design D16): which site, and where on its
+  // ground (metres east/north of the site origin). CreationForm restricts
+  // the terminal bus to the site's members, prefills the primary one, and
+  // writes the placement at this point on success.
+  dropSite?: { siteId: string; ground: { x: number; y: number } }
 }
 // pendingNodePosition is a one-shot handoff used by the drag-drop flow.
 // CreationForm sets it after a successful create; TopologyCanvas reads it
@@ -39,18 +57,25 @@ export type CanvasMode = 'select' | 'connect'
 // deliberately NOT among them: `activeSlidePanel` holds ONE value, so while
 // `'chat'` was a member the assistant was mutually exclusive with every view
 // it exists to explain. It lives in `assistantDockOpen` below instead.
-export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings' | 'gridspine'
+export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings' | 'gridspine' | 'hubDesign' | 'reports' | 'campusElectrical'
 // Command-palette open mode. `null` = closed. `'all'` = full surface (⌘K).
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null
 export type SidebarMode = 'expanded' | 'icon' | 'hidden'
-// Three canvas backgrounds:
+// Four canvas views:
 //   blank      — current React Flow grid (full edit, drag-to-move)
 //   satellite  — Leaflet + Esri World_Imagery tiles
 //   hybrid     — satellite with place / boundary labels overlay
-export type CanvasView = 'blank' | 'satellite' | 'hybrid'
+//   site       — 3D site view of one bus (pages/SiteCanvas.tsx; spike, see
+//                docs/superpowers/assessments/2026-09-28-3d-site-view-feasibility.md)
+export type CanvasView = 'blank' | 'satellite' | 'hybrid' | 'site'
 export type Theme = 'light' | 'dark'
 export type Density = 'comfortable' | 'compact'
+// Guided hides the navigation chrome the EH hub-design flow does not need;
+// Expert is every panel and tab. See the guided-mode spec §3.
+export type UiMode = 'guided' | 'expert'
+// What created a new project (informational — logged, never branched on).
+export type NewProjectKind = 'blank' | 'template' | 'file' | 'clone' | 'study'
 
 const SIDEBAR_MODE_KEY = 'network-diagram:sidebar-mode'
 const PROJECT_NAME_KEY = 'network-diagram:project-name'
@@ -78,8 +103,79 @@ const DENSITY_KEY = 'network-diagram:density'
 const COMPARE_RAIL_KEY = 'network-diagram:compare-rail'
 const COMPARE_RAIL_WIDTH_KEY = 'network-diagram:compare-rail-width'
 const ASSISTANT_DOCK_KEY = 'network-diagram:assistant-dock'
+const UI_MODE_KEY = 'network-diagram:ui-mode'
+// '1' when the user picked the mode themselves; absent otherwise. An explicit
+// choice is never overridden (G4), so nothing ever clears this key.
+const UI_MODE_EXPLICIT_KEY = 'network-diagram:ui-mode-explicit'
 
 const RECENTS_MAX = 5
+
+// ── First-run detection (guided-mode spec §3.2) ──────────────────────────────
+// Import-time call log for uiStore.firstRunOrder.test.ts: records that
+// detectFirstRun ran and every storage write made while this module loads, in
+// order. Written only at import; nothing reads it at runtime.
+export const __firstRunProbe: { events: string[] } = { events: [] }
+
+// A key that only an existing user can have. `theme-schema` is excluded
+// because storedTheme() writes it on every first load (see the race note
+// below); chat:* and pypsa-gui:map:* cannot exist without a network-diagram:*
+// key, so they are not counted.
+function isLegacyKey(k: string): boolean {
+  return k !== THEME_SCHEMA_KEY
+    && (k.startsWith('network-diagram:') || k.startsWith('pypsa-guide-seen:') || k === 'results:active-tab')
+}
+
+function detectFirstRun(): boolean {
+  __firstRunProbe.events.push('detectFirstRun')
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k != null && isLegacyKey(k)) return false
+    }
+    return true
+  } catch {
+    // Unreadable storage: not provably a first-time user → Expert (§3.2).
+    return false
+  }
+}
+
+// The race: storedTheme() WRITES theme-schema while create() evaluates the
+// initial state, so the first-time check must run before create(). This
+// constant is declared above create(...) for exactly that reason — do not
+// move it into the initialiser.
+const FIRST_RUN = detectFirstRun()
+
+function readUiMode(): UiMode | null {
+  try {
+    const v = localStorage.getItem(UI_MODE_KEY)
+    if (v === 'guided' || v === 'expert') return v
+  } catch { /* noop */ }
+  return null
+}
+
+function readUiModeExplicit(): boolean {
+  try { return localStorage.getItem(UI_MODE_EXPLICIT_KEY) === '1' } catch { return false }
+}
+
+// §3.2 truth table. A stored mode wins (explicit or not); otherwise a
+// first-time user gets Guided and an existing one Expert. The first-time
+// branch PERSISTS its answer (implicit): without it, the first legacy key
+// written later would turn this user into an "existing user" and flip them
+// to Expert on the next load.
+function initialUiMode(firstRun: boolean): { mode: UiMode; explicit: boolean } {
+  const stored = readUiMode()
+  if (stored) return { mode: stored, explicit: readUiModeExplicit() }
+  if (firstRun) {
+    try {
+      __firstRunProbe.events.push(`setItem:${UI_MODE_KEY}`)
+      localStorage.setItem(UI_MODE_KEY, 'guided')
+    } catch { /* noop */ }
+    return { mode: 'guided', explicit: false }
+  }
+  return { mode: 'expert', explicit: false }
+}
+
+const INITIAL_UI_MODE = initialUiMode(FIRST_RUN)
 
 function storedSidebarMode(): SidebarMode {
   try {
@@ -136,7 +232,7 @@ function storedOpenTabs(): OpenTab[] {
 function storedCanvasView(): CanvasView {
   try {
     const v = localStorage.getItem(CANVAS_VIEW_KEY)
-    if (v === 'blank' || v === 'satellite' || v === 'hybrid') return v
+    if (v === 'blank' || v === 'satellite' || v === 'hybrid' || v === 'site') return v
   } catch { /* noop */ }
   return 'blank'
 }
@@ -149,6 +245,7 @@ function storedTheme(): Theme {
   try {
     if (localStorage.getItem(THEME_SCHEMA_KEY) !== THEME_SCHEMA) {
       localStorage.removeItem(THEME_KEY)
+      __firstRunProbe.events.push(`setItem:${THEME_SCHEMA_KEY}`)
       localStorage.setItem(THEME_SCHEMA_KEY, THEME_SCHEMA)
     }
     const v = localStorage.getItem(THEME_KEY)
@@ -181,10 +278,10 @@ function storedCompareRailWidth(): number {
 }
 
 // Default OPEN. The spec's headline is an assistant "present when the tool
-// launches", and a 40px muted icon is not presence — it is the opt-in panel
-// the dock exists to replace, in a different shape. Only an explicit
-// 'closed' collapses it, so a user who asked for the width back keeps it;
-// re-opening on every launch is how a feature gets switched off for good.
+// launches"; when closed the floating companion overlay carries that presence
+// while the dock column takes no width. Only an explicit 'closed' collapses
+// it, so a user who asked for the width back keeps it; re-opening on every
+// launch is how a feature gets switched off for good.
 const ASSISTANT_DOCK_WIDTH_KEY = 'network-diagram:assistant-dock-width'
 export const DOCK_MIN_W = 320
 export const DOCK_DEFAULT_W = 420
@@ -281,6 +378,19 @@ export interface AssetDetailRequest {
   chart?: boolean
 }
 
+// Issue 06 — discussed historical run selected in Results chrome. Sticky
+// until cleared or the project switches; does not restore run inputs.
+export interface RunResultRequest {
+  runId: string
+  status?: string
+  resultsTab?: string
+  section?: string
+  baselineRunId?: string
+  mode?: string
+  fingerprint?: string
+  evidenceAvailable?: boolean
+}
+
 interface UIStore {
   sidebarExpanded: boolean
   sidebarMode: SidebarMode
@@ -321,6 +431,7 @@ interface UIStore {
   // regression test and the 2026-08-05 presence spec.
   assistantDockOpen: boolean
   assistantDockWidth: number
+  assistantEntry: 'compose' | 'speak' | 'profiles' | null
   // True while a project switch/load is mid-flight (between the moment the
   // backend starts swapping the in-memory network and the moment
   // currentProject is updated to the new project). Autosave checks this and
@@ -328,6 +439,17 @@ interface UIStore {
   // newly-loaded network under the OLD project's name (silent cross-project
   // overwrite). In-memory only; defaults false.
   projectSwitchInProgress: boolean
+  // How many switches are in flight (P27b gate note 8): overlapping switches
+  // must not drop the fence when the first one finishes. The boolean above
+  // mirrors `projectSwitchDepth > 0` and is what every reader uses.
+  projectSwitchDepth: number
+  // A2 (deferred spec §2.1): the tab's `currentProject` and the backend's
+  // binding (`/network/meta.loaded_project`) disagree — after a backend
+  // restart another tab's project was resumed, or an external client swapped
+  // it. While set, the axios interceptor refuses the tab's writes, autosave
+  // is suspended, chat Send is gated and ProjectMismatchBanner offers Reload
+  // or Switch. In-memory only; cleared by an agreeing sample or a switch.
+  projectMismatch: ProjectMismatch | null
   // Docked comparison rail (lives inside the Results view). Independent of
   // activeSlidePanel so the A-vs-B CompareView can coexist with the live
   // Results tabs and persist across result-tab switches until explicitly
@@ -342,9 +464,26 @@ interface UIStore {
   // anchor has to live outside it — a set(SlidePanel) parameter cannot
   // survive that remount. Consumed then cleared by the section itself.
   settingsSectionRequest: string | null
+  // WP7b: "generation pre-armed" — the Adequacy tab's Reports button opens
+  // the Reports panel WITH the Generate dialog. Same shape as the settings
+  // deep link: the panel subtree remounts on every switch, so the flag lives
+  // here and ReportsPanel consumes then clears it.
+  reportGenerateRequest: boolean
+  // Ask the Properties panel's Bus / Link card to open its Edit form (the EH
+  // tagging tour's targets only render in Edit). Consumed then cleared by the
+  // card showing exactly that component (P30 B10); a selection change to any
+  // other component clears it, so a request never replays on a later card.
+  propertiesEditRequest: PropertiesEditRequest | null
+  // Ask the Energy Hub reference-design panel (Results → Adequacy) to open
+  // and bring its report into view — the hub-design Results card's "Open
+  // full report" (guided-mode P24). Consumed then cleared by the panel.
+  ehReportRequest: boolean
   // Deep-link into the Asset Detail tab (Task 13). Consumed then cleared by
   // AssetDetail.tsx's effect. Set only via `requestAssetDetail`.
   assetDetailRequest: AssetDetailRequest | null
+  // Issue 06 — discussed run shown in Results chrome. Sticky (not consumed);
+  // cleared by clearDiscussedRun or project switch.
+  discussedRun: RunResultRequest | null
   // Chat / agent: seed CompareView A/B + tab (consumed then cleared).
   compareNavRequest: { a?: string; b?: string; tab?: string } | null
   // Chat / agent: open Import/Export modal ('import' | 'export').
@@ -388,6 +527,21 @@ interface UIStore {
   // attributes which the CSS-var overrides in index.css key off.
   theme: Theme
   density: Density
+  // Guided / Expert (spec §3.1). `uiModeExplicit` is true once the user chose
+  // a mode themselves; the new-project rule never overrides that choice.
+  uiMode: UiMode
+  uiModeExplicit: boolean
+  setUiMode: (mode: UiMode, opts?: { explicit?: boolean }) => void
+  // Called by every project-creation success handler (G4): an implicit mode
+  // becomes Guided; an explicit choice is left alone.
+  noteNewProjectCreated: (kind: NewProjectKind) => void
+  readStoredUiMode: () => UiMode | null
+  // Guided tours in flight (a prepare step running, or a tour on screen).
+  // While > 0, Guided never auto-opens hubDesign — the tour always wins
+  // (guided-mode spec §10 addendum, gate P23 B2). In-memory only.
+  guidedTourHolds: number
+  holdGuidedTour: () => void
+  releaseGuidedTour: () => void
   setTheme: (t: Theme) => void
   setDensity: (d: Density) => void
   toggleTheme: () => void
@@ -408,8 +562,21 @@ interface UIStore {
   setPendingNodePosition: (p: PendingNodePosition | null) => void
   setCanvasMode: (mode: CanvasMode) => void
   setCanvasView: (view: CanvasView) => void
+  // 3D site view (WP2): drawing a boundary on the map, and the active site.
+  siteDrawMode: 'idle' | 'drawing'
+  siteDraft: Array<[number, number]>
+  setSiteDrawMode: (m: 'idle' | 'drawing') => void
+  setSiteDraft: (d: Array<[number, number]>) => void
+  activeSiteId: string | null
+  setActiveSiteId: (id: string | null) => void
+  // 3D site view (Phase 2 E6): draw extendable assets at their installed
+  // size or at the optimum. Takes effect only while dispatch is fresh
+  // (site3d/sizing.ts effectiveSizing). A view setting, not a mutation.
+  siteSizing: SizingMode
+  setSiteSizing: (m: SizingMode) => void
   setSlidePanel: (p: SlidePanel | null) => void
   setAssistantDockOpen: (open: boolean) => void
+  setAssistantEntry: (entry: 'compose' | 'speak' | 'profiles' | null) => void
   toggleAssistantDock: () => void
   setAssistantDockWidth: (px: number) => void
   assistantSpeakEnabled: boolean
@@ -417,6 +584,7 @@ interface UIStore {
   constrainDockWidth: (desired: number, available: number) => number
   readStoredDockOpen: () => boolean
   setProjectSwitchInProgress: (v: boolean) => void
+  setProjectMismatch: (v: ProjectMismatch | null) => void
   setCompareRailOpen: (v: boolean) => void
   toggleCompareRail: () => void
   setCompareRailWidth: (px: number) => void
@@ -426,11 +594,20 @@ interface UIStore {
   clearResultsTabRequest: () => void
   requestSettingsSection: (section: string) => void
   clearSettingsSectionRequest: () => void
+  requestReportGenerate: () => void
+  clearReportGenerateRequest: () => void
+  requestPropertiesEdit: (c: PropertiesEditRequest) => void
+  clearPropertiesEditRequest: () => void
+  requestEhReport: () => void
+  clearEhReportRequest: () => void
   // ONE path for all four entry points (Properties, bottom table, map,
   // chatbot). Each of them only has to call this — the panel, the tab and
   // the selection all move together, so none of them can drift out of step.
   requestAssetDetail: (req: AssetDetailRequest) => void
   clearAssetDetailRequest: () => void
+  // Issue 06 — open Results on a discussed historical run (identifiers only).
+  requestRunResult: (req: RunResultRequest) => void
+  clearDiscussedRun: () => void
   requestCompareNav: (nav: { a?: string; b?: string; tab?: string }) => void
   clearCompareNavRequest: () => void
   requestIoModal: (tab: 'import' | 'export') => void
@@ -477,17 +654,28 @@ export const useUIStore = create<UIStore>((set) => ({
   pendingNodePosition: null,
   canvasMode: 'select',
   canvasView: storedCanvasView(),
+  siteDrawMode: 'idle',
+  siteDraft: [],
+  activeSiteId: readActiveSite(storedCurrentProject()),
+  siteSizing: 'installed',
   activeSlidePanel: null,
   assistantDockOpen: storedAssistantDockOpen(),
   assistantDockWidth: storedAssistantDockWidth(),
+  assistantEntry: null,
   assistantSpeakEnabled: storedAssistantSpeak(),
   projectSwitchInProgress: false,
+  projectSwitchDepth: 0,
+  projectMismatch: null,
   compareRailOpen: storedCompareRailOpen(),
   compareRailWidth: storedCompareRailWidth(),
   bottomTabRequest: null,
   resultsTabRequest: null,
   settingsSectionRequest: null,
+  reportGenerateRequest: false,
+  propertiesEditRequest: null,
+  ehReportRequest: false,
   assetDetailRequest: null,
+  discussedRun: null,
   compareNavRequest: null,
   ioModalRequest: null,
   readOnly: false,
@@ -517,6 +705,45 @@ export const useUIStore = create<UIStore>((set) => ({
   paletteMode: null,
   theme: storedTheme(),
   density: storedDensity(),
+  uiMode: INITIAL_UI_MODE.mode,
+  uiModeExplicit: INITIAL_UI_MODE.explicit,
+  setUiMode: (mode, opts) => {
+    const explicit = opts?.explicit === true
+    try {
+      localStorage.setItem(UI_MODE_KEY, mode)
+      if (explicit) localStorage.setItem(UI_MODE_EXPLICIT_KEY, '1')
+    } catch { /* noop */ }
+    set(s => {
+      const patch: Partial<UIStore> = { uiMode: mode, uiModeExplicit: s.uiModeExplicit || explicit }
+      // §3.7: a slide panel Guided has no navigation for is swapped for the
+      // hub-design flow (or closed when there is no project). Results stays —
+      // Guided keeps two of its tabs. Switching to Expert closes nothing.
+      if (mode === 'guided' && s.activeSlidePanel != null
+          && s.activeSlidePanel !== 'hubDesign' && s.activeSlidePanel !== 'results') {
+        patch.activeSlidePanel = s.currentProject ? 'hubDesign' : null
+      }
+      return patch
+    })
+  },
+  noteNewProjectCreated: (kind) => {
+    const { uiMode, setUiMode } = useUIStore.getState()
+    // Re-read the flag from storage, not only memory: another browser tab may
+    // have made the explicit choice after this one loaded (spec §10 addendum).
+    // Adopt that choice here rather than override it.
+    if (!useUIStore.getState().uiModeExplicit && readUiModeExplicit()) {
+      setUiMode(readUiMode() ?? uiMode, { explicit: true })
+    }
+    if (useUIStore.getState().uiModeExplicit) {
+      appLog('INFO', `New ${kind} project — keeping the chosen ${useUIStore.getState().uiMode} mode`)
+      return
+    }
+    appLog('INFO', `New ${kind} project — starting in Guided mode`)
+    setUiMode('guided')
+  },
+  readStoredUiMode: () => readUiMode(),
+  guidedTourHolds: 0,
+  holdGuidedTour: () => set(s => ({ guidedTourHolds: s.guidedTourHolds + 1 })),
+  releaseGuidedTour: () => set(s => ({ guidedTourHolds: Math.max(0, s.guidedTourHolds - 1) })),
   setTheme: (t) => {
     try { localStorage.setItem(THEME_KEY, t) } catch { /* noop */ }
     set({ theme: t })
@@ -547,7 +774,14 @@ export const useUIStore = create<UIStore>((set) => ({
   },
   toggleRightPanel: () => set(s => ({ rightPanelOpen: !s.rightPanelOpen })),
   openRightPanel: () => set({ rightPanelOpen: true }),
-  setSelectedComponent: (c) => set({ selectedComponent: c }),
+  setSelectedComponent: (c) => set(s => ({
+    selectedComponent: c,
+    // P30 (B10): an edit request belongs to one component; moving the
+    // selection anywhere else drops it.
+    propertiesEditRequest: s.propertiesEditRequest && c
+      && c.type === s.propertiesEditRequest.type && c.name === s.propertiesEditRequest.name
+      ? s.propertiesEditRequest : null,
+  })),
   setHighlightedComponent: (c) => set({ highlightedComponent: c }),
   setProjectName: (name) => {
     try { localStorage.setItem(PROJECT_NAME_KEY, name) } catch { /* noop */ }
@@ -577,17 +811,28 @@ export const useUIStore = create<UIStore>((set) => ({
     try { localStorage.setItem(CANVAS_VIEW_KEY, view) } catch { /* noop */ }
     set({ canvasView: view })
   },
+  setSiteDrawMode: (m) => set({ siteDrawMode: m }),
+  setSiteDraft: (d) => set({ siteDraft: d }),
+  setActiveSiteId: (id) => set({ activeSiteId: id }),
+  setSiteSizing: (m) => set({ siteSizing: m }),
   setSlidePanel: (p) => set({ activeSlidePanel: p }),
   setAssistantDockOpen: (open) => {
     persistAssistantDockOpen(open)
     set({ assistantDockOpen: open })
   },
+  setAssistantEntry: (entry) => set({ assistantEntry: entry }),
   toggleAssistantDock: () => set(s => {
     const next = !s.assistantDockOpen
     persistAssistantDockOpen(next)
     return { assistantDockOpen: next }
   }),
-  setProjectSwitchInProgress: (v) => set({ projectSwitchInProgress: v }),
+  setProjectSwitchInProgress: (v) => set(s => {
+    // A counter under the boolean (gate note 8). A test or caller that set
+    // the boolean directly (depth 0) still gets `false` from a finish.
+    const depth = Math.max(0, (s.projectSwitchDepth ?? 0) + (v ? 1 : -1))
+    return { projectSwitchDepth: depth, projectSwitchInProgress: depth > 0 }
+  }),
+  setProjectMismatch: (v) => set({ projectMismatch: v }),
   setCompareRailOpen: (v) => {
     try { localStorage.setItem(COMPARE_RAIL_KEY, v ? 'true' : 'false') } catch { /* noop */ }
     set({ compareRailOpen: v })
@@ -627,13 +872,27 @@ export const useUIStore = create<UIStore>((set) => ({
   clearResultsTabRequest: () => set({ resultsTabRequest: null }),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),
+  requestReportGenerate: () => set({ reportGenerateRequest: true }),
+  clearReportGenerateRequest: () => set({ reportGenerateRequest: false }),
+  requestPropertiesEdit: (c) => set({ propertiesEditRequest: c }),
+  clearPropertiesEditRequest: () => set({ propertiesEditRequest: null }),
+  requestEhReport: () => set({ ehReportRequest: true }),
+  clearEhReportRequest: () => set({ ehReportRequest: false }),
   requestAssetDetail: (req) => set({
     assetDetailRequest: req,
     selectedComponent: { type: req.componentClass, name: req.name },
+    // P30 gate S-2: the selection moved, so a pending edit request goes.
+    propertiesEditRequest: null,
     activeSlidePanel: 'results',
     resultsTabRequest: 'asset',
   }),
   clearAssetDetailRequest: () => set({ assetDetailRequest: null }),
+  requestRunResult: (req) => set({
+    discussedRun: req,
+    activeSlidePanel: 'results',
+    ...(req.resultsTab ? { resultsTabRequest: req.resultsTab } : {}),
+  }),
+  clearDiscussedRun: () => set({ discussedRun: null }),
   requestCompareNav: (nav) => set({ compareNavRequest: nav }),
   clearCompareNavRequest: () => set({ compareNavRequest: null }),
   requestIoModal: (tab) => set({ ioModalRequest: tab }),
@@ -678,10 +937,23 @@ export const useUIStore = create<UIStore>((set) => ({
         selectedComponent: null,
         highlightedComponent: null,
         assetDetailRequest: null,
+        // Issue 06 — discussed run ids are project-scoped; drop on switch.
+        discussedRun: null,
+        // P30 gate S-2: the same hazard for a pending Edit request — it must
+        // not open project B's same-named bus in Edit.
+        propertiesEditRequest: null,
         // Per-project result-source (B8): restore the new project's choice so
         // an instant switch lands on the source the user last picked there.
         // Defaults to 'lopf' for a never-visited / fresh project.
         resultSource: name ? (s.resultSourceByProject[name] ?? 'lopf') : 'lopf',
+        // The 3D site view is per project too: restore the new project's
+        // remembered site and drop any boundary being drawn for the old
+        // one (a draft panel left open would otherwise create A's site in B).
+        activeSiteId: readActiveSite(name),
+        siteDrawMode: 'idle',
+        siteDraft: [],
+        // Optimised sizes are opted into per project, not carried over.
+        siteSizing: 'installed',
       }
       if (name) patch.lastProjectId = preferredId ?? name
       if (name && !s.openTabs.some(t => t.name === name)) {
@@ -807,3 +1079,26 @@ export const useUIStore = create<UIStore>((set) => ({
   }),
   setPaletteMode: (m) => set({ paletteMode: m }),
 }))
+
+// ── P28 C10 (deferred spec 2026-09-28 §3.3): multi-tab mode choice ──────────
+// A `storage` event carries another tab's write (never this tab's own). When
+// the other tab's user CHOSE a mode (the explicit flag is set in storage) and
+// this tab has made no choice of its own, adopt it — explicitly, through
+// setUiMode, so §3.7 pruning applies as for any switch. An implicit change
+// elsewhere (a G4 flip, a first-run default) is ignored: it is that tab's
+// default, not the user's choice. An explicit choice made here is kept.
+function onUiModeStorage(e: StorageEvent): void {
+  if (e.key !== UI_MODE_KEY && e.key !== UI_MODE_EXPLICIT_KEY) return
+  const s = useUIStore.getState()
+  if (s.uiModeExplicit || !readUiModeExplicit()) return
+  const stored = readUiMode()
+  if (stored) s.setUiMode(stored, { explicit: true })
+}
+if (typeof window !== 'undefined') {
+  // One listener per window: a module re-evaluated by HMR (or a test's
+  // `vi.resetModules()`) replaces the previous one instead of stacking.
+  const w = window as unknown as { __uiModeStorageListener?: (e: StorageEvent) => void }
+  if (w.__uiModeStorageListener) window.removeEventListener('storage', w.__uiModeStorageListener)
+  w.__uiModeStorageListener = onUiModeStorage
+  window.addEventListener('storage', onUiModeStorage)
+}

@@ -83,7 +83,7 @@ def test_unknown_scenario_type_is_refused_with_the_valid_set():
     from fastapi import HTTPException
 
     with pytest.raises(HTTPException) as excinfo:
-        _validated_scenario_type("sensitivity")
+        _validated_scenario_type("exotic")
     assert excinfo.value.status_code == 400
     # The message must name what IS accepted — a bare rejection makes the
     # caller guess.
@@ -269,3 +269,31 @@ def test_a_category_the_old_format_cannot_hold_is_dropped_not_mangled(migration_
         ).scalar()
 
     assert description == "notes"
+
+
+# ── the fourth category (Edge Investment Case P0 WP0.4) ──────────────────────
+#
+# `sensitivity` is what the scenario matrix (spec §10) files its children
+# under. The column was declared a plain string precisely so this needs no
+# migration; migration 0004's DOWNGRADE still drops it (see the test above),
+# which is the honest behaviour for a value the prefix encoding never held.
+
+
+def test_sensitivity_is_an_accepted_category():
+    assert _validated_scenario_type("sensitivity") == "sensitivity"
+    assert _validated_scenario_type("  Sensitivity ") == "sensitivity"
+
+
+def test_the_valid_set_names_sensitivity_in_the_refusal():
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as excinfo:
+        _validated_scenario_type("exotic")
+    assert "sensitivity" in excinfo.value.detail
+
+
+def test_legacy_sensitivity_tag_is_lifted_like_the_others():
+    assert _split_legacy_tag("[sensitivity] capex +20%") == ("sensitivity", "capex +20%")
+    assert _scenario_fields_from_meta(
+        {"scenario_description": "[sensitivity] x"}
+    ) == {"scenario_type": "sensitivity", "scenario_description": "x"}

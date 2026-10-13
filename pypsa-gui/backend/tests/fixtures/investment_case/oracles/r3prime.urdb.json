@@ -1,0 +1,48 @@
+{
+ "label": "self-authored R3prime (reconstructed from REopt runtests.jl L1893-1909)",
+ "flatdemandstructure": [
+  [
+   {
+    "rate": 10.5,
+    "unit": "kW"
+   }
+  ],
+  [
+   {
+    "rate": 11.5,
+    "unit": "kW"
+   }
+  ]
+ ],
+ "flatdemandmonths": [
+  0,
+  0,
+  0,
+  0,
+  1,
+  1,
+  1,
+  1,
+  1,
+  1,
+  0,
+  0
+ ],
+ "lookbackpercent": 0.35,
+ "lookbackrange": 11,
+ "lookbackmonths": [
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0
+ ],
+ "demandwindow": 60
+}

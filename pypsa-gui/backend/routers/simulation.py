@@ -151,7 +151,13 @@ class BufferedLogQueue:
         with self._sub_lock:
             self._subscribers.pop(sub_id, None)
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy.orm import Session as DBSession
+
+from db.models import User
+from db.session import get_db
+from deps import optional_user
 from models.schemas import SolverConfigSchema
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.pypsa_service import PyPSAService
@@ -328,8 +334,173 @@ def get_solver_config():
     return asdict(_state["solver_config"])
 
 
+def _bind_commercial(commercial, user) -> dict | None:
+    """
+    Bind a submitted commercial block to the ACTIVE network: a call of
+    `services.commercial.binding.bind_commercial_on_context` on the active
+    context (IC U1 follow-up, GS Q15), which supplies the in-flight guard, the
+    project directory and the Library resolvers (series resolve in the ACTIVE
+    PROJECT's org; the caller's org for an unsaved network) and checks
+    everything before any write. The in-flight check is this module's
+    `_solver_in_flight_ctx`. Refusals carry `{code, message}`. Returns the
+    plain dict stored on `SolverConfig.commercial`.
+    """
+    from fastapi import HTTPException
+
+    from services.commercial import binding
+
+    try:
+        return binding.bind_commercial_on_context(
+            PyPSAService.get_active_context(), commercial, user=user,
+            in_flight=lambda ctx: _solver_in_flight_ctx(ctx))
+    except binding.BindingRefusal as exc:
+        raise HTTPException(exc.status, {"code": exc.code, "message": exc.message}) from exc
+
+
+def _check_site_connection(commercial, stored) -> None:
+    """The meter Links' direction (IC U1 follow-up b, review B1): for the
+    submitted `poc_link` / `export_link` that differs from the stored one (that
+    side only), the same check `set_site_connection` runs
+    (`binding.check_site_connection`), direction only: a missing or two-way
+    Link stays the binding's own refusal.
+    A refusal is `{code, error_kind, message}` (the chat tool's kinds)."""
+    from fastapi import HTTPException
+
+    from services.commercial import binding
+
+    before = stored if isinstance(stored, dict) else {}
+    poc_changed = commercial.poc_link != before.get("poc_link")
+    export_changed = commercial.export_link != before.get("export_link")
+    if not (poc_changed or export_changed):
+        return
+    if _solver_in_flight_ctx(PyPSAService.get_active_context()):
+        return   # `_bind_commercial` refuses it (solver_in_flight) before any read
+    try:
+        # Only the side that changed (round 2 review): an untouched Link of a
+        # config saved before this check is not refused; the pair check runs.
+        binding.check_site_connection(PyPSAService.get_network(), commercial.poc_link,
+                                      commercial.export_link, direction_only=True,
+                                      check_poc=poc_changed, check_export=export_changed,
+                                      group_members=commercial.group_members)
+    except binding.BindingRefusal as exc:
+        raise HTTPException(exc.status, {"code": exc.code, "error_kind": exc.code,
+                                         "message": exc.message}) from exc
+
+
+def user_code_authorized(db, actor) -> bool:
+    """
+    True iff `actor` may set `extra_functionality_code` in this deployment.
+
+    The ONE definition of that authorization, because the PUT below is not the
+    only writer of the field: `routers/projects.import_bundle` takes a bundle's
+    `solver_config.json`, and `_solver_config_from_dict` filters to the live
+    `SolverConfig` field set — of which this is one. A member refused here
+    reached the identical capability through a zip until both edges shared this
+    predicate (found by an independent QA review, 2026-09-12; see
+    tests/test_user_code_import_bypass.py). A field is only as gated as its
+    least-guarded writer.
+
+    Both conditions are required, and neither overrides the other: the operator
+    opted in via the process-wide flag, AND the caller is an org admin. Local
+    mode is exempt from the admin half — the desktop build has one seeded
+    identity and no org to be an admin of.
+    """
+    import local_mode
+
+    if local_mode.is_local_mode():
+        return True
+
+    from services.solver_service import user_code_enabled
+
+    if not user_code_enabled():
+        return False
+    if actor is None:
+        return False
+    from services.tenancy_service import is_org_admin
+
+    return is_org_admin(db, actor)
+
+
+def _gate_user_code(submitted: dict, db, actor) -> None:
+    """
+    Refuse a non-admin's attempt to set `extra_functionality_code`.
+
+    That field is `exec()`-ed in-process with full filesystem and network
+    privileges (`solver_service._compile_extra_functionality`). Two independent
+    conditions must hold, and this enforces both at the EDGE, so the field can
+    never be stored by someone not allowed to run it:
+
+    * the operator opted in (`PYPSA_GUI_ALLOW_USER_CODE`) — the deployment's
+      kill switch, which admin does not override, and
+    * the caller is an org admin or super-admin.
+
+    Holding the project's lock is NOT sufficient and never was: a lock means
+    "nobody else is editing this", not "may execute code on this host". Before
+    this gate the field rode `merged.update(submitted)` below, so any member of
+    any org could set it whenever the flag was on — see finding 4 of
+    `docs/superpowers/assessments/2026-09-12-per-route-authorization-audit.md`.
+
+    Local mode is exempt: the desktop build has one seeded identity, no second
+    tenant and no org to be an admin of, which is the same exemption every other
+    tenancy check in this codebase makes.
+
+    Refused at SET time rather than at run time because the solve worker has no
+    request context. `_compile_extra_functionality`'s own flag check stays as
+    defence in depth.
+    """
+    code = submitted.get("extra_functionality_code")
+    if not (isinstance(code, str) and code.strip()):
+        return  # Not setting it (or clearing it) — nothing to gate.
+
+    import local_mode
+
+    if local_mode.is_local_mode():
+        return
+
+    from services.solver_service import user_code_enabled
+
+    # Split rather than one `user_code_authorized` call so each refusal keeps
+    # its own message: "the operator never opted in" and "you are not an admin"
+    # are different problems with different remedies.
+    if not user_code_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error_kind": "user_code_disabled",
+                "message": (
+                    "extra_functionality_code is disabled in this deployment. "
+                    "An operator must set PYPSA_GUI_ALLOW_USER_CODE=1 before "
+                    "the backend starts."
+                ),
+            },
+        )
+    if actor is None:
+        raise HTTPException(status_code=403, detail={
+            "error_kind": "user_code_forbidden",
+            "message": "extra_functionality_code requires an authenticated org admin.",
+        })
+    from services.tenancy_service import is_org_admin
+
+    if not is_org_admin(db, actor):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error_kind": "user_code_forbidden",
+                "message": (
+                    "Only an org admin or super-admin may set "
+                    "extra_functionality_code: it runs arbitrary Python "
+                    "in-process with no sandbox."
+                ),
+            },
+        )
+
+
 @router.put("/solver_config")
-def update_solver_config(cfg: SolverConfigSchema):
+def update_solver_config(
+    cfg: SolverConfigSchema,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
     # Real partial-PUT: merge submitted fields over the existing config so
     # callers can flip a single knob without echoing the rest of the
     # payload. exclude_unset=True only emits fields the request body
@@ -337,6 +508,44 @@ def update_solver_config(cfg: SolverConfigSchema):
     # silently overwrite live state (e.g. "PUT run_ac_pf_after_lopf=true"
     # used to reset voll/discount_rate/sclopf back to defaults).
     submitted = cfg.model_dump(exclude_unset=True)
+    if "finance" in submitted:
+        # The finance inputs are owned by `PUT /finance` (validation, If-Match;
+        # IC P4 WP4.6b — the value-flows guard). An unchanged echo is dropped;
+        # a change is refused. Either way the merge below keeps what is stored
+        # NOW (read under the lock), so a concurrent finance edit is never lost.
+        if submitted["finance"] != getattr(_state["solver_config"], "finance", None):
+            raise HTTPException(422, {
+                "code": "finance_via_dedicated_route",
+                "message": "change the finance inputs through PUT /api/simulation/finance (it "
+                           "validates them and checks If-Match); omit the key here"})
+        submitted.pop("finance")
+    stored_commercial = getattr(_state["solver_config"], "commercial", None)
+    rebound = False
+    if "commercial" in submitted and (cfg.commercial is not None
+                                      or stored_commercial is not None):
+        if cfg.commercial is not None and "value_flows" in cfg.commercial.model_fields_set:
+            # Read BEFORE binding: `resolve_tariff_ref` re-validates from a dump,
+            # after which every field reads as set (IC P3 WP3.0, review D2). An
+            # unchanged echo (a client re-sending the whole block) is fine; a
+            # change must go through the value-flows route (full validation,
+            # If-Match).
+            stored_vf = (stored_commercial or {}).get("value_flows") \
+                if isinstance(stored_commercial, dict) else None
+            if cfg.commercial.value_flows != stored_vf:
+                raise HTTPException(422, {
+                    "code": "value_flows_via_dedicated_route",
+                    "message": "change value_flows through PUT "
+                               "/api/simulation/commercial/value_flows (it validates the "
+                               "parties and checks If-Match); omit the key here"})
+        # A direct in-process call (chat tools) passes no user: the Depends
+        # default is not a User, and `_bind_commercial` then uses the project org.
+        # An explicit null clears the layer (and its FCA stress entry); a null
+        # when nothing is stored (a full-payload PUT from the settings form)
+        # touches nothing (WP1.4 round 3 #6).
+        if cfg.commercial is not None:
+            _check_site_connection(cfg.commercial, stored_commercial)
+        submitted["commercial"] = _bind_commercial(cfg.commercial, user)
+        rebound = submitted["commercial"] is not None
     # Legacy mode 'lpf' was removed in v1.x — coerce to 'lopf' silently so
     # old saved configs and stale frontend caches don't 400 the user. Same
     # treatment applied in projects.py at load time.
@@ -344,11 +553,248 @@ def update_solver_config(cfg: SolverConfigSchema):
         submitted["mode"] = "lopf"
     # Read-modify-write is racy without the lock: a concurrent PUT could
     # observe the same baseline and clobber a sibling's update.
+    # BEFORE the merge: a 403 that still stored the code would read as
+    # protection while the next run executed it.
+    _gate_user_code(submitted, db, user)
     with PyPSAService.get_solver_state_lock():
         merged = asdict(_state["solver_config"])
+        if rebound:
+            # The value-flow config is owned by its own route: keep what is
+            # stored NOW (read under the lock, so a concurrent value-flows edit
+            # is never lost to this save; plan C7).
+            current = merged.get("commercial")
+            submitted["commercial"]["value_flows"] = (
+                current.get("value_flows") if isinstance(current, dict) else None)
         merged.update(submitted)
         _state["solver_config"] = SolverConfig(**merged)
         return asdict(_state["solver_config"])
+
+
+class ValueFlowsIn(BaseModel):
+    # Required and closed: an unwrapped config or an empty body must be a 422,
+    # never a default `null` that clears the stored value (WP3.0 review #1).
+    model_config = ConfigDict(extra="forbid")
+    value_flows: dict[str, Any] | None = Field(...)
+
+
+def _entity_tag(value: str | None) -> str | None:
+    """An `If-Match` value without the `W/` prefix and quotes (review #6)."""
+    if value is None:
+        return None
+    tag = value.strip()
+    if tag.startswith("W/"):
+        tag = tag[2:]
+    return tag.strip('"')
+
+
+def _value_flows_state(commercial) -> dict:
+    from services.commercial import participants as P
+
+    if not isinstance(commercial, dict):
+        return {"value_flows": None, "digest": P.value_flows_digest(None),
+                "status": "no_commercial_config"}
+    raw = commercial.get("value_flows")
+    out = {"value_flows": raw, "digest": P.value_flows_digest(raw),
+           "status": "not_set" if raw is None else "ok"}
+    try:
+        P.parse_value_flows(raw)
+    except P.ValueFlowsInvalid as exc:
+        out.update(status=exc.code, message=str(exc))
+    return out
+
+
+@router.get("/commercial/value_flows")
+def get_value_flows():
+    """The stored value-flow config and its `If-Match` digest (IC P3 WP3.0)."""
+    return _value_flows_state(getattr(_state["solver_config"], "commercial", None))
+
+
+@router.put("/commercial/value_flows")
+def put_value_flows(body: ValueFlowsIn, if_match: str | None = Header(default=None)):
+    """Set (or clear, with null) the participants and value-flow assignment
+    (IC P3 WP3.0). Merged into the stored commercial config server-side under
+    the solver-state lock; the parties are checked against the contracts, the
+    network and the group contract; no commercial re-binding (nothing at solve
+    time reads it). `If-Match` (the GET's digest) refuses a stale edit (412)."""
+    from models.commercial import CommercialConfig
+    from services.commercial import participants as P
+
+    if _solver_in_flight_ctx(PyPSAService.get_active_context()):
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                  "message": "a solve is running on this project; change the "
+                                             "participants after it finishes"})
+    with PyPSAService.get_solver_state_lock():
+        commercial = getattr(_state["solver_config"], "commercial", None)
+        if not isinstance(commercial, dict):
+            raise HTTPException(409, {"code": "no_commercial_config",
+                                      "message": "set the commercial config (poc_link) first"})
+        current = commercial.get("value_flows")
+        tag = _entity_tag(if_match)
+        if tag is not None and tag != "*" and tag != P.value_flows_digest(current):
+            raise HTTPException(412, {"code": "value_flows_changed",
+                                      "message": "the value-flow config changed since it was "
+                                                 "read; reload and re-apply the edit"})
+        new = None
+        if body.value_flows is not None:
+            try:
+                vf = P.parse_value_flows(body.value_flows)
+            except P.ValueFlowsInvalid as exc:
+                raise HTTPException(422, {"code": exc.code, "message": str(exc)}) from exc
+            try:
+                bound = CommercialConfig.model_validate(commercial)
+            except ValidationError as exc:
+                # The load path does not re-validate a stored config (review #4).
+                raise HTTPException(409, {"code": "commercial_config_invalid",
+                                          "message": "the stored commercial config does not "
+                                                     f"validate; re-save it first ({exc.errors()[0]['msg']})"}) \
+                    from exc
+            problems = P.value_flows_problems(vf, bound, PyPSAService.get_network())
+            if problems:
+                raise HTTPException(422, {"code": "value_flows_invalid",
+                                          "message": "; ".join(problems),
+                                          "problems": problems})
+            new = vf.model_dump(mode="json")
+        merged = asdict(_state["solver_config"])
+        merged["commercial"] = {**commercial, "value_flows": new}
+        _state["solver_config"] = SolverConfig(**merged)
+        return _value_flows_state(merged["commercial"])
+
+
+class FinanceIn(BaseModel):
+    # Required and closed, like `ValueFlowsIn`: an unwrapped body or an empty
+    # one is a 422, never a default null that clears the stored inputs.
+    model_config = ConfigDict(extra="forbid")
+    finance: dict[str, Any] | None = Field(...)
+
+
+def _finance_state(raw) -> dict:
+    from services.finance.investment_case_runner import finance_digest
+
+    out = {"finance": raw, "digest": finance_digest(raw),
+           "status": "not_set" if raw is None else "ok"}
+    if raw is not None:
+        from models.finance import FinanceInputs
+
+        try:
+            FinanceInputs.model_validate(raw)
+        except ValidationError as exc:
+            # A stored value the current model refuses (it tightened since the
+            # save): shown, never silently dropped; the run refuses it (422).
+            out.update(status="finance_inputs_invalid", message=str(exc.errors()[0]["msg"]))
+    return out
+
+
+@router.get("/finance")
+def get_finance():
+    """The stored finance inputs (`FinanceInputs` JSON) and their `If-Match`
+    digest (IC P4 WP4.6b). `status`: `not_set`, `ok` or
+    `finance_inputs_invalid`."""
+    return _finance_state(getattr(_state["solver_config"], "finance", None))
+
+
+@router.put("/finance")
+def put_finance(body: FinanceIn, if_match: str | None = Header(default=None)):
+    """Set (or clear, with null) the finance inputs (IC P4 WP4.6b). Validated
+    through `FinanceInputs` (422 with the field paths); `If-Match` (the GET's
+    digest) refuses a stale edit (412); 409 while a solve runs. Not part of any
+    solve fingerprint: a finance edit never marks the dispatch stale, only a
+    stored investment-case report (its assumptions hash)."""
+    from services.finance.investment_case_runner import finance_digest, finance_inputs_or_422
+
+    if _solver_in_flight_ctx(PyPSAService.get_active_context()):
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                  "message": "a solve is running on this project; change the "
+                                             "finance inputs after it finishes"})
+    new = None
+    if body.finance is not None:
+        new = finance_inputs_or_422(body.finance).model_dump(mode="json")
+    with PyPSAService.get_solver_state_lock():
+        current = getattr(_state["solver_config"], "finance", None)
+        tag = _entity_tag(if_match)
+        if tag is not None and tag != "*" and tag != finance_digest(current):
+            raise HTTPException(412, {"code": "finance_changed",
+                                      "message": "the finance inputs changed since they were "
+                                                 "read; reload and re-apply the edit"})
+        merged = asdict(_state["solver_config"])
+        merged["finance"] = new
+        _state["solver_config"] = SolverConfig(**merged)
+        return _finance_state(new)
+
+
+@router.get("/value_flows/designer")
+def get_value_flow_designer():
+    """What the participants designer offers (IC P3 WP3.6): the assets with
+    their meter side (grid-side ones are not ownable), the tariff items with
+    their default payee, the contracts' parties and the group members.
+    Read-only; 409 like the template route when there is no valid commercial
+    config or a solve is running (its slacks are on the network)."""
+    from models.commercial import CommercialConfig
+    from services.commercial import participants as P
+
+    if _solver_in_flight_ctx(PyPSAService.get_active_context()):
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                  "message": "a solve is running on this project"})
+    commercial = getattr(_state["solver_config"], "commercial", None)
+    if not isinstance(commercial, dict):
+        raise HTTPException(409, {"code": "no_commercial_config",
+                                  "message": "set the commercial config (poc_link) first"})
+    try:
+        bound = CommercialConfig.model_validate(commercial)
+    except ValidationError as exc:
+        raise HTTPException(409, {"code": "commercial_config_invalid",
+                                  "message": exc.errors()[0]["msg"]}) from exc
+    return P.designer_context(PyPSAService.get_network(), bound)
+
+
+class TemplateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    template: str = Field(min_length=1)
+
+
+@router.post("/value_flows/template")
+def build_value_flow_template(body: TemplateIn):
+    """Build a participants template for the current network and commercial
+    config (IC P3 WP3.2). Nothing is saved: the answer is the config, the
+    unsaved draft contracts it needs and notes; the client saves them through
+    the value-flows and solver-config routes.
+
+    Refused while a solve runs (409 `solver_in_flight`, as the value-flows
+    PUT): a solve adds its VoLL and DSR slack generators to the live network
+    for the whole optimisation, and a build then would own them and draft
+    contracts on them (WP3.2 review round 2 #10). It writes nothing, so it
+    takes no lock. The DSR buses passed are those the solve actually enables
+    (price > 0, share > 0), as DR activation settles on them."""
+    from dataclasses import asdict as _asdict
+
+    from models.commercial import CommercialConfig
+    from services.commercial import value_flow_templates as T
+
+    if _solver_in_flight_ctx(PyPSAService.get_active_context()):
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                  "message": "a solve is running on this project; build the "
+                                             "template after it finishes"})
+
+    commercial = getattr(_state["solver_config"], "commercial", None)
+    if not isinstance(commercial, dict):
+        raise HTTPException(409, {"code": "no_commercial_config",
+                                  "message": "set the commercial config (poc_link) first"})
+    try:
+        bound = CommercialConfig.model_validate(commercial)
+    except ValidationError as exc:
+        raise HTTPException(409, {"code": "commercial_config_invalid",
+                                  "message": exc.errors()[0]["msg"]}) from exc
+    try:
+        cfg = _state["solver_config"]
+        dsr_on = (float(getattr(cfg, "dsr_price_eur_per_mwh", 0.0) or 0.0) > 0
+                  and float(getattr(cfg, "dsr_share_of_load", 0.0) or 0.0) > 0)
+        result = T.build(body.template, PyPSAService.get_network(), bound,
+                         dsr_buses=tuple(getattr(cfg, "dsr_buses", None) or ()) if dsr_on else ())
+    except T.TemplateRefused as exc:
+        raise HTTPException(422 if exc.code == "template_unknown" else 409,
+                            {"code": exc.code, "message": str(exc)}) from exc
+    out = _asdict(result)
+    out["config"] = result.config.model_dump(mode="json")
+    return out
 
 
 @router.get("/check_solvers")
@@ -637,7 +1083,14 @@ def run():
         elapsed = _time.time() - t0
         # Total system cost (variable objective + objective_constant, summed
         # across per-period LPs in myopic mode) — see _compute_run_objective.
-        obj = _compute_run_objective(n)
+        # Only for a solve that actually produced one. PyPSA assigns `n._objective` only on a SUCCESSFUL solve
+        # (`assign_solution`) and it is persisted in the netcdf, so it is still
+        # the PREVIOUS run's number after a failure or an abort — the comment
+        # above says as much ("an aborted or failed solve leaves the network as
+        # it was"). Publishing it unconditionally therefore reported a cost for
+        # a solve that produced none, in the status bar and on the queue row.
+        obj = (_compute_run_objective(n)
+               if status in ("ok", "optimal") else None)
         # If the user force-reset us, _state["thread"] has been swapped to
         # another worker (or cleared). Skip the final state write so we
         # don't clobber the new run's status.
@@ -696,6 +1149,8 @@ def run():
         # doesn't surface stale objective / lost-load / Stage-2 state. The
         # thread handle is registered in the SAME apply so there's no window
         # where status="running" but thread is unset.
+        from services.project_context import cleared_result_state
+
         _state_update(
             status="running",
             condition=None,
@@ -704,22 +1159,8 @@ def run():
             last_failure=None,
             stop_event=stop_event,
             log_queue=log_queue,
-            last_lost_load=None,
-            adequacy_report=None,
-            last_reserve_margin=None,
-            eh_redundancy_comparison=None,
-            eh_lever_comparison=None,
-            eh_dtc_stress=None,
-            eh_dtc_planning=None,
-            eh_reference_design_report=None,
-            lopf_results=None,
-            ac_pf_results=None,
-            ac_pf_convergence=None,
-            ac_pf_convergence_list=None,
-            ac_pf_slack_bus_used=None,
-            ac_pf_stripped_voll_slacks=None,
-            ac_pf_converged_count=None,
-            ac_pf_total_snapshots=None,
+            # Every per-solve result, DERIVED — see `cleared_result_state`.
+            **cleared_result_state(),
             thread=t,
             # Which KIND of worker owns `thread`. AC PF and the LP solve share
             # this key with identical status and condition, so without it a

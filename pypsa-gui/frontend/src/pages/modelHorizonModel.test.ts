@@ -8,8 +8,7 @@ import { describe, it, expect } from 'vitest'
 import {
   snapshotWeightKey,
   buildWeightingRows,
-  type WeightingRow,
-} from './modelHorizonModel'
+  type WeightingRow, stepHoursForFreq, FREQ_OPTIONS} from './modelHorizonModel'
 
 const FLAT_ROW: WeightingRow = {
   snapshot: '2024-01-01T00:00:00', objective: 1, generators: 1, stores: 1,
@@ -396,7 +395,7 @@ describe('stepSummary', () => {
 
   describe('weights', () => {
     it('says default when every snapshot still carries weight 1', () => {
-      expect(stepSummary('weights', multiCtx)).toBe('Default weights (every snapshot weighted 1)')
+      expect(stepSummary('weights', multiCtx)).toBe('Default weights (each snapshot weighted by its step length)')
     })
 
     it('says custom when weights have been edited away from default', () => {
@@ -416,5 +415,23 @@ describe('stepSummary', () => {
     for (const [step, a, b] of pairs) {
       expect(stepSummary(step, a)).not.toBe(stepSummary(step, b))
     }
+  })
+})
+
+
+describe('sub-hourly resolution (Edge Investment Case WP1.0)', () => {
+  it('knows the step length of every fixed frequency', () => {
+    expect(stepHoursForFreq('15min')).toBe(0.25)
+    expect(stepHoursForFreq('30min')).toBe(0.5)
+    expect(stepHoursForFreq('h')).toBe(1)
+    expect(stepHoursForFreq('3h')).toBe(3)
+    expect(stepHoursForFreq('D')).toBe(24)
+    expect(stepHoursForFreq('W')).toBeNull()
+    expect(stepHoursForFreq('MS')).toBeNull()
+    expect(stepHoursForFreq(null)).toBeNull()
+  })
+
+  it('offers 15- and 30-minute resolutions', () => {
+    expect(FREQ_OPTIONS.map(o => o.value)).toEqual(expect.arrayContaining(['15min', '30min']))
   })
 })

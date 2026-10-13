@@ -427,6 +427,87 @@ def _wrap_with_ens_cap(network: "pypsa.Network", user_fn, cfg, log_queue=None):
     return wrapper
 
 
+def _wrap_with_import_energy_cap(network: "pypsa.Network", user_fn, cfg,
+                                 log_queue=None):
+    """
+    Compose extra_functionality with the Energy Hub energy import cap (EH
+    spec §6, P17 amendment). For each investment period P:
+
+        Σ_{t∈P} w[t] · Σ_{l ∈ metered} η_l[t] · p0[l,t]  ≤  E × Σ_{t∈P} w[t] / 8760
+
+    ``w`` is the ``generators`` snapshot weighting WITHOUT the period's
+    ``years`` multiplier — the cap is per YEAR of each period, not per
+    period. ``metered`` = ``cfg.import_energy_links``, already oriented
+    grid → hub by the pack patch (so η·p0 is the energy delivered to the
+    hub); bidirectional Links and rolling/myopic are refused at preflight.
+    Added through extra_functionality, not as a PyPSA GlobalConstraint row.
+    """
+    try:
+        cap = cfg.import_energy_cap_mwh_per_year
+        cap = float(cap) if cap is not None else None
+    except (TypeError, ValueError, AttributeError):
+        cap = None
+    links = [str(x) for x in (getattr(cfg, "import_energy_links", None) or [])]
+    if cap is None or not math.isfinite(cap) or cap < 0 or not links:
+        return user_fn
+
+    def _emit(msg: str) -> None:
+        _safe_log(log_queue, f"[IMPORT] {msg}")
+
+    def import_cap_fn(n, snapshots):
+        import xarray as xr
+
+        present = [l for l in links if l in n.links.index]
+        missing = sorted(set(links) - set(present))
+        if missing:
+            _emit(f"Metered import Link(s) {missing} not on the network — "
+                  "left out of the energy cap.")
+        if not present:
+            _emit("No metered import Link on the network — cap skipped.")
+            return
+        if "Link-p" not in n.model.variables:
+            _emit("Link-p variable absent — cap skipped.")
+            return
+        p_var = n.model.variables["Link-p"]
+        snap_coord = p_var.coords["snapshot"]
+        sw = n.snapshot_weightings
+        col = "generators" if "generators" in sw.columns else sw.columns[0]
+        w = sw.loc[snapshots, col].astype(float)
+        if isinstance(snapshots, pd.MultiIndex):
+            period_of = pd.Series(snapshots.get_level_values(0), index=snapshots)
+            periods = sorted(set(period_of))
+        else:
+            period_of = pd.Series("ALL", index=snapshots)
+            periods = ["ALL"]
+        eff_t = getattr(getattr(n, "links_t", None), "efficiency", None)
+
+        def _eff(l) -> pd.Series:
+            if eff_t is not None and l in getattr(eff_t, "columns", []):
+                return eff_t[l].reindex(snapshots).astype(float)
+            return pd.Series(float(n.links.at[l, "efficiency"]), index=snapshots)
+
+        for P in periods:
+            w_p = w.where(period_of == P, 0.0)
+            budget = cap * float(w_p.sum()) / 8760.0
+            expr = None
+            for l in present:
+                coef = xr.DataArray((w_p * _eff(l)).values, dims=["snapshot"],
+                                    coords={"snapshot": snap_coord})
+                term = (p_var.sel(name=l) * coef).sum()
+                expr = term if expr is None else expr + term
+            n.model.add_constraints(expr <= budget, name=f"import_energy_cap_{P}")
+            _emit(f"Period {P}: hub import ≤ {budget:,.1f} MWh "
+                  f"({cap:,.0f} MWh/yr × {float(w_p.sum()):g} h / 8760) on "
+                  f"{', '.join(present)}.")
+
+    def wrapper(n, snapshots):
+        if user_fn is not None:
+            user_fn(n, snapshots)
+        import_cap_fn(n, snapshots)
+
+    return wrapper
+
+
 def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
                          demand_scaled_in_place: bool = False) -> dict | None:
     """

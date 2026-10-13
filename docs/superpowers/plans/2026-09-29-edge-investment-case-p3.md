@@ -1,0 +1,1173 @@
+# Edge Investment Case — Phase 3: participants and value flows (plan v0.4)
+
+**Spec:** `docs/superpowers/specs/2026-09-26-edge-investment-case-design.md` §7 (participants), §12 (UI), §13
+(P3 row), §15 (conservation doctrine), decision 4 (participants first-class), decision 9 (splits never enter
+the objective). **Outline:** P0–P1 plan, "P3 Participants & value flows". **Carried in from P2:** the UI for
+the Tariff builder, Library browser and Contracts editor; the group net-import variable for net energy items
+on multi-member groups; the attribution of exported PV under a BTM PPA (P2 plan, WP2.2b: "P3 attributes
+it"). **Branch:** `claude/energy-tool-features-research-fdixs0`.
+
+**Process (owner's instruction, spec §13):** this plan → review loop until PASS → per WP: TDD, then an
+implementation-review loop until PASS → Phase 3 e2e QA gate (a `qa_value_flows.py` driver discovered by
+`run_qa_drivers.py`, frontend vitest + `tsc`, full backend suite, findings note, independent assessor)
+before P4.
+
+---
+
+## What P3 delivers
+
+A **value-flow ledger**: every money flow of the modelled site as a double-entry line **payer → payee**
+with a `ValueStreamKind`, per modelled period, **unweighted** (one period-year, the `cost_rows` basis; P4
+applies years). The lines come from the exact tariff bill per item (P2), the connection-agreement fees, the
+export price, the grid-side commodity, every contract settlement line (P2) and every asset's cost (the
+Economics seam). Parties are **participants** (internal) or **externals** (retailer, DSO, market, tax
+authority, suppliers). The ledger is **reconciled to `cost_breakdown`** through named bridge terms, so an
+omitted or double-counted flow fails the gate. A **template** fills participants and assignments for the
+five spec §7 structures. A new Results tab `investment` shows a per-participant table and a Sankey, and
+hosts the editors whose APIs landed in P2.
+
+**Not P3:** money over time (years, escalation, discounting, debt, tax) — P4 converts ledger lines to
+`CashflowLine`s (mapping pinned in WP3.1); multi-party co-optimisation (decision 9).
+
+## Dependency graph
+
+```
+WP3.0 value-flow config, route, hashing, types.ts
+ ├─ WP3.1 ledger: sources → lines, coverage, reconciliation to cost_breakdown
+ │   ├─ WP3.2 templates
+ │   ├─ WP3.3a energy hub: allocation keys
+ │   └─ WP3.4 /results/value_flows (+ cache), chat
+ ├─ WP3.3b group net-import LP variable (P2 carry-in; independent of the ledger)
+ └─ WP3.5 FE foundation: clients, typed contracts, `investment` tab shell, commercial writes
+      ├─ WP3.6 Participants designer + per-participant table + Sankey
+      ├─ WP3.7a Library browser
+      ├─ WP3.7b Tariff builder + bill preview
+      └─ WP3.7c Contracts and connection-agreement editors
+```
+
+**Per-WP invariants (all of P3).** The P1 reconciliation gate and the P2 billing gate stay green after every
+WP (`qa_commercial_lp.py` and `qa_billing_contracts.py` run in each WP's verification). **The ledger never
+changes the LP or any committed commercial hash** (decision 9): WP3.3b is the only LP change in P3 and is
+kept out of the ledger WPs. Unknown is `None` + a flag, never 0 (ADR-0001). Every new persisted field is
+backward compatible (P2 configs validate unchanged) and mirrored in `frontend/src/api/types.ts`. Services
+never import routers or `solver_service` (tripwires). Parties are compared with `lp_bindings.same_party`
+(trimmed, case-insensitive) everywhere.
+
+---
+
+## Fixtures and oracles (bind the gate)
+
+| Id | What | Expected |
+|---|---|---|
+| V1 | `single_owner` on the P1 edge fixture (`build_edge_15min`, US tariff, PV + BESS, a grid-side supply generator, an export price, a connection-agreement capacity fee) | coverage complete; reconciliation to `cost_breakdown` closes to the cent through the bridge terms; the commodity line and the fee line present |
+| V1b | V1 plus a costed Line, a Transformer and an asset on a bus without a price column | every costed asset in the ledger (no silent drop); reconciliation still closes |
+| V2 | `btm_ppa`: PV sold as consumed to the site; BESS under an EaaS contract; exported PV attributed to the developer (`export_revenue_to="asset_owner"`); at least one interval with both a tariff export item and an export price | developer receives PPA + EaaS + its export share of both export sources, pays PV/BESS costs; site pays bill + PPA + EaaS; hand formula per interval for the export split |
+| V3 | `landlord_tenant` with a `LeaseContract` | landlord pays asset costs, receives the lease; tenant (= `site_party`) pays lease + bill |
+| V4 | `dso_developer` with a `DrContract` (counterparty `dso`, a participant) on an active DSR bus (loads only until P5) | DSO → developer availability + activation to the cent (P2 C-style formula) |
+| V5 | `energy_hub`: 3 members on a group connection, 15-min, 7 days, self-authored with the working (like H1–H3) | each member's share of every shared item under each key, to the cent; linear import energy metered per member |
+| V6 | group net-import (WP3.3b): a net cost energy item on a 3-member group with an export Link | LP row = billed item to the cent; objective gap 0; the P2 gate numbers unchanged |
+
+### Conservation and reconciliation (spec §7, §15)
+
+Four checks per period; `conservation_ok` (`GatesBlock`, P0) is `True` only when all four hold, `None` +
+`ledger_incomplete:<n>` when a line is `None` (never `True` over unknown money), `False` otherwise.
+
+1. **Double entry** (bookkeeping): one payer, one payee, `payer != payee`, amount ≥ 0 or `None`.
+2. **Internal streams net to zero** (spec §7 literally; also bookkeeping).
+3. **Coverage:** every source record maps to exactly one ledger line or one allocated group — every
+   `per_item` key of the bill, every settlement line, every connection fee record, the export revenue, every
+   grid-side generator, every cost-bearing asset of `asset_economics`. The comparison is on **signed
+   site-view amounts** (`gap._site_view` convention), so a swapped payer/payee fails.
+4. **Reconciliation to independent truth.** Per period, with every amount on the **unweighted period-year
+   basis** (`cost_breakdown.by_period[p]` ÷ years(p) on multi-period networks — `by_period` is years-weighted,
+   `cost_breakdown.py:324`; the top-level totals on a flat network; the same for any per-period input):
+
+   Σ over participants of net outflow to externals (participant → external positive, external →
+   participant negative)
+   = `cost_breakdown` total
+   − **every** `commercial_cost_terms` item (import, export, demand, tiers, tariff capacity, connection fee,
+     dispatch PPA, and any later term such as WP3.3b's `energy_net_group`)
+   + the billed tariff items **whose resolved payee is external**, signed from the participants' side
+   + the connection fees **whose payee is external** (the `included_in_total: False` fixed fee too)
+   + the contract lines with **one external party**, signed from the participants' side
+   − the export-price revenue (Σ w·p0(export_link)·`ic_export_price`, received by participants).
+
+   Closes to the cent. Lines between participants never enter it (they net out); a line between two
+   externals (a contract naming two externals) is excluded from both sides and listed in `notes`. A line
+   whose party is not established cannot be classed internal or external: it makes check 4 and
+   `conservation_ok` `None` (`ledger_incomplete`), like a `None` amount. **Not in either side:** the DSR slack
+   cost and VoLL shedding — transient LP terms absent from `cost_breakdown` (they are the objective
+   decomposition's residual, `objective_decomposition.py:94-100`); the ledger discloses their amounts
+   (from `buses_t["ic_dsr_p"]` and the lost-load capture) as `dsr_slack_not_a_cash_flow` /
+   `voll_not_a_cash_flow`, with no line. This check fails on an omitted source, a double-counted one, a
+   swapped direction and a mis-resolved payee.
+
+---
+
+## WP3.0 Value-flow config, route, hashing, types
+
+**Model** (`models/commercial.py`):
+
+```python
+TariffPayeeRule(kind: TariffItemKind | None = None, item_id: str | None = None, payee: str)  # item_id wins
+AssetOwnership(asset_id: str, component: Literal["Generator","StorageUnit","Store","Link"], owner: str)
+HubMember(link: str, participant: str, contracted_mw: float | None = None)
+ValueFlowConfig(
+    template: Literal["single_owner","btm_ppa","landlord_tenant","dso_developer","energy_hub","custom"]
+              = "custom",
+    template_version: str | None = None,       # builder id + version, pinned
+    built_digest: str | None = None,           # digest of the config the builder produced
+    participants: list[Participant] = [],      # internal parties; must include `site_party`
+    externals: list[str] = ["retailer", "dso", "tso", "market", "tax_authority",
+                            "capex_supplier", "om_contractor"],
+    tariff_payees: list[TariffPayeeRule] = [],
+    asset_owners: list[AssetOwnership] = [],   # owners are PARTICIPANTS; unassigned → site_party (note)
+    hub_members: list[HubMember] = [],         # energy hub only
+    allocation: AllocationKey | None = None,   # energy hub only
+    export_revenue_to: Literal["site_party", "asset_owner"] = "site_party",
+)
+CommercialConfig.value_flows: dict[str, Any] | None = None   # raw JSON; see below
+```
+
+- **`value_flows` is stored raw** on `CommercialConfig` and validated into `ValueFlowConfig` **lazily** by
+  `participants.py` (a failure is a `value_flows_invalid` ledger payload). `apply_commercial_for_solve` and
+  `_lp._parse` parse the whole `CommercialConfig` (`solver_service.py:751`, `cost_rows`, `billing`): a stored
+  `value_flows` that later fails a structural rule must never fail a solve or invalidate the commercial
+  rows. Test: a corrupted `value_flows` still solves, bills and reconciles.
+- **Asset owners are participants** (validated at the route): an asset owned by an external would create
+  external → external cost lines while `cost_breakdown` still counts the asset. A third-party asset owner
+  (a PPA seller operating on site) is modelled as a participant.
+
+- **Tariff payee precedence:** an explicit rule (item id, then kind) → the `RetailContract`'s retailer for
+  the attached tariff (`contracts.retail_parties`) → the default: `energy`, `fixed`, `certificate` →
+  `retailer`; `demand`, `capacity` → `dso`; `tax_levy` → `tax_authority`. `Tariff.dso_or_retailer` is a
+  **label** on the `retailer` node, never a party id. The resolved payee of each item is echoed in
+  `provenance.tariff_payees`.
+- **`site_party` is never changed by P3.** Templates create the participant whose id equals the existing
+  `site_party` and give it the template's role (`contracts_record` and `ppa_dispatch_hash` hash
+  `site_party`, `settlement_inputs.py:203`, `lp_bindings.py:1651`: changing it would flip settlement drift and
+  the dispatch-PPA hash).
+- **Validation lives at the route, not in a model validator** (`_lp._parse` runs in `cost_rows`, `billing`,
+  `gap`: a stale party must never make the whole commercial layer invalid or fail a project load). The
+  route checks: participant ids unique and disjoint from `externals` (by `same_party`); `site_party` is a
+  participant; every party named by a contract, an ownership or a hub member is a participant or an
+  external; `hub_members` / `allocation` only with a group contract; `fixed_shares` keys = hub
+  participants. The model keeps structural checks only. At ledger time a party that no longer resolves (a
+  contract edited later) is a line flagged `party_not_established:<name>`. A contract party that is `None`
+  in P2 (CfD `generator_owner`, DR `counterparty`) stays `party_not_established` (the P2 rule), never
+  defaulted.
+- **Route:** `PUT /api/simulation/commercial/value_flows` — merges `value_flows` into the current
+  commercial config **server-side** under the solver-state lock, validates it fully (`ValueFlowConfig` +
+  parties; no `bind_commercial`: no network validation, Library resolution or series writes), takes an
+  `If-Match` digest of the current `value_flows` (412 on mismatch), 409 `solver_in_flight` during a solve,
+  409 `no_commercial_config` when there is no commercial config (the `attach_tariff` rule). The chat tool
+  uses the same route. Nothing at solve time reads `value_flows`.
+- **`PUT /solver_config` keeps the stored `value_flows`** when the submitted `commercial` omits the key
+  (it replaces the commercial block today, `routers/simulation.py:401-417`, and `bind_commercial` dumps the
+  whole model back). Mechanism: the route reads `"value_flows" in commercial.model_fields_set` **before**
+  `bind_commercial` (after it, `resolve_tariff_ref` re-validates from a dump and every field reads as set,
+  `binding.py:62-64`) and re-inserts the stored value when the key was omitted. An **explicit**
+  `value_flows` in this body (including chat's `update_solver_config`) is refused with a 422 naming the
+  value-flows route (it would bypass the full validation and `If-Match`). Tests: omitted, `null`, explicit,
+  and a Library-tariff-ref config; a tariff save after a value-flows edit keeps the edit.
+- **Hashing:** `("CommercialConfig", "value_flows"): None` in `FIELDS_AFTER_V1`. The adequacy
+  `_config_hash` (`services/adequacy/report.py:55`, `asdict(cfg)`) **pops `commercial.value_flows`
+  whatever its value** (`bind_commercial` will dump `value_flows: null` into every commercial dict), so
+  neither a participant edit nor the new key changes an AdequacyReport's `assumptions_hash`.
+- **Single source of participants:** `ValueFlowConfig.participants`. `FinanceInputs.participants`
+  (`models/finance.py:176`) is filled from it in P4; a P0 fixture that sets it keeps validating (it is
+  documented as derived).
+- **types.ts:** `Participant`, `ParticipantRole`, `ValueStreamKind`, `AllocationKey`, `ValueFlowConfig` and
+  parts; the typed contract variants (`PpaContract` … `RetailContract`) with `CommercialContract` kept as
+  their union; `CommercialConfig.value_flows: ValueFlowConfig | null` (commented: stored raw, validated by
+  the server on write; a stored bad value makes the ledger answer `value_flows_invalid`).
+
+**Tests:** round trip; every P2 driver config validates unchanged; the route's party cases (typo, case,
+disjointness, stale party at ledger time → flag, not an invalid config); `If-Match` 412; the
+**hash-invariance test**: flip `value_flows` and assert unchanged demand, tiers, PoC links, agreement,
+`ppa_dispatch_hash`, `contracts_record`, no `config_changed_since_solve`, and an unchanged adequacy
+`assumptions_hash`; the FIELDS_AFTER_V1 inventory test.
+
+
+**WP3.0 implementation (fb35865; master-merge regressions fixed in the next commit).**
+- **Review round 1 → PASS WITH CONDITIONS, fixed:**
+  - #1 a misshaped body (the config unwrapped, or `{}`) cleared the stored value; the body field is now required and extra keys are forbidden (422);
+  - #2 the fixture test was tautological; it is now a recipe-1/2 invisibility check plus route round trips of three P1/P2 shapes;
+  - #3 `value_flows: Any`, so a string or list in a hand-edited file cannot fail `_lp._parse`; a live solve with three corrupted values solves, bills and reconciles;
+  - #4 a stored commercial config that no longer validates answers 409 `commercial_config_invalid`, not 500;
+  - #5 more party checks: blank ids, blank or duplicate externals, a payee rule naming an item the tariff lacks, duplicate hub links or participants, `contracted_capacity` needing every `contracted_mw`;
+  - #6 `If-Match` accepts quoted and weak tags;
+  - #7 `attach_tariff` strips `value_flows` before its PUT;
+  - #8 a live solve, then a value-flows edit, then billing and `cost_breakdown`, shows no `config_changed_since_solve`.
+- **Review round 2 → PASS.** Notes applied: `If-Match: *` matches any current value; `types.ts` says a reader trusts the shape only when `status === 'ok'`; the parse error names `value_flows` for a non-object root. **For WP3.3a:** the route now refuses `contracted_capacity` without every `contracted_mw` and a participant on two hub links; the ledger-time `allocation_not_established` stays for configs that became stale after saving.
+- The WP3.5 editor and the WP3.4 chat tool must always send `If-Match`. Chat errors from the new 422s arrive as the generic `tool_error` kind, like the existing binding refusals (INFO).
+---
+
+## WP3.1 Ledger: sources, lines, coverage, reconciliation
+
+`services/commercial/participants.py` (pure; imports `models` and `services.commercial` only):
+
+```python
+ValueFlowLine(period: str, payer: str, payee: str, value_stream: ValueStreamKind, source: str,
+              source_id: str, tariff_item: str | None, tariff_item_kind: str | None,
+              contract_id: str | None, asset: str | None,
+              basis: Literal["cash","annuity","model_only"],
+              amount: float | None, flags: list[str])
+build_ledger(inputs: LedgerInputs, vf: ValueFlowConfig, *, site_party: str) -> Ledger
+check_conservation(ledger, inputs) -> ConservationResult(ok: bool | None, checks, flags)
+```
+
+`LedgerInputs` is plain data built by the results caller (`services/results/value_flows.py`, WP3.4) — the
+commercial package never calls `physical_quantities` / `asset_economics` (they import `solver_service`).
+
+| Source | Line(s) | Stream |
+|---|---|---|
+| Bill: `bill_site` `per_item` per period | one line per item, **signed site view**: a positive amount site_party → payee, a negative one reversed (a cost item with negative rates, a revenue item) | by item kind and `measured_on`: energy on import → `energy_import`, on export / revenue → `energy_export`, a DSO-paid energy item → `network_energy`; demand → `demand_charge`; capacity → `network_capacity`; fixed → `retail_fixed`; certificate → `certificates`; tax_levy → `tax` (with `tariff_item_kind="tax_levy"`: P4 treats levies as deductible opex, never as corporate tax) |
+| Connection agreement: `n.meta["ic_connection_fee"]` (fee × `p_nom_opt`) and `ic_connection_fixed_fee` | site_party → `dso` (or the agreement's payee rule) | `network_capacity` |
+| Curtailment compensation (`curtailment_compensation_eur_per_mwh` set) | `None` + `curtailment_compensation_not_computed` (nothing computes it yet) | `network_capacity` |
+| Export price: Σ w·p0(export_link)·`links_t["ic_export_price"]` per period (signed: a negative price means the site pays) | `market` → site_party (or the asset owners, `export_revenue_to`) | `energy_export` |
+| Grid-side assets (the meter-side classifier below), any class | VOM: site_party → `market`, flag `commodity_from_grid_side_generator` (`energy_import`); fixed cost: site_party → `market`, flag `grid_side_asset_cost` (`other`), `basis="model_only"` (a modelling proxy, not a cash flow: excluded from the P4 conversion, labelled in the table, kept in check 4); never an owned asset | `energy_import`, `other` |
+| Settlement lines (P2 `settlement_lines`) | payer → payee; a negative amount reversed | ppa_energy, ppa_sleeving_fee → `ppa_settlement`; cfd_difference → `cfd_settlement`; dr_availability / dr_activation → same; lease_payment → `lease`; eaas_fee → `eaas_fee`; unknown → `other` + `unmapped_stream:<s>`. `ppa_excess_mwh` is a volume with no money: disclosed in `notes`, no line |
+| Site-side assets and network assets (Lines, Transformers), enumerated from the **`physical_quantities` superset** plus Lines / Transformers — **not** `asset_economics` (it excludes Lines and Transformers and skips assets on price-less buses or without a dispatch column, `asset_economics.py:79-85, 340-349, 465-472`) | owner → `capex_supplier`: annualised capex = per-horizon rate × `p_nom_opt` × active(p), `basis="annuity"`; owner → `om_contractor`: FOM, same arithmetic, `basis="cash"`; owner → `om_contractor`: per-asset operational expenditure from **`n.statistics()` "Operational Expenditure"** — the source `cost_breakdown.opex` reads (it covers storage and quadratic cost terms); PyPSA has no VOM/fuel split, so one `vom` line. Network assets default to site_party (assignable). An asset `_meter_sides` cannot classify → its lines carry `asset_side_unclassified` (never dropped) | `capex`, `fom`, `vom` |
+
+- **No double counting:** the LP's `energy_import` / `energy_export` / `demand_charge` / tier / capacity
+  cost rows are never ledger sources (they are the LP's view; P2's gap compares them). A `changes_dispatch`
+  PPA appears once (its settlement line). The tariff's export items and the export price are separate
+  sources (the LP's `energy_export` row mixes them).
+- **Meter-side classifier** (`participants.classify_buses`, tested on its own): `lp_bindings._meter_sides`
+  returns only `(seen, bypass)` — the site-side buses and the grid-side buses reachable from the site
+  without crossing the meter (`lp_bindings.py:483-522`) — so it cannot place the V1 `grid_supply` generator
+  on bus `grid`. The classifier: **site-side** = `seen`; **grid-side** = the meter Links' grid buses plus
+  everything reachable from them without crossing the meter; `bypass` buses are grid-side and flagged
+  `meter_bypass`; **unclassified** = reachable from neither (flag `asset_side_unclassified`, never dropped).
+  **Meter Links** (import, export, group members: the PoC capital cost or connection extension) are
+  site-side assets owned by site_party; the connection fee stays its own line.
+- **Not money, disclosed:** the DSR slack cost and VoLL shedding (not in `cost_breakdown` either; amounts
+  in `notes` with `dsr_slack_not_a_cash_flow` / `voll_not_a_cash_flow`).
+- **Export attribution** (`export_revenue_to="asset_owner"`): covers the export-price revenue **and** the
+  tariff's export revenue items, split **per interval** pro rata to each owner's on-site generation in that
+  interval (the `as_consumed_btm` rule, P2); the results caller supplies the interval frames.
+- **Per period:** one ledger per investment period; money unweighted.
+- **P4 mapping (pinned now):** a `ValueFlowLine` becomes one `CashflowLine` per operating year with
+  `participant` = the side whose cash it is (both sides for internal lines), `counterparty` = the other,
+  `amount` signed from the participant, `provenance.source` carrying `source` / `source_id` /
+  `contract_id` (drill-down survives); `basis="annuity"` and `basis="model_only"` lines are **not** converted — P4 assigns the
+  overnight capex (`overnight_cost` + `capex_phasing`) to the owner from `asset_owners`; a `None` line makes
+  that participant's returns `not_established` in P4 (never 0).
+
+**Tests (TDD, `tests/test_value_flow_ledger.py`):** each source row; sign reversals (negative bill, negative
+settlement, negative export price); `None` kept; the stream map; party resolution; the four checks, each
+failing on its own corruption (dropped source, duplicated source, swapped direction, amount off by 0.01,
+phantom internal party, a mis-resolved payee); V1 and V1b reconciliation to the cent through the bridge,
+flat and multi-period; a tariff export item **and** `export_price_ref` together (no double count); an
+internal DSO (V4) closes; the DSR / VoLL disclosures when they dispatch.
+
+
+**WP3.1 implementation (f66173b).**
+- **Review round 1 → PASS WITH CONDITIONS, fixed.** The reviewer's probes closed check 4 on:
+  - tariff capacity items (extendable and fixed PoC);
+  - the firm and fixed connection fees;
+  - DSR and VoLL;
+  - activity masking;
+  - the export split across DST;
+  - a 35,040-snapshot year (ledger in 2.9 s, no cache needed).
+
+  Fixes:
+  - **H1:** an unsettled contract (or a retail contract on another tariff) is a None line plus a blocking flag, never a vanished contract.
+  - **H2:** the bill's, the cost terms' and the settlement's flags reach `LedgerInputs.input_flags`. Drift, a partial import, an unsettled contract, a term not established and an unbilled period make every period None through a fifth check, `inputs_established`. Per-period bill flags are disclosed.
+  - **#3:** a single `_sources` definition gives each source's expected legs (debtor, creditor, signed value) and stream. The builder emits them; coverage compares payer AND payee (`same_party`), signed sums and the stream, so a moved payer, a moved capex payer, a relabelled stream and a line contradicting its source all fail. What check 4 can and cannot see is documented; check 2 is documented as a bookkeeping identity.
+  - **#4:** `ValueFlowConfig.connection_fee_payee` replaces the unsaveable `connection_fee` payee rule.
+  - **#5:** `classify_buses` runs two searches (site, grid). A bus both reach is behind a meter bypass: flagged, on the nearer side, a tie on the site side. A site-side Generator on a bus of another carrier is a `fuel_supply_generator` (opex → market, stream `fuel`). Eight classifier unit tests.
+  - **#6:** `same_party` everywhere.
+  - **#7:** a capacity item on `peak_import` is `network_capacity`.
+  - **#8:** None disclosures are flagged; sub-cent disclosures are LP noise; the curtailment penalty is disclosed; NaN→0 in `_per_asset` is documented; the per-period total is guarded.
+  - **#9:** skipped export-split sources are flagged; bill items split at any sign; `asset_under_external_ppa` notes.
+  - **#10:** imports moved to the top, and the `build_ledger` docstring written. The plan's `site_party` argument is `inputs.site_party`.
+  - **#11:** V1b is multi-period too; live DSR/VoLL (VoLL equals the lost-load capture's cost); live unsettled and dead-retail contracts, drift, partial import; the export split by hand with two site generators whose shares vary; the phantom-party cases split (a stale party in a source → None, a line contradicting its source → coverage fails).
+- **Review round 2 → PASS WITH CONDITIONS, fixed:**
+  - **R1 (regression):** split legs resolving to the same (payer, payee) collided in coverage (two generators of one owner; a site generator beside the no-generation share). Legs are now merged by (debtor, creditor), compared with `same_party`, before emitting. Unit and live same-owner tests.
+  - **R2:** the blocking list is explicit (exact names plus prefixes). `demand_months_not_established`, `group_energy_share_not_established` and `*_recipe_changed` are disclosures. A representative-week run keeps its ledger (live test).
+  - **R3:** `is_fuel_supply` requires a non-electric bus carrier (AC, DC, low voltage, … never qualify), no Load, and a bus that feeds the site only as Link input. Tests: PV on LV and DC buses, gas behind a CHP, a heat bus fed by a Link.
+  - **R4 (LOW, accepted):** with a bypass, both searches reach the whole connected network, so every asset carries `meter_bypass`. Placement is right and preflight warns; noise only.
+  - **R5:** check 2 stays a documented identity.
+- **Review round 3 → PASS.** R1–R3 closed, no regressions in probes 1–9. **Note for WP3.4/WP3.6:** merged export-split legs give one line per (owner, source); if the Sankey or drill-down needs per-asset shares, carry the unmerged parts as line metadata.
+---
+
+## WP3.2 Templates
+
+`services/commercial/value_flow_templates.py`: builders `(network_summary, commercial) -> TemplateResult
+(config, draft_contracts, notes)`, pure, registered with a pinned `template_version`; `built_digest` =
+digest of the produced config. `template_edited` = current digest ≠ `built_digest` (disclosure);
+`template_stale` = the network's assets differ from those the builder saw (disclosure). Builders never
+save contracts: a missing one is returned as an **unsaved draft** for the user to confirm.
+
+| Template | Participants (`site_party` keeps its id) | Ownership / flows / needed contracts |
+|---|---|---|
+| `single_owner` | site_party (site_owner) | every site-side asset owned by site_party |
+| `btm_ppa` | site_party (offtaker), `developer` | the developer owns **only the PPA's `asset_ids`** (PPA seller=developer, buyer=site_party, `as_consumed_btm` or `pay_as_produced`); other developer assets need an EaaS or lease draft; `export_revenue_to="asset_owner"` pro rata by the `as_consumed_btm` rule |
+| `landlord_tenant` | `landlord`, site_party (tenant) | assets owned by `landlord`; a `LeaseContract` draft lessor=landlord, lessee=site_party |
+| `dso_developer` | site_party (developer), `dso` moved from externals to participants | assets owned by site_party; a `DrContract` draft counterparty=dso (on loads until P5) |
+| `energy_hub` | site_party (hub, the group-contract holder), one `hub_member` per member Link | members own the assets on their bus; `allocation` required (WP3.3a) |
+
+`POST /api/simulation/value_flows/template {template}` → `TemplateResult` (nothing saved). **Tests:** each
+template on its fixture; drafts for missing contracts; `template_version` pinned in
+`tests/fixtures/investment_case/value_flow_templates.json`; `template_edited` / `template_stale`.
+
+
+**WP3.2 implementation.**
+- `services/commercial/value_flow_templates.py` (five builders, `build`, `template_status`, `config_digest`, `assets_digest`, `source_sha`) and `POST /api/simulation/value_flows/template` (409 `no_commercial_config` / `commercial_config_invalid` / a template refusal; 422 `template_unknown`).
+- `template_version` = `<name>@<version>`; the fixture pins version and builder source hash.
+- `ValueFlowConfig.built_assets_digest` added (for `template_stale`).
+- Meter Links and network branches stay with `site_party` in every template (the connection is the site's).
+- `is_fuel_supply` moved beside the classifier (`participants`), and `branch_edges` extracted.
+
+**WP3.2 review round 1 (c41ca58): FAIL** — binding #1–#3; #4–#9 fixed with them; #10–#11 notes.
+Probed end to end through the routes (POST template → PUT solver_config with the drafts → PUT
+value_flows with If-Match → solve on the session → `value_flow_ledger`).
+- #1 HIGH: contract parties were never listed as externals — single_owner / btm_ppa on V1 (PPA + lease)
+  got 422 from the value-flows route. → `_with_parties` in `build`: every party a saved contract or a
+  draft names that is not a participant becomes an external; no participant stays an external.
+- #2 HIGH: the dso_developer DR draft had no `contracted_mw` (ledger `ok=None`) and DSR state was
+  ignored. → the draft carries `contracted_mw: null`; `dr_needs_contracted_mw:<id>` for an adopted DR
+  without it; `dsr_not_enabled:<bus>` when the load's bus is not among the buses the solve enables
+  (the route passes `dsr_buses` only when DSR price and share are > 0).
+- #3 MEDIUM (binding): zero-price drafts solved silently. → every draft money field is `null` (the
+  contract model refuses to save it until priced) with a `draft_needs:<id>:<fields>` note.
+- #4: btm_ppa owns `PPA.asset_ids ∩` site-side generators, notes `ppa_assets_not_on_site`,
+  `several_btm_ppas_first_used`, and refuses `template_conflicting_ppa` rather than drafting a second
+  PPA over output the site does not buy.
+- #5: landlord_tenant gives the landlord `lease.asset_ids ∩` site assets only.
+- #6: dso_developer adopts only a DSO-like counterparty (`dso`, or not a default external); others are
+  noted (`dr_counterparty_not_a_dso`, `dr_without_counterparty`), never drafted over.
+- #7: the pin hashes the whole module plus the classifier (`code_sha()`); the fixture is a history of
+  `{code_sha, versions}` whose entries must each bump a version; `template_outdated` when a stored
+  `template_version` is older than the registry's.
+- #8: `config_digest` leaves defaults out (nested, and a top-level value equal to its default in any
+  order) and sorts lists canonically — a reorder or a new defaulted field is not an edit.
+- #9: `built_assets_digest` → `built_inputs_digest` (site assets + contracts' type/id/parties/assets/
+  loads + PoC + group members; money fields excluded). A build counts its own drafts as saved, so the
+  normal flow reads `[]`; an unsaved draft reads `template_stale`. A PoC that leaves nothing site-side
+  is noted `no_site_side_assets`.
+- #10: the route takes no lock and no solver-in-flight check — it only reads the network and the
+  solver config (the solve adds no component the builders read; its slacks are transient) and writes
+  nothing; stated in its docstring. The WP3.4 chat and WP3.6 designer surface `notes`.
+- #11: landlord_tenant notes `connection_costs_on_tenant`; energy_hub member ids never collide with
+  `site_party` and the member region reads bus0–bus4. **M5 deviation (recorded):** btm_ppa drafts no
+  EaaS contract; storage stays with the site and the note is
+  `site_keeps_assets_developer_needs_eaas_or_lease:<ids>`.
+- Tests: `test_value_flow_templates.py` (46 incl. 7 live e2e on V1 through the routes: all five
+  templates, with and without drafts; dso with DSR enabled; energy_hub on a two-member hub).
+
+**WP3.2 review round 2 (1e952e7): PASS WITH CONDITIONS** — #1–#9 and #11 closed; binding #10: the
+route's "a solve adds no components" was false (the VoLL/DSR slacks sit on the live network for the
+whole optimisation; a build mid-solve owned `__voll_*` / `__dsr_*` and drafted a PPA on them). → the
+route answers 409 `solver_in_flight` like the value-flows PUT (tested), docstring corrected. INFO taken:
+btm_ppa notes `developer_is_default_external:<party>` (btm_ppa → version 3, pin history appended).
+INFO left: `_contract_parties` / `same_party` / the models are outside `code_sha`; hub member ids
+`member_import_2` vs `member_import2` read alike (the name field disambiguates). **WP3.2 closed.**
+---
+
+## WP3.3a Energy hub: allocation
+
+`participants.allocate(ledger, hub_inputs, vf)` splits the hub's shared lines into internal lines between
+`hub` (= site_party) and each member; `hub` then nets to its external payments.
+
+- **Linear import energy items** (energy items without tiers, measured on import): **metered per member**
+  — each member rated through `tariff_engine.rate` with a one-item tariff and the group bill's own
+  `billing_period` / `represents_hours` / `per_item` vs `per_item_sampled` choice; the last member (sorted
+  id) takes the remainder; the residual before it is asserted ≤ 1e-9. A share key would misallocate TOU
+  costs.
+- **Keyed items** (demand, capacity, tiers, fixed, net items, the connection fee, export revenue):
+  - `contracted_capacity` — `HubMember.contracted_mw` (all set, sum > 0, else `allocation_not_established`);
+  - `peak_contribution` — each member's import in the group's billed interval per demand window and month,
+    on the item's **settlement-interval means** (the engine's `interval_key`), so shares re-add to the
+    billed kW; ties → the first maximal interval; when a ratchet floor binds, the contributions in the
+    month that set the floor. `demand_lines` records neither the peak interval nor the floor's source month
+    (`tariff_engine.py:898`), and the engine is P2-gated, so `allocate` **recomputes both** from the engine's
+    `interval_key` and the candidate months of `_ratchet_floor_prior` (it returns only the value and a
+    missing flag, `tariff_engine.py:287-326`): the floor's source month is the **argmax over the same
+    candidate months** for all three modes (range, cyclic, designated months), earliest on ties; a floor
+    from meter history (no modelled month) → `allocation_not_established:<item>`; non-demand items under this key fall back to `energy`
+    (disclosed);
+  - `energy` — per-period member import energy (Σ w·p0 per member in the period), **not** the
+    years-weighted `ic_group.energy_share`;
+  - `fixed_shares` — the key's shares.
+- **Direction:** a cost share runs member → hub; a revenue share (export, a negative line) hub → member.
+- **Remainder:** shares in exact floats; the last member in **sorted-id order** takes `item − Σ others`.
+
+**Tests:** V5 under all four keys with the working in the fixture; remainder exactness; tie rule; the
+ratchet-floor month; missing-key refusals; conservation checks 3–4 still close after allocation.
+
+**WP3.3a implementation.**
+- `services/commercial/hub_allocation.py` (pure): `period_hub(...)` → `participants.HubPeriod`
+  (`energy_mwh`, `metered`, `peak`, `flags`); `is_metered`, `is_peak_item`, `floor_source_month`.
+  `services/results/value_flows._hub_inputs` feeds it each group member's `p0` on the rating arguments
+  `bill_site` uses (step, represented hours, billing period, site clock) and the group bill's own
+  `RatingResult` per period (`LedgerInputs.hub`).
+- The allocation is a ledger SOURCE (`source="allocation"`, `source_id="<source>:<id>"`, the shared
+  source's stream), so the coverage check covers it: `participants._allocation_sources` splits the
+  hub's own legs of every bill item, connection fee and export-price revenue (an `asset_owner` export
+  split already paid to owners is not re-split); contract and asset lines are never allocated;
+  curtailment compensation (always None) is not split.
+- Peak contribution: the group's billed interval per (month, window) is re-derived from the engine's
+  `interval_key` means and checked against the bill's `peak_kw`; a binding floor splits on its source
+  month (argmax over the same candidate months, earliest on ties), checked against the engine's floor
+  — a floor from meter history → `allocation_not_established:<item>:ratchet_floor_from_meter_history`.
+- A residual above 1e-9 relative, an unknown member rating or key, or an unknown shared amount gives
+  None lines flagged `allocation_not_established:<id>:<reason>` (ADR-0001), never a guess.
+- **Deviations (recorded):** per-kWh import levies and certificates (no tiers) are metered like energy
+  items (a key would misallocate them as it would a TOU rate); `value_flows_problems` requires every
+  group member to be a hub member when an allocation key is set (a member outside the hub would leave
+  its share with nobody); a hub member that IS `site_party` gets no line to itself.
+- Tests: `test_value_flow_allocation.py` (27): V5 regenerates from `fixtures/investment_case/hub/
+  v5_arithmetic.py` (stdlib only, no half-cent ties) and every share matches to the cent under all four
+  keys with conservation ok; remainder exact; revenue direction; energy fallback disclosed; tie rule;
+  ratchet floor month (and parity with `_ratchet_floor_prior` in the three modes); meter-history floor;
+  unknown key / rating; config refusals; live: a solved two-member V1 hub closes under every key (flat
+  and multi-period).
+
+**WP3.3a review round 1 (271d9d5): PASS WITH CONDITIONS** — binding #1–#3; #4–#5 taken; #6–#8 noted.
+The reviewer confirmed (independent recomputation to the cent) TOU windows with 30-min / hourly
+settlement across DST, all ratchet modes with windowed and convex tiers, representative weeks,
+multi-period, net / peak_import demand, an asset-owner export split with a hub, and that coverage
+fails on every tampering of an allocation line.
+- #1 HIGH: a hub made stale by a later `group_members` change (the solver-config route does not
+  re-validate `value_flows`) was split silently over the remaining members. → `HubInputs.group_links`;
+  the ledger refuses every allocation line (`allocation_not_established:<id>:hub_members_stale`) when
+  the hub members' Links are not exactly the group's, or fixed shares key other participants.
+- #2 MEDIUM: the specific reason (e.g. `ratchet_floor_from_meter_history`) never reached the ledger.
+  → `HubPeriod.peak_reason` / `reason`; the line's flag carries it; peaks are computed only under the
+  `peak_contribution` key (no spurious reasons under other keys).
+- #3 MEDIUM: an export-measured demand item was split by the members' IMPORT in the export peak
+  interval. → not a peak item: it falls back to energy, disclosed `allocation_fallback_energy`
+  (recorded choice).
+- #4 (taken): a linear import item is metered or not split (`member_rating_unknown` /
+  `period_not_rated`), never keyed — `HubInputs.metered_items` / `peak_items` are known whether or not
+  a period rated.
+- #5 (taken): each member is rated once with all its linear items (was once per item).
+- #6: members are sorted case-insensitively (`strip().casefold()`, the party-matching rule) — the
+  remainder member does not depend on capitalisation. #7: V5 stays one naive month; windows, DST,
+  ratchets and ties are pinned by the engine-parity tests (and the reviewer's recomputation). #8:
+  noted.
+- Tests: +7 (34 in `test_value_flow_allocation.py`).
+
+**WP3.3a review round 2 (83d361f): FAIL, one binding item** — #1–#6 verified closed on the probes
+(35k rows × 6 members 4.05 s → 1.47 s; the ratchet split still matches the independent
+recomputation to the cent). R2-1: clearing the group contract after the hub was saved made
+`_hub_inputs` return None, so the allocation was silently not applied. → it returns a stale
+`HubInputs` (no group links), so every allocation line is None flagged `hub_members_stale` (tested).
+Not binding, taken in WP3.4: the payload's `flags` name the lines' `allocation_not_established:*`.
+
+**WP3.3a review round 3 (fa2aabc): PASS.** R2-1 verified (the cleared group gives None lines flagged
+`hub_members_stale`, conservation None); no regressions (probes re-run, ratchet split to the cent,
+35k rows × 6 members 1.58 s). **WP3.3a closed.**
+
+---
+
+## WP3.3b Group net-import LP variable (P2 carry-in)
+
+P1 refuses a `measured_on="net"` energy item on a multi-member group with an export Link
+(`lp_bindings.validate_for_network`, "gross member import the group meter nets out"). Lift it for the
+**cost** direction:
+
+- Variables `ic_group_net_import[t]`, `ic_group_net_export[t]` ≥ 0 with the **equality**
+  `net_import − net_export = Σ_members p_member − p_export`. No capacity bounds (members or the PoC may be
+  extendable, so `p_nom` is not the solved capacity); with cost-only pricing at rates ≥ 0 the split is
+  bounded. Where a rate is 0 the split is degenerate, so the committed record and the cost row use
+  **max(0, Σ p_member − p_export) recomputed from dispatch**, never the raw variable values.
+- A net **cost** item is priced on `net_import` only when every rate is ≥ 0 (else refused, naming the
+  item); the item is **removed from the per-member adders and from the export adders** — its
+  `net_split_by_direction` `_side` handling (today priced on both sides) is replaced for this item — so it
+  is priced once.
+- Solve strategies: the same coverage as the existing group terms (`add_group_terms`); any strategy that
+  refuses group terms refuses this too (stated and tested for rolling and myopic). A net **revenue** item keeps the existing gross-export pricing with the `net_split_by_direction` gap
+  cause (P2), or is refused — never priced as a concave max.
+- Commit record (`n.meta["ic_group_net"]`) with a drift hash (recipe 2, FIELDS_AFTER_V1 where a model field
+  is added), a `cost_rows` label `energy_net_group`, the `cost_breakdown` "Commercial" row, `gap.py`'s LP-side
+  mapping of the item, reload tests.
+- **No billing change:** `bill_site` already meters Σ members − export (`billing.py:5-8`), so the P2 gate
+  numbers are untouched (asserted).
+- The other group refusals stay (regression tests).
+
+**Tests:** V6 (LP row = billed to the cent, objective gap 0, a case in
+`test_commercial_objective_reconciliation.py`); negative-rate refusal; revenue-direction behaviour; the
+removal from adders (no double pricing); reload; P1 and P2 drivers green.
+
+**WP3.3b implementation.**
+- `lp_bindings`: `group_net_items(cfg)` (net cost, non-demand, untiered energy items on a ≥2-member
+  group with an export Link), `group_net_hash`, `_group_net_spec` (Σ of their rates, €/MWh per
+  snapshot), `add_group_net_terms` (the two variables, the balance equality, objective += Σ w·price·
+  net_import weighted as a marginal cost over the snapshots the LP holds), `group_net_amounts` (the
+  record's amount from the dispatch, max(0, Σ members − export)). `_adders` skips the items (never on
+  members or export); `validate_for_network` replaces the P1 refusal with the negative-rate refusal
+  (naming the item); a net REVENUE item keeps gross-export pricing and its `net_split_by_direction`
+  cause. `LP_RECIPE` 6 (`GROUP_NET_RECIPE`). Commit: `n.meta["ic_group_net"]` (items, members,
+  export, link, items_hash, hash_version, lp_recipe) and `links_t["ic_group_net_price"]` (column = the
+  PoC); cleared by a solve without it. Scenario networks refuse the term (as the dispatch PPA).
+- `cost_rows`: label `energy_net_group` (→ the `cost_breakdown` "Commercial" rows and horizon total),
+  drift on `items_hash`, `energy_net_group_not_established` (blocking in the ledger). `gap`: the item's
+  LP side is the record's net-import amount, joined to the energy kind's LP total; no
+  `net_split_by_direction` cause for it. The energy record's hash still lists the item (drift is
+  flagged by both records). `bill_site` unchanged (asserted: the bill = the engine on Σ members −
+  export).
+- Strategies: no strategy refuses group terms, so none refuses this one; rolling (per window) and
+  myopic (per period) are tested to bill = row. The P1 refusal test now asserts the net pricing and the
+  negative-rate refusal.
+- Tests: `test_group_net_import.py` (9; V6 = three members, the third a must-run PV exporting through
+  the group's export Link, so the group nets and net-exports), the V6 case in
+  `test_commercial_objective_reconciliation.py` (save → load) and so in `test_billing_gap.py`.
+
+**WP3.3b review round 1 (0c052c9): PASS WITH CONDITIONS** — binding #1–#2; #3–#4 taken; #5–#7 INFO.
+The reviewer held the row = bill to the cent under zero-rate periods (degenerate split), a timezone,
+years/objective weighting, representative weeks, extendable Links, rolling with overlap, myopic, a
+net demand item beside it, the V6 value-flow ledger (all five checks), an infeasible re-solve (nothing
+committed) and a re-solve without the item (record cleared, drift flagged); QA drivers green.
+- #1 MEDIUM: a net REVENUE item on the group was let through on gross export beside the now
+  circulation-neutral net cost item — the LP imported through a member and exported at once (12.6 of
+  13.4 GWh). → stays refused (as in P1), naming the item; the plan's "keeps the existing gross-export
+  pricing … or is refused" resolves to refused (tested alone and beside the cost item).
+- #2 LOW–MEDIUM: `_adders` skips group net items before its rate check, so the config route and
+  preflight passed an unrated item the solve refuses. → `validate_for_network` dry-runs
+  `_group_net_spec` (tested).
+- #3 (taken): `simultaneous_import_export` is not raised when every net item is priced on the group's
+  net import (members importing while another exports is metering there, asserted on V6).
+- #4 (taken): the gap joins the committed net amount on the RECORD, not the current config.
+- #5 INFO: a scenario network is refused earlier for every commercial term (pre-existing). #6 INFO:
+  rolling / myopic objective gaps are pre-existing (last window / period). #7 INFO: confirmed points.
+
+**WP3.3b review round 2 (2b1e175): PASS.** #1–#4 verified: the circulation probe is refused before
+the LP (preflight `commercial.binding_invalid`) while a net revenue item on a single PoC or a
+one-member group is still accepted; the unrated item is refused at config time; no false
+`simultaneous_import_export` on V6 (it still appears for a gross-priced group); the gap keeps the
+committed amount after an edit and attributes the change to `config_changed_since_solve`. 436 tests
+and the three QA drivers green. INFO: tiered / capacity net items on a group are outside the LP
+(`not_in_lp`), never priced twice. **WP3.3b closed.**
+
+---
+
+## WP3.4 `/results/value_flows`, chat
+
+`services/results/value_flows.py` `compute_value_flows(n, cfg, *, result_df)` builds `LedgerInputs` from
+`bill_site` / `settlement_lines` (the `compute_billing` pieces), the connection meta, the export price, the
+meter sides and the asset enumeration of WP3.1, then runs `build_ledger`, `allocate`,
+`check_conservation`. **No cache** unless the GET on the P1 15-min fixture measures over 2 s; if one is
+added it is in-memory only (not in `RESULT_STATE_KEYS`) and keyed on the solve id, the full commercial
+canonical digest (contracts, `site_party`, connection included — settlement re-settles freely on
+contract edits, `settlement_inputs.py:195`) and a digest of the enumerated assets' cost columns (a
+`capital_cost` edit changes the ledger without a re-solve).
+
+Payload:
+
+```
+{ status: "ok" | "not_established", reason?, participants, externals, template, template_version,
+  periods: { "_"|"<year>": {
+      lines: [ValueFlowLine...],
+      by_participant: {pid: {paid, received, net, by_stream: {kind: net}}},
+      sankey: {nodes: [{id, label, side: "payer"|"payee", internal}],
+               links: [{source, target, value, stream}]},   # ids; the FE maps them to indices
+      conservation: {ok, checks: [{name, ok, detail}]} } },
+  conservation_ok, flags, notes, provenance: {tariff_payees, billing, template} }
+```
+
+- **Sankey is a DAG by construction** (recharts' Sankey recurses without a visited set and crashes on
+  cycles): a **bipartite** layout — payer nodes `p:<id>` on the left, payee nodes `r:<id>` on the right —
+  with links aggregated by (payer, payee, stream); zero and `None` values dropped (counted in `flags`). A
+  payload test asserts no node is both a source and a target.
+- Route `GET /api/results/value_flows` like `get_billing` (409 `solver_in_flight`, 204 when not
+  dispatch-ready); **no `value_flows` config → 200 `{status: "not_established", reason}`** (a 204 would read
+  as "not solved" in chat).
+- Registries: `_HANDLER_PARAMS`, `_LIFTED`, `IC_RESULTS_MODULES` (tripwire), `RESULTS_ENUM` in **both**
+  `chat_tools.py` and `chat_tools_schema.py` (31), `_RESULTS_HANDLER_NAMES`, the route inventory and
+  `ROUTE_SURFACES` for every new route (`GET /results/value_flows`, `POST
+  /simulation/value_flows/template`, `PUT /simulation/commercial/value_flows`, and WP3.7b's `POST
+  /results/billing/preview`), the no-snapshot-series exemption, a seam case.
+- **Chat:** `define_participants(template? | config?)` → the template route (drafts returned, never saved
+  silently) then the value-flows route (tier `write`, the `attach_tariff` guard pattern); `get_results`
+  gains a `detail` argument (schema + argshape updated for every kind; ignored where not meaningful); the
+  value-flows result is summarised per participant and stream under the 4,000-character cap, full lines
+  with `detail="lines"` (paginated); `investment` added to `RESULTS_TAB_ENUM`. New `error_kind`s in
+  `tool-error-kinds.json` and the FE manifest. **ADR-0002:** a live probe is owed (with P2's) — a gate
+  checkbox.
+
+**Tests:** seam, facade, argshape, endpoint map (31), chat dispatch, manifest, the cap, the Sankey DAG
+assertion, the `not_established` and `value_flows_invalid` payloads.
+
+**WP3.4 implementation, part 1 (route and payload).**
+- `services/results/value_flows.compute_value_flows(n, cfg, *, result_df, lost_load=None)`: None
+  (the route's 204) without a commercial config or a solve; `{status: "not_established", reason:
+  "no_value_flows_config"}`; `{status: "value_flows_invalid", reason}`; else the payload above plus
+  per period `disclosures` (DSR slack, VoLL — never lines) and `provenance.basis =
+  "unweighted_per_period"`, `provenance.template.status` (`template_edited` / `_stale` /
+  `_outdated`, also in `flags`). The allocation (WP3.3a) runs inside `build_ledger`, so the plan's
+  separate `allocate` step is not a call here.
+- `by_participant` totals are `number | null` (a party on a line of unknown amount has null
+  `paid` / `received` / `net` and that stream; WP3.1 review #11). The Sankey canonicalises parties
+  with `same_party` (one node per party) and counts dropped lines in `sankey_dropped_{unknown,zero}:
+  <period>:<n>`.
+- **No cache:** the GET on the P1 15-min fixture (V1) is under 2 s (asserted in the test).
+- Route `GET /api/results/value_flows` (409 `solver_in_flight`, 204); registered in `_RESULTS_ENUM`,
+  `_RESULTS_HANDLER_NAMES`, `RESULTS_ENUM` (31) and the `get_results` description, `_HANDLER_PARAMS`,
+  `_LIFTED`, `ROUTE_SURFACES`, the route inventory, the no-snapshot-series exemption and a seam case.
+  FE type: nullable totals and `disclosures`.
+- Per-asset export parts as line metadata: deferred to WP3.6 (the drill-down is its consumer).
+- Tests: `test_results_value_flows.py` (7: V1 flat and multi-period with the DAG assertion and the
+  2 s bound; not_established; value_flows_invalid; an unlisted party → None; 204 / 409; a money
+  cycle stays bipartite), a ledger test for the null totals.
+
+**WP3.4 implementation, part 2 (chat).**
+- `define_participants(template? | config? | clear, replace=False)` (Safety: write; routes: POST
+  template, GET + PUT value flows — lock-gated by derivation): a template needing contracts the
+  project lacks is NOT saved (`{saved: false, status: "drafts_need_pricing", draft_contracts}` with
+  null money fields); every write sends the digest it read as If-Match; an existing, different config
+  is refused `value_flows_would_be_replaced` until `replace=true` (the `attach_tariff` guard; the same
+  config again needs no confirmation). Route refusals re-raised under fixed kinds
+  (`_VALUE_FLOW_ERROR_KINDS`: `value_flows_invalid` with the problems fitted, `value_flows_changed`,
+  `no_commercial_config`, `commercial_config_invalid`, `solver_in_flight`; `template_*` codes →
+  `template_refused` with the code).
+- `get_results(result_kind, source, detail=None, offset=0, limit=None)`: for `value_flows` the
+  default is a SUMMARY (per period and participant: paid / received / net / by_stream, conservation,
+  line counts; fitted under 3,500 characters by dropping the stream split, then the externals' rows,
+  then the flags — `omitted` says what went); `detail="lines"` pages the lines through `_paginate`.
+  `detail` is ignored by the other kinds (schema and description updated).
+- `RESULTS_TAB_ENUM` gains `investment`; `tool-error-kinds.json` gains five inline kinds
+  (`value_flows_invalid`, `value_flows_changed`, `value_flows_would_be_replaced`,
+  `commercial_config_invalid`, `template_refused`) — the FE manifest test passes unchanged (inline).
+- **ADR-0002: a live chat probe is owed** (with P2's) — a Phase 3 gate checkbox.
+- Tests: `test_chat_value_flows.py` (13: registration and tier; drafts not saved; If-Match digest;
+  the replace guard; problems and template codes; exactly-one-of; no config / in flight; the summary
+  cap on a 60-party three-period ledger; line paging; live V1 summary and lines; not_established).
+
+**WP3.4 review round 1 (fa2aabc + 96dea5e): PASS WITH CONDITIONS** — binding #1–#4; #5–#8, #11, #12
+taken; #9 taken; #10 INFO (pre-existing pattern). Confirmed: the Sankey a DAG on flat / multi-period
+/ hub networks and a money cycle, spellings canonicalised, template status in the flags, the GET
+0.4 s flat / 0.8 s multi (payload 10–20 KB — no cache), paging edges, the If-Match race, the invalid
+stored state, the problems budget, every error kind in the manifest, lock-gated, ADR-0002 recorded.
+- #1: the chat summary overflowed with many INTERNAL participants. → after the existing steps it keeps
+  only `net`, then the largest rows by |net| per period (`participants_omitted`), then fewer ids
+  (`participants_total`) — always under 3,500 characters (tested: 60 participants × 3 periods, and
+  200-character ids).
+- #2: the `drafts_need_pricing` answer carried the whole config. → no config: `participants`
+  (fitted), `asset_owners_total`, drafts with id lists fitted (first 10 + `<key>_total`); the saved
+  answer's participants fitted too (tested on an 80-generator site).
+- #3: `by_participant` keyed rows by each line's spelling while the Sankey merged them. →
+  `participants.canonical_party` (shared with the Sankey); `by_participant(ledger, vf)`.
+- #4: an unsettled contract's line had no parties, so their totals stayed numbers. →
+  `LedgerInputs.unsettled_parties` (`contract_payer_payee`: buyer→seller, lessee→lessor,
+  customer→provider / retailer, counterparty→generator owner, DR counterparty→site party); the
+  line names them and their totals are null.
+- #5: the same raw config twice was refused → compared as stored (`model_dump`). #6: the argshape
+  guard binds `_value_flow_call`. #7: only the side a party is on goes null (plus `net`). #8: schema
+  minimums for offset / limit. #9: the guard's message for an invalid stored value. #11: the timing
+  bound is 2 s for both. #12: the roles and the config's keys are in the tool description.
+
+**WP3.4 review round 2 (ec79a0f): FAIL, one binding item** — #1–#12 verified closed (the summary
+2.7–3.5 k characters up to 200 participants × 300-character ids × 10 periods; the drafts answer
+~0.7–0.8 k at 300 extra generators; spellings merged; unsettled parties null; 1,166 tests green).
+R2-1: a long FLAG string still overflowed the summary. → every flag is cut to 160 characters, then
+(last resorts) no flags, then only as many periods as fit (`periods_total`). R2-2 (taken): rows
+with an unknown net are kept first. R2-3 INFO: a CfD's direction in `contract_payer_payee` is
+nominal (net is null for both either way); a sleeving party is not named on the unsettled line.
+Tested (40 periods × 60 participants × 3,000-character flags).
+
+**WP3.4 review round 3 (b3f6536): PASS.** R2-1 verified (every probe under 3,500 characters, up to
+500 periods and 3,000-character flags; one remaining period always fits) and R2-2 (unknown nets
+kept). **WP3.4 closed** (the ADR-0002 live chat probe stays owed at the gate).
+
+---
+
+## WP3.5 Frontend foundation
+
+- `src/api/library.ts` (items, series, uploads, meter data, URDB import) with the DTOs in `types.ts`;
+  `resultsApi.getBilling`, `getCfeScore`, `getValueFlows`, `previewBilling`; `simulationApi.buildTemplate`,
+  `putValueFlows` (with `If-Match`); 204 → null, 409 → a typed `SolverInFlight` error, 412 → a typed
+  `StaleEdit` error.
+- The `investment` tab: `ResultsTab`, `VALID_TABS`, `TABS`, `RESULTS_TO_COMPARE_TAB` (`'overview'`), the
+  render switch; `InvestmentTab.tsx` with sections (Participants, Bill, Library, Tariff, Contracts); the EH
+  completeness chips extracted to a shared `CompletenessChips` (EH tests stay green).
+- **Commercial writes:** `value_flows` edits go through `PUT …/commercial/value_flows` (server-side
+  merge). Editors of other commercial sub-trees (tariff, contracts, agreement) refetch the latest config and
+  PUT `{commercial}` with only their sub-tree changed **and `value_flows` stripped** (the server keeps it,
+  WP3.0). `SolverSettings` is **unchanged** (it already PUTs a
+  diff and has no commercial controls); a test asserts its PUT body omits `commercial` even when the server
+  config carries one, including the no-baseline fallback path — if that path sends the full payload, it is
+  fixed to strip `commercial`.
+
+**Tests (vitest):** clients (axios mocked like `api/mc.test.ts`), the tab registered and reachable from
+`resultsTabRequest`, two editors saving different sub-trees in sequence keep both, the SolverSettings
+omission, `tsc` clean.
+
+
+**WP3.5 implementation.**
+- **Review round 1 → PASS WITH CONDITIONS, fixed:**
+  - #1 the result clients map a solve-in-flight 409 to `SolverInFlightError`;
+  - #2 result requests are quiet (`skipErrorToast`) and a 404 (a route not yet deployed) reads as no result;
+  - #3 tests for two editors saving in sequence (both kept, `value_flows` kept) and for the Investment tab reached from a results-tab request (Expert, and Guided's advanced chip);
+  - #4 the "never zero" test renders null cells;
+  - #5 the bill chip is `ok` only when every period has a total (the note names the missing ones);
+  - #6 distinct texts for no result, a failed load and invalid participants (`failed`);
+  - #7 no currency symbol (the payload has no currency);
+  - #8 `aria-controls` only on the selected tab, Home/End, and a focusable panel;
+  - #9 `NoCommercialConfigError`, also for the value-flows route's 409s.
+- **Carried forward:**
+  - #10 `saveCommercial` is GET-then-PUT, and any save re-binds the commercial config: WP3.6/3.7 handle `library_ref_stale` / `import_tariff_ref_conflict`.
+  - #11 WP3.4: `by_participant` sums skip None lines, so its totals should be `number | null` (None when a party has a None line).
+  - #12 WP3.6/3.7 editors invalidate the results queries after a save.
+- **Review round 2 → PASS WITH CONDITIONS, closed (fixed and covered by tests; no round 3):**
+  - A: quiet result requests hid billing failures. The Bill section and chip now show `failed` with "could not be loaded" or "a solve is running". Every caller of a quiet result request must render its own error state: nothing is toasted or logged.
+  - B: the 404→no-result mapping is limited to the two routes not yet deployed (`/results/value_flows`, `/results/billing/preview`).
+  - C: WP3.7b maps the preview's 422 to fields (already planned).
+---
+
+## WP3.6 Participants designer, per-participant table, Sankey
+
+- **Designer:** template picker (drafts shown for confirmation in a `Dialog`), participants table (id,
+  name, role), externals, asset owners (asset picker grouped by bus; grid-side generators not assignable),
+  tariff payees (per item, the resolved default shown), `export_revenue_to`, hub members + allocation key;
+  422 errors mapped per field; 412 → "changed elsewhere, reload".
+- **Per-participant table:** paid / received / net per participant and stream, per period (the
+  `ResultsFilterProvider` period filter), `basis="annuity"` capex labelled, `None` as "not established" with
+  its flag (`UnavailableCell`), CSV export.
+- **Sankey:** recharts `Sankey` on the bipartite payload (ids mapped to the indices recharts needs,
+  tested), internal vs external colouring, tooltip with
+  stream and amount, SVG export, a fixed width in tests (ResponsiveContainer renders 0 in jsdom); an
+  incomplete ledger shows `UnavailableBlock` with the flags.
+- **Conservation chip:** ok / failed (naming the check) / not established.
+
+**Tests:** designer round trip, 422/412 mapping, table sums, the Sankey from a fixture payload **including
+a two-way pair** (dso ↔ developer), conservation states, a11y (`expectAllButtonsNamed`, native checkboxes —
+not `PageKit.Toggle`).
+
+**WP3.6 implementation, part 1 (results views).**
+- `src/pages/results/investment/valueFlows.ts` (pure: `participantRows` — participants first, null
+  totals stay null; `conservationState`; `sankeyData` — ids → recharts indices, dangling links
+  dropped; `csvRows`; `streamLabel` — `capex (annuity)`; `fmtAmount` moved here, re-exported by
+  `InvestmentTab`) and `ValueFlowsView.tsx` (the conservation chip ok / failed naming the check / not
+  established; the per-participant table with a native `<details>` stream split per party,
+  `UnavailableCell` for null, CSV export; a period `<select>` unless the shell's period filter picks
+  one; the Sankey — internal / external colours, a stream-and-amount tooltip, SVG export, a fixed
+  width in tests — drawn ONLY when the period's conservation is ok, else `UnavailableBlock` with the
+  flags). The Investment tab's Participants section renders it when the result is `ok`.
+- `GET /api/simulation/value_flows/designer` (`participants.designer_context`): every asset with its
+  meter side and `ownable` (grid side: never), the tariff items with their default payee and stream,
+  the contracts' parties, the group members, the default externals; 409 like the template route
+  (no / invalid commercial config, solve in flight). Route inventory + `ROUTE_SURFACES`.
+- Client: `getValueFlowsResult` no longer maps a 404 to "no result" (WP3.4 shipped — the gate item,
+  the preview keeps it until WP3.7b); `getDesigner`, `appendContracts`.
+- Tests: `valueFlows.test.ts` (5), `ValueFlowsView.test.tsx` (4: the two-way dso ↔ developer Sankey,
+  an incomplete ledger not drawn, a failed check named, CSV + period pick; `expectAllButtonsNamed`),
+  `test_value_flow_designer.py` (2), client tests.
+
+**WP3.6 implementation, part 2 (designer).**
+- `designerModel.ts` (pure: `initialConfig` — the stored config only when it validates, else the
+  site party as `site_owner` with the default externals; `setOwner` / `setPayee` / `update` — a hand
+  edit KEEPS the template stamp so the server discloses `template_edited`; `draftNeeds` / `fillDraft`
+  — a draft is saveable only when every null money field is a number ≥ 0; `problemSection`).
+- `ParticipantsDesigner.tsx` ("Define participants" in the Participants section): template picker →
+  `TemplateDialog` (the config's participants, notes, and an input per null field of each draft;
+  "Save contracts and use" appends the priced drafts through the solver-config route, then loads the
+  config into the editor — the value flows are saved only by the user's Save); participants table
+  (id / name / role; the site party cannot be removed), externals (add / remove; the contracts'
+  parties listed), asset owners grouped by bus (grid-side: "grid side (market)", no control), tariff
+  payees per item (the resolved default shown), `export_revenue_to`, the energy hub (member per group
+  Link, contracted MW, allocation key, fixed shares). Save sends the digest it read; 422 problems are
+  shown (role="alert") beside the section they name; 412 → "changed elsewhere … Reload"; results and
+  the state are invalidated after a save.
+- Tests: `designerModel.test.ts` (4), `ParticipantsDesigner.test.tsx` (5: round trip with the digest,
+  422 per section, 412 reload, drafts priced before saving and nothing saved on Use, no commercial
+  config; `expectAllButtonsNamed`). Full vitest 2695 passed; tsc clean.
+
+**WP3.6 review round 1 (96dea5e WP3.6 parts, 23e1ad2): FAIL** — binding #1–#5; #6, #7, #9, #10, #11
+(CSV), #12, #13 taken; #8 (LOW), #11 (FE merge — the server now canonicalises, WP3.4 review #3) and
+#14 noted. Confirmed: the Sankey mapping and the two-way pair, nothing drawn unless conservation is
+ok, null money never zero, no currency symbol, the app's Dialog, If-Match always sent, the designer
+route's sides for Links / Lines / Transformers / islands (an `unclassified` asset ownable, as the
+ledger defaults it to the site party), CSV text injection-safe, 300 parties / 3,000 links in 0.8 s.
+- #1 HIGH: "Reload" after a 412 re-seeded from the stale cache and resent the old digest. → it
+  fetches the state (`fetchQuery`, `staleTime: 0`) and re-seeds from it; the seeding effect never
+  reads a cache that is being refetched (tested: save after Reload sends the new digest).
+- #2: hub problems were invisible without a group contract. → the hub section shows whenever hub
+  settings exist, with "Remove hub settings"; hub problems fall back to a visible list (tested).
+- #3: a failed state GET left "Loading…" forever → handled like the context error (tested);
+  `getValueFlows` is quiet and typed.
+- #4: appending a template's drafts now invalidates the results and the commercial config too
+  (tested); the message says N contracts were saved and the participants are not yet.
+- #5: the default payee ignored kind rules → `resolvedPayee` (item rule, kind rule, default); kind
+  rules are listed with a Remove (tested).
+- #6: a stored config that does not validate is named, with "saving replaces it" (tested). #7:
+  `problemSection` anchors on the server's phrasing (a name inside a problem cannot route it;
+  tested). #9: Save is disabled while in flight. #10: externals deduped (case / spacing) and blank
+  dropped, the site party's id read-only, contracted MW disabled without a member, a cleared share
+  or a removed member drops its share key. #11: `csvCell` leaves finite numbers as numbers (a
+  negative net was written as text). #12: a shell period with no data is said; flags "+N more". #13:
+  the template build is quiet (no double toast).
+- **Carry-forward closed:** per-asset export parts as line metadata — WP3.6 has no per-asset
+  drill-down (the table splits by stream); P4 reopens it if the returns need it.
+
+**WP3.6 review round 2 (c2c007c): PASS.** #1–#5 verified by probes (a stale cache re-seeded from the
+fresh read; one PUT on a double click; 2,714 vitest green incl. the shared `csvCell` change).
+Follow-ups taken with WP3.7a: R1 — a model validation error (`value_flows is not valid (<loc>: …)`)
+is routed by its location root; R2 — a hub member whose Link left the group is listed with a Remove;
+R3 — a failed reload says so. Not taken: #8 (`appendContracts` reads twice, LOW) and the
+contracted-MW `min` (the server refuses 0). **WP3.6 closed.**
+
+---
+
+## WP3.7a Library browser
+
+Items per kind (tariffs, contracts, connection agreements) and series, versions and pins; item view (JSON +
+summary); **URDB import** (file → `import_urdb`, `accept_partial`, `cyclic_year`; refusals by field;
+`urdb_multiple_rates` → pick `item_index`); series upload (CSV/xlsx, unit, label) and meter data (required
+unit; `meter_meta_conflict` 409 shown); "attach as import tariff" with the P2 semantics (an inline tariff
+is never replaced silently: a confirm `Dialog`). **Tests:** each flow with mocked API; refusal and conflict
+states; a11y.
+
+**WP3.7a implementation.**
+- `libraryModel.ts` (pure: `urdbRate` — the rate of an upload: the object, one item of an OpenEI
+  response (several → the user picks; never silently), a REopt scenario's `urdb_response`;
+  `pinnedVersion` — the project's import-tariff ref; `replacesInline` — the P2 rule: an inline
+  tariff with no ref, or one that no longer equals its old ref's payload, is replaced only after a
+  confirm) and `LibraryBrowser.tsx` (the Investment tab's Library section): items per kind with a
+  version picker and the project's pin ("a newer version exists"), the item's summary and JSON;
+  "Attach as the import tariff" (a confirm `Dialog` when a hand-made inline tariff would be replaced;
+  saves `import_tariff_ref` through the solver-config route, which resolves it; results and the
+  config invalidated); the URDB import (rate choice, name, valid_from, cyclic_year; `urdb_refused`
+  lists the refused fields and offers the partial import); series (list; upload of a price series or
+  meter data — the unit required, settlement, timestamp label, time zone; `meter_meta_conflict`
+  explained; the monthly peaks and notes shown).
+- Tests: `libraryModel.test.ts` (3), `LibraryBrowser.test.tsx` (5: pin and versions; attach without
+  asking; confirm and cancel; URDB choice → refusals → partial import; meter unit required and the
+  conflict; `expectAllButtonsNamed`).
+
+**WP3.7a review round 1 — FAIL (5 binding + 4 optional); fixed.**
+1. `replacesInline` asked on a plain switch between Library tariffs → with a ref the stored inline
+   copy IS that ref's payload (the solver-config route refuses any other, `import_tariff_ref_conflict`),
+   so the rule is now "an inline tariff or id with NO ref" (one argument; no payload fetch).
+2. The rate picker vanished after a pick and its labels showed raw epoch seconds → `urdbRate` returns
+   `rates`/`index` with the picked rate, the select stays visible and changeable; `urdbDate` formats
+   URDB start/end dates as YYYY-MM-DD.
+3. Pins covered only the import tariff → `pinnedVersions(commercial, kind, id)` also scans
+   `contracts[].library_ref` and `connection.library_ref`; contracts and agreements get a one-line
+   summary (`itemSummary`), `unsupported_fields` shown on a partial tariff.
+4. `requestAttach` swallowed a failed config read → try/catch, "could not be attached: <reason>".
+5. `detailText` dropped FastAPI's validation list → `formatApiDetail` (loc: msg; …).
+Optional taken: #6 the open item follows the list (a new version shows at once); #8 the file input is
+named by its label, the Library-name input by its label (maxLength 128); #9 the message clears on a
+kind switch; the library write calls pass `skipErrorToast` (the browser shows its own errors).
+Tests: `libraryModel.test.ts` 4, `LibraryBrowser.test.tsx` 9 (+ Library switch without the dialog,
+failed read, 422 list, contract pin and summary; the picker stays after a pick), `commercial.test.ts`
+quiet calls.
+
+**WP3.7a review round 2 — FAIL (1 binding, a regression of the #2 fix); fixed.** R2-1: with the
+picker now kept, switching the rate after a refusal left the old refusals on screen and "Import
+without them" imported the NEW rate partially without its own refusals ever shown → `pick()` clears
+refusals, error and result (a new rate is a new import); the URDB test switches the rate after a
+refusal and re-imports. Optional: the timestamps-label select is named by its visible label. INFO (not
+taken): a hand-edited `solver_config.json` could carry an inline tariff that does not hash to its ref
+(`replacesInline` trusts the PUT check) — the load path does not re-check; noted for P4 hygiene.
+
+**WP3.7a review round 3 — PASS.** R2-1 fixed and tested. Low, taken: the rate select and the file input
+are disabled while an import is in flight (a switch within the round trip would otherwise receive the
+old rate's refusals). **WP3.7a closed.**
+
+## WP3.7b Tariff builder + bill preview
+
+Items / periods / tiers (per-period `tier_rates` for windowed items) / ratchets (range, cyclic, months) /
+settlement / measured_on / direction; minimal client checks, **the server is the source of truth** (422
+mapped to fields). **Bill preview** `POST /api/results/billing/preview {tariff}`: parse the draft and check it with
+`lp_bindings.validate_for_network` (never `bind_commercial`, which writes series and the FCA registry),
+hold the network lock, 409 during a
+solve, 204 when not dispatch-ready; call `bill_site` with `state=None`; **replace the drift flags** with
+`preview_dispatch_not_optimised_for_draft` (the dispatch was optimised for the attached tariff, not the
+draft); no gap computed (stated); no state written. Save to Library or inline. **Tests:** the builder
+reproduces `h3_us_ci.json`'s tariff exactly; the preview handler: no state change, the preview flag, no
+drift flags, 409; FE preview rendering.
+
+
+**WP3.7b implementation.**
+- `services/results/billing.compute_billing_preview(n, cfg, tariff)`: the draft replaces the stored
+  tariff and its Library ref / id (and the value-flows sub-tree) in a COPY of the commercial config,
+  `lp_bindings.validate_for_network` checks it (never `bind_commercial`), `bill_site` rates the last
+  dispatch; the drift flags `_drift_flags` names are removed and `preview_dispatch_not_optimised_for_
+  draft` added; no settlement (`contracts_not_settled_in_preview`) and no gap
+  (`provenance.gap = "not_computed_for_preview"`); nothing stored. Route `POST
+  /api/results/billing/preview {tariff}` (`BillingPreviewIn`, extra=forbid): 409 `solver_in_flight`
+  / `no_commercial_config`, 204 before a solve, 422 `tariff_invalid` (pydantic errors with `loc`) /
+  `tariff_not_bindable`; holds the network lock while it reads. Route inventory + `ROUTE_SURFACES`.
+- FE: `tariffModel.ts` (`normaliseTariff` — optional fields and defaults left out, so H3 round-trips
+  byte-for-byte as JSON; list parsing; `errorsByField` / `errorsUnder` map a 422's `loc` — with or
+  without a `body` / `payload` prefix — to item and period fields) and `TariffBuilder.tsx` (header,
+  items: id / kind / unit / measured_on / direction / settlement, periods with months / weekdays /
+  hours and per-period tier rates, tiers, the ratchet in its three modes; "Preview the bill", "Save
+  to Library", "Save as the project tariff" — inline save clears `import_tariff_ref`; results
+  invalidated). The Investment tab's Tariff section edits the project's inline tariff (or a blank
+  one). The client's last 404 fallback (`notYetDeployed`) is gone — both routes shipped (gate item).
+- Tests: `test_results_billing_preview.py` (3: rates the dispatch under the draft, the drift flags
+  replaced, config / meta / state unchanged, the real bill untouched; 422 invalid and unbindable;
+  409 / 204 through the route), `tariffModel.test.ts` (4: H3 exact), `TariffBuilder.test.tsx` (4:
+  H3 saved unchanged inline and to the Library, a windowed tiered item built through the form, the
+  preview rendered, a 422 at its item; `expectAllButtonsNamed`).
+
+**WP3.7b review round 1 (86a116f): PASS WITH CONDITIONS** — binding #1–#5; #6–#8, #9, #10, #11 and
+the #12 lock note taken. Confirmed on a live heavy draft: no state written (every component table and
+`_t` frame, `n.meta`, `_ic*` attributes, result state, the stored config and `GET /results/billing`
+byte-identical), the 422 codes, multi-period and timezone networks, a stored ref / id dropped
+cleanly, the H3 inline save accepted by the solver-config route, the lock re-entrant, no
+`bind_commercial`.
+- #1 HIGH: list fields kept stale text after a row was removed or a tier added, and a blur saved it.
+  → `ListInput` follows its value whenever it is not being edited (tested: remove a period, blur,
+  save).
+- #2: an unparsable list was ignored silently. → named beside the field (`aria-describedby`) and
+  Preview / Save are disabled while any list is invalid (tested).
+- #3: tariff-level 422s (`loc` `['import_tariff']`, `['body', 'tariff']`) were shown nowhere. →
+  `fieldKey` maps them to `tariff`; the header lists every error not under an item (tested).
+- #4: a Library 422's string detail was lost → shown (tested). #5: turning per-period tier rates off
+  zeroed the tiers → the first period's rates come back (tested).
+- #6: new item ids are the next unused. #7: a typed error says why. #8: a kind change resets the unit
+  and drops a ratchet; the checkbox is named per item. #9: `preview_contract_problem:<code>` flags a
+  contract the save would refuse. #10: the preview shows the total of the billable items and the
+  per-item notes when the total is not established. #11: a failed tariff read shows an error, not a
+  blank builder; a Library-ref tariff says an inline save detaches it; the save invalidates the
+  commercial config. #12: the preview checks the solve and the config under the lock.
+
+**WP3.7b review round 2 (b3f6536): FAIL** — #1–#11 verified (a retail contract naming another
+tariff flags `preview_contract_problem:commercial.contract_tariff_mismatch`; nothing written).
+- R2 #1 HIGH: taking the network lock before the in-flight check made a preview WAIT out a whole
+  solve (the solve holds the lock). → the fast in-flight check first, then the lock with a 2 s
+  timeout (a quick edit may finish; a solve cannot be waited out) → 409, and the check repeated under
+  the lock (tested: a held lock is a prompt 409).
+- R2 #2: invalid lists were tracked by label, so renaming the item cleared the block. → tracked by a
+  stable id with the current label for the banner (tested).
+- R2 #3 (taken): "tier rates per period" cannot be turned off while the periods' rates differ
+  (tested on H3). R2 #4 (taken): preview notes carry their period and are de-duplicated.
+
+**WP3.7b review round 3 (14b7974): PASS.** R2 #1–#4 verified (live: an in-flight solve → 409 in
+0.0 s; a held lock without a solve → 409 after the 2 s wait; the lock released after 200 / 422 /
+409; a re-entrant call → 200). LOW notes: the disabled "tier rates per period" now says why
+(`aria-describedby`); a removed period's invalid text can show on the next row (Save stays blocked;
+rows are keyed by index — left). **WP3.7b closed.**
+## WP3.7c Contracts and connection-agreement editors
+
+Typed forms per contract type (P2 models, allowed pricing combinations; party pickers from participants +
+externals), the connection agreement (kind, caps, envelope ref, capacity-fee item through the Tariff
+builder's item editor, `available_from`, group); Library pins shown. **Tests:** each type round-trips to the
+P2 model; invalid combinations surface the 422; a11y.
+
+---
+
+**WP3.7c implementation.**
+- `contractModel.ts`: `CONTRACT_FIELDS` — one field spec per P2 type (ppa, cfd, dr, lease, eaas,
+  retail: kind, parties, assets / loads, prices, pricing mode, reference series, indexation, floor /
+  cap, volume cap, baseload MW, sleeving, DR limits, fees, retail tariff id, base year), with `when`
+  for fields a mode enables (the premium under `market_plus_premium`, sleeving under `sleeved`,
+  baseload MW under `baseload`); `blankContract` (the site party as buyer / lessee / customer),
+  `setField` (a cleared optional field is removed — the model's default), `nextContractId`,
+  `contractErrors` (a solver-config 422 by the contract index its `loc` names).
+- `ContractsEditor.tsx` (the Investment tab's Contracts section): a generated form per contract (party
+  pickers: a `datalist` of the site party, participants, externals and every contract party; series
+  pickers from the Library; id lists), add / remove, "Save the contracts" through the solver-config
+  route (results, config and value flows invalidated); the Library pin shown ("copied from Library
+  item … v…"); the connection agreement — kind, import / export caps, envelope series, curtailment
+  hours and compensation, available_from, group, the capacity fee through the tariff builder's
+  `ItemEditor` — saved or removed. Allowed combinations are the server's to judge (its 422 at the
+  contract).
+- Tests: `ContractsEditor.test.tsx` (5: all six types round-trip unchanged with the pin shown and
+  mode-dependent fields; an edit writes the field and a cleared optional one is removed; add a
+  contract; a 422 at its contract only; the connection agreement with its capacity fee and envelope;
+  `expectAllButtonsNamed`). Full vitest 2,734 passed.
+
+**WP3.7c review round 1 — PASS WITH CONDITIONS (7 binding: #1–#7); fixed, with the optional ones.**
+1. Hidden `when` fields were still sent after a kind / pricing change (a stale `sleeving_party`
+   then failed the value-flows party check, unfixable from the form) → `setField` removes every
+   field whose `when` no longer holds; floor and cap now show (and live) only under
+   `market_plus_premium` (P2 settlement applies them there only).
+2. A blank required party saved as `''` → `missingRequired` refuses a blank required text / party
+   field before the server, at its contract.
+3. A stale envelope ref showed "none" but was saved → one `SeriesSelect` for contracts and the
+   envelope: a ref the Library no longer lists shows "(not listed)", "none" clears it.
+4. Removing the connection hid it before the server confirmed → removed only when the save succeeds.
+5. An untagged P0-era contract crashed the panel (`c.type.toUpperCase()`) → `contractType` mirrors
+   `_contract_type_from_shape`; an unknown tag is shown read-only and saved unchanged.
+6. Integer fields were truncated by `parseInt` → `Number(text)`, the server judges.
+7. Positional errors outlived add / remove → cleared on both.
+Optional taken: #8 a `connection` 422 is shown at the connection agreement (prefix `body.commercial.`
+dropped); #9 a binding refusal naming `contract '<id>'` is shown at that contract; #10 the contracts
+save compares the stored list with the one the edits started from and refuses a changed one ("Reload
+the contracts"; the form keeps its state after a save, the stored form is the new baseline); #11 a new
+agreement starts with no import cap (a cleared cap is `null`, the server refuses it); #12 the capacity
+fee's kind stays `capacity` (stated); #13 the TariffBuilder's `aria-describedby` IDREF from `useId`;
+#14 DR `asset_ids` labelled as refused until DR on assets ships; the test's no-op `.replace` removed.
+Tests: `ContractsEditor.test.tsx` 15 (+10, one per finding), `contractModel.test.ts` 4 (new).
+
+**WP3.7c review round 2 — PASS WITH CONDITIONS (1 binding, a regression of optional #12); fixed.**
+Forcing the fee's kind back to `capacity` kept the unit the kind change had set (`per_kwh`): saved
+with 200, refused only at the solve (`fee_eur_per_mw_year`) → `ItemEditor` takes `kinds` / `units`
+(offered options; a stored other value stays shown) and the connection passes `['capacity']` and
+`['per_kw_year', 'per_kw_month']`; no forcing. Low, taken: the form's copy tags an untagged P0-era
+contract with its derived type (clearing a field no longer turns an EaaS into a PPA mid-edit).
+Low, not taken (follow-up): the staleness baseline is the raw stored list, so a P0-era untagged list
+normalised by the editor's own connection save reads as "changed" once (a reload recovers it);
+the pre-save read and the save are two requests (a narrow race, accepted). Backend follow-up (P4
+hygiene): the PUT's binding step should run `fee_eur_per_mw_year` so an unsupported fee unit is a 422
+at save. Tests: `ContractsEditor.test.tsx` 16.
+
+**WP3.7c review round 3 (26c4378) — PASS.** The fee's kinds / units props and the tagged form copy
+verified; the TariffBuilder's own use unchanged. INFO taken: the fee note says "a single all-year period
+(no windows or tiers)" — a windowed or multi-period fee is still refused only at the solve (the same
+backend follow-up). **WP3.7c closed.**
+
+## Phase 3 e2e QA gate
+
+- [x] `backend/tests/qa_value_flows.py` (auto-discovered): V1–V4 through the routes (template → drafts
+  confirmed → value-flows route → solve → `/results/value_flows`): all four checks on every template,
+  reconciliation to `cost_breakdown` to the cent; V5 hand splits to the cent under all four keys; V6
+  group net-import gap 0 and LP row = billed; a swapped-direction and a dropped-source corruption detected;
+  a bundle round trip keeps `value_flows` and the ledger identical; the P1 and P2 drivers still pass.
+- [x] Frontend: vitest (including the Sankey two-way case and the a11y checks) and `tsc` green.
+- [x] Full backend `not slow`, all QA drivers green; findings note
+  `docs/superpowers/findings/<date>-ic-p3-participants.md`; assessor verdict recorded here.
+- [x] ADR-0002: the live probe for P2's and P3's chat changes run and recorded, or stated as owed in the
+  verdict (the chat surface is then not done).
+- [x] `notYetDeployed` (frontend `api/commercial.ts`) removed once `/results/value_flows` and
+  `/results/billing/preview` ship (WP3.5 review round 2 B).
+
+**Gate assessor round 1 (bfb5bef): PASS WITH CONDITIONS.** It re-ran the driver (222/222), all QA
+drivers (25/25), 855 targeted tests (one red: the hourly audit), the investment vitest and `tsc`,
+re-derived V2 (export-price and feed-in shares, PPA, EaaS) by a per-interval loop and V4 (DSR 437.5 MWh,
+activation 43,750.00, availability 38.356) analytically, and probed the export split. Conditions and
+what was done (e27fe5d):
+1. **The hourly-assumption audit was red** (the energy-hub adequacy sites from the master merge
+   e364837, before WP3.0) → each reviewed: all year conversions weighted by Σ w, listed with reasons.
+   The first full run also failed `test_openpyxl_parses_uploads_with_defusedxml_in_this_environment`:
+   the local venv lacked the pinned `defusedxml==0.7.1` (an environment gap, not code) — installed.
+2. **The export split weighted a fuel supply behind a CHP by its MW of gas and ignored the CHP's
+   output** (MEDIUM, silent: 21,825.92 vs 26,368.16 with `conservation_ok` True) → one definition of
+   site electric generation for the split and the `as_consumed_btm` share: `site_generators` without
+   fuel supplies plus `site_generating_links` (bus1 output of a converting Link, keyed by the Link);
+   storage is not generation. Test fails on the old code.
+3. **Findings note corrected:** the WP3.2 verdict, scenario E's hand-share scope, V1b (suite, not
+   driver), the bridge's limited independence, the accepted residues and deviations.
+4. **ADR-0002 procedure extended** (manifest at a P3 head; template, drafts, replace-guard and lines
+   turns). Still owed; the chat surface is not done.
+Notes taken: the driver asserts non-empty ledgers and replaces the vacuous pv2 check (235/235); chat
+value-flow line rows cut (ids 80, flags 160 characters) so one always fits a page. Not taken: the
+Sankey test's loose link count; the unlocked in-flight checks (accepted in WP3.2).
+
+**Gate assessor round 2 (7075919): PASS WITH CONDITIONS.** Conditions 1, 3, 4 closed (the chunked full
+suite re-summed: 7,891 passed, 0 failed; `qa_billing_contracts` 49/49 and `qa_commercial_lp` 30/30 with
+the new definition; multi-period split per period to the hand value). Condition 2 only partly closed —
+the definition still counted non-electric Generators whenever `is_fuel_supply` was False and read only
+a Link's bus1: a gas supply with a boiler beside it (19,161.48 vs 31,877.02), a solar-thermal collector
+(18,059.84 vs 19,824.27), a multi-output CHP's bus2 power ignored (42,825.27 vs 31,877.02), NaN
+generation given to the site (19,184.77 vs 19,824.27), all with `conservation_ok` True. Fixed (06374d7):
+`site_generators` = Generators on an ELECTRIC bus (`_electric_bus_test`: `_ELECTRIC` or the PoC site
+carrier); `site_generating_ports` / `site_link_generation` = a site-side Link with a non-electric bus0,
+counting −p_k on every port 1–4 that lands on a site-side electric bus (the split keys it by the Link;
+the PPA path receives the same frame, `SettlementInputs.site_link_generation`); NaN generation in a
+period → `export_split_not_established:<source>:<period>` and the source's amount None (never the whole
+amount to the site). Tests: the four topologies (split and PPA to the cent) and NaN; 632 targeted tests
+and the three drivers green.
+
+**Gate assessor rounds 3–6: PASS WITH CONDITIONS each, on the same condition-2 class** (a silent
+misattribution of the export split with `conservation_ok` True; each probe became a test that fails on
+the code before its fix):
+- **Round 3 (38d6e20):** a Store battery's discharger counted as generation (310,452.72 vs 448,000.00)
+  → b0cbbfe: a Link fed by storage is not generation; fuel and storage together → mixed (NaN whenever it
+  delivers, not established).
+- **Round 4 (b0cbbfe):** the rule read only bus0 — a gas-heated heat Store's ORC excluded, a two-hop
+  battery and a two-hop H2 loop counted, a reformer-plus-electrolyser bus taken as storage → cb478a9:
+  origins followed upstream through non-electric Links (primary: a producing Generator; charged: site
+  electricity entering the non-electric side); Stores buffer only.
+- **Round 5 (cb478a9):** Links read one-way — a reversible SOFC, an H2 co-firing engine (an input port
+  with `efficiency2 < 0`) and a reversible Link with an electric bus0 → e731683: PyPSA Link semantics
+  (inputs = bus0 + negative-efficiency ports; a negative `p_min_pu` makes every port both; a reversible
+  Link touching the site charges its own side); an electric input port on the converter itself stays
+  netted (accepted by the assessor); a mixed Link is unknown only when it delivers.
+- **Round 6 (e731683): condition 1 CLOSED** — all 21 probes right (16 earlier + 5 new: a sign-changing
+  time-varying `efficiency2`, a reversible battery inverter, a reversible heat Link with a boiler and
+  ORC, `p_min_pu` negative only sometimes, twice). Remaining: the full-suite totals at this head
+  (round-3 condition 2). Non-binding: the note's Σ −p_k wording aligned; a mixed Link delivering
+  anywhere in a period blocks that period's split (conservative, recorded).
+
+**Gate closed.** The full backend suite at e731683 (the final backend code; later commits docs only):
+**7,904 passed, 31 skipped, 0 failed**; all 25 QA drivers green (`qa_value_flows` 235/235); vitest
+2,754 passed and `tsc` clean at 024d21b (no frontend change since). Findings note
+`docs/superpowers/findings/2026-09-29-ic-p3-participants.md` carries the evidence, the rule and the
+verdict. **Phase 3 is closed; P4 may start.** ADR-0002 is stated as OWED (the checkbox is ticked for
+"stated as owed"): the chat surface stays not done until the live probe is run and recorded.
+
+## Scope boundaries (not P3)
+
+- Annual cashflows, escalation, degradation, debt, tax, incentives, returns — P4 (mapping pinned in WP3.1).
+- Multi-party co-optimisation — later, behind a flag (decision 9).
+- DR on BESS / generators — P5 (templates use loads).
+- Allocation over billing periods longer than a month; a ratchet floor seeded only from meter history
+  (`allocation_not_established`).
+- Annual per-connection tier bands (P2 gate): a documented limitation; importer/preflight disclosure in P4.
+- Realistic-dispatch ledgers — P6 (the ledger is on the current dispatch, `mode="pf"`).
+- Net **revenue** items on the group net meter — kept on gross export with a disclosed gap cause.
+
+---
+
+## Plan review
+
+**Round 1 (FAIL; 8 HIGH, 9 MEDIUM, 5 LOW) → v0.2.**
+- **HIGH:**
+  - H1 export revenue from `ic_export_price`, never a cost row;
+  - H2 connection fees and curtailment compensation as sources;
+  - H3 grid-side generators as the commodity (`market`), POC_ROLES claim removed;
+  - H4 templates never change `site_party`; the hash test covers `contracts_record` / `ppa_dispatch_hash`; the adequacy hash excludes `value_flows`;
+  - H5 payee precedence, `retailer` / `dso` externals, `same_party`;
+  - H6 coverage and reconciliation to `cost_breakdown` added (checks 3–4);
+  - H7 equality split, bounds, cost-only, removal from adders, no billing change;
+  - H8 bipartite Sankey DAG.
+- **MEDIUM:**
+  - M1 `asset_economics` VOM, per-period fixed basis, no fuel split;
+  - M2 `basis="annuity"`, excluded from P4 conversion;
+  - M3 signed site view;
+  - M4 per-member metering for linear energy, per-period energy key, settlement-interval peaks, tie, ratchet month, direction, sorted remainder, export allocation;
+  - M5 BTM ownership limited to PPA assets, EaaS draft, `export_revenue_to`;
+  - M6 route-level validation, `None` party rule;
+  - M7 dedicated value-flows route with server merge and `If-Match`, SolverSettings unchanged;
+  - M8 preview semantics;
+  - M9 single participants source, P4 mapping.
+- **LOW:**
+  - L1 WP3.3b split out;
+  - L2 `template_version` / `built_digest` / `template_stale`, drafts;
+  - L3 all new routes in the registries, both enums, `detail` argument, `not_established` payload;
+  - L4 gate checkboxes, cache;
+  - L5 levy semantics, `ppa_excess_mwh` disclosed.
+
+**Round 2 (PASS WITH CONDITIONS; C1–C3 binding) → v0.3.**
+- **C1** check 4 rewritten:
+  - the export-price revenue is its own term;
+  - DSR and VoLL are disclosures, not bridge terms;
+  - only lines with an external party enter;
+  - the basis is stated (`by_period` ÷ years; flat top-level).
+- **C2** assets are enumerated from the `physical_quantities` superset plus Lines and Transformers (not `asset_economics`):
+  - per-period fixed cost and VOM use `cost_breakdown`'s arithmetic;
+  - unclassified assets are flagged, never dropped;
+  - grid-side assets of any class are included;
+  - V1b added.
+- **C3** asset owners must be participants.
+- **C4** no capacity bounds; the record is recomputed from dispatch; the `_side` replacement and solve-strategy coverage are stated.
+- **C5** `allocate` recomputes the peak interval and the floor month (no engine change).
+- **C6** per-member rating through the engine with the group's settings; residual ≤ 1e-9.
+- **C7** `PUT /solver_config` keeps a stored `value_flows` the body omits; editors strip it.
+- **C8** `value_flows` is stored raw and validated lazily; a corrupted value still solves; 409 `no_commercial_config`.
+- **C9** no cache unless measured; if one is added, the full key is specified.
+- **C10** preview uses `validate_for_network`.
+- **C11** export attribution covers both sources, per interval; V2 extended.
+- **C12** provenance carries the source ids; P4 reads `asset_owners` for overnight capex.
+- **C13** id→index mapping tested; the DAG payload assertion.
+- The adequacy hash pops `value_flows` whatever its value.
+
+**Round 3 (PASS WITH CONDITIONS; none blocking WP3.0) → v0.4, all closed in text.** The reviewer walked check 4 on V1 and V4 term by term and both close; C1–C13 verified. Closed here:
+- **D1** a meter-side classifier (site, grid, bypass, unclassified; meter Links site-side) replaces the bare `_meter_sides`, which cannot place the V1 grid generator;
+- **D2** the `PUT /solver_config` mechanism (`model_fields_set` before bind) and an explicit `value_flows` there refused;
+- **D3** grid-side fixed cost is `basis="model_only"`;
+- **D4** VOM from `n.statistics()` operational expenditure;
+- **D5** external↔external lines excluded and noted; an unresolved party makes check 4 `None`;
+- **D6** the bridge subtracts every `commercial_cost_terms` item;
+- **D7** the floor's source month is the argmax over `_ratchet_floor_prior`'s candidate months, earliest on ties.
+
+**Plan status: PASS** (round 3 conditions closed in text; no open plan-level items). Implementation starts at WP3.0.

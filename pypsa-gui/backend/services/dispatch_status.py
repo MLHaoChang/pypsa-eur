@@ -65,7 +65,42 @@ _DISPATCH_AXES: tuple[tuple[str, str, str], ...] = (
 )
 
 
-def dispatch_status(n: pypsa.Network) -> DispatchStatus:
+# `_DISPATCH_AXES` component attr → PyPSA class name, the key the transient
+# registry (`PyPSAService.mark_transient`) uses.
+_AXIS_CLASS: dict[str, str] = {
+    "generators": "Generator", "lines": "Line", "storage_units": "StorageUnit",
+    "stores": "Store", "loads": "Load", "links": "Link",
+    "transformers": "Transformer",
+}
+
+
+def _axis_mismatch(comp: str, comp_df, t_df, transient) -> bool:
+    """True when the dispatch columns and the component index differ,
+    ignoring rows a solve marked transient.
+
+    A solve on the LIVE network (an FMEA sweep, a frontier / coupling loop, a
+    foreground run) adds VOLL slack generators / vintage clones for the
+    duration of the LP and removes them afterwards, marking them transient
+    first. `/simulation/status` reads without the lock, so a poll landing in
+    that window saw `__voll_*` in `n.generators` but not in
+    `generators_t.p` (or the reverse during `n.remove`) and reported
+    'stale' although nothing was edited.
+    """
+    ignore = transient.get(_AXIS_CLASS.get(comp, ""), ()) if transient else ()
+    return set(t_df.columns).difference(ignore) != set(comp_df.index).difference(ignore)
+
+
+def _transient_rows() -> dict[str, set[str]]:
+    """The active context's transient registry, or {} when unavailable."""
+    try:
+        from services.pypsa_service import PyPSAService
+        return {cls: PyPSAService.get_transient_rows(cls)
+                for cls in _AXIS_CLASS.values()}
+    except Exception:  # noqa: BLE001 — never let freshness crash a read
+        return {}
+
+
+def dispatch_status(n: pypsa.Network, *, transient=None) -> DispatchStatus:
     """
     Classify ``n``'s dispatch state.
 
@@ -74,8 +109,14 @@ def dispatch_status(n: pypsa.Network) -> DispatchStatus:
     the network is stale. If at least one axis has matching dispatch,
     it's fresh. Otherwise none.
 
+    ``transient`` maps a component class ("Generator", …) to row names a
+    running solve added temporarily; they are ignored on both sides. When
+    None it is read from the active context's transient registry.
+
     Cheap to call — just shape + index comparison, no data access.
     """
+    if transient is None:
+        transient = _transient_rows()
     has_any = False
     for comp, t_attr, col_attr in _DISPATCH_AXES:
         comp_df = getattr(n, comp)
@@ -86,12 +127,12 @@ def dispatch_status(n: pypsa.Network) -> DispatchStatus:
         # `t_df.columns` is the dispatch's view of the components. If it
         # diverges from `comp_df.index`, the dispatch is for a different
         # set of components than the network currently holds.
-        if set(t_df.columns) != set(comp_df.index):
+        if _axis_mismatch(comp, comp_df, t_df, transient):
             return "stale"
     return "fresh" if has_any else "none"
 
 
-def dispatch_status_detail(n: pypsa.Network) -> dict:
+def dispatch_status_detail(n: pypsa.Network, *, transient=None) -> dict:
     """
     Richer sibling of ``dispatch_status`` that ALSO reports WHICH component
     classes carry stale dispatch.
@@ -104,6 +145,8 @@ def dispatch_status_detail(n: pypsa.Network) -> dict:
     left untouched so its existing callers are unaffected — this is the shape the
     chat tool's schema promises.
     """
+    if transient is None:
+        transient = _transient_rows()
     has_any = False
     mismatched: list[str] = []
     for comp, t_attr, col_attr in _DISPATCH_AXES:
@@ -112,7 +155,7 @@ def dispatch_status_detail(n: pypsa.Network) -> dict:
         if comp_df.empty or t_df.empty:
             continue
         has_any = True
-        if set(t_df.columns) != set(comp_df.index):
+        if _axis_mismatch(comp, comp_df, t_df, transient):
             mismatched.append(comp)
     state = "stale" if mismatched else ("fresh" if has_any else "none")
     return {"state": state, "mismatched_classes": mismatched}
@@ -275,3 +318,55 @@ def clear_dispatch(n: pypsa.Network) -> bool:
             )
             cleared = True
     return cleared
+
+
+# ── dispatch digest (IC P4 WP4.6b) ───────────────────────────────────────────
+#
+# The investment-case report is valued on ONE solve: its staleness key carries a
+# digest of the result tables it read, so a re-solve (or a restore of another
+# solve's results) marks the stored report stale. What the finance adapter reads:
+# the dispatch, the optimised capacities (capex), the prices and the weights.
+_DIGEST_T_TABLES: tuple[tuple[str, str], ...] = (
+    ("generators_t", "p"), ("storage_units_t", "p"), ("storage_units_t", "state_of_charge"),
+    ("stores_t", "p"), ("stores_t", "e"), ("links_t", "p0"), ("links_t", "p1"),
+    ("lines_t", "p0"), ("loads_t", "p"), ("buses_t", "marginal_price"),
+)
+_DIGEST_STATIC: tuple[tuple[str, str], ...] = (
+    ("generators", "p_nom_opt"), ("storage_units", "p_nom_opt"), ("stores", "e_nom_opt"),
+    ("links", "p_nom_opt"), ("lines", "s_nom_opt"),
+)
+
+
+def _hash_frame(h, label: str, obj) -> None:
+    h.update(label.encode())
+    if obj is None or getattr(obj, "empty", True):
+        h.update(b"\x00empty")
+        return
+    if isinstance(obj, pd.DataFrame):
+        h.update("\x1f".join(map(str, obj.columns)).encode())
+    h.update(pd.util.hash_pandas_object(obj, index=True).to_numpy().tobytes())
+
+
+def dispatch_digest(n, result_df=None) -> str:
+    """A digest of the solve's result tables (dispatch, optimised capacities,
+    prices, snapshot weights and the objective). `result_df(n, accessor,
+    attr)` reads a table the way the results router does (the stored LOPF
+    snapshot first); default: the live network. Deterministic across
+    processes; an unsolved network has a digest too (its empty tables')."""
+    import hashlib
+
+    h = hashlib.sha256()
+    obj = getattr(n, "objective", None)
+    h.update(repr(None if obj is None else float(obj)).encode())
+    _hash_frame(h, "snapshot_weightings", getattr(n, "snapshot_weightings", None))
+    for acc, attr in _DIGEST_T_TABLES:
+        if result_df is not None:
+            df = result_df(n, acc, attr)
+        else:
+            df = getattr(getattr(n, acc, None), attr, None)
+        _hash_frame(h, f"{acc}.{attr}", df)
+    for comp, col in _DIGEST_STATIC:
+        frame = getattr(n, comp, None)
+        ser = frame[col] if frame is not None and col in frame.columns else None
+        _hash_frame(h, f"{comp}.{col}", ser)
+    return h.hexdigest()[:32]

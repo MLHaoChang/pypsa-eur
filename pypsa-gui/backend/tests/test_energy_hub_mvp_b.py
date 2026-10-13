@@ -296,3 +296,48 @@ def test_all_kinds_soft_skipped_marks_pipeline_skipped():
     lever_stages = [s for s in report.pipeline.stages if s.stage == "levers"]
     assert lever_stages and lever_stages[0].status == "skipped"
 
+
+
+# ── P11: MVP-B DoD with REAL certification (no mc_certify_required override) ─
+
+
+def _run_default(n, pack):
+    from services.adequacy import eh_study as S
+    from services.pypsa_service import PyPSAService
+
+    PyPSAService.set_network(n)
+    return S.run_eh_study(
+        n, pack, SolverConfig(voll=5000.0), lock=PyPSAService.get_lock(),
+        stop_event=threading.Event(), log_queue=queue.SimpleQueue(),
+        stages=None)
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("factory", [default_weak_flexible_pack,
+                                     default_off_grid_pack])
+def test_mvp_b_dod_default_packs_certify_on_a_week_long_hub(factory):
+    """The unmodified default pack (MC required) on a 168 h hub: certification
+    is established and carries a verdict — the real MVP-B DoD."""
+    from tests.test_energy_hub_mc_certify import _cert_network
+
+    pack = factory()
+    assert pack.mc_certify_required is True
+    report = _run_default(_cert_network(), pack)
+    assert report.completeness["target"] == "ok"
+    sec = report.sections["certification"]
+    assert sec.status == "ok", sec.note
+    assert sec.payload["verdict"] in ("pass", "fail", "inconclusive")
+    assert report.certified is not None
+    assert "remote" in sec.payload["fleet_boundary"]["removed_generators"]
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("hours", [4, 12])
+def test_mvp_b_short_fixtures_are_refused_with_the_mttr_reason(hours):
+    from tests.test_energy_hub_mc_certify import _cert_network
+
+    report = _run_default(_cert_network(hours=hours), default_off_grid_pack())
+    sec = report.sections["certification"]
+    assert sec.status == "not_established"
+    assert "MTTR" in (sec.note or "")
+    assert report.certified is None

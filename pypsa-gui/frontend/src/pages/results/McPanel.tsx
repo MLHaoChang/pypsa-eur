@@ -5,8 +5,9 @@ import { resultsApi } from '../../api/simulation'
 import type {
   ElccCandidate, ElccRow, McMetrics, McRequestBody, McStatus, ElccPortfolioBlock, ElccPortfolioPeriod,
 } from '../../api/simulation'
-import { formatApiDetail } from '../../api/client'
+import { blockerMessage } from '../../utils/blockerMessage'
 import { useUIStore } from '../../store/uiStore'
+import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { nk } from '../../utils/queryKeys'
 import {
   activityChipText, basisSuffix, foldChipText, foldChipTitle,
@@ -43,19 +44,9 @@ import {
 // decoration. (Were one added: literal hex only. `var(--…)` does not resolve
 // inside SVG attributes, a bug this directory has already paid for twice.)
 
-/**
- * The 409 detail string, which NAMES the blocking study ("a frontier study is
- * running — wait for it to finish").
- *
- * A generic "busy" would be strictly worse than useless here: the mutual
- * exclusion mesh has four members (solve / sweep / frontier / MC) and the user
- * cannot act on the block without knowing which one to wait for or cancel.
- */
-export function blockerMessage(err: unknown): string {
-  const data = (err as { response?: { data?: { detail?: unknown } } })?.response?.data
-  if (data?.detail != null) return formatApiDetail(data.detail)
-  return String((err as Error)?.message ?? err)
-}
+// The 409 detail sentence — moved to utils (P24-BE gate N6); re-exported so
+// every panel keeps importing it from here.
+export { blockerMessage }
 
 /**
  * Compact number for display: 2 dp above 1, 3 significant figures below.
@@ -382,6 +373,7 @@ export function McPanel() {
   })
   const payload = (data ?? null) as McStatus | null
   const running = payload?.status === 'running'
+  useStudyFinishedInvalidation(data === undefined ? undefined : payload?.status ?? null)
 
   // Same query keys LostLoadTab uses, so the comparison table reads the
   // cache the tab already populated rather than issuing its own round-trips.

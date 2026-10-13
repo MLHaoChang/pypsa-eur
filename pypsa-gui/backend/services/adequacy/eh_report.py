@@ -32,6 +32,7 @@ EXPORT_KEYS: tuple[str, ...] = (
     "achieved_ens_permyriad",
     "achieved_shed_hours",
     "mc_lole_h",
+    "certified",
     "cost_at_target_eur",
     "period_basis",
     "excludes_shed_cost",
@@ -40,6 +41,7 @@ EXPORT_KEYS: tuple[str, ...] = (
     "pipeline",
     "tea",
     "gates",
+    "notes",
 )
 
 
@@ -201,10 +203,12 @@ def assemble_reference_design_report(
     achieved_ens_permyriad: float | None = None,
     achieved_shed_hours: float | None = None,
     mc_lole_h: float | None = None,
+    certified: bool | None = None,
     cost_at_target_eur: float | None = None,
     period_basis: str | None = None,
     tea: TeaBlock | None = None,
     gates: GatesBlock | None = None,
+    notes: list[str] | None = None,
 ) -> ReferenceDesignReport:
     """Build the one product artifact from stage fragments + completeness."""
     sections: dict[str, SectionState] = {}
@@ -225,6 +229,7 @@ def assemble_reference_design_report(
         achieved_ens_permyriad=achieved_ens_permyriad,
         achieved_shed_hours=achieved_shed_hours,
         mc_lole_h=mc_lole_h,
+        certified=certified,
         cost_at_target_eur=cost_at_target_eur,
         period_basis=period_basis,  # type: ignore[arg-type]
         sections=sections,
@@ -232,6 +237,7 @@ def assemble_reference_design_report(
         pipeline=pipeline,
         tea=tea,
         gates=gates,
+        notes=list(notes or []),
     )
 
 

@@ -73,14 +73,45 @@ MODEL_PARAMS = {
 }
 SYNCHRONOUS_MODELS = frozenset({"GENROU", "GENSAL", "legacy"})
 
+#: An inverter's dynamic record pair: the WECC second-generation generic
+#: models as PSS/E names them, ``REGCA1`` (converter/grid interface) and
+#: ``REECA1`` (electrical controls). ICONs then CONs, each in the PSS/E model
+#: library's order — the .dyr writer emits these tuples as they stand, so the
+#: ORDER here is the record layout. The prefix keeps REECA1's ``Tp`` apart from
+#: a later plant controller's. REECA1's first ICON, BUSR (the regulated bus),
+#: is absent on purpose: it is a RAW bus number, which only the RAW writer
+#: authors, and the .dyr writer writes it as 0 (the unit's own terminal).
+REGCA1_ICONS = ("regc_lvplsw",)
+REGCA1_CONS = (
+    "regc_tg", "regc_rrpwr", "regc_brkpt", "regc_zerox", "regc_lvpl1",
+    "regc_volim", "regc_lvpnt1", "regc_lvpnt0", "regc_iolim", "regc_tfltr",
+    "regc_khv", "regc_iqrmax", "regc_iqrmin", "regc_accel",
+)
+REECA1_ICONS = ("reec_pfflag", "reec_vflag", "reec_qflag", "reec_pflag", "reec_pqflag")
+REECA1_CONS = (
+    "reec_vdip", "reec_vup", "reec_trv", "reec_dbd1", "reec_dbd2", "reec_kqv",
+    "reec_iqh1", "reec_iql1", "reec_vref0", "reec_iqfrz", "reec_thld",
+    "reec_thld2", "reec_tp", "reec_qmax", "reec_qmin", "reec_vmax", "reec_vmin",
+    "reec_kqp", "reec_kqi", "reec_kvp", "reec_kvi", "reec_vbias", "reec_tiq",
+    "reec_dpmax", "reec_dpmin", "reec_pmax", "reec_pmin", "reec_imax",
+    "reec_tpord",
+    "reec_vq1", "reec_iq1", "reec_vq2", "reec_iq2",
+    "reec_vq3", "reec_iq3", "reec_vq4", "reec_iq4",
+    "reec_vp1", "reec_ip1", "reec_vp2", "reec_ip2",
+    "reec_vp3", "reec_ip3", "reec_vp4", "reec_ip4",
+)
+IBR_PARAMS = REGCA1_ICONS + REGCA1_CONS + REECA1_ICONS + REECA1_CONS
+IBR_FLAGS = frozenset(REGCA1_ICONS + REECA1_ICONS)
+
 #: Parameters a model MAY carry beyond its dynamic record: the IEC 60909 data
 #: for synchronous machines (R/X ratio, rated power factor). Optional here so
 #: the .dyr layout and its fixtures are untouched; ``static/shortcircuit`` asserts
-#: their presence itself, element by element, before it solves.
+#: their presence itself, element by element, before it solves. An inverter's
+#: IBR group is optional too, but ALL-OR-NOTHING (``_check_ibr``).
 MODEL_OPTIONAL_PARAMS = {
     "GENROU": ("rx_sc", "cos_phi"),
     "GENSAL": ("rx_sc", "cos_phi"),
-    "inverter": (),
+    "inverter": IBR_PARAMS,
     "legacy": (),
 }
 _V2_MODELS = frozenset(MODEL_PARAMS) - {"legacy"}
@@ -182,6 +213,7 @@ def _check_physics(uid, model, values, include_in_inertia, mbase):
             )
         if mbase <= 0:
             raise ContractError(f"unit {uid}: mbase_mva must be > 0, got {mbase}")
+        _check_ibr(uid, values)
         return
     needs_h = include_in_inertia or model in ("GENROU", "GENSAL")
     if needs_h and (values["h_s"] <= 0 or mbase <= 0):
@@ -205,6 +237,69 @@ def _check_physics(uid, model, values, include_in_inertia, mbase):
         elif not (xq > xd_pp):
             raise ContractError(
                 f"unit {uid}: xq must exceed xd_pp: xq={xq}, xd_pp={xd_pp}"
+            )
+
+
+#: (lower, upper) pairs that must be ordered, strictly unless noted. Each is a
+#: typo that imports into a dynamics engine without complaint.
+_IBR_ORDERED = (
+    ("regc_lvpnt0", "regc_lvpnt1", True),
+    ("regc_zerox", "regc_brkpt", True),
+    ("reec_vdip", "reec_vup", True),
+    ("reec_dbd1", "reec_dbd2", False),
+    ("reec_iql1", "reec_iqh1", True),
+    ("reec_qmin", "reec_qmax", True),
+    ("reec_vmin", "reec_vmax", True),
+    ("reec_pmin", "reec_pmax", False),
+    ("reec_dpmin", "reec_dpmax", False),
+)
+#: Filter time constants PSS/E allows at 0 (bypass) but never below.
+_IBR_NON_NEGATIVE = ("regc_tfltr", "reec_trv", "reec_tp", "reec_tiq", "reec_tpord")
+
+
+def _check_ibr(uid, values):
+    """An inverter's REGCA1 + REECA1 group: absent, or complete and possible.
+
+    Absent is legal — the unit is then a static injection in the .dyr, and the
+    bundle ledgers the omission. Partial is refused: the missing CONs would
+    import as zero, and a converter with a zero current limit is a plausible,
+    wrong machine.
+    """
+    present = [p for p in IBR_PARAMS if p in values]
+    if not present:
+        return
+    missing = [p for p in IBR_PARAMS if p not in values]
+    if missing:
+        raise ContractError(
+            f"unit {uid}: the REGCA1/REECA1 group is all-or-nothing; missing {missing}"
+        )
+    for flag in sorted(IBR_FLAGS):
+        if values[flag] not in (0.0, 1.0):
+            raise ContractError(f"unit {uid}: {flag} is a switch and must be 0 or 1, got {values[flag]}")
+    for name in ("regc_tg", "reec_imax"):
+        if values[name] <= 0:
+            raise ContractError(f"unit {uid}: {name} must be > 0, got {values[name]}")
+    for name in _IBR_NON_NEGATIVE:
+        if values[name] < 0:
+            raise ContractError(f"unit {uid}: {name} must be >= 0, got {values[name]}")
+    if not values["regc_iqrmax"] > 0:
+        raise ContractError(f"unit {uid}: regc_iqrmax must be > 0, got {values['regc_iqrmax']}")
+    if not values["regc_iqrmin"] < 0:
+        raise ContractError(f"unit {uid}: regc_iqrmin must be < 0, got {values['regc_iqrmin']}")
+    if not values["regc_iolim"] < 0:
+        raise ContractError(f"unit {uid}: regc_iolim must be < 0, got {values['regc_iolim']}")
+    for lo, hi, strict in _IBR_ORDERED:
+        ok = values[lo] < values[hi] if strict else values[lo] <= values[hi]
+        if not ok:
+            raise ContractError(
+                f"unit {uid}: {lo} must be {'<' if strict else '<='} {hi}: "
+                f"{lo}={values[lo]}, {hi}={values[hi]}"
+            )
+    for axis in ("reec_vq", "reec_vp"):
+        points = [values[f"{axis}{k}"] for k in range(1, 5)]
+        if any(b <= a for a, b in zip(points, points[1:])):
+            raise ContractError(
+                f"unit {uid}: VDL voltages {axis}1..4 must strictly increase, got {points}"
             )
 
 
@@ -328,6 +423,22 @@ def load_unit_params(path=None) -> pd.DataFrame:
     front = ["h_s", "mbase_mva", "source", "include_in_inertia", "model"]
     rest = [c for c in df.columns if c not in front]
     return df[front + rest]
+
+
+def ibr_params(templates: UnitTemplates) -> pd.DataFrame:
+    """The inverters that carry a REGCA1 + REECA1 group, wide: index
+    ``unit_id``, columns ``mbase_mva`` then ``IBR_PARAMS``. The loader has
+    already made every group complete, so a unit is here with all of it or
+    not at all. This is what the .dyr writer reads for converter records."""
+    inv = templates.units.index[templates.units["model"] == "inverter"]
+    rows = templates.params[
+        templates.params["unit_id"].isin(inv) & templates.params["param"].isin(IBR_PARAMS)
+    ]
+    wide = rows.pivot(index="unit_id", columns="param", values="value")
+    wide = wide.reindex(columns=list(IBR_PARAMS))
+    wide.insert(0, "mbase_mva", templates.units.loc[wide.index, "mbase_mva"])
+    wide.index.name = "unit_id"
+    return wide
 
 
 def provenance_counts(templates: UnitTemplates) -> pd.Series:

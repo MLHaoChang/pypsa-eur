@@ -26,6 +26,7 @@ import argparse
 import dataclasses
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import time
@@ -82,6 +83,8 @@ from gridspine.static.loadflow import LFResult, apply_snapshot, run_lf
 from gridspine.static.lodf import N2_LEDGER, dc_base, to_sensitivities
 from gridspine.static.shortcircuit import FAULT_LEDGER, fault_levels
 from gridspine.static.strength import SCR_LEDGER, scr
+from gridspine.schema.capacity import CAPACITY_CSV
+from gridspine.static.capacity import CAPACITY_LEDGER, dc_rows
 from gridspine.templates.unit_params import load_unit_params, load_unit_templates
 
 STAGES = ["ingest", "dispatch", "ranking", "loadflow", "screening", "handoff"]
@@ -210,6 +213,7 @@ def _ledger(unit_params, screen: bool = True, ac_pass: dict | None = None) -> li
                 *N2_LEDGER,
                 *FAULT_LEDGER,
                 *SCR_LEDGER,
+                *CAPACITY_LEDGER,
                 "SCR is taken at the IEC 60909 MINIMUM case, the conservative choice "
                 "for weak-grid screening (assumed)",
                 "N-2 verified at prune threshold 0 by default: the measured lossless "
@@ -347,15 +351,115 @@ def dispatch_from_network(src, outdir, *, progress=NULL_PROGRESS):
         stage = "dispatch"
         n = load_solved_network(src)
         dispatch, loads, commitment = tables_from_network(n, net, registry)
-        # Demand first, as in `dispatch_year`: the loads artifact is an input.
-        loads.to_csv(outdir / "loads.csv", index=False)
-        dispatch.to_csv(outdir / "dispatch.csv", index=False)
+        _write_stage_tables(outdir, loads, dispatch)
         dispatch_source = {
             "network": str(src),
             "network_sha256": _sha256(src),
             "hours": int(pd.Series(dispatch["hour"]).nunique()),
             "commitment": commitment,
         }
+        progress.tick("dispatch", 1, 1)
+        return net, registry, dispatch, loads, dispatch_source
+    except Exception as exc:
+        StageError(stage=stage, element_ids=[], cause=repr(exc)).write(outdir)
+        raise
+
+
+def _write_stage_tables(outdir: Path, loads, dispatch) -> None:
+    """Write `loads.csv` and `dispatch.csv`, or neither.
+
+    The artifacts ARE the stage boundary, and they were written one after the
+    other: a failure between the two (ENOSPC, a full quota) left this run's
+    demand beside the PREVIOUS run's dispatch — a mixed pair that
+    `drivers.status` reports as `resumable` and every later stage reads as one
+    set of snapshots. Both go to temporary names in the same directory first and
+    are then moved into place with `os.replace`, which is atomic within a
+    filesystem.
+
+    Demand first, as `dispatch_year` has it: the loads artifact is an input.
+    """
+    staged_loads = outdir / ".loads.csv.part"
+    staged_dispatch = outdir / ".dispatch.csv.part"
+    try:
+        loads.to_csv(staged_loads, index=False)
+        dispatch.to_csv(staged_dispatch, index=False)
+        os.replace(staged_loads, outdir / "loads.csv")
+        os.replace(staged_dispatch, outdir / "dispatch.csv")
+    finally:
+        for path in (staged_loads, staged_dispatch):
+            if path.exists():
+                path.unlink()
+
+
+def _demand_buses(net) -> set[str]:
+    """The grid's load-carrying bus names — what a client's loads table must
+    name, and the set `producers.external` checks it against in both
+    directions.
+
+    Not the registry's `bus` column: that is where the MACHINES sit, and on a
+    real grid neither set contains the other. `net.load["bus"]` holds bus
+    INDICES, so the canonical names come back through `net.bus["name"]` — the
+    same indirection `to_loads_table` uses (`pypsa_nodal.py:205`), and the key
+    `loadflow._apply_loads` matches on.
+    """
+    return set(net.bus.loc[net.load["bus"], "name"].astype(str))
+
+
+def check_external(dispatch_src, loads_src):
+    """Validate a client's tables against the real grid and return the summary.
+
+    Writes NOTHING. The backend calls this as an upload arrives so a bad file is
+    refused there — the posture `upload_readback` takes — rather than queueing a
+    study that fails at its dispatch stage minutes later. Running
+    `dispatch_from_external` for this instead would leave `dispatch.csv` in the
+    run directory, and every later stage reads that as a finished dispatch.
+
+    Raises the producer's `ContractError` unchanged, so the message the engineer
+    reads is the one the producer wrote.
+    """
+    from gridspine.producers.external import tables_from_external
+
+    net = load_case39_res()
+    _dispatch, _loads, source = tables_from_external(
+        dispatch_src, loads_src, registry_from_net(net),
+        load_buses=_demand_buses(net),
+    )
+    return source
+
+
+def dispatch_from_external(dispatch_src, loads_src, outdir, *, progress=NULL_PROGRESS):
+    """Increment 7, A1: stages ingest and dispatch from the CLIENT's own tables.
+
+    Mirrors `dispatch_from_network`, and for the same reason: the backend reaches
+    only `gridspine.drivers`, so the producer needs a driver in front of it. The
+    two-directional unit check and both column contracts are enforced in the
+    producer (`producers.external.tables_from_external`); a failure lands in the
+    `dispatch` stage's error artifact with the cause, and NOTHING is written —
+    the artifacts are the stage boundary, so a half-written pair would read
+    downstream as a valid dispatch.
+
+    `loads_src` is None when `dispatch_src` is one Excel workbook carrying both
+    sheets. Returns (net, registry, dispatch, loads, dispatch_source); the
+    provenance record names both files and both digests, so a bundle built from
+    this is traceable to exactly the tables the client handed over.
+    """
+    from gridspine.producers.external import tables_from_external
+
+    dispatch_path = Path(dispatch_src)
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    stage = "ingest"
+    try:
+        net = load_case39_res()
+        registry = registry_from_net(net)
+        progress.tick("ingest", 1, 1)
+
+        stage = "dispatch"
+        dispatch, loads, dispatch_source = tables_from_external(
+            dispatch_path, loads_src, registry,
+            load_buses=_demand_buses(net),
+        )
+        _write_stage_tables(outdir, loads, dispatch)
         progress.tick("dispatch", 1, 1)
         return net, registry, dispatch, loads, dispatch_source
     except Exception as exc:
@@ -453,6 +557,7 @@ def study_dispatch(
         if screen:
             n2_set = n2_candidates(branch_contingencies(net))
         screening, faults, strength, thresholds, ac_severity = {}, {}, {}, {}, {}
+        capacity = {}
 
         converged = []
         n_selected = len(selection)
@@ -492,6 +597,9 @@ def study_dispatch(
                     ignore_index=True,
                 )
                 strength[hour] = scr(faults[hour][faults[hour]["case"] == "min"], registry, templates)
+                # Increment 9: the DC connection-capacity screen, every bus, both
+                # kinds. The AC answer is on demand (drivers/capacity.py).
+                capacity[hour] = dc_rows(net, hour)
                 progress.tick("screening", i, n_selected)
 
             stage = "handoff"
@@ -521,6 +629,10 @@ def study_dispatch(
 
         bundles, extra = {}, {}
         if screen:
+            art["capacity"] = outdir / CAPACITY_CSV
+            pd.concat([capacity[h] for h in hours_selected], ignore_index=True).to_csv(
+                art["capacity"], index=False
+            )
             # The two numbers the ledger README declares, measured on the hours
             # this run actually selected — which is why bundles are written in a
             # second pass, after every hour has been screened.
@@ -561,6 +673,7 @@ def study_dispatch(
                     lf=lf_results[hour], ledger_entries=ledger, measurements=measurements,
                     f_hz=CASE39_F_HZ, case_name="case39",
                     screening=screening[hour], fault_levels=faults[hour],
+                    capacity=capacity[hour],
                 ))
                 art[f"bundle_{hour}"] = bundles[hour]
                 progress.tick("handoff", i, len(hours_selected))

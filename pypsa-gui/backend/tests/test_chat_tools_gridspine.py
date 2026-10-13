@@ -37,6 +37,10 @@ GRIDSPINE_TOOLS = (
     "gridspine_export_handoff_bundle",
     "gridspine_get_readback",
     "gridspine_fetch_result_figure",
+    "gridspine_get_capacity",
+    "gridspine_compute_capacity",
+    "gridspine_get_connection_assessments",
+    "gridspine_assess_connection",
 )
 PROJECT_SCOPED = tuple(t for t in GRIDSPINE_TOOLS if t != "gridspine_create_study")
 CONFIG = {"hours": 24, "k": 1, "window": 24, "overlap": 0, "screen": False}
@@ -68,11 +72,13 @@ def test_the_run_is_long_running_and_the_reads_are_reads():
     assert safety_tier_for("gridspine_run_pipeline") == "execution_long_running"
     for name in ("gridspine_get_stage_status", "gridspine_list_ranked_snapshots",
                  "gridspine_get_assumption_ledger", "gridspine_get_config",
-                 "gridspine_get_readback", "gridspine_fetch_result_figure"):
+                 "gridspine_get_readback", "gridspine_fetch_result_figure",
+                 "gridspine_get_capacity", "gridspine_get_connection_assessments"):
         assert safety_tier_for(name) == "read", name
     for name in ("gridspine_create_study", "gridspine_set_dispatch_source",
                  "gridspine_edit_template_param", "gridspine_export_handoff_bundle",
-                 "gridspine_update_config"):
+                 "gridspine_update_config", "gridspine_compute_capacity",
+                 "gridspine_assess_connection"):
         assert safety_tier_for(name) == "write", name
 
 
@@ -101,6 +107,12 @@ def test_project_scoped_tools_take_the_project_by_name():
     ("gridspine_get_config", {"project_id": "Chat Study"}, "get_config"),
     ("gridspine_get_readback", {"project_id": "Chat Study"}, "get_readback"),
     ("gridspine_fetch_result_figure", {"project_id": "Chat Study", "hour": 19, "name": "vm"}, "fetch_result_figure"),
+    ("gridspine_get_capacity", {"project_id": "Chat Study"}, "get_capacity"),
+    ("gridspine_compute_capacity", {"project_id": "Chat Study", "bus": "BUS_16", "kind": "load"},
+     "compute_capacity"),
+    ("gridspine_get_connection_assessments", {"project_id": "Chat Study"}, "get_connection"),
+    ("gridspine_assess_connection", {"project_id": "Chat Study", "bus": "BUS_16", "load_mw": 300.0},
+     "assess_facility"),
 ])
 def test_each_dispatcher_resolves_the_project_and_calls_its_service_function(
     study, monkeypatch, tool, args, function
@@ -151,7 +163,10 @@ def test_export_returns_a_file_description_not_a_path_only(study, monkeypatch, t
     target.write_bytes(b"PK\x05\x06" + b"\x00" * 18)
     monkeypatch.setattr(gs, "export_handoff_bundle", lambda project, hour: target)
     out = chat_tools.DISPATCHERS["gridspine_export_handoff_bundle"](project_id="Chat Study", hour=7)
-    assert out == {"path": str(target), "filename": "bundle_h7.zip", "bytes": 22}
+    # A route, not `str(target)`: the absolute path named the storage root and
+    # the org/project UUIDs, and nothing can fetch a server-side path anyway.
+    assert out == {"download_url": "/api/gridspine/Chat%20Study/bundles/7",
+                   "filename": "bundle_h7.zip", "bytes": 22}
 
 
 def test_an_unknown_or_foreign_project_is_404_like_the_router(study):
@@ -253,3 +268,51 @@ def test_the_figure_tool_passes_name_and_hour_in_the_services_order(study, monke
                         lambda project, name, hour: seen.update(name=name, hour=hour) or {})
     chat_tools.DISPATCHERS["gridspine_fetch_result_figure"](project_id="Chat Study", hour="19", name="branch_p")
     assert seen == {"name": "branch_p", "hour": "19"}
+
+
+
+# --------------------------------------------------------------------------
+# connection capacity (increment 9)
+# --------------------------------------------------------------------------
+
+def test_the_capacity_read_forwards_its_filters_by_name(study, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(gs, "get_capacity",
+                        lambda project, bus=None, kind=None, hour=None:
+                        seen.update(bus=bus, kind=kind, hour=hour) or {"rows": []})
+    chat_tools.DISPATCHERS["gridspine_get_capacity"](
+        project_id="Chat Study", bus="BUS_16", kind="generation", hour=19)
+    assert seen == {"bus": "BUS_16", "kind": "generation", "hour": 19}
+
+
+def test_the_capacity_compute_passes_bus_and_kind_in_the_services_order(study, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(gs, "compute_capacity",
+                        lambda project, bus, kind: seen.update(bus=bus, kind=kind) or {"rows": []})
+    chat_tools.DISPATCHERS["gridspine_compute_capacity"](project_id="Chat Study", bus="BUS_03", kind="load")
+    assert seen == {"bus": "BUS_03", "kind": "load"}
+
+
+def test_the_capacity_tool_tells_the_model_not_to_sell_an_existing_overload_as_headroom():
+    # Found in the browser run: 13.8 MW at BUS_16 was the worsening tolerance
+    # over an N-1 overload that existed before anything connected. The panel
+    # says so; a model reading the raw row must be told the same, or it will
+    # report "13.8 MW available".
+    desc = next(t["description"] for t in TOOLS if t["name"] == "gridspine_get_capacity")
+    assert "binding_preexisting" in desc and "not present the MW figure as headroom" in desc
+    assert "never infinity" in desc
+
+
+
+def test_the_assessment_tool_forwards_the_whole_facility_with_the_defaults_filled(study, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(gs, "assess_facility", lambda project, spec: seen.update(spec) or {"rows": []})
+    chat_tools.DISPATCHERS["gridspine_assess_connection"](project_id="Chat Study", bus="BUS_16", load_mw=300.0,
+                                                          onsite_mw=100.0)
+    assert seen == {"bus": "BUS_16", "load_mw": 300.0, "load_pf": 0.98, "onsite_mw": 100.0,
+                    "onsite_converter": True, "profile": "eu_rfg_dcc_ce"}
+
+
+def test_the_assessment_tool_says_it_is_a_screen_not_a_certificate():
+    desc = next(t["description"] for t in TOOLS if t["name"] == "gridspine_assess_connection")
+    assert "not a compliance certificate" in desc and "RfG" in desc and "DCC" in desc

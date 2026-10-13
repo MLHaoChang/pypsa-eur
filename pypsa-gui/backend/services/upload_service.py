@@ -51,7 +51,7 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException
 
-from models.upload_schemas import DeleteUploadResponse, UploadMeta, UploadKind
+from models.upload_schemas import PROMOTABLE_KINDS, DeleteUploadResponse, UploadMeta, UploadKind
 from services.filename_service import safe_upload_filename
 
 logger = logging.getLogger(__name__)
@@ -80,6 +80,8 @@ MAX_MULTIMODAL_BLOCKS = 20
 # parse server-side (Phase B). CSV is text/plain but worth allowing as a
 # poor-man's tabular input.
 ALLOWED_MIME_TYPES = frozenset({
+    # Native network files are tool-accessible attachments, never model bytes.
+    "application/x-netcdf", "application/x-hdf", "application/x-hdf5", "application/zip",
     # Images (Phase C multimodal)
     "image/png", "image/jpeg", "image/webp", "image/gif",
     # PDFs (Phase C multimodal)
@@ -330,6 +332,7 @@ def add_upload(
     kind: UploadKind = "user_upload",
     quota_bytes: int = DEFAULT_QUOTA_BYTES,
     project_dir: pathlib.Path | None = None,
+    assurance_sha256: str | None = None,
 ) -> UploadMeta:
     """
     Add `file_bytes` to `name`'s uploads dir. Idempotent on bytes — same
@@ -353,7 +356,11 @@ def add_upload(
     safe_name = safe_upload_filename(filename, ext=pathlib.Path(filename).suffix.lstrip("."))
 
     with _project_upload_lock(name):
-        # Dedup hit: existing meta + ready blob → return as-is.
+        # Dedup hit: existing meta + ready blob → return as-is — except that a
+        # user upload re-sent AS A TEMPLATE (or as a round-trip copy) is
+        # promoted to that kind, so the report viewer's picker (which lists
+        # one kind only) shows it. Never the other direction: a template
+        # stays a template, a round-trip copy stays one.
         existing = _read_meta(meta_path)
         if existing is not None and existing.blob_ready:
             if existing.sha256 != sha256_full:
@@ -368,6 +375,12 @@ def add_upload(
                         ),
                     },
                 )
+            if kind in PROMOTABLE_KINDS and existing.kind == "user_upload":
+                existing = existing.model_copy(update={"kind": kind})
+                _atomic_write_meta(meta_path, existing)
+            if assurance_sha256 is not None and existing.assurance_sha256 != assurance_sha256:
+                existing = existing.model_copy(update={"assurance_sha256": assurance_sha256})
+                _atomic_write_meta(meta_path, existing)
             return existing
 
         # Quota check — only on a fresh upload (dedup hit doesn't grow disk).
@@ -415,6 +428,7 @@ def add_upload(
             version=1,
             page_count=page_count,
             truncated_to_100_pages=truncated_flag,
+            assurance_sha256=assurance_sha256,
         )
         # Write meta (blob_ready=false) → write blob → flip meta.blob_ready=true.
         # An orphan blob without a meta is invisible to list_uploads.
@@ -425,12 +439,14 @@ def add_upload(
         return meta
 
 
-def list_uploads(name: str, *, project_dir: pathlib.Path | None = None) -> list[UploadMeta]:
+def list_uploads(name: str, *, project_dir: pathlib.Path | None = None,
+                 kind: UploadKind | None = None) -> list[UploadMeta]:
     """
     Return all blob_ready=true uploads for `name`, newest first by
-    uploaded_at. Missing uploads/ dir → []. Holds the per-project lock
-    for the read so a concurrent delete can't surface a half-removed
-    entry.
+    uploaded_at — only those of `kind` when one is given (the report
+    viewer's template picker asks for `report_template`). Missing uploads/
+    dir → []. Holds the per-project lock for the read so a concurrent
+    delete can't surface a half-removed entry.
     """
     paths = _resolve_paths(name, project_dir)
     if not paths.uploads_dir.exists():
@@ -449,6 +465,8 @@ def list_uploads(name: str, *, project_dir: pathlib.Path | None = None) -> list[
             if not (sub / "blob").exists():
                 # Meta is committed but blob vanished — skip gracefully,
                 # leave the dir for prune_orphans to clean up.
+                continue
+            if kind is not None and meta.kind != kind:
                 continue
             out.append(meta)
         out.sort(key=lambda m: m.uploaded_at, reverse=True)

@@ -5,6 +5,7 @@ import collections
 import copy
 
 from services import chat_service
+from harness import history as harness_history
 
 
 def _user(text: str = "hi") -> dict:
@@ -75,7 +76,7 @@ def test_trim_does_not_orphan_tool_use_without_result():
 
 
 def test_append_history_message_trims_over_cap(monkeypatch):
-    monkeypatch.setattr(chat_service, "SESSION_MESSAGES_MAX", 6)
+    monkeypatch.setattr(harness_history, "SESSION_MESSAGES_MAX", 6)
     sess = chat_service.ChatSession()
     for i in range(10):
         sess.append_history_message(_user(f"u{i}"))

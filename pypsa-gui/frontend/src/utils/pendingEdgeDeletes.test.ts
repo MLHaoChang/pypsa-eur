@@ -7,8 +7,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   registerPendingEdgeDelete, cancelPendingEdgeDelete, pendingEdgeDeleteCount,
-  flushPendingEdgeDeletes, drainPendingEdgeDeletes,
+  flushPendingEdgeDeletes, drainPendingEdgeDeletes, drainPendingEdgeDeletesForUnload,
+  keepaliveFlushPendingEdgeDeletes,
 } from './pendingEdgeDeletes'
+import { useUIStore } from '../store/uiStore'
+import { useSimulationStore } from '../store/simulationStore'
 
 const UNDO_MS = 5000
 
@@ -102,5 +105,72 @@ describe('pending edge deletes', () => {
     const drained = drainPendingEdgeDeletes()
     expect(drained.map(e => e.edgeId).sort()).toEqual(['line-L1', 'link-K1'])
     expect(pendingEdgeDeleteCount()).toBe(0)
+  })
+
+  // A2 (deferred spec 2026-09-28 §2.1, "Writes that bypass axios"): while the
+  // tab and the backend disagree about the open project, a pending delete
+  // would remove a same-named line from the OTHER project's live network. The
+  // unload path is a raw keepalive fetch (no axios interceptor) and the save
+  // path's flush commits it: both drop it with one WARN instead.
+  describe('while the tab and the backend disagree (A2)', () => {
+    const warns = () => useSimulationStore.getState().logLines.filter(l => / WARN /.test(l))
+    beforeEach(() => {
+      useSimulationStore.setState({ logLines: [] })
+      useUIStore.setState({ projectMismatch: { tab: 'X', backend: 'Y' } })
+    })
+    afterEach(() => { useUIStore.setState({ projectMismatch: null }) })
+
+    it('the save path\'s flush drops the deletes with one WARN and commits nothing', async () => {
+      const commit = vi.fn(async () => {})
+      defer('line-L1', commit)
+      defer('link-K1', commit)
+      const res = await flushPendingEdgeDeletes()
+      expect(commit).not.toHaveBeenCalled()
+      expect(res).toEqual({ flushed: 0, failed: 0 })
+      expect(pendingEdgeDeleteCount()).toBe(0)
+      expect(warns()).toHaveLength(1)
+      expect(warns()[0]).toContain('2 pending')
+    })
+
+    it('the unload keepalive DELETE is dropped with one WARN', () => {
+      defer('line-L1', async () => {})
+      expect(drainPendingEdgeDeletesForUnload()).toEqual([])
+      expect(pendingEdgeDeleteCount()).toBe(0)
+      expect(warns()).toHaveLength(1)
+    })
+
+    it('the pagehide keepalive flush sends no DELETE while mismatched', () => {
+      const fetchSpy = vi.fn(async () => new Response(null))
+      vi.stubGlobal('fetch', fetchSpy)
+      try {
+        defer('line-L1', async () => {})
+        defer('link-K1', async () => {})
+        keepaliveFlushPendingEdgeDeletes()
+        expect(fetchSpy).not.toHaveBeenCalled()
+        expect(pendingEdgeDeleteCount()).toBe(0)
+        expect(warns()).toHaveLength(1)
+      } finally { vi.unstubAllGlobals() }
+    })
+
+    it('the control: without a mismatch the keepalive flush DELETEs each edge', () => {
+      useUIStore.setState({ projectMismatch: null })
+      const fetchSpy = vi.fn(async () => new Response(null))
+      vi.stubGlobal('fetch', fetchSpy)
+      try {
+        defer('line-L1', async () => {})
+        defer('link-K 1', async () => {})
+        keepaliveFlushPendingEdgeDeletes()
+        const calls = fetchSpy.mock.calls as unknown as Array<[string, RequestInit]>
+        expect(calls.map(c => c[0]).sort()).toEqual(['/api/network/lines/L1', '/api/network/links/K%201'])
+        expect(calls.every(c => c[1].method === 'DELETE' && c[1].keepalive === true)).toBe(true)
+      } finally { vi.unstubAllGlobals() }
+    })
+
+    it('the control: without a mismatch the unload drain hands the entries over', () => {
+      useUIStore.setState({ projectMismatch: null })
+      defer('line-L1', async () => {})
+      expect(drainPendingEdgeDeletesForUnload().map(e => e.edgeId)).toEqual(['line-L1'])
+      expect(warns()).toHaveLength(0)
+    })
   })
 })

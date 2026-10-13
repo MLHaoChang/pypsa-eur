@@ -43,5 +43,24 @@
        resolve its own dependencies. -->
   <key>com.apple.security.cs.allow-dyld-environment-variables</key>
   <true/>
+
+  <!-- The chat panel's mic button dictates into the message box through the
+       WKWebView's Web Speech API. The Info.plist usage-description strings
+       (`.spec`, NSMicrophoneUsageDescription / NSSpeechRecognitionUsageDescription)
+       are what the OS SHOWS the user; they are not what lets the app ask. The
+       hardened runtime gates resource access on the entitlement, so a signed
+       and notarised build without this one is refused the microphone whatever
+       the Info.plist says — and the refusal surfaces inside the web view as a
+       `not-allowed` SpeechRecognition error, i.e. as "the mic button is
+       broken" rather than as a permissions problem.
+
+       NOT VERIFIED ON A SIGNED BUILD. Added from Apple's hardened-runtime
+       resource-access rules, because the default build is unsigned and the
+       failure it prevents only appears after notarisation — the expensive
+       moment this file's header warns about. The first signed build should
+       confirm the mic prompt appears; if it does not, the problem is here.
+       It grants nothing the app does not already declare in Info.plist. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
 </dict>
 </plist>

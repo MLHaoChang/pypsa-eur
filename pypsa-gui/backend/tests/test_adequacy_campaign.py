@@ -233,19 +233,79 @@ def test_the_margin_loop_pays_for_its_probe_as_well():
             == C.estimate_solves(n, "coupling_loop", max_solves=3) + 1)
 
 
-def test_the_sweep_charges_its_contingencies_plus_the_closing_re_solve():
+def _sweep_network():
     n = _network()
     n.add("Carrier", "hydrogen")
     n.add("Bus", "B2")
+    n.add("Load", "L2", bus="B2", p_set=10.0)
     for i in range(3):
         n.add("Link", f"link{i}", bus0="B1", bus1="B2", carrier="hydrogen",
               p_nom=50.0, outage_rate_value=0.05, mttr_hours=40.0)
+    return n
+
+
+_SCENARIOS = [
+    {"id": f"s{i}", "name": f"s{i}", "kind": "parametric",
+     "frequency_per_year": 0.1, "electrical_load_multiplier": 1.1,
+     "renewable_availability_multiplier": 1.0}
+    for i in range(2)
+]
+
+
+def test_the_sweep_charges_each_sweeps_base_and_closing_re_solve():
+    """
+    Class B and class C each run their OWN contingency sweep: one frozen base
+    solve, one per contingency, one closing restore — K+2 and C+2, and 0 for
+    a sweep that has nothing to run (the engine returns early).
+    """
+    n = _sweep_network()
     from services.adequacy.sweep import class_b_contingencies
 
-    expected = len(class_b_contingencies(n)) + 1
-    assert C.estimate_solves(n, "fmea_sweep") == expected
-    assert C.estimate_solves(n, "fmea_sweep",
-                             scenarios=[{"a": 1}, {"b": 2}]) == expected + 2
+    k = len(class_b_contingencies(n))
+    assert k == 3
+    assert C.estimate_solves(n, "fmea_sweep") == k + 2
+    assert C.estimate_solves(n, "fmea_sweep", scenarios=_SCENARIOS) == \
+        (k + 2) + (len(_SCENARIOS) + 2)
+    bare = _network()
+    assert C.estimate_solves(bare, "fmea_sweep") == 0
+    assert C.estimate_solves(bare, "fmea_sweep", scenarios=_SCENARIOS) == \
+        len(_SCENARIOS) + 2
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("with_links,scenarios", [
+    (True, []), (True, _SCENARIOS), (False, _SCENARIOS),
+])
+def test_the_sweep_estimate_matches_a_counted_run(
+        monkeypatch, with_links, scenarios):
+    """The estimate is the engine's promise — pin it against real solves."""
+    import queue
+
+    import services.solver_service as SS
+    from services.adequacy.stress import run_class_c_sweep
+    from services.adequacy.sweep import run_class_b_sweep
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig
+
+    n = _sweep_network() if with_links else _network()
+    n.add("Carrier", "gas")
+    n.generators.at["gas", "marginal_cost"] = 10.0
+    expected = C.estimate_solves(n, "fmea_sweep", scenarios=scenarios)
+    calls = {"n": 0}
+    real = SS.run_simulation
+
+    def counting(*a, **k):
+        calls["n"] += 1
+        return real(*a, **k)
+
+    monkeypatch.setattr(SS, "run_simulation", counting)
+    PyPSAService.set_network(n)
+    lock, cfg = PyPSAService.get_lock(), SolverConfig(voll=500.0)
+    # Same sequence as fmea_sweep_runner's worker.
+    run_class_b_sweep(n, lock, cfg, log_queue=queue.SimpleQueue())
+    if scenarios:
+        run_class_c_sweep(n, lock, cfg, scenarios, log_queue=queue.SimpleQueue())
+    assert calls["n"] == expected
 
 
 def test_eh_study_charges_its_own_budget_solves():
