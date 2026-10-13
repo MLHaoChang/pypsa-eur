@@ -148,6 +148,25 @@ describe('TemplatePicker', () => {
     await waitFor(() => expect(select.value).toBe('f1'))
   })
 
+  it('a bind invalidates the document and the list — the next export is of the bound version', async () => {
+    // Binding writes a new version; a viewer still holding the old document
+    // would export it with the built-in writer (browser smoke, findings §7).
+    api.setReportTemplate.mockResolvedValue({ ...BOUND, plan: undefined })
+    const user = userEvent.setup()
+    const client = renderPicker()
+    const spy = vi.spyOn(client, 'invalidateQueries')
+    const select = await screen.findByLabelText('Template') as HTMLSelectElement
+    await waitFor(() => expect(select.options).toHaveLength(3))
+    api.getReportTemplate.mockResolvedValue(BOUND)
+    await user.selectOptions(select, 'f1')
+    await waitFor(() => expect(api.setReportTemplate).toHaveBeenCalledWith('Demo', REPORT_ID, 'f1'))
+    await waitFor(() => {
+      const keys = spy.mock.calls.map(c => JSON.stringify(c[0]?.queryKey))
+      expect(keys).toContain(JSON.stringify(['reports', 'doc', 'Demo', REPORT_ID]))
+      expect(keys).toContain(JSON.stringify(['reports', 'list', 'Demo']))
+    })
+  })
+
   it('unbinds back to the built-in default with {file_id: null}', async () => {
     api.getReportTemplate.mockResolvedValue(BOUND)
     api.setReportTemplate.mockResolvedValue(UNBOUND)
