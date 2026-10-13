@@ -280,13 +280,54 @@ def test_the_pcc_switchgear_scope_is_a_study_setting_and_is_written(tmp_path, pr
     assert f"switchgear {pcc}" not in set(by_operator["investment"]["need"])
     from gridspine.static.campus_invest import ParallelRules
     rules = ParallelRules().scope()
-    assert json.loads((run / INVEST_SCOPE_JSON).read_text()) == {"pcc_switchgear": "grid_operator", "parallel": rules}
+
+    def scope():
+        got = json.loads((run / INVEST_SCOPE_JSON).read_text())
+        assert got["horizon"]["period_years"] == {"2030": 1, "2040": 1}                  # plan C14
+        return {k: v for k, v in got.items() if k != "horizon"}
+    assert scope() == {"pcc_switchgear": "grid_operator", "parallel": rules, "pcc_tap_control": "campus"}
     invest_campus(run)
-    assert json.loads((run / INVEST_SCOPE_JSON).read_text()) == {"pcc_switchgear": "campus", "parallel": rules}
+    assert scope() == {"pcc_switchgear": "campus", "parallel": rules, "pcc_tap_control": "campus"}
     # the rules for adding units next to existing ones are passed on and written with the run (plan C13)
     invest_campus(run, parallel=ParallelRules(uk_tol=0.075))
     written = json.loads((run / INVEST_SCOPE_JSON).read_text())["parallel"]
     assert written == ParallelRules(uk_tol=0.075).scope() and written["uk_tol"]["value"] == 0.075
+
+
+def test_who_moves_the_pcc_taps_is_a_study_setting_and_the_taps_are_written(tmp_path, project):
+    """Plan C15: ``pcc_tap_control`` reaches the engine and the scope file,
+    and ``campus_invest_taps.csv`` lists every transformer with tap data
+    per hour and case. A drafted campus has no tap data: the file is a
+    header. With on-load taps on every unit, the grid operator's PCC units
+    never move."""
+    import json
+    import pandas as pd
+    from gridspine.drivers.campus_study import INVEST_SCOPE_JSON, INVEST_TAPS_CSV
+    from gridspine.static.campus_taps import TAP_COLUMNS
+    run = tmp_path / "run"
+    spec = draft_from_project(project).spec
+    prepare_campus(run, spec, project)
+    rank_campus(run, k=1)
+    invest_campus(run)
+    assert list(pd.read_csv(run / INVEST_TAPS_CSV).columns) == TAP_COLUMNS
+    assert pd.read_csv(run / INVEST_TAPS_CSV).empty
+    c = spec["campus"]
+    pcc = str(c["pcc"]["bus"])
+    for tr in c["transformers"].values():
+        tr["existing"] = True
+        tr["tap"] = {"changer": "on_load", "side": "hv", "neutral": 0, "min": -9, "max": 9,
+                     "step_percent": {"value": 1.5, "source": "assumed"}}
+    prepare_campus(run, spec, project)
+    rank_campus(run, k=1)
+    with pytest.raises(ContractError, match="pcc_tap_control"):
+        invest_campus(run, pcc_tap_control="operator")
+    assert not (run / INVEST_TAPS_CSV).exists() or pd.read_csv(run / INVEST_TAPS_CSV).empty
+    out = invest_campus(run, pcc_tap_control="grid_operator")
+    assert json.loads((run / INVEST_SCOPE_JSON).read_text())["pcc_tap_control"] == "grid_operator"
+    taps = pd.read_csv(run / INVEST_TAPS_CSV)
+    assert list(taps.columns) == TAP_COLUMNS and len(taps) == len(out["taps"]) > 0
+    at_pcc = {n for n, tr in out["spec"]["campus"]["transformers"].items() if str(tr["hv_bus"]) == pcc}
+    assert at_pcc and set(taps.loc[taps["transformer"].isin(at_pcc), "moved_by"]) == {0}
 
 
 def test_investing_by_milp_writes_c8s_files_and_the_milp_history(tmp_path, project):
@@ -343,3 +384,71 @@ def test_a_cancelled_milp_still_writes_its_files_and_the_least_cost_pick_takes_n
                  MILP_COMPARISON_CSV):
         assert (run / name).is_file(), name
     assert list(pd.read_csv(run / MILP_HISTORY_CSV)["iteration"]) == [0]
+
+
+# --------------------------------------------------------------------------
+# plan C14: the study horizon is the project's investment-period weightings
+# --------------------------------------------------------------------------
+
+def _weighted(tmp_path, years):
+    from tests.gridspine.test_campus_hourly import solved_hub
+    n = solved_hub(periods=[2030, 2040])
+    n.investment_period_weightings["years"] = years
+    path = tmp_path / "weighted.nc"
+    n.export_to_netcdf(str(path))
+    return path
+
+
+def test_the_manifest_records_the_projects_period_weightings_in_years(tmp_path):
+    path = _weighted(tmp_path, [10.0, 15.0])
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(path).spec, path)
+    manifest = json.loads((run / CAMPUS_MANIFEST).read_text())
+    assert manifest["period_weightings"] == {"2030": 10, "2040": 15}
+    assert manifest["period_years"] == {"2030": 10, "2040": 15}
+    assert manifest["period_years_source"] == {"2030": "project", "2040": "project"}
+    rank_campus(run, k=1)
+    out = invest_campus(run)
+    assert out["scope"]["horizon"]["period_years"] == {2030: 10, 2040: 15}
+    assert out["scope"]["horizon"]["horizon_end"] == 2055
+
+
+def test_a_weighting_that_is_not_positive_is_the_gap_and_flagged_assumed(tmp_path):
+    path = _weighted(tmp_path, [0.0, 15.0])
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(path).spec, path)
+    manifest = json.loads((run / CAMPUS_MANIFEST).read_text())
+    assert manifest["period_years"] == {"2030": 10, "2040": 15}
+    assert manifest["period_years_source"]["2030"] == "assumed: the gap to the next period"
+
+
+def test_a_single_period_project_spans_one_year(tmp_path):
+    from tests.gridspine.test_campus_hourly import solved_hub
+    path = tmp_path / "single.nc"
+    solved_hub().export_to_netcdf(str(path))
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(path).spec, path)
+    manifest = json.loads((run / CAMPUS_MANIFEST).read_text())
+    assert manifest["period_weightings"] == {"2030": None}
+    assert manifest["period_years"] == {"2030": 1}
+    assert manifest["period_years_source"] == {"2030": "single period: one year"}
+
+
+def test_a_run_prepared_before_the_weightings_were_recorded_takes_the_gaps(tmp_path, project):
+    import pandas as pd
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(project).spec, project)
+    manifest = json.loads((run / CAMPUS_MANIFEST).read_text())
+    for key in ("period_weightings", "period_years", "period_years_source"):
+        manifest.pop(key)
+    (run / CAMPUS_MANIFEST).write_text(json.dumps(manifest))
+    rank_campus(run, k=1)
+    out = invest_campus(run)
+    h = out["scope"]["horizon"]
+    assert h["period_years"] == {2030: 10, 2040: 10}
+    assert h["source"] == {2030: "assumed: the gap to the next period", 2040: "assumed: the gap from the previous period"}
+    assert any("assumed" in n for n in h["notes"])
+    inv = pd.read_csv(run / INVESTMENT_CSV)
+    assert {"purchase", "build_year", "service_to", "replaces", "lineage", "commissioned",
+            "commissioned_source"} <= set(inv.columns)
+    assert "capex_replacement_eur" in pd.read_csv(run / COST_CSV).columns

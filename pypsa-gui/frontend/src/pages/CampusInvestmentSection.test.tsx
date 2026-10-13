@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { CampusMilp, CampusState, CampusResults, CostBasis, InvestmentRow, MilpResults } from '../api/campusElectrical'
+import type { CampusMilp, CampusState, CampusResults, CostBasis, InvestmentRow, MilpResults, TapRow } from '../api/campusElectrical'
 import CampusElectricalPanel from './CampusElectricalPanel'
 import { formatEur } from './CampusInvestmentSection'
 
@@ -549,6 +549,152 @@ describe('investment: units added next to an existing transformer group (plan C1
   })
 })
 
+describe('investment: on-load taps set per hour and case (plan C15)', () => {
+  const tap = (over: Partial<TapRow>): TapRow => ({
+    period: 2030, hour: 158, case: 'intact', transformer: 'TR1', group: 'TR1+TR2', tap_pos: 0, ratio_pct: 100,
+    moved_by: 0, ...over,
+  })
+  const tapped = (over: Partial<CampusResults> = {}) => results({
+    taps: [
+      tap({}), tap({ transformer: 'TR2' }),
+      tap({ hour: 19, tap_pos: -3, ratio_pct: 95.5, moved_by: -3 }), tap({ hour: 19, transformer: 'TR2', tap_pos: -3,
+                                                                            ratio_pct: 95.5, moved_by: -3 }),
+      tap({ hour: 19, case: 'N-1:TR1', transformer: 'TR2', tap_pos: -5, ratio_pct: 92.5, moved_by: -5 }),
+    ],
+    tap_hours_moved: 1,
+    selection: [{ period: 2030, hour: 158, reasons: ['max_consumption_mw'] },
+                { period: 2030, hour: 19, reasons: ['max_import_q_mvar'] }],
+    scope: { pcc_switchgear: 'campus', pcc_tap_control: 'campus' },
+    ...over,
+  })
+
+  it('says how the taps act, how many hours moved one and who moves the PCC taps', async () => {
+    api.state.mockResolvedValue(stateWith(tapped()))
+    renderPanel()
+    const line = (await screen.findByTestId('invest-taps-summary')).textContent
+    expect(line).toContain('set per critical hour and per case')
+    expect(line).toContain('an N-1 case after the tap changers act, the reactive dispatch held')
+    expect(line).toContain('1 of the 2 critical hours moved a tap')
+    expect((await screen.findByTestId('invest-tap-scope')).textContent)
+      .toBe('PCC transformer taps: moved by the campus')
+  })
+
+  it('names the grid operator when it holds the PCC taps', async () => {
+    api.state.mockResolvedValue(stateWith(tapped({ scope: { pcc_switchgear: 'campus', pcc_tap_control: 'grid_operator' } })))
+    renderPanel()
+    expect((await screen.findByTestId('invest-tap-scope')).textContent)
+      .toBe("PCC transformer taps: held by the grid operator at the campus file's position")
+  })
+
+  it('keeps the tap table collapsed until opened, one row per hour, case and transformer', async () => {
+    api.state.mockResolvedValue(stateWith(tapped()))
+    renderPanel()
+    const box = (await screen.findByTestId('invest-taps')) as HTMLDetailsElement
+    expect(box.open).toBe(false)
+    expect(within(box).getByText('Tap positions (5)')).toBeTruthy()
+    const n1 = within(box).getByTestId('tap-2030-19-N-1:TR1-TR2')
+    expect(n1.textContent).toContain('-5')
+    expect(n1.textContent).toContain('92.5 %')
+    expect(n1.className).toContain('font-medium')                  // a moved tap stands out
+    expect(within(box).getByTestId('tap-2030-158-intact-TR1').className).not.toContain('font-medium')
+  })
+
+  it('says so when no transformer has tap data', async () => {
+    api.state.mockResolvedValue(stateWith(tapped({ taps: [], tap_hours_moved: 0 })))
+    renderPanel()
+    expect((await screen.findByTestId('invest-taps-summary')).textContent)
+      .toContain("No transformer has on-load tap data: every tap stays at the campus file's position")
+    expect(screen.queryByTestId('invest-taps')).toBeNull()
+  })
+
+  it('shows nothing about taps for a run from before them', async () => {
+    renderPanel()
+    await screen.findByTestId('campus-investment')
+    expect(screen.queryByTestId('invest-taps-summary')).toBeNull()
+    expect(screen.queryByTestId('invest-tap-scope')).toBeNull()
+  })
+})
+
+describe('investment: replacement at the end of life (plan C14)', () => {
+  const horizon = {
+    period_years: { '2030': 10, '2040': 10, '2050': 10 },
+    source: { '2030': 'project', '2040': 'project', '2050': 'assumed: the gap from the previous period' },
+    horizon_end: 2060,
+    notes: [
+      'Replacements are reported, not ranked: candidates are ranked by annualised cost.',
+      'TR1 (transformer K): no commissioning year; assumed: mid-life at the first period (commissioned 2010)',
+    ],
+  }
+  const renewed = () => results({
+    investment: [
+      row({ need: 'transformer T1', library_id: 'TR_110_20_63', units: 2, capex_eur: 4_300_000, action: 'buy',
+            purchase: 1, build_year: 2030, service_to: 2055, lineage: 'transformer T1|TR_110_20_63', replaces: null }),
+      row({ need: 'transformer T1', library_id: 'TR_110_20_63', units: 2, capex_eur: 4_300_000, action: 'renew',
+            invest_period: 2050, purchase: 2, build_year: 2055, service_to: 2060,
+            lineage: 'transformer T1|TR_110_20_63', replaces: 'transformer T1|TR_110_20_63|1' }),
+      row({ need: 'transformer K', library_id: 'TR_110_20_40', kind: 'keep', units: 1, capex_eur: 0,
+            annualised_eur_per_a: 0, existing: true, status: 'kept', action: 'keep', purchase: 0, build_year: 2010,
+            commissioned: 2010, commissioned_source: 'assumed: mid-life at the first period', service_to: 2050 }),
+      row({ need: 'transformer K', library_id: 'TR_110_20_40', units: 1, capex_eur: 950_000, action: 'renew',
+            invest_period: 2050, purchase: 1, build_year: 2050, service_to: 2060, reason: '',
+            commissioned: 2010, commissioned_source: 'assumed: mid-life at the first period' }),
+    ],
+    cost: [
+      { period: 2030, capex_eur: 4_300_000, capex_replacement_eur: 0, annualised_eur_per_a: 300_000 },
+      { period: 2040, capex_eur: 0, capex_replacement_eur: 0, annualised_eur_per_a: 300_000 },
+      { period: 2050, capex_eur: 5_250_000, capex_replacement_eur: 5_250_000, annualised_eur_per_a: 380_000 },
+    ],
+    scope: { pcc_switchgear: 'campus', horizon },
+  })
+  const perPeriodHub = { basis: 'per_period' as const, per_period: { '2030': 1e6, '2040': 1e6, '2050': 1e6 }, total: 3e7 }
+
+  it('lists one row per purchase with the year it is bought, a renewal saying so', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const [first, again] = await screen.findAllByTestId('invest-transformer T1')
+    expect(within(first).getByTestId('invest-action').textContent).toBe('buy')
+    expect(within(first).getByTestId('invest-bought').textContent).toBe('2030')
+    expect(within(again).getByTestId('invest-action').textContent).toBe('renew')
+    expect(within(again).getByTestId('invest-bought').textContent).toBe('2055')
+    expect(again.textContent).toContain('€4.30 M')
+  })
+
+  it('says when a kept existing asset went into service, and that the year is assumed', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const [keep, renew] = await screen.findAllByTestId('invest-transformer K')
+    expect(within(keep).getByTestId('invest-bought').textContent).toBe('in service since 2010 (assumed)')
+    expect(within(renew).getByTestId('invest-bought').textContent).toBe('2050')
+  })
+
+  it('shows the replacement part of each period capex', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const p2050 = await screen.findByTestId('cost-2050')
+    expect(within(p2050).getByTestId('cost-replacement').textContent).toBe('€5.25 M')
+    expect(within(screen.getByTestId('cost-2030')).getByTestId('cost-replacement').textContent).toBe('€0')
+  })
+
+  it('states the horizon, flags an assumed span and lists the notes', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const line = (await screen.findByTestId('invest-horizon')).textContent ?? ''
+    expect(line).toContain('to 2060')
+    expect(line).toContain('2030: 10 years')
+    expect(line).toContain('2050: 10 years (assumed)')
+    const notes = within(screen.getByTestId('invest-horizon-notes')).getAllByRole('listitem')
+    expect(notes.map(n => n.textContent)).toEqual(horizon.notes)
+  })
+
+  it('reads a run from before it: no horizon line, no replacement column, the period as the year', async () => {
+    renderPanel()
+    const t = await screen.findByTestId('invest-transformer GRID_IMPORT')
+    expect(within(t).getByTestId('invest-bought').textContent).toBe('2030')
+    expect(screen.queryByTestId('invest-horizon')).toBeNull()
+    expect(within(screen.getByTestId('cost-2030')).queryByTestId('cost-replacement')).toBeNull()
+  })
+})
+
 // Owner decision 2026-10-12: the investment case takes the joint optimisation when it is
 // fresh and found its own choice, else the least-cost run. The switch is never silent.
 describe('which result feeds the investment case', () => {
@@ -596,5 +742,47 @@ describe('which result feeds the investment case', () => {
     renderPanel()
     await screen.findByTestId('campus-investment')
     expect(screen.queryByTestId('invest-ic-source')).toBeNull()
+  })
+})
+
+// Owner decision 2026-10-13: the needs the run the case uses could not meet go to the
+// investment case, which flags the case. The panel says so, only when there are any.
+describe('unresolved needs passed to the investment case', () => {
+  it('says the unresolved needs are passed as a flag, beside the source line', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'least_cost', owner_assets_unresolved: 2 }))
+    renderPanel()
+    expect((await screen.findByTestId('invest-ic-unresolved')).textContent)
+      .toBe('2 unresolved needs are passed to the investment case as a flag: the case is not compliant without them.')
+    expect(screen.getByTestId('invest-ic-source').textContent).toBe('Investment case uses: least cost.')
+  })
+
+  it('says it in the singular for one', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'milp', owner_assets_unresolved: 1 }))
+    renderPanel()
+    expect((await screen.findByTestId('invest-ic-unresolved')).textContent)
+      .toBe('1 unresolved need is passed to the investment case as a flag: the case is not compliant without it.')
+  })
+
+  it('says it when the run bought nothing for the case', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 0, owner_assets_method: null, owner_assets_unresolved: 1 }))
+    renderPanel()
+    expect(await screen.findByTestId('invest-ic-unresolved')).toBeTruthy()
+    expect(screen.queryByTestId('invest-ic-source')).toBeNull()
+  })
+
+  it('says nothing when there are none, or the backend does not say', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'least_cost', owner_assets_unresolved: 0 }))
+    const { unmount } = renderPanel()
+    await screen.findByTestId('invest-ic-source')
+    expect(screen.queryByTestId('invest-ic-unresolved')).toBeNull()
+    unmount()
+    api.state.mockResolvedValue(stateWith(results(), { owner_assets_count: 2, owner_assets_method: 'least_cost' }))
+    renderPanel()
+    await screen.findByTestId('invest-ic-source')
+    expect(screen.queryByTestId('invest-ic-unresolved')).toBeNull()
   })
 })

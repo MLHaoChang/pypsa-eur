@@ -25,6 +25,9 @@ Translation, in the order the draft is built:
     rounded **up** to the next size in ``STANDARD_MVA``, with typical
     impedance and losses for its size class (``_TRAFO_CLASS``).
   - At the same voltage, a link becomes a short **bus tie**.
+  - A drafted transformer has **no tap block** (plans C13, C15): it sits at
+    its rated ratio, and the investment study never moves its taps until
+    the engineer adds the unit's tap data.
 * **A Link from an AC bus to another carrier** (an electrolyser, a heat
   pump) is power drawn from that bus, so it becomes a **load** at its
   optimised capacity. A Link from another carrier into an AC bus (a fuel
@@ -439,6 +442,23 @@ def _periods(n):
         return [(int(p), sns[sns.get_level_values(0) == p]) for p in sns.get_level_values(0).unique()]
     first = sns[0]
     return [(int(first.year) if hasattr(first, "year") else 0, sns)]
+
+
+def period_weightings(n) -> dict:
+    """``{period label: years or None}``: the project's investment-period
+    weightings in years (plan C14), None where it gives none. A
+    single-period network has no weighting, so its one period is None."""
+    periods = [p for p, _ in _periods(n)]
+    if not isinstance(n.snapshots, pd.MultiIndex):
+        return {periods[0]: None}
+    w = n.investment_period_weightings
+    years = w["years"] if "years" in w.columns else pd.Series(dtype=float)
+    out = {}
+    for p in periods:
+        v = years.get(p) if p in years.index else None
+        v = None if v is None or not np.isfinite(float(v)) else float(v)
+        out[p] = int(v) if v is not None and v.is_integer() else v
+    return out
 
 
 def _find(n, pypsa_name, kind, uid):

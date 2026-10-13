@@ -175,10 +175,23 @@ result is returned, flagged, with the reason.
 
 **Feasible** means C8's own re-check finds nothing (``_failures``), with
 the PCC's switchgear left out when the study gives it to the grid operator
-(``pcc_switchgear=False``, as C8). Then the PCC has no switchgear
+(``pcc_switchgear=False``, as C8). A PCC voltage out of its band is the
+grid's set-point: C8 reports it without an escalation and buys nothing for
+it (owner, 2026-10-13), and here no point buys for it either (the PCC
+voltage does not move with the campus's Q), but no point is feasible, so
+C8's result is returned. Then the PCC has no switchgear
 candidate and no ``ik``/``ip`` constraint either.
 
-Steady state only: no dynamics, no harmonics, no tap-changer optimisation.
+**Taps** (plan C15, owner's question 15): the on-load taps are set by C8's
+rule (``campus_taps``) inside every AC evaluation: the point's own
+dispatch (Q held, taps searched per hour and case), the reference dispatch
+for the margin (``reference``, C8's Q and tap rounds) and every finite
+difference. The linearisation is then taken at those fixed taps: the
+Jacobian sensitivities to Q are at the tapped point, and a tap change the
+rule makes between iterations is part of the linearisation error that
+``beta`` backs off. Integer tap variables are not modelled (ledgered).
+
+Steady state only: no dynamics, no harmonics, no tap-changer dynamics.
 Allowed to import pandapower, linopy and highspy (``static/``); never pypsa.
 """
 import dataclasses
@@ -198,10 +211,12 @@ from gridspine.static.campus_compliance import Q_TOL
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
 from gridspine.static.campus_invest import (
     ParallelRules, _apply, _bays, _compliance, _dispatch_table, _failures, _investment, _pcc_table, open_candidates,
-    select_assets, study_from, with_measures,
+    ranked_annual,
+    select_assets, study_from, taps_dispatch, with_measures,
 )
-from gridspine.static.campus_reactive import _SUPPLIERS, ALWAYS_ON, ReactiveResult, compensation_bus, reactive_need
+from gridspine.static.campus_reactive import _SUPPLIERS, ALWAYS_ON, ReactiveResult, compensation_bus
 from gridspine.static.campus_sc import PEAK_FACTOR, campus_fault_levels
+from gridspine.static.campus_taps import Taps, tap_table
 from gridspine.templates.campus_assets import value
 from gridspine.templates.grid_codes import band_for
 
@@ -436,8 +451,9 @@ def _smallest(group_of, rating):
 class _Problem:
     """Everything that stays fixed through the loop."""
 
-    def __init__(self, campus_spec, hourly, library, req, criteria, state):
+    def __init__(self, campus_spec, hourly, library, req, criteria, state, pcc_tap_control="campus"):
         self.spec0, self.library, self.req, self.criteria = campus_spec, library, req, criteria
+        self.tap_control = pcc_tap_control
         self.st = state
         self.lib_by_id = state.lib_by_id
         self.hours = state.hours
@@ -539,15 +555,21 @@ class _Problem:
         needs, spec, added = self.realise(point)
         campus = build_campus(spec)
         sp = self.setpoints(point, spec, added)
-        sens, flows, reactive = {}, {}, {}
+        sens, flows, reactive, taps = {}, {}, {}, []
         rows_of = self.st.rows_of
+        tapper = Taps(campus, self.profile, self.tap_control)
         for key in self.hours:
             def inspect(case, net, key=key):
                 if linearise:
                     sens[(key, case)] = sensitivities(net, self.ctrl_buses)
-            flows[key] = solve_cases(campus, rows_of[key], setpoints=sp[key], inspect=inspect)
+            log = {}
+            retap = tapper.hook(True, log) if tapper.data else None
+            flows[key] = solve_cases(campus, rows_of[key], setpoints=sp[key], inspect=inspect, retap=retap)
             reactive[key] = self._reactive(campus, flows[key]["intact"], sp[key], point, key)
-        study = study_from(campus, reactive, flows, self.st.installed, self.req, self.criteria, recheck=True)
+            reactive[key].taps = {m: p for m, p in log.get("intact", {}).items() if p != tapper.file_pos.get(m)}
+            taps += tapper.rows(key, log)
+        study = study_from(campus, reactive, flows, self.st.installed, self.req, self.criteria, recheck=True,
+                           taps=tap_table(taps), tapper=tapper)
         ref, ref_ok = self.reference(campus)
         # the sizing margin is judged on C8's own dispatch (owner, 2026-10-06)
         study.sizing = size_transformers(ref, campus, self.criteria)
@@ -567,12 +589,14 @@ class _Problem:
         """C8's dispatch for these assets (``reactive_need(residual=False)``:
         inverters, then STATCOMs, then steps, only as far as the PCC band
         needs) and every case solved with it: ``({hour: solve_cases},
-        converged)``. The sizing margin is judged on these flows."""
+        converged)``. The sizing margin is judged on these flows. The taps
+        are set by C8's rule (plan C15, ``campus_invest.taps_dispatch``)."""
         flows, rs, ok = {}, {}, True
+        tapper = Taps(campus, self.profile, self.tap_control)
         for key in hours or self.hours:
             rows = self.st.rows_of[key]
-            r = reactive_need(campus, rows, self.req, residual=False)
-            flows[key], rs[key] = solve_cases(campus, rows, setpoints=r.setpoints), r
+            r, flows[key], _log, _hunted = taps_dispatch(campus, rows, self.req, tapper)
+            rs[key] = r
             ok &= r.converged and all(f.converged for f in flows[key].values())
         self._ref_r = rs
         return flows, ok
@@ -1102,12 +1126,18 @@ def _label(prob, point):
 def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
                        criteria: SizingCriteria = SizingCriteria(), max_iter: int = MAX_ITER,
                        pcc_switchgear: bool = True, adaptive: bool = True, c8=None,
-                       progress=None, should_stop=None, parallel: ParallelRules = ParallelRules()) -> dict:
+                       progress=None, should_stop=None, parallel: ParallelRules = ParallelRules(),
+                       pcc_tap_control: str = "campus", period_years=None) -> dict:
     """The joint asset choice (module docstring). ``adaptive=False`` holds
     ``beta`` at 1 and ``Delta`` at its start, for comparison. ``c8`` is
     C8's result if already computed; else C8 runs with ``parallel``, the
     rules for adding units next to existing transformers (plan C13), which
-    the MILP's open candidates then follow too.
+    the MILP's open candidates then follow too, ``pcc_tap_control``
+    (plan C15): the taps are set by C8's rule inside every AC evaluation,
+    and ``period_years``, the project's investment-period weightings (plan
+    C14), passed to C8; the purchases and their renewals are written as C8
+    writes them, and the ranking, as C8's, leaves the renewals out
+    (``ranked_annual``).
 
     ``progress(iteration, max_iter, summary)``, when given, is called once
     per row of the history (the warm start is iteration 0), in order;
@@ -1130,14 +1160,15 @@ def select_assets_milp(campus_spec, hourly, selection, library, req, profile,
     result is returned)."""
     if c8 is None:
         c8 = select_assets(campus_spec, hourly, selection, library, req, profile, criteria,
-                           pcc_switchgear=pcc_switchgear, parallel=parallel)
+                           pcc_switchgear=pcc_switchgear, parallel=parallel, pcc_tap_control=pcc_tap_control,
+                           period_years=period_years)
     state = c8["state"]
-    prob = _Problem(campus_spec, hourly, library, req, criteria, state)
+    prob = _Problem(campus_spec, hourly, library, req, criteria, state, pcc_tap_control)
     prob.should_stop = should_stop
     c8_items = [((n.choice.items, n.choice.existing, n.choice.keep) if n.choice is not None and n.pos >= 0 else None)
                 for n in prob.needs]
     inv = c8["investment"]
-    c8_cost = float(inv.loc[inv["status"].isin(["chosen", "kept"]), "annualised_eur_per_a"].sum())
+    c8_cost = ranked_annual(inv)
     upper = c8_cost if state.feasible else math.inf
     prob.build_options(c8_items, upper)
     prob.q_ref = max([s for (_, s) in prob.avail.values()] + [o.q_stat for o in prob.options] + [1.0])
@@ -1274,7 +1305,7 @@ def _comparison(c8, prob, best):
     inv = c8["investment"]
     rows = []
     for j, need in enumerate(prob.needs):
-        c8_rows = inv[inv["need"] == need.key]
+        c8_rows = inv[(inv["need"] == need.key) & (inv["action"] != "renew")]       # plan C14: not ranked
         c8_cost = float(c8_rows["annualised_eur_per_a"].sum())
         c8_label = prob.c8_labels[j]
         o = prob.options[best.point.choice[j]] if best is not None else None
@@ -1301,12 +1332,14 @@ def _fallback(c8, prob, hist, why, c8_cost, stop="fallback"):
 def _result(c8, prob, best, hist, c8_cost, stop):
     needs, spec, added = prob.realise(best.point)
     study = best.study
-    investment, cost = _investment(needs, added, spec, study, prob.library, prob.lib_by_id, prob.st.periods)
+    investment, cost, horizon = _investment(needs, added, spec, study, prob.library, prob.lib_by_id,
+                                            prob.st.periods, *prob.st.horizon)
     final = with_measures(prob.st.as_is, best.compliance)
     summary = {"method": "milp", "fallback": False, "reason": "", "stop": stop, "c8_cost": c8_cost,
                "milp_cost": best.cost, "c8_feasible": bool(prob.st.feasible),
                "iterations": int(hist["iteration"].max())}
     return {"investment": investment.drop(columns=["lifetime_a"]), "cost": cost, "compliance": final,
             "dispatch": _dispatch_table(study), "spec": spec, "history": c8["history"], "unresolved": [],
-            "pcc": _pcc_table(study), "short_circuit": study.short_circuit, "scope": c8["scope"],
+            "pcc": _pcc_table(study), "short_circuit": study.short_circuit, "scope": {**c8["scope"], "horizon": horizon},
+            "taps": study.taps,
             "milp_history": hist, "comparison": _comparison(c8, prob, best), "fallback": None, "summary": summary}

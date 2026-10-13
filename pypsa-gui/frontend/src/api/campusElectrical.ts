@@ -22,7 +22,12 @@ export interface CampusSettings {
   invest: boolean
   /** The grid operator owns the PCC switchgear: it is not bought or costed. */
   pcc_switchgear_by_operator: boolean
+  /** Who moves the PCC transformer's on-load taps (plan C15); absent in a run
+   *  saved before it existed, which means the campus. */
+  pcc_tap_control: PccTapControl
 }
+
+export type PccTapControl = 'campus' | 'grid_operator'
 
 export interface ComplianceRow {
   check: 'pcc_reactive' | 'pcc_voltage' | 'campus_voltage' | 'transformer_loading' | 'switchgear' | 'cable_loading'
@@ -93,9 +98,10 @@ export interface Requirement {
 export type InvestStatus = 'chosen' | 'kept' | 'not_needed' | 'unresolved'
 
 /** What a row does (plan C13): a new asset, units added next to existing ones,
- *  existing units kept, or a group or cable bought where existing ones stood.
+ *  existing units kept, or a group or cable bought where existing ones stood;
+ *  plan C14: `renew`, an asset bought again at the end of its life.
  *  Absent in a run from before it, and empty for a need that needs nothing. */
-export type InvestAction = 'buy' | 'add' | 'keep' | 'replace'
+export type InvestAction = 'buy' | 'add' | 'keep' | 'replace' | 'renew'
 
 /** One need and the asset bought for it (`campus_investment.csv`). `library_id`
  *  and `invest_period` are null for a need that needs nothing. */
@@ -113,10 +119,33 @@ export interface InvestmentRow {
   status: InvestStatus
   reason: string | null
   action?: InvestAction | '' | null
+  // Plan C14, one row per purchase; absent in a run from before it.
+  /** 0 for a kept existing asset, 1 for the first buy, k for later ones. */
+  purchase?: number | null
+  /** The year bought (an existing asset's: its commissioning year). */
+  build_year?: number | null
+  /** The year its successor starts, or the horizon's end. */
+  service_to?: number | null
+  /** The row it replaces, as `lineage|purchase`. */
+  replaces?: string | null
+  lineage?: string | null
+  commissioned?: number | null
+  /** How the commissioning year is known: a source tag, or `assumed: ...`. */
+  commissioned_source?: string | null
 }
 
-/** The electrical cost of one investment period (`campus_cost.csv`). */
-export interface CostRow { period: number; capex_eur: number; annualised_eur_per_a: number }
+/** The electrical cost of one investment period (`campus_cost.csv`);
+ *  `capex_replacement_eur` (plan C14) is the part bought again. */
+export interface CostRow { period: number; capex_eur: number; annualised_eur_per_a: number; capex_replacement_eur?: number }
+
+/** The study horizon (plan C14): each period's span in years and where it came
+ *  from (`project`, or `assumed: ...`), the horizon's end and the run's notes. */
+export interface HorizonScope {
+  period_years: Record<string, number>
+  source: Record<string, string>
+  horizon_end: number
+  notes: string[]
+}
 
 /** The compliance table re-solved with the assets: `status_with_measures` and
  *  `value_with_measures` are an AC result, not a recommendation. */
@@ -142,8 +171,29 @@ export interface ParallelScope {
 }
 
 /** Who buys the PCC switchgear, and (plan C13; absent in older runs) the rules
- *  for adding units in parallel. */
-export interface InvestScope { pcc_switchgear: 'campus' | 'grid_operator'; parallel?: ParallelScope }
+ *  for adding units in parallel, (plan C15; absent in older runs) who moves
+ *  the PCC transformer's taps, and (plan C14; absent in older runs) the study
+ *  horizon. */
+export interface InvestScope {
+  pcc_switchgear: 'campus' | 'grid_operator'
+  parallel?: ParallelScope
+  pcc_tap_control?: PccTapControl
+  horizon?: HorizonScope
+}
+
+/** One transformer's tap in one hour and case of the re-check (plan C15,
+ *  `campus_invest_taps.csv`): `moved_by` is the change from the campus file's
+ *  position, `ratio_pct` the ratio against the rated one. */
+export interface TapRow {
+  period: number
+  hour: number
+  case: string
+  transformer: string
+  group: string
+  tap_pos: number
+  ratio_pct: number
+  moved_by: number
+}
 
 /** The solved hub's own system cost. `per_period` is EUR per year for a
  *  multi-period project; a single-period project has only `total`, as solved. */
@@ -184,6 +234,10 @@ export interface CampusResults {
   scope: InvestScope | null
   /** Null when the run did not invest. */
   cost_basis?: CostBasis | null
+  /** The on-load taps of the re-check and how many critical hours moved one
+   *  (plan C15); null when the run did not invest, absent in older runs. */
+  taps?: TapRow[] | null
+  tap_hours_moved?: number | null
 }
 
 // ── the joint optimisation (MILP) as a background job (plan C12) ────────────
@@ -282,6 +336,9 @@ export interface CampusState {
    *  optimisation when it is fresh and found its own choice, else the least-cost run;
    *  null when there are none. */
   owner_assets_method?: 'milp' | 'least_cost' | null
+  /** How many needs that same run could not meet; they are passed to the investment case,
+   *  which flags the case (owner decision 2026-10-13). */
+  owner_assets_unresolved?: number
   /** The joint optimisation's job and results (plan C12). */
   milp?: CampusMilp
 }

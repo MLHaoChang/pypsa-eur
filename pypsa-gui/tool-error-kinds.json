@@ -327,6 +327,10 @@
       "surface": "inline",
       "why": "A section id the report does not have, on generate (`sections`), on the per-section regenerate (WP3) or on get_report(section_id) (WP6). The message names the id; when WP6's tool passes a model-typed id the model corrects within the turn, as with invalid_tool_args."
     },
+    "result_unavailable": {
+      "surface": "inline",
+      "why": "read_result was given a locator that has expired, belongs to another chat or user, or was read during a checked answer. The model reads the message and re-runs a narrower query instead (chat harness issue 16)."
+    },
     "report_table_not_found": {
       "surface": "inline",
       "why": "get_report_table (WP6) was asked for a table id the report version does not carry. Tool-only: the routes serve whole documents. The message lists the ids the report has, so the model corrects within the turn, as with invalid_tool_args."

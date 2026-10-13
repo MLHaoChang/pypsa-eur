@@ -4,6 +4,7 @@ import json
 from urllib.parse import urlsplit
 
 from harness.protocol import LLMEvent, ProviderError
+from harness.providers.usage import usage_from
 
 
 REASONING_TOOL_MODELS = frozenset({"gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra"})
@@ -107,12 +108,9 @@ def stream_response(response, request, state):
                         yield LLMEvent(type="tool_use_start", tool_use_id=call_id, tool_name=item["name"])
                         starts.add(call_id)
                     blocks.append({"type": "tool_use", "id": call_id, "name": item["name"], "input": args})
-            usage = result.get("usage") or {}
-            neutral_usage = {"input_tokens": usage.get("input_tokens", 0),
-                             "output_tokens": usage.get("output_tokens", 0)} if usage else {}
-            cached = (usage.get("input_tokens_details") or {}).get("cached_tokens", 0)
-            if cached:
-                neutral_usage["cache_read_tokens"] = cached
+            usage = result.get("usage")
+            # Uncached input on every wire (harness/providers/usage.py).
+            neutral_usage = usage_from(usage) if isinstance(usage, dict) and usage else {}
             state.update(id=result.get("id"), model=request.model,
                          system=deepcopy(request.system_blocks),
                          messages=deepcopy(request.messages) + [{"role": "assistant", "content": deepcopy(blocks)}])
