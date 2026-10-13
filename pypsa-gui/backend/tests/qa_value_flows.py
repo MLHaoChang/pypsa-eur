@@ -749,6 +749,19 @@ def scenario_g() -> None:
 # ── I: bundle round trip ───────────────────────────────────────────────────
 
 
+def _same_line(x: dict, y: dict) -> bool:
+    """Every field equal; the amount to rel 1e-12. The asset cost lines are
+    unrounded since IC engine ask 4, and a netCDF round trip can sum a
+    statistic in another order (one ulp)."""
+    if {k: v for k, v in x.items() if k != "amount"} != \
+            {k: v for k, v in y.items() if k != "amount"}:
+        return False
+    a, b = x.get("amount"), y.get("amount")
+    if a is None or b is None:
+        return a is b
+    return bool(np.isclose(float(a), float(b), rtol=1e-12, atol=0.0))
+
+
 def _same_ledger(a: dict, b: dict) -> tuple[bool, str]:
     la, lb = _lines(a), _lines(b)
     if la == lb:
@@ -756,7 +769,9 @@ def _same_ledger(a: dict, b: dict) -> tuple[bool, str]:
     if len(la) != len(lb):
         return False, f"{len(la)} vs {len(lb)} lines"
     diffs = [(x["source"], x["source_id"], x["amount"], y["amount"])
-             for x, y in zip(la, lb) if x != y]
+             for x, y in zip(la, lb) if not _same_line(x, y)]
+    if not diffs:
+        return True, f"{len(la)} lines identical (amounts to rel 1e-12)"
     return False, f"{len(diffs)} differ, e.g. {diffs[:3]}"
 
 
