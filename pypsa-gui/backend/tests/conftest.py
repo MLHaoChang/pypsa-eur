@@ -63,7 +63,8 @@ os.environ["PROJECTS_ROOT"] = _TEST_PROJECTS_ROOT
 # `test_tenancy_api` and anything that calls `ensure_app_dirs()` accumulate
 # directories in the developer's real ~/Library/Application Support/PyPSA GUI/
 # and become history-dependent. Pinning only one moves the problem to the others.
-os.environ["PYPSAGUI_APP_DATA_DIR"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-appdata-")
+_TEST_APP_DATA_DIR = _tempfile.mkdtemp(prefix="pypsa-gui-test-appdata-")
+os.environ["PYPSAGUI_APP_DATA_DIR"] = _TEST_APP_DATA_DIR
 os.environ["LEGACY_ROOT"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-legacy-")
 os.environ["FLAT_PROJECTS_ROOT"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-flat-")
 # Same reasoning, one step further: this one is UNSET rather than redirected.
@@ -137,6 +138,14 @@ def _reset_backend_state() -> None:
     # "current") can't bleed across tests. The daemon dispatcher thread stays
     # parked on the now-empty queue — it's reused by the next test that enqueues.
     solve_queue.reset_for_tests()
+    # The authenticated suite reuses its seeded user and app-data root. Owned
+    # checked-answer/evidence files otherwise accumulate across unrelated tests
+    # until the real 512-record quota refuses publication. Reset only this
+    # test-owned subtree; preserve the production quota and persistence within
+    # a case (including reload/recovery and uncertain-operation checks).
+    shutil.rmtree(
+        pathlib.Path(_TEST_APP_DATA_DIR) / "assistant_assurance", ignore_errors=True
+    )
 
 
 @pytest.fixture(autouse=True)
