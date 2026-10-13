@@ -20,6 +20,10 @@
 // has finished: what it buys and its cost against the least-cost choice, need by
 // need, whether it kept the least-cost choice or was cancelled, and its
 // iteration history.
+//
+// One line under Investment says which of the two feeds the investment case
+// (owner decision 2026-10-12: the joint optimisation when it is fresh and found
+// its own choice, else the least-cost one), so the switch is never silent.
 import {
   type CampusMilp, type CampusState, type CostBasis, type CostRow, type HistoryRow, type HubCost, type InvestmentRow,
   type InvestStatus, type MilpHistoryRow, type MilpStop, type ParallelScope, type PccTapControl, type TapRow,
@@ -151,6 +155,25 @@ function CostBasisLine({ basis }: { basis: CostBasis }) {
   )
 }
 
+/** Which result the investment case's extra owner assets come from, as the backend
+ *  chose it (`owner_assets_method`), and, when it is the least cost beside a joint
+ *  optimisation, why. Nothing when the case takes no assets. */
+function IcSourceLine({ state }: { state: CampusState }) {
+  const method = state.owner_assets_method
+  if (method !== 'milp' && method !== 'least_cost') return null
+  const milp = state.milp?.results ? state.milp : null
+  let why = ''
+  if (method === 'least_cost' && milp) {
+    if (milp.stale) why = ' The joint optimisation is stale; run it again to use it.'
+    else if (milp.results!.fallback != null) why = ' The joint optimisation kept the least-cost choice.'
+  }
+  return (
+    <p data-testid="invest-ic-source" className="text-[12px] mb-2">
+      Investment case uses: {method === 'milp' ? 'joint optimisation (MILP)' : 'least cost'}.{why}
+    </p>
+  )
+}
+
 /** The hub's cost to set beside one electrical period, or null when it has none there. */
 function hubFor(hub: HubCost | null, period: number, periods: number): number | null {
   if (!hub) return null
@@ -177,6 +200,7 @@ export default function CampusInvestmentSection({ state }: { state: CampusState 
           Prices come from the asset library; every cost in the shipped library is one of the assumed placeholders,
           an order of magnitude and not a quote.
         </p>
+        <IcSourceLine state={state} />
         {r.cost_basis && <CostBasisLine basis={r.cost_basis} />}
         {r.scope && (
           <p data-testid="invest-scope" className="text-[12px] mb-2">{SCOPE_TEXT[r.scope.pcc_switchgear]}</p>

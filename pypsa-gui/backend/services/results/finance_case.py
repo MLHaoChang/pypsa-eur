@@ -1068,6 +1068,56 @@ def _assets(n, owned_list, *, discount_rate: float | None = None
     return tuple(assets), rates, flags
 
 
+# The columns an owner asset's investment is read from (IC G3 F-2; `_parts`,
+# `_assets`, `_cod`, the incentives' `carrier`): besides these, the composite
+# part columns (`inv_*_{overnight,lifetime,fom_share}`) and the static capacity
+# column. `max_hours` scales the energy part. The `_opt` capacities are the
+# dispatch part's (`dispatch_digest`), except a Transformer's, which it does not
+# cover.
+_INVESTMENT_COLS = ("overnight_cost", "lifetime", "capital_cost", "discount_rate", "build_year",
+                    "max_hours", "carrier")
+
+
+def _raw_value(v):
+    """A frame cell as plain JSON data: a numpy scalar as its Python value."""
+    return v.item() if isinstance(v, np.generic) else v
+
+
+def owner_assets_digest(n, commercial) -> str:
+    """A digest of the raw investment columns of EVERY `value_flows.asset_owners`
+    entry of the raw commercial config (IC G3 F-2; S0b findings limits 4 and 6):
+    `GET /results/investment_case` does not know the run's `owner`, so all of
+    them, read without model parsing. Raw columns, not computed parts: the
+    parts read the config `discount_rate`, which `solver_config` already names.
+    An asset absent from the network is digested as `missing`, a malformed
+    entry as `invalid`; never raises. The caller holds the network lock."""
+    from services.finance.investment_case_runner import json_digest
+
+    try:
+        vf = commercial.get("value_flows") if isinstance(commercial, dict) else None
+        entries = vf.get("asset_owners") if isinstance(vf, dict) else None
+        out = []
+        for o in entries if isinstance(entries, list) else ():
+            comp = o.get("component") if isinstance(o, dict) else None
+            name = o.get("asset_id") if isinstance(o, dict) else None
+            frame = _frame_of(comp) if isinstance(comp, str) else None
+            if frame is None or not isinstance(name, str):
+                out.append([str(comp), str(name), "invalid"])
+                continue
+            df = getattr(n, frame, None)
+            if df is None or name not in df.index:
+                out.append([comp, name, "missing"])
+                continue
+            cols = [*_INVESTMENT_COLS, *_schema.part_columns(comp), _CAPACITY_COLS[comp]]
+            if comp == "Transformer":
+                cols.append("s_nom_opt")
+            out.append([comp, name, {c: _raw_value(df.at[name, c]) for c in cols
+                                     if c in df.columns}])
+        return json_digest(sorted(out, key=lambda e: (e[0], e[1])))
+    except Exception as exc:                        # noqa: BLE001 — a digest never raises
+        return json_digest({"error": type(exc).__name__})
+
+
 def _build_year(n, comp: str, name: str) -> int | None:
     """An asset's `build_year` as a year, or None when absent (S3, review B2):
     PyPSA's default 0, NaN, a non-integer value or one outside 1900..2200 (the

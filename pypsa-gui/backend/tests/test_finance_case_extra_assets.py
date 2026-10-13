@@ -202,6 +202,61 @@ def test_a_part_that_is_not_a_dataclass_or_misses_a_field_is_invalid():
             _ext(parts=(bad,))
 
 
+# ── IC G3 F-1: validated, then stored as float; a strict flag; a named part ──
+
+
+def _mapping_part(**over):
+    return {"name": "investment", "upfront_per_unit": 1_800_000.0, "lifetime": 40.0,
+            "fom_share": 0.015, **over}
+
+
+def test_an_int_and_a_float_of_the_same_value_are_stored_and_hashed_alike():
+    from services.results.finance_case import finance_case_hash
+
+    ints = _ext(quantity=2, parts=[_mapping_part(upfront_per_unit=1_800_000, lifetime=40,
+                                                 fom_share=0)])
+    floats = _ext(quantity=2.0, parts=[_mapping_part(fom_share=0.0)])
+    assert ints == floats
+    assert type(ints.quantity) is float
+    assert all(type(getattr(ints.parts[0], f)) is float
+               for f in ("upfront_per_unit", "lifetime", "fom_share"))
+    assert finance_case_hash(_hash_fixture(extra_assets=(ints,))) == \
+        finance_case_hash(_hash_fixture(extra_assets=(floats,)))
+
+
+@pytest.mark.parametrize("field,value", [
+    ("quantity", True), ("quantity", "5"),
+    ("upfront_per_unit", True), ("upfront_per_unit", "5"),
+    ("lifetime", True), ("lifetime", "40"),
+    ("fom_share", False), ("fom_share", "0.1"),
+])
+def test_a_bool_or_a_string_is_still_refused_before_any_cast(field, value):
+    if field == "quantity":
+        with pytest.raises(ValueError, match="extra_asset_invalid:trf:quantity"):
+            _ext(quantity=value)
+    else:
+        with pytest.raises(ValueError, match=f"extra_asset_invalid:trf:{field}"):
+            _ext(parts=[_mapping_part(**{field: value})])
+
+
+def test_derived_from_capital_cost_must_be_a_real_bool():
+    import numpy as np
+
+    for bad in ("false", "True", 0, 1, None):
+        with pytest.raises(ValueError, match="extra_asset_invalid:trf:derived_from_capital_cost"):
+            _ext(parts=[_mapping_part(derived_from_capital_cost=bad)])
+    got = _ext(parts=[_mapping_part(derived_from_capital_cost=np.bool_(True))])
+    # Stored as a Python bool: a `numpy.bool_` would hash as the string "True".
+    assert got.parts[0].derived_from_capital_cost is True
+    assert _ext(parts=[_mapping_part()]).parts[0].derived_from_capital_cost is False
+
+
+@pytest.mark.parametrize("name", ["", "   ", None, 7])
+def test_a_part_needs_a_non_empty_string_name(name):
+    with pytest.raises(ValueError, match="extra_asset_invalid:trf:parts"):
+        _ext(parts=[_mapping_part(name=name)])
+
+
 def test_importing_the_finance_case_never_loads_the_solve_stack_or_asset_schema():
     import subprocess
     import sys
@@ -479,6 +534,8 @@ def test_the_report_block_reads_the_case_assets_and_the_workbook_lists_them(solv
                              "lifetime": 40.0, "fom_share": 0.015}]
     assert "within its build year 2030" in trf["cod"]
     assert "2026 EUR" in trf["money_year"]
+    # IC G3 gate C3: the case does not convert, and the route refuses another money year.
+    assert "converted" not in trf["money_year"] and "refuses" in trf["money_year"]
     assert by["feeder_cable"]["overnight_cost"] == pytest.approx(1.1 * 225_000.0)
     ws = load_workbook(io.BytesIO(build_workbook(rep)))["About"]
     rows = [(ws.cell(i, 1).value, ws.cell(i, 2).value) for i in range(1, ws.max_row + 1)]
@@ -642,6 +699,7 @@ def test_an_unstated_currency_year_with_extras_is_flagged_and_the_text_softened(
     (b,) = assemble_finance_sections(run_case(case), case).sections["project"].payload[
         "extra_assets"]
     assert "not stated" in b["money_year"] and "converted" not in b["money_year"]
+    assert "currency" in b["money_year"].split("not stated", 1)[1]    # the route still checks it
     stated = _build(n, cfg, _fin(currency_year=2026), extras=(_ext(),))
     assert "extra_asset_money_year_unstated" not in stated.flags
     assert "extra_asset_money_year_unstated" not in _build(n, cfg, _fin()).flags   # no extras

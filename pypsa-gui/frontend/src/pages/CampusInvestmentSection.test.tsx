@@ -614,3 +614,53 @@ describe('investment: on-load taps set per hour and case (plan C15)', () => {
     expect(screen.queryByTestId('invest-tap-scope')).toBeNull()
   })
 })
+
+// Owner decision 2026-10-12: the investment case takes the joint optimisation when it is
+// fresh and found its own choice, else the least-cost run. The switch is never silent.
+describe('which result feeds the investment case', () => {
+  const milpOf = (over: Partial<MilpResults> = {}): MilpResults => ({
+    investment: [], cost: [], compliance_invested: [], history: [], comparison: [],
+    summary: { method: 'milp', fallback: false, reason: '', stop: 'converged', c8_cost: 2, milp_cost: 1,
+               c8_feasible: true, iterations: 1 },
+    fallback: null, stop: 'converged', ...over,
+  })
+
+  it('says the joint optimisation feeds it', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'milp', milp: { status: null, stale: false, results: milpOf() } }))
+    renderPanel()
+    const line = await screen.findByTestId('invest-ic-source')
+    expect(line.textContent).toMatch(/^Investment case uses: joint optimisation \(MILP\)\.$/)
+  })
+
+  it('says the least cost feeds it when there is no joint optimisation', async () => {
+    api.state.mockResolvedValue(stateWith(results(), { owner_assets_count: 2, owner_assets_method: 'least_cost' }))
+    renderPanel()
+    const line = await screen.findByTestId('invest-ic-source')
+    expect(line.textContent).toMatch(/^Investment case uses: least cost\.$/)
+  })
+
+  it('says why the least cost feeds it when a joint optimisation is stale', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'least_cost', milp: { status: null, stale: true, results: milpOf() } }))
+    renderPanel()
+    expect((await screen.findByTestId('invest-ic-source')).textContent)
+      .toBe('Investment case uses: least cost. The joint optimisation is stale; run it again to use it.')
+  })
+
+  it('says why the least cost feeds it when the joint optimisation kept the least-cost choice', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'least_cost',
+      milp: { status: null, stale: false, results: milpOf({ fallback: 'no AC-feasible point is cheaper' }) } }))
+    renderPanel()
+    expect((await screen.findByTestId('invest-ic-source')).textContent)
+      .toBe('Investment case uses: least cost. The joint optimisation kept the least-cost choice.')
+  })
+
+  it('shows no line when there is nothing for the investment case', async () => {
+    api.state.mockResolvedValue(stateWith(results(), { owner_assets_count: 0, owner_assets_method: null }))
+    renderPanel()
+    await screen.findByTestId('campus-investment')
+    expect(screen.queryByTestId('invest-ic-source')).toBeNull()
+  })
+})

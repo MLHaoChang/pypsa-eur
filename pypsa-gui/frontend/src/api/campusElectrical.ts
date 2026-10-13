@@ -306,6 +306,10 @@ export interface CampusState {
   hub_cost_reason: string | null
   /** How many purchased items the last investment run offers as extra owner assets. */
   owner_assets_count?: number
+  /** Which result those owner assets come from (owner decision 2026-10-12): the joint
+   *  optimisation when it is fresh and found its own choice, else the least-cost run;
+   *  null when there are none. */
+  owner_assets_method?: 'milp' | 'least_cost' | null
   /** The joint optimisation's job and results (plan C12). */
   milp?: CampusMilp
 }

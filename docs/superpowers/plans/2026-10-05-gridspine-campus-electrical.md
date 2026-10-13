@@ -933,6 +933,26 @@ Owner decision 2026-10-07 (above). Branch `feat/gridspine-campus-milp-job`, cut 
 - **Measured.** The real MILP as a job on the backend tests' mini hub: about 19 s, 1 iteration, converged.
 - **Checks.** 35 mutations by hand (engine 6, service 17, routes 3, panel 9): 33 caught at once; two survived and got tests (the best cost reported as the trial's, on the outage case where a cheaper trial fails AC; the staleness hashes, on a least-cost run made again alike on another library). Holding the NetCDF lock in the thread was first caught only by a hang; every job test now checks the lock is free at teardown.
 
+## The investment case's source (2026-10-12)
+
+### Owner decision (2026-10-12): the investment case's source
+
+**"MILP when fresh, else least cost."** The extra owner assets the investment case takes come from the joint optimisation (`run_milp/`) when its result is fresh, and from the least-cost run (`run/`) otherwise. The owner accepted that the source then switches without a rerun of the case being asked for (a MILP finishing, or going stale); the switch is made visible instead: the method travels with every entry, the hash changes with the source, and the panel says which result feeds the case.
+
+### As built (2026-10-12)
+
+Branch `feat/gridspine-campus-ic-source`, cut from `feat/gridspine-campus-milp-job` (C12), with master merged (IC G1, G2 included).
+
+- **The choice** (`campus_electrical_service._owner_source`): `("milp", run_milp/)` when the job's summary is written and readable, it has a point of its own (`fallback` is null), `run_milp/` has its `campus_investment.csv` and `campus_assets_used.yaml`, and it is not stale by C12's rule (`_milp_stale`, the same flag as `get_state.milp.stale`); otherwise `("least_cost", run/)`, exactly as before. A running, failed or never-run job has no summary, so the least-cost run is the source.
+- **A fallback does not count, cancelled or not.** C12 writes `fallback` (the reason) when the MILP kept C8's choice: no AC-feasible point was cheaper, or the job was cancelled before it found one ("cancelled after n iteration(s): …"). Its investment table is then C8's choice re-solved on the same inputs, so the least-cost run is the honest source, and the hash does not change for nothing. A cancelled job that had found a cheaper AC-feasible point (its `fallback` null, `stop == "cancelled"`) does count: that point passed C8's own AC re-check.
+- **What changed for the IC**, additively: `meta.study_method` (`"milp" | "least_cost"`) on every entry of `extra_owner_assets`; `study_method` in `owner_assets_response` (`{assets, source_hash, stale, study_method}`, null when there are no assets); `owner_assets_method` beside `owner_assets_count` in `get_state`, and in `get_investment` (the copilot's read). The eight top-level keys of an entry are unchanged; G2 builds `ExtraOwnerAsset` from them and drops `meta`.
+- **The hash.** For the MILP it is the least-cost contract's digest over `run_milp/`'s files, preceded by `study_method`, a NUL byte and `milp`. For the least-cost run there is no prefix, so its hash is the one it had before (a case built on it does not turn stale on upgrade). A switch of source changes the hash, so a case built on the other one is seen as stale.
+- **`stale`** in the response is the flag of the run used: for the least-cost run, the results-stale flag of `get_state`, as before; for the MILP, false (it is used only when fresh).
+- **Panel.** Under Investment, one line: "Investment case uses: joint optimisation (MILP)." or "Investment case uses: least cost.", followed, when a joint optimisation result exists but is not used, by why: "The joint optimisation is stale; run it again to use it." or "The joint optimisation kept the least-cost choice." No line when the case takes no assets.
+- **Copilot.** `campus_get_study` (the state) and `campus_get_investment` carry `owner_assets_method`; their descriptions say what it means.
+- **The IC side** (the route that passes `extra_assets` into `build_finance_case`, its stale refusal, digest and currency handling, and the Investment tab) is a handoff issue: `.scratch/campus-ic-extra-owner-assets/`.
+- **Checks.** 20 service cases in `tests/test_campus_electrical_ic_source.py` (C12's fake engine, writing a MILP table of its own; real files in tmp project dirs) and 5 panel tests. Five existing assertions were extended, not relaxed, for the additive keys (`META_FIELDS`, the full entry, the response's key list and its empty body, the router's empty body). 21 mutations by hand (service 16, panel 5): 19 caught. Two survive and are equivalent: the response's `stale` computed from the least-cost run for a MILP source too (a MILP is used only when fresh, and its staleness includes the least-cost run's, so the least-cost flag is then false as well), and the panel's reason shown for a MILP source too (a MILP source is never stale and never a fallback, so the reason is empty).
+
 ## Part four: adding to existing transformers, replacement at end of life, tap changers (plan, 2026-10-12, no code yet)
 
 Written before the code, as every gridspine increment is, and amended as built. The owner approved three engine follow-ups on 2026-10-12. They are numbered C13 to C15.
