@@ -786,8 +786,11 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
                             fidelity=fidelity, status=status, error=error,
                             run_ledger=ledger, run_intake=intake,
                             preflight_flags=preflight_flags)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             logger.exception("decision study %s: finishing the run failed", study_id)
+            final["error"] = (f"finishing the run failed: {type(exc).__name__}: {exc}"
+                              + (f" (the run itself: {error})" if error else ""))
+            _record_unfinished(base_dir, study_id, record, final)
         finally:
             db.close()
             # Gate S6: release EVERYTHING before the terminal status is
@@ -799,6 +802,21 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
             if record.get("registered_base"):
                 _release_base(ctx.registry_key, True)
             _set(ctx, record, **final)
+
+
+def _record_unfinished(base_dir, study_id: str, record: dict, final: dict) -> None:
+    """
+    The run record of a run whose `_finish` raised. Without it an accepted run
+    read as never run: `GET /run` serves the live record only while it runs,
+    and nothing was on disk (CI, 13 Oct). Best effort; a failure here is
+    logged, and the live record still carries the terminal status.
+    """
+    try:
+        with store.WRITE_LOCK:
+            store.save_aux(base_dir, study_id, "run", {
+                **_public(record), **final, "current": None})
+    except Exception:  # noqa: BLE001
+        logger.exception("decision study %s: recording the failed finish failed", study_id)
 
 
 def _uuid(value):
@@ -829,6 +847,15 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
             study_forks.delete_fork(db, row, study_id=study_id, base_uuid=base_row_id)
         except study_forks.ForkError as exc:
             removal_errors.append(exc.code)
+        except Exception as exc:  # noqa: BLE001
+            # A fork that will not go (a tree removal's `OSError`, a locked
+            # database) is named on the run like a refusal. It must not sink
+            # the findings and the run record below: the run then read as
+            # never run (CI, 13 Oct). Rolled back so the next removal can go.
+            logger.exception("decision study %s: removing fork %s failed",
+                             study_id, opt.option_id)
+            removal_errors.append(f"fork_removal_failed:{type(exc).__name__}")
+            db.rollback()
 
     with store.WRITE_LOCK:
         study = store.load_study(base_dir, study_id)
