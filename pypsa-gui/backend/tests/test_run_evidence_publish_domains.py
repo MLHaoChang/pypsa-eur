@@ -178,3 +178,37 @@ def test_queue_finish_hook_via_solve_queue(evidence_root, monkeypatch):
     sq.solve_queue._finish(job, 'failed', error='boom')
     items = re_.list_project_runs()['items']
     assert items[0]['status'] == 'failed'
+
+
+def test_study_watcher_publishes_in_the_callers_context(monkeypatch):
+    """The watcher resolves the run's authority from the REQUEST's context.
+
+    Started as a bare thread, it had no request-scoped context, so
+    `_authority()` fell through to `PyPSAService._ensure_active()`, whose
+    unlocked self-heal could overwrite a network another thread had just
+    installed in the process foreground with an empty one (the intermittent
+    `qa_eh_reference_design` failure: the next study saw no import Links).
+    """
+    import pypsa
+
+    from services.pypsa_service import PyPSAService, ProjectContext
+
+    seen = []
+    done = threading.Event()
+
+    def _publish(study_key, record):
+        seen.append(PyPSAService._scoped())
+        done.set()
+
+    monkeypatch.setattr(re_, 'start_study_run', lambda key, record: None)
+    monkeypatch.setattr(re_, 'publish_study_run', _publish)
+    ctx = ProjectContext(network=pypsa.Network())
+    token = PyPSAService._request_ctx.set(ctx)
+    try:
+        record = {'status': 'running'}
+        re_.watch_study_run('eh_study', record)
+    finally:
+        PyPSAService._request_ctx.reset(token)
+    record['status'] = 'done'
+    assert done.wait(5.0), 'the watcher never published'
+    assert seen == [ctx]

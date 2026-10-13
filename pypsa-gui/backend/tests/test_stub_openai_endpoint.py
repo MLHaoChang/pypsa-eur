@@ -451,3 +451,47 @@ def test_branch_7_waits_for_both_results_then_closes(stub):
         {"role": "tool", "tool_call_id": "call_stub_7b", "content": "[]"}])
     assert calls == []
     assert said == "Done — create_project_from_template applied."
+
+
+# ── chat harness issue 20: reasoning and cached usage on the OpenAI wire ──
+
+def _chunks(base: str, text: str) -> list[dict]:
+    """POST one user message; return every decoded SSE chunk."""
+    body = json.dumps({"model": "stub-model", "stream": True,
+                       "messages": [{"role": "user", "content": text}]}).encode()
+    req = urllib.request.Request(f"{base}/v1/chat/completions", data=body,
+                                 headers={"content-type": "application/json"})
+    out = []
+    with urllib.request.urlopen(req, timeout=10) as r:
+        for raw in r.read().decode().split("\n\n"):
+            raw = raw.strip()
+            if raw.startswith("data: ") and raw != "data: [DONE]":
+                out.append(json.loads(raw[len("data: "):]))
+    return out
+
+
+def test_the_think_branch_streams_reasoning_before_the_answer(stub):
+    mod, base = stub
+    chunks = _chunks(base, f"{mod._THINK} before you answer.")
+    deltas = [c["choices"][0]["delta"] for c in chunks if c.get("choices")]
+    reasoning = "".join(d.get("reasoning_content") or "" for d in deltas)
+    content = "".join(d.get("content") or "" for d in deltas)
+    assert reasoning and content
+    first_content = next(i for i, d in enumerate(deltas) if d.get("content"))
+    assert all(d.get("reasoning_content") for d in deltas[:first_content])
+
+
+def test_every_reply_reports_a_cache_read_in_its_usage(stub):
+    mod, base = stub
+    usage = [c["usage"] for c in _chunks(base, "hello") if c.get("usage")][-1]
+    cached = usage["prompt_tokens_details"]["cached_tokens"]
+    assert 0 < cached < usage["prompt_tokens"]
+
+
+def test_the_multi_select_branch_asks_with_multi_select(stub):
+    mod, base = stub
+    calls, _ = _chat(base, [{"role": "user", "content": f"Which checks? {mod._ASK_MULTI}."}])
+    assert [c["name"] for c in calls] == ["ask_user"]
+    args = json.loads(calls[0]["arguments"])
+    assert args["multi_select"] is True and len(args["options"]) == 3
+    assert sum(1 for o in args["options"] if o.get("recommended")) == 1

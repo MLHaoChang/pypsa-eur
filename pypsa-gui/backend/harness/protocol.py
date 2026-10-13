@@ -63,6 +63,9 @@ class LLMEvent:
     blocks: list[dict[str, Any]] = field(default_factory=list)
     # message_done only: {"input_tokens", "output_tokens",
     # "cache_read_tokens", "cache_create_tokens"} — absent keys read as 0.
+    # `input_tokens` is input NOT served from cache, on every wire (owner
+    # decision 2026-10-12; OpenAI-shaped wires subtract their cached count
+    # in harness/providers/usage.py).
     usage: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
