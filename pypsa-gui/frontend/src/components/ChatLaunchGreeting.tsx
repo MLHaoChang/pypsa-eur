@@ -44,6 +44,7 @@ import { useUIStore } from '../store/uiStore'
 import { useChatReadiness } from '../hooks/useChatProfiles'
 import { nk } from '../utils/queryKeys'
 import { ehStudyRefetchInterval } from '../pages/results/ehStudyPoll'
+import { useNetworkRevisionInvalidation } from '../hooks/useNetworkRevisionInvalidation'
 import ApiKeySetup, { API_KEY_SETTINGS_KEY } from './ApiKeySetup'
 import type { SimulationStatus } from '../api/types'
 
@@ -57,24 +58,27 @@ import type { SimulationStatus } from '../api/types'
  *  finished study decides the Guided line on its own record — dispatch does
  *  not (deferred spec 2026-09-28 §3.2). */
 function solveLine(status: SimulationStatus | undefined, guided = false,
-  hubStudy: string | null = null, reviewStale = false): string | null {
+  hubStudy: string | null = null, reviewStale = false, editedSince = false): string | null {
   if (!status) return null
   if (status.running) return 'A solve is running right now.'
   if (guided && hubStudy === 'running') return 'The hub study is running — follow it in Hub design.'
   if (guided && (hubStudy === 'failed' || hubStudy === 'aborted')) {
     return 'The last hub study did not finish — see Hub design.'
   }
-  if (guided && hubStudy === 'done' && status.dispatch !== 'stale') {
-    // Stale when a later solve cleared the stored report (the review's
-    // `stale`). Otherwise the sentence says where the last study's results
-    // are and claims nothing about the current network: an edit after a
-    // study is not tracked yet (the planned `network_changed` marker on the
-    // study record). Live dispatch the backend marks stale means the network
-    // was edited since its last solve, so it falls through to the pre-P28
-    // stale-dispatch sentence below (O1 precedence; gate R-1 wording).
-    return reviewStale
-      ? 'A study has run, but the network was solved since — run it again in Hub design.'
-      : 'The last study’s results are in Hub design.'
+  if (guided && hubStudy === 'done') {
+    // P33b (D-2, D-3): precedence edited > solved-since > dispatch-stale >
+    // done. `editedSince` is the record's `edited_since_study === true`: an
+    // edit seam was crossed since the study started — the fact a Guided user
+    // acts on, and all the counter carries ("edited", never "changed"). Then
+    // the review's `stale`: a later solve cleared the stored report. Solved-
+    // since now sits above dispatch-stale (owner-approved change from O1; the
+    // combination is reachable only for a record that cannot say whether it
+    // was edited). Live dispatch the backend marks stale still falls through
+    // to the pre-P28 stale-dispatch sentence below (gate R-1 wording).
+    // Otherwise the done sentence claims nothing about the current network.
+    if (editedSince) return 'The network has been edited since the last study — run it again in Hub design.'
+    if (reviewStale) return 'A study has run, but the network was solved since — run it again in Hub design.'
+    if (status.dispatch !== 'stale') return 'The last study’s results are in Hub design.'
   }
   switch (status.dispatch) {
     case 'fresh':
@@ -167,7 +171,14 @@ export default function ChatLaunchGreeting() {
     enabled: guided && !!currentProject && hubStatus === 'done',
   })
   const reviewStale = (review as { status?: string; stale?: boolean } | null | undefined)?.stale === true
-  const solve = solveLine(status, guided, hubStatus, reviewStale)
+  // P33b: an edit after the study, from the record (one source with the
+  // Results card). `null` (Unavailable) never selects a sentence.
+  const editedSince = (hubStudy as { edited_since_study?: boolean | null } | null | undefined)
+    ?.edited_since_study === true
+  // Re-read the record and the review when the polled edit counter moves, so
+  // the sentence follows an edit without a reload. Guided only.
+  useNetworkRevisionInvalidation(guided && !!currentProject)
+  const solve = solveLine(status, guided, hubStatus, reviewStale, editedSince)
   const needsKey = keySettings?.configured === false && !effectiveReady
 
   return (
