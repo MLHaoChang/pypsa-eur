@@ -6,6 +6,8 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
+* Fix(CI): Publish development images in the repository owner's lowercase registry namespace using the workflow token. Include editable package sources in the locked image and validate builds before merge. Build when the environment image is missing, reuse it when available, and keep manual builds and failure handling from publishing incorrect tags.
+
 * Test(pypsa-gui): Isolate owned assurance records between backend test cases so long suites do not exhaust a shared user's 512-record quota. Add regressions for case isolation and refusal to publish from a full store; production storage limits and within-case recovery remain unchanged.
 
 * Feat(pypsa-gui): Expand the checked-answer CI gate to 133 deterministic cases with varied load, weight, price and storage-efficiency oracles. Add offline blind review preparation and calibration reports requiring two agreeing independently attested reviewers, explicit unresolved/missing/error counts and conditional statistical intervals. Synthetic evidence cannot certify production error rates or confer domain approval.

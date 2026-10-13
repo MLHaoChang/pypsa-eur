@@ -4,3 +4,8 @@
 
 *
 !pixi.*
+!pyproject.toml
+!gridspine
+!gridspine/**
+gridspine/**/__pycache__
+gridspine/**/*.pyc
