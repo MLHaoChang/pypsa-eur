@@ -115,3 +115,16 @@ def test_every_extendable_asset_of_a_template_is_priced(nets):
             col = "e_nom_extendable" if comp == "stores" else "p_nom_extendable"
             for name in df.index[df[col].astype(bool)]:
                 assert (tid, comp, name) in PRICED, f"{tid}: extendable {comp} {name} not pack-priced"
+
+
+def test_each_candidate_carries_its_pack_provenance(nets, pack):
+    """S1a: what the pack wrote is stamped `default` with the pack as its source."""
+    from services.asset_schema import provenance
+
+    cls = {"generators": "Generator", "storage_units": "StorageUnit", "links": "Link"}
+    source = f"{pack.pack_id}@{pack.version}#{pack.hash[:16]}"
+    for (tid, comp, name), tech in PRICED.items():
+        got = provenance.get(nets[tid], cls[comp], name)
+        assert got and all(e["status"] == "default" and e["source"] == source
+                           for e in got.values()), (tid, name, got)
+        assert "capital_cost" not in got

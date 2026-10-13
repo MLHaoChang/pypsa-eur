@@ -86,3 +86,54 @@ def test_an_unknown_technology_is_refused():
 
     with pytest.raises(KeyError, match="nuclear"):
         price_from_pack(_net(), "generators", "g", "nuclear", version=VERSION)
+
+
+# ── provenance (S1a, gatekeeper 2026-10-13): typed fields only, never derived ones ──
+
+
+def _row(key):
+    return next(r for r in _pack().cost_values if r.key == key)
+
+
+def test_a_single_part_asset_records_each_typed_field_it_wrote():
+    from services.asset_schema import provenance
+    from services.library.defaults_pack.pricing import price_from_pack
+
+    n = _net()
+    price_from_pack(n, "generators", "g", "gas-genset", version=VERSION)
+    got = provenance.get(n, "Generator", "g")
+    assert set(got) == {"overnight_cost", "lifetime", "fom_cost", "discount_rate"}   # no capital_cost
+    pack = _pack()
+    source = f"{pack.pack_id}@{VERSION}#{pack.hash[:16]}"
+    assert all(e["status"] == "default" and e["source"] == source for e in got.values())
+    over = _row("gas-genset.investment.overnight")
+    assert got["overnight_cost"]["range"] == [over.range.low, over.range.high]
+    assert got["overnight_cost"]["currency_year"] == 2020
+    assert got["overnight_cost"]["source_year"] == over.source_year
+    life = _row("gas-genset.investment.lifetime")
+    assert got["lifetime"]["range"] == [life.range.low, life.range.high]
+    assert got["overnight_cost"]["illustrative"] is False
+
+
+def test_a_battery_records_its_six_part_fields_never_the_derived_ones():
+    from services.asset_schema import provenance
+    from services.library.defaults_pack.pricing import price_from_pack
+
+    n = _net()
+    price_from_pack(n, "storage_units", "s", "battery", version=VERSION)
+    got = provenance.get(n, "StorageUnit", "s")
+    assert set(got) == {f"inv_{p}_{f}" for p in ("power", "energy")
+                        for f in ("overnight", "lifetime", "fom_share")} | {"discount_rate"}
+    assert not {"capital_cost", "fom_cost", "lifetime"} & set(got)
+
+
+def test_a_link_records_what_it_wrote_with_the_efficiency_scaled_range():
+    from services.asset_schema import provenance
+    from services.library.defaults_pack.pricing import price_from_pack
+
+    n = _net()
+    price_from_pack(n, "links", "fc", "fuel-cell", version=VERSION)
+    got = provenance.get(n, "Link", "fc")
+    assert set(got) == {"overnight_cost", "lifetime", "fom_cost", "discount_rate"}
+    over = _row("fuel-cell.investment.overnight")
+    assert got["overnight_cost"]["range"] == pytest.approx([0.5 * over.range.low, 0.5 * over.range.high])
