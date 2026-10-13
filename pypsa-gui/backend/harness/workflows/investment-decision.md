@@ -1,10 +1,10 @@
 ---
 id: investment-decision
 title: Is this investment worth it?
-intent: A question-led decision study (battery at my site, data-centre power, waste heat) with an assumptions ledger and a verdict.
+intent: A question-led decision study (today, a battery at my site) with an assumptions ledger, a verdict and a report.
 when: [guided, expert]
 order: 70
-status: planned
+status: active
 opening_request: Help me decide whether an investment is worth it. Ask me which question I have and what you need to know.
 steps:
   - id: question
@@ -21,28 +21,38 @@ steps:
     done_when: The report is generated or declined.
 ---
 
-Planned: the tools below are defined in plan v1.4 (U3) and do not exist
-yet; this workflow stays out of the menu until they do.
+Each study tool takes **project** and **study_id**. **project** is the study's own
+base project, which `start_decision_study` returns; only
+`start_decision_study` takes the project open now, and it does not change it.
 
 ## Step: question
 
-Offer the questions in the owner's order (battery at site, data-centre
-power, waste heat, hydrogen, off-grid) with `ask_user`, then
-`start_decision_study`.
+Today one question can be answered: "Do I need a battery at my site?"
+(**bess_at_site**). Data-centre power, waste heat, hydrogen and off-grid are
+coming; say so if asked. Ask for the bidding zone, the grid connection in MW
+and the load (a sector profile with its annual MWh, or an uploaded meter
+file) with `ask_user`; never invent them. Ask whether the site has a tariff
+of its own; without one the defaults' illustrative tariff is used and the
+report says so. Then `start_decision_study`.
 
 ## Step: parameters
 
-For each key parameter ask with `ask_user`, offering the generic default as
-the recommended option with its source and year; `set_study_parameter` on
-the answer.
+`start_decision_study` returned the key parameters, each with its default
+and source. For each, ask with `ask_user`, offering the default as the
+recommended option with its source and year; `set_study_parameter` on a
+changed answer, with the row's own unit. Everything else stays the generic
+defaults; say that once.
 
 ## Step: verdict
 
-`run_decision_study`, then `get_study_findings` and `explain_verdict`.
-State whether the verdict is recommended, marginal or not recommended and
-which driver could flip it.
+`run_decision_study` runs the options; poll `get_study_findings` until it
+has finished. Then `run_decision_study` with stage `tornado`, and poll
+again: the verdict needs the tornado. Read the verdict with
+`get_study_findings` and `explain_verdict`: say whether it is recommended,
+marginal or not recommended, at what size, and which driver could flip it.
+A figure that is not established is said so, never read as zero.
 
 ## Step: report
 
-Offer `generate_study_report`; list every generic default the report
-relies on.
+Offer `generate_study_report` (Word by default, the workbook on request);
+say that the report lists every generic default it relies on.
