@@ -995,7 +995,9 @@ class PyPSAService:
     # to build-then-activate (the swap happens under get_lock() today), which
     # lands with B4. The netCDF I/O lock stays global forever (process-global HDF5).
     @classmethod
-    def register(cls, project_id: str, ctx: ProjectContext) -> list[str]:
+    def register(
+        cls, project_id: str, ctx: ProjectContext, *, write_back: bool = True,
+    ) -> list[str]:
         """
         Add/replace a bound resident context, stamp its LRU recency (registering
         counts as an interaction), and run the B9 cap check. Every registration
@@ -1022,6 +1024,12 @@ class PyPSAService:
         an eviction victim, because the outcome for that context is identical:
         it stops being reachable. `prior is not ctx` keeps a plain
         re-registration (the common case) from triggering a save.
+
+        `write_back=False` is for the one caller whose displaced context is NOT
+        merely becoming unreachable: `load_project` has just re-read the same
+        project off disk to REPLACE it (OPEN-ITEMS 13). Writing the displaced
+        copy back would put the edit the user chose to discard on disk while
+        memory holds the disk copy — the next save loses it, a restart revives it.
         """
         with cls._registry_lock:
             prior = cls._contexts.get(project_id)
@@ -1033,7 +1041,7 @@ class PyPSAService:
         # detach-then-save shape, as `_evict_if_over_cap`. The save takes
         # mutation_lock + the netCDF I/O lock, which must never nest under
         # `_registry_lock`.
-        if prior is not None and prior is not ctx:
+        if write_back and prior is not None and prior is not ctx:
             cls._save_evicted_ctx(project_id, prior)
         if project_id in cls._study_owned:
             # A study's registration never makes room (BC-S4-1).

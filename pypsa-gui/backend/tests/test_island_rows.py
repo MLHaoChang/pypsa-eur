@@ -494,6 +494,37 @@ def test_a_period_shorter_than_the_window_is_a_refusal_not_a_crash():
                         extra_functionality=island_extra_functionality(_island(sustained_h=48.0)))
 
 
+def test_one_snapshot_cannot_define_the_ride_through_step():
+    """Δ is the gap between snapshots. One snapshot has no gap, so the
+    window length D = sustained_h/Δ is undefined — a refusal, not a solve
+    that treats the hour as 1 h because the weightings say so."""
+    with pytest.raises(IslandRefusal, match="at least two snapshots"):
+        _net(hours=1).optimize(
+            solver_name="highs",
+            extra_functionality=island_extra_functionality(_island(sustained_h=1.0)))
+
+
+def test_uneven_snapshot_spacing_is_refused():
+    """A mixed 1 h / 2 h index must not be reduced to one Δ. The energy row
+    is d·Δ over D = sustained_h/Δ snapshots; the wrong Δ mis-sizes the
+    reserve."""
+    n = _net(hours=3)
+    n.set_snapshots(pd.to_datetime([
+        "2030-01-01 00:00", "2030-01-01 01:00", "2030-01-01 03:00"]))
+    with pytest.raises(IslandRefusal, match="evenly spaced"):
+        n.optimize(solver_name="highs",
+                   extra_functionality=island_extra_functionality(_island(sustained_h=1.0)))
+
+
+def test_a_window_that_is_not_a_whole_number_of_snapshots_is_refused():
+    """1.5 h of ride-through on a 1 h index is not an integer window. Rounding
+    it to 1 or 2 snapshots would hold the wrong MWh."""
+    with pytest.raises(IslandRefusal, match="whole number"):
+        _net(hours=4).optimize(
+            solver_name="highs",
+            extra_functionality=island_extra_functionality(_island(sustained_h=1.5)))
+
+
 def test_pf_runs_and_scopf_without_branches_are_not_refused():
     """A power flow never builds the LP, and SCOPF with no branch selected
     falls back to the plain solve."""
