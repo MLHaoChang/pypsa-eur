@@ -278,6 +278,48 @@ describe('a failed first read (re-gate B4)', () => {
     expect(screen.queryByTestId('hub-load-error')).toBeNull()
   })
 
+  // P30 (B8): the line names what failed — the first of study state,
+  // template, readiness — and Goal's Run waits for the template.
+  it('template 500 → the line names the template, hub-goal-run disabled', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockRejectedValue(boom())
+    const user = mount()
+    const line = await screen.findByTestId('hub-load-error')
+    expect(line.textContent).toMatch(
+      /^This project's template could not be read from the server, so the steps below may be incomplete\./)
+    await user.click(rail('goal'))
+    const run = await screen.findByTestId('hub-goal-run') as HTMLButtonElement
+    expect(run.disabled).toBe(true)
+    expect(run.title).toBe('The template could not be read — retry above.')
+  })
+
+  it('study 500 → the line names the study state', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockRejectedValue(boom())
+    mount()
+    const line = await screen.findByTestId('hub-load-error')
+    expect(line.textContent).toMatch(/^This project's study state could not be read from the server/)
+  })
+
+  it('study and template both fail → the study state is named (first in order)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockRejectedValue(boom())
+    vi.mocked(resultsApi.getEhTemplate).mockRejectedValue(boom())
+    mount()
+    const line = await screen.findByTestId('hub-load-error')
+    expect(line.textContent).toMatch(/^This project's study state could not be read/)
+  })
+
+  it('readiness 500 → the line names the readiness check; Retry re-reads it', async () => {
+    vi.mocked(resultsApi.getEhReadiness).mockRejectedValue(boom())
+    const user = mount()
+    await screen.findByTestId('hub-card-site')
+    const line = await screen.findByTestId('hub-load-error')
+    expect(line.textContent).toMatch(/^This project's readiness check could not be read from the server/)
+    vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness())
+    const calls = vi.mocked(resultsApi.getEhReadiness).mock.calls.length
+    await user.click(screen.getByTestId('hub-load-retry'))
+    await waitFor(() => expect(screen.queryByTestId('hub-load-error')).toBeNull())
+    expect(vi.mocked(resultsApi.getEhReadiness).mock.calls.length).toBeGreaterThan(calls)
+  })
+
   it('the hub reads the study and template quietly (the card shows the error, no toast storm)', async () => {
     mount()
     await screen.findByTestId('hub-card-site')
@@ -293,5 +335,43 @@ describe('tour anchors', () => {
     expect(screen.getByTestId('hub-rail')).toBeTruthy()
     expect(screen.getByTestId('hub-guide-button')).toBeTruthy()
     expect(screen.getByTestId('hub-design-panel')).toBeTruthy()
+  })
+})
+
+// P33b 10b: the panel watches the polled edit counter and re-reads the study
+// record and the review when it moves, so the Results card's edited banner
+// appears without a reload.
+describe('HubDesignPanel re-reads the study after an edit (P33b)', () => {
+  it('a polled network_revision change invalidates the two hub queries once', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    const { networkApi } = await import('../../api/network')
+    vi.spyOn(networkApi, 'undoInfo').mockResolvedValue({ depth: 0, unsaved: false, network_revision: 2 })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(DONE as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
+    mount()
+    await screen.findByTestId('hub-card-results')
+    await waitFor(() => expect(networkApi.undoInfo).toHaveBeenCalled())
+    const spy = vi.spyOn(client, 'invalidateQueries')
+    await act(async () => {
+      client.setQueryData(nk('Demo', 'undoInfo'), { depth: 1, unsaved: true, network_revision: 3 })
+      await new Promise(r => setTimeout(r, 5))
+    })
+    const keys = spy.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
+    expect(keys.filter(k => k === JSON.stringify(nk('Demo', 'results', 'eh_study')))).toHaveLength(1)
+    expect(keys.filter(k => k === JSON.stringify(nk('Demo', 'results', 'eh_review')))).toHaveLength(1)
+  })
+})
+
+describe('HubDesignPanel in Expert never watches the edit counter (P33b, D-4)', () => {
+  it('no undo/info read and no hub invalidation from the hook', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    const { networkApi } = await import('../../api/network')
+    vi.spyOn(networkApi, 'undoInfo').mockResolvedValue({ depth: 0, unsaved: false, network_revision: 2 })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(DONE as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
+    mount()
+    await screen.findByTestId('hub-card-results')
+    await new Promise(r => setTimeout(r, 30))
+    expect(networkApi.undoInfo).not.toHaveBeenCalled()
   })
 })

@@ -5,7 +5,9 @@ import { useUIStore } from '../store/uiStore'
 import { useChatStore, type PendingConfirmationCard } from '../store/chatStore'
 import { createChatStream, getChatHealth, postChatAbort, postChatConfirm } from '../api/chat'
 import { listUploads } from '../api/uploads'
-import ChatPanel, { guidedCardSummary } from './ChatPanel'
+import ChatPanel, { guidedCardSummary, guidedToolPhrase } from './ChatPanel'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import chatStoreSource from '../store/chatStore.ts?raw'
 
 // Guided-mode spec §6.1: a card's "Let the assistant do this" goes through
@@ -617,7 +619,7 @@ describe('P26: a declined card in Guided', () => {
 
 // P26 gate B2: the collapsed Details hid what a destructive card deletes or
 // replaces. Every destructive and execution tool the assistant can call
-// (BE/services/chat_tools_schema.py, "Safety: destructive" / "execution" /
+// (BE/harness/catalogue.py — the former services/chat_tools_schema.py, "Safety: destructive" / "execution" /
 // "execution_long_running") has a summary that names its target; the fallback
 // names the first identifying argument; destructive cards open their Details.
 describe('P26 gate B2: Guided cards name what they touch', () => {
@@ -696,5 +698,159 @@ describe('P26 gate B2: Guided cards name what they touch', () => {
     renderPanel()
     await screen.findByTestId('chat-confirmation-card')
     expect(details().open).toBe(false)
+  })
+})
+
+// P29 (B1, deferred spec §4.1): Guided renders the tool progress lines in
+// words — `… preparing X` hidden, `→ X` "Working: …", `✓ X` "Done: …",
+// `✗ X` "Could not: …" with the error's own message as the next line. The
+// raw line sits under Details; the transcript and Expert are unchanged.
+describe('P29: Guided tool lines', () => {
+  type Frame = { event: string; data: Record<string, unknown> }
+  const toolRows = () => screen.queryAllByTestId('chat-message').filter(m => m.getAttribute('data-role') === 'tool')
+  const labels = () => screen.queryAllByTestId('chat-tool-label').map(l => l.textContent)
+  // The visible text of a row: everything outside a <details>.
+  const outsideDetails = (el: HTMLElement) => {
+    const c = el.cloneNode(true) as HTMLElement
+    c.querySelectorAll('details').forEach(d => d.remove())
+    return c.textContent ?? ''
+  }
+  async function startTurn() {
+    renderPanel()
+    send('Run the study')
+    await waitFor(() => expect(calls()).toHaveLength(1))
+    const onFrame = calls()[0][1] as (f: Frame) => void
+    return (f: Frame) => act(() => { onFrame(f as never) })
+  }
+  const PREP = { event: 'tool_preparing', data: { tool_name: 'run_eh_study', tool_use_id: 'tu9' } }
+  const REQ = { event: 'tool_request', data: { tool_name: 'run_eh_study', tool_use_id: 'tu9', safety_tier: 'execution' } }
+  const RES = { event: 'tool_result', data: { tool_name: 'run_eh_study', tool_use_id: 'tu9' } }
+
+  it('Guided: three frames read "Working: …" then "Done: …", no raw arrow or "preparing"', async () => {
+    const emit = await startTurn()
+    await emit(PREP)
+    expect(toolRows()).toHaveLength(0)
+    await emit(REQ)
+    await waitFor(() => expect(labels()).toEqual(['Working: start the reliability study…']))
+    await emit(RES)
+    // The outcome replaces the "Working" line: one line per call.
+    await waitFor(() => expect(labels()).toEqual(['Done: start the reliability study']))
+    for (const m of screen.queryAllByTestId('chat-message')) {
+      expect(outsideDetails(m)).not.toMatch(/→ |preparing/)
+    }
+    // The raw line is kept under Details, collapsed.
+    const details = toolRows()[0].querySelector('details') as HTMLDetailsElement
+    expect(details.open).toBe(false)
+    expect(details.textContent).toContain('✓ run_eh_study')
+    // The transcript keeps the raw lines.
+    expect(useChatStore.getState().messages.filter(m => m.role === 'tool').map(m => m.content))
+      .toEqual(['… preparing run_eh_study', '→ run_eh_study', '✓ run_eh_study'])
+  })
+
+  it('Guided: a failed tool reads "Could not: …" with its message as the next line', async () => {
+    const emit = await startTurn()
+    await emit({ event: 'tool_request', data: { tool_name: 'update_component', tool_use_id: 'tu8', safety_tier: 'write' } })
+    await emit({ event: 'tool_error', data: {
+      tool_name: 'update_component', tool_use_id: 'tu8', error_kind: 'validation_error',
+      message: 'bus Field required' } })
+    await waitFor(() => expect(labels()).toEqual(['Could not: change a setting']))
+    const row = toolRows()[0]
+    expect(row.querySelector('[data-testid="chat-tool-message"]')!.textContent).toBe('bus Field required')
+    expect(outsideDetails(row)).not.toMatch(/validation_error|✗/)
+    expect(row.querySelector('details')!.textContent).toContain('✗ update_component — validation_error: bus Field required')
+  })
+
+  it.each<[string, string]>([
+    ['suggest_eh_setup', 'look at how the site is set up'],
+    ['get_adequacy_results', 'read the study results'],
+    ['list_components', 'list what is in the network'],
+    ['run_fmea_sweep', 'start the equipment-failure check'],
+    ['update_solver_config', 'change a study setting'],
+    ['put_stress_scenarios', 'save the stress scenarios'],
+    ['frob_widget', 'use frob widget'],
+  ])('Guided: %s reads "Done: %s"', async (tool, phrase) => {
+    useChatStore.setState({ messages: [
+      { id: 't1', role: 'tool', content: `✓ ${tool}`, tool_use_id: 'tu1', tool_name: tool, ts: 1 },
+    ] })
+    renderPanel()
+    await waitFor(() => expect(labels()).toEqual([`Done: ${phrase}`]))
+  })
+
+  it('Guided: a declined call does not keep saying "Working"', async () => {
+    useChatStore.setState({ messages: [
+      { id: 't0', role: 'tool', content: '→ run_eh_study', tool_use_id: 'tu1', tool_name: 'run_eh_study', ts: 0 },
+      { id: 't1', role: 'tool', content: "✗ run_eh_study — confirmation_denied: deny on confirmation for 'run_eh_study'", tool_use_id: 'tu1', tool_name: 'run_eh_study', ts: 1 },
+      { id: 't2', role: 'tool', content: 'denied: run_eh_study', tool_use_id: 'tu1', tool_name: 'run_eh_study', ts: 2 },
+      { id: 't3', role: 'tool', content: '→ list_components', tool_use_id: 'tu2', tool_name: 'list_components', ts: 3 },
+    ] })
+    renderPanel()
+    await waitFor(() => expect(labels()).toEqual([
+      'You declined — nothing was changed.', 'Working: list what is in the network…']))
+  })
+
+  it.each<[string, string]>([
+    ['🔀 active project: Demo → Site2', 'The assistant is now working in the project Site2.'],
+    ['🔀 active project: Demo → (unbound)', 'The assistant replaced the network; it is not saved to a project yet.'],
+  ])('Guided: the rebound line %s reads in words (no raw arrow)', async (raw, want) => {
+    useChatStore.setState({ messages: [{ id: 't1', role: 'tool', content: raw, ts: 1 }] })
+    renderPanel()
+    await waitFor(() => expect(labels()).toEqual([want]))
+    expect(outsideDetails(toolRows()[0])).not.toMatch(/→ /)
+  })
+
+  it('Expert renders the raw three lines', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    const emit = await startTurn()
+    await emit(PREP)
+    await emit(REQ)
+    await emit(RES)
+    await waitFor(() => expect(toolRows()).toHaveLength(3))
+    expect(screen.queryByTestId('chat-tool-label')).toBeNull()
+    expect(toolRows().map(r => r.outerHTML)).toMatchSnapshot()
+  })
+})
+
+// P29 gate B1-1: a tool that only STARTS background work answers at once, so
+// its ✓ line means "started", never "finished". Every such tool has its own
+// phrase beginning "start …" (or saying what it asked for) — none falls back
+// to "use <tool words>", and none reads as a finished study.
+describe('P29 gate B1-1: start-only tools never say they finished', () => {
+  // The backend schema's own word: descriptions that begin "Start …".
+  const schema = readFileSync(resolve(process.cwd(), '..', 'backend', 'harness', 'catalogue.py'), 'utf8')
+  const fromSchema = [...schema.matchAll(/"([a-z_]+)",\s*\n\s*"Start /g)].map(m => m[1])
+  const START_ONLY = [...new Set([...fromSchema,
+    'run_simulation', 'run_ac_pf_stage', 'run_fmea_sweep', 'run_frontier_study', 'run_mc_study',
+    'run_coupling_loop', 'run_margin_loop', 'run_eh_study', 'gridspine_run_pipeline',
+    // a background report job (poll get_report_status), not "Start …" worded
+    'regenerate_report_section'])]
+
+  it('the schema scan finds the study starters', () => {
+    expect(fromSchema).toEqual(expect.arrayContaining([
+      'run_simulation', 'run_fmea_sweep', 'run_frontier_study', 'run_mc_study',
+      'run_coupling_loop', 'run_margin_loop', 'run_eh_study']))
+  })
+
+  it.each(START_ONLY)('%s has an explicit "start …" phrase', (tool) => {
+    const phrase = guidedToolPhrase(tool)
+    expect(phrase).not.toMatch(/^use /)
+    expect(phrase).toMatch(/^start /)
+    expect(phrase).not.toMatch(/_/)
+  })
+
+  it.each<[string, string]>([
+    ['solve_queue_enqueue', 'add the project to the solve queue'],
+    ['abort_adequacy_study', 'ask the running study to stop'],
+    ['abort_report_generation', 'ask the report writing to stop'],
+  ])('%s says what it asked for', (tool, phrase) => {
+    expect(guidedToolPhrase(tool)).toBe(phrase)
+  })
+
+  it('a Guided run_fmea_sweep ✓ line reads "Done: start the equipment-failure check"', async () => {
+    useChatStore.setState({ messages: [
+      { id: 't1', role: 'tool', content: '✓ run_fmea_sweep', tool_use_id: 'tu1', tool_name: 'run_fmea_sweep', ts: 1 },
+    ] })
+    renderPanel()
+    await waitFor(() => expect(screen.getByTestId('chat-tool-label').textContent)
+      .toBe('Done: start the equipment-failure check'))
   })
 })

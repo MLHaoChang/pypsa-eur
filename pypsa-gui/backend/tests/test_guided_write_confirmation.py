@@ -26,6 +26,7 @@ import pytest
 
 from routers import simulation as sim_router
 from services import chat_service
+from harness import session as harness_session
 from services import chat_tools
 from services.pypsa_service import PyPSAService
 from tests.test_chat_e2e import (
@@ -78,7 +79,7 @@ CASES = [
 
 @pytest.fixture
 def world(tmp_projects_dir, install_network, monkeypatch):
-    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 5.0)
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 5.0)
     n = pypsa.Network()
     n.add("Bus", "B1")
     n.add("Bus", "B2")

@@ -38,7 +38,7 @@ All line numbers were verified on the base commit and are anchors, not contracts
 
 Each half-phase is shippable on its own (additive backend fields; lifted hooks with unchanged behaviour) and each runs the full §8 gate.
 
-**Non-goals (all phases).** No new engine; no change to study, sweep, review or readiness *semantics* (additive fields only); no per-user server-side preference (mode is per browser); no Guided coverage for anything outside the EH hub-design flow; no change to the command palette beyond one new entry; no change to the assistant's tool tiers; no mobile layout; chat-created template projects (`create_project_from_template`) do not switch the mode (see §10).
+**Non-goals (all phases).** No new engine; no change to study, sweep, review or readiness *semantics* (additive fields only); no per-user server-side preference (mode is per browser); no Guided coverage for anything outside the EH hub-design flow; no change to the command palette beyond one new entry; no change to the assistant's tool tiers; no mobile layout; chat-created template projects (`create_project_from_template`) do not switch the mode (see §10). *Amended by the §10 addendum D-8 (2026-09-28): projects the assistant creates switch the mode like any new project.*
 
 **How the Guided flow answers the click-through obstacles.**
 
@@ -222,7 +222,7 @@ The initial `uiMode` is computed by `initialUiMode(FIRST_RUN)`. If the store did
 | `Sidebar.newProjectMut.onSuccess` (`Sidebar.tsx:1721`) | `'blank'` |
 | `ProjectsHomePage.createBlank.onSuccess` (`ProjectsHomePage.tsx:311`) | `'blank'` |
 
-Opening an existing project never changes the mode. Chat-created projects (`create_project_from_template`, `save_project_as`) are a v1 non-goal (§10).
+Opening an existing project never changes the mode. Chat-created projects (`create_project_from_template`, `save_project_as`) are a v1 non-goal (§10). *Amended by the §10 addendum D-8 (2026-09-28): see there.*
 
 ### 3.5 What Guided hides
 
@@ -715,7 +715,7 @@ A separate agent (not the implementer; Fable reviews the plan, an Opus-class rev
 | Which PROJECT rows survive in Guided | Save, Recent, Projects home, header card. |
 | `hubDesign` full-screen or half | Full-screen (it replaces the canvas for the flow). |
 | `ui_mode` transport | Inside `ui_context` (allow-listed), addendum in the per-turn user content, system prompt untouched. |
-| G4 "new projects" | Implemented **literally** (review B10, owner's choice): every wizard tab, `Sidebar.newProjectMut` and `ProjectsHomePage.createBlank` call `noteNewProjectCreated`; only an explicit choice blocks it. Chat-created projects (`create_project_from_template`, `save_project_as`) are not switched in v1 — the assistant is already the Guided surface. |
+| G4 "new projects" | Implemented **literally** (review B10, owner's choice): every wizard tab, `Sidebar.newProjectMut` and `ProjectsHomePage.createBlank` call `noteNewProjectCreated`; only an explicit choice blocks it. Chat-created projects (`create_project_from_template`, `save_project_as`) are not switched in v1 — the assistant is already the Guided surface. *(Superseded by the §10 addendum D-8.)* |
 | Stale detection | `review_latest` returns a boolean `stale` (review suggestion 5); the FE never parses the `source` prose. |
 | `GET /eh_review` on `running` | 200 with `{status:'running'}` (the FE polls the study record anyway), 204 only for `no_data`. |
 | `suggest_eh_setup` input | optional `archetype` only. |
@@ -766,3 +766,7 @@ A separate agent (not the implementer; Fable reviews the plan, an Opus-class rev
 | Note 2 — card header | In Guided the header reads "Confirm this change" for the `write` tier and "Confirm" for run / delete tiers, in normal case. Expert keeps "Confirm · <tier>" (uppercase) unchanged. |
 | Note 3 — button flows in the smoke | Stub branches 5 (Goal VOLL) and 6 (stress scenario) script those buttons' texts, so the P25 smoke takes both cards from the buttons themselves. |
 
+### §10 addendum: D-8 (2026-09-28, product owner)
+| Item | Decision |
+|---|---|
+| Chat-created projects (amends §1's non-goal sentence and §3.4's last paragraph; supersedes the "G4 new projects" row's last sentence) | G4 extends literally to projects the assistant **creates**: a `project_rebound` frame whose `via_tool` is `create_project_from_template` or `import_project_bundle` counts as a new project (`noteNewProjectCreated('template' \| 'file')`). A save (`save_project`, `save_project_as`) is not a new project and never changes the mode. Only an explicit mode choice blocks the switch. Implemented in P32 (deferred spec `2026-09-28-guided-mode-deferred.md` §7.1). |

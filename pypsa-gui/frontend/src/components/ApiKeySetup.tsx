@@ -43,6 +43,7 @@ import {
 } from '../api/chat'
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
+import { CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
 
 // Exported so ChatLaunchGreeting reads the SAME cache entry rather than a
 // parallel one: the greeting only needs to know whether a key exists, and
@@ -113,6 +114,9 @@ export default function ApiKeySetup({
     // ChatPanel gates Send on this probe's `chat_ready` (obstacle 9): re-read
     // it so a saved key re-enables Send at once (and a forgotten one gates).
     void qc.invalidateQueries({ queryKey: ['chat', 'health'] })
+    // P28 A3: the gate prefers the per-profile `chat_ready` on GET
+    // /chat/profiles, which the saved key changes too.
+    void qc.invalidateQueries({ queryKey: CHAT_PROFILES_QUERY_KEY })
     // Clearing the banner is what makes the save legible. The backend reads
     // `os.environ` at request time, so the next send just works. Leaving the
     // red "API key missing" box on screen underneath a form that reported

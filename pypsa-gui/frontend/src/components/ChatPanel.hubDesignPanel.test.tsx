@@ -3,8 +3,9 @@
 // panel id (HubDesign / hubDesign / hub_design → 'hubDesign') and its
 // setSlidePanel allow-list must accept the new slot. Hidden panels stay
 // reachable in Guided through the same path (§3.5, §3.7).
-import { beforeEach, describe, expect, it } from 'vitest'
-import { APPLY_UI_NAVIGATE_FOR_TEST as applyUiNavigate, starterPromptsFor } from './ChatPanel'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { APPLY_UI_NAVIGATE_FOR_TEST as applyUiNavigate, ChatStarterChips, workflowContextFor } from './ChatPanel'
 import { useUIStore } from '../store/uiStore'
 
 beforeEach(() => {
@@ -37,25 +38,32 @@ describe('ui_open_panel with results_tab in Guided', () => {
   })
 })
 
-// §10 addendum (gate note): in Guided the greeting chips offer only
-// Guided-visible destinations, plus Hub design. Expert is unchanged.
-describe('greeting chips', () => {
-  it('Guided: Hub design, adequacy, and a summary — nothing hidden', () => {
-    const chips = starterPromptsFor('Demo', 'guided')
-    // P26 gate friction 2: plain chips in Guided (were "Check adequacy" / "Summarize this solve").
-    expect(chips.map(c => c.label)).toEqual(['Open Hub design', 'Explain my results', 'What should I improve?'])
-    const text = chips.map(c => c.text).join(' | ')
-    expect(text).not.toMatch(/Economics|compare/i)
+// The greeting chips are the harness's start menu (chat harness issue 03):
+// `GET /chat/workflows?context=…`, where the context is derived here from
+// where the user is. The menu's CONTENT per context is pinned on the backend
+// (`tests/test_chat_workflows_route.py`); this side pins the mapping and the
+// click (owner decision Q10: a chip SENDS, it does not prefill).
+describe('start menu', () => {
+  it('maps where the user is onto the registry context', () => {
+    expect(workflowContextFor(null, 'guided')).toBe('unbound')
+    expect(workflowContextFor(null, 'expert')).toBe('unbound')
+    expect(workflowContextFor('Demo', 'guided')).toBe('guided')
+    expect(workflowContextFor('Demo', 'expert')).toBe('expert')
   })
 
-  it('Expert: the original three', () => {
-    expect(starterPromptsFor('Demo', 'expert').map(c => c.label))
-      .toEqual(['Compare two scenarios', 'Open Economics', 'Summarize this solve'])
-  })
-
-  it('no project: the unbound pair in either mode', () => {
-    for (const m of ['guided', 'expert'] as const) {
-      expect(starterPromptsFor(null, m).map(c => c.label)).toEqual(['Open a project', 'Browse projects'])
-    }
+  it('a chip hands the whole prompt to onPick, with the intent as its tooltip', () => {
+    const onPick = vi.fn()
+    render(
+      <ChatStarterChips
+        prompts={[{ label: 'Build a network', text: 'Help me build my network step by step.', title: 'Add buses…' }]}
+        onPick={onPick}
+      />,
+    )
+    const chip = screen.getByTestId('chat-starter-chip')
+    expect(chip.getAttribute('title')).toBe('Add buses…')
+    fireEvent.click(chip)
+    expect(onPick).toHaveBeenCalledWith(
+      expect.objectContaining({ label: 'Build a network', text: 'Help me build my network step by step.' }),
+    )
   })
 })

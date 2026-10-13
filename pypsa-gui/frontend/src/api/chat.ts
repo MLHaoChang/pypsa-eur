@@ -19,6 +19,7 @@
 import { client } from './client'
 import { rawFetchHeaders } from './csrf'
 import type { UiContext } from '../utils/uiContext'
+import type { AnswerReceipt } from '../utils/answerAssurance'
 
 /**
  * A model id. Deliberately a bare `string`, no longer a closed union.
@@ -76,6 +77,15 @@ export interface ChatStreamRequest {
   // guesswork — and speech reciprocity (a spoken turn gets a spoken answer)
   // depends on getting it right.
   input_mode?: 'voice' | 'text'
+  assurance?: { version: 1; mode: 'strict' }
+  // Issue 02 / C-I1 — Live companion turns only. Both must be set together so
+  // the server can admit via the shared utterance coordinator. Typed and
+  // hub-card sends omit both fields and keep pre-admission /stream behaviour.
+  utterance_id?: string
+  generation?: number
+  binding_generation?: number
+  checked_scope?: Record<string, unknown>
+  checked_operation?: Record<string, unknown>
 }
 
 export interface ChatFrame {
@@ -92,6 +102,68 @@ export interface ChatFrame {
  * frame OR fetch errors). The caller doesn't normally await — they wire
  * onFrame/onError callbacks and call the cleanup on unmount.
  */
+async function readSseResponse(
+  resp: Response,
+  onFrame: (frame: ChatFrame) => void,
+  onError?: (err: unknown) => void,
+  label = 'chat stream',
+): Promise<void> {
+  if (!resp.ok) {
+    // Carry the server's `error_kind` on the Error so a caller can act on
+    // it. `session_not_yours` in particular is RECOVERABLE — the client is
+    // holding a session id that belongs to another user (GET /history
+    // hands `last_session_id` to any co-member of the project), and the
+    // cure is to start a fresh session rather than to keep retrying the
+    // same id forever.
+    let kind: string | undefined
+    let detailMsg: string | undefined
+    try {
+      const body = await resp.json()
+      const detail = (body as { detail?: unknown })?.detail
+      if (detail && typeof detail === 'object') {
+        kind = (detail as { error_kind?: string }).error_kind
+        detailMsg = (detail as { message?: string }).message
+      }
+    } catch {
+      // Not JSON, or an empty body — fall back to the status line.
+    }
+    const err = new Error(detailMsg ?? `${label} HTTP ${resp.status}`)
+    ;(err as Error & { kind?: string }).kind = kind
+    onError?.(err)
+    return
+  }
+  const reader = resp.body?.getReader()
+  if (!reader) {
+    onError?.(new Error(`${label}: no response body`))
+    return
+  }
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) return
+    buffer += decoder.decode(value, { stream: true })
+    // SSE frames are separated by blank lines (\n\n).
+    let idx: number
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const block = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      let event = ''
+      let dataRaw = ''
+      for (const line of block.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim()
+        else if (line.startsWith('data:')) dataRaw += line.slice(5).trim()
+      }
+      if (!event) continue
+      let data: Record<string, unknown> = {}
+      try { data = dataRaw ? JSON.parse(dataRaw) : {} } catch {
+        data = { raw: dataRaw }
+      }
+      onFrame({ event, data })
+    }
+  }
+}
+
 export function createChatStream(
   req: ChatStreamRequest,
   onFrame: (frame: ChatFrame) => void,
@@ -109,42 +181,47 @@ export function createChatStream(
         body: JSON.stringify(req),
         signal: controller.signal,
       })
-      if (!resp.ok) {
-        onError?.(new Error(`chat stream HTTP ${resp.status}`))
-        return
-      }
-      const reader = resp.body?.getReader()
-      if (!reader) {
-        onError?.(new Error('chat stream: no response body'))
-        return
-      }
-      const decoder = new TextDecoder('utf-8')
-      let buffer = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) return
-        buffer += decoder.decode(value, { stream: true })
-        // SSE frames are separated by blank lines (\n\n).
-        let idx: number
-        while ((idx = buffer.indexOf('\n\n')) !== -1) {
-          const block = buffer.slice(0, idx)
-          buffer = buffer.slice(idx + 2)
-          let event = ''
-          let dataRaw = ''
-          for (const line of block.split('\n')) {
-            if (line.startsWith('event:')) event = line.slice(6).trim()
-            else if (line.startsWith('data:')) dataRaw += line.slice(5).trim()
-          }
-          if (!event) continue
-          let data: Record<string, unknown> = {}
-          try { data = dataRaw ? JSON.parse(dataRaw) : {} } catch {
-            data = { raw: dataRaw }
-          }
-          onFrame({ event, data })
-        }
-      }
+      await readSseResponse(resp, onFrame, onError, 'chat stream')
     } catch (err) {
       if ((err as { name?: string }).name === 'AbortError') return  // expected on cleanup
+      onError?.(err)
+    }
+  })()
+
+  return () => {
+    try { controller.abort() } catch { /* idempotent */ }
+  }
+}
+
+/**
+ * Issue 11 — observe detached solver progress after a foreground handoff.
+ * GET /api/chat/{sessionId}/progress emits existing `tool_progress` frames.
+ */
+export function createChatProgressStream(
+  sessionId: string,
+  onFrame: (frame: ChatFrame) => void,
+  onError?: (err: unknown) => void,
+  options?: { afterCursor?: number },
+): () => void {
+  const controller = new AbortController()
+
+  ;(async () => {
+    try {
+      const qs =
+        typeof options?.afterCursor === 'number' && options.afterCursor >= 0
+          ? `?cursor=${encodeURIComponent(String(options.afterCursor))}`
+          : ''
+      const resp = await fetch(
+        `/api/chat/${encodeURIComponent(sessionId)}/progress${qs}`,
+        {
+          method: 'GET',
+          headers: { ...rawFetchHeaders('GET') },
+          signal: controller.signal,
+        },
+      )
+      await readSseResponse(resp, onFrame, onError, 'chat progress')
+    } catch (err) {
+      if ((err as { name?: string }).name === 'AbortError') return
       onError?.(err)
     }
   })()
@@ -217,6 +294,69 @@ export async function getChatHealth(): Promise<ChatHealth> {
   return r.data
 }
 
+// ── The start menu (chat harness issue 03) ──────────────────────────────────
+//
+// `GET /chat/workflows?context=…` is the harness's workflow registry filtered
+// for where the user is: `unbound` (no project), `expert` or `guided`. The
+// panel renders it as the greeting chips. It is one source of truth for every
+// LLM provider, so switching the profile never changes what the chips offer,
+// and it needs no API key.
+export type WorkflowContext = 'unbound' | 'expert' | 'guided'
+
+export interface WorkflowMenuEntry {
+  id: string
+  /** The chip label. */
+  title: string
+  /** One sentence; the chip tooltip. */
+  intent: string
+  /** The message the chip sends (owner decision Q10: sent, not prefilled). */
+  opening_request: string
+  steps: { id: string; title: string }[]
+}
+
+export interface WorkflowMenu {
+  context: WorkflowContext
+  workflows: WorkflowMenuEntry[]
+}
+
+export async function getWorkflowMenu(context: WorkflowContext): Promise<WorkflowMenu> {
+  const r = await client.get('/chat/workflows', { params: { context } })
+  return r.data
+}
+
+// ── `ask_user` → the Choice card (chat harness issue 04) ────────────────────
+//
+// The `choice_request` frame carries the structured question the assistant
+// asked through `ask_user`. The panel renders it as a card; the pick is sent
+// as the NEXT user message (owner decision Q4: the turn does not block).
+export interface ChoiceOption {
+  label: string
+  description?: string
+  recommended?: boolean
+}
+
+export interface ChoiceRequestFrame {
+  tool_use_id?: string
+  title: string
+  question: string
+  options: ChoiceOption[]
+  allow_free_text: boolean
+}
+
+// ── The session's workflow step (chat harness issue 06) ─────────────────────
+//
+// `workflow_state` arrives after start_workflow / advance_workflow /
+// end_workflow, and `GET /chat/history` carries the same shape, so a reload
+// shows the strip again while the server session is resident.
+export interface WorkflowState {
+  id: string
+  title: string
+  step: string
+  step_title: string
+  step_index: number
+  step_count: number
+}
+
 // ── U-1 — supplying the Anthropic API key from inside the app ──────────────
 //
 // The packaged app ships no `backend/.env` (it would carry a real key and the
@@ -254,6 +394,8 @@ export async function deleteApiKeySettings(): Promise<ApiKeySettings> {
 }
 
 export interface ChatTurn {
+  /** Retry policy only; this flag never establishes checked evidence/approval. */
+  requires_checked?: boolean
   ts: number
   session_id: string
   /** Resolved model id. Kept alongside `profile_id`, never replaced by it —
@@ -263,6 +405,8 @@ export interface ChatTurn {
   /** Which profile produced the turn. Absent on records written before
    *  profiles existed; the reader falls back to resolving `model`. */
   profile_id?: string
+  answer_id?: string
+  receipt?: AnswerReceipt
   user: string
   assistant: Array<Record<string, unknown>>
   usage: {
@@ -274,6 +418,11 @@ export interface ChatTurn {
   // Phase C — file_ids of uploads attached to this user message. Omitted
   // when the turn carried no attachments.
   attachment_file_ids?: string[]
+  // A turn that produced output and ended without completing (abort, a cap,
+  // a stream error, a disconnect). Display only: `assistant` is what the user
+  // saw, and the backend never replays this turn to the model.
+  interrupted?: boolean
+  interrupted_reason?: string
 }
 
 // A turn that started and never finished, recovered from the server's
@@ -294,12 +443,18 @@ export interface InterruptedTurn {
 export interface ChatHistory {
   turns: ChatTurn[]
   last_session_id: string | null
+  /** The bound session's workflow step (chat harness issue 06), or null. */
+  workflow?: WorkflowState | null
   bound_project: string | null
   // How many on-disk records were unreadable. Non-zero means `turns` is
   // INCOMPLETE — say so rather than rendering a quietly shorter conversation.
   history_gap: number
   // Reported once, then cleared server-side; null on a clean reload.
   pending_turn: InterruptedTurn | null
+  // P28 A3 — the profile the resumed session is bound to (its next turn runs
+  // on it when the request names none); null with no turns or when that
+  // profile is no longer configured. Optional: older backends omit it.
+  bound_profile_id?: string | null
 }
 
 export async function getChatHistory(limit = 200): Promise<ChatHistory> {

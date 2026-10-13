@@ -182,8 +182,8 @@ export default function CapacityBoundsEditor() {
         Single-mode min/max edits save on blur; per-period edits open the dedicated modal.
         {!hasPeriods && (
           <span className="ml-2 text-warn">
-            No investment periods configured — per-period mode is disabled until you promote snapshots
-            to multi-period under Snapshots → Multi-period.
+            No investment periods configured — per-period mode is disabled until you set
+            Model Horizon → Mode to Multi-period.
           </span>
         )}
       </div>
@@ -418,7 +418,7 @@ function AssetRowEditor({
             className="text-[10.5px] text-accent hover:underline disabled:opacity-40 disabled:no-underline"
             title={hasPeriods
               ? 'Configure per-period bounds for this asset'
-              : 'Enable multi-period planning first (Snapshots → Multi-period)'}
+              : 'Enable multi-period planning first (Model Horizon → Mode → Multi-period)'}
           >Per-period…</button>
         )}
       </td>

@@ -84,7 +84,7 @@ export function templateForm(template: EhTemplateMeta | null): PackForm {
  *  `ready` = the study record and the template have been read, so the first
  *  request already carries the right overrides. */
 export function useHubReadiness(template: EhTemplateMeta | null, running: boolean,
-  ready: boolean) {
+  ready: boolean, { observeOnly = false }: { observeOnly?: boolean } = {}) {
   const project = useUIStore(s => s.currentProject)
   const archetype = useHubDesignStore(s => s.archetype)
   const overrides = buildEhStudyBody(archetype, templateForm(template)).body?.pack_overrides
@@ -93,9 +93,11 @@ export function useHubReadiness(template: EhTemplateMeta | null, running: boolea
       JSON.stringify(overrides ?? null)],
     queryFn: () => resultsApi.getEhReadiness(archetype, undefined, undefined,
       { stages: undefined, pack_overrides: overrides }),
-    enabled: !!project && ready && !running,
+    // `observeOnly` (the panel's load-error line, P30 B8): read the shared
+    // cache entry's state without starting a request of its own.
+    enabled: !observeOnly && !!project && ready && !running,
   })
-  return { isError: q.isError, readiness: q.data ?? null }
+  return { isError: q.isError, refetch: q.refetch, readiness: q.data ?? null }
 }
 
 /** VOLL from the solver settings (same key as the Solver settings page). */

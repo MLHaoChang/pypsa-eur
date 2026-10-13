@@ -41,6 +41,8 @@ import queue
 import threading
 from typing import Callable
 
+from services.adequacy.worksheet import zero_reason
+
 logger = logging.getLogger(__name__)
 
 MAX_CONTINGENCIES = 20
@@ -83,8 +85,31 @@ def _topology_tables(n) -> dict:
     return out
 
 
+def _restore_topology(n, saved: dict, saved_index: list) -> bool:
+    """The write-back half of ``preserve_bus_topology``; True when every
+    saved table reads back equal."""
+    before = set(saved_index)
+    added = [s for s in n.sub_networks.index if s not in before]
+    if added:
+        n.remove("SubNetwork", added)
+    tables = _topology_tables(n)
+    same = True
+    for cls, old in saved.items():
+        df = tables.get(cls, (None, None))[0]
+        if df is None:
+            same = False
+            continue
+        cols = list(old.columns)
+        # Rows cannot change inside a study (mutations are undone), but align
+        # on the saved index so a surprise never becomes a crash.
+        idx = old.index.intersection(df.index)
+        df.loc[idx, cols] = old.loc[idx, cols]
+        same = same and df[cols].equals(old)
+    return same
+
+
 @contextlib.contextmanager
-def preserve_bus_topology(n):
+def preserve_bus_topology(n, lock=None):
     """
     Put back what a solve's topology pass writes on the LIVE network (P22.9,
     bug 3). PyPSA's optimize post-processing runs
@@ -103,6 +128,13 @@ def preserve_bus_topology(n):
     must enclose the study's CLOSING re-solve too: that solve is itself an
     optimize and would re-apply the columns. A mismatch after the restore is
     logged, never raised; the study's own answer stands.
+
+    ``lock`` (P27a, A1) is the runner's own lock, captured at request time —
+    never ``PyPSAService.get_lock()`` fetched here, on the worker. When given,
+    the whole write-back (every table and the ``SubNetwork`` removal) runs
+    inside ``with lock:`` so a foreground request that holds the lock cannot
+    interleave with it. ``None`` keeps the unlocked behaviour, for a caller
+    that works on a private copy (``dtc``).
     """
     try:
         saved = {cls: df[cols].copy()
@@ -118,24 +150,8 @@ def preserve_bus_topology(n):
         yield
     finally:
         try:
-            before = set(saved_index)
-            added = [s for s in n.sub_networks.index if s not in before]
-            if added:
-                n.remove("SubNetwork", added)
-            tables = _topology_tables(n)
-            same = True
-            for cls, old in saved.items():
-                df = tables.get(cls, (None, None))[0]
-                if df is None:
-                    same = False
-                    continue
-                cols = list(old.columns)
-                # Rows cannot change inside a study (mutations are undone),
-                # but align on the saved index so a surprise never becomes a
-                # crash.
-                idx = old.index.intersection(df.index)
-                df.loc[idx, cols] = old.loc[idx, cols]
-                same = same and df[cols].equals(old)
+            with (lock if lock is not None else contextlib.nullcontext()):
+                same = _restore_topology(n, saved, saved_index)
             if not (same and sorted(n.sub_networks.index) == saved_index):
                 logger.warning(
                     "preserve_bus_topology: the topology columns or the "
@@ -147,7 +163,7 @@ def preserve_bus_topology(n):
                 "values")
 
 
-def freeze_capacities(n) -> Callable[[], None]:
+def freeze_capacities(n, lock=None) -> Callable[[], None]:
     """Pin every extendable capacity to its solved size by clamping
     ``*_nom_min = *_nom_max = size`` (``*_nom_opt`` where finite, else the
     current ``*_nom``), KEEPING extendability on. NOTE: PyPSA holds
@@ -164,7 +180,10 @@ def freeze_capacities(n) -> Callable[[], None]:
     most a micro-MW above the solved size — orders of magnitude below every
     tolerance in the sweep — and the (near-)constant capital term is the
     same in the base and in every contingency, cancelling out of every
-    ΔEUE. Returns an undo closure restoring both bound columns exactly."""
+    ΔEUE. Returns an undo closure restoring both bound columns exactly.
+
+    ``lock`` (P27a, A1): the runner's captured lock; when given, the undo
+    runs inside ``with lock:``. ``None`` (a private copy) stays unlocked."""
     undo_ops: list[Callable[[], None]] = []
     for attr, nom in _CAPACITY_ATTRS:
         df = getattr(n, attr, None)
@@ -216,8 +235,9 @@ def freeze_capacities(n) -> Callable[[], None]:
     undo_ops.append(_clear_operational)
 
     def undo_all() -> None:
-        for op in reversed(undo_ops):
-            op()
+        with (lock if lock is not None else contextlib.nullcontext()):
+            for op in reversed(undo_ops):
+                op()
 
     return undo_all
 
@@ -409,8 +429,8 @@ def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
     # P22.9 bug 3: OUTERMOST, around the closing re-solve as well — that
     # solve is an optimize too, so a restore inside the `unfreeze` finally
     # would run before it and the columns would come straight back.
-    with preserve_bus_topology(network):
-        unfreeze = freeze_capacities(network)
+    with preserve_bus_topology(network, lock):
+        unfreeze = freeze_capacities(network, lock)
         results: dict = {"base": {}, "contingencies": {}, "aborted": False,
                          "base_restored": False}
         try:
@@ -654,6 +674,11 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
                 "in_metric_scope": in_scope,
                 "engine": "lp_proxy",
                 "fidelity": "deterministic_scenario",
+                # P29 (B3): why a €0 row is €0 — additive.
+                "zero_reason": zero_reason(
+                    severity_eur=severity, delta_eue_mwh=delta,
+                    occurrence_per_year=occ, in_metric_scope=in_scope,
+                    voll=voll),
             },
             "meta": meta,
         })

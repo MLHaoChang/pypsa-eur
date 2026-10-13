@@ -64,6 +64,10 @@ _HANDLER_PARAMS: dict[str, list[str]] = {
     "get_asset_economics": [],
     "get_billing": [],          # P2 WP2.5
     "get_cfe_score": [],        # P2 WP2.5
+    "get_value_flows": [],      # P3 WP3.4
+    "get_investment_case": [],          # IC P4 WP4.6b
+    "get_investment_case_report": ["detail"],   # IC P4 WP4.6b; detail=full WP4.7b
+    "get_investment_case_export": [],   # IC P4 WP4.6d
 }
 
 # Non-route names other modules import from `routers.results`.
@@ -88,6 +92,7 @@ _LIFTED: dict[str, tuple[str, str]] = {
     "get_lost_load": ("services.results.lost_load", "compute_lost_load"),
     "get_billing": ("services.results.billing", "compute_billing"),
     "get_cfe_score": ("services.results.cfe_score", "compute_cfe_score"),
+    "get_value_flows": ("services.results.value_flows", "compute_value_flows"),
 }
 
 # The two shared helpers move to services with a `result_df` keyword; the

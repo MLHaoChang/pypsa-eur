@@ -208,7 +208,7 @@ def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
     # P22.9 bug 3: the points AND the closing `_restore_base` solve the
     # network in place, so the topology columns PyPSA writes are put back
     # after all of them (see `preserve_bus_topology`).
-    with preserve_bus_topology(network):
+    with preserve_bus_topology(network, lock):
         eps = _validate(list(targets))
         if float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
             raise FrontierConfigError(

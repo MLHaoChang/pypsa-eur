@@ -61,6 +61,9 @@ def _config_hash(cfg) -> str:
             # 9): pop the key whatever its value, since the binding dumps
             # `value_flows: null` into every commercial dict.
             payload["commercial"] = {k: v for k, v in commercial.items() if k != "value_flows"}
+        # The finance inputs never change a design either (IC P4 WP4.6b): a
+        # finance edit must not re-hash a solve's assumptions.
+        payload.pop("finance", None)
         blob = json.dumps(payload, sort_keys=True, default=str)
     except Exception:
         blob = repr(cfg)

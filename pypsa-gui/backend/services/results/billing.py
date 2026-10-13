@@ -145,6 +145,8 @@ def settlement_lines(n, cfg, pq: dict) -> tuple[list[_K.Line], list[str]]:
     dsr = _SI.dsr_activation(n)
     refs = {c.id: _SI.reference_price(n, c) for c in cfg.contracts}
     site = _lp.site_generators(n, cfg)
+    site_links = _lp.site_link_generation(
+        n, cfg, lambda k: pq["result_df"](n, "links_t", f"p{k}", "lopf"))
     load_bus = n.loads["bus"].astype(str).to_dict() if not n.loads.empty else {}
     ppa_rec = n.meta.get(_lp.META_PPA) or {}
     ppa_frame = n.generators_t.get(_lp.PPA_PRICE_ATTR) if hasattr(n.generators_t, "get") \
@@ -186,7 +188,8 @@ def settlement_lines(n, cfg, pq: dict) -> tuple[list[_K.Line], list[str]]:
             dsr=(cut_frame(dsr_frame), dsr_flags),
             storage_discharge=cut_frame(raw["storage_discharge"]),
             link_output=cut_frame(raw["link_output"]),
-            site_party=cfg.site_party, site_generators=site)
+            site_party=cfg.site_party, site_generators=site,
+            site_link_generation=cut_frame(site_links) if not site_links.empty else None)
         for c in cfg.contracts:
             try:
                 got = _K.settle(c, inputs)
@@ -323,4 +326,56 @@ def compute_billing(n, cfg, *, state: dict | None = None,
         "per_period": per_period,
         "gap": gap,
         "provenance": {**bill.provenance, "contracts": record},
+    })
+
+
+# ── the bill preview of a draft tariff (IC P3 WP3.7b) ──────────────────────
+
+PREVIEW_FLAG = "preview_dispatch_not_optimised_for_draft"
+
+
+def compute_billing_preview(n, cfg, tariff) -> dict | None:
+    """What the last solve's dispatch would be billed under a DRAFT import
+    tariff (plan WP3.7b). The draft replaces the stored tariff (and its Library
+    ref) in a copy of the commercial config, is checked with
+    `lp_bindings.validate_for_network` — never `bind_commercial`, which writes
+    series and the FCA registry — and rated by `bill_site`. Nothing is stored.
+    The drift flags compare the solve with the CONFIG, which the draft is not:
+    they are replaced by `preview_dispatch_not_optimised_for_draft` (the
+    dispatch was optimised for the attached tariff). No settlement and no gap
+    are computed (stated in the payload). None before a solve. Raises
+    `ValueError` (pydantic) / `CommercialBindingError` for a draft that does not
+    validate or bind on this network — the route's 422."""
+    commercial = getattr(cfg, "commercial", None)
+    if not commercial or not _solved(n):
+        return None
+    draft = {**commercial, "import_tariff": tariff}
+    for key in ("import_tariff_ref", "import_tariff_id", "value_flows"):
+        draft.pop(key, None)
+    parsed = _lp._parse(draft)
+    _lp.validate_for_network(n, parsed)
+    bill = _billing.bill_site(n, parsed)
+    if "not_solved" in bill.flags:
+        return None
+    drift, _solve = _billing._drift_flags(n, parsed)
+    flags = {f for f in bill.flags if f not in set(drift)} | {PREVIEW_FLAG}
+    # A contract the SAVE would refuse with this tariff (a retail contract
+    # naming another tariff id) is said here, not only at save (review #9).
+    flags |= {f"preview_contract_problem:{code}"
+              for code, _msg, _dispatch in _lp.contract_problems(n, parsed)}
+    flags = sorted(flags)
+    per_period = {_key(p): _period_payload(r) for p, r in bill.per_period.items()}
+    provenance = {k: v for k, v in bill.provenance.items()
+                  if k not in ("drift", "recipe_changed")}
+    return _json({
+        "summary": {k: (None if v is None else {"total": v["total"],
+                                                "total_supported": v["total_supported"],
+                                                "per_item": v["per_item"]})
+                    for k, v in per_period.items()},
+        "flags": flags,
+        "contracts": {"lines": [], "flags": ["contracts_not_settled_in_preview"], "retail": {}},
+        "gap_summary": {"gates": [], "periods": {}},
+        "per_period": per_period,
+        "gap": None,
+        "provenance": {**provenance, "preview": True, "gap": "not_computed_for_preview"},
     })

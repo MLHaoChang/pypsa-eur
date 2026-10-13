@@ -223,3 +223,61 @@ describe('noteNewProjectCreated re-reads the explicit flag from storage (multi-t
     expect(localStorage.getItem(MODE_KEY)).toBe('expert')
   })
 })
+
+// P28 C10 (deferred spec 2026-09-28 §3.3): a `storage` event is how another
+// tab's write reaches this one. When the other tab's explicit flag is set and
+// this tab's is not, adopt the other tab's choice (explicitly). An implicit
+// change elsewhere (a G4 flip, a first-run default) is ignored, and an
+// explicit choice made in THIS tab is never overridden.
+describe('the storage listener (C10, multi-tab)', () => {
+  function otherTabWrites(entries: Record<string, string>, key: string) {
+    for (const [k, v] of Object.entries(entries)) localStorage.setItem(k, v)
+    window.dispatchEvent(new StorageEvent('storage', { key, newValue: entries[key] ?? null }))
+  }
+
+  it("a storage event adopts the other tab's explicit choice; an implicit change is ignored", async () => {
+    const s = await freshStore({ [MODE_KEY]: 'expert', 'network-diagram:current-project': 'P' })
+    expect(s.getState().uiMode).toBe('expert')
+    expect(s.getState().uiModeExplicit).toBe(false)
+
+    // Implicit change in the other tab (e.g. its G4 flip): ignored.
+    otherTabWrites({ [MODE_KEY]: 'guided' }, MODE_KEY)
+    expect(s.getState().uiMode).toBe('expert')
+    expect(s.getState().uiModeExplicit).toBe(false)
+
+    // The other tab's user picks Guided explicitly: adopted, explicitly.
+    otherTabWrites({ [MODE_KEY]: 'guided', [EXPLICIT_KEY]: '1' }, EXPLICIT_KEY)
+    expect(s.getState().uiMode).toBe('guided')
+    expect(s.getState().uiModeExplicit).toBe(true)
+  })
+
+  it('the event on the mode key alone also adopts once the flag is set', async () => {
+    const s = await freshStore({ [MODE_KEY]: 'guided', 'network-diagram:current-project': 'P' })
+    otherTabWrites({ [EXPLICIT_KEY]: '1', [MODE_KEY]: 'expert' }, MODE_KEY)
+    expect(s.getState().uiMode).toBe('expert')
+    expect(s.getState().uiModeExplicit).toBe(true)
+  })
+
+  it("this tab's own explicit choice is never overridden", async () => {
+    const s = await freshStore({ [MODE_KEY]: 'expert', [EXPLICIT_KEY]: '1', 'network-diagram:current-project': 'P' })
+    otherTabWrites({ [MODE_KEY]: 'guided', [EXPLICIT_KEY]: '1' }, MODE_KEY)
+    expect(s.getState().uiMode).toBe('expert')
+  })
+
+  it('unrelated keys and a cleared storage change nothing', async () => {
+    const s = await freshStore({ [MODE_KEY]: 'expert', 'network-diagram:current-project': 'P' })
+    localStorage.setItem(MODE_KEY, 'guided')
+    localStorage.setItem(EXPLICIT_KEY, '1')
+    window.dispatchEvent(new StorageEvent('storage', { key: 'network-diagram:theme', newValue: 'dark' }))
+    window.dispatchEvent(new StorageEvent('storage', { key: null }))
+    expect(s.getState().uiMode).toBe('expert')
+    expect(s.getState().uiModeExplicit).toBe(false)
+  })
+
+  it('adopting Guided prunes a hidden panel like any switch (§3.7)', async () => {
+    const s = await freshStore({ [MODE_KEY]: 'expert', 'network-diagram:current-project': 'P' })
+    s.setState({ currentProject: 'P', activeSlidePanel: 'timeseries' })
+    otherTabWrites({ [MODE_KEY]: 'guided', [EXPLICIT_KEY]: '1' }, EXPLICIT_KEY)
+    expect(s.getState().activeSlidePanel).toBe('hubDesign')
+  })
+})

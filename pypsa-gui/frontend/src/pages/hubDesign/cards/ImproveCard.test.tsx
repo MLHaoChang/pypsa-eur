@@ -3,7 +3,7 @@
 // §5.7 texts to the assistant; Check risks starts the lifted FMEA sweep hook;
 // the FMEA tab opens through requestResultsTab.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { resultsApi } from '../../../api/simulation'
@@ -14,6 +14,7 @@ import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { actionLabel, actionText, actionTexts, askText, stressScenarioText } from '../delegate'
 import { DC_TEMPLATE, REPORT, review } from '../testFixtures'
 import { ImproveCard } from './ImproveCard'
+import { nk } from '../../../utils/queryKeys'
 
 vi.mock('../../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/simulation')>()
@@ -26,8 +27,12 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
     },
   }
 })
-const sweep = { mutate: vi.fn(), isPending: false, isSuccess: false }
-vi.mock('../../../hooks/useStartFmeaSweep', () => ({ useStartFmeaSweep: vi.fn(() => sweep) }))
+const sweep = { mutate: vi.fn(), reset: vi.fn(), isPending: false, isSuccess: false }
+// The real `fmeaModesRefetchInterval` (A5): only the mutation is stubbed.
+vi.mock('../../../hooks/useStartFmeaSweep', async (orig) => ({
+  ...(await orig<typeof import('../../../hooks/useStartFmeaSweep')>()),
+  useStartFmeaSweep: vi.fn(() => sweep),
+}))
 
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: 'hubDesign',
@@ -39,6 +44,7 @@ beforeEach(() => {
   vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(DC_TEMPLATE)
   sweep.mutate.mockReset()
+  sweep.reset.mockReset()
   sweep.isSuccess = false
 })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
@@ -231,11 +237,18 @@ describe('ImproveCard follows the sweep it started (P26)', () => {
     expect(vi.mocked(resultsApi.getFmeaModes).mock.calls.length).toBeGreaterThanOrEqual(2)
   })
 
+  // P27b (A1-FE): the card now reads the modes ONCE through
+  // useLiveStudyRunning (to disable its buttons while a risk check runs), so
+  // "not called" became "read at most once and never polled".
   it('no sweep started from here → the modes are not polled', async () => {
-    mount()
-    await screen.findByTestId('hub-improve-fmea')
-    await new Promise(r => setTimeout(r, 50))
-    expect(resultsApi.getFmeaModes).not.toHaveBeenCalled()
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({ per_mode: [], sweep_status: 'done' } as never)
+      mount()
+      await screen.findByTestId('hub-improve-fmea')
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+      expect(vi.mocked(resultsApi.getFmeaModes).mock.calls.length).toBeLessThanOrEqual(1)
+    } finally { vi.useRealTimers() }
   })
 })
 
@@ -259,5 +272,72 @@ describe('Improve description matches the action (P26 gate)', () => {
     mount()
     const li = await screen.findByTestId('hub-improve-voll_missing')
     expect(li.textContent).toContain('The assistant would set the price of undelivered energy to 5000 €/MWh.')
+  })
+})
+
+// A5 (deferred spec 2026-09-28 §2.2): the poll stopped at the first sample
+// after `running`, which could still carry the partial rows — the risk table
+// read stale for a moment after a sweep (smoke settle loop). One extra read
+// now follows. And a sweep started here belongs to its project: after a
+// switch the card neither follows nor polls the new project's modes.
+describe('ImproveCard sweep follow-up (A5)', () => {
+  afterEach(() => { vi.useRealTimers() })
+  const modesCalls = () => vi.mocked(resultsApi.getFmeaModes).mock.calls.length
+
+  it('one extra poll after the sweep ends (running → done: 3 reads, not 2)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    sweep.isSuccess = true
+    vi.mocked(resultsApi.getFmeaModes)
+      .mockResolvedValueOnce({ sweep_status: 'running' } as never)
+      .mockResolvedValue({ sweep_status: 'done' } as never)
+    mount()
+    await vi.waitFor(() => expect(modesCalls()).toBe(1))
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100) })
+    await vi.waitFor(() => expect(modesCalls()).toBe(2))
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100) })
+    await vi.waitFor(() => expect(modesCalls()).toBe(3))
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(modesCalls()).toBe(3)
+  })
+
+  it('a project switch resets the sweep state: no "Started" line, no poll of the new project', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    sweep.isSuccess = true
+    // The backend answers for its current project: Demo's sweep runs, Other has none.
+    vi.mocked(resultsApi.getFmeaModes).mockImplementation(async () =>
+      (useUIStore.getState().currentProject === 'Demo'
+        ? { sweep_status: 'running' } : { sweep_status: null }) as never)
+    mount()
+    await screen.findByTestId('hub-improve-fmea-started')
+    await act(async () => { useUIStore.setState({ currentProject: 'Other' }) })
+    expect(sweep.reset).toHaveBeenCalled()
+    expect(screen.queryByTestId('hub-improve-fmea-started')).toBeNull()
+    const other = () => vi.mocked(resultsApi.getFmeaModes).mock.calls.length
+    const at = other()
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    // At most the one read the live-study probe makes (A1-FE) — never a poll.
+    expect(other() - at).toBeLessThanOrEqual(1)
+  })
+})
+
+// A1-FE (deferred spec 2026-09-28 §2.4): each finding's "Let the assistant do
+// this" (and the card's footer one) is disabled with one plain sentence while
+// an FMEA sweep re-solves the live network; the backend would refuse the edit.
+describe('ImproveCard while a risk check runs (A1-FE)', () => {
+  const LIVE = 'A risk check is running — wait for it to finish or abort it before changing the network.'
+  it('buttons disabled with the sentence while the sweep runs; enabled after', async () => {
+    vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({ per_mode: [], sweep_status: 'running' } as never)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><ImproveCard /></QueryClientProvider>)
+    const doBtn = await screen.findByTestId('hub-improve-do-certification_fail') as HTMLButtonElement
+    await waitFor(() => expect(doBtn.disabled).toBe(true))
+    expect(doBtn.title).toBe(LIVE)
+    expect((screen.getByTestId('hub-delegate-improve') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('hub-live-study-note').textContent).toBe(LIVE)
+    await act(async () => {
+      client.setQueryData(nk('Demo', 'results', 'fmea_modes'), { per_mode: [], sweep_status: 'done' })
+    })
+    await waitFor(() => expect(doBtn.disabled).toBe(false))
+    expect(screen.queryByTestId('hub-live-study-note')).toBeNull()
   })
 })

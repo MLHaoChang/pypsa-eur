@@ -46,6 +46,7 @@ import math
 import pathlib
 import re
 
+from services.adequacy.worksheet import zero_reason
 from services.atomic_io import atomic_write_text
 
 SIDECAR_NAME = "adequacy_stress_scenarios.json"
@@ -738,6 +739,11 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
                 "in_metric_scope": True,
                 "engine": "lp_proxy",
                 "fidelity": "deterministic_scenario",
+                # P29 (B3): why a €0 row is €0 — additive.
+                "zero_reason": zero_reason(
+                    severity_eur=severity, delta_eue_mwh=delta,
+                    occurrence_per_year=freq, in_metric_scope=True,
+                    voll=voll),
             },
             "meta": meta,
         })

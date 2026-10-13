@@ -29,7 +29,9 @@ Every difference the model explains is a cause with a COMPUTED amount:
     allocation − the LP's optimal one, billed − LP;
   * `net_split_by_direction` — a net item the LP charges on one side, which
     the meter nets per interval (import and export in one interval):
-    billed − LP;
+    billed − LP. A net COST item on a multi-member group with an export Link
+    is priced on the group's net import (P3 WP3.3b, `ic_group_net`): the LP
+    side is that record's amount, exactly the meter's, so it has no cause;
   * `settlement_only` — a contract with no LP term: its settled amount;
   * `months_not_established` / `partial_months` — disclosures: both sides
     compare the same sampled months (WP2.1b), so their amount is 0;
@@ -156,11 +158,18 @@ def _energy_items_lp(n, cfg, ax: _Axis, local) -> dict:
     from their rates on the side the LP charges them."""
     imp = _import_flow(n, cfg)
     exp = _p0(n, cfg.export_link)
+    net_group = {i.id for i in _lp.group_net_items(cfg)}
     out = {}
     for item in cfg.import_tariff.items:
         if item_kind(item) != "energy" or _lp._lp_reason(item) is not None:
             continue
-        flow = imp if _lp._side(item) == "import" else exp
+        if item.id in net_group:
+            # Priced on the group's net import (P3 WP3.3b): max(0, Σ members −
+            # export), the meter's quantity — None without the committed term.
+            flow = (None if imp is None or exp is None or not n.meta.get(_lp.META_GROUP_NET)
+                    else np.clip(imp - exp, 0.0, None))
+        else:
+            flow = imp if _lp._side(item) == "import" else exp
         r = _rates(item, local)
         if flow is None or np.isnan(r).any():
             out[item.id] = None
@@ -441,10 +450,20 @@ def billing_vs_lp_gap(n, commercial, site_bill, *, settlement_lines: list | None
         energy_total = ax.by_period(committed - sum(nonconvex.values(), np.zeros(len(ax.w))))
     else:
         energy_total = None
+    if energy_total is not None and n.meta.get(_lp.META_GROUP_NET):
+        # The group net-import term (P3 WP3.3b) rides its own record, not the
+        # adders: its committed amount joins the LP's energy — keyed on the
+        # RECORD, so an item edited out since stays in the LP side and the
+        # drift explains it (review #4).
+        net_amounts = _lp.group_net_amounts(n)
+        energy_total = (None if net_amounts is None else
+                        {p: v + net_amounts.get(p, 0.0) for p, v in energy_total.items()})
     energy_items_p = {k: (None if v is None else ax.by_period(v)) for k, v in energy_items.items()}
     nonconvex_p = {k: (None if v is None else ax.by_period(v)) for k, v in nonconvex.items()}
+    net_group = {i.id for i in _lp.group_net_items(cfg)} if items else set()
     net_p = {i.id: _net_split(n, cfg, i, ax, local) for i in by_kind["energy"]
-             if i.measured_on == "net" and _lp._lp_reason(i) is None}
+             if i.measured_on == "net" and _lp._lp_reason(i) is None
+             and i.id not in net_group}   # a group net item is priced exactly (WP3.3b)
     demand = _demand_lp(n)
     demand_info = n.meta.get(_lp.META_DEMAND_INFO) or {}
     demand_notes = demand_info.get("notes") or []
@@ -476,7 +495,7 @@ def billing_vs_lp_gap(n, commercial, site_bill, *, settlement_lines: list | None
                 if reason is not None:
                     causes.append({"cause": "not_in_lp", "item": item.id, "reason": reason,
                                    "amount": b})
-                elif item.measured_on == "net":
+                elif item.measured_on == "net" and item.id not in net_group:
                     split = net_p.get(item.id)
                     causes.append({"cause": "net_split_by_direction", "item": item.id,
                                    "amount": None if split is None else split.get(period, 0.0)})

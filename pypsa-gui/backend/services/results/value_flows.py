@@ -31,6 +31,7 @@ Imports no router.
 """
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import asdict
 from typing import Any, Callable
@@ -40,6 +41,8 @@ import pandas as pd
 
 from services.commercial import lp_bindings as _lp
 from services.commercial import participants as P
+
+_log = logging.getLogger(__name__)
 
 
 def _key(period) -> str:
@@ -67,8 +70,12 @@ def _fin(v) -> float | None:
 
 
 def _per_asset(frame_or_series, periods) -> dict[tuple[str, str], dict[str, float]]:
-    """`n.statistics.*(groupby=False)` → {(component, name): {period key: value}}
-    (NaN = no cost = 0, the `cost_breakdown` reading)."""
+    """`n.statistics.*(groupby=False)` → {(component, name): {period key: value}}.
+
+    NaN reads as 0 on purpose: `n.statistics` returns NaN for an asset with no
+    cost of that kind (no capital cost, no marginal cost, inactive in the
+    period), and `cost_breakdown` reads it the same way (`_safe_float`), so the
+    ledger re-adds to it. It is not an unknown amount."""
     out: dict[tuple[str, str], dict[str, float]] = {}
     if frame_or_series is None or len(frame_or_series) == 0:
         return out
@@ -85,6 +92,10 @@ def _per_asset(frame_or_series, periods) -> dict[tuple[str, str], dict[str, floa
     return out
 
 
+# Kept here for callers; defined beside the classifier (WP3.2 moved it).
+is_fuel_supply = P.is_fuel_supply
+
+
 def _asset_costs(n, cfg, parsed, sides) -> list[P.AssetCost]:
     from services.solver_service import with_periodized_cost_defaults
 
@@ -97,6 +108,8 @@ def _asset_costs(n, cfg, parsed, sides) -> list[P.AssetCost]:
     for key in sorted(set(capex) | set(fom) | set(opex)):
         comp, name = key
         side, flags = P.asset_side(n, comp, name, sides)
+        if comp == "Generator" and side == "site" and is_fuel_supply(n, parsed, name):
+            flags = [*flags, "fuel_supply_generator"]
         out.append(P.AssetCost(component=comp, name=name, side=side, flags=flags,
                                capex=capex.get(key, {}), fom=fom.get(key, {}),
                                opex=opex.get(key, {})))
@@ -110,10 +123,9 @@ def _years_of(n) -> Callable[[Any], float]:
     return lambda p: years_for_period(ymap, p)
 
 
-def _cost_breakdown_total(n, cfg) -> dict[str, float | None]:
-    from services.results.cost_breakdown import compute_cost_breakdown
-
-    cb = compute_cost_breakdown(n, cfg)
+def _cost_breakdown_total(n, cb) -> dict[str, float | None]:
+    """`cost_breakdown`'s total per period on the unweighted basis: the flat
+    total, or each period's `by_period` entry ÷ its years."""
     if cb is None:
         return {_key(p): None for p in _periods(n)}
     if not isinstance(n.snapshots, pd.MultiIndex):
@@ -121,8 +133,8 @@ def _cost_breakdown_total(n, cfg) -> dict[str, float | None]:
     years = _years_of(n)
     out = {}
     for entry in cb.get("by_period") or []:
-        y = years(entry["period"])
-        out[_key(entry["period"])] = (_fin(entry["total"]) / y) if y else None
+        y, total = years(entry["period"]), _fin(entry.get("total"))
+        out[_key(entry["period"])] = (total / y) if (y and total is not None) else None
     return out
 
 
@@ -181,12 +193,40 @@ def _export_revenue(n, parsed) -> tuple[dict[str, float | None], dict | None]:
     return out, intervals
 
 
-def _export_split(n, parsed, sides, bill, export_intervals) -> dict | None:
+def export_revenue(n, commercial) -> dict[str, float | None]:
+    """The export-price revenue per period key ("_" on a flat axis, "YYYY"
+    per investment period): Σ w · p0(export_link) · `links_t["ic_export_price"]`,
+    unweighted by the period's years — the ledger's `export_price` line.
+    Public (GS Q4, the engine facade). `{}` when the config prices no export
+    (no export Link or no `export_price_ref`: the caller reads 0); a period
+    whose price column or flow is missing is None, never 0 (ADR-0001).
+    `commercial` is a `CommercialConfig` or its dict."""
+    return _export_revenue(n, _lp._parse(commercial))[0]
+
+
+def _export_split(n, parsed, sides, bill, export_intervals, flags: list[str]) -> dict | None:
     """Per period and source, the export revenue split pro rata to each site-side
-    generator's output per interval (key (component, name)); intervals with no
-    site generation go to key None."""
-    gens = [g for g in n.generators.index if str(n.generators.at[g, "bus"]) in sides.site]
-    gp = n.generators_t.p.reindex(columns=gens).to_numpy(dtype=float) if gens else None
+    generator's ELECTRIC output per interval (key (component, name)); intervals
+    with no site generation go to key None. Generation is one definition with
+    the `as_consumed_btm` PPA's share (IC P3 gate, condition 2): the site's
+    Generators on electric buses (`lp_bindings.site_generators`) and what its
+    converting Links deliver to electric buses from every port
+    (`site_link_generation`, a CHP's power, not its heat). Storage discharge
+    is not generation: its export stays the site's. A generation value that is
+    not known (NaN) in a period makes that period's split not established —
+    never a silent share for the site (ADR-0001)."""
+    from services.commercial import lp_bindings as _lp
+
+    gens = _lp.site_generators(n, parsed)
+    links = _lp.site_link_generation(n, parsed, lambda k: getattr(n.links_t, f"p{k}", None))
+    keys = [("Generator", g) for g in gens] + [("Link", str(k)) for k in links.columns]
+    cols = []
+    if gens:
+        cols.append(n.generators_t.p.reindex(index=n.snapshots, columns=gens)
+                    .to_numpy(dtype=float))
+    if not links.empty:
+        cols.append(links.to_numpy(dtype=float))
+    gp = np.hstack(cols) if cols else None
     rev_items = [it.id for it in (parsed.import_tariff.items if parsed.import_tariff else [])
                  if it.kind == "energy" and (it.direction == "revenue"
                                              or it.measured_on == "export")]
@@ -204,9 +244,15 @@ def _export_split(n, parsed, sides, bill, export_intervals) -> dict | None:
                     .to_numpy(dtype=float)
                 if len(amounts) == int(m.sum()):
                     sources[item] = amounts
+                else:
+                    # The bill's lines are in dispatch-row order per item; a
+                    # different length cannot be aligned (never guessed).
+                    flags.append(f"export_split_not_established:{item}:{k}")
         split = {}
+        gen_unknown = gp is not None and bool(np.isnan(gp[m]).any())
         for sid, vals in sources.items():
-            if np.isnan(vals).any():
+            if np.isnan(vals).any() or gen_unknown:
+                flags.append(f"export_split_not_established:{sid}:{k}")
                 continue
             parts: dict = {}
             if gp is not None:
@@ -214,10 +260,10 @@ def _export_split(n, parsed, sides, bill, export_intervals) -> dict | None:
                 tot = g.sum(axis=1)
                 has = tot > 0
                 share = np.where(has[:, None], g / np.where(has, tot, 1.0)[:, None], 0.0)
-                for j, name in enumerate(gens):
+                for j, key in enumerate(keys):
                     v = float((vals * share[:, j]).sum())
                     if v:
-                        parts[("Generator", str(name))] = v
+                        parts[key] = v
                 rest = float(vals[~has].sum())
             else:
                 rest = float(vals.sum())
@@ -226,6 +272,60 @@ def _export_split(n, parsed, sides, bill, export_intervals) -> dict | None:
             split[sid] = parts
         out[k] = split
     return out
+
+
+def _hub_inputs(n, parsed, vf, bill) -> P.HubInputs | None:
+    """An energy hub's allocation inputs (WP3.3a): per period, each group
+    member's import on the group bill's own rating arguments (the ones
+    `billing.bill_site` passes — step, represented hours, billing period, the
+    site clock), rated by `hub_allocation.period_hub`."""
+    from services.commercial import billing as _billing
+    from services.commercial import hub_allocation as _HA
+
+    if vf is None or vf.allocation is None or not vf.hub_members:
+        return None
+    # No group left (the contract cleared after the hub was saved): stale, so
+    # the ledger refuses the split — never a silent "no allocation" (WP3.3a
+    # review round 2 R2-1).
+    by_link = {m.link: m.participant for m in vf.hub_members}
+    members = [(link, by_link[link]) for link in parsed.group_members if link in by_link]
+    items = parsed.import_tariff.items if parsed.import_tariff is not None else []
+    hub = P.HubInputs(members=members, periods={}, group_links=list(parsed.group_members),
+                      metered_items=[i.id for i in items if _HA.is_metered(i)],
+                      peak_items=[i.id for i in items if _HA.is_peak_item(i)])
+    if sorted(parsed.group_members) != sorted(by_link):
+        return hub                    # stale: the ledger refuses the split (review #1)
+    p0 = getattr(n.links_t, "p0", None)
+    links = [link for link, _p in members] + ([parsed.export_link] if parsed.export_link else [])
+    if p0 is None or any(link not in p0.columns for link in links):
+        return hub
+    scratch: list[str] = []
+    flows = {part: _billing._flow(p0, link, scratch) for link, part in members}
+    exp_all = (_billing._flow(p0, parsed.export_link, scratch) if parsed.export_link
+               else np.zeros(len(n.snapshots)))
+    w_all = n.snapshot_weightings.objective.to_numpy(dtype=float)
+    multi = isinstance(n.snapshots, pd.MultiIndex)
+    periods: dict[str, P.HubPeriod] = {}
+    for p in _periods(n):
+        sel = _period_mask(n, p)
+        ts = pd.DatetimeIndex(n.snapshots[sel].get_level_values(-1) if multi
+                              else n.snapshots[sel])
+        idx = ts.tz_localize("UTC") if parsed.timezone and ts.tz is None else ts
+        step = _billing._step_hours(ts)
+        represents, billing_period = _billing._represented(ts, w_all[sel], step)
+        group = bill.per_period.get(p) if bill is not None else None
+        try:
+            periods[_key(p)] = _HA.period_hub(
+                idx, {part: v[sel] for part, v in flows.items()}, exp_all[sel], w_all[sel],
+                parsed.import_tariff, step_hours=step, timezone=parsed.timezone,
+                billing_period=billing_period, represents_hours=represents, group=group,
+                peak=vf.allocation.basis == "peak_contribution")
+        except ValueError as exc:                   # the results path never raises
+            periods[_key(p)] = P.HubPeriod(
+                energy_mwh={part: None for _l, part in members}, metered={}, peak={},
+                reason="period_not_rated", flags=[f"period_not_rated:{str(exc)[:120]}"])
+    hub.periods = periods
+    return hub
 
 
 def _disclosures(n, cfg, lost_load) -> dict[str, dict[str, float | None]]:
@@ -241,6 +341,8 @@ def _disclosures(n, cfg, lost_load) -> dict[str, dict[str, float | None]]:
     for p in _periods(n):
         m = _period_mask(n, p)
         d: dict[str, float | None] = {"dsr_slack": 0.0, "voll": 0.0}
+        if frame is None and dsr_price and getattr(cfg, "dsr_buses", None):
+            d["dsr_slack"] = None               # DSR configured, no committed record
         if frame is not None and not frame.empty:
             vals = frame.reindex(n.snapshots).to_numpy(dtype=float)[m]
             d["dsr_slack"] = None if np.isnan(vals).any() else \
@@ -269,6 +371,7 @@ def ledger_inputs(n, cfg, *, result_df, lost_load=None) -> P.LedgerInputs | None
     bill = _billing.bill_site(n, commercial) if parsed.import_tariff is not None else None
     items = {it.id: P.BillItem(it.id, it.kind, it.measured_on, it.direction)
              for it in (parsed.import_tariff.items if parsed.import_tariff else [])}
+    input_flags: list[str] = list(bill.flags) if bill is not None else []
     per_item: dict[str, dict] = {}
     bill_flags: dict[str, list[str]] = {}
     for p in _periods(n):
@@ -277,24 +380,48 @@ def ledger_inputs(n, cfg, *, result_df, lost_load=None) -> P.LedgerInputs | None
         if res is None:
             per_item[k] = {i: None for i in items}
             bill_flags[k] = ["bill_not_established"] if bill is not None else []
+            if bill is not None:
+                input_flags.append(f"period_not_billed:{k}")
             continue
         per_item[k] = {i: _fin(res.per_item_sampled.get(i)) for i in items}
         bill_flags[k] = [f"{i}:{f}" for i, fl in res.flags.items() for f in fl]
-    retail, _flags = _retail(parsed)
+        # A partial URDB import is a bill missing charges (ADR-0001).
+        input_flags += [f for f in res.flags.get("_tariff", [])]
+    retail, retail_flags = _retail(parsed)
     retailers = {r[1] for r in retail.values() if r}
     retailer = next(iter(retailers)) if len(retailers) == 1 else None
 
     pq = physical_quantities(n, cfg, result_df=result_df)
     pq["result_df"] = result_df
-    lines, _ = settlement_lines(n, parsed, pq)
+    lines, contract_flags = settlement_lines(n, parsed, pq)
     settlement = [{**asdict(ln), "period": _key(ln.period)} for ln in lines]
+    unsettled = []
+    unsettled_parties = {}
+    by_id = {c.id: c for c in parsed.contracts}
+    for f in [*contract_flags, *retail_flags]:
+        if f.startswith("contract_not_settled:"):
+            cid, _, reason = f[len("contract_not_settled:"):].partition(":")
+            unsettled.append((cid, reason))
+            if cid in by_id:
+                unsettled_parties[cid] = P.contract_payer_payee(by_id[cid], parsed.site_party)
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    input_flags += [*contract_flags, *retail_flags,
+                    *commercial_cost_terms(n, commercial)["flags"]]
 
     fee, fixed = _connection(n, commercial)
     export_revenue, export_intervals = _export_revenue(n, parsed)
     vf = P.parse_value_flows(parsed.value_flows)
-    split = (_export_split(n, parsed, sides, bill, export_intervals)
+    split = (_export_split(n, parsed, sides, bill, export_intervals, input_flags)
              if vf is not None and vf.export_revenue_to == "asset_owner" else None)
     agreement = parsed.connection
+    external_ppa = [c.id for c in parsed.contracts
+                    if c.type == "ppa" and vf is not None
+                    and any(P.same_party(c.seller, e) for e in vf.externals)
+                    and any(a in n.generators.index for a in c.asset_ids)]
+    from services.results.cost_breakdown import compute_cost_breakdown
+
+    cb = compute_cost_breakdown(n, cfg)
     return P.LedgerInputs(
         periods=periods, site_party=parsed.site_party, bill_items=items, bill=per_item,
         bill_flags=bill_flags, retailer=retailer, settlement=settlement,
@@ -304,9 +431,13 @@ def ledger_inputs(n, cfg, *, result_df, lost_load=None) -> P.LedgerInputs | None
             and agreement.curtailment_compensation_eur_per_mwh is not None),
         export_revenue=export_revenue, export_split=split,
         assets=_asset_costs(n, cfg, parsed, sides),
-        cost_breakdown_total=_cost_breakdown_total(n, cfg),
+        cost_breakdown_total=_cost_breakdown_total(n, cb),
         lp_commercial=_lp_commercial(n, commercial),
-        disclosures=_disclosures(n, cfg, lost_load))
+        disclosures=_disclosures(n, cfg, lost_load),
+        input_flags=sorted(set(input_flags)), unsettled_contracts=unsettled,
+        unsettled_parties=unsettled_parties,
+        curtailment_penalty=_fin((cb or {}).get("curtailment_cost")),
+        external_ppa_assets=external_ppa, hub=_hub_inputs(n, parsed, vf, bill))
 
 
 def value_flow_ledger(n, cfg, *, result_df, lost_load=None):
@@ -325,3 +456,104 @@ def value_flow_ledger(n, cfg, *, result_df, lost_load=None):
         return None
     ledger = P.build_ledger(inputs, vf)
     return inputs, vf, ledger, P.check_conservation(ledger, inputs, vf)
+
+
+# ── the payload (WP3.4) ─────────────────────────────────────────────────────
+
+
+def _sankey(lines: list[P.ValueFlowLine], vf) -> tuple[dict, dict[str, int]]:
+    """A bipartite Sankey — payer nodes `p:<id>` on the left, payee nodes
+    `r:<id>` on the right — so it is a DAG by construction (recharts' Sankey
+    recurses without a visited set and crashes on a cycle). Links aggregate
+    lines by (payer, payee, stream); zero and unknown amounts are dropped and
+    counted."""
+    names = {x.id: x.name for x in vf.participants}
+    ids = list(names)
+
+    def canon(party: str) -> str:
+        # One node per party however a line spells it (as `by_participant`).
+        return P.canonical_party(party, vf)
+
+    agg: dict[tuple[str, str, str], float] = {}
+    dropped = {"unknown": 0, "zero": 0}
+    for ln in lines:
+        if ln.amount is None or ln.payer is None or ln.payee is None:
+            dropped["unknown"] += 1
+            continue
+        if ln.amount == 0:
+            dropped["zero"] += 1
+            continue
+        key = (canon(ln.payer), canon(ln.payee), ln.value_stream)
+        agg[key] = agg.get(key, 0.0) + ln.amount
+    nodes: dict[str, dict] = {}
+
+    def node(party: str, side: str) -> str:
+        nid = f"{'p' if side == 'payer' else 'r'}:{party}"
+        internal = any(P.same_party(party, i) for i in ids)
+        nodes.setdefault(nid, {"id": nid, "label": names.get(party, party), "side": side,
+                               "internal": internal})
+        return nid
+
+    links = [{"source": node(payer, "payer"), "target": node(payee, "payee"),
+              "value": value, "stream": stream}
+             for (payer, payee, stream), value in sorted(agg.items()) if value]
+    return {"nodes": list(nodes.values()), "links": links}, dropped
+
+
+def compute_value_flows(n, cfg, *, result_df, lost_load=None) -> dict | None:
+    """`GET /results/value_flows` (plan WP3.4): the participants' ledger of the
+    last solve per period — its lines, per-participant totals, a bipartite
+    Sankey and the conservation checks. None (the route's 204) without a
+    commercial config or before a solve; `status: "not_established"` without a
+    value-flows config (a 204 would read as "not solved" in chat);
+    `status: "value_flows_invalid"` for a stored value that does not
+    validate. Money is unweighted per period (the `cost_rows` basis)."""
+    from services.commercial import value_flow_templates as T
+    from services.results.billing import _solved
+
+    commercial = getattr(cfg, "commercial", None)
+    if not commercial or not _solved(n):
+        return None
+    parsed = _lp._parse(commercial)
+    try:
+        vf = P.parse_value_flows(parsed.value_flows)
+    except P.ValueFlowsInvalid as exc:
+        # The payload is a route's answer: a fixed reason, never the
+        # validator's text; the detail goes to the server log.
+        _log.warning("stored value_flows does not validate: %s", exc)
+        return {"status": "value_flows_invalid",
+                "reason": "the stored value_flows does not validate; re-save it "
+                          "(PUT /simulation/commercial/value_flows names the field)"}
+    if vf is None:
+        return {"status": "not_established", "reason": "no_value_flows_config"}
+    inputs = ledger_inputs(n, cfg, result_df=result_df, lost_load=lost_load)
+    if inputs is None:
+        return None
+    ledger = P.build_ledger(inputs, vf)
+    res = P.check_conservation(ledger, inputs, vf)
+    totals = P.by_participant(ledger, vf)
+    template = T.template_status(vf, n, parsed)
+    flags = sorted({*ledger.flags, *res.flags, *template})
+    # The allocation's reasons ride its lines; the payload names them once.
+    flags += sorted({f for lines in ledger.periods.values() for ln in lines
+                     for f in ln.flags if f.startswith("allocation_not_established:")})
+    periods = {}
+    for p in inputs.periods:
+        lines = ledger.periods.get(p, [])
+        sankey, dropped = _sankey(lines, vf)
+        for kind, count in dropped.items():
+            if count:
+                flags.append(f"sankey_dropped_{kind}:{p}:{count}")
+        pc = res.periods[p]
+        periods[p] = {"lines": [asdict(ln) for ln in lines], "by_participant": totals.get(p, {}),
+                      "sankey": sankey, "conservation": {"ok": pc.ok, "checks": pc.checks},
+                      "disclosures": ledger.disclosures.get(p, {})}
+    return {"status": "ok", "participants": [x.model_dump(mode="json") for x in vf.participants],
+            "externals": list(vf.externals), "template": vf.template,
+            "template_version": vf.template_version, "periods": periods,
+            "conservation_ok": res.ok, "flags": sorted(set(flags)), "notes": list(ledger.notes),
+            "provenance": {"tariff_payees": ledger.tariff_payees,
+                           "billing": {"input_flags": list(inputs.input_flags)},
+                           "template": {"name": vf.template, "version": vf.template_version,
+                                        "status": template},
+                           "basis": "unweighted_per_period"}}

@@ -183,6 +183,42 @@ export interface CapacityRow {
 }
 export interface CapacityTable { rows: CapacityRow[]; hours: number[]; buses: string[] }
 
+/** Increment 10: a facility at one connection point, a load plus an optional
+ *  on-site unit (BESS or generator) that stays connected when the load trips. */
+export interface FacilitySpec {
+  bus: string
+  load_mw: number
+  load_pf: number
+  onsite_mw: number
+  onsite_converter: boolean
+  profile?: string
+}
+export type ConnectionCheck =
+  | 'connection' | 'energisation' | 'load_trip' | 'facility_trip'
+  | 'q_lead' | 'q_lag' | 'scr_onsite' | 'scr_load'
+/** One check of one assessment at one hour. `status` is pass/fail against the
+ *  grid-code limit, or `reported` for a figure the code does not gate (SCR).
+ *  `clause` names the rule applied; `source` is `code` for a number the
+ *  regulation states and `assumed` for an engineering choice. */
+export interface ConnectionRow {
+  assessment_id: string
+  hour: number
+  bus: string
+  load_mw: number
+  load_pf: number
+  onsite_mw: number
+  onsite_converter: boolean
+  profile: string
+  check: ConnectionCheck
+  status: 'pass' | 'fail' | 'reported'
+  value: number | null
+  unit: string | null
+  limit: number | null
+  detail: string | null
+  clause: string
+  source: 'code' | 'assumed'
+}
+
 const quiet = { skipErrorToast: true } as const
 
 export const gridspineApi = {
@@ -264,6 +300,17 @@ export const gridspineApi = {
   computeCapacity: (project: string, bus: string, kind: CapacityKind) =>
     client.post<{ rows: CapacityRow[] }>(
       `/gridspine/${encodeURIComponent(project)}/capacity`, { bus, kind }, quiet,
+    ).then(r => r.data),
+
+  /** Every stored connection-point assessment of the run. 404 before a screened run. */
+  connection: (project: string) =>
+    client.get<{ rows: ConnectionRow[] }>(`/gridspine/${encodeURIComponent(project)}/connection`, quiet).then(r => r.data),
+
+  /** Assess a facility at every selected hour (a few seconds per hour). The
+   *  same facility assessed again replaces its rows. */
+  assessConnection: (project: string, spec: FacilitySpec) =>
+    client.post<{ assessment_id: string; rows: ConnectionRow[] }>(
+      `/gridspine/${encodeURIComponent(project)}/connection`, spec, quiet,
     ).then(r => r.data),
 
   /** The handoff bundle for one selected hour, as a zip blob. */

@@ -14,6 +14,7 @@ import StressScenarioEditor, {
   validateDraft,
 } from './StressScenarioEditor'
 import { resultsApi, type StressScenario } from '../../api/simulation'
+import { useUIStore } from '../../store/uiStore'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -265,4 +266,22 @@ it('labels a pack with its length, the names it swaps and fixture status', () =>
     snapshots: 2, loads: ['l'], generators: ['wind1'],
     provenance: 'synthetic_fixture_v1' }))
     .toBe('Synthetic mild cold snap (2h) · 2 h · swaps l, wind1 · test fixture')
+})
+
+// P29 gate S-1: under the Guided FMEA tab the heading drops the class letter;
+// Expert keeps its words.
+describe('P29 gate S-1: the heading in Guided', () => {
+  const heading = () => screen.getByTestId('stress-editor').querySelector('p')!.textContent
+  it('Guided: "Stress scenarios · 2/10", no class letter', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    renderEditor()
+    await waitFor(() => expect(heading()).toMatch(/2\//))
+    expect(heading()).toBe('Stress scenarios · 2/10')
+  })
+  it('Expert: "Stress scenarios (class C) · 2/10"', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    renderEditor()
+    await waitFor(() => expect(heading()).toMatch(/2\//))
+    expect(heading()).toBe('Stress scenarios (class C) · 2/10')
+  })
 })

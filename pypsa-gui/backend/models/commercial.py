@@ -124,6 +124,9 @@ class ValueFlowConfig(BaseModel):
                       "energy_hub", "custom"] = "custom"
     template_version: str | None = None
     built_digest: str | None = None
+    # What the template builder read (WP3.2): the site-side assets, the
+    # contracts' parties and assets, the PoC — `template_stale` when they differ.
+    built_inputs_digest: str | None = None
     participants: list[Participant] = Field(default_factory=list)
     externals: list[str] = Field(default_factory=lambda: list(DEFAULT_EXTERNALS))
     tariff_payees: list[TariffPayeeRule] = Field(default_factory=list)
@@ -131,6 +134,8 @@ class ValueFlowConfig(BaseModel):
     hub_members: list[HubMember] = Field(default_factory=list)
     allocation: AllocationKey | None = None
     export_revenue_to: Literal["site_party", "asset_owner"] = "site_party"
+    # Who is paid the connection agreement's fees; None = `dso` (WP3.1 review #4).
+    connection_fee_payee: str | None = None
 
 
 # ------------------------------------------------------------------ series refs

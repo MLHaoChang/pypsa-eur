@@ -53,6 +53,7 @@ MAX_ENTRIES = 200
 # an unknown study and refused, and the point is that MC is known and free.
 CHARGEABLE = (
     "frontier", "fmea_sweep", "coupling_loop", "margin_loop", "mc", "eh_study",
+    "investment_case",
 )
 
 
@@ -255,6 +256,11 @@ def estimate_solves(n, study: str, **kwargs) -> int:
     if study == "mc":
         # Spec §4: this engine SOLVES NOTHING. Its metrics are hours and MWh
         # sampled off one snapshot.
+        return 0
+
+    if study == "investment_case":
+        # IC P4: the finance engine values the stored solve; it runs no LP.
+        # Known and free, like `mc` — logged in the campaign, charged nothing.
         return 0
 
     # Review finding 4: every one of these ends with a full re-solve that the

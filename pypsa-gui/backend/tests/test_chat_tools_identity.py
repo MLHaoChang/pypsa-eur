@@ -51,6 +51,8 @@ def unbound_identity():
         pytest.param(lambda: chat_tools.get_library_item("tariff", "x"),
                      id="get_library_item"),
         pytest.param(lambda: chat_tools.attach_tariff("x"), id="attach_tariff"),
+        pytest.param(lambda: chat_tools.set_site_connection("x"),
+                     id="set_site_connection"),
         pytest.param(lambda: chat_tools.import_urdb_tariff("f", "x"),
                      id="import_urdb_tariff"),
     ],

@@ -737,7 +737,7 @@ export function averageScaling(
 // ── Number formatting ────────────────────────────────────────────────────────
 // fmtEnergy expects MWh (PyPSA's natural unit when summing MW × hourly
 // snapshots). It scales up to GWh / TWh once the magnitude crosses 1000 /
-// 1e6 MWh respectively, and down to kWh for sub-MWh values. The previous code
+// 1e6 MWh respectively; below 1 MWh it stays in MWh (three decimals, P31 C3). The previous code
 // formatted MWh as if they were Wh, producing absurd labels (e.g. 1234 MWh
 // as "1.23 kWh").
 export function fmtEnergy(mwh: number | null | undefined, digits = 2): string {
@@ -746,7 +746,21 @@ export function fmtEnergy(mwh: number | null | undefined, digits = 2): string {
   if (a >= 1e6) return `${(mwh / 1e6).toFixed(digits)} TWh`
   if (a >= 1e3) return `${(mwh / 1e3).toFixed(digits)} GWh`
   if (a >= 1)   return `${mwh.toFixed(digits)} MWh`
-  return `${(mwh * 1e3).toFixed(digits)} kWh`
+  // P31 C3: below 1 MWh stay in MWh with three decimals (not "250.00 kWh"
+  // beside MWh / GWh cells), and zero reads "0 MWh" (not "0.00 kWh").
+  if (mwh === 0) return '0 MWh'
+  return `${mwh.toFixed(3)} MWh`
+}
+
+/** A MWh value as a bare number, for a column whose header carries the unit
+ *  ("ΔEUE (MWh)"): never scaled to kWh / GWh, so the header stays true for
+ *  every cell. Two decimals with grouping from 1 MWh, three below, "0" for
+ *  zero, "—" for a missing value (P31 C3). */
+export function fmtMwhNumber(mwh: number | null | undefined): string {
+  if (mwh == null || !Number.isFinite(mwh)) return '—'
+  if (mwh === 0) return '0'
+  if (Math.abs(mwh) < 1) return mwh.toFixed(3)
+  return mwh.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 export function fmtCurrency(eur: number | null | undefined, digits = 2): string {
@@ -795,6 +809,9 @@ export function stampWithPeriod(s: string, period?: number): string {
 // classic CSV-injection vector when names like "=cmd|'/c calc'!A1" sneak in).
 export function csvCell(v: unknown): string {
   if (v == null) return ''
+  // A finite number is data, never a formula: `-800` stays a number (only
+  // TEXT that starts like a formula is quoted).
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v)
   let s = String(v)
   if (/^[=+\-@\t\r]/.test(s)) s = "'" + s
   return /[,"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s

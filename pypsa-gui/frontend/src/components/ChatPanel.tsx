@@ -1,3 +1,5 @@
+import AssistantResultCard from './AssistantResultCard'
+import DictationControls from './DictationControls'
 /**
  * Phase 3 chatbot integration v6 — ChatPanel.
  *
@@ -24,22 +26,29 @@
  *     never leaks a setInterval.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { acknowledgeMountedView, type NavigationAcknowledgement } from '../utils/verifiedNavigation'
+import { CheckedEvidenceCard } from './CheckedEvidenceCard'
+import { CheckedAnswerControl } from './CheckedAnswerControl'
+import { CHECKED_ANSWERS_QUERY_KEY, getCheckedAnswerCapabilities } from '../api/reliability'
 import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   createChatStream,
-  getChatHealth,
+  createChatProgressStream,
   getChatHistory,
   postChatAbort,
   postChatConfirm,
   type ChatFrame,
-  type ChatHealth,
   type InterruptedTurn,
 } from '../api/chat'
-import { useChatProfiles, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
+import { useChatProfiles, useChatReadiness, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
+import { applyUiNavigate } from './uiNavigate'
 import { nk } from '../utils/queryKeys'
+import { mismatchSentence } from '../utils/projectMismatch'
+import { moveProjectLock } from '../utils/projectActions'
 import { invalidateAssetQueries, isMutatingTier } from '../utils/assetWrite'
+import { parseApproval, verifyApprovedText, type ApprovedAnswerFrame } from '../utils/answerAssurance'
 import {
   deleteUpload,
   getUploadBlobUrl,
@@ -53,7 +62,7 @@ import ApiKeySetup from './ApiKeySetup'
 import ChatLaunchGreeting from './ChatLaunchGreeting'
 import { buildUiContext } from '../utils/uiContext'
 import { plainWords } from '../pages/hubDesign/plainWords'
-import { postChatRewind } from '../api/chat'
+import { getWorkflowMenu, postChatRewind, type ChoiceRequestFrame, type WorkflowContext, type WorkflowMenu, type WorkflowState } from '../api/chat'
 import * as speechOut from '../utils/speechOut'
 import { useUIStore, type UiMode } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
@@ -62,10 +71,12 @@ import { isNearBottom } from '../utils/chatUi'
 import { insertAtCursor } from '../utils/speechToText'
 import ChatMarkdown from './ChatMarkdown'
 import { UploadProgressToast } from './UploadProgressToast'
+import { ConfirmationCard } from './ConfirmationCard'
+export { guidedCardSummary } from './ConfirmationCard'
 
 // Phase D — extensions accepted by the file picker / drag-drop overlay.
 // Matches the upload_service.ALLOWED_MIME_TYPES allowlist.
-const UPLOAD_ACCEPT = '.xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp,.gif,.docx'
+const UPLOAD_ACCEPT = '.xlsx,.xls,.csv,.nc,.zip,.m,.pdf,.png,.jpg,.jpeg,.webp,.gif,.docx'
 const UPLOAD_MAX_BYTES = 25 * 1024 * 1024
 
 // F2 — every localStorage touch in this panel is a UI PREFERENCE: a dismissed
@@ -110,138 +121,6 @@ function _frame_data<T = Record<string, unknown>>(f: ChatFrame): T {
   return f.data as T
 }
 
-/**
- * Map chat tool panel_id → SlidePanel / special navigation targets.
- *
- * Not every value here is a `SlidePanel`. 'topology', 'map', 'properties',
- * 'palette', 'bottom', 'import_export', 'project_picker', 'new_project' and
- * 'chat' name surfaces that live outside `activeSlidePanel`; applyUiNavigate
- * dispatches on each of them explicitly before falling through to the
- * setSlidePanel branch. 'chat' in particular now resolves to the assistant
- * dock, not to a slide panel.
- */
-function _normalizePanelId(raw: string): string {
-  const key = raw.trim()
-  const aliases: Record<string, string> = {
-    Results: 'results', results: 'results',
-    SolverSettings: 'simparams', simparams: 'simparams',
-    TimeSeriesManager: 'timeseries', LoadProfileManager: 'timeseries', timeseries: 'timeseries',
-    VintagePeriodBoundsModal: 'capacityBounds', capacityBounds: 'capacityBounds',
-    OverviewPanel: 'overview', overview: 'overview',
-    IssuesPanel: 'issues', issues: 'issues',
-    Scenarios: 'scenarios', scenarios: 'scenarios',
-    Snapshots: 'snapshots', snapshots: 'snapshots',
-    Horizon: 'horizon', horizon: 'horizon',
-    SolveQueue: 'solveQueue', solveQueue: 'solveQueue',
-    Chat: 'chat', chat: 'chat',
-    Compare: 'compare', compare: 'compare',
-    Topology: 'topology', topology: 'topology',
-    MapCanvas: 'map', map: 'map',
-    PropertiesPanel: 'properties', properties: 'properties',
-    BottomPanel: 'bottom',
-    CommandPalette: 'palette', palette: 'palette',
-    ImportExport: 'import_export', import_export: 'import_export',
-    GenerationStack: 'results',
-    ProjectPicker: 'project_picker', project_picker: 'project_picker',
-    OpenProject: 'project_picker',
-    NewProject: 'new_project', new_project: 'new_project',
-    NewProjectWizard: 'new_project',
-    // Guided-mode spec §3.6 — the hub-design panel slot.
-    HubDesign: 'hubDesign', hubDesign: 'hubDesign', hub_design: 'hubDesign',
-  }
-  return aliases[key] ?? key
-}
-
-function applyUiNavigate(d: {
-  kind?: string
-  panel_id?: string
-  results_tab?: string
-  bottom_tab?: string
-  compare_rail?: boolean
-  compare_a?: string
-  compare_b?: string
-  compare_tab?: string
-  component_class?: string
-  name?: string
-  snapshot_iso?: string
-  period?: number | null
-  category?: string
-  metrics?: string[]
-  mode?: 'chronological' | 'duration' | 'monthly'
-  chart?: boolean
-}) {
-  const ui = useUIStore.getState()
-  if (d.kind === 'select_component' && d.component_class && d.name) {
-    ui.setSelectedComponent({ type: d.component_class, name: d.name })
-    ui.openRightPanel()
-    return
-  }
-  if (d.kind === 'open_asset_detail' && d.component_class && d.name) {
-    ui.requestAssetDetail({
-      componentClass: d.component_class,
-      name: d.name,
-      category: d.category,
-      metrics: d.metrics,
-      mode: d.mode,
-      chart: d.chart,
-    })
-    return
-  }
-  if (d.kind === 'set_snapshot' && d.snapshot_iso) {
-    // Snapshot picker is driven by ISO + optional period; store the index
-    // is unknown here — open Results so the user sees the picker context.
-    ui.setSlidePanel('results')
-    return
-  }
-  // kind === 'navigate' | legacy 'open_panel'
-  const panel = d.panel_id ? _normalizePanelId(d.panel_id) : null
-  if (panel === 'topology') {
-    ui.setSlidePanel(null)
-    ui.setCanvasView('blank')
-  } else if (panel === 'map') {
-    ui.setSlidePanel(null)
-    ui.setCanvasView('satellite')
-  } else if (panel === 'properties') {
-    ui.openRightPanel()
-  } else if (panel === 'palette') {
-    ui.setPaletteMode('all')
-  } else if (panel === 'import_export') {
-    ui.requestIoModal('import')
-  } else if (panel === 'project_picker') {
-    window.dispatchEvent(new CustomEvent('chat:open-project-picker'))
-  } else if (panel === 'new_project') {
-    window.dispatchEvent(new CustomEvent('chat:open-new-project-wizard'))
-  } else if (panel === 'bottom') {
-    // Expand bottom panel on a default tab if none specified below.
-    if (!d.bottom_tab) ui.requestBottomTab('Buses')
-  } else if (panel === 'compare') {
-    ui.setSlidePanel('results')
-    ui.setCompareRailOpen(true)
-  } else if (panel === 'chat') {
-    // 'chat' is no longer a SlidePanel member — it resolves to the dock. The
-    // agent can still be asked to open the assistant, and doing so no longer
-    // evicts whatever view is currently on screen.
-    ui.setAssistantDockOpen(true)
-  } else if (
-    panel === 'results' || panel === 'simparams' || panel === 'timeseries'
-    || panel === 'capacityBounds' || panel === 'overview' || panel === 'issues'
-    || panel === 'scenarios' || panel === 'snapshots' || panel === 'horizon'
-    || panel === 'solveQueue' || panel === 'hubDesign'
-  ) {
-    ui.setSlidePanel(panel)
-  }
-
-  if (d.results_tab) ui.requestResultsTab(d.results_tab)
-  if (d.bottom_tab) ui.requestBottomTab(d.bottom_tab)
-  if (typeof d.compare_rail === 'boolean') ui.setCompareRailOpen(d.compare_rail)
-  if (d.compare_a || d.compare_b || d.compare_tab) {
-    ui.requestCompareNav({
-      a: d.compare_a,
-      b: d.compare_b,
-      tab: d.compare_tab,
-    })
-  }
-}
 
 interface SessionInitFrame {
   session_id: string
@@ -254,6 +133,8 @@ interface SessionInitFrame {
   // admin changes / A8 fallbacks.
   profile_id?: string
   profile_label?: string
+  turn_id?: string
+  assurance?: { version: number; mode: string; state: string }
 }
 
 interface TokenFrame {
@@ -280,194 +161,107 @@ interface ToolPendingFrame {
   ttl_seconds: number
 }
 
-// Tools that require an EXTRA typed-confirmation step (Phase 4 polish).
-// v4-MAJOR-1 / v6-F1: save_project force-overwrite needs the user to type
-// the EXISTING project name. v4-MINOR-1 + memory-rule: delete_project on
-// the active project also requires typed confirmation so a misclick can't
-// nuke the user's active work.
-const TYPED_CONFIRMATION_TOOLS = new Set<string>([
-  'delete_project', 'save_project', 'save_project_as',
-  'restore_project_snapshot', 'cascade_delete_bus',
-])
-
-function _typed_confirmation_target(tool: string, args: Record<string, unknown>): string | null {
-  // The user must type this exact string before Approve is unlocked.
-  if (tool === 'delete_project' || tool === 'cascade_delete_bus') {
-    return (args.name as string) ?? null
-  }
-  if (tool === 'save_project' || tool === 'save_project_as') {
-    return (args.name as string) ?? null
-  }
-  if (tool === 'restore_project_snapshot') {
-    return (args.snapshot_id as string) ?? null
-  }
-  return null
-}
-
-// P26 (carried from the P25 gate): in Guided every write-tier call asks for
-// confirmation, but some write-tier tools do not edit the network — they
-// write a file, back the project up, or open another project. The card says
-// what the call is for; "Confirm this change" stays for real edits. Keyed on
-// the tier as well, so a tool that ever moves tier falls back to the tier's
-// wording. Expert never reads this.
-const GUIDED_WRITE_PURPOSE: Record<string, { header: string; note: string }> = {}
-for (const t of ['export_to_csv', 'export_to_excel', 'export_preview_png', 'export_chat_summary',
-  'export_asset_results', 'gridspine_export_handoff_bundle']) {
-  GUIDED_WRITE_PURPOSE[t] = { header: 'Confirm: export a file',
-    note: 'Writes a file you can download. Your network is not changed.' }
-}
-GUIDED_WRITE_PURPOSE.create_project_snapshot = { header: 'Confirm: save a copy',
-  note: 'Saves a backup copy of the project as it is now. Your network is not changed.' }
-for (const t of ['load_project', 'activate_project']) {
-  GUIDED_WRITE_PURPOSE[t] = { header: 'Confirm: open a project',
-    note: 'Switches the workbench to another project. Save first if you have unsaved edits.' }
-}
-
-function guidedConfirmWording(tool: string, tier: string): { header: string; note: string | null } {
-  if (tier !== 'write') return { header: 'Confirm', note: null }
-  return Object.prototype.hasOwnProperty.call(GUIDED_WRITE_PURPOSE, tool)
-    ? GUIDED_WRITE_PURPOSE[tool]
-    : { header: 'Confirm this change', note: null }
-}
-
-// P26 (coordinator item 5): a Guided card leads with one plain sentence
-// about the call; the tool id and its JSON arguments move into a collapsed
-// "Details". Unknown tools fall back to "The assistant wants to use <tool
-// name in words>". Expert never reads this.
-const _str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null)
-const _count = (v: unknown): number | null => (Array.isArray(v) ? v.length : null)
-const GUIDED_CARD_SUMMARY: Record<string, (a: Record<string, unknown>) => string> = {
-  run_eh_study: (a) => {
-    const n = typeof a.budget_solves === 'number' && Number.isFinite(a.budget_solves) ? a.budget_solves : null
-    return n != null
-      ? `Run the reliability study for this site (about ${n} calculation steps)`
-      : 'Run the reliability study for this site'
-  },
-  run_fmea_sweep: () => 'Run the equipment-failure check (FMEA)',
-  run_simulation: () => 'Run a full calculation of the network',
-  update_component: (a) => `Change the settings of ${_str(a.name) ?? 'one component'}`,
-  bulk_update_components: (a) => {
-    const n = _count(a.names)
-    return n != null ? `Change the settings of ${n} components` : 'Change the settings of several components'
-  },
-  update_solver_config: (a) => {
-    const p = (a.partial ?? {}) as Record<string, unknown>
-    return typeof p.voll === 'number' && Number.isFinite(p.voll)
-      ? `Set the price of undelivered energy to €${p.voll.toLocaleString('en-US')} per MWh`
-      : 'Change the study settings'
-  },
-  put_stress_scenarios: (a) => {
-    const n = _count(a.scenarios)
-    return n != null ? `Save the list of hard conditions to test (${n} scenarios)`
-      : 'Save the list of hard conditions to test'
-  },
-  create_project_snapshot: (a) => _str(a.label)
-    ? `Save a backup copy named "${a.label}"` : 'Save a backup copy of the project',
-  load_project: (a) => _str(a.name) ? `Open the project ${a.name}` : 'Open another project',
-  activate_project: (a) => {
-    const n = _str(a.project_id) ?? _str(a.name)
-    return n ? `Open the project ${n}` : 'Open another project'
-  },
-  save_project: (a) => {
-    const n = _str(a.name)
-    const base = n ? `Save the project ${n}` : 'Save the project'
-    return a.force === true ? `${base}, overwriting the saved version` : base
-  },
-  // P26 gate B2: every destructive and execution tool names its target
-  // (BE/services/chat_tools_schema.py safety tiers), because the raw call is
-  // no longer the first thing on the card.
-  delete_component: (a) => `Delete ${_str(a.name) ?? 'a component'} from the network`,
-  cascade_delete_bus: (a) => `Delete the bus ${_str(a.name) ?? '(unnamed)'} and everything connected to it`,
-  batch_delete_components: (a) => {
-    const names = Array.isArray(a.names) ? a.names.map(String) : []
-    if (!names.length) return 'Delete several components from the network'
-    const shown = names.slice(0, 5).join(', ')
-    const rest = names.length - 5
-    return `Delete ${names.length} components from the network: ${shown}${rest > 0 ? ` and ${rest} more` : ''}`
-  },
-  cluster_network: (a) => typeof a.n_clusters === 'number'
-    ? `Simplify the network by merging buses into ${a.n_clusters} groups (replaces the current network)`
-    : 'Simplify the network by merging buses (replaces the current network)',
-  delete_vintage_bounds: (a) => `Remove the build-year limits of ${_str(a.name) ?? 'a component'}`,
-  delete_timeseries: (a) => `Delete ${_str(a.attribute) ? `the ${a.attribute}` : 'a'} time series of ${
-    _str(a.name) ?? 'a component'}`,
-  run_ac_pf_stage: () => 'Run the power-flow check on the network',
-  abort_simulation: () => 'Stop the running calculation',
-  force_reset_simulation: () => 'Force-reset the calculation state (stops anything running)',
-  run_frontier_study: () => 'Run the cost-versus-reliability check',
-  run_mc_study: (a) => typeof a.draws === 'number'
-    ? `Run the reliability simulation (${a.draws} runs)` : 'Run the reliability simulation',
-  run_coupling_loop: (a) => typeof a.target_lole_h === 'number'
-    ? `Size the design to meet ${a.target_lole_h} h/yr of shortfall (repeated calculations)`
-    : 'Size the design to meet the shortfall goal (repeated calculations)',
-  run_margin_loop: (a) => typeof a.target_lole_h === 'number'
-    ? `Size the reserve margin to meet ${a.target_lole_h} h/yr of shortfall (repeated calculations)`
-    : 'Size the reserve margin to meet the shortfall goal (repeated calculations)',
-  abort_adequacy_study: (a) => `Stop the running ${_str(a.study) ?? 'reliability'} study`,
-  solve_queue_enqueue: (a) => `Queue a calculation of the project ${_str(a.project_id) ?? '(current)'}`,
-  solve_queue_abort: (a) => `Stop the queued calculation ${_str(a.job_id) ?? ''}`.trimEnd(),
-  save_project_as: (a) => `Save the project under the new name ${_str(a.name) ?? '(unnamed)'}`,
-  save_project_a_copy: (a) => `Save a copy of the project named ${_str(a.name) ?? '(unnamed)'}`,
-  rename_project: (a) => `Rename the project ${_str(a.name) ?? '(unnamed)'} to ${_str(a.new_name) ?? '(unnamed)'}`,
-  delete_project: (a) => `Delete the project ${_str(a.name) ?? '(unnamed)'}`
-    + (a.cascade === true ? ' and every scenario made from it' : ''),
-  create_scenario: (a) => `Create the scenario ${_str(a.new_name) ?? '(unnamed)'} from ${_str(a.base) ?? 'the project'}`,
-  import_project_bundle: (a) => _str(a.filename)
-    ? `Import a project from the file ${a.filename}` : 'Import a project from a file',
-  create_project_from_template: (a) =>
-    `Create the project ${_str(a.new_name) ?? '(unnamed)'} from the ${_str(a.template_id) ?? ''} template`,
-  restore_project_snapshot: (a) =>
-    `Restore the project ${_str(a.name) ?? '(unnamed)'} to the backup ${_str(a.snapshot_id) ?? ''} (replaces the current network)`,
-  delete_project_snapshot: (a) =>
-    `Delete the backup ${_str(a.snapshot_id) ?? ''} of the project ${_str(a.name) ?? '(unnamed)'}`,
-  clear_audit_log: () => 'Clear the change log of this project',
-  undo_last: () => 'Undo the last change to the network',
-  clear_chat_history: () => "Delete this project's chat history",
-  apply_demand_from_excel: (a) =>
-    `Replace the demand of ${_str(a.load_name) ?? 'a load'} with values from the uploaded file ${_str(a.file_id) ?? ''}`.trimEnd(),
-  delete_upload: (a) => `Delete the uploaded file ${_str(a.file_id) ?? ''}`.trimEnd(),
-  reconstruct_network_from_image: (a) =>
-    `Build the network from the uploaded image ${_str(a.file_id) ?? ''} (replaces the current network)`,
-  clear_uploads: () => "Delete every uploaded file of this project",
-  set_active_profile: (a) => `Switch the assistant to the model profile ${_str(a.profile_id) ?? ''}`.trimEnd(),
-  gridspine_run_pipeline: (a) => `Run the GridSpine pipeline for the project ${_str(a.project_id) ?? '(current)'}`,
-}
-for (const t of ['import_network_nc', 'import_csv_bundle', 'import_excel', 'import_matpower']) {
-  GUIDED_CARD_SUMMARY[t] = (a) => (_str(a.filename)
-    ? `Replace the whole network with the imported file ${a.filename}`
-    : 'Replace the whole network with an imported file')
-}
-// The fallback names the first identifying argument it finds, in this order.
-const IDENTIFYING_ARGS = ['name', 'names', 'component', 'project_id', 'project', 'file_id', 'filename', 'path']
-function _identifying(a: Record<string, unknown>): string | null {
-  for (const k of IDENTIFYING_ARGS) {
-    const v = a[k]
-    if (typeof v === 'string' && v.trim()) return v
-    if (Array.isArray(v) && v.length) return v.map(String).join(', ')
-  }
-  return null
-}
-for (const t of ['export_to_csv', 'export_to_excel', 'export_preview_png', 'export_chat_summary',
-  'export_asset_results', 'gridspine_export_handoff_bundle']) {
-  GUIDED_CARD_SUMMARY[t] = (a) => (_str(a.filename) ? `Export the file ${a.filename}` : 'Export a file')
-}
-
-export function guidedCardSummary(tool: string, args: Record<string, unknown>): string {
-  const f = Object.prototype.hasOwnProperty.call(GUIDED_CARD_SUMMARY, tool) ? GUIDED_CARD_SUMMARY[tool] : null
-  if (f) return f(args ?? {})
-  const target = _identifying(args ?? {})
-  return `The assistant wants to use ${tool.replace(/_/g, ' ')}${target ? ` on ${target}` : ''}`
-}
-
 // P26 (coordinator item 6): after a Deny, Guided shows one plain line. The
 // backend's `confirmation_denied` error line is hidden (the "denied: <tool>"
 // line says the same thing) and the raw "denied: <tool>" goes under Details.
 // Render-only: the transcript keeps the raw lines, and Expert shows them.
 const DENIED_LINE = /^denied: \S+$/
 const DENIED_ERROR_LINE = /^✗ \S+ — confirmation_denied\b/
-export function guidedToolLine(content: string): { hidden: true } | { hidden: false; label: string | null } {
+
+// P29 (B1, deferred spec §4.1): the progress lines in words. `phrase(X)` is
+// this table's entry, else "use <tool name in words>". Render-only, like
+// the declined line above: the transcript keeps `… preparing X`, `→ X`,
+// `✓ X` and `✗ X — kind: message`, and Expert shows them.
+//
+// P29 gate B1-1: a tool that only STARTS background work returns at once
+// (e.g. run_fmea_sweep: "returns {status:'running'} immediately"), so its ✓
+// line means "started". Its phrase says "start …", so "Done: start the
+// reliability study" stays true while the study runs.
+const GUIDED_TOOL_PHRASE: Record<string, string> = {
+  update_component: 'change a setting',
+  suggest_eh_setup: 'look at how the site is set up',
+  get_adequacy_results: 'read the study results',
+  list_components: 'list what is in the network',
+  update_solver_config: 'change a study setting',
+  put_stress_scenarios: 'save the stress scenarios',
+  // Start-only tools (their schema description begins "Start …", or they
+  // hand the work to a queue / a worker).
+  run_eh_study: 'start the reliability study',
+  run_fmea_sweep: 'start the equipment-failure check',
+  run_simulation: 'start a solve',
+  run_ac_pf_stage: 'start the power-flow check',
+  run_frontier_study: 'start the cost-versus-reliability study',
+  run_mc_study: 'start the random-outage reliability study',
+  run_coupling_loop: 'start the planning loop that adjusts the shortfall limit',
+  run_margin_loop: 'start the planning loop that adds backup capacity',
+  gridspine_run_pipeline: 'start the planning and dynamics study',
+  solve_queue_enqueue: 'add the project to the solve queue',
+  abort_adequacy_study: 'ask the running study to stop',
+  // The finance engine runs in the background (poll get_investment_case).
+  run_investment_case: 'start the investment case',
+  // The chat harness's workflow tools (issue 06): start_workflow puts the
+  // session on a step; the other two move or clear it. None runs anything.
+  start_workflow: 'start the workflow',
+  advance_workflow: 'move the workflow to its next step',
+  end_workflow: 'leave the workflow',
+  // Report jobs run in the background (poll get_report_status).
+  generate_report: 'start writing the project report',
+  regenerate_report_section: 'start rewriting one section of the report',
+  abort_report_generation: 'ask the report writing to stop',
+}
+export function guidedToolPhrase(tool: string): string {
+  return Object.prototype.hasOwnProperty.call(GUIDED_TOOL_PHRASE, tool)
+    ? GUIDED_TOOL_PHRASE[tool]
+    : `use ${tool.replace(/_/g, ' ')}`
+}
+const PREPARING_LINE = /^… preparing \S+$/
+const REQUEST_LINE = /^→ (\S+)$/
+const RESULT_LINE = /^✓ (\S+)$/
+// `✗ X`, `✗ X — kind` or `✗ X — kind: message` (ChatPanel's tool_error line).
+const REBOUND_LINE = /^🔀 active project: .* → (.+)$/
+const ERROR_LINE = /^✗ (\S+)(?: — [^:\s]+(?:: ([\s\S]*))?)?$/
+
+// A tool call whose outcome line has arrived (✓, ✗ or "denied:"): in Guided
+// its "Working: …" line gives way to that outcome, so a finished or declined
+// call never keeps saying it is working. Cached per messages array.
+const _settledCache = new WeakMap<readonly unknown[], Set<string>>()
+export function guidedSettledToolIds(
+  messages: ReadonlyArray<{ role: string; content: string; tool_use_id?: string }>,
+): Set<string> {
+  const hit = _settledCache.get(messages)
+  if (hit) return hit
+  const out = new Set<string>()
+  for (const m of messages) {
+    if (m.role === 'tool' && m.tool_use_id && /^(✓ |✗ |denied: )/.test(m.content)) out.add(m.tool_use_id)
+  }
+  _settledCache.set(messages, out)
+  return out
+}
+
+export type GuidedToolLine =
+  | { hidden: true }
+  | { hidden: false; label: string | null; message?: string | null }
+
+export function guidedToolLine(content: string): GuidedToolLine {
   if (DENIED_ERROR_LINE.test(content)) return { hidden: true }
   if (DENIED_LINE.test(content)) return { hidden: false, label: 'You declined — nothing was changed.' }
+  if (PREPARING_LINE.test(content)) return { hidden: true }
+  let m = REQUEST_LINE.exec(content)
+  if (m) return { hidden: false, label: `Working: ${guidedToolPhrase(m[1])}…` }
+  m = RESULT_LINE.exec(content)
+  if (m) return { hidden: false, label: `Done: ${guidedToolPhrase(m[1])}` }
+  // The rebound line (`project_rebound`) carries a raw arrow too.
+  m = REBOUND_LINE.exec(content)
+  if (m) {
+    return { hidden: false, label: m[1] === '(unbound)'
+      ? 'The assistant replaced the network; it is not saved to a project yet.'
+      : `The assistant is now working in the project ${m[1]}.` }
+  }
+  m = ERROR_LINE.exec(content)
+  if (m) {
+    const message = m[2]?.trim() || null
+    return { hidden: false, label: `Could not: ${guidedToolPhrase(m[1])}`, message }
+  }
   return { hidden: false, label: null }
 }
 
@@ -485,6 +279,7 @@ interface ToolErrorFrame {
 }
 
 interface TurnDoneFrame {
+  answer_id?: string
   usage?: {
     input_tokens?: number
     output_tokens?: number
@@ -526,213 +321,103 @@ function UsageMeter() {
   )
 }
 
-function ConfirmationCard() {
-  const pending = useChatStore((s) => s.pending)
-  const setPending = useChatStore((s) => s.setPending)
-  const setError = useChatStore((s) => s.setError)
-  const sessionId = useChatStore((s) => s.sessionId)
-  const appendMessage = useChatStore((s) => s.appendMessage)
-  const uiMode = useUIStore((s) => s.uiMode)
-  const [secondsLeft, setSecondsLeft] = useState<number>(0)
-  const [typedConfirmation, setTypedConfirmation] = useState<string>('')
-  const timerRef = useRef<number | null>(null)
-
-  // Reset the typed-confirmation field whenever the pending card changes.
-  useEffect(() => { setTypedConfirmation('') }, [pending?.confirmation_token])
-
-  // Countdown timer. Tracked via ref so a re-render or unmount never leaks.
-  useEffect(() => {
-    if (timerRef.current != null) {
-      clearInterval(timerRef.current)
-      timerRef.current = null
-    }
-    if (!pending) {
-      setSecondsLeft(0)
-      return
-    }
-    const tick = () => {
-      const left = Math.max(0, Math.floor((pending.expires_at_epoch_ms - Date.now()) / 1000))
-      setSecondsLeft(left)
-      if (left <= 0 && timerRef.current != null) {
-        clearInterval(timerRef.current)
-        timerRef.current = null
-        // The countdown used to just stop here, leaving a dead card on
-        // screen with Approve still clickable — which 409s
-        // `confirmation_expired`. Teaching a user that confirming an expired
-        // destructive action is harmless is the one lesson this card must
-        // not give. Withdraw it and say why; the agent re-prompts with a
-        // fresh token, which is the flow the backend already implements.
-        // Only this card: a newer one may already be showing (R1).
-        if (useChatStore.getState().pending?.confirmation_token === pending.confirmation_token) {
-          setPending(null)
-        }
-        // P25 re-gate note 1: a card left to lapse ends its card run like a
-        // Deny — the rest of that click's queued actions are dropped.
-        const lapsedGroup = useChatStore.getState().activeRequest?.group
-        if (lapsedGroup) useChatStore.getState().dropRequestGroup(lapsedGroup)
-        setError({
-          error_kind: 'confirmation_expired',
-          message: `The confirmation for ${pending.tool_name} expired before it was answered. Ask again to retry.`,
-        })
-      }
-    }
-    tick()
-    timerRef.current = window.setInterval(tick, 250) as unknown as number
-    return () => {
-      if (timerRef.current != null) {
-        clearInterval(timerRef.current)
-        timerRef.current = null
-      }
-    }
-  }, [pending])
-
-  // P25 re-gate R1: several Guided writes in one response are carded one
-  // after the other, and the NEXT card's SSE frame often lands while this
-  // card's /confirm POST is still in flight. Clear only the card that was
-  // answered — the token is captured before the await.
-  const clearIfStill = useCallback((token: string) => {
-    if (useChatStore.getState().pending?.confirmation_token === token) setPending(null)
-  }, [setPending])
-
-  const onApprove = useCallback(async () => {
-    if (!pending || !sessionId) return
-    const token = pending.confirmation_token
-    try {
-      await postChatConfirm(sessionId, {
-        token, decision: 'approve',
-      })
-      clearIfStill(token)
-    } catch (err) {
-      toast.error(`confirmation failed: ${(err as Error).message}`)
-    }
-  }, [pending, sessionId, clearIfStill])
-
-  const onDeny = useCallback(async () => {
-    if (!pending || !sessionId) return
-    const token = pending.confirmation_token
-    try {
-      await postChatConfirm(sessionId, {
-        token, decision: 'deny',
-      })
-      // P25 gate: a denial ends that card's run — the card's remaining
-      // queued actions (Improve: one message per action) are dropped.
-      const group = useChatStore.getState().activeRequest?.group
-      if (group) useChatStore.getState().dropRequestGroup(group)
-      appendMessage({
-        role: 'tool', content: `denied: ${pending.tool_name}`,
-        tool_use_id: pending.tool_use_id, tool_name: pending.tool_name,
-      })
-      clearIfStill(token)
-    } catch (err) {
-      toast.error(`confirmation failed: ${(err as Error).message}`)
-    }
-  }, [pending, sessionId, clearIfStill, appendMessage])
-
-  if (!pending) return null
-
-  // Phase 4 — typed confirmation widget for the highest-risk tools.
-  // v4-MAJOR-1 / v6-F1: save_project + save_project_as (force-overwrite path),
-  // v4-MINOR-1: delete_project, restore_project_snapshot, cascade_delete_bus.
-  const requiresTyped = TYPED_CONFIRMATION_TOOLS.has(pending.tool_name)
-  const typedTarget = requiresTyped
-    ? _typed_confirmation_target(pending.tool_name, pending.args)
-    : null
-  const typedSatisfied = !requiresTyped || (typedTarget != null && typedConfirmation === typedTarget)
-  const guidedWording = uiMode === 'guided'
-    ? guidedConfirmWording(pending.tool_name, pending.safety_tier)
-    : null
-
+/**
+ * The workflow strip (chat harness issue 06): which workflow and step the
+ * session is on, from the `workflow_state` frame and `/chat/history`.
+ * "Leave" asks the assistant to end it (the assistant calls end_workflow);
+ * nothing here changes server state directly.
+ */
+export function WorkflowStrip() {
+  const workflow = useChatStore((s) => s.workflow)
+  const sendRequest = useChatStore((s) => s.sendRequest)
+  if (!workflow) return null
   return (
     <div
-      // A destructive action blocking on the user is the strongest reason
-      // this panel has to interrupt a screen reader. `alertdialog` both
-      // interrupts AND says the thing is interactive — `alert` alone would
-      // announce the text and imply there is nothing to do about it.
-      // aria-modal is false because focus is deliberately NOT trapped: the
-      // card sits inline in the transcript and the user must stay free to
-      // scroll back and read what they are approving.
-      role="alertdialog"
-      aria-modal="false"
-      aria-labelledby="chat-confirmation-title"
-      className="border border-amber-500/60 bg-amber-500/5 rounded p-3 mx-3 my-2"
-      data-testid="chat-confirmation-card"
-      data-tool-name={pending.tool_name}
-      data-safety-tier={pending.safety_tier}
+      className="mx-3 mt-2 px-2.5 py-1.5 text-[11px] rounded border border-accent/40 bg-accent/5 flex items-center gap-2"
+      data-testid="chat-workflow-strip"
     >
-      <div className={uiMode === 'guided'
-        ? 'text-[12px] font-semibold text-amber-500 mb-1'
-        : 'text-[11px] uppercase tracking-wider text-amber-500 mb-1'}
-        data-testid="chat-confirmation-header">
-        {/* P25 re-gate note 2 / P26: plain words in Guided; Expert unchanged. */}
-        {guidedWording
-          ? guidedWording.header
-          : <>Confirm · {pending.safety_tier}</>}
+      <span className="text-muted">Workflow</span>
+      <span className="text-text font-medium" data-testid="chat-workflow-title">{workflow.title}</span>
+      <span className="text-muted">·</span>
+      <span className="text-text" data-testid="chat-workflow-step">
+        step {workflow.step_index} of {workflow.step_count}: {workflow.step_title}
+      </span>
+      <button
+        type="button"
+        className="ml-auto px-1.5 py-0.5 rounded border border-border text-muted hover:text-text hover:border-accent/40"
+        onClick={() => sendRequest('Please end the current workflow.', { source: 'workflow-strip', label: 'Leave the workflow' })}
+        data-testid="chat-workflow-leave"
+        title="Ask the assistant to end this workflow"
+      >
+        Leave
+      </button>
+    </div>
+  )
+}
+
+/**
+ * The Choice card (chat harness issue 04): what `ask_user` renders. A pick
+ * goes out as the next user message through the request queue — labelled
+ * "<title>: <option>" in the transcript — so the assistant's next turn
+ * starts with the answer. Nothing blocks on it: the user can equally type
+ * an answer, and the card goes away when the next turn starts.
+ */
+export function ChoiceCard() {
+  const choice = useChatStore((s) => s.choice)
+  const setChoice = useChatStore((s) => s.setChoice)
+  const sendRequest = useChatStore((s) => s.sendRequest)
+  const streaming = useChatStore((s) => s.streaming)
+  if (!choice) return null
+  const pick = (label: string) => {
+    sendRequest(label, { source: 'choice-card', label: `${choice.title}: ${label}`,
+      ...(choice.requiresChecked ? { requiresChecked: true } : {}) })
+    setChoice(null)
+  }
+  return (
+    <div
+      className="border border-accent/50 bg-accent/5 rounded p-3 mx-3 my-2"
+      data-testid="chat-choice-card"
+      role="group"
+      aria-labelledby="chat-choice-title"
+    >
+      <div id="chat-choice-title" className="text-sm font-medium mb-1 text-text"
+        data-testid="chat-choice-title">
+        {choice.title}
       </div>
-      {guidedWording?.note && (
-        <div className="text-[11px] text-muted mb-1" data-testid="chat-confirmation-note">
-          {guidedWording.note}
+      <div className="text-[12px] text-text/90 mb-2" data-testid="chat-choice-question">
+        {choice.question}
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {choice.options.map((o) => (
+          <button
+            key={o.label}
+            type="button"
+            disabled={streaming}
+            onClick={() => pick(o.label)}
+            data-testid="chat-choice-option"
+            data-recommended={o.recommended ? 'true' : undefined}
+            className={`text-left px-2.5 py-1.5 text-[12px] rounded border transition-colors disabled:opacity-50 disabled:pointer-events-none ${
+              o.recommended
+                ? 'border-accent/70 bg-accent/10 hover:bg-accent/20'
+                : 'border-border bg-bg-2/60 hover:bg-bg-3/50 hover:border-accent/40'
+            }`}
+          >
+            <span className="font-medium text-text">{o.label}</span>
+            {o.recommended && (
+              <span className="ml-2 text-[10px] uppercase tracking-wide text-accent"
+                data-testid="chat-choice-recommended">Recommended</span>
+            )}
+            {o.description && (
+              <div className="text-[11px] text-muted mt-0.5">{o.description}</div>
+            )}
+          </button>
+        ))}
+      </div>
+      {choice.allow_free_text && (
+        <div className="text-[11px] text-muted mt-2" data-testid="chat-choice-free-text">
+          Or type your own answer below.
         </div>
       )}
-      {guidedWording ? (
-        <>
-          <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text"
-            data-testid="chat-confirmation-summary">
-            {guidedCardSummary(pending.tool_name, pending.args)}
-          </div>
-          {/* P26 gate B2: a destructive card shows its raw call by default. */}
-          <details className="mb-2 text-[11px] text-muted" data-testid="chat-confirmation-details"
-            open={pending.safety_tier === 'destructive'}>
-            <summary className="cursor-pointer select-none">Details</summary>
-            <div className="font-mono mt-1">{pending.tool_name}</div>
-            <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mt-1 whitespace-pre-wrap break-all">
-              {JSON.stringify(pending.args, null, 2)}
-            </pre>
-          </details>
-        </>
-      ) : (
-        <>
-          <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
-            {pending.tool_name}
-          </div>
-          <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">
-            {JSON.stringify(pending.args, null, 2)}
-          </pre>
-        </>
-      )}
-      {requiresTyped && typedTarget && (
-        <div className="mb-2" data-testid="chat-typed-confirmation">
-          <div className="text-[10px] text-muted mb-1">
-            Type <span className="font-mono text-text">{typedTarget}</span> to confirm:
-          </div>
-          <input
-            className="w-full bg-bg border border-border rounded px-2 py-1 text-xs font-mono"
-            value={typedConfirmation}
-            onChange={(e) => setTypedConfirmation(e.target.value)}
-            placeholder={typedTarget}
-            data-testid="chat-typed-confirmation-input"
-          />
-        </div>
-      )}
-      <div className="flex items-center gap-2">
-        <button
-          className="px-2 py-1 text-xs rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
-          onClick={onApprove}
-          disabled={!typedSatisfied}
-          data-testid="chat-confirm-approve"
-        >
-          Approve
-        </button>
-        <button
-          className="px-2 py-1 text-xs rounded bg-bg-2 hover:bg-bg-3 border border-border"
-          onClick={onDeny}
-          data-testid="chat-confirm-deny"
-        >
-          Deny
-        </button>
-        <span className="font-mono text-[10px] text-muted ml-auto">
-          {secondsLeft}s
-        </span>
-      </div>
     </div>
   )
 }
@@ -823,6 +508,15 @@ export const KIND_COPY: Record<
   // RETRYABLE_ERROR_KINDS above — the file knew the kind in one constant and
   // not the other, so the retry button appeared under a raw snake_case title.
   internal_error: { title: 'Something went wrong on the server' },
+  assurance_unavailable: { title: 'Checked answers are unavailable' },
+  assurance_context_changed: { title: 'The project changed while checking the answer' },
+  assurance_context_persistence_failed: { title: 'Checked conversation state could not be saved' },
+  wrong_replica: { title: 'This chat belongs to another application worker' },
+  assurance_publication_failed: { title: 'The checked answer could not be published' },
+  task_checkpoint_failed: {
+    title: 'Task progress could not be saved',
+    body: 'Inspect the task before retrying.',
+  },
   turn_already_in_flight: { title: 'A turn is already running' },
   project_switched_mid_turn: { title: 'The active project changed mid-turn' },
   unknown_session: { title: 'That chat session is no longer known' },
@@ -911,6 +605,9 @@ export const TOOL_ERROR_BANNER_KINDS = new Set([
   'inactive_acting_user',
   'solver_in_flight', 'parallel_destructive_not_allowed',
   'tool_call_cap_exceeded',
+  'assurance_unavailable', 'assurance_context_changed', 'assurance_context_persistence_failed', 'assurance_publication_failed',
+  'wrong_replica',
+  'task_checkpoint_failed',
   // `set_active_profile` raises these as HTTPExceptions, which the dispatcher
   // converts to `tool_error` frames — so copy alone was unreachable and the
   // user got the truncated gray tool line. Same shape as the
@@ -1299,59 +996,33 @@ function MessageActions({ message, streaming, onCopy, onRetry, onEdit }: {
   )
 }
 
-/** Starter prompts when no project is loaded. */
-const CHAT_STARTER_PROMPTS_UNBOUND: { label: string; text: string }[] = [
-  {
-    label: 'Open a project',
-    text: 'List my projects and open project_name',
-  },
-  {
-    label: 'Browse projects',
-    text: 'Open the project picker',
-  },
-]
+// The start menu (chat harness issue 03). The chips used to be three arrays
+// here; they are now the harness's workflow registry, served by
+// `GET /chat/workflows?context=…` so every LLM provider — and any future
+// external client — sees the same menu. What remains in the panel is the
+// mapping from where the user is to the registry's context, and the render.
 
-/** Starter prompts when a project is loaded but the conversation is empty. */
-const CHAT_STARTER_PROMPTS: { label: string; text: string }[] = [
-  {
-    label: 'Compare two scenarios',
-    text: 'Compare scenario_a vs scenario_b on total cost and open the compare rail',
-  },
-  {
-    label: 'Open Economics',
-    text: 'Open the Results Economics tab',
-  },
-  {
-    label: 'Summarize this solve',
-    text: 'Summarize the key results of the current project',
-  },
-]
-
-/** Starter prompts in Guided mode: only destinations Guided shows, plus the
- *  hub-design flow (guided-mode spec §10 addendum). */
-const CHAT_STARTER_PROMPTS_GUIDED: { label: string; text: string }[] = [
-  {
-    label: 'Open Hub design',
-    text: 'Open the Hub design panel',
-  },
-  // P26 gate: plain questions instead of "Check adequacy" / "Summarize this solve".
-  {
-    label: 'Explain my results',
-    text: 'Explain the results of my hub design study in plain language.',
-  },
-  {
-    label: 'What should I improve?',
-    text: 'What is the single most useful thing I can improve in my hub design, and why?',
-  },
-]
-
-/** The greeting chips for the current project and mode. */
-export function starterPromptsFor(
+/** Which start menu applies: no project → `unbound`; otherwise the UI mode. */
+export function workflowContextFor(
   currentProject: string | null,
   uiMode: UiMode,
-): { label: string; text: string }[] {
-  if (!currentProject) return CHAT_STARTER_PROMPTS_UNBOUND
-  return uiMode === 'guided' ? CHAT_STARTER_PROMPTS_GUIDED : CHAT_STARTER_PROMPTS
+): WorkflowContext {
+  if (!currentProject) return 'unbound'
+  return uiMode === 'guided' ? 'guided' : 'expert'
+}
+
+export const WORKFLOW_MENU_QUERY_KEY = ['chat', 'workflows'] as const
+
+/** The start menu for one context. `retry: false` and a quiet fetch: the
+ *  menu is a courtesy, and a backend that cannot serve it must not toast or
+ *  spin — the chips are simply absent, like every other greeting fact. */
+export function useWorkflowMenu(context: WorkflowContext) {
+  return useQuery<WorkflowMenu>({
+    queryKey: [...WORKFLOW_MENU_QUERY_KEY, context],
+    queryFn: () => getWorkflowMenu(context),
+    retry: false,
+    staleTime: 5 * 60_000,
+  })
 }
 
 // P25 gate B2 — a request a hub-design card sent shows its plain label; the
@@ -1385,13 +1056,14 @@ function UserMessageText({ message }: { message: ChatMessage }) {
   )
 }
 
-function ChatStarterChips({
+export function ChatStarterChips({
   prompts,
   onPick,
   disabled,
 }: {
-  prompts: { label: string; text: string }[]
-  onPick: (text: string) => void
+  /** `label` is the chip, `text` what a click sends, `title` the tooltip. */
+  prompts: { label: string; text: string; title?: string }[]
+  onPick: (prompt: { label: string; text: string }) => void
   disabled?: boolean
 }) {
   return (
@@ -1399,7 +1071,7 @@ function ChatStarterChips({
       className="m-3 mt-4"
       data-testid="chat-starter-chips"
     >
-      <div className="text-[11px] text-muted mb-2">Try asking</div>
+      <div className="text-[11px] text-muted mb-2">What would you like to do?</div>
       <div className="flex flex-wrap gap-1.5">
         {prompts.map((p) => (
           <button
@@ -1407,9 +1079,9 @@ function ChatStarterChips({
             type="button"
             disabled={disabled}
             className="px-2.5 py-1 text-[11px] rounded border border-border bg-bg-2/60 text-text hover:bg-bg-3/50 hover:border-accent/40 disabled:opacity-50 disabled:pointer-events-none transition-colors"
-            onClick={() => onPick(p.text)}
+            onClick={() => onPick(p)}
             data-testid="chat-starter-chip"
-            title={p.text}
+            title={p.title ?? p.text}
           >
             {p.label}
           </button>
@@ -1465,6 +1137,21 @@ export default function ChatPanel() {
   // tool_result / tool_error. `tool_result` frames don't carry the tier, so
   // this map is how a completion knows whether it mutated (assetWrite fix).
   const toolTierRef = useRef(new Map<string, string>())
+  const streamGenerationRef = useRef(0)
+  const streamProjectRef = useRef(useUIStore.getState().currentProject)
+  // Issue 11 — detached solver progress observer (GET …/progress). Independent
+  // of the turn SSE so reads can continue while the solve still emits lines.
+  const progressCleanupRef = useRef<(() => void) | null>(null)
+  const stopProgressObserver = useCallback(() => {
+    try { progressCleanupRef.current?.() } catch { /* idempotent */ }
+    progressCleanupRef.current = null
+  }, [])
+  const assuranceRef = useRef<{
+    strict: boolean; text: string; approved: ApprovedAnswerFrame | null;
+    requested?: boolean;
+    turnId?: string; sessionId?: string; project: string | null; completed: boolean;
+    navigationCompleted?: Set<string>;
+  }>({ strict: false, text: '', approved: null, project: null, completed: false })
   const sessionId = useChatStore((s) => s.sessionId)
   const setSessionId = useChatStore((s) => s.setSessionId)
   const profileId = useChatStore((s) => s.profileId)
@@ -1488,34 +1175,59 @@ export default function ChatPanel() {
   const closeStream = useChatStore((s) => s.closeStream)
   const chatError = useChatStore((s) => s.error)
 
-  // Send gate (click-through obstacle 9): without a key for the ACTIVE
-  // profile every send came back as "API key missing". Same key ApiKeySetup
-  // and AssistantModelSettings use, so a key save or a profile switch
-  // re-reads it. Only an explicit `chat_ready: false` gates; unknown (probe
+  // Send gate (click-through obstacle 9): without a key every send came back
+  // as "API key missing". Only an explicit `false` gates; unknown (probe
   // failed, older backend without the field) stays open — a probe outage
   // must not lock the assistant.
   //
-  // `chat_ready` describes the instance's ACTIVE profile only. A turn runs on
-  // the session's pick when it names one (`profile_id` in the request, which
-  // routers/chat.py binds); a `null` pick follows the active profile — the
-  // same rule the model dropdown displays (`profileId ?? active`). So the
-  // gate applies only while the pick IS the active profile (QA gate B1: a
-  // user with no Anthropic key who picked a working local profile was
-  // locked out).
-  const { data: chatHealth } = useQuery<ChatHealth>({
-    queryKey: ['chat', 'health'],
-    queryFn: getChatHealth,
-    staleTime: 30_000,
-    retry: false,
-  })
-  const notReady = chatHealth?.chat_ready === false
-    && (profileId == null || profileId === chatHealth.active_profile?.id)
+  // P28 A3 (deferred spec §3.1): the gate reads the readiness of the profile
+  // the turn RUNS on — the pick (sent as `profile_id`), else the session's
+  // bound profile (`/history.bound_profile_id`; `/stream` keeps a bound
+  // session's binding when the request names none), else the active one —
+  // from the per-profile `chat_ready` on GET /chat/profiles, with `/health`
+  // as the active profile's fallback (QA gate B1 of P22.9-FE: a user with no
+  // Anthropic key on a working local profile is never locked out; after a
+  // reload that profile is the bound one).
+  const { ready: effectiveReady } = useChatReadiness()
+  const notReady = effectiveReady === false
+  // A2 (deferred spec §2.1): while this tab and the backend disagree about the
+  // open project, the assistant's tools would write into the BACKEND's project
+  // (the stream is a raw fetch — the axios mismatch block never sees it). Send
+  // is gated with the banner's sentence until Reload or Switch.
+  const projectMismatch = useUIStore((s) => s.projectMismatch)
+  const mismatchLine = projectMismatch ? mismatchSentence(projectMismatch) : null
 
   const currentProject = useUIStore((s) => s.currentProject)
+  const checkedCapabilities = useQuery({ queryKey: CHECKED_ANSWERS_QUERY_KEY,
+    queryFn: getCheckedAnswerCapabilities, retry: false, refetchInterval: 30_000 })
+  const [checkedSelection, setCheckedSelection] = useState<{ project: string | null; chat: number; on: boolean }>(
+    { project: null, chat: -1, on: false },
+  )
+  const optedIntoChecks = checkedSelection.on && checkedSelection.project === currentProject
+    && checkedSelection.chat === newChatSeq
+  useEffect(() => {
+    setCheckedSelection({ project: currentProject, chat: newChatSeq, on: false })
+  }, [currentProject, newChatSeq])
+  const requiredChecks = checkedCapabilities.data?.mode === 'strict'
+  const checksAvailable = !checkedCapabilities.isError && (requiredChecks
+    || (checkedCapabilities.data?.mode === 'pilot'
+      && Object.values(checkedCapabilities.data.profiles).some(p => p.enabled)))
+  // The start menu for where the user is (chat harness issue 03). Fetched
+  // whenever the panel is mounted so the chips are known by the time the
+  // greeting renders; a click goes through `sendRequest` like a card does.
+  const sendRequest = useChatStore((s) => s.sendRequest)
+  const setChoice = useChatStore((s) => s.setChoice)
+  const setWorkflow = useChatStore((s) => s.setWorkflow)
+  const workflowMenu = useWorkflowMenu(workflowContextFor(currentProject, uiMode))
   // Read only for the autoscroll effect below — see the dependency-array
   // comment there for why AssistantDock's collapsed state has to be visible
   // here at all.
   const assistantDockOpen = useUIStore((s) => s.assistantDockOpen)
+  const assistantEntry = useUIStore((s) => s.assistantEntry)
+  const [dictationPanelRequested, setDictationPanelRequested] = useState(false)
+  const consumeDictationRequest = useCallback(() => {
+    setDictationPanelRequested(false)
+  }, [])
   const assistantSpeakEnabled = useUIStore((s) => s.assistantSpeakEnabled)
   const toggleAssistantSpeak = useUIStore((s) => s.toggleAssistantSpeak)
   const resetChatForProjectSwitch = useChatStore((s) => s.resetForProjectSwitch)
@@ -1531,6 +1243,8 @@ export default function ChatPanel() {
   // Reset chat state on project switch (mirrors simulationStore pattern).
   useEffect(() => {
     if (prevProjectRef.current !== undefined && prevProjectRef.current !== currentProject) {
+      if (streamProjectRef.current !== currentProject) streamGenerationRef.current += 1
+      stopProgressObserver()
       resetChatForProjectSwitch()
       // N-1 — the recovery banners describe ONE hydration of ONE project, as
       // their declaration comment says. They were only ever reassigned inside
@@ -1543,7 +1257,8 @@ export default function ChatPanel() {
       setInterruptedTurn(null)
     }
     prevProjectRef.current = currentProject
-  }, [currentProject, resetChatForProjectSwitch])
+    streamProjectRef.current = currentProject
+  }, [currentProject, resetChatForProjectSwitch, stopProgressObserver])
 
   // N-1 — same for "start a new chat": the banners are about the transcript
   // being replaced, so they must not outlive it. `newChatSeq` is the counter
@@ -1552,11 +1267,13 @@ export default function ChatPanel() {
   const prevNewChatSeqRef = useRef<number>(newChatSeq)
   useEffect(() => {
     if (prevNewChatSeqRef.current !== newChatSeq) {
+      streamGenerationRef.current += 1
+      stopProgressObserver()
       prevNewChatSeqRef.current = newChatSeq
       setHistoryGap(0)
       setInterruptedTurn(null)
     }
-  }, [newChatSeq])
+  }, [newChatSeq, stopProgressObserver])
 
   // Hydrate from chat.jsonl whenever a project becomes active. The backend
   // also rehydrates `session.messages` so subsequent turns can thread prior
@@ -1645,6 +1362,7 @@ export default function ChatPanel() {
             role: 'user',
             content: t.user,
             attachment_file_ids: t.attachment_file_ids,
+            ...(t.requires_checked === true || (t.answer_id && t.receipt) ? { requiresChecked: true } : {}),
             ts: Math.round((t.ts || 0) * 1000),
           })
         }
@@ -1659,19 +1377,29 @@ export default function ChatPanel() {
             assistantText += `\n[tool: ${name}]`
           }
         }
-        if (assistantText.trim()) {
+        // An interrupted turn always gets a bubble, even with no text: the
+        // note on it is what explains tools that ran without an answer.
+        if (assistantText.trim() || t.interrupted) {
           seeded.push({
             id: `replay-a-${counter++}`,
             role: 'assistant',
             content: assistantText,
+            answer_id: t.answer_id,
+            receipt: t.receipt,
             ts: Math.round((t.ts || 0) * 1000),
+            ...(t.interrupted ? { interrupted: t.interrupted_reason || 'unknown' } : {}),
           })
         }
       }
       setMessages(seeded)
+      // The server session's workflow step, if it is still resident.
+      setWorkflow(h.workflow ?? null)
       if (h.last_session_id) {
         setSessionId(h.last_session_id)
       }
+      // P28 A3 — the resumed session's binding; the Send gate, the dropdown
+      // and the key offer follow it while nothing is picked.
+      useChatStore.getState().setBoundProfileId(h.bound_profile_id ?? null)
       // #20 — the backend detects both of these and reports them exactly
       // once. Dropping them here would make that whole recovery path
       // invisible: the user would see a shorter conversation than they had,
@@ -2019,8 +1747,10 @@ export default function ChatPanel() {
     })
   }, [])
 
+  const [dictationLanguage, setDictationLanguage] = useState('auto')
   const speech = useSpeechToText({
     enabled: !streaming,
+    language: dictationLanguage === 'auto' ? (navigator.language || 'en-US') : dictationLanguage,
     onFinal: onSpeechFinal,
     onError: (msg) => toast.error(msg),
   })
@@ -2158,7 +1888,32 @@ export default function ChatPanel() {
     switch (frame.event) {
       case 'session_init': {
         const d = _frame_data<SessionInitFrame>(frame)
+        const requested = assuranceRef.current.requested === true
+        if (requested && (d.assurance?.version !== 1 || d.assurance.mode !== 'strict'
+          || d.assurance.state !== 'checking' || typeof d.turn_id !== 'string' || !d.turn_id || d.turn_id.length > 128
+          || typeof d.session_id !== 'string' || !d.session_id || d.session_id.length > 128 || assuranceRef.current.turnId)) {
+          streamGenerationRef.current += 1
+          assuranceRef.current = { strict: true, requested: true, text: '', approved: null,
+            completed: true, project: null }
+          voiceTurnRef.current = false
+          setError({ error_kind: 'assurance_publication_failed',
+            message: 'The server did not acknowledge the requested answer checks. No answer was shown.' })
+          closeStream()
+          break
+        }
+        assuranceRef.current = {
+          strict: d.assurance?.mode === 'strict', text: '', approved: null,
+          requested,
+          turnId: d.turn_id, sessionId: d.session_id,
+          project: useUIStore.getState().currentProject, completed: false,
+        }
         setSessionId(d.session_id)
+        // A new turn answers (or moves past) any Choice card still showing.
+        setChoice(null)
+        // P28 A3 — the frame names the profile the session is bound to. Kept
+        // as the session's binding (the gate and the dropdown follow it), and
+        // still never copied into `profileId` (see below).
+        if (d.profile_id) useChatStore.getState().setBoundProfileId(d.profile_id)
         // The dropdown's fallback display (`profileId ?? active_profile_id`)
         // is only as fresh as its last fetch — refetch on every new session
         // so an admin's `set_active_profile` elsewhere, or a prior turn's A8
@@ -2170,6 +1925,16 @@ export default function ChatPanel() {
       }
       case 'token': {
         const d = _frame_data<TokenFrame>(frame)
+        if (assuranceRef.current.strict) {
+          const state = assuranceRef.current
+          if (!state.completed && state.approved && typeof d.delta === 'string') {
+            if (state.text.length + d.delta.length > 65536) {
+              state.approved = null
+              state.text = ''
+            } else state.text += d.delta
+          }
+          break
+        }
         // Accumulate into the active assistant bubble instead of spawning
         // one bubble per delta — keeps the message list readable when
         // Sonnet streams 2k tokens of output.
@@ -2177,8 +1942,31 @@ export default function ChatPanel() {
         break
       }
       case 'thinking': {
+        if (assuranceRef.current.strict) break
         const d = _frame_data<ThinkingFrame>(frame)
         appendThinkingDelta(d.delta)
+        break
+      }
+      case 'answer_approved': {
+        const state = assuranceRef.current
+        if (!state.strict || state.completed) break
+        const approved = parseApproval(frame.data)
+        if (!approved || state.approved || !state.turnId || approved.turn_id !== state.turnId) {
+          state.approved = null
+          state.completed = true
+          state.text = ''
+          break
+        }
+        state.approved = approved
+        break
+      }
+      case 'answer_progress': {
+        if (!assuranceRef.current.strict) break
+        const state = assuranceRef.current
+        if (state.turnId && frame.data.turn_id !== state.turnId) break
+        if (frame.data.version === 1 && frame.data.stage === 'checking_claims' && frame.data.status === 'running') {
+          appendMessage({ role: 'system', content: 'Checking answer against project evidence.' })
+        }
         break
       }
       case 'model_fallback': {
@@ -2237,7 +2025,7 @@ export default function ChatPanel() {
         break
       }
       case 'tool_result': {
-        const d = _frame_data<{ tool_name: string; tool_use_id: string }>(frame)
+        const d = _frame_data<{ tool_name: string; tool_use_id: string; result?: unknown }>(frame)
         // The chat-staleness fix: a completed tool whose tier is not `read`
         // may have changed any component, and the caches MUST follow — a
         // stale row here is spread into the user's next manual PUT and the
@@ -2254,9 +2042,44 @@ export default function ChatPanel() {
         }
         appendMessage({
           role: 'tool',
-          content: `✓ ${d.tool_name}`,
+          content: (() => {
+            const metadata = (d.result as { _assurance?: { outcome?: string } } | undefined)?._assurance
+            if (metadata || assuranceRef.current.strict) {
+              const outcome = assuranceRef.current.navigationCompleted?.has(d.tool_use_id) ? 'completed' : metadata?.outcome ?? 'uncertain'
+              return `${outcome === 'completed' ? '✓' : '…'} ${d.tool_name} (${outcome})`
+            }
+            return `✓ ${d.tool_name}`
+          })(),
+          // Checked artifacts/task projections are not implemented in this pilot.
+          tool_result: assuranceRef.current.strict ? undefined : d.result,
           tool_use_id: d.tool_use_id, tool_name: d.tool_name,
         })
+        // Issue 11 — foreground solve handoff: subscribe to the detached
+        // progress ring so PHASE/VALIDATION lines keep arriving after the
+        // turn SSE closes. Same tool_progress frames as an in-turn bridge.
+        {
+          const result = d.result as { detached_progress?: unknown } | undefined
+          if (result?.detached_progress === true) {
+            const sid = useChatStore.getState().sessionId
+            if (sid) {
+              stopProgressObserver()
+              progressCleanupRef.current = createChatProgressStream(
+                sid,
+                (progressFrame) => {
+                  if (progressFrame.event !== 'tool_progress') return
+                  const p = progressFrame.data as {
+                    tool_use_id?: string; kind?: string; line?: string
+                  }
+                  if (p.tool_use_id && typeof p.kind === 'string' && typeof p.line === 'string') {
+                    useChatStore.getState().appendToolProgress(
+                      p.tool_use_id, { kind: p.kind, line: p.line },
+                    )
+                  }
+                },
+              )
+            }
+          }
+        }
         break
       }
       case 'tool_error': {
@@ -2293,8 +2116,27 @@ export default function ChatPanel() {
         }
         break
       }
+      case 'workflow_state': {
+        const d = _frame_data<{ workflow: WorkflowState | null }>(frame)
+        setWorkflow(d.workflow ?? null)
+        break
+      }
+      case 'choice_request': {
+        const d = _frame_data<ChoiceRequestFrame>(frame)
+        setChoice({
+          ...(assuranceRef.current.strict ? { requiresChecked: true } : {}),
+          tool_use_id: d.tool_use_id,
+          title: d.title,
+          question: d.question,
+          options: Array.isArray(d.options) ? d.options : [],
+          allow_free_text: d.allow_free_text !== false,
+        })
+        break
+      }
       case 'ui_event': {
         const d = _frame_data<{
+          acknowledgement?: NavigationAcknowledgement
+          tool_use_id?: string
           kind?: string
           panel_id?: string
           results_tab?: string
@@ -2309,11 +2151,31 @@ export default function ChatPanel() {
           period?: number | null
           category?: string
           metrics?: string[]
-          mode?: 'chronological' | 'duration' | 'monthly'
+          mode?: 'chronological' | 'duration' | 'monthly' | string
           chart?: boolean
+          run_id?: string
+          section?: string
+          baseline_run_id?: string
+          status?: string
+          fingerprint?: string
+          evidence_available?: boolean
         }>(frame)
         try {
           applyUiNavigate(d)
+          if (d.acknowledgement && assuranceRef.current.strict) {
+            const expected = d.acknowledgement
+            const state = assuranceRef.current
+            acknowledgeMountedView(expected, () => assuranceRef.current === state
+              && streamGenerationRef.current === expected.binding_generation
+              && useUIStore.getState().currentProject === expected.project_name, () => {
+              if (!d.tool_use_id) return
+              state.navigationCompleted ??= new Set()
+              state.navigationCompleted.add(d.tool_use_id)
+              useChatStore.setState(s => ({ messages: s.messages.map(m =>
+                m.role === 'tool' && m.tool_use_id === d.tool_use_id
+                  ? { ...m, content: '✓ ui_open_panel (completed)' } : m) }))
+            })
+          }
         } catch (e) {
           console.warn('ui_event apply failed', e)
         }
@@ -2322,7 +2184,8 @@ export default function ChatPanel() {
       case 'project_rebound': {
         // The agent dispatched a tool that legitimately changed the
         // backend's active project (activate_project / load_project /
-        // save_project_as / rename_project / restore_project_snapshot).
+        // save_project_as / rename_project / restore_project_snapshot /
+        // create_project_from_template / import_project_bundle).
         // Mirror the change into uiStore.currentProject so the autosave
         // loop's `expect=<name>` matches the backend's binding —
         // otherwise the next autosave 409s with "Backend network is
@@ -2333,13 +2196,46 @@ export default function ChatPanel() {
         const d = _frame_data<{ from: string | null; to: string | null; via_tool: string }>(frame)
         if (d.to && d.to !== useUIStore.getState().currentProject) {
           const ui = useUIStore.getState()
+          const leaving = ui.currentProject
           ui.setCurrentProject(d.to)
           ui.setProjectName(d.to)
           ui.touchTab(d.to)
+          // P32 (D-8 = (a), deferred spec §7.1): a project the assistant
+          // CREATED is a new project for G4 — an implicit mode starts Guided;
+          // an explicit choice is kept (the rule is inside
+          // noteNewProjectCreated). After setCurrentProject, so the §3.7
+          // pruning sees the project. A save or an open is not a new project;
+          // a network import unbinds (`to: null`) and creates none.
+          if (d.via_tool === 'create_project_from_template') ui.noteNewProjectCreated('template')
+          else if (d.via_tool === 'import_project_bundle') ui.noteNewProjectCreated('file')
           qc.invalidateQueries({ queryKey: nk(d.to, 'meta') })
           qc.invalidateQueries({ queryKey: nk(d.to, 'simulationStatus') })
           qc.invalidateQueries({ queryKey: nk(d.to, 'snapshots') })
+          // P28 (P32 gate N6): in auth mode the edit lock moves with the
+          // rebind, as in `switchToProject` — release the old project's lock,
+          // claim the new one's, read-only if another user holds it. Without
+          // this the tab kept heart-beating the old lock and edited the new
+          // project holding none. A no-op without auth.
+          void moveProjectLock(leaving, d.to)
           toast(`Active project: ${d.to}`, { icon: '🔀' })
+        } else if (d.to == null && useUIStore.getState().currentProject != null) {
+          // A network import (`import_network_nc`, `import_csv_bundle`,
+          // `import_excel`, `import_matpower`) replaced the backend's network
+          // with an UNBOUND draft (P27a gate finding 3). Keeping the old name
+          // would be wrong twice over: the tab would show a project the
+          // backend no longer holds, and the save identity guard lets an
+          // unbound network through, so the next autosave would write the
+          // import over the old project's folder. Show the unbound state
+          // instead — Save asks for a name, as for any new network.
+          const was = useUIStore.getState().currentProject
+          useUIStore.getState().setCurrentProject(null)
+          // P28 (N6): the tab no longer edits `was` — give its lock back.
+          void moveProjectLock(was, null)
+          qc.invalidateQueries({ queryKey: nk(null, 'meta') })
+          qc.invalidateQueries({ queryKey: nk(null, 'simulationStatus') })
+          qc.invalidateQueries({ queryKey: nk(null, 'snapshots') })
+          toast(`The assistant replaced the network — it is no longer '${was}' and is not saved to a project yet. Save it under a name to keep it.`,
+            { icon: '🔀' })
         }
         // Render a small tool-line so the conversation explains what
         // happened.
@@ -2350,17 +2246,47 @@ export default function ChatPanel() {
         break
       }
       case 'turn_done': {
+        const d = _frame_data<TurnDoneFrame>(frame)
+        const state = assuranceRef.current
+        if (state.strict) {
+          const speak = voiceTurnRef.current
+          if (!state.completed && state.approved && d.answer_id === state.approved.answer_id) {
+            state.completed = true
+            const approved = state.approved
+            const generation = streamGenerationRef.current
+            void verifyApprovedText(state.text, approved.receipt.content_sha256).then(matches => {
+              if (assuranceRef.current !== state
+                || streamGenerationRef.current !== generation
+                || useUIStore.getState().currentProject !== state.project
+                || useChatStore.getState().sessionId !== state.sessionId) return
+              if (!matches) {
+                setError({ error_kind: 'assurance_publication_failed',
+                  message: 'The checked answer could not be verified. Reload to recover the saved answer.' })
+                return
+              }
+              appendMessage({ role: 'assistant', content: state.text,
+                answer_id: approved.answer_id, receipt: approved.receipt })
+              if (speak && useUIStore.getState().assistantSpeakEnabled) {
+                speechOut.speak(speechOut.plainTextForSpeech(state.text))
+              }
+            })
+          } else if (state.requested) {
+            state.completed = true
+            state.text = ''
+            setError({ error_kind: 'assurance_publication_failed',
+              message: 'The checked answer ended without a valid approval. No answer was shown.' })
+          }
+        }
         // Modal reciprocity: a turn begun with the microphone is answered
         // aloud. Decided by `voiceTurnRef`, captured at SEND — `dictatedRef`
         // is cleared by the send itself, and the mute is read live so
         // muting mid-turn takes effect on this answer rather than the next.
-        if (voiceTurnRef.current && useUIStore.getState().assistantSpeakEnabled) {
+        if (!state.strict && voiceTurnRef.current && useUIStore.getState().assistantSpeakEnabled) {
           const last = useChatStore.getState().messages
             .filter((m) => m.role === 'assistant').slice(-1)[0]
           if (last) speechOut.speak(speechOut.plainTextForSpeech(last.content))
         }
         voiceTurnRef.current = false
-        const d = _frame_data<TurnDoneFrame>(frame)
         if (d.usage) {
           // M10: server reports token counts; client renders them as-is.
           accrueUsage({
@@ -2378,10 +2304,16 @@ export default function ChatPanel() {
         break
       }
       case 'session_done': {
+        assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+          project: null, completed: true }
+        voiceTurnRef.current = false
         closeStream()
         break
       }
       case 'error': {
+        assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+          project: null, completed: true }
+        voiceTurnRef.current = false
         const d = _frame_data<{ error_kind: string; message: string }>(frame)
         setError({ error_kind: d.error_kind, message: d.message })
         closeStream()
@@ -2389,7 +2321,8 @@ export default function ChatPanel() {
       }
     }
   }, [qc, setSessionId, appendMessage, appendTokenDelta, appendThinkingDelta, setPending,
-      appendToolProgress, accrueUsage, setStreaming, setError, closeStream])
+      appendToolProgress, accrueUsage, setStreaming, setError, closeStream,
+      stopProgressObserver])
 
   // Phase D polish #3 — auto-uncheck-after-send opt-in setting.
   // Stored in localStorage; OFF by default (matches sticky-chip intent).
@@ -2414,7 +2347,31 @@ export default function ChatPanel() {
   // user's draft (and its dictation flag) stays as it is, and the turn is a
   // typed one.
   const dispatchSend = useCallback((text: string, attachIds: string[],
-    opts?: { fromCard?: boolean; label?: string }) => {
+    opts?: {
+      fromCard?: boolean
+      label?: string
+      /** Live admission only — omit for typed / hub-card sends. */
+      utterance_id?: string
+      generation?: number
+      requiresChecked?: boolean
+    }) => {
+    const requestedChecks = opts?.requiresChecked === true || optedIntoChecks || requiredChecks
+    if (requestedChecks && !checksAvailable) {
+      setError({ error_kind: 'assurance_unavailable',
+        message: 'Answer checks are unavailable. Retry availability, or explicitly turn off checking for a new message.' })
+      if (opts?.fromCard) useChatStore.setState({ requestQueue: [], activeRequest: null })
+      else setInput(text)
+      return
+    }
+    const generation = ++streamGenerationRef.current
+    streamProjectRef.current = useUIStore.getState().currentProject
+    const chatSequence = useChatStore.getState().newChatSeq
+    const isCurrentStream = () => streamGenerationRef.current === generation
+      && useUIStore.getState().currentProject === streamProjectRef.current
+      && useChatStore.getState().newChatSeq === chatSequence
+    assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+      ...(requestedChecks ? { strict: true, requested: true } : {}),
+      project: useUIStore.getState().currentProject, completed: false }
     // FIRST, before the composer reset four lines below clears `dictatedRef`.
     // Reading it later — say, next to the createChatStream call that consumes
     // `input_mode` — always yields false, and the bug is invisible: the
@@ -2425,6 +2382,7 @@ export default function ChatPanel() {
       role: 'user', content: text,
       attachment_file_ids: attachIds.length > 0 ? attachIds : undefined,
       ...(opts?.label ? { display: opts.label } : {}),
+      ...(requestedChecks ? { requiresChecked: true } : {}),
     })
     // A typed turn is nobody's card request: a denial in it drops nothing.
     if (!opts?.fromCard) useChatStore.getState().setActiveRequest(null)
@@ -2434,10 +2392,18 @@ export default function ChatPanel() {
     }
     setStreaming(true)
     setError(null)
+    const admission = (
+      typeof opts?.utterance_id === 'string'
+      && opts.utterance_id.length > 0
+      && typeof opts?.generation === 'number'
+    )
+      ? { utterance_id: opts.utterance_id, generation: opts.generation }
+      : {}
     const cleanup = createChatStream(
       {
         session_id: sessionId ?? undefined,
         message: text,
+        ...(requestedChecks ? { assurance: { version: 1, mode: 'strict' } as const } : {}),
         // Task 13 — `profile_id` is included ONLY when the user actually
         // picked one. `profileId === null` means "the server's active
         // profile", and OMITTING the field (never sending `model` either) is
@@ -2456,9 +2422,46 @@ export default function ChatPanel() {
         // after dispatchSend has already reset the composer, so reading
         // the composer flag here always yields 'text'.
         input_mode: voiceTurnRef.current ? 'voice' : 'text',
+        ...admission,
+        binding_generation: generation,
       },
-      handleFrame,
+      (frame) => {
+        if (!isCurrentStream()) return
+        if (requestedChecks && !assuranceRef.current.turnId
+          && !['session_init', 'error', 'session_done', 'turn_done'].includes(frame.event)) return
+        // Ordinary chat can deliberately change projects within a turn. Track
+        // that server-issued rebind while rejecting callbacks after user changes.
+        if (frame.event === 'project_rebound' && !assuranceRef.current.strict) {
+          streamProjectRef.current = typeof frame.data.to === 'string' ? frame.data.to : null
+        }
+        handleFrame(frame)
+      },
       (err) => {
+        if (!isCurrentStream()) return
+        streamGenerationRef.current += 1
+        assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+          project: null, completed: true }
+        voiceTurnRef.current = false
+        // A session that belongs to someone else is recoverable, and retrying
+        // the same id never will be: the server refuses it every time. Drop it
+        // and start a fresh conversation so the next send mints one owned by
+        // this user. Reachable without anyone doing anything wrong — the id
+        // comes from the project's shared transcript, so a co-member's GET
+        // /history can mint it under their name first.
+        const kind = (err as Error & { kind?: string })?.kind
+        if (requestedChecks) {
+          setError({ error_kind: kind ?? 'assurance_unavailable',
+            message: (err as Error).message || 'The checked answer request failed.' })
+          void qc.invalidateQueries({ queryKey: CHECKED_ANSWERS_QUERY_KEY })
+        }
+        if (kind === 'session_not_yours') {
+          startNewChat()
+          toast.error(
+            'chat: that conversation belongs to another user — started a new one',
+          )
+          setStreaming(false)
+          return
+        }
         toast.error(`chat: connection lost — ${(err as Error).message ?? err}`)
         setStreaming(false)
       },
@@ -2468,11 +2471,12 @@ export default function ChatPanel() {
       setAttachedFileIds([])
     }
   }, [appendMessage, sessionId, profileId, handleFrame, setStreaming, setError,
-      setStreamCleanup, autoUncheckAfterSend, setAttachedFileIds])
+      setStreamCleanup, autoUncheckAfterSend, setAttachedFileIds, startNewChat,
+      optedIntoChecks, requiredChecks, checksAvailable, qc])
 
   const onSend = useCallback(() => {
     const text = input.trim()
-    if (!text || streaming || notReady) return
+    if (!text || streaming || notReady || mismatchLine) return
     const attachIds = useChatStore.getState().attachedFileIds.slice()
     // First-send confirmation modal (default-ON friction killer).
     const firstAck = readPref('chat:firstSendAck') === '1'
@@ -2482,7 +2486,7 @@ export default function ChatPanel() {
       return
     }
     dispatchSend(text, attachIds)
-  }, [input, streaming, notReady, dispatchSend])
+  }, [input, streaming, notReady, mismatchLine, dispatchSend])
 
   const confirmSendWithAttachments = useCallback(() => {
     if (pendingSendText == null) return
@@ -2523,6 +2527,14 @@ export default function ChatPanel() {
   // once a key is added — and the key form below says what to do.
   useEffect(() => {
     if (requestCount === 0) return
+    // A2: a card request made while the tab is mismatched is dropped, like
+    // the no-key case below — it must not fire into whichever project a later
+    // Reload / Switch lands on.
+    if (mismatchLine) {
+      useChatStore.setState({ requestQueue: [] })
+      toast(`${mismatchLine} Nothing was sent to the assistant.`)
+      return
+    }
     if (notReady) {
       useChatStore.setState({ requestQueue: [] })
       toast('Add an API key for the assistant first — nothing was sent.')
@@ -2531,10 +2543,42 @@ export default function ChatPanel() {
     if (streaming || pendingCard != null || pendingSendText != null) return
     const req = useChatStore.getState().takeNextRequest()
     if (!req) return
-    dispatchSend(req.text, [], { fromCard: true, label: req.label })
-  }, [requestCount, streaming, pendingCard, pendingSendText, notReady, dispatchSend])
+    const liveAdmission = req.source === 'live'
+      ? {
+          utterance_id: req.id,
+          generation: useChatStore.getState().utteranceGeneration,
+        }
+      : {}
+    dispatchSend(req.text, [], { fromCard: true, label: req.label, ...liveAdmission,
+      ...(req.requiresChecked ? { requiresChecked: true } : {}) })
+  }, [requestCount, streaming, pendingCard, pendingSendText, notReady, mismatchLine, dispatchSend])
+
+  // Live companion turns use this same send. The dock only dispatches the
+  // event when a model key is present; without one it navigates locally and
+  // must not start a stream that would stick on "API key missing".
+  useEffect(() => {
+    const onUtterance = (ev: Event) => {
+      const text = (ev as CustomEvent<string>).detail
+      if (typeof text !== 'string' || !text.trim()) return
+      if (notReady || streaming) return
+      if (useChatStore.getState().pending) return
+      if (useUIStore.getState().projectMismatch) return
+      const utterance_id = globalThis.crypto?.randomUUID?.()
+        ?? `live-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      dispatchSend(text.trim(), [], {
+        fromCard: true,
+        utterance_id,
+        generation: useChatStore.getState().utteranceGeneration,
+      })
+    }
+    window.addEventListener('companion:live-utterance', onUtterance)
+    return () => window.removeEventListener('companion:live-utterance', onUtterance)
+  }, [notReady, streaming, dispatchSend])
 
   const onAbort = useCallback(async () => {
+    streamGenerationRef.current += 1
+    assuranceRef.current = { strict: assuranceRef.current.strict, text: '', approved: null,
+      project: null, completed: true }
     // Stopping a turn has to stop the VOICE as well. A synthesiser that keeps
     // reading an answer the user just cancelled is the single most alarming
     // way this feature can fail — there is no visible progress bar to explain
@@ -2575,11 +2619,12 @@ export default function ChatPanel() {
   // panel. An idle stream is still closed here.
   useEffect(() => {
     return () => {
+      stopProgressObserver()
       const { streaming, streamCleanup } = useChatStore.getState()
       if (streaming) return
       try { streamCleanup?.() } catch { /* idempotent */ }
     }
-  }, [])
+  }, [stopProgressObserver])
 
   // ── per-message actions ───────────────────────────────────────────────
   //
@@ -2589,6 +2634,9 @@ export default function ChatPanel() {
   // against the turn it is clearing space for, and the model would answer with
   // the discarded exchange still in context.
   const withdrawTurn = useCallback(async (userIdx: number) => {
+    const project = useUIStore.getState().currentProject
+    const sequence = useChatStore.getState().newChatSeq
+    const generation = streamGenerationRef.current
     const sid = useChatStore.getState().sessionId
     if (sid) {
       try {
@@ -2601,6 +2649,8 @@ export default function ChatPanel() {
         return false
       }
     }
+    if (useUIStore.getState().currentProject !== project || useChatStore.getState().newChatSeq !== sequence
+      || streamGenerationRef.current !== generation) return false
     useChatStore.setState((st) => ({
       messages: st.messages.slice(0, userIdx),
       toolProgress: {},
@@ -2635,7 +2685,7 @@ export default function ChatPanel() {
     // Withdraw the ANSWER, keeping the question: it is being re-asked, not
     // retracted. dispatchSend re-appends it, so cut at the question's index.
     if (!await withdrawTurn(idx)) return
-    dispatchSend(question.content, attachIds)
+    dispatchSend(question.content, attachIds, { requiresChecked: question.requiresChecked || !!m.receipt })
   }, [precedingUserIndex, withdrawTurn, dispatchSend])
 
   const onEditMessage = useCallback(async (m: ChatMessage) => {
@@ -2653,6 +2703,8 @@ export default function ChatPanel() {
     // leaving the old phrasing above the new one would show them asking twice.
     if (!await withdrawTurn(idx)) return
     setInput(text)
+    if (m.requiresChecked) setCheckedSelection({ project: useUIStore.getState().currentProject,
+      chat: useChatStore.getState().newChatSeq, on: true })
     useChatStore.getState().setAttachedFileIds(files)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [withdrawTurn])
@@ -2675,7 +2727,7 @@ export default function ChatPanel() {
     if (idx < 0) return
     const question = msgs[idx]
     if (!await withdrawTurn(idx)) return
-    dispatchSend(question.content, question.attachment_file_ids ?? [])
+    dispatchSend(question.content, question.attachment_file_ids ?? [], { requiresChecked: question.requiresChecked })
   }, [withdrawTurn, dispatchSend])
 
   // ⌘/Ctrl-J toggles the assistant, and the OPEN path lands the caret in the
@@ -2711,6 +2763,7 @@ export default function ChatPanel() {
     const opened = assistantDockOpen && !prevDockOpenRef.current
     prevDockOpenRef.current = assistantDockOpen
     if (!opened) return
+    if (useUIStore.getState().assistantEntry === 'profiles') return
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [assistantDockOpen])
 
@@ -2746,6 +2799,40 @@ export default function ChatPanel() {
   // loading (`!profilesQuery.data`), refused (`profilesQuery.isError`), and
   // empty (`data.profiles.length === 0`).
   const profilesQuery = useChatProfiles()
+  const modelSelectRef = useRef<HTMLSelectElement>(null)
+
+  useEffect(() => {
+    if (!assistantDockOpen) {
+      if (assistantEntry != null) useUIStore.getState().setAssistantEntry(null)
+      return
+    }
+    if (assistantEntry == null) return
+    if (assistantEntry === 'speak') {
+      setDictationPanelRequested(true)
+      useUIStore.getState().setAssistantEntry(null)
+      return
+    }
+    if (assistantEntry === 'compose') {
+      useUIStore.getState().setAssistantEntry(null)
+      return
+    }
+    if (assistantEntry !== 'profiles') return
+    if (streaming) return
+    if (profilesQuery.isError) {
+      useUIStore.getState().setAssistantEntry(null)
+      return
+    }
+    if (profilesQuery.data == null) return
+    if (profilesQuery.data.profiles.length === 0) {
+      useUIStore.getState().setAssistantEntry(null)
+      return
+    }
+    const select = modelSelectRef.current
+    if (select == null || select.disabled) return
+    select.focus()
+    useUIStore.getState().setAssistantEntry(null)
+  }, [assistantDockOpen, assistantEntry, profilesQuery.data, profilesQuery.isError, streaming])
+
   const chatProfiles = profilesQuery.data?.profiles ?? []
   const activeProfileId = profilesQuery.data?.active_profile_id ?? null
   // `profileId` (the store's explicit pick) wins; `null` falls back to
@@ -2753,7 +2840,11 @@ export default function ChatPanel() {
   // the SAME fetch, so this never lands on an id absent from `chatProfiles`
   // except in the brief window before the fetch resolves — handled by the
   // disabled placeholder below rather than by this fallback.
-  const selectedProfileId = profileId ?? activeProfileId
+  // P28 A3: a null pick shows the session's bound profile when it has one —
+  // the one its next turn runs on — so the dropdown, the Send gate and the
+  // cross-wire check below agree.
+  const boundProfileId = useChatStore((s) => s.boundProfileId)
+  const selectedProfileId = profileId ?? boundProfileId ?? activeProfileId
   const selectedProfileMeta = chatProfiles.find((p) => p.id === selectedProfileId) ?? null
 
   const [pendingProfilePick, setPendingProfilePick] = useState<{ id: string; label: string } | null>(null)
@@ -2805,7 +2896,7 @@ export default function ChatPanel() {
           data-testid="chat-drop-overlay"
         >
           <div className="text-accent text-sm font-medium px-4 py-2 bg-bg-2 rounded shadow">
-            Drop to upload — Excel, PDF, images (≤ 25 MB each)
+            Drop documents, tables, images or network files (≤ 25 MB each)
           </div>
         </div>
       )}
@@ -2825,6 +2916,7 @@ export default function ChatPanel() {
           // "zero profiles exist", a materially different fact from
           // "couldn't find out".
           <select
+            ref={modelSelectRef}
             disabled
             data-profiles-state="error"
             className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-danger"
@@ -2835,6 +2927,7 @@ export default function ChatPanel() {
           </select>
         ) : !profilesQuery.data ? (
           <select
+            ref={modelSelectRef}
             disabled
             data-profiles-state="loading"
             className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-muted"
@@ -2844,6 +2937,7 @@ export default function ChatPanel() {
           </select>
         ) : chatProfiles.length === 0 ? (
           <select
+            ref={modelSelectRef}
             disabled
             data-profiles-state="empty"
             className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-muted"
@@ -2854,6 +2948,7 @@ export default function ChatPanel() {
           </select>
         ) : (
           <select
+            ref={modelSelectRef}
             value={selectedProfileId ?? ''}
             onChange={(e) => onPickProfile(e.target.value)}
             disabled={streaming}
@@ -3080,15 +3175,20 @@ export default function ChatPanel() {
             above a live conversation is a header repeating what they have
             moved past. */}
         {messages.length === 0 && <ChatLaunchGreeting />}
-        {/* Discoverability chips: unbound → open/browse; bound → compare /
-            navigate / summarize. Click fills the composer for edit-before-send. */}
-        {messages.length === 0 && (
+        {/* The start menu: the harness's workflows for this context. A click
+            SENDS the workflow's opening request through the request queue,
+            labelled with the chip (owner decision Q10) — the same path the
+            hub-design cards use — so one click starts the flow. Absent until
+            the menu is known; never a spinner, never an error. */}
+        {messages.length === 0 && Array.isArray(workflowMenu.data?.workflows)
+          && workflowMenu.data.workflows.length > 0 && (
           <ChatStarterChips
-            prompts={starterPromptsFor(currentProject, uiMode)}
+            prompts={workflowMenu.data.workflows.map((w) => ({
+              label: w.title, text: w.opening_request, title: w.intent,
+            }))}
             disabled={streaming}
-            onPick={(text) => {
-              setInput(text)
-              requestAnimationFrame(() => textareaRef.current?.focus())
+            onPick={(p) => {
+              sendRequest(p.text, { source: 'start-menu', label: p.label })
             }}
           />
         )}
@@ -3096,7 +3196,10 @@ export default function ChatPanel() {
           // P26 item 6: Guided renders a declined card as one plain line.
           const toolLine = m.role === 'tool' && uiMode === 'guided' ? guidedToolLine(m.content) : null
           if (toolLine?.hidden) return null
+          if (toolLine && m.tool_use_id && REQUEST_LINE.test(m.content)
+            && guidedSettledToolIds(messages).has(m.tool_use_id)) return null
           const toolLabel = toolLine && !toolLine.hidden ? toolLine.label : null
+          const toolMessage = toolLine && !toolLine.hidden ? toolLine.message ?? null : null
           return (
           <div
             key={m.id}
@@ -3133,6 +3236,10 @@ export default function ChatPanel() {
               : toolLabel ? (
                 <>
                   <span className="font-sans text-[12px] text-text" data-testid="chat-tool-label">{toolLabel}</span>
+                  {toolMessage && (
+                    <span className="block font-sans text-[12px] text-text whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+                      data-testid="chat-tool-message">{toolMessage}</span>
+                  )}
                   <details className="mt-0.5" data-testid="chat-tool-details">
                     <summary className="cursor-pointer select-none font-sans">Details</summary>
                     <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>
@@ -3140,8 +3247,19 @@ export default function ChatPanel() {
                 </>
               )
               : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>}
+            {m.role === 'assistant' && m.answer_id && m.receipt && <CheckedEvidenceCard answerId={m.answer_id} receipt={m.receipt} />}
             {m.role === 'tool' && m.tool_use_id && (
-              <ToolProgressDetails toolUseId={m.tool_use_id} />
+              <>
+                <AssistantResultCard result={m.tool_result} disabled={streaming || notReady || Boolean(mismatchLine)}
+                  onRequest={(text) => useChatStore.getState().sendRequest(text, { source: 'assistant-task' })} />
+                <ToolProgressDetails toolUseId={m.tool_use_id} />
+              </>
+            )}
+            {m.role === 'assistant' && m.interrupted && (
+              <div className="mt-1 text-[11px] text-amber-400" data-testid="chat-interrupted-note">
+                This turn did not finish ({m.interrupted.replace(/_/g, ' ')}). It is
+                shown for reference; the assistant does not see it on later turns.
+              </div>
             )}
             {m.role === 'user' && m.attachment_file_ids && m.attachment_file_ids.length > 0 && (
               <ReplayAttachmentChips fileIds={m.attachment_file_ids} />
@@ -3151,7 +3269,8 @@ export default function ChatPanel() {
           </div>
           )
         })}
-        <ConfirmationCard />
+        <ChoiceCard />
+        {assistantDockOpen ? <ConfirmationCard /> : null}
         <div ref={messagesEndRef} />
         </div>
         {showJumpLatest && (
@@ -3181,6 +3300,12 @@ export default function ChatPanel() {
       {/* Phase D — live upload chip strip. Hidden when no project loaded or
           no uploads exist. Each chip carries a checkbox controlling
           attach-to-next-message + a delete (trash) button. */}
+      <WorkflowStrip />
+      <CheckedAnswerControl checked={optedIntoChecks || requiredChecks} required={requiredChecks}
+        available={checksAvailable} loading={checkedCapabilities.isPending} failed={checkedCapabilities.isError}
+        mode={checkedCapabilities.data?.mode} busy={streaming || pendingSendText != null}
+        onChange={on => setCheckedSelection({ project: currentProject, chat: newChatSeq, on })}
+        onRetry={() => { void checkedCapabilities.refetch() }} />
       <UploadChipStrip
         uploads={uploads}
         attachedFileIds={attachedFileIds}
@@ -3190,7 +3315,10 @@ export default function ChatPanel() {
       />
       {/* The key form, inline, while Send is gated — unless the error
           banner above already shows it for a missing_api_key turn. */}
-      {notReady && chatError?.error_kind !== 'missing_api_key' && (
+      {mismatchLine ? (
+        <div className="px-3 py-2 border-t border-border bg-bg-2 shrink-0 text-[12px] text-muted"
+             data-testid="chat-send-gate">{mismatchLine}</div>
+      ) : notReady && chatError?.error_kind !== 'missing_api_key' && (
         <div className="px-3 py-2 border-t border-border bg-bg-2 shrink-0 text-[12px] text-muted"
              data-testid="chat-send-gate">
           The assistant needs an API key for the active model before it can answer.
@@ -3210,7 +3338,7 @@ export default function ChatPanel() {
         >
           <div className="w-8 h-[2px] rounded-full bg-border group-hover:bg-accent/60 transition-colors" />
         </div>
-        <div className="flex items-stretch gap-2 px-2 pb-2 flex-1 min-h-0">
+        <div className="relative flex items-stretch gap-2 px-2 pb-2 flex-1 min-h-0">
           <div className="flex flex-col gap-1 self-end pb-0.5">
             {/* Phase D polish #5 — 44×44 px touch targets on coarse pointers
                 (WCAG 2.5.5). Desktop stays compact. */}
@@ -3225,7 +3353,7 @@ export default function ChatPanel() {
               disabled={streaming || !currentProject}
               title={
                 currentProject
-                  ? 'Upload a file (Excel / PDF / image, ≤25 MB)'
+                ? 'Upload documents, tables, images or network files (≤25 MB)'
                   : 'Load a project first'
               }
               aria-label="Upload a file"
@@ -3252,34 +3380,13 @@ export default function ChatPanel() {
             >
               📋
             </button>
-            <button
-              className={
-                (isCoarsePointer
-                  ? 'min-w-[44px] min-h-[44px] text-lg '
-                  : 'px-2 py-1 text-[10px] ') +
-                'rounded border ' +
-                (speech.listening
-                  ? 'bg-accent/15 border-accent text-accent'
-                  : 'bg-bg-3/40 hover:bg-bg-3 border-border text-muted') +
-                (speech.available && !streaming ? '' : ' opacity-50')
-              }
-              onClick={speech.toggle}
-              disabled={!speech.available || streaming}
-              title={
-                !speech.supported
-                  ? 'Voice input needs Chrome or Edge'
-                  : speech.permissionDenied
-                    ? 'Microphone access denied — allow it in System Settings → Privacy & Security → Microphone'
-                    : speech.listening
-                      ? 'Stop voice input (Esc)'
-                      : 'Start voice input (English)'
-              }
-              aria-label={speech.listening ? 'Stop voice input' : 'Start voice input'}
-              aria-pressed={speech.listening}
-              data-testid="chat-mic"
-            >
-              {speech.listening ? '■' : '🎙'}
-            </button>
+            <DictationControls
+              speech={speech} language={dictationLanguage} onLanguage={setDictationLanguage}
+              onInsert={onSpeechFinal} streaming={streaming} dockOpen={assistantDockOpen}
+              project={currentProject} coarsePointer={isCoarsePointer}
+              panelRequested={dictationPanelRequested}
+              onPanelRequestConsumed={consumeDictationRequest}
+            />
           </div>
           <div className="flex-1 min-w-0 min-h-0 flex flex-col">
             <textarea
@@ -3324,10 +3431,12 @@ export default function ChatPanel() {
           <button
             className="self-end px-3 py-1.5 text-xs rounded bg-accent text-bg disabled:opacity-50 max-w-[260px]"
             onClick={onSend}
-            disabled={streaming || !input.trim() || notReady}
+            disabled={streaming || !input.trim() || notReady || !!mismatchLine}
             data-testid="chat-send"
             title={
-              notReady
+              mismatchLine
+                ? mismatchLine
+                : notReady
                 ? 'Add an API key first (Settings → Assistant)'
                 : attachedFileIds.length > 0
                 ? `Sending with ${attachedFileIds.length} file(s): ` +

@@ -409,3 +409,52 @@ def test_another_orgs_capacity_is_404(other_org_client, study):
     assert other_org_client.get("/api/gridspine/Router Study/capacity").status_code == 404
     resp = other_org_client.post("/api/gridspine/Router Study/capacity", json={"bus": "BUS_16", "kind": "load"})
     assert resp.status_code == 404
+
+
+# --------------------------------------------------------------------------
+# connection-point assessment (increment 10)
+# --------------------------------------------------------------------------
+
+def test_post_connection_passes_the_facility_and_runs_off_the_event_loop(client, study, monkeypatch):
+    seen = {}
+
+    def fake(project, spec):
+        seen.update(name=project.name, spec=spec, on_the_loop=_running_on_the_event_loop())
+        return {"assessment_id": "abc", "rows": []}
+
+    monkeypatch.setattr(gs, "assess_facility", fake)
+    body = {"bus": "BUS_16", "load_mw": 300, "onsite_mw": 100}
+    resp = client.post("/api/gridspine/Router Study/connection", json=body)
+    assert resp.status_code == 200, resp.text
+    assert seen["on_the_loop"] is False and seen["name"] == "Router Study"
+    assert seen["spec"] == {"bus": "BUS_16", "load_mw": 300.0, "load_pf": 0.98, "onsite_mw": 100.0,
+                            "onsite_converter": True, "profile": "eu_rfg_dcc_ce"}
+
+
+@pytest.mark.parametrize("body", [
+    {"bus": "BUS_16", "load_mw": -1},
+    {"bus": "BUS_16", "load_mw": 100, "load_pf": 1.5},
+    {"bus": "BUS_16", "load_mw": 1e7},
+    {"bus": "", "load_mw": 100},
+    {"load_mw": 100},
+])
+def test_post_connection_refuses_a_malformed_facility_before_the_service(client, study, monkeypatch, body):
+    called = []
+    monkeypatch.setattr(gs, "assess_facility", lambda *a: called.append(1))
+    assert client.post("/api/gridspine/Router Study/connection", json=body).status_code == 422
+    assert called == []
+
+
+def test_get_connection_calls_the_service_with_its_filters(client, study, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(gs, "get_connection", lambda project, assessment_id=None, hour=None:
+                        seen.update(aid=assessment_id, hour=hour) or {"rows": []})
+    assert client.get("/api/gridspine/Router Study/connection",
+                      params={"assessment_id": "abc", "hour": 3}).status_code == 200
+    assert seen == {"aid": "abc", "hour": 3}
+
+
+def test_another_orgs_connection_is_404(other_org_client, study):
+    assert other_org_client.get("/api/gridspine/Router Study/connection").status_code == 404
+    resp = other_org_client.post("/api/gridspine/Router Study/connection", json={"bus": "BUS_16", "load_mw": 10})
+    assert resp.status_code == 404

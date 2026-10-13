@@ -30,6 +30,7 @@ import pytest
 from routers import projects as projects_router
 from routers.simulation import BufferedLogQueue
 from services import chat_service
+from harness import history as harness_history
 from services.chat_service import ChatSession
 from services.project_context import ChatState, ProjectContext
 from services.pypsa_service import PyPSAService
@@ -149,11 +150,12 @@ def test_save_evicted_ctx_calls_chat_flush_after_save(monkeypatch):
 
     def fake_save_context(ctx, name, *, expect=None, persist_user_ts=True, **kw):
         call_log.append(f"save:{name}")
-        # _save_context's documented args from _save_evicted_ctx (expect=victim_id,
-        # persist_user_ts=False) — assert here so a refactor that breaks the
+        # _save_context's documented args from _save_evicted_ctx: expect is the
+        # victim's name, and persist_user_ts follows may_rewrite_user_ts (True
+        # for a readable victim) — assert here so a refactor that breaks the
         # contract fails loudly:
         assert expect == name
-        assert persist_user_ts is False
+        assert persist_user_ts is True
 
     def fake_flush(ctx):
         call_log.append(f"flush:{ctx.loaded_project}")
@@ -541,7 +543,7 @@ def test_append_turn_rotates_when_oversize(tmp_projects_dir, monkeypatch):
     monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
     # Lower the rotation threshold for the test so we don't have to fabricate
     # a 5 MiB file.
-    monkeypatch.setattr(chat_service, "ROTATE_BYTES", 100)
+    monkeypatch.setattr(harness_history, "ROTATE_BYTES", 100)
 
     n = pypsa.Network()
     ctx = ProjectContext(network=n, loaded_project="rot")

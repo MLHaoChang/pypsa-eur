@@ -3,12 +3,42 @@
 // Behaviour unchanged: the project's stress-scenario registry is read first,
 // an unreadable registry refuses the sweep, and a refused start toasts the
 // backend's own sentence.
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient, type Query } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { resultsApi } from '../api/simulation'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { blockerMessage } from '../utils/blockerMessage'
+
+/** Per-query "one more read" latch (A5). Keyed by the `Query` object React
+ *  Query hands to `refetchInterval`; a GC'd query is a fresh object, which is
+ *  the intended reset. `extraAt` is the `dataUpdateCount` of the first sample
+ *  after `running`: React Query re-evaluates `refetchInterval` several times
+ *  per sample (every observer render), so the latch answers per SAMPLE, not
+ *  per call — a second evaluation of the same sample must not cancel the
+ *  pending extra tick. */
+const extraTick = new WeakMap<Query, { running: boolean; extraAt?: number }>()
+
+/** The `fmea_modes` poll FmeaTab, the Improve card and the live-study probe
+ *  share (A5, deferred spec 2026-09-28 §2.2): 2 s while the sweep runs, 2 s
+ *  ONCE more on the first sample after it leaves `running` (that sample can
+ *  still carry the partial rows while the finished ones land), then off. */
+export function fmeaModesRefetchInterval(q: Query): number | false {
+  const status = (q.state.data as { sweep_status?: string } | null | undefined)?.sweep_status
+  if (status === 'running') {
+    extraTick.set(q, { running: true })
+    return 2000
+  }
+  const latch = extraTick.get(q)
+  if (!latch) return false
+  if (latch.running) {
+    extraTick.set(q, { running: false, extraAt: q.state.dataUpdateCount })
+    return 2000
+  }
+  if (latch.extraAt === q.state.dataUpdateCount) return 2000
+  extraTick.delete(q)
+  return false
+}
 
 export interface StartFmeaSweepOptions {
   /** Runs once the sweep has started. FmeaTab refetches its modes query

@@ -44,7 +44,12 @@ REQUIREMENTS = BACKEND.parent / "gui-requirements.txt"
 # `tests/` and `smoke/` are development tooling. The frozen app's entry point
 # is `desktop/gui.py` and neither is reachable from it, so `pytest` and
 # `requests` are not shipped dependencies.
-NOT_SHIPPED = {"tests", "smoke"}
+# `tools/` holds developer and CI scripts (bootstrap, auth smoke, OpenAPI diff,
+# the pilot-evaluation pytest plugin): nothing the frozen app imports, so their
+# imports (pytest among them) are not promises the bundle has to keep. The
+# first `tools/` file to import pytest unguarded (#137) tripped the pin test and
+# with it the macOS build's gate.
+NOT_SHIPPED = {"tests", "smoke", "tools"}
 
 # Third-party modules the backend imports INSIDE a try/except that catches the
 # import failure. Each is allowed to be absent from the bundle, and the value
@@ -353,6 +358,18 @@ def test_the_spec_freezes_gridspine_from_the_repo_root_with_its_data():
     # and the one exclusion the frozen probe found necessary: without it the
     # frozen app's pandapower looks for case39.json one directory too deep
     assert '"pandapower.__init__",' in text
+
+
+def test_the_spec_ships_the_generic_defaults_pack_data():
+    """IC U1 (a): the defaults pack's loader is a module (collected by import)
+    but its versioned data files are not — the spec must list them, at the
+    path the loader resolves (`services/library/defaults_pack/versions`)."""
+    from services.library.defaults_pack.loader import VERSIONS_DIR
+
+    text = SPEC.read_text(encoding="utf-8")
+    assert '"services/library/defaults_pack/versions"' in text
+    assert VERSIONS_DIR.parts[-4:] == ("services", "library", "defaults_pack", "versions")
+    assert any(VERSIONS_DIR.iterdir())
 
 
 def test_the_build_script_builds_the_project_templates_with_gridspine_reachable():

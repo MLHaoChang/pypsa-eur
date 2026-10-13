@@ -4,7 +4,7 @@
 // yet.". Every panel that already polls a study's status now invalidates that
 // query when the study leaves `running` — one shared hook.
 import { describe, expect, it, vi } from 'vitest'
-import { renderHook } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { useUIStore } from '../store/uiStore'
@@ -46,5 +46,40 @@ describe('useStudyFinishedInvalidation', () => {
     hook.rerender({ s: 'running' })
     hook.rerender({ s: 'done' })
     expect(statusCalls()).toBe(1)
+  })
+})
+
+// A5 (deferred spec 2026-09-28 §2.2; P22.9-FE note 7): `prev` survived a
+// project switch, so project A's last `running` sample followed by project B's
+// `done` read as a false running → done transition and invalidated B's status
+// for a study B never ran. The previous sample now belongs to one project.
+describe('useStudyFinishedInvalidation across a project switch (A5)', () => {
+  function setupSwitch() {
+    useUIStore.setState({ currentProject: 'A' })
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    const hook = renderHook(({ s }: { s: string | null | undefined }) => useStudyFinishedInvalidation(s),
+      { wrapper, initialProps: { s: 'running' as string | null | undefined } })
+    return { hook, spy }
+  }
+
+  it('no invalidation when the project changes between samples', () => {
+    const { hook, spy } = setupSwitch()
+    // The switch and B's first sample land in one render: the status prop is
+    // read from B's query key once `currentProject` is B.
+    act(() => { useUIStore.setState({ currentProject: 'B' }); hook.rerender({ s: 'done' }) })
+    hook.rerender({ s: 'done' })
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('…and B\'s own running → done afterwards still invalidates B', () => {
+    const { hook, spy } = setupSwitch()
+    act(() => { useUIStore.setState({ currentProject: 'B' }); hook.rerender({ s: 'done' }) })
+    hook.rerender({ s: 'running' })
+    hook.rerender({ s: 'done' })
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy).toHaveBeenCalledWith({ queryKey: nk('B', 'simulationStatus') })
   })
 })

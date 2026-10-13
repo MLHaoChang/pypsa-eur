@@ -708,6 +708,10 @@ describe('LoopPanel run controls', () => {
     await openPanel()
     expect((await screen.findByTestId('loop-not-run')).textContent?.length ?? 0)
       .toBeGreaterThan(30)
+    // The budget is a number, not the parameter's name (UX assessment D-2).
+    const notRun = screen.getByTestId('loop-not-run').textContent ?? ''
+    expect(notRun).toMatch(/up to\s+8 full capacity expansions/)
+    expect(notRun).not.toContain('max_solves')
     expect(screen.queryByTestId('loop-iterations')).toBeNull()
     expect(screen.queryByTestId('loop-verdict')).toBeNull()
   })

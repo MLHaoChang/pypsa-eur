@@ -10,12 +10,13 @@ recomputes the rows after a reload with no solver state at all, and
 `_HANDLER_PARAMS` is unchanged (no new route argument; plan deviation from the
 `commercial_terms=` keyword, recorded in the plan).
 
-Eighteen cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
+Nineteen cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
 tiers; + group cap; a representative-weeks axis; two investment periods (TOU +
 demand + fee); a two-period group whose demand is metered on the group; annual FOM on the extendable assets; capex and FOM on a fee-bearing PoC Link (WP2.0);
 rising demand tiers, a designated-month and a cyclic ratchet (WP2.1c-i); convex
 windowed energy tiers (WP2.1c-ii); tariff capacity, contracted and measured-peak
-(WP2.1c-iii); a changes_dispatch PPA (WP2.2d).
+(WP2.1c-iii); a changes_dispatch PPA (WP2.2d); a net cost item on a three-member
+group's net import (P3 WP3.3b, V6).
 After the reload the gap must still be computed (never None), and the flags,
 the not-established months and the group record must be the same.
 """
@@ -29,6 +30,7 @@ import pandas as pd
 import pytest
 
 from tests.fixtures.investment_case.edge_15min import build_edge_15min
+from tests.test_group_net_import import v6_commercial, v6_network
 
 TOU = {"id": "energy", "kind": "energy", "unit": "per_kwh", "periods": [
     {"name": "night", "rate": 0.05, "start_hour": 0, "end_hour": 6},
@@ -173,6 +175,9 @@ CASES = {
     "ratchet_designated": (_jan_feb, {"import_tariff": _tariff(TOU, RATCHET_MONTHS)}),
     "ratchet_cyclic": (_jan_feb, {"import_tariff": _tariff(TOU, RATCHET_CYCLIC),
                                   "meter_history_peaks_kw": {"2030-12": 60_000.0}}),
+    # P3 WP3.3b (V6): a net cost item priced once on a 3-member group's net import.
+    "group_net_import": (v6_network, {k: v for k, v in v6_commercial().items()
+                                      if k != "poc_link"}),
     "group_multi_period": (_two_periods(_two_members),
                            {"import_tariff": _tariff(TOU, DEMAND), "group_contract": "hub",
                             "group_members": ["import", "import_b"], "group_cap_mw": 60.0}),
@@ -232,7 +237,7 @@ def test_rows_reconcile_before_and_after_a_save_and_load(case, client, install_n
     dec2, cb2 = _gap_and_rows(reloaded.network, cfg2)
     after = cb2["commercial"]
     for key in ("energy_import", "energy_export", "demand_charge", "energy_tiers",
-                "network_capacity", "tariff_capacity", "ppa_settlement"):
+                "network_capacity", "tariff_capacity", "ppa_settlement", "energy_net_group"):
         if before.get(key) is None:
             continue
         assert after.get(key) == pytest.approx(before[key], rel=1e-9), (case, key)
@@ -240,9 +245,40 @@ def test_rows_reconcile_before_and_after_a_save_and_load(case, client, install_n
     assert after.get("demand_months_not_established") == \
         before.get("demand_months_not_established"), case
     assert after.get("group") == before.get("group"), case
-    if extra.get("group_members"):
+    if case == "group_net_import":
+        assert before["energy_net_group"] and after["energy_net_group"]
+    elif extra.get("group_members"):
         assert before["group"]["members"] == ["import", "import_b"]
         assert sum(before["group"]["energy_share"].values()) == pytest.approx(1.0)
     assert cb2["total"] == pytest.approx(cb["total"], rel=1e-9)
     assert dec2["gap_pct"] is not None, (case, dec2)
     assert abs(dec2["gap_pct"]) < 1e-6, (case, dec2)
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("case", ["demand", "tariff_capacity_peak"])
+def test_the_bridge_residual_closes_with_commercial_opex_terms(case, reset_backend):
+    """GS Q12b (IC U1 follow-up): `objective_decomposition._bridge` closes with
+    the "Commercial" component for commercial OPEX terms — energy, a monthly
+    demand charge, a measured-peak capacity item: `residual_gap_eur` ≈ 0 (the
+    research probe read −3.1e-7 €). Capex-like terms (a firm-connection fee, a
+    contracted capacity on an extendable PoC) are not in the bridge's LP basis
+    and land in the residual — a known gap, not pinned here."""
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig, run_simulation
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.results.objective_decomposition import compute_objective_decomposition
+
+    build, extra = CASES[case]
+    n = build()
+    PyPSAService.set_network(n)
+    cfg = SolverConfig(commercial={"poc_link": "import", **extra})
+    status, condition = run_simulation(cfg, n, PyPSAService.get_lock(), threading.Event(),
+                                       queue.SimpleQueue(), state_update=lambda **kw: None)
+    assert status in ("ok", "optimal"), (status, condition)
+    cb = compute_cost_breakdown(n, cfg)
+    dec = compute_objective_decomposition(n, cb, cfg)
+    assert abs(dec["gap_pct"]) < 1e-6, dec
+    assert dec["residual_gap_eur"] is not None, dec
+    assert abs(dec["residual_gap_eur"]) <= max(0.01, 1e-9 * abs(dec["lp_total"])), dec
+    assert cb["commercial"]["demand_charge" if case == "demand" else "tariff_capacity"] > 0

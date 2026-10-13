@@ -12,7 +12,7 @@ import { fmtCurrency } from '../../results/shared'
 import { headline } from '../headline'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { REPORT, review } from '../testFixtures'
-import { ResultsCard } from './ResultsCard'
+import { EDITED_TEXT, ResultsCard } from './ResultsCard'
 
 vi.mock('../../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/simulation')>()
@@ -129,6 +129,24 @@ describe('ResultsCard body', () => {
     expect(r1.textContent).not.toContain('€0')
   })
 
+  // P29 (B3): the hub reads the row's `zero_reason`, the same text as the
+  // FMEA tab; without the field it falls back to "no measurable cost".
+  it('a zero-cost risk says why', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study({ ...REPORT, sections: { ...REPORT.sections,
+      fmea_top: { status: 'ok', payload: { rows: [
+        { mode_id: 'B:a', name: 'site_transformer', criticality_eur_per_year: 7_890_000, zero_reason: null },
+        { mode_id: 'B:e', name: 'electrolyser', criticality_eur_per_year: 0, zero_reason: 'out_of_scope' },
+        { mode_id: 'A:g', name: 'genset_1', criticality_eur_per_year: 0, zero_reason: 'no_shortfall' },
+      ] } } } }))
+    mount()
+    const r1 = await screen.findByTestId('hub-results-risks-1')
+    expect(r1.textContent).toContain('not counted (outside the electricity metric)')
+    expect(r1.textContent).not.toContain('no measurable cost')
+    expect(screen.getByTestId('hub-results-risks-2').textContent)
+      .toContain('no shortfall — the site copes without it')
+    expect(screen.getByTestId('hub-results-risks-0').textContent).toContain(fmtCurrency(7_890_000))
+  })
+
   it('stale banner from the boolean (not the source text)', async () => {
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ stale: true, source: 'stored report' }))
     mount()
@@ -193,5 +211,37 @@ describe('ResultsCard: Set a goal (P26 gate)', () => {
     mount()
     await screen.findByTestId('hub-results-verdict')
     expect(screen.queryByTestId('hub-results-set-goal')).toBeNull()
+  })
+})
+
+// P33b 10b (D-2, D-3): `edited_since_study` on the study record says an edit
+// seam was crossed since the study started. One amber line: the edited
+// banner subsumes the solved-since one; `false` / `null` / absent say nothing.
+describe('ResultsCard: edited since the study (P33b)', () => {
+  const EDITED = 'The network has been edited since this study, so these results describe the design as it was. Run again to refresh.'
+
+  it('edited_since_study: true → the edited banner', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ ...study(), edited_since_study: true })
+    mount()
+    expect((await screen.findByTestId('hub-results-edited')).textContent).toBe(EDITED)
+    expect(EDITED_TEXT).toBe(EDITED)
+    expect(screen.queryByTestId('hub-results-stale')).toBeNull()
+  })
+
+  it('edited and review stale → only the edited banner', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ ...study(), edited_since_study: true })
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ stale: true, edited_since_study: true }))
+    mount()
+    await screen.findByTestId('hub-results-edited')
+    await screen.findByTestId('hub-results-verdict')
+    expect(screen.queryByTestId('hub-results-stale')).toBeNull()
+  })
+
+  it.each([false, null, undefined])('edited_since_study: %s → no edited banner', async (v) => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ ...study(), edited_since_study: v })
+    mount()
+    await screen.findByTestId('hub-results-verdict')
+    expect(screen.queryByTestId('hub-results-edited')).toBeNull()
+    expect(screen.queryByTestId('hub-results-stale')).toBeNull()
   })
 })

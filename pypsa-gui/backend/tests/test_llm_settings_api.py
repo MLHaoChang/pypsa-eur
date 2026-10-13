@@ -162,9 +162,11 @@ def test_profiles_route_allows_any_authenticated_member(client):
     ids = [p["id"] for p in body["profiles"]]
     assert "anthropic-sonnet" in ids and "anthropic-opus" in ids
     assert body["active_profile_id"] == "anthropic-sonnet"
-    # Only id/label/wire per profile — no base_url, no key info.
+    # id/label/wire plus the P28 `chat_ready` boolean (deferred spec §3.1,
+    # D-3) — no base_url, no key hint, no key-env name.
     for p in body["profiles"]:
-        assert set(p.keys()) == {"id", "label", "wire"}
+        assert set(p.keys()) == {"id", "label", "wire", "chat_ready"}
+        assert isinstance(p["chat_ready"], bool)
 
 
 # ─────────────────────────────────────────────────────────────────────────

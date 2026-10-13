@@ -32,6 +32,9 @@ const RULES: [RegExp, string][] = [
   [/\b(\d+) draws\b/g, '$1 runs'],
   [/\bconfidence interval\b/g, 'range of the estimate'],
   [/\bstages?\b/g, 'step'],
+  // P30 (C12): an amount of energy ("… is lost: 12.5 MWh"); a price per MWh
+  // ("€/MWh") has no number before the unit and is left alone.
+  [/\b(\d+(?:\.\d+)?) MWh\b/g, '$1 megawatt-hours'],
 ]
 
 /** A finding title or action effect with the known engine terms replaced. */

@@ -208,7 +208,8 @@ def test_F1b_the_sweep_breaks_rather_than_raising_so_the_restore_runs(monkeypatc
 
     monkeypatch.setattr(SW, "_solve_once", fake_solve_once)
     monkeypatch.setattr(SW, "_restore_base_guarded", fake_restore)
-    monkeypatch.setattr(SW, "freeze_capacities", lambda n: (lambda: None))
+    # P27a: freeze_capacities(n, lock=None) — the runner passes its lock.
+    monkeypatch.setattr(SW, "freeze_capacities", lambda n, lock=None: (lambda: None))
     monkeypatch.setattr(SW, "_electrical_eue_mwh", lambda *a, **k: 0.0)
 
     conts = [{"id": f"c{i}", "mutate": lambda n: (lambda: None), "meta": {}}
@@ -238,7 +239,8 @@ def test_F1b2_a_failing_restore_does_not_destroy_the_partial_rows(monkeypatch):
         raise RuntimeError("solver died in the restore")
 
     monkeypatch.setattr(SW, "_solve_once", fake_solve_once)
-    monkeypatch.setattr(SW, "freeze_capacities", lambda n: (lambda: None))
+    # P27a: freeze_capacities(n, lock=None) — the runner passes its lock.
+    monkeypatch.setattr(SW, "freeze_capacities", lambda n, lock=None: (lambda: None))
     monkeypatch.setattr(SW, "_electrical_eue_mwh", lambda *a, **k: 0.0)
     import services.solver_service as _ss
     monkeypatch.setattr(_ss, "run_simulation", boom)

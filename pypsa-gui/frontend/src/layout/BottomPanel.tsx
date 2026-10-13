@@ -64,7 +64,7 @@ const COL_LABELS: Record<string, string> = {
   v_nom_0: 'V₀ (kV)', v_nom_1: 'V₁ (kV)', tap_ratio: 'Tap',
   p_set: 'P set (MW)', q_set: 'Q set (MVAr)', max_hours: 'Max hrs',
   efficiency_store: 'η store', efficiency_dispatch: 'η disp',
-  p_nom_extendable: 'Extendable', marginal_cost: 'MC ($/MWh)', capital_cost: 'CC ($/MW)',
+  p_nom_extendable: 'Extendable', marginal_cost: 'MC (€/MWh)', capital_cost: 'CC (€/MW)',
   sub_network: 'Sub-net',
   // Store-specific. e_nom is energy capacity (MWh); e_initial seeds SoC at t=0;
   // e_cyclic (bool) ties initial SoC = final SoC for cyclic operation.

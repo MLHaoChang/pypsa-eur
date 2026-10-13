@@ -12,14 +12,29 @@ import pypsa
 from services.commercial import settlement_inputs as _ic_settlement_inputs  # noqa: F401
 
 from services.project_context import (
+    RESULT_STATE_KEYS,
     STUDY_KEYS,
     ProjectContext,
     record_is_running,
     running_study_key,
     study_swap_refusal,
 )
+from services.undo_service import _UndoState
 
 logger = logging.getLogger(__name__)
+
+
+def _copy_undo_state(src: _UndoState) -> _UndoState:
+    """An independent copy of an undo stack (same entries, own deque and locks),
+    so the two contexts can never push onto or pop from each other's history."""
+    from collections import deque
+
+    with src.lock:
+        out = _UndoState()
+        out.stack = deque(src.stack, maxlen=src.stack.maxlen)
+        out.total_bytes = src.total_bytes
+        out.last_push = src.last_push
+    return out
 
 
 class PyPSAService:
@@ -206,6 +221,27 @@ class PyPSAService:
         "pypsa_request_scratch", default=None
     )
 
+    # P33b: a one-element list the request middleware binds beside the ctx.
+    # A handler's `_request_ctx.set(...)` (a mid-request swap: undo, "New",
+    # import) is made in a COPY of the context (threadpool / call_next task),
+    # so the middleware cannot see it after `call_next` — but it can see a
+    # mutation of a list it shares. `_note_request_ctx` writes the swapped-in
+    # ctx into it, so the middleware's edit-counter bump lands on the ctx the
+    # request ENDED on, not on the project the user just left.
+    _request_ctx_box: ContextVar[list | None] = ContextVar(
+        "pypsa_request_ctx_box", default=None
+    )
+
+    @classmethod
+    def bind_request_box(cls, box: list | None):
+        return cls._request_ctx_box.set(box)
+
+    @classmethod
+    def _note_request_ctx(cls, ctx: ProjectContext) -> None:
+        box = cls._request_ctx_box.get()
+        if box is not None:
+            box[0] = ctx
+
     @classmethod
     def bind_request_slot(cls, key: str | None):
         return cls._request_slot.set(key)
@@ -214,9 +250,59 @@ class PyPSAService:
     def bind_request_scratch(cls, key: str | None):
         return cls._request_scratch.set(key)
 
+    # A chat turn's binding CELL — a one-element list shared by reference.
+    #
+    # `_request_ctx` is a ContextVar, and a `set()` only reaches code running
+    # in the same Context. The chat SSE generator never runs in one: Starlette's
+    # `iterate_in_threadpool` drives every `next()` in a FRESH copy of the
+    # request task's context, so a project switch a tool makes — published by
+    # `_publish_active`, adopted by the dispatcher — lands on a per-item copy
+    # and is gone at the next `yield`. The rest of the turn then edits the
+    # PREVIOUS project while the model believes it moved. (The first fix for
+    # this, `adopt_active_from`, was tested by driving the generator in one
+    # context, which is exactly the case where it works.)
+    #
+    # A cell fixes it without any reader caring: the ContextVar holds the same
+    # LIST object in every copy that descends from the task that bound it, so a
+    # write into the list is seen by all of them — including the `asyncio.run`
+    # task an async import handler runs in, two copies further down.
+    # `routers/chat.py` binds it from the event-loop task (the only place a
+    # binding survives the per-item copies, as its `set_acting_user` note
+    # explains); nothing else binds one, so outside a chat turn every read
+    # below is exactly `_request_ctx.get()`.
+    _turn_cell: ContextVar[list | None] = ContextVar("pypsa_turn_cell", default=None)
+
+    @classmethod
+    def bind_turn_cell(cls):
+        """Share this request's binding with every context copied from here.
+
+        No-op (returns None) outside a request: with no request context the
+        process foreground `_active` is used, which is shared already.
+        """
+        current = cls._request_ctx.get()
+        if current is None:
+            return None
+        return cls._turn_cell.set([current])
+
+    @classmethod
+    def _scoped(cls) -> ProjectContext | None:
+        """The request-scoped context: the turn cell's if one is bound."""
+        cell = cls._turn_cell.get()
+        if cell is not None and cell[0] is not None:
+            return cell[0]
+        return cls._request_ctx.get()
+
+    @classmethod
+    def _set_scoped(cls, ctx: ProjectContext) -> None:
+        """Publish `ctx` as the request-scoped context, cell included."""
+        cls._request_ctx.set(ctx)
+        cell = cls._turn_cell.get()
+        if cell is not None:
+            cell[0] = ctx
+
     @classmethod
     def get_request_context(cls) -> ProjectContext | None:
-        return cls._request_ctx.get()
+        return cls._scoped()
 
     @classmethod
     def adopt_process_foreground(cls) -> ProjectContext | None:
@@ -268,8 +354,58 @@ class PyPSAService:
                 if existing_ctx is ctx and existing_key != key:
                     cls._contexts.pop(existing_key, None)
             cls._contexts[key] = ctx
-        if cls._request_ctx.get() is ctx:
+        if cls._scoped() is ctx:
             cls._request_slot.set(key)
+
+    @classmethod
+    def adopt_active_from(cls, snapshot) -> bool:
+        """Carry a project switch made inside `snapshot` into THIS context.
+
+        `snapshot` is a `contextvars.Context` that some other thread ran work
+        in. A `ContextVar.set()` performed inside `Context.run()` mutates that
+        Context and is invisible to the caller once `run()` returns — which is
+        exactly what happens to a chat tool: `chat_service` dispatches every
+        tool as `copy_context().run(...)` on an executor (it has to, because a
+        pool worker inherits no contextvars), so `_publish_active`'s
+        `_request_ctx.set(ctx)` landed on the copy and died with it. In server
+        mode the rest of the turn therefore kept operating on the PREVIOUS
+        project while the model believed it had switched.
+
+        Only the active-project var is carried, deliberately: the acting user
+        and session are bound per request and a tool has no business changing
+        them, so a blanket "copy every var back" would turn this into a
+        privilege-transfer primitive.
+
+        Returns True when a switch was actually adopted. No-op outside a
+        request, where `_publish_active` writes the process foreground
+        (`cls._active`) instead and nothing was ever lost.
+
+        NOT sufficient on its own, and that is why `_turn_cell` exists: this
+        writes `_request_ctx` in the CALLER's context, and the chat generator's
+        caller is itself a per-item copy that is discarded at the next yield.
+        It also cannot see a publish made one copy further down, inside the
+        `asyncio.run` task an async handler (every import) runs in. With a cell
+        bound the publish has already reached the turn and this is a no-op.
+        """
+        if cls._scoped() is None:
+            return False
+        try:
+            switched = snapshot[cls._request_ctx]
+        except (KeyError, TypeError):
+            return False
+        # Compared against the caller's RAW var — what the copy started as —
+        # not against `_scoped()`. Unchanged means the tool published nothing
+        # in this copy, which is not the same as "no switch": an async handler
+        # publishes one copy further down, straight into the cell, and the
+        # snapshot still holds the OLD context. Comparing with the cell would
+        # read that stale value as a switch and adopt it, quietly undoing the
+        # import that just happened.
+        if switched is None or switched is cls._request_ctx.get():
+            return False
+        if switched is cls._scoped():
+            return False
+        cls._set_scoped(switched)
+        return True
 
     @classmethod
     def _publish_active(cls, ctx: ProjectContext) -> None:
@@ -281,8 +417,9 @@ class PyPSAService:
         request — the solve dispatcher, eviction, direct in-process callers —
         it means the process foreground, exactly as before.
         """
-        if cls._request_ctx.get() is not None:
-            cls._request_ctx.set(ctx)
+        if cls._scoped() is not None:
+            cls._set_scoped(ctx)
+            cls._note_request_ctx(ctx)
             # Route by the NEW context's own identity, not by the slot the
             # request arrived on. A `reset_network()` mid-request produces an
             # UNBOUND context; writing it into the previous project's registry
@@ -312,7 +449,7 @@ class PyPSAService:
         fresh + empty; last assignment wins) — same race profile as the previous
         unlocked `_network` self-heal.
         """
-        scoped = cls._request_ctx.get()
+        scoped = cls._scoped()
         if scoped is not None:
             return scoped
         if cls._active is None:
@@ -356,7 +493,7 @@ class PyPSAService:
         A route that mutates anything before swapping must call THIS first.
         The check is pure: it reads the state and raises, and touches nothing.
         """
-        prev = ctx if ctx is not None else (cls._request_ctx.get() or cls._active)
+        prev = ctx if ctx is not None else (cls._scoped() or cls._active)
         if prev is None:
             return
         detail = study_swap_refusal(prev.solver_state, action)
@@ -367,7 +504,8 @@ class PyPSAService:
 
     @classmethod
     def reset_network(cls, *, allow_during_study: bool = False,
-                      action: str = "replace the network") -> None:
+                      action: str = "replace the network",
+                      carry: str = "fresh") -> None:
         # Swap in a fresh, UNBOUND context — no on-disk project owns it yet.
         # reset_network runs at the START of every load/import/restore (which
         # then re-bind via set_loaded_project at the end), and on explicit
@@ -375,7 +513,27 @@ class PyPSAService:
         # empty transient registry, so a load that fails mid-import leaves
         # identity unbound (rather than dangling on the previous project) and a
         # subsequent autosave can't misdirect.
-        prev = cls._request_ctx.get() or cls._active
+        # ★ `carry` — what of the outgoing context's PER-PROJECT state the new
+        # one inherits (P33b gate B-1). It used to hand over the outgoing
+        # `_UndoState` OBJECT on every swap; with both contexts resident
+        # (P33b step 4b) and an undo that lands (step 0), project B's edits
+        # then sat on project A's stack, and Undo in A replaced A's network
+        # with B's — which a save wrote into A's files.
+        #   "same"  — an in-place replace of the SAME project (undo): share
+        #             the undo stack, keep the edit counter and result state.
+        #   "copy"  — the same workspace gets a new network (io import into
+        #             the open draft): a COPY of the undo stack (the capture the
+        #             middleware pushed before the import stays undoable, and
+        #             the outgoing context's own stack is never touched) and
+        #             the counter.
+        #   "fresh" — (default) a DIFFERENT project or a blank draft (load,
+        #             template, bundle import, Saved-snapshot restore, New):
+        #             its own empty undo stack, counter 0 (the routes restore a
+        #             saved project's counter from metadata.json) and no result
+        #             state of the project being left.
+        if carry not in ("same", "copy", "fresh"):
+            raise ValueError(f"reset_network carry={carry!r}")
+        prev = cls._scoped() or cls._active
         # ★ REFUSE BY DEFAULT while a study is live (Phase 11).
         #
         # A study's worker closes over the `pypsa.Network` object captured
@@ -440,9 +598,33 @@ class PyPSAService:
             # replace the network); leaking its record keeps the mutex honest
             # and the panel reads "running" rather than showing a fabricated
             # result. A test pins this choice.
+            #
+            # ★ Cleared on the COPY, not on `prev` (P33b 10a). `prev` is the
+            # outgoing project's RESIDENT, registered context: clearing its own
+            # dict erased that project's finished study, so creating B from a
+            # template, loading B or pressing "New" and then re-activating A (a
+            # pointer swap) found no study while A's stored report was still
+            # there. The fresh context must not inherit A's study — that is the
+            # whole purpose of the clear, and the copy serves it. `prev`'s
+            # record still describes `prev`'s own network object, which the swap
+            # does not touch. (`set_network` keeps its in-place clear: there the
+            # measured network IS replaced.)
+            state = dict(prev.solver_state)
             for key in STUDY_KEYS:
-                if not record_is_running(prev.solver_state.get(key)):
-                    prev.solver_state[key] = None
+                if not record_is_running(state.get(key)):
+                    state[key] = None
+            if carry == "fresh":
+                # The project being left keeps its results; the new one starts
+                # without them (load / import / restore re-read their own from
+                # results_state.pkl; a template project has none).
+                for key in RESULT_STATE_KEYS:
+                    state[key] = None
+            if carry == "same":
+                undo_state = prev.undo
+            elif carry == "copy":
+                undo_state = _copy_undo_state(prev.undo)
+            else:
+                undo_state = _UndoState()
             cls._publish_active(ProjectContext(
                 network=n,
                 # ★ A COPY, not the same dict (Phase 11 review, BLOCKER 5).
@@ -464,9 +646,9 @@ class PyPSAService:
                 # and lifecycle surviving "New" — is preserved by the copy's
                 # VALUES. The lock stays shared: it guards both dicts, which
                 # is coarser than necessary and never wrong.
-                solver_state=dict(prev.solver_state),
+                solver_state=state,
                 solver_state_lock=prev.solver_state_lock,
-                undo=prev.undo,
+                undo=undo_state,
                 # Carry the mutation_lock forward too (B4 Inc 2): the foreground
                 # `get_lock()` then returns ONE persistent RLock across every
                 # reset/set swap — byte-identical to the old global `_lock`, and
@@ -483,6 +665,32 @@ class PyPSAService:
                 # build_context EXCLUDED from this carry (background-solve
                 # contexts get clean chat).
                 chat_state=prev.chat_state,
+                # P33b: the edit counter belongs to the project, like `undo`;
+                # a load / restore re-hydrates it from metadata.json.
+                network_revision=(prev.network_revision
+                                  if carry in ("same", "copy") else 0),
+                # Carry the user-uploaded time-series store forward, as a COPY
+                # for the same reason `solver_state` is copied above: the old ctx
+                # must not observe writes made after the swap.
+                #
+                # Carried at all because the store used to be a module global and
+                # so survived every swap. Nothing depends on the VALUES arriving
+                # here: every caller that resets in order to LOAD something sets
+                # the store explicitly a few lines later (load_project,
+                # import_bundle, create-from-template, restore-snapshot,
+                # `POST /network/reset`, `POST /io/new`, undo), so the copy is
+                # replaced before anyone reads it. `set_network` (clustering) is
+                # the case that genuinely needs the values — see there.
+                #
+                # Per `carry` (P33b master merge): "same" / "copy" keep the
+                # workspace, so they keep a copy of its profiles; "fresh" is a
+                # DIFFERENT project or a blank draft, so it starts with its own
+                # empty store, like its undo stack, counter and result state.
+                # load_project's late queue-solve refusal resets "fresh" on
+                # purpose (an empty context neither an eviction write-back nor
+                # a first save can misuse), so it gets no profiles either.
+                user_ts=(dict(prev.user_ts)
+                         if carry in ("same", "copy") else {}),
             ))
         else:
             cls._publish_active(ProjectContext(network=n))
@@ -541,6 +749,16 @@ class PyPSAService:
             # is an explicit user op the chat may have just triggered; killing
             # its session here would lose the very conversation that drove it.
             chat_state=prev.chat_state,
+            # P33b B3: replacing the network object is an edit. Its one
+            # production caller (POST /api/network/cluster) is also bumped by
+            # the HTTP or chat seam, so one clustering is +2 — harmless, the
+            # sentence ("edited since") stays true.
+            network_revision=prev.network_revision + 1,
+            # Same project, same uploaded profiles: clustering swaps the network
+            # object and nothing repopulates the store afterwards, so NOT carrying
+            # this would drop every uploaded profile the moment a network is
+            # re-clustered. A copy, not the object — see `reset_network`.
+            user_ts=dict(prev.user_ts),
         ))
         cls._clear_swap_caches()
 
@@ -575,6 +793,23 @@ class PyPSAService:
         # expose its in-flight conversation to background-solve agents and
         # cross-contaminate the chat.jsonl persist target. The fresh ctx gets
         # a default-factory ChatState (empty session, fresh lock).
+        #
+        # `user_ts` gets NO carry flag at all — not even an opt-in one like
+        # `carry_solver_state`. This is the builder behind every cold path
+        # (`activate_project`, `resolve_project_context`,
+        # `active_project.resolve_for_session` twice per authenticated request on
+        # every route, and the solve dispatcher), so a context built here must
+        # start with its own empty store or one session's uploaded profiles
+        # become readable — and persistable — from another session's project.
+        #
+        # The isolation is the dataclass default (`field(default_factory=dict)`),
+        # NOT the absence of a line here: `prev` above is `cls._active`, which
+        # after Step 0b is None for the whole life of a serving process (the first
+        # session adopts the foreground and clears it), so every `carry_*` in this
+        # method is already dead on a real server. A `carry_user_ts` flag would
+        # therefore look harmless AND be untestable through the request path —
+        # which is why there isn't one. Measured: a mutant that added the carry
+        # changed nothing, because `prev` is None.
         return ProjectContext(network=n, **kwargs)
 
     @classmethod
@@ -593,8 +828,9 @@ class PyPSAService:
         """
         with cls._registry_lock:
             ctx.last_interacted_at = time.monotonic()
-            if cls._request_ctx.get() is not None:
-                cls._request_ctx.set(ctx)
+            if cls._scoped() is not None:
+                cls._set_scoped(ctx)
+                cls._note_request_ctx(ctx)
                 cls._request_slot.set(ctx.registry_key)
             else:
                 cls._active = ctx
@@ -719,6 +955,31 @@ class PyPSAService:
     def get_solver_state_lock(cls) -> threading.RLock:
         """RLock guarding the active project's solver_state (old `_state_lock`)."""
         return cls._ensure_active().solver_state_lock
+
+    @classmethod
+    def get_user_ts(cls) -> dict:
+        """
+        The active project's user-uploaded time-series store.
+
+        What `services/user_timeseries._user_ts` resolves through on every
+        access, so the existing call sites that read or write that name reach
+        the CALLER'S project and nobody else's. The same shape of
+        indirection as `get_solver_state()` above, for a sharper reason: the
+        store is authoritative at save/export time, so sharing it across
+        sessions moved one tenant's demand profile into another tenant's
+        `network.nc`.
+
+        ★ Resolving through `_ensure_active()` means a READ of `_user_ts` on a
+        thread with no request context ASSIGNS `_active` a fresh unbound context
+        as a side effect — the same property `get_solver_state()` has, and the
+        reason `services/shutdown._context_solves` walks the contexts itself
+        instead of asking the `_state` proxy (asking created a phantom context
+        that the flush then saved). Nothing on the shutdown path reads the store
+        today: `_save_context` only touches it under `persist_user_ts`, and a
+        phantom context has `loaded_project is None`, which the desktop saver
+        skips. A new session-less reader has to keep that true.
+        """
+        return cls._ensure_active().user_ts
 
     # ── Resident-context registry methods (B2; dormant until B6/B8) ───────────
     # These manipulate the multi-project registry. Production paths still go
@@ -958,6 +1219,7 @@ class PyPSAService:
             import pathlib
 
             from routers.projects import _save_context
+            from services.project_context import may_rewrite_user_ts
             # Save under the ctx's own NAME and its own org-scoped storage
             # directory — NOT under `victim_id`, which since Step 0a is the
             # composite `org:uuid` registry key. Passing `storage_dir` also
@@ -968,7 +1230,8 @@ class PyPSAService:
                 victim_ctx,
                 victim_ctx.loaded_project,
                 expect=victim_ctx.loaded_project,
-                persist_user_ts=False,
+                # The victim's own series; see `may_rewrite_user_ts`.
+                persist_user_ts=may_rewrite_user_ts(victim_ctx),
                 storage_dir=(
                     pathlib.Path(victim_ctx.storage_dir)
                     if victim_ctx.storage_dir
@@ -1066,10 +1329,11 @@ class PyPSAService:
         with cls._registry_lock:
             ctx = cls._contexts[project_id]
             ctx.last_interacted_at = time.monotonic()  # resident switch → MRU (B9)
-            if cls._request_ctx.get() is not None:
+            if cls._scoped() is not None:
                 # Step 0b: inside a request the switch is per SESSION. Writing
                 # `_active` here would move every other user's foreground too.
-                cls._request_ctx.set(ctx)
+                cls._set_scoped(ctx)
+                cls._note_request_ctx(ctx)
                 cls._request_slot.set(project_id)
             else:
                 cls._active = ctx
@@ -1122,7 +1386,7 @@ class PyPSAService:
         # project was resolved correctly — `/api/network/meta` served the right
         # network with the wrong (None) binding, which the autosave `expect`
         # guard then refused.
-        scoped = cls._request_ctx.get()
+        scoped = cls._scoped()
         if scoped is not None:
             return scoped.registry_key
         return cls._active.registry_key if cls._active is not None else None
@@ -1144,7 +1408,7 @@ class PyPSAService:
         # Read-only: don't materialize a context just to answer "unbound?" — but
         # DO honour the request-scoped binding, or a caller reads its own
         # network under someone else's project name (Step 0b).
-        scoped = cls._request_ctx.get()
+        scoped = cls._scoped()
         if scoped is not None:
             return scoped.loaded_project
         return cls._active.loaded_project if cls._active is not None else None
@@ -1298,7 +1562,7 @@ class PyPSAService:
             return ctx
         if ensure:
             return cls._ensure_active()
-        return cls._request_ctx.get() or cls._active
+        return cls._scoped() or cls._active
 
     @classmethod
     def mark_transient(cls, component_class: str, name: str) -> None:
@@ -1345,6 +1609,16 @@ class PyPSAService:
         """
         with ctx.transient_lock:
             return set(ctx.transient_rows.get(component_class, set()))
+
+    @classmethod
+    def solve_target_context(cls) -> ProjectContext | None:
+        """
+        The context a solve on this thread belongs to: the one bound by
+        `solving_context()` (a background solve), else the active one; None
+        when there is none. Read-only, so a solve can find its own project's
+        sidecars (e.g. the island config) without touching the foreground.
+        """
+        return cls._transient_target(ensure=False)
 
     @classmethod
     def has_any_transient_rows(cls) -> bool:

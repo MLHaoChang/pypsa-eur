@@ -235,6 +235,7 @@ it('renders tool_request and tool_result frames in the transcript', async () => 
 })
 
 it('renders an approve/reject control for tool_pending_confirmation and calls postChatConfirm with confirmation_token on approve', async () => {
+  useUIStore.setState({ assistantDockOpen: true })
   renderPanel()
   await sendAndScript([
     { event: 'session_init', data: { session_id: 'sess-2' } },
@@ -253,7 +254,7 @@ it('renders an approve/reject control for tool_pending_confirmation and calls po
   const card = await screen.findByTestId('chat-confirmation-card')
   expect(card).toBeTruthy()
   const approve = screen.getByTestId('chat-confirm-approve')
-  // 'delete_component' is not in ChatPanel.tsx's TYPED_CONFIRMATION_TOOLS
+  // 'delete_component' is not in ConfirmationCard.tsx's TYPED_CONFIRMATION_TOOLS
   // set (only delete_project/save_project/save_project_as/
   // restore_project_snapshot/cascade_delete_bus require typed confirmation),
   // so Approve is enabled immediately with no typed input needed.
@@ -264,6 +265,60 @@ it('renders an approve/reject control for tool_pending_confirmation and calls po
     token: 'tok-abc',
     decision: 'approve',
   })
+})
+
+// P27b gate note 6 (fixed): approving a confirmation card runs the write on
+// the BACKEND's project. While this tab and the backend disagree about the
+// open project, Approve is disabled and the card says why; Deny writes
+// nothing and stays available.
+it('while the tab is mismatched, Approve is disabled with the banner sentence; Deny still works', async () => {
+  useUIStore.setState({ assistantDockOpen: true })
+  renderPanel()
+  await sendAndScript([
+    { event: 'session_init', data: { session_id: 'sess-mm' } },
+    {
+      event: 'tool_pending_confirmation',
+      data: {
+        tool_use_id: 'tu-mm', tool_name: 'delete_component',
+        args: { component_class: 'Generator', name: 'SmokeSolar' },
+        safety_tier: 'write', confirmation_token: 'tok-mm', ttl_seconds: 120,
+      },
+    },
+  ])
+  await screen.findByTestId('chat-confirmation-card')
+  act(() => { useUIStore.setState({ projectMismatch: { tab: 'Demo', backend: 'Other' } }) })
+  const SENTENCE = 'This tab shows Demo, but the app is now on Other. Changes from this tab are paused.'
+  try {
+    const approve = screen.getByTestId('chat-confirm-approve') as HTMLButtonElement
+    await waitFor(() => expect(approve.disabled).toBe(true))
+    expect(approve.title).toBe(SENTENCE)
+    expect(screen.getByTestId('chat-confirm-mismatch').textContent).toBe(SENTENCE)
+    const user = userEvent.setup()
+    await user.click(approve)
+    expect(postChatConfirm).not.toHaveBeenCalled()
+    await user.click(screen.getByTestId('chat-confirm-deny'))
+    expect(postChatConfirm).toHaveBeenCalledWith('sess-mm', { token: 'tok-mm', decision: 'deny' })
+  } finally {
+    act(() => { useUIStore.setState({ projectMismatch: null }) })
+  }
+})
+
+it('does not render the confirmation card while the dock is closed', () => {
+  useUIStore.setState({ assistantDockOpen: false })
+  useChatStore.setState({
+    sessionId: 'sess-closed',
+    pending: {
+      tool_use_id: 'tu-closed',
+      tool_name: 'delete_component',
+      args: { component_class: 'Generator', name: 'SmokeSolar' },
+      safety_tier: 'write',
+      confirmation_token: 'tok-closed',
+      ttl_seconds: 120,
+      expires_at_epoch_ms: Date.now() + 120_000,
+    },
+  })
+  renderPanel()
+  expect(screen.queryByTestId('chat-confirmation-card')).toBeNull()
 })
 
 // ── An unmount mid-turn must not kill the turn ────────────────────────────
@@ -446,4 +501,52 @@ it('re-fires the stick-to-bottom autoscroll when the assistant dock expands', as
   } finally {
     scrollSpy.mockRestore()
   }
+})
+
+// CH-2 — an agent-driven raw import is a rebind to an UNBOUND project. The
+// handler used to act only on a truthy `to`, so `to: null` left
+// `currentProject` on the old name; the autosave then sent `expect=<old>` to a
+// backend that was unbound, which the save guard lets through (its identity
+// check only fires against a BOUND backend), and the imported network was
+// written over the previous project's folder. ImportExport.tsx clears the
+// active project for the same import made by hand; this pins chat to that.
+it('clears the active project when the agent rebinds to an unbound (imported) network', async () => {
+  renderPanel()
+  await sendAndScript([
+    { event: 'session_init', data: { session_id: 'sess-import' } },
+    {
+      event: 'project_rebound',
+      data: { from: 'Demo', to: null, via_tool: 'import_network_nc' },
+    },
+  ])
+  await waitFor(() => expect(useUIStore.getState().currentProject).toBeNull())
+})
+
+it('still follows a rebind to a named project (control)', async () => {
+  renderPanel()
+  await sendAndScript([
+    { event: 'session_init', data: { session_id: 'sess-activate' } },
+    {
+      event: 'project_rebound',
+      data: { from: 'Demo', to: 'Other', via_tool: 'activate_project' },
+    },
+  ])
+  await waitFor(() => expect(useUIStore.getState().currentProject).toBe('Other'))
+})
+
+it('renders structured task checkpoints and downloads from real tool_result frames', async () => {
+  renderPanel()
+  await sendAndScript([
+    { event: 'session_init', data: { session_id: 'sess-task' } },
+    { event: 'tool_request', data: { tool_use_id: 'chart-result', tool_name: 'create_chart', args: {}, safety_tier: 'write' } },
+    { event: 'tool_result', data: { tool_use_id: 'chart-result', tool_name: 'create_chart', result: {
+      filename: 'chart.png', download_url: '/api/projects/Demo/uploads/0123456789abcdef/blob',
+      _task: { task_id: '0ba037fe-bc46-43d3-a9c2-9b587c9cd50e', title: 'Deliver study', status: 'ready', completed_steps: 3, total_steps: 4,
+        next_step: { tool: 'build_delivery', status: 'pending' } },
+    } } },
+    { event: 'turn_done', data: { usage_acc: { input_tokens: 10, output_tokens: 10 } } },
+  ])
+  expect(await screen.findByText('ready · 3 / 4 steps')).toBeTruthy()
+  expect(screen.getByText('Next: build_delivery (pending)')).toBeTruthy()
+  expect(screen.getByTestId('assistant-file-download').getAttribute('href')).toBe('/api/projects/Demo/uploads/0123456789abcdef/blob')
 })

@@ -1534,7 +1534,7 @@ function Co2PricePerPeriod({
         and at least one investment period is defined.{' '}
         {draft.multi_investment_periods
           ? <>Add periods under <span className="font-medium text-text">Model Horizon</span>.</>
-          : <>Toggle <span className="font-medium text-text">Multi-investment periods</span> in General.</>}
+          : <>Set <span className="font-medium text-text">Model Horizon → Mode</span> to Multi-period.</>}
       </div>
     )
   }
@@ -1648,7 +1648,7 @@ export function ReliabilityAssumptions({
           hint="When > 0, a slack 'load_shedding' generator is added on every bus at this marginal_cost. Lets the LP drop demand instead of failing when supply is tight. Typical 3 000–10 000 €/MWh."
         />
         <p className="text-[10px] text-muted mt-2">
-          Lost-load energy + cost surface in the Results → LoadFlow tab when
+          Lost-load energy + cost surface in the Results → Lost load tab when
           this is set and the LP actually sheds.
         </p>
 

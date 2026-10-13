@@ -58,6 +58,7 @@ import types
 import pytest
 
 from services import chat_service
+from harness import budget as harness_budget
 
 # ─────────────────────────────────────────────────────────────────────────
 # Minimal local fake SDK plumbing. Deliberately NOT imported from
@@ -204,9 +205,9 @@ def _drive_one_turn(tmp_projects_dir, install_network, fake_anthropic_module,
 
     # Retryable errors sleep BASE_STREAM_RETRY_DELAY * 2**attempt between
     # attempts by default — zero it so this test doesn't actually wait.
-    monkeypatch.setattr(chat_service, "BASE_STREAM_RETRY_DELAY", 0.0)
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRY_DELAY", 0.0)
-    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRIES", 3)
+    monkeypatch.setattr(harness_budget, "BASE_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(harness_budget, "MAX_STREAM_RETRIES", 3)
 
     # The managed, non-pattern-matching key value this precondition is about.
     monkeypatch.setenv("PYPSA_GUI_LLM_KEY__ZZTEST", SECRET)

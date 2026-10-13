@@ -64,11 +64,30 @@ describe('tagging tour prepare (obstacle 3)', () => {
     renderPanel(new QueryClient({ defaultOptions: { queries: { retry: false } } }))
     await user.click(screen.getByTestId('eh-reference-design-toggle'))
     await user.click(screen.getByTestId('eh-tagging-guide-button'))
-    await waitFor(() => expect(useUIStore.getState().propertiesEditRequest).toBe('Bus'))
+    // P30 (B10): the request names the bus prepare selected.
+    await waitFor(() => expect(useUIStore.getState().propertiesEditRequest)
+      .toEqual({ type: 'Bus', name: 'grid' }))
     const s = useUIStore.getState()
     expect(s.activeSlidePanel).toBeNull()
     expect(s.selectedComponent).toEqual({ type: 'Bus', name: 'grid' })
     expect(s.rightPanelOpen).toBe(true)
+  })
+
+  it('finishes a pending target wait after the document environment is torn down', async () => {
+    vi.useFakeTimers()
+    const qc = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } })
+    qc.setQueryData(nk('Demo', 'buses'), [{ name: 'grid' }])
+    const pending = prepareTaggingTour(qc, 'Demo', { waitMs: 100 })
+    try {
+      vi.stubGlobal('document', undefined)
+      await vi.advanceTimersByTimeAsync(100)
+      await expect(pending).resolves.toBeUndefined()
+      // Continue past the deadline: no later polling callback may throw.
+      await vi.advanceTimersByTimeAsync(1000)
+    } finally {
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    }
   })
 
   it('reads the buses query cache first and falls back to the first bus', async () => {

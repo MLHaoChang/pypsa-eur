@@ -52,6 +52,8 @@ from services import project_registry
 # comes back.
 try:
     from gridspine.drivers.capacity import capacity_table as _capacity_table
+    from gridspine.drivers.connection import assess_facility as _assess_facility
+    from gridspine.drivers.connection import connection_table as _connection_table
     from gridspine.drivers.capacity import compute_capacity_ac as _compute_capacity_ac
     from gridspine.drivers.readback import ingest_powerfactory_results as _ingest_readback
     from gridspine.drivers.readback import readback_status as _readback_status
@@ -934,6 +936,35 @@ def compute_capacity(project, bus: str, kind: str) -> dict:
         except ContractError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"rows": _capacity_records(rows)}
+
+
+def get_connection(project, assessment_id: str | None = None, hour: int | None = None) -> dict:
+    """Increment 10: the stored connection-point assessments of the latest
+    run (empty before the first), optionally one assessment and/or one hour."""
+    require_planning(project)
+    table = _connection_table(run_dir(project))
+    if assessment_id is not None:
+        table = table[table["assessment_id"] == assessment_id]
+    if hour is not None:
+        table = table[table["hour"] == _hour(hour)]
+    return {"rows": _capacity_records(table)}
+
+
+def assess_facility(project, spec: dict) -> dict:
+    """Increment 10: assess one facility (a load plus an on-site unit) at every
+    selected hour against the grid-code profile, and keep the result in the run
+    and its bundles. 404 before a completed, screened run; 409 while a study is
+    queued or running; 422 for a facility the grid or the profile refuses."""
+    require_planning(project)
+    _refuse_while_active(project, "assessing a connection")
+    rdir = run_dir(project)
+    with _capacity_lock(rdir):
+        try:
+            rows = _assess_facility(rdir, spec)
+        except ContractError as exc:
+            status = 404 if "screened run" in str(exc) else 422
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+    return {"assessment_id": str(rows["assessment_id"].iloc[0]), "rows": _capacity_records(rows)}
 
 
 def get_readback(project) -> dict:

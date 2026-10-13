@@ -21,6 +21,7 @@ from openpyxl import Workbook
 
 import main
 from services import chat_tools, chat_service, upload_service
+from harness.providers import wiring as harness_wiring
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -887,7 +888,7 @@ class TestReconstructRespectsTheTurnProfile:
         # The ambient path must not be what answers this.
         built_ambient: list = []
         monkeypatch.setattr(
-            chat_service, "_build_anthropic_client",
+            harness_wiring, "_build_anthropic_client",
             lambda: (built_ambient.append(True), (None, "missing_api_key"))[1],
         )
 

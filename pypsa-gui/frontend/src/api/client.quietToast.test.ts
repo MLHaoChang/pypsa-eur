@@ -13,6 +13,12 @@ vi.mock('react-hot-toast', () => ({
   toast: { error: (...a: unknown[]) => toastError(...a), success: vi.fn(), dismiss: vi.fn() },
 }))
 
+const appLog = vi.fn()
+vi.mock('../store/simulationStore', async (orig) => ({
+  ...(await orig<typeof import('../store/simulationStore')>()),
+  appLog: (...a: unknown[]) => appLog(...a),
+}))
+
 const client = (await import('./client')).default
 
 type Rejected = (err: unknown) => Promise<never>
@@ -35,6 +41,7 @@ function axiosError(status: number, data: unknown, url = '/projects/demo', metho
 
 beforeEach(() => {
   toastError.mockReset()
+  appLog.mockReset()
 })
 
 describe('quiet-toast codes', () => {
@@ -71,5 +78,27 @@ describe('quiet-toast codes', () => {
     ).rejects.toBeTruthy()
     expect(toastError).toHaveBeenCalledTimes(1)
     expect(String(toastError.mock.calls[0][0])).toContain('sequential-MC')
+  })
+})
+
+// P30 (B8): a caller that shows the failure itself (`skipErrorToast`) still
+// leaves a line in the app log — at INFO, never ERROR, and never a toast.
+describe('quiet failures (skipErrorToast)', () => {
+  it('quiet failure logs INFO', async () => {
+    const err = axiosError(500, { detail: 'boom' }, '/results/eh_study', 'get')
+    ;(err.config as Record<string, unknown>).skipErrorToast = true
+    await expect(rejectedHandler()(err)).rejects.toBeTruthy()
+    expect(toastError).not.toHaveBeenCalled()
+    expect(appLog).toHaveBeenCalledTimes(1)
+    expect(appLog.mock.calls[0][0]).toBe('INFO')
+    expect(String(appLog.mock.calls[0][1])).toContain('GET /results/eh_study')
+    expect(String(appLog.mock.calls[0][1])).toContain('boom')
+  })
+
+  it('a loud failure still logs ERROR and toasts', async () => {
+    await expect(rejectedHandler()(axiosError(500, { detail: 'boom' }, '/results/eh_study', 'get')))
+      .rejects.toBeTruthy()
+    expect(toastError).toHaveBeenCalledTimes(1)
+    expect(appLog.mock.calls.map(c => c[0])).toEqual(['ERROR'])
   })
 })

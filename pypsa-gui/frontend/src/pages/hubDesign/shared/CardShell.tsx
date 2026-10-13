@@ -11,6 +11,7 @@ import type { HubStep } from '../hubDesignStore'
 import { useHubDesignStore } from '../hubDesignStore'
 import { useUIStore } from '../../../store/uiStore'
 import { useTerm } from './Term'
+import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
 
 const INTRO_KEY = {
   start: 'hub_start', site: 'hub_site', goal: 'hub_goal', results: 'hub_results',
@@ -30,9 +31,12 @@ export function AskButton({ testId, text, label = 'Ask about this' }: {
 
 /** Sends `text` — or each of several texts, in order, as one group — to the
  *  assistant. `display` is what the transcript shows for each (P25 gate B2). */
-export function DelegateButton({ testId, text, display, label = 'Let the assistant do this' }: {
+export function DelegateButton({ testId, text, display, label = 'Let the assistant do this',
+  disabled = false, disabledTitle }: {
   testId: string; text: string | readonly string[]; display?: string | readonly string[]
   label?: string
+  /** A1-FE: e.g. while a risk check re-solves the live network. */
+  disabled?: boolean; disabledTitle?: string
 }) {
   const mode = useUIStore(s => s.uiMode)
   const send = () => {
@@ -45,12 +49,15 @@ export function DelegateButton({ testId, text, display, label = 'Let the assista
       ...(labels[i] ? { label: labels[i] } : {}), ...(group ? { group } : {}) }))
   }
   return (
-    <button type="button" data-testid={testId} onClick={send} title={delegateTitle(mode)}
-      className="inline-flex items-center gap-1 px-2 py-1 border border-accent/60 rounded text-[11px] text-accent hover:bg-accent/10">
+    <button type="button" data-testid={testId} onClick={send} disabled={disabled}
+      title={disabled && disabledTitle ? disabledTitle : delegateTitle(mode)}
+      className="inline-flex items-center gap-1 px-2 py-1 border border-accent/60 rounded text-[11px] text-accent hover:bg-accent/10 disabled:opacity-50 disabled:hover:bg-transparent">
       <Sparkles size={12} /> {label}
     </button>
   )
 }
+
+const EDIT_STEPS = new Set<HubStep>(['site', 'goal', 'improve'])
 
 const STEP_NAME: Record<HubStep, string> = {
   start: 'Start', site: 'Site', goal: 'Goal', results: 'Results', improve: 'Improve',
@@ -69,6 +76,12 @@ export function CardShell({ step, testId, title, next, children }: {
   const intro = useTerm(INTRO_KEY[step])
   const archetype = useHubDesignStore(s => s.archetype) as EhArchetype
   const setStep = useHubDesignStore(s => s.setStep)
+  // A1-FE: the steps whose footer request edits the network (Site fixes the
+  // gaps, Improve applies a recommendation) and Goal (its VOLL fix) wait
+  // while a risk check re-solves the live network; the note says why.
+  const edits = EDIT_STEPS.has(step)
+  const liveStudy = useLiveStudyRunning(edits)
+  const footerEdits = step === 'site' || step === 'improve'
   return (
     <section data-testid={testId}
       className="flex flex-col gap-4 rounded-lg border border-border bg-panel p-5">
@@ -77,9 +90,13 @@ export function CardShell({ step, testId, title, next, children }: {
         <p className="text-[12px] text-muted leading-relaxed">{intro}</p>
       </header>
       <div className="flex flex-col gap-4">{children}</div>
+      {liveStudy && (
+        <p data-testid="hub-live-study-note" className="text-[12px] text-warn">{LIVE_STUDY_EDIT}</p>
+      )}
       <footer className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
         <AskButton testId={`hub-ask-${step}`} text={footerAskText(step)} />
-        <DelegateButton testId={`hub-delegate-${step}`} text={footerDelegateText(step, archetype)} />
+        <DelegateButton testId={`hub-delegate-${step}`} text={footerDelegateText(step, archetype)}
+          disabled={footerEdits && liveStudy} disabledTitle={LIVE_STUDY_EDIT} />
         {next && (
           <button type="button" data-testid={`hub-next-${step}`}
             onClick={() => setStep(next, { user: true })}

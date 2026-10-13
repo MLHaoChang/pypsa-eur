@@ -260,17 +260,36 @@ def _tv_network() -> pypsa.Network:
     return n
 
 
-def test_contingency_mutation_survives_the_user_ts_reapply(monkeypatch):
-    from routers import network as network_router
-
+def test_contingency_mutation_survives_the_user_ts_reapply():
     n = _tv_network()
     PyPSAService.set_network(n)          # makes the sweep's solves FOREGROUND
 
     # Populate the store exactly as a GUI profile upload does, with the
     # PRISTINE (unstressed) series — this is what used to clobber the
     # mutation mid-sweep.
-    store = {("loads", "p_set", "l"): pd.Series([100.0] * N, index=n.snapshots)}
-    monkeypatch.setattr(network_router, "_user_ts", store, raising=False)
+    #
+    # ★ Written through `services.user_timeseries._user_ts`, and that detail is
+    # the whole test. It used to be
+    #     monkeypatch.setattr(network_router, "_user_ts", store)
+    # which rebinds the name on `routers.network`. `routers.network` only
+    # RE-EXPORTS it; `_reapply_user_ts_to_network` is defined in
+    # `services/user_timeseries.py` and resolves `_user_ts` in THAT module's
+    # globals, so the patch reached nothing the code under test reads. The store
+    # it consulted stayed EMPTY, the reapply was a no-op whether the guard below
+    # was present or not, and the assertion passed for a reason unrelated to the
+    # guard: deleting `not _transient_profiles` from the gate in
+    # `services/solver_service.py` — the exact regression this test is named for
+    # — left it green. Measured, both ways, in
+    # `docs/superpowers/findings/2026-09-28-the-adequacy-reapply-test-patches-a-name-the-code-never-reads.md`.
+    #
+    # `_user_ts` is a view onto the ACTIVE context's store, and `set_network`
+    # above published the context this test's solves run on, so writing through
+    # the view lands in the store the sweep will read. The autouse
+    # `reset_backend` fixture clears it after the test, which is why there is no
+    # `monkeypatch` left to undo anything.
+    from services.user_timeseries import _user_ts
+
+    _user_ts[("loads", "p_set", "l")] = pd.Series([100.0] * N, index=n.snapshots)
 
     scenario = {"id": "coldsnap", "kind": "parametric",
                 "frequency_per_year": 2.0,

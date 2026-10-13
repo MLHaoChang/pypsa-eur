@@ -564,3 +564,27 @@ def test_the_state_reports_whether_the_key_can_be_redacted(local_client, no_prob
 def test_an_unset_key_claims_neither_here_either(local_client):
     """ADR-0001: absent is not 'will leak'."""
     assert local_client.get("/api/local-settings").json()["key_redactable"] is None
+
+
+# ── P30 (B6): where a new project is saved ────────────────────────────────
+# The New-project dialog's "Saved to" line reads this. Local mode stores each
+# project at `<settings.projects_root>/<name>/` (`storage_paths`: no org
+# segment locally; `project_registry.project_dir` rejoins the row with this
+# root). It is NOT `flat_projects_root` — that is the auth-disabled legacy
+# store, which a local-mode project never uses.
+
+def test_get_reports_the_projects_root_a_new_project_lands_in(local_client):
+    import uuid
+    from pathlib import Path
+
+    from services import storage_paths
+    from settings import get_settings
+
+    body = local_client.get("/api/local-settings").json()
+    root = Path(get_settings().projects_root)
+    assert body["projects_root"] == str(root)
+    assert body["projects_root"] != str(get_settings().flat_projects_root)
+    rel = storage_paths.storage_path_for(
+        uuid.uuid4(), uuid.uuid4(), "Demo Hub", set(),
+        org_segment=storage_paths.use_org_segment())
+    assert str(root / rel) == str(Path(body["projects_root"]) / "Demo Hub")

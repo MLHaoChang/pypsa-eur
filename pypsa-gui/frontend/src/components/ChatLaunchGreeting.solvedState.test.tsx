@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { networkApi } from '../api/network'
 import { resultsApi, simulationApi } from '../api/simulation'
 import { getApiKeySettings } from '../api/chat'
+import { nk } from '../utils/queryKeys'
 import ChatLaunchGreeting from './ChatLaunchGreeting'
 
 // Bug 2 (guided-mode spec §2.2): after an FMEA sweep the sweep's closing base
@@ -13,10 +14,10 @@ import ChatLaunchGreeting from './ChatLaunchGreeting'
 // solve was recorded). The canvas footer and SnapshotPicker read the latter and
 // say "Run a simulation to enable"; the greeting must not claim "Solved" then.
 
-vi.mock('../api/network', () => ({ networkApi: { getMeta: vi.fn() } }))
+vi.mock('../api/network', () => ({ networkApi: { getMeta: vi.fn(), undoInfo: vi.fn() } }))
 vi.mock('../api/simulation', () => ({
   simulationApi: { getStatus: vi.fn() },
-  resultsApi: { getEhStudy: vi.fn() },
+  resultsApi: { getEhStudy: vi.fn(), getEhReview: vi.fn() },
 }))
 vi.mock('../api/chat', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/chat')>()
@@ -93,16 +94,19 @@ describe('greeting solve line (bug 2)', () => {
 // P24-FE re-gate: Guided hides the header Run button, so after a study the
 // greeting must not send the user to "run a simulation"; it points to the hub.
 describe('greeting solve line in Guided', () => {
-  it('after a study re-solve it points to Hub design, not to a hidden Run', async () => {
+  // P28 A4 (changed assertion): with no hub study, a re-solve's fresh
+  // dispatch is not a hub result — the spec §3.2 sentence points to Results.
+  it('after a study re-solve it points to Results, not to a hidden Run', async () => {
     useUIStore.setState({ uiMode: 'guided' })
     vi.mocked(simulationApi.getStatus).mockResolvedValue({
       running: false, status: 'idle', condition: null,
       objective: null, solve_time: null, dispatch: 'fresh',
     })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
     renderGreeting()
-    const line = await screen.findByTestId('chat-launch-solve')
-    expect(line.textContent).toBe('A study has run on this network — its results are in Hub design.')
-    expect(line.textContent).not.toMatch(/run a simulation/i)
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
+      .toBe('A calculation has updated this network — see Results.'))
+    expect(screen.getByTestId('chat-launch-solve').textContent).not.toMatch(/run a simulation/i)
   })
 })
 
@@ -121,7 +125,7 @@ describe('greeting solve line in Guided after the hub study (P26)', () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done' } as never)
     renderGreeting()
     await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
-      .toBe('A study has run on this network — its results are in Hub design.'))
+      .toBe('The last study’s results are in Hub design.'))
   })
 
   it('a running hub study → says so and where to follow it', async () => {
@@ -133,13 +137,16 @@ describe('greeting solve line in Guided after the hub study (P26)', () => {
       .toBe('The hub study is running — follow it in Hub design.'))
   })
 
-  it('no hub study yet → still "Not solved yet."', async () => {
+  // P28 C6 (changed assertion): Guided opens with where to start, not
+  // "Not solved yet." (Expert keeps it, below).
+  it('no hub study yet → the C6 sentence', async () => {
     useUIStore.setState({ uiMode: 'guided' })
     vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
     renderGreeting()
     await vi.waitFor(() => expect(resultsApi.getEhStudy).toHaveBeenCalled())
-    expect((await screen.findByTestId('chat-launch-solve')).textContent).toBe('Not solved yet.')
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
+      .toBe('No study has run yet — start in Hub design.'))
   })
 
   it('Expert is unchanged: "Not solved yet." and the study record is not read', async () => {
@@ -169,7 +176,7 @@ describe('greeting follows the hub study with the hub closed (P26 gate B1)', () 
     await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
       .toBe('The hub study is running — follow it in Hub design.'))
     await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
-      .toBe('A study has run on this network — its results are in Hub design.'), { timeout: 5000 })
+      .toBe('The last study’s results are in Hub design.'), { timeout: 5000 })
   })
 
   it.each(['failed', 'aborted'])('a %s hub study → "did not finish", not "Not solved yet."', async (st) => {
@@ -179,5 +186,231 @@ describe('greeting follows the hub study with the hub closed (P26 gate B1)', () 
     renderGreeting()
     await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
       .toBe('The last hub study did not finish — see Hub design.'))
+  })
+})
+
+
+// P28 A4 + C6 (deferred spec 2026-09-28 §3.2): Guided reads the hub study
+// RECORD and, once it is done, the review's `stale` boolean (key
+// nk(project,'results','eh_review'), no poll). A re-solve with no hub study
+// is not a hub result; never solved → where to start. Expert is untouched
+// and never reads the review.
+describe('greeting: stale review, the fresh fallback and C6 (P28)', () => {
+  const NONE = { running: false, status: 'idle', condition: null,
+    objective: null, solve_time: null, dispatch: 'none' } as const
+  const STALE = 'A study has run, but the network was solved since — run it again in Hub design.'
+  const DONE = 'The last study’s results are in Hub design.'
+  const review = (stale: boolean) => ({ status: 'ok', source: 's', stale, summary: {},
+    findings: [], next_steps: [] })
+
+  it('hub done, review stale → the stale sentence', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done' } as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(true) as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent).toBe(STALE))
+  })
+
+  it('hub done, review not stale → the results-in-Hub-design sentence', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done' } as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(false) as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(resultsApi.getEhReview).toHaveBeenCalled())
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent).toBe(DONE))
+  })
+
+  it('hub done: the study record decides, not dispatch (a later foreground solve reads the review)', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({
+      running: false, status: 'completed', condition: 'optimal',
+      objective: 1, solve_time: 3, dispatch: 'fresh',
+    })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done' } as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(true) as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent).toBe(STALE))
+  })
+
+  // O1 (owner, 2026-09-30) / gate probe Q16: live dispatch the backend marks
+  // stale says the network changed since its last solve — the finished
+  // study's results no longer describe it either (pre-P28 precedence and
+  // sentence: the network was edited, not re-solved — gate R-1).
+  it('hub done, review not stale, live dispatch stale → the changed-since sentence', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({
+      running: false, status: 'completed', condition: 'optimal',
+      objective: 1, solve_time: 3, dispatch: 'stale',
+    })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done' } as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(false) as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(resultsApi.getEhReview).toHaveBeenCalled())
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent).toBe(
+      'Solved earlier, but the results are stale — the network changed since.'))
+  })
+
+  it('the done sentence claims nothing about the current network', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done' } as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(false) as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent).toBe(DONE))
+    expect(DONE).not.toMatch(/this network|match/)
+  })
+
+  it('fresh dispatch, no foreground solve, no hub study (204) → "see Results", not Hub design', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE, dispatch: 'fresh' })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
+    renderGreeting()
+    await vi.waitFor(() => expect(resultsApi.getEhStudy).toHaveBeenCalled())
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
+      .toBe('A calculation has updated this network — see Results.'))
+    expect(screen.getByTestId('chat-launch-solve').textContent).not.toMatch(/Hub design/)
+    expect(resultsApi.getEhReview).not.toHaveBeenCalled()
+  })
+
+  it('Guided never solved → "No study has run yet — start in Hub design."', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
+    renderGreeting()
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
+      .toBe('No study has run yet — start in Hub design.'))
+  })
+
+  it('Expert never solved → "Not solved yet."; Expert never fetches eh_review', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done' } as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(true) as never)
+    renderGreeting()
+    expect((await screen.findByTestId('chat-launch-solve')).textContent).toBe('Not solved yet.')
+    await new Promise(r => setTimeout(r, 30))
+    expect(resultsApi.getEhReview).not.toHaveBeenCalled()
+  })
+
+  it('Guided does not read the review until the study is done', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'running' } as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
+      .toBe('The hub study is running — follow it in Hub design.'))
+    expect(resultsApi.getEhReview).not.toHaveBeenCalled()
+  })
+})
+
+
+// P33b 10b (D-2, D-3): the study record's `edited_since_study` says an edit
+// seam was crossed since the study started. Precedence among the done arms:
+// edited > solved-since > dispatch-stale > done — the solved-since arm now
+// sits above dispatch-stale (an owner-approved change from O1, reachable only
+// for a record with `edited_since_study: null`). `null` never selects a
+// sentence. Expert is untouched and never reads the record.
+describe('greeting: edited since the study (P33b)', () => {
+  const NONE = { running: false, status: 'idle', condition: null,
+    objective: null, solve_time: null, dispatch: 'none' } as const
+  const STALE_DISPATCH = { running: false, status: 'completed', condition: 'optimal',
+    objective: 1, solve_time: 3, dispatch: 'stale' } as const
+  const EDITED = 'The network has been edited since the last study — run it again in Hub design.'
+  const SOLVED_SINCE = 'A study has run, but the network was solved since — run it again in Hub design.'
+  const DONE = 'The last study’s results are in Hub design.'
+  const review = (stale: boolean, edited: boolean | null = null) => ({ status: 'ok', source: 's',
+    stale, edited_since_study: edited, summary: {}, findings: [], next_steps: [] })
+  const line = () => screen.getByTestId('chat-launch-solve').textContent
+
+  it('hub done + edited → the edited sentence', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', edited_since_study: true } as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(false, true) as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(line()).toBe(EDITED))
+  })
+
+  it('edited and review stale → edited wins', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', edited_since_study: true } as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(true, true) as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(resultsApi.getEhReview).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 20))
+    await vi.waitFor(() => expect(line()).toBe(EDITED))
+  })
+
+  it('edited and live dispatch stale → edited wins', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...STALE_DISPATCH })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', edited_since_study: true } as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(false, true) as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(line()).toBe(EDITED))
+  })
+
+  it('not edited + review stale → the solved-since sentence (unchanged)', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', edited_since_study: false } as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(true, false) as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(line()).toBe(SOLVED_SINCE))
+  })
+
+  // D-3: the one combination whose sentence changes from O1 — today it read
+  // the dispatch-stale sentence. Reachable only for an Unavailable record.
+  it('review stale + dispatch stale + edited null → the solved-since sentence (D-3)', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...STALE_DISPATCH })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', edited_since_study: null } as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(true, null) as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(resultsApi.getEhReview).toHaveBeenCalled())
+    await vi.waitFor(() => expect(line()).toBe(SOLVED_SINCE))
+  })
+
+  it('edited null → the O1 done sentence (claims nothing)', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', edited_since_study: null } as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(false, null) as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(resultsApi.getEhReview).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 20))
+    await vi.waitFor(() => expect(line()).toBe(DONE))
+  })
+
+  it('Expert with edited_since_study: true → "Not solved yet." and the record is not read', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', edited_since_study: true } as never)
+    renderGreeting()
+    expect((await screen.findByTestId('chat-launch-solve')).textContent).toBe('Not solved yet.')
+    await new Promise(r => setTimeout(r, 30))
+    expect(resultsApi.getEhStudy).not.toHaveBeenCalled()
+    expect(networkApi.undoInfo).not.toHaveBeenCalled()
+  })
+
+  it('Guided: an edit seen on the polled revision re-reads the record without a reload', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 0, unsaved: false, network_revision: 4 })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', edited_since_study: false } as never)
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review(false, false) as never)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><ChatLaunchGreeting /></QueryClientProvider>)
+    await vi.waitFor(() => expect(line()).toBe(DONE))
+    await vi.waitFor(() => expect(networkApi.undoInfo).toHaveBeenCalled())
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', edited_since_study: true } as never)
+    await act(async () => {
+      client.setQueryData(nk('dc', 'undoInfo'), { depth: 1, unsaved: true, network_revision: 5 })
+      await new Promise(r => setTimeout(r, 5))
+    })
+    await vi.waitFor(() => expect(line()).toBe(EDITED))
   })
 })

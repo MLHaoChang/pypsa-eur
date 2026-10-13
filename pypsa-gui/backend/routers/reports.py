@@ -69,6 +69,7 @@ an id outside the slug charset cannot name a figure that exists.
 from __future__ import annotations
 
 import logging
+import pathlib
 import uuid
 from types import SimpleNamespace
 
@@ -289,12 +290,23 @@ def _current_study_report() -> dict | None:
         return None
 
 
-def _render_figures(eh_report: dict | None) -> dict[str, bytes]:
-    """WP4's three PNGs from the EH sections that are established; each may be absent."""
+def _render_figures(eh_report: dict | None,
+                    project_dir: pathlib.Path | None = None) -> dict[str, bytes]:
+    """
+    WP4's three PNGs from the EH sections that are established, each may be
+    absent; plus the 3D site view's capture (`sites/<id>/thumb.png`, plan 3
+    S5) when `project_dir` is given and a site has one.
+    """
+    from services import site_service
+    from services.reports.assemble import SITE_FIGURE_ID
     from services.reports.figures import capacity_mix_png, fmea_pareto_png, frontier_png
     from services.reports.evidence import fmea_top_modes
 
     out: dict[str, bytes] = {}
+    if project_dir is not None:
+        thumb = site_service.first_thumbnail(project_dir)
+        if thumb:
+            out[SITE_FIGURE_ID] = thumb
     if not isinstance(eh_report, dict):
         return out
     sections = eh_report.get("sections") or {}
@@ -358,7 +370,7 @@ def create_report(body: CreateReportBody,
     _check_lock(project, db, user)
 
     evidence, eh_report = _current_evidence(project)
-    figure_pngs = _render_figures(eh_report)
+    figure_pngs = _render_figures(eh_report, project.directory)
     title = (body.title or "").strip() or f"{DEFAULT_TITLE} — {project.name}"
     doc = evidence_only_document(evidence, title=title,
                                  report_id=store.new_report_id(),

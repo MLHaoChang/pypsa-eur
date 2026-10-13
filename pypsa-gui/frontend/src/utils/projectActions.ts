@@ -9,6 +9,8 @@ import { authEnabled } from '../auth/config'
 import { lockStateFromAcquire, WRITABLE, type LockInfo, type LockAcquireOutcome } from './lockState'
 import { nk } from './queryKeys'
 import { flushPendingEdgeDeletes } from './pendingEdgeDeletes'
+import { flushPendingSitesToServer } from '../site3d/sitesStore'
+import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
 
 // Query keys invalidated by any operation that swaps the underlying PyPSA
 // network in memory (load, restore, import). Includes:
@@ -238,6 +240,17 @@ export const LOCK_HEARTBEAT_MS = 45_000
 let _heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let _heartbeatProject: string | null = null
 
+// P28 gate N-a / N-b — the lock generation. Every acquire, and every release
+// of the project this tab is locking, starts a new generation; a lock reply
+// (heartbeat, its re-acquire, an acquire) carries the generation it was sent
+// in and is IGNORED once a later move has happened. Without it a heartbeat
+// for X answered after a move to a foreign-locked Y flipped the tab writable,
+// its 409 path re-claimed X after the release, and two moves in one turn whose
+// acquire replies crossed left the heartbeat on the middle project. The
+// project the current generation is claiming (null after its release).
+let _lockGen = 0
+let _lockTarget: string | null = null
+
 function _lockFromErrorDetail(e: unknown): LockInfo | null {
   const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
   if (detail && typeof detail === 'object' && 'lock' in detail) {
@@ -266,9 +279,16 @@ function startLockHeartbeat(projectId: string): void {
   _heartbeatTimer = setInterval(() => {
     // Defend against a stale timer that outlived a project switch.
     if (_heartbeatProject !== projectId) return
+    const gen = _lockGen
     projectsApi.heartbeatLock(projectId)
-      .then(res => _applyLock({ ok: true, lock: res.lock }))
+      .then(res => {
+        // A move happened while this ping was in flight (N-a): its answer
+        // describes a lock this tab has let go of.
+        if (gen !== _lockGen) return
+        _applyLock({ ok: true, lock: res.lock })
+      })
       .catch((e) => {
+        if (gen !== _lockGen) return
         const status = (e as { response?: { status?: number } })?.response?.status
         if (status === 409) {
           // The lock may have merely EXPIRED (laptop sleep outlives the
@@ -286,11 +306,11 @@ function startLockHeartbeat(projectId: string): void {
               // one's, and could even stop ITS heartbeat below. Re-check the
               // singleton identity (mirrors the guard at the top of the tick)
               // before touching any shared state.
-              if (_heartbeatProject !== projectId) return
+              if (_heartbeatProject !== projectId || gen !== _lockGen) return
               _applyLock({ ok: true, lock: res.lock })
             })
             .catch((e2) => {
-              if (_heartbeatProject !== projectId) return
+              if (_heartbeatProject !== projectId || gen !== _lockGen) return
               // Re-acquire was refused too — someone else genuinely holds
               // it now. Fall to read-only and stop pinging.
               _applyLock({ ok: false, lock: _lockFromErrorDetail(e2) })
@@ -309,17 +329,35 @@ function startLockHeartbeat(projectId: string): void {
 // ACTIVATED for viewing but the workbench drops into read-only mode. Returns
 // the resulting `readOnly` flag. A no-op returning false when auth is disabled
 // — the legacy single-user workbench is always writable.
+/** The project whose edit lock this tab last acquired and has not released
+ *  on purpose — kept when a heartbeat loses it, so the mismatch banner's
+ *  Reload can take it back (P27b gate B1). */
+let _lastHeldLockProject: string | null = null
+export function lastHeldLockProject(): string | null {
+  return _lastHeldLockProject
+}
+
 export async function acquireProjectLock(projectId: string): Promise<boolean> {
   if (!authEnabled) {
     useUIStore.getState().setLockState(WRITABLE)
     return false
   }
+  const gen = ++_lockGen
+  _lockTarget = projectId
   try {
     const res = await projectsApi.acquireLock(projectId)
+    if (gen !== _lockGen) {
+      // A later move superseded this one (N-b). Give back a lock nobody here
+      // wants any more — unless the later move is claiming the same project.
+      if (_lockTarget !== projectId) void projectsApi.releaseLock(projectId).catch(() => {})
+      return useUIStore.getState().readOnly
+    }
     _applyLock({ ok: true, lock: res.lock })
+    _lastHeldLockProject = projectId
     startLockHeartbeat(projectId)
     return false
   } catch (e) {
+    if (gen !== _lockGen) return useUIStore.getState().readOnly
     stopLockHeartbeat()
     const lock = _lockFromErrorDetail(e)
     // Both a 409 and an unexpected failure resolve to read-only: never let two
@@ -339,7 +377,13 @@ export async function acquireProjectLock(projectId: string): Promise<boolean> {
 // pick it up immediately instead of waiting out the TTL. Never throws.
 export async function releaseProjectLock(projectId: string): Promise<void> {
   if (!authEnabled) return
+  if (_heartbeatProject === projectId || _lockTarget === projectId) {
+    // Replies still in flight for this project are now stale (N-a).
+    _lockGen++
+    if (_lockTarget === projectId) _lockTarget = null
+  }
   if (_heartbeatProject === projectId) stopLockHeartbeat()
+  if (_lastHeldLockProject === projectId) _lastHeldLockProject = null
   try {
     await projectsApi.releaseLock(projectId)
   } catch { /* best effort — the TTL reclaims it anyway */ }
@@ -402,14 +446,9 @@ export async function switchToProject(target: string, qc: QueryClient): Promise<
   const currentProject = ui.currentProject
   if (target === currentProject) return { status: 'noop' }
 
-  // A planning → dynamics STUDY has no network: it is a config and a run
-  // directory, and `/activate` — which hydrates a network context from
-  // `network.nc` — 404s for every one of them. So both ends of a switch treat
-  // a study as network-less, exactly as the new-project wizard always has (it
-  // never calls /activate): entering one sets the current project and opens
-  // the study panel; leaving one skips the save, because the only network the
-  // backend could be holding belongs to some other project, and writing it
-  // under the study's name would put a stray network.nc in the study.
+  // A study has a config and a run directory, without a network.nc. Bind its
+  // backend session so chat follows the visible study. Skip the outgoing
+  // network save when leaving a study.
   const [targetStudy, currentIsStudy] = await Promise.all([
     studyFor(target, qc),
     studyFor(currentProject, qc).then(Boolean),
@@ -433,6 +472,19 @@ export async function switchToProject(target: string, qc: QueryClient): Promise<
       const stopped = await abortRunningSim()
       if (!stopped) return { status: 'abort-failed' }
       await saveProjectQuietly(currentProject)
+    }
+    try {
+      const res = await projectsApi.activate(targetStudy.id ?? targetStudy.name)
+      res.evicted?.forEach(id => dropProjectCache(qc, id))
+    } catch (e) {
+      const err = e as { response?: { status?: number; data?: { detail?: { error_kind?: string; message?: string } } } }
+      if (err.response?.status === 409) {
+        const detail = err.response.data?.detail
+        if (detail?.error_kind === 'study_in_flight' && detail.message) return { status: 'busy-study', message: detail.message }
+        return { status: 'busy-solve' }
+      }
+      if (err.response?.status === 404) return { status: 'not-found' }
+      return { status: 'error', message: String((e as Error)?.message ?? e) }
     }
     useUIStore.getState().setCurrentProject(targetStudy.name, targetStudy.id ?? undefined)
     useUIStore.getState().setProjectName(targetStudy.name)
@@ -505,15 +557,30 @@ export async function switchToProject(target: string, qc: QueryClient): Promise<
   //    switch itself still succeeds (the project is activated for viewing).
   //    A no-op when auth is disabled (legacy workbench stays writable).
   if (authEnabled) {
-    if (currentProject && currentProject !== activated) {
-      void releaseProjectLock(currentProject)
-    }
-    await acquireProjectLock(activated)
+    await moveProjectLock(currentProject, activated)
   } else {
     useUIStore.getState().setLockState(WRITABLE)
   }
 
   return { status: 'switched' }
+}
+
+/**
+ * Move this tab's edit lock from `from` to `to` (auth mode; a no-op without
+ * auth). Releases the outgoing project's lock so a teammate can take it now,
+ * then claims the target's; if another user holds it, `acquireProjectLock`
+ * drops the workbench to read-only ("locked-by-user") and the project stays
+ * open for viewing. `to === null` (the tab became unbound) only releases.
+ *
+ * Shared by `switchToProject` (step 7) and the assistant's `project_rebound`
+ * handler in ChatPanel (P28, P32 gate N6): a rebind the backend already made
+ * must move the lock exactly as a switch does, or the tab edits the new
+ * project holding no lock while still heart-beating the old one.
+ */
+export async function moveProjectLock(from: string | null, to: string | null): Promise<void> {
+  if (!authEnabled) return
+  if (from && from !== to) void releaseProjectLock(from)
+  if (to) await acquireProjectLock(to)
 }
 
 // Best-effort save of the current project. Returns true on success, false on
@@ -569,8 +636,26 @@ export async function saveProjectQuietly(name: string, clearUndo = false): Promi
       } else if (r.status === 'local') {
         appLog('WARN', `Layout server write failed — kept ${r.nodes} node(s) + ${r.edges} edge(s) in localStorage`)
       }
+
     } catch (e) {
       appLog('WARN', `Layout flush failed for '${name}': ${String((e as Error)?.message ?? e)}`)
+    }
+    // The 3D site sidecar flushes beside the layout, same reasons, same
+    // debounce: a Save-As re-homes the pending document to the new name.
+    try {
+      const sr = await flushPendingSitesToServer(name, { previousProject: name })
+      if (sr.status === 'local') appLog('WARN', 'Sites server write failed — kept the site document in localStorage')
+    } catch (e) {
+      appLog('WARN', `Sites flush failed: ${e instanceof Error ? e.message : String(e)}`)
+    }
+    // The map's sidecar (routes + bubbles) flushes beside the layout for the
+    // same reason: a drag inside its debounce window must not be lost when
+    // the tab closes right after an autosave.
+    try {
+      const mr = await flushPendingMapLayoutToServer(name)
+      if (mr.status === 'local') appLog('WARN', 'Map layout server write failed — kept the routes in localStorage')
+    } catch (e) {
+      appLog('WARN', `Map layout flush failed for '${name}': ${e instanceof Error ? e.message : String(e)}`)
     }
     // Stamp the saved-time so the Recents row / StatusBar reflect the
     // background save even when the caller (project-switch flow, tab-switch)

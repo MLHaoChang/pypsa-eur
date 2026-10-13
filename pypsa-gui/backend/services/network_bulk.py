@@ -21,6 +21,7 @@ from fastapi import HTTPException
 from services import change_log_service
 from services.carrier_catalog import ensure_carrier
 from services.pypsa_service import PyPSAService
+from services.study_state import refuse_edit_during_live_study
 
 
 # Map tab/component-class names → PyPSA's network-attribute name. The frontend
@@ -272,6 +273,7 @@ def apply_bulk_update(body: dict) -> dict:
     coercion below — the only place that knows a column's dtype rules — has
     exactly one implementation rather than one per shape.
     """
+    refuse_edit_during_live_study()  # P27a A1: not routed via _update_component
     component_class = body.get("component_class", "")
     names = body.get("names", [])
     updates = body.get("updates", {})

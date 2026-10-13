@@ -1,0 +1,311 @@
+{
+ "_working": [
+  "V5 — an energy hub: three members behind one group connection, 15-min, 2029-01-01..07 (672 rows), naive clock. Self-authored; illustrative prices.",
+  "Energy TOU: night 00–06 at 0.06 €/kWh (42 h), day otherwise at 0.18 €/kWh (126 h). Levy 0.02 €/kWh on import.",
+  "member_a: 1 MW flat, 4 MW in the interval 2029-01-03 12:00 (+750 kWh at the day rate) → energy 25335.0 €, levy 3375.0 €, 168.75 MWh.",
+  "member_b: 2 MW 06–18, 0.5 MW otherwise → energy 35280.0 €, levy 4200.0 €, 210.0 MWh.",
+  "member_c: 0.5 MW flat → energy 12600.0 €, levy 1680.0 €, 84.0 MWh.",
+  "Linear import items (energy, levy) are metered per member; the last member (member_c) takes the remainder of the group item.",
+  "Group peak: the spike interval, 4 + 2 + 0.5 MW = 6500 kW; demand 9 €/kW-month → 58500.0 €. peak_contribution splits it 4 : 2 : 0.5.",
+  "Standing charge 150 €/month × 168 h / 744 h = 33.87 €.",
+  "Export 0.3 MW 10–14 h → 8400 kWh; feed-in 0.01 €/kWh → revenue 84.0 € (site view negative: the hub pays each member its share).",
+  "Connection fee 1000.0 €; export-price revenue 500.0 € (site view −).",
+  "Keys: contracted_capacity 5 : 3 : 2 MW; fixed_shares 0.25 : 0.25 : 0.5; energy by MWh 168.75 : 210.0 : 84.0; peak_contribution splits demand items by the billed interval and falls back to energy for the rest."
+ ],
+ "profile": {
+  "start": "2029-01-01T00:00",
+  "days": 7,
+  "step_min": 15,
+  "members": {
+   "member_a": {
+    "link": "la",
+    "base": 1.0,
+    "spike": {
+     "at": "2029-01-03T12:00",
+     "mw": 4.0
+    }
+   },
+   "member_b": {
+    "link": "lb",
+    "base": 0.5,
+    "window": {
+     "from": 6,
+     "to": 18,
+     "mw": 2.0
+    }
+   },
+   "member_c": {
+    "link": "lc",
+    "base": 0.5
+   }
+  },
+  "export": {
+   "window": {
+    "from": 10,
+    "to": 14,
+    "mw": 0.3
+   }
+  }
+ },
+ "tariff": {
+  "id": "v5",
+  "name": "V5 hub tariff",
+  "jurisdiction": "DE",
+  "valid_from": "2029-01-01",
+  "items": [
+   {
+    "id": "energy",
+    "kind": "energy",
+    "unit": "per_kwh",
+    "periods": [
+     {
+      "name": "night",
+      "rate": 0.06,
+      "start_hour": 0,
+      "end_hour": 6
+     },
+     {
+      "name": "day",
+      "rate": 0.18
+     }
+    ]
+   },
+   {
+    "id": "levy",
+    "kind": "tax_levy",
+    "unit": "per_kwh",
+    "periods": [
+     {
+      "name": "all",
+      "rate": 0.02
+     }
+    ]
+   },
+   {
+    "id": "demand",
+    "kind": "demand",
+    "unit": "per_kw_month",
+    "periods": [
+     {
+      "name": "all",
+      "rate": 9.0
+     }
+    ]
+   },
+   {
+    "id": "standing",
+    "kind": "fixed",
+    "unit": "per_month",
+    "periods": [
+     {
+      "name": "all",
+      "rate": 150.0
+     }
+    ]
+   },
+   {
+    "id": "feed_in",
+    "kind": "energy",
+    "unit": "per_kwh",
+    "measured_on": "export",
+    "direction": "revenue",
+    "periods": [
+     {
+      "name": "all",
+      "rate": 0.01
+     }
+    ]
+   }
+  ]
+ },
+ "connection_fee": 1000.0,
+ "export_price_revenue": 500.0,
+ "keys": {
+  "contracted_capacity": {
+   "member_a": 5.0,
+   "member_b": 3.0,
+   "member_c": 2.0
+  },
+  "fixed_shares": {
+   "member_a": 0.25,
+   "member_b": 0.25,
+   "member_c": 0.5
+  }
+ },
+ "bill": {
+  "energy": 73215.0,
+  "levy": 9255.0,
+  "demand": 58500.0,
+  "standing": 33.87,
+  "feed_in": -84.0
+ },
+ "metered": {
+  "member_a": {
+   "energy": 25335.0,
+   "levy": 3375.0
+  },
+  "member_b": {
+   "energy": 35280.0,
+   "levy": 4200.0
+  },
+  "member_c": {
+   "energy": 12600.0,
+   "levy": 1680.0
+  }
+ },
+ "energy_mwh": {
+  "member_a": 168.75,
+  "member_b": 210.0,
+  "member_c": 84.0
+ },
+ "expected": {
+  "contracted_capacity": {
+   "bill:energy": {
+    "member_a": 25335.0,
+    "member_b": 35280.0,
+    "member_c": 12600.0
+   },
+   "bill:levy": {
+    "member_a": 3375.0,
+    "member_b": 4200.0,
+    "member_c": 1680.0
+   },
+   "bill:demand": {
+    "member_a": 29250.0,
+    "member_b": 17550.0,
+    "member_c": 11700.0
+   },
+   "bill:standing": {
+    "member_a": 16.94,
+    "member_b": 10.16,
+    "member_c": 6.77
+   },
+   "bill:feed_in": {
+    "member_a": -42.0,
+    "member_b": -25.2,
+    "member_c": -16.8
+   },
+   "connection:fee": {
+    "member_a": 500.0,
+    "member_b": 300.0,
+    "member_c": 200.0
+   },
+   "export_price:export_price": {
+    "member_a": -250.0,
+    "member_b": -150.0,
+    "member_c": -100.0
+   }
+  },
+  "fixed_shares": {
+   "bill:energy": {
+    "member_a": 25335.0,
+    "member_b": 35280.0,
+    "member_c": 12600.0
+   },
+   "bill:levy": {
+    "member_a": 3375.0,
+    "member_b": 4200.0,
+    "member_c": 1680.0
+   },
+   "bill:demand": {
+    "member_a": 14625.0,
+    "member_b": 14625.0,
+    "member_c": 29250.0
+   },
+   "bill:standing": {
+    "member_a": 8.47,
+    "member_b": 8.47,
+    "member_c": 16.94
+   },
+   "bill:feed_in": {
+    "member_a": -21.0,
+    "member_b": -21.0,
+    "member_c": -42.0
+   },
+   "connection:fee": {
+    "member_a": 250.0,
+    "member_b": 250.0,
+    "member_c": 500.0
+   },
+   "export_price:export_price": {
+    "member_a": -125.0,
+    "member_b": -125.0,
+    "member_c": -250.0
+   }
+  },
+  "energy": {
+   "bill:energy": {
+    "member_a": 25335.0,
+    "member_b": 35280.0,
+    "member_c": 12600.0
+   },
+   "bill:levy": {
+    "member_a": 3375.0,
+    "member_b": 4200.0,
+    "member_c": 1680.0
+   },
+   "bill:demand": {
+    "member_a": 21333.06,
+    "member_b": 26547.81,
+    "member_c": 10619.12
+   },
+   "bill:standing": {
+    "member_a": 12.35,
+    "member_b": 15.37,
+    "member_c": 6.15
+   },
+   "bill:feed_in": {
+    "member_a": -30.63,
+    "member_b": -38.12,
+    "member_c": -15.25
+   },
+   "connection:fee": {
+    "member_a": 364.67,
+    "member_b": 453.81,
+    "member_c": 181.52
+   },
+   "export_price:export_price": {
+    "member_a": -182.33,
+    "member_b": -226.9,
+    "member_c": -90.76
+   }
+  },
+  "peak_contribution": {
+   "bill:energy": {
+    "member_a": 25335.0,
+    "member_b": 35280.0,
+    "member_c": 12600.0
+   },
+   "bill:levy": {
+    "member_a": 3375.0,
+    "member_b": 4200.0,
+    "member_c": 1680.0
+   },
+   "bill:demand": {
+    "member_a": 36000.0,
+    "member_b": 18000.0,
+    "member_c": 4500.0
+   },
+   "bill:standing": {
+    "member_a": 12.35,
+    "member_b": 15.37,
+    "member_c": 6.15
+   },
+   "bill:feed_in": {
+    "member_a": -30.63,
+    "member_b": -38.12,
+    "member_c": -15.25
+   },
+   "connection:fee": {
+    "member_a": 364.67,
+    "member_b": 453.81,
+    "member_c": 181.52
+   },
+   "export_price:export_price": {
+    "member_a": -182.33,
+    "member_b": -226.9,
+    "member_c": -90.76
+   }
+  }
+ }
+}

@@ -405,6 +405,42 @@ def test_post_evidence_only_builds_v1_and_the_figure_files(
     assert client.get(f"/api/projects/{name}/reports/{rid}").json()["version"] == 1
 
 
+def test_post_evidence_only_carries_the_site_thumbnail_as_a_figure(
+        client, api_project, project_storage_dir):
+    """Visual-layers plan 3 S5: a site with a capture → `site_3d` in the summary; none → no figure."""
+    from services import site_service as ss
+
+    name = api_project("rep-site")
+    d = project_storage_dir(name)
+    doc = {"version": 1, "sites": [{
+        "id": "site_a", "name": "Campus", "buses": [],
+        "boundary": [[0.0, 0.0], [0.01, 0.0], [0.01, 0.01]],
+        "origin": {"lng": 0.005, "lat": 0.003}, "placements": {}}]}
+    assert client.put(f"/api/projects/{name}/sites", json=doc).status_code == 200
+    # No capture yet: no figure.
+    r = client.post(f"/api/projects/{name}/reports", json={"mode": "evidence_only"})
+    assert r.status_code == 200, r.text[:400]
+    assert "site_3d" not in r.json()["document"]["figures"]
+
+    png = b"\x89PNG\r\n\x1a\n" + b"site" * 8
+    assert client.put(f"/api/projects/{name}/sites/site_a/thumbnail", content=png,
+                      headers={"Content-Type": "image/png"}).status_code == 200
+    r = client.post(f"/api/projects/{name}/reports", json={"mode": "evidence_only"})
+    assert r.status_code == 200, r.text[:400]
+    body = r.json()
+    rid = body["report_id"]
+    document = body["document"]
+    assert document["figures"]["site_3d"]["png_file"] == "figures/site_3d.png"
+    summary = document["sections"][0]
+    assert summary["section_id"] == "executive_summary"
+    assert summary["blocks"][-1] == {"type": "figure_ref", "figure_id": "site_3d",
+                                     "caption": document["figures"]["site_3d"]["caption"]}
+    assert (d / "reports" / rid / "figures" / "site_3d.png").read_bytes() == png
+    fig = client.get(f"/api/projects/{name}/reports/{rid}/figures/site_3d")
+    assert fig.status_code == 200 and fig.content == png
+    assert ss.first_thumbnail(d) == png
+
+
 def test_post_evidence_only_without_any_study_states_every_section(
         client, api_project):
     name = api_project("rep-post-empty")

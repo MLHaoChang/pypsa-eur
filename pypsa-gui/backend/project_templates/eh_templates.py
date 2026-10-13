@@ -15,9 +15,13 @@ right shape and order of magnitude, costs in the range of public cost
 catalogues. They are for learning and demonstrating the workflow, not for a
 real project decision — ``TEMPLATE_META[...]["provenance"]`` says so.
 
-Horizon: one representative 168 h week weighted 8760/168 per snapshot, so
-``nyears ≈ 1`` (no CAPEX scaling warning) and every MTTR here (≤ 72 h) fits
-the MC's MTTR floor (P11, decision Q2).
+Horizon: one representative 168 h week weighted 8760/168 per snapshot for
+cost and energy (``objective``, ``generators``), so ``nyears ≈ 1`` (no CAPEX
+scaling warning) and every MTTR here (≤ 72 h) fits the MC's MTTR floor (P11,
+decision Q2). The ``stores`` weighting stays 1: PyPSA reads it as the hours
+each snapshot lasts in the state-of-charge balance, and a snapshot here lasts
+one hour (plan 2026-10-07 campus island, S0). Weighting it 52.14 made every
+hourly dispatch move 52 hours of stored energy.
 """
 from __future__ import annotations
 
@@ -64,7 +68,8 @@ def _base(name: str) -> pypsa.Network:
     n = pypsa.Network()
     n.name = name
     n.set_snapshots(SNAPSHOTS)
-    n.snapshot_weightings.loc[:, :] = WEIGHT
+    n.snapshot_weightings.loc[:, ["objective", "generators"]] = WEIGHT
+    n.snapshot_weightings.loc[:, "stores"] = 1.0          # hours per snapshot (S0)
     return n
 
 
@@ -104,8 +109,8 @@ def build_eh_datacenter() -> pypsa.Network:
                    ("battery", 0.0), ("grid", 0.35)):
         n.add("Carrier", c, co2_emissions=co2)
     n.add("Bus", "grid", v_nom=132.0, carrier="AC", x=0.0, y=0.0)
-    n.add("Bus", "dc_mv", v_nom=33.0, carrier="AC", x=2.0, y=0.0)
-    n.add("Bus", "it_bus", v_nom=11.0, carrier="AC", x=3.0, y=0.6)
+    n.add("Bus", "dc_mv", v_nom=33.0, carrier="AC", x=0.0, y=0.0)
+    n.add("Bus", "it_bus", v_nom=11.0, carrier="AC", x=0.0, y=0.0)
 
     # Wholesale supply beyond the PoC (not firm capacity of the hub).
     price = 70.0 + 40.0 * np.exp(-((_HOD - 19) ** 2) / 8.0)
@@ -141,8 +146,11 @@ def build_eh_datacenter() -> pypsa.Network:
           marginal_cost=0.0)
     n.generators_t.p_max_pu = pd.DataFrame(
         {"rooftop_pv": _solar()}, index=SNAPSHOTS)
+    # The UPS carries the IT load it protects (about 36 MW) for a realistic
+    # 15 minutes: 40 MW / 10 MWh, enough for the island plan's 600 s bridge
+    # (owner decision, plan 2026-10-07 campus island, S0).
     n.add("StorageUnit", "ups_battery", bus="it_bus", carrier="battery",
-          p_nom=15.0, max_hours=1.0, efficiency_store=0.95,
+          p_nom=40.0, max_hours=0.25, efficiency_store=0.95,
           efficiency_dispatch=0.95, cyclic_state_of_charge=True)
 
     # Candidates the ENS-capped expansion may build (annualised €/MW/yr).
@@ -158,8 +166,8 @@ def build_eh_datacenter() -> pypsa.Network:
     _tag_columns(n)
     n.buses.at["grid", "eh_poc"] = True
     # SCR gate inputs at the PoC: a 250 MVA fault level against ~30 MVA of
-    # inverter-based resources (PV + UPS/BESS inverters) → SCR ≈ 8, which
-    # passes. The connection is CAPACITY-weak (40 MW), not SCR-weak.
+    # inverter-based resources (PV + BESS inverters; the UPS feeds no fault
+    # upstream, its rectifier blocks it) → SCR ≈ 8, which passes. The connection is CAPACITY-weak (40 MW), not SCR-weak.
     n.buses.at["grid", "eh_sk_mva"] = 250.0
     n.buses.at["grid", "eh_ibr_mva"] = 30.0
     n.buses.at["dc_mv", "eh_sk_mva"] = 220.0
@@ -189,8 +197,8 @@ def build_eh_h2_hub() -> pypsa.Network:
                    ("grid", 0.35), ("electrolysis", 0.0), ("fuel cell", 0.0)):
         n.add("Carrier", c, co2_emissions=co2)
     n.add("Bus", "grid", v_nom=220.0, carrier="AC", x=0.0, y=0.0)
-    n.add("Bus", "hub", v_nom=110.0, carrier="AC", x=2.0, y=0.0)
-    n.add("Bus", "h2", carrier="H2", x=3.0, y=-0.8)
+    n.add("Bus", "hub", v_nom=110.0, carrier="AC", x=0.0, y=0.0)
+    n.add("Bus", "h2", carrier="H2", x=0.0, y=0.0)
 
     price = 60.0 + 35.0 * np.exp(-((_HOD - 18) ** 2) / 10.0)
     n.add("Generator", "grid_supply", bus="grid", carrier="grid",
@@ -269,8 +277,8 @@ def build_eh_microgrid() -> pypsa.Network:
                    ("diesel", 0.27), ("battery", 0.0), ("grid", 0.35)):
         n.add("Carrier", c, co2_emissions=co2)
     n.add("Bus", "mainland", v_nom=33.0, carrier="AC", x=0.0, y=0.0)
-    n.add("Bus", "island", v_nom=11.0, carrier="AC", x=2.0, y=0.0)
-    n.add("Bus", "hospital", v_nom=11.0, carrier="AC", x=2.8, y=0.7)
+    n.add("Bus", "island", v_nom=11.0, carrier="AC", x=0.0, y=0.0)
+    n.add("Bus", "hospital", v_nom=11.0, carrier="AC", x=0.0, y=0.0)
 
     n.add("Generator", "mainland_supply", bus="mainland", carrier="grid",
           p_nom=100.0, marginal_cost=110.0)
@@ -432,27 +440,91 @@ STRESS_SCENARIOS: dict[str, list[dict]] = {
 # Solver settings a project from these templates starts with: frontier and
 # fmea_top need VOLL > 0 (a template otherwise starts from the default 0).
 SOLVER_CONFIG: dict = {"voll": 5000.0}
+# Per-template additions. The island rows (campus island I2a) are opt-in per
+# project and ship enabled on the templates that carry an island sidecar
+# (owner Q5).
+SOLVER_CONFIG_EXTRA: dict[str, dict] = {"eh_datacenter": {"island_constraints": True}}
+
+
+def solver_config(template_id: str) -> dict:
+    """The solver settings written beside one template."""
+    return {**SOLVER_CONFIG, **SOLVER_CONFIG_EXTRA.get(template_id, {})}
+
+# The island sidecar (plan 2026-10-07 campus island, I1): control modes, unit
+# dynamics and island requirements, keyed by PyPSA name. Its schema is
+# gridspine's (gridspine/schema/island.py), which cannot be imported here
+# (_build.py runs with only this directory on sys.path), so the content is a
+# plain mapping and tests/test_island_config.py validates it through
+# gridspine. Every number is {value, source}; all are "assumed" until the
+# client's datasheets arrive. Only templates listed here ship the file.
+def _a(value):
+    return {"value": value, "source": "assumed"}
+
+
+def _genset_island(**extra):
+    return {"kind": "genset", "governor": "droop", "droop_pct": _a(4.0), "q_droop_pct": _a(4.0),
+            "H_s": _a(1.5), "T_g_s": _a(0.5), "ramp_pu_per_s": _a(0.2), "start_s": _a(10.0),
+            "sync_s": _a(5.0), "p_min_pu": _a(0.3), "load_step_max_pct": _a(50.0),
+            "cos_phi_r": _a(0.8), "xd_sat": _a(2.0), "excitation": "avr_pmg",
+            "neutral_earthing": "solid", **extra}
+
+
+_LIMITS = {"rocof_hz_per_s": _a(1.0), "f_min_hz": _a(47.5), "f_max_hz": _a(51.5), "qss_band_hz": _a(1.0)}
+
+ISLAND_CONFIG: dict[str, dict] = {
+    "eh_datacenter": {
+        "units": {
+            **{f"genset_{i}": _genset_island() for i in range(1, 5)},
+            "genset_new": _genset_island(unit_mw=_a(10.0)),
+            "rooftop_pv": {"kind": "pv", "control": "gfl_qu", "pf_rated": _a(0.95),
+                           "qu_points": _a([[0.9, 0.33], [0.97, 0.0], [1.03, 0.0], [1.1, -0.33]])},
+            "bess_new": {"kind": "bess", "control": "gfm_droop", "pf_rated": _a(0.95),
+                         "droop_pct": _a(4.0), "q_droop_pct": _a(4.0), "tau_f_s": _a(0.1),
+                         "i_max_pu": _a(1.2), "k_gfm_min": _a(1.0)},
+            "ups_battery": {"kind": "ups", "it_load": ["it_load"], "walk_in_s": _a(15.0),
+                            "f_window_hz": _a(2.0)},
+            # Plan Q1: the critical load is the IT and the cooling it needs.
+            "it_load": {"kind": "load", "critical": True},
+            "cooling": {"kind": "load", "critical": True},
+            "offices": {"kind": "load", "critical": False},
+        },
+        "requirements": {
+            "bridge_s": _a(600.0), "sustained_h": _a(24.0), "fuel_autonomy_h": _a(24.0),
+            "genset_redundancy_n": _a(1), "scenarios": ["ups_bridged", "seamless"],
+            "pickup_blocks": _a([15.0, 15.0, 15.0, 10.0]),
+            "frequency_limits": {"transition": dict(_LIMITS), "steady_island": dict(_LIMITS)},
+            "rocof_window_ms": _a(500.0), "gfm_margin": _a(0.1), "ride_through_storage": ["bess_new"],
+        },
+    },
+}
 
 # Sidecar file names copied by POST /api/projects/from_template/<id>.
 META_FILE = "eh_template.json"
 STRESS_FILE = "adequacy_stress_scenarios.json"
 SOLVER_FILE = "solver_config.json"
 SIDECAR_FILES = (META_FILE, STRESS_FILE, SOLVER_FILE)
+# Written only for the templates in ISLAND_CONFIG.
+ISLAND_FILE = "island_config.json"
 # services.adequacy.stress.SCHEMA — not imported: _build.py runs with only
 # this directory on sys.path. A test pins the two equal.
 SCHEMA = 1
 
 
 def write_sidecars(out_dir, template_id: str) -> None:
-    """Write the template's metadata and stress registry beside network.nc."""
+    """Write the template's metadata and stress registry beside network.nc,
+    and its island sidecar when it has one."""
     import json
     import pathlib
 
     out_dir = pathlib.Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / META_FILE).write_text(
         json.dumps(TEMPLATE_META[template_id], indent=2, sort_keys=True) + "\n")
     (out_dir / STRESS_FILE).write_text(json.dumps(
         {"__schema__": SCHEMA, "scenarios": STRESS_SCENARIOS[template_id]},
         indent=2, sort_keys=True) + "\n")
     (out_dir / SOLVER_FILE).write_text(
-        json.dumps(SOLVER_CONFIG, indent=2, sort_keys=True) + "\n")
+        json.dumps(solver_config(template_id), indent=2, sort_keys=True) + "\n")
+    if template_id in ISLAND_CONFIG:
+        (out_dir / ISLAND_FILE).write_text(
+            json.dumps(ISLAND_CONFIG[template_id], indent=2, sort_keys=True) + "\n")

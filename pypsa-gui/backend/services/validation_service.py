@@ -983,8 +983,8 @@ def _check_myopic_foresight(n, cfg) -> list[Issue]:
     if not network_periods and not cfg_periods:
         out.append(_err("myopic_no_periods", "", "",
             "Myopic foresight needs at least one investment period. The "
-            "network's snapshot MultiIndex is empty at level 0 — promote "
-            "snapshots to multi-period under Snapshots → Multi-period first, "
+            "network's snapshot MultiIndex is empty at level 0 — set "
+            "Model Horizon → Mode to Multi-period first, "
             "or switch solve_strategy back to 'full'."))
     # Flat snapshots on a multi-period config are auto-promoted by
     # _apply_modelling_assumptions step 4 when cfg.investment_periods is
@@ -1695,6 +1695,28 @@ _nonfinite_bound_hits = _nonfinite_input_hits
 _check_nonfinite_bounds = _check_nonfinite_inputs
 
 
+def _zero_cost_generators(n) -> list[str]:
+    """Generators the `gen_zero_costs` warning counts.
+
+    All three static costs are 0 (`overnight_cost > 0` also feeds
+    `capital_cost` at solve time via the annuity recompute, so a unit with
+    it set is not cost-less). Exempt (P30, B5): a unit whose marginal cost
+    is a TIME SERIES (`generators_t.marginal_cost` column — the static 0 is
+    a placeholder) and a unit with a `generators_t.p_max_pu` PROFILE (a
+    variable renewable, whose output the weather fixes). A fixed
+    dispatchable unit at zero cost still counts: its dispatch is
+    indeterminate.
+    """
+    g = n.generators
+    if g.empty or "capital_cost" not in g.columns or "marginal_cost" not in g.columns:
+        return []
+    oc = g["overnight_cost"].fillna(0) if "overnight_cost" in g.columns \
+        else pd.Series(0.0, index=g.index)
+    mask = (g["capital_cost"].fillna(0) == 0) & (g["marginal_cost"].fillna(0) == 0) & (oc == 0)
+    series = set(n.generators_t.marginal_cost.columns) | set(n.generators_t.p_max_pu.columns)
+    return [str(name) for name in g.index[mask] if name not in series]
+
+
 def _check_lopf(n, solver_config) -> list[Issue]:
     out: list[Issue] = []
 
@@ -1745,23 +1767,12 @@ def _check_lopf(n, solver_config) -> list[Issue]:
         # Cost sanity: zero capital + zero marginal cost in LOPF means the
         # solver has no preference between gens — solvable but probably not
         # what the user meant. Warning only.
-        if "capital_cost" in n.generators.columns and "marginal_cost" in n.generators.columns:
-            # overnight_cost > 0 also feeds into capital_cost at solve time via
-            # the annuity recompute, so a generator with overnight_cost set
-            # isn't actually cost-less — only flag rows where all three are 0.
-            oc = n.generators["overnight_cost"].fillna(0) \
-                if "overnight_cost" in n.generators.columns \
-                else pd.Series(0.0, index=n.generators.index)
-            zero_cost = n.generators[
-                (n.generators["capital_cost"].fillna(0) == 0)
-                & (n.generators["marginal_cost"].fillna(0) == 0)
-                & (oc == 0)
-            ]
-            if len(zero_cost) > 0:
-                out.append(_warn("gen_zero_costs", "Generator",
-                    f"{len(zero_cost)} item(s)",
-                    f"{len(zero_cost)} generator(s) have capital_cost, "
-                    "overnight_cost, and marginal_cost all == 0. Result will be indeterminate."))
+        zero_cost = _zero_cost_generators(n)
+        if len(zero_cost) > 0:
+            out.append(_warn("gen_zero_costs", "Generator",
+                f"{len(zero_cost)} item(s)",
+                f"{len(zero_cost)} generator(s) have capital_cost, "
+                "overnight_cost, and marginal_cost all == 0. Result will be indeterminate."))
 
     # Loads
     out += _check_loads_p_set(n)
@@ -2514,6 +2525,13 @@ def _check_commercial(n, solver_config) -> list[Issue]:
 
     from services.commercial.lp_bindings import effective_strategy
 
+    if not getattr(solver_config, "commercial", None):
+        # No commercial config (IC U1 f, owner decision 10): the import-to-export
+        # cycling check on the Links' own marginal costs.
+        from services.commercial.preflight import network_findings
+
+        return [Issue(severity=sev, code=code, component_class=cls, name=name, message=msg)
+                for sev, code, cls, name, msg in network_findings(n)]
     multi = bool(getattr(solver_config, "multi_investment_periods", False))
     strategy = effective_strategy(getattr(solver_config, "solve_strategy", "full"),
                                   sclopf=bool(getattr(solver_config, "sclopf", False)),

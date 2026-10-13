@@ -32,6 +32,7 @@
  * 2,200-line component: untestable in isolation, and invisible to whoever
  * adds the next panel and needs to decide whether it belongs here.
  */
+import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { useHubDesignStore, type HubStep } from '../pages/hubDesign/hubDesignStore'
 
@@ -45,6 +46,10 @@ export interface UiContext {
   // context carries neither key, so its request body is unchanged.
   ui_mode?: 'guided'
   guided_step?: HubStep
+  // Chat harness issue 06 — only while a workflow is active: lets the
+  // backend rebind a session that lost its state. Absent otherwise, so a
+  // context without a workflow is byte-identical to before.
+  workflow?: { id: string; step: string }
 }
 
 export function buildUiContext(): UiContext | null {
@@ -80,6 +85,9 @@ export function buildUiContext(): UiContext | null {
     ctx.ui_mode = 'guided'
     if (s.activeSlidePanel === 'hubDesign') ctx.guided_step = useHubDesignStore.getState().step
   }
+
+  const wf = useChatStore.getState().workflow
+  if (wf) ctx.workflow = { id: wf.id, step: wf.step }
 
   return Object.keys(ctx).length > 0 ? ctx : null
 }

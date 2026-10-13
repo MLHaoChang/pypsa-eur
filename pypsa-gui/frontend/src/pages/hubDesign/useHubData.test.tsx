@@ -46,8 +46,18 @@ describe('hub data hooks return named fields, never a spread query result', () =
       ['data', 'isError', 'isPending', 'refetch', 'running', 'study'])
     expect(Object.keys(result.current.template).sort()).toEqual(['isError', 'isPending', 'refetch', 'template'])
     expect(Object.keys(result.current.review).sort()).toEqual(['review'])
-    expect(Object.keys(result.current.readiness).sort()).toEqual(['isError', 'readiness'])
+    // P30 (B8): `refetch` added for the panel's Retry (named, not spread).
+    expect(Object.keys(result.current.readiness).sort()).toEqual(['isError', 'readiness', 'refetch'])
     expect(resultsApi.getEhReview).not.toHaveBeenCalled()
+  })
+
+  // P30 (B8): the panel observes readiness for its error line without a
+  // request of its own.
+  it('readiness with observeOnly sends no request', async () => {
+    useUIStore.setState({ currentProject: 'Demo' })
+    renderHook(() => useHubReadiness(null, false, true, { observeOnly: true }), { wrapper: wrap })
+    await new Promise(r => setTimeout(r, 30))
+    expect(resultsApi.getEhReadiness).not.toHaveBeenCalled()
   })
 
   it('the solver-config hook exposes only its data', () => {

@@ -21,7 +21,7 @@ import { useUIStore } from '../store/uiStore'
 // dock is on this page.
 //
 // ChatPanel is stubbed: the subject here is placement, and the panel's own
-// no-project behaviour (CHAT_STARTER_PROMPTS_UNBOUND, the `!currentProject`
+// no-project behaviour (the `unbound` start menu, the `!currentProject`
 // guards on the history and uploads effects) is covered by its own suite.
 
 const authState = { user: localAdminUser(), logout: vi.fn() }
@@ -42,6 +42,16 @@ vi.mock('../api/projects', async (importOriginal) => {
 })
 vi.mock('../components/ChatPanel', () => ({
   default: () => <div data-testid="chat-panel-stub" />,
+}))
+vi.mock('../hooks/useChatProfiles', () => ({
+  useChatProfiles: () => ({
+    data: {
+      profiles: [{ id: 'claude', label: 'Claude', wire: 'anthropic' as const }],
+      active_profile_id: 'claude',
+    },
+    isError: false,
+  }),
+  useChatReadiness: () => ({ effectiveProfileId: 'claude', ready: true }),
 }))
 
 function renderPage() {
@@ -74,16 +84,16 @@ describe('the assistant on the projects home', () => {
   })
 
   // Collapsed is a legitimate state — the user's choice persists across
-  // surfaces — but the strip has to still be there, or the landing page loses
-  // the affordance entirely the first time someone collapses it in the
-  // workbench.
+  // surfaces — but the floating companion has to still be there, or the landing
+  // page loses the affordance entirely the first time someone collapses it in
+  // the workbench.
   it('keeps its launcher strip when the user has collapsed it', async () => {
     useUIStore.setState({ assistantDockOpen: false })
     renderPage()
     await screen.findByRole('navigation', { name: 'Account' })
 
     expect(screen.getByTestId('assistant-dock')).toBeTruthy()
-    expect(screen.getByTestId('assistant-dock-launcher')).toBeTruthy()
+    expect(screen.getByTestId('companion-compose')).toBeTruthy()
   })
 
   // The page is `data-pypsa-surface="brand-dark"` on purpose (see its own

@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from services import change_log_service
+from services import change_log_service, network_lengths
+from services.network_crud import purge_component_side_data
 from services.network_geometry import _recompute_lengths_for_bus
 from services.pypsa_service import PyPSAService
+from services.study_state import refuse_edit_during_live_study
 
 
 def apply_update_bus(name: str, bus, *, update_component):
@@ -53,26 +55,44 @@ def apply_update_bus(name: str, bus, *, update_component):
     # can still override later via PUT /lines/{name}. Use the post-update name
     # (rename-aware) so we hit the renamed bus, not its ghost.
     rescale: list[dict] = []
+    length_sources: dict[str, str] = {}
     if coord_changed:
         new_name = result.get("name", name)
+        # Plan M2: with the project setting "Derive lengths from geometry" on,
+        # a routed branch follows its route rather than the chord, and Links
+        # follow too. Off (the default) is exactly the pre-M2 rewrite.
+        project_dir, routes, derive = network_lengths.geometry_context()
         with PyPSAService.get_lock():
-            recompute = _recompute_lengths_for_bus(n, new_name)
+            recompute = _recompute_lengths_for_bus(
+                n, new_name, routes=routes if derive else None, include_links=derive,
+            )
         rescale = recompute.previews
+        length_sources = recompute.sources
         # Log the true rewrite count, not len(rescale): a zero-impedance line
         # still has its length rewritten but _impedance_preview omits it (no
         # rescale to offer), so len(rescale) alone would undercount whenever
         # such a line is among the ones touched.
         if recompute.updated:
+            what = "line/link length(s) from geometry" if derive else "line length(s)"
             change_log_service.log(
                 "update", "Lines", "(auto)",
-                f"Auto-rewrote {recompute.updated} line length(s) after bus '{new_name}' moved",
+                f"Auto-rewrote {recompute.updated} {what} after bus '{new_name}' moved",
             )
+            network_lengths.record_length_sources(project_dir, length_sources)
     if isinstance(result, dict):
-        result = {**result, "rescale": rescale}
+        result = {**result, "rescale": rescale, "length_sources": length_sources}
     return result
 
 
 def apply_delete_bus_cascade(name: str) -> None:
+    refuse_edit_during_live_study()  # P27a A1: not routed via _delete_component
+    # Every removal here goes through `purge_component_side_data`, the same
+    # cleanup `_delete_component` runs. Without it the cascade — the path a
+    # user reaches by deleting a node on the map, so the common one — left an
+    # orphaned `_user_ts` entry and a stale vintage bound behind for each of
+    # the up-to-seven classes it removes. The orphan is not inert: it is
+    # re-injected on every solve and inherited by any later component that
+    # reuses the name.
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
         if name not in n.buses.index:
@@ -87,6 +107,7 @@ def apply_delete_bus_cascade(name: str) -> None:
                 mask = df[cols[0]].eq(name) | df[cols[1]].eq(name)
                 for comp in df[mask].index.tolist():
                     n.remove(cls, comp)
+                    purge_component_side_data(n, cls, attr, comp)
         for cls, attr in [
             ("Generator", "generators"), ("Load", "loads"),
             ("StorageUnit", "storage_units"), ("Store", "stores"),
@@ -95,11 +116,14 @@ def apply_delete_bus_cascade(name: str) -> None:
             if df is not None and not df.empty and "bus" in df.columns:
                 for comp in df[df.bus.eq(name)].index.tolist():
                     n.remove(cls, comp)
+                    purge_component_side_data(n, cls, attr, comp)
         n.remove("Bus", name)
+        purge_component_side_data(n, "Bus", "buses", name)
     change_log_service.log("delete", "Bus", name, f"Deleted bus '{name}' and all connected components")
 
 
 def apply_rename_bus(name: str, body: dict):
+    refuse_edit_during_live_study()  # P27a A1: not routed via _update_component
     new_name = (body.get("new_name") or "").strip()
     if not new_name:
         raise HTTPException(400, "new_name cannot be empty")
@@ -125,5 +149,10 @@ def apply_rename_bus(name: str, body: dict):
         # subsequent `n.statistics()` would silently return wrong numbers
         # for any aggregation that walked sub_networks (P0 data integrity).
         n.rename_component_names("Bus", **{name: new_name})
+    # A bus is placeable too (the site view draws a switchyard per bus): keep
+    # its placement across the rename. Same best-effort seam as the CRUD path.
+    from services.network_crud import _rename_site_placement
+
+    _rename_site_placement("Bus", name, new_name)
     return {"old_name": name, "new_name": new_name}
 
