@@ -999,9 +999,12 @@ def _write_island_tables(project, run_dir: Path, spec: dict, nc: Path) -> None:
     ``services/solver/island.island_hourly`` from the saved project. Written
     only when the project has an island sidecar; otherwise an earlier run's
     tables are removed, so nothing stale is read as this run's."""
-    from gridspine.schema.island import ISLAND_HOURLY_CSV, ISLAND_UNIT_HOURLY_CSV
-
-    from services.adequacy.island_config import SIDECAR_NAME, load_island_config
+    from services.adequacy.island_config import (
+        ISLAND_HOURLY_CSV,
+        ISLAND_UNIT_HOURLY_CSV,
+        SIDECAR_NAME,
+        load_island_config,
+    )
     from services.solver.island import IslandRefusal, island_hourly
 
     paths = (run_dir / ISLAND_UNIT_HOURLY_CSV, run_dir / ISLAND_HOURLY_CSV)
