@@ -29,6 +29,8 @@ gui-db-up    = { cmd = "docker compose up -d", cwd = "pypsa-gui" }
 gui-db-down  = { cmd = "docker compose down", cwd = "pypsa-gui" }
 setup-ssl-bypass = "python scripts/install_ssl_bypass.py"
 gridspine-tests = "python -m pytest tests/gridspine -v"
+# Fold doc/release-notes.d/*.md into doc/release_notes.md at release time.
+collate-release-notes = "python scripts/collate_release_notes.py"
 
 reset = """bash -c '
     read -p "Do you really wanna continue? This will remove all contents of \
@@ -359,6 +361,12 @@ desktop-gui = { cmd = "python -m desktop.gui", cwd = "pypsa-gui/backend" }
 
 [feature.test.dependencies]
 pytest = ">=8.4.2"
+# Test-only: the chat-harness, assurance and workflow tests validate tool
+# schemas with `jsonschema.Draft202012Validator`. No shipped backend code
+# imports it, so it is NOT in pypsa-gui/gui-requirements.txt. It used to be
+# present only transitively, so an environment built from the declared
+# packages lacked it and ~25 test files failed at collection.
+jsonschema = ">=4.26.0"
 
 [environments]
 doc = { features = ["doc"], no-default-feature = true }

@@ -26,8 +26,11 @@ import os
 import re
 import tempfile
 import zlib
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 import numpy as np
@@ -270,3 +273,91 @@ def list_series(db: DBSession, org_id: UUID) -> list[PriceSeriesRef]:
         .where(LibraryItem.org_id == org_id, LibraryItem.kind == KIND)
         .order_by(LibraryItem.name)).all()
     return [_ref(r) for r in rows]
+
+
+# ── Delete (IC engine ask "delete_series / pinned_by", owner 2026-10-13) ──
+
+@dataclass(frozen=True)
+class SeriesPin:
+    """A project directory that pins a series: through its `library_refs.json`
+    (`sidecar`), a ref in its `solver_config.json` (`config`), or a pin source
+    that cannot be read and so might pin it (`unreadable`)."""
+
+    project_dir: Path
+    via: Literal["sidecar", "config", "unreadable"]
+
+
+@dataclass(frozen=True)
+class SeriesDeleted:
+    """What `delete_series` did. `kept` is None when the series is gone (or
+    never existed), else `series_pinned` / `series_pins_unreadable`, with
+    nothing deleted and the pins that kept it in `pinned_by`."""
+
+    deleted_versions: int
+    kept: Literal["series_pinned", "series_pins_unreadable"] | None
+    pinned_by: tuple[SeriesPin, ...]
+
+
+def pinned_by(name: str, *, project_dirs: Iterable[Path]) -> list[SeriesPin]:
+    """Every directory of `project_dirs` that pins ANY version of the series
+    `name`, in the given order (at most one entry per directory; an unreadable
+    source wins, since it might hide a pin). The caller passes every project
+    directory of the series' org: the Library does not enumerate projects. A
+    directory that does not exist pins nothing."""
+    from services.library import bundle_pins
+
+    out: list[SeriesPin] = []
+    for d in project_dirs:
+        d = Path(d)
+        pins, issues = bundle_pins.read_pins(d)
+        unreadable = bool(issues)
+        cfg_path = d / "solver_config.json"
+        cfg_refs = []
+        if cfg_path.exists():
+            try:
+                cfg_refs = bundle_pins.collect_refs(json.loads(cfg_path.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                unreadable = True
+        if unreadable:
+            out.append(SeriesPin(d, "unreadable"))
+        elif any(p.get("kind", bundle_pins.SERIES) == bundle_pins.SERIES and p.get("id") == name
+                 for p in pins):
+            out.append(SeriesPin(d, "sidecar"))
+        elif any(r.id == name for r in cfg_refs):
+            out.append(SeriesPin(d, "config"))
+    return out
+
+
+def delete_series(db: DBSession, org_id: UUID, name: str, *, project_dirs: Iterable[Path],
+                  root: Path | None = None) -> SeriesDeleted:
+    """Delete EVERY version of the org's series `name`, unless a directory of
+    `project_dirs` pins it (`pinned_by`): then nothing is deleted. A payload
+    file is removed only when no remaining row of the org points at it (two
+    names cut to the same slug with the same content share one file). An
+    unknown name deletes nothing and is not an error. `project_dirs` is
+    required (possibly empty): a delete never skips the pin check. COMMITS
+    `db`."""
+    if project_dirs is None:
+        raise ValueError("pass every project directory of the org as project_dirs "
+                         "(possibly none): a delete never skips the pin check")
+    pins = tuple(pinned_by(name, project_dirs=project_dirs))
+    if pins:
+        kept = ("series_pins_unreadable" if any(p.via == "unreadable" for p in pins)
+                else "series_pinned")
+        return SeriesDeleted(deleted_versions=0, kept=kept, pinned_by=pins)
+    rows = db.scalars(select(LibraryItem).where(
+        LibraryItem.org_id == org_id, LibraryItem.kind == KIND, LibraryItem.name == name)).all()
+    paths = {r.path for r in rows}
+    for r in rows:
+        db.delete(r)
+    db.commit()
+    base = root or _default_root()
+    for rel in sorted(paths):
+        still = db.scalars(select(LibraryItem.id).where(
+            LibraryItem.org_id == org_id, LibraryItem.path == rel).limit(1)).first()
+        if still is None:
+            try:
+                library_file(base, org_id, rel).unlink(missing_ok=True)
+            except ValueError:  # a path outside the org's directory is never touched
+                pass
+    return SeriesDeleted(deleted_versions=len(rows), kept=None, pinned_by=())

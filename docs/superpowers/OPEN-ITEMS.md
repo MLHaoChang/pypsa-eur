@@ -33,6 +33,20 @@ the detail) and item 14 (a three-port Link dropping `bus2` / `efficiency2`;
 `_drop_unknown_extras` admits PyPSA's per-port columns by regex). Both are
 increments A1 and A4 of `plans/2026-10-06-visual-layers-1-abstract-canvas.md`.
 
+**2026-10-13:** the P33b-era items 12 and 13 closed (see "Closed since the
+2026-09-12 pass"; the open 3D-site-view items 12 and 13 are different). Item 12
+(an io import under a session pointer landing in a context the next request
+never reads) was already fixed on master by `e049c25e`: `routers/io.py::_unbind_session`
+clears the pointer on a successful import, as `/network/reset` does. The only
+test covered NetCDF; `test_every_http_import_is_what_the_next_request_sees`
+now covers all four imports and fails with the un-pointing removed. Item 13 (a
+re-load of the open project writing the discarded edit to disk): `load_project`
+now registers with `write_back=False`. When the displaced copy is the
+caller's own, the UI has already confirmed "discard and reload". When it is
+another resident project's copy (the clone wizard's `load(src)`), its unsaved
+work is saved before the disk read, so memory and disk agree and nothing is
+lost. Tests: `tests/test_reload_same_project.py`.
+
 This file exists because GitHub Issues is **disabled** on this repository, so
 there is nowhere else to keep a queue. It is deliberately thin: one entry per
 open item, with the anchor and the source document. The analysis lives in
@@ -88,30 +102,6 @@ preview environment, not as a permanent rule — the deployment should decide it
 own cookie policy through configuration. The CSRF double-submit check
 (`main.py:645`) currently carries the load for those sessions. Source: gap 5 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
-
-### 12. `/api/io/import/*` under a session pointer imports into a context the next request never reads
-
-Added 2026-10-06, found while scoping P33b step 0 (spec §0a). The four io
-imports (`routers/io.py:191` `_reset_with_ts_clear` → `reset_network`) run
-inside a session-bound request, so the fresh **unbound** ctx they import into
-lands in `scratch:<session>`; unlike `POST /api/network/reset`
-(`routers/network.py:633-635`) they never clear the session's active-project
-pointer, so `resolve_for_session` hands the next request the project's
-resident ctx again. Reproduced on `bb8b2e7b8` with the suite's fixtures: with
-a 1-bus project active, `POST /api/io/import/netcdf` of a 7-bus file returns
-200 `{"buses": 7, …}` and the next `GET /api/network/buses` returns 1 bus; the
-registry holds `org:uuid → (project, 1 bus)` and `scratch:<session> → (None,
-7 buses)`. The user sees an import that appears not to happen. The fix is the
-"New" rule (clear the pointer, as `/api/network/reset` does), not P33b's
-re-keying, so it is outside step 0. (The related note about `import_bundle` and
-`create_from_template` never registering their new ctx is resolved by P33b step
-4b, `_register_created_context` in `routers/projects.py`: in local mode it was
-lossy — the next project switch dropped the unregistered ctx.) Severity: High
-(a write that is silently not read back). Server only.
-
-### 13. Re-loading the open project with unsaved edits leaves memory and disk disagreeing
-
-Added 2026-10-06, found at the P33b re-gate (`qa/2026-10-06-guided-p33b-gate.md`, RN-1; pre-existing, identical on `240b2a00e` and after P33b). Under sessions, with project A resident and an unsaved edit in memory (bus x 0 → 1), `GET /api/projects/A` (load) reads the disk: memory holds x = 0 and the undo stack is empty. `load_project` then calls `PyPSAService.register(key, ctx)` (`routers/projects.py`, the registration after the import), which displaces the resident A ctx and writes it back through `_save_evicted_ctx` — so **disk** now holds the edited copy (x = 1) while **memory** holds the disk copy (x = 0). The next save or autosave overwrites the edit silently; a restart instead brings it back. Probe: `scratchpad/qa33b/test_qa_regate.py::test_reload_same_project`. Fix direction: a load of the project the caller is already on must not write the displaced context back (it is the copy the user chose to discard), or must ask first; the same displacement mechanism is why P33b's deviation 1 rejected registering `prev` inside `reset_network`. Severity: Medium (a deliberate "discard and reload" is undone on the next restart, or an edit is lost on the next save, depending on order). Server only.
 
 ## Closed since the 2026-09-12 pass
 
@@ -194,6 +184,21 @@ NOT reused or compacted — other findings and assessments cite these numbers.
   comparison is exactly the fix this item asked for, so `/confirm` no longer
   depends on the session id being unguessable.
 
+* **12 (P33b entry, 2026-10-06; not the open item 12 below)** — `/api/io/import/*`
+  under a session pointer imported into a context
+  the next request never read. Already closed on master by `e049c25e`
+  (`routers/io.py::_unbind_session` clears the pointer on a successful import).
+  Tripwire widened by `9c99daa0` (PR #170):
+  `test_every_http_import_is_what_the_next_request_sees` covers all four
+  imports, and all four fail with the un-pointing removed.
+* **13 (P33b entry, 2026-10-06; not the open item 13 below)** — re-loading the
+  open project with unsaved edits left memory and disk
+  disagreeing. Closed by `9c99daa0` (PR #170): `load_project` registers with
+  `write_back=False`, and a displaced copy belonging to a project the caller is
+  not on is saved before the disk read. Tripwire:
+  `tests/test_reload_same_project.py`, red on the old code in server and local
+  mode.
+
 ---
 
 ## Verification / CI
@@ -259,6 +264,12 @@ after re-binding; pass the acting session through the chat import wrappers) and
 five regression tests sit unapplied in `notes/2026-09-30-full-e2e/`; the diff
 targets the 2026-09-30 tree and needs porting to today's `routers/io.py`.
 Source: `notes/2026-09-29-3d-site-view-phase2-qa.md` §7, defects A–C.
+**2026-10-13:** the raw-import part is closed: `e049c25e` clears the pointer
+after a successful import, and PR #170's
+`test_every_http_import_is_what_the_next_request_sees` runs all four formats
+with the pointer SET (the `on_project_x` fixture activates a project). Undo,
+snapshot restore and template / bundle import were not re-verified for this
+note.
 
 ### 13. `login.html` prefills and prints a review credential
 

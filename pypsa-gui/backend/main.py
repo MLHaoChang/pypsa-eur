@@ -96,10 +96,12 @@ from routers import (
     simulation,
     snapshots,
     solve_queue,
+    studies,
     uploads,
     vintage,
 )
 from services.pypsa_service import PyPSAService
+from services.study.body_limit import StudyBodyLimitMiddleware
 from settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -327,6 +329,38 @@ _SOLVER_BLOCKING_EXEMPT: set[str] = set()
 # middleware 409 fires first and the user can't leave a solving project — the
 # whole point of the resident multi-project work.
 _SOLVER_BLOCKING_EXEMPT_SUFFIXES = ("/activate",)
+# Pattern-exempt routes: the regex variant the comment on
+# `_SOLVER_BLOCKING_EXEMPT` anticipates, built the way
+# `_FOREIGN_LOCK_GATE_EXEMPT_PATTERNS` is (compiled, anchored, `.match`).
+#
+#   * `/api/projects/{name}/studies[/...]` — the decision-study routes
+#     (`routers/studies.py`, guided investment study S1; review v2 BC-3). They
+#     read and write one JSON sidecar under the PATH project's `studies/` dir
+#     and never touch the resident network, so there is nothing for the LP
+#     worker to race. Without this, every study write 409s while the ACTIVE
+#     project solves — which need not even be the project the study belongs
+#     to. The routes carry their own authorisation (`ProjectAccessDep`) and
+#     their own foreign-lock check against the PATH project; neither prefix
+#     list names them, because both match with `startswith` and a templated
+#     segment cannot be expressed there.
+#
+# Anchored at the start and closed by `(/|$)`, so `/studiesX` or a `studies`
+# segment deeper in some other route does not ride the exemption. A route that
+# is added under `studies/` and DOES mutate the network (S4's run) must take
+# its own `_solver_in_flight_ctx` check against the context it solves.
+_SOLVER_BLOCKING_EXEMPT_PATTERNS = (
+    re.compile(r"^/api/projects/[^/]+/studies(/|$)"),
+)
+
+
+def _solver_blocking_exempt(path: str) -> bool:
+    """True iff `path` is exempt from the solver-in-flight gate below."""
+    if path in _SOLVER_BLOCKING_EXEMPT:
+        return True
+    if any(path.endswith(s) for s in _SOLVER_BLOCKING_EXEMPT_SUFFIXES):
+        return True
+    return any(p.match(path) for p in _SOLVER_BLOCKING_EXEMPT_PATTERNS)
+
 # P27a (A1): the prefixes whose writes a LIVE-NETWORK study refuses (the
 # component, profile, time-axis, cluster, vintage and import routes). A
 # separate tuple, and deliberately NOT `/api/projects/`: the project routes
@@ -508,6 +542,23 @@ def run_first_run_import() -> None:
 
 
 @asynccontextmanager
+def _load_skills_at_startup() -> None:
+    """Read both skill roots at boot (chat harness issue 14), so a user skill
+    the loader refuses (malformed, or named like a package skill) is logged
+    when the app starts rather than on the first chat turn. Never fails boot:
+    a broken skill costs that skill, not the app."""
+    try:
+        from harness import skills
+
+        loaded = skills.registry()
+        user = sum(1 for s in loaded.values() if s.source == "user")
+        if user or skills.refusals():
+            logger.info("startup: %d user skill(s) loaded, %d refused",
+                        user, len(skills.refusals()))
+    except Exception:  # noqa: BLE001 — a missing catalogue beats a dead app
+        logger.exception("startup: skill registry failed to load; continuing")
+
+
 async def lifespan(app: FastAPI):
     if local_mode.is_local_mode():
         # First run on a fresh machine has no app-data directory, no database
@@ -530,6 +581,22 @@ async def lifespan(app: FastAPI):
         # desktop splash reasonably read it as the first.
         run_first_run_import()
     PyPSAService.initialize()
+    # Decision-study forks a crash left behind (plan 2026-09-28 guided
+    # investment study MVP-1, S9; gate S6 [N7]): throw-away tornado variants
+    # and option forks whose study record is gone, and only what is provably
+    # study-owned (`services/study/forks.py::sweep_leftover_forks`). BEFORE the
+    # queue is reconciled: a job it re-enqueues on such a fork would make the
+    # fork undeletable (`fork_solving`). Never fails boot.
+    try:
+        from services.study import forks as study_forks
+
+        with db_session_module.SessionLocal() as db:
+            swept = study_forks.sweep_leftover_forks(db)
+        if swept:
+            logger.info("startup: swept %d leftover decision-study fork(s): %s",
+                        len(swept), ", ".join(swept))
+    except Exception:  # noqa: BLE001 — a sweep that fails leaves forks, not a dead app
+        logger.exception("decision-study fork sweep failed; continuing without it")
     # Solve-queue boot reconciliation. Placed AFTER `ensure_schema` (which runs
     # in the local branch above) so the table exists on the desktop path, and
     # after `PyPSAService.initialize()` so a resumed job has a service to build
@@ -544,6 +611,7 @@ async def lifespan(app: FastAPI):
         logging.getLogger("pypsa_gui").exception(
             "solve-queue boot reconciliation failed; continuing without it"
         )
+    _load_skills_at_startup()
     # Ask macOS for the projects root NOW, on a thread, rather than letting
     # the first data request discover it is gated. On a granted machine this
     # costs microseconds; on a fresh build it is what turns an unbounded hang
@@ -676,6 +744,12 @@ def _csrf_rejection(request: Request) -> JSONResponse | None:
 # before this note). The replica header must sit outside the auth gate so that
 # a rejected request still identifies which replica rejected it — otherwise the
 # multi-replica QA cases cannot attribute a failure.
+#
+# Innermost of all, the decision-study body limit (F1 B2): it refuses an
+# oversized `/api/projects/{name}/studies` body 413 before anything parses
+# it, and leaves every other route alone. Inside the auth gate, so an
+# unauthenticated request is still answered 401 first.
+app.add_middleware(StudyBodyLimitMiddleware)
 
 
 @app.middleware("http")
@@ -832,8 +906,7 @@ async def undo_snapshot_middleware(request: Request, call_next):
     # catch-all for everything else.
     if (is_write
             and any(path.startswith(p) for p in _SOLVER_BLOCKING_PREFIXES)
-            and path not in _SOLVER_BLOCKING_EXEMPT
-            and not any(path.endswith(s) for s in _SOLVER_BLOCKING_EXEMPT_SUFFIXES)):
+            and not _solver_blocking_exempt(path)):
         from routers.simulation import _solver_in_flight
         if _solver_in_flight():
             return JSONResponse(
@@ -1233,6 +1306,17 @@ app.include_router(
 app.include_router(
     report_jobs.router, prefix="/api/projects", tags=["reports"],
     dependencies=_projects_router_guard,
+)
+# Decision studies (guided investment study MVP-1, S1). Path-scoped under the
+# project so `ProjectAccessDep` authorises `{name}` from the PATH and a study id
+# resolves only inside that project's `studies/` directory (review v1 B7).
+# Registered before projects.router like the worksheet; exempt from the
+# solver-in-flight gate by `_SOLVER_BLOCKING_EXEMPT_PATTERNS`, in neither prefix
+# list (review v2 BC-3). In auth mode every route refuses until OPEN-ITEMS 1
+# closes (BC-6); the refusal is the router's own dependency.
+app.include_router(
+    studies.router, prefix="/api/projects/{name}/studies",
+    tags=["decision-studies"], dependencies=_projects_router_guard,
 )
 app.include_router(
     projects.router, prefix="/api/projects", tags=["projects"],

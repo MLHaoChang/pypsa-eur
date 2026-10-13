@@ -760,7 +760,7 @@ export default function ModelHorizon() {
   return (
     <div className="flex flex-col h-full">
       <PageHeader
-        eyebrow="SIMULATION · MODEL HORIZON"
+        eyebrow="TIME · MODEL HORIZON"
         title="Snapshot range &amp; weightings"
         subtitle="Configure the time slice the optimizer sees. Smaller windows solve faster; full-year captures seasonality."
       />
@@ -810,6 +810,7 @@ export default function ModelHorizon() {
             steps={steps}
             current={view}
             onSelect={setView}
+            labels={STEP_LABELS}
             // `steps.indexOf(view)` can be -1 for one render: turning the
             // multi-period toggle off while parked on 'years'/'economics'
             // removes those ids from `steps`, and the guard effect above

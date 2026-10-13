@@ -13,7 +13,7 @@ import { PageBody, PageSection, Btn, Tag } from '../components/PageKit'
 import { Dialog } from '../components/Dialog'
 
 // SnapshotsPanel — vertical timeline of project snapshots with restore +
-// delete, rendered as a full-page tab from the sidebar's PROJECT section.
+// delete, rendered as a full-page tab from the sidebar's REPORTS step.
 
 // Snapshot "type" tag. The backend SnapshotInfo has no `type` field, so the
 // category (scenario / stress / archive) is encoded as a `[type]` prefix on

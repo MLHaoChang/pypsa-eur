@@ -298,3 +298,100 @@ def test_the_adapter_on_a_solved_two_part_battery(reset_backend):
     r = run_case(case)
     assert r.op.status["capex"] == "ok", r.op.reasons
     assert float(r.op.capex.sum()) == pytest.approx(1_600_000.0 + 800_000.0 * 2)
+
+
+# ── Per-part scale_capex (IC engine ask 2, owner 2026-10-13; retires C5's WORKAROUND) ──
+
+
+def _scale_case(replacement_capex=(), rule="part_lifetimes"):
+    from services.finance.case import FinanceCase, Template, TemplateLine
+
+    assets, _ = _assets(_net(), [("StorageUnit", "bess"), ("Generator", "pv")])
+    fin = _fin(cod_by_asset={}, replacement_capex=list(replacement_capex), replacement_rule=rule)
+    return FinanceCase(inputs=fin, owner="o", base_year=2030, cod=date(2030, 1, 1),
+                       templates=(Template(2030, (TemplateLine("x", "other", 1.0, "opex"),)),),
+                       assets=(assets["bess"], assets["pv"], AssetFinance("x", "Generator", 7.0)))
+
+
+def test_scale_capex_moves_one_part_and_its_asset_total_only():
+    from services.finance.case import scale_capex
+
+    case = _scale_case()
+    s = scale_capex(case, 1.5, asset="bess", part="energy")
+    bess, pv, x = s.assets
+    assert [p.overnight_cost for p in bess.parts] == [400_000.0, pytest.approx(1_800_000.0)]
+    assert bess.parts[0] == case.assets[0].parts[0]
+    assert bess.overnight_cost == pytest.approx(2_200_000.0)          # the parts check holds
+    assert (pv, x) == case.assets[1:]
+    assert s.templates == case.templates and s.inputs == case.inputs
+    assert case.assets[0].parts[1].overnight_cost == 1_200_000.0       # the input is untouched
+
+
+def test_scale_capex_moves_one_asset_whole_with_its_fixed_replacements():
+    from services.finance.case import scale_capex
+
+    case = _scale_case([(2039, "bess", 400_000.0), (2040, "pv", 10.0)], rule="fixed")
+    s = scale_capex(case, 1.1, asset="bess")
+    bess, pv, _x = s.assets
+    assert bess.overnight_cost == pytest.approx(1_760_000.0)
+    assert [p.overnight_cost for p in bess.parts] == [pytest.approx(440_000.0),
+                                                      pytest.approx(1_320_000.0)]
+    assert pv == case.assets[1]
+    assert s.inputs.replacement_capex == [(2039, "bess", pytest.approx(440_000.0)),
+                                          (2040, "pv", 10.0)]
+
+
+def test_a_partless_asset_scales_through_its_one_investment_part():
+    """`effective_parts` reads an asset without parts as one `investment` part."""
+    from services.finance.case import scale_capex
+
+    s = scale_capex(_scale_case(), 2.0, asset="x", part="investment")
+    assert s.assets[2] == AssetFinance("x", "Generator", 14.0)
+
+
+def test_a_part_with_no_cost_leaves_the_total_unestablished():
+    from services.finance.case import FinanceCase, scale_capex
+
+    case = _scale_case()
+    bess = dataclasses.replace(case.assets[0], parts=(
+        case.assets[0].parts[0], dataclasses.replace(case.assets[0].parts[1], overnight_cost=None)),
+        overnight_cost=None)
+    case = FinanceCase(**{**{f.name: getattr(case, f.name) for f in dataclasses.fields(case)},
+                          "assets": (bess,) + case.assets[1:]})
+    s = scale_capex(case, 2.0, asset="bess", part="power")
+    assert s.assets[0].parts[0].overnight_cost == pytest.approx(800_000.0)
+    assert s.assets[0].parts[1].overnight_cost is None and s.assets[0].overnight_cost is None
+
+
+def test_the_whole_case_form_is_unchanged():
+    from services.finance.case import scale_capex
+
+    case = _scale_case([(2039, "bess", 400_000.0)], rule="fixed")
+    assert scale_capex(case, 1.1) == scale_capex(case, 1.1, asset=None, part=None)
+    assert scale_capex(case, 1.1).assets[1].overnight_cost == pytest.approx(2_310_000.0)
+
+
+@pytest.mark.parametrize("kw,code", [
+    ({"part": "energy"}, "scale_capex_part_without_asset"),
+    ({"asset": "nope"}, "scale_capex_unknown_asset"),
+    ({"asset": "bess", "part": "nope"}, "scale_capex_unknown_part"),
+])
+def test_scale_capex_refuses_what_it_cannot_name(kw, code):
+    from services.finance.case import scale_capex
+
+    with pytest.raises(FinanceRefused) as e:
+        scale_capex(_scale_case(), 1.1, **kw)
+    assert e.value.code == code
+
+
+def test_a_part_bound_refuses_an_asset_with_fixed_replacement_amounts():
+    """A `fixed` replacement amount is per asset, not per part: a part bound
+    cannot say how much of it moves, so it refuses rather than guess."""
+    from services.finance.case import scale_capex
+
+    case = _scale_case([(2039, "bess", 400_000.0)], rule="fixed")
+    with pytest.raises(FinanceRefused) as e:
+        scale_capex(case, 1.1, asset="bess", part="energy")
+    assert e.value.code == "scale_capex_part_fixed_replacement"
+    # Another asset's fixed entry does not stand in the way.
+    assert scale_capex(case, 1.1, asset="pv", part="investment").inputs == case.inputs

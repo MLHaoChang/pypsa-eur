@@ -80,7 +80,7 @@ All nine were answered on 2026-10-07. Each took the recommended answer.
 | Q1 | How the outage ride-through is specified | **Two durations.** A **bridge** time in seconds to minutes (UPS/BESS until the gensets are online) is reserved in I2a and checked in I6 (E4). A **sustained** time in hours (gensets, fuel, BESS) is an I2a constraint, from every start hour. Fuel autonomy is its own input. The template ships 24 h sustained, tagged `assumed`, and the panel asks for it. Critical load = IT plus the cooling the IT needs, tagged per Load; offices are not critical. |
 | Q2 | Where the frequency limits come from | **From the most sensitive island equipment, with defaults.** The equipment is the UPS input window, the chiller and drive trips, and the genset ISO 8528-5 class. The class limits are user-entered, because the standard is not freely available (the same treatment as VDE). Until entered, the defaults are tagged `assumed`: a 47.5 Hz lowest frequency, ±1 Hz quasi-steady-state, and 1 Hz/s RoCoF over 500 ms. 47.5 Hz is the bottom of the RfG Continental Europe 30-minute band (47.5–48.5 Hz); the unlimited band is 49.0–51.0 Hz. The limits for the transition and for steady island operation are kept separate. The report names the binding limit. |
 | Q3 | Which islanding scenarios are studied | **All three:** `ups_bridged`, `seamless` and `planned`. `ups_bridged` and `seamless` are compared side by side, which gives the client the cost of seamless islanding. In `seamless`, the gensets start and join the BESS-formed island after their start delay. |
-| Q4 | Multi-bus RMS, given ANDES is GPL-3.0-or-later (confirmed from the wheel metadata) | **ANDES as an optional engine in its own process**, exchanging files as the gridspine stages do. It is not bundled in the desktop app. The **PSS/E/PowerFactory export** is built as the client-grade route. A short legal check comes before I8. |
+| Q4 | Multi-bus RMS, given ANDES is GPL-3.0-or-later (confirmed from the wheel metadata) | **ANDES as an optional engine in its own process**, exchanging files as the gridspine stages do. It is not bundled in the desktop app. The **PSS/E/PowerFactory export** is built as the client-grade route. A short legal check comes before I8. **Held (2026-10-13): PSS/E export only for now; the ANDES path is parked, Q4 open** (see "Q4 open" under I8). |
 | Q5 | Island constraints in the hub LP | **Opt-in** per project; the template ships them enabled. A regression test guards that results are unchanged when they are off. |
 | Q6 | Frequency failures fed back into sizing (I7) | **Manual, with a preview.** The panel shows the failed hours, the proposed cut and its estimated cost, and the user applies it with "apply cuts". It becomes automatic only once a project's parameters are mostly datasheet-backed. |
 | Q7 | Gensets running in parallel with the grid | **Cold standby by default**, a per-genset `spinning` flag, and **optional linearised unit commitment** for fixed-size gensets (I2c), so the LP can buy spinning capacity at the fuel cost of its minimum load. A full unit-commitment MILP stays out of scope. |
@@ -790,6 +790,130 @@ k largest gains:
   minimum-load fuel, by hand.
 - Mutations.
 
+### I2b as built (2026-10-13)
+
+**`services/solver/island.py`**, in the same wrapper and through the same
+`_wrap_with_island` path: opt-in, refused on rolling, SCOPF and myopic as
+they will run, passed through for a power flow, skipped on a dispatch-only
+solve. Nothing new in `solver_service.py`.
+- **ΔP⁺ is a linear expression** now, and the hook kept its name.
+  `delta_p_plus=None` (the default) builds it from the model; a number,
+  Series or callable still overrides it, for every `seamless` row. B(t)
+  takes max(ΔP⁺, 0) through a variable b ≥ ΔP⁺, b ≥ 0, which only tightens
+  the energy row it enters, so it settles at the max. It stays in the same
+  row as the sustained ride-through.
+- **The PCC** is the Links tagged `eh_role` `grid_import` (the
+  `POC_ROLES` spellings), less those tagged `grid_export`. `seamless`
+  without a tagged import Link is refused with the remedy.
+- **Late** is `walk_in_s` ≥ the slowest active genset's `start_s + sync_s`,
+  and needs a genset in the period (with none, nothing joins and a
+  transfer gives no relief). X_u is one variable per late UPS and period,
+  bounded by L_it,u (as its upper bound) and p_nom_u (a row), and used only
+  where it loosens.
+- **ΔP⁻ (owner, 2026-10-13).** At 0⁺ every transferring UPS has dropped its
+  IT load, early walk-in or late, so the 0⁺ rows (downward power, SoC room,
+  RoCoF) add every transferring UPS's L_it. The plan's late-only sum is kept
+  for the quasi-steady-state row, after the gensets have joined, when an
+  early walk-in's load is back. This changes the plan text above, on the
+  conservative side (B3).
+- **Every row of the matrix** is built, per period, over the gensets, GFM
+  storage and UPSs active in it. Each row is named (`Island-headroom-up`,
+  `-headroom-down`, `-soc-room`, `-mva-instant`, `-mva-steady`,
+  `-rocof-up/-down/-block`, `-qss-up/-down/-block`, `-pickup`,
+  `-min-load-<g>`) and listed in `facts["instant"]["rows"]`. The UPS bridge
+  now follows the matrix too: unplanned islanding only, none for `planned`.
+- **Readings the plan left implicit:** RoCoF reads the `transition` limits,
+  the qss band the `steady_island` ones. f0 is 50 Hz (the hub carries no
+  nominal frequency; ledgered). A genset's s_nom is p_nom/`cos_phi_r`, a
+  converter's p_nom/`pf_rated`. A Link genset counts its output
+  (efficiency·p). Spinning headroom uses `p_max_pu`. The k largest gains,
+  inertias and load steps are taken over genset units (k is the genset
+  redundancy), with heterogeneous H or ls handled by the max of the
+  product. Isochronous gensets add no droop gain (conservative). Several
+  scenarios in one sidecar get the union of their rows in one solve; I2c
+  splits them into separate solves.
+- **"Surplus not curtailable."** With no `gfl_fw` unit the SoC-room row is
+  not added, the facts say so, and `not_islandable_hours(n)` gives the
+  hours whose solved ΔP⁻ > 0.
+- **A row with no variable** (e.g. pickup blocks against fixed gensets in a
+  solve that sizes only storage) is checked, not handed to the LP: when it
+  holds it is dropped, and when it fails it is an `IslandRefusal` naming the
+  row, not an infeasible LP.
+
+**The Data Center template (owner, 2026-10-13).** With I2b, the template as
+shipped was infeasible in both scenarios:
+- `ups_bridged`: a 15 MW block at 1 Hz/s needs about 210 MW of H 1.5 s
+  gensets against the 80 MW the fleet can reach;
+- `seamless`: forming the island at 0⁺ needs about 54 MW of BESS against
+  the 30 MW cap, and the droop GFM's RoCoF needs p_nom ≥ 20·ΔP⁺.
+
+So the template ships `ups_bridged` only, with 11 × 5 MW pickup blocks
+(55 MW ≥ the 51.5 MW critical peak), and keeps Q2's 1 Hz/s. The RoCoF row on
+a 5 MW block binds:
+- genset_new 19.1 → 36.7 MW, by hand 250/3.75 − 30;
+- objective 3.882e7 → 3.981e7 (+2.6 %).
+
+For comparison, `seamless` with the BESS cap lifted runs the site on
+gensets: import about 2.7 MW, objective 6.87e7. It stays a sidecar option,
+and I2c compares the two.
+
+**Tests** (`tests/test_island_rows.py`, 80 collected, 38 of them I2b's): each row of the
+matrix on its own hand network, import and export, as the plan lists:
+- (b↑): no transfer, a late transfer, the walk-in exactly at the join, an
+  early walk-in, both branches of min(L_it, p_nom_u) for an extendable UPS;
+- spinning headroom and minimum load (in `seamless` and in `planned`);
+- (b↓): power, a late and an early transfer, SoC room with t_curt 2.5 s,
+  and "not curtailable" with its hours;
+- (b■): N+1 with unequal units, and the refusal;
+- (c): at 0⁺ with cold gensets, in the steady island, and the refusal with
+  no former;
+- (d): VSM 25 MVA, droop 80 MW, the export side, a spinning genset's
+  inertia, the block at N+1;
+- (e): both sides at N+1, the qss export step counting late transfers only,
+  and the block;
+- the bridge from I2b's own ΔP⁺ with relief, the matrix for `planned`, the
+  refusal without an import tag, import efficiency, two investment periods,
+  and the template's 36.67 MW;
+- a GFM store outside RT holding B in its own row, and a VSM's inertia on
+  its apparent power (both added after the mutation run, see below).
+
+The hand value for a spinning genset's inertia was corrected while
+building: its minimum load also carries part of the load, so the step
+falls to 2.8 MW (15.625 MVA, not 23.125). The I2a fixtures set the I2b
+limits slack (a 0 margin; RoCoF and qss at 1e6 in the two `seamless`
+cases), and the UPS-bridge case moved to `ups_bridged`, as the matrix
+requires.
+
+**Mutations.** Two kinds, each run against the whole file:
+- **Each named row deleted** (a pytest plugin that drops it):
+  `-min-load`, `-mva-steady`, `-pickup`, `-rocof-block`, `-qss-block`,
+  `-headroom-up`, `-headroom-down`, `-soc-room`, `-mva-instant`,
+  `-rocof-up`, `-rocof-down`, `-qss-up`, `-qss-down`, `-step-up`,
+  `-ups-relief-cap`, `-energy`, `-ups-bridge` and `-gfm-bridge`. Each was
+  caught by the test written for it, except `-gfm-bridge`. I2a's tests
+  never put GFM storage outside RT with a non-zero step, so a test was
+  added, and it catches the deletion.
+- **18 source edits:**
+  - a strict `>` for "late";
+  - late-only ΔP⁻ at 0⁺, and every transfer after the join;
+  - X without its L_it bound;
+  - min instead of max in the pickup row;
+  - N+k dropped from the block RoCoF and from ΣK;
+  - the import efficiency ignored;
+  - f0 60 Hz;
+  - the UPS bridge in `planned`;
+  - t_curt as the delay only;
+  - cold gensets forming at 0⁺;
+  - spinning headroom ignored;
+  - the droop GFM's inertia without 2R;
+  - the VSM's inertia on p, not s;
+  - the `seamless` rows run under `ups_bridged`;
+  - the bridge without UPS relief;
+  - a failing fixed row dropped instead of refused.
+
+  All were killed except the VSM-on-p edit, because the VSM test had
+  pf 1. A pf-0.8 VSM test was added, and it kills that edit.
+
 ### I2c: linearised UC, the two variants and the cost of island capability (M)
 
 **Linearised UC (Q7)**, when `linearised_uc` is on:
@@ -835,6 +959,110 @@ it replaces nothing.
 - `ups_bridged` against `seamless` on one hand network: the reported cost
   difference equals the hand-worked cost of the extra BESS headroom.
 - Mutations.
+
+### I2c as built (2026-10-13)
+
+**`services/solver/island.py`**, in the same wrapper.
+- **Linearised UC (Q7).** It is on when the sidecar's
+  `requirements.linearised_uc` is on, and it applies only where the island
+  rows apply: opt-in, the plain solve, a sizing solve.
+  - `linearised_uc(n, island)` is a context manager. For the solve it sets
+    `committable` and the sidecar's `p_min_pu` on the fixed-size genset
+    Generators and Links, restores both afterwards, and yields
+    `linearized_unit_commitment=True` for `optimize`.
+  - `run_simulation` calls it on the plain solve only, through
+    `solve_uc(network, cfg)`. SCOPF, rolling and myopic are already refused
+    by the island rows, and the refusal now names linearised UC too.
+- **Extendable gensets are not committed** (owner, 2026-10-13, option A).
+  PyPSA's committable-extendable unit is big-M. Such a genset keeps I2b's
+  `spinning` rule, and the facts list it under `uc.not_committed` as
+  "not committed: extendable (big-M bilinear)". The template's 4 × 10 MW
+  fleet can therefore be committed while genset_new stays extendable.
+  - **This rewords the plan's test** "Linearised UC on an extendable genset
+    is refused, with a reason". `linearised_uc` is one sidecar-wide flag,
+    so "refused" now means the extendable genset is never made committable
+    and the reason is recorded. The solve is not refused.
+- **u_g(t) replaces the spinning flag** for the committed gensets in the 0⁺
+  rows that count units online:
+  - (b↑) headroom, u·p_max_pu·η·p_nom − η·p;
+  - (c) the GFM MVA at 0⁺;
+  - (d) RoCoF, as H·u·η·p_nom/cos φ_r.
+
+  PyPSA's own p ≥ u·p_min_pu·p_nom replaces I2b's `Island-min-load` row for
+  them. (e) is unchanged, because it already counts every genset once
+  joined. The facts say "linearised (u may be fractional)".
+- **Refusals:**
+  - a committed genset with no positive `p_min_pu` (sidecar, else the
+    network's), because its online headroom would cost no fuel (review B4);
+  - `linearised_uc` on with a fixed genset that was not committed for the
+    solve, which is a refusal rather than a silent fall-back to `spinning`.
+- **`island_study(n, island, scenarios=None, solve=None)`** solves copies
+  of the network:
+  - a baseline with no island rows;
+  - one solve per scenario, with the sidecar narrowed to that scenario
+    (`scenarios` can name one the sidecar does not ship).
+
+  It returns each variant's status and objective, the **cost of island
+  capability** (variant − baseline), the **cost of seamless islanding**
+  (seamless − ups_bridged), and `binding_rows`: every `Island-` row with a
+  non-zero dual, its hours (None for a static row) and its duals, in
+  objective units. A refused variant is recorded with its reason and has no
+  cost. The default solve is HiGHS. The endpoint, panel and copilot tools
+  are I9's.
+
+**The Data Center template.**
+- With no island rows it solves at **3.754e7** and buys no genset_new.
+- ups_bridged gives 3.981e7, so the cost of island capability is
+  **2.27e6 (+6.1 %)**.
+- I2b's "3.882e7" was the I2a rows alone, which is the `planned` variant.
+- `seamless`, with bess_new's cap lifted, gives 6.87e7, so the cost of
+  seamless islanding is **2.89e7**.
+
+**Tests** (`tests/test_island_study.py`, 25 collected):
+- UC buys exactly the online capacity each 0⁺ row needs, by hand:
+  - (b↑) u = 1/2. Each MW of minimum load also leaves the import, so the
+    step falls with it, and the row is 7 + 6u − p ≥ 10 − p.
+  - with p_max_pu 0.5, u = 2/3;
+  - (d) u = 8/75;
+  - (c) u = 2/3;
+  - a Link genset, through η.
+- Without UC, the cold genset must run 3 MW to cut the step. UC is cheaper
+  by 4·2.1·990.
+- The minimum load comes from PyPSA, not the spinning row. `p_min_pu` and
+  `committable` are restored after the solve.
+- The refusals: no minimum load, an uncommitted genset, and
+  rolling/SCOPF/myopic.
+- An extendable genset is not committed and keeps `spinning`.
+- `run_simulation` passes UC through and restores the network.
+- The cost of seamless equals the hand-worked 10 MW of BESS at 100/MW. The
+  cost of island capability equals the I2a reserve (2000).
+- The binding rows: the headroom duals sum to the BESS capital cost, and the
+  pickup row's dual is 1/ls. The LP may put a degenerate dual on one hour.
+- A refused variant; a scenario the sidecar does not ship; both template
+  figures.
+
+**Mutations.** 19 source edits, each run against the file:
+- UC ignored in the headroom, the MVA at 0⁺ and the RoCoF rows;
+- a committed genset counted at its full p_nom;
+- p_max_pu dropped, and a Link genset's η dropped;
+- I2b's spinning minimum-load row kept for a committed genset;
+- an extendable genset committed;
+- the refusals removed: no minimum load, an uncommitted genset, and the
+  strategy refusal's UC note;
+- `committable` and `p_min_pu` not restored, and the sidecar `p_min_pu`
+  not written;
+- `run_simulation` dropping the UC keyword;
+- the baseline keeping the rows, the variants not split, the seamless cost
+  reversed;
+- zero duals kept, and a static row given hours.
+
+All were killed except "zero duals kept", because no test had a built but
+slack row. The binding test now checks the slack steady-island MVA row,
+and it kills that edit.
+
+The first hand values for UC (u = 5/7, 8/15) left out that the committed
+genset's minimum load displaces import, the same correction I2b recorded for
+spinning inertia. The LP was right and the tests were corrected.
 
 ### I3a: the hourly island contract (S–M)
 
@@ -1614,6 +1842,119 @@ in the separate environment runs it):
   or PSS/E can run the client-grade study.
 
 **EMT stays a flag.** It is raised by I6 or I8.
+
+### I8 as built: the PSS/E path (2026-10-13)
+
+**Owner decisions of 2026-10-13** (relayed by the coordinator session):
+- **REGFM_A1/B1 parameters go in a named sidecar until their CON order is
+  verified.** The `.dyr` carries only verified record layouts: GENSAL,
+  DEGOV1, SEXS and GENCLS.
+- **DEGOV1 is the governor for every genset.** Gas engines are approximated
+  by it, ledgered.
+
+**`gridspine/handoff/campus_bundle.py`**
+- `export_campus_bundle(outdir, campus, rows, hour)` writes one directory
+  per island hour.
+- **`<case>.raw`:** the hour grid-connected, before the event (`apply_hour`
+  on a copy of the campus net).
+- **`<case>.dyr`:**
+  - per genset with island data, **GENSAL + DEGOV1 + SEXS**;
+  - **GENCLS with H = 0** for the grid, an infinite bus until the islanding
+    trip;
+  - no SEXS when `excitation` is `none`.
+- **`gfm_models.csv`:** REGFM_A1 (droop) or REGFM_B1 (VSM) parameters by
+  name, in long form, with bus number, machine ID, base and source.
+- **`README.md`:**
+  - the event: trip the grid machine at bus N, ID 'n', at t = 0;
+  - the record counts;
+  - **pending verification** (the REGFM CON order);
+  - **every drafted value with its source**;
+  - the omissions;
+  - the ledger.
+- **`manifest.json`.**
+
+**Identity:** `dyr_writer.machine_records` (new, public) gives the RAW's own
+(bus number, ID). The test parses both files back with the existing
+`test_dyr_writer` parsers.
+
+**Values:**
+- **GENSAL:** H, X_d (= `xd_sat`) and x''d come from the island data. X'd
+  is max(0.25, 1.5·x''d) and X_l is 0.5·x''d; X_q, the time constants and
+  the saturation points are typical (assumed). The existing
+  `_check_physics` validates the ordering.
+- **DEGOV1:**
+  - M = 1 (droop on electrical power), DROOP = `droop_pct`/100, K = 1/DROOP,
+    TMAX = P_n/MBASE;
+  - **isochronous:** DROOP 0 and K = 1/0.04;
+  - the rest are typical.
+- **SEXS:** EMAX 4 (`avr_pmg`) or 3 (`avr_shunt`); the rest are typical
+  (K 50, TB 10, TA/TB 0.1, TE 0.05, EMIN 0), inside the PSS/E check ranges.
+- **The GFM's** droops, P range, current limit, filter (A1) and H (B1) come
+  from the island data, **converted from P_n to the inverter's S_n**:
+  mp = R·S_n/P_n, mq = k_q·S_n/P_n, Pmax = P_n/S_n. The rest are the
+  specifications' example values, PNNL-35110 for REGFM_A1 and the UNIFI VSM
+  specification for REGFM_B1, tagged as such.
+- **Omitted and listed:** grid-following converters (REGCA1/REECA1 need the
+  OEM's 45 parameters), UPSs, STATCOMs, and gensets without island data.
+
+**`dyr_writer`:** new `DYR_CONTROLS` (DEGOV1, SEXS, GENCLS layouts) and
+`format_record`, which refuses a missing value. The REGFM records are
+documented as deliberately absent.
+
+**Tests:**
+- 18 in `tests/gridspine/test_campus_bundle.py`;
+- plus the plan's guard that **no gridspine module imports `andes`**
+  (parsed with `ast`).
+- **Mutation testing:** 25 of 25 killed; 3 round-1 survivors, closed.
+
+**Not yet:** the ANDES path is held (Q4 open, below), and the hour
+selection waits for I3b.
+
+### Q4 open: the ANDES licence check (held 2026-10-13)
+
+**Owner decision of 2026-10-13** (relayed by the coordinator session):
+**hold**. The PSS/E/PowerFactory export (#165) is the dynamic hand-off for
+now. Neither the ANDES path nor its runner is built until the owner, or a
+lawyer, signs off on the questions below.
+
+**What needs checking.** ANDES 2.0.0 is GPL-3.0-or-later. The parked design
+runs it in its own process:
+- gridspine writes the island case to files;
+- a runner script, the only code that imports `andes`, runs in a separate
+  environment the user installs;
+- the results come back as files;
+- gridspine never imports `andes`, which the guard test from #165 enforces,
+  and the desktop app does not bundle it.
+
+The questions:
+- **(a)** Is this arm's-length use (aggregation), so that GPL obligations do
+  not reach gridspine or pypsa-gui?
+- **(b)** Must the runner script itself be GPL-3.0-or-later, and may it live
+  in this repository under that licence?
+- **(c)** May the repository ship an environment file or install guide that
+  pulls ANDES, without bundling it?
+- **(d)** Do the exchanged case and result files carry any licence
+  obligation? (Expected: no.)
+
+**The candidates, when the check is done:**
+1. **ANDES in its own process,** user-installed, with the runner under its
+   own GPL-3.0-or-later licence in a separate folder (for example
+   `gridspine/handoff/andes_runner/`, with its LICENSE file, excluded from
+   the app build).
+   - gridspine only reads and writes files.
+   - This gives in-house multi-bus RMS: voltage dips, current-limit hits,
+     and the nadir cross-check against I6.
+   - It needs a yes to (a) to (c).
+3. **A permissively licensed RMS engine instead,** for example NREL's
+   PowerSimulationsDynamics.jl (its licence is to be verified; believed
+   BSD-3-Clause).
+   - No GPL question.
+   - More work: a Julia runtime, and a model library to map the GFM, GFL and
+     genset controls onto.
+
+(The numbering is the question's as put to the owner. Option 2, the PSS/E
+export only, is what holds now. Option 4, bundling ANDES in the app, was
+not recommended.)
 
 ### I9: panel, copilot and report (M)
 

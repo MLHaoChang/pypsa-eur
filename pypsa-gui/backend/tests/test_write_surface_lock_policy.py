@@ -127,6 +127,11 @@ _R_LLM_SETTINGS = (
     "LLM provider settings: instance/user scope, `_require_super_admin`-gated "
     "where they are instance-wide. Not project data."
 )
+_R_SKILL_REGISTRY = (
+    "re-reads the assistant's skill files from the package and the install's "
+    "`<app data>/skills/` into the in-process registry (chat harness issue 14). "
+    "Writes nothing to disk and touches no project. Not project data."
+)
 _R_LOCAL = "desktop-only (`reject_unless_local_mode` on the router); one identity, no holder."
 _R_CHAT_OWNED = (
     "acts on a chat SESSION, authorized by its owner (`session_owner_allows`, "
@@ -147,6 +152,12 @@ _R_STUDY = (
     "`_refuse_while_active`; every one of these refuses a non-study project "
     "(`require_planning`). Whether studies should join the lock is an open "
     "product question, not a gap in a control that exists."
+)
+_R_READ_ONLY_PREVIEW = (
+    "a POST only to carry a body: it computes and returns, and writes nothing. "
+    "`studies.preview_intake` reads the PATH project's uploads behind "
+    "`ProjectAccessDep`, builds a throwaway site network (never the live one) "
+    "and prices its baseline bill."
 )
 _R_NO_PROJECT = (
     "transcribes the caller's audio and returns the text; it resolves no "
@@ -218,6 +229,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("PUT", "/api/local-settings/anthropic-key"): (NOT_PROJECT_DATA, _R_LOCAL),
     ("POST", "/api/local-settings/reveal-log"): (NOT_PROJECT_DATA, _R_LOCAL),
     ("POST", "/api/dictation/transcribe"): (NOT_PROJECT_DATA, _R_NO_PROJECT),
+    ("POST", "/api/projects/{name}/studies/preview"): (NOT_PROJECT_DATA, _R_READ_ONLY_PREVIEW),
     ("POST", "/api/chat/operations/{operation_id}/reconcile"): (NOT_PROJECT_DATA, _R_ASSURANCE),
     ("POST", "/api/chat/ui-ack"): (NOT_PROJECT_DATA, _R_ASSURANCE),
     # chat session
@@ -226,6 +238,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/chat/{session_id}/rewind"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/abort"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/import"): (CHAT_SESSION, _R_CHAT_HISTORY),
+    ("POST", "/api/chat/skills/reload"): (NOT_PROJECT_DATA, _R_SKILL_REGISTRY),
     ("POST", "/api/durable-conversations"): (CHAT_SESSION, _R_DURABLE_THREAD),
     ("POST", "/api/durable-conversations/{thread_id}/checkpoint"): (CHAT_SESSION, _R_DURABLE_THREAD),
     ("POST", "/api/durable-conversations/{thread_id}/resume"): (CHAT_SESSION, _R_DURABLE_THREAD),

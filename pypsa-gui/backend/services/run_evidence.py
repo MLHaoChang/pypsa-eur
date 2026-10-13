@@ -608,7 +608,9 @@ _STUDY_KIND = {
 }
 
 _WORKER_COMPLETED = frozenset({'completed', 'done', 'met'})
-_WORKER_FAILED = frozenset({'failed', 'budget_exhausted', 'refused'})
+_WORKER_FAILED = frozenset({
+    'failed', 'budget_exhausted', 'refused', 'unreachable',
+})
 _WORKER_INTERRUPTED = frozenset({'aborted', 'interrupted', 'idle'})
 
 
@@ -811,9 +813,16 @@ def publish_study_run(study_key: str, record: dict) -> dict | None:
         }
         error = None
         if status == 'failed':
+            raw = record.get('status')
+            if raw == 'unreachable':
+                message = (
+                    'The study finished and no plan meets the target (unreachable).'
+                )
+            else:
+                message = str(record.get('error') or 'The study failed.')[:500]
             error = {
                 'error_kind': 'study_failed',
-                'message': str(record.get('error') or 'The study failed.')[:500],
+                'message': message,
             }
         return publish_run(
             token['root'], token['project_id'], run_id=token['run_id'],

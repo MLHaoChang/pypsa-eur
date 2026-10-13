@@ -79,6 +79,8 @@ SAFETY_PANEL_ENUM = [
     "Workspace", "workspace", "Settings", "settings",
     "GridSpine", "gridspine", "Reports", "reports",
     "CampusElectrical", "campusElectrical",
+    # The guided investment study panel (frontend normalises both to 'decision').
+    "DecisionStudy", "decision",
 ]
 RESULTS_TAB_ENUM = [
     "overview", "capex", "dispatch", "loadflow", "prices", "economics",
@@ -1355,7 +1357,9 @@ TOOLS: list[dict[str, Any]] = [
         "has_solver_config, bus_count, snapshot_count, objective, "
         "has_orphan_tmp, missing, parent_project, scenario_description, "
         "scenario_type, project_kind (null = capacity_expansion; "
-        "'planning_dynamics' for a gridspine study), settings (the per-project "
+        "'planning_dynamics' for a gridspine study), study_owned, "
+        "owner_study_id, owner_study_name (study_owned = a decision study's own "
+        "option or tornado fork; leave it to the study), settings (the per-project "
         "settings table: derive_lengths_from_geometry) (per "
         "schemas.py:467-491). `id` is the DB-registry UUID when multi-user "
         "auth is enabled and null in single-user mode. Each entry is "
@@ -1466,7 +1470,8 @@ TOOLS: list[dict[str, Any]] = [
         "entry is a ProjectInfo {name, id, created_at, has_solver_config, "
         "bus_count, snapshot_count, objective, has_orphan_tmp, missing, "
         "parent_project, scenario_description, scenario_type, project_kind, "
-        "settings} per schemas.py:467-491. "
+        "study_owned, owner_study_id, owner_study_name, settings} per "
+        "schemas.py:467-491. "
         "Safety: read.",
         {"name": {"type": "string"}},
         ["name"],
@@ -2754,12 +2759,17 @@ TOOLS: list[dict[str, Any]] = [
         "(capacitive and inductive Mvar after the inverters' own headroom), "
         "short_circuit (IEC 60909 per bus and period against the switchgear "
         "rating), compliance (per check: status_as_is, status_with_measures, "
-        "value, limit, worst hour, clause and its code|assumed tag), "
-        "requirement (the PCC reactive band applied and where P_ref came from)}. "
+        "value, limit, worst hour and its case, clause and its code|assumed tag), "
+        "requirement (the PCC reactive band applied and where P_ref came from), "
+        "and after an investing run taps (the on-load tap positions per hour and "
+        "case) and tap_hours_moved (how many critical hours moved a tap)}. "
         "owner_assets_count is how many bought items the investment case takes as "
         "extra owner assets and owner_assets_method (milp|least_cost, null when "
         "none) which result they come from: the joint optimisation when it is "
         "fresh and found its own choice, else the least-cost run; say which. "
+        "owner_assets_unresolved is how many needs that same run could not meet; "
+        "when it is above 0 they are passed to the investment case as a flag "
+        "(the case is not compliant without them): say so. "
         "When stale is true the campus or the project changed since the run: say "
         "so before quoting numbers. It is a steady-state study, not a compliance "
         "certificate. 409 for a project of another kind. Safety: read.",
@@ -2794,6 +2804,9 @@ TOOLS: list[dict[str, Any]] = [
         "with campus_get_investment. pcc_switchgear_by_operator (default "
         "false) says the grid operator owns the PCC switchgear, so it is "
         "neither bought nor costed: ask the user who owns it before assuming. "
+        "pcc_tap_control (campus|grid_operator, default campus) says who moves "
+        "the on-load taps of the transformers at the PCC; with grid_operator "
+        "they stay at the campus file's position. "
         "422 without a campus file or for a bad "
         "setting. Safety: write.",
         {
@@ -2805,6 +2818,7 @@ TOOLS: list[dict[str, Any]] = [
             "n_minus_1": {"type": "boolean"},
             "invest": {"type": "boolean"},
             "pcc_switchgear_by_operator": {"type": "boolean"},
+            "pcc_tap_control": {"type": "string", "enum": ["campus", "grid_operator"]},
         },
         ["project_id"],
     ),
@@ -2851,9 +2865,15 @@ TOOLS: list[dict[str, Any]] = [
         "as solved; null with hub_cost_reason when it cannot be computed), "
         "unresolved ({need, reason}: needs the library could not meet), history "
         "(each escalation to a dearer candidate and the check that forced it), "
-        "compliance_invested (the compliance table re-solved with the assets), "
+        "compliance_invested (the compliance table re-solved with the assets; "
+        "quote value_with_measures with its own worst_period_with_measures, "
+        "worst_hour_with_measures and worst_case_with_measures, not the as-is "
+        "worst hour), "
         "scope ({pcc_switchgear: campus|grid_operator}: whether the PCC switchgear "
-        "was costed to the campus or left to the grid operator, say which), "
+        "was costed to the campus or left to the grid operator, say which; "
+        "pcc_tap_control: campus|grid_operator, who moves the PCC transformer's "
+        "taps), taps and tap_hours_moved (the on-load tap positions the re-check "
+        "used per hour and case, and how many hours moved one), "
         "library_is_default, stale, owner_assets_method (milp|least_cost: which "
         "result the investment case's extra owner assets come from; the joint "
         "optimisation's when it is fresh and found its own choice, else this "
@@ -2861,9 +2881,11 @@ TOOLS: list[dict[str, Any]] = [
         "are placeholders tagged assumed unless the user replaced them with "
         "quotes (datasheet or measured) or cited reference values "
         "(literature, still not quotes), so quote assumed ones as orders of "
-        "magnitude; tap changers are not "
-        "optimised, so a voltage excursion compensation cannot shrink is "
-        "reported unresolved, not fixed; and when stale is true the campus, "
+        "magnitude; the on-load taps act "
+        "inside the re-check (per hour and case, an N-1 case after the tap "
+        "changers act), so a voltage excursion still unresolved is one neither "
+        "the taps nor compensation could shrink, and its reason says why; and "
+        "when stale is true the campus, "
         "the project or the library changed since the run. Never add the "
         "electrical cost to the hub's as if it were in the hub's optimisation: "
         "it is reported alongside, and the PyPSA project is unchanged. "
@@ -2881,7 +2903,10 @@ TOOLS: list[dict[str, Any]] = [
         "iterations, stop, fallback), stop (converged|stalled|delta_floor|"
         "max_iter|cancelled), fallback (why the least-cost choice was kept, or "
         "null), comparison (per need: c8_choice, milp_choice and each one's "
-        "annualised cost), stale, notes}. You cannot start or cancel it: it "
+        "annualised cost), stale, notes}. The c8_ fields are the least-cost "
+        "choice's: call it the least-cost choice, not C8. iterations and "
+        "iteration count the steps after the warm start (history row 0, the "
+        "least-cost choice re-solved). You cannot start or cancel it: it "
         "takes minutes and runs from the panel's Joint optimisation button, so "
         "tell the user to start it there. Say these with the numbers: the "
         "design margin is the owner's rule, judged on the least-cost dispatch "

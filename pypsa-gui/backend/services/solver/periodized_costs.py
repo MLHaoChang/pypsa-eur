@@ -20,6 +20,7 @@ economics fixtures all import from there, and none of them changed when this
 module appeared. `tests/test_solver_facade_surface.py` is what keeps that true.
 """
 import threading
+import weakref
 from collections.abc import Callable
 from contextlib import contextmanager
 
@@ -43,16 +44,36 @@ def _annuity(rate: float, lifetime: float) -> float:
 
 HOURS_PER_YEAR = 8760.0
 
-# `id()` of every network whose `fom_cost` a fill currently has scaled to the
-# modelled horizon, so a nested fill (a report computed inside a solve, a
-# resolver called inside another `with` block) cannot scale it a second time.
+# Every network whose `fom_cost` a fill currently has scaled to the modelled
+# horizon, so a nested fill (a report computed inside a solve, a resolver
+# called inside another `with` block) cannot scale it a second time.
 # Kept OFF the network on purpose: PyPSA exports a network's attributes to
 # netCDF, and a boolean flag there made every project save inside a fill fail
-# ("illegal data type for attribute network__pypsa_gui_fom_scaled"). An id is
-# stable for exactly as long as it matters — the fill holds a reference to the
-# network until its revert removes the entry.
-_FOM_SCALED_IDS: set[int] = set()
+# ("illegal data type for attribute network__pypsa_gui_fom_scaled").
+#
+# Keyed by `id(n)` because `pypsa.Network` is unhashable, but the VALUE is a
+# weak reference to the network itself and `fom_is_scaled` checks identity.
+# A bare id set was wrong: CPython reuses addresses, so an entry whose revert
+# never ran (a fill that raised, a process that dropped the network) made an
+# unrelated network later allocated at the same address read as already
+# scaled, and its `fom_cost` silently stayed on the annual basis. Seen on the
+# macOS runner (2026-10-13), where the allocator handed the control test in
+# `test_assumptions_revert_on_raise` an address a leaked entry still named.
+# A WeakValueDictionary drops the entry when the network dies, and the
+# identity check covers the window before the collector gets to it.
+_FOM_SCALED: "weakref.WeakValueDictionary[int, object]" = weakref.WeakValueDictionary()
 _FOM_SCALED_LOCK = threading.Lock()
+
+
+def _mark_fom_scaled(n) -> None:
+    with _FOM_SCALED_LOCK:
+        _FOM_SCALED[id(n)] = n
+
+
+def _unmark_fom_scaled(n) -> None:
+    with _FOM_SCALED_LOCK:
+        if _FOM_SCALED.get(id(n)) is n:
+            del _FOM_SCALED[id(n)]
 
 
 def fom_horizon_factor(n) -> float:
@@ -106,7 +127,7 @@ def fom_horizon_factor(n) -> float:
 def fom_is_scaled(n) -> bool:
     """True while a fill has `fom_cost` on the per-horizon basis."""
     with _FOM_SCALED_LOCK:
-        return id(n) in _FOM_SCALED_IDS
+        return _FOM_SCALED.get(id(n)) is n
 
 
 def fom_per_horizon(n, fom: pd.Series) -> pd.Series:
@@ -186,8 +207,6 @@ def fill_periodized_cost_defaults(
     already active on this network (`fom_is_scaled`), so nested fills never
     compound it, and the revert restores the typed values exactly.
     """
-    import numpy as np
-
     undo: list[tuple[str, str, pd.Index, pd.Series]] = []
 
     # Composite assets (a battery's power and energy parts): re-derive the annual `capital_cost` with the
@@ -253,9 +272,43 @@ def fill_periodized_cost_defaults(
                 original = df.loc[idx, "capital_cost"].copy()
                 df.loc[idx, "capital_cost"] = original * factor
                 undo.append((comp_attr, "capital_cost", idx, original))
-        with _FOM_SCALED_LOCK:
-            _FOM_SCALED_IDS.add(id(n))
+        _mark_fom_scaled(n)
         fom_scaled_here = True
+
+    def revert() -> None:
+        try:
+            for comp_attr, col, idx, original in reversed(undo):
+                df = getattr(n, comp_attr, None)
+                if df is None:
+                    continue
+                valid = [i for i in idx if i in df.index]
+                if valid:
+                    df.loc[valid, col] = original.loc[valid]
+        finally:
+            # In a `finally`: the column restores above can raise (a
+            # misaligned `original`), and a registration that outlives its
+            # fill is exactly the leak the registry's comment describes.
+            if fom_scaled_here:
+                _unmark_fom_scaled(n)
+
+    try:
+        _fill_overnight_defaults(n, cfg, undo, for_back_calculation=for_back_calculation)
+    except BaseException:
+        # Nothing downstream holds `revert` yet, so this is the only place
+        # that can undo what the passes above did and drop the registration.
+        revert()
+        raise
+
+    return revert
+
+
+def _fill_overnight_defaults(n, cfg: "SolverConfig", undo: list, *, for_back_calculation: bool) -> None:
+    """
+    The `discount_rate` / `lifetime` defaults for overnight-priced assets
+    (and, when asked, the back-calculation population). Appends to `undo`.
+    """
+    import numpy as np
+
     for comp_attr in ("generators", "storage_units", "stores", "links", "lines", "transformers"):
         df = getattr(n, comp_attr, None)
         if df is None or df.empty or "overnight_cost" not in df.columns:
@@ -292,29 +345,6 @@ def fill_periodized_cost_defaults(
                 original = df.loc[idx, "lifetime"].copy()
                 df.loc[idx, "lifetime"] = cfg.default_lifetime
                 undo.append((comp_attr, "lifetime", idx, original))
-
-    def revert() -> None:
-        try:
-            for comp_attr, col, idx, original in reversed(undo):
-                df = getattr(n, comp_attr, None)
-                if df is None:
-                    continue
-                valid = [i for i in idx if i in df.index]
-                if valid:
-                    df.loc[valid, col] = original.loc[valid]
-        finally:
-            # In a `finally` because the registry is keyed by `id(n)`, and
-            # CPython REUSES addresses. A leaked entry is therefore not merely
-            # stale: an unrelated network later allocated at the same address
-            # reads as already-scaled, so `fom_per_horizon` leaves its
-            # `fom_cost` on the wrong basis and nothing anywhere says so. The
-            # column restores above can raise (a misaligned `original`), and
-            # before this the discard sat after them.
-            if fom_scaled_here:
-                with _FOM_SCALED_LOCK:
-                    _FOM_SCALED_IDS.discard(id(n))
-
-    return revert
 
 
 @contextmanager

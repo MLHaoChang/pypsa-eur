@@ -57,7 +57,11 @@ async function renderSidebar() {
   return utils
 }
 
-// The six PROJECT rows Guided hides (§3.5) and the four it keeps.
+const STEP_IDS = ['build', 'time', 'run', 'results', 'studies', 'reports']
+
+// The six PROJECT rows Guided hides (§3.5) and the four it keeps. In Expert,
+// Snapshots and Scenarios are REPORTS rows and the rest sit behind the footer
+// card's menu (M2).
 const HIDDEN_PROJECT_ROWS = ['Project info', 'Snapshots', 'Scenarios', 'Duplicate project', 'Export bundle', 'Workspace panel']
 const KEPT_PROJECT_ROWS = ['Save', 'Other', 'Projects home']
 
@@ -75,12 +79,12 @@ beforeEach(() => {
 describe('Sidebar in Guided mode — expanded', () => {
   beforeEach(() => useUIStore.setState({ uiMode: 'guided', sidebarMode: 'expanded' }))
 
-  it('hides DATA, SIMULATION and the canvas mode switcher', async () => {
+  it('hides the Expert steps, the footer project card and the canvas mode switcher', async () => {
     await renderSidebar()
-    expect(screen.queryByTestId('sidebar-section-data')).toBeNull()
-    expect(screen.queryByTestId('sidebar-section-simulation')).toBeNull()
+    for (const id of STEP_IDS) expect(screen.queryByTestId(`sidebar-section-${id}`)).toBeNull()
+    expect(screen.queryByTestId('sidebar-project-card')).toBeNull()
     expect(screen.queryByTestId('sidebar-mode-switcher')).toBeNull()
-    // Their rows go with them — Solve Queue lives in SIMULATION.
+    // Their rows go with them — Solve Queue lives in RUN.
     expect(screen.queryByText('Assets')).toBeNull()
     expect(screen.queryByText('Solve Queue')).toBeNull()
     expect(screen.queryByText('Select / Pan')).toBeNull()
@@ -121,13 +125,12 @@ describe('Sidebar in Guided mode — expanded', () => {
 describe('Sidebar in Guided mode — icon strip', () => {
   beforeEach(() => useUIStore.setState({ uiMode: 'guided', sidebarMode: 'icon' }))
 
-  it('shows Assistant, Hub design and Project; hides Data, Simulation and the mode switcher', async () => {
+  it('shows Assistant, Hub design and Project; hides the steps and the mode switcher', async () => {
     await renderSidebar()
     expect(screen.getByTestId('sidebar-assistant')).toBeTruthy()
     expect(screen.getByTestId('sidebar-hub-design')).toBeTruthy()
     expect(screen.getByTestId('sidebar-section-project')).toBeTruthy()
-    expect(screen.queryByTestId('sidebar-section-data')).toBeNull()
-    expect(screen.queryByTestId('sidebar-section-simulation')).toBeNull()
+    for (const id of STEP_IDS) expect(screen.queryByTestId(`sidebar-section-${id}`)).toBeNull()
     expect(screen.queryByTestId('sidebar-mode-switcher')).toBeNull()
   })
 
@@ -149,23 +152,26 @@ describe('Sidebar in Guided mode — icon strip', () => {
 describe('Sidebar in Expert mode', () => {
   beforeEach(() => useUIStore.setState({ uiMode: 'expert' }))
 
-  it('expanded: every section, the mode switcher and every PROJECT row; no Hub design', async () => {
+  // The Expert order itself (BUILD … REPORTS, the footer project card) is
+  // pinned by Sidebar.taskOrder.test.tsx; this file pins what Guided removes.
+  it('expanded: every step, the mode switcher and every project row; no Hub design', async () => {
     useUIStore.setState({ sidebarMode: 'expanded' })
     await renderSidebar()
-    expect(screen.getByTestId('sidebar-section-project')).toBeTruthy()
-    expect(screen.getByTestId('sidebar-section-data')).toBeTruthy()
-    expect(screen.getByTestId('sidebar-section-simulation')).toBeTruthy()
+    for (const id of STEP_IDS) expect(screen.getByTestId(`sidebar-section-${id}`)).toBeTruthy()
+    expect(screen.getByTestId('sidebar-project-card')).toBeTruthy()
     expect(screen.getByTestId('sidebar-mode-switcher')).toBeTruthy()
     expect(screen.queryByTestId('sidebar-hub-design')).toBeNull()
+    // Snapshots and Scenarios moved to REPORTS; the rest sit behind the card menu.
+    expect(screen.getByText('Snapshots')).toBeTruthy()
+    expect(screen.getByText('Scenarios')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('sidebar-project-menu'))
     for (const label of [...KEPT_PROJECT_ROWS, ...HIDDEN_PROJECT_ROWS]) expect(screen.getByText(label)).toBeTruthy()
   })
 
-  it('icon strip: all three section buttons and the mode switcher; no Hub design', async () => {
+  it('icon strip: every step button, Project and the mode switcher; no Hub design', async () => {
     useUIStore.setState({ sidebarMode: 'icon' })
     await renderSidebar()
-    expect(screen.getByTestId('sidebar-section-project')).toBeTruthy()
-    expect(screen.getByTestId('sidebar-section-data')).toBeTruthy()
-    expect(screen.getByTestId('sidebar-section-simulation')).toBeTruthy()
+    for (const id of [...STEP_IDS, 'project']) expect(screen.getByTestId(`sidebar-section-${id}`)).toBeTruthy()
     expect(screen.getByTestId('sidebar-mode-switcher')).toBeTruthy()
     expect(screen.queryByTestId('sidebar-hub-design')).toBeNull()
   })
@@ -173,10 +179,11 @@ describe('Sidebar in Expert mode', () => {
   it('switching modes live re-renders the sidebar', async () => {
     useUIStore.setState({ sidebarMode: 'expanded' })
     await renderSidebar()
-    expect(screen.getByTestId('sidebar-section-data')).toBeTruthy()
+    expect(screen.getByTestId('sidebar-section-build')).toBeTruthy()
     act(() => { useUIStore.setState({ uiMode: 'guided' }) })
-    expect(screen.queryByTestId('sidebar-section-data')).toBeNull()
+    expect(screen.queryByTestId('sidebar-section-build')).toBeNull()
+    expect(screen.getByTestId('sidebar-section-project')).toBeTruthy()
     act(() => { useUIStore.setState({ uiMode: 'expert' }) })
-    expect(screen.getByTestId('sidebar-section-data')).toBeTruthy()
+    expect(screen.getByTestId('sidebar-section-build')).toBeTruthy()
   })
 })

@@ -1,0 +1,1 @@
+* Feat(agents): Add the `steward` skill with the owner's rules for driving a PR to merge, `scripts/coord/premerge.sh` (conflict, overlap and trial-merge semantic-test check), `scripts/coord/sessions.py` (session list summary) and a session-brief template in `docs/agents/session-brief.md`.

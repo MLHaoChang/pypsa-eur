@@ -170,7 +170,12 @@ What the harness adds to the assistant (all read tier, see the README):
   more context under the question, let you pick several options (tick them,
   then Send), or ask you to approve a plan (a "Plan review" card).
 - **Skills.** `use_skill` loads a procedure (`grill` first); the prompt
-  carries only the catalogue.
+  carries only the catalogue. You can add your own: put
+  `<name>/SKILL.md` (the same layout as `harness/skills/`) in the `skills`
+  folder of the app's data directory, then reload (`POST
+  /api/chat/skills/reload`) or restart. A skill named like a built-in one is
+  refused, not used in its place; `GET /api/chat/skills` lists the skills and
+  any refused ones.
 - **Large results.** A tool result too large to show the assistant whole
   (an hourly series, a long table) is kept for the chat; the assistant sees
   the start of it and reads the rest a page at a time with `read_result`.
@@ -330,6 +335,19 @@ If the TTL elapses without a decision the stream emits a `tool_error` with
 `error_kind='confirmation_expired'` — the agent re-prompts with a fresh
 token. Approving an expired token via the REST endpoint returns 409
 `error_kind='confirmation_expired'`.
+
+Every card is recorded (`harness/approvals.py`, chat harness issue 18): an
+`approval/asked` line when it is shown, and an `approval/decided` line with
+the outcome (`approved`, `rejected`, `expired`, `aborted`, `revoked` or
+`unavailable`) and who decided (`user`, `ttl`, `session`, `system`, or
+`policy` for a tier in `PYPSA_GUI_CHAT_AUTO_APPROVE_TIERS`, which records a
+decision with no card). The log never repeats the tool's arguments; it links
+a preview's `preview_id` and a checked turn's `operation_id`. It lives under
+the app-data directory (`chat-approvals/`, per user and chat, kept 90 days).
+Approvals fail closed: if the record cannot be written, the action does not
+run and the stream emits `error_kind='approval_unavailable'`. A card
+withdrawn because the conversation's scope changed ends at once with
+`error_kind='confirmation_revoked'` instead of waiting for its timeout.
 
 ## Error flows
 

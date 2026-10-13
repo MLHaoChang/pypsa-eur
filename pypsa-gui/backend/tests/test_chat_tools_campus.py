@@ -56,6 +56,8 @@ def test_the_descriptions_say_what_the_model_must_not_do():
     ("campus_run_study", {"project_id": "Chat Hub", "invest": True}, "run", ({"invest": True, "pf": None},)),
     ("campus_run_study", {"project_id": "Chat Hub", "pcc_switchgear_by_operator": True}, "run",
      ({"pcc_switchgear_by_operator": True, "pf": None},)),
+    ("campus_run_study", {"project_id": "Chat Hub", "pcc_tap_control": "grid_operator"}, "run",
+     ({"pcc_tap_control": "grid_operator", "pf": None},)),
 ])
 def test_each_dispatcher_resolves_the_project_and_calls_its_service_function(hub, monkeypatch, tool, args,
                                                                            function, expected):
@@ -145,13 +147,18 @@ def test_the_library_descriptions_say_what_the_model_must_not_do():
     assert "validated" in desc["campus_set_library"] and "422" in desc["campus_set_library"]
     inv = desc["campus_get_investment"]
     assert "placeholder" in inv and "assumed" in inv
-    assert "tap" in inv and "not optimised" in inv
+    # plan C15: the on-load taps act inside the re-check; what is left unresolved is what they could not fix
+    assert "on-load taps" in inv and "not optimised" not in inv and "pcc_tap_control" in inv
     assert "unresolved" in inv and "stale" in inv
     assert "invest" in desc["campus_run_study"]
     assert "grid operator" in desc["campus_run_study"] and "ask the user who owns" in desc["campus_run_study"]
     assert "campus|grid_operator" in inv
     schema = {t["name"]: t["input_schema"] for t in TOOLS}
     assert schema["campus_run_study"]["properties"]["pcc_switchgear_by_operator"] == {"type": "boolean"}
+    assert schema["campus_run_study"]["properties"]["pcc_tap_control"] == {"type": "string",
+                                                                         "enum": ["campus", "grid_operator"]}
+    assert "pcc_tap_control" in desc["campus_run_study"] and "grid_operator" in desc["campus_run_study"]
+    assert "tap_hours_moved" in desc["campus_get_study"]
 
 
 @pytest.mark.parametrize("tool, args, function, expected", [
@@ -196,3 +203,16 @@ def test_the_milp_read_dispatcher_resolves_the_project_and_calls_get_milp(hub, m
     assert chat_tools.DISPATCHERS["campus_get_milp"](project_id="Chat Hub") == {"ok": True}
     (call,) = calls
     assert isinstance(call[0], Project) and call[0].name == "Chat Hub" and len(call) == 1
+
+
+def test_the_copilot_quotes_a_re_checked_value_with_its_own_hour_and_case():
+    desc = {t["name"]: t["description"] for t in TOOLS}["campus_get_investment"]
+    for field in ("worst_period_with_measures", "worst_hour_with_measures", "worst_case_with_measures"):
+        assert field in desc
+    assert "not the as-is worst hour" in desc
+
+
+def test_the_copilot_says_least_cost_choice_rather_than_the_plans_step_name():
+    desc = {t["name"]: t["description"] for t in TOOLS}["campus_get_milp"]
+    assert "call it the least-cost choice, not C8" in desc
+    assert "after the warm start" in desc
