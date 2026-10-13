@@ -131,4 +131,8 @@ def test_workflow_uses_repository_token_and_lowercase_owner_namespace():
     assert login["with"]["password"] == "${{ secrets.GITHUB_TOKEN }}"
     setup = next(step for step in steps if "IMAGE_NAME=" in step.get("run", ""))
     assert "${GITHUB_REPOSITORY_OWNER,,}/eur-dev-env" in setup["run"]
+    assert (
+        "pixi.toml pixi.lock pyproject.toml gridspine .dockerignore docker/dev-env/Dockerfile"
+        in setup["run"]
+    )
     assert steps[-1]["run"] == "bash .github/scripts/push-dev-image.sh"

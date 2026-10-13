@@ -20,6 +20,13 @@ Neither repository secrets nor upstream registry write access are required.
 Package/organization policy can still independently restrict publishing; an
 actual registry denial must remain a failure, rather than a skipped green job.
 
+The existing Dockerfile also omitted the editable GridSpine package and its
+build metadata; `.dockerignore` excluded both. The image now includes those
+inputs, pins Pixi to the same 0.68.1 version used in test CI, and installs the
+frozen lock. Current bind-mounted repository sources take priority over its
+editable fallback. All copied source and context inputs participate in the
+environment-revision cache key.
+
 The publisher checks whether the owned environment-revision image exists.
 Unchanged environments reuse it; a missing image builds the checked-out source
 and publishes both environment-revision and current-commit tags. Changed
@@ -33,7 +40,11 @@ Docker command. They cover missing-image construction, unchanged-image reuse,
 environment changes, manual dispatch, repository source labels, tag selection,
 non-master refusal, fatal build/pull/push failures, and workflow token permissions.
 Shell syntax and changed-test Ruff checks also pass. These offline checks do not
-claim an actual container build or successful registry publication.
+claim an actual container build or successful registry publication. A new
+read-only PR job builds the real locked image without logging into the registry
+or publishing it; it must pass before merge. Local Docker socket access was
+rejected by automatic approval review because daemon access grants broad host
+control. GitHub CI provides the safer build-validation path.
 
 PR #159 independently completed the previous backend reliability CI scope:
 12,987 backend tests passed, 290 skipped, all 31 QA drivers passed, and the

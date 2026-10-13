@@ -4,6 +4,18 @@ on:
   push:
     branches:
     - master
+  pull_request:
+    branches:
+    - master
+    paths:
+    - '.github/workflows/push-images.yaml'
+    - '.github/scripts/push-dev-image.sh'
+    - '.dockerignore'
+    - 'docker/dev-env/Dockerfile'
+    - 'pixi.toml'
+    - 'pixi.lock'
+    - 'pyproject.toml'
+    - 'gridspine/**'
   workflow_dispatch:
 
 permissions:
@@ -11,8 +23,21 @@ permissions:
   packages: write
 
 jobs:
+  validate-image:
+    name: Validate development image
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v7
+    - name: Build locked environment without publishing
+      run: docker build . --file docker/dev-env/Dockerfile --tag dev-env-validation:${{ github.sha }}
+
   push-image:
     name: dev-env
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
@@ -21,7 +46,7 @@ jobs:
 
     - name: 'Select image namespace and environment revision'
       run: |
-        hash_last_changed=$(git log -1 --pretty=format:%H -- pixi.toml pixi.lock docker/dev-env/Dockerfile)
+        hash_last_changed=$(git log -1 --pretty=format:%H -- pixi.toml pixi.lock pyproject.toml gridspine .dockerignore docker/dev-env/Dockerfile)
         echo "hash_last_changed=$hash_last_changed" >> $GITHUB_ENV
         echo "IMAGE_NAME=${GITHUB_REPOSITORY_OWNER,,}/eur-dev-env" >> $GITHUB_ENV
 
