@@ -11,7 +11,9 @@ together (master-follower): the group has one position, an offset ``o`` from
 neutral, and every unit sits at its own ``neutral + o``. The group's range
 is the offsets every unit can reach. The group's position is its first
 unit's (the master's): units the file puts at other offsets join the
-master's once the group moves. Nothing else moves:
+master's once the group moves. In the outage of the first unit it is read
+from a unit in service, on the first unit's scale (``Taps.group_position``).
+Nothing else moves:
 
 * an ``off_circuit`` tap stays at the file's ``tap.pos`` (owner, 2026-10-12);
 * a group with a unit without tap data, or with an off-circuit unit, has no
@@ -228,6 +230,17 @@ class Taps:
         for m, n0 in zip(g.members, g.neutral):
             net.trafo.at[self.idx[m], "tap_pos"] = n0 + o
 
+    @staticmethod
+    def group_position(g, pos: dict):
+        """The group's position, on its first unit's scale (``neutral[0] +
+        offset``), from ``pos`` = ``{transformer: tap_pos}`` of the units in
+        service: read on the first of its units there, so a case with the
+        first unit out still has one. None when no unit of it is in ``pos``."""
+        for m, n0 in zip(g.members, g.neutral):
+            if m in pos:
+                return g.neutral[0] + int(pos[m]) - n0
+        return None
+
     def positions(self, net) -> dict:
         """``{transformer: tap_pos}`` of every unit the search may move."""
         return {m: int(net.trafo.at[self.idx[m], "tap_pos"]) for g in self.searched for m in g.members}
@@ -392,8 +405,8 @@ class Taps:
             elif not g.controlled:
                 said.append(f"{g.name}'s taps are the grid operator's (pcc_tap_control)")
             else:
-                master = g.members[0]
-                p = pos.get(master, self.file_pos[master])
+                p = self.group_position(g, pos)
+                p = self.file_pos[g.members[0]] if p is None else p
                 o = p - g.neutral[0]
                 end = " (max)" if o >= g.hi else " (min)" if o <= g.lo else ""
                 said.append(f"range exhausted: {g.name} at {p:+d}{end}" if end else
@@ -414,7 +427,8 @@ def compliance_note(tapper, bus: pd.DataFrame, taps: pd.DataFrame, hunted=()) ->
         _, key, case, _, _ = w
         here = taps[(taps["period"] == key[0]) & (taps["hour"] == key[1]) & (taps["case"] == case)]
         pos = dict(zip(here["transformer"], here["tap_pos"]))
-        said = [f"{g.name} {pos[g.members[0]]:+d}" for g in tapper.searched if g.members[0] in pos]
+        said = [f"{g.name} {p:+d}" for g in tapper.searched
+                if (p := tapper.group_position(g, pos)) is not None]
         if said:
             out.append(f"taps at {key} ({case}): " + ", ".join(said))
     if hunted:
