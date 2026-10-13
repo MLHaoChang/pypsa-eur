@@ -72,7 +72,8 @@ def _value(pack, key: str) -> float:
 def price_from_pack(n, component: str, name: str, technology: str, *,
                     version: str) -> dict[str, Any]:
     """Write `technology`'s pack costs onto `n.<component>.loc[name]`; return what was written with
-    the pack's id, version and hash. Raises `KeyError` for a technology the pack does not price."""
+    the pack's id, version and hash, and the annual charge: `capital_cost` (the annuity alone),
+    `fom_cost` and `annualised_cost_eur_per_mw_yr` (their sum, what the LP charges per MW-year). Raises `KeyError` for a technology the pack does not price."""
     pack = load_defaults_pack(version)
     rate = float(pack.finance.discount_rate.value)
     df = getattr(n, component)
@@ -89,8 +90,9 @@ def price_from_pack(n, component: str, name: str, technology: str, *,
                {**{f"inv_{part}_{field}": (_row(pack, f"battery.{part}.{field}"), 1.0)
                    for part in ("power", "energy") for field in ("overnight", "lifetime", "fom_share")},
                 "discount_rate": (None, 1.0)})
-        return {**stamp, **parts, "capital_cost": float(df.at[name, "capital_cost"]),
-                "fom_cost": float(df.at[name, "fom_cost"])}
+        capital, fom = float(df.at[name, "capital_cost"]), float(df.at[name, "fom_cost"])
+        return {**stamp, **parts, "capital_cost": capital, "fom_cost": fom,
+                "annualised_cost_eur_per_mw_yr": capital + fom}
     overnight = _value(pack, f"{technology}.investment.overnight")
     scale = float(df.at[name, "efficiency"]) if component == "links" else 1.0
     overnight *= scale
@@ -107,4 +109,11 @@ def price_from_pack(n, component: str, name: str, technology: str, *,
             # FOM per MW: the overnight cost × the share's range
             "fom_cost": (_row(pack, f"{technology}.investment.fom_share"), overnight),
             "discount_rate": (None, 1.0)})   # capital_cost: derived on every class
-    return {**stamp, **written}
+    from services.solver.periodized_costs import _annuity
+
+    # The disclosure states what the LP charges per MW-year: `capital_cost` the annuity alone
+    # (its meaning everywhere in the GUI; the column itself stays 0, PyPSA annuitises
+    # `overnight_cost`), `fom_cost` beside it, and their sum.
+    annuity = overnight * _annuity(rate, written["lifetime"])
+    return {**stamp, **written, "capital_cost": annuity,
+            "annualised_cost_eur_per_mw_yr": annuity + written["fom_cost"]}
