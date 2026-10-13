@@ -6,6 +6,8 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
+* Feat(pypsa-gui): Campus island I2c. Linearised unit commitment for the island sidecar's fixed-size gensets (`linearised_uc`, plain solve only, restored after the solve) replaces the spinning flag in the headroom, RoCoF and grid-forming MVA rows at the instant of islanding. `island_study` solves the islanding variants separately and reports the cost of island capability, the cost of seamless islanding and the binding rows with their duals.
+
 * Fix(CI): Publish development images in the repository owner's lowercase registry namespace using the workflow token. Include editable package sources in the locked image and validate builds before merge. Build when the environment image is missing, reuse it when available, and keep manual builds and failure handling from publishing incorrect tags.
 
 * Test(pypsa-gui): Isolate owned assurance records between backend test cases so long suites do not exhaust a shared user's 512-record quota. Add regressions for case isolation and refusal to publish from a full store; production storage limits and within-case recovery remain unchanged.
