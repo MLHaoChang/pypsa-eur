@@ -1,8 +1,8 @@
 # 18 — Confirmation decisions as durable, fail-closed events
 
-Status: ready-for-agent (once 13 has landed)
+Status: ready-for-agent (re-scoped 2026-10-12: no longer blocked by 13, see Comments)
 Type: task
-Blocked by: 13
+Blocked by: none
 
 Source: assessment design 2; DeepSeek Harness `docs/subsystems/approval.md`
 (`approval/asked` and `approval/decided` audit events, closed outcomes,
@@ -33,3 +33,21 @@ tool result; an expired or never-answered card leaves no record.
 
 The three outcomes and the policy path each have a red-first test; the
 frame recording is unchanged; `/history` is unchanged.
+
+## Comments
+
+2026-10-12 (re-scoped against master after 143 commits; nothing of this issue exists there yet):
+Confirmation cards are still in memory only (`harness/confirm.py`,
+`PendingConfirmation` / `record_decision` / `wait_for_decision` in
+`harness/session.py`). The card frame is `tool_pending_confirmation` (this
+issue said `confirmation_request`). Changes:
+- Write the records now to an owner store in the `assurance_records` style
+  or a small append-only JSONL under `harness/durable.transaction`; fold them
+  into issue 13's log when it lands.
+- The closed outcomes gain `aborted` (`wait_for_decision` returns it) and
+  `revoked` (`durable_conversation.rebind_scope` clears open cards and
+  decisions without a record today).
+- Link `approval/decided` to the effect `operation_id` (`harness/effects.py`
+  reserves after confirmation) and the task `attempt_id` when present.
+- For preview confirmations (`assistant_tools.preview_confirmation`) record
+  the `preview_id`, not the diff.
