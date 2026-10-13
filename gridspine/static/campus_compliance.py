@@ -29,8 +29,10 @@ Every row carries:
   compensation. A voltage check becomes ``not_rechecked`` whenever any
   measure is recommended, because those measures move voltages and the
   study did not re-solve with them in place.
-- ``value``, ``limit``, ``unit``, the worst ``(period, hour)``, ``clause``,
-  ``source`` and ``detail``. ``source`` is the limit's own tag, so a limit
+- ``value``, ``limit``, ``unit``, the worst ``(period, hour)``, the case of
+  that reading (``worst_case``: ``intact`` or ``N-1:<unit>``; None for the
+  reactive exchange, one figure per hour, and for the fault level, one per
+  period), ``clause``, ``source`` and ``detail``. ``source`` is the limit's own tag, so a limit
   read from an uploaded grid code and not yet confirmed says ``extracted``.
 
 pandas only, plus the profile's band lookup.
@@ -51,11 +53,16 @@ def _true(flag) -> bool:
     return str(flag).strip().lower() == "true"
 
 
-def _row(check, as_is, with_measures, value, limit, unit, where, clause, source, detail):
+#: The report's columns; ``worst_case`` was added after the others were in use, so it comes last.
+COLUMNS = ["check", "status_as_is", "status_with_measures", "value", "limit", "unit", "worst_period", "worst_hour",
+           "clause", "source", "detail", "worst_case"]
+
+
+def _row(check, as_is, with_measures, value, limit, unit, where, clause, source, detail, case=None):
     period, hour = where if where else (None, None)
     return {"check": check, "status_as_is": as_is, "status_with_measures": with_measures,
             "value": value, "limit": limit, "unit": unit, "worst_period": period, "worst_hour": hour,
-            "clause": clause, "source": source, "detail": detail}
+            "worst_case": case, "clause": clause, "source": source, "detail": detail}
 
 
 def _voltage(rows: pd.DataFrame, profile, bus_kv, fixed_band=None):
@@ -117,7 +124,7 @@ def campus_compliance(bus, trafo, reactive, sizing, compensation, short_circuit,
                 "design limit inside the campus, the code band applied as one")
         detail = (f"worst at {b} ({case}); {what}"
                   f"; band {band['v_min']:g}-{band['v_max']:g} pu")
-        rows.append(_row(check, status, after, value, limit, "pu", where, band["clause"], source, detail))
+        rows.append(_row(check, status, after, value, limit, "pu", where, band["clause"], source, detail, str(case)))
 
     # transformers
     j = trafo["loading_pct"].idxmax()
@@ -129,7 +136,8 @@ def campus_compliance(bus, trafo, reactive, sizing, compensation, short_circuit,
     rows.append(_row("transformer_loading", as_is, after, peak, 100.0, "%",
                      (int(trafo.at[j, "period"]), int(trafo.at[j, "hour"])),
                      "equipment rating (not a grid-code clause)", "assumed",
-                     "; ".join(recs) if recs else f"worst {trafo.at[j, 'trafo']} ({trafo.at[j, 'case']})"))
+                     "; ".join(recs) if recs else f"worst {trafo.at[j, 'trafo']} ({trafo.at[j, 'case']})",
+                     str(trafo.at[j, "case"])))
 
     # switchgear
     rated = short_circuit[short_circuit["rated_ka"].notna()]
@@ -147,5 +155,4 @@ def campus_compliance(bus, trafo, reactive, sizing, compensation, short_circuit,
     rows.append(_row("switchgear", status, status, float(short_circuit.at[k, "ikss_max_ka"]),
                      float(short_circuit.at[k, "rated_ka"]), "kA", (int(short_circuit.at[k, "period"]), None),
                      "equipment rating (IEC 62271-1 peak ratio, assumed)", "assumed", detail))
-    return pd.DataFrame(rows, columns=["check", "status_as_is", "status_with_measures", "value", "limit", "unit",
-                                       "worst_period", "worst_hour", "clause", "source", "detail"])
+    return pd.DataFrame(rows, columns=COLUMNS)

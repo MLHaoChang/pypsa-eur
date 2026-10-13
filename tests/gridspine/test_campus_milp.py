@@ -880,3 +880,23 @@ def test_the_warm_start_is_c8s_addition_not_the_replacement_with_the_same_units(
     assert h.iloc[0]["choice"].startswith("transformer TR1: keep TR1 + 1 x T40")
     assert bool(h.iloc[0]["feasible"])
     assert out["comparison"].set_index("need").at["transformer TR1", "c8_choice"] == "keep TR1 + 1 x T40"
+
+
+def test_the_joint_choices_with_measures_values_carry_their_own_hour_and_case(tmp_path):
+    """The joint choice's re-check reports each value where it was read: the
+    transformer loading at the one hour (2030, 1), in an outage, since the
+    survivor carries the whole hour (solved here: either unit out gives the
+    peak, the intact pair less), never the intact case."""
+    from gridspine.static.campus_milp import select_assets_milp
+    spec, table, sel, lib, crit = outage_case(tmp_path)
+    out = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, crit)
+    assert out["fallback"] is None
+    q_bess = float(out["dispatch"].loc[out["dispatch"]["element"] == "inverters", "q_mvar"].iloc[0])
+    load = {case: float(n.res_trafo.loc[n.trafo["in_service"], "loading_percent"].max())
+            for case, n in (("intact", pair_net(q_bess)), ("N-1:TR1", pair_net(q_bess, out=0)),
+                            ("N-1:TR2", pair_net(q_bess, out=1)))}
+    peak = max(load.values())
+    assert load["intact"] < peak - 1.0
+    r = out["compliance"].set_index("check").loc["transformer_loading"]
+    assert (r["worst_period_with_measures"], r["worst_hour_with_measures"]) == (2030, 1)
+    assert load[r["worst_case_with_measures"]] == pytest.approx(peak, abs=1e-6)

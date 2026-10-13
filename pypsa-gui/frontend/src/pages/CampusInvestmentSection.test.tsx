@@ -354,6 +354,44 @@ describe('compliance with the investment', () => {
     await waitFor(() => expect(screen.queryByTestId('compliance-cable_loading')).toBeNull())
   })
 
+  it('shows each re-solved value with its own worst hour and case, never the as-is hour', async () => {
+    // the browser run's case: as is worst at h158, re-checked worst at h117 in the outage of SITE_TRANSFO
+    const base = results()
+    api.state.mockResolvedValue(stateWith(results({
+      compliance_invested: [...base.compliance_invested!, {
+        check: 'campus_voltage', status_as_is: 'fail', status_with_measures: 'pass', value: 0.884, limit: 0.9,
+        unit: 'pu', worst_period: 2030, worst_hour: 158, worst_case: 'N-1:SITE_TRANSFO', clause: 'design',
+        source: 'assumed', detail: 'as is', value_with_measures: 0.9003, detail_with_measures: 'worst at IT_BUS',
+        worst_period_with_measures: 2030, worst_hour_with_measures: 117, worst_case_with_measures: 'N-1:SITE_TRANSFO',
+      }],
+    })))
+    renderPanel()
+    const cell = await screen.findByTestId('compliance-worst-campus_voltage')
+    expect(cell.textContent).toBe('0.900 pu 2030 · h117 · N-1:SITE_TRANSFO')
+    expect(cell.textContent).not.toContain('h158')
+  })
+
+  it('gives no hour beside a re-solved value from a run that did not keep it', async () => {
+    renderPanel()
+    const cell = await screen.findByTestId('compliance-worst-pcc_reactive')
+    expect(cell.textContent).toContain('11.93')
+    expect(cell.textContent).not.toContain('h158')
+  })
+
+  it('shows the as-is value with its own hour and case when the run did not invest', async () => {
+    const base = results()
+    api.state.mockResolvedValue(stateWith(results({
+      compliance: [...base.compliance, {
+        check: 'transformer_loading', status_as_is: 'fail', status_with_measures: 'pass', value: 112.5, limit: 100,
+        unit: '%', worst_period: 2030, worst_hour: 158, worst_case: 'N-1:TR1', clause: 'equipment rating',
+        source: 'assumed', detail: 'worst TR2 (N-1:TR1)' }],
+      investment: null, cost: null, compliance_invested: null, history: null, unresolved: null, scope: null,
+    })))
+    renderPanel()
+    expect((await screen.findByTestId('compliance-worst-transformer_loading')).textContent)
+      .toBe('112.500 % 2030 · h158 · N-1:TR1')
+  })
+
   it('says in the header that the with-assets column is an AC re-solve', async () => {
     renderPanel()
     expect((await screen.findByText(/With the assets \(AC re-solved\)/))).toBeTruthy()

@@ -74,9 +74,9 @@ function num(v: number | null | undefined, digits = 2): string {
   return v == null || !isFinite(v) ? '—' : v.toFixed(digits).replace(/\.?0+$/, m => (m.startsWith('.') ? '' : m))
 }
 
-function where(period: number | null, hour: number | null): string {
+function where(period: number | null | undefined, hour: number | null | undefined, kase?: string | null): string {
   if (period == null) return ''
-  return hour == null ? `${period}` : `${period} · h${hour}`
+  return [`${period}`, hour == null ? null : `h${hour}`, kase || null].filter(Boolean).join(' · ')
 }
 
 export default function CampusElectricalPanel() {
@@ -429,16 +429,22 @@ function ResultsSection({ state, pending }: { state: CampusState; pending: boole
           </thead>
           <tbody>
             {rows.map(c => {
-              // With the investment, the "with" side is an AC result of the campus as bought.
-              const value = invested ? (c as InvestedComplianceRow).value_with_measures : c.value
-              const detail = invested ? (c as InvestedComplianceRow).detail_with_measures : c.detail
+              // With the investment, the "with" side is an AC result of the campus as bought, read at its
+              // own worst hour and case (a run from before they were kept has none: no hour is shown
+              // rather than the as-is one).
+              const w = c as InvestedComplianceRow
+              const value = invested ? w.value_with_measures : c.value
+              const detail = invested ? w.detail_with_measures : c.detail
+              const at = invested
+                ? where(w.worst_period_with_measures, w.worst_hour_with_measures, w.worst_case_with_measures)
+                : where(c.worst_period, c.worst_hour, c.worst_case)
               return (
                 <tr key={c.check} data-testid={`compliance-${c.check}`} className="border-t border-border">
                   <td className="py-1 pr-3 whitespace-nowrap align-top">{CHECK_LABEL[c.check] ?? c.check}</td>
                   <td className="pr-3 align-top"><StatusTag s={c.status_as_is} /></td>
                   <td className="pr-3 align-top"><StatusTag s={c.status_with_measures} /></td>
-                  <td className="pr-3 whitespace-nowrap align-top tabular-nums">
-                    {num(value, 3)} {c.unit} <span className="text-muted">{where(c.worst_period, c.worst_hour)}</span>
+                  <td data-testid={`compliance-worst-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums">
+                    {num(value, 3)} {c.unit} <span className="text-muted">{at}</span>
                   </td>
                   <td className="pr-3 whitespace-nowrap align-top tabular-nums text-muted">{num(c.limit, 3)} {c.unit}</td>
                   <td className="align-top">

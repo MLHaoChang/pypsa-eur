@@ -444,10 +444,11 @@ def _compliance(study, req, profile) -> pd.DataFrame:
         status = "fail" if peak > 100.0 + 1e-9 else "pass"
         where, detail = (int(line.at[j, "period"]), int(line.at[j, "hour"])), \
             f"worst {line.at[j, 'cable']} ({line.at[j, 'case']})"
+        case = str(line.at[j, "case"])
     else:
-        peak, status, where, detail = math.nan, "pass", (None, None), "no cable"
+        peak, status, where, detail, case = math.nan, "pass", (None, None), "no cable", None
     cable = {"check": "cable_loading", "status_as_is": status, "status_with_measures": status, "value": peak,
-             "limit": 100.0, "unit": "%", "worst_period": where[0], "worst_hour": where[1],
+             "limit": 100.0, "unit": "%", "worst_period": where[0], "worst_hour": where[1], "worst_case": case,
              "clause": "equipment rating (not a grid-code clause)", "source": "assumed", "detail": detail}
     return pd.concat([out, pd.DataFrame([cable])], ignore_index=True)
 
@@ -1285,12 +1286,19 @@ def _cost(inv, hz):
 
 def with_measures(as_is, compliance) -> pd.DataFrame:
     """The as-is compliance with the re-checked one as its "with measures"
-    columns."""
+    columns: status, value and detail, and where that value was read
+    (``worst_period_with_measures``, ``worst_hour_with_measures``,
+    ``worst_case_with_measures``), which need not be the as-is worst hour.
+    ``worst_case`` and the where-columns come after the columns that were in
+    use first."""
     after = compliance.set_index("check")
     final = as_is.copy()
     final["status_with_measures"] = final["check"].map(after["status_as_is"])
     final["value_with_measures"] = final["check"].map(after["value"])
     final["detail_with_measures"] = final["check"].map(after["detail"])
+    final = final[[c for c in final.columns if c != "worst_case"] + ["worst_case"]]
+    for col in ("worst_period", "worst_hour", "worst_case"):
+        final[f"{col}_with_measures"] = final["check"].map(after[col])
     return final
 
 

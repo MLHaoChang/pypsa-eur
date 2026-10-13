@@ -38,6 +38,9 @@ export interface ComplianceRow {
   unit: string
   worst_period: number | null
   worst_hour: number | null
+  /** The case of the worst reading (`intact`, `N-1:<unit>`); null for the
+   *  reactive exchange and the fault level, absent in an older run. */
+  worst_case?: string | null
   clause: string
   source: 'code' | 'assumed'
   detail: string
@@ -152,6 +155,11 @@ export interface HorizonScope {
 export interface InvestedComplianceRow extends ComplianceRow {
   value_with_measures: number | null
   detail_with_measures: string
+  /** Where the re-solved value was read, which need not be the as-is worst
+   *  hour; absent in a run from before they were kept. */
+  worst_period_with_measures?: number | null
+  worst_hour_with_measures?: number | null
+  worst_case_with_measures?: string | null
 }
 
 export interface HistoryRow { iteration: number; need: string; from: string; to: string; check: string; detail: string }

@@ -1284,3 +1284,73 @@ def test_an_existing_compensation_entry_with_a_library_id_is_kept_and_renewed(tm
     assert row(out, "reactive")["kind"] == "none"
     cost = out["cost"].set_index("period")
     assert list(cost["capex_replacement_eur"]) == pytest.approx([0.0, 120e3 + 1.9e6, 0.0])
+
+
+# --------------------------------------------------------------------------
+# the with-measures value carries its own worst hour and case
+# --------------------------------------------------------------------------
+
+def test_with_measures_pairs_each_re_checked_value_with_its_own_worst_hour_and_case():
+    """The browser run's case: as is, the campus voltage was worst at
+    (2030, 158); re-checked with the assets, at (2030, 117) in the outage of
+    SITE_TRANSFO. The re-checked value is reported with that hour and case,
+    and the as-is columns keep their own."""
+    from gridspine.static.campus_invest import with_measures
+    as_is = pd.DataFrame([
+        {"check": "campus_voltage", "status_as_is": "fail", "status_with_measures": "not_rechecked", "value": 0.88,
+         "limit": 0.9, "unit": "pu", "worst_period": 2030, "worst_hour": 158,
+         "clause": "c", "source": "assumed", "detail": "as is", "worst_case": "N-1:SITE_TRANSFO"},
+        {"check": "switchgear", "status_as_is": "not_rated", "status_with_measures": "not_rated", "value": 20.0,
+         "limit": float("nan"), "unit": "kA", "worst_period": 2030, "worst_hour": None,
+         "clause": "c", "source": "assumed", "detail": "as is", "worst_case": None}])
+    recheck = pd.DataFrame([
+        {"check": "switchgear", "status_as_is": "pass", "status_with_measures": "pass", "value": 25.1,
+         "limit": 31.5, "unit": "kA", "worst_period": 2040, "worst_hour": None, "worst_case": None,
+         "clause": "c", "source": "assumed", "detail": "re-checked sc"},
+        {"check": "campus_voltage", "status_as_is": "pass", "status_with_measures": "pass", "value": 0.9001,
+         "limit": 0.9, "unit": "pu", "worst_period": 2030, "worst_hour": 117, "worst_case": "N-1:SITE_TRANSFO",
+         "clause": "c", "source": "assumed", "detail": "re-checked"}])
+    table = with_measures(as_is, recheck)
+    out = table.set_index("check")
+    v = out.loc["campus_voltage"]
+    assert (v["worst_period"], v["worst_hour"], v["value"]) == (2030, 158, 0.88)
+    assert (v["worst_period_with_measures"], v["worst_hour_with_measures"], v["worst_case_with_measures"],
+            v["value_with_measures"], v["status_with_measures"], v["detail_with_measures"]) == (
+        2030, 117, "N-1:SITE_TRANSFO", 0.9001, "pass", "re-checked")
+    assert list(table.columns) == [
+        "check", "status_as_is", "status_with_measures", "value", "limit", "unit", "worst_period", "worst_hour",
+        "clause", "source", "detail", "value_with_measures", "detail_with_measures",       # in use first
+        "worst_case", "worst_period_with_measures", "worst_hour_with_measures", "worst_case_with_measures"]
+    s = out.loc["switchgear"]
+    assert s["worst_period_with_measures"] == 2040 and pd.isna(s["worst_hour_with_measures"])
+    assert pd.isna(s["worst_case_with_measures"])
+
+
+def test_the_with_measures_worst_is_the_re_checked_studys_own(tmp_path):
+    """On a real selection, each with-measures worst (period, hour, case) is
+    the re-checked study's worst reading, found here from its tables: the
+    lowest campus voltage against the EU band (0.90-1.10 pu below 110 kV,
+    restated), the highest transformer and cable loading, the largest PCC
+    exchange (one per hour, no case)."""
+    lib = library(tmp_path, transformers=[tr(i, s, capex) for i, (s, capex) in SIZES.items()])
+    table, sel = hourly((2030, 7, H7, {}), (2030, 19, H19, {}), (2040, 3, H3, {}))
+    out = select_assets(wide_cable_spec(), table, sel, lib, WIDE, PROFILE, SizingCriteria(margin=0.2))
+    st = out["state"].study
+    comp_ = out["compliance"].set_index("check")
+
+    def got(check):
+        r = comp_.loc[check]
+        return (int(r["worst_period_with_measures"]), int(r["worst_hour_with_measures"]),
+                r["worst_case_with_measures"], r["value_with_measures"])
+
+    b = st.bus[st.bus["bus"] != "PCC"]
+    key = [max(v - 1.10, 0.90 - v) for v in b["vm_pu"]]
+    w = b.iloc[max(range(len(key)), key=lambda i: key[i])]               # the first of the worst
+    assert got("campus_voltage") == (w["period"], w["hour"], w["case"], pytest.approx(w["vm_pu"]))
+    for check, tbl in (("transformer_loading", st.trafo), ("cable_loading", st.line)):
+        w = tbl.loc[tbl["loading_pct"].astype(float).idxmax()]
+        assert got(check) == (w["period"], w["hour"], w["case"], pytest.approx(w["loading_pct"]))
+    q = st.q.loc[st.q["q0_mvar"].abs().idxmax()]
+    r = comp_.loc["pcc_reactive"]
+    assert (r["worst_period_with_measures"], r["worst_hour_with_measures"]) == (q["period"], q["hour"])
+    assert pd.isna(r["worst_case_with_measures"])

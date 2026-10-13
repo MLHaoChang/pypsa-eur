@@ -179,3 +179,19 @@ def test_the_campus_band_carries_its_own_tag_not_a_fixed_one():
     profile = load_grid_code("generic_assumed")
     profile["campus_voltage"]["source"] = "code"
     assert report(bus=_mv_bus(0.94), profile=profile).loc["campus_voltage", "source"] == "code"
+
+
+def test_every_row_names_the_case_of_its_worst_reading():
+    """The worst reading's case beside its (period, hour), read from the
+    inputs above by hand: MV1 at 0.89 pu and TR2 at 175 % are both in the
+    outage of TR1 at hour 2; the PCC's 1.00 pu first appears intact at hour 1.
+    The reactive exchange is one figure per hour and the fault level one per
+    period, so neither has a case."""
+    r = report()
+    assert (r.at["campus_voltage", "worst_hour"], r.at["campus_voltage", "worst_case"]) == (2, "N-1:TR1")
+    assert (r.at["transformer_loading", "worst_hour"], r.at["transformer_loading", "worst_case"]) == (2, "N-1:TR1")
+    assert (r.at["pcc_voltage", "worst_hour"], r.at["pcc_voltage", "worst_case"]) == (1, "intact")
+    assert r.at["pcc_reactive", "worst_case"] is None and r.at["switchgear", "worst_case"] is None
+    assert list(campus_compliance(**inputs()).columns) == [
+        "check", "status_as_is", "status_with_measures", "value", "limit", "unit", "worst_period", "worst_hour",
+        "clause", "source", "detail", "worst_case"]                          # the new column last
