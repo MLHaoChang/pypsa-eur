@@ -1,5 +1,5 @@
 """
-Representative-week sampling writes EVERY snapshot-weighting column equally.
+Representative-week sampling writes ``objective`` and ``generators`` equally.
 
 This pins the premise behind a "known limitation" in
 `docs/superpowers/findings/2026-08-03-compare-tab-correctness.md`, which
@@ -10,10 +10,12 @@ said the `binding_hours` basis fix (suspect S2) was:
     differ [...]) has not been observed by this examination.
 
 That run cannot exist. `sample_representative_weeks` assigns the SAME
-vector to every column of `n.snapshot_weightings`, deliberately — its own
-comment says "Set all three weight columns so the LP objective, generator
-energy balance and storage SoC equations scale consistently". So a
-representative-week network is weighting-basis-degenerate by construction,
+scale vector to the `objective` and `generators` columns of
+`n.snapshot_weightings`. (`stores` is deliberately different: it is PyPSA's
+elapsed hours in the storage SoC balance and stays at the 1 h step — see
+`test_rep_week_stores_weighting.py`. The loading summary reads `generators`
+only, so `stores` does not bear on suspect S2.) So a representative-week
+network is objective/generators-basis-degenerate by construction,
 and the `objective`/`generators` split can only be created by a manual edit
 (the weightings CSV upload or PATCH), which is exactly what
 `build_weighting_basis_network` models.
@@ -79,26 +81,24 @@ def sampled(install_network):
             _user_ts.update(previous)
 
 
-def test_rep_week_sampling_sets_every_weighting_column_identically(sampled):
+def test_rep_week_sampling_sets_objective_and_generators_identically(sampled):
     """
     The invariant. If this ever fails, the Line-loading tab's `binding_hours`
     basis choice (ENERGY, not COST) becomes observable on real
     representative-week networks and suspect S2 must be re-measured there.
+
+    Previously asserted every column equal; `stores` now stays at the snapshot
+    step (elapsed hours for the SoC balance), so the guard covers the two
+    columns the basis choice actually distinguishes.
     """
     sw = sampled.snapshot_weightings
     assert not sw.empty, "sampling produced no weightings"
-    assert len(sw.columns) > 1, (
-        "expected several weighting columns (objective / generators / stores)"
+    assert sw["generators"].equals(sw["objective"]), (
+        "snapshot_weightings 'generators' differs from 'objective' after "
+        "representative-week sampling — the objective/generators basis split "
+        "is now reachable from a real run, so binding_hours must be "
+        "re-measured against it"
     )
-
-    reference = sw[sw.columns[0]]
-    for col in sw.columns[1:]:
-        assert sw[col].equals(reference), (
-            f"snapshot_weightings column {col!r} differs from "
-            f"{sw.columns[0]!r} after representative-week sampling — the "
-            f"objective/generators basis split is now reachable from a real "
-            f"run, so binding_hours must be re-measured against it"
-        )
 
 
 def test_the_sampled_weights_are_not_all_default(sampled):
@@ -110,7 +110,7 @@ def test_the_sampled_weights_are_not_all_default(sampled):
     equality above is a real observation about the sampler.
     """
     sw = sampled.snapshot_weightings
-    assert (sw[sw.columns[0]] != 1.0).any(), (
+    assert (sw["objective"] != 1.0).any(), (
         "no weight departed from the 1.0 default — sampling did not scale "
         "anything and the equality assertion would be vacuous"
     )
