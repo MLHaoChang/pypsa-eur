@@ -1615,6 +1615,73 @@ in the separate environment runs it):
 
 **EMT stays a flag.** It is raised by I6 or I8.
 
+### I8 as built: the PSS/E path (2026-10-13)
+
+**Owner decisions of 2026-10-13** (relayed by the coordinator session):
+- **REGFM_A1/B1 parameters go in a named sidecar until their CON order is
+  verified.** The `.dyr` carries only verified record layouts: GENSAL,
+  DEGOV1, SEXS and GENCLS.
+- **DEGOV1 is the governor for every genset.** Gas engines are approximated
+  by it, ledgered.
+
+**`gridspine/handoff/campus_bundle.py`**
+- `export_campus_bundle(outdir, campus, rows, hour)` writes one directory
+  per island hour.
+- **`<case>.raw`:** the hour grid-connected, before the event (`apply_hour`
+  on a copy of the campus net).
+- **`<case>.dyr`:**
+  - per genset with island data, **GENSAL + DEGOV1 + SEXS**;
+  - **GENCLS with H = 0** for the grid, an infinite bus until the islanding
+    trip;
+  - no SEXS when `excitation` is `none`.
+- **`gfm_models.csv`:** REGFM_A1 (droop) or REGFM_B1 (VSM) parameters by
+  name, in long form, with bus number, machine ID, base and source.
+- **`README.md`:**
+  - the event: trip the grid machine at bus N, ID 'n', at t = 0;
+  - the record counts;
+  - **pending verification** (the REGFM CON order);
+  - **every drafted value with its source**;
+  - the omissions;
+  - the ledger.
+- **`manifest.json`.**
+
+**Identity:** `dyr_writer.machine_records` (new, public) gives the RAW's own
+(bus number, ID). The test parses both files back with the existing
+`test_dyr_writer` parsers.
+
+**Values:**
+- **GENSAL:** H, X_d (= `xd_sat`) and x''d come from the island data. X'd
+  is max(0.25, 1.5·x''d) and X_l is 0.5·x''d; X_q, the time constants and
+  the saturation points are typical (assumed). The existing
+  `_check_physics` validates the ordering.
+- **DEGOV1:**
+  - M = 1 (droop on electrical power), DROOP = `droop_pct`/100, K = 1/DROOP,
+    TMAX = P_n/MBASE;
+  - **isochronous:** DROOP 0 and K = 1/0.04;
+  - the rest are typical.
+- **SEXS:** EMAX 4 (`avr_pmg`) or 3 (`avr_shunt`); the rest are typical
+  (K 50, TB 10, TA/TB 0.1, TE 0.05, EMIN 0), inside the PSS/E check ranges.
+- **The GFM's** droops, P range, current limit, filter (A1) and H (B1) come
+  from the island data, **converted from P_n to the inverter's S_n**:
+  mp = R·S_n/P_n, mq = k_q·S_n/P_n, Pmax = P_n/S_n. The rest are the
+  specifications' example values, PNNL-35110 for REGFM_A1 and the UNIFI VSM
+  specification for REGFM_B1, tagged as such.
+- **Omitted and listed:** grid-following converters (REGCA1/REECA1 need the
+  OEM's 45 parameters), UPSs, STATCOMs, and gensets without island data.
+
+**`dyr_writer`:** new `DYR_CONTROLS` (DEGOV1, SEXS, GENCLS layouts) and
+`format_record`, which refuses a missing value. The REGFM records are
+documented as deliberately absent.
+
+**Tests:**
+- 18 in `tests/gridspine/test_campus_bundle.py`;
+- plus the plan's guard that **no gridspine module imports `andes`**
+  (parsed with `ast`).
+- **Mutation testing:** 25 of 25 killed; 3 round-1 survivors, closed.
+
+**Not yet:** the ANDES path waits for the legal check (Q4), and the hour
+selection waits for I3b.
+
 ### I9: panel, copilot and report (M)
 
 This follows the C6 and C9 conventions.
