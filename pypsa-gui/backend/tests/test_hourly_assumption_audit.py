@@ -36,6 +36,8 @@ ALLOWED: dict[str, tuple[int, str]] = {
                               "(formula, code, message) — a unit"),
     "solver_service.py": (1, "comment restating the solver/adequacy.py cap formula"),
     "asset_results/compute.py": (2, "prose explaining why Σweights/8760 is avoided"),
+    "asset_schema/fields.py": (1, "MTTR help text restating the occurrence.py formula "
+                                  "(8760 × rate / MTTR events/yr) — prose, a unit (S1a)"),
     "harness/loop.py": (1, "prompt text about CSV row counts"),
     "solver/periodized_costs.py": (3, "HOURS_PER_YEAR converts Σ objective weights to years "
                                       "(PyPSA's n.nyears) to scale annual FOM and capital cost "
@@ -112,6 +114,7 @@ def test_every_hourly_assumption_site_is_listed_with_a_reason():
 
 def test_the_inventory_is_pinned():
     # U2 WP10: GS's `study/tariff.py` (3 sites) is deleted.
-    assert sum(c for c, _ in ALLOWED.values()) == 72
-    assert len(ALLOWED) == 34
+    # S1a: `asset_schema/fields.py` (1 site, MTTR help text) is added.
+    assert sum(c for c, _ in ALLOWED.values()) == 73
+    assert len(ALLOWED) == 35
     assert all(reason for _, reason in ALLOWED.values())
