@@ -16,7 +16,7 @@ No second store, no direct writes to `n.meta["asset_params"]`.
 | — | W4 refusal fix (mark post-U2 networks, refuse only unmarked ones, the user-typed price test) and the gate's four U3 one-line records | — | already on master (`96b7b6ef`); re-run green on `8776f4a6` |
 | B | Decision-study entry in Guided's Start card: "Is my site reliable?" beside "Is this investment worth it?" (owner decision 5) | A | branch `claude/u3-start-card` |
 | C | The six study chat tools with Guided confirmation tiers and `delegate()` steps | B | branch `claude/u3-chat-tools` |
-| D | The key-parameter list view | — | |
+| D | The key-parameter list view | C | branch `claude/u3-key-params` |
 | E | M7 (Guided shell) and M8 (Guided without an API key) | — | |
 | F | "Open in Expert" lands on the study's project (today's cards; switch to the S1b cards when they merge) | S1b for the final form | |
 | H | Open the study routes in multi-user mode, with a cross-tenant test of every study route, the study-created base project and its forks (owner, 2026-10-13: a later slice) | — | later |
@@ -65,3 +65,14 @@ energy-hub examples, "Use my network") above "Is this investment worth it?" (the
 - The decision panel's ledger, run, verdict and report steps carry "Let the assistant do this" and "Ask
   about this" (`StudyAssist.tsx`, through the hub-design `DelegateButton` and `AskButton`). The copy lives
   in `decisionVocabulary.ts`, and a test checks that every tool the sent text names is in the catalogue.
+
+## D — the key-parameter list
+
+The assumptions step (`LedgerReview`) is the key-parameter list of owner decision 4:
+1. The site's answers: price zone, grid connection, consumption, tariff and PV.
+2. The key drivers (`sensitivity_flag` rows).
+3. Any other row the user changed, or that needs a look.
+4. Everything else, collapsed as "N more, from the generic defaults (<ledger version>)".
+
+The labels live in `KEY_PARAMETER_LABELS`. S2 will later make these rows a view of the provenance store;
+the list does not change shape for that.
