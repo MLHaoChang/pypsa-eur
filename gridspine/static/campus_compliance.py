@@ -32,7 +32,10 @@ Every row carries:
 - ``value``, ``limit``, ``unit``, the worst ``(period, hour)``, the case of
   that reading (``worst_case``: ``intact`` or ``N-1:<unit>``; None for the
   reactive exchange, one figure per hour, and for the fault level, one per
-  period), ``clause``, ``source`` and ``detail``. ``source`` is the limit's own tag, so a limit
+  period), ``clause``, ``source`` and ``detail``; a voltage row also the
+  band its limit is an edge of (``limit_min``, ``limit_max``; None for the
+  other checks). A reactive pass that relies on ``Q_TOL`` (the exchange
+  above the band by no more than it) says so in its detail. ``source`` is the limit's own tag, so a limit
   read from an uploaded grid code and not yet confirmed says ``extracted``.
 
 pandas only, plus the profile's band lookup.
@@ -53,16 +56,19 @@ def _true(flag) -> bool:
     return str(flag).strip().lower() == "true"
 
 
-#: The report's columns; ``worst_case`` was added after the others were in use, so it comes last.
+#: Columns added after the others were in use: they come last, here and in the
+#: invested table (``campus_invest.with_measures``).
+ADDED = ("worst_case", "limit_min", "limit_max")
 COLUMNS = ["check", "status_as_is", "status_with_measures", "value", "limit", "unit", "worst_period", "worst_hour",
-           "clause", "source", "detail", "worst_case"]
+           "clause", "source", "detail", *ADDED]
 
 
-def _row(check, as_is, with_measures, value, limit, unit, where, clause, source, detail, case=None):
+def _row(check, as_is, with_measures, value, limit, unit, where, clause, source, detail, case=None, band=None):
     period, hour = where if where else (None, None)
+    lo, hi = (band["v_min"], band["v_max"]) if band else (None, None)
     return {"check": check, "status_as_is": as_is, "status_with_measures": with_measures,
             "value": value, "limit": limit, "unit": unit, "worst_period": period, "worst_hour": hour,
-            "worst_case": case, "clause": clause, "source": source, "detail": detail}
+            "worst_case": case, "clause": clause, "source": source, "detail": detail, "limit_min": lo, "limit_max": hi}
 
 
 def _voltage(rows: pd.DataFrame, profile, bus_kv, fixed_band=None):
@@ -100,6 +106,12 @@ def campus_compliance(bus, trafo, reactive, sizing, compensation, short_circuit,
     cap, ind = float(comp.at["capacitive", "recommended_mvar"]), float(comp.at["inductive", "recommended_mvar"])
     detail = (f"inverters supply up to {ok['q_inverters_mvar'].abs().max():.1f} Mvar; compensation recommended: "
               f"{cap:g} Mvar capacitive, {ind:g} Mvar inductive")
+    # a pass within Q_TOL above the band is said, so a value over the limit never reads as a silent pass
+    passed = [*(ok["q_final_mvar"].abs() if after == "pass" else []), *(ok["q0_mvar"].abs() if as_is == "pass" else [])]
+    q_edge = max(passed, default=0.0)
+    if q_edge > lim:
+        detail += (f"; passes within the solver tolerance of {Q_TOL:g} Mvar: {q_edge:.3f} Mvar against the "
+                   f"{lim:.3f} Mvar band")
     rows.append(_row("pcc_reactive", as_is, after, float(ok.at[i, "q0_mvar"]), lim, "Mvar",
                      (int(ok.at[i, "period"]), int(ok.at[i, "hour"])), requirement["clause"],
                      requirement["source"], detail))
@@ -124,7 +136,8 @@ def campus_compliance(bus, trafo, reactive, sizing, compensation, short_circuit,
                 "design limit inside the campus, the code band applied as one")
         detail = (f"worst at {b} ({case}); {what}"
                   f"; band {band['v_min']:g}-{band['v_max']:g} pu")
-        rows.append(_row(check, status, after, value, limit, "pu", where, band["clause"], source, detail, str(case)))
+        rows.append(_row(check, status, after, value, limit, "pu", where, band["clause"], source, detail, str(case),
+                         band))
 
     # transformers
     j = trafo["loading_pct"].idxmax()

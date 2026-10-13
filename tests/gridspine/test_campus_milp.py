@@ -505,7 +505,8 @@ def test_when_the_milp_cannot_beat_c8_c8s_choice_is_returned_and_flagged(tmp_pat
     lib["transformers"] = [e for e in lib["transformers"] if e["id"] == "T_A"]
     c8 = select_assets(spec, table, sel, lib, req, PROFILE)
     out = select_assets_milp(spec, table, sel, lib, req, PROFILE, c8=c8)
-    assert out["fallback"].startswith("no AC-feasible point is cheaper than C8's")
+    assert out["fallback"].startswith("no AC-feasible point is cheaper than the least-cost choice (")
+    assert "C8" not in out["fallback"]                                   # plain words, not the plan's names
     assert out["summary"]["fallback"] is True
     pd_testing = pytest.importorskip("pandas").testing
     pd_testing.assert_frame_equal(out["investment"], c8["investment"])
@@ -900,3 +901,12 @@ def test_the_joint_choices_with_measures_values_carry_their_own_hour_and_case(tm
     r = out["compliance"].set_index("check").loc["transformer_loading"]
     assert (r["worst_period_with_measures"], r["worst_hour_with_measures"]) == (2030, 1)
     assert load[r["worst_case_with_measures"]] == pytest.approx(peak, abs=1e-6)
+
+
+def test_the_warm_start_is_named_in_plain_words(tmp_path):
+    """The history's first row is the least-cost choice re-solved, said
+    without the plan's step names."""
+    from gridspine.static.campus_milp import select_assets_milp
+    spec, table, sel, lib, crit = outage_case(tmp_path)
+    h = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, crit)["milp_history"]
+    assert h.iloc[0]["iteration"] == 0 and h.iloc[0]["note"] == "the least-cost choice, re-solved as the warm start"

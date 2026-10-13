@@ -1299,10 +1299,12 @@ def test_with_measures_pairs_each_re_checked_value_with_its_own_worst_hour_and_c
     as_is = pd.DataFrame([
         {"check": "campus_voltage", "status_as_is": "fail", "status_with_measures": "not_rechecked", "value": 0.88,
          "limit": 0.9, "unit": "pu", "worst_period": 2030, "worst_hour": 158,
-         "clause": "c", "source": "assumed", "detail": "as is", "worst_case": "N-1:SITE_TRANSFO"},
+         "clause": "c", "source": "assumed", "detail": "as is", "worst_case": "N-1:SITE_TRANSFO",
+         "limit_min": 0.9, "limit_max": 1.1},
         {"check": "switchgear", "status_as_is": "not_rated", "status_with_measures": "not_rated", "value": 20.0,
          "limit": float("nan"), "unit": "kA", "worst_period": 2030, "worst_hour": None,
-         "clause": "c", "source": "assumed", "detail": "as is", "worst_case": None}])
+         "clause": "c", "source": "assumed", "detail": "as is", "worst_case": None,
+         "limit_min": None, "limit_max": None}])
     recheck = pd.DataFrame([
         {"check": "switchgear", "status_as_is": "pass", "status_with_measures": "pass", "value": 25.1,
          "limit": 31.5, "unit": "kA", "worst_period": 2040, "worst_hour": None, "worst_case": None,
@@ -1320,7 +1322,8 @@ def test_with_measures_pairs_each_re_checked_value_with_its_own_worst_hour_and_c
     assert list(table.columns) == [
         "check", "status_as_is", "status_with_measures", "value", "limit", "unit", "worst_period", "worst_hour",
         "clause", "source", "detail", "value_with_measures", "detail_with_measures",       # in use first
-        "worst_case", "worst_period_with_measures", "worst_hour_with_measures", "worst_case_with_measures"]
+        "worst_case", "limit_min", "limit_max",
+        "worst_period_with_measures", "worst_hour_with_measures", "worst_case_with_measures"]
     s = out.loc["switchgear"]
     assert s["worst_period_with_measures"] == 2040 and pd.isna(s["worst_hour_with_measures"])
     assert pd.isna(s["worst_case_with_measures"])
@@ -1354,3 +1357,48 @@ def test_the_with_measures_worst_is_the_re_checked_studys_own(tmp_path):
     r = comp_.loc["pcc_reactive"]
     assert (r["worst_period_with_measures"], r["worst_hour_with_measures"]) == (q["period"], q["hour"])
     assert pd.isna(r["worst_case_with_measures"])
+
+
+# --------------------------------------------------------------------------
+# a replace row says what failed and what it replaces
+# --------------------------------------------------------------------------
+
+def test_a_replaced_transformer_group_says_what_failed_and_what_it_replaces(tmp_path):
+    """The pair of test_existing_transformers_short_of_the_margin_are_replaced_not_kept:
+    at 30 MW a survivor carries about 38.5 MVA (solved here), so a unit
+    must be 1.2 x that with the 20 % margin, above its 40 MVA. TR1's
+    commissioning year is given, TR2's is not."""
+    hour = {"DC_LOAD": -30.0, "BESS1": 0.0, "PV1": 0.0, "GEN1": 0.0}
+    survivor = max(s_hv(solve_direct(hour, [(40.0, 12.0)] * 2, out=0, lv_kv=21.0, pf=0.85)))
+    spec = lowpf_spec()
+    spec["campus"]["transformers"]["TR1"]["commissioning_year"] = t(2004, "datasheet")
+    lib = library(tmp_path, transformers=[tr("T63", 63.0, 1.2e6)])
+    table, sel = dark_hours((2030, 30.0))
+    got = row(select_assets(spec, table, sel, lib, WIDE, PROFILE), "transformer TR1+TR2")
+    assert got["action"] == "replace"
+    assert got["reason"] == (
+        f"replaces TR1 (in service since 2004) and TR2 (commissioning year not given): 2 x 40 MVA as is, "
+        f"{survivor * 1.2:.2f} MVA a unit needed with the 20 % design margin")
+
+
+def test_a_replaced_cable_says_it_was_overloaded_and_what_it_replaces(tmp_path):
+    """The existing cable rated 0.8 kA carries 30 MW at pf 0.85 and 20 kV,
+    about 1.0 kA (by hand: 30 / 0.85 / (sqrt 3 x 20)), so it is replaced."""
+    assert 30.0 / 0.85 / (math.sqrt(3) * 20.0) > 0.8 * 1.2
+    spec = existing_campus(tr1=2001, tr2=2001, cable_year=2012)
+    spec["campus"]["cables"]["CB1"]["max_i_ka"] = t(0.8)
+    lib = library(tmp_path, transformers=[tr("T40", 40.0, 0.95e6), tr("T63", 63.0, 1.2e6)],
+                  cables=[cable("C1", 3.0, 200e3)])
+    table, sel = dark_hours((2030, 30.0))
+    got = row(select_assets(spec, table, sel, lib, WIDE, PROFILE), "cable CB1")
+    # the as-is loading, solved here: the pair intact and with each unit out, the worst
+    peak = max(float(mixed_direct([(40.0, 12.0)] * 2, 30.0, out=k).res_line["i_ka"].max())
+               for k in (None, 0, 1)) / 0.8 * 100.0
+    assert got["action"] == "replace"
+    assert got["reason"] == f"replaces CB1 (in service since 2012): loaded to {peak:.1f} % as is"
+
+
+def test_the_horizon_notes_speak_plain_words():
+    """The ranking note reaches the panel: no plan step names in it."""
+    from gridspine.static.campus_invest import RANKING_NOTE
+    assert "plan C" not in RANKING_NOTE and RANKING_NOTE.startswith("Replacements are reported, not ranked")

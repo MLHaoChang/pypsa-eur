@@ -194,4 +194,50 @@ def test_every_row_names_the_case_of_its_worst_reading():
     assert r.at["pcc_reactive", "worst_case"] is None and r.at["switchgear", "worst_case"] is None
     assert list(campus_compliance(**inputs()).columns) == [
         "check", "status_as_is", "status_with_measures", "value", "limit", "unit", "worst_period", "worst_hour",
-        "clause", "source", "detail", "worst_case"]                          # the new column last
+        "clause", "source", "detail", "worst_case", "limit_min", "limit_max"]   # the new columns last
+
+
+def test_a_pass_that_relies_on_the_solver_tolerance_says_so():
+    """The browser run: 13.157 Mvar against a 13.147 Mvar band is 0.010 Mvar
+    over, inside the 0.011 Mvar the band is judged with (the solver's)."""
+    reactive = inputs()["reactive"].assign(q0_mvar=[10.0, 13.157], q_final_mvar=[10.0, 13.157],
+                                           compliant_without=[True, True])
+    req = {**inputs()["requirement"], "q_limit_mvar": 13.147}
+    row = report(reactive=reactive, requirement=req).loc["pcc_reactive"]
+    assert row["status_as_is"] == row["status_with_measures"] == "pass"
+    assert row["detail"].endswith(
+        "; passes within the solver tolerance of 0.011 Mvar: 13.157 Mvar against the 13.147 Mvar band")
+
+
+@pytest.mark.parametrize("q_final, status", [(13.0, "pass"), (13.2, "fail")])
+def test_a_pass_inside_the_band_or_a_fail_says_nothing_of_the_tolerance(q_final, status):
+    reactive = inputs()["reactive"].assign(q0_mvar=[10.0, 13.5], q_final_mvar=[10.0, q_final],
+                                           compliant_without=[True, False])
+    req = {**inputs()["requirement"], "q_limit_mvar": 13.147}
+    row = report(reactive=reactive, requirement=req).loc["pcc_reactive"]
+    assert (row["status_as_is"], row["status_with_measures"]) == ("fail", status)
+    assert "tolerance" not in row["detail"]
+
+
+def test_a_voltage_row_carries_its_whole_band():
+    """The limit is the band edge the worst reading is judged against; the
+    band itself is carried too (EU profile: 0.90-1.118 pu at 110 kV,
+    0.90-1.10 pu below, restated). Rows without a band carry none."""
+    r = report()
+    assert (r.at["pcc_voltage", "limit_min"], r.at["pcc_voltage", "limit_max"]) == (0.90, 1.118)
+    assert (r.at["campus_voltage", "limit_min"], r.at["campus_voltage", "limit_max"]) == (0.90, 1.10)
+    for check in ("pcc_reactive", "transformer_loading", "switchgear"):
+        assert pd.isna(r.at[check, "limit_min"]) and pd.isna(r.at[check, "limit_max"])
+
+
+@pytest.mark.parametrize("q0, ok_as_is, q_final, q_said", [
+    (13.5, False, 13.157, "13.157"),      # only the corrected exchange is over the band: the with-measures pass
+    (13.155, True, 13.0, "13.155"),       # only the as-is exchange is over it: the as-is pass
+])
+def test_the_tolerance_is_said_for_whichever_pass_relies_on_it(q0, ok_as_is, q_final, q_said):
+    reactive = inputs()["reactive"].assign(q0_mvar=[10.0, q0], q_final_mvar=[10.0, q_final],
+                                           compliant_without=[True, ok_as_is])
+    req = {**inputs()["requirement"], "q_limit_mvar": 13.147}
+    row = report(reactive=reactive, requirement=req).loc["pcc_reactive"]
+    assert row["status_with_measures"] == "pass" and row["status_as_is"] == ("pass" if ok_as_is else "fail")
+    assert row["detail"].endswith(f"tolerance of 0.011 Mvar: {q_said} Mvar against the 13.147 Mvar band")
