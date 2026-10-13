@@ -32,11 +32,21 @@ group, the unit rating that carries every selected hour:
                      the largest S on a survivor under N-1)
     required   = max over hours of need * (1 + margin)
 
-``required`` is rounded up to the next standard MVA (``STANDARD_MVA``) and
-compared with the rating the campus has now. The N-1 term applies only to
-groups of two or more, and only when ``criteria.n_minus_1`` is set (the
-default). A single transformer has no N-1 redundancy to size for, and the
-report says so (``max_s_n1_mva`` = 0).
+``required`` is rounded up to the next standard MVA (``STANDARD_MVA``): the
+rating of identical units that would carry the group. The N-1 term applies
+only to groups of two or more, and only when ``criteria.n_minus_1`` is set
+(the default). A single transformer has no N-1 redundancy to size for, and
+the report says so (``max_s_n1_mva`` = 0).
+
+**Whether the group is adequate is judged unit by unit** (plan C13), each
+against its own rating, because parallel units share a flow in proportion
+to ``S_r / uk``, not equally: the unit with the lower impedance carries
+more than its share. Each unit's utilisation is ``S_i x (1 + margin) /
+S_r,i``, over the intact case and (N-1 on, two or more units) every
+survivor in every outage. ``utilisation`` is the worst, ``worst_unit`` the
+unit it is on, and the group is ``adequate`` when every unit's ``S_i x (1 +
+margin)`` is within its rating. For identical units this is the rule
+above, because equal units share equally.
 
 Allowed to import pandapower (``static/``); never pypsa.
 """
@@ -197,40 +207,53 @@ def size_transformers(flows: dict, campus, criteria: SizingCriteria = SizingCrit
     solve_cases(...)}``. See the module docstring for the rule."""
     net = campus.net
     rating = dict(zip(net.trafo["name"].astype(str), net.trafo["sn_mva"].astype(float)))
+    m = criteria.margin
     rows = []
     for group, members in trafo_groups(campus).items():
         n = len(members)
         best = {"need": -1.0, "period": None, "hour": None}
         max_intact = max_n1 = 0.0
         unconverged = 0
+        worst = {"util": 0.0, "unit": None, "excess": -math.inf}
+
+        def judge(s_by_unit):
+            for name, s in s_by_unit.items():
+                util = s * (1.0 + m) / rating[name]
+                if util > worst["util"]:
+                    worst.update(util=util, unit=name)
+                worst["excess"] = max(worst["excess"], s * (1.0 + m) - rating[name])
+
         for (period, hour), cases in flows.items():
             intact = cases["intact"]
             if not intact.converged:
                 unconverged += 1
                 continue
-            t = intact.trafo.set_index("trafo")["s_mva"]
-            total = float(t.reindex(members).fillna(0.0).sum())
+            t = intact.trafo.set_index("trafo")["s_mva"].reindex(members).fillna(0.0)
+            total = float(t.sum())
+            judge(t.to_dict())
             n1 = 0.0
             if n >= 2 and criteria.n_minus_1:
                 for name in members:
                     case = cases.get(f"N-1:{name}")
                     if case is None or not case.converged:
                         continue
-                    surv = case.trafo.set_index("trafo")["s_mva"].reindex([m for m in members if m != name])
+                    surv = case.trafo.set_index("trafo")["s_mva"].reindex([x for x in members if x != name])
                     n1 = max(n1, float(surv.max()))
+                    judge(surv.fillna(0.0).to_dict())
             need = max(total / n, n1)
             max_intact, max_n1 = max(max_intact, total), max(max_n1, n1)
             if need > best["need"]:
                 best = {"need": need, "period": int(period), "hour": int(hour)}
-        unit_rating = min(rating[m] for m in members)
-        required = max(best["need"], 0.0) * (1.0 + criteria.margin)
+        unit_rating = min(rating[x] for x in members)
+        required = max(best["need"], 0.0) * (1.0 + m)
         rows.append({
             "group": group, "units": n, "unit_rating_mva": unit_rating,
             "max_s_intact_mva": max_intact, "max_s_n1_mva": max_n1,
             "required_unit_mva": required, "recommended_unit_mva": _standard_up(required),
-            "adequate": bool(unit_rating >= required - 1e-9),
+            "adequate": bool(worst["excess"] <= 1e-9),
+            "utilisation": worst["util"], "worst_unit": worst["unit"],
             "worst_period": best["period"], "worst_hour": best["hour"],
-            "unconverged_hours": unconverged, "margin": criteria.margin,
+            "unconverged_hours": unconverged, "margin": m,
             "n_minus_1": bool(criteria.n_minus_1 and n >= 2),
         })
     return pd.DataFrame(rows)
