@@ -47,11 +47,6 @@ ALLOWED_EXCEPTIONS: dict[str, str] = {
     "services.library.series_store.resolve": "Q15",
     "services.library.series_store.LibraryRefNotFound": "Q15",
     "services.library.series_store.LibraryRefStale": "Q15",
-    # The study-owned export series' delete (owner decision 2026-10-05, WP6
-    # gate W1): `series_store.delete_series` / `pinned_by` asked for.
-    "services.library.series_store.list_series": "delete_series/pinned_by",
-    "services.library.bundle_pins.read_pins": "delete_series/pinned_by",
-    "services.library.bundle_pins.collect_refs": "delete_series/pinned_by",
     # WP7 freeze ask: names `engine_adapter` reads outside the facade.
     "services.finance.engine.wacc_gate": "WP7 freeze (wacc_gate)",
     "services.commercial.lp_bindings.META_LINKS": "WP7 freeze (META_LINKS)",

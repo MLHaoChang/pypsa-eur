@@ -7,7 +7,8 @@ additions of `2026-10-06-ic-s0b-replacements-terminal.md` S7: the asset parts,
 `FinanceInputs.replacement_rule` and the `remaining_life_annuity` method; and
 the G2 additions of `2026-10-07-ic-g1-g2-campus-equipment.md` G-11:
 `ExtraOwnerAsset`, `FinanceCase.extra_assets` and the `extra_assets` keyword of
-`build_finance_case`).
+`build_finance_case`; and the 2026-10-13 engine ask: `series_store.delete_series`,
+`pinned_by`, `list_series` and their result types).
 
 Every facade name is imported and its call signature pinned with
 `inspect.signature` against the expectation below, so any change — a renamed
@@ -102,6 +103,16 @@ SIGNATURES: dict[str, str] = {
     "services.library.series_store.put_series":
         "(db: 'DBSession', org_id: 'UUID', name: 'str', series: 'pd.Series', meta: 'dict', *, "
         "created_by: 'UUID | None' = None, root: 'Path | None' = None) -> 'PriceSeriesRef'",
+    # The engine ask "delete_series / pinned_by" (owner 2026-10-13): the study
+    # deletes the export series it minted, never while a project pins it, and
+    # its orphan sweep lists the org's series.
+    "services.library.series_store.list_series":
+        "(db: 'DBSession', org_id: 'UUID') -> 'list[PriceSeriesRef]'",
+    "services.library.series_store.pinned_by":
+        "(name: 'str', *, project_dirs: 'Iterable[Path]') -> 'list[SeriesPin]'",
+    "services.library.series_store.delete_series":
+        "(db: 'DBSession', org_id: 'UUID', name: 'str', *, project_dirs: 'Iterable[Path]', "
+        "root: 'Path | None' = None) -> 'SeriesDeleted'",
     "services.commercial.cost_rows.commercial_cost_terms":
         "(n, commercial: 'dict | None', *, years=None) -> 'dict'",
     "services.results.value_flows.export_revenue":
@@ -146,6 +157,8 @@ DATACLASS_FIELDS: dict[str, tuple[str, ...]] = {
         "name", "kind", "basis", "quantity", "parts", "build_year", "source", "source_hash"),
     "services.finance.case.ExtraAssetPart": (
         "name", "upfront_per_unit", "lifetime", "fom_share", "derived_from_capital_cost"),
+    "services.library.series_store.SeriesPin": ("project_dir", "via"),
+    "services.library.series_store.SeriesDeleted": ("deleted_versions", "kept", "pinned_by"),
     "services.finance.case.FinanceCase": (
         "inputs", "owner", "base_year", "cod", "templates", "assets", "flags", "counterfactual",
         "lp_basis", "counterfactual_hash", "conservation_ok", "extra_assets"),
