@@ -147,6 +147,7 @@ from harness.budget import (  # noqa: E402, F401 — moved (issue 08); re-export
 )
 from harness import budget as harness_budget  # noqa: E402 — moved tunables are read live (issue 08)
 from harness import fence as harness_fence  # noqa: E402 — a patched function is read live (issue 08)
+from harness import spill as harness_spill  # noqa: E402 — issue 16
 
 
 
@@ -2412,6 +2413,16 @@ def _dispatch_real_tool_call(
         if effect_fresh and tier != "read" and tool_name not in {"run_sensitivity_sweep", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
             from services import dirty_state
             dirty_state.mark_dirty()
+            # ★ P33b B2: the chat seam of the edit counter. Same placement and
+            # same rationale as the mark above — before the handler, so a
+            # handler that raises part-way or outlives the per-tool deadline
+            # (the orphan may still land) cannot skip it; and only on a fresh
+            # effect, since a replayed completed operation edits nothing. Only
+            # for tools that write the live network: a study, a Solve, a read
+            # or an export is not an edit.
+            from services.chat_tools_schema import tool_edits_network
+            if tool_edits_network(tool_name):
+                dirty_state.bump_revision()
         # Same seam, same reason: the HTTP middleware's undo snapshot never runs
         # for an in-process call either. After the confirmation gate, so a refused
         # tool costs no snapshot. See `_snapshot_for_turn_undo`.
@@ -2764,10 +2775,14 @@ def _dispatch_real_tool_call(
         # answer is NOT in this result — it arrives as the next user message.
         ui_event_payload = {"tool_use_id": tool_use_id}
         ui_event_payload.update({k: v for k, v in result.items() if k != "_ui_event"})
+        multi = bool(ui_event_payload.get("multi_select"))
         result_for_model = {
             "ok": True, "status": "presented", "awaiting": "user",
             "title": ui_event_payload.get("title"),
             "options": [o.get("label") for o in ui_event_payload.get("options", [])],
+            "multi_select": multi,
+            "answer_format": ("the chosen labels joined by '; '" if multi
+                              else "one option label, or the user's own words"),
         }
         yield "choice_request", ui_event_payload
     elif isinstance(result, dict) and result.get("_ui_event"):
@@ -2828,7 +2843,14 @@ def _dispatch_real_tool_call(
         # The panel's step strip follows the session's state (issue 06
         # follow-up); emitted after the result so the two frames agree.
         yield "workflow_state", _workflow_state_payload(session)
-    content = _result_to_anthropic_content(result_for_model)
+    # Issue 16: a result too large for the model is kept whole and replaced,
+    # for the MODEL only, by a preview and a locator (`harness/spill.py`).
+    # The frames above are unchanged; a checked turn and a self-paging tool
+    # are never spilled, and a failure falls back to the ordinary cut.
+    result_for_model = harness_spill.shape_for_model(
+        session, tool_name, tool_use_id, result_for_model)
+    content = _result_to_anthropic_content(
+        result_for_model, marker_hint=harness_spill.paging_hint(tool_name))
     if result_char_budget is not None:
         content = _apply_turn_tool_result_budget(content, result_char_budget)
     tool_results_collector.append({
