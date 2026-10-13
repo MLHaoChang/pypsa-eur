@@ -16,6 +16,7 @@ from __future__ import annotations
 import time
 import uuid
 
+import pytest
 from sqlalchemy import select
 
 from db.models import SolveJobRow
@@ -239,5 +240,106 @@ def test_two_queued_rows_for_the_same_project_do_not_both_restore(monkeypatch):
         # job. It will be reconsidered next boot once the winner goes terminal.
         statuses = {"first": _status(first), "second": _status(second)}
         assert list(statuses.values()).count("queued") == 2, statuses
+    finally:
+        solve_queue.reset_for_tests()
+
+
+def _seed_with_dir(storage_dir, project_id: str) -> uuid.UUID:
+    job = SolveJob(id=uuid.uuid4(), project_id=project_id, enqueued_at=time.time(),
+                   storage_dir=str(storage_dir))
+    solve_job_store.record_enqueued(job, enqueued_by_user_id=None, solver_config_json=None)
+    return job.id
+
+
+def _row_fields(job_id: uuid.UUID) -> tuple:
+    from db.session import SessionLocal
+
+    with SessionLocal() as db:
+        row = db.get(SolveJobRow, job_id)
+        return row.status, row.condition, row.error
+
+
+def test_a_queued_job_whose_storage_dir_is_gone_fails_typed_and_is_not_restored(
+    monkeypatch, tmp_path,
+):
+    """
+    F1 B1 (gate S9 [N6]). A queued job whose project directory was swept
+    while the process was down (a study's option fork, say) was restored and
+    then failed in the worker as an untyped `FileNotFoundError` under
+    `queue_error`. Reconciliation fails it typed instead and never restores
+    it; a sibling whose directory is present is restored as before.
+    """
+    monkeypatch.setattr(solve_queue, "_ensure_dispatcher_locked", lambda: None)
+    monkeypatch.setattr(solve_queue, "_q", _NullQueue())
+    solve_queue.reset_for_tests()
+    present = tmp_path / "present"
+    present.mkdir()
+    gone = _seed_with_dir(tmp_path / "swept-fork", project_id="SweptFork")
+    kept = _seed_with_dir(present, project_id="StillThere")
+    try:
+        interrupted, resumed = solve_job_store.reconcile_on_boot()
+
+        assert solve_queue.get_job(gone) is None, "a job on a missing directory was restored"
+        status, condition, error = _row_fields(gone)
+        assert (status, condition) == ("failed", "project_storage_missing"), (
+            status, condition, error)
+        assert "FileNotFoundError" not in (error or "")
+        assert solve_queue.get_job(kept) is not None
+        assert (interrupted, resumed) == (0, 1), (interrupted, resumed)
+    finally:
+        solve_queue.reset_for_tests()
+
+
+@pytest.mark.parametrize("exc", [PermissionError(13, "Operation not permitted"),
+                                 OSError(5, "Input/output error")],
+                         ids=["permission", "io_error"])
+def test_a_directory_that_cannot_be_read_is_not_failed_as_gone(monkeypatch, tmp_path, exc):
+    """
+    Gate F1 BC-F1-2. Only a directory that is provably absent fails the job.
+    One that cannot be stat'ed (the macOS privacy gate before the projects
+    root is granted, an unmounted volume, EACCES on a parent) may come back,
+    so the job is restored as before, as the startup fork sweep treats an
+    unreadable record as not absent.
+    """
+    import os
+
+    monkeypatch.setattr(solve_queue, "_ensure_dispatcher_locked", lambda: None)
+    monkeypatch.setattr(solve_queue, "_q", _NullQueue())
+    solve_queue.reset_for_tests()
+    locked = tmp_path / "behind-a-privacy-gate"
+    locked.mkdir()
+    real_stat = os.stat
+
+    def stat(path, *a, **k):
+        if os.fspath(path) == str(locked):
+            raise exc
+        return real_stat(path, *a, **k)
+
+    jid = _seed_with_dir(locked, project_id="Unreadable")
+    monkeypatch.setattr(os, "stat", stat)
+    try:
+        interrupted, resumed = solve_job_store.reconcile_on_boot()
+        monkeypatch.setattr(os, "stat", real_stat)
+        assert solve_queue.get_job(jid) is not None, "an unreadable directory was failed as gone"
+        assert _row_fields(jid)[0] == "queued"
+        assert (interrupted, resumed) == (0, 1)
+    finally:
+        monkeypatch.setattr(os, "stat", real_stat)
+        solve_queue.reset_for_tests()
+
+
+def test_a_path_that_is_a_file_is_gone(monkeypatch, tmp_path):
+    monkeypatch.setattr(solve_queue, "_ensure_dispatcher_locked", lambda: None)
+    monkeypatch.setattr(solve_queue, "_q", _NullQueue())
+    solve_queue.reset_for_tests()
+    afile = tmp_path / "not-a-dir"
+    afile.write_text("x")
+    under = _seed_with_dir(afile / "child", project_id="UnderAFile")   # NotADirectoryError
+    itself = _seed_with_dir(afile, project_id="IsAFile")               # stat ok, not a dir
+    try:
+        solve_job_store.reconcile_on_boot()
+        for jid in (under, itself):
+            assert solve_queue.get_job(jid) is None
+            assert _row_fields(jid)[:2] == ("failed", "project_storage_missing")
     finally:
         solve_queue.reset_for_tests()

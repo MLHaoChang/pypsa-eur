@@ -1,0 +1,128 @@
+{
+ "bill": {
+  "bill": {
+   "annual_bill": 9746220.0,
+   "basis": {
+    "subsidy": "excl",
+    "tax": "pre",
+    "terms": "real"
+   },
+   "billing_periods": [
+    "2025-01",
+    "2025-02",
+    "2025-03",
+    "2025-04",
+    "2025-05",
+    "2025-06",
+    "2025-07",
+    "2025-08",
+    "2025-09",
+    "2025-10",
+    "2025-11",
+    "2025-12"
+   ],
+   "by_component": {
+    "capacity": 0.0,
+    "demand": 8248500.0,
+    "energy": 1263240.0,
+    "export_credit": 0.0,
+    "fixed": 4800.0,
+    "network": 229680.0,
+    "unavailable": {}
+   },
+   "currency": "EUR",
+   "currency_year": 2020,
+   "engine": "bill_calculator",
+   "fidelity": null,
+   "honesty_notes": [],
+   "horizon_hours": 8760.0,
+   "partial_billing_periods": [],
+   "peak_mw_by_billing_period": {
+    "2025-01": 900.0,
+    "2025-02": 1.5,
+    "2025-03": 1.5,
+    "2025-04": 1.5,
+    "2025-05": 1.5,
+    "2025-06": 1.5,
+    "2025-07": 1.5,
+    "2025-08": 1.5,
+    "2025-09": 1.5,
+    "2025-10": 1.5,
+    "2025-11": 1.5,
+    "2025-12": 1.5
+   },
+   "total": 9746220.0,
+   "unavailable": {}
+  },
+  "notes": [],
+  "status": "ok",
+  "tariff": {
+   "billing_period": "month",
+   "capacity_charge": null,
+   "connection_limit_mw": null,
+   "currency": "EUR",
+   "currency_year": 2020,
+   "demand_charge": {
+    "basis": "billing_period_peak",
+    "price_per_mw_per_period": 9000.0,
+    "ratchet": null
+   },
+   "energy_bands": [
+    {
+     "applies": {
+      "hours": [],
+      "months": [],
+      "weekdays": []
+     },
+     "label": "Energy (all hours)",
+     "price_per_mwh": 110.0
+    }
+   ],
+   "export": {
+    "cap_mw": null,
+    "price_per_mwh": 40.0,
+    "series_ref": null
+   },
+   "fixed_charge_per_period": 400.0,
+   "honesty_help": {
+    "tariff_demand_charge_monthly_peak_not_annual": "German network operators bill the capacity charge on the ANNUAL peak (Jahresleistungspreis); this seed bills each month's peak because MVP-1 models one monthly demand charge.",
+    "tariff_illustrative": "Illustrative figures of a plausible order of magnitude, not a published tariff: replace them with the site's own bill."
+   },
+   "honesty_notes": [
+    "tariff_illustrative",
+    "tariff_demand_charge_monthly_peak_not_annual"
+   ],
+   "name": "German-style industrial tariff (illustrative)",
+   "network_charges": [
+    {
+     "basis": "per_mwh",
+     "label": "Network energy charge (Arbeitspreis)",
+     "price": 20.0
+    }
+   ],
+   "source": "illustrative",
+   "source_year": 2026,
+   "tariff_id": "de_industrial_illustrative"
+  }
+ },
+ "load": {
+  "annual_mwh": 11484.0,
+  "connection_mw": 2.0,
+  "has_timestamps": true,
+  "hours": 8760,
+  "notes": [
+   "load_upload_converted_from_kw",
+   "load_upload_qa_timeseries_spike"
+  ],
+  "peak_exceeds_connection": true,
+  "peak_mw": 900.0,
+  "status": "ok",
+  "unit": "kW",
+  "warnings": [
+   {
+    "code": "timeseries_spike",
+    "message": "time-varying p_set peaks at 900, 900x its own median of 1. A single outlier that far out is usually a misplaced decimal point \u2014 and the peak is what sizes the fleet, so one bad cell propagates into every capacity number."
+   }
+  ]
+ }
+}

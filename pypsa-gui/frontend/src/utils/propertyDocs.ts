@@ -53,7 +53,7 @@ export const PROPERTY_DOCS: Record<string, string> = {
   'line.b':
     'Shunt susceptance per km (S/km). UI multiplies by length on save; PyPSA stores absolute Siemens. Models charging current; usually negligible for short overhead lines and important for long underground/submarine cables.',
   'line.capital_cost':
-    'Annualised investment cost per added MVA of capacity (€/MVA). Only used when the line is extendable. The model charges it for the share of a year your snapshots represent, so a one-day model pays 1/365 of it.',
+    'Annualised investment cost per added MVA of capacity (€/MVA/yr). Only used when the line is extendable. The model charges it for the share of a year your snapshots represent, so a one-day model pays 1/365 of it.',
   'line.fom_cost':
     'Fixed O&M cost per installed MVA per year (€/MVA/yr). Paid on the full s_nom_opt, regardless of dispatch. The model charges it for the share of a year your snapshots represent (like an annualised overnight cost), so a one-day model pays 1/365 of it.',
   'line.overnight_cost':
