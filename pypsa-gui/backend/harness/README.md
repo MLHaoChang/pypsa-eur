@@ -28,7 +28,7 @@ harness/
   workflows/      the start menu and the step-by-step flows (Markdown + front matter)
   skills/         procedures the model loads on demand (<name>/SKILL.md)
   prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
-  providers/      anthropic, openai_compat, openai_responses, fake, and wiring (profile → provider, tools payload, history portability) — the only place a wire is named
+  providers/      anthropic, openai_compat, openai_responses, usage (one token-usage meaning for both OpenAI wires), fake, and wiring (profile → provider, tools payload, history portability) — the only place a wire is named
   loop.py         the turn loop: the stream seam and tool dispatch (the former services/chat_service.py)
   solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call
   job_adapters.py foreground (fg:…) and later domain job handles for wait_for_job without holding the turn
@@ -41,11 +41,12 @@ harness/
   sse.py          the SSE framing of a yielded (event, payload)
   fence.py        the untrusted-content delimiters and the neutraliser
   results.py      tool-result shaping: coercion, truncation, the per-turn result budget, error content
+  spill.py        oversized results kept whole per owner and session; the model gets a preview and a locator for `read_result`
   history.py      the in-memory trim and turn summary, chat.jsonl persistence, the pending-turn WAL, lineage
   metrics.py      the process-wide chat metrics behind GET /api/chat/metrics
 ```
 
-Borrowed designs under consideration: `docs/superpowers/assessments/2026-10-06-deepseek-harness-adoption-assessment.md` (issues 13–20). Spec: `.scratch/harness/spec.md`. Plan:
+Borrowed designs (phase 5): `docs/superpowers/assessments/2026-10-06-deepseek-harness-adoption-assessment.md`; issues 13–20 under `.scratch/harness/issues/` (20 and 15 done, the rest re-scoped against the modules above on 2026-10-12, plan §9). Spec: `.scratch/harness/spec.md`. Plan:
 `docs/superpowers/plans/2026-10-05-chat-harness.md`. Vocabulary:
 `pypsa-gui/CONTEXT.md` (Harness, Workflow, Skill, Choice card, Start menu).
 
@@ -163,10 +164,16 @@ before extending adapters.
 
 Read-tier tools exist only for the harness (catalogue banner "Harness"):
 `ask_user` (a Choice card; the pick is the next user message, the turn does
-not block), `use_skill` (a skill's body on demand), `start_workflow`,
+not block; optional `multi_select`, a Markdown `detail`, and `intent`
+`choice` or `plan_review`), `use_skill` (a skill's body on demand), `start_workflow`,
 `advance_workflow`, `end_workflow` (the session's `{id, step}`; the current
 step's body rides each turn as per-turn user content, after the context
-block and outside the untrusted fence). `use_toolset` changes the session's
+block and outside the untrusted fence), `read_result` (pages a result that
+was too large to show whole: `spill.py` keeps it under the app-data dir per
+owner and session and gives the model a preview and a locator; never in a
+checked turn, never for a tool with its own `offset`/`page`/`cursor`, whose
+cut names that argument instead; a control tool, so every toolset view and
+the OpenAI tool selection keep it). `use_toolset` changes the session's
 catalogue view for the next model request, including within the same turn.
 These controls do not change project access or confirmation rules.
 
@@ -275,9 +282,11 @@ It is a run checkpoint, not a persistent substitute for regression tests after
 changing their schemas, prompts, fixtures or relevant implementation.
 
 `backend/smoke/run_chat_smoke.py --workflow --profile <id>` drives the same
-battery (start menu, one Choice card, a workflow started and ended) on any
-profile; `docs/superpowers/runbooks/harness-parity-probe.md` has the recipe
-and the runs. Run it on every wire you can reach before calling a harness
+battery (start menu, a single-pick and a multi-select Choice card, a
+workflow started and ended, one reasoning prompt) on any profile and prints each turn's usage, with the same
+meaning on every wire, and whether it showed reasoning;
+`docs/superpowers/runbooks/harness-parity-probe.md` has the recipe and the
+runs. Run it on every wire you can reach before calling a harness
 change done.
 
 ## Adding a workflow
@@ -412,3 +421,164 @@ chart/export steps, bounded by the per-tool deadline and cancellation. Ordinary
 foreground solver calls retain the detached start receipt. A start or
 contradictory still-running receipt cannot complete a task; fully asynchronous
 durable-task step resumption remains outside the checked-scope recovery tranche.
+
+## Recorded runs, load flow, and experiment plans
+
+These tools live in `services/run_evidence.py`, `services/loadflow_summary.py`,
+`services/experiments.py`, and `services/durable_conversation.py`. Each is a
+catalogue entry dispatched from `services/chat_tools.py`. Each name except
+`get_loadflow_summary` is in `toolsets.CONTROL_TOOLS`, so a reduced toolset
+still offers it; `get_loadflow_summary` reaches a reduced toolset only through
+the `results` domain (keyword `loadflow`). They require
+an activated saved project (`run_project_required` or
+`experiment_project_required` otherwise). The model supplies ids and typed
+fields. It does not supply filesystem paths, and it does not supply the
+numbers these tools publish.
+
+### Run evidence
+
+One run is the directory `<project>/run_evidence/<run_id>/`. Section artifacts
+are written first, under `sections/<name>.json`, at most 16 KiB each. The
+terminal `manifest.json` is written last, atomically, and is not rewritten.
+Its presence is what makes the run terminal. A crash before that write leaves
+at most a `running.json` marker and orphan sections. Each manifest section
+entry stores a SHA-256 and a byte length. A later read re-checks both. A
+mismatch, a missing file, an unknown section, or a still-running run returns
+`evidence_unavailable` for **that** `run_id`, with a reason
+(`artifact_missing`, `artifact_corrupt`, `section_not_recorded`,
+`run_not_finished`). The answer stays on the requested id. The newest run and
+the live network stay out of it.
+
+Retention keeps section artifacts for the 20 newest manifests and manifest
+records for 200 runs. Older section directories are removed; a later read of
+a pruned section is `evidence_unavailable`.
+
+Publishers are best-effort. An unsaved scratch network produces no record, and
+a recording failure does not fail the solve.
+
+| Source | When a record opens | Run id |
+|---|---|---|
+| Foreground `run_simulation` / `run_ac_pf_stage` | `start_foreground_run`, then `publish_foreground_run` | `fg-<job hex>` |
+| Solve queue / GridSpine | `start_queue_run` on claim, `publish_queue_run` on terminal finish | `q-<job id, dashes removed>` |
+| Adequacy / study mesh | `watch_study_run` from `routers/results.py` `_publish_study` | `ad-<study key>-<nonce>` |
+| Report jobs | `start_report_run` when the report job starts running, `publish_report_run` on terminal finish | `rpt-<report id>` |
+
+The study watcher polls for up to six hours. If the study is still running at
+the deadline, the running marker stays and no terminal status is invented.
+
+Statuses are `running`, `completed`, `failed`, and `interrupted`.
+`list_project_runs` pages newest first (default 10, maximum 50) and accepts
+an optional status filter. `get_run_evidence` returns warnings, the error,
+software-computed metrics as `{value, unit}`, and each section's
+availability. Pass `section` (lowercase snake_case, from that list) for the
+stored JSON. An unknown id is `run_not_found`.
+
+`compare_project_runs` computes `delta = run − baseline` from recorded
+metrics only. Both runs must be `completed`, share a mode, and share an
+input fingerprint. `allow_input_changes=true` still compares when the
+fingerprints differ and sets `inputs_differ=true`. Any other mismatch
+returns `comparable=false`, an empty `deltas` object, and
+`incomparable_reasons` (`run_not_completed`, `mode_mismatch`,
+`mode_unknown`, `fingerprint_mismatch`, `fingerprint_unknown`). A metric
+missing on one side, or stored in different units, is listed in
+`unmatched_metrics` and left unestimated. `delta_pct` is null when the
+baseline value is zero. The two ids must differ. Optional `metrics` accepts
+1–20 recorded names. Comparing a run whose section artifacts fail
+verification returns `evidence_unavailable` for that run.
+
+### Discussed run
+
+`discuss_project_run` binds the chat session's `discussed_refs` after
+`get_run_evidence` succeeds for `run_id` (and for `baseline_run_id` when
+that argument is set). The binding stores project, run, status, mode,
+fingerprint, and whether evidence is still available. Optional `results_tab`
+is stored as `source`. Optional `section` is stored as given.
+
+`open_ui` defaults to true and emits a `ui_event` with `kind=open_run_result`
+so the Results chrome selects that run and the optional tab. The event
+carries identifiers. It leaves the live network's inputs where they are.
+`open_ui=false` returns `{ok: true, discussed, ui_navigated: false}`.
+
+When the episode has a durable parent thread, the same identifiers are
+patched onto `refs.discussed` with generation compare-and-swap
+(`durable_conversation.set_discussed_run`). That patch does not bump the
+thread generation. Omitting `baseline_run_id` clears a baseline previously
+stored on the thread.
+
+`resume_episode` drops the previous episode and its approvals, mints a new
+session, and copies `refs.discussed` onto that session's `discussed_refs`.
+When the run is still readable under the current project ACL, status, mode,
+fingerprint, and `evidence_available` are refreshed from `get_run_evidence`.
+When that read fails, the durable identifiers alone are restored. Export and
+later turns keep that run without another `discuss_project_run`.
+
+`export_run_evidence` writes one run as a JSON agent-export chip. Omit
+`run_id` to export the discussed run. With no `run_id` and no discussed run
+the error is `discussed_run_required`. Download the chip with
+`get_file_delivery`.
+
+`discuss_project_run` and `export_run_evidence` are write-tier. Expert mode
+leaves write-tier tools uncarded. Guided mode cards every write, and
+`AUTO_APPROVE_TIERS` never includes `write`.
+
+### Current load flow
+
+`get_loadflow_summary` ranks lines and transformers on the current solve. It
+uses the same source selection, dispatch-freshness gate, rating (`s_nom_opt`
+for an extendable branch, otherwise `s_nom`), and snapshot weights as the
+Load flow tab. The default list is 5 branches, the maximum is 25, and the
+payload is trimmed to stay under 3800 characters.
+
+Peak utilisation is the larger terminal flow divided by `rating * s_max_pu`.
+`source=lopf` (the default) is an active-power proxy: the larger of `|p0|`
+and `|p1|`. `source=ac_pf` uses apparent power where reactive flows exist
+and excludes unconverged snapshots. `claims.full_ac_thermal_compliance` is
+false: the summary has no N-1 check and no voltage limits. An unsolved,
+stale, running, infeasible, or failed solve returns `status: unavailable`
+with a typed `unavailable_kind`. Branches with a missing or zero rating, or
+with no flow data, appear in `skipped` and stay out of the ranking.
+
+A `run_id` argument reads a stored `loadflow` section when that artifact
+exists. With no such section the result is
+`unavailable_kind=historical_loadflow_unavailable`. Omit `run_id` for the
+live results. `window_from` and `window_to` are snapshot indexes;
+`window_from` must not exceed `window_to`.
+
+### Experiment plans
+
+`start_experiment` writes `<project>/experiments/<uuid>.json` plus
+`experiments/index.json`. The returned view has `status: "planned"`,
+`executed: false`, empty `job_ids`, and a note that nothing ran. The call
+does not queue a solve or apply a change. A later slice is what advances a
+case, through ordinary harness tools and approvals.
+
+- `domain` is one of `network`, `commercial`, `reliability`, `gridspine`.
+- One to eight cases. Each `id` matches `^[A-Za-z][A-Za-z0-9_-]{0,31}$` and is unique inside the plan. An optional `label` is 1–120 characters.
+- Each case has 1–12 changes: `{path, value, value_type}` and an optional `unit` of 1–24 characters.
+- `value_type` is `number` (finite, and not a boolean), `boolean`, `string`, or `enum`. String and enum values are 1–120 characters.
+- `path` starts with an identifier of at most 32 characters, then one to six dotted segments.
+- `title` is 1–120 characters. `request_id` is 1–64 characters. The same `request_id` for the same owner and project returns the existing plan when that file is still readable.
+- `baseline_run_id`, when set, is stored as a string of 1–64 characters. This call does not look the run up.
+- `limits`, when set, must be an object and is stored as given.
+- `list_experiments` (`limit` 1–20) returns the newest plans this owner has in the active project, without case bodies. The index keeps 100 ids. `get_experiment` returns cases, limits, and `job_ids`. A malformed id, a missing file, or another owner's record is `experiment_not_found`. Unreadable JSON is `experiment_unreadable`.
+
+```json
+{
+  "title": "Battery sensitivity",
+  "request_id": "req-1",
+  "domain": "network",
+  "baseline_run_id": "run-base",
+  "cases": [
+    {
+      "id": "case-hi",
+      "label": "Higher battery cap",
+      "changes": [
+        {"path": "Generator.battery.p_nom", "value": 7.5, "value_type": "number", "unit": "MW"}
+      ]
+    }
+  ]
+}
+```
+
+`start_experiment` is write-tier, with the same Guided confirmation rule as
+`discuss_project_run`. `list_experiments` and `get_experiment` are read-tier.

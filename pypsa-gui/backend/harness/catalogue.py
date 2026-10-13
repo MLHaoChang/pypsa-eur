@@ -79,6 +79,8 @@ SAFETY_PANEL_ENUM = [
     "Workspace", "workspace", "Settings", "settings",
     "GridSpine", "gridspine", "Reports", "reports",
     "CampusElectrical", "campusElectrical",
+    # The guided investment study panel (frontend normalises both to 'decision').
+    "DecisionStudy", "decision",
 ]
 RESULTS_TAB_ENUM = [
     "overview", "capex", "dispatch", "loadflow", "prices", "economics",
@@ -1355,7 +1357,9 @@ TOOLS: list[dict[str, Any]] = [
         "has_solver_config, bus_count, snapshot_count, objective, "
         "has_orphan_tmp, missing, parent_project, scenario_description, "
         "scenario_type, project_kind (null = capacity_expansion; "
-        "'planning_dynamics' for a gridspine study), settings (the per-project "
+        "'planning_dynamics' for a gridspine study), study_owned, "
+        "owner_study_id, owner_study_name (study_owned = a decision study's own "
+        "option or tornado fork; leave it to the study), settings (the per-project "
         "settings table: derive_lengths_from_geometry) (per "
         "schemas.py:467-491). `id` is the DB-registry UUID when multi-user "
         "auth is enabled and null in single-user mode. Each entry is "
@@ -1466,7 +1470,8 @@ TOOLS: list[dict[str, Any]] = [
         "entry is a ProjectInfo {name, id, created_at, has_solver_config, "
         "bus_count, snapshot_count, objective, has_orphan_tmp, missing, "
         "parent_project, scenario_description, scenario_type, project_kind, "
-        "settings} per schemas.py:467-491. "
+        "study_owned, owner_study_id, owner_study_name, settings} per "
+        "schemas.py:467-491. "
         "Safety: read.",
         {"name": {"type": "string"}},
         ["name"],
@@ -1867,7 +1872,12 @@ TOOLS: list[dict[str, Any]] = [
         "{status: 'presented'} at once and the user's pick arrives as their "
         "NEXT message (its text is the option label). So after calling it, "
         "end your turn with at most one short sentence; do not call it "
-        "twice in one turn and do not guess the answer. Safety: read.",
+        "twice in one turn and do not guess the answer. Set multi_select "
+        "when several options may be chosen together (the answer is then "
+        "the chosen labels joined by '; '). Put anything longer than the "
+        "question (a plan, a comparison) in detail, as Markdown. Use "
+        "intent 'plan_review' to show a plan in detail for approval: one "
+        "verdict, e.g. options Approve and Revise. Safety: read.",
         {
             "title": {"type": "string", "description": "The decision, as a short heading (Q1 — …)."},
             "question": {"type": "string", "description": "Why it matters, one or two sentences."},
@@ -1887,8 +1897,33 @@ TOOLS: list[dict[str, Any]] = [
                 "description": "The real alternatives; exactly one `recommended: true`.",
             },
             "allow_free_text": {"type": "boolean", "description": "Default true."},
+            "multi_select": {"type": "boolean",
+                             "description": "Several options may be picked together. Default false."},
+            "detail": {"type": "string",
+                       "description": "Markdown shown under the question (a plan, a table). At most 2000 characters."},
+            "intent": {"type": "string", "enum": ["choice", "plan_review"],
+                       "description": "'plan_review' presents detail as a plan to approve. Default 'choice'."},
         },
         ["title", "question", "options"],
+    ),
+
+    _t(
+        "read_result",
+        "Read part of a tool result that was too large to show you whole. "
+        "When a result comes back as {spill: {locator, total_chars, shape}, "
+        "preview}, the whole result is kept for this chat: call this with "
+        "the locator and a JSON pointer to the part you need (\"/rows\", "
+        "\"/rows/3/p\"). A list is returned a page at a time (offset, limit; "
+        "follow next_offset), a large object as its keys, a long string in "
+        "slices. Page and narrow; do not try to read everything. Locators "
+        "expire with the chat. Safety: read.",
+        {
+            "locator": {"type": "string", "description": "The 32-character id from the spill block."},
+            "pointer": {"type": "string", "description": "JSON pointer into the result, e.g. /rows. Empty for the top."},
+            "offset": {"type": "integer", "description": "First list index or string character. Default 0."},
+            "limit": {"type": "integer", "description": "List items per page, at most 500 (fewer if they do not fit). Default 50."},
+        },
+        ["locator"],
     ),
 
     _t(
@@ -2724,12 +2759,17 @@ TOOLS: list[dict[str, Any]] = [
         "(capacitive and inductive Mvar after the inverters' own headroom), "
         "short_circuit (IEC 60909 per bus and period against the switchgear "
         "rating), compliance (per check: status_as_is, status_with_measures, "
-        "value, limit, worst hour, clause and its code|assumed tag), "
-        "requirement (the PCC reactive band applied and where P_ref came from)}. "
+        "value, limit, worst hour and its case, clause and its code|assumed tag), "
+        "requirement (the PCC reactive band applied and where P_ref came from), "
+        "and after an investing run taps (the on-load tap positions per hour and "
+        "case) and tap_hours_moved (how many critical hours moved a tap)}. "
         "owner_assets_count is how many bought items the investment case takes as "
         "extra owner assets and owner_assets_method (milp|least_cost, null when "
         "none) which result they come from: the joint optimisation when it is "
         "fresh and found its own choice, else the least-cost run; say which. "
+        "owner_assets_unresolved is how many needs that same run could not meet; "
+        "when it is above 0 they are passed to the investment case as a flag "
+        "(the case is not compliant without them): say so. "
         "When stale is true the campus or the project changed since the run: say "
         "so before quoting numbers. It is a steady-state study, not a compliance "
         "certificate. 409 for a project of another kind. Safety: read.",
@@ -2764,6 +2804,9 @@ TOOLS: list[dict[str, Any]] = [
         "with campus_get_investment. pcc_switchgear_by_operator (default "
         "false) says the grid operator owns the PCC switchgear, so it is "
         "neither bought nor costed: ask the user who owns it before assuming. "
+        "pcc_tap_control (campus|grid_operator, default campus) says who moves "
+        "the on-load taps of the transformers at the PCC; with grid_operator "
+        "they stay at the campus file's position. "
         "422 without a campus file or for a bad "
         "setting. Safety: write.",
         {
@@ -2775,6 +2818,7 @@ TOOLS: list[dict[str, Any]] = [
             "n_minus_1": {"type": "boolean"},
             "invest": {"type": "boolean"},
             "pcc_switchgear_by_operator": {"type": "boolean"},
+            "pcc_tap_control": {"type": "string", "enum": ["campus", "grid_operator"]},
         },
         ["project_id"],
     ),
@@ -2821,9 +2865,15 @@ TOOLS: list[dict[str, Any]] = [
         "as solved; null with hub_cost_reason when it cannot be computed), "
         "unresolved ({need, reason}: needs the library could not meet), history "
         "(each escalation to a dearer candidate and the check that forced it), "
-        "compliance_invested (the compliance table re-solved with the assets), "
+        "compliance_invested (the compliance table re-solved with the assets; "
+        "quote value_with_measures with its own worst_period_with_measures, "
+        "worst_hour_with_measures and worst_case_with_measures, not the as-is "
+        "worst hour), "
         "scope ({pcc_switchgear: campus|grid_operator}: whether the PCC switchgear "
-        "was costed to the campus or left to the grid operator, say which), "
+        "was costed to the campus or left to the grid operator, say which; "
+        "pcc_tap_control: campus|grid_operator, who moves the PCC transformer's "
+        "taps), taps and tap_hours_moved (the on-load tap positions the re-check "
+        "used per hour and case, and how many hours moved one), "
         "library_is_default, stale, owner_assets_method (milp|least_cost: which "
         "result the investment case's extra owner assets come from; the joint "
         "optimisation's when it is fresh and found its own choice, else this "
@@ -2831,9 +2881,11 @@ TOOLS: list[dict[str, Any]] = [
         "are placeholders tagged assumed unless the user replaced them with "
         "quotes (datasheet or measured) or cited reference values "
         "(literature, still not quotes), so quote assumed ones as orders of "
-        "magnitude; tap changers are not "
-        "optimised, so a voltage excursion compensation cannot shrink is "
-        "reported unresolved, not fixed; and when stale is true the campus, "
+        "magnitude; the on-load taps act "
+        "inside the re-check (per hour and case, an N-1 case after the tap "
+        "changers act), so a voltage excursion still unresolved is one neither "
+        "the taps nor compensation could shrink, and its reason says why; and "
+        "when stale is true the campus, "
         "the project or the library changed since the run. Never add the "
         "electrical cost to the hub's as if it were in the hub's optimisation: "
         "it is reported alongside, and the PyPSA project is unchanged. "
@@ -2851,7 +2903,10 @@ TOOLS: list[dict[str, Any]] = [
         "iterations, stop, fallback), stop (converged|stalled|delta_floor|"
         "max_iter|cancelled), fallback (why the least-cost choice was kept, or "
         "null), comparison (per need: c8_choice, milp_choice and each one's "
-        "annualised cost), stale, notes}. You cannot start or cancel it: it "
+        "annualised cost), stale, notes}. The c8_ fields are the least-cost "
+        "choice's: call it the least-cost choice, not C8. iterations and "
+        "iteration count the steps after the warm start (history row 0, the "
+        "least-cost choice re-solved). You cannot start or cancel it: it "
         "takes minutes and runs from the panel's Joint optimisation button, so "
         "tell the user to start it there. Say these with the numbers: the "
         "design margin is the owner's rule, judged on the least-cost dispatch "
@@ -3456,6 +3511,7 @@ TOOL_ROUTES: dict[str, list] = {
     "run_sensitivity_sweep": _SERVICE_CALL,
     "use_toolset": _SERVICE_CALL,
     "use_skill": _SERVICE_CALL,
+    "read_result": _SERVICE_CALL,
     "start_workflow": _SERVICE_CALL,
     "advance_workflow": _SERVICE_CALL,
     "end_workflow": _SERVICE_CALL,
@@ -3599,6 +3655,72 @@ SAFETY_TIERS = (
     "write",
     "read",
 )
+
+
+# ── P33b: which chat tools EDIT the live network ──────────────────────────
+#
+# The chat seam of the edit counter (`ProjectContext.network_revision`). Chat
+# tools call their handlers directly, so `undo_snapshot_middleware` (the HTTP
+# seam) never sees them; the dispatch site bumps for every tool this predicate
+# accepts. Derived from TOOL_ROUTES — a non-GET route under the undo prefixes —
+# plus ONE hand list for the write tools that have no route at all, pinned by
+# construction against its complement (`tests/test_eh_study_edited_since.py`:
+# every `_SERVICE_CALL` tool of tier write / destructive is in exactly one).
+# Lives outside TOOLS: no tool description changes.
+
+# Must equal `main._UNDO_PREFIXES` (pinned by a test; main imports services,
+# never the reverse).
+NETWORK_EDIT_PREFIXES = ("/api/network/", "/api/io/")
+
+# `_SERVICE_CALL` write / destructive tools that mutate the live network.
+_SERVICE_CALL_NETWORK_WRITES = frozenset({
+    "batch_create_components",        # loops create_component
+    "batch_delete_components",        # loops delete_component
+    "generate_exemplary_timeseries",  # writes _user_ts / n.*_t
+    "apply_demand_from_excel",        # writes a Load's series under the lock
+    "reconstruct_network_from_image",  # materialises buses / lines
+    # master (assistant tools): an uploaded network replaces the live one
+    # through the /api/io import handlers; an applied preview swaps the live
+    # network through `set_network` (which bumps too: +2, like clustering).
+    "import_uploaded_network",
+    "apply_project_changes",
+})
+
+# `_SERVICE_CALL` write / destructive tools that do NOT touch the live network
+# (gridspine opens its own pypsa.Network from disk; exports write files; the
+# rest are chat / upload / profile state).
+_SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
+    "gridspine_create_study", "gridspine_set_dispatch_source",
+    "gridspine_update_config", "gridspine_edit_template_param",
+    "gridspine_export_handoff_bundle", "gridspine_compute_capacity",
+    "gridspine_assess_connection",
+    # campus (master #84/#89/#91): the study reads the SAVED network.nc and
+    # writes its own files under the project directory; never the live one.
+    "campus_draft_campus", "campus_run_study", "campus_set_library",
+    "campus_extract_grid_code",
+    # master (assistant tasks, experiments, deliveries): task / experiment
+    # records, a preview built on a side context (`build_context`), charts,
+    # delivery and evidence files — none writes the live network.
+    "start_task", "resume_task", "cancel_task", "resolve_task_step",
+    "start_experiment", "preview_project_changes", "create_chart",
+    "build_delivery", "export_run_evidence",
+    "export_to_excel", "export_to_csv", "export_preview_png",
+    "export_chat_summary", "export_eh_report_docx", "export_asset_results",
+    "set_active_profile", "clear_uploads", "start_campaign", "end_campaign",
+})
+
+
+def tool_edits_network(tool_name: str) -> bool:
+    """True when running `tool_name` edits the live network (P33b B2)."""
+    if tool_name in _SERVICE_CALL_NETWORK_WRITES:
+        return True
+    for route in TOOL_ROUTES.get(tool_name) or ():
+        if (isinstance(route, tuple) and len(route) == 2
+                and route[0] != "GET"
+                and route[1] != "/api/network/undo/info"
+                and route[1].startswith(NETWORK_EDIT_PREFIXES)):
+            return True
+    return False
 
 
 def safety_tier_for(tool_name: str) -> str:

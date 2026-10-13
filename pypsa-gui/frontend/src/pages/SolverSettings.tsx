@@ -255,7 +255,7 @@ export default function SolverSettings() {
   return (
     <div className="flex flex-col h-full text-sm">
       <PageHeader
-        eyebrow="SIMULATION · SOLVER"
+        eyebrow="RUN · SOLVER"
         title="Solver &amp; mode"
         subtitle="Pick how PyPSA builds and solves the optimization model — backend, optimization mode, physics, and forwarded solver options."
       />

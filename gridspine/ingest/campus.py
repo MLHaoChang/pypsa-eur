@@ -52,7 +52,10 @@ The description is one YAML mapping under ``campus``:
 A transformer or cable may carry ``existing: true``: it is owned already, so
 an investment study (``static/campus_invest.py``) prices it at zero. It may
 also carry ``library_id``, the asset-library entry it was taken from. Both
-are plain flags, not values, so they are untagged.
+are plain flags, not values, so they are untagged. A transformer, cable or
+compensation entry may carry ``commissioning_year`` (plan C14), tagged, a
+whole year: when it was put in service, so that the investment study can
+replace it at the end of its life. It changes nothing in the net.
 
 ``compensation`` (optional)
     A list of reactive compensation, each ``{name, bus, kind, q_mvar}`` with
@@ -112,6 +115,7 @@ Refused at load, each with a message naming the field:
 * a cable between two nominal voltages, or a ``parallel`` that is not a
   whole number of at least 1;
 * an ``existing`` that is not true or false;
+* a ``commissioning_year`` that is untagged, not positive or not a whole year;
 * a compensation entry of unknown kind, at an unknown bus, with an unknown
   field, a non-positive ``q_mvar`` or (a capacitor bank) ``steps`` that is
   not a whole number of at least 1;
@@ -211,6 +215,8 @@ _UNIT_FIELDS = {
 _TRAFO_EARTHING = {"hv": ("earthing_hv", "r_n_hv_ohm"), "lv": ("earthing_lv", "r_n_lv_ohm")}
 #: Untagged flags a transformer or cable may carry (see the docstring).
 _ASSET_FLAGS = ("existing", "library_id")
+#: When an asset was put in service (plan C14): tagged, optional, a whole year.
+_COMMISSIONED = "commissioning_year"
 _COMP_STRUCTURAL = ("name", "bus", "kind", "library_id", "pypsa_name")
 #: Fields that may be zero. Every other tagged field must be strictly positive.
 _MAY_BE_ZERO = frozenset({"pfe_kw", "i0_percent", "c_nf_per_km", "rx_sc", "rx_max", "rx_min", "c0_nf_per_km",
@@ -232,6 +238,9 @@ CAMPUS_LEDGER = (
     "(assumed); capacitor banks and reactors feed no fault current",
     "campus: a UPS is a storage unit that feeds no fault current upstream "
     "(UPS_K = 0): its rectifier blocks it",
+    "campus: the investment re-check sets on-load taps per hour and per case, "
+    "an N-1 case after the tap changers have acted, the Q dispatch held "
+    "(plan C15, static/campus_taps); off-circuit taps stay at the file's position",
 )
 
 
@@ -396,6 +405,14 @@ def _flags(where, spec):
         raise ContractError(f"{where}.library_id must be a non-empty string, got {spec['library_id']!r}")
 
 
+def _commissioned(where, spec, rows):
+    """Check the optional tagged ``commissioning_year`` (plan C14)."""
+    if _COMMISSIONED in spec:
+        year = _tagged(where, _COMMISSIONED, spec, rows)
+        if not float(year).is_integer():
+            raise ContractError(f"{where}.{_COMMISSIONED} must be a whole year, got {year}")
+
+
 def _whole(where, field, v):
     if isinstance(v, bool) or not isinstance(v, int) or v < 1:
         raise ContractError(f"{where}.{field} must be a whole number of at least 1, got {v!r}")
@@ -495,9 +512,10 @@ def build_campus(spec) -> Campus:
     for tname, ts in trafos.items():
         where = f"transformers.{tname}"
         _fields(where, ts, _TRAFO_FIELDS,
-                ("hv_bus", "lv_bus", "pypsa_name", "vector_group", "tap", *_ASSET_FLAGS,
+                ("hv_bus", "lv_bus", "pypsa_name", "vector_group", "tap", *_ASSET_FLAGS, _COMMISSIONED,
                  *(f for pair in _TRAFO_EARTHING.values() for f in pair)))
         _flags(where, ts)
+        _commissioned(where, ts, rows)
         hv, lv = str(ts.get("hv_bus")), str(ts.get("lv_bus"))
         if hv == lv:
             raise ContractError(f"{where}: hv_bus and lv_bus are the same bus {hv!r}")
@@ -543,8 +561,10 @@ def build_campus(spec) -> Campus:
 
     for cname, cs in cables.items():
         where = f"cables.{cname}"
-        _fields(where, cs, _CABLE_FIELDS, ("from_bus", "to_bus", "pypsa_name", "parallel", *_CABLE_ZERO, *_ASSET_FLAGS))
+        _fields(where, cs, _CABLE_FIELDS, ("from_bus", "to_bus", "pypsa_name", "parallel", *_CABLE_ZERO, *_ASSET_FLAGS,
+                                           _COMMISSIONED))
         _flags(where, cs)
+        _commissioned(where, cs, rows)
         parallel = _whole(where, "parallel", cs["parallel"]) if "parallel" in cs else 1
         a, b = str(cs.get("from_bus")), str(cs.get("to_bus"))
         if a == b:
@@ -623,10 +643,12 @@ def build_campus(spec) -> Campus:
         kind = cs.get("kind")
         if kind not in COMP_KINDS:
             raise ContractError(f"{where}: unknown kind {kind!r}; allowed {list(COMP_KINDS)}")
-        _fields(where, cs, ("q_mvar", "steps") if kind == "capacitor_bank" else ("q_mvar",), _COMP_STRUCTURAL)
+        _fields(where, cs, ("q_mvar", "steps") if kind == "capacitor_bank" else ("q_mvar",),
+                (*_COMP_STRUCTURAL, _COMMISSIONED))
         bus = str(cs.get("bus"))
         _bus_kv(where, buses, bus)
         _flags(where, cs)
+        _commissioned(where, cs, rows)
         q = _tagged(where, "q_mvar", cs, rows)
         steps = _whole(where, "steps", cs.get("steps")) if kind == "capacitor_bank" else 1
         if kind == "statcom":

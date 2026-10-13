@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { CampusMilp, CampusState, CampusResults, CostBasis, InvestmentRow, MilpResults } from '../api/campusElectrical'
+import type { CampusMilp, CampusState, CampusResults, CostBasis, InvestmentRow, MilpResults, TapRow } from '../api/campusElectrical'
 import CampusElectricalPanel from './CampusElectricalPanel'
 import { formatEur } from './CampusInvestmentSection'
 
@@ -354,6 +354,60 @@ describe('compliance with the investment', () => {
     await waitFor(() => expect(screen.queryByTestId('compliance-cable_loading')).toBeNull())
   })
 
+  it('shows each re-solved value with its own worst hour and case, never the as-is hour', async () => {
+    // the browser run's case: as is worst at h158, re-checked worst at h117 in the outage of SITE_TRANSFO
+    const base = results()
+    api.state.mockResolvedValue(stateWith(results({
+      compliance_invested: [...base.compliance_invested!, {
+        check: 'campus_voltage', status_as_is: 'fail', status_with_measures: 'pass', value: 0.884, limit: 0.9,
+        unit: 'pu', worst_period: 2030, worst_hour: 158, worst_case: 'N-1:SITE_TRANSFO', clause: 'design',
+        source: 'assumed', detail: 'as is', value_with_measures: 0.9003, detail_with_measures: 'worst at IT_BUS',
+        worst_period_with_measures: 2030, worst_hour_with_measures: 117, worst_case_with_measures: 'N-1:SITE_TRANSFO',
+      }],
+    })))
+    renderPanel()
+    const cell = await screen.findByTestId('compliance-worst-campus_voltage')
+    expect(cell.textContent).toBe('0.900 pu 2030 · h117 · N-1:SITE_TRANSFO')
+    expect(cell.textContent).not.toContain('h158')
+  })
+
+  it('gives no hour beside a re-solved value from a run that did not keep it', async () => {
+    renderPanel()
+    const cell = await screen.findByTestId('compliance-worst-pcc_reactive')
+    expect(cell.textContent).toContain('11.93')
+    expect(cell.textContent).not.toContain('h158')
+  })
+
+  it('shows the as-is value with its own hour and case when the run did not invest', async () => {
+    const base = results()
+    api.state.mockResolvedValue(stateWith(results({
+      compliance: [...base.compliance, {
+        check: 'transformer_loading', status_as_is: 'fail', status_with_measures: 'pass', value: 112.5, limit: 100,
+        unit: '%', worst_period: 2030, worst_hour: 158, worst_case: 'N-1:TR1', clause: 'equipment rating',
+        source: 'assumed', detail: 'worst TR2 (N-1:TR1)' }],
+      investment: null, cost: null, compliance_invested: null, history: null, unresolved: null, scope: null,
+    })))
+    renderPanel()
+    expect((await screen.findByTestId('compliance-worst-transformer_loading')).textContent)
+      .toBe('112.500 % 2030 · h158 · N-1:TR1')
+  })
+
+  it('shows the whole band as the limit of a voltage row, and the single limit otherwise', async () => {
+    const base = results()
+    api.state.mockResolvedValue(stateWith(results({
+      compliance_invested: base.compliance_invested!.map(c => (c.check === 'pcc_voltage'
+        ? { ...c, limit: 0.9, limit_min: 0.9, limit_max: 1.118 } : c)),
+    })))
+    renderPanel()
+    expect((await screen.findByTestId('compliance-limit-pcc_voltage')).textContent).toBe('0.900–1.118 pu')
+    expect(screen.getByTestId('compliance-limit-pcc_reactive').textContent).toBe('13.150 Mvar')
+  })
+
+  it('shows the single limit of a voltage row from a run before the band was kept', async () => {
+    renderPanel()
+    expect((await screen.findByTestId('compliance-limit-pcc_voltage')).textContent).toBe('0.900 pu')
+  })
+
   it('says in the header that the with-assets column is an AC re-solve', async () => {
     renderPanel()
     expect((await screen.findByText(/With the assets \(AC re-solved\)/))).toBeTruthy()
@@ -370,7 +424,7 @@ describe('the joint optimisation beside the least-cost choice', () => {
     compliance_invested: [],
     history: [
       { iteration: 0, cost: 261_526.96, feasible: true, accepted: true, choice: 'transformer GRID_IMPORT: 1 x TR63',
-        note: "C8's result, the warm start" },
+        note: 'the least-cost choice, re-solved as the warm start' },
       { iteration: 1, cost: 150_000, feasible: true, accepted: true, choice: 'transformer GRID_IMPORT: 1 x TR50', note: '' },
     ],
     comparison: [
@@ -400,7 +454,7 @@ describe('the joint optimisation beside the least-cost choice', () => {
     renderPanel()
     const block = await screen.findByTestId('campus-milp')
     expect(within(block).getByTestId('milp-summary').textContent)
-      .toMatch(/Joint optimisation €150,000\/a against least cost €261,527\/a, €111,527\/a less\. 1 iteration, converged/)
+      .toMatch(/Joint optimisation €150,000\/a against least cost €261,527\/a, €111,527\/a less\. 1 iteration after the warm start, converged/)
     const t = within(block).getByTestId('milp-compare-transformer GRID_IMPORT').textContent!
     expect(t).toContain('1 x TR_110_20_63')
     expect(t).toContain('€193,520')
@@ -423,7 +477,7 @@ describe('the joint optimisation beside the least-cost choice', () => {
   })
 
   it('labels a fallback to the least-cost choice with its reason', async () => {
-    const reason = "no AC-feasible point is cheaper than C8's (261,527 against 261,527 per year)"
+    const reason = 'no AC-feasible point is cheaper than the least-cost choice (261,527 against 261,527 per year)'
     api.state.mockResolvedValue(withMilp({ results: milpResults({
       fallback: reason, summary: { ...milpResults().summary, fallback: true, milp_cost: 261_526.96 } }) }))
     renderPanel()
@@ -451,10 +505,25 @@ describe('the joint optimisation beside the least-cost choice', () => {
     renderPanel()
     const details = (await screen.findByTestId('milp-history')) as HTMLDetailsElement
     expect(details.open).toBe(false)
-    expect(details.textContent).toContain('Iteration history (2)')
-    await userEvent.click(within(details).getByText('Iteration history (2)'))
+    expect(details.textContent).toContain('Iteration history (warm start + 1 iteration)')
+    await userEvent.click(within(details).getByText('Iteration history (warm start + 1 iteration)'))
     expect(details.open).toBe(true)
     expect(details.textContent).toContain('1. €150,000/a, AC-feasible, accepted — transformer GRID_IMPORT: 1 x TR50')
+    expect(details.textContent).toContain('Warm start: €261,527/a, AC-feasible, accepted')
+  })
+
+  it('counts a history without a warm start as iterations only', async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults({ history: [] }) }))
+    renderPanel()
+    expect((await screen.findByTestId('milp-history')).textContent).toContain('Iteration history (0 iterations)')
+  })
+
+  it('says nothing of an internal plan step in the summary, the fallback or the notes', async () => {
+    api.state.mockResolvedValue(withMilp({ results: milpResults() }))
+    renderPanel()
+    const block = await screen.findByTestId('campus-milp')
+    await userEvent.click(within(block).getByText(/Iteration history/))
+    expect(block.textContent).not.toMatch(/\bC(8|11|12)\b/)
   })
 
   it('warns when the least-cost run it was based on has changed', async () => {
@@ -509,6 +578,15 @@ describe('investment: units added next to an existing transformer group (plan C1
     expect(within(keep).queryByTestId('invest-reason')).toBeNull()                 // nothing to say
   })
 
+  it('shows why a group was replaced and what it replaced, with its commissioning year', async () => {
+    const reason = 'replaces GRID_IMPORT (in service since 2015): 1 x 50 MVA as is, 52.33 MVA a unit needed with '
+      + 'the 20 % design margin'
+    api.state.mockResolvedValue(stateWith(results({ investment: [row({ action: 'replace', reason })] })))
+    renderPanel()
+    const r = await screen.findByTestId('invest-transformer GRID_IMPORT')
+    expect(within(r).getByTestId('invest-reason').textContent).toBe(reason)
+  })
+
   it('does not repeat an unresolved reason in the table: the alert lists it', async () => {
     api.state.mockResolvedValue(stateWith(results({
       investment: [row({ status: 'unresolved', reason: 'no library transformer', action: 'buy' })],
@@ -549,8 +627,186 @@ describe('investment: units added next to an existing transformer group (plan C1
   })
 })
 
+describe('investment: on-load taps set per hour and case (plan C15)', () => {
+  const tap = (over: Partial<TapRow>): TapRow => ({
+    period: 2030, hour: 158, case: 'intact', transformer: 'TR1', group: 'TR1+TR2', tap_pos: 0, ratio_pct: 100,
+    moved_by: 0, ...over,
+  })
+  const tapped = (over: Partial<CampusResults> = {}) => results({
+    taps: [
+      tap({}), tap({ transformer: 'TR2' }),
+      tap({ hour: 19, tap_pos: -3, ratio_pct: 95.5, moved_by: -3 }), tap({ hour: 19, transformer: 'TR2', tap_pos: -3,
+                                                                            ratio_pct: 95.5, moved_by: -3 }),
+      tap({ hour: 19, case: 'N-1:TR1', transformer: 'TR2', tap_pos: -5, ratio_pct: 92.5, moved_by: -5 }),
+    ],
+    tap_hours_moved: 1,
+    selection: [{ period: 2030, hour: 158, reasons: ['max_consumption_mw'] },
+                { period: 2030, hour: 19, reasons: ['max_import_q_mvar'] }],
+    scope: { pcc_switchgear: 'campus', pcc_tap_control: 'campus' },
+    ...over,
+  })
+
+  it('says how the taps act, how many hours moved one and who moves the PCC taps', async () => {
+    api.state.mockResolvedValue(stateWith(tapped()))
+    renderPanel()
+    const line = (await screen.findByTestId('invest-taps-summary')).textContent
+    expect(line).toContain('set per critical hour and per case')
+    expect(line).toContain('an N-1 case after the tap changers act, the reactive dispatch held')
+    expect(line).toContain('1 of the 2 critical hours moved a tap')
+    expect((await screen.findByTestId('invest-tap-scope')).textContent)
+      .toBe('PCC transformer taps: moved by the campus')
+  })
+
+  it('names the grid operator when it holds the PCC taps', async () => {
+    api.state.mockResolvedValue(stateWith(tapped({ scope: { pcc_switchgear: 'campus', pcc_tap_control: 'grid_operator' } })))
+    renderPanel()
+    expect((await screen.findByTestId('invest-tap-scope')).textContent)
+      .toBe("PCC transformer taps: held by the grid operator at the campus file's position")
+  })
+
+  it('keeps the tap table collapsed until opened, one row per hour, case and transformer', async () => {
+    api.state.mockResolvedValue(stateWith(tapped()))
+    renderPanel()
+    const box = (await screen.findByTestId('invest-taps')) as HTMLDetailsElement
+    expect(box.open).toBe(false)
+    expect(within(box).getByText('Tap positions (5)')).toBeTruthy()
+    const n1 = within(box).getByTestId('tap-2030-19-N-1:TR1-TR2')
+    expect(n1.textContent).toContain('-5')
+    expect(n1.textContent).toContain('92.5 %')
+    expect(n1.className).toContain('font-medium')                  // a moved tap stands out
+    expect(within(box).getByTestId('tap-2030-158-intact-TR1').className).not.toContain('font-medium')
+  })
+
+  it('says so when no transformer has tap data', async () => {
+    api.state.mockResolvedValue(stateWith(tapped({ taps: [], tap_hours_moved: 0 })))
+    renderPanel()
+    expect((await screen.findByTestId('invest-taps-summary')).textContent)
+      .toContain("No transformer has on-load tap data: every tap stays at the campus file's position")
+    expect(screen.queryByTestId('invest-taps')).toBeNull()
+  })
+
+  it('shows nothing about taps for a run from before them', async () => {
+    renderPanel()
+    await screen.findByTestId('campus-investment')
+    expect(screen.queryByTestId('invest-taps-summary')).toBeNull()
+    expect(screen.queryByTestId('invest-tap-scope')).toBeNull()
+  })
+})
+
+describe('investment: replacement at the end of life (plan C14)', () => {
+  const horizon = {
+    period_years: { '2030': 10, '2040': 10, '2050': 10 },
+    source: { '2030': 'project', '2040': 'project', '2050': 'assumed: the gap from the previous period' },
+    horizon_end: 2060,
+    notes: [
+      'Replacements are reported, not ranked: candidates are ranked by annualised cost.',
+      'TR1 (transformer K): no commissioning year; assumed: mid-life at the first period (commissioned 2010)',
+    ],
+  }
+  const renewed = () => results({
+    investment: [
+      row({ need: 'transformer T1', library_id: 'TR_110_20_63', units: 2, capex_eur: 4_300_000, action: 'buy',
+            purchase: 1, build_year: 2030, service_to: 2055, lineage: 'transformer T1|TR_110_20_63', replaces: null }),
+      row({ need: 'transformer T1', library_id: 'TR_110_20_63', units: 2, capex_eur: 4_300_000, action: 'renew',
+            invest_period: 2050, purchase: 2, build_year: 2055, service_to: 2060,
+            lineage: 'transformer T1|TR_110_20_63', replaces: 'transformer T1|TR_110_20_63|1' }),
+      row({ need: 'transformer K', library_id: 'TR_110_20_40', kind: 'keep', units: 1, capex_eur: 0,
+            annualised_eur_per_a: 0, existing: true, status: 'kept', action: 'keep', purchase: 0, build_year: 2010,
+            commissioned: 2010, commissioned_source: 'assumed: mid-life at the first period', service_to: 2050 }),
+      row({ need: 'transformer K', library_id: 'TR_110_20_40', units: 1, capex_eur: 950_000, action: 'renew',
+            invest_period: 2050, purchase: 1, build_year: 2050, service_to: 2060, reason: '',
+            commissioned: 2010, commissioned_source: 'assumed: mid-life at the first period' }),
+    ],
+    cost: [
+      { period: 2030, capex_eur: 4_300_000, capex_replacement_eur: 0, annualised_eur_per_a: 300_000 },
+      { period: 2040, capex_eur: 0, capex_replacement_eur: 0, annualised_eur_per_a: 300_000 },
+      { period: 2050, capex_eur: 5_250_000, capex_replacement_eur: 5_250_000, annualised_eur_per_a: 380_000 },
+    ],
+    scope: { pcc_switchgear: 'campus', horizon },
+  })
+  const perPeriodHub = { basis: 'per_period' as const, per_period: { '2030': 1e6, '2040': 1e6, '2050': 1e6 }, total: 3e7 }
+
+  it('lists one row per purchase with the year it is bought, a renewal saying so', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const [first, again] = await screen.findAllByTestId('invest-transformer T1')
+    expect(within(first).getByTestId('invest-action').textContent).toBe('buy')
+    expect(within(first).getByTestId('invest-bought').textContent).toBe('2030')
+    expect(within(again).getByTestId('invest-action').textContent).toBe('renew')
+    expect(within(again).getByTestId('invest-bought').textContent).toBe('2055')
+    expect(again.textContent).toContain('€4.30 M')
+  })
+
+  it('says when a kept existing asset went into service, and that the year is assumed', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const [keep, renew] = await screen.findAllByTestId('invest-transformer K')
+    expect(within(keep).getByTestId('invest-bought').textContent).toBe('in service since 2010 (assumed)')
+    expect(within(renew).getByTestId('invest-bought').textContent).toBe('2050')
+  })
+
+  it('shows the replacement part of each period capex', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const p2050 = await screen.findByTestId('cost-2050')
+    expect(within(p2050).getByTestId('cost-replacement').textContent).toBe('€5.25 M')
+    expect(within(screen.getByTestId('cost-2030')).getByTestId('cost-replacement').textContent).toBe('€0')
+  })
+
+  it('states the horizon, flags an assumed span and lists the notes', async () => {
+    api.state.mockResolvedValue(stateWith(renewed(), { hub_cost: perPeriodHub }))
+    renderPanel()
+    const line = (await screen.findByTestId('invest-horizon')).textContent ?? ''
+    expect(line).toContain('to 2060')
+    expect(line).toContain('2030: 10 years')
+    expect(line).toContain('2050: 10 years (assumed)')
+    const notes = within(screen.getByTestId('invest-horizon-notes')).getAllByRole('listitem')
+    expect(notes.map(n => n.textContent)).toEqual(horizon.notes)
+  })
+
+  it('reads a run from before it: no horizon line, no replacement column, the period as the year', async () => {
+    renderPanel()
+    const t = await screen.findByTestId('invest-transformer GRID_IMPORT')
+    expect(within(t).getByTestId('invest-bought').textContent).toBe('2030')
+    expect(screen.queryByTestId('invest-horizon')).toBeNull()
+    expect(within(screen.getByTestId('cost-2030')).queryByTestId('cost-replacement')).toBeNull()
+  })
+})
+
 // Owner decision 2026-10-12: the investment case takes the joint optimisation when it is
 // fresh and found its own choice, else the least-cost run. The switch is never silent.
+describe('wide tables scroll sideways instead of being clipped', () => {
+  // A page section clips its overflow (rounded corners): at 1440 px with the
+  // assistant open the investment table (about 880 px) sat in a 714 px section
+  // and lost its Existing and Status columns, the tap table its Moved by.
+  const scrolls = (el: HTMLElement) => {
+    const wrap = el.closest('table')!.parentElement!
+    expect(wrap.getAttribute('data-testid')).toBe('campus-table-scroll')
+    expect(wrap.className).toContain('overflow-x-auto')
+  }
+
+  it('wraps the investment, tap, cost, comparison and joint-choice tables', async () => {
+    const res = results({
+      taps: [{ period: 2030, hour: 158, case: 'intact', transformer: 'TR1', group: 'TR1', tap_pos: -1,
+               ratio_pct: 98.5, moved_by: -1 }],
+      tap_hours_moved: 1,
+    })
+    api.state.mockResolvedValue(stateWith(res, { milp: { status: null, stale: false, results: {
+      investment: [row({ library_id: 'TR_110_20_50' })], cost: [], compliance_invested: [], history: [],
+      comparison: [{ need: 'transformer GRID_IMPORT', c8_choice: 'a', milp_choice: 'b', c8_annualised_eur_per_a: 1,
+                     milp_annualised_eur_per_a: 1 }],
+      summary: { method: 'milp', fallback: false, reason: '', stop: 'converged', c8_cost: 2, milp_cost: 1,
+                 c8_feasible: true, iterations: 1 },
+      fallback: null, stop: 'converged' } } }))
+    renderPanel()
+    scrolls(await screen.findByTestId('invest-transformer GRID_IMPORT'))
+    scrolls(screen.getByTestId('tap-2030-158-intact-TR1'))
+    scrolls(screen.getByTestId('cost-2030'))
+    scrolls(screen.getByTestId('milp-compare-transformer GRID_IMPORT'))
+    scrolls(screen.getByTestId('milp-invest-transformer GRID_IMPORT'))
+  })
+})
+
 describe('which result feeds the investment case', () => {
   const milpOf = (over: Partial<MilpResults> = {}): MilpResults => ({
     investment: [], cost: [], compliance_invested: [], history: [], comparison: [],
@@ -596,5 +852,47 @@ describe('which result feeds the investment case', () => {
     renderPanel()
     await screen.findByTestId('campus-investment')
     expect(screen.queryByTestId('invest-ic-source')).toBeNull()
+  })
+})
+
+// Owner decision 2026-10-13: the needs the run the case uses could not meet go to the
+// investment case, which flags the case. The panel says so, only when there are any.
+describe('unresolved needs passed to the investment case', () => {
+  it('says the unresolved needs are passed as a flag, beside the source line', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'least_cost', owner_assets_unresolved: 2 }))
+    renderPanel()
+    expect((await screen.findByTestId('invest-ic-unresolved')).textContent)
+      .toBe('2 unresolved needs are passed to the investment case as a flag: the case is not compliant without them.')
+    expect(screen.getByTestId('invest-ic-source').textContent).toBe('Investment case uses: least cost.')
+  })
+
+  it('says it in the singular for one', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'milp', owner_assets_unresolved: 1 }))
+    renderPanel()
+    expect((await screen.findByTestId('invest-ic-unresolved')).textContent)
+      .toBe('1 unresolved need is passed to the investment case as a flag: the case is not compliant without it.')
+  })
+
+  it('says it when the run bought nothing for the case', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 0, owner_assets_method: null, owner_assets_unresolved: 1 }))
+    renderPanel()
+    expect(await screen.findByTestId('invest-ic-unresolved')).toBeTruthy()
+    expect(screen.queryByTestId('invest-ic-source')).toBeNull()
+  })
+
+  it('says nothing when there are none, or the backend does not say', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'least_cost', owner_assets_unresolved: 0 }))
+    const { unmount } = renderPanel()
+    await screen.findByTestId('invest-ic-source')
+    expect(screen.queryByTestId('invest-ic-unresolved')).toBeNull()
+    unmount()
+    api.state.mockResolvedValue(stateWith(results(), { owner_assets_count: 2, owner_assets_method: 'least_cost' }))
+    renderPanel()
+    await screen.findByTestId('invest-ic-source')
+    expect(screen.queryByTestId('invest-ic-unresolved')).toBeNull()
   })
 })

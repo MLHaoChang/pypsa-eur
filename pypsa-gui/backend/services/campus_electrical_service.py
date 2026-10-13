@@ -48,9 +48,11 @@ The functions:
   optimisation's (``run_milp/``) when it is fresh and has a point of its own,
   else the least-cost one (owner decision 2026-10-12); ``meta.study_method``
   says which. ``campus_study_hash`` identifies the study they come from;
-  ``owner_assets_response`` is the route's body (assets, hash, stale, method).
-  Read only; ``get_state`` carries only the count and the method,
-  ``owner_assets_count`` and ``owner_assets_method``.
+  ``owner_assets_response`` is the route's body (assets, hash, stale, method,
+  and the needs that run could not meet, ``unresolved``; owner decision
+  2026-10-13). Read only; ``get_state`` carries only the counts and the
+  method, ``owner_assets_count``, ``owner_assets_unresolved`` and
+  ``owner_assets_method``.
 * ``start_milp_job``, ``milp_job_status``, ``cancel_milp_job``: the joint
   optimisation (plan C11's MILP) as a background job, in the report job's
   shape (``services/reports/report_job.py``): one job at a time on a daemon
@@ -80,6 +82,7 @@ import shutil
 import tempfile
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 import pandas as pd
@@ -121,7 +124,9 @@ SOLVER_CONFIG_FILE = "solver_config.json"
 MAX_CAMPUS_BYTES = 1_000_000
 MAX_LIBRARY_BYTES = 1_000_000
 DEFAULTS = {"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce", "margin": 0.2, "n_minus_1": True, "invest": True,
-            "pcc_switchgear_by_operator": False}
+            "pcc_switchgear_by_operator": False, "pcc_tap_control": "campus"}
+#: Who moves the PCC transformer's on-load taps (plan C15; the engine's ``PCC_TAP_CONTROL``).
+PCC_TAP_CONTROL = ("campus", "grid_operator")
 
 _LOCKS: dict = {}
 _LOCKS_GUARD = threading.Lock()
@@ -210,12 +215,21 @@ def _unresolved(investment):
     return [{"need": r["need"], "reason": r["reason"]} for r in investment if r["status"] == "unresolved"]
 
 
+def _tap_hours_moved(taps):
+    """How many selected hours moved a tap in any case (plan C15), or None
+    when the run did not invest."""
+    if taps is None:
+        return None
+    return len({(r["period"], r["hour"]) for r in taps if r["moved_by"]})
+
+
 def _results(run: Path):
     if not (run / cs.COMPLIANCE_CSV).is_file():
         return None
     selection = pd.read_csv(run / cs.SELECTED_CSV)
     selection["reasons"] = selection["reasons"].str.split(";")
     investment = _read_csv(run / cs.INVESTMENT_CSV)
+    taps = _read_csv(run / cs.INVEST_TAPS_CSV) if investment is not None else None
     return {
         "selection": _records(selection),
         "transformers": _read_csv(run / cs.SIZING_TRAFO_CSV),
@@ -230,7 +244,12 @@ def _results(run: Path):
         "compliance_invested": _read_csv(run / cs.COMPLIANCE_INVESTED_CSV),
         "history": _read_csv(run / cs.INVEST_HISTORY_CSV),
         "unresolved": _unresolved(investment),
-        # Who buys the PCC switchgear: {"pcc_switchgear": "campus" | "grid_operator"}.
+        # Plan C15: the on-load taps per hour and case of the re-check (period, hour, case, transformer,
+        # group, tap_pos, ratio_pct, moved_by), and how many hours moved one. None when the run did not invest.
+        "taps": taps,
+        "tap_hours_moved": _tap_hours_moved(taps),
+        # Who buys the PCC switchgear: {"pcc_switchgear": "campus" | "grid_operator"}, and who moves the
+        # PCC transformer's taps: {"pcc_tap_control": "campus" | "grid_operator"}.
         "scope": (json.loads((run / cs.INVEST_SCOPE_JSON).read_text())
                   if investment is not None and (run / cs.INVEST_SCOPE_JSON).is_file() else None),
         # Part three D1a: the rate, money year and currency the costs were annualised on, and where
@@ -246,6 +265,52 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+#: ``_file_digest``'s memo: ``{(real path, st_mtime_ns, st_size, st_ino): sha256}``, least recently used
+#: first, one entry per path. Owner decision 2026-10-13.
+_DIGEST_CACHE: OrderedDict = OrderedDict()
+_DIGEST_CACHE_MAX = 32
+_DIGEST_GUARD = threading.Lock()
+
+
+def _file_key(path) -> tuple:
+    st = os.stat(path)
+    return os.path.realpath(path), st.st_mtime_ns, st.st_size, st.st_ino
+
+
+def _file_digest(path) -> str:
+    """``_sha256_file(path)``, memoised in-process for the staleness checks
+    (owner decision 2026-10-13): every investment-case status poll with a
+    stored report hashes the saved ``network.nc`` through ``_stale``, and
+    ``get_state`` does it up to three times.
+
+    The key is the real path, ``st_mtime_ns``, ``st_size`` and ``st_ino``, so
+    a file written again or replaced (an atomic save is another inode) is
+    hashed again; a file that changed while it was read (its key before and
+    after differ) is not kept. One entry per path (a new version drops the
+    old one), at most ``_DIGEST_CACHE_MAX`` paths, the least recently used
+    evicted. The lock guards the memo only: the MILP job thread and the
+    request threads may both call this, and two that miss together both hash.
+
+    Limit: a file rewritten in place with the same size inside one tick of the
+    filesystem's timestamps, with no stat in between, keeps its old key."""
+    key = _file_key(path)
+    with _DIGEST_GUARD:
+        digest = _DIGEST_CACHE.get(key)
+        if digest is not None:
+            _DIGEST_CACHE.move_to_end(key)
+            return digest
+    digest = _sha256_file(path)
+    if _file_key(path) != key:                             # it changed while it was read
+        return digest
+    with _DIGEST_GUARD:
+        for old in [k for k in _DIGEST_CACHE if k[0] == key[0]]:
+            del _DIGEST_CACHE[old]
+        _DIGEST_CACHE[key] = digest
+        while len(_DIGEST_CACHE) > _DIGEST_CACHE_MAX:
+            _DIGEST_CACHE.popitem(last=False)
+    return digest
 
 
 def _effective_library(d: Path) -> Path:
@@ -360,7 +425,7 @@ def _stale(project, d: Path) -> bool:
     m = json.loads(manifest.read_text())
     text = yaml.safe_dump(yaml.safe_load(campus.read_text()), sort_keys=False)
     return (hashlib.sha256(text.encode()).hexdigest() != m.get("campus_sha256")
-            or _sha256_file(nc) != m.get("network_sha256")
+            or _file_digest(nc) != m.get("network_sha256")
             or _library_stale(project, d))
 
 
@@ -450,6 +515,7 @@ def get_state(project) -> dict:
     owner_assets = _owner_assets(method, source)
     return {
         "owner_assets_count": len(owner_assets),
+        "owner_assets_unresolved": len(_owner_unresolved(source)),
         "owner_assets_method": method if owner_assets else None,
         "campus_yaml": campus.read_text() if campus.is_file() else None,
         "skipped": json.loads(notes.read_text()) if notes.is_file() else [],
@@ -460,18 +526,33 @@ def get_state(project) -> dict:
         "hub_cost": cost,
         "hub_cost_reason": reason,
         "milp": _milp_state(project, d),
+        # A run answers only when it ends: a client whose request timed out reads here whether the
+        # backend is still at it (the run holds this lock throughout, the joint optimisation's
+        # least-cost run too), so it never takes the previous run's results for the new one's.
+        "run_in_progress": _lock(d / "run").locked(),
     }
 
 
 INVESTMENT_NOTES = (
     "Every cost in the shipped asset library is an assumed order-of-magnitude placeholder, tagged assumed; "
     "replace it with quotes before relying on any figure in euro.",
-    "Voltage excursions are met by compensation, not by changing a transformer tap: tap changers are not "
-    "optimised, and an excursion that compensation cannot shrink is reported unresolved.",
-    "A steady-state study at the critical hours, with an asset bought from the first period that needs it and "
-    "no replacement; unresolved needs are priced but not summed.",
+    "Voltage excursions are met first by the on-load taps of the campus transformers, set per critical hour and "
+    "per case (an N-1 case after the tap changers act, the reactive dispatch held), parallel units together and "
+    "nearest neutral; the PCC transformer's only when scope.pcc_tap_control is campus. Off-circuit taps stay where "
+    "the campus file puts them, and a transformer without tap data stays fixed. An excursion the taps and "
+    "compensation cannot shrink is reported unresolved with the reason (range exhausted, or no on-load tap data); "
+    "the PCC voltage is the grid's set-point and never a campus measure: it is reported at once, with nothing "
+    "bought for it. taps lists every position used.",
+    "A steady-state study at the critical hours, with an asset bought from the first period that needs it; "
+    "unresolved needs are priced but not summed.",
+    "An asset whose life ends inside the study horizon (the project's investment-period weightings, in "
+    "scope.horizon; a single-period study spans one year) is bought again like for like: renew rows, one per "
+    "purchase, linked by lineage and replaces. An existing asset is renewed from its commissioning year, or "
+    "assumed at mid-life at the first period, or in the first period when overdue; without a library entry its "
+    "replacement is unpriced. Renewals are reported, not ranked: the choice is by annualised cost, and keeping an "
+    "existing unit counts zero there although its renewal is costed later.",
     "Each row's action says what it does: buy, add (units added next to existing transformers, beside a keep row "
-    "for the existing units kept at zero cost), keep or replace. A unit is added only when it can run in parallel "
+    "for the existing units kept at zero cost), keep, replace or renew. A unit is added only when it can run in parallel "
     "with the existing ones under the tolerances in scope.parallel, which are assumed, not from a standard; a "
     "vector group that is not given is assumed compatible and the row says so.",
 )
@@ -494,6 +575,7 @@ def get_investment(project) -> dict:
     return {
         "investment": res["investment"], "cost": res["cost"], "unresolved": res["unresolved"],
         "history": res["history"], "compliance_invested": res["compliance_invested"], "scope": res["scope"],
+        "taps": res["taps"], "tap_hours_moved": res["tap_hours_moved"],
         "hub_cost": state["hub_cost"], "hub_cost_reason": state["hub_cost_reason"],
         "library_is_default": _library_text(campus_dir(project))[1], "cost_basis": res["cost_basis"],
         "stale": state["stale"], "owner_assets_method": state["owner_assets_method"],
@@ -551,6 +633,30 @@ def _owner_source(project) -> tuple:
     return "least_cost", d / "run"
 
 
+def _owner_unresolved(run_dir: Path) -> list:
+    """The needs the investment run in ``run_dir`` could not meet, for the
+    investment case (owner decision 2026-10-13: "report them; the IC flags the
+    case"): ``[{"need": str, "reason": str}]``, one per distinct need and
+    reason among the ``status == "unresolved"`` rows of its
+    ``campus_investment.csv``, in table order (one need can have several rows,
+    one per item or kept unit; a kept unit's reason adds its own note). The
+    reason is the table's (an empty one is ``""``). ``[]`` when there are none,
+    and when the run has no investment: no table, or no library it bought from
+    (the same rule as the assets and the hash)."""
+    table, used = run_dir / cs.INVESTMENT_CSV, run_dir / USED_LIBRARY_FILE
+    if not table.is_file() or not used.is_file():
+        return []
+    out, seen = [], set()
+    for r in _records(pd.read_csv(table)):
+        if r["status"] != "unresolved":
+            continue
+        entry = (str(r["need"]), r["reason"] if isinstance(r["reason"], str) else "")
+        if entry not in seen:
+            seen.add(entry)
+            out.append({"need": entry[0], "reason": entry[1]})
+    return out
+
+
 def _study_hash(method: str, run_dir: Path):
     names = (cs.INVESTMENT_CSV, USED_LIBRARY_FILE, cs.CAMPUS_YAML, COST_BASIS_FILE)
     if not (run_dir / names[0]).is_file() or not (run_dir / names[1]).is_file():
@@ -585,7 +691,15 @@ def campus_study_hash(project):
     return _study_hash(*_owner_source(project))
 
 
-def extra_owner_assets(project) -> list:
+def _int_or_none(v):
+    return None if v is None or (isinstance(v, float) and math.isnan(v)) else int(v)
+
+
+def _str_or_none(v):
+    return v if isinstance(v, str) and v else None
+
+
+def extra_owner_assets(project, replacements: bool = False) -> list:
     """What the investment run the case stands on bought, as the extra owner
     assets of the investment case (IC): one dict per purchased item that is
     neither existing (sunk) nor unresolved. ``[]`` when that run has no
@@ -600,6 +714,18 @@ def extra_owner_assets(project) -> list:
     by C12's rule (``get_state.milp.stale``); otherwise the least-cost ``run/``,
     as before. ``meta.study_method`` says which: ``"milp"`` or ``"least_cost"``.
 
+    Plan C14: the table has one row per purchase, an asset bought again at the
+    end of its life as ``renew`` rows. By default only the first purchases are
+    listed, exactly as before C14 (same entries, same names, same
+    ``build_year``): the IC refuses a ``build_year`` after the case COD
+    (``extra_asset_staged_build``) and its ``part_lifetimes`` rule would buy a
+    listed replacement a second time, so the IC must opt in.
+    ``replacements=True`` lists every purchase, the renewals too (an existing
+    asset's included), each with its own ``build_year`` (the first service year
+    of the new unit); the first purchases keep their names and the renewals
+    count on from them. See the handoff issue
+    ``.scratch/campus-ic-extra-owner-assets/issues/04-campus-replacements.md``.
+
     The TOP-LEVEL keys of an entry are exactly the fields of the IC's
     ``ExtraOwnerAsset`` (``services/finance/case.py``, a frozen dataclass; the
     type is the IC's), so the IC builds it with
@@ -611,11 +737,12 @@ def extra_owner_assets(project) -> list:
          "quantity": float,   # lump: units; per_km: units x length_km; per_bay: bays (the table's units)
          "parts": [{"name": "investment", "upfront_per_unit": EUR per basis unit,
                     "lifetime": years, "fom_share": share}],      # asset_schema.access.UpfrontPart
-         "build_year": int,   # the campus invest_period
+         "build_year": int,   # the campus build_year (its invest_period for a table before plan C14)
          "source": "campus_study",
          "source_hash": str,  # campus_study_hash(project): the same for every entry
          "meta": {"need", "library_id", "units", "length_km", "currency", "price_year",
-                  "provenance", "illustrative", "study_method", "action"}}
+                  "provenance", "illustrative", "study_method", "action",
+                  "purchase", "lineage", "replaces", "service_to", "commissioned_source"}}
 
     ``quantity x upfront_per_unit`` is the item's total overnight cost in the
     library's currency, in the library's price year (no escalation).
@@ -627,9 +754,19 @@ def extra_owner_assets(project) -> list:
     ``literature`` cost is a cited reference value, not a quote, and is not
     illustrative: in the defaults pack's sense that flag means "not taken from
     a cited source". ``action`` is the table's (plan C13: ``buy``, ``add`` for
-    units added next to existing ones, ``replace``; None for a table written
-    before it). Kept units are existing, so they are not here. An engine kind
-    that ``IC_KIND`` does not list is refused with 422 naming it.
+    units added next to existing ones, ``replace``; plan C14: ``renew`` for a
+    replacement; None for a table written before C13). Kept units are
+    existing, so they are not here. Plan C14's keys: ``purchase`` (1 for the
+    first buy, k for later ones; an existing asset's first replacement is 1),
+    ``lineage`` (the same for every purchase of one asset), ``replaces`` (the
+    name of the entry this one replaces, or None: always None for a first
+    purchase, and for an existing asset's first replacement, the kept asset
+    being no entry), ``service_to`` (the year its successor starts, or the
+    study horizon's end) and ``commissioned_source`` (for an existing asset's
+    replacement, how its commissioning year is known: a source tag, or
+    ``assumed: mid-life at the first period``); a table from before C14 gives
+    ``purchase`` 1 and None for the others. An engine kind that ``IC_KIND``
+    does not list is refused with 422 naming it.
 
     Read from that run directory: ``campus_investment.csv`` (the items, their
     units, cable length and investment period) and ``campus_assets_used.yaml``
@@ -640,10 +777,10 @@ def extra_owner_assets(project) -> list:
     grid operator owns it the engine writes no row for it, so none appears here.
     The IC route refuses a stale study (``owner_assets_response``'s ``stale``)."""
     require_capacity_expansion(project)
-    return _owner_assets(*_owner_source(project))
+    return _owner_assets(*_owner_source(project), replacements=replacements)
 
 
-def _owner_assets(method: str, run_dir: Path) -> list:
+def _owner_assets(method: str, run_dir: Path, replacements: bool = False) -> list:
     table, used = run_dir / cs.INVESTMENT_CSV, run_dir / USED_LIBRARY_FILE
     if not table.is_file() or not used.is_file():
         return []
@@ -652,9 +789,13 @@ def _owner_assets(method: str, run_dir: Path) -> list:
     digest = _study_hash(method, run_dir)
     seen: dict = {}
     out = []
-    for r in pd.read_csv(table).to_dict(orient="records"):
-        if bool(r["existing"]) or r["status"] == "unresolved" or not isinstance(r["library_id"], str):
-            continue
+    bought = [r for r in pd.read_csv(table).to_dict(orient="records")
+              if not (bool(r["existing"]) or r["status"] == "unresolved" or not isinstance(r["library_id"], str))]
+    renewal = [r.get("action") == "renew" for r in bought]
+    rows = [r for r, again in zip(bought, renewal) if not again]          # the first purchases keep their names
+    rows += [r for r, again in zip(bought, renewal) if again and replacements]
+    names: dict = {}
+    for r in rows:
         if r["library_id"] not in priced:
             raise HTTPException(status_code=422, detail=f"{r['need']}: {r['library_id']} is not in the library the run used")
         if r["kind"] not in IC_KIND:
@@ -675,24 +816,40 @@ def _owner_assets(method: str, run_dir: Path) -> list:
         quantity = units * float(length) if basis == "per_km" else float(units)
         source = entry[cost]["source"]
         seen[r["library_id"]] = seen.get(r["library_id"], 0) + 1
+        name = f"campus:{r['library_id']}#{seen[r['library_id']]}"
+        purchase = _int_or_none(r.get("purchase"))
+        purchase = 1 if purchase is None else purchase
+        lineage = _str_or_none(r.get("lineage"))
+        if lineage is not None:
+            names[f"{lineage}|{purchase}"] = name
+        build_year = _int_or_none(r.get("build_year"))
+        service_to = r.get("service_to")
+        service_to = None if service_to is None or (isinstance(service_to, float) and math.isnan(service_to)) \
+            else (int(service_to) if float(service_to).is_integer() else float(service_to))
         out.append({
-            "name": f"campus:{r['library_id']}#{seen[r['library_id']]}", "kind": kind, "basis": basis,
+            "name": name, "kind": kind, "basis": basis,
             "quantity": quantity,
             "parts": [{"name": "investment", "upfront_per_unit": float(entry[cost]["value"]),
                        "lifetime": float(entry["lifetime_a"]["value"]),
                        "fom_share": float(entry["opex_frac"]["value"])}],
-            "build_year": int(r["invest_period"]), "source": OWNER_ASSET_SOURCE, "source_hash": digest,
+            "build_year": int(r["invest_period"]) if build_year is None else build_year,
+            "source": OWNER_ASSET_SOURCE, "source_hash": digest,
             "meta": {"need": r["need"], "library_id": r["library_id"], "units": units,
                      "length_km": float(length) if basis == "per_km" else None,
                      "currency": lib["currency"], "price_year": lib["price_year"],
                      "provenance": source, "illustrative": source == "assumed",
                      "study_method": method,
-                     "action": r["action"] if isinstance(r.get("action"), str) and r["action"] else None},
+                     "action": _str_or_none(r.get("action")),
+                     "purchase": purchase, "lineage": lineage,
+                     "replaces": _str_or_none(r.get("replaces")), "service_to": service_to,
+                     "commissioned_source": _str_or_none(r.get("commissioned_source"))},
         })
+    for a in out:                     # the row it replaces, as that row's entry name (None when it is no entry)
+        a["meta"]["replaces"] = names.get(a["meta"]["replaces"])
     return out
 
 
-def owner_assets_response(project) -> dict:
+def owner_assets_response(project, replacements: bool = False) -> dict:
     """The body of ``GET /api/campus-electrical/{name}/owner-assets``:
     ``{"assets": extra_owner_assets, "source_hash": campus_study_hash or None,
     "stale": bool, "study_method": "milp" | "least_cost" | None}``. ``stale`` is
@@ -700,14 +857,23 @@ def owner_assets_response(project) -> dict:
     get_state for the least-cost run (a joint optimisation is used only when it
     is fresh, so it is False then). ``study_method`` is the run's method, None
     when there are no assets. The assets of a stale study are still listed,
-    flagged: the IC refuses to build a case on them."""
+    flagged: the IC refuses to build a case on them. ``replacements`` is
+    ``extra_owner_assets``'s (plan C14; off by default, so the IC route gets
+    the first purchases only).
+
+    ``unresolved`` (owner decision 2026-10-13, additive) lists the needs that
+    same run could not meet, ``[{"need", "reason"}]`` (``_owner_unresolved``):
+    the case is not compliant without them, so the IC flags it. ``[]`` when
+    there are none or the run has no investment. It is read from
+    ``campus_investment.csv``, which ``source_hash`` already covers, so the
+    list never changes without the hash changing."""
     require_capacity_expansion(project)
     d = campus_dir(project)
     method, run_dir = _owner_source(project)
-    assets = _owner_assets(method, run_dir)
+    assets = _owner_assets(method, run_dir, replacements=replacements)
     stale = False if method == "milp" else bool(_results(d / "run")) and _stale(project, d)
     return {"assets": assets, "source_hash": _study_hash(method, run_dir), "stale": stale,
-            "study_method": method if assets else None}
+            "study_method": method if assets else None, "unresolved": _owner_unresolved(run_dir)}
 
 
 def draft(project, overwrite: bool = False) -> dict:
@@ -812,6 +978,9 @@ def _settings(raw: dict, known: dict) -> dict:
     s["n_minus_1"] = bool(s["n_minus_1"])
     s["invest"] = bool(s["invest"])
     s["pcc_switchgear_by_operator"] = bool(s["pcc_switchgear_by_operator"])
+    if s["pcc_tap_control"] not in PCC_TAP_CONTROL:
+        raise HTTPException(status_code=422, detail=f"pcc_tap_control must be one of {list(PCC_TAP_CONTROL)}, "
+                                                    f"got {s['pcc_tap_control']!r}")
     return s
 
 
@@ -819,8 +988,8 @@ def _clear_investment(run_dir: Path) -> None:
     """Remove the investment files of an earlier run, so that a run that does
     not invest, or fails part way, never sits beside another run's purchases."""
     for name in (cs.INVESTMENT_CSV, cs.COST_CSV, cs.INVESTED_YAML, cs.COMPLIANCE_INVESTED_CSV,
-                 cs.INVEST_HISTORY_CSV, cs.INVEST_DISPATCH_CSV, cs.INVEST_SCOPE_JSON, USED_LIBRARY_FILE,
-                 COST_BASIS_FILE):
+                 cs.INVEST_HISTORY_CSV, cs.INVEST_DISPATCH_CSV, cs.INVEST_SCOPE_JSON, cs.INVEST_TAPS_CSV,
+                 USED_LIBRARY_FILE, COST_BASIS_FILE):
         (run_dir / name).unlink(missing_ok=True)
 
 
@@ -855,7 +1024,8 @@ def run(project, settings: dict) -> dict:
                     used.write_bytes(text.encode())
                     cs.invest_campus(run_dir, used if overridden or (d / LIBRARY_FILE).is_file() else None,
                                      criteria=criteria, profile=s["profile"], pf=s["pf"],
-                                     profile_dirs=profile_dirs, pcc_switchgear=not s["pcc_switchgear_by_operator"])
+                                     profile_dirs=profile_dirs, pcc_switchgear=not s["pcc_switchgear_by_operator"],
+                                     pcc_tap_control=s["pcc_tap_control"])
                     (run_dir / COST_BASIS_FILE).write_text(json.dumps(basis))
                 except BaseException:
                     _clear_investment(run_dir)       # never half a purchase beside the new sizing
@@ -917,8 +1087,14 @@ def _public(record):
 
 
 def _least_cost_total(run_dir: Path) -> float:
+    """What the least-cost pick ranks on (the MILP's ``c8_cost``): the chosen
+    and kept rows' annualised cost, the renewals left out (plan C14: they are
+    reported, not ranked)."""
     inv = pd.read_csv(run_dir / cs.INVESTMENT_CSV)
-    return float(inv.loc[inv["status"].isin(["chosen", "kept"]), "annualised_eur_per_a"].sum())
+    ranked = inv["status"].isin(["chosen", "kept"])
+    if "action" in inv:
+        ranked &= inv["action"] != "renew"
+    return float(inv.loc[ranked, "annualised_eur_per_a"].sum())
 
 
 def _least_cost_fresh(project, d: Path, s: dict) -> bool:
@@ -941,6 +1117,7 @@ def _milp_results(milp_dir: Path):
     meta = json.loads(summary.read_text())
     return {
         "investment": _read_csv(milp_dir / cs.INVESTMENT_CSV),
+        "taps": _read_csv(milp_dir / cs.INVEST_TAPS_CSV),
         "cost": _read_csv(milp_dir / cs.COST_CSV),
         "compliance_invested": _read_csv(milp_dir / cs.COMPLIANCE_INVESTED_CSV),
         "history": _read_csv(milp_dir / cs.MILP_HISTORY_CSV),
@@ -965,7 +1142,7 @@ def _milp_stale(project, d: Path) -> bool:
             return True
         for name, digest in basis["inputs"].items():
             path = d / "run" / name
-            if (_sha256_file(path) if path.is_file() else None) != digest:
+            if (_file_digest(path) if path.is_file() else None) != digest:
                 return True
     except Exception:                                          # noqa: BLE001 - see the docstring
         return True
@@ -1044,8 +1221,8 @@ def _prepare_milp_dir(d: Path, s: dict) -> Path:
 
 def _clear_milp_results(milp_dir: Path) -> None:
     for name in (cs.INVESTMENT_CSV, cs.COST_CSV, cs.INVESTED_YAML, cs.COMPLIANCE_INVESTED_CSV, cs.INVEST_HISTORY_CSV,
-                 cs.INVEST_DISPATCH_CSV, cs.INVEST_SCOPE_JSON, cs.MILP_HISTORY_CSV, cs.MILP_COMPARISON_CSV,
-                 MILP_SUMMARY_FILE):
+                 cs.INVEST_DISPATCH_CSV, cs.INVEST_SCOPE_JSON, cs.INVEST_TAPS_CSV, cs.MILP_HISTORY_CSV,
+                 cs.MILP_COMPARISON_CSV, MILP_SUMMARY_FILE):
         (milp_dir / name).unlink(missing_ok=True)
 
 
@@ -1116,7 +1293,7 @@ def start_milp_job(project, settings: dict) -> dict:
         record["message"] = "starting: the least-cost pick is re-solved as the warm start"
         kw = {"criteria": SizingCriteria(margin=float(s["margin"]), n_minus_1=s["n_minus_1"]), "profile": s["profile"],
               "pf": s["pf"], "profile_dirs": (grid_codes_dir(project),),
-              "pcc_switchgear": not s["pcc_switchgear_by_operator"]}
+              "pcc_switchgear": not s["pcc_switchgear_by_operator"], "pcc_tap_control": s["pcc_tap_control"]}
         ctx = contextvars.copy_context()
         thread = threading.Thread(target=lambda: ctx.run(_run_milp_job, record, milp_dir, kw), daemon=True,
                                   name=THREAD_NAME)

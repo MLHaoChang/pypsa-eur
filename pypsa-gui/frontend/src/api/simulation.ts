@@ -985,6 +985,9 @@ export type EhReview =
       status: 'ok'
       source: string
       stale: boolean
+      /** P33b: the network was edited since the study started (independent
+       *  of `stale`); null when the record cannot say (Unavailable). */
+      edited_since_study?: boolean | null
       summary: {
         archetype?: EhArchetype | null
         certified?: boolean | null
@@ -1015,6 +1018,11 @@ export interface EhStudyPayload {
   error?: string | null
   started_at?: number
   finished_at?: number | null
+  /** P33b: the project's edit counter when the study started. */
+  network_revision?: number | null
+  /** P33b: true when the network was edited since the study started; null
+   *  while running or for a record that cannot say (Unavailable). */
+  edited_since_study?: boolean | null
 }
 
 export interface EhRedundancyOption {
@@ -1811,6 +1819,10 @@ export interface AssetEconomicsPayload {
   storage_units: StorageUnitEconomicsRow[]
   stores: StoreEconomicsRow[]
   links: LinkEconomicsRow[]
+  /** Framing the surfaces must show beside the numbers, e.g. the
+   *  zero-profit-by-construction note for an interior optimum. Absent or
+   *  empty when there is nothing to say. */
+  reading_notes?: string[]
 }
 
 export function createLogStream(

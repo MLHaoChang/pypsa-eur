@@ -82,7 +82,13 @@ A cable or bus that first fails in a re-check becomes a need then.
    re-conductored or paralleled; buses get the ``ik_rated_ka`` chosen.
 3. The copy is built and every selected hour is re-solved, intact and N-1,
    with its reactive dispatch in place (``reactive_need(residual=False)``:
-   inverters, then STATCOMs, then steps; nothing virtual). Fault levels are
+   inverters, then STATCOMs, then steps; nothing virtual). Where a campus
+   voltage is then out of its band, the on-load taps are set (plan C15,
+   ``campus_taps``): searched with that Q held, the Q re-settled, per hour
+   and per case (an N-1 case after the tap changers act, its Q the intact
+   case's); the taps of the PCC transformers only when the study gives
+   them to the campus (``pcc_tap_control``). An hour in band keeps its
+   file taps and today's numbers. Fault levels are
    re-computed with the new transformers, every STATCOM energised in every
    period (conservative).
 4. Every check is run. A failing check escalates the need it maps to:
@@ -97,17 +103,27 @@ A cable or bus that first fails in a re-check becomes a need then.
    cable loading > 100 %        that cable
    PCC reactive band            the reactive need, to the next candidate
                                 that adds Mvar in the short direction
-   PCC or campus voltage        the reactive need, to the next candidate
+   campus voltage               the reactive need, to the next candidate
+   PCC voltage                  none: reported at once on the reactive
+                                need, nothing bought (owner, 2026-10-13)
    switchgear (judge)           that bus
    ===========================  ===========================================
 
    A voltage is mapped to the reactive need because compensation is the
-   only voltage-acting asset here. That is an honest limit: compensation
-   is dispatched to hold the PCC band, not a voltage, and a voltage problem
-   may need a tap change, which is out of scope (no tap-changer
-   optimisation). So when a reactive escalation made for a voltage does
-   not reduce the worst voltage excursion, the need is reported unresolved
-   rather than walked through the whole library.
+   only voltage-acting asset bought here; the taps have already acted
+   inside the re-check (step 3), so a voltage failure is one the taps could
+   not fix. Compensation is dispatched to hold the PCC band, not a
+   voltage. So when a reactive escalation made for a voltage does not
+   reduce the worst voltage excursion, the need is reported unresolved
+   rather than walked through the whole library, with the taps' reason
+   (``campus_taps.Taps.diagnose``: "range exhausted: TR1+TR2 at +9 (max),
+   MV2 0.893 pu", "TR3 has no on-load tap data", or the grid operator's
+   taps). A PCC voltage is the grid's set-point in this model: it is never
+   sent to the taps nor escalated (owner, 2026-10-13). The reactive need is
+   reported unresolved in the re-check that first sees it, its reason
+   saying it is the operator's voltage, at the candidate it has; the other
+   failures go on escalating, and the excursion a voltage escalation must
+   reduce is the campus voltages' only.
 5. The loop stops when every check passes, when a need runs out of
    candidates (it is reported unresolved, with the failing check, and the
    state with its last candidate is re-checked once more so the report is
@@ -127,17 +143,44 @@ worst period, and invested in the first period that needs it:
 * switchgear: the first period its fault level exceeds the old rating, or
   the first period for a bus that had none.
 
-Its annualised cost counts in every period from that one while the period
-is within its lifetime (``invest <= period < invest + lifetime``; period
-labels are years). Replacement at the end of life is not modelled.
-Existing assets cost nothing. Unresolved needs are priced in the table but
-not added to the cost per period. The table's ``action`` says what each row
-does: ``buy`` (a new asset), ``add`` (units added next to existing ones),
-``keep`` (existing units kept, at zero cost; an addition writes one such row
-beside its ``add`` row) or ``replace`` (a group or cable bought where
-existing ones stood).
+**Replacement at the end of life** (plan C14). Period ``p`` spans ``[p, p
++ w_p)``, ``w_p`` the project's investment-period weighting in years
+(``period_spans``: a missing one is the gap between periods, assumed; a
+study of one period spans one year), and the horizon ends at ``H = last p +
+w_last``. Every purchase is bought again like for like (the same entry and
+units, so no re-check) while the year is before ``H``: purchase ``k + 1`` in
+``b_1 + floor(k L + 0.5)``, the investment case's rounding, half up, in the
+first service year of the new unit. A purchase serves until its successor
+starts (or ``H``). Existing assets cost nothing, but a kept transformer, and
+an existing cable or compensation entry that is not a need, is listed as a
+``keep`` row (``purchase`` 0) and bought again when its own life ends:
+``commissioning_year + floor(L + 0.5)``, L and the price from its
+``library_id``; with no commissioning year it is assumed at mid-life at the
+first period; one whose life ended before the first period is bought in the
+first period, flagged overdue; without a library entry its replacement is
+unpriced (said on the row, not costed). Unresolved and ``none`` rows are
+never bought again. The cost per period counts the capex of every purchase
+made in the period's span (``capex_replacement_eur`` the renewals' part)
+and each purchase's annuity times the share of the span it serves; where no
+purchase starts or ends inside a period this is the rule before C14, every
+asset counted in full from its period while it lives. The ranking is
+unchanged: candidates are ranked by annualised cost, which a like-for-like
+replacement leaves the same, and keeping an existing unit stays zero there
+(``ranked_annual``; the run's notes say so).
 
-Steady state only: no dynamics, no harmonics, no tap-changer optimisation.
+Unresolved needs are priced in the table but not added to the cost per
+period. The table's ``action`` says what each row does: ``buy`` (a new
+asset), ``add`` (units added next to existing ones), ``keep`` (existing
+units kept, at zero cost; an addition writes one such row beside its
+``add`` row), ``replace`` (a group or cable bought where existing ones
+stood) or ``renew`` (bought again at the end of a life).
+
+The re-check's taps are returned as ``taps`` (``campus_taps.TAP_COLUMNS``),
+and the compliance detail of the campus voltage names the taps at its
+worst hour when any moved.
+
+Steady state only: no dynamics, no harmonics, no tap-changer dynamics or
+wear, no off-circuit tap optimisation.
 Allowed to import pandapower (``static/``); never pypsa.
 """
 import copy
@@ -150,10 +193,11 @@ from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.network import MAX_NAME_LEN
 from gridspine.schema.transformer import check_tap, check_vector_group, ratio as tap_ratio
-from gridspine.static.campus_compliance import CHECKS, Q_TOL, campus_compliance
+from gridspine.static.campus_compliance import ADDED, CHECKS, Q_TOL, campus_compliance
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases, trafo_groups
 from gridspine.static.campus_reactive import compensation_bus, reactive_need, size_compensation
 from gridspine.static.campus_sc import campus_fault_levels, judge
+from gridspine.static.campus_taps import PCC_TAP_CONTROL, Taps, compliance_note, tap_table
 from gridspine.templates.campus_assets import annualised_cost, library_entries, value
 from gridspine.templates.grid_codes import load_grid_code
 
@@ -170,7 +214,9 @@ _COMP_PREFIX = {"capacitor_bank": "CAP", "shunt_reactor": "REACTOR", "statcom": 
 _COMBOS = (("statcom",), ("capacitor_bank", "shunt_reactor"), ("capacitor_bank",), ("shunt_reactor",),
            ("statcom", "capacitor_bank"))
 COLUMNS = ["need", "library_id", "kind", "units", "length_km", "invest_period", "capex_eur", "opex_eur_per_a",
-           "annualised_eur_per_a", "existing", "status", "reason", "action"]
+           "annualised_eur_per_a", "existing", "status", "reason", "action",
+           # plan C14: one row per purchase
+           "purchase", "build_year", "service_to", "replaces", "lineage", "commissioned", "commissioned_source"]
 #: The flag on an added unit whose vector group, or an existing unit's, is not given.
 VG_ASSUMED = "vector group assumed compatible (not given)"
 _PARALLEL_NOTE = ("A transformer vendor's application note on paralleling (Rex Power Magnetics, read 2026-10-12); "
@@ -260,6 +306,12 @@ class _Study:
     compensation: pd.DataFrame
     short_circuit: pd.DataFrame
     converged: bool
+    #: The taps per hour and case (plan C15, ``campus_taps.TAP_COLUMNS``),
+    #: the rule that set them (None for part one's study, at the file's
+    #: taps) and the hours whose taps were still moving at the cap.
+    taps: pd.DataFrame = dataclasses.field(default_factory=lambda: tap_table([]))
+    tapper: object = None
+    hunted: tuple = ()
 
 
 @dataclasses.dataclass
@@ -279,6 +331,8 @@ class SelectionState:
     as_is: pd.DataFrame
     skip_buses: frozenset
     feasible: bool
+    #: ``(spans, source)`` of ``period_spans`` (plan C14).
+    horizon: tuple = (None, None)
 
 
 def _label(items):
@@ -297,22 +351,52 @@ def _installed(hourly):
     return {int(p): set(b.loc[b["status"] == 1, "unit_id"]) for p, b in hourly.groupby("period")}
 
 
-def _study(campus, hours, rows_of, installed, req, criteria, recheck) -> _Study:
+def taps_dispatch(campus, rows, req, tapper):
+    """One hour of the re-check (plan C15): C8's dispatch with the taps
+    (``Taps.settle``), then every case solved with it, the taps set per
+    case from the intact case's. ``(ReactiveResult, flows, {case:
+    positions}, hunted)``. Without a searched tap changer this is today's
+    dispatch and solve, unchanged."""
+    if tapper is None or not tapper.active:
+        r = reactive_need(campus, rows, req, residual=False)
+        log = {}
+        retap = tapper.hook(False, log) if tapper is not None and tapper.data else None
+        return r, solve_cases(campus, rows, setpoints=r.setpoints, retap=retap), log, False
+    r, hunted = tapper.settle(campus, rows, req)
+    log = {}
+    flows = solve_cases(campus, rows, setpoints=r.setpoints, retap=tapper.hook(False, log))
+    return r, flows, log, hunted
+
+
+def _study(campus, hours, rows_of, installed, req, criteria, recheck, profile=None,
+           pcc_tap_control="campus") -> _Study:
     """Part one's calculation on ``campus``. ``recheck`` dispatches the real
-    equipment only and solves every case with that dispatch in place."""
-    reactive, flows = {}, {}
+    equipment only and solves every case with that dispatch in place; with
+    ``profile`` it also sets the on-load taps (plan C15, ``campus_taps``)."""
+    reactive, flows, taps, hunted = {}, {}, [], []
+    tapper = Taps(campus, profile, pcc_tap_control) if recheck and profile is not None else None
     for key in hours:
         rows = rows_of[key]
-        r = reactive_need(campus, rows, req, residual=not recheck)
+        if recheck:
+            r, flows[key], log, hunt = taps_dispatch(campus, rows, req, tapper)
+            if tapper is not None:
+                taps += tapper.rows(key, log)
+            if hunt:
+                hunted.append(key)
+        else:
+            r = reactive_need(campus, rows, req, residual=True)
+            flows[key] = solve_cases(campus, rows)
         reactive[key] = r
-        flows[key] = solve_cases(campus, rows, setpoints=r.setpoints if recheck else None)
-    return study_from(campus, reactive, flows, installed, req, criteria, recheck)
+    return study_from(campus, reactive, flows, installed, req, criteria, recheck, tap_table(taps), tapper,
+                      tuple(hunted))
 
 
-def study_from(campus, reactive, flows, installed, req, criteria, recheck=True) -> _Study:
+def study_from(campus, reactive, flows, installed, req, criteria, recheck=True, taps=None, tapper=None,
+               hunted=()) -> _Study:
     """The study tables from solved hours: ``reactive`` and ``flows`` are
     ``{(period, hour): ReactiveResult}`` and ``{(period, hour): solve_cases(...)}``.
-    Shared with the MILP (``campus_milp``), which brings its own dispatch."""
+    Shared with the MILP (``campus_milp``), which brings its own dispatch.
+    ``taps`` is the tap table and ``tapper`` the rule that set it (plan C15)."""
     bus, trafo, line, q = [], [], [], []
     converged = True
     for key in flows:
@@ -338,7 +422,7 @@ def study_from(campus, reactive, flows, installed, req, criteria, recheck=True) 
     return _Study(campus, reactive, flows, pd.DataFrame(bus, columns=cols["bus"]),
                   pd.DataFrame(trafo, columns=cols["trafo"]), pd.DataFrame(line, columns=cols["line"]),
                   pd.DataFrame(q), size_transformers(flows, campus, criteria), size_compensation(reactive, criteria),
-                  sc, converged)
+                  sc, converged, tap_table([]) if taps is None else taps, tapper, tuple(hunted))
 
 
 def _compliance(study, req, profile) -> pd.DataFrame:
@@ -349,6 +433,10 @@ def _compliance(study, req, profile) -> pd.DataFrame:
                                                          "source": req.source},
         profile=profile, pcc_bus=str(net.bus.at[int(net.ext_grid["bus"].iloc[0]), "name"]),
         bus_kv=dict(zip(net.bus["name"].astype(str), net.bus["vn_kv"].astype(float))))
+    note = compliance_note(study.tapper, study.bus, study.taps, study.hunted)
+    if note:
+        at = out.index[out["check"] == "campus_voltage"]
+        out.loc[at, "detail"] = out.loc[at, "detail"] + "; " + note
     line = study.line
     if len(line):
         j = line["loading_pct"].astype(float).idxmax()
@@ -356,10 +444,11 @@ def _compliance(study, req, profile) -> pd.DataFrame:
         status = "fail" if peak > 100.0 + 1e-9 else "pass"
         where, detail = (int(line.at[j, "period"]), int(line.at[j, "hour"])), \
             f"worst {line.at[j, 'cable']} ({line.at[j, 'case']})"
+        case = str(line.at[j, "case"])
     else:
-        peak, status, where, detail = math.nan, "pass", (None, None), "no cable"
+        peak, status, where, detail, case = math.nan, "pass", (None, None), "no cable", None
     cable = {"check": "cable_loading", "status_as_is": status, "status_with_measures": status, "value": peak,
-             "limit": 100.0, "unit": "%", "worst_period": where[0], "worst_hour": where[1],
+             "limit": 100.0, "unit": "%", "worst_period": where[0], "worst_hour": where[1], "worst_case": case,
              "clause": "equipment rating (not a grid-code clause)", "source": "assumed", "detail": detail}
     return pd.concat([out, pd.DataFrame([cable])], ignore_index=True)
 
@@ -572,6 +661,24 @@ def open_candidates(need, library, lib_by_id, criteria, f_hz):
     return []
 
 
+def _in_service(name, spec) -> tuple:
+    """``(name, commissioning year or None, its source tag)`` of a campus-file asset."""
+    given = spec.get("commissioning_year")
+    return (str(name), None, "") if given is None else (str(name), int(given["value"]), str(given["source"]))
+
+
+def _replace_reason(target) -> str:
+    """What a ``replace`` row replaces and why: the existing units with their
+    commissioning year when the campus file gives one, then what failed as is
+    (``target["failed"]``, set with the need)."""
+    names = []
+    for name, year, src in target.get("replaced", []):
+        names.append(f"{name} (commissioning year not given)" if year is None else
+                     f"{name} (in service since {year}{', assumed' if src.startswith('assumed') else ''})")
+    what = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return f"replaces {what}: {target['failed']}" if names else ""
+
+
 def _cable_need(name, study, library, criteria, spec):
     rows = study.line[study.line["cable"] == name]
     i_ka = float(rows["i_ka"].max())
@@ -581,7 +688,9 @@ def _cable_need(name, study, library, criteria, spec):
         study.campus.net.line["name"] == name, "from_bus"].iloc[0]), "vn_kv"])
     length = float(cs["length_km"]["value"])
     return Need(f"cable {name}", "cable", {"cable": name, "i_ka": i_ka, "kv": kv, "length_km": length,
-                                           "existing": bool(cs.get("existing"))},
+                                           "existing": bool(cs.get("existing")),
+                                           "replaced": [_in_service(name, cs)] if cs.get("existing") else [],
+                                           "failed": f"loaded to {float(rows['loading_pct'].max()):.1f} % as is"},
                 _cable_candidates(library, kv, length, i_ka, criteria), int(bad["period"].min()))
 
 
@@ -638,9 +747,20 @@ def _needs(spec, study, library, criteria, periods, lib_by_id, skip_buses=frozen
         whole = len(existing) == len(members)
         if whole and bool(r.adequate) and not peak > 100.0 + 1e-9:
             cands = [Candidate("keep (existing)", (), 0.0, existing=True), *cands]
+        # what a replacement of the existing units would say failed (``_replace_reason``)
+        if not bool(r.adequate):
+            failed = (f"{int(r.units)} x {r.unit_rating_mva:g} MVA as is, {r.required_unit_mva:.2f} MVA a unit "
+                      f"needed with the {criteria.margin * 100:g} % design margin")
+        elif peak > 100.0 + 1e-9:
+            failed = f"loaded to {peak:.1f} % as is"
+        elif not whole:
+            failed = "part of the group is not built yet, and a new group was the cheapest that passes"
+        else:
+            failed = "keeping it failed the AC re-check with the other assets (see the escalation history)"
         needs.append(Need(f"transformer {r.group}", "transformer",
                           {"members": members, "hv_bus": hv, "lv_bus": lv, "s_tot": s_tot, "s_n1": s_n1,
-                           "n_old": int(r.units), "kv": (kv[hv], kv[lv]), "existing": existing, "parallel": parallel},
+                           "n_old": int(r.units), "kv": (kv[hv], kv[lv]), "existing": existing, "parallel": parallel,
+                           "replaced": [_in_service(m, u) for m, u in existing.items()], "failed": failed},
                           cands, _fail_period(r.group, members, study, criteria, periods) if whole else first))
     comp = study.compensation.set_index("direction")
     cap_need = float(comp.at["capacitive", "required_mvar"]) * (1 + criteria.margin)
@@ -796,8 +916,9 @@ def _apply(spec, needs, lib_by_id):
 # --------------------------------------------------------------------------
 
 def _excursion(compliance):
-    rows = compliance[compliance["check"].isin(["pcc_voltage", "campus_voltage"])
-                      & (compliance["status_as_is"] == "fail")]
+    """The worst campus voltage excursion, pu. The PCC's is left out: it is
+    the grid's set-point, never escalated (owner, 2026-10-13)."""
+    rows = compliance[(compliance["check"] == "campus_voltage") & (compliance["status_as_is"] == "fail")]
     return max((abs(float(r.value) - float(r.limit)) for r in rows.itertuples(index=False)), default=0.0)
 
 
@@ -845,6 +966,28 @@ def _failures(study, compliance, needs, req, criteria):
     return out
 
 
+def _voltage_reason(check, study):
+    """Why a voltage is unresolved (plan C15): the PCC voltage is the grid's
+    set-point, reported without an escalation (owner, 2026-10-13); a campus
+    voltage that a reactive escalation did not reduce is what the taps could
+    not reach (``Taps.diagnose``)."""
+    if check == "pcc_voltage":
+        return ("the grid set-point is outside the band: the operator's voltage, not a campus measure "
+                "(the PCC voltage is never sent to the taps)")
+    why = ("a reactive escalation did not reduce the excursion. Compensation is dispatched to the PCC band, "
+           "not to a voltage")
+    if study.tapper is None:
+        return why
+    return f"{why}; taps: {study.tapper.diagnose(study.bus, study.taps)}"
+
+
+def _also(reason, more):
+    """An unresolved reason with ``more`` after the one already given (a
+    reactive need reported for the PCC's set-point, then for a campus
+    voltage)."""
+    return f"{reason} | {more}" if reason else more
+
+
 def _escalate(need, check, direction, lib_by_id):
     """Move ``need`` to its next candidate (see the module docstring); False
     when there is none."""
@@ -866,7 +1009,221 @@ def _escalate(need, check, direction, lib_by_id):
 # timing and cost
 # --------------------------------------------------------------------------
 
-def _investment(needs, added, spec, study, library, lib_by_id, periods):
+#: How a period's span was found when the project does not give it (plan C14).
+SPAN_GAP_NEXT = "assumed: the gap to the next period"
+SPAN_GAP_PREV = "assumed: the gap from the previous period"
+SPAN_SINGLE = "single period: one year"
+#: The commissioning year of an existing asset that does not give one (owner, 2026-10-12).
+MID_LIFE = "assumed: mid-life at the first period"
+RANKING_NOTE = ("Replacements are reported, not ranked: candidates are ranked by annualised cost, which a "
+                "like-for-like replacement leaves the same, and keeping an existing unit is ranked at zero although "
+                "its replacement is costed later.")
+
+
+def _positive(v):
+    return not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v) and v > 0
+
+
+def period_spans(periods, given=None) -> tuple:
+    """``({period: years}, {period: source})``: period ``p`` spans ``[p, p +
+    years)`` (plan C14). ``given`` is the project's investment-period
+    weightings in years (keys may be strings, as read from JSON); a value
+    that is missing or not positive is the gap to the next period, or for
+    the last period the gap from the previous one, flagged assumed. A study
+    of one period without a weighting spans one year (owner, 2026-10-12)."""
+    periods = sorted(int(p) for p in periods)
+    given = {int(k): v for k, v in (given or {}).items()}
+    spans, source = {}, {}
+    for i, p in enumerate(periods):
+        if _positive(given.get(p)):
+            spans[p], source[p] = given[p], "project"
+        elif len(periods) == 1:
+            spans[p], source[p] = 1, SPAN_SINGLE
+        elif i + 1 < len(periods):
+            spans[p], source[p] = periods[i + 1] - p, SPAN_GAP_NEXT
+        else:
+            spans[p], source[p] = p - periods[i - 1], SPAN_GAP_PREV
+    return spans, source
+
+
+def _next_year(anchor, life, k):
+    """The year of purchase ``k + 1`` of a lineage first bought in
+    ``anchor``: ``anchor + floor(k L + 0.5)`` (the investment case's rounding
+    of a non-whole lifetime, half up, in the first service year)."""
+    return int(anchor) + math.floor(k * life + 0.5)
+
+
+def _lineage(anchor, life, horizon_end):
+    """``[(year, service_to)]`` of a lineage first bought in ``anchor``: every
+    purchase made before ``horizon_end``, each serving until its successor
+    starts or the horizon ends."""
+    out, k = [], 0
+    while True:
+        year = _next_year(anchor, life, k) if k else int(anchor)
+        if k and year >= horizon_end:
+            return out
+        out.append((year, min(_next_year(anchor, life, k + 1), horizon_end)))
+        k += 1
+
+
+def purchase_years(start, life, horizon_end) -> list:
+    """The years an asset first bought in ``start`` is bought, like for
+    like, while the year is before ``horizon_end`` (plan C14)."""
+    return [y for y, _ in _lineage(start, life, horizon_end)]
+
+
+def assumed_commissioning(first, life) -> int:
+    """An existing asset with no commissioning year, at mid-life at the first
+    period: ``first - floor(L / 2 + 0.5)`` (owner, 2026-10-12)."""
+    return int(first) - math.floor(life / 2 + 0.5)
+
+
+def renewal_years(commissioned, life, first, horizon_end) -> tuple:
+    """``(years, overdue)``: the years an existing asset commissioned in
+    ``commissioned`` is bought again. Its life ends in ``commissioned +
+    floor(L + 0.5)``; one that ended before the first period is overdue and
+    bought in the first period (owner, 2026-10-12), then every L after."""
+    if _next_year(commissioned, life, 1) < first:
+        return purchase_years(first, life, horizon_end), True
+    return purchase_years(commissioned, life, horizon_end)[1:], False
+
+
+def ranked_annual(investment) -> float:
+    """The annualised cost the selection ranks on: every chosen and kept row
+    but the renewals (plan C14: replacements are reported, not ranked)."""
+    inv = investment
+    rows = inv[inv["status"].isin(["chosen", "kept"])]
+    if "action" in rows:
+        rows = rows[rows["action"] != "renew"]
+    return float(rows["annualised_eur_per_a"].sum())
+
+
+def _row_id(lineage, purchase):
+    return f"{lineage}|{purchase}"
+
+
+class _Horizon:
+    """The study horizon (plan C14) and the notes the run writes about it."""
+
+    def __init__(self, periods, spans, source):
+        self.periods, self.spans, self.source = list(periods), spans, source
+        self.end = self.periods[-1] + spans[self.periods[-1]]
+        self.notes = []
+
+    def period_of(self, year):
+        """The period whose label is the last at or before ``year``."""
+        return max(p for p in self.periods if p <= year) if year >= self.periods[0] else self.periods[0]
+
+    def spanned(self, year):
+        p = self.period_of(year)
+        return p <= year < p + self.spans[p]
+
+    def scope(self):
+        return {"period_years": dict(self.spans), "source": dict(self.source), "horizon_end": self.end,
+                "notes": [RANKING_NOTE, *self.notes]}
+
+
+def _renewals(head, lineage, hz, years_and_ends, *, first_purchase, extra=None):
+    """The renewal rows of a lineage: like for like, ``head``'s units and
+    length, each at ``(year, service_to)``. ``first_purchase`` is the
+    purchase number of the first renewal."""
+    out = []
+    for i, (year, end) in enumerate(years_and_ends):
+        k = first_purchase + i
+        r = {**head, **(extra or {}), "purchase": k, "build_year": year, "service_to": end,
+             "invest_period": hz.period_of(year), "replaces": _row_id(lineage, k - 1), "lineage": lineage,
+             "action": "renew", "status": "chosen", "existing": False}
+        out.append(r)
+        if not hz.spanned(year):
+            hz.notes.append(f"{head['need']} ({head['library_id']}): bought again in {year}, in no period's span "
+                            f"(after {hz.period_of(year)}'s {hz.spans[hz.period_of(year)]:g} years), so no period's "
+                            "capex counts it")
+    return out
+
+
+def _priced_item(entry, library, kind, units, length):
+    capex = units * (value(entry["capex_eur_per_km"]) * length if length else value(entry["capex_eur"]))
+    return {"library_id": entry["id"], "kind": kind, "units": units, "length_km": length if length else math.nan,
+            "capex_eur": capex, "opex_eur_per_a": capex * value(entry["opex_frac"]),
+            "annualised_eur_per_a": units * annualised_cost(entry, library, length_km=length),
+            "lifetime_a": value(entry["lifetime_a"])}
+
+
+def _existing_rows(need, members, item_kind, hz, library, lib_by_id, status="kept", renew=True):
+    """The keep rows of existing assets ``members`` (``[(name, spec)]``) of
+    ``need`` and their renewals (plan C14): one keep row per library entry
+    and commissioning year, then its renewals, bought like for like when its
+    own life ends. ``item_kind`` is the library kind of an item (a
+    compensation entry's own kind). A member without a priced library entry
+    is kept with its replacement unpriced."""
+    first = hz.periods[0]
+    groups = {}
+    for name, spec in members:
+        lid = spec.get("library_id")
+        e = lib_by_id.get(lid) if lid else None
+        given = spec.get("commissioning_year")
+        if given is not None:
+            year, src = int(given["value"]), given["source"]
+        elif e is not None:
+            year, src = assumed_commissioning(first, value(e["lifetime_a"])), MID_LIFE
+        else:
+            year, src = None, ""
+        groups.setdefault((lid, year, src), []).append((name, spec))
+    out = []
+    for (lid, year, src), group in groups.items():
+        names = [n for n, _ in group]
+        lineage = f"{need}|{','.join(names)}"
+        spec0 = group[0][1]
+        cable = item_kind == "cable"
+        units = int(spec0.get("parallel", 1)) if cable else len(group)
+        length = float(spec0["length_km"]["value"]) if cable else None
+        e = lib_by_id.get(lid) if lid else None
+        keep = {"need": need, "library_id": lid, "kind": "keep", "units": units,
+                "length_km": length if cable else math.nan, "invest_period": first, "capex_eur": 0.0,
+                "opex_eur_per_a": 0.0, "annualised_eur_per_a": 0.0, "existing": True, "status": status, "reason": "",
+                "action": "keep", "lifetime_a": math.inf, "purchase": 0, "build_year": year, "commissioned": year,
+                "commissioned_source": src, "lineage": lineage, "replaces": None, "service_to": math.nan}
+        who = ", ".join(names)
+        if e is None:
+            why = ("no library_id" if not lid else f"library_id {lid} is not in the library the run used")
+            keep["reason"] = f"replacement unpriced: {why}, so its lifetime and price are unknown"
+            hz.notes.append(f"{who} ({need}): replacement unpriced: {why}")
+            out.append(keep)
+            continue
+        life = value(e["lifetime_a"])
+        if src == MID_LIFE:
+            hz.notes.append(f"{who} ({need}): no commissioning year; {MID_LIFE} (commissioned {year})")
+        years, overdue = renewal_years(year, life, first, hz.end)
+        keep["service_to"] = min(first if overdue else _next_year(year, life, 1), hz.end)
+        out.append(keep)
+        if not renew:
+            continue
+        anchor = years[0] if overdue else year
+        spans = _lineage(anchor, life, hz.end)
+        spans = spans if overdue else spans[1:]
+        head = {**keep, **_priced_item(e, library, item_kind, units, length), "reason": ""}
+        if overdue:
+            due = _next_year(year, life, 1)
+            msg = f"overdue: its life ended in {due}, before the first period {first}; bought again in {first}"
+            hz.notes.append(f"{who} ({need}): {msg}")
+            rows = _renewals(head, lineage, hz, spans[:1], first_purchase=1, extra={"reason": msg})
+            rows += _renewals(head, lineage, hz, spans[1:], first_purchase=2)
+        else:
+            rows = _renewals(head, lineage, hz, spans, first_purchase=1)
+        out += rows
+    return out
+
+
+def _investment(needs, added, spec, study, library, lib_by_id, periods, spans=None, span_source=None):
+    """The investment table, the cost per period and the horizon's scope
+    (module docstring; plan C14 for the purchases)."""
+    if spans is None:
+        spans, span_source = period_spans(periods)
+    hz = _Horizon(sorted(periods), spans, span_source or {p: "project" for p in spans})
+    assumed = [p for p, src in hz.source.items() if src.startswith("assumed")]
+    if assumed:
+        hz.notes.append(f"period span assumed for {', '.join(map(str, assumed))} (the gap between periods): the "
+                        "project's investment-period weightings do not give it")
     c = spec["campus"]
     dispatched = {}
     for (period, _hour), r in sorted(study.reactive.items()):
@@ -874,28 +1231,36 @@ def _investment(needs, added, spec, study, library, lib_by_id, periods):
             if abs(d["q_mvar"]) > 1e-9:
                 dispatched.setdefault(name, period)
     rows = []
+    trafos = c.get("transformers") or {}
     for need in needs:
         status = "unresolved" if need.unresolved else "chosen"
         base = {"need": need.key, "existing": False, "status": status, "reason": need.unresolved or "",
                 "length_km": math.nan, "action": ""}
         cand = need.choice
-        kept = {"library_id": None, "kind": "keep", "invest_period": periods[0], "capex_eur": 0.0,
-                "opex_eur_per_a": 0.0, "annualised_eur_per_a": 0.0, "existing": True, "action": "keep",
-                "lifetime_a": math.inf}
         if cand is None or not cand.items:
             if cand is not None and cand.existing:
-                rows.append({**base, **kept, "units": len(need.target["members"]),
-                             "status": status if need.unresolved else "kept"})
+                members = [(m, trafos[m]) for m in need.target["members"]]
+                kept = _existing_rows(need.key, members, "transformer", hz, library, lib_by_id,
+                                      status="unresolved" if need.unresolved else "kept",
+                                      renew=not need.unresolved)
+                if need.unresolved:
+                    for r in kept:
+                        r["reason"] = "; ".join(x for x in (need.unresolved, r["reason"]) if x)
+                rows += kept
             else:
-                rows.append({**base, **kept, "kind": "none", "units": 0, "existing": False, "action": "",
-                             "status": status if need.unresolved else "not_needed"})
+                rows.append({**base, "library_id": None, "kind": "none", "units": 0, "invest_period": periods[0],
+                             "capex_eur": 0.0, "opex_eur_per_a": 0.0, "annualised_eur_per_a": 0.0,
+                             "lifetime_a": math.inf, "status": status if need.unresolved else "not_needed"})
             continue
         if cand.keep:                                     # an addition: the kept units, then the new ones
-            rows.append({**base, **kept, "units": len(cand.keep), "status": "kept", "reason": ""})
+            rows += _existing_rows(need.key, [(m, trafos[m]) for m in cand.keep], "transformer", hz, library,
+                                   lib_by_id, renew=not need.unresolved)
             base["reason"] = "; ".join(x for x in (need.unresolved, cand.note) if x)
         t = need.target
         base["action"] = ("add" if cand.keep else "replace" if t.get("existing") and need.kind in ("transformer", "cable")
                           else "buy")
+        if base["action"] == "replace":
+            base["reason"] = "; ".join(x for x in (need.unresolved, _replace_reason(t)) if x)
         names = iter(added.get(need.key, []))
         for kind, lid, n in cand.items:
             e = lib_by_id[lid]
@@ -907,30 +1272,66 @@ def _investment(needs, added, spec, study, library, lib_by_id, periods):
                 mine = [next(names) for _ in range(n)]
                 used = [dispatched[m] for m in mine if m in dispatched]
                 period = min(used) if used else periods[0]
-            capex = n * (value(e["capex_eur_per_km"]) * length if length else value(e["capex_eur"]))
-            rows.append({**base, "library_id": lid, "kind": kind, "units": n,
-                         "length_km": length if length else math.nan, "invest_period": int(period),
-                         "capex_eur": capex, "opex_eur_per_a": capex * value(e["opex_frac"]),
-                         "annualised_eur_per_a": n * annualised_cost(e, library, length_km=length),
-                         "lifetime_a": value(e["lifetime_a"])})
+            lineage = f"{need.key}|{lid}"
+            life = value(e["lifetime_a"])
+            (year, end), *later = _lineage(int(period), life, hz.end)
+            head = {**base, **_priced_item(e, library, kind, n, length), "invest_period": int(period),
+                    "purchase": 1, "build_year": year, "service_to": end, "lineage": lineage, "replaces": None,
+                    "commissioned": None, "commissioned_source": ""}
+            rows.append(head)
+            if not need.unresolved:
+                rows += _renewals(head, lineage, hz, later, first_purchase=2, extra={"reason": ""})
+    needed = {n.key for n in needs}
+    for name, cb in (c.get("cables") or {}).items():
+        if cb.get("existing") and cb.get("library_id") and f"cable {name}" not in needed:
+            rows += _existing_rows(f"cable {name}", [(str(name), cb)], "cable", hz, library, lib_by_id)
+    new = {x for names in added.values() for x in names}
+    for x in c.get("compensation") or []:
+        if x.get("library_id") and str(x["name"]) not in new:
+            rows += _existing_rows(f"compensation {x['name']}", [(str(x["name"]), x)], x["kind"], hz, library,
+                                   lib_by_id)
     inv = pd.DataFrame(rows, columns=[*COLUMNS, "lifetime_a"])
-    counted = inv[inv["status"].isin(["chosen", "kept"])]
+    for col in ("purchase", "build_year", "commissioned"):
+        inv[col] = pd.array(inv[col].astype(float), dtype="Int64")
+    end = inv["service_to"].astype(float)
+    inv["service_to"] = pd.array(end, dtype="Int64") if (end.dropna() % 1 == 0).all() else end
+    return inv, _cost(inv, hz), hz.scope()
+
+
+def _cost(inv, hz):
+    """The cost per period (plan C14): the capex of every purchase made in
+    the period's span, the part of it that buys again, and each purchase's
+    annuity times the share of the span it serves."""
+    counted = inv[inv["status"].isin(["chosen", "kept"]) & (inv["purchase"].fillna(0) >= 1)]
     cost = []
-    for p in periods:
-        live = counted[(counted["invest_period"] <= p) & (p < counted["invest_period"] + counted["lifetime_a"])]
-        cost.append({"period": int(p), "capex_eur": float(counted.loc[counted["invest_period"] == p, "capex_eur"].sum()),
-                     "annualised_eur_per_a": float(live["annualised_eur_per_a"].sum())})
-    return inv, pd.DataFrame(cost)
+    for p in hz.periods:
+        w = hz.spans[p]
+        b = counted["build_year"].astype(float)
+        made = counted[(b >= p) & (b < p + w)]
+        served = sum(float(r.annualised_eur_per_a) * max(0.0, min(float(r.service_to), p + w)
+                                                          - max(float(r.build_year), p)) / w
+                     for r in counted.itertuples(index=False))
+        cost.append({"period": int(p), "capex_eur": float(made["capex_eur"].sum()),
+                     "capex_replacement_eur": float(made.loc[made["action"] == "renew", "capex_eur"].sum()),
+                     "annualised_eur_per_a": served})
+    return pd.DataFrame(cost, columns=["period", "capex_eur", "capex_replacement_eur", "annualised_eur_per_a"])
 
 
 def with_measures(as_is, compliance) -> pd.DataFrame:
     """The as-is compliance with the re-checked one as its "with measures"
-    columns."""
+    columns: status, value and detail, and where that value was read
+    (``worst_period_with_measures``, ``worst_hour_with_measures``,
+    ``worst_case_with_measures``), which need not be the as-is worst hour.
+    The columns added later (``campus_compliance.ADDED``) and the
+    where-columns come after the columns that were in use first."""
     after = compliance.set_index("check")
     final = as_is.copy()
     final["status_with_measures"] = final["check"].map(after["status_as_is"])
     final["value_with_measures"] = final["check"].map(after["value"])
     final["detail_with_measures"] = final["check"].map(after["detail"])
+    final = final[[c for c in final.columns if c not in ADDED] + [c for c in ADDED if c in final.columns]]
+    for col in ("worst_period", "worst_hour", "worst_case"):
+        final[f"{col}_with_measures"] = final["check"].map(after[col])
     return final
 
 
@@ -956,7 +1357,8 @@ def _dispatch_table(study):
 
 def select_assets(campus_spec, hourly, selection, library, req, profile, criteria: SizingCriteria = SizingCriteria(),
                   max_iter: int = MAX_ITER, pcc_switchgear: bool = True,
-                  parallel: ParallelRules = ParallelRules()) -> dict:
+                  parallel: ParallelRules = ParallelRules(), pcc_tap_control: str = "campus",
+                  period_years=None) -> dict:
     """Least-cost assets for ``campus_spec`` at the selected hours, AC-checked
     (module docstring). ``profile`` is a grid-code profile or its name.
 
@@ -969,8 +1371,21 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
     means the grid operator owns it: the PCC bus is never a need, and its
     switchgear row reports what it finds without buying anything. The
     choice is returned as ``scope``, with ``parallel``, the rules for adding
-    units next to existing ones (``ParallelRules.scope``)."""
+    units next to existing ones (``ParallelRules.scope``),
+    ``pcc_tap_control`` and ``horizon``.
+
+    The re-check sets the on-load taps (plan C15, ``campus_taps``) per hour
+    and case. ``pcc_tap_control`` says who moves the taps of the
+    transformers at the PCC: ``campus`` (default) or ``grid_operator`` (they
+    stay at the file's taps). The taps are returned as ``taps``
+    (``campus_taps.TAP_COLUMNS``).
+
+    ``period_years`` is ``{period: years}``, the project's investment-period
+    weightings (plan C14, ``period_spans``); None takes every span as
+    assumed. The horizon they give, and its notes, are ``scope["horizon"]``."""
     profile = load_grid_code(profile) if isinstance(profile, str) else profile
+    if pcc_tap_control not in PCC_TAP_CONTROL:
+        raise ContractError(f"pcc_tap_control is {pcc_tap_control!r}; allowed {list(PCC_TAP_CONTROL)}")
     lib_by_id = {e["id"]: e for kind in ("transformers", "cables", "capacitor_banks", "shunt_reactors", "statcoms",
                                          "switchgear") for e in library[kind]}
     hours = [(int(p), int(h)) for p, h in selection[["period", "hour"]].itertuples(index=False)]
@@ -979,24 +1394,39 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
     rows_of = {(p, h): hourly[(hourly["period"] == p) & (hourly["hour"] == h)] for p, h in hours}
     installed = _installed(hourly)
     periods = sorted(installed)
+    spans, span_source = period_spans(periods, period_years)
     base = _study(build_campus(campus_spec), hours, rows_of, installed, req, criteria, recheck=False)
     as_is = _compliance(base, req, profile)
     skip = frozenset() if pcc_switchgear else frozenset({str(campus_spec["campus"]["pcc"]["bus"])})
     needs = _needs(campus_spec, base, library, criteria, periods, lib_by_id, skip, parallel)
     history, last_voltage, stop = [], None, any(n.unresolved for n in needs)
+    pcc_reported = {}                                   # need key -> its set-point reason
     for it in range(1, max_iter + 1):
         spec, added = _apply(campus_spec, needs, lib_by_id)
-        study = _study(build_campus(spec), hours, rows_of, installed, req, criteria, recheck=True)
+        study = _study(build_campus(spec), hours, rows_of, installed, req, criteria, recheck=True, profile=profile,
+                       pcc_tap_control=pcc_tap_control)
         compliance = _compliance(study, req, profile)
         fails = [f for f in _failures(study, compliance, needs, req, criteria)
                  if f[1] != "switchgear" or f[0].split(" ", 1)[1] not in skip]
+        # owner, 2026-10-13: a PCC voltage is the grid's set-point. It is reported
+        # at once, on the reactive need, and never escalated; nothing is bought for it
+        for key, check, detail, _ in fails:
+            if check == "pcc_voltage" and key not in pcc_reported:
+                need = next(n for n in needs if n.key == key)
+                need.unresolved = _also(need.unresolved, f"{check}: {detail}; " + _voltage_reason(check, study))
+                pcc_reported[key] = need.unresolved
+                label = need.choice.label if need.choice is not None and need.pos >= 0 else "as described"
+                history.append({"iteration": it, "need": key, "from": label, "to": label, "check": check,
+                                "detail": detail})
+        fails = [f for f in fails if f[1] != "pcc_voltage"]
         if not fails or stop:
             break
         if it == max_iter:
             for key, check, detail, _ in fails:
                 for need in needs:
-                    if need.key == key and not need.unresolved:
-                        need.unresolved = f"{check}: {detail}; stopped at the iteration cap ({max_iter})"
+                    if need.key == key and (not need.unresolved or need.unresolved == pcc_reported.get(key)):
+                        need.unresolved = _also(need.unresolved,
+                                                f"{check}: {detail}; stopped at the iteration cap ({max_iter})")
             break
         by_key = {n.key: n for n in needs}
         if fails[0][1] == "load_flow":
@@ -1018,20 +1448,19 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
                 by_key[key] = need
             done.add(key)
             before = need.choice.label if need.choice is not None and need.pos >= 0 else "as described"
-            if check in ("pcc_voltage", "campus_voltage"):
+            if check == "campus_voltage":
                 now = _excursion(compliance)
                 if last_voltage is not None and now >= last_voltage - V_IMPROVE:
-                    need.unresolved = (f"{check}: {detail}; a reactive escalation did not reduce the excursion. "
-                                       "Compensation is dispatched to the PCC band, not to a voltage: a tap change "
-                                       "or voltage control may be needed (out of scope)")
+                    need.unresolved = _also(need.unresolved, f"{check}: {detail}; " + _voltage_reason(check, study))
                     history.append({"iteration": it, "need": key, "from": before, "to": before, "check": check,
                                     "detail": detail})
                     stop = True
                     continue
                 last_voltage = now
             if not _escalate(need, check, extra if check == "pcc_reactive" else 0, lib_by_id):
-                need.unresolved = f"{check}: {detail}; no further candidate in the library" if need.candidates \
-                    else _no_candidate(need)
+                need.unresolved = _also(need.unresolved,
+                                        f"{check}: {detail}; no further candidate in the library" if need.candidates
+                                        else _no_candidate(need))
                 if need.pos < 0:
                     need.pos = 0
                 stop = True
@@ -1040,13 +1469,16 @@ def select_assets(campus_spec, hourly, selection, library, req, profile, criteri
                 after = need.choice.label
             history.append({"iteration": it, "need": key, "from": before, "to": after, "check": check,
                             "detail": detail})
-    investment, cost = _investment(needs, added, spec, study, library, lib_by_id, periods)
+    investment, cost, horizon = _investment(needs, added, spec, study, library, lib_by_id, periods, spans,
+                                            span_source)
     final = with_measures(as_is, compliance)
     unresolved = [{"need": n.key, "reason": n.unresolved} for n in needs if n.unresolved]
     return {"investment": investment.drop(columns=["lifetime_a"]), "cost": cost, "compliance": final,
             "dispatch": _dispatch_table(study), "spec": spec,
             "history": pd.DataFrame(history, columns=["iteration", "need", "from", "to", "check", "detail"]),
             "unresolved": unresolved, "pcc": _pcc_table(study), "short_circuit": study.short_circuit,
-            "scope": {"pcc_switchgear": "campus" if pcc_switchgear else "grid_operator", "parallel": parallel.scope()},
+            "taps": study.taps,
+            "scope": {"pcc_switchgear": "campus" if pcc_switchgear else "grid_operator", "parallel": parallel.scope(),
+                      "pcc_tap_control": pcc_tap_control, "horizon": horizon},
             "state": SelectionState(needs, added, study, hours, rows_of, installed, periods, lib_by_id, profile, as_is,
-                                    skip, not fails and not unresolved)}
+                                    skip, not fails and not unresolved, (spans, span_source))}

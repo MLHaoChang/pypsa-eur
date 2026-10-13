@@ -387,9 +387,15 @@ def test_a_rated_bus_whose_rating_holds_is_not_a_need(tmp_path):
 def test_an_existing_adequate_transformer_is_kept_at_zero_and_compensation_is_bought_when_first_needed(tmp_path):
     """Three periods. Every inverter is off, the load is at pf 0.85; the PCC
     draws 13.5 Mvar at 20 MW (2030, 2050) and 17.3 Mvar at 25 MW (2040),
-    against a 15 Mvar band. A 3 Mvar bank is needed in 2040 only; with a
-    5-year life it is gone by 2050. The 2.3 Mvar gap is 2.8 Mvar with the
-    20 % margin, so the cheaper 2.5 Mvar bank is not a candidate."""
+    against a 15 Mvar band. A 3 Mvar bank is needed in 2040 only. The 2.3
+    Mvar gap is 2.8 Mvar with the 20 % margin, so the cheaper 2.5 Mvar bank
+    is not a candidate.
+
+    Plan C14 changed this test's cost on purpose: before it, the bank's
+    5-year life ended in 2045 and 2050 cost nothing. Now the bank is bought
+    again like for like when its life ends inside the horizon (the spans are
+    the 10-year gaps, so H = 2060): in 2045, 2050 and 2055. The cost is
+    flat from 2040 and each decade buys two banks."""
     spec = lowpf_spec()
     lib = library(tmp_path, transformers=[tr("T63", 63.0, 1.0e6)],
                   capacitor_banks=[comp("capacitor_banks", "CAP2p5", 2.5, 100e3, life=5),
@@ -407,8 +413,10 @@ def test_an_existing_adequate_transformer_is_kept_at_zero_and_compensation_is_bo
     assert cap["capex_eur"] == pytest.approx(120e3) and cap["opex_eur_per_a"] == pytest.approx(2400.0)
     assert cap["annualised_eur_per_a"] == pytest.approx(annual)
     cost = out["cost"].set_index("period")
-    assert list(cost["annualised_eur_per_a"]) == pytest.approx([0.0, annual, 0.0])
-    assert list(cost["capex_eur"]) == pytest.approx([0.0, 120e3, 0.0])
+    assert list(cost["annualised_eur_per_a"]) == pytest.approx([0.0, annual, annual])
+    assert list(cost["capex_eur"]) == pytest.approx([0.0, 240e3, 240e3])
+    assert list(out["investment"].loc[out["investment"]["need"] == "reactive", "build_year"]) == [
+        2040, 2045, 2050, 2055]
     d = out["dispatch"]
     steps = d[d["kind"] == "capacitor_bank"].sort_values("period")
     assert list(steps["element"]) == ["CAP_1"] * 3 and list(steps["steps"]) == [0, 1, 0]
@@ -437,7 +445,10 @@ def test_a_voltage_compensation_cannot_lift_is_unresolved_with_the_tap_change_na
     """A 30 % impedance unit carries the flow but leaves MV2 below 0.90 pu
     (solved here). A voltage maps to the reactive need, so a STATCOM is
     tried; it is dispatched to the PCC band, which holds, so it does nothing
-    for the voltage, and the selector says so instead of trying the rest."""
+    for the voltage, and the selector says so instead of trying the rest.
+
+    Plan C15: the unit has no tap data, so the taps cannot act either, and
+    the reason says so in place of the old "(out of scope)"."""
     assert solve_direct(H7, [(60.0, 30.0)]).res_bus["vm_pu"].min() < 0.9
     lib = library(tmp_path, transformers=[tr("T60", 60.0, 1.0e6, vk=30.0)],
                   statcoms=[comp("statcoms", "ST10", 10.0, 400e3), comp("statcoms", "ST20", 20.0, 700e3)])
@@ -447,7 +458,8 @@ def test_a_voltage_compensation_cannot_lift_is_unresolved_with_the_tap_change_na
     assert list(h["need"]) == ["reactive", "reactive"] and list(h["check"]) == ["campus_voltage"] * 2
     assert (h.iloc[0]["from"], h.iloc[0]["to"]) == ("none", "1 x ST10")
     got = row(out, "reactive")
-    assert got["status"] == "unresolved" and "tap change" in got["reason"]
+    assert got["status"] == "unresolved" and "TR1 has no on-load tap data" in got["reason"]
+    assert "MV2" in got["reason"] and "out of scope" not in got["reason"]
     assert row(out, "transformer TR1")["library_id"] == "T60"
     comp_ = out["compliance"].set_index("check")
     assert comp_.at["campus_voltage", "status_with_measures"] == "fail"
@@ -547,10 +559,14 @@ def test_pcc_switchgear_owned_by_the_grid_operator_is_not_bought(tmp_path):
     out = select_assets(wide_cable_spec(), table, sel, lib, WIDE, PROFILE, pcc_switchgear=False)
     assert "switchgear PCC" not in set(out["investment"]["need"])
     assert "ik_rated_ka" not in out["spec"]["campus"]["pcc"]
-    assert out["scope"] == {"pcc_switchgear": "grid_operator", "parallel": ParallelRules().scope()}
+    horizon = {"period_years": {2030: 1}, "source": {2030: "single period: one year"}, "horizon_end": 2031}
+    assert {k: v for k, v in out["scope"]["horizon"].items() if k != "notes"} == horizon      # plan C14
+    assert {k: v for k, v in out["scope"].items() if k != "horizon"} == {
+        "pcc_switchgear": "grid_operator", "parallel": ParallelRules().scope(), "pcc_tap_control": "campus"}
     assert out["compliance"].set_index("check").at["switchgear", "status_with_measures"] == "not_rated"
-    assert select_assets(wide_cable_spec(), table, sel, lib, WIDE, PROFILE)["scope"] == {
-        "pcc_switchgear": "campus", "parallel": ParallelRules().scope()}
+    assert {k: v for k, v in select_assets(wide_cable_spec(), table, sel, lib, WIDE, PROFILE)["scope"].items()
+            if k != "horizon"} == {"pcc_switchgear": "campus", "parallel": ParallelRules().scope(),
+                                   "pcc_tap_control": "campus"}
 
 
 def test_a_rated_pcc_that_fails_is_reported_not_bought_when_the_operator_owns_it(tmp_path):
@@ -964,3 +980,425 @@ def test_the_parallel_rules_are_reported_with_the_scope(tmp_path):
     rules = ParallelRules(uk_tol=0.075)
     out = select_assets(rewound_spec(), table, sel, lib, WIDE, PROFILE, parallel=rules)
     assert out["scope"]["parallel"] == rules.scope() and out["scope"]["parallel"]["uk_tol"]["value"] == 0.075
+
+
+# --------------------------------------------------------------------------
+# plan C14: replacement at the end of life
+# --------------------------------------------------------------------------
+# Every expected year and amount below is worked by hand: a purchase k + 1 is
+# in b_1 + floor(k L + 0.5) (half up), made while it is before the horizon
+# end H = last period + its span; a purchase serves until its successor
+# starts (or H); the annual cost of a period is each purchase's annuity times
+# the share of the period it serves.
+
+from gridspine.static.campus_invest import assumed_commissioning, period_spans, purchase_years, renewal_years  # noqa: E402
+
+DECADES = {2030: 10, 2040: 10, 2050: 10}                  # H = 2060
+
+
+def test_the_spans_are_the_projects_weightings_and_the_gaps_where_missing():
+    assert period_spans([2030, 2040, 2050], DECADES) == (
+        {2030: 10, 2040: 10, 2050: 10}, {2030: "project", 2040: "project", 2050: "project"})
+    spans, src = period_spans([2030, 2040, 2055], None)
+    assert spans == {2030: 10, 2040: 15, 2055: 15}
+    assert src == {2030: "assumed: the gap to the next period", 2040: "assumed: the gap to the next period",
+                   2055: "assumed: the gap from the previous period"}
+    spans, src = period_spans([2030, 2040], {2030: 0, 2040: 5.0})
+    assert spans == {2030: 10, 2040: 5.0} and src[2030].startswith("assumed") and src[2040] == "project"
+    spans, src = period_spans([2030, 2040], {2030: float("nan"), 2040: -1})
+    assert spans == {2030: 10, 2040: 10} and all(s.startswith("assumed") for s in src.values())
+    assert period_spans([2030], None) == ({2030: 1}, {2030: "single period: one year"})
+    assert period_spans([2030], {2030: 25}) == ({2030: 25}, {2030: "project"})
+
+
+def test_purchases_by_hand():
+    assert purchase_years(2030, 25, 2060) == [2030, 2055]
+    assert purchase_years(2030, 40, 2060) == [2030]
+    assert purchase_years(2030, 12.5, 2060) == [2030, 2043, 2055]      # 12.5 rounds up, 25.0 is whole
+    assert purchase_years(2030, 12.4, 2060) == [2030, 2042, 2055]      # 12.4 rounds down, 24.8 up
+    assert purchase_years(2030, 30, 2060) == [2030]                    # 2060 is the horizon end: not made
+    assert purchase_years(2030, 29, 2060) == [2030, 2059]              # a year before it is
+
+
+def test_an_existing_asset_is_renewed_when_its_own_life_ends():
+    assert renewal_years(2000, 40, 2030, 2060) == ([2040], False)
+    assert assumed_commissioning(2030, 40) == 2010
+    assert renewal_years(assumed_commissioning(2030, 40), 40, 2030, 2060) == ([2050], False)
+    assert assumed_commissioning(2030, 25) == 2017                     # 12.5 rounds up
+    assert assumed_commissioning(2030, 24.8) == 2018                   # 12.4 rounds down
+    assert renewal_years(1980, 40, 2030, 2060) == ([2030], True)       # overdue: bought in the first period
+    assert renewal_years(1980, 20, 2030, 2060) == ([2030, 2050], True)
+    assert renewal_years(1990, 40, 2030, 2060) == ([2030], False)      # due exactly at the first period
+    assert renewal_years(2020, 40, 2030, 2060) == ([], False)          # due at H: not made
+    assert renewal_years(2019, 40, 2030, 2060) == ([2059], False)
+    assert renewal_years(2000, 40, 2030, 2031) == ([], False)          # a single period spans one year
+    assert renewal_years(1980, 40, 2030, 2031) == ([2030], True)
+
+
+def bought_t100(tmp_path, life, periods=DECADES, hours=((2030, 7, H7, {}), (2040, 19, H19, {}), (2050, 3, H3, {}))):
+    lib = library(tmp_path, transformers=[tr("T100", 100.0, 1.75e6, life=life)])
+    table, sel = hourly(*hours)
+    return select_assets(wide_cable_spec(), table, sel, lib, WIDE, PROFILE, period_years=periods)
+
+
+def test_a_new_purchase_is_bought_again_like_for_like_when_its_life_ends_in_the_horizon(tmp_path):
+    out = bought_t100(tmp_path, 25)
+    inv = out["investment"]
+    rows_ = inv[inv["need"] == "transformer TR1+TR2"].reset_index(drop=True)
+    assert len(rows_) == 2
+    first, second = rows_.iloc[0], rows_.iloc[1]
+    assert (first["purchase"], first["build_year"], first["service_to"], first["invest_period"], first["action"]) == (
+        1, 2030, 2055, 2030, "buy")
+    assert pd.isna(first["replaces"]) and first["lineage"] == "transformer TR1+TR2|T100"
+    assert (second["purchase"], second["build_year"], second["service_to"], second["invest_period"],
+            second["action"], second["status"]) == (2, 2055, 2060, 2050, "renew", "chosen")
+    assert second["replaces"] == "transformer TR1+TR2|T100|1" and second["lineage"] == first["lineage"]
+    assert (second["library_id"], second["units"], bool(second["existing"])) == ("T100", 2, False)
+    assert second["capex_eur"] == pytest.approx(3.5e6)
+    annual = 3.5e6 * (crf(RATE, 25) + 0.01)
+    assert first["annualised_eur_per_a"] == pytest.approx(annual) == second["annualised_eur_per_a"]
+    cost = out["cost"].set_index("period")
+    assert list(cost["capex_eur"]) == pytest.approx([3.5e6, 0.0, 3.5e6])
+    assert list(cost["capex_replacement_eur"]) == pytest.approx([0.0, 0.0, 3.5e6])
+    assert list(cost["annualised_eur_per_a"]) == pytest.approx([annual] * 3)     # flat to the horizon
+    # the reactive need, not needed, is never renewed
+    assert (inv["need"] == "reactive").sum() == 1
+    assert out["scope"]["horizon"]["period_years"] == DECADES and out["scope"]["horizon"]["horizon_end"] == 2060
+
+
+def test_a_life_longer_than_the_horizon_is_not_renewed_and_the_old_rule_holds(tmp_path):
+    """Nothing starts or ends inside a period: the cost per period is the
+    rule before C14, restated here (every row with invest <= p < invest + L)."""
+    out = bought_t100(tmp_path, 40)
+    inv = out["investment"]
+    assert (inv["action"] == "renew").sum() == 0
+    old = [sum(r.annualised_eur_per_a for r in inv.itertuples() if r.status in ("chosen", "kept")
+               and r.invest_period <= p < r.invest_period + 40) for p in (2030, 2040, 2050)]
+    assert list(out["cost"]["annualised_eur_per_a"]) == pytest.approx(old)
+    assert list(out["cost"]["capex_replacement_eur"]) == [0.0, 0.0, 0.0]
+    row_ = row(out, "transformer TR1+TR2")
+    assert (row_["service_to"], row_["build_year"]) == (2060, 2030)
+
+
+def test_a_non_whole_lifetime_rounds_half_up_and_the_cost_stays_flat(tmp_path):
+    out = bought_t100(tmp_path, 12.5)
+    rows_ = out["investment"][out["investment"]["need"] == "transformer TR1+TR2"]
+    assert list(rows_["build_year"]) == [2030, 2043, 2055]
+    assert list(rows_["service_to"]) == [2043, 2055, 2060]
+    assert list(rows_["purchase"]) == [1, 2, 3]
+    assert list(rows_["replaces"].fillna("")) == ["", "transformer TR1+TR2|T100|1", "transformer TR1+TR2|T100|2"]
+    assert list(rows_["invest_period"]) == [2030, 2040, 2050]
+    annual = 3.5e6 * (crf(RATE, 12.5) + 0.01)
+    cost = out["cost"].set_index("period")
+    assert list(cost["capex_eur"]) == pytest.approx([3.5e6] * 3)
+    assert list(cost["capex_replacement_eur"]) == pytest.approx([0.0, 3.5e6, 3.5e6])
+    assert list(cost["annualised_eur_per_a"]) == pytest.approx([annual] * 3)
+
+
+def test_a_single_period_study_spans_one_year_and_buys_nothing_again(tmp_path):
+    out = bought_t100(tmp_path, 25, periods=None, hours=((2030, 7, H7, {}),))
+    rows_ = out["investment"][out["investment"]["need"] == "transformer TR1+TR2"]
+    assert list(rows_["build_year"]) == [2030] and list(rows_["service_to"]) == [2031]
+    h = out["scope"]["horizon"]
+    assert h["period_years"] == {2030: 1} and h["source"] == {2030: "single period: one year"}
+    assert h["horizon_end"] == 2031
+
+
+def existing_campus(tr1=None, tr2=None, lid="T40", cable_year=None, cable_lid="C1"):
+    """The rewound campus: an existing pair of 40 MVA units, adequate at
+    20 MW, kept; the cable existing too. ``tr1``/``tr2``/``cable_year``
+    are commissioning years (None: not given)."""
+    spec = rewound_spec()
+    for name, year in (("TR1", tr1), ("TR2", tr2)):
+        u = spec["campus"]["transformers"][name]
+        if lid:
+            u["library_id"] = lid
+        if year is not None:
+            u["commissioning_year"] = t(year, "datasheet")
+    cb = spec["campus"]["cables"]["CB1"]
+    cb["existing"] = True
+    if cable_lid:
+        cb["library_id"] = cable_lid
+    if cable_year is not None:
+        cb["commissioning_year"] = t(cable_year, "measured")
+    return spec
+
+
+def existing_lib(tmp_path):
+    return library(tmp_path, transformers=[tr("T40", 40.0, 0.95e6, life=40)], cables=[cable("C1", 3.0, 200e3)])
+
+
+def test_kept_existing_assets_are_renewed_from_their_commissioning_year(tmp_path):
+    """The pair was commissioned in 2000 (L = 40: renewed in 2040); the
+    cable, not a need, in 1995 (renewed in 2035, half-way through 2030's
+    span, so 2030 carries half its annuity)."""
+    table, sel = dark_hours((2030, 20.0), (2040, 20.0), (2050, 20.0))
+    out = select_assets(existing_campus(2000, 2000, cable_year=1995), table, sel, existing_lib(tmp_path), WIDE,
+                        PROFILE, period_years=DECADES)
+    inv = out["investment"]
+    tr_rows = inv[inv["need"] == "transformer TR1+TR2"].reset_index(drop=True)
+    assert len(tr_rows) == 2
+    keep, renew = tr_rows.iloc[0], tr_rows.iloc[1]
+    assert (keep["action"], keep["status"], keep["purchase"], keep["library_id"], keep["units"]) == (
+        "keep", "kept", 0, "T40", 2)
+    assert (keep["build_year"], keep["commissioned"], keep["commissioned_source"], keep["service_to"]) == (
+        2000, 2000, "datasheet", 2040)
+    assert bool(keep["existing"]) and keep["capex_eur"] == 0.0 and keep["lineage"] == "transformer TR1+TR2|TR1,TR2"
+    assert (renew["action"], renew["status"], renew["purchase"], renew["build_year"], renew["service_to"],
+            renew["invest_period"], renew["kind"], renew["units"]) == (
+        "renew", "chosen", 1, 2040, 2060, 2040, "transformer", 2)
+    assert renew["replaces"] == "transformer TR1+TR2|TR1,TR2|0" and not bool(renew["existing"])
+    assert renew["capex_eur"] == pytest.approx(1.9e6)
+    cb = inv[inv["need"] == "cable CB1"].reset_index(drop=True)
+    assert len(cb) == 2
+    assert (cb.at[0, "action"], cb.at[0, "status"], cb.at[0, "library_id"], cb.at[0, "units"],
+            cb.at[0, "length_km"], cb.at[0, "build_year"], cb.at[0, "service_to"]) == (
+        "keep", "kept", "C1", 1, 2.0, 1995, 2035)
+    assert cb.at[0, "annualised_eur_per_a"] == 0.0 and cb.at[0, "commissioned_source"] == "measured"
+    assert (cb.at[1, "action"], cb.at[1, "build_year"], cb.at[1, "invest_period"], cb.at[1, "units"]) == (
+        "renew", 2035, 2030, 1)
+    assert cb.at[1, "capex_eur"] == pytest.approx(400e3)
+    a_tr = 1.9e6 * (crf(RATE, 40) + 0.01)
+    a_cb = 400e3 * (crf(RATE, 40) + 0.005)
+    cost = out["cost"].set_index("period")
+    assert list(cost["capex_eur"]) == pytest.approx([400e3, 1.9e6, 0.0])
+    assert list(cost["capex_replacement_eur"]) == pytest.approx([400e3, 1.9e6, 0.0])
+    assert list(cost["annualised_eur_per_a"]) == pytest.approx([a_cb * 5 / 10, a_cb + a_tr, a_cb + a_tr])
+    # the choice is unchanged: the pair is kept, at zero in the ranking
+    assert out["spec"]["campus"]["transformers"] == existing_campus(2000, 2000, cable_year=1995)["campus"]["transformers"]
+
+
+def test_an_existing_asset_without_a_year_is_at_mid_life_and_one_past_its_life_is_overdue(tmp_path):
+    table, sel = dark_hours((2030, 20.0), (2040, 20.0), (2050, 20.0))
+    out = select_assets(existing_campus(None, 1980, cable_lid=None), table, sel, existing_lib(tmp_path), WIDE,
+                        PROFILE, period_years=DECADES)
+    inv = out["investment"]
+    tr_rows = inv[inv["need"] == "transformer TR1+TR2"].reset_index(drop=True)
+    assert list(tr_rows["action"]) == ["keep", "renew", "keep", "renew"]
+    assert list(tr_rows["units"]) == [1, 1, 1, 1]
+    assert list(tr_rows["build_year"]) == [2010, 2050, 1980, 2030]
+    assert list(tr_rows["lineage"]) == ["transformer TR1+TR2|TR1"] * 2 + ["transformer TR1+TR2|TR2"] * 2
+    assert tr_rows.at[0, "commissioned_source"] == "assumed: mid-life at the first period"
+    assert tr_rows.at[2, "commissioned_source"] == "datasheet"
+    assert "overdue" in tr_rows.at[3, "reason"] and "2020" in tr_rows.at[3, "reason"]
+    assert tr_rows.at[3, "invest_period"] == 2030 and tr_rows.at[2, "service_to"] == 2030
+    # an existing cable without a library_id is not a need and has no row
+    assert "cable CB1" not in set(inv["need"])
+    notes = " ".join(out["scope"]["horizon"]["notes"])
+    assert "TR1" in notes and "mid-life" in notes and "TR2" in notes and "overdue" in notes
+    cost = out["cost"].set_index("period")
+    assert list(cost["capex_replacement_eur"]) == pytest.approx([0.95e6, 0.0, 0.95e6])
+
+
+def test_an_existing_asset_without_a_library_id_is_kept_with_its_replacement_unpriced(tmp_path):
+    table, sel = dark_hours((2030, 20.0))
+    out = select_assets(existing_campus(2000, 2000, lid=None), table, sel, existing_lib(tmp_path), WIDE, PROFILE,
+                        period_years={2030: 30})
+    inv = out["investment"]
+    tr_rows = inv[inv["need"] == "transformer TR1+TR2"]
+    assert len(tr_rows) == 1
+    keep = tr_rows.iloc[0]
+    assert keep["action"] == "keep" and "unpriced" in keep["reason"] and pd.isna(keep["library_id"])
+    assert any("unpriced" in n for n in out["scope"]["horizon"]["notes"])
+    # one whose library_id is not in the library the run used is unpriced too
+    out = select_assets(existing_campus(2000, 2000, lid="T99"), table, sel, existing_lib(tmp_path), WIDE, PROFILE,
+                        period_years={2030: 30})
+    keep = row(out, "transformer TR1+TR2")
+    assert "unpriced" in keep["reason"] and "T99" in keep["reason"]
+    assert (out["investment"]["need"] == "transformer TR1+TR2").sum() == 1
+
+
+def test_a_single_period_study_renews_only_an_overdue_existing_asset(tmp_path):
+    table, sel = dark_hours((2030, 20.0))
+    out = select_assets(existing_campus(2000, 1980, cable_year=2001), table, sel, existing_lib(tmp_path), WIDE,
+                        PROFILE)
+    inv = out["investment"]
+    renew = inv[inv["action"] == "renew"]
+    assert list(renew["need"]) == ["transformer TR1+TR2"] and list(renew["build_year"]) == [2030]
+    assert out["cost"]["capex_replacement_eur"].tolist() == pytest.approx([0.95e6])
+
+
+def test_a_renewal_between_the_periods_spans_is_listed_and_counted_where_it_serves(tmp_path):
+    """Spans of one year (pypsa's default weighting) leave 2031-2039 in no
+    period: the pair commissioned in 1997 is renewed in 2037, listed under
+    2030, counted in no period's capex, and serves the whole of 2040."""
+    table, sel = dark_hours((2030, 20.0), (2040, 20.0))
+    out = select_assets(existing_campus(1997, 1997, cable_lid=None), table, sel, existing_lib(tmp_path), WIDE,
+                        PROFILE, period_years={2030: 1, 2040: 1})
+    renew = out["investment"][out["investment"]["action"] == "renew"].iloc[0]
+    assert (renew["build_year"], renew["invest_period"], renew["service_to"]) == (2037, 2030, 2041)
+    cost = out["cost"].set_index("period")
+    assert list(cost["capex_eur"]) == [0.0, 0.0]
+    assert list(cost["annualised_eur_per_a"]) == pytest.approx([0.0, 1.9e6 * (crf(RATE, 40) + 0.01)])
+    assert any("2037" in n and "no period" in n for n in out["scope"]["horizon"]["notes"])
+
+
+def test_unresolved_needs_are_never_renewed(tmp_path):
+    lib = library(tmp_path, capacitor_banks=[comp("capacitor_banks", "CAP30", 30.0, 100e3, life=5)],
+                  shunt_reactors=[comp("shunt_reactors", "SR5", 5.0, 50e3)])
+    table, sel = dark_hours((2030, 25.0))
+    out = select_assets(lowpf_spec(), table, sel, lib, ReactiveRequirement(15.0, "c", "code"), PROFILE,
+                        period_years={2030: 30})
+    rows_ = out["investment"][out["investment"]["need"] == "reactive"]
+    assert len(rows_) == 1 and rows_.iloc[0]["status"] == "unresolved"
+    assert out["cost"]["capex_eur"].sum() == 0.0
+
+
+def test_an_addition_renews_its_kept_units_and_its_new_ones_on_their_own_lives(tmp_path):
+    """Keep 2 + add 1 x T63 (the C13 example), the pair commissioned in 2005
+    with library_id T40 (renewed in 2045), the T63 bought in 2030 with
+    L = 20 (renewed in 2050)."""
+    table, sel = dark_hours((2030, 30.0), (2040, 30.0), (2050, 30.0))
+    spec = rewound_spec()
+    for name in ("TR1", "TR2"):
+        spec["campus"]["transformers"][name].update(library_id="T40", commissioning_year=t(2005))
+    lib = library(tmp_path, transformers=[tr("T40", 40.0, 0.95e6, vk=40.0), tr("T63", 63.0, 1.2e6, life=20)])
+    out = select_assets(spec, table, sel, lib, WIDE, PROFILE, period_years=DECADES)
+    rows_ = out["investment"][out["investment"]["need"] == "transformer TR1+TR2"].reset_index(drop=True)
+    assert list(rows_["action"]) == ["keep", "renew", "add", "renew"]
+    assert list(rows_["build_year"]) == [2005, 2045, 2030, 2050]
+    assert list(rows_["library_id"]) == ["T40", "T40", "T63", "T63"]
+    assert list(rows_["purchase"]) == [0, 1, 1, 2]
+    assert rows_.at[3, "replaces"] == "transformer TR1+TR2|T63|1" and rows_.at[1, "replaces"] == (
+        "transformer TR1+TR2|TR1,TR2|0")
+
+
+def test_an_existing_compensation_entry_with_a_library_id_is_kept_and_renewed(tmp_path):
+    """A 3 Mvar bank in the campus file, commissioned in 2020, library CAP3
+    (L = 25): kept at zero, bought again in 2045, inside 2040's span. A bank
+    the study buys is no existing entry and gets no keep row."""
+    table, sel = dark_hours((2030, 20.0), (2040, 20.0), (2050, 20.0))
+    spec = existing_campus(2000, 2000, cable_lid=None)
+    spec["campus"]["compensation"] = [{"name": "CAPX", "bus": "MV1", "kind": "capacitor_bank", "q_mvar": t(3.0),
+                                       "steps": 1, "library_id": "CAP3", "commissioning_year": t(2020, "datasheet")}]
+    lib = library(tmp_path, transformers=[tr("T40", 40.0, 0.95e6, life=40)],
+                  capacitor_banks=[comp("capacitor_banks", "CAP3", 3.0, 120e3)])
+    out = select_assets(spec, table, sel, lib, WIDE, PROFILE, period_years=DECADES)
+    rows_ = out["investment"][out["investment"]["need"] == "compensation CAPX"].reset_index(drop=True)
+    assert list(rows_["action"]) == ["keep", "renew"]
+    assert (rows_.at[0, "library_id"], rows_.at[0, "units"], rows_.at[0, "build_year"], rows_.at[0, "service_to"]) == (
+        "CAP3", 1, 2020, 2045)
+    assert (rows_.at[1, "kind"], rows_.at[1, "build_year"], rows_.at[1, "invest_period"]) == (
+        "capacitor_bank", 2045, 2040)
+    assert rows_.at[1, "capex_eur"] == pytest.approx(120e3)
+    assert row(out, "reactive")["kind"] == "none"
+    cost = out["cost"].set_index("period")
+    assert list(cost["capex_replacement_eur"]) == pytest.approx([0.0, 120e3 + 1.9e6, 0.0])
+
+
+# --------------------------------------------------------------------------
+# the with-measures value carries its own worst hour and case
+# --------------------------------------------------------------------------
+
+def test_with_measures_pairs_each_re_checked_value_with_its_own_worst_hour_and_case():
+    """The browser run's case: as is, the campus voltage was worst at
+    (2030, 158); re-checked with the assets, at (2030, 117) in the outage of
+    SITE_TRANSFO. The re-checked value is reported with that hour and case,
+    and the as-is columns keep their own."""
+    from gridspine.static.campus_invest import with_measures
+    as_is = pd.DataFrame([
+        {"check": "campus_voltage", "status_as_is": "fail", "status_with_measures": "not_rechecked", "value": 0.88,
+         "limit": 0.9, "unit": "pu", "worst_period": 2030, "worst_hour": 158,
+         "clause": "c", "source": "assumed", "detail": "as is", "worst_case": "N-1:SITE_TRANSFO",
+         "limit_min": 0.9, "limit_max": 1.1},
+        {"check": "switchgear", "status_as_is": "not_rated", "status_with_measures": "not_rated", "value": 20.0,
+         "limit": float("nan"), "unit": "kA", "worst_period": 2030, "worst_hour": None,
+         "clause": "c", "source": "assumed", "detail": "as is", "worst_case": None,
+         "limit_min": None, "limit_max": None}])
+    recheck = pd.DataFrame([
+        {"check": "switchgear", "status_as_is": "pass", "status_with_measures": "pass", "value": 25.1,
+         "limit": 31.5, "unit": "kA", "worst_period": 2040, "worst_hour": None, "worst_case": None,
+         "clause": "c", "source": "assumed", "detail": "re-checked sc"},
+        {"check": "campus_voltage", "status_as_is": "pass", "status_with_measures": "pass", "value": 0.9001,
+         "limit": 0.9, "unit": "pu", "worst_period": 2030, "worst_hour": 117, "worst_case": "N-1:SITE_TRANSFO",
+         "clause": "c", "source": "assumed", "detail": "re-checked"}])
+    table = with_measures(as_is, recheck)
+    out = table.set_index("check")
+    v = out.loc["campus_voltage"]
+    assert (v["worst_period"], v["worst_hour"], v["value"]) == (2030, 158, 0.88)
+    assert (v["worst_period_with_measures"], v["worst_hour_with_measures"], v["worst_case_with_measures"],
+            v["value_with_measures"], v["status_with_measures"], v["detail_with_measures"]) == (
+        2030, 117, "N-1:SITE_TRANSFO", 0.9001, "pass", "re-checked")
+    assert list(table.columns) == [
+        "check", "status_as_is", "status_with_measures", "value", "limit", "unit", "worst_period", "worst_hour",
+        "clause", "source", "detail", "value_with_measures", "detail_with_measures",       # in use first
+        "worst_case", "limit_min", "limit_max",
+        "worst_period_with_measures", "worst_hour_with_measures", "worst_case_with_measures"]
+    s = out.loc["switchgear"]
+    assert s["worst_period_with_measures"] == 2040 and pd.isna(s["worst_hour_with_measures"])
+    assert pd.isna(s["worst_case_with_measures"])
+
+
+def test_the_with_measures_worst_is_the_re_checked_studys_own(tmp_path):
+    """On a real selection, each with-measures worst (period, hour, case) is
+    the re-checked study's worst reading, found here from its tables: the
+    lowest campus voltage against the EU band (0.90-1.10 pu below 110 kV,
+    restated), the highest transformer and cable loading, the largest PCC
+    exchange (one per hour, no case)."""
+    lib = library(tmp_path, transformers=[tr(i, s, capex) for i, (s, capex) in SIZES.items()])
+    table, sel = hourly((2030, 7, H7, {}), (2030, 19, H19, {}), (2040, 3, H3, {}))
+    out = select_assets(wide_cable_spec(), table, sel, lib, WIDE, PROFILE, SizingCriteria(margin=0.2))
+    st = out["state"].study
+    comp_ = out["compliance"].set_index("check")
+
+    def got(check):
+        r = comp_.loc[check]
+        return (int(r["worst_period_with_measures"]), int(r["worst_hour_with_measures"]),
+                r["worst_case_with_measures"], r["value_with_measures"])
+
+    b = st.bus[st.bus["bus"] != "PCC"]
+    key = [max(v - 1.10, 0.90 - v) for v in b["vm_pu"]]
+    w = b.iloc[max(range(len(key)), key=lambda i: key[i])]               # the first of the worst
+    assert got("campus_voltage") == (w["period"], w["hour"], w["case"], pytest.approx(w["vm_pu"]))
+    for check, tbl in (("transformer_loading", st.trafo), ("cable_loading", st.line)):
+        w = tbl.loc[tbl["loading_pct"].astype(float).idxmax()]
+        assert got(check) == (w["period"], w["hour"], w["case"], pytest.approx(w["loading_pct"]))
+    q = st.q.loc[st.q["q0_mvar"].abs().idxmax()]
+    r = comp_.loc["pcc_reactive"]
+    assert (r["worst_period_with_measures"], r["worst_hour_with_measures"]) == (q["period"], q["hour"])
+    assert pd.isna(r["worst_case_with_measures"])
+
+
+# --------------------------------------------------------------------------
+# a replace row says what failed and what it replaces
+# --------------------------------------------------------------------------
+
+def test_a_replaced_transformer_group_says_what_failed_and_what_it_replaces(tmp_path):
+    """The pair of test_existing_transformers_short_of_the_margin_are_replaced_not_kept:
+    at 30 MW a survivor carries about 38.5 MVA (solved here), so a unit
+    must be 1.2 x that with the 20 % margin, above its 40 MVA. TR1's
+    commissioning year is given, TR2's is not."""
+    hour = {"DC_LOAD": -30.0, "BESS1": 0.0, "PV1": 0.0, "GEN1": 0.0}
+    survivor = max(s_hv(solve_direct(hour, [(40.0, 12.0)] * 2, out=0, lv_kv=21.0, pf=0.85)))
+    spec = lowpf_spec()
+    spec["campus"]["transformers"]["TR1"]["commissioning_year"] = t(2004, "datasheet")
+    lib = library(tmp_path, transformers=[tr("T63", 63.0, 1.2e6)])
+    table, sel = dark_hours((2030, 30.0))
+    got = row(select_assets(spec, table, sel, lib, WIDE, PROFILE), "transformer TR1+TR2")
+    assert got["action"] == "replace"
+    assert got["reason"] == (
+        f"replaces TR1 (in service since 2004) and TR2 (commissioning year not given): 2 x 40 MVA as is, "
+        f"{survivor * 1.2:.2f} MVA a unit needed with the 20 % design margin")
+
+
+def test_a_replaced_cable_says_it_was_overloaded_and_what_it_replaces(tmp_path):
+    """The existing cable rated 0.8 kA carries 30 MW at pf 0.85 and 20 kV,
+    about 1.0 kA (by hand: 30 / 0.85 / (sqrt 3 x 20)), so it is replaced."""
+    assert 30.0 / 0.85 / (math.sqrt(3) * 20.0) > 0.8 * 1.2
+    spec = existing_campus(tr1=2001, tr2=2001, cable_year=2012)
+    spec["campus"]["cables"]["CB1"]["max_i_ka"] = t(0.8)
+    lib = library(tmp_path, transformers=[tr("T40", 40.0, 0.95e6), tr("T63", 63.0, 1.2e6)],
+                  cables=[cable("C1", 3.0, 200e3)])
+    table, sel = dark_hours((2030, 30.0))
+    got = row(select_assets(spec, table, sel, lib, WIDE, PROFILE), "cable CB1")
+    # the as-is loading, solved here: the pair intact and with each unit out, the worst
+    peak = max(float(mixed_direct([(40.0, 12.0)] * 2, 30.0, out=k).res_line["i_ka"].max())
+               for k in (None, 0, 1)) / 0.8 * 100.0
+    assert got["action"] == "replace"
+    assert got["reason"] == f"replaces CB1 (in service since 2012): loaded to {peak:.1f} % as is"
+
+
+def test_the_horizon_notes_speak_plain_words():
+    """The ranking note reaches the panel: no plan step names in it."""
+    from gridspine.static.campus_invest import RANKING_NOTE
+    assert "plan C" not in RANKING_NOTE and RANKING_NOTE.startswith("Replacements are reported, not ranked")

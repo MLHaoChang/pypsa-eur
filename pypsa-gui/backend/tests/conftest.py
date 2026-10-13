@@ -63,7 +63,8 @@ os.environ["PROJECTS_ROOT"] = _TEST_PROJECTS_ROOT
 # `test_tenancy_api` and anything that calls `ensure_app_dirs()` accumulate
 # directories in the developer's real ~/Library/Application Support/PyPSA GUI/
 # and become history-dependent. Pinning only one moves the problem to the others.
-os.environ["PYPSAGUI_APP_DATA_DIR"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-appdata-")
+_TEST_APP_DATA_DIR = _tempfile.mkdtemp(prefix="pypsa-gui-test-appdata-")
+os.environ["PYPSAGUI_APP_DATA_DIR"] = _TEST_APP_DATA_DIR
 os.environ["LEGACY_ROOT"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-legacy-")
 os.environ["FLAT_PROJECTS_ROOT"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-flat-")
 # Same reasoning, one step further: this one is UNSET rather than redirected.
@@ -137,6 +138,14 @@ def _reset_backend_state() -> None:
     # "current") can't bleed across tests. The daemon dispatcher thread stays
     # parked on the now-empty queue — it's reused by the next test that enqueues.
     solve_queue.reset_for_tests()
+    # The authenticated suite reuses its seeded user and app-data root. Owned
+    # checked-answer/evidence files otherwise accumulate across unrelated tests
+    # until the real 512-record quota refuses publication. Reset only this
+    # test-owned subtree; preserve the production quota and persistence within
+    # a case (including reload/recovery and uncertain-operation checks).
+    shutil.rmtree(
+        pathlib.Path(_TEST_APP_DATA_DIR) / "assistant_assurance", ignore_errors=True
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -175,6 +184,28 @@ def _clean_llm_profiles():
 
     yield
     llm_config.profiles_path().unlink(missing_ok=True)
+
+
+@pytest.fixture(autouse=True)
+def _clean_assurance_records():
+    """
+    Checked-answer records must not survive past the test that wrote them.
+
+    `services.assurance_records` keeps at most `MAX_RECORDS` (512) per owner
+    under the session-wide app-data directory and reclaims only records older
+    than a day, and every test signs in as the same seeded user. So the
+    records accumulate across the whole suite: once the reliability cases from
+    #145 pushed the total past 512, every later checked answer failed to save
+    (`assurance_storage_full` -> `assurance_publication_failed`) in CI's full
+    run while each file passed on its own. Same rule as `llm-profiles.json`
+    above: unlink after every test, so a crashed test still leaves a clean slate.
+    """
+    import shutil
+
+    import app_paths
+
+    yield
+    shutil.rmtree(app_paths.app_data_dir() / "assistant_assurance", ignore_errors=True)
 
 
 # ── Auth harness (Step 0a) ──────────────────────────────────────────────────

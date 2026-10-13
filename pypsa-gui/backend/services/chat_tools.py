@@ -3417,11 +3417,13 @@ def campus_draft_campus(project_id: str, overwrite: bool = False) -> dict:
 def campus_run_study(project_id: str, k: int | None = None, pf: float | None = None,
                      profile: str | None = None, margin: float | None = None,
                      n_minus_1: bool | None = None, invest: bool | None = None,
-                     pcc_switchgear_by_operator: bool | None = None) -> dict:
+                     pcc_switchgear_by_operator: bool | None = None,
+                     pcc_tap_control: str | None = None) -> dict:
     from services.campus_electrical_service import run as _h
     settings = {key: v for key, v in (("k", k), ("profile", profile), ("margin", margin),
                                        ("n_minus_1", n_minus_1), ("invest", invest),
-                                       ("pcc_switchgear_by_operator", pcc_switchgear_by_operator))
+                                       ("pcc_switchgear_by_operator", pcc_switchgear_by_operator),
+                                       ("pcc_tap_control", pcc_tap_control))
                 if v is not None}
     settings["pf"] = pf
     with _acting() as (db, user):
@@ -4473,6 +4475,8 @@ def export_run_evidence(
 # ── Harness: ask the user (chat harness issue 04) ──────────────────────────
 
 ASK_USER_MAX_OPTIONS = 8
+ASK_USER_MAX_DETAIL = 2000
+ASK_USER_INTENTS = ("choice", "plan_review")
 
 
 def ask_user(
@@ -4480,6 +4484,9 @@ def ask_user(
     question: str,
     options: list[dict],
     allow_free_text: bool = True,
+    multi_select: bool = False,
+    detail: str | None = None,
+    intent: str = "choice",
 ) -> dict:
     """
     Present a structured question. Non-blocking by design (owner decision
@@ -4489,6 +4496,12 @@ def ask_user(
 
     Validation is strict and typed (`invalid_tool_args`) because a half-built
     card — no options, two recommendations — is worse than none.
+
+    Issue 15: `multi_select` lets several options go out together (one
+    message, labels joined by "; "); `detail` is Markdown shown under the
+    question, line breaks kept, capped at ASK_USER_MAX_DETAIL; `intent`
+    changes the presentation only — a `plan_review` card shows `detail` as
+    the plan and takes one verdict, so it needs a detail and is single-pick.
     """
     def bad(message: str) -> HTTPException:
         return HTTPException(status_code=422, detail={
@@ -4523,6 +4536,16 @@ def ask_user(
         clean.append(entry)
     if sum(1 for o in clean if o.get("recommended")) > 1:
         raise bad("mark at most one option as recommended")
+    if intent not in ASK_USER_INTENTS:
+        raise bad(f"intent must be one of {', '.join(ASK_USER_INTENTS)}")
+    if detail is not None and not isinstance(detail, str):
+        raise bad("detail must be a string of Markdown")
+    body = (detail or "").strip()[:ASK_USER_MAX_DETAIL] or None
+    if intent == "plan_review":
+        if body is None:
+            raise bad("a plan_review needs the plan in detail")
+        if multi_select:
+            raise bad("a plan_review takes one verdict; multi_select must be false")
     return {
         "_ui_event": True,
         "kind": "choice",
@@ -4530,6 +4553,9 @@ def ask_user(
         "question": " ".join(question.split())[:800],
         "options": clean,
         "allow_free_text": bool(allow_free_text),
+        "multi_select": bool(multi_select),
+        "detail": body,
+        "intent": intent,
     }
 
 
@@ -4545,6 +4571,108 @@ def set_chat_session(session: Any) -> None:
 
 def chat_session() -> Any:
     return _CHAT_SESSION.get()
+
+
+# ── Harness: page a spilled result (chat harness issue 16) ─────────────────
+
+READ_RESULT_CAP = 3500          # a page must fit the model-facing result cap
+READ_RESULT_MAX_LIMIT = 500
+
+
+def read_result(locator: str, pointer: str | None = None,
+                offset: int = 0, limit: int = 50) -> dict:
+    """
+    Page a tool result that was too large for the model and kept whole
+    (`harness/spill.py`). `pointer` is a JSON pointer ("/rows", "/rows/3/p");
+    a list is sliced by `offset`/`limit`, a large object is described by its
+    keys, a long string is sliced by characters. Every response fits
+    READ_RESULT_CAP: a page is shrunk until it does.
+
+    Bound to the calling chat: the locator resolves only inside this
+    session's and owner's spill directory, so another user's or another
+    chat's locator is `result_unavailable`, as is any read during a checked
+    answer. A malformed locator or pointer is `invalid_tool_args`.
+    """
+    from harness import spill
+
+    def bad(message: str) -> HTTPException:
+        return HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args", "message": f"read_result: {message}"})
+
+    def gone(message: str) -> HTTPException:
+        return HTTPException(status_code=404, detail={
+            "error_kind": "result_unavailable", "message": f"read_result: {message}"})
+
+    if not spill.valid_locator(locator):
+        raise bad("locator must be the 32-character id from a spill block")
+    session = chat_session()
+    if session is None:
+        raise gone("no chat is bound to this call")
+    if getattr(session, "assurance_turn", None) is not None:
+        raise gone("kept results are not readable during a checked answer")
+    path = spill.path_for(session, locator)
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise gone("that result has expired or belongs to another chat") from None
+
+    if pointer in (None, ""):
+        tokens: list[str] = []
+    elif not isinstance(pointer, str) or not pointer.startswith("/"):
+        raise bad("pointer must be empty or start with '/', e.g. /rows")
+    else:
+        tokens = [t.replace("~1", "/").replace("~0", "~") for t in pointer[1:].split("/")]
+    value: Any = doc
+    for tok in tokens:
+        if isinstance(value, dict):
+            if tok not in value:
+                raise bad(f"no key {tok!r} at that pointer")
+            value = value[tok]
+        elif isinstance(value, list):
+            if not tok.isdigit() or int(tok) >= len(value):
+                raise bad(f"{tok!r} is not an index of a list of {len(value)}")
+            value = value[int(tok)]
+        else:
+            raise bad("the pointer goes past a single value")
+
+    try:
+        offset = max(int(offset or 0), 0)
+        limit = min(max(int(limit or 50), 1), READ_RESULT_MAX_LIMIT)
+    except (TypeError, ValueError):
+        raise bad("offset and limit must be integers") from None
+    where = pointer or ""
+
+    def fits(payload: dict) -> bool:
+        return len(json.dumps(payload, default=str)) <= READ_RESULT_CAP
+
+    if isinstance(value, list):
+        items = value[offset:offset + limit]
+        page = {"pointer": where, "total": len(value), "offset": offset, "items": items}
+        while not fits(page) and len(items) > 1:
+            items = items[: max(1, len(items) // 2)]
+            page["items"] = items
+        if not fits(page):
+            return {"pointer": where, "total": len(value), "offset": offset,
+                    "too_large": True, "shape": spill.describe(items[0]) if items else "nothing",
+                    "hint": f"narrow with a pointer into the item, e.g. {where}/{offset}/<key>"}
+        end = offset + len(items)
+        page["next_offset"] = end if end < len(value) else None
+        return page
+    if isinstance(value, dict):
+        whole = {"pointer": where, "value": value}
+        if fits(whole):
+            return whole
+        keys = list(value)
+        return {"pointer": where, "keys": keys[:200], "total_keys": len(keys),
+                "shape": {str(k): spill.describe(value[k]) for k in keys[:40]},
+                "hint": f"add a key to the pointer, e.g. {where}/{keys[0]}" if keys else ""}
+    if isinstance(value, str) and len(value) > READ_RESULT_CAP - 200:
+        chunk = READ_RESULT_CAP - 200
+        part = value[offset:offset + chunk]
+        end = offset + len(part)
+        return {"pointer": where, "total_chars": len(value), "offset": offset,
+                "value": part, "next_offset": end if end < len(value) else None}
+    return {"pointer": where, "value": value}
 
 
 def use_skill(name: str) -> dict:
@@ -6660,306 +6788,52 @@ def record_asset_health(name: str, entries: list) -> dict:
 # verdict: the model writes the prose, and can only write it from numbers
 # that are in the payload.
 
-# Which bus columns carry an asset's electrical location, per class.
-_INVESTMENT_BUS_COLS: dict[str, tuple[str, ...]] = {
-    "Generator": ("bus",),
-    "StorageUnit": ("bus",),
-    "Store": ("bus",),
-    "Link": ("bus0", "bus1"),
-    "Line": ("bus0", "bus1"),
-    "Transformer": ("bus0", "bus1"),
-}
+# The implementation lives in `services/study/explain.py` (plan S6, lifted so
+# the guided investment study explains an option's assets from an explicit
+# network without the copilot). ONE implementation: this tool delegates with
+# the ACTIVE network and its own readers, and its output is pinned
+# byte-identical to a recording made before the lift
+# (`tests/test_study_explain.py`). The classifier and its sentences live in
+# `services.results.sizing` so the Economics tab and Asset Detail read the
+# SAME `binding_constraint` this tool reports. Bound here under the names the
+# rest of this module (and its tests) use.
+from services.results.sizing import classify_sizing as _sizing  # noqa: E402,F401
+from services.study import explain as _explain  # noqa: E402
 
-# One sentence per structural outcome — the LP fact, not advice.
-_BINDING_EXPLANATIONS: dict[str, str] = {
-    "not_solved": (
-        "the network has no fresh dispatch, so there is no sizing decision to "
-        "explain — every capacity below is an input or a stale leftover"
-    ),
-    "not_extendable": (
-        "the LP could not size this asset at all: its capacity is an INPUT, "
-        "not a result. Set p_nom_extendable (or the class's equivalent) to "
-        "let the optimisation choose it"
-    ),
-    "at_upper_bound": (
-        "the LP took every MW the upper bound allowed. The BOUND set this "
-        "size, not the economics — raise it to learn what the economics would "
-        "build"
-    ),
-    "not_built": (
-        "the LP chose to build none of it: at these costs it did not compete "
-        "at the margin against everything else on the system. Nothing blocked "
-        "it — it was simply not worth building"
-    ),
-    "at_lower_bound": (
-        "the LP built the minimum it was FORCED to and no more. The asset was "
-        "not competitive at the margin; a non-zero floor is holding it up, so "
-        "this capacity is a constraint's doing, not the economics'"
-    ),
-    "interior": (
-        "the LP stopped between the bounds, so this size IS the economic "
-        "answer: the marginal MW broke even against everything else on the "
-        "system"
-    ),
-}
-
-
-def _finite(value: Any) -> float | None:
-    """float(value) or None for anything non-finite, missing or unparseable."""
-    try:
-        out = float(value)
-    except (TypeError, ValueError):
-        return None
-    return out if math.isfinite(out) else None
-
-
-def _is_at(value: float | None, bound: float | None) -> bool:
-    """
-    Is an optimised capacity sitting ON a bound?
-
-    Relative, because an LP lands on a bound within solver tolerance and an
-    exact `==` reports "interior" for a plainly saturated asset — the single
-    wrong answer this whole tool exists to avoid.
-    """
-    if value is None or bound is None:
-        return False
-    return abs(value - bound) <= max(abs(bound), abs(value), 1.0) * 1e-6
-
-
-def _sizing(row: Any, nom_col: str, *, solved: bool) -> dict:
-    """Classify the sizing decision from the asset's static row."""
-    existing = _finite(row.get(nom_col))
-    optimised = _finite(row.get(f"{nom_col}_opt")) if solved else None
-    lower = _finite(row.get(f"{nom_col}_min"))
-    upper = _finite(row.get(f"{nom_col}_max"))   # None == unbounded (inf)
-    extendable = bool(row.get(f"{nom_col}_extendable", False))
-
-    if not solved:
-        binding = "not_solved"
-    elif not extendable:
-        binding = "not_extendable"
-    elif _is_at(optimised, upper):
-        binding = "at_upper_bound"
-    elif _is_at(optimised, lower):
-        # A floor of zero is not a floor. Reporting "the minimum it was forced
-        # to" for an asset nobody forced anywhere reads as if a constraint
-        # explained the zero, when the honest answer is that it lost on cost.
-        binding = "at_lower_bound" if (lower or 0.0) > 0 else "not_built"
-    else:
-        binding = "interior"
-
-    added = None if (optimised is None or existing is None) else optimised - existing
-    headroom = None if (optimised is None or upper is None) else upper - optimised
-    return {
-        "capacity_column": nom_col,
-        "extendable": extendable,
-        "existing": existing,
-        "optimised": optimised,
-        "added": added,
-        "lower_bound": lower,
-        "upper_bound": upper,          # null = unbounded (p_nom_max = inf)
-        "headroom": headroom,
-        "binding_constraint": binding,
-        "explanation": _BINDING_EXPLANATIONS[binding],
-    }
-
-
-def _bus_price_signals(n: Any, buses: list[str]) -> dict:
-    """Mean / min / max / load-weighted marginal price at each of the asset's buses."""
-    from services.asset_results import service as svc
-
-    wanted = ["bus_price_mean", "bus_price_min", "bus_price_max",
-              "bus_load_weighted_price"]
-    out: dict[str, Any] = {}
-    for bus in buses:
-        if bus not in n.buses.index:
-            continue
-        try:
-            resp = svc.build_response(
-                n, "Bus", bus, category="prices", metric_ids=wanted,
-                source="lopf", from_iso=None, to_iso=None, period=None,
-                mode="chronological",
-            )
-        except Exception:  # noqa: BLE001 — a missing signal is not a failure
-            continue
-        scalars = {k: v for k, v in resp.get("scalars", {}).items() if k in wanted}
-        if scalars:
-            out[bus] = scalars
-    return out
-
-
-def _congestion_at(n: Any, buses: list[str]) -> dict:
-    """
-    The binding LINES touching the asset's buses, WITH why the list may be
-    empty.
-
-    An empty list has four very different causes — no lines there at all, no
-    duals captured on this solve, lines that never bind, or an asset that
-    connects through links and transformers, which `compute_line_duals` does
-    not cover (it walks `n.lines`). Returning the bare list makes all four read
-    as "uncongested", the one reading that can be flatly wrong, so the reason
-    travels with the data instead of being inferred from its absence.
-    """
-    at_bus = {
-        str(name) for name, line in n.lines.iterrows()
-        if str(line.get("bus0")) in buses or str(line.get("bus1")) in buses
-    }
-    if not at_bus:
-        # Checked FIRST: on a network with no lines, compute_line_duals says
-        # "No LP duals captured — re-run the solve", which sends the agent
-        # (and the user) after a solve that would change nothing.
-        return {"lines": [], "note": (
-            "no line connects to this asset's buses, so line congestion does "
-            "not apply here — links and transformers are out of scope either "
-            "way"
-        )}
-
-    payload = get_results("line_duals")
-    if not isinstance(payload, dict):
-        return {"lines": [], "note": "line duals unavailable"}
-    if payload.get("status") == "no_data":
-        return {"lines": [], "note": payload.get("message")}
-    if payload.get("note"):
-        # compute_line_duals' own sentence — "No LP duals captured…". Empty
-        # here means UNKNOWN, not uncongested.
-        return {"lines": [], "note": str(payload["note"])}
-
-    lines = [
-        {k: r.get(k) for k in ("name", "binding_hours",
-                               "max_mu_eur_per_MWh", "congestion_rent_eur")}
-        for r in payload.get("rows", [])
-        if r.get("name") in at_bus and (r.get("binding_hours") or 0) > 0
-    ]
-    note = None if lines else (
-        "no line at this asset's buses binds in any hour — but this covers "
-        "n.lines only, so a link- or transformer-connected corridor is not "
-        "evidence either way"
-    )
-    return {"lines": lines, "note": note}
+_INVESTMENT_BUS_COLS = _explain.INVESTMENT_BUS_COLS
+_bus_price_signals = _explain.bus_price_signals
+_co2_signals_of = _explain.co2_signals
+_reading_notes = _explain.reading_notes
 
 
 def _co2_signals() -> list[dict]:
-    """Active CO2 caps with their shadow prices — the system-wide clean premium."""
-    payload = get_results("emissions")
-    if not isinstance(payload, dict) or payload.get("status") == "no_data":
-        return []
-    return [
-        {k: cap.get(k) for k in ("name", "scope", "investment_period",
-                                 "binding", "shadow_price_eur_per_tCO2",
-                                 "slack_tCO2")}
-        for cap in payload.get("caps", []) if cap.get("active")
-    ]
+    """Active CO2 caps with their shadow prices, on the active project."""
+    return _co2_signals_of(get_results)
 
 
-def _reading_notes(sizing: dict, co2: list[dict], buses: list[str]) -> list[str]:
-    """The framing that keeps the narration honest. Order is deliberate."""
-    notes = [
-        "This payload is EVIDENCE, not a verdict. Narrate only numbers that "
-        "appear in it, and name the field you used.",
-    ]
-    binding = sizing["binding_constraint"]
-    if binding == "interior":
-        notes.append(
-            "Zero-profit equilibrium: an extendable asset at an interior "
-            "optimum earns approximately zero net profit BY CONSTRUCTION — "
-            "the LP builds until the marginal MW breaks even. A near-zero "
-            "net_profit_eur here is the expected result, not a fault."
-        )
-    elif binding == "at_upper_bound":
-        notes.append(
-            "The size is a bound, not an optimum: do not narrate capture "
-            "price or profitability as the reason it is this big."
-        )
-    elif binding == "not_built":
-        notes.append(
-            "Nothing was built, so revenue / capture-price KPIs below are "
-            "zero or absent BY CONSTRUCTION. The question to answer is what "
-            "it lost to: compare its capital_cost and marginal_cost against "
-            "the bus price and against what the LP built instead."
-        )
-    elif binding == "not_extendable":
-        notes.append(
-            "Every capacity number below is an input the user typed. Nothing "
-            "here explains a build decision, because none was made."
-        )
-    binding_caps = [c for c in co2 if c.get("binding")]
-    if binding_caps:
-        notes.append(
-            "A CO2 cap binds. Its shadow price is part of this asset's "
-            "competitiveness and vanishes if the cap is relaxed — say so "
-            "rather than presenting the economics as cap-independent."
-        )
-    if len(buses) > 1:
-        notes.append(
-            "This asset spans more than one bus; the price signals are "
-            "reported per bus and can disagree across a congested corridor."
-        )
-    notes.append(
-        "Read system_signals.congestion.note before concluding anything from "
-        "an empty `lines` list: it says whether nothing binds, the duals were "
-        "never captured, or the corridor is simply out of scope."
-    )
-    return notes
+def _congestion_at(n: Any, buses: list[str]) -> dict:
+    """The binding lines at the asset's buses, on the active project's results."""
+    return _explain.congestion_at(n, buses, get_results)
+
+
+def _explain_kpis(component_class: str, name: str) -> dict:
+    return get_asset_results(component_class, name, category="summary")
 
 
 def explain_investment(component_class: str, name: str) -> dict:
     """
     Assemble the evidence behind one sizing decision: what the LP built, WHICH
     CONSTRAINT stopped it there, what the asset earned, and the system signals
-    it was priced against.
+    it was priced against (`services/study/explain.py::explain_asset`, on the
+    active network).
     """
-    from services.asset_results.compute import attr_for, nom_col_for
-    from services.dispatch_status import dispatch_status_detail
+    try:
+        return _explain.explain_asset(
+            PyPSAService.get_network(), component_class, name,
+            results=get_results, asset_kpis=_explain_kpis)
+    except _explain.ExplainError as exc:
+        raise HTTPException(exc.status, exc.message) from None
 
-    nom_col = nom_col_for(component_class)
-    if nom_col is None:
-        raise HTTPException(
-            400,
-            f"{component_class!r} carries no capacity the optimiser sizes. "
-            f"Sizeable classes: "
-            f"{', '.join(sorted(_INVESTMENT_BUS_COLS))}",
-        )
-
-    n = PyPSAService.get_network()
-    # `attr_for`, not `_GENERIC_CRUD_ATTRS`: the same class → DataFrame map
-    # `get_asset_results` uses, so the row this reads and the KPIs it fuses
-    # below can never come from two different tables.
-    df = getattr(n, attr_for(component_class))
-    if name not in df.index:
-        raise HTTPException(404, f"No {component_class} named {name!r}")
-    row = df.loc[name].to_dict()
-
-    dispatch = dispatch_status_detail(n)
-    solved = dispatch.get("state") == "fresh"
-
-    buses = [str(row.get(col)) for col in _INVESTMENT_BUS_COLS[component_class]
-             if row.get(col) is not None]
-    sizing = _sizing(row, nom_col, solved=solved)
-    co2 = _co2_signals() if solved else []
-
-    # The per-asset KPIs, taken from the registry rather than recomputed, so
-    # this can never disagree with the Asset Detail tab the user is looking at.
-    kpis = get_asset_results(component_class, name, category="summary")
-
-    return {
-        "asset": {
-            "component_class": component_class,
-            "name": name,
-            "carrier": row.get("carrier"),
-            "buses": buses,
-        },
-        "dispatch_state": dispatch,
-        "sizing": sizing,
-        "asset_kpis": kpis.get("headline", []),
-        "unavailable_kpis": kpis.get("unavailable", []),
-        "system_signals": {
-            "bus_prices": _bus_price_signals(n, buses) if solved else {},
-            "co2_caps": co2,
-            "congestion": _congestion_at(n, buses) if solved else {
-                "lines": [], "note": "no fresh dispatch — nothing to assess"},
-        },
-        "reading_notes": _reading_notes(sizing, co2, buses),
-    }
 
 # ── Pre-dispatch validation (Improvement #19) ───────────────────────────────
 #
@@ -7289,6 +7163,7 @@ DISPATCHERS: dict[str, Any] = {
     "explain_cashflow": explain_cashflow,
     # project_mgmt (21)
     "list_projects": list_projects,
+    "read_result": read_result,
     "load_project": load_project,
     "activate_project": activate_project,
     "save_project": save_project,

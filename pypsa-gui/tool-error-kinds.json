@@ -47,6 +47,10 @@
       "surface": "inline",
       "why": "The user pressed stop. Announcing their own action in a banner is noise."
     },
+    "baseline_has_no_case": {
+      "surface": "inline",
+      "why": "Decision study (S5): the investment case was asked for the grid-only baseline, which every case is measured against. Route-only today; a client-side slip, nothing for the user to fix."
+    },
     "capability_unsupported": {
       "surface": "banner",
       "why": "The profile cannot do what the turn needs (vision, tools). A configuration problem only the user can fix, and the turn is over. It already had KIND_COPY and did not route — the same unreachable-copy shape as inactive_acting_user."
@@ -107,6 +111,18 @@
       "surface": "inline",
       "why": "Raised only by GET /{name}/reports/{id}/figures/{figure_id}, the report viewer's <img> source, for an unknown or malformed figure id. No tool serves figure bytes, so it never reaches a tool_error frame."
     },
+    "fork_changed_since_run": {
+      "surface": "inline",
+      "why": "Decision study (S5): an option fork's network changed after the run (opened, edited or re-solved outside the study), so its case would price one network with another's bills. Route-only today; the message tells the user to re-run the study."
+    },
+    "fork_has_children": {
+      "surface": "inline",
+      "why": "Decision study (S4): deleting a study, or re-running it, refused because a user branched a project from one of its option forks. Route-only today (routers/studies.py); the user moves or deletes that project and retries, so the refusal reads in place rather than as a banner."
+    },
+    "fork_solving": {
+      "surface": "inline",
+      "why": "Decision study (S4): a study fork still has an active solve-queue job, so it cannot be removed yet. Route-only today; transient, the user waits for or aborts the job."
+    },
     "format_not_supported": {
       "surface": "inline",
       "why": "One tool could not read one format. Per-call, and the model can try another route."
@@ -130,6 +146,10 @@
     "inline_tariff_would_be_replaced": {
       "surface": "inline",
       "why": "attach_tariff refused to replace a project's inline import tariff with a different Library tariff. The model asks the user and calls again with replace_inline=true — a question it is already asking in prose."
+    },
+    "intake_changed_since_run": {
+      "surface": "inline",
+      "why": "Decision study (S7 gate): the study's answers (site, load, tariff, PV) changed after the run, so its findings, cases and report would describe options built from other answers. Route-only today; the message tells the user to re-run the study."
     },
     "internal_error": {
       "surface": "inline",
@@ -191,6 +211,10 @@
       "surface": "inline",
       "why": "A Library reference no longer matches its item (edited or removed). The model re-reads the Library and retries or asks; a route code surfaced by attach_tariff."
     },
+    "ledger_changed_since_run": {
+      "surface": "inline",
+      "why": "Decision study (S5): the assumptions ledger was edited after the run, so the solved options no longer match it. Route-only today; the message tells the user to re-run the study."
+    },
     "load_not_found": {
       "surface": "banner",
       "why": "The named load is not in the network. The user gave a name that does not exist."
@@ -234,6 +258,14 @@
     "not_authorized": {
       "surface": "banner",
       "why": "The account may not take this action (e.g. switching the instance-wide profile). Terminal for the request and needs an administrator."
+    },
+    "option_not_solved": {
+      "surface": "inline",
+      "why": "Decision study (S5): the last run did not solve the option, or the study does not own its fork. Route-only today; the option list already shows which options solved."
+    },
+    "option_unknown": {
+      "surface": "inline",
+      "why": "Decision study (S5): the question has no such option id. Route-only today; a client-side slip, not a condition the user must act on."
     },
     "parallel_destructive_not_allowed": {
       "surface": "banner",
@@ -295,6 +327,10 @@
       "surface": "inline",
       "why": "A section id the report does not have, on generate (`sections`), on the per-section regenerate (WP3) or on get_report(section_id) (WP6). The message names the id; when WP6's tool passes a model-typed id the model corrects within the turn, as with invalid_tool_args."
     },
+    "result_unavailable": {
+      "surface": "inline",
+      "why": "read_result was given a locator that has expired, belongs to another chat or user, or was read during a checked answer. The model reads the message and re-runs a narrower query instead (chat harness issue 16)."
+    },
     "report_table_not_found": {
       "surface": "inline",
       "why": "get_report_table (WP6) was asked for a table id the report version does not carry. Tool-only: the routes serve whole documents. The message lists the ids the report has, so the model corrects within the turn, as with invalid_tool_args."
@@ -330,6 +366,14 @@
     "site_connection_wrong_direction": {
       "surface": "inline",
       "why": "set_site_connection: the PoC Link runs into the grid, or the export Link does not run from the site side to the grid. The model names the Link that runs the other way and retries."
+    },
+    "report_never_assembled": {
+      "surface": "inline",
+      "why": "Decision study (S7): reading or rendering the decision report (JSON, HTML, DOCX, XLSX) before it was ever assembled. A client-side sequencing slip on a route-only surface; the message says to POST the report first."
+    },
+    "report_prose_invalid": {
+      "surface": "inline",
+      "why": "Decision study (S7): the report's prose guard refused a paragraph (a number outside a fact reference, or an unresolved reference), naming the section and paragraph. The templates are the product's own, so this is a defect to fix, not a condition the user acts on; route-only today."
     },
     "snapshot_count_mismatch": {
       "surface": "banner",
@@ -419,6 +463,18 @@
       "surface": "inline",
       "why": "The bound template's bytes could not be opened as a Word document (docx_reader.TemplateReadError: a renamed zip, a truncated file) on bind, GET, plan or export. The message names the reason; the user must supply a real .docx, and the model relays it rather than retrying."
     },
+    "study_never_run": {
+      "surface": "inline",
+      "why": "Decision study (S4): asking for the run status or aborting a study that has never been run. A client-side sequencing slip, not a condition the user must act on."
+    },
+    "study_request_too_large": {
+      "surface": "inline",
+      "why": "Decision study (F1 B2): a /studies request body over the size limit (the 25 MB load-file cap plus headroom), refused 413 by services/study/body_limit.py before it is parsed. Route-only, no chat tool posts a study body; the message tells the user to use a smaller file."
+    },
+    "study_running": {
+      "surface": "inline",
+      "why": "Decision study (S4): a second run, a delete, or another study refused while a study runs on the base project. Route-only today; the message names the study and the user waits or aborts it."
+    },
     "time_column_parse_error": {
       "surface": "banner",
       "why": "The time column could not be parsed as datetimes; the user must fix the input."
@@ -442,6 +498,10 @@
     "tool_timeout": {
       "surface": "inline",
       "why": "One tool exceeded its budget. The turn continues and the model can route around it."
+    },
+    "tornado_never_run": {
+      "surface": "inline",
+      "why": "Decision study (S6): asking for the fixed-size tornado's progress, or aborting it, before it was ever run. A client-side sequencing slip on a route-only surface, not a condition the user must act on."
     },
     "turn_already_in_flight": {
       "surface": "inline",

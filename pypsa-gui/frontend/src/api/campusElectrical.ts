@@ -22,7 +22,12 @@ export interface CampusSettings {
   invest: boolean
   /** The grid operator owns the PCC switchgear: it is not bought or costed. */
   pcc_switchgear_by_operator: boolean
+  /** Who moves the PCC transformer's on-load taps (plan C15); absent in a run
+   *  saved before it existed, which means the campus. */
+  pcc_tap_control: PccTapControl
 }
+
+export type PccTapControl = 'campus' | 'grid_operator'
 
 export interface ComplianceRow {
   check: 'pcc_reactive' | 'pcc_voltage' | 'campus_voltage' | 'transformer_loading' | 'switchgear' | 'cable_loading'
@@ -33,6 +38,13 @@ export interface ComplianceRow {
   unit: string
   worst_period: number | null
   worst_hour: number | null
+  /** The case of the worst reading (`intact`, `N-1:<unit>`); null for the
+   *  reactive exchange and the fault level, absent in an older run. */
+  worst_case?: string | null
+  /** The band a voltage row's limit is an edge of; null for the other checks,
+   *  absent in an older run. */
+  limit_min?: number | null
+  limit_max?: number | null
   clause: string
   source: 'code' | 'assumed'
   detail: string
@@ -93,9 +105,10 @@ export interface Requirement {
 export type InvestStatus = 'chosen' | 'kept' | 'not_needed' | 'unresolved'
 
 /** What a row does (plan C13): a new asset, units added next to existing ones,
- *  existing units kept, or a group or cable bought where existing ones stood.
+ *  existing units kept, or a group or cable bought where existing ones stood;
+ *  plan C14: `renew`, an asset bought again at the end of its life.
  *  Absent in a run from before it, and empty for a need that needs nothing. */
-export type InvestAction = 'buy' | 'add' | 'keep' | 'replace'
+export type InvestAction = 'buy' | 'add' | 'keep' | 'replace' | 'renew'
 
 /** One need and the asset bought for it (`campus_investment.csv`). `library_id`
  *  and `invest_period` are null for a need that needs nothing. */
@@ -113,16 +126,44 @@ export interface InvestmentRow {
   status: InvestStatus
   reason: string | null
   action?: InvestAction | '' | null
+  // Plan C14, one row per purchase; absent in a run from before it.
+  /** 0 for a kept existing asset, 1 for the first buy, k for later ones. */
+  purchase?: number | null
+  /** The year bought (an existing asset's: its commissioning year). */
+  build_year?: number | null
+  /** The year its successor starts, or the horizon's end. */
+  service_to?: number | null
+  /** The row it replaces, as `lineage|purchase`. */
+  replaces?: string | null
+  lineage?: string | null
+  commissioned?: number | null
+  /** How the commissioning year is known: a source tag, or `assumed: ...`. */
+  commissioned_source?: string | null
 }
 
-/** The electrical cost of one investment period (`campus_cost.csv`). */
-export interface CostRow { period: number; capex_eur: number; annualised_eur_per_a: number }
+/** The electrical cost of one investment period (`campus_cost.csv`);
+ *  `capex_replacement_eur` (plan C14) is the part bought again. */
+export interface CostRow { period: number; capex_eur: number; annualised_eur_per_a: number; capex_replacement_eur?: number }
+
+/** The study horizon (plan C14): each period's span in years and where it came
+ *  from (`project`, or `assumed: ...`), the horizon's end and the run's notes. */
+export interface HorizonScope {
+  period_years: Record<string, number>
+  source: Record<string, string>
+  horizon_end: number
+  notes: string[]
+}
 
 /** The compliance table re-solved with the assets: `status_with_measures` and
  *  `value_with_measures` are an AC result, not a recommendation. */
 export interface InvestedComplianceRow extends ComplianceRow {
   value_with_measures: number | null
   detail_with_measures: string
+  /** Where the re-solved value was read, which need not be the as-is worst
+   *  hour; absent in a run from before they were kept. */
+  worst_period_with_measures?: number | null
+  worst_hour_with_measures?: number | null
+  worst_case_with_measures?: string | null
 }
 
 export interface HistoryRow { iteration: number; need: string; from: string; to: string; check: string; detail: string }
@@ -142,8 +183,29 @@ export interface ParallelScope {
 }
 
 /** Who buys the PCC switchgear, and (plan C13; absent in older runs) the rules
- *  for adding units in parallel. */
-export interface InvestScope { pcc_switchgear: 'campus' | 'grid_operator'; parallel?: ParallelScope }
+ *  for adding units in parallel, (plan C15; absent in older runs) who moves
+ *  the PCC transformer's taps, and (plan C14; absent in older runs) the study
+ *  horizon. */
+export interface InvestScope {
+  pcc_switchgear: 'campus' | 'grid_operator'
+  parallel?: ParallelScope
+  pcc_tap_control?: PccTapControl
+  horizon?: HorizonScope
+}
+
+/** One transformer's tap in one hour and case of the re-check (plan C15,
+ *  `campus_invest_taps.csv`): `moved_by` is the change from the campus file's
+ *  position, `ratio_pct` the ratio against the rated one. */
+export interface TapRow {
+  period: number
+  hour: number
+  case: string
+  transformer: string
+  group: string
+  tap_pos: number
+  ratio_pct: number
+  moved_by: number
+}
 
 /** The solved hub's own system cost. `per_period` is EUR per year for a
  *  multi-period project; a single-period project has only `total`, as solved. */
@@ -184,6 +246,10 @@ export interface CampusResults {
   scope: InvestScope | null
   /** Null when the run did not invest. */
   cost_basis?: CostBasis | null
+  /** The on-load taps of the re-check and how many critical hours moved one
+   *  (plan C15); null when the run did not invest, absent in older runs. */
+  taps?: TapRow[] | null
+  tap_hours_moved?: number | null
 }
 
 // ── the joint optimisation (MILP) as a background job (plan C12) ────────────
@@ -282,8 +348,15 @@ export interface CampusState {
    *  optimisation when it is fresh and found its own choice, else the least-cost run;
    *  null when there are none. */
   owner_assets_method?: 'milp' | 'least_cost' | null
+  /** How many needs that same run could not meet; they are passed to the investment case,
+   *  which flags the case (owner decision 2026-10-13). */
+  owner_assets_unresolved?: number
   /** The joint optimisation's job and results (plan C12). */
   milp?: CampusMilp
+  /** A study run is going on in the backend now (its own request, another
+   *  tab's, the copilot's, or the joint optimisation's least-cost run): the
+   *  results are the previous run's until it ends. Absent from an older backend. */
+  run_in_progress?: boolean
 }
 
 /** The asset library: the project's copy, else the shipped default. */
@@ -371,6 +444,16 @@ export interface GridCodeDraft {
 }
 
 const quiet = { skipErrorToast: true } as const
+
+/** A study run is one synchronous request: seconds to minutes of AC load flows
+ *  (18 to 31 s on a realistic campus at 3 hours per criterion, growing with the
+ *  hours), and starting the joint optimisation makes that run first unless a
+ *  fresh one exists. The client's 30 s default would abandon the request while
+ *  the backend finishes and saves the run, so these calls override it, as the
+ *  bundle download and import do (`projects.ts`). */
+export const CAMPUS_RUN_TIMEOUT_MS = 900_000
+/** Drafting loads the whole saved network, as a bundle download does: its 180 s. */
+export const CAMPUS_DRAFT_TIMEOUT_MS = 180_000
 const base = (project: string) => `/campus-electrical/${encodeURIComponent(project)}`
 const codes = (project: string) => `${base(project)}/grid-codes`
 
@@ -381,7 +464,8 @@ export const campusApi = {
   /** Draft the campus file from the project's solved network. Refused (409)
    *  rather than overwrite an existing file unless `overwrite`. */
   draft: (project: string, overwrite = false) =>
-    client.post<{ campus_yaml: string; skipped: string[] }>(`${base(project)}/draft`, { overwrite }, quiet)
+    client.post<{ campus_yaml: string; skipped: string[] }>(`${base(project)}/draft`, { overwrite },
+      { ...quiet, timeout: CAMPUS_DRAFT_TIMEOUT_MS })
       .then(r => r.data),
 
   /** Save the user's campus file; the backend builds it and answers 422 naming
@@ -389,15 +473,18 @@ export const campusApi = {
   save: (project: string, yaml: string) =>
     client.put<{ campus_yaml: string }>(`${base(project)}/campus`, { yaml }, quiet).then(r => r.data),
 
-  /** Prepare, rank and size the campus; returns the new state. Seconds of CPU. */
+  /** Prepare, rank and size the campus; returns the new state. Seconds to
+   *  minutes of CPU: see `CAMPUS_RUN_TIMEOUT_MS`. */
   run: (project: string, settings: CampusSettings) =>
-    client.post<CampusState>(`${base(project)}/run`, settings, quiet).then(r => r.data),
+    client.post<CampusState>(`${base(project)}/run`, settings, { ...quiet, timeout: CAMPUS_RUN_TIMEOUT_MS })
+      .then(r => r.data),
 
   /** Start the joint optimisation (MILP, minutes) in the background. The
    *  least-cost run is made first unless a fresh one with these settings exists.
    *  409 while a job runs for any project. */
   startMilp: (project: string, settings: CampusSettings) =>
-    client.post<MilpJobRecord>(`${base(project)}/milp`, settings, quiet).then(r => r.data),
+    client.post<MilpJobRecord>(`${base(project)}/milp`, settings, { ...quiet, timeout: CAMPUS_RUN_TIMEOUT_MS })
+      .then(r => r.data),
 
   /** The job's record; null when no job has run since the backend started. */
   milpStatus: (project: string) =>
@@ -479,6 +566,15 @@ export const campusApi = {
 export function errorText(e: unknown): string {
   const detail = (e as { response?: { data?: { detail?: unknown } } } | null)?.response?.data?.detail
   return formatApiDetail(detail, (e as Error)?.message ?? 'Request failed')
+}
+
+/** The request got no answer: it timed out or the connection dropped. The
+ *  backend may still be running it (a study run saves its results when it
+ *  ends), unlike a refusal, which comes with a response. */
+export function isNoAnswer(err: unknown): boolean {
+  const e = err as { response?: unknown; code?: string } | null
+  if (e == null || e.response != null) return false
+  return e.code === 'ECONNABORTED' || e.code === 'ETIMEDOUT' || e.code === 'ERR_NETWORK'
 }
 
 export function isOtherKind(err: unknown): boolean {

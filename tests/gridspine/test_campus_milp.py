@@ -268,7 +268,7 @@ def test_the_milp_finds_the_joint_optimum_that_c8s_greedy_choice_misses(tmp_path
     comp_ = out["compliance"].set_index("check")
     assert set(comp_["status_with_measures"]) <= {"pass", "not_rated"}
     h = out["milp_history"]
-    assert h.iloc[0]["note"].startswith("C8") and h.iloc[0]["cost"] == pytest.approx(c8_cost)
+    assert h.iloc[0]["note"].startswith("the least-cost choice") and h.iloc[0]["cost"] == pytest.approx(c8_cost)
     assert bool(h["feasible"].iloc[-1]) and h["cost"].iloc[-1] == pytest.approx(best[0])
     # one discrete change (the transformer) and one switched step out: the
     # linear model predicted the AC flows to within a scale unit. Not the
@@ -277,6 +277,31 @@ def test_the_milp_finds_the_joint_optimum_that_c8s_greedy_choice_misses(tmp_path
     e = out["lin_errors"]
     first = e[e["iteration"] == 1]
     assert len(first) and first.loc[~first["constraint"].str.startswith("ts"), "error"].abs().max() < 1.0
+
+
+def test_renewals_are_written_but_the_milp_ranks_first_purchases_only(tmp_path):
+    """Plan C14 on the joint case over a 50-year span (H = 2080): C8's T_A
+    (40 years) is bought again in 2070 and its bank (25 years) in 2055, the
+    MILP's T_B in 2070. The ranking is unchanged: C8's cost and the
+    comparison are the first purchases' annual cost, by hand as above."""
+    from gridspine.static.campus_milp import select_assets_milp
+    spec, table, sel, lib, req = joint_case(tmp_path)
+    out = select_assets_milp(spec, table, sel, lib, req, PROFILE, period_years={2030: 50})
+    c8_cost = annual(TA[3], 40, 0.01) + annual(CAP[3], 25, 0.02)
+    assert out["summary"]["c8_cost"] == pytest.approx(c8_cost)
+    cmp_ = out["comparison"].set_index("need")
+    assert cmp_.at["transformer TR1", "c8_annualised_eur_per_a"] == pytest.approx(annual(TA[3], 40, 0.01))
+    assert cmp_.at["reactive", "c8_annualised_eur_per_a"] == pytest.approx(annual(CAP[3], 25, 0.02))
+    assert out["summary"]["milp_cost"] == pytest.approx(annual(TB[3], 40, 0.01))
+    inv = out["investment"]
+    rows_ = inv[inv["need"] == "transformer TR1"]
+    assert list(rows_["build_year"]) == [2030, 2070] and list(rows_["action"]) == ["buy", "renew"]
+    assert list(rows_["library_id"]) == ["T_B", "T_B"]
+    cost = out["cost"].set_index("period")
+    assert cost.at[2030, "capex_eur"] == pytest.approx(2 * TB[3])
+    assert cost.at[2030, "capex_replacement_eur"] == pytest.approx(TB[3])
+    assert cost.at[2030, "annualised_eur_per_a"] == pytest.approx(annual(TB[3], 40, 0.01))
+    assert out["scope"]["horizon"]["horizon_end"] == 2080
 
 
 # --------------------------------------------------------------------------
@@ -480,7 +505,8 @@ def test_when_the_milp_cannot_beat_c8_c8s_choice_is_returned_and_flagged(tmp_pat
     lib["transformers"] = [e for e in lib["transformers"] if e["id"] == "T_A"]
     c8 = select_assets(spec, table, sel, lib, req, PROFILE)
     out = select_assets_milp(spec, table, sel, lib, req, PROFILE, c8=c8)
-    assert out["fallback"].startswith("no AC-feasible point is cheaper than C8's")
+    assert out["fallback"].startswith("no AC-feasible point is cheaper than the least-cost choice (")
+    assert "C8" not in out["fallback"]                                   # plain words, not the plan's names
     assert out["summary"]["fallback"] is True
     pd_testing = pytest.importorskip("pandas").testing
     pd_testing.assert_frame_equal(out["investment"], c8["investment"])
@@ -517,8 +543,10 @@ def test_switchgear_is_costed_per_bay_of_the_joint_choice_and_the_pcc_is_a_study
     assert (inv.at["switchgear MV1", "units"], inv.at["switchgear MV2", "units"]) == (4, 3)
     assert ("switchgear PCC" in inv.index) is pcc_switchgear
     assert ("switchgear PCC" in set(out["comparison"]["need"])) is pcc_switchgear
-    assert out["scope"] == {"pcc_switchgear": "campus" if pcc_switchgear else "grid_operator",
-                            "parallel": ParallelRules().scope()}
+    assert {k: v for k, v in out["scope"].items() if k != "horizon"} == {
+        "pcc_switchgear": "campus" if pcc_switchgear else "grid_operator", "parallel": ParallelRules().scope(),
+        "pcc_tap_control": "campus"}
+    assert out["scope"]["horizon"]["period_years"] == {2030: 1}                 # plan C14: one period, one year
 
 
 def test_bays_a_choice_adds_are_priced_in_the_milp(tmp_path):
@@ -575,7 +603,8 @@ def test_a_rated_pcc_left_to_the_grid_operator_constrains_nothing(tmp_path):
     h = out["milp_history"]
     assert (h["slack"] == 0).all() and (h.loc[h["feasible"], "worst_violation"] == 0).all()
     assert out["comparison"].set_index("need").at["transformer TR1", "milp_choice"] == "1 x T_B"
-    assert out["scope"] == {"pcc_switchgear": "grid_operator", "parallel": ParallelRules().scope()}
+    assert {k: v for k, v in out["scope"].items() if k != "horizon"} == {
+        "pcc_switchgear": "grid_operator", "parallel": ParallelRules().scope(), "pcc_tap_control": "campus"}
 
 
 def test_the_battery_is_held_to_the_polygon_not_the_circle(tmp_path):
@@ -852,3 +881,32 @@ def test_the_warm_start_is_c8s_addition_not_the_replacement_with_the_same_units(
     assert h.iloc[0]["choice"].startswith("transformer TR1: keep TR1 + 1 x T40")
     assert bool(h.iloc[0]["feasible"])
     assert out["comparison"].set_index("need").at["transformer TR1", "c8_choice"] == "keep TR1 + 1 x T40"
+
+
+def test_the_joint_choices_with_measures_values_carry_their_own_hour_and_case(tmp_path):
+    """The joint choice's re-check reports each value where it was read: the
+    transformer loading at the one hour (2030, 1), in an outage, since the
+    survivor carries the whole hour (solved here: either unit out gives the
+    peak, the intact pair less), never the intact case."""
+    from gridspine.static.campus_milp import select_assets_milp
+    spec, table, sel, lib, crit = outage_case(tmp_path)
+    out = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, crit)
+    assert out["fallback"] is None
+    q_bess = float(out["dispatch"].loc[out["dispatch"]["element"] == "inverters", "q_mvar"].iloc[0])
+    load = {case: float(n.res_trafo.loc[n.trafo["in_service"], "loading_percent"].max())
+            for case, n in (("intact", pair_net(q_bess)), ("N-1:TR1", pair_net(q_bess, out=0)),
+                            ("N-1:TR2", pair_net(q_bess, out=1)))}
+    peak = max(load.values())
+    assert load["intact"] < peak - 1.0
+    r = out["compliance"].set_index("check").loc["transformer_loading"]
+    assert (r["worst_period_with_measures"], r["worst_hour_with_measures"]) == (2030, 1)
+    assert load[r["worst_case_with_measures"]] == pytest.approx(peak, abs=1e-6)
+
+
+def test_the_warm_start_is_named_in_plain_words(tmp_path):
+    """The history's first row is the least-cost choice re-solved, said
+    without the plan's step names."""
+    from gridspine.static.campus_milp import select_assets_milp
+    spec, table, sel, lib, crit = outage_case(tmp_path)
+    h = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, crit)["milp_history"]
+    assert h.iloc[0]["iteration"] == 0 and h.iloc[0]["note"] == "the least-cost choice, re-solved as the warm start"

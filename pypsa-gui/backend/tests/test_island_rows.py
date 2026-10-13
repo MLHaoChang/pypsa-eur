@@ -58,12 +58,18 @@ def _genset(start_s=10.0, sync_s=5.0, **extra):
 
 
 def _island(*, units=None, sustained_h=4.0, k=None, scenarios=("planned",), rt=None,
-            bridge_s=600.0, fuel_h=None):
+            bridge_s=600.0, fuel_h=None, rocof=1.0, qss=1.0, margin=0.0, blocks=None):
+    """The I2b limits default slack enough that the I2a cases are sized by
+    the I2a rows alone: the steady-island MVA row (all scenarios) at a 0
+    margin is below every I2a answer."""
     units = {"bess": dict(_BESS), "crit": {"kind": "load", "critical": True}} \
         if units is None else units
+    limits = dict(_LIMITS, rocof_hz_per_s=_a(rocof), qss_band_hz=_a(qss))
     req = {"bridge_s": _a(bridge_s), "sustained_h": _a(sustained_h),
-           "rocof_window_ms": _a(500.0), "gfm_margin": _a(0.1), "scenarios": list(scenarios),
-           "frequency_limits": {"transition": dict(_LIMITS), "steady_island": dict(_LIMITS)}}
+           "rocof_window_ms": _a(500.0), "gfm_margin": _a(margin), "scenarios": list(scenarios),
+           "frequency_limits": {"transition": dict(limits), "steady_island": dict(limits)}}
+    if blocks is not None:
+        req["pickup_blocks"] = _a(list(blocks))
     if k is not None:
         req["genset_redundancy_n"] = _a(k)
     if rt is not None:
@@ -253,7 +259,9 @@ def _ups_case(eta):
     units = {"ups": {"kind": "ups", "it_load": ["it"], "walk_in_s": _a(15.0),
                      "f_window_hz": _a(2.0)},
              "it": {"kind": "load", "critical": True}, "g": _genset()}
-    return _solve(n, _island(units=units, k=0))
+    # ups_bridged, so the UPS bridge applies (I2b's matrix); one 1 MW block
+    # leaves the 30 MW genset's pickup, RoCoF and droop rows slack.
+    return _solve(n, _island(units=units, k=0, scenarios=("ups_bridged",), blocks=[1.0]))
 
 
 @pytest.mark.parametrize("eta,need", [(1.0, 20.0 * 600 / 3600), (0.95, 20.0 * 600 / 3600 / 0.95)])
@@ -270,7 +278,8 @@ def test_seamless_gfm_bridge_adds_to_the_window_in_one_row():
     max(40, 0.0417) = 40)."""
     units = {"bess": dict(_BESS), "crit": {"kind": "load", "critical": True},
              "g": _genset(start_s=10.0, sync_s=5.0)}
-    n = _solve(_net(gensets=[("g", 0.0)]), _island(units=units, k=0, scenarios=("seamless",)),
+    n = _solve(_net(gensets=[("g", 0.0)]),
+               _island(units=units, k=0, scenarios=("seamless",), rocof=1e6, qss=1e6),
                delta_p_plus=10.0)
     assert _p_nom(n) == pytest.approx((40.0 + 10.0 * 15.0 / 3600.0) / 2.0, abs=TOL)
 
@@ -548,7 +557,8 @@ def test_a_flat_delta_p_plus_series_lines_up_with_investment_periods():
     n = _net(gensets=[("g", 0.0)])
     step = pd.Series(10.0, index=n.snapshots)
     n.set_investment_periods([2030, 2040])
-    n = _solve(n, _island(units=units, k=0, scenarios=("seamless",)), delta_p_plus=step)
+    n = _solve(n, _island(units=units, k=0, scenarios=("seamless",), rocof=1e6, qss=1e6),
+               delta_p_plus=step)
     assert _p_nom(n) == pytest.approx((40.0 + 10.0 * 15.0 / 3600.0) / 2.0, abs=TOL)
     assert n._island_facts["seamless_bridge"] == "held"
 
@@ -564,3 +574,444 @@ def test_the_initial_soc_is_credited_once_at_the_start_of_the_horizon():
     p_set.iloc[24, p_set.columns.get_loc("crit")] = 10.0
     n = _solve(n, _island(sustained_h=1.0))
     assert _p_nom(n) == pytest.approx(20.0, abs=TOL)
+
+
+# ══ I2b: the instant of islanding ═══════════════════════════════════════════
+#
+# A hub: the grid supply on its own bus, an import Link into the site tagged
+# eh_role=grid_import (and an export Link back when the site exports), the
+# loads, a must-run PV and an extendable GFM BESS. The PCC import is
+# p_imp = η·p0_imp − p0_exp; the steps are
+#   ΔP⁺ = p_imp − Σ_{late UPS} X_u,   X_u ≤ L_it,u,  X_u ≤ p_nom_u,  X_u ≥ 0
+#   ΔP⁻ = −p_imp + Σ_{late UPS} L_it,u
+# Each case sets the limits it does not test slack (RoCoF and the qss band
+# at 1e6, a 0 MVA margin, no critical load), so one row sizes the BESS.
+
+SLACK = {"rocof": 1e6, "qss": 1e6}
+_VSM = {"kind": "bess", "control": "gfm_vsm", "pf_rated": _a(1.0), "droop_pct": _a(4.0),
+        "q_droop_pct": _a(4.0), "H_v_s": _a(4.0), "i_max_pu": _a(1.2), "k_gfm_min": _a(1.0)}
+_FW_PV = {"kind": "pv", "control": "gfl_fw", "pf_rated": _a(0.95), "fw_k_mw_per_hz": _a(10.0),
+          "fw_deadband_hz": _a(0.2), "fw_delay_s": _a(0.5), "fw_ramp_mw_per_s": _a(2.0),
+          "fw_p_limit_mw": _a(4.0)}
+
+
+def _ups(walk_in_s=20.0, transfers=True):
+    return {"kind": "ups", "it_load": ["it"], "walk_in_s": _a(walk_in_s), "f_window_hz": _a(2.0),
+            "transfers_on_islanding": transfers}
+
+
+def _hub(*, load=0.0, crit=0.0, it=0.0, pv=0.0, hours=4, export=False, gensets=(),
+         bess_hours=4.0, ups_mw=None, ups_extendable=False, extra_storage=()):
+    """``gensets``: [(name, MW)] fixed, never dispatched (marginal 1000);
+    ``ups_mw`` adds a UPS StorageUnit of that rating (fixed, or pinned by
+    p_nom_min = p_nom_max when ``ups_extendable``)."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=hours, freq="h"))
+    n.add("Bus", "grid")
+    n.add("Bus", "site")
+    n.add("Generator", "supply", bus="grid", p_nom=1000.0, p_min_pu=-1.0, marginal_cost=10.0)
+    n.add("Link", "imp", bus0="grid", bus1="site", p_nom=1000.0, efficiency=1.0)
+    n.links["eh_role"] = ""
+    n.links.at["imp", "eh_role"] = "grid_import"
+    if export:
+        n.add("Link", "exp", bus0="site", bus1="grid", p_nom=1000.0, efficiency=1.0)
+        n.links.at["exp", "eh_role"] = "grid_export"
+    n.add("Load", "load", bus="site", p_set=load)
+    n.add("Load", "crit", bus="site", p_set=crit)
+    n.add("Load", "it", bus="site", p_set=it)
+    if pv:
+        n.add("Generator", "pv", bus="site", p_nom=pv, p_min_pu=1.0, p_max_pu=1.0)
+    for name, mw in gensets:
+        n.add("Generator", name, bus="site", p_nom=mw, marginal_cost=1000.0)
+    n.add("StorageUnit", "bess", bus="site", p_nom_extendable=True, capital_cost=100.0,
+          max_hours=bess_hours, cyclic_state_of_charge=True)
+    if ups_mw is not None:
+        kw = (dict(p_nom_extendable=True, p_nom_min=ups_mw, p_nom_max=ups_mw)
+              if ups_extendable else dict(p_nom=ups_mw))
+        n.add("StorageUnit", "ups", bus="site", max_hours=1.0, cyclic_state_of_charge=True, **kw)
+    for name, mw, hours_ in extra_storage:
+        n.add("StorageUnit", name, bus="site", p_nom=mw, max_hours=hours_,
+              cyclic_state_of_charge=True)
+    return n
+
+
+def _units(*, bess=_BESS, ups=None, gensets=None, pv=None, extra=None):
+    units = {"crit": {"kind": "load", "critical": True}}
+    if bess is not None:
+        units["bess"] = dict(bess)
+    if ups is not None:
+        units["ups"] = ups
+    for name, spec in (gensets or {}).items():
+        units[name] = spec
+    if pv is not None:
+        units["pv"] = pv
+    units.update(extra or {})
+    return units
+
+
+def _seamless(units, **kw):
+    kw = {**SLACK, "sustained_h": 1.0, "bridge_s": 1.0, **kw}
+    return _island(units=units, k=kw.pop("k", 0), scenarios=kw.pop("scenarios", ("seamless",)),
+                   **kw)
+
+
+# ── (b↑) upward headroom at t = 0⁺ ─────────────────────────────────────────
+
+
+def test_headroom_covers_the_import_step_with_the_ups_on_line():
+    """10 MW import, the UPS on line (no transfer): the BESS needs 10 MW of
+    upward headroom at every hour, so p_nom = 10."""
+    n = _hub(load=4.0, it=6.0, ups_mw=10.0)
+    n = _solve(n, _seamless(_units(ups=_ups(transfers=False))))
+    assert _p_nom(n) == pytest.approx(10.0, abs=TOL)
+
+
+def test_a_late_walk_in_transfer_relieves_the_step():
+    """A 6 MW UPS that transfers and walks in after the gensets join
+    (20 s ≥ 10 + 5 s): ΔP⁺ = 10 − 6 = 4 MW."""
+    n = _hub(load=4.0, it=6.0, ups_mw=10.0, gensets=[("g", 0.0)])
+    n = _solve(n, _seamless(_units(ups=_ups(walk_in_s=20.0), gensets={"g": _genset()})))
+    assert _p_nom(n) == pytest.approx(4.0, abs=TOL)
+
+
+def test_a_walk_in_exactly_at_the_join_counts_as_late():
+    n = _hub(load=4.0, it=6.0, ups_mw=10.0, gensets=[("g", 0.0)])
+    n = _solve(n, _seamless(_units(ups=_ups(walk_in_s=15.0), gensets={"g": _genset()})))
+    assert _p_nom(n) == pytest.approx(4.0, abs=TOL)
+
+
+def test_an_early_walk_in_gives_no_relief():
+    """Walk-in 10 s < 15 s: the IT load is back before the gensets join, so
+    the BESS carries the whole 10 MW."""
+    n = _hub(load=4.0, it=6.0, ups_mw=10.0, gensets=[("g", 0.0)])
+    n = _solve(n, _seamless(_units(ups=_ups(walk_in_s=10.0), gensets={"g": _genset()})))
+    assert _p_nom(n) == pytest.approx(10.0, abs=TOL)
+
+
+@pytest.mark.parametrize("ups_mw,headroom", [(4.0, 6.0), (8.0, 4.0)])
+def test_extendable_ups_relief_is_the_smaller_of_its_load_and_its_rating(ups_mw, headroom):
+    """L_it 6 MW. An extendable UPS of 4 MW relieves X = 4 (headroom 6);
+    one of 8 MW relieves X = L_it = 6 (headroom 4)."""
+    n = _hub(load=4.0, it=6.0, ups_mw=ups_mw, ups_extendable=True, gensets=[("g", 0.0)])
+    n = _solve(n, _seamless(_units(ups=_ups(walk_in_s=20.0), gensets={"g": _genset()})))
+    assert _p_nom(n) == pytest.approx(headroom, abs=TOL)
+    assert _p_nom(n, "ups") == pytest.approx(ups_mw, abs=TOL)
+
+
+def test_a_spinning_genset_adds_headroom_and_burns_its_minimum_load():
+    """A spinning 6 MW genset at p_min_pu 0.3 carries 6 − p_g of the 10 MW
+    step: the BESS needs 4 MW. It runs at ≥ 1.8 MW every hour, which is the
+    fuel it costs. Cold, the BESS needs 10 MW and the genset never runs."""
+    units = _units(gensets={"g": _genset(spinning=True, p_min_pu=_a(0.3))})
+    n = _solve(_hub(load=10.0, gensets=[("g", 6.0)]), _seamless(units))
+    assert _p_nom(n) == pytest.approx(4.0, abs=TOL)
+    assert (n.generators_t.p["g"] >= 1.8 - TOL).all()
+    cold = _solve(_hub(load=10.0, gensets=[("g", 6.0)]),
+                  _seamless(_units(gensets={"g": _genset()})))
+    assert _p_nom(cold) == pytest.approx(10.0, abs=TOL)
+    assert cold.generators_t.p["g"].abs().max() <= TOL
+
+
+def test_the_minimum_load_row_holds_in_every_scenario():
+    """Spinning without seamless still burns the minimum load (planned)."""
+    units = _units(gensets={"g": _genset(spinning=True, p_min_pu=_a(0.3))})
+    n = _solve(_hub(load=10.0, gensets=[("g", 6.0)]), _seamless(units, scenarios=("planned",)))
+    assert (n.generators_t.p["g"] >= 1.8 - TOL).all()
+
+
+def test_ups_bridged_has_no_headroom_row():
+    """Under ups_bridged the bus goes dead: no BESS headroom is bought."""
+    units = _units(gensets={"g": _genset()})
+    n = _solve(_hub(load=10.0, gensets=[("g", 20.0)]),
+               _seamless(units, scenarios=("ups_bridged",), blocks=[1.0]))
+    assert _p_nom(n) == pytest.approx(0.0, abs=TOL)
+
+
+# ── (b↓) downward headroom ──────────────────────────────────────────────────
+
+
+def test_the_export_step_needs_downward_power():
+    """The site exports 8 MW (a must-run 8 MW PV, no load): ΔP⁻ = 8, and the
+    BESS absorbs it: p_s + p_nom ≥ 8."""
+    n = _solve(_hub(pv=8.0, export=True), _seamless(_units()))
+    assert _p_nom(n) == pytest.approx(8.0, abs=TOL)
+
+
+def test_a_late_transferring_ups_adds_its_load_to_the_export_step():
+    """Exporting 8 MW with a 6 MW IT load that transfers late: ΔP⁻ = 8 + 6."""
+    n = _hub(pv=14.0, it=6.0, export=True, ups_mw=10.0, gensets=[("g", 0.0)])
+    n = _solve(n, _seamless(_units(ups=_ups(walk_in_s=20.0), gensets={"g": _genset()})))
+    assert _p_nom(n) == pytest.approx(14.0, abs=TOL)
+
+
+def test_an_early_transfer_adds_its_load_to_the_export_step_at_the_instant():
+    """Owner, 2026-10-13: every transferring UPS drops its IT load at 0⁺,
+    early walk-in or late, so the 0⁺ surplus is 8 + 6 even with a 10 s
+    walk-in (the plan's late-only sum would give 8)."""
+    n = _hub(pv=14.0, it=6.0, export=True, ups_mw=10.0, gensets=[("g", 0.0)])
+    n = _solve(n, _seamless(_units(ups=_ups(walk_in_s=10.0), gensets={"g": _genset()})))
+    assert _p_nom(n) == pytest.approx(14.0, abs=TOL)
+
+
+def test_the_qss_export_step_counts_only_late_transfers():
+    """After the gensets join, an early walk-in UPS has its load back: the
+    qss export step is 4 MW, not 10. Band 0.5 Hz, R 4 %: p/2·0.5 ≥ 4 → 16
+    (counting the early UPS would give 40; the 0⁺ power row gives 10)."""
+    n = _hub(pv=10.0, it=6.0, export=True, ups_mw=10.0, gensets=[("g", 0.0)])
+    n = _solve(n, _seamless(_units(ups=_ups(walk_in_s=10.0), gensets={"g": _genset()}),
+                            qss=0.5))
+    assert _p_nom(n) == pytest.approx(16.0, abs=TOL)
+
+
+def test_soc_room_holds_the_surplus_until_frequency_watt_curtails_it():
+    """t_curt = 0.5 s delay + 4 MW / 2 MW/s = 2.5 s. 8 MW for 2.5 s is
+    0.005556 MWh of room; at 0.0005 h of storage that is 11.11 MW (the power
+    row alone gives 8)."""
+    n = _hub(pv=8.0, export=True, bess_hours=0.0005)
+    n = _solve(n, _seamless(_units(pv=_FW_PV)))
+    assert _p_nom(n) == pytest.approx(8.0 * 2.5 / 3600.0 / 0.0005, abs=1e-3)
+    assert n._island_facts["surplus"]["t_curt_s"] == pytest.approx(2.5)
+
+
+def test_a_surplus_with_no_frequency_watt_is_reported_not_islandable():
+    """Without a gfl_fw unit the surplus is not curtailable: no SoC row, and
+    every exporting hour is reported."""
+    from services.solver.island import not_islandable_hours
+
+    n = _hub(pv=8.0, export=True, bess_hours=0.0005)
+    n = _solve(n, _seamless(_units()))
+    assert _p_nom(n) == pytest.approx(8.0, abs=TOL)
+    assert n._island_facts["surplus"]["status"] == "not curtailable: no gfl_fw unit"
+    assert list(not_islandable_hours(n)) == list(n.snapshots)
+
+
+def test_an_importing_site_has_no_not_islandable_hours():
+    from services.solver.island import not_islandable_hours
+
+    n = _solve(_hub(load=10.0), _seamless(_units()))
+    assert list(not_islandable_hours(n)) == []
+
+
+# ── (b■) genset pickup blocks (ups_bridged) ─────────────────────────────────
+
+
+def test_pickup_blocks_size_the_gensets_at_n_plus_1():
+    """ls 50 %. A fixed 6 MW genset and an extendable one of 4 MW units, N+1,
+    largest block 3 MW: 0.5·(6 + p) − 1·max(0.5·6, 0.5·4) ≥ 3 → p = 6."""
+    n = _hub(gensets=[("g1", 6.0)])
+    _extendable_genset(n, "gx", p_nom_max=100.0)
+    units = _units(bess=None, gensets={"g1": _genset(), "gx": _genset(unit_mw=_a(4.0))})
+    n = _solve(n, _seamless(units, scenarios=("ups_bridged",), blocks=[2.0, 3.0], k=1))
+    assert float(n.generators.at["gx", "p_nom_opt"]) == pytest.approx(6.0, abs=TOL)
+
+
+def test_pickup_blocks_too_large_for_fixed_gensets_are_refused():
+    """Nothing the row can size: a refusal naming the row, not an
+    infeasible LP."""
+    n = _hub(gensets=[("g1", 4.0), ("g2", 4.0)])
+    units = _units(gensets={"g1": _genset(), "g2": _genset()})
+    with pytest.raises(IslandRefusal, match="pickup"):
+        n.optimize(solver_name="highs", extra_functionality=island_extra_functionality(
+            _seamless(units, scenarios=("ups_bridged",), blocks=[3.0], k=1)))
+
+
+# ── (c) grid-forming MVA ────────────────────────────────────────────────────
+
+
+def test_gfm_mva_at_the_instant_binds_with_cold_gensets():
+    """10 MW critical, served by a 10 MW must-run PV (no import step). At
+    0⁺ the cold genset does not count: s_bess = p/0.95 ≥ 1.1·10 → 11.58 MW."""
+    n = _hub(crit=10.0, pv=10.0, gensets=[("g", 20.0)])
+    n = _solve(n, _seamless(_units(gensets={"g": _genset()}), margin=0.1))
+    assert _p_nom(n) == pytest.approx(11.0 * 0.95, abs=TOL)
+
+
+def test_gfm_mva_in_the_steady_island_counts_every_genset():
+    """planned: only the steady row. A 4 MW genset (5 MVA at 0.8) leaves
+    11 − 5 = 6 MVA to the BESS: 5.7 MW. A separate, fixed ride-through
+    store carries (a)."""
+    rt = {"kind": "bess", "control": "gfl_pq", "pf_rated": _a(0.95)}
+    n = _hub(crit=10.0, pv=10.0, gensets=[("g", 4.0)], extra_storage=[("rt", 100.0, 10.0)])
+    units = _units(gensets={"g": _genset()}, extra={"rt": rt})
+    n = _solve(n, _seamless(units, scenarios=("planned",), margin=0.1, rt=["rt"]))
+    assert _p_nom(n) == pytest.approx(6.0 * 0.95, abs=TOL)
+
+
+def test_seamless_with_no_former_at_the_instant_is_refused():
+    """A critical load, cold gensets and no GFM storage: nothing forms the
+    island at 0⁺, and nothing the row can size changes that."""
+    n = _hub(crit=10.0, pv=10.0, gensets=[("g", 20.0)])
+    n.storage_units.at["bess", "p_nom_extendable"] = False
+    _extendable_genset(n, "gx", p_nom_max=10.0)
+    units = _units(bess=None, gensets={"g": _genset(), "gx": _genset(unit_mw=_a(10.0))})
+    with pytest.raises(IslandRefusal, match="grid-forming"):
+        n.optimize(solver_name="highs", extra_functionality=island_extra_functionality(
+            _seamless(units, margin=0.1)))
+
+
+# ── (d) RoCoF ───────────────────────────────────────────────────────────────
+
+
+def test_rocof_with_a_vsm_bess():
+    """ΔP⁺ 4 MW, f0 50 Hz, 1 Hz/s, H_v 4 s: 2·4·s ≥ 50·4 → s = 25 MVA
+    (pf 1)."""
+    n = _solve(_hub(load=4.0), _seamless(_units(bess=_VSM), rocof=1.0))
+    assert _p_nom(n) == pytest.approx(25.0, abs=TOL)
+
+
+def test_rocof_counts_a_vsm_on_its_apparent_power():
+    """H_v is on S_n: at pf 0.8, s = p/0.8, so 2·4·p/0.8 ≥ 200 → p = 20 MW
+    (25 if the inertia were counted on p)."""
+    vsm = dict(_VSM, pf_rated=_a(0.8))
+    n = _solve(_hub(load=4.0), _seamless(_units(bess=vsm), rocof=1.0))
+    assert _p_nom(n) == pytest.approx(20.0, abs=TOL)
+
+
+def test_rocof_with_a_droop_bess():
+    """τ_f 0.1 s, R 4 %: M = 0.1·p/(2·0.04); 2M = 2.5·p ≥ 200 → p = 80 MW."""
+    n = _solve(_hub(load=4.0), _seamless(_units(), rocof=1.0))
+    assert _p_nom(n) == pytest.approx(80.0, abs=TOL)
+
+
+def test_rocof_on_the_export_step():
+    """Exporting 4 MW: the same 25 MVA VSM."""
+    n = _solve(_hub(pv=4.0, export=True), _seamless(_units(bess=_VSM), rocof=1.0))
+    assert _p_nom(n) == pytest.approx(25.0, abs=TOL)
+
+
+def test_rocof_counts_a_spinning_gensets_inertia():
+    """A spinning 4 MW genset, H 1.5 s on 5 MVA: 7.5 MWs. Its minimum load
+    (1.2 MW) also carries part of the 4 MW load, so ΔP⁺ = 2.8 MW:
+    2·(4·s + 7.5) ≥ 50·2.8 → s = 15.625 (23.125 if the step stayed 4)."""
+    units = _units(bess=_VSM, gensets={"g": _genset(spinning=True, p_min_pu=_a(0.3))})
+    n = _solve(_hub(load=4.0, gensets=[("g", 4.0)]), _seamless(units, rocof=1.0))
+    assert _p_nom(n) == pytest.approx(15.625, abs=TOL)
+    assert n.generators_t.p["g"].max() == pytest.approx(1.2, abs=TOL)
+
+
+def test_rocof_under_ups_bridged_takes_the_largest_block_at_n_plus_1():
+    """A fixed 10 MW genset and an extendable one of 10 MW units, H 1.5 s,
+    cos φ 0.8, N+1, block 3 MW, 1 Hz/s:
+    2·(1.875·(10 + p) − 1.875·10) ≥ 150 → p = 40."""
+    n = _hub(gensets=[("g1", 10.0)])
+    _extendable_genset(n, "gx", p_nom_max=100.0)
+    units = _units(bess=None, gensets={"g1": _genset(), "gx": _genset(unit_mw=_a(10.0))})
+    n = _solve(n, _seamless(units, scenarios=("ups_bridged",), blocks=[3.0], k=1, rocof=1.0))
+    assert float(n.generators.at["gx", "p_nom_opt"]) == pytest.approx(40.0, abs=TOL)
+
+
+# ── (e) quasi-steady-state frequency ───────────────────────────────────────
+
+
+def _qss_gensets():
+    return {"g1": _genset(), "g2": _genset()}
+
+
+def test_qss_on_the_import_step_at_n_plus_1():
+    """ΔP⁺ 4 MW, band 0.5 Hz, R 4 %, f0 50. Gensets 2 + 1 MW, N+1:
+    ΣK = p/2 + (2 + 1)/2 − 2/2 = p/2 + 0.5 ≥ 8 → p = 15."""
+    n = _hub(load=4.0, gensets=[("g1", 2.0), ("g2", 1.0)])
+    n = _solve(n, _seamless(_units(gensets=_qss_gensets()), qss=0.5, k=1))
+    assert _p_nom(n) == pytest.approx(15.0, abs=TOL)
+
+
+def test_qss_on_the_export_step():
+    n = _hub(pv=4.0, export=True, gensets=[("g1", 2.0), ("g2", 1.0)])
+    n = _solve(n, _seamless(_units(gensets=_qss_gensets()), qss=0.5, k=1))
+    assert _p_nom(n) == pytest.approx(15.0, abs=TOL)
+
+
+def test_qss_under_ups_bridged_takes_the_largest_block():
+    """Block 4 MW, band 0.5 Hz: ΣK ≥ 8. A fixed 2 MW genset and an extendable
+    one of 2 MW units, N+1: (2 + p)/2 − 1 ≥ 8 → p = 16."""
+    n = _hub(gensets=[("g1", 2.0)])
+    _extendable_genset(n, "gx", p_nom_max=100.0)
+    units = _units(bess=None, gensets={"g1": _genset(), "gx": _genset(unit_mw=_a(2.0))})
+    n = _solve(n, _seamless(units, scenarios=("ups_bridged",), blocks=[4.0], k=1, qss=0.5))
+    assert float(n.generators.at["gx", "p_nom_opt"]) == pytest.approx(16.0, abs=TOL)
+
+
+# ── the GFM bridge from I2b's own ΔP⁺, and where the rows apply ────────────
+
+
+def test_the_gfm_bridge_reads_the_islanding_step_with_its_relief():
+    """10 MW critical for 4 h in the BESS (40 MWh) plus B = ΔP⁺·15 s. The
+    import is 16 MW, of which a late UPS relieves 6: B = 10·15/3600."""
+    n = _hub(crit=10.0, it=6.0, ups_mw=10.0, gensets=[("g", 0.0)], bess_hours=2.0)
+    units = _units(ups=_ups(walk_in_s=20.0), gensets={"g": _genset()})
+    n = _solve(n, _seamless(units, sustained_h=4.0))
+    assert _p_nom(n) == pytest.approx((40.0 + 10.0 * 15.0 / 3600.0) / 2.0, abs=TOL)
+    assert n._island_facts["seamless_bridge"] == "held"
+
+
+def test_a_gfm_store_outside_ride_through_holds_the_bridge_in_its_own_row():
+    """The GFM BESS is not in RT (a fixed GFL store carries the ride-through):
+    it holds B = ΔP⁺·15 s = 10·15/3600 MWh in a row of its own. At 0.001 h
+    of storage that is 41.67 MW (headroom alone gives 10)."""
+    rt = {"kind": "bess", "control": "gfl_pq", "pf_rated": _a(0.95)}
+    n = _hub(load=10.0, gensets=[("g", 0.0)], bess_hours=0.001,
+             extra_storage=[("rt", 100.0, 10.0)])
+    units = _units(gensets={"g": _genset()}, extra={"rt": rt})
+    n = _solve(n, _seamless(units, rt=["rt"]))
+    assert _p_nom(n) == pytest.approx(10.0 * 15.0 / 3600.0 / 0.001, abs=1e-3)
+    assert "Island-gfm-bridge" in n.model.constraints
+
+
+def test_planned_islanding_holds_no_ups_bridge():
+    """The matrix: the UPS bridge is for unplanned islanding only."""
+    n = _hub(it=6.0, ups_mw=0.0, ups_extendable=True)
+    n.storage_units.at["ups", "p_nom_max"] = 100.0
+    n.storage_units.at["ups", "capital_cost"] = 1.0
+    units = _units(ups=_ups(transfers=False))
+    n = _solve(n, _seamless(units, scenarios=("planned",), bridge_s=600.0))
+    assert _p_nom(n, "ups") == pytest.approx(0.0, abs=TOL)
+
+
+def test_planned_islanding_has_no_instant_rows():
+    """planned: no headroom, RoCoF or qss row, so a 10 MW import buys no BESS."""
+    n = _solve(_hub(load=10.0), _seamless(_units(), scenarios=("planned",), rocof=1.0, qss=0.5))
+    assert _p_nom(n) == pytest.approx(0.0, abs=TOL)
+
+
+def test_seamless_without_a_tagged_import_link_is_refused():
+    n = _hub(load=10.0)
+    n.links.at["imp", "eh_role"] = ""
+    with pytest.raises(IslandRefusal, match="grid_import"):
+        n.optimize(solver_name="highs",
+                   extra_functionality=island_extra_functionality(_seamless(_units())))
+
+
+def test_import_efficiency_scales_the_step():
+    """η_imp 0.9: 10 MW of load is 10 MW on the site side, so ΔP⁺ = 10."""
+    n = _hub(load=10.0)
+    n.links.at["imp", "efficiency"] = 0.9
+    n = _solve(n, _seamless(_units()))
+    assert _p_nom(n) == pytest.approx(10.0, abs=TOL)
+
+
+def test_each_investment_period_reads_its_own_step():
+    """4 MW import in 2030, 8 MW in 2040: the BESS needs 8 MW."""
+    n = _hub(load=4.0)
+    n.set_investment_periods([2030, 2040])
+    p_set = n.loads_t.p_set
+    if "load" not in p_set:
+        p_set["load"] = 4.0
+    p_set.loc[p_set.index.get_level_values(0) == 2040, "load"] = 8.0
+    n = _solve(n, _seamless(_units()))
+    assert _p_nom(n) == pytest.approx(8.0, abs=TOL)
+
+
+# ── the Data Center template under I2b (owner, 2026-10-13) ─────────────────
+
+
+def test_template_islands_ups_bridged_in_5_mw_blocks():
+    """The template ships ups_bridged with 11 × 5 MW blocks. The RoCoF row on
+    a 5 MW block binds: 4 × 10 MW plus genset_new (10 MW units), H 1.5 s,
+    cos φ 0.8, N+1, 1 Hz/s: 2·1.875·(40 + p − 10) ≥ 250 → p = 36.67 MW."""
+    cfg = T.ISLAND_CONFIG["eh_datacenter"]["requirements"]
+    assert cfg["scenarios"] == ["ups_bridged"]
+    assert cfg["pickup_blocks"]["value"] == [5.0] * 11
+    n = _solve(T.build_eh_datacenter(), validate_island_config(T.ISLAND_CONFIG["eh_datacenter"]))
+    assert float(n.generators.at["genset_new", "p_nom_opt"]) == pytest.approx(
+        250.0 / 3.75 - 30.0, abs=1e-3)
+    assert "Island-rocof-block" in n.model.constraints

@@ -10,6 +10,7 @@ durable generation refuse further mutations.
 from __future__ import annotations
 
 import json
+import shutil
 
 import pytest
 from fastapi import HTTPException
@@ -243,3 +244,56 @@ def test_restart_clears_session_refs_and_stale_generation_refuses(roots):
     after = dc.get_thread(updated['thread_id'])
     assert after['refs']['discussed']['run_id'] == 'run-completed'
     assert after['generation'] == live_generation + 1
+
+
+def test_resume_keeps_discussed_run_when_evidence_is_gone(roots):
+    """A deleted run must not drop the binding or invent a live evidence status."""
+    root = roots['root_for'](PROJECT)
+    _seed_three(root)
+    thread = dc.create_thread()
+    updated, episode = dc.resume_episode(thread['thread_id'], generation=1)
+    chat_tools.set_chat_session(episode)
+    chat_tools.DISPATCHERS['discuss_project_run'](
+        run_id='run-completed',
+        results_tab='economics',
+        section='summary',
+        open_ui=False,
+    )
+    generation = dc.get_thread(updated['thread_id'])['generation']
+    shutil.rmtree(root / 'run_evidence' / 'run-completed')
+
+    chat_service._reset_sessions_for_tests()
+    _view, resumed = dc.resume_episode(updated['thread_id'], generation=generation)
+    refs = resumed.discussed_refs
+    assert refs['run_id'] == 'run-completed'
+    assert refs['project_id'] == PROJECT
+    assert refs['source'] == 'economics'
+    assert refs['section'] == 'summary'
+    for invented in ('status', 'mode', 'fingerprint', 'evidence_available'):
+        assert invented not in refs
+
+    chat_tools.set_chat_session(resumed)
+    with pytest.raises(HTTPException) as missing:
+        chat_tools.DISPATCHERS['export_run_evidence']()
+    assert missing.value.status_code == 404
+    assert missing.value.detail['error_kind'] == 'run_not_found'
+
+
+def test_resume_does_not_hide_evidence_lookup_failures(roots, monkeypatch):
+    root = roots['root_for'](PROJECT)
+    _seed_three(root)
+    thread = dc.create_thread()
+    updated, episode = dc.resume_episode(thread['thread_id'], generation=1)
+    chat_tools.set_chat_session(episode)
+    chat_tools.DISPATCHERS['discuss_project_run'](
+        run_id='run-completed', open_ui=False,
+    )
+    generation = dc.get_thread(updated['thread_id'])['generation']
+
+    def boom(run_id, section=None):
+        raise RuntimeError('evidence store offline')
+
+    monkeypatch.setattr(re_, 'get_run_evidence', boom)
+    chat_service._reset_sessions_for_tests()
+    with pytest.raises(RuntimeError, match='evidence store offline'):
+        dc.resume_episode(updated['thread_id'], generation=generation)

@@ -15,26 +15,44 @@
 // draft, save, run (and the library's save and reset). Refusals come back as the backend's message and render
 // inline: another project kind (409), not saved or solved (422), a campus
 // file that does not build (422, naming the field).
-import { useEffect, useState } from 'react'
+//
+// A run is one synchronous request (seconds to minutes; `CAMPUS_RUN_TIMEOUT_MS`).
+// When it gets no answer (a timeout, a dropped connection) the backend may still
+// be running it and will save its results, so the panel never treats the results
+// it shows as the new run's: it re-reads the state, warns while the backend says
+// a run is going on (`run_in_progress`), and says once it ends whether the
+// results it saved are the run asked for.
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, RefreshCw, Save, Square, Wand2, Workflow } from 'lucide-react'
 import {
-  campusApi, errorText, isOtherKind,
+  campusApi, errorText, isNoAnswer, isOtherKind,
   type CampusSettings, type CampusState, type CheckStatus, type ComplianceRow, type InvestedComplianceRow,
   type MilpJobRecord,
 } from '../api/campusElectrical'
 import { useUIStore } from '../store/uiStore'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
-import CampusInvestmentSection, { formatEur } from './CampusInvestmentSection'
+import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
 import CampusLibrarySection from './CampusLibrarySection'
 import { useCampusMilpJob } from './useCampusMilpJob'
 
 export const CAMPUS_KEY = (name: string) => ['campusElectrical', 'state', name] as const
+/** How often the state is re-read while a run goes on without an answer. */
+export const CAMPUS_RUN_POLL_MS = 1500
+
+/** A run whose request got no answer: what was asked, and why. */
+interface LostRun { settings: CampusSettings; why: string }
+
+function sameSettings(a: CampusSettings | null, b: CampusSettings): boolean {
+  if (a == null) return false
+  return (Object.keys(b) as (keyof CampusSettings)[]).every(k => a[k] === b[k])
+}
 
 const INPUT = 'px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20'
 const DEFAULT_SETTINGS: CampusSettings = {
   k: 3, pf: null, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true, invest: true, pcc_switchgear_by_operator: false,
+  pcc_tap_control: 'campus',
 }
 
 const CHECK_LABEL: Record<ComplianceRow['check'], string> = {
@@ -56,9 +74,9 @@ function num(v: number | null | undefined, digits = 2): string {
   return v == null || !isFinite(v) ? '—' : v.toFixed(digits).replace(/\.?0+$/, m => (m.startsWith('.') ? '' : m))
 }
 
-function where(period: number | null, hour: number | null): string {
+function where(period: number | null | undefined, hour: number | null | undefined, kase?: string | null): string {
   if (period == null) return ''
-  return hour == null ? `${period}` : `${period} · h${hour}`
+  return [`${period}`, hour == null ? null : `h${hour}`, kase || null].filter(Boolean).join(' · ')
 }
 
 export default function CampusElectricalPanel() {
@@ -79,7 +97,25 @@ export default function CampusElectricalPanel() {
 
 function CampusView({ name }: { name: string }) {
   const qc = useQueryClient()
-  const state = useQuery({ queryKey: CAMPUS_KEY(name), queryFn: () => campusApi.state(name), retry: false })
+  const [lost, setLost] = useState<LostRun | null>(null)
+  const [outcome, setOutcome] = useState<string | null>(null)
+  const state = useQuery({
+    queryKey: CAMPUS_KEY(name), queryFn: () => campusApi.state(name), retry: false,
+    refetchInterval: q => (lost != null || q.state.data?.run_in_progress ? CAMPUS_RUN_POLL_MS : false),
+  })
+  // Once a read made after the lost request (the effect runs on new data only) finds no run
+  // going on, the backend has ended: say whether what it saved is the run asked for.
+  const lostRef = useRef(lost)
+  lostRef.current = lost
+  useEffect(() => {
+    const l = lostRef.current
+    if (l == null || !state.data || state.data.run_in_progress) return
+    setOutcome(sameSettings(state.data.settings, l.settings)
+      ? 'The backend finished the run after the request went unanswered: the results below are that run\'s.'
+      : 'The backend saved no results for the run asked for: the results below, if any, are from an earlier run. '
+        + 'Run the study again.')
+    setLost(null)
+  }, [state.data, state.dataUpdatedAt])
 
   if (state.isError && isOtherKind(state.error)) {
     return (
@@ -103,6 +139,12 @@ function CampusView({ name }: { name: string }) {
   }
   const refresh = (data?: CampusState) =>
     data ? qc.setQueryData(CAMPUS_KEY(name), data) : qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })
+  const onRunStart = () => { setOutcome(null); setLost(null) }
+  const onRunLost = (settings: CampusSettings, why: string) => {
+    setLost({ settings, why })
+    void qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })
+  }
+  const pending = lost != null || state.data.run_in_progress === true
 
   return (
     <PageBody>
@@ -121,8 +163,11 @@ function CampusView({ name }: { name: string }) {
         onProfilesChanged={() => qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })}
       />
       <CampusLibrarySection name={name} onChanged={() => qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })} />
-      {state.data.campus_yaml && <RunSection name={name} state={state.data} onChange={refresh} />}
-      {state.data.results && <ResultsSection state={state.data} />}
+      {state.data.campus_yaml && (
+        <RunSection name={name} state={state.data} onChange={refresh} lost={lost} outcome={outcome} pending={pending}
+                    onRunStart={onRunStart} onRunLost={onRunLost} />
+      )}
+      {state.data.results && <ResultsSection state={state.data} pending={pending} />}
     </PageBody>
   )
 }
@@ -189,8 +234,16 @@ function CampusFileSection({ name, state, onChange }: {
   )
 }
 
-function RunSection({ name, state, onChange }: {
+function RunSection({ name, state, onChange, lost, outcome, pending, onRunStart, onRunLost }: {
   name: string; state: CampusState; onChange: (d?: CampusState) => unknown
+  /** The run whose request got no answer, while the panel waits for the backend. */
+  lost: LostRun | null
+  /** Once it ended: whether the backend saved the run asked for. */
+  outcome: string | null
+  /** A run is going on in the backend: no second one is asked for. */
+  pending: boolean
+  onRunStart: () => void
+  onRunLost: (settings: CampusSettings, why: string) => void
 }) {
   const initial = state.settings ?? DEFAULT_SETTINGS
   const [k, setK] = useState(String(initial.k))
@@ -201,6 +254,8 @@ function RunSection({ name, state, onChange }: {
   // A run saved before these settings existed has neither: the defaults.
   const [invest, setInvest] = useState(initial.invest ?? DEFAULT_SETTINGS.invest)
   const [byOperator, setByOperator] = useState(initial.pcc_switchgear_by_operator ?? DEFAULT_SETTINGS.pcc_switchgear_by_operator)
+  const [tapsByOperator, setTapsByOperator] = useState(
+    (initial.pcc_tap_control ?? DEFAULT_SETTINGS.pcc_tap_control) === 'grid_operator')
   const [refusal, setRefusal] = useState<string | null>(null)
   // The grid-codes listing says which published profiles still carry
   // unconfirmed limits; the picker names them so a run is never held to one unawares.
@@ -209,13 +264,13 @@ function RunSection({ name, state, onChange }: {
 
   const settings = (): CampusSettings => ({
     k: Number(k), pf: pf.trim() === '' ? null : Number(pf), profile, margin: Number(margin) / 100, n_minus_1: n1,
-    invest, pcc_switchgear_by_operator: byOperator,
+    invest, pcc_switchgear_by_operator: byOperator, pcc_tap_control: tapsByOperator ? 'grid_operator' : 'campus',
   })
   const run = useMutation({
-    mutationFn: () => campusApi.run(name, settings()),
-    onMutate: () => setRefusal(null),
+    mutationFn: (s: CampusSettings) => campusApi.run(name, s),
+    onMutate: () => { setRefusal(null); onRunStart() },
     onSuccess: data => onChange(data),
-    onError: e => setRefusal(errorText(e)),
+    onError: (e, s) => (isNoAnswer(e) ? onRunLost(s, errorText(e)) : setRefusal(errorText(e))),
   })
   // The joint optimisation: a background job, polled while it runs; when it
   // ends the state is re-read so its results appear beside the least-cost ones.
@@ -223,10 +278,13 @@ function RunSection({ name, state, onChange }: {
   const hasLeastCost = state.results?.investment != null
   const startMilp = () => {
     setRefusal(null)
-    milp.start(settings()).catch(e => setRefusal(errorText(e)))
+    milp.start(settings()).catch(e => setRefusal(isNoAnswer(e)
+      ? `No answer from the backend to the start of the joint optimisation (${errorText(e)}). It may have started: `
+        + 'its progress is read again.'
+      : errorText(e)))
   }
   const cancelMilp = () => { milp.cancel().catch(e => setRefusal(errorText(e))) }
-  const busy = run.isPending || milp.isStarting || milp.isRunning
+  const busy = run.isPending || milp.isStarting || milp.isRunning || pending
 
   return (
     <PageSection title="Study settings" hint="Applies to the next run">
@@ -260,7 +318,11 @@ function RunSection({ name, state, onChange }: {
           <input type="checkbox" aria-label="PCC switchgear owned by the grid operator (not costed)" checked={byOperator}
                  disabled={!invest} onChange={e => setByOperator(e.target.checked)} />
         </Field>
-        <Btn variant="primary" onClick={() => run.mutate()} disabled={busy}>
+        <Field label="PCC transformer taps held by the grid operator (at the campus file's position)" row>
+          <input type="checkbox" aria-label="PCC transformer taps held by the grid operator (at the campus file's position)"
+                 checked={tapsByOperator} disabled={!invest} onChange={e => setTapsByOperator(e.target.checked)} />
+        </Field>
+        <Btn variant="primary" onClick={() => run.mutate(settings())} disabled={busy}>
           <Play size={13} /> {run.isPending ? 'Running…' : 'Run study'}
         </Btn>
         <Btn
@@ -277,25 +339,42 @@ function RunSection({ name, state, onChange }: {
         background; you can cancel it and keep the best choice found so far.
         {!hasLeastCost && ' It needs a least-cost run first: run the study with assets bought from the library.'}
       </p>
-      {milp.record && <MilpProgress record={milp.record} cancelling={milp.cancelling} onCancel={cancelMilp} />}
+      {milp.record && (
+        <MilpProgress record={milp.record} cancelling={milp.cancelling} onCancel={cancelMilp}
+                      stale={state.milp?.stale === true} />
+      )}
       {refusal && <p className="text-[12px] text-danger mt-2">{refusal}</p>}
+      {lost && (
+        <p data-testid="campus-run-lost" role="alert" className="text-[12px] text-warn mt-2">
+          No answer from the backend to the run ({lost.why}). It may still be running the study, and saves its
+          results when it ends; the panel reads them again until then.
+        </p>
+      )}
+      {outcome && <p data-testid="campus-run-outcome" className="text-[12px] mt-2">{outcome}</p>}
     </PageSection>
   )
 }
 
 /** The job's line: while it runs, its iteration and best cost against the
- *  least-cost one, with Cancel; once ended, how it ended. */
-function MilpProgress({ record, cancelling, onCancel }: {
+ *  least-cost one, with Cancel; once ended, how it ended, or that its result is
+ *  stale. Iteration 0 is the warm start (the least-cost choice re-solved), so it
+ *  is named, not counted: the counts agree with the summary and the history. */
+function MilpProgress({ record, cancelling, onCancel, stale }: {
   record: MilpJobRecord; cancelling: boolean; onCancel: () => void
+  /** The least-cost run the finished result came from has changed since. */
+  stale: boolean
 }) {
   if (record.state === 'running') {
     const started = record.iteration != null && record.max_iter != null
+    const best = `best ${formatEur(record.best_cost)}/a vs least cost ${formatEur(record.c8_cost)}/a`
     return (
       <div data-testid="milp-progress" className="flex items-center gap-3 mt-2 text-[12px]">
         <span className="tabular-nums">
-          {started
-            ? `Iteration ${record.iteration} of ${record.max_iter} · best ${formatEur(record.best_cost)}/a vs least cost ${formatEur(record.c8_cost)}/a`
-            : `Joint optimisation running: ${record.message}`}
+          {!started
+            ? `Joint optimisation running: ${record.message}`
+            : record.iteration === 0
+              ? `Warm start solved, 0 of ${record.max_iter} iterations · ${best}`
+              : `Iteration ${record.iteration} of ${record.max_iter} · ${best}`}
           {cancelling && <span className="text-muted"> · cancelling…</span>}
         </span>
         <Btn onClick={onCancel} disabled={cancelling}><Square size={12} /> Cancel</Btn>
@@ -309,11 +388,15 @@ function MilpProgress({ record, cancelling, onCancel }: {
       </p>
     )
   }
+  const ended = record.state === 'cancelled' ? 'The joint optimisation was cancelled' : 'The joint optimisation has finished'
   return (
-    <p data-testid="milp-progress" className="text-[12px] text-muted mt-2">
-      {record.state === 'cancelled'
-        ? 'The joint optimisation was cancelled; the best choice it had found is shown under Investment.'
-        : 'The joint optimisation has finished; its choice is shown under Investment.'}
+    <p data-testid="milp-progress" className={`text-[12px] mt-2 ${stale ? 'text-warn' : 'text-muted'}`}>
+      {stale
+        ? `${ended}, but the least-cost run it started from has changed since: its result is stale. Run it again `
+          + 'before using it.'
+        : record.state === 'cancelled'
+          ? `${ended}; the best choice it had found is shown under Joint optimisation.`
+          : `${ended}; its choice is shown under Joint optimisation.`}
     </p>
   )
 }
@@ -322,7 +405,7 @@ function StatusTag({ s }: { s: CheckStatus }) {
   return <Tag tone={STATUS_TONE[s]}>{STATUS_TEXT[s]}</Tag>
 }
 
-function ResultsSection({ state }: { state: CampusState }) {
+function ResultsSection({ state, pending }: { state: CampusState; pending: boolean }) {
   const r = state.results!
   const req = r.requirement
   // The investment's table re-solves every check with the assets in place; without it
@@ -331,6 +414,13 @@ function ResultsSection({ state }: { state: CampusState }) {
   const rows: ComplianceRow[] = r.compliance_invested ?? r.compliance
   return (
     <>
+      {pending && (
+        <p data-testid="campus-run-pending" role="status"
+           className="text-[12px] text-warn border border-warn/40 rounded px-3 py-2">
+          A study run is going on in the backend: the results below are from the previous run, not the one being
+          run. They are replaced when it ends.
+        </p>
+      )}
       {state.stale && (
         <p className="text-[12px] text-warn border border-warn/40 rounded px-3 py-2">
           The campus file or the project has changed since this run. Run the study again before using these numbers.
@@ -342,111 +432,129 @@ function ResultsSection({ state }: { state: CampusState }) {
         title="PCC compliance"
         hint={invested ? 'as the campus is, and with the purchased assets, re-solved' : 'as the campus is, and with the recommended measures'}
       >
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="text-left text-muted">
-              <th className="font-normal pr-3">Check</th><th className="font-normal pr-3">As is</th>
-              <th className="font-normal pr-3">{invested ? 'With the assets (AC re-solved)' : 'With measures'}</th>
-              <th className="font-normal pr-3">Worst</th>
-              <th className="font-normal pr-3">Limit</th><th className="font-normal">Detail · rule</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(c => {
-              // With the investment, the "with" side is an AC result of the campus as bought.
-              const value = invested ? (c as InvestedComplianceRow).value_with_measures : c.value
-              const detail = invested ? (c as InvestedComplianceRow).detail_with_measures : c.detail
-              return (
-                <tr key={c.check} data-testid={`compliance-${c.check}`} className="border-t border-border">
-                  <td className="py-1 pr-3 whitespace-nowrap align-top">{CHECK_LABEL[c.check] ?? c.check}</td>
-                  <td className="pr-3 align-top"><StatusTag s={c.status_as_is} /></td>
-                  <td className="pr-3 align-top"><StatusTag s={c.status_with_measures} /></td>
-                  <td className="pr-3 whitespace-nowrap align-top tabular-nums">
-                    {num(value, 3)} {c.unit} <span className="text-muted">{where(c.worst_period, c.worst_hour)}</span>
+        <TableScroll>
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-muted">
+                <th className="font-normal pr-3">Check</th><th className="font-normal pr-3">As is</th>
+                <th className="font-normal pr-3">{invested ? 'With the assets (AC re-solved)' : 'With measures'}</th>
+                <th className="font-normal pr-3">Worst</th>
+                <th className="font-normal pr-3">Limit</th><th className="font-normal">Detail · rule</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(c => {
+                // With the investment, the "with" side is an AC result of the campus as bought, read at its
+                // own worst hour and case (a run from before they were kept has none: no hour is shown
+                // rather than the as-is one).
+                const w = c as InvestedComplianceRow
+                const value = invested ? w.value_with_measures : c.value
+                const detail = invested ? w.detail_with_measures : c.detail
+                const at = invested
+                  ? where(w.worst_period_with_measures, w.worst_hour_with_measures, w.worst_case_with_measures)
+                  : where(c.worst_period, c.worst_hour, c.worst_case)
+                return (
+                  <tr key={c.check} data-testid={`compliance-${c.check}`} className="border-t border-border">
+                    <td className="py-1 pr-3 whitespace-nowrap align-top">{CHECK_LABEL[c.check] ?? c.check}</td>
+                    <td className="pr-3 align-top"><StatusTag s={c.status_as_is} /></td>
+                    <td className="pr-3 align-top"><StatusTag s={c.status_with_measures} /></td>
+                    <td data-testid={`compliance-worst-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums">
+                      {num(value, 3)} {c.unit} <span className="block text-muted">{at}</span>
+                    </td>
+                    <td data-testid={`compliance-limit-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums text-muted">
+                    {c.limit_min != null && c.limit_max != null
+                      ? `${num(c.limit_min, 3)}–${num(c.limit_max, 3)} ${c.unit}`
+                      : `${num(c.limit, 3)} ${c.unit}`}
                   </td>
-                  <td className="pr-3 whitespace-nowrap align-top tabular-nums text-muted">{num(c.limit, 3)} {c.unit}</td>
-                  <td className="align-top">
-                    <div>{detail}</div>
-                    <div className="text-[11px] text-muted flex items-start gap-1.5 mt-0.5">
-                      <Tag tone={c.source === 'code' ? 'accent' : 'warn'}>{c.source}</Tag><span>{c.clause}</span>
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+                    <td className="align-top min-w-[16rem]">
+                      <div>{detail}</div>
+                      <div className="text-[11px] text-muted flex items-start gap-1.5 mt-0.5">
+                        <Tag tone={c.source === 'code' ? 'accent' : 'warn'}>{c.source}</Tag><span>{c.clause}</span>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </TableScroll>
         <p className="text-[11px] text-muted mt-2">
           PCC reactive band ±{num(req.q_limit_mvar)} Mvar ({req.clause}); P_ref {num(req.p_ref_mw)} MW, {req.p_ref_from}.
         </p>
       </PageSection>
 
       <PageSection title="Transformers" hint="worst selected hour, intact and N-1, with the design margin">
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="text-left text-muted">
-              <th className="font-normal pr-3">Group</th><th className="font-normal pr-3">Now</th>
-              <th className="font-normal pr-3">Peak S intact</th><th className="font-normal pr-3">Peak S N-1</th>
-              <th className="font-normal pr-3">Required per unit</th><th className="font-normal pr-3">Recommended</th>
-              <th className="font-normal">Verdict</th>
-            </tr>
-          </thead>
-          <tbody>
-            {r.transformers.map(t => (
-              <tr key={t.group} data-testid={`trafo-${t.group}`} className="border-t border-border">
-                <td className="py-1 pr-3 whitespace-nowrap">{t.group}</td>
-                <td className="pr-3 whitespace-nowrap tabular-nums">{t.units} × {num(t.unit_rating_mva)} MVA</td>
-                <td className="pr-3 tabular-nums">{num(t.max_s_intact_mva)} MVA</td>
-                <td className="pr-3 tabular-nums">{t.n_minus_1 ? `${num(t.max_s_n1_mva)} MVA` : '—'}</td>
-                <td className="pr-3 tabular-nums">{num(t.required_unit_mva)} MVA</td>
-                <td className="pr-3 whitespace-nowrap tabular-nums">{t.units} × {num(t.recommended_unit_mva)} MVA</td>
-                <td><Tag tone={t.adequate ? 'ok' : 'err'}>{t.adequate ? 'adequate' : 'undersized'}</Tag></td>
+        <TableScroll>
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-muted">
+                <th className="font-normal pr-3">Group</th><th className="font-normal pr-3">Now</th>
+                <th className="font-normal pr-3">Peak S intact</th><th className="font-normal pr-3">Peak S N-1</th>
+                <th className="font-normal pr-3">Required per unit</th><th className="font-normal pr-3">Recommended</th>
+                <th className="font-normal">Verdict</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {r.transformers.map(t => (
+                <tr key={t.group} data-testid={`trafo-${t.group}`} className="border-t border-border">
+                  <td className="py-1 pr-3 whitespace-nowrap">{t.group}</td>
+                  <td className="pr-3 whitespace-nowrap tabular-nums">{t.units} × {num(t.unit_rating_mva)} MVA</td>
+                  <td className="pr-3 tabular-nums">{num(t.max_s_intact_mva)} MVA</td>
+                  <td className="pr-3 tabular-nums">{t.n_minus_1 ? `${num(t.max_s_n1_mva)} MVA` : '—'}</td>
+                  <td className="pr-3 tabular-nums">{num(t.required_unit_mva)} MVA</td>
+                  <td className="pr-3 whitespace-nowrap tabular-nums">{t.units} × {num(t.recommended_unit_mva)} MVA</td>
+                  <td><Tag tone={t.adequate ? 'ok' : 'err'}>{t.adequate ? 'adequate' : 'undersized'}</Tag></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
       </PageSection>
 
       <PageSection title="Reactive compensation" hint="after the inverters' own headroom, sized to the worst hour">
-        <table className="w-full text-[12px]">
-          <tbody>
-            {r.compensation.map(c => (
-              <tr key={c.direction} data-testid={`comp-${c.direction}`} className="border-t border-border first:border-0">
-                <td className="py-1 pr-3 capitalize">{c.direction}</td>
-                <td className="pr-3 tabular-nums">required {num(c.required_mvar)} Mvar</td>
-                <td className="pr-3 tabular-nums font-semibold">recommended {num(c.recommended_mvar)} Mvar</td>
-                <td className="text-muted">{where(c.worst_period, c.worst_hour)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <TableScroll>
+          <table className="w-full text-[12px]">
+            <tbody>
+              {r.compensation.map(c => (
+                <tr key={c.direction} data-testid={`comp-${c.direction}`} className="border-t border-border first:border-0">
+                  <td className="py-1 pr-3 capitalize">{c.direction}</td>
+                  <td className="pr-3 tabular-nums">required {num(c.required_mvar)} Mvar</td>
+                  <td className="pr-3 tabular-nums font-semibold">recommended {num(c.recommended_mvar)} Mvar</td>
+                  <td className="text-muted">{where(c.worst_period, c.worst_hour)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
       </PageSection>
 
       <PageSection title="Short circuit" hint="IEC 60909, every installed unit energised, per period">
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="text-left text-muted">
-              <th className="font-normal pr-3">Period</th><th className="font-normal pr-3">Bus</th>
-              <th className="font-normal pr-3">kV</th><th className="font-normal pr-3">Ik'' max</th>
-              <th className="font-normal pr-3">ip</th><th className="font-normal pr-3">Ik'' min</th>
-              <th className="font-normal pr-3">Rating</th><th className="font-normal">Verdict</th>
-            </tr>
-          </thead>
-          <tbody>
-            {r.short_circuit.map(f => (
-              <tr key={`${f.bus}-${f.period}`} data-testid={`fault-${f.bus}-${f.period}`} className="border-t border-border">
-                <td className="py-1 pr-3">{f.period}</td><td className="pr-3">{f.bus}</td>
-                <td className="pr-3 tabular-nums">{num(f.vn_kv)}</td>
-                <td className="pr-3 tabular-nums">{num(f.ikss_max_ka)} kA</td>
-                <td className="pr-3 tabular-nums">{num(f.ip_max_ka)} kA</td>
-                <td className="pr-3 tabular-nums">{num(f.ikss_min_ka)} kA</td>
-                <td className="pr-3 tabular-nums">{f.rated_ka == null ? '—' : `${num(f.rated_ka)} kA`}</td>
-                <td>{f.adequate == null ? <Tag tone="neutral">not rated</Tag>
-                  : <Tag tone={f.adequate ? 'ok' : 'err'}>{f.adequate ? 'within rating' : 'over rating'}</Tag>}</td>
+        <TableScroll>
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-muted">
+                <th className="font-normal pr-3">Period</th><th className="font-normal pr-3">Bus</th>
+                <th className="font-normal pr-3">kV</th><th className="font-normal pr-3">Ik'' max</th>
+                <th className="font-normal pr-3">ip</th><th className="font-normal pr-3">Ik'' min</th>
+                <th className="font-normal pr-3">Rating</th><th className="font-normal">Verdict</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {r.short_circuit.map(f => (
+                <tr key={`${f.bus}-${f.period}`} data-testid={`fault-${f.bus}-${f.period}`} className="border-t border-border">
+                  <td className="py-1 pr-3">{f.period}</td><td className="pr-3">{f.bus}</td>
+                  <td className="pr-3 tabular-nums">{num(f.vn_kv)}</td>
+                  <td className="pr-3 tabular-nums">{num(f.ikss_max_ka)} kA</td>
+                  <td className="pr-3 tabular-nums">{num(f.ip_max_ka)} kA</td>
+                  <td className="pr-3 tabular-nums">{num(f.ikss_min_ka)} kA</td>
+                  <td className="pr-3 tabular-nums">{f.rated_ka == null ? '—' : `${num(f.rated_ka)} kA`}</td>
+                  <td>{f.adequate == null ? <Tag tone="neutral">not rated</Tag>
+                    : <Tag tone={f.adequate ? 'ok' : 'err'}>{f.adequate ? 'within rating' : 'over rating'}</Tag>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
       </PageSection>
 
       <PageSection title="Critical hours" count={r.selection.length} hint="selected per investment period">

@@ -163,6 +163,19 @@ class ProjectContext:
     # single attribute assignment, which is atomic under the GIL.
     results_unsaved: bool = False
 
+    # P33b 10b: a per-project EDIT counter. Bumped at the three edit seams —
+    # the HTTP undo-prefix chokepoint on a 2xx (`main.undo_snapshot_middleware`),
+    # the chat dispatch site for tools that write the live network
+    # (`chat_tools_schema.tool_edits_network`) and `set_network` — and nowhere
+    # else: a Solve, a study and the solver's transient rows never cross a
+    # seam. Captured on the EH study record when the study starts and compared
+    # at read time (`study_state.edited_since`), so it answers "has an edit
+    # happened since?", never "does the network differ?". Carried forward by
+    # reset_network / set_network like `undo` (it belongs to the project, not
+    # to one network object), persisted in metadata.json. A plain int for the
+    # same GIL reason as `results_unsaved`; owned by `services/dirty_state.py`.
+    network_revision: int = 0
+
     # LRU recency stamp (B9). `time.monotonic()` of the last time this context
     # became active, was activated, was registered, or was returned as a
     # resident path-scoped read. The eviction policy (PyPSAService._evict_if_
@@ -214,8 +227,10 @@ class ProjectContext:
     # The `Any` value type is `pd.Series`, spelled loosely to keep this module's
     # imports to `pypsa` alone (the same reason `ChatState.session` is `Any`).
     #
-    # LIFECYCLE — carried forward (as a COPY) by `reset_network` / `set_network`,
-    # NOT carried by `build_context`. See those methods for why each way round.
+    # LIFECYCLE — carried forward (as a COPY) by `set_network` and by
+    # `reset_network(carry="same"|"copy")`; a `carry="fresh"` reset (a different
+    # project or a blank draft) and `build_context` start empty. See those
+    # methods for why each way round.
     user_ts: dict[tuple[str, str, str], Any] = field(default_factory=dict)
     # Set by `_hydrate_context_from_disk` when `user_ts.json` exists but cannot
     # be read, cleared by the next save that rewrites it. See
@@ -278,6 +293,9 @@ RESULT_STATE_KEYS = (
     "ac_pf_convergence", "ac_pf_convergence_list",
     "ac_pf_slack_bus_used", "ac_pf_stripped_voll_slacks",
     "ac_pf_converged_count", "ac_pf_total_snapshots",
+    # P33b D-1: the on-disk mirror of a FINISHED `eh_study` record — derived
+    # at save, mapped onto `eh_study` at hydrate, always None in memory.
+    "eh_study_record",
 )
 
 
@@ -315,7 +333,7 @@ def cleared_result_state() -> dict[str, None]:
 # so `pypsa_service` cannot import `study_state`, but it already imports this
 # module.
 STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
-             "eh_study", "investment_case")
+             "eh_study", "investment_case", "decision_study")
 
 # The studies that re-solve the USER'S OWN network object in place, between
 # their iterates — so an edit landing mid-study is either overwritten by the
@@ -323,8 +341,10 @@ STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
 # refuse component edits; the others do not, and the evidence is in the code:
 # `mc` snapshots the network under the lock and never mutates it
 # (`mc_loop_runner.py`, the `network.copy()` under `lock`), and `eh_study`
-# solves a private `network.copy()` (`eh_study.py`). A key added to STUDY_KEYS
-# must be classified here on purpose.
+# solves a private `network.copy()` (`eh_study.py`). `decision_study` solves
+# study-owned option forks through the queue, never the base network object
+# (`services/study/runner.py`). A key added to STUDY_KEYS must be classified
+# here on purpose.
 LIVE_NETWORK_STUDIES = frozenset({"fmea_sweep", "frontier", "coupling_loop",
                                   "margin_loop"})
 
@@ -337,6 +357,9 @@ STUDY_LABELS = {
     "coupling_loop": "a coupling-loop study",
     "margin_loop": "a margin-loop study",
     "eh_study": "an Energy Hub study",
+    # S4: the guided investment study's option runner. It solves study-owned
+    # forks through the queue, and holds its BASE project while it does.
+    "decision_study": "a decision study",
     # Edge Investment Case P4 WP4.6b: the finance run reads the solved network's
     # result tables, so it holds the mesh like any other study.
     "investment_case": "an investment-case run",
@@ -355,7 +378,8 @@ STUDY_LABELS = {
 # Pinned by a test against the routes that actually exist, so this cannot
 # drift the day someone REMOVES an abort.
 ABORTABLE_STUDIES = ("coupling_loop", "margin_loop", "mc", "frontier",
-                     "fmea_sweep", "eh_study", "investment_case")
+                     "fmea_sweep", "eh_study", "investment_case",
+                     "decision_study")
 
 
 def may_rewrite_user_ts(ctx: Any) -> bool:
@@ -378,7 +402,8 @@ def may_rewrite_user_ts(ctx: Any) -> bool:
 
 
 def record_is_running(record) -> bool:
-    """True while a study record's worker thread is genuinely alive.
+    """
+    True while a study record's worker thread is genuinely alive.
 
     ONE definition, called by `study_state.study_running` (the 409 mesh) and by
     `PyPSAService.reset_network` (which must not clear a live study out from
@@ -417,7 +442,8 @@ def record_is_running(record) -> bool:
 
 
 def running_study_key(state) -> str | None:
-    """The key of the first live study in ``state``, or None.
+    """
+    The key of the first live study in ``state``, or None.
 
     Pure: takes the state dict rather than reaching for the active project, so
     `pypsa_service` can call it without importing `study_state` (which imports
@@ -435,7 +461,8 @@ def running_study_key(state) -> str | None:
 
 
 def study_swap_refusal(state, action: str) -> str | None:
-    """The 409 detail for an action that would REPLACE the network, or None.
+    """
+    The 409 detail for an action that would REPLACE the network, or None.
 
     ``action`` is what the user was trying to do ("load a project", "undo",
     "restore a snapshot"), because a refusal that does not say what it refused
@@ -525,6 +552,13 @@ class ProjectSolverState:
     ac_pf_stripped_voll_slacks: Any = None
     ac_pf_converged_count: Any = None
     ac_pf_total_snapshots: Any = None
+    # P33b D-1: the on-disk mirror of a FINISHED `eh_study` record (no thread,
+    # no stop event). Result state so it rides `results_state.pkl`, but it is
+    # DERIVED at save from the live record and CONSUMED at hydrate (mapped onto
+    # `eh_study` when the ctx has none, then assigned None) — so in memory it is
+    # always None. The restored record is compared against `network_revision`
+    # at read time (`study_state.edited_since`), never trusted as current.
+    eh_study_record: Any = None
     # ── Study records (STUDY_KEYS) — NOT persisted, NOT lifecycle ────────────
     # Each holds the record of one long-running adequacy study: status, its
     # result, the worker thread the 409 mesh tests for liveness.
@@ -539,9 +573,13 @@ class ProjectSolverState:
     # and a study of a discarded network survived "New". Both reproduced over
     # HTTP in `tests/test_adequacy_study_scoping.py`.
     #
-    # They are deliberately in NO persistence group: a study measures a
-    # network in memory and must not be restored from disk beside a network it
-    # may no longer describe.
+    # Study records are not persisted — except the finished EH record's
+    # mirror, `eh_study_record` above, which is result state, compared against
+    # `network_revision` at read time and never trusted as current (P33b D-1).
+    # The rule for the rest stands: a study measures a network in memory and
+    # must not be restored from disk beside a network it may no longer
+    # describe; the EH record may, only because the edit counter travels with
+    # it and says whether the network was edited since.
     fmea_sweep: Any = None
     frontier: Any = None
     mc: Any = None
@@ -552,6 +590,7 @@ class ProjectSolverState:
     # code). Its REPORT is result state (`investment_case_report`); the record
     # is not persisted, like every study record above.
     investment_case: Any = None
+    decision_study: Any = None
 
     def as_dict(self) -> dict[str, Any]:
         """A plain dict with the same keys/values — the legacy `_state` shape."""

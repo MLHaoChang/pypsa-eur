@@ -96,10 +96,12 @@ from routers import (
     simulation,
     snapshots,
     solve_queue,
+    studies,
     uploads,
     vintage,
 )
 from services.pypsa_service import PyPSAService
+from services.study.body_limit import StudyBodyLimitMiddleware
 from settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -134,6 +136,9 @@ _UNDO_EXCLUDE = {"/api/network/undo", "/api/network/undo/info"}
 # `_SOLVER_BLOCKING_PREFIXES` (below) while absent here, so the uploads
 # endpoints are guarded against a solve-in-flight but not against another
 # user's edit lock. Reading any one guard makes coverage look complete.
+# `tests/test_write_surface_lock_policy.py` now asks that question per route
+# and per chat tool, and FAILS on a write path nobody made a decision for, so
+# this comment is no longer the only thing holding the line (OPEN-ITEMS 6).
 # `/api/results/` carries exactly ten write routes: the five adequacy-study
 # STARTS (frontier, mc, fmea_sweep, margin_loop, coupling_loop) and their five
 # aborts, which are exempted above. The starts belong here because each takes
@@ -324,6 +329,38 @@ _SOLVER_BLOCKING_EXEMPT: set[str] = set()
 # middleware 409 fires first and the user can't leave a solving project — the
 # whole point of the resident multi-project work.
 _SOLVER_BLOCKING_EXEMPT_SUFFIXES = ("/activate",)
+# Pattern-exempt routes: the regex variant the comment on
+# `_SOLVER_BLOCKING_EXEMPT` anticipates, built the way
+# `_FOREIGN_LOCK_GATE_EXEMPT_PATTERNS` is (compiled, anchored, `.match`).
+#
+#   * `/api/projects/{name}/studies[/...]` — the decision-study routes
+#     (`routers/studies.py`, guided investment study S1; review v2 BC-3). They
+#     read and write one JSON sidecar under the PATH project's `studies/` dir
+#     and never touch the resident network, so there is nothing for the LP
+#     worker to race. Without this, every study write 409s while the ACTIVE
+#     project solves — which need not even be the project the study belongs
+#     to. The routes carry their own authorisation (`ProjectAccessDep`) and
+#     their own foreign-lock check against the PATH project; neither prefix
+#     list names them, because both match with `startswith` and a templated
+#     segment cannot be expressed there.
+#
+# Anchored at the start and closed by `(/|$)`, so `/studiesX` or a `studies`
+# segment deeper in some other route does not ride the exemption. A route that
+# is added under `studies/` and DOES mutate the network (S4's run) must take
+# its own `_solver_in_flight_ctx` check against the context it solves.
+_SOLVER_BLOCKING_EXEMPT_PATTERNS = (
+    re.compile(r"^/api/projects/[^/]+/studies(/|$)"),
+)
+
+
+def _solver_blocking_exempt(path: str) -> bool:
+    """True iff `path` is exempt from the solver-in-flight gate below."""
+    if path in _SOLVER_BLOCKING_EXEMPT:
+        return True
+    if any(path.endswith(s) for s in _SOLVER_BLOCKING_EXEMPT_SUFFIXES):
+        return True
+    return any(p.match(path) for p in _SOLVER_BLOCKING_EXEMPT_PATTERNS)
+
 # P27a (A1): the prefixes whose writes a LIVE-NETWORK study refuses (the
 # component, profile, time-axis, cluster, vintage and import routes). A
 # separate tuple, and deliberately NOT `/api/projects/`: the project routes
@@ -527,6 +564,22 @@ async def lifespan(app: FastAPI):
         # desktop splash reasonably read it as the first.
         run_first_run_import()
     PyPSAService.initialize()
+    # Decision-study forks a crash left behind (plan 2026-09-28 guided
+    # investment study MVP-1, S9; gate S6 [N7]): throw-away tornado variants
+    # and option forks whose study record is gone, and only what is provably
+    # study-owned (`services/study/forks.py::sweep_leftover_forks`). BEFORE the
+    # queue is reconciled: a job it re-enqueues on such a fork would make the
+    # fork undeletable (`fork_solving`). Never fails boot.
+    try:
+        from services.study import forks as study_forks
+
+        with db_session_module.SessionLocal() as db:
+            swept = study_forks.sweep_leftover_forks(db)
+        if swept:
+            logger.info("startup: swept %d leftover decision-study fork(s): %s",
+                        len(swept), ", ".join(swept))
+    except Exception:  # noqa: BLE001 — a sweep that fails leaves forks, not a dead app
+        logger.exception("decision-study fork sweep failed; continuing without it")
     # Solve-queue boot reconciliation. Placed AFTER `ensure_schema` (which runs
     # in the local branch above) so the table exists on the desktop path, and
     # after `PyPSAService.initialize()` so a resumed job has a service to build
@@ -673,6 +726,12 @@ def _csrf_rejection(request: Request) -> JSONResponse | None:
 # before this note). The replica header must sit outside the auth gate so that
 # a rejected request still identifies which replica rejected it — otherwise the
 # multi-replica QA cases cannot attribute a failure.
+#
+# Innermost of all, the decision-study body limit (F1 B2): it refuses an
+# oversized `/api/projects/{name}/studies` body 413 before anything parses
+# it, and leaves every other route alone. Inside the auth gate, so an
+# unauthenticated request is still answered 401 first.
+app.add_middleware(StudyBodyLimitMiddleware)
 
 
 @app.middleware("http")
@@ -781,6 +840,10 @@ async def undo_snapshot_middleware(request: Request, call_next):
                 if session_row is not None:
                     ctx, slot = active_project.resolve_for_session(db, session_row)
                     PyPSAService.bind_request_context(ctx)
+                    # P33b: shared with the handler's context copy, so the
+                    # edit-counter bump below lands on the ctx the request
+                    # ENDED on (see `PyPSAService._request_ctx_box`).
+                    PyPSAService.bind_request_box([ctx])
                     PyPSAService.bind_request_slot(slot)
                     PyPSAService.bind_request_scratch(
                         active_project.scratch_key(session_row)
@@ -825,8 +888,7 @@ async def undo_snapshot_middleware(request: Request, call_next):
     # catch-all for everything else.
     if (is_write
             and any(path.startswith(p) for p in _SOLVER_BLOCKING_PREFIXES)
-            and path not in _SOLVER_BLOCKING_EXEMPT
-            and not any(path.endswith(s) for s in _SOLVER_BLOCKING_EXEMPT_SUFFIXES)):
+            and not _solver_blocking_exempt(path)):
         from routers.simulation import _solver_in_flight
         if _solver_in_flight():
             return JSONResponse(
@@ -1029,6 +1091,27 @@ async def undo_snapshot_middleware(request: Request, call_next):
 
     response = await call_next(request)
 
+    # ★ P33b B1: an accepted write under the undo prefixes is an EDIT — bump
+    # the project's edit counter (`ProjectContext.network_revision`). Undo IS
+    # an edit (it is in `_UNDO_EXCLUDE` only so it never captures itself);
+    # `/undo/info` is a read. A refused write (4xx/5xx) never bumps. The bump
+    # goes to the ctx the request ended on — after an undo that is the re-keyed
+    # project ctx (step 0); after "New" or an io import it is the fresh draft,
+    # never the project the user left.
+    if (
+        is_write
+        and 200 <= response.status_code < 300
+        and path != "/api/network/undo/info"
+        and any(path.startswith(p) for p in _UNDO_PREFIXES)
+    ):
+        try:
+            from services import dirty_state
+            from services.pypsa_service import PyPSAService
+            box = PyPSAService._request_ctx_box.get()
+            dirty_state.bump_revision(box[0] if box else None)
+        except Exception:  # noqa: BLE001 — never fail an applied edit
+            logger.exception("could not bump the network revision")
+
     # Rollback the snapshot if the mutation was rejected by the server.
     if pushed and response.status_code >= 400:
         try:
@@ -1205,6 +1288,17 @@ app.include_router(
 app.include_router(
     report_jobs.router, prefix="/api/projects", tags=["reports"],
     dependencies=_projects_router_guard,
+)
+# Decision studies (guided investment study MVP-1, S1). Path-scoped under the
+# project so `ProjectAccessDep` authorises `{name}` from the PATH and a study id
+# resolves only inside that project's `studies/` directory (review v1 B7).
+# Registered before projects.router like the worksheet; exempt from the
+# solver-in-flight gate by `_SOLVER_BLOCKING_EXEMPT_PATTERNS`, in neither prefix
+# list (review v2 BC-3). In auth mode every route refuses until OPEN-ITEMS 1
+# closes (BC-6); the refusal is the router's own dependency.
+app.include_router(
+    studies.router, prefix="/api/projects/{name}/studies",
+    tags=["decision-studies"], dependencies=_projects_router_guard,
 )
 app.include_router(
     projects.router, prefix="/api/projects", tags=["projects"],

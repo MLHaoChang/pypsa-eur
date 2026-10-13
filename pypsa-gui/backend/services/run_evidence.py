@@ -36,6 +36,7 @@ Conversational refs / result UI: see ``discuss_project_run`` (chat_tools) and
 """
 from __future__ import annotations
 
+import contextvars
 import copy
 import hashlib
 import json
@@ -607,7 +608,9 @@ _STUDY_KIND = {
 }
 
 _WORKER_COMPLETED = frozenset({'completed', 'done', 'met'})
-_WORKER_FAILED = frozenset({'failed', 'budget_exhausted', 'refused'})
+_WORKER_FAILED = frozenset({
+    'failed', 'budget_exhausted', 'refused', 'unreachable',
+})
 _WORKER_INTERRUPTED = frozenset({'aborted', 'interrupted', 'idle'})
 
 
@@ -810,9 +813,16 @@ def publish_study_run(study_key: str, record: dict) -> dict | None:
         }
         error = None
         if status == 'failed':
+            raw = record.get('status')
+            if raw == 'unreachable':
+                message = (
+                    'The study finished and no plan meets the target (unreachable).'
+                )
+            else:
+                message = str(record.get('error') or 'The study failed.')[:500]
             error = {
                 'error_kind': 'study_failed',
-                'message': str(record.get('error') or 'The study failed.')[:500],
+                'message': message,
             }
         return publish_run(
             token['root'], token['project_id'], run_id=token['run_id'],
@@ -842,8 +852,13 @@ def watch_study_run(study_key: str, record: dict) -> None:
             time.sleep(0.25)
         # Timed out still running — leave the running marker; do not invent a terminal.
 
+    # Run in the caller's context, as the study worker does: `_authority()`
+    # must resolve the REQUEST's project. A bare thread has no scoped context
+    # and fell through to the process-foreground self-heal, which could
+    # overwrite a network another thread had just installed with an empty one.
+    ctx = contextvars.copy_context()
     threading.Thread(
-        target=_watch, daemon=True, name=f'run-evidence-{study_key}',
+        target=lambda: ctx.run(_watch), daemon=True, name=f'run-evidence-{study_key}',
     ).start()
 
 

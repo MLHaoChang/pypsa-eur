@@ -162,9 +162,27 @@ in — the same property, which is what the test needs. **Run these from a
 non-elevated PowerShell.** As Administrator the directory *is* writable and the
 test passes vacuously.
 
+**Clear `DATABASE_URL` for this step, and only this step.** The setup block
+above sets it globally, which every other harness needs — but
+`build_environment` leaves an explicitly exported `DATABASE_URL` alone
+(`launcher.py:129`), so leaving it set here routes the run down the operator
+branch and the pin this harness exists to prove is never executed. Worse than
+vacuous: the harness refuses outright rather than passing quietly, so a set
+variable here reads as a broken harness.
+
+Isolation is not lost by clearing it: the pin puts the database under
+`PYPSAGUI_APP_DATA_DIR`, already a throwaway, and the harness asserts the file
+the engine actually opened is inside it. Restore it afterwards — §5 onward
+needs it.
+
 ```powershell
+$saved = $env:DATABASE_URL
+Remove-Item Env:\DATABASE_URL -ErrorAction SilentlyContinue
+
 pixi run -e desktop cmd /c "cd /d C:\Windows\System32 && python ""%COLD%"" first"
 pixi run -e desktop cmd /c "cd /d C:\Windows\System32 && python ""%COLD%"" relaunch"
+
+$env:DATABASE_URL = $saved
 ```
 
 **The inner quotes around `%COLD%` are load-bearing** and were missing in the

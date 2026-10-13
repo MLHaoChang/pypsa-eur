@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-12",
+  "generated_at": "2026-10-13",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 230,
+  "tool_count": 231,
   "tools": [
     {
       "name": "list_components",
@@ -2940,7 +2940,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "dad8a69aa580c2a14ca139bc3660892ee310f2266b39b8427e6264e607512fc9",
+      "schema_sha256": "459d165e23cc24b40d4e1966e039a9ca1e7f34a7b9ca1c909b9f8b001b84da27",
       "behavioral_fixture": "pending"
     },
     {
@@ -3118,7 +3118,10 @@
         "title",
         "question",
         "options",
-        "allow_free_text"
+        "allow_free_text",
+        "multi_select",
+        "detail",
+        "intent"
       ],
       "required": [
         "title",
@@ -3126,7 +3129,32 @@
         "options"
       ],
       "safety_tier": "read",
-      "schema_sha256": "401a910990c4816884b1954644fbb19ce83762746df1d9fe5b94792b6be412f4",
+      "schema_sha256": "8131e8e85f0f4773cdb9055b32f31ba534c32ba199a5feb998baaafea585f660",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "read_result",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "locator",
+        "pointer",
+        "offset",
+        "limit"
+      ],
+      "required": [
+        "locator"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "f2fb5139e30f6abeebd6ca348603bc53a4f5cda11de70accd848de5c2e843e32",
       "behavioral_fixture": "pending"
     },
     {
@@ -4263,13 +4291,14 @@
         "margin",
         "n_minus_1",
         "invest",
-        "pcc_switchgear_by_operator"
+        "pcc_switchgear_by_operator",
+        "pcc_tap_control"
       ],
       "required": [
         "project_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "9ac24dc57ea0c2a97a397558f6c3126632cddb3c4af1a3dc4efcf4697423640c",
+      "schema_sha256": "c2516f103a5d78e5c75ff13fb31a31febf7e33a4fb0cde85287b1b77e0e16f7d",
       "behavioral_fixture": "pending"
     },
     {
@@ -5316,7 +5345,8 @@
     "gridspine",
     "hubDesign",
     "reports",
-    "campusElectrical"
+    "campusElectrical",
+    "decision"
   ],
   "tool_panel_enum": [
     "Results",
@@ -5373,7 +5403,9 @@
     "Reports",
     "reports",
     "CampusElectrical",
-    "campusElectrical"
+    "campusElectrical",
+    "DecisionStudy",
+    "decision"
   ],
   "slide_panels_not_in_tool_enum": [],
   "requested_aliases": {
