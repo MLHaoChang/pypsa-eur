@@ -668,7 +668,12 @@ def get_or_create_session(
 def drop_session(session_id: str) -> None:
     """Called by `/abort` to release the session record. Safe on unknown id."""
     with _SESSIONS_LOCK:
-        _SESSIONS.pop(session_id, None)
+        dropped = _SESSIONS.pop(session_id, None)
+    if dropped is not None:
+        # Issue 16: its kept results go with it. Evicted sessions are swept
+        # by the spill store's TTL instead (no disk work under the lock).
+        from harness import spill
+        spill.drop(dropped)
 
 
 def _reset_sessions_for_tests() -> None:

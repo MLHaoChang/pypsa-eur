@@ -47,7 +47,9 @@ def test_official_reasoning_tools_use_responses(model):
     assert sent[0]["tools"][0]["name"] == "get_component"
     assert sent[0]["tools"][0]["strict"] is False
     assert events[-1].blocks[0]["input"]["name"] == "B1"
-    assert events[-1].usage == {"input_tokens": 100, "output_tokens": 20}
+    # All four keys, input uncached (harness/providers/usage.py, issue 20).
+    assert events[-1].usage == {"input_tokens": 100, "output_tokens": 20,
+                                "cache_read_tokens": 0, "cache_create_tokens": 0}
 
 
 @pytest.mark.parametrize("model,base", [

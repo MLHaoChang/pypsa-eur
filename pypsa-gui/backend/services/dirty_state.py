@@ -66,3 +66,21 @@ def clear(ctx: ProjectContext | None = None) -> None:
 
 def is_dirty(ctx: ProjectContext | None = None) -> bool:
     return bool((ctx or _active()).results_unsaved)
+
+
+def bump_revision(ctx: ProjectContext | None = None) -> int:
+    """
+    Record that an edit seam was crossed on this context (P33b 10b).
+
+    Monotonic: an edit then its undo is two bumps. The counter answers "has
+    the network been edited since <a captured revision>?", which stays true
+    after an undo — and that is all a sentence built on it may claim.
+    """
+    target = ctx or _active()
+    target.network_revision = int(target.network_revision or 0) + 1
+    return target.network_revision
+
+
+def revision(ctx: ProjectContext | None = None) -> int:
+    """The context's current edit counter (see `bump_revision`)."""
+    return int((ctx or _active()).network_revision or 0)
