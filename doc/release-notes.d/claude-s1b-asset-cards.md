@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Expert StorageUnit and Generator cards render from the asset schema. Fields come in fixed groups with their units, derived values such as the annualised capital cost are read-only, and a battery's power and energy parts are edited directly. A typed capital cost is no longer silently dropped on save.
