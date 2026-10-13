@@ -973,12 +973,15 @@ it replaces nothing.
   - `run_simulation` calls it on the plain solve only, through
     `solve_uc(network, cfg)`. SCOPF, rolling and myopic are already refused
     by the island rows, and the refusal now names linearised UC too.
-- **Extendable gensets are not committed** (option A, sent to the
-  coordinator 2026-10-13; not yet answered when this was written). PyPSA's
-  committable-extendable unit is big-M. Such a genset keeps `spinning`, and
-  the facts list it under `uc.not_committed` with the reason. The template's
-  4 × 10 MW fleet can therefore be committed while genset_new stays
-  extendable.
+- **Extendable gensets are not committed** (owner, 2026-10-13, option A).
+  PyPSA's committable-extendable unit is big-M. Such a genset keeps I2b's
+  `spinning` rule, and the facts list it under `uc.not_committed` as
+  "not committed: extendable (big-M bilinear)". The template's 4 × 10 MW
+  fleet can therefore be committed while genset_new stays extendable.
+  - **This rewords the plan's test** "Linearised UC on an extendable genset
+    is refused, with a reason". `linearised_uc` is one sidecar-wide flag,
+    so "refused" now means the extendable genset is never made committable
+    and the reason is recorded. The solve is not refused.
 - **u_g(t) replaces the spinning flag** for the committed gensets in the 0⁺
   rows that count units online:
   - (b↑) headroom, u·p_max_pu·η·p_nom − η·p;
