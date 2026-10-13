@@ -1,8 +1,7 @@
 // The `decision` SlidePanel (plan S8): the guided flow for one decision study.
 //
-// * Availability (review v2 BC-6, OPEN-ITEMS 1): in auth (multi-user) mode the
-//   backend refuses every study route, and in local mode without
-//   `PYPSAGUI_DECISION_STUDIES=1`; the panel then says why and offers nothing
+// * Availability (review v2 BC-6): in auth (multi-user) mode the backend
+//   refuses every study route; the panel then says why and offers nothing
 //   that would fail — it never crashes.
 // * Entry state: an incomplete study opens on its intake, a complete one on
 //   the hub (`decisionModel.entryState`); a new study is answered in draft and

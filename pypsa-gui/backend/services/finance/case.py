@@ -196,21 +196,68 @@ def effective_parts(a: AssetFinance) -> tuple[AssetPart, ...]:
     return (AssetPart("investment", a.overnight_cost, a.lifetime_years, None),)
 
 
-def scale_capex(case: FinanceCase, f: float) -> FinanceCase:
-    """The case with every purchase's cost × `f` (IC S0b plan S2): each
-    asset's parts and `overnight_cost` together, and the amounts of the
-    `fixed` `replacement_capex` entries — one CAPEX bound moves every purchase
-    (a `part_lifetimes` replacement is its part's cost, so it moves with it).
-    Not established costs stay None; the case is not mutated."""
+def scale_capex(case: FinanceCase, f: float, *, asset: str | None = None,
+                part: str | None = None) -> FinanceCase:
+    """The case with purchase costs × `f`; the case is not mutated and costs
+    not established stay None.
+
+    * No `asset` (IC S0b plan S2): every purchase — each asset's parts and
+      `overnight_cost` together, and the amounts of the `fixed`
+      `replacement_capex` entries; one CAPEX bound moves every purchase (a
+      `part_lifetimes` replacement is its part's cost, so it moves with it).
+    * `asset` alone: the same, for that asset only (its parts, its
+      `overnight_cost`, its own `replacement_capex` entries).
+    * `asset` and `part` (IC engine ask 2, 2026-10-13): that one part of
+      `effective_parts` (an asset without parts is one `investment` part),
+      and the asset's `overnight_cost` as the new sum of its parts, so the
+      parts check holds; None when any part's cost is not established. A
+      `fixed` `replacement_capex` amount for the asset is per asset, not per
+      part, so a part bound refuses it (`scale_capex_part_fixed_replacement`).
+
+    Refusals (`FinanceRefused`): `scale_capex_part_without_asset`,
+    `scale_capex_unknown_asset`, `scale_capex_unknown_part`. FOM lines are not
+    touched in any form (they are the dispatch's, `case.templates`)."""
     def x(v):
         return None if v is None else v * f
 
-    assets = tuple(dataclasses.replace(
-        a, overnight_cost=x(a.overnight_cost),
-        parts=tuple(dataclasses.replace(p, overnight_cost=x(p.overnight_cost)) for p in a.parts))
-        for a in case.assets)
+    if asset is None:
+        if part is not None:
+            raise FinanceRefused("scale_capex_part_without_asset",
+                                 f"part {part!r} named without its asset")
+    elif asset not in {a.name for a in case.assets}:
+        raise FinanceRefused("scale_capex_unknown_asset", f"no asset {asset!r} in the case")
+
+    def whole(a: AssetFinance) -> AssetFinance:
+        return dataclasses.replace(
+            a, overnight_cost=x(a.overnight_cost),
+            parts=tuple(dataclasses.replace(p, overnight_cost=x(p.overnight_cost))
+                        for p in a.parts))
+
+    def one_part(a: AssetFinance) -> AssetFinance:
+        if not a.parts:
+            if part != "investment":
+                raise FinanceRefused("scale_capex_unknown_part",
+                                     f"{a.name} has no part {part!r} (only 'investment')")
+            return dataclasses.replace(a, overnight_cost=x(a.overnight_cost))
+        if part not in {p.name for p in a.parts}:
+            raise FinanceRefused("scale_capex_unknown_part", f"{a.name} has no part {part!r}")
+        parts = tuple(dataclasses.replace(p, overnight_cost=x(p.overnight_cost))
+                      if p.name == part else p for p in a.parts)
+        costs = [p.overnight_cost for p in parts]
+        total = None if any(c is None for c in costs) else float(sum(costs))
+        return dataclasses.replace(a, overnight_cost=total, parts=parts)
+
+    if part is not None and any(name == asset for _y, name, _amt in case.inputs.replacement_capex):
+        raise FinanceRefused("scale_capex_part_fixed_replacement",
+                             f"a fixed replacement_capex amount for {asset} is per asset; "
+                             "a part bound cannot say how much of it moves")
+    scale = whole if part is None else one_part
+    assets = tuple(scale(a) if asset in (None, a.name) else a for a in case.assets)
+    if part is not None:
+        return dataclasses.replace(case, assets=assets)
     inputs = case.inputs.model_copy(update={"replacement_capex": [
-        (year, asset, amount * f) for year, asset, amount in case.inputs.replacement_capex]})
+        (year, name, amount * f if asset in (None, name) else amount)
+        for year, name, amount in case.inputs.replacement_capex]})
     return dataclasses.replace(case, inputs=inputs, assets=assets)
 
 

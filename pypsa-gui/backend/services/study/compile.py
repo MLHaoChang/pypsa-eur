@@ -647,8 +647,8 @@ def delete_export_series(db, org_id: UUID, *, base_uuid: UUID | str, study_id: s
     "export_series_kept_in_use"}``; an unreadable config or sidecar keeps it
     too (``"export_series_pins_unreadable"``).
 
-    The Library access is the WORKAROUND :func:`_ic_internals_delete_series`
-    (the one place GS touches IC internals for it); it COMMITS `db`, as
+    The delete is the engine's `series_store.delete_series` (through
+    :func:`_delete_series`); it COMMITS `db`, as
     `series_store.put_series` does, so the caller holds no other unsaved work
     in that session.
     """
@@ -657,8 +657,8 @@ def delete_export_series(db, org_id: UUID, *, base_uuid: UUID | str, study_id: s
         raise CompileError("export_series_pin_sources_missing",
                            "pass every project directory of the org (except the study's "
                            "forks): a delete never skips the pin check")
-    return _ic_internals_delete_series(db, org_id, export_series_name(base_uuid, study_id),
-                                       project_dirs=dirs, root=root)
+    return _delete_series(db, org_id, export_series_name(base_uuid, study_id),
+                          project_dirs=dirs, root=root)
 
 
 def discard_export_series_of_failed_creation(db, org_id: UUID, *, base_uuid: UUID | str,
@@ -683,65 +683,26 @@ def discard_export_series_of_failed_creation(db, org_id: UUID, *, base_uuid: UUI
         raise CompileError("export_series_pin_sources_missing",
                            "pass every other project directory of the org (possibly "
                            "none): a delete never skips the pin check")
-    return _ic_internals_delete_series(db, org_id, export_series_name(base_uuid, study_id),
-                                       project_dirs=[Path(d) for d in other_project_dirs],
-                                       root=root)
+    return _delete_series(db, org_id, export_series_name(base_uuid, study_id),
+                          project_dirs=[Path(d) for d in other_project_dirs], root=root)
 
 
-def _ic_internals_delete_series(db, org_id: UUID, name: str, *, project_dirs: list[Path],
-                                root: Path | None) -> dict[str, Any]:
+def _delete_series(db, org_id: UUID, name: str, *, project_dirs: list[Path],
+                   root: Path | None) -> dict[str, Any]:
     """
-    WORKAROUND — IC INTERNALS (gate U2-S1 C3e; owner question pending). Until
-    IC adds `series_store.delete_series(db, org_id, name, *,
-    refuse_if_pinned=True)` and `pinned_by(db, org_id, name)` to the frozen
-    facade, this reads and deletes IC's Library rows directly: `db.models.
-    LibraryItem` (kind "series", ORG-SCOPED and name-exact), the pin sidecars
-    (`library.bundle_pins`), the projects' commercial configs, and the payload
-    files (`storage_paths.library_file`). A payload file goes only when no
-    remaining row of the org points at it (two studies on the same base
-    minting the same price share one content-addressed file). Nothing else in
-    the guided study touches these names; replace this function, not its
-    callers, when the facade lands.
+    Delete every version of the study's export series through the engine's
+    facade (`series_store.delete_series`, which refuses while a project pins
+    it: a `library_refs.json` pin, a ref in a `solver_config.json`, or a pin
+    source it cannot read). Retired gate U2-S1 C3e, which read the Library
+    rows and pin sidecars directly. The engine's refusal codes map back to the
+    study's own.
     """
-    import json
+    from services.library import series_store
 
-    from sqlalchemy import select
-
-    from db.models import LibraryItem
-    from services.library import bundle_pins
-    from services.storage_paths import library_file
-
-    for d in project_dirs:
-        pins, issues = bundle_pins.read_pins(d)
-        if issues:  # a sidecar that cannot be read might pin it
-            return {"deleted_versions": 0, "kept": "export_series_pins_unreadable"}
-        if any(p.get("id") == name for p in pins):
-            return {"deleted_versions": 0, "kept": "export_series_kept_in_use"}
-        cfg_path = d / "solver_config.json"
-        if cfg_path.exists():
-            try:
-                cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                return {"deleted_versions": 0, "kept": "export_series_pins_unreadable"}
-            if any(r.id == name for r in bundle_pins.collect_refs(cfg)):
-                return {"deleted_versions": 0, "kept": "export_series_kept_in_use"}
-    rows = db.scalars(select(LibraryItem).where(
-        LibraryItem.org_id == org_id, LibraryItem.kind == "series",
-        LibraryItem.name == name)).all()
-    paths = {r.path for r in rows}
-    for r in rows:
-        db.delete(r)
-    db.commit()
-    if root is None:
-        from settings import get_settings
-
-        root = Path(get_settings().projects_root)
-    for rel in paths:
-        still = db.scalars(select(LibraryItem).where(
-            LibraryItem.org_id == org_id, LibraryItem.path == rel)).first()
-        if still is None:
-            library_file(root, org_id, rel).unlink(missing_ok=True)
-    return {"deleted_versions": len(rows), "kept": None}
+    out = series_store.delete_series(db, org_id, name, project_dirs=project_dirs, root=root)
+    kept = {None: None, "series_pinned": "export_series_kept_in_use",
+            "series_pins_unreadable": "export_series_pins_unreadable"}[out.kept]
+    return {"deleted_versions": out.deleted_versions, "kept": kept}
 
 
 def sweep_orphan_export_series(db, *, root: Path | None = None) -> list[str]:
@@ -757,9 +718,8 @@ def sweep_orphan_export_series(db, *, root: Path | None = None) -> list[str]:
     base uuid names ANY project row (also of another org: the conservative
     reading of "never while the base exists"). The pin check stays honest:
     every remaining project directory of the series' org is passed to
-    :func:`_ic_internals_delete_series`, so a project that copied the ref
-    keeps it. Listing the org's series (`series_store.list_series`) is outside
-    the frozen facade, like :func:`library_series_resolver` (Q15). A failure
+    :func:`_delete_series`, so a project that copied the ref keeps it.
+    Listing the org's series is the facade's `series_store.list_series`. A failure
     on one series is logged and the sweep goes on. COMMITS `db`.
     """
     import logging
@@ -784,8 +744,7 @@ def sweep_orphan_export_series(db, *, root: Path | None = None) -> list[str]:
                 if dirs is None:
                     dirs = [project_registry.project_dir(p) for p in db.scalars(
                         select(Project).where(Project.org_id == org_id)).all()]
-                out = _ic_internals_delete_series(db, org_id, ref.id, project_dirs=dirs,
-                                                  root=root)
+                out = _delete_series(db, org_id, ref.id, project_dirs=dirs, root=root)
             except Exception:  # noqa: BLE001 — one series never stops the sweep
                 db.rollback()
                 log.exception("study: could not sweep export series %s", ref.id)

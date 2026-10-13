@@ -15,9 +15,10 @@ on that date, so the entries below still date from 2026-09-12.
 2026-09-12 pass" — and the re-verification turned up a fourth instance of item
 2's defect, entered below as item 16.
 
-**2026-10-13:** that item is renumbered **16**. Master assigned 12–14 to the
-3D site view on 2026-10-06 while this branch was unmerged. Commits and
-findings written before 2026-10-13 cite it as item 12.
+**2026-10-13:** that item is renumbered **16**, and this pass's 13 and 14 become
+**17** and **18**. Master assigned 12–14 to the 3D site view on 2026-10-06
+while these branches were unmerged. Commits, findings and tests written
+before 2026-10-13 cite them as 12, 13 and 14.
 
 **2026-10-06:** items 12–14 added from the 3D site view branch's full-product
 browser E2E (`notes/2026-09-29-3d-site-view-phase2-qa.md` §7), re-verified in
@@ -31,6 +32,20 @@ surfaces once, `findings/2026-07-31-blank-canvas-node-drags-revert.md` carries
 the detail) and item 14 (a three-port Link dropping `bus2` / `efficiency2`;
 `_drop_unknown_extras` admits PyPSA's per-port columns by regex). Both are
 increments A1 and A4 of `plans/2026-10-06-visual-layers-1-abstract-canvas.md`.
+
+**2026-10-13:** the P33b-era items 12 and 13 closed (see "Closed since the
+2026-09-12 pass"; the open 3D-site-view items 12 and 13 are different). Item 12
+(an io import under a session pointer landing in a context the next request
+never reads) was already fixed on master by `e049c25e`: `routers/io.py::_unbind_session`
+clears the pointer on a successful import, as `/network/reset` does. The only
+test covered NetCDF; `test_every_http_import_is_what_the_next_request_sees`
+now covers all four imports and fails with the un-pointing removed. Item 13 (a
+re-load of the open project writing the discarded edit to disk): `load_project`
+now registers with `write_back=False`. When the displaced copy is the
+caller's own, the UI has already confirmed "discard and reload". When it is
+another resident project's copy (the clone wizard's `load(src)`), its unsaved
+work is saved before the disk read, so memory and disk agree and nothing is
+lost. Tests: `tests/test_reload_same_project.py`.
 
 This file exists because GitHub Issues is **disabled** on this repository, so
 there is nowhere else to keep a queue. It is deliberately thin: one entry per
@@ -48,41 +63,48 @@ verification record.
 
 ## High
 
-*(Nothing open at this severity.)*
+### 18. The campus-electrical chat tools bypass the edit-lock check
+
+`services/chat_tools.py`, added by #79 (merged 2026-10-06). The HTTP routes in
+`routers/campus_electrical.py` call `_check_lock` before the service. The chat
+tools `campus_draft_campus` and `campus_run_study` call the service directly,
+and `_gridspine_project` resolves access but not the lock. Reproduced on
+`af69613`: the HTTP draft returned 409 for a non-holder, while
+`campus_draft_campus(overwrite=True)` and `campus_run_study` both reached the
+write path. #84 added a third, `campus_extract_grid_code` (it can add a grid-code draft but not overwrite one), reproduced the same way. #91 added a fourth, `campus_set_library` (it replaces the project's asset library), also reproduced. This is the fifth instance of the "a second caller skips the
+handler" shape. `tests/test_write_surface_lock_policy.py` caught it on the day
+it landed, by going red on #80 merged with the new master. Note for the fix:
+these tools take a `project_id`, so the seam's active-project predicate would
+test the wrong lock. Check the lock of the resolved project. Full analysis:
+`findings/2026-10-06-campus-chat-tools-bypass-the-lock-check.md`. Server only.
 
 ## Medium
 
-### 6. `ProjectAccessDep` is adopted by 6 of 23 routers
+### 6. Authorization denies by omission: lock dimension done, ACL dimension open
 
-`routers/deps.py:100` defines the right primitive — a per-route dependency that
-resolves the project named by the request and checks the caller's access. It is
-used by `compare`, `adequacy_worksheet`, `uploads`, `snapshots`, `gridspine` and
-`deps`, and NOT by the five routers carrying most of the surface: `network` (81
-routes), `results` (48), `chat` (20), `simulation` (14), `io` (8) — 171 of 267.
-Those rely on the path-prefix middleware instead.
+**Narrowed 2026-10-05.** The original entry ("`ProjectAccessDep` is adopted by
+6 of 23 routers") was partly stale and partly mis-framed: `/api/results/` has
+since been lock-gated; the count missed `ProjectDep`, a second ACL dependency
+on the same `resolve_project`; and the five large routers act on the ACTIVE
+project, which no path-param dependency can resolve. The item's own remedy was
+the right one: make the omission fail loudly.
 
-This is the structural cause of the route-scoping defects above, and it is a
-shape rather than a one-off:
-a prefix list denies by omission, so a new router under a new prefix is ungated
-by default, silently, with nothing failing. A dependency declared on the route
-has the opposite default. Worth a test that fails when a route is mounted under
-a prefix no mechanism covers — the omission is what needs to become loud.
-Source: finding 3 of the same audit.
+**Lock dimension: done** in `a266dd5`. `tests/test_write_surface_lock_policy.py`
+fails on any write route or non-read chat tool that is not gated, not
+verifiably holder-checked (calls are followed, not source-scanned), and not
+given a written reason. Mutation-tested seven ways; undoing item 16's fix turns
+it red naming that exact route. Writing it found item 17.
 
-**Fresh evidence, 2026-09-30: item 16 is the fourth miss in one router family.**
-`tests/test_worksheet_foreign_lock.py` already called the fix it guards "the
-third instance of one miss"; `put_asset_health` makes four, and it was ungated
-for 20 days with nothing failing. The proposed test now has a concrete shape to
-aim at, because enumerating write routes in the five routers under
-`/api/projects` and flagging those matched by no lock mechanism is exactly how
-item 16 was found — by hand, in one pass. Two of the four misses would have been
-red the day they landed.
+**Still open:**
+* the **ACL** dimension ("may this caller SEE this project") has the same shape
+  and no omission test. Nothing has been found there, and nothing has looked
+  systematically either;
+* three product questions the policy table now states rather than settles:
+  should gridspine studies, chat-history import/clear, and adequacy campaigns
+  respect the edit lock?
 
-Item 16 being CLOSED does not weaken this. The class is closed in that one
-router family — all three sidecar PUTs now carry the check — but the mechanism
-that let a route ship ungated for 20 days with nothing failing is untouched, and
-it is the same mechanism for every other prefix. Four hand-caught misses is the
-argument for the test, not against it.
+Plan and ground-truth counts:
+`plans/2026-10-05-item-6-write-surface-lock-policy.md`.
 
 ### 8. Component names are not validated at the edge
 
@@ -117,30 +139,6 @@ preview environment, not as a permanent rule — the deployment should decide it
 own cookie policy through configuration. The CSRF double-submit check
 (`main.py:645`) currently carries the load for those sessions. Source: gap 5 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
-
-### 12. `/api/io/import/*` under a session pointer imports into a context the next request never reads
-
-Added 2026-10-06, found while scoping P33b step 0 (spec §0a). The four io
-imports (`routers/io.py:191` `_reset_with_ts_clear` → `reset_network`) run
-inside a session-bound request, so the fresh **unbound** ctx they import into
-lands in `scratch:<session>`; unlike `POST /api/network/reset`
-(`routers/network.py:633-635`) they never clear the session's active-project
-pointer, so `resolve_for_session` hands the next request the project's
-resident ctx again. Reproduced on `bb8b2e7b8` with the suite's fixtures: with
-a 1-bus project active, `POST /api/io/import/netcdf` of a 7-bus file returns
-200 `{"buses": 7, …}` and the next `GET /api/network/buses` returns 1 bus; the
-registry holds `org:uuid → (project, 1 bus)` and `scratch:<session> → (None,
-7 buses)`. The user sees an import that appears not to happen. The fix is the
-"New" rule (clear the pointer, as `/api/network/reset` does), not P33b's
-re-keying, so it is outside step 0. (The related note about `import_bundle` and
-`create_from_template` never registering their new ctx is resolved by P33b step
-4b, `_register_created_context` in `routers/projects.py`: in local mode it was
-lossy — the next project switch dropped the unregistered ctx.) Severity: High
-(a write that is silently not read back). Server only.
-
-### 13. Re-loading the open project with unsaved edits leaves memory and disk disagreeing
-
-Added 2026-10-06, found at the P33b re-gate (`qa/2026-10-06-guided-p33b-gate.md`, RN-1; pre-existing, identical on `240b2a00e` and after P33b). Under sessions, with project A resident and an unsaved edit in memory (bus x 0 → 1), `GET /api/projects/A` (load) reads the disk: memory holds x = 0 and the undo stack is empty. `load_project` then calls `PyPSAService.register(key, ctx)` (`routers/projects.py`, the registration after the import), which displaces the resident A ctx and writes it back through `_save_evicted_ctx` — so **disk** now holds the edited copy (x = 1) while **memory** holds the disk copy (x = 0). The next save or autosave overwrites the edit silently; a restart instead brings it back. Probe: `scratchpad/qa33b/test_qa_regate.py::test_reload_same_project`. Fix direction: a load of the project the caller is already on must not write the displaced context back (it is the copy the user chose to discard), or must ask first; the same displacement mechanism is why P33b's deviation 1 rejected registering `prev` inside `reset_network`. Severity: Medium (a deliberate "discard and reload" is undone on the next restart, or an edit is lost on the next save, depending on order). Server only.
 
 ## Closed since the 2026-09-12 pass
 
@@ -179,10 +177,35 @@ NOT reused or compacted — other findings and assessments cite these numbers.
   mutation-verified after. **This closes the class in this router family — all
   three sidecar PUTs now carry the check** — but not the shape that produced it,
   which is item 6.
+* **17** — chat tools that wrote a project's upload store bypassed its lock
+  check (`clear_uploads` and six `export_*` tools). Found and reproduced
+  2026-10-05 while doing item 6. Fixed independently by #76 (`e36c041`), which
+  merged on 2026-10-07: it gates the tools at the seam and checks every export
+  through `_check_foreign_lock("export")` in `_save_agent_export`. On merge,
+  the write-surface ratchet failed on exactly the 7 `KNOWN_GAPS` entries and
+  on the 3 `TOOL_POLICY` entries #76 also gated (`clear_chat_history`,
+  `start_campaign`, `end_campaign`). That is the same 10 a trial merge
+  predicted two days earlier, and all are now deleted. #76 also settled two of
+  the three product questions item 6 recorded.
 * **5** — chat sessions have no owner, so the confirmation gate rests on id
   secrecy. Closed by the same commit as item 3: `owner_user_id` plus one
   comparison is exactly the fix this item asked for, so `/confirm` no longer
   depends on the session id being unguessable.
+
+* **12 (P33b entry, 2026-10-06; not the open item 12 below)** — `/api/io/import/*`
+  under a session pointer imported into a context
+  the next request never read. Already closed on master by `e049c25e`
+  (`routers/io.py::_unbind_session` clears the pointer on a successful import).
+  Tripwire widened by `9c99daa0` (PR #170):
+  `test_every_http_import_is_what_the_next_request_sees` covers all four
+  imports, and all four fail with the un-pointing removed.
+* **13 (P33b entry, 2026-10-06; not the open item 13 below)** — re-loading the
+  open project with unsaved edits left memory and disk
+  disagreeing. Closed by `9c99daa0` (PR #170): `load_project` registers with
+  `write_back=False`, and a displaced copy belonging to a project the caller is
+  not on is saved before the disk read. Tripwire:
+  `tests/test_reload_same_project.py`, red on the old code in server and local
+  mode.
 
 ---
 
@@ -249,6 +272,12 @@ after re-binding; pass the acting session through the chat import wrappers) and
 five regression tests sit unapplied in `notes/2026-09-30-full-e2e/`; the diff
 targets the 2026-09-30 tree and needs porting to today's `routers/io.py`.
 Source: `notes/2026-09-29-3d-site-view-phase2-qa.md` §7, defects A–C.
+**2026-10-13:** the raw-import part is closed: `e049c25e` clears the pointer
+after a successful import, and PR #170's
+`test_every_http_import_is_what_the_next_request_sees` runs all four formats
+with the pointer SET (the `on_project_x` fixture activates a project). Undo,
+snapshot restore and template / bundle import were not re-verified for this
+note.
 
 ### 13. `login.html` prefills and prints a review credential
 
