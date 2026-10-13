@@ -3239,7 +3239,9 @@ export default function ChatPanel() {
             labelled with the chip (owner decision Q10) — the same path the
             hub-design cards use — so one click starts the flow. Absent until
             the menu is known; never a spinner, never an error. */}
-        {messages.length === 0 && Array.isArray(workflowMenu.data?.workflows)
+        {/* UX M8 (U3): without a usable assistant a chip would send into
+            nothing, so the menu waits for the key the greeting offers. */}
+        {messages.length === 0 && effectiveReady !== false && Array.isArray(workflowMenu.data?.workflows)
           && workflowMenu.data.workflows.length > 0 && (
           <ChatStarterChips
             prompts={workflowMenu.data.workflows.map((w) => ({

@@ -32,6 +32,8 @@ vi.mock('../api/chat', async (importOriginal) => {
     }),
     deleteApiKeySettings: vi.fn(),
     getChatHealth: vi.fn(),
+    getWorkflowMenu: vi.fn().mockResolvedValue({ context: 'expert', workflows: [
+      { id: 'hub-design', title: 'Hub design, step by step', intent: 'i', opening_request: 'go', steps: [] }] }),
   }
 })
 vi.mock('../api/llmSettings', () => ({ getChatProfiles: vi.fn() }))
@@ -366,5 +368,22 @@ describe('Send gate follows the bound profile and per-profile readiness (P28 A3)
     await user.click(screen.getByTestId('chat-api-key-save'))
     await waitFor(() => expect(putApiKeySettings).toHaveBeenCalled())
     await waitFor(() => expect(send.disabled).toBe(false))
+  })
+})
+
+// UX M8 (U3): a start-menu chip sends a request, so without a usable
+// assistant the menu waits for the key; unknown readiness shows it.
+describe('the start menu and readiness', () => {
+  it('chat_ready:false → no start-menu chips', async () => {
+    vi.mocked(getChatHealth).mockResolvedValue(health(false))
+    renderPanel()
+    await waitFor(() => expect(screen.getByTestId('chat-send-gate')).toBeTruthy())
+    expect(screen.queryByTestId('chat-starter-chips')).toBeNull()
+  })
+
+  it('chat_ready:true → the chips are offered', async () => {
+    vi.mocked(getChatHealth).mockResolvedValue(health(true))
+    renderPanel()
+    expect(await screen.findByTestId('chat-starter-chips')).toBeTruthy()
   })
 })
