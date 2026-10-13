@@ -540,7 +540,7 @@ export default function Results() {
       data-assurance-tab={effectiveTab}
     >
       <PageHeader
-        eyebrow={uiMode === 'guided' ? 'HUB DESIGN · RESULTS' : 'SIMULATION · RESULTS'}
+        eyebrow={uiMode === 'guided' ? 'HUB DESIGN · RESULTS' : 'RESULTS · OPTIMIZATION'}
         title={uiMode === 'guided' ? 'Reliability results' : 'Optimization results'}
         subtitle={uiMode === 'guided'
           ? 'Adequacy and failure-mode (FMEA) risk results for the hub design.'

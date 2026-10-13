@@ -1,6 +1,6 @@
 # Plan: one investment engine, two faces (expert workbench and guided study)
 
-**Date:** 2026-10-05. **Status:** v1.8 (2026-10-13: C5 per-part CAPEX amendment, U2 gate X6). Owner decisions in §8 taken 2026-10-05; independent review PASS WITH CONDITIONS, all conditions applied (§9); C1 corrected after the asset-parameterisation assessment (§9 R12, §10).
+**Date:** 2026-10-05. **Status:** v1.9 (2026-10-13: M2 task-ordered sidebar built, M1 deferred; v1.8: C5 per-part CAPEX amendment, U2 gate X6). Owner decisions in §8 taken 2026-10-05; independent review PASS WITH CONDITIONS, all conditions applied (§9); C1 corrected after the asset-parameterisation assessment (§9 R12, §10).
 **Replaces nothing yet.** It sequences two existing efforts so they converge instead of colliding:
 
 - **Edge Investment Case (IC)**: spec `docs/superpowers/specs/2026-09-26-edge-investment-case-design.md`.
@@ -297,7 +297,7 @@ shared by both modes.
 |---|---|---|---|
 | Engine-side fixes | Q2 Investment tab calls `/results/value_flows`, which exists only on the IC branch (503 toasts on master); Q7 plain labels for the completeness chips | IC session | With the U1 PR |
 | Shell polish PR | Q1 panel width policy, Q3 `$` to `€`, Q5 battery size and cost at creation, Q6 solve feedback and Abort/Optimal overlap, Q10 Settings out of SIMULATION, Q12 one header row; plus the free items Q4, Q8, Q9, Q11 | Coordinating session (after S0) | Between U1's follow-up PR and U2 (touches shared `App.tsx` / `layout/*`) |
-| Shell change | M1 right inspector, M2 task-ordered sidebar | Coordinating session | Right after U2, before U3, so U3 builds on the new shell |
+| Shell change | M2 task-ordered sidebar: **built 2026-10-13**. Six steps Build, Time, Run, Results, Studies, Reports (Economics gets a step when it has a panel; the decision study carries it today), the project as a footer card with its actions behind a menu, `layout/sidebar/*Section.tsx`. Assets stays an inline drill-in, not a popover: the drag-to-canvas gesture starts in it. M1 right inspector: **deferred** (owner, 2026-10-13) until the Live/companion redesign of `AssistantDock.tsx` (#115) settles, since both rewrite the right column | Coordinating session | M2 right after U2, before U3, so U3 builds on the new sidebar; M1 after #115 |
 | Economics in Expert | M4 cost-mode control becomes the S1 asset cards of §10; S2 Economics section hosting IC's editors | IC (editors) + whoever owns S1 | After U1 follow-up and S0 |
 | Guided shell | M7 hide expert chrome in Guided, M8 Guided without an API key, S1 question-first rail | GS session | Inside U3 |
 | Later | M3 Summary tab, M5 catalogue-driven forms, M6 type scale (quiet window, both sessions merged), M9 responsive, M10 validation catalogue, S3 table view, S4 report page, S5 deep links | to decide | After U3 |

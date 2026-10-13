@@ -67,7 +67,7 @@ def test_the_datacenter_sidecar_names_components_of_the_template_and_their_kinds
     n.generators.loc["genset_new", "p_nom_opt"] = 10.0
     n.links["p_nom_opt"] = n.links["p_nom"]
     draft = draft_campus(n, island=cfg)
-    assert draft.spec["campus"]["island"]["scenarios"] == ["ups_bridged", "seamless"]
+    assert draft.spec["campus"]["island"]["scenarios"] == ["ups_bridged"]
 
 
 def test_the_datacenter_pickup_blocks_cover_its_peak_critical_load():

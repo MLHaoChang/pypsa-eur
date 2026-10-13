@@ -222,4 +222,20 @@ describe('createChatProgressStream', () => {
       data: { tool_use_id: 'tu-sim', kind: 'PHASE', line: 'Optimising' },
     })
   })
+
+  it.each([0, 41])('resumes with a non-negative cursor (%s)', async (cursor) => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(streamingResponse([]))
+    createChatProgressStream('sess/1', () => {}, undefined, { afterCursor: cursor })
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe(
+      `/api/chat/sess%2F1/progress?cursor=${cursor}`,
+    )
+  })
+
+  it.each([-1, Number.NaN])('omits a cursor the server would reject (%s)', async (cursor) => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(streamingResponse([]))
+    createChatProgressStream('sess-1', () => {}, undefined, { afterCursor: cursor })
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe('/api/chat/sess-1/progress')
+  })
 })
