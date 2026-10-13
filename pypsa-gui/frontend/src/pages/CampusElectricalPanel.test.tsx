@@ -257,6 +257,9 @@ describe('CampusElectricalPanel', () => {
       expect(wrap.getAttribute('data-testid')).toBe('campus-table-scroll')
       expect(wrap.className).toContain('overflow-x-auto')
     }
+    // the free-text column keeps a readable width: the table scrolls rather than squeezing it
+    const cells = screen.getByTestId('compliance-pcc_reactive').querySelectorAll('td')
+    expect(cells[cells.length - 1].className).toContain('min-w-[16rem]')
   })
 
   it('warns when the results are stale', async () => {

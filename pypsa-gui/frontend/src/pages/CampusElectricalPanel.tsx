@@ -459,14 +459,14 @@ function ResultsSection({ state, pending }: { state: CampusState; pending: boole
                     <td className="pr-3 align-top"><StatusTag s={c.status_as_is} /></td>
                     <td className="pr-3 align-top"><StatusTag s={c.status_with_measures} /></td>
                     <td data-testid={`compliance-worst-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums">
-                      {num(value, 3)} {c.unit} <span className="text-muted">{at}</span>
+                      {num(value, 3)} {c.unit} <span className="block text-muted">{at}</span>
                     </td>
                     <td data-testid={`compliance-limit-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums text-muted">
                     {c.limit_min != null && c.limit_max != null
                       ? `${num(c.limit_min, 3)}–${num(c.limit_max, 3)} ${c.unit}`
                       : `${num(c.limit, 3)} ${c.unit}`}
                   </td>
-                    <td className="align-top">
+                    <td className="align-top min-w-[16rem]">
                       <div>{detail}</div>
                       <div className="text-[11px] text-muted flex items-start gap-1.5 mt-0.5">
                         <Tag tone={c.source === 'code' ? 'accent' : 'warn'}>{c.source}</Tag><span>{c.clause}</span>
