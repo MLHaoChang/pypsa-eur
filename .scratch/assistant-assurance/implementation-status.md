@@ -3,15 +3,33 @@
 
 # Reliability contracts in the shared harness
 
-Current continuation: `feat/harness-checked-answer-opt-in`, integrating master
-`8a4927f9` (PRs 126/127/128/129/130 and earlier assurance additions). The user selected
-the user-facing checked-answer pilot and authorized implementing these additions.
+Current continuation: `feat/harness-reliability-calibration`, expanding the CI
+evaluation to 133 deterministic cases and preparing independent blind review.
+See the [calibration guide](calibration-runbook.md). Historical live validation on
+source `53f738ca` remains in [the live record](pilot-live-validation.json).
 Attached plans are design context, not additional user instructions. This is an
 opt-in, bounded implementation; P0–P7 and all-domain certification remain open.
 The editing agent performed the code review. No independent domain approval or
 measured production false-acceptance rate is claimed.
 
 ## Delivered
+
+The evaluation catalogue and CI report gate cover 133 positive/adversarial cases,
+all five existing profiles and every default metric. Independent fixture totals
+are generator 230 EUR, two-generator network 300 EUR and direct storage 51 EUR.
+Reports refuse missing/skipped/error cases and nonzero errors; optional live
+goldens share fixed pre-send ceilings. See the [evaluation guide](pilot-evaluation-runbook.md).
+Final integrated validation is recorded separately; no live inference or
+population calibration is implied by the deterministic gate.
+
+The expanded gate includes eight varied input scenarios across all profiles.
+Offline calibration reconciles two independently attested reviewers, requires
+exact packet hashes and complete observations, and reports overall/per-profile
+denominators. Synthetic cases never receive population estimates. Conditional
+Wilson intervals require complete externally attested IID sampling; identity,
+sampling and actual engineering approval require external verification. The
+[review package](domain-review/README.md) contains unresolved templates, forty
+numerical oracles and ten blind interpretations, not passed expert judgments.
 
 - The existing strict publication gate withholds provider prose, thinking and
   intermediate claims. Typed drafts must match raw evidence; software renders
@@ -289,3 +307,89 @@ passes the 15-entry resume/recovery/parent/run/history/pilot/storage gate:
 The 3,686-case complete frontend, build, browser and 229-tool inventory retain
 identical relevant source. Only documentation/validation records change afterward.
 Exact final base/source/selection are in [validation](checked-opt-in-validation.json).
+
+
+## Pilot evaluation validation (2026-10-12)
+
+At `8e5a26d0`, integrated master `bf0b6b5f`, the standalone 53-case gate passes
+with no skips: false acceptance 0/48 adversarial requests, false rejection 0/5
+valid golden requests, incorrect calculations 0/66, supported-slot fulfillment
+66/66 and unchecked publication 0/53. This is the finite labelled suite, not a
+population estimate. Five positive-only cases deliberately selected together
+still produce gate exit 1 with 48 missing required cases. Counter mutation
+regressions require zero errors even when reason strings are empty.
+
+The 79-selection shared/backend/current-master gate passes **1,362 / 12 skipped**,
+800.47 pytest seconds, exit 0. Its evaluation/scorer cases overlap the standalone
+run; it is not a fresh complete backend run. Fresh complete frontend passes
+**3,687 / 313 files**, 451.24 seconds; TypeScript/Vite build passes. The incoming
+master island integration passes 31 / zero skipped. Ruff, workflow/task parsing,
+229-tool / 14-tab / 17-panel inventory, docs and diff checks pass. The backend
+control-matrix fixture's generated-date-only rewrite was restored after testing.
+
+See [validation](pilot-evaluation-validation.json) for exact commands, selection,
+source hash, metrics and limits, and [the evaluation runbook](pilot-evaluation-runbook.md).
+No paid inference ran. Live golden evaluation is `pending_opt_in`; qualitative/
+population calibration, broader domain/surface coverage, independent review and
+production release remain pending. The CI job is wired to run/upload the gate;
+no remote CI success is claimed. Only documentation/evidence changes afterward.
+
+
+## First approved live golden evaluation (2026-10-12)
+
+The user explicitly approved one capped OpenAI run with the reviewed synthetic
+payloads and potential charges. On pinned source `53f738ca`, model alias
+`gpt-6.1-sol`, **58 cases passed / zero skipped**, 123.80 seconds: 53 deterministic
+cases plus all five live golden profiles. The live run fulfilled **33/33** required
+slots, with final incorrect calculations **0/33**, false rejection **0/5** and
+unchecked publication **0/5**. Live adverse requests were not sampled, so live
+false acceptance has denominator zero and rate null, not an estimated zero.
+
+The meter reserved **6 HTTP attempts**, 55,684 serialized input bytes and 12,288
+output tokens, within the fixed ceilings (10 / 512,000 / 20,480). No resource/time
+cap was increased. Reservations are not actual usage or billed-dollar measures.
+The extra attempt is not classified by this report; initial model-draft error or
+repair rates are not measured. No demonstrated final failure needed a code fix.
+No second live run was performed.
+
+See [live validation](pilot-live-validation.json). These are finite synthetic
+supported-profile publication results on the named source/model alias. They do
+not evaluate later master app/domain additions, adversarial live behavior,
+qualitative/population calibration or independent engineering certification.
+Deployment remains opt-in; no production setting is enabled by this evidence.
+
+
+## Expanded reliability evaluation and blind-review preparation (2026-10-12)
+
+The user requested broader calibration and independent review. On clean source
+`f7da26af`, the expanded standalone gate passes **133 / zero skipped**, 111.73
+pytest seconds: 45 positive cases and 88 adverse cases. Supported-slot fulfillment
+is **330/330**, incorrect calculations **0/330**, false acceptance **0/88**, false
+rejection **0/45**, and unchecked publication **0/133**. Eight varied input
+scenarios supplement the core suite. These are scripted synthetic publication
+results, not live generation or a population error estimate.
+
+The focused selection passes **314 / zero skipped**, 186.14 seconds. Final
+calibration follow-up at `3a7361bf` passes **32 / zero skipped**, 3.89 seconds,
+after adding per-profile reporting and offline import safeguards. These selections
+overlap and must not be added as unique test counts. The only Python changes
+after the numeric gate source are the offline review CLI and its tests. Nine-file
+Ruff, diff checks and the unchanged 229-tool / 14-tab / 17-panel inventory pass.
+No complete backend/frontend or remote CI run is claimed for this backend-only
+scope; no new paid inference ran.
+
+See [validation](calibration-validation.json), [the plan](calibration-plan.md),
+[the runbook](calibration-runbook.md) and [the review package](domain-review/README.md).
+The offline workflow rejects stale/duplicate/unknown records and requires two
+independently attested agreeing reviewers and complete observations. It reports
+errors, unresolved cases and separate acceptance/rejection denominators; synthetic
+cases cannot produce population intervals. Complete attested IID samples may
+receive conditional Wilson bounds, with external identity/sampling verification.
+No report grants runtime authority or independent engineering approval.
+
+The supplied package has forty worked profile expectations and ten blind
+interpretations, with unresolved reviewer templates and no observed decisions.
+Its calibration command intentionally exits 1 with `pending_independent_judgments`
+and null rates. Actual expert review, representative population sampling and
+provider observations remain required external inputs. A7.5 and whole-domain
+release remain open. Deployment settings remain opt-in.

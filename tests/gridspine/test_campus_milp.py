@@ -16,7 +16,7 @@ import pandapower as pp
 import pytest
 
 from gridspine.static.campus_flow import SizingCriteria
-from gridspine.static.campus_invest import open_candidates, select_assets
+from gridspine.static.campus_invest import ParallelRules, open_candidates, select_assets
 from gridspine.static.campus_reactive import ReactiveRequirement
 from tests.gridspine.test_campus_invest import (
     PROFILE, WIDE, H7, comp, dark_hours, hourly, library, lowpf_spec, single_spec, tr,
@@ -279,6 +279,31 @@ def test_the_milp_finds_the_joint_optimum_that_c8s_greedy_choice_misses(tmp_path
     assert len(first) and first.loc[~first["constraint"].str.startswith("ts"), "error"].abs().max() < 1.0
 
 
+def test_renewals_are_written_but_the_milp_ranks_first_purchases_only(tmp_path):
+    """Plan C14 on the joint case over a 50-year span (H = 2080): C8's T_A
+    (40 years) is bought again in 2070 and its bank (25 years) in 2055, the
+    MILP's T_B in 2070. The ranking is unchanged: C8's cost and the
+    comparison are the first purchases' annual cost, by hand as above."""
+    from gridspine.static.campus_milp import select_assets_milp
+    spec, table, sel, lib, req = joint_case(tmp_path)
+    out = select_assets_milp(spec, table, sel, lib, req, PROFILE, period_years={2030: 50})
+    c8_cost = annual(TA[3], 40, 0.01) + annual(CAP[3], 25, 0.02)
+    assert out["summary"]["c8_cost"] == pytest.approx(c8_cost)
+    cmp_ = out["comparison"].set_index("need")
+    assert cmp_.at["transformer TR1", "c8_annualised_eur_per_a"] == pytest.approx(annual(TA[3], 40, 0.01))
+    assert cmp_.at["reactive", "c8_annualised_eur_per_a"] == pytest.approx(annual(CAP[3], 25, 0.02))
+    assert out["summary"]["milp_cost"] == pytest.approx(annual(TB[3], 40, 0.01))
+    inv = out["investment"]
+    rows_ = inv[inv["need"] == "transformer TR1"]
+    assert list(rows_["build_year"]) == [2030, 2070] and list(rows_["action"]) == ["buy", "renew"]
+    assert list(rows_["library_id"]) == ["T_B", "T_B"]
+    cost = out["cost"].set_index("period")
+    assert cost.at[2030, "capex_eur"] == pytest.approx(2 * TB[3])
+    assert cost.at[2030, "capex_replacement_eur"] == pytest.approx(TB[3])
+    assert cost.at[2030, "annualised_eur_per_a"] == pytest.approx(annual(TB[3], 40, 0.01))
+    assert out["scope"]["horizon"]["horizon_end"] == 2080
+
+
 # --------------------------------------------------------------------------
 # the adaptive rate
 # --------------------------------------------------------------------------
@@ -517,7 +542,9 @@ def test_switchgear_is_costed_per_bay_of_the_joint_choice_and_the_pcc_is_a_study
     assert (inv.at["switchgear MV1", "units"], inv.at["switchgear MV2", "units"]) == (4, 3)
     assert ("switchgear PCC" in inv.index) is pcc_switchgear
     assert ("switchgear PCC" in set(out["comparison"]["need"])) is pcc_switchgear
-    assert out["scope"] == {"pcc_switchgear": "campus" if pcc_switchgear else "grid_operator"}
+    assert {k: v for k, v in out["scope"].items() if k != "horizon"} == {
+        "pcc_switchgear": "campus" if pcc_switchgear else "grid_operator", "parallel": ParallelRules().scope()}
+    assert out["scope"]["horizon"]["period_years"] == {2030: 1}                 # plan C14: one period, one year
 
 
 def test_bays_a_choice_adds_are_priced_in_the_milp(tmp_path):
@@ -574,7 +601,8 @@ def test_a_rated_pcc_left_to_the_grid_operator_constrains_nothing(tmp_path):
     h = out["milp_history"]
     assert (h["slack"] == 0).all() and (h.loc[h["feasible"], "worst_violation"] == 0).all()
     assert out["comparison"].set_index("need").at["transformer TR1", "milp_choice"] == "1 x T_B"
-    assert out["scope"] == {"pcc_switchgear": "grid_operator"}
+    assert {k: v for k, v in out["scope"].items() if k != "horizon"} == {
+        "pcc_switchgear": "grid_operator", "parallel": ParallelRules().scope()}
 
 
 def test_the_battery_is_held_to_the_polygon_not_the_circle(tmp_path):
@@ -617,3 +645,237 @@ def test_the_battery_is_held_to_the_polygon_not_the_circle(tmp_path):
     assert not h.loc[h["choice"].str.contains("TS"), "feasible"].any()
     q = out["dispatch"].loc[out["dispatch"]["element"] == "inverters", "q_mvar"].abs()
     assert (q <= q_poly + 1e-6).all()
+
+
+# --------------------------------------------------------------------------
+# progress and cancel (plan C12): the panel runs the loop as a background job
+# --------------------------------------------------------------------------
+
+def test_progress_is_reported_once_per_iteration_in_order(tmp_path):
+    """One call per row of the history, the warm start (0) included, with
+    the iteration, the cap and the best AC-feasible cost so far."""
+    from gridspine.static.campus_milp import MAX_ITER, select_assets_milp
+    spec, table, sel, lib, req = joint_case(tmp_path)
+    calls = []
+    out = select_assets_milp(spec, table, sel, lib, req, PROFILE,
+                             progress=lambda i, n, s: calls.append((i, n, dict(s))))
+    h = out["milp_history"]
+    assert [c[0] for c in calls] == list(h["iteration"]) == [0, 1, 2]
+    assert {c[1] for c in calls} == {MAX_ITER}
+    c8_cost = out["summary"]["c8_cost"]
+    assert all(c[2]["c8_cost"] == pytest.approx(c8_cost) for c in calls)
+    # the warm start is C8's (feasible) point; iteration 1 finds T_B alone
+    assert calls[0][2]["best_cost"] == pytest.approx(c8_cost)
+    assert calls[1][2]["best_cost"] == pytest.approx(out["summary"]["milp_cost"])
+    assert out["summary"]["milp_cost"] < c8_cost
+    assert [c[2]["cost"] for c in calls] == pytest.approx(list(h["cost"]))
+    assert out["summary"]["stop"] == "converged"
+
+
+def test_a_stop_after_the_first_iteration_keeps_the_best_ac_feasible_point(tmp_path):
+    """Cancelled after iteration 1, the loop returns the best AC-feasible
+    point it has seen (T_B alone, already cheaper than C8), AC re-checked,
+    with ``stop == "cancelled"``; no further MILP is solved."""
+    from gridspine.static.campus_milp import select_assets_milp
+    spec, table, sel, lib, req = joint_case(tmp_path)
+    seen = []
+    out = select_assets_milp(spec, table, sel, lib, req, PROFILE, progress=lambda i, n, s: seen.append(i),
+                             should_stop=lambda: bool(seen) and seen[-1] >= 1)
+    assert out["summary"]["stop"] == "cancelled" and seen == [0, 1]
+    assert list(out["milp_history"]["iteration"]) == [0, 1] and out["summary"]["iterations"] == 1
+    assert out["fallback"] is None
+    inv = out["investment"].set_index("need")
+    assert inv.at["transformer TR1", "library_id"] == "T_B" and inv.at["reactive", "status"] == "not_needed"
+    assert set(out["compliance"]["status_with_measures"]) <= {"pass", "not_rated"}
+    assert out["summary"]["milp_cost"] < out["summary"]["c8_cost"]
+
+
+def test_a_stop_before_any_iteration_returns_c8s_result_flagged(tmp_path):
+    """Cancelled at once, even the warm start's finite differences are
+    skipped: C8's result comes back, flagged, with ``stop == "cancelled"``."""
+    from gridspine.static.campus_milp import select_assets_milp
+    spec, table, sel, lib, req = joint_case(tmp_path)
+    full = select_assets_milp(spec, table, sel, lib, req, PROFILE)
+    assert full["milp_history"].iloc[0]["fd_solves"] > 0
+    out = select_assets_milp(spec, table, sel, lib, req, PROFILE, should_stop=lambda: True)
+    assert out["summary"]["stop"] == "cancelled" and out["summary"]["fallback"] is True
+    assert out["fallback"] is not None and "cancelled" in out["fallback"]
+    h = out["milp_history"]
+    assert list(h["iteration"]) == [0] and h.iloc[0]["fd_solves"] == 0      # stopped between the FD solves
+    assert out["comparison"].set_index("need").at["transformer TR1", "milp_choice"] == "1 x T_A"
+    assert out["investment"].set_index("need").at["transformer TR1", "library_id"] == "T_A"
+    assert set(out["compliance"]["status_with_measures"]) <= {"pass", "not_rated"}
+
+
+def test_progress_reports_the_best_ac_feasible_cost_so_far_not_the_trials(tmp_path):
+    """On the outage case the first trial (the pair) is cheaper than C8's
+    point but fails the AC check: the cost reported as best stays the
+    cheapest AC-feasible point seen so far (None while there is none), not
+    the trial's."""
+    from gridspine.static.campus_milp import select_assets_milp
+    spec, table, sel, lib, crit = outage_case(tmp_path)
+    calls = []
+    out = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, crit,
+                             progress=lambda i, n, s: calls.append((i, dict(s))))
+    h = out["milp_history"]
+    first = h.iloc[1]
+    assert not first["feasible"] and first["cost"] < h.iloc[0]["cost"]          # a cheaper, infeasible trial
+    best = math.inf
+    for (i, s), feasible, cost in zip(calls, h["feasible"], h["cost"]):
+        if feasible:
+            best = min(best, cost)
+        assert s["best_cost"] == (None if best == math.inf else pytest.approx(best)), i
+    assert calls[1][1]["best_cost"] != pytest.approx(first["cost"])
+    assert calls[-1][1]["best_cost"] == pytest.approx(out["summary"]["milp_cost"])
+
+
+# --------------------------------------------------------------------------
+# plan C13: the MILP sees the units it may add next to an existing group
+# --------------------------------------------------------------------------
+
+def test_open_candidates_add_the_compatible_additions_without_the_adequacy_filter(tmp_path):
+    from tests.gridspine.test_campus_invest import SMALL, rewound_spec
+    lib = library(tmp_path, transformers=[tr(i, s, c, vk=vk) for i, (s, vk, c) in SMALL.items()])
+    table, sel = dark_hours((2030, 33.0))
+    out = select_assets(rewound_spec(), table, sel, lib, WIDE, PROFILE)
+    st = out["state"]
+    need = next(n for n in st.needs if n.key == "transformer TR1+TR2")
+    opened = open_candidates(need, lib, st.lib_by_id, SizingCriteria(), 50)
+    adds = {(c.items[0][1], c.items[0][2]) for c in opened if c.keep}
+    # every entry within 10 % of the pair's 12 %, 1..3 units: T10 x 1 included, which C8's estimate refuses
+    assert adds == {(i, k) for i in ("T10", "T20", "T20B", "T40", "T63") for k in (1, 2, 3)}
+    assert ("T10", 1) not in {(c.items[0][1], c.items[0][2]) for c in need.candidates if c.keep}
+    assert {(c.items[0][1], c.items[0][2]) for c in opened if not c.keep and not c.existing} == {
+        (i, n) for i in SMALL for n in (2, 3)}
+    assert all(c.keep == ("TR1", "TR2") for c in opened if c.keep)
+
+
+T_A = ("T_A", 40.0, 13.0, 0.90e6)           # cheap, 13 %: a little more reactive loss
+T_B = ("T_B", 40.0, 11.0, 0.95e6)           # a little dearer, 11 %: less; both within 10 % of the pair's 12 %
+
+
+def mixed_joint(units, load, banks=0, steps=0, out=None):
+    """The rewound campus (pair 110/20 kV) with ``units`` in parallel and
+    ``banks`` 4 Mvar banks with ``steps`` 2 Mvar steps in, written directly."""
+    from tests.gridspine.test_campus import direct_net
+    net = direct_net()
+    net.trafo.drop(net.trafo.index, inplace=True)
+    for i, (s, vk) in enumerate(units):
+        pp.create_transformer_from_parameters(net, 0, 1, sn_mva=s, vn_hv_kv=110.0, vn_lv_kv=20.0, vkr_percent=0.4,
+                                              vk_percent=vk, pfe_kw=25.0, i0_percent=0.05, name=f"T{i}")
+    if out is not None:
+        net.trafo.at[out, "in_service"] = False
+    net.line.at[0, "max_i_ka"] = 3.0
+    net.load.at[0, "p_mw"] = load
+    net.load.at[0, "q_mvar"] = load * math.tan(math.acos(0.85))
+    net.sgen["in_service"] = False
+    if banks:
+        pp.create_shunt(net, 1, q_mvar=-2.0, p_mw=0.0, step=steps, max_step=2 * banks)
+    pp.runpp(net)
+    return net
+
+
+def mixed_feasible(units, load, banks, q_limit, margin=0.2):
+    for steps in range(2 * banks + 1):
+        cases = [mixed_joint(units, load, banks, steps)] + [mixed_joint(units, load, banks, steps, out=k)
+                                                             for k in range(len(units))]
+        if abs(float(cases[0].res_ext_grid["q_mvar"].sum())) > q_limit + 0.011:
+            continue
+        ok = True
+        for c in cases:
+            on = c.trafo["in_service"].to_numpy()
+            s_unit = ((c.res_trafo["p_hv_mw"] ** 2 + c.res_trafo["q_hv_mvar"] ** 2) ** 0.5).to_numpy()[on]
+            ok &= bool((s_unit * (1 + margin) <= c.trafo["sn_mva"].to_numpy()[on] + 1e-9).all())
+            ok &= bool((c.res_trafo["loading_percent"].to_numpy()[on] <= 100.0).all())
+            ok &= bool(((c.res_bus["vm_pu"] >= 0.9) & (c.res_bus["vm_pu"] <= 1.1)).all())
+        if ok:
+            return True
+    return False
+
+
+def test_the_milp_finds_the_addition_that_c8s_greedy_choice_misses(tmp_path):
+    """The joint optimum of the 24-combination test, on an existing pair at
+    33 MW: adding T_A is the cheapest addition that carries the load, so C8
+    takes it, and its reactive loss puts the PCC outside the band, so C8
+    adds a bank. Adding T_B costs a little more and needs none. The brute
+    force here, over every replacement and addition and every bank count,
+    each solved directly, finds T_B added alone; so must the MILP."""
+    from gridspine.static.campus_milp import select_assets_milp
+    from tests.gridspine.test_campus_invest import rewound_spec
+    pair = [(40.0, 12.0)] * 2
+    q_a = float(mixed_joint(pair + [T_A[1:3]], 33.0).res_ext_grid["q_mvar"].sum())
+    q_b = float(mixed_joint(pair + [T_B[1:3]], 33.0).res_ext_grid["q_mvar"].sum())
+    assert q_b + 0.08 < q_a
+    req = ReactiveRequirement((q_a + q_b) / 2, "test band", "code")
+    lib = library(tmp_path, transformers=[tr(i, s, capex, vk=vk) for i, s, vk, capex in (T_A, T_B)],
+                  capacitor_banks=[comp("capacitor_banks", CAP[0], CAP[1], CAP[3], steps=CAP[2])])
+    table, sel = dark_hours((2030, 33.0))
+    combos = []
+    for tid, s, vk, capex in (T_A, T_B):
+        for kind, n in [("replace", 2), ("replace", 3), ("add", 1), ("add", 2), ("add", 3)]:
+            units = [(s, vk)] * n if kind == "replace" else pair + [(s, vk)] * n
+            for banks in (0, 1, 2, 3):
+                cost = n * annual(capex, 40, 0.01) + banks * annual(CAP[3], 25, 0.02)
+                combos.append((cost, kind, tid, n, banks, units))
+    best = next(c for c in sorted(combos, key=lambda c: c[0]) if mixed_feasible(c[5], 33.0, c[4], req.q_limit_mvar))
+    assert best[1:5] == ("add", "T_B", 1, 0)
+    out = select_assets_milp(rewound_spec(), table, sel, lib, req, PROFILE)
+    cmp_ = out["comparison"].set_index("need")
+    assert cmp_.at["transformer TR1+TR2", "c8_choice"] == "keep TR1, TR2 + 1 x T_A"
+    assert cmp_.at["reactive", "c8_choice"] == "1 x CAP4"
+    assert cmp_.at["transformer TR1+TR2", "milp_choice"] == "keep TR1, TR2 + 1 x T_B"
+    assert cmp_.at["reactive", "milp_choice"] == "none"
+    assert out["fallback"] is None and out["summary"]["milp_cost"] == pytest.approx(best[0])
+    inv = out["investment"]
+    rows = inv[inv["need"] == "transformer TR1+TR2"].set_index("action")
+    assert rows.at["keep", "units"] == 2 and rows.at["add", "library_id"] == "T_B"
+    assert sorted(out["spec"]["campus"]["transformers"]) == ["TR1", "TR1_2", "TR2"]
+    assert set(out["compliance"]["status_with_measures"]) <= {"pass", "not_rated"}
+
+
+def test_the_loading_and_margin_scales_are_one_percent_of_the_groups_smallest_unit(tmp_path):
+    """A mixed group (two 40 MVA units and an added 20 MVA): the scale of a
+    group's ``tl`` and ``ts`` rows is 1 % of its smallest rating, whatever
+    order the units come in (the first seen here is a 40 MVA unit)."""
+    import dataclasses as dc
+    from gridspine.static.campus_milp import _Problem, _warm_start
+    from tests.gridspine.test_campus_invest import rewound_spec
+    lib = library(tmp_path, transformers=[tr("T20", 20.0, 0.55e6)])
+    table, sel = dark_hours((2030, 33.0))
+    c8 = select_assets(rewound_spec(), table, sel, lib, WIDE, PROFILE)
+    st = c8["state"]
+    assert list(build_campus_names(c8["spec"])) == ["TR1", "TR2", "TR1_2"]
+    prob = _Problem(rewound_spec(), table, lib, WIDE, SizingCriteria(), st)
+    prob.should_stop = None
+    items = [((n.choice.items, n.choice.existing, n.choice.keep) if n.choice is not None and n.pos >= 0 else None)
+             for n in prob.needs]
+    prob.build_options(items, math.inf)
+    prob.q_ref = 1.0
+    ev = prob.evaluate(_warm_start(prob, st))
+    scales = {k[0]: v[1] for k, v in prob.limit.items() if k[0] in ("tl", "ts") and k[3] == "PCC/MV1"}
+    assert scales == {"tl": pytest.approx(0.2), "ts": pytest.approx(0.2)}
+    assert ev.converged and dc.is_dataclass(ev)
+
+
+def build_campus_names(spec):
+    from gridspine.ingest.campus import build_campus
+    return build_campus(spec).net.trafo["name"].astype(str)
+
+
+def test_the_warm_start_is_c8s_addition_not_the_replacement_with_the_same_units(tmp_path):
+    """One existing 40 MVA unit, N-1 off, 30 MW at pf 0.85: it is short of
+    the margin, so C8 keeps it and adds a T40 beside it. "1 x T40" alone (a
+    replacement) has the same items and cost and is in the MILP's open set:
+    the warm start must still be C8's addition."""
+    from gridspine.static.campus_milp import select_assets_milp
+    from tests.gridspine.test_campus_invest import rewound_spec
+    spec = rewound_spec(existing=("TR1",))
+    del spec["campus"]["transformers"]["TR2"]
+    lib = library(tmp_path, transformers=[tr("T40", 40.0, 0.95e6), tr("T63", 63.0, 1.4e6)])
+    table, sel = dark_hours((2030, 30.0))
+    crit = SizingCriteria(n_minus_1=False)
+    out = select_assets_milp(spec, table, sel, lib, WIDE, PROFILE, crit)
+    h = out["milp_history"]
+    assert h.iloc[0]["choice"].startswith("transformer TR1: keep TR1 + 1 x T40")
+    assert bool(h.iloc[0]["feasible"])
+    assert out["comparison"].set_index("need").at["transformer TR1", "c8_choice"] == "keep TR1 + 1 x T40"

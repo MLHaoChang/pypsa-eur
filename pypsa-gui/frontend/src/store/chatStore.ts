@@ -45,6 +45,9 @@ export interface ChatMessage {
   receipt?: AnswerReceipt
   /** Retrying a checked question must not silently become ordinary chat. */
   requiresChecked?: boolean
+  // Replayed from an interrupted turn record: why it ended. Shown under the
+  // bubble; the assistant does not see this turn on later ones.
+  interrupted?: string
   ts: number
 }
 

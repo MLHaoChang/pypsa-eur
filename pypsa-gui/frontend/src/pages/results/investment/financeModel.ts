@@ -508,6 +508,17 @@ export function fmtCell(column: string, v: unknown): string {
 
 export const label = (k: string) => k.replace(/_/g, ' ')
 
+// The staleness parts the generic label reads poorly (IC G3), worded as in the
+// view's fallback stale text. Not in `label`: the report's own `extra_assets`
+// block keeps its plain caption.
+const STALE_PART_LABELS: Record<string, string> = {
+  extra_assets: 'the campus study',
+  owner_assets: "the owner assets' investment columns",
+}
+
+/** A `changed` part of the report's staleness block, in words. */
+export const stalePartLabel = (k: string) => STALE_PART_LABELS[k] ?? label(k)
+
 // ── the study's progress ─────────────────────────────────────────────────
 
 /** A fraction in [0, 1] when the study reports one, else null. */

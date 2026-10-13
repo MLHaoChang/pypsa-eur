@@ -110,6 +110,13 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
     if not fin.incentives:
         return out
     reasons, flags = out.reasons, out.flags
+    # Extra (campus) assets carry no carrier and are not incentive assets (IC G2
+    # plan G-5, review B2): excluded before the carrier checks (they would read
+    # `asset_carrier_missing`, or enter an ITC / grant basis with no
+    # `asset_classes`), disclosed.
+    extra = {e.name for e in case.extra_assets}
+    flags.extend(f"incentive_excludes_extra_asset:{name}" for name in sorted(extra))
+    eligible = [a for a in case.assets if a.name not in extra]
     us = pack is not None and pack.jurisdiction == "us_federal"
     ca = pack is not None and pack.jurisdiction == "ca_federal"
     cs = fin.construction_start
@@ -135,7 +142,7 @@ def build_incentives(case: FinanceCase, tl: Timeline, op: Operating,
             reasons.append(f"incentive_expressed_elsewhere:{tag}:{ELSEWHERE[inc.kind]}")
             continue
         el = inc.eligibility
-        assets = list(case.assets)
+        assets = list(eligible)
         if el.asset_classes:
             unknown = [a.name for a in assets if a.carrier is None]
             if unknown:

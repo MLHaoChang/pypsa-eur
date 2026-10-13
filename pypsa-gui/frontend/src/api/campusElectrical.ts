@@ -92,6 +92,12 @@ export interface Requirement {
 
 export type InvestStatus = 'chosen' | 'kept' | 'not_needed' | 'unresolved'
 
+/** What a row does (plan C13): a new asset, units added next to existing ones,
+ *  existing units kept, or a group or cable bought where existing ones stood;
+ *  plan C14: `renew`, an asset bought again at the end of its life.
+ *  Absent in a run from before it, and empty for a need that needs nothing. */
+export type InvestAction = 'buy' | 'add' | 'keep' | 'replace' | 'renew'
+
 /** One need and the asset bought for it (`campus_investment.csv`). `library_id`
  *  and `invest_period` are null for a need that needs nothing. */
 export interface InvestmentRow {
@@ -107,10 +113,34 @@ export interface InvestmentRow {
   existing: boolean
   status: InvestStatus
   reason: string | null
+  action?: InvestAction | '' | null
+  // Plan C14, one row per purchase; absent in a run from before it.
+  /** 0 for a kept existing asset, 1 for the first buy, k for later ones. */
+  purchase?: number | null
+  /** The year bought (an existing asset's: its commissioning year). */
+  build_year?: number | null
+  /** The year its successor starts, or the horizon's end. */
+  service_to?: number | null
+  /** The row it replaces, as `lineage|purchase`. */
+  replaces?: string | null
+  lineage?: string | null
+  commissioned?: number | null
+  /** How the commissioning year is known: a source tag, or `assumed: ...`. */
+  commissioned_source?: string | null
 }
 
-/** The electrical cost of one investment period (`campus_cost.csv`). */
-export interface CostRow { period: number; capex_eur: number; annualised_eur_per_a: number }
+/** The electrical cost of one investment period (`campus_cost.csv`);
+ *  `capex_replacement_eur` (plan C14) is the part bought again. */
+export interface CostRow { period: number; capex_eur: number; annualised_eur_per_a: number; capex_replacement_eur?: number }
+
+/** The study horizon (plan C14): each period's span in years and where it came
+ *  from (`project`, or `assumed: ...`), the horizon's end and the run's notes. */
+export interface HorizonScope {
+  period_years: Record<string, number>
+  source: Record<string, string>
+  horizon_end: number
+  notes: string[]
+}
 
 /** The compliance table re-solved with the assets: `status_with_measures` and
  *  `value_with_measures` are an AC result, not a recommendation. */
@@ -122,8 +152,22 @@ export interface InvestedComplianceRow extends ComplianceRow {
 export interface HistoryRow { iteration: number; need: string; from: string; to: string; check: string; detail: string }
 export interface UnresolvedNeed { need: string; reason: string }
 
-/** Who buys the PCC switchgear. */
-export interface InvestScope { pcc_switchgear: 'campus' | 'grid_operator' }
+/** A tolerance of the parallel rules, tagged as every engine figure is. */
+export interface TaggedRule { value: number; source: string; note?: string }
+
+/** The rules a unit added next to existing transformers had to meet (plan C13),
+ *  written with the run; the panel shows them and does not edit them. */
+export interface ParallelScope {
+  ratio_tol: TaggedRule
+  uk_tol: TaggedRule
+  step_tol_pct: TaggedRule
+  unknown_vector_group: 'assume_compatible' | 'refuse'
+  rating_ratio: string
+}
+
+/** Who buys the PCC switchgear, and (plan C13; absent in older runs) the rules
+ *  for adding units in parallel. */
+export interface InvestScope { pcc_switchgear: 'campus' | 'grid_operator'; parallel?: ParallelScope; horizon?: HorizonScope }
 
 /** The solved hub's own system cost. `per_period` is EUR per year for a
  *  multi-period project; a single-period project has only `total`, as solved. */
@@ -166,6 +210,86 @@ export interface CampusResults {
   cost_basis?: CostBasis | null
 }
 
+// ── the joint optimisation (MILP) as a background job (plan C12) ────────────
+// `POST /{name}/milp` starts it (202 with the record), `GET /{name}/milp` is the
+// record (null when no job has run since the backend started), `POST
+// /{name}/milp/cancel` asks it to stop, keeping the best point found so far.
+
+export type MilpJobState = 'running' | 'done' | 'cancelled' | 'failed'
+/** Why the loop ended (`summary.stop`). */
+export type MilpStop = 'converged' | 'stalled' | 'delta_floor' | 'max_iter' | 'cancelled'
+
+/** The job's record (`campus_electrical_service.start_milp_job`). `iteration`,
+ *  `max_iter` and `best_cost` are null until the loop's warm start is solved;
+ *  `best_cost` is the cheapest AC-feasible point so far, `c8_cost` the least-cost pick's. */
+export interface MilpJobRecord {
+  state: MilpJobState
+  project: string
+  started_at: number
+  finished_at: number | null
+  iteration: number | null
+  max_iter: number | null
+  best_cost: number | null
+  c8_cost: number | null
+  stop: MilpStop | null
+  error: string | null
+  message: string
+}
+
+/** One iteration of the loop (`campus_milp_history.csv`). Iteration 0 is the warm start. */
+export interface MilpHistoryRow {
+  iteration: number
+  cost: number
+  feasible: boolean
+  accepted: boolean
+  worst_violation?: number | null
+  worst_lin_error?: number | null
+  delta?: number | null
+  rho?: number | null
+  choice: string
+  note?: string | null
+}
+
+/** Per need, the least-cost choice against the joint one (`campus_milp_comparison.csv`). */
+export interface MilpComparisonRow {
+  need: string
+  c8_choice: string
+  milp_choice: string
+  c8_annualised_eur_per_a: number
+  milp_annualised_eur_per_a: number
+}
+
+export interface MilpSummary {
+  method: 'milp'
+  fallback: boolean
+  reason: string
+  stop: MilpStop
+  c8_cost: number
+  milp_cost: number
+  c8_feasible: boolean
+  iterations: number
+}
+
+/** What the last finished job chose (`run_milp/`). `fallback` is the reason the
+ *  least-cost choice was kept, or null. */
+export interface MilpResults {
+  investment: InvestmentRow[] | null
+  cost: CostRow[] | null
+  compliance_invested: InvestedComplianceRow[] | null
+  history: MilpHistoryRow[] | null
+  comparison: MilpComparisonRow[] | null
+  summary: MilpSummary
+  fallback: string | null
+  stop: MilpStop
+}
+
+export interface CampusMilp {
+  status: MilpJobRecord | null
+  results: MilpResults | null
+  /** The least-cost run it was made from has changed since. */
+  stale: boolean
+}
+
 export interface CampusState {
   campus_yaml: string | null
   skipped: string[]
@@ -178,6 +302,12 @@ export interface CampusState {
   hub_cost_reason: string | null
   /** How many purchased items the last investment run offers as extra owner assets. */
   owner_assets_count?: number
+  /** Which result those owner assets come from (owner decision 2026-10-12): the joint
+   *  optimisation when it is fresh and found its own choice, else the least-cost run;
+   *  null when there are none. */
+  owner_assets_method?: 'milp' | 'least_cost' | null
+  /** The joint optimisation's job and results (plan C12). */
+  milp?: CampusMilp
 }
 
 /** The asset library: the project's copy, else the shipped default. */
@@ -286,6 +416,21 @@ export const campusApi = {
   /** Prepare, rank and size the campus; returns the new state. Seconds of CPU. */
   run: (project: string, settings: CampusSettings) =>
     client.post<CampusState>(`${base(project)}/run`, settings, quiet).then(r => r.data),
+
+  /** Start the joint optimisation (MILP, minutes) in the background. The
+   *  least-cost run is made first unless a fresh one with these settings exists.
+   *  409 while a job runs for any project. */
+  startMilp: (project: string, settings: CampusSettings) =>
+    client.post<MilpJobRecord>(`${base(project)}/milp`, settings, quiet).then(r => r.data),
+
+  /** The job's record; null when no job has run since the backend started. */
+  milpStatus: (project: string) =>
+    client.get<MilpJobRecord | null>(`${base(project)}/milp`, quiet).then(r => r.data ?? null),
+
+  /** Ask the running job to stop; it keeps the best point found so far. */
+  cancelMilp: (project: string) =>
+    client.post<{ state: MilpJobState; cancelling: boolean }>(`${base(project)}/milp/cancel`, undefined, quiet)
+      .then(r => r.data),
 
   /** The asset library a study buys from. */
   library: (project: string) =>

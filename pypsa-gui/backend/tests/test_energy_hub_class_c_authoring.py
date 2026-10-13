@@ -188,9 +188,10 @@ def test_bundle_check_requires_the_pack_at_the_frozen_root(tmp_path):
     templates.mkdir()
     (templates / "eh_templates.py").write_text("")
     # The generic defaults pack is read `__file__`-relative too (IC U1 a).
-    pack = root / "services" / "library" / "defaults_pack" / "versions" / "2026-10-05"
-    pack.mkdir(parents=True)
-    (pack / "manifest.json").write_text("{}")
+    for version in ("2026-10-05", "2026-10-07"):          # one manifest per version (IC G1)
+        pack = root / "services" / "library" / "defaults_pack" / "versions" / version
+        pack.mkdir(parents=True)
+        (pack / "manifest.json").write_text("{}")
     # The chat harness's Markdown (prompts, workflows, skills) is read
     # `__file__`-relative from the package too (chat harness issue 10).
     assert any("harness/prompts/base_identity.md" in m
