@@ -27,9 +27,16 @@ from gridspine.schema.island import (
     ISLAND_UNIT_HOURLY_COLUMNS,
 )
 from services.solver.island import island_hourly
-from tests.test_island_rows import _BESS, _a, _genset, _island, _ups
+from gridspine.schema.island import validate_island_config
+from tests.test_island_rows import _BESS, _VSM, _a, _genset, _island, _ups
 
 TOL = 1e-9
+#: A minimal requirements block, for validating one unit on its own.
+_REQ = {"bridge_s": _a(1.0), "sustained_h": _a(1.0), "rocof_window_ms": _a(500.0),
+        "gfm_margin": _a(0.0), "scenarios": ["seamless"],
+        "frequency_limits": {s: {"rocof_hz_per_s": _a(1.0), "f_min_hz": _a(47.5),
+                                 "f_max_hz": _a(51.5), "qss_band_hz": _a(1.0)}
+                             for s in ("transition", "steady_island")}}
 
 
 def _units(*, uc=True, spinning=False):
@@ -113,6 +120,24 @@ def test_the_export_step_at_0_plus_adds_every_transferring_ups():
     assert _hrow(hourly, "seamless")["dp_down_mw"].tolist() == pytest.approx([-4.0, 9.0])
 
 
+def test_a_walk_in_exactly_at_the_join_counts_as_late():
+    """walk_in 15 s = start 10 + sync 5: late, so the relief stands."""
+    island = _sidecar()
+    island["units"]["ups"]["values"]["walk_in_s"] = 15.0
+    _, hourly = island_hourly(_solved(), island)
+    assert _hrow(hourly, "seamless")["dp_up_mw"].tolist() == pytest.approx([6.0, -7.0])
+
+
+def test_the_import_is_counted_site_side():
+    """Import efficiency 0.9: p_imp = 0.9·10 − 0 and 0 − 3, so ΔP⁺ = 5 and
+    −7, ΔP⁻ = −3 and 9."""
+    n = _solved()
+    n.links.at["imp", "efficiency"] = 0.9
+    _, hourly = island_hourly(n, _sidecar())
+    assert _hrow(hourly, "seamless")["dp_up_mw"].tolist() == pytest.approx([5.0, -7.0])
+    assert _hrow(hourly, "seamless")["dp_down_mw"].tolist() == pytest.approx([-3.0, 9.0])
+
+
 def test_an_early_walk_in_gives_no_import_relief():
     island = _sidecar()
     island["units"]["ups"]["values"]["walk_in_s"] = 10.0
@@ -145,6 +170,16 @@ def test_without_uc_the_spinning_flag_sets_who_is_online():
     assert _hrow(hourly, "seamless")["inertia_mws"].tolist() == pytest.approx([36.25, 36.25])
     assert _row(unit, "g1", 1)["online"] == 1.0
     assert _row(unit, "g2", 1)["online"] == 0.0
+
+
+def test_a_vsm_counts_its_inertia_on_apparent_power():
+    """A VSM BESS, H_v 4 s at pf 0.8: 4/0.8·20 = 100 MW·s, plus the
+    committed gensets' 5.625 and 18.75."""
+    island = _sidecar()
+    island["units"]["bess"] = validate_island_config({"units": {"bess": {
+        **_VSM, "pf_rated": _a(0.8)}}, "requirements": _REQ})["units"]["bess"]
+    _, hourly = island_hourly(_solved(), island)
+    assert _hrow(hourly, "seamless")["inertia_mws"].tolist() == pytest.approx([105.625, 118.75])
 
 
 def test_the_droop_gain_takes_out_the_largest_genset():
@@ -193,6 +228,14 @@ def test_committed_genset_headroom_and_online():
     assert [r["headroom_up_mw"] for r in g2] == pytest.approx([0.0, 6.0])
     assert [r["headroom_down_mw"] for r in g2] == pytest.approx([0.0, 1.0])
     assert math.isnan(g1["soc_start_mwh"]) and math.isnan(g1["p_ups_it_mw"])
+
+
+def test_genset_headroom_is_scaled_by_its_availability():
+    """g2 at p_max_pu 0.5 in hour 1 (u 1, p 4): up 0.5·10 − 4 = 1."""
+    n = _solved()
+    n.generators.at["g2", "p_max_pu"] = 0.5
+    unit, _ = island_hourly(n, _sidecar())
+    assert _row(unit, "g2", 1)["headroom_up_mw"] == pytest.approx(1.0)
 
 
 def test_a_ups_row_carries_its_it_load_and_no_headroom():
