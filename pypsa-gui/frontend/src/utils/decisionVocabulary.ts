@@ -139,6 +139,8 @@ export const LEDGER_STATUS_LABELS: Record<LedgerStatus, string> = {
   customised: 'Customised',
   needs_attention: 'Needs attention',
 }
+/** U3 rule 5: a row whose value an Expert changed on an option fork. */
+export const CHANGED_IN_EXPERT_LABEL = 'Changed in Expert'
 export const PROVENANCE_LABELS: Record<Provenance, string> = {
   library: 'from the library',
   user: 'your value',
@@ -597,6 +599,10 @@ export const PREFIX_HELP: ReadonlyArray<readonly [string, string]> = [
   [
     "engine_reason:",
     "The finance engine could not establish part of the case; the reason is named."
+  ],
+  [
+    "changed_in_expert:",
+    "A value behind this row was changed in the Expert view on one of the study's options, so that option no longer matches the study; run the study again, or set the value here."
   ]
 ]
 // END PREFIX HELP MIRROR

@@ -669,8 +669,9 @@ def build_site_network(intake: Mapping[str, Any] | None,
     r = _need(values, "discount_rate")
     cost_basis: dict[str, str] = {}
     upfront: dict[str, Any] = {}
+    pv_kind: str | None = None
     if Q.PV in opt.free_assets:
-        kind = str((intake.get("pv") or {}).get("kind") or "rooftop")
+        kind = pv_kind = str((intake.get("pv") or {}).get("kind") or "rooftop")
         if kind not in ("rooftop", "utility"):
             raise PackError("intake_invalid", f"pv.kind {kind!r} is rooftop or utility")
         pv_cost = _need(values, f"pv_{kind}_eur_per_kw") * 1000.0
@@ -716,6 +717,13 @@ def build_site_network(intake: Mapping[str, Any] | None,
     if not bool(n.links.at[IMPORT_LINK, "active"]):
         raise PackError("import_link_inactive", f"{IMPORT_LINK} is inactive")
 
+    # U3 S2: every asset field written from a ledger row is stamped in S1a's
+    # provenance store (its one writer), so the Expert card and the ledger
+    # view read the same provenance (`asset_view`).
+    from services.study import asset_view
+
+    asset_view.record_pack_defaults(n, ledger, pv_kind=pv_kind)
+
     n.meta[PACK_META_KEY] = {
         "question_id": question.question_id,
         "option_id": option_id,
@@ -725,6 +733,7 @@ def build_site_network(intake: Mapping[str, Any] | None,
         "connection_mw": conn,
         "p_nom_max_mw": p_nom_max,
         "max_hours": hours,
+        "pv_kind": pv_kind,
         "cost_basis": cost_basis,
         "upfront_eur_per_mw": upfront,
         "honesty_notes": notes,
