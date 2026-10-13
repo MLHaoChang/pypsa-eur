@@ -1098,6 +1098,82 @@ module that loads a network file. Names are mapped by `pypsa_name`.
 - the producer never imports pypsa;
 - mutations.
 
+### I3a as built (2026-10-13)
+
+**Where it lives (owner, 2026-10-13, option A).** gridspine owns the
+contracts and pypsa-gui produces the values. This departs from the plan,
+which put the producer in `producers/campus.py`. The values are the I2b/I2c
+definitions (late relief, ΔP⁻ at 0⁺, N+k on ΣK, the committed u), which live
+in pypsa-gui. gridspine cannot import pypsa-gui, so a gridspine producer
+would have had to code every rule a second time.
+
+**`gridspine/schema/island.py`** (additive):
+- `ISLAND_UNIT_HOURLY_COLUMNS`, `ISLAND_HOURLY_COLUMNS` and their CSV
+  names;
+- `validate_island_unit_hourly` and `validate_island_hourly`. They are
+  pandas-free, like the module, and refuse:
+  - a missing or extra column;
+  - a duplicate key;
+  - a non-integral or negative period/hour;
+  - an unknown scenario;
+  - a non-finite value;
+  - `online` outside [0, 1];
+  - empty headroom on any row but a UPS's (the rows that carry
+    `p_ups_it_mw`).
+- `period` and `hour` are keyed as in `schema/campus.py`: the investment
+  period, or the first snapshot's year, and the position in the period.
+
+**`services/solver/island.py`: `island_hourly(n, island, unit_ids=None)`.**
+- **Reads the saved, solved project, not the LP.** The campus study reads
+  the network file, where the model is gone. The values therefore come from
+  the stored dispatch, `p_nom_opt`, `Generator`/`Link` `status` and state of
+  charge. X_u is free in the LP wherever its row does not bind, so it is
+  taken at its physical value, min(L_it, p_nom_u).
+- **Per scenario:**
+  - ΔP⁺ and ΔP⁻ use the same definition in every scenario: the step at the
+    PCC at 0⁺. Under `ups_bridged` the gensets then see the pickup blocks
+    (I6b's E4), and under `planned` the ramp removes the step (E6).
+  - M is the units online at 0⁺ under `seamless` and `planned`, and the
+    started gensets at N+k under `ups_bridged`, as I2b (d).
+  - ΣK is the same in every scenario.
+- **Per unit:**
+  - `soc_start_mwh` is e(t−1), with the LP's linkage: cyclic, initial, and
+    carried across periods.
+  - `online` is u under linearised UC, else the spinning flag. A bess is 1;
+    a UPS is empty.
+  - Headroom up is u·p_max_pu·η·p_nom − η·p for a genset, and p_nom − p_s
+    for a bess.
+  - Headroom down is η·p − u·p_min_pu·η·p_nom for an online genset, and
+    p_s + p_nom for a bess.
+  - `p_ups_it_mw` is set on UPS rows only.
+- Unit ids are mapped by `pypsa_name` to the campus ids. A unit the campus
+  lacks keeps its PyPSA name.
+
+**`services/campus_electrical_service.run`** writes `island_unit_hourly.csv`
+and `island_hourly.csv` into the run directory, beside `campus_hourly.csv`.
+It does so only when the project has an island sidecar. Without one, an
+earlier run's tables are removed. A sidecar that fails validation is a 422
+with the reason. The panel and report reading is I9's.
+
+**Tests:**
+- `tests/gridspine/test_island_hourly_contract.py` (18): each refusal.
+- `tests/test_island_hourly.py` (19), with hand values on a two-hour
+  network whose results are set by hand:
+  - ΔP⁺ 6/−7 with the late relief, 10/−3 with an early walk-in;
+  - ΔP⁻ −4/9;
+  - M 30.625/43.75 with the committed shares, 11.25 under `ups_bridged`,
+    and 36.25 with the spinning flag;
+  - ΣK 13;
+  - e(t−1) cyclic, from the initial SoC, and across two periods;
+  - headroom both ways for the bess and the committed gensets;
+  - the UPS row, the id mapping, and the unsolved refusal.
+- A real solve through a NetCDF round trip gives the same tables.
+- The Data Center template's `ups_bridged` M is 125 MW·s. That is exactly
+  the 2M = 250 its binding RoCoF block row asks of a 5 MW block, which
+  cross-checks the producer against the LP.
+- `tests/test_campus_island_tables.py` (3): the run writes the tables keyed
+  like `campus_hourly.csv`, removes stale ones, and refuses a bad sidecar.
+
 ### I3b: island critical hours — step 2 (S)
 
 New `ISLAND_CRITERIA` in `ranking/campus.py`, used when the study has
