@@ -1,7 +1,7 @@
 """
 The campus-electrical chat tools must respect another user's edit lock.
 
-OPEN-ITEMS item 14. `routers/campus_electrical.py` runs `_check_lock` in each
+OPEN-ITEMS item 18. `routers/campus_electrical.py` runs `_check_lock` in each
 write handler and only then calls the service. The four write tools called the
 SERVICE directly, so a non-holder could redraft (with `overwrite=True`), run,
 add a grid-code draft to, or overwrite the asset library of a project another

@@ -3309,7 +3309,7 @@ def _gridspine_project_for_write(db, user, project_id: str):
 
     The campus write tools call their service directly, so the `_check_lock`
     each HTTP handler in `routers/campus_electrical.py` runs never ran for them
-    (OPEN-ITEMS 14: four tools, added by #79, #84 and #91, each caught on the
+    (OPEN-ITEMS 18: four tools, added by #79, #84 and #91, each caught on the
     day it landed by `tests/test_write_surface_lock_policy.py`). The chat
     seam's `_check_foreign_lock` is the wrong check for them, because it tests
     the session's ACTIVE project, and these tools take a `project_id` that
