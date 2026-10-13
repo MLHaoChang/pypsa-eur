@@ -35,6 +35,7 @@ export const CAMPUS_KEY = (name: string) => ['campusElectrical', 'state', name] 
 const INPUT = 'px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20'
 const DEFAULT_SETTINGS: CampusSettings = {
   k: 3, pf: null, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true, invest: true, pcc_switchgear_by_operator: false,
+  pcc_tap_control: 'campus',
 }
 
 const CHECK_LABEL: Record<ComplianceRow['check'], string> = {
@@ -201,6 +202,8 @@ function RunSection({ name, state, onChange }: {
   // A run saved before these settings existed has neither: the defaults.
   const [invest, setInvest] = useState(initial.invest ?? DEFAULT_SETTINGS.invest)
   const [byOperator, setByOperator] = useState(initial.pcc_switchgear_by_operator ?? DEFAULT_SETTINGS.pcc_switchgear_by_operator)
+  const [tapsByOperator, setTapsByOperator] = useState(
+    (initial.pcc_tap_control ?? DEFAULT_SETTINGS.pcc_tap_control) === 'grid_operator')
   const [refusal, setRefusal] = useState<string | null>(null)
   // The grid-codes listing says which published profiles still carry
   // unconfirmed limits; the picker names them so a run is never held to one unawares.
@@ -209,7 +212,7 @@ function RunSection({ name, state, onChange }: {
 
   const settings = (): CampusSettings => ({
     k: Number(k), pf: pf.trim() === '' ? null : Number(pf), profile, margin: Number(margin) / 100, n_minus_1: n1,
-    invest, pcc_switchgear_by_operator: byOperator,
+    invest, pcc_switchgear_by_operator: byOperator, pcc_tap_control: tapsByOperator ? 'grid_operator' : 'campus',
   })
   const run = useMutation({
     mutationFn: () => campusApi.run(name, settings()),
@@ -259,6 +262,10 @@ function RunSection({ name, state, onChange }: {
         <Field label="PCC switchgear owned by the grid operator (not costed)" row>
           <input type="checkbox" aria-label="PCC switchgear owned by the grid operator (not costed)" checked={byOperator}
                  disabled={!invest} onChange={e => setByOperator(e.target.checked)} />
+        </Field>
+        <Field label="PCC transformer taps held by the grid operator (at the campus file's position)" row>
+          <input type="checkbox" aria-label="PCC transformer taps held by the grid operator (at the campus file's position)"
+                 checked={tapsByOperator} disabled={!invest} onChange={e => setTapsByOperator(e.target.checked)} />
         </Field>
         <Btn variant="primary" onClick={() => run.mutate()} disabled={busy}>
           <Play size={13} /> {run.isPending ? 'Running…' : 'Run study'}

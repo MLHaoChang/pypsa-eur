@@ -911,3 +911,24 @@ Its calibration command intentionally exits 1 with `pending_independent_judgment
 and null rates. Actual expert review, representative population sampling and
 provider observations remain required external inputs. A7.5 and whole-domain
 release remain open. Deployment settings remain opt-in.
+
+
+## Backend CI quota isolation (2026-10-13)
+
+The full code-change CI run at `f1856446` passed the standalone gate but failed
+33 later stress/transport cases when earlier tests exhausted the shared test
+user's 512-record store. The public harness refused publication, as required.
+A seeded full store reproduces that failure; a two-case regression exposes the
+cross-test files. The fixture now clears only its explicitly created test
+assurance subtree before/after each case. Production quota/retention/access and
+within-case recovery remain unchanged. The default full-store refusal is pinned.
+
+Local focused tests pass **323 / five paid opt-in skips**, 171.20 seconds;
+standalone evaluation passes **133 / zero skips**, 110.49 seconds, with
+**330/330** fulfillment and zero calculation/publication errors. These selections
+overlap. No new Ruff findings or paid inference; three existing conftest findings
+remain unchanged. Complete backend CI is pending before merge, rather than
+inferred from the subsequent documentation-only green workflow. See
+[diagnosis and commands](ci-store-isolation.md) and
+[validation](ci-store-isolation-validation.json). Independent review/population
+calibration remain pending external judgments and representative observations.
