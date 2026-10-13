@@ -177,6 +177,28 @@ def _clean_llm_profiles():
     llm_config.profiles_path().unlink(missing_ok=True)
 
 
+@pytest.fixture(autouse=True)
+def _clean_assurance_records():
+    """
+    Checked-answer records must not survive past the test that wrote them.
+
+    `services.assurance_records` keeps at most `MAX_RECORDS` (512) per owner
+    under the session-wide app-data directory and reclaims only records older
+    than a day, and every test signs in as the same seeded user. So the
+    records accumulate across the whole suite: once the reliability cases from
+    #145 pushed the total past 512, every later checked answer failed to save
+    (`assurance_storage_full` -> `assurance_publication_failed`) in CI's full
+    run while each file passed on its own. Same rule as `llm-profiles.json`
+    above: unlink after every test, so a crashed test still leaves a clean slate.
+    """
+    import shutil
+
+    import app_paths
+
+    yield
+    shutil.rmtree(app_paths.app_data_dir() / "assistant_assurance", ignore_errors=True)
+
+
 # ── Auth harness (Step 0a) ──────────────────────────────────────────────────
 # Single-user mode is gone, so EVERY /api route now requires a session and every
 # state-changing one requires a CSRF token. Rather than touch ~60 test modules,

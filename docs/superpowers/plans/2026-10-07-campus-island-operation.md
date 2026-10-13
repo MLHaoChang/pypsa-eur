@@ -1455,6 +1455,95 @@ oscillation and no current-limit dynamics.
     saturates.
 - Mutations.
 
+### I6a as built (2026-10-13)
+
+**Split** (this session's decision, recorded here): I6 lands in two PRs.
+- **I6a**, this one, is the engine, the metrics and limits, and E1, E2, E3
+  and E5, against every analytical oracle above.
+- **I6b** adds:
+  - E4 (`ups_bridged` pickup, the bridge check) and E6 (planned islanding,
+    the ramp time);
+  - the UPS walk-in and its window drop-out with the autonomy check;
+  - the Q8 i_max rerun;
+  - the EMT/RMS flags;
+  - the hour sweeps (E1 at every hour, E2–E6 at the I3b hours).
+- I6b waits for I3a/I3b, which carry the hourly ΔP, `dp_up_mw` /
+  `dp_down_mw` and e(t−1).
+- **Owner split of 2026-10-13:** the other session keeps the pypsa-gui track
+  (I2b → I2c → I3a → I3b → I9); this session takes I6 and I8's PSS/E path.
+
+**`gridspine/static/frequency.py`** (numpy only)
+- **`simulate(units, dp_event, t_end, dt=1 ms, damping=0)`** solves the
+  single-bus aggregate swing equation with fixed-step RK4. Each `Unit`
+  follows its control:
+  - **genset:** governor lag T_g and droop. An isochronous governor is a PI
+    with T_i 2 s, assumed. ΔP_m is clamped to the load-acceptance step plus
+    the ramp since joining, and P to [0, P_n]. A cold genset joins at
+    start + sync from P = 0.
+  - **droop GFM:** K·τ_f in M, and −K·Δf.
+  - **VSM:** 2·H_v·S_n/f0 in M, and −K·Δf.
+  - **GFM limits:** at its P range or i_max·S_n (taken as MW), the GFM
+    becomes a constant-P source and its M and K go. The saturated set is
+    found by iteration at each evaluation, and the inertial power counts
+    (it can saturate at 0⁺).
+  - **frequency-watt:** deadband, delay, ramp and cap, with headroom (PV
+    only curtails).
+  - **PQ units:** no response.
+  - With no machine joined and every GFM at a limit, the result is
+    `COLLAPSE` ("frequency collapse: no grid-forming headroom").
+- **`native_droop_reference(genset, gfm, dp)`** is the D'Arco–Suul
+  cross-check, coded independently. Its states are the GFM's filtered P_f
+  and the genset's ΔP_m. The imposed frequency, differentiated, and the
+  genset swing are solved together as a 2×2 system each step.
+- **`metrics(trace, window_ms, band_hz)`:**
+  - RoCoF at 0⁺ and over the window;
+  - the extreme Δf (the nadir, or the peak for a surplus) and its time;
+  - Δf_qss;
+  - the last exit from the band around Δf_qss;
+  - the saturation times.
+- **`judge(metrics, frequency_limits, equipment)`:**
+  - `transition` limits during the event, `steady_island` limits after it;
+  - each piece of equipment as (label, f_low, f_high);
+  - the **binding limit is the one exceeded most relative to what it
+    allows** (f0 − f_min, f_max − f0, the RoCoF limit, the band), so a Hz/s
+    limit and a Hz limit compare. Raw exceedance would mix units; a test
+    pins a case where the two orderings differ.
+- **Events:** `e1_islanding`, `e2_load_step`, `e3_unit_trip` (the unit's
+  output and its response go) and `e5_pv_loss`.
+- **`units_from_campus(campus, rows, online, cold)`** reads I4's unit plan
+  (`island_flow._build`), so P0 and K = P_n/R are shared with I4.
+
+**Checked against**
+- **Inertia only:** RoCoF = ΔP·f0/(2·H·S) exactly, a linear trace.
+- **One governor:** the exact solution of the linear system (matrix
+  exponential); nadir and time within 0.1 %.
+- **Δf_qss = ΔP/ΣK** with three references.
+- **D'Arco–Suul:**
+  - the engine's droop and VSM forms against the native model, within
+    1e-7 Hz over the whole trace;
+  - 3.636 Hz/s at 0⁺ and −0.40 Hz settled;
+  - **every simulated value the plan pinned:** 2.88 Hz/s over 100 ms,
+    1.09 Hz/s over 500 ms, and −0.555 Hz at 0.415 s;
+  - the rejected lag model would give 6.667 Hz/s.
+- **A droop GFM alone:** first order with time constant τ_f.
+- **Saturation:**
+  - the nadir deepens monotonically;
+  - the current limit acts like the P limit;
+  - the absorbing side works;
+  - saturation can start at 0⁺ on the inertial power.
+- **Isochronous** returns to 0. **Collapse.**
+- **Cold genset:** the join, and the ramp counted from the join.
+- **Load acceptance:** the step and ramp.
+- **Frequency-watt:** the settled share by hand, its delay, deadband and
+  no-headroom cases, and its ramp and cap.
+- **Load damping.**
+- **I4:** E1 with I4's ΔP_AC settles at I4's Δf within 1 mHz, without
+  saturation and with the genset at its P limit.
+
+**Tests and mutations:** 32 tests in `tests/gridspine/test_frequency.py`.
+Mutation testing killed 32 of 32. Round 1 left 9 survivors, closed by the
+extra cases above.
+
 ### I7: closing the loop — frequency cuts back into sizing (S–M; manual, owner Q6)
 
 When I6 fails at hours T_fail, **heuristic** cuts are proposed for I2b at
@@ -1525,6 +1614,73 @@ in the separate environment runs it):
   or PSS/E can run the client-grade study.
 
 **EMT stays a flag.** It is raised by I6 or I8.
+
+### I8 as built: the PSS/E path (2026-10-13)
+
+**Owner decisions of 2026-10-13** (relayed by the coordinator session):
+- **REGFM_A1/B1 parameters go in a named sidecar until their CON order is
+  verified.** The `.dyr` carries only verified record layouts: GENSAL,
+  DEGOV1, SEXS and GENCLS.
+- **DEGOV1 is the governor for every genset.** Gas engines are approximated
+  by it, ledgered.
+
+**`gridspine/handoff/campus_bundle.py`**
+- `export_campus_bundle(outdir, campus, rows, hour)` writes one directory
+  per island hour.
+- **`<case>.raw`:** the hour grid-connected, before the event (`apply_hour`
+  on a copy of the campus net).
+- **`<case>.dyr`:**
+  - per genset with island data, **GENSAL + DEGOV1 + SEXS**;
+  - **GENCLS with H = 0** for the grid, an infinite bus until the islanding
+    trip;
+  - no SEXS when `excitation` is `none`.
+- **`gfm_models.csv`:** REGFM_A1 (droop) or REGFM_B1 (VSM) parameters by
+  name, in long form, with bus number, machine ID, base and source.
+- **`README.md`:**
+  - the event: trip the grid machine at bus N, ID 'n', at t = 0;
+  - the record counts;
+  - **pending verification** (the REGFM CON order);
+  - **every drafted value with its source**;
+  - the omissions;
+  - the ledger.
+- **`manifest.json`.**
+
+**Identity:** `dyr_writer.machine_records` (new, public) gives the RAW's own
+(bus number, ID). The test parses both files back with the existing
+`test_dyr_writer` parsers.
+
+**Values:**
+- **GENSAL:** H, X_d (= `xd_sat`) and x''d come from the island data. X'd
+  is max(0.25, 1.5·x''d) and X_l is 0.5·x''d; X_q, the time constants and
+  the saturation points are typical (assumed). The existing
+  `_check_physics` validates the ordering.
+- **DEGOV1:**
+  - M = 1 (droop on electrical power), DROOP = `droop_pct`/100, K = 1/DROOP,
+    TMAX = P_n/MBASE;
+  - **isochronous:** DROOP 0 and K = 1/0.04;
+  - the rest are typical.
+- **SEXS:** EMAX 4 (`avr_pmg`) or 3 (`avr_shunt`); the rest are typical
+  (K 50, TB 10, TA/TB 0.1, TE 0.05, EMIN 0), inside the PSS/E check ranges.
+- **The GFM's** droops, P range, current limit, filter (A1) and H (B1) come
+  from the island data, **converted from P_n to the inverter's S_n**:
+  mp = R·S_n/P_n, mq = k_q·S_n/P_n, Pmax = P_n/S_n. The rest are the
+  specifications' example values, PNNL-35110 for REGFM_A1 and the UNIFI VSM
+  specification for REGFM_B1, tagged as such.
+- **Omitted and listed:** grid-following converters (REGCA1/REECA1 need the
+  OEM's 45 parameters), UPSs, STATCOMs, and gensets without island data.
+
+**`dyr_writer`:** new `DYR_CONTROLS` (DEGOV1, SEXS, GENCLS layouts) and
+`format_record`, which refuses a missing value. The REGFM records are
+documented as deliberately absent.
+
+**Tests:**
+- 18 in `tests/gridspine/test_campus_bundle.py`;
+- plus the plan's guard that **no gridspine module imports `andes`**
+  (parsed with `ast`).
+- **Mutation testing:** 25 of 25 killed; 3 round-1 survivors, closed.
+
+**Not yet:** the ANDES path waits for the legal check (Q4), and the hour
+selection waits for I3b.
 
 ### I9: panel, copilot and report (M)
 

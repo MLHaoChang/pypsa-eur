@@ -1273,13 +1273,14 @@ def test_the_source_hash_changes_when_the_run_changes(hub):
 def test_the_response_is_the_assets_the_hash_and_the_stale_flag(hub):
     fake_investment(hub, purchase_rows())
     out = ce.owner_assets_response(hub)
-    assert list(out) == ["assets", "source_hash", "stale", "study_method"]
+    assert list(out) == ["assets", "source_hash", "stale", "study_method", "unresolved"]
     assert out["assets"] == ce.extra_owner_assets(hub) and out["source_hash"] == ce.campus_study_hash(hub)
     assert out["stale"] is False and out["study_method"] == "least_cost"
 
 
 def test_an_empty_run_answers_no_assets_no_hash_and_not_stale(hub):
-    assert ce.owner_assets_response(hub) == {"assets": [], "source_hash": None, "stale": False, "study_method": None}
+    assert ce.owner_assets_response(hub) == {"assets": [], "source_hash": None, "stale": False, "study_method": None,
+                                             "unresolved": []}
 
 
 def test_the_response_is_stale_after_the_discount_rate_changes_and_fresh_after_a_rerun(hub):

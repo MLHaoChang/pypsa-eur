@@ -744,3 +744,45 @@ describe('which result feeds the investment case', () => {
     expect(screen.queryByTestId('invest-ic-source')).toBeNull()
   })
 })
+
+// Owner decision 2026-10-13: the needs the run the case uses could not meet go to the
+// investment case, which flags the case. The panel says so, only when there are any.
+describe('unresolved needs passed to the investment case', () => {
+  it('says the unresolved needs are passed as a flag, beside the source line', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'least_cost', owner_assets_unresolved: 2 }))
+    renderPanel()
+    expect((await screen.findByTestId('invest-ic-unresolved')).textContent)
+      .toBe('2 unresolved needs are passed to the investment case as a flag: the case is not compliant without them.')
+    expect(screen.getByTestId('invest-ic-source').textContent).toBe('Investment case uses: least cost.')
+  })
+
+  it('says it in the singular for one', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'milp', owner_assets_unresolved: 1 }))
+    renderPanel()
+    expect((await screen.findByTestId('invest-ic-unresolved')).textContent)
+      .toBe('1 unresolved need is passed to the investment case as a flag: the case is not compliant without it.')
+  })
+
+  it('says it when the run bought nothing for the case', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 0, owner_assets_method: null, owner_assets_unresolved: 1 }))
+    renderPanel()
+    expect(await screen.findByTestId('invest-ic-unresolved')).toBeTruthy()
+    expect(screen.queryByTestId('invest-ic-source')).toBeNull()
+  })
+
+  it('says nothing when there are none, or the backend does not say', async () => {
+    api.state.mockResolvedValue(stateWith(results(), {
+      owner_assets_count: 2, owner_assets_method: 'least_cost', owner_assets_unresolved: 0 }))
+    const { unmount } = renderPanel()
+    await screen.findByTestId('invest-ic-source')
+    expect(screen.queryByTestId('invest-ic-unresolved')).toBeNull()
+    unmount()
+    api.state.mockResolvedValue(stateWith(results(), { owner_assets_count: 2, owner_assets_method: 'least_cost' }))
+    renderPanel()
+    await screen.findByTestId('invest-ic-source')
+    expect(screen.queryByTestId('invest-ic-unresolved')).toBeNull()
+  })
+})

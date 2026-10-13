@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-12",
+  "generated_at": "2026-10-13",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 230,
+  "tool_count": 231,
   "tools": [
     {
       "name": "list_components",
@@ -3118,7 +3118,10 @@
         "title",
         "question",
         "options",
-        "allow_free_text"
+        "allow_free_text",
+        "multi_select",
+        "detail",
+        "intent"
       ],
       "required": [
         "title",
@@ -3126,7 +3129,32 @@
         "options"
       ],
       "safety_tier": "read",
-      "schema_sha256": "401a910990c4816884b1954644fbb19ce83762746df1d9fe5b94792b6be412f4",
+      "schema_sha256": "8131e8e85f0f4773cdb9055b32f31ba534c32ba199a5feb998baaafea585f660",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "read_result",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "locator",
+        "pointer",
+        "offset",
+        "limit"
+      ],
+      "required": [
+        "locator"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "f2fb5139e30f6abeebd6ca348603bc53a4f5cda11de70accd848de5c2e843e32",
       "behavioral_fixture": "pending"
     },
     {

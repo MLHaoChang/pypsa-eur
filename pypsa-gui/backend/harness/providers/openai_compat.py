@@ -52,10 +52,14 @@ from urllib.parse import urlsplit
 from services import redaction
 from harness.protocol import LLMEvent, LLMRequest, ProviderError
 from harness.providers import openai_responses
+from harness.providers.usage import usage_from as _usage_from
 
 logger = logging.getLogger("pypsa_gui.chat")
 
 _REASONING_KEYS = ("reasoning_content", "reasoning")  # passive passthrough
+
+
+
 
 
 def _to_openai_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -372,15 +376,7 @@ class OpenAICompatProvider:
                         yield LLMEvent(type="ping")
                         continue
                     if isinstance(chunk.get("usage"), dict):
-                        u = chunk["usage"]
-                        usage = {
-                            "input_tokens": int(u.get("prompt_tokens", 0) or 0),
-                            "output_tokens": int(
-                                u.get("completion_tokens", 0) or 0),
-                        }
-                        cached = int((u.get("prompt_tokens_details") or {}).get("cached_tokens", 0) or 0)
-                        if cached:
-                            usage["cache_read_tokens"] = cached
+                        usage = _usage_from(chunk["usage"])
                     for choice in chunk.get("choices", []):
                         finish_reason = choice.get("finish_reason")
                         if finish_reason is not None:
