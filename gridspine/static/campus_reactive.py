@@ -50,7 +50,10 @@ above reduce to part one's rule, and give the same numbers.
 its kind, its switched ``steps`` (None for a STATCOM) and the Q it supplies
 in the solved hour (``+`` capacitive; a shunt's Q follows V^2).
 ``ReactiveResult.setpoints`` is the real equipment's dispatch in the form
-``solve_cases`` takes, so the same hour can be re-solved with it.
+``solve_cases`` takes, so the same hour can be re-solved with it. The
+dispatch itself never moves a tap; when the study has set taps for the hour
+(plan C15, ``campus_taps``), ``ReactiveResult.taps`` carries them and the
+setpoints include them.
 
 **Sign convention.** ``q0_mvar`` and ``q_final_mvar`` are the grid's
 ``ext_grid`` Q, which is positive when the grid supplies reactive power
@@ -94,14 +97,21 @@ class ReactiveResult:
     compliant_without: bool        # inside the band before any correction
     dispatch: dict = dataclasses.field(default_factory=dict)    # compensation name -> kind, steps, q_mvar
     q_installed_mvar: float = 0.0  # supplied by the installed compensation (+ capacitive)
+    #: The tap positions the study set in the intact case (plan C15,
+    #: ``campus_taps``): the moved units only; empty when none moved.
+    taps: dict = dataclasses.field(default_factory=dict)
 
     @property
     def setpoints(self) -> dict:
-        """The real equipment's dispatch, for ``solve_cases(setpoints=...)``."""
+        """The real equipment's dispatch, for ``solve_cases(setpoints=...)``,
+        with the moved taps as ``trafo_tap`` when there are any."""
         sgen = dict(self.unit_q)
         sgen.update({k: d["q_mvar"] for k, d in self.dispatch.items() if d["kind"] == "statcom"})
-        return {"sgen_q": sgen,
-                "shunt_step": {k: d["steps"] for k, d in self.dispatch.items() if d["kind"] != "statcom"}}
+        out = {"sgen_q": sgen,
+               "shunt_step": {k: d["steps"] for k, d in self.dispatch.items() if d["kind"] != "statcom"}}
+        if self.taps:
+            out["trafo_tap"] = dict(self.taps)
+        return out
 
 
 def requirement_from(profile: dict, p_ref_mw: float, pf: float | None = None) -> ReactiveRequirement:

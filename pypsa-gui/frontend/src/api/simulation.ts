@@ -1819,6 +1819,10 @@ export interface AssetEconomicsPayload {
   storage_units: StorageUnitEconomicsRow[]
   stores: StoreEconomicsRow[]
   links: LinkEconomicsRow[]
+  /** Framing the surfaces must show beside the numbers, e.g. the
+   *  zero-profit-by-construction note for an interior optimum. Absent or
+   *  empty when there is nothing to say. */
+  reading_notes?: string[]
 }
 
 export function createLogStream(

@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "scope": "backend_test_fixture_owned_record_isolation",
+  "failure_run": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/38353820801",
+  "failure_source": "f1856446b570fefe21aac603c37caea504faf9f2",
+  "original_full_backend": {
+    "failed": 33,
+    "passed": 12426,
+    "skipped": 290,
+    "pytest_seconds": 5190.59
+  },
+  "reproduction": {
+    "two_case_isolation": "first passed, second failed on leftover records",
+    "full_default_store_seed": "reproduced missing approved receipt and assurance_publication_failed",
+    "logs_archive": "ordinary workflow-level log archive retrieved; individual job-log download returned 403"
+  },
+  "focused_checks": {
+    "passed": 323,
+    "skipped": 5,
+    "pytest_seconds": 171.2,
+    "exit_code": 0,
+    "skips": "existing paid-model opt-ins",
+    "selection": [
+      "tests/test_answer_assurance.py",
+      "tests/test_reliability_cases.py",
+      "tests/test_reliability_transport.py",
+      "tests/test_pilot_evaluation.py",
+      "tests/test_pilot_evaluation_scoring.py",
+      "tests/test_harness_reliability.py",
+      "tests/test_assurance_storage.py",
+      "tests/assurance_acceptance"
+    ],
+    "junit": "/tmp/backend-ci-fix-focused.xml"
+  },
+  "standalone": {
+    "source": {
+      "commit": "6d0490651507ab711e934b8963b6e8478ec8a6c3",
+      "dirty": true,
+      "backend_python_sha256": "eec5a361eee1c952ca730308de7d1704363bba1aff0ba71f46efa4b835285c9e"
+    },
+    "suite": "checked-pilot-expanded/1",
+    "oracle": "weighted-arithmetic-stress/1",
+    "manifest_sha256": "5fbb76b5ff1034af08c70663492060babbe0fcd7aaf88e00359003f561cc9b57",
+    "passed": true,
+    "required_cases": 133,
+    "metrics": {
+      "deterministic": {
+        "scored_cases": 133,
+        "false_acceptance": {
+          "count": 0,
+          "denominator": 88,
+          "rate": 0.0
+        },
+        "false_rejection": {
+          "count": 0,
+          "denominator": 45,
+          "rate": 0.0
+        },
+        "incorrect_calculations": {
+          "count": 0,
+          "denominator": 330,
+          "rate": 0.0
+        },
+        "fulfillment": {
+          "count": 330,
+          "denominator": 330,
+          "rate": 1.0
+        },
+        "abstention": {
+          "count": 480,
+          "denominator": 810,
+          "rate": 0.5925925925925926
+        },
+        "unchecked_publication": {
+          "count": 0,
+          "denominator": 133,
+          "rate": 0.0
+        }
+      },
+      "live": {
+        "scored_cases": 0,
+        "false_acceptance": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        },
+        "false_rejection": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        },
+        "incorrect_calculations": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        },
+        "fulfillment": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        },
+        "abstention": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        },
+        "unchecked_publication": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        }
+      }
+    },
+    "process_exit_code": 0,
+    "wall_timeout_or_interruption": false
+  },
+  "standalone_pytest_seconds": 110.49,
+  "full_collection_count": 12752,
+  "full_remote_validation": "pending_before_merge",
+  "style": {
+    "new_ruff_findings": 0,
+    "pre_existing_conftest_findings": 3,
+    "diff_check": "passed"
+  },
+  "paid_generation": false,
+  "production_changes": false,
+  "independent_domain_approval": false
+}

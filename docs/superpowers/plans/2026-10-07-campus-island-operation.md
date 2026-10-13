@@ -80,7 +80,7 @@ All nine were answered on 2026-10-07. Each took the recommended answer.
 | Q1 | How the outage ride-through is specified | **Two durations.** A **bridge** time in seconds to minutes (UPS/BESS until the gensets are online) is reserved in I2a and checked in I6 (E4). A **sustained** time in hours (gensets, fuel, BESS) is an I2a constraint, from every start hour. Fuel autonomy is its own input. The template ships 24 h sustained, tagged `assumed`, and the panel asks for it. Critical load = IT plus the cooling the IT needs, tagged per Load; offices are not critical. |
 | Q2 | Where the frequency limits come from | **From the most sensitive island equipment, with defaults.** The equipment is the UPS input window, the chiller and drive trips, and the genset ISO 8528-5 class. The class limits are user-entered, because the standard is not freely available (the same treatment as VDE). Until entered, the defaults are tagged `assumed`: a 47.5 Hz lowest frequency, ±1 Hz quasi-steady-state, and 1 Hz/s RoCoF over 500 ms. 47.5 Hz is the bottom of the RfG Continental Europe 30-minute band (47.5–48.5 Hz); the unlimited band is 49.0–51.0 Hz. The limits for the transition and for steady island operation are kept separate. The report names the binding limit. |
 | Q3 | Which islanding scenarios are studied | **All three:** `ups_bridged`, `seamless` and `planned`. `ups_bridged` and `seamless` are compared side by side, which gives the client the cost of seamless islanding. In `seamless`, the gensets start and join the BESS-formed island after their start delay. |
-| Q4 | Multi-bus RMS, given ANDES is GPL-3.0-or-later (confirmed from the wheel metadata) | **ANDES as an optional engine in its own process**, exchanging files as the gridspine stages do. It is not bundled in the desktop app. The **PSS/E/PowerFactory export** is built as the client-grade route. A short legal check comes before I8. |
+| Q4 | Multi-bus RMS, given ANDES is GPL-3.0-or-later (confirmed from the wheel metadata) | **ANDES as an optional engine in its own process**, exchanging files as the gridspine stages do. It is not bundled in the desktop app. The **PSS/E/PowerFactory export** is built as the client-grade route. A short legal check comes before I8. **Held (2026-10-13): PSS/E export only for now; the ANDES path is parked, Q4 open** (see "Q4 open" under I8). |
 | Q5 | Island constraints in the hub LP | **Opt-in** per project; the template ships them enabled. A regression test guards that results are unchanged when they are off. |
 | Q6 | Frequency failures fed back into sizing (I7) | **Manual, with a preview.** The panel shows the failed hours, the proposed cut and its estimated cost, and the user applies it with "apply cuts". It becomes automatic only once a project's parameters are mostly datasheet-backed. |
 | Q7 | Gensets running in parallel with the grid | **Cold standby by default**, a per-genset `spinning` flag, and **optional linearised unit commitment** for fixed-size gensets (I2c), so the LP can buy spinning capacity at the fuel cost of its minimum load. A full unit-commitment MILP stays out of scope. |
@@ -1738,6 +1738,119 @@ in the separate environment runs it):
   or PSS/E can run the client-grade study.
 
 **EMT stays a flag.** It is raised by I6 or I8.
+
+### I8 as built: the PSS/E path (2026-10-13)
+
+**Owner decisions of 2026-10-13** (relayed by the coordinator session):
+- **REGFM_A1/B1 parameters go in a named sidecar until their CON order is
+  verified.** The `.dyr` carries only verified record layouts: GENSAL,
+  DEGOV1, SEXS and GENCLS.
+- **DEGOV1 is the governor for every genset.** Gas engines are approximated
+  by it, ledgered.
+
+**`gridspine/handoff/campus_bundle.py`**
+- `export_campus_bundle(outdir, campus, rows, hour)` writes one directory
+  per island hour.
+- **`<case>.raw`:** the hour grid-connected, before the event (`apply_hour`
+  on a copy of the campus net).
+- **`<case>.dyr`:**
+  - per genset with island data, **GENSAL + DEGOV1 + SEXS**;
+  - **GENCLS with H = 0** for the grid, an infinite bus until the islanding
+    trip;
+  - no SEXS when `excitation` is `none`.
+- **`gfm_models.csv`:** REGFM_A1 (droop) or REGFM_B1 (VSM) parameters by
+  name, in long form, with bus number, machine ID, base and source.
+- **`README.md`:**
+  - the event: trip the grid machine at bus N, ID 'n', at t = 0;
+  - the record counts;
+  - **pending verification** (the REGFM CON order);
+  - **every drafted value with its source**;
+  - the omissions;
+  - the ledger.
+- **`manifest.json`.**
+
+**Identity:** `dyr_writer.machine_records` (new, public) gives the RAW's own
+(bus number, ID). The test parses both files back with the existing
+`test_dyr_writer` parsers.
+
+**Values:**
+- **GENSAL:** H, X_d (= `xd_sat`) and x''d come from the island data. X'd
+  is max(0.25, 1.5·x''d) and X_l is 0.5·x''d; X_q, the time constants and
+  the saturation points are typical (assumed). The existing
+  `_check_physics` validates the ordering.
+- **DEGOV1:**
+  - M = 1 (droop on electrical power), DROOP = `droop_pct`/100, K = 1/DROOP,
+    TMAX = P_n/MBASE;
+  - **isochronous:** DROOP 0 and K = 1/0.04;
+  - the rest are typical.
+- **SEXS:** EMAX 4 (`avr_pmg`) or 3 (`avr_shunt`); the rest are typical
+  (K 50, TB 10, TA/TB 0.1, TE 0.05, EMIN 0), inside the PSS/E check ranges.
+- **The GFM's** droops, P range, current limit, filter (A1) and H (B1) come
+  from the island data, **converted from P_n to the inverter's S_n**:
+  mp = R·S_n/P_n, mq = k_q·S_n/P_n, Pmax = P_n/S_n. The rest are the
+  specifications' example values, PNNL-35110 for REGFM_A1 and the UNIFI VSM
+  specification for REGFM_B1, tagged as such.
+- **Omitted and listed:** grid-following converters (REGCA1/REECA1 need the
+  OEM's 45 parameters), UPSs, STATCOMs, and gensets without island data.
+
+**`dyr_writer`:** new `DYR_CONTROLS` (DEGOV1, SEXS, GENCLS layouts) and
+`format_record`, which refuses a missing value. The REGFM records are
+documented as deliberately absent.
+
+**Tests:**
+- 18 in `tests/gridspine/test_campus_bundle.py`;
+- plus the plan's guard that **no gridspine module imports `andes`**
+  (parsed with `ast`).
+- **Mutation testing:** 25 of 25 killed; 3 round-1 survivors, closed.
+
+**Not yet:** the ANDES path is held (Q4 open, below), and the hour
+selection waits for I3b.
+
+### Q4 open: the ANDES licence check (held 2026-10-13)
+
+**Owner decision of 2026-10-13** (relayed by the coordinator session):
+**hold**. The PSS/E/PowerFactory export (#165) is the dynamic hand-off for
+now. Neither the ANDES path nor its runner is built until the owner, or a
+lawyer, signs off on the questions below.
+
+**What needs checking.** ANDES 2.0.0 is GPL-3.0-or-later. The parked design
+runs it in its own process:
+- gridspine writes the island case to files;
+- a runner script, the only code that imports `andes`, runs in a separate
+  environment the user installs;
+- the results come back as files;
+- gridspine never imports `andes`, which the guard test from #165 enforces,
+  and the desktop app does not bundle it.
+
+The questions:
+- **(a)** Is this arm's-length use (aggregation), so that GPL obligations do
+  not reach gridspine or pypsa-gui?
+- **(b)** Must the runner script itself be GPL-3.0-or-later, and may it live
+  in this repository under that licence?
+- **(c)** May the repository ship an environment file or install guide that
+  pulls ANDES, without bundling it?
+- **(d)** Do the exchanged case and result files carry any licence
+  obligation? (Expected: no.)
+
+**The candidates, when the check is done:**
+1. **ANDES in its own process,** user-installed, with the runner under its
+   own GPL-3.0-or-later licence in a separate folder (for example
+   `gridspine/handoff/andes_runner/`, with its LICENSE file, excluded from
+   the app build).
+   - gridspine only reads and writes files.
+   - This gives in-house multi-bus RMS: voltage dips, current-limit hits,
+     and the nadir cross-check against I6.
+   - It needs a yes to (a) to (c).
+3. **A permissively licensed RMS engine instead,** for example NREL's
+   PowerSimulationsDynamics.jl (its licence is to be verified; believed
+   BSD-3-Clause).
+   - No GPL question.
+   - More work: a Julia runtime, and a model library to map the GFM, GFL and
+     genset controls onto.
+
+(The numbering is the question's as put to the owner. Option 2, the PSS/E
+export only, is what holds now. Option 4, bundling ANDES in the app, was
+not recommended.)
 
 ### I9: panel, copilot and report (M)
 

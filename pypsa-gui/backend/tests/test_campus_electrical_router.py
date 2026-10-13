@@ -32,13 +32,21 @@ def hub(client, _auth_db, seeded_identity):
     ("put", "/campus", "save_campus", {"yaml": "campus: {}"}, ("campus: {}",)),
     ("post", "/run", "run", {"k": 2, "pf": 0.95}, ({"k": 2, "pf": 0.95, "profile": "eu_rfg_dcc_ce",
                                                     "margin": 0.2, "n_minus_1": True, "invest": True,
-                                                    "pcc_switchgear_by_operator": False},)),
+                                                    "pcc_switchgear_by_operator": False,
+                                                    "pcc_tap_control": "campus"},)),
     ("post", "/run", "run", {"invest": False}, ({"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce",
                                                   "margin": 0.2, "n_minus_1": True, "invest": False,
-                                                  "pcc_switchgear_by_operator": False},)),
+                                                  "pcc_switchgear_by_operator": False,
+                                                  "pcc_tap_control": "campus"},)),
     ("post", "/run", "run", {"pcc_switchgear_by_operator": True}, ({"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce",
                                                                    "margin": 0.2, "n_minus_1": True, "invest": True,
-                                                                   "pcc_switchgear_by_operator": True},)),
+                                                                   "pcc_switchgear_by_operator": True,
+                                                                   "pcc_tap_control": "campus"},)),
+    # plan C15: who moves the PCC transformer's taps
+    ("post", "/run", "run", {"pcc_tap_control": "grid_operator"}, ({"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce",
+                                                                     "margin": 0.2, "n_minus_1": True, "invest": True,
+                                                                     "pcc_switchgear_by_operator": False,
+                                                                     "pcc_tap_control": "grid_operator"},)),
     ("get", "/library", "get_library", None, ()),
     ("put", "/library", "save_library", {"yaml": "discount_rate: {}"}, ("discount_rate: {}",)),
     ("post", "/library/reset", "reset_library", None, ()),
@@ -63,7 +71,8 @@ def test_each_route_calls_its_service_function_with_the_row(client, hub, monkeyp
     assert tuple(rest) == expected_args
 
 
-@pytest.mark.parametrize("body", [{"k": 0}, {"pf": 1.5}, {"margin": -1}, {"profile": ""}])
+@pytest.mark.parametrize("body", [{"k": 0}, {"pf": 1.5}, {"margin": -1}, {"profile": ""},
+                                  {"pcc_tap_control": "operator"}])
 def test_bad_run_settings_are_422_before_the_service(client, hub, monkeypatch, body):
     monkeypatch.setattr(ce, "run", lambda *a: pytest.fail("the service must not be reached"))
     resp = client.post("/api/campus-electrical/Router Hub/run", json=body)
@@ -126,7 +135,8 @@ def test_the_owner_assets_are_a_read_that_a_lock_does_not_refuse_and_a_write_ver
 def test_the_owner_assets_of_a_project_with_no_run_are_empty_with_no_hash_over_http(client, hub):
     resp = client.get("/api/campus-electrical/Router Hub/owner-assets")
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"assets": [], "source_hash": None, "stale": False, "study_method": None}
+    assert resp.json() == {"assets": [], "source_hash": None, "stale": False, "study_method": None,
+                           "unresolved": []}
 
 
 # ── the joint optimisation as a background job (plan C12) ──────────────────
@@ -149,7 +159,8 @@ def test_the_milp_routes_answer_202_200_and_200_and_call_their_service_functions
     resp = client.post(base + "/cancel")
     assert resp.status_code == 200 and resp.json() == {"state": "running", "cancelling": True}
     assert calls == [("start", "Router Hub", {"k": 2, "pf": 0.95, "profile": "eu_rfg_dcc_ce", "margin": 0.2,
-                                              "n_minus_1": True, "invest": True, "pcc_switchgear_by_operator": False}),
+                                              "n_minus_1": True, "invest": True, "pcc_switchgear_by_operator": False,
+                                              "pcc_tap_control": "campus"}),
                      ("status", "Router Hub"), ("cancel", "Router Hub")]
 
 
