@@ -159,7 +159,8 @@ def test_a_pinned_series_is_kept_whole(db, org, tmp_path, how, kept):
 
 
 def test_a_payload_file_another_row_shares_is_kept(db, org, tmp_path):
-    """Two names cut to the same 48-character slug, same content: one file."""
+    """Two names cut to the same 48-character slug, same content: one file,
+    kept while either row points at it, removed with the last."""
     from services.library import series_store as S
     from services.storage_paths import library_file
 
@@ -173,6 +174,9 @@ def test_a_payload_file_another_row_shares_is_kept(db, org, tmp_path):
     assert out.deleted_versions == 1
     assert library_file(root, org, row_b.path).exists()
     assert S.resolve(db, org, b, root=root).iloc[0] == 40.0
+    # Deleting the last series that points at the file removes it.
+    assert S.delete_series(db, org, b.id, project_dirs=[], root=root).deleted_versions == 1
+    assert not library_file(root, org, row_b.path).exists()
 
 
 def test_delete_touches_only_this_org(db, org, tmp_path):
