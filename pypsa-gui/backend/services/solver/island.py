@@ -1152,3 +1152,225 @@ def _fuel(n, m, sns, units, gensets, vals, critical) -> dict:
         m.add_constraints(lhs >= need - fixed, name=f"Island-fuel-{bus}")
         out["buses"][bus] = {"need_mwh": need, "status": "row"}
     return out
+
+
+# ── the hourly island tables (I3a; owner option A, 2026-10-13) ─────────────
+#
+# gridspine owns the two contracts (``gridspine/schema/island.py``); the
+# values come from here, evaluated on a solved network with the same
+# definitions as the rows above. The campus study reads the *saved* project,
+# where the LP is gone, so everything is computed from the stored results
+# (dispatch, p_nom_opt, Generator/Link status, state of charge), never from
+# the model. X_u, the late UPS relief, is free in the LP wherever its row
+# does not bind, so it is taken at its physical value min(L_it, p_nom_u).
+
+
+def _solved_nom(n, comp, name) -> float:
+    frame = getattr(n, _LIST_NAMES[comp])
+    if bool(frame.at[name, "p_nom_extendable"]) and "p_nom_opt" in frame.columns:
+        v = float(frame.at[name, "p_nom_opt"])
+        if np.isfinite(v):
+            return v
+    return float(frame.at[name, "p_nom"])
+
+
+def _series(frame, name, index, default):
+    if name in frame.columns:
+        return frame[name].reindex(index).astype(float).fillna(default)
+    return pd.Series(float(default), index=index)
+
+
+def _storage_p(n, name, sns) -> pd.Series:
+    """p_s = p_dispatch − p_store, positive when discharging."""
+    st = n.storage_units_t
+    p = getattr(st, "p", pd.DataFrame())
+    if name in p.columns:
+        return p[name].reindex(sns).astype(float).fillna(0.0)
+    return (_series(getattr(st, "p_dispatch", pd.DataFrame()), name, sns, 0.0)
+            - _series(getattr(st, "p_store", pd.DataFrame()), name, sns, 0.0))
+
+
+def _solved_soc_before(n, sns, sns_p, name) -> pd.Series:
+    """e(t−1) over one period, linked as ``_soc_before`` links it in the LP."""
+    su = n.storage_units
+    cyclic = bool(su.at[name, "cyclic_state_of_charge"])
+    multi = isinstance(sns, pd.MultiIndex)
+    within = multi and bool(su.at[name, "cyclic_state_of_charge_per_period"] if cyclic
+                            else su.at[name, "state_of_charge_initial_per_period"])
+    init = float(su.at[name, "state_of_charge_initial"])
+    soc = _series(n.storage_units_t.state_of_charge, name, sns, 0.0)
+    if within or not multi:
+        s = soc.loc[sns_p]
+        prev = s.shift(1)
+        prev.iloc[0] = s.iloc[-1] if cyclic else init
+        return prev
+    prev = soc.shift(1)
+    prev.iloc[0] = soc.iloc[-1] if cyclic else init
+    return prev.loc[sns_p]
+
+
+def _period_label(period, sns_p) -> int:
+    """The campus tables' period key (``producers/campus.py``): the
+    investment period, or the first snapshot's year."""
+    if period is not None:
+        return int(period)
+    first = sns_p[0]
+    return int(first.year) if hasattr(first, "year") else 0
+
+
+def island_hourly(n, island, unit_ids=None):
+    """``(island_unit_hourly, island_hourly)`` for a solved hub network and
+    its validated sidecar, as gridspine's contracts (I3a). ``unit_ids`` maps
+    a PyPSA name to the campus unit id (default: the PyPSA name).
+
+    Per period, hour and scenario, with the I2b/I2c definitions:
+    ΔP⁺ = p_imp − Σ_late min(L_it, p_nom), ΔP⁻ = −p_imp + Σ_transferring L_it
+    (at 0⁺); M = Σ_online H·u·η·p_nom/cos φ + Σ_VSM H_v·p_nom/pf
+    + Σ_droop GFM τ_f·p_nom/(2R) (``seamless`` and ``planned``: the units
+    online at 0⁺), and under ``ups_bridged`` the started gensets at N+k;
+    ΣK over the GFMs and droop gensets less the k largest genset unit's.
+    Per unit: e(t−1), online (u under linearised UC, else the spinning flag),
+    headroom both ways, and a UPS's IT load."""
+    from services.adequacy.activity import active_mask
+    # gridspine's contracts, through the guarded seam (a build without it says so).
+    from services.adequacy.island_config import (
+        GFM_CONTROLS,
+        ISLAND_UNIT_HOURLY_COLUMNS,
+        validate_island_hourly,
+        validate_island_unit_hourly,
+    )
+
+    units, req = island["units"], island["requirements"]
+    vals = req["values"]
+    unit_ids = dict(unit_ids or {})
+    solved = any(len(getattr(getattr(n, ts), attr, pd.DataFrame()).columns)
+                 for ts, attr in (("generators_t", "p"), ("storage_units_t", "p"),
+                                  ("storage_units_t", "state_of_charge"), ("links_t", "p0")))
+    if not solved:
+        raise IslandRefusal("the island hourly tables need a solved network; solve the project "
+                            "and save it first")
+
+    def named(kind, frames, pred=lambda s: True):
+        return [u for u, s in units.items() if s["kind"] == kind and pred(s)
+                and any(u in getattr(n, f).index for f in frames)]
+
+    critical = named("load", ("loads",), lambda s: s["critical"])
+    gensets = named("genset", ("generators", "links"))
+    bess = named("bess", ("storage_units",))
+    gfm = [s for s in bess if units[s].get("control") in GFM_CONTROLS]
+    upss = named("ups", ("storage_units",))
+    committed, _ = uc_gensets(n, island, gensets)
+    k = int(vals["genset_redundancy_n"])
+    pcc = _pcc_links(n)
+    sns = n.snapshots
+    unit_rows, hour_rows = [], []
+
+    def spec(x):
+        return units[x]["values"]
+
+    for period, sns_p in _periods(sns):
+        label = "ALL" if period is None else period
+        on = lambda comp, x: bool(active_mask(n, comp, label).get(x, True))   # noqa: E731
+        g_p = [g for g in gensets if on(_genset_out(n, g)[0], g)]
+        gfm_p = [s for s in gfm if on("StorageUnit", s)]
+        ups_p = [u for u in upss if on("StorageUnit", u)]
+        hours = np.arange(len(sns_p))
+        key = _period_label(period, sns_p)
+        loads = n.get_switchable_as_dense("Load", "p_set", sns_p)
+        l_c = loads[critical].sum(axis=1) if critical else pd.Series(0.0, index=sns_p)
+
+        def it_load(u):
+            it = [x for x in units[u]["it_load"] if x in loads.columns]
+            return loads[it].sum(axis=1) if it else pd.Series(0.0, index=sns_p)
+
+        # The gensets: output, online share and nominal output, per hour.
+        gen = {}
+        for g in g_p:
+            comp, eta = _genset_out(n, g)
+            ts = n.generators_t if comp == "Generator" else n.links_t
+            p = _series(ts.p if comp == "Generator" else ts.p0, g, sns_p, 0.0) * eta
+            if g in committed:
+                u = _series(getattr(ts, "status", pd.DataFrame()), g, sns_p, 1.0)
+            else:
+                u = pd.Series(1.0 if units[g]["spinning"] else 0.0, index=sns_p)
+            avail = n.get_switchable_as_dense(comp, "p_max_pu", sns_p)[g]
+            gen[g] = {"p": p, "u": u, "nom": _solved_nom(n, comp, g) * eta, "avail": avail}
+
+        # (I2b) the steps, numerically.
+        p_imp = pd.Series(0.0, index=sns_p)
+        for name in pcc["import"]:
+            if on("Link", name):
+                p_imp += float(n.links.at[name, "efficiency"]) * _series(n.links_t.p0, name,
+                                                                         sns_p, 0.0)
+        for name in pcc["export"]:
+            if on("Link", name):
+                p_imp -= _series(n.links_t.p0, name, sns_p, 0.0)
+        joins = max((spec(g)["start_s"] + spec(g)["sync_s"] for g in g_p), default=0.0)
+        late = [u for u in ups_p if units[u]["transfers_on_islanding"] and g_p
+                and spec(u)["walk_in_s"] >= joins]
+        transferring = [u for u in ups_p if units[u]["transfers_on_islanding"]]
+        dp_up = p_imp - sum((np.minimum(it_load(u), _solved_nom(n, "StorageUnit", u))
+                             for u in late), pd.Series(0.0, index=sns_p))
+        dp_down = -p_imp + sum((it_load(u) for u in transferring), pd.Series(0.0, index=sns_p))
+
+        # (d) M at 0⁺, and under ups_bridged; (e) ΣK.
+        m_gfm = 0.0
+        for s in gfm_p:
+            nom = _solved_nom(n, "StorageUnit", s)
+            m_gfm += (spec(s)["H_v_s"] / spec(s)["pf_rated"] * nom
+                      if units[s]["control"] == "gfm_vsm"
+                      else spec(s)["tau_f_s"] * nom / (2.0 * spec(s)["droop_pct"] / 100.0))
+        m_instant = pd.Series(m_gfm, index=sns_p)
+        for g in g_p:
+            m_instant += spec(g)["H_s"] / spec(g)["cos_phi_r"] * gen[g]["u"] * gen[g]["nom"]
+        unit_mw = {g: (float(spec(g)["unit_mw"]) if spec(g).get("unit_mw") is not None
+                       else gen[g]["nom"]) for g in g_p}
+        m_bridged = (sum(spec(g)["H_s"] / spec(g)["cos_phi_r"] * gen[g]["nom"] for g in g_p)
+                     - k * max((spec(g)["H_s"] * unit_mw[g] / spec(g)["cos_phi_r"] for g in g_p),
+                               default=0.0))
+        droop_g = [g for g in g_p if units[g]["governor"] == "droop"]
+        k_sum = (sum(_solved_nom(n, "StorageUnit", s) / (spec(s)["droop_pct"] / 100.0 * F0_HZ)
+                     for s in gfm_p)
+                 + sum(gen[g]["nom"] / (spec(g)["droop_pct"] / 100.0 * F0_HZ) for g in droop_g)
+                 - k * max((unit_mw[g] / (spec(g)["droop_pct"] / 100.0 * F0_HZ)
+                            for g in droop_g), default=0.0))
+
+        for sc in req["scenarios"]:
+            m = m_bridged if sc == "ups_bridged" else m_instant
+            hour_rows.append(pd.DataFrame({
+                "period": key, "hour": hours, "scenario": sc,
+                "dp_up_mw": dp_up.to_numpy(dtype=float), "dp_down_mw": dp_down.to_numpy(dtype=float),
+                "inertia_mws": np.broadcast_to(np.asarray(m, dtype=float), len(sns_p)).copy(),
+                "k_mw_per_hz": float(k_sum), "critical_load_mw": l_c.to_numpy(dtype=float)}))
+
+        nan = np.full(len(sns_p), np.nan)
+        for g in g_p:
+            d = gen[g]
+            p_min = spec(g).get("p_min_pu")
+            if p_min is None:
+                comp = _genset_out(n, g)[0]
+                p_min = float(getattr(n, _LIST_NAMES[comp]).at[g, "p_min_pu"])
+            up = (d["u"] * d["avail"] * d["nom"] - d["p"]).clip(lower=0.0)
+            down = (d["p"] - d["u"] * p_min * d["nom"]).clip(lower=0.0) * (d["u"] > 0)
+            unit_rows.append(pd.DataFrame({
+                "period": key, "hour": hours, "unit_id": unit_ids.get(g, g), "soc_start_mwh": nan,
+                "online": d["u"].to_numpy(dtype=float), "headroom_up_mw": up.to_numpy(dtype=float),
+                "headroom_down_mw": down.to_numpy(dtype=float), "p_ups_it_mw": nan}))
+        for s in [x for x in bess if on("StorageUnit", x)] + ups_p:
+            soc = _solved_soc_before(n, sns, sns_p, s).to_numpy(dtype=float)
+            if s in ups_p:
+                row = {"online": nan, "headroom_up_mw": nan, "headroom_down_mw": nan,
+                       "p_ups_it_mw": it_load(s).to_numpy(dtype=float)}
+            else:
+                nom = _solved_nom(n, "StorageUnit", s)
+                p_s = _storage_p(n, s, sns_p)
+                row = {"online": np.ones(len(sns_p)),
+                       "headroom_up_mw": (nom - p_s).to_numpy(dtype=float),
+                       "headroom_down_mw": (p_s + nom).to_numpy(dtype=float), "p_ups_it_mw": nan}
+            unit_rows.append(pd.DataFrame({"period": key, "hour": hours,
+                                           "unit_id": unit_ids.get(s, s), "soc_start_mwh": soc,
+                                           **row}))
+    unit_df = (pd.concat(unit_rows, ignore_index=True) if unit_rows
+               else pd.DataFrame(columns=list(ISLAND_UNIT_HOURLY_COLUMNS)))
+    return (validate_island_unit_hourly(unit_df),
+            validate_island_hourly(pd.concat(hour_rows, ignore_index=True)))
