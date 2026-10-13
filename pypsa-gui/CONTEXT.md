@@ -62,6 +62,20 @@ chat-staleness silent revert).
 _Avoid_: mutation (overloaded with React Query's `useMutation`), save (that's
 project persistence)
 
+**Decision study**:
+A guided investment question answered for one base Project ("Do I need a
+battery at my site?"): intake answers, assumptions ledger, options, findings
+and report, stored as the sidecar `studies/<study_id>.json` inside that
+Project's storage directory (`backend/services/study/store.py`) and served under
+`/api/projects/{name}/studies` (`backend/routers/studies.py`). Its option
+Projects are study-owned forks. Unqualified "study" already names two other
+things in this codebase, so always write **decision study** (ids and keys
+`decision_study`).
+_Avoid_: study, investment study, the gridspine study (the planning → dynamics
+pipeline, `backend/routers/gridspine.py`), the adequacy studies (frontier, mc,
+fmea_sweep, margin_loop, coupling_loop, eh_study; `STUDY_KEYS` in
+`backend/services/project_context.py`)
+
 **Vintage**:
 A per-investment-period capacity bound on a component
 (`backend/routers/vintage.py`). Multi-period work expands these transiently

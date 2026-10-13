@@ -2940,7 +2940,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "dad8a69aa580c2a14ca139bc3660892ee310f2266b39b8427e6264e607512fc9",
+      "schema_sha256": "459d165e23cc24b40d4e1966e039a9ca1e7f34a7b9ca1c909b9f8b001b84da27",
       "behavioral_fixture": "pending"
     },
     {
@@ -5345,7 +5345,8 @@
     "gridspine",
     "hubDesign",
     "reports",
-    "campusElectrical"
+    "campusElectrical",
+    "decision"
   ],
   "tool_panel_enum": [
     "Results",
@@ -5402,7 +5403,9 @@
     "Reports",
     "reports",
     "CampusElectrical",
-    "campusElectrical"
+    "campusElectrical",
+    "DecisionStudy",
+    "decision"
   ],
   "slide_panels_not_in_tool_enum": [],
   "requested_aliases": {

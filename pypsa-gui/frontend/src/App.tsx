@@ -30,6 +30,7 @@ import WorkspacePanel from './pages/WorkspacePanel'
 import CompareView from './pages/CompareView'
 import SolveQueuePanel from './pages/SolveQueuePanel'
 import GridspinePanel from './pages/GridspinePanel'
+import DecisionPanel from './pages/decision/DecisionPanel'
 import ReportsPanel from './pages/ReportsPanel'
 import CampusElectricalPanel from './pages/CampusElectricalPanel'
 import { recoveryFor } from './utils/autoRecovery'
@@ -125,6 +126,7 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   gridspine:  { eyebrow: 'STUDIES',    title: 'Planning → dynamics' },
   reports:    { eyebrow: 'STUDIES',    title: 'Reports' },
   campusElectrical: { eyebrow: 'STUDIES', title: 'Campus electrical' },
+  decision:   { eyebrow: 'STUDIES',    title: 'Decision study' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
   settings:   { eyebrow: 'APPLICATION', title: 'Settings' },
   hubDesign:  { eyebrow: 'GUIDED',     title: 'Hub design' },
@@ -133,7 +135,7 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
 // half-width panel beside the canvas — their charts, tables, and two-column
 // layouts need the full width.
-const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'reports', 'hubDesign', 'campusElectrical'])
+const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'reports', 'hubDesign', 'campusElectrical', 'decision'])
 
 function fullPageContent(panel: SlidePanel): React.ReactNode {
   switch (panel) {
@@ -153,6 +155,7 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'capacityBounds': return <CapacityBoundsEditor />
     case 'solveQueue': return <SolveQueuePanel />
     case 'gridspine':  return <GridspinePanel />
+    case 'decision':   return <DecisionPanel />
     case 'reports':    return <ReportsPanel />
     case 'campusElectrical': return <CampusElectricalPanel />
     case 'settings':   return <LocalSettings />

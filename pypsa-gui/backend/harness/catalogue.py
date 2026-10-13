@@ -79,6 +79,8 @@ SAFETY_PANEL_ENUM = [
     "Workspace", "workspace", "Settings", "settings",
     "GridSpine", "gridspine", "Reports", "reports",
     "CampusElectrical", "campusElectrical",
+    # The guided investment study panel (frontend normalises both to 'decision').
+    "DecisionStudy", "decision",
 ]
 RESULTS_TAB_ENUM = [
     "overview", "capex", "dispatch", "loadflow", "prices", "economics",
@@ -1355,7 +1357,9 @@ TOOLS: list[dict[str, Any]] = [
         "has_solver_config, bus_count, snapshot_count, objective, "
         "has_orphan_tmp, missing, parent_project, scenario_description, "
         "scenario_type, project_kind (null = capacity_expansion; "
-        "'planning_dynamics' for a gridspine study), settings (the per-project "
+        "'planning_dynamics' for a gridspine study), study_owned, "
+        "owner_study_id, owner_study_name (study_owned = a decision study's own "
+        "option or tornado fork; leave it to the study), settings (the per-project "
         "settings table: derive_lengths_from_geometry) (per "
         "schemas.py:467-491). `id` is the DB-registry UUID when multi-user "
         "auth is enabled and null in single-user mode. Each entry is "
@@ -1466,7 +1470,8 @@ TOOLS: list[dict[str, Any]] = [
         "entry is a ProjectInfo {name, id, created_at, has_solver_config, "
         "bus_count, snapshot_count, objective, has_orphan_tmp, missing, "
         "parent_project, scenario_description, scenario_type, project_kind, "
-        "settings} per schemas.py:467-491. "
+        "study_owned, owner_study_id, owner_study_name, settings} per "
+        "schemas.py:467-491. "
         "Safety: read.",
         {"name": {"type": "string"}},
         ["name"],
