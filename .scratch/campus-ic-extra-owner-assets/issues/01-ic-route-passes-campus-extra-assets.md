@@ -1,6 +1,6 @@
 # The investment-case route passes the campus equipment, refuses a stale study, and goes stale with it
 
-Status: ready-for-agent
+Status: resolved
 Type: task
 Blocked by: none (the producer and `build_finance_case(extra_assets=)` are on master)
 
@@ -92,3 +92,15 @@ as-built note, and the gates of the IC session pass (backend `tests/test_finance
 `tests/test_campus_*`, the QA drivers that cover the IC route).
 
 ## Comments
+
+## Answer
+
+Resolved on 2026-10-13 by the IC session: PR #148 (IC G3, merge 3c32e4646). `POST /results/investment_case` and
+the chat tool `solve_ppa_price` call `owner_assets_response(project)` once per request and pass its assets as
+`extra_assets`. A stale study is not used and is flagged `campus_study_stale`. A money-year mismatch is refused
+(`campus_assets_money_year_mismatch`), and so is an invalid asset (`campus_assets_invalid`). A changed hash, set of
+assets or stale flag marks a stored report stale, naming `extra_assets`. See
+`docs/superpowers/findings/2026-10-12-ic-g3-campus-route-and-followups.md`. The route pins
+`{assets, source_hash, stale}` (`tests/test_investment_case_campus_route.py`). It reads only those keys and strips
+`meta` before hashing, so the campus side's additive `study_method` (top level and in `meta`) does not change its
+behaviour; the IC session was told after the fact.

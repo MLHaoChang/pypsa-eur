@@ -14,6 +14,11 @@ no investment case ever contains campus equipment, and the Investment tab shows 
 connection. It is written for whichever session picks it up; it assumes no knowledge of the conversations that
 produced it.
 
+## Status (2026-10-13)
+
+Issue 01 (the route) is **resolved** by the IC session in PR #148 (IC G3). Issues 02 (the Investment tab shows the
+campus equipment) and 03 (a defaults-pack version with the cited campus costs) remain open.
+
 ## Open ownership question (state it, do not guess)
 
 The IC session's findings say who builds the route "is the campus session's answer" (U1 landing plan §8; findings
