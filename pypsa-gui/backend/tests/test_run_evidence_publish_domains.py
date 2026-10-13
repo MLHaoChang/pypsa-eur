@@ -30,6 +30,7 @@ def test_map_worker_status_covers_family_labels():
     assert re_.map_worker_status('failed') == 'failed'
     assert re_.map_worker_status('budget_exhausted') == 'failed'
     assert re_.map_worker_status('refused') == 'failed'
+    assert re_.map_worker_status('unreachable') == 'failed'
     assert re_.map_worker_status('aborted') == 'interrupted'
     assert re_.map_worker_status('running') is None
 
@@ -106,6 +107,25 @@ def test_study_watcher_publishes_when_record_finishes(evidence_root, monkeypatch
     detail = re_.get_run_evidence(run_id)
     assert detail['kind'] == 'fmea_sweep'
     assert detail['status'] == 'completed'
+
+
+def test_unreachable_study_publishes_instead_of_staying_running(evidence_root, monkeypatch):
+    """A coupling/margin 'unreachable' verdict is terminal, not still running."""
+    monkeypatch.setattr(re_, '_authority', lambda: (evidence_root, PROJECT, OWNER))
+    record = {'status': 'unreachable', 'error': None}
+    re_.watch_study_run('coupling_loop', record)
+    run_id = record['_run_evidence']['run_id']
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        items = re_.list_project_runs()['items']
+        if items and items[0]['status'] == 'failed':
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError(re_.list_project_runs())
+    detail = re_.get_run_evidence(run_id)
+    assert detail['status'] == 'failed'
+    assert 'unreachable' in detail['error']['message']
 
 
 def test_study_failed_publishes_failed_run(evidence_root, monkeypatch):
