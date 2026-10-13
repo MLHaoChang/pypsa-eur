@@ -1405,7 +1405,12 @@ def get_eh_study():
     st = _state.get("eh_study")
     if not st:
         return Response(status_code=204)
-    return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+    from services.study_state import edited_since
+    out = {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+    # P33b 10b: has the network been edited since this study started? null
+    # (Unavailable) while running or for a record without a captured revision.
+    out["edited_since_study"] = edited_since(st)
+    return out
 
 
 @results_router.post("/eh_study/abort")
@@ -1452,18 +1457,203 @@ def post_eh_study(body: EhStudyRequest | None = None):
 
 _IC_LOCK_WAIT_S = 2.0
 
+# ── IC G3: the campus study's equipment as extra owner assets (plan R-1 … R-4) ─
+#
+# The route takes the extra owner assets from the latest solved campus study of
+# the active project (`campus_electrical_service.owner_assets_response`, whose
+# shape is a contract this route consumes), pinned by its `source_hash`. It is
+# read once per request, outside the network lock, and the same source goes to
+# the case (`_ic_build_case(campus=)`) and to the staleness key.
 
-def _ic_build_case(n, cfg, *, owner: str | None, lost_load):
+_CAMPUS_UNSAVED = "campus_study_network_unsaved"
+
+
+@dataclasses.dataclass(frozen=True)
+class CampusSource:
+    """What the campus study gives the case, as plain data (never an ORM row):
+    the `ExtraOwnerAsset`s, the flags that go into the staleness digest, whether
+    the in-memory network differs from the saved one the study read (flagged
+    `campus_study_network_unsaved` on the run only: a later save is not "the
+    campus study changed"), a refusal code raised as `FinanceRefused` inside
+    `build()`, and the `extra_assets` digest (None: no study applies)."""
+
+    extras: tuple = ()
+    flags: tuple[str, ...] = ()
+    unsaved: bool = False
+    refusal: str | None = None
+    detail: str = ""
+    digest: str | None = None
+
+    @property
+    def run_flags(self) -> tuple[str, ...]:
+        return self.flags + ((_CAMPUS_UNSAVED,) if self.unsaved else ())
+
+    @classmethod
+    def refused(cls, code: str, detail: str) -> "CampusSource":
+        from services.finance.investment_case_runner import json_digest
+
+        return cls(refusal=code, detail=detail, digest=json_digest({"error": code}))
+
+
+def _ic_campus_digest(source_hash, stale, flags, assets) -> str:
+    from services.finance.investment_case_runner import json_digest
+
+    return json_digest({"source_hash": source_hash, "stale": stale, "flags": list(flags),
+                        "assets": assets})
+
+
+def _ic_asset_label(a, i: int) -> str:
+    """An asset as named in a refusal detail: its name when it is a string, else
+    its position. Details carry fixed text and this label only, never a value
+    or exception text (those are logged); a name is cut at 80 characters."""
+    name = a.get("name") if isinstance(a, dict) else None
+    return repr(name[:80]) if isinstance(name, str) else f"asset {i}"
+
+
+def _ic_money_year_problem(assets: list, fin) -> str | None:
+    """R-3: every asset states `meta.currency` and `meta.price_year`, they agree,
+    the currency is the case's and, when the case states its currency year, so
+    is the price year (otherwise G2's `extra_asset_money_year_unstated`). `fin`
+    None (no valid finance inputs): the runner refuses first, nothing to compare.
+    The detail names assets and the case's own money only; the assets' values
+    are logged."""
+    years = set()
+    for i, a in enumerate(assets):
+        meta = a.get("meta")
+        if not isinstance(meta, dict) or meta.get("currency") is None \
+                or meta.get("price_year") is None:
+            return f"{_ic_asset_label(a, i)} states no currency and price year"
+        years.add((str(meta["currency"]).upper(), meta["price_year"]))
+    if len(years) > 1:
+        logger.warning("investment_case: campus assets priced in %s", sorted(map(str, years)))
+        return "the campus assets are priced in different currencies or price years"
+    if fin is None or not years:
+        return None
+    ((currency, year),) = years
+    if currency != fin.currency.upper():
+        logger.warning("investment_case: campus assets priced in %r, the case in %s",
+                       currency, fin.currency)
+        return f"the campus assets are not priced in the case currency {fin.currency}"
+    if fin.currency_year is not None and year != fin.currency_year:
+        logger.warning("investment_case: campus assets priced in %r money, the case in %s",
+                       year, fin.currency_year)
+        return f"the campus assets are not priced in the case's {fin.currency_year} money"
+    return None
+
+
+def _ic_campus_from_response(resp: dict, fin, *, unsaved: bool) -> CampusSource:
+    """R-1 steps 5 … 7 on the producer's `{"assets", "source_hash", "stale"}`. A
+    run without a purchase or a hash (no investment run) is no study."""
+    from services.finance.case import ExtraOwnerAsset
+
+    assets, source_hash = resp.get("assets"), resp.get("source_hash")
+    if not isinstance(assets, list) or not all(isinstance(a, dict) for a in assets):
+        return CampusSource.refused("campus_assets_invalid",
+                                    "the campus study's owner assets are not a list of entries")
+    if not assets and source_hash is None:
+        return CampusSource()
+    problem = _ic_money_year_problem(assets, fin)
+    if problem:
+        return CampusSource.refused("campus_assets_money_year_mismatch", problem)
+    stale = bool(resp.get("stale"))
+    flags = ("campus_study_stale",) if stale else ()
+    bare = [{k: v for k, v in a.items() if k != "meta"} for a in assets]
+    digest = _ic_campus_digest(source_hash, stale, flags, bare)
+    if stale:
+        return CampusSource(flags=flags, unsaved=unsaved, digest=digest)
+    names = [f.name for f in dataclasses.fields(ExtraOwnerAsset)]
+    extras = []
+    for i, a in enumerate(bare):          # one at a time: the refused asset is known
+        try:
+            extras.append(ExtraOwnerAsset(**{k: a[k] for k in names}))
+        except (KeyError, TypeError, ValueError) as exc:
+            logger.warning("investment_case: campus asset %s refused: %s",
+                           _ic_asset_label(a, i), type(exc).__name__)
+            return CampusSource.refused(
+                "campus_assets_invalid",
+                f"{_ic_asset_label(a, i)} is not a valid extra owner asset")
+    return CampusSource(extras=tuple(extras), unsaved=unsaved, digest=digest)
+
+
+def _ic_campus_source(finance: dict | None) -> CampusSource:
+    """The active project's campus study as the case's extra owner assets (R-1),
+    checked against `finance` (the raw finance inputs the caller holds, R-3).
+    A seam: tests replace it. In this order: no project, no row or no
+    `campus_electrical/run` directory → none (checked before any producer call,
+    so nothing is created); a project of another kind → none; the engine absent
+    → none, flagged `campus_study_unavailable`; the producer raising → refused
+    `campus_assets_invalid` (detail logged, the reason kept generic); then
+    `_ic_campus_from_response`."""
+    import uuid
+
+    from db import session as _db
+    from db.models import Project
+    from models.finance import FinanceInputs
+    from services import campus_electrical_service as ce
+    from services import dirty_state, project_registry, undo_service
+    from services.gridspine_service import CAPACITY_EXPANSION, kind_of
+
+    ctx = PyPSAService.get_active_context()
+    pid = getattr(ctx, "project_uuid", None)
+    if not pid:
+        return CampusSource()
+    with _db.SessionLocal() as db:
+        row = db.get(Project, uuid.UUID(str(pid)))
+        if row is None or not (project_registry.project_dir(row) / ce.SUBDIR / "run").is_dir():
+            return CampusSource()
+        if kind_of(row) != CAPACITY_EXPANSION:
+            return CampusSource()
+        if not ce.CAMPUS_AVAILABLE:
+            flags = ("campus_study_unavailable",)
+            return CampusSource(flags=flags, digest=_ic_campus_digest(None, None, flags, []))
+        try:
+            resp = ce.owner_assets_response(row)
+        except Exception as exc:  # noqa: BLE001 — HTTPException, ContractError, anything
+            logger.warning("investment_case: the campus study's owner assets could not be "
+                           "read: %r", exc)
+            return CampusSource.refused("campus_assets_invalid",
+                                        "the campus study's owner assets could not be read")
+    try:
+        fin = FinanceInputs.model_validate(finance) if finance is not None else None
+    except ValueError:
+        fin = None
+    unsaved = dirty_state.is_dirty(ctx) or undo_service.depth() > 0
+    return _ic_campus_from_response(resp, fin, unsaved=unsaved)
+
+
+def _ic_read_campus(finance: dict | None) -> CampusSource:
+    """`_ic_campus_source(finance)` for a request, never raising: a source that
+    cannot be read is refused (`campus_assets_invalid`), so a GET digests it as
+    `{"error": code}` instead of reading `current_assumptions_not_established`
+    for good, and a run stores a refused report."""
+    try:
+        return _ic_campus_source(finance)
+    except Exception as exc:  # noqa: BLE001 — see the docstring
+        logger.warning("investment_case: the campus source could not be read: %r", exc)
+        return CampusSource.refused("campus_assets_invalid",
+                                    "the campus study's owner assets could not be read")
+
+
+def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource | None = None):
     """The adapter closure the runner calls in its worker (plan C1). A seam:
-    tests replace this factory with one returning a fake `build_case`."""
+    tests replace this factory with one returning a fake `build_case`.
+    `campus` (IC G3 R-2) is the request's campus source: its refusal is raised
+    here, so it is a refused report like every adapter refusal; its extras go
+    to the adapter and its run flags onto the case."""
     def build():
         from models.finance import FinanceInputs
+        from services.finance.case import FinanceRefused
         from services.results.finance_case import build_finance_case
 
         fin = FinanceInputs.model_validate(cfg.finance)
+        if campus is not None and campus.refusal:
+            raise FinanceRefused(campus.refusal, campus.detail)
         with PyPSAService.get_lock():
-            return build_finance_case(n, cfg, fin, result_df=_result_df, lost_load=lost_load,
-                                      owner=owner)
+            case = build_finance_case(n, cfg, fin, result_df=_result_df, lost_load=lost_load,
+                                      owner=owner,
+                                      extra_assets=campus.extras if campus is not None else ())
+        flags = campus.run_flags if campus is not None else ()
+        return dataclasses.replace(case, flags=case.flags + flags) if flags else case
     return build
 
 
@@ -1473,16 +1663,20 @@ def _ic_case_hash(case) -> str | None:
     return finance_case_hash(case)
 
 
-def _ic_assumptions(cfg, n) -> tuple[str, dict]:
+def _ic_assumptions(cfg, n, *, lock, extra_assets: str | None = None) -> tuple[str, dict]:
     """(hash, parts) of the inputs a finance case is built from: the finance
     inputs, the value flows, the rest of the commercial config, the rest of
-    the solver config (review B1), the dispatch digest of the solve and the
-    pack versions (WP4.6b staleness key)."""
+    the solver config (review B1), the dispatch digest of the solve, the
+    pack versions (WP4.6b staleness key), the owner assets' investment
+    columns (IC G3 F-2, read under `lock`, the network lock the request took:
+    the runner's worker does not hold it, a GET re-enters it) and the campus
+    study's digest (`extra_assets`, IC G3 R-4: the request's source)."""
     from pydantic import ValidationError as _VE
 
     from models.finance import FinanceInputs
     from services.dispatch_status import dispatch_digest
     from services.finance.investment_case_runner import assumptions_digest, pack_versions
+    from services.results.finance_case import owner_assets_digest
 
     raw = getattr(cfg, "finance", None)
     try:
@@ -1490,9 +1684,13 @@ def _ic_assumptions(cfg, n) -> tuple[str, dict]:
     except _VE:
         fin = None
     solver = dataclasses.asdict(cfg) if dataclasses.is_dataclass(cfg) else None
-    return assumptions_digest(finance=raw, commercial=getattr(cfg, "commercial", None),
+    commercial = getattr(cfg, "commercial", None)
+    with lock:
+        owner_assets = owner_assets_digest(n, commercial)
+    return assumptions_digest(finance=raw, commercial=commercial,
                               dispatch=dispatch_digest(n, _result_df), packs=pack_versions(fin),
-                              solver=solver)
+                              solver=solver, owner_assets=owner_assets,
+                              extra_assets=extra_assets)
 
 
 def _ic_current_assumptions() -> tuple[tuple[str, dict] | None, str | None]:
@@ -1501,11 +1699,14 @@ def _ic_current_assumptions() -> tuple[tuple[str, dict] | None, str | None]:
     never silently current."""
     if _solver_in_flight():
         return None, "solve_in_flight"
+    cfg = _state["solver_config"]
+    campus = _ic_read_campus(getattr(cfg, "finance", None))     # outside the lock (IC G3 R-2)
     lock = PyPSAService.get_lock()
     if not lock.acquire(timeout=_IC_LOCK_WAIT_S):
         return None, "network_busy"
     try:
-        return _ic_assumptions(_state["solver_config"], PyPSAService.get_network()), None
+        return _ic_assumptions(cfg, PyPSAService.get_network(), lock=lock,
+                               extra_assets=campus.digest), None
     except Exception as exc:  # noqa: BLE001 — a read must not 500 on a bad input
         logger.warning("investment_case staleness key not computable: %s", exc)
         return None, "current_assumptions_not_established"
@@ -1519,8 +1720,9 @@ def get_investment_case():
     The investment-case run: its status (stage, refusal code) and whether the
     stored report is still current (IC P4 WP4.6b). `report.stale` is true when
     any input changed since the run — the finance inputs, the value flows, the
-    commercial config, the solve (dispatch digest) or a pack — with `changed`
-    naming them; a report whose current key cannot be read is stale too.
+    commercial config, the solve (dispatch digest), a pack, the owner assets'
+    investment columns or the campus study (IC G3) — with `changed` naming
+    them; a report whose current key cannot be read is stale too.
     204 when neither a run nor a report exists.
     """
     from services.finance.investment_case_runner import public_record, staleness
@@ -1554,7 +1756,9 @@ def post_investment_case(body: InvestmentCaseRequest | None = None):
     WP4.6b): build the `FinanceCase` from the solved network and the stored
     finance inputs, run the finance engine, store the report for
     `GET /results/investment_case/report`. 409 while a solve or another study
-    runs, or before a solve; 422 without (valid) finance inputs.
+    runs, or before a solve; 422 without (valid) finance inputs. The equipment
+    the project's latest solved campus study bought is owner capex in the case
+    (IC G3, `_ic_campus_source`).
     """
     from routers.simulation import _state_update
     from services.finance.investment_case_runner import start_investment_case
@@ -1566,13 +1770,18 @@ def post_investment_case(body: InvestmentCaseRequest | None = None):
                                              "values the solved dispatch"})
     cfg = _state["solver_config"]
     owner = body.owner if body is not None else None
+    # IC G3 R-2: the campus study read once, outside the network lock; the case
+    # and the staleness key take the same source.
+    campus = _ic_read_campus(getattr(cfg, "finance", None))
+    lock = PyPSAService.get_lock()
     return start_investment_case(
         body,
-        build_case=_ic_build_case(n, cfg, owner=owner, lost_load=_state.get("last_lost_load")),
+        build_case=_ic_build_case(n, cfg, owner=owner, lost_load=_state.get("last_lost_load"),
+                                  campus=campus),
         solver_state=_state,
         state_update=_state_update,
         publish_study=_publish_study,
-        assumptions=lambda: _ic_assumptions(cfg, n),
+        assumptions=lambda: _ic_assumptions(cfg, n, lock=lock, extra_assets=campus.digest),
         case_hash=_ic_case_hash,
         state_lock=PyPSAService.get_solver_state_lock(),
     )

@@ -36,6 +36,7 @@ Conversational refs / result UI: see ``discuss_project_run`` (chat_tools) and
 """
 from __future__ import annotations
 
+import contextvars
 import copy
 import hashlib
 import json
@@ -842,8 +843,13 @@ def watch_study_run(study_key: str, record: dict) -> None:
             time.sleep(0.25)
         # Timed out still running — leave the running marker; do not invent a terminal.
 
+    # Run in the caller's context, as the study worker does: `_authority()`
+    # must resolve the REQUEST's project. A bare thread has no scoped context
+    # and fell through to the process-foreground self-heal, which could
+    # overwrite a network another thread had just installed with an empty one.
+    ctx = contextvars.copy_context()
     threading.Thread(
-        target=_watch, daemon=True, name=f'run-evidence-{study_key}',
+        target=lambda: ctx.run(_watch), daemon=True, name=f'run-evidence-{study_key}',
     ).start()
 
 

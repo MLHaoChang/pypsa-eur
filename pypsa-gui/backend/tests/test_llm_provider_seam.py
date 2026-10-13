@@ -367,7 +367,10 @@ def test_openai_compat_streams_text_tools_reasoning_and_usage():
     tool = [b for b in done.blocks if b["type"] == "tool_use"][0]
     assert tool["id"] == "c1" and tool["name"] == "list_projects"
     assert tool["input"] == {"limit": 2}
-    assert done.usage == {"input_tokens": 11, "output_tokens": 4}
+    # All four keys, Anthropic meaning (chat harness issue 20; the vendor
+    # cache-field cases are in test_harness_provider_parity.py).
+    assert done.usage == {"input_tokens": 11, "output_tokens": 4,
+                          "cache_read_tokens": 0, "cache_create_tokens": 0}
     # request translation
     sent = captured["json"]
     assert captured["auth"] == "Bearer k"

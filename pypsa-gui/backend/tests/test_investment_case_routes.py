@@ -73,7 +73,8 @@ def _fake_build(monkeypatch, *, hold: threading.Event | None = None, refuse: str
 
     calls: list[dict] = []
 
-    def factory(n, cfg, *, owner, lost_load):
+    # IC G3 R-2: the factory takes the request's campus source (None: no study).
+    def factory(n, cfg, *, owner, lost_load, campus=None):
         calls.append({"owner": owner, "finance": cfg.finance})
 
         def build():
@@ -434,8 +435,9 @@ def test_a_run_stores_the_report_and_it_is_current(client, install_network, sess
     assert isinstance(stored, dict) and stored["excludes_shed_cost"] is True
     prov = stored["sections"]["project"]["payload"]["provenance"]
     assert prov["finance_case_hash"] == "case-hash-for-test"
+    # IC G3: the owner assets' investment columns (F-2) and the campus study (R-4).
     assert set(prov["inputs"]) == {"finance", "value_flows", "commercial", "solver_config",
-                                   "dispatch", "packs"}
+                                   "dispatch", "packs", "owner_assets", "extra_assets"}
     assert stored["cashflow_lines"], "cashflow lines missing"
     # detail=full: the sections with payloads and the cashflow lines (WP4.7b).
     full = client.get(REPORT_URL, params={"detail": "full"}).json()
@@ -502,6 +504,85 @@ def test_staleness_follows_each_input(client, install_network, session_ctx, monk
     st["investment_case_report"]["assumptions_hash"] = "0" * 32
     rep = client.get(STUDY_URL).json()["report"]
     assert rep["stale"] is True
+
+
+def _owned_storage(n):
+    """A battery with its two parts (IC S0b) beside build_network's generators."""
+    n.add("StorageUnit", "bess", bus="B1", carrier="battery", p_nom=1.0, max_hours=2.0,
+          overnight_cost=600_000.0, lifetime=15.0, build_year=2030, discount_rate=0.07)
+    for col, val in (("inv_power_overnight", 200_000.0), ("inv_power_lifetime", 10.0),
+                     ("inv_power_fom_share", 0.01), ("inv_energy_overnight", 200_000.0),
+                     ("inv_energy_lifetime", 15.0), ("inv_energy_fom_share", 0.0)):
+        n.storage_units[col] = val
+    return {"value_flows": {"asset_owners": [
+        {"asset_id": "bess", "component": "StorageUnit", "owner": "owner"},
+        {"asset_id": "solar", "component": "Generator", "owner": "owner"},
+        {"asset_id": "gone", "component": "Generator", "owner": "owner"}]}}
+
+
+def test_g3_an_owner_asset_investment_column_marks_the_report_stale(client, install_network,
+                                                                     session_ctx, monkeypatch):
+    """IC G3 F-2 (S0b findings limits 4 and 6): the raw investment columns of every
+    `asset_owners` entry are in the key, a non-owner asset's are not."""
+    import dataclasses
+
+    _fake_build(monkeypatch)
+    n = _solved(install_network)
+    commercial = _owned_storage(n)
+    st = session_ctx(client).solver_state
+    st["solver_config"] = dataclasses.replace(st["solver_config"], commercial=commercial)
+    assert _put_fin(client, _s2_inputs()).status_code == 200
+    assert client.post(STUDY_URL, json={}).status_code == 200
+    assert _poll(client)["report"]["stale"] is False
+
+    edits = (("storage_units", "bess", "build_year", 2031), ("storage_units", "bess",
+             "inv_power_overnight", 250_000.0), ("storage_units", "bess", "lifetime", 20.0),
+             ("storage_units", "bess", "max_hours", 4.0), ("storage_units", "bess", "carrier",
+             "li-ion"), ("storage_units", "bess", "inv_energy_fom_share", 0.02),
+             ("storage_units", "bess", "capital_cost", 1.0), ("storage_units", "bess",
+             "discount_rate", 0.05), ("storage_units", "bess", "p_nom", 2.0),
+             ("generators", "solar", "overnight_cost", 1.0))
+    for frame, name, col, val in edits:
+        df = getattr(n, frame)
+        old = df.at[name, col]
+        df.at[name, col] = val
+        rep = client.get(STUDY_URL).json()["report"]
+        assert rep["stale"] is True and rep["changed"] == ["owner_assets"], (col, rep)
+        df.at[name, col] = old
+        assert client.get(STUDY_URL).json()["report"]["stale"] is False, col
+    # A non-owner asset's investment columns are not the case's.
+    n.generators.at["gas", "overnight_cost"] = 123.0
+    n.generators.at["gas", "build_year"] = 2040
+    assert client.get(STUDY_URL).json()["report"]["stale"] is False
+    # The missing owner asset appearing is a change too.
+    n.add("Generator", "gone", bus="B1", carrier="gas", p_nom=0.0)
+    rep = client.get(STUDY_URL).json()["report"]
+    assert rep["stale"] is True and "owner_assets" in rep["changed"]
+
+
+def test_g3_the_owner_assets_digest_reads_raw_columns_and_never_raises():
+    from services.results.finance_case import owner_assets_digest
+
+    n = build_network(solve=True)
+    vf = _owned_storage(n)
+    d0 = owner_assets_digest(n, vf)
+    assert owner_assets_digest(n, vf) == d0 and isinstance(d0, str)
+    # `_opt` is the dispatch part's (dispatch_digest), not this one's …
+    n.storage_units.at["bess", "p_nom_opt"] = 9.0
+    assert owner_assets_digest(n, vf) == d0
+    # … except a Transformer's, which dispatch_digest does not cover.
+    n.add("Bus", "B2")
+    n.add("Transformer", "t1", bus0="B1", bus1="B2", s_nom=10.0, x=0.1)
+    owned_t = {"value_flows": {"asset_owners": [*vf["value_flows"]["asset_owners"],
+               {"asset_id": "t1", "component": "Transformer", "owner": "owner"}]}}
+    t0 = owner_assets_digest(n, owned_t)
+    n.transformers.at["t1", "s_nom_opt"] = 20.0
+    assert owner_assets_digest(n, owned_t) != t0
+    # Malformed raw config is digested, never raised.
+    for raw in (None, {}, {"value_flows": None}, {"value_flows": {"asset_owners": "x"}},
+                {"value_flows": {"asset_owners": [1, {"component": "Nope", "asset_id": "a"}]}}):
+        assert isinstance(owner_assets_digest(n, raw), str)
+    assert owner_assets_digest(n, None) == owner_assets_digest(n, {"value_flows": None})
 
 
 def test_a_stored_report_without_a_record_is_served_and_checked(client, install_network,

@@ -335,12 +335,20 @@ export interface ChoiceOption {
   recommended?: boolean
 }
 
+export type ChoiceIntent = 'choice' | 'plan_review'
+
 export interface ChoiceRequestFrame {
   tool_use_id?: string
   title: string
   question: string
   options: ChoiceOption[]
   allow_free_text: boolean
+  // Issue 15: several picks go out together, joined by "; ".
+  multi_select?: boolean
+  // Issue 15: Markdown shown under the question (a plan, a comparison).
+  detail?: string | null
+  // Issue 15: presentation only; `plan_review` shows `detail` as the plan.
+  intent?: ChoiceIntent
 }
 
 // ── The session's workflow step (chat harness issue 06) ─────────────────────
@@ -418,6 +426,11 @@ export interface ChatTurn {
   // Phase C — file_ids of uploads attached to this user message. Omitted
   // when the turn carried no attachments.
   attachment_file_ids?: string[]
+  // A turn that produced output and ended without completing (abort, a cap,
+  // a stream error, a disconnect). Display only: `assistant` is what the user
+  // saw, and the backend never replays this turn to the model.
+  interrupted?: boolean
+  interrupted_reason?: string
 }
 
 // A turn that started and never finished, recovered from the server's

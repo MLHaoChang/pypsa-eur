@@ -32,3 +32,13 @@ The prompt-injection surface (a server's tool descriptions enter the system
 prompt and its results the context); whether servers may be added by
 non-admins; whether to ship with zero servers configured. Recommend: admin
 only, zero by default, descriptions capped and fenced.
+
+## Comments
+
+2026-10-12 (re-scoped against master after 143 commits; nothing of this issue exists there yet):
+Still deferred (Q18). Add to the open points: the OpenAI 128-tool
+per-request selection and dispatch allowlist (`providers/wiring`),
+`toolsets.filter_tools` domains, `find_capabilities` indexing, the
+checked-mode `tool_guard` (fails closed for unmapped tools), and the
+`smoke/assistant_inventory.py --check` CI step, which would flag tools that
+appear at runtime.

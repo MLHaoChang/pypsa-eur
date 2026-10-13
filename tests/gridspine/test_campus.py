@@ -354,3 +354,135 @@ def test_existing_assets_parallel_runs_and_library_ids_are_accepted():
 def test_an_impossible_compensation_or_sunk_flag_is_refused(mutate, match):
     with pytest.raises(ContractError, match=match):
         build_campus(_broken(mutate))
+
+
+# --------------------------------------------------------------------------
+# the commissioning year (plan C14): optional, tagged, a whole year
+# --------------------------------------------------------------------------
+
+def test_a_commissioning_year_is_accepted_on_transformers_cables_and_compensation_and_changes_nothing():
+    spec = campus_spec()
+    spec["campus"]["transformers"]["TR1"].update(existing=True, commissioning_year=t(2001, "datasheet"))
+    spec["campus"]["cables"]["CB1"].update(existing=True, commissioning_year=t(1995))
+    spec["campus"]["compensation"] = [{"name": "CAP1", "bus": "MV1", "kind": "capacitor_bank", "q_mvar": t(2.0),
+                                       "steps": 1, "commissioning_year": t(2010, "measured")}]
+    camp = build_campus(spec)
+    params = camp.params.set_index(["element", "param"])
+    assert params.at[("TR1", "commissioning_year"), "value"] == 2001.0
+    assert params.at[("TR1", "commissioning_year"), "source"] == "datasheet"
+    assert params.at[("CB1", "commissioning_year"), "value"] == 1995.0
+    assert params.at[("CAP1", "commissioning_year"), "source"] == "measured"
+    plain = build_campus(_with_comp({"name": "CAP1", "bus": "MV1", "kind": "capacitor_bank", "q_mvar": t(2.0),
+                                     "steps": 1}))
+    assert _pcc_q(camp.net) == pytest.approx(_pcc_q(build_campus(campus_spec()).net), abs=1e-12)
+    assert len(camp.net.shunt) == len(plain.net.shunt) == 1
+
+
+@pytest.mark.parametrize("year, match", [
+    (2001.5, "whole year"), (0, "positive"), (-5, "non-negative|positive"), (True, "finite number"),
+    ("2001", "finite number"),
+])
+def test_an_impossible_commissioning_year_is_refused(year, match):
+    spec = campus_spec()
+    spec["campus"]["transformers"]["TR1"]["commissioning_year"] = t(year)
+    with pytest.raises(ContractError, match=match):
+        build_campus(spec)
+    with pytest.raises(ContractError, match="value.*source"):
+        spec["campus"]["transformers"]["TR1"]["commissioning_year"] = 2001
+        build_campus(spec)
+
+
+def test_a_whole_float_commissioning_year_is_accepted_on_a_cable():
+    spec = campus_spec()
+    spec["campus"]["cables"]["CB1"]["commissioning_year"] = t(2001.0)
+    assert build_campus(spec).params.set_index(["element", "param"]).at[("CB1", "commissioning_year"), "value"] == 2001
+    spec["campus"]["cables"]["CB1"]["commissioning_year"] = t(2001.25)
+    with pytest.raises(ContractError, match="cables.CB1.commissioning_year.*whole year"):
+        build_campus(spec)
+
+
+# --------------------------------------------------------------------------
+# the tap changer (plan C13): optional, written into pandapower's tap columns
+# --------------------------------------------------------------------------
+
+def _tap(**over):
+    block = {"changer": "on_load", "side": "hv", "neutral": 0, "min": -9, "max": 9,
+             "step_percent": t(1.5, "datasheet"), "pos": 2}
+    block.update(over)
+    return block
+
+
+def test_a_tap_block_builds_as_the_same_tapped_transformer_written_in_pandapower():
+    spec = campus_spec()
+    spec["campus"]["transformers"]["TR1"]["tap"] = _tap()
+    spec["campus"]["transformers"]["TR2"]["tap"] = _tap(side="lv", pos=-3, changer="off_circuit")
+    camp = build_campus(spec)
+    ref = direct_net()
+    for name, side, pos in (("TR1", "hv", 2), ("TR2", "lv", -3)):
+        i = ref.trafo.index[ref.trafo["name"] == name][0]
+        ref.trafo.loc[i, ["tap_side", "tap_neutral", "tap_min", "tap_max", "tap_step_percent", "tap_pos"]] = \
+            [side, 0, -9, 9, 1.5, pos]
+        ref.trafo.at[i, "tap_changer_type"] = "Ratio"
+    got, want = _res(camp.net), _res(ref)
+    assert list(got.res_bus["vm_pu"]) == pytest.approx(list(want.res_bus["vm_pu"]), abs=1e-9)
+    assert list(got.res_trafo["p_hv_mw"]) == pytest.approx(list(want.res_trafo["p_hv_mw"]), abs=1e-9)
+    assert list(got.res_trafo["q_hv_mvar"]) == pytest.approx(list(want.res_trafo["q_hv_mvar"]), abs=1e-9)
+    # the taps do move the result: the same net untapped solves differently
+    plain = _res(direct_net())
+    assert abs(float(got.res_bus.at[1, "vm_pu"]) - float(plain.res_bus.at[1, "vm_pu"])) > 1e-4
+    assert camp.taps == {
+        "TR1": {"changer": "on_load", "side": "hv", "neutral": 0, "min": -9, "max": 9, "step_percent": 1.5, "pos": 2},
+        "TR2": {"changer": "off_circuit", "side": "lv", "neutral": 0, "min": -9, "max": 9, "step_percent": 1.5,
+                "pos": -3}}
+    tagged = camp.params[(camp.params["element"] == "TR1") & (camp.params["param"] == "tap.step_percent")]
+    assert list(tagged["source"]) == ["datasheet"]
+
+
+def test_the_tap_sign_by_hand_on_an_unloaded_unit():
+    """One unit, no load, no magnetising branch, taps on the HV side: the LV
+    voltage is V_hv / (1 + t s). At t = +2 and s = 1.5 % it is 1/1.03."""
+    spec = campus_spec()
+    c = spec["campus"]
+    del c["transformers"]["TR2"]
+    tr1 = c["transformers"]["TR1"]
+    tr1.update(vn_lv_kv=t(20.0), pfe_kw=t(0.0), i0_percent=t(0.0), tap=_tap(pos=2))
+    camp = build_campus(spec)
+    net = camp.net
+    net.load["in_service"] = False
+    net.sgen["in_service"] = False
+    net.line["in_service"] = False
+    pp.runpp(net)
+    assert float(net.res_bus.at[1, "vm_pu"]) == pytest.approx(1 / 1.03, abs=1e-9)
+
+
+def test_a_file_without_tap_data_builds_exactly_as_before():
+    camp = build_campus(campus_spec())
+    assert camp.taps == {}
+    assert camp.net.trafo["tap_pos"].isna().all() and camp.net.trafo["tap_step_percent"].isna().all()
+
+
+def test_the_position_defaults_to_the_neutral():
+    spec = campus_spec()
+    block = _tap(neutral=5, min=1, max=9)
+    del block["pos"]
+    spec["campus"]["transformers"]["TR1"]["tap"] = block
+    camp = build_campus(spec)
+    assert camp.taps["TR1"]["pos"] == 5
+    assert int(camp.net.trafo.set_index("name").at["TR1", "tap_pos"]) == 5
+
+
+@pytest.mark.parametrize("over, match", [
+    ({"pos": 10}, r"transformers\.TR1\.tap\.pos.*outside"),
+    ({"pos": 1.5}, r"transformers\.TR1\.tap\.pos.*whole"),
+    ({"changer": "motor"}, r"transformers\.TR1\.tap\.changer"),
+    ({"side": "both"}, r"transformers\.TR1\.tap\.side"),
+    ({"neutral": 10}, r"transformers\.TR1\.tap.*min <= neutral <= max"),
+    ({"step_percent": 1.5}, r"transformers\.TR1\.tap\.step_percent.*value.*source"),
+    ({"step_percent": t(0.0)}, r"transformers\.TR1\.tap\.step_percent.*positive"),
+    ({"phase": 1}, r"transformers\.TR1\.tap.*unknown.*phase"),
+])
+def test_a_malformed_tap_block_is_refused_naming_transformer_and_field(over, match):
+    spec = campus_spec()
+    spec["campus"]["transformers"]["TR1"]["tap"] = _tap(**over)
+    with pytest.raises(ContractError, match=match):
+        build_campus(spec)

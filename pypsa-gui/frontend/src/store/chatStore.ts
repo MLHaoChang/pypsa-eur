@@ -45,6 +45,9 @@ export interface ChatMessage {
   receipt?: AnswerReceipt
   /** Retrying a checked question must not silently become ordinary chat. */
   requiresChecked?: boolean
+  // Replayed from an interrupted turn record: why it ended. Shown under the
+  // bubble; the assistant does not see this turn on later ones.
+  interrupted?: string
   ts: number
 }
 
@@ -69,6 +72,12 @@ export interface PendingChoiceCard {
   question: string
   options: { label: string; description?: string; recommended?: boolean }[]
   allow_free_text: boolean
+  /** Issue 15: several options may be picked; they go out as one message. */
+  multi_select?: boolean
+  /** Issue 15: Markdown under the question, or null. */
+  detail?: string | null
+  /** Issue 15: `plan_review` shows `detail` as a plan to approve. */
+  intent?: 'choice' | 'plan_review'
 }
 
 export interface PendingConfirmationCard {

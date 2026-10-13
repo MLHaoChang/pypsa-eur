@@ -32,7 +32,11 @@ The description is one YAML mapping under ``campus``:
     vector group a transformer is taken as Dyn11 (YNyn11 when its HV
     earthing is given), and a star neutral brought out without its earthing
     as solidly earthed; each such assumption is listed in
-    ``Campus.assumptions``.
+    ``Campus.assumptions``. Optionally (plan C13) the tap changer ``tap``,
+    ``{changer, side, neutral, min, max, step_percent, pos}``
+    (``schema/transformer.py``; ``pos`` defaults to ``neutral``), which goes
+    into pandapower's tap columns (``tap_changer_type = "Ratio"``) and
+    ``Campus.taps``. Without it the unit is at its nominal ratio, as before.
 
 ``cables``
     ``{name: {from_bus, to_bus, length_km, r_ohm_per_km, x_ohm_per_km,
@@ -48,7 +52,10 @@ The description is one YAML mapping under ``campus``:
 A transformer or cable may carry ``existing: true``: it is owned already, so
 an investment study (``static/campus_invest.py``) prices it at zero. It may
 also carry ``library_id``, the asset-library entry it was taken from. Both
-are plain flags, not values, so they are untagged.
+are plain flags, not values, so they are untagged. A transformer, cable or
+compensation entry may carry ``commissioning_year`` (plan C14), tagged, a
+whole year: when it was put in service, so that the investment study can
+replace it at the end of its life. It changes nothing in the net.
 
 ``compensation`` (optional)
     A list of reactive compensation, each ``{name, bus, kind, q_mvar}`` with
@@ -108,10 +115,12 @@ Refused at load, each with a message naming the field:
 * a cable between two nominal voltages, or a ``parallel`` that is not a
   whole number of at least 1;
 * an ``existing`` that is not true or false;
+* a ``commissioning_year`` that is untagged, not positive or not a whole year;
 * a compensation entry of unknown kind, at an unknown bus, with an unknown
   field, a non-positive ``q_mvar`` or (a capacitor bank) ``steps`` that is
   not a whole number of at least 1;
 * an inverter whose MVA is below its MW;
+* a malformed ``tap`` block, or a position outside its range;
 * a malformed ``vector_group``, earthing on a delta winding, or solid or
   resistance earthing on a star whose neutral is not brought out;
 * a relay with neither pickup;
@@ -130,7 +139,6 @@ full ``yaml.load``.
 """
 import dataclasses
 import math
-import re
 from collections import deque
 from pathlib import Path
 
@@ -147,6 +155,7 @@ from gridspine.schema.island import (
     validate_unit_island,
 )
 from gridspine.schema.network import validate_canonical
+from gridspine.schema.transformer import VECTOR_GROUP, check_tap
 from gridspine.static.shortcircuit import LINE_ENDTEMP_DEGREE
 
 SOURCES = frozenset({"measured", "datasheet", "assumed"})
@@ -189,8 +198,8 @@ _CABLE_FIELDS = ("length_km", "r_ohm_per_km", "x_ohm_per_km", "c_nf_per_km", "ma
 #: A cable's zero sequence (island plan I5b), tagged and optional.
 _CABLE_ZERO = ("r0_ohm_per_km", "x0_ohm_per_km", "c0_nf_per_km")
 #: ``Dyn11``: the HV winding (``D``, ``Y``, ``YN``), the LV winding (``d``,
-#: ``y``, ``yn``) and the clock number 0-11.
-_VECTOR_GROUP = re.compile(r"(YN|Y|D)(yn|y|d)(1[01]|[0-9])")
+#: ``y``, ``yn``) and the clock number 0-11 (``schema/transformer.py``).
+_VECTOR_GROUP = VECTOR_GROUP
 _UNIT_FIELDS = {
     "load": ("p_mw", "pf"),
     "bess": ("p_mw", "e_mwh", "s_mva", "k_sc", "rx_sc"),
@@ -206,6 +215,8 @@ _UNIT_FIELDS = {
 _TRAFO_EARTHING = {"hv": ("earthing_hv", "r_n_hv_ohm"), "lv": ("earthing_lv", "r_n_lv_ohm")}
 #: Untagged flags a transformer or cable may carry (see the docstring).
 _ASSET_FLAGS = ("existing", "library_id")
+#: When an asset was put in service (plan C14): tagged, optional, a whole year.
+_COMMISSIONED = "commissioning_year"
 _COMP_STRUCTURAL = ("name", "bus", "kind", "library_id", "pypsa_name")
 #: Fields that may be zero. Every other tagged field must be strictly positive.
 _MAY_BE_ZERO = frozenset({"pfe_kw", "i0_percent", "c_nf_per_km", "rx_sc", "rx_max", "rx_min", "c0_nf_per_km",
@@ -263,6 +274,9 @@ class Campus:
     earthing_transformers: pd.DataFrame = dataclasses.field(default_factory=lambda: _empty_earthing_transformers())
     #: What the campus took without being told (plan I5b), one line each.
     assumptions: list = dataclasses.field(default_factory=list)
+    #: The tap changers given (plan C13): ``{transformer: {changer, side,
+    #: neutral, min, max, step_percent, pos}}``; empty when none is.
+    taps: dict = dataclasses.field(default_factory=dict)
 
 
 _COMP_COLUMNS = ["name", "kind", "bus", "q_mvar", "steps", "library_id", "pypsa_name"]
@@ -388,6 +402,14 @@ def _flags(where, spec):
         raise ContractError(f"{where}.library_id must be a non-empty string, got {spec['library_id']!r}")
 
 
+def _commissioned(where, spec, rows):
+    """Check the optional tagged ``commissioning_year`` (plan C14)."""
+    if _COMMISSIONED in spec:
+        year = _tagged(where, _COMMISSIONED, spec, rows)
+        if not float(year).is_integer():
+            raise ContractError(f"{where}.{_COMMISSIONED} must be a whole year, got {year}")
+
+
 def _whole(where, field, v):
     if isinstance(v, bool) or not isinstance(v, int) or v < 1:
         raise ContractError(f"{where}.{field} must be a whole number of at least 1, got {v!r}")
@@ -483,13 +505,14 @@ def build_campus(spec) -> Campus:
                        s_sc_min_mva=pv["sk_min_mva"], rx_max=pv["rx_max"], rx_min=pv["rx_min"],
                        name=GRID_NAME)
 
-    edges, earthing, windings, assumptions = [], {}, {}, []
+    edges, earthing, windings, assumptions, taps = [], {}, {}, [], {}
     for tname, ts in trafos.items():
         where = f"transformers.{tname}"
         _fields(where, ts, _TRAFO_FIELDS,
-                ("hv_bus", "lv_bus", "pypsa_name", "vector_group", *_ASSET_FLAGS,
+                ("hv_bus", "lv_bus", "pypsa_name", "vector_group", "tap", *_ASSET_FLAGS, _COMMISSIONED,
                  *(f for pair in _TRAFO_EARTHING.values() for f in pair)))
         _flags(where, ts)
+        _commissioned(where, ts, rows)
         hv, lv = str(ts.get("hv_bus")), str(ts.get("lv_bus"))
         if hv == lv:
             raise ContractError(f"{where}: hv_bus and lv_bus are the same bus {hv!r}")
@@ -504,10 +527,19 @@ def build_campus(spec) -> Campus:
             raise ContractError(f"{where}: vn_hv_kv must be above vn_lv_kv")
         if not v["vkr_percent"] < v["vk_percent"]:
             raise ContractError(f"{where}: vkr_percent ({v['vkr_percent']}) must be below vk_percent ({v['vk_percent']})")
+        tap_kw = {}
+        if "tap" in ts:
+            def tagged(w, f, spec, tname=str(tname)):
+                x = _tagged(w, f, spec, [])
+                rows.append({"element": tname, "param": f"tap.{f}", "value": x, "source": spec[f]["source"]})
+                return x
+            tp = taps[str(tname)] = check_tap(f"{where}.tap", ts["tap"], tagged, with_pos=True)
+            tap_kw = {"tap_side": tp["side"], "tap_neutral": tp["neutral"], "tap_min": tp["min"], "tap_max": tp["max"],
+                      "tap_step_percent": tp["step_percent"], "tap_pos": tp["pos"], "tap_changer_type": "Ratio"}
         pp.create_transformer_from_parameters(
             net, idx[hv], idx[lv], sn_mva=v["sn_mva"], vn_hv_kv=v["vn_hv_kv"], vn_lv_kv=v["vn_lv_kv"],
             vkr_percent=v["vkr_percent"], vk_percent=v["vk_percent"], pfe_kw=v["pfe_kw"],
-            i0_percent=v["i0_percent"], name=str(tname))
+            i0_percent=v["i0_percent"], name=str(tname), **tap_kw)
         edges.append((hv, lv))
         for side, (field, r_field) in _TRAFO_EARTHING.items():
             if field not in ts:
@@ -526,8 +558,10 @@ def build_campus(spec) -> Campus:
 
     for cname, cs in cables.items():
         where = f"cables.{cname}"
-        _fields(where, cs, _CABLE_FIELDS, ("from_bus", "to_bus", "pypsa_name", "parallel", *_CABLE_ZERO, *_ASSET_FLAGS))
+        _fields(where, cs, _CABLE_FIELDS, ("from_bus", "to_bus", "pypsa_name", "parallel", *_CABLE_ZERO, *_ASSET_FLAGS,
+                                           _COMMISSIONED))
         _flags(where, cs)
+        _commissioned(where, cs, rows)
         parallel = _whole(where, "parallel", cs["parallel"]) if "parallel" in cs else 1
         a, b = str(cs.get("from_bus")), str(cs.get("to_bus"))
         if a == b:
@@ -606,10 +640,12 @@ def build_campus(spec) -> Campus:
         kind = cs.get("kind")
         if kind not in COMP_KINDS:
             raise ContractError(f"{where}: unknown kind {kind!r}; allowed {list(COMP_KINDS)}")
-        _fields(where, cs, ("q_mvar", "steps") if kind == "capacitor_bank" else ("q_mvar",), _COMP_STRUCTURAL)
+        _fields(where, cs, ("q_mvar", "steps") if kind == "capacitor_bank" else ("q_mvar",),
+                (*_COMP_STRUCTURAL, _COMMISSIONED))
         bus = str(cs.get("bus"))
         _bus_kv(where, buses, bus)
         _flags(where, cs)
+        _commissioned(where, cs, rows)
         q = _tagged(where, "q_mvar", cs, rows)
         steps = _whole(where, "steps", cs.get("steps")) if kind == "capacitor_bank" else 1
         if kind == "statcom":
@@ -630,7 +666,7 @@ def build_campus(spec) -> Campus:
     params = pd.DataFrame(rows, columns=["element", "param", "value", "source"])
     return Campus(name=name, net=net, units=units_df, params=params, registry=registry, compensation=compensation,
                   island=island, earthing=earthing, relays=relays, windings=windings,
-                  earthing_transformers=earthing_transformers, assumptions=assumptions)
+                  earthing_transformers=earthing_transformers, assumptions=assumptions, taps=taps)
 
 
 def _island_requirements(c, units_df, island_units, rows):
