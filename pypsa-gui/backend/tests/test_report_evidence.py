@@ -259,6 +259,18 @@ def test_headline_table_shows_cost_with_period_basis_and_excludes():
     assert ev.headline["archetype"] == "strong_grid"
 
 
+def test_a_multi_period_cost_reads_npv_discounted_in_every_place_it_is_named():
+    report = _populated()
+    report["period_basis"] = "npv_multi_period"
+    report["sections"]["frontier"]["payload"]["period_basis"] = "npv_multi_period"
+    ev = collect_evidence(study_report=None, eh_report=report, worksheet=None)
+    cost_row = next(r for r in ev.tables["headline"].rows if r[0].startswith("Cost at target"))
+    assert "NPV-discounted multi-period" in cost_row[1]
+    assert "NPV-discounted multi-period" in ev.tables["frontier"].caption
+    assert any("NPV-discounted multi-period basis" in d for d in ev.required_disclosures)
+    assert "npv_multi_period" not in cost_row[1] + ev.tables["frontier"].caption
+
+
 def test_populated_sections_carry_status_engine_fidelity_and_note():
     ev = collect_evidence(study_report=None, eh_report=_populated(), worksheet=None)
     cert = ev.sections["certification"]

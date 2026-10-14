@@ -469,3 +469,22 @@ class FinanceCase:
     # `assets` (after the network assets); this keeps the record (source, hash,
     # quantity) for the report and the case hash. Never in the counterfactual.
     extra_assets: tuple[ExtraOwnerAsset, ...] = ()
+    # Each owner asset's COD (P5, staged builds): the adapter resolves it from
+    # `cod_by_asset`, else the asset's first active period. Empty = every
+    # asset at `cod` (the case before P5). The earliest is `cod`; an asset
+    # whose COD year is later is a STAGE: its capex is paid on its own
+    # (`Operating.stage_capex`) and its clocks run from its COD.
+    asset_cod: dict[str, date] = field(default_factory=dict)
+
+
+def cod_year_of(case: FinanceCase, name: str, cod_year: int) -> int:
+    """The COD year of owner asset `name`: its `asset_cod`, else `cod_year`
+    (the case's)."""
+    d = case.asset_cod.get(name)
+    return cod_year if d is None else d.year
+
+
+def staged_assets(case: FinanceCase, cod_year: int) -> tuple[str, ...]:
+    """The owner assets whose COD year is after `cod_year` (the case's), in
+    `case.assets` order: the later stages (P5)."""
+    return tuple(a.name for a in case.assets if cod_year_of(case, a.name, cod_year) > cod_year)

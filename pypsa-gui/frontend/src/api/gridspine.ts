@@ -195,7 +195,7 @@ export interface FacilitySpec {
 }
 export type ConnectionCheck =
   | 'connection' | 'energisation' | 'load_trip' | 'facility_trip'
-  | 'q_lead' | 'q_lag' | 'scr_onsite' | 'scr_load'
+  | 'q_lead' | 'q_lag' | 'scr_onsite' | 'scr_load' | 'q_ibr'
 /** One check of one assessment at one hour. `status` is pass/fail against the
  *  grid-code limit, or `reported` for a figure the code does not gate (SCR).
  *  `clause` names the rule applied; `source` is `code` for a number the

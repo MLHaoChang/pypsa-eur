@@ -2401,6 +2401,151 @@ in E4, were put to the owner:
 The first run killed 15. The step and ramp scaling survived because no
 block reached the step limit; a test was added where it does. All 16 are
 killed.
+### E4 performance: a steady-tail stop and one pickup per fleet (2026-10-14)
+
+**Why.** On master `island_frequency_campus` took about 713 s on
+eh_datacenter (the gatekeeper's profile). Each of the 9 island hours ran
+E4 at about 79 s: 11 blocks of 600 s at 5 ms, 120,001 steps each. Two
+changes caused it: #226 simulates each block on its own, and #238 computes
+the genset bounds in every RK4 stage. A block settles in about 1.4 s, so
+99.8 % of the steps were spent on a flat tail. The hours ran identical
+pickups, because E4 resets the gensets' dispatch and join.
+
+**Owner, 2026-10-14: option A.**
+- **A steady-tail stop** (`_block_run`, `_steady_tail`).
+  - Each block first runs `E4_FIRST_S` (20 s). The horizon doubles while
+    the last `E4_STEADY_HOLD_S` (5 s) still show |RoCoF| above
+    `E4_STEADY_HZ_PER_S` (1e-6 Hz/s), up to `t_end` (600 s).
+  - It is a steadiness test, not a short fixed horizon. A slow island, an
+    isochronous genset or a ramp-limited one, is run on rather than read
+    early. Δf_qss is still the last sample.
+  - It differs from the full horizon by at most the tolerance times the
+    slowest time constant. The tests hold it to 1e-6 Hz.
+  - `steady_stop=False` keeps the full horizon, and the equality tests use
+    it.
+- **One pickup per fleet.** `e4_ups_bridged(…, cache=)` keys the pickup on
+  everything that reaches the simulation: the gensets left at N+k (reset),
+  the blocks, band, settle, window, t_end, dt, f0 and the stop flag.
+  `campus_frequency_study` shares one cache across its hours, and only the
+  bridge check runs per hour.
+- Out of scope: cheaper per-stage bounds (option B). `_hold` and `_clamp`
+  are unchanged.
+
+**Tests:**
+- **eh_datacenter's fleet:** 4 × 10 MW and genset_new 36.67 MW in 10 MW
+  units, N+1, 11 × 5 MW blocks. The run matches the 600 s run block by
+  block: nadir, qss, RoCoF at 0⁺ and over the window, t_return,
+  saturation, the verdicts, the block times, completion and the bridge.
+  Each block needs one 20 s run, and it matches the gatekeeper's reference.
+- **A ramp-limited and an isochronous genset** match the 600 s run. The
+  ramp-limited one reads as not completing at a fixed 20 s; the stop runs
+  it to 80 s, where it completes.
+- **A block that never steadies** runs 20, 40, 80 and then 100 s (its
+  t_end), and does not complete.
+- **Two hours with the same fleet** at another dispatch, join and UPS
+  energy share one pickup and keep their own bridge. A change in the
+  blocks, dt, the gensets or f0 runs anew.
+- **The study** runs as many simulations for 4 identical hours as for 1,
+  with one bridge row per hour.
+- **The steady tail** holds over its whole window, not one flat moment. A
+  collapse ends the run, and a horizon shorter than the first run is the
+  run.
+
+**Measured** on eh_datacenter with the gatekeeper's scripts: 9 island
+hours, all CSVs compared.
+
+| | master | this change |
+|---|---|---|
+| `island_frequency_campus` | 726.1 s | 5.8 s |
+| simulations | 99 | 11 |
+| RK4 steps | 11,880,099 | 44,011 |
+
+- Every output CSV is identical except `df_qss_hz`, which moves by at most
+  3.2e-10 Hz between the stop and 600 s.
+- Nadir, t_return, RoCoF, the verdicts, the bridge rows and the cuts are
+  identical.
+
+**Mutations.** 13 edits:
+- the stop never taken, or taken at once;
+- the doubling uncapped, or the first run uncapped;
+- the tolerance loosened;
+- the hold shrunk to one sample;
+- a collapse not ending the run;
+- the key without the gensets, the blocks or f0;
+- the cache never filled, or not passed by the study;
+- the bridge without the ready time.
+
+The first pass left three: a horizon below the first run, the hold, and
+the collapse. The last two tests were added for them, and all 13 are
+killed.
+
+### The trip floor: a run beyond protection is a trip, not a number (2026-10-14)
+
+**Why.** The owner asked how −23.54 Hz could be valid. It is Δf, so that
+trace reached about 26.5 Hz. `simulate` declared a collapse only when
+nothing had headroom. With a genset joined, the linear model kept
+integrating far below any protection, and the tables showed a nadir with
+no physical meaning. `judge` already failed such runs.
+
+**Representation (option 1, agreed with the gatekeeper).**
+- `trip_floor(limits, equipment)` gives a `TripFloor`, from the lowest
+  limit and the highest:
+  - the transition and steady-island f_min and f_max;
+  - each piece of equipment's low and high: a UPS window, or a load's
+    `f_trip_hz`.
+  - An undefined side (NaN) is skipped. Each side is named by what sets it.
+- `simulate(…, floor=)` stops at the first sample beyond it. `Trace.trip`
+  holds (t, what), for example "Δf below the 47.5 Hz floor (transition
+  f_min)". `floor=None` keeps today's run.
+- `Metrics.trip` is set, and the figures are NaN as for a collapse.
+  `judge` binds "trip: … at t = 3.21 s" with `worst` inf.
+- **The CSVs** get `trip_s`, next to `collapse_s`, in the sweep and study
+  tables, E4 rows included.
+- **The study and the sweep** pass the campus floor to every event, E1 to
+  E6 and the Q8 reruns. It is in the sweep's and E4's cache keys.
+- **E4:** a tripped block does not settle, so it reads `complete=False`.
+  The blocks after it are not attempted and the bridge needs inf, as at a
+  collapse. The trip is checked before the steady-tail stop.
+- **I7** re-runs without the floor, so a tripped event gets the cuts of the
+  same event without it. That is sound because the floor is at or below
+  every limit `judge` checks: a run that passes never reaches it, and the
+  floor changes the label and the figures, never the verdict.
+- **Where a UPS window sets the floor,** the run stops before that UPS's
+  transfer is modelled. The verdict is the same, because the window has
+  failed.
+
+**Contract.** `trip_s` is a new column, and nothing in pypsa-gui reads
+`collapse_s`. The island report checks each CSV's header against the
+column tuples, so a run written before this change shows its frequency
+tables as "columns differ" until it is re-run. The I2c and E2E sessions
+have been told.
+
+**Tests:**
+- the floor is the lowest limit, named; a UPS window can set it; NaN sides
+  are skipped;
+- a run inside the floor is bit-identical to the run without it;
+- a run beyond it stops at the first crossing, with the trip, the label,
+  NaN figures and worst inf, on both sides;
+- E4 reads a tripped block as not completing, and the floor is in its
+  cache key;
+- the sweep reports the trip, and its cuts equal those of the sweep
+  without the floor;
+- the existing unbuilt-BESS test now reads that genset-only island as a
+  trip, where it used to read +131 Hz;
+- the study runs every event against the campus floor: E1 trips at the UPS
+  window's 52 Hz ceiling, and an E4 block at the 47.5 Hz floor, whose
+  pickup then does not complete.
+- **Mutations:** 16 edits, 13 killed. The three left are equivalent, and
+  their guards stay as the gatekeeper asked:
+  - skipping a NaN high: `max` never picks a NaN after the first, defined
+    limit;
+  - `_settle_time` on a trip: a runaway trace never settles;
+  - the floor in the sweep's cache key: that cache lives within one call
+    and one floor.
+- **eh_datacenter** with the gatekeeper's scripts: every CSV is unchanged
+  against master to 1e-6, and `trip_s` is empty in every row (no hour comes
+  near the floor). It takes 6.1 s.
+
 ### I7 as built: the gridspine cut derivation (2026-10-14)
 
 **Owner, 2026-10-14:** the pypsa-gui island session takes I7. This session
@@ -2586,6 +2731,26 @@ two-former hub, 0.02 MW at 1 ms.
   - a genset on its ramp rides it, not a step behind.
 - **With it, the gatekeeper's #228 nit:** when `_settle_run` exhausts its
   tries, it returns the horizon it last ran, not that horizon doubled.
+
+**The isochronous integral, after #256** (found during the E4 speed-up;
+the gatekeeper asked for it separately):
+- **The problem.** An isochronous genset's integral `~i` kept integrating
+  Δf while the genset was held at a bound. With a 0.5 MW load step and a
+  0.08 MW/s ramp, a 2 MW block held it for about 19 s. Once the ramp caught
+  up, the wound integral overshot by about 61.8 Hz in either direction.
+  #238's `_hold` covered only the governor state.
+- **The fix.** `_hold_integral` stops the integral at a bound while the
+  error pushes outward: Δf < 0 at the upper bound, Δf > 0 at the lower.
+  The frequency then comes back with 0.05 Hz of overshoot.
+- **Tests:**
+  - both bounds, with the excursion while held (23.54 Hz), the bounded
+    overshoot, and the windup shown with the hold removed;
+  - an unclamped isochronous genset, and one at full output whose error
+    pulls it back inside when load drops, give traces bit-identical to the
+    run without the hold.
+- **Mutations:** 6 edits (either bound's hold lost, the sign flipped, the
+  hold made unconditional, the tolerance widened, the hold removed), all
+  killed. The unconditional hold was closed by the "pulled back in" test.
 
 **Mutations.** 28 source edits:
 - the pure-inertia unit at half weight;

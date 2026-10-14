@@ -40,10 +40,7 @@ import {
 // All three share the same status query (objective / solve_time / condition)
 // at the top so the user always sees solve metadata regardless of tab.
 
-type ResultsTab =
-  | 'summary' | 'overview' | 'capex' | 'dispatch' | 'loadflow' | 'prices' | 'emissions'
-  | 'economics' | 'curtailment' | 'lostload' | 'adequacy' | 'storage'
-  | 'asset' | 'fmea' | 'investment'
+import { RESULT_GROUPS, groupOf, type ResultsGroup, type ResultsTab } from './results/groups'
 const RESULTS_TAB_KEY = 'results:active-tab'
 
 const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
@@ -90,7 +87,7 @@ const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip:
   { id: 'adequacy',   label: 'Adequacy',           Icon: ShieldCheck,      tip: 'Reliability targets, COPT screening, the cost-vs-availability frontier, sequential Monte Carlo and the reliability-targeted planning loop' },
   { id: 'storage',    label: 'Storage cycling',    Icon: BatteryCharging,  tip: 'Equivalent full-cycle count per storage unit + carrier rollup', expertOnly: true },
   { id: 'fmea',       label: 'FMEA',               Icon: ShieldAlert,      tip: 'Failure modes ranked by €/yr criticality — computed rows + expert class-D rows, mitigability, CSV export' },
-  { id: 'investment', label: 'Investment',         Icon: Briefcase,        tip: 'The investment case: the site bill, participants and value flows, the Library, tariffs and contracts', expertOnly: true },
+  { id: 'investment', label: 'Investment case',    Icon: Briefcase,        tip: 'The investment case: the site bill, participants and value flows, the Library, tariffs and contracts', expertOnly: true },
   { id: 'asset',      label: 'Asset Detail',       Icon: Crosshair,        tip: 'One asset in full — every applicable result, as numbers or charts, exportable', expertOnly: true },
 ]
 
@@ -142,6 +139,10 @@ export default function Results() {
     setRequestedTab(null)
     setTab(t)
   }
+  // UX overhaul S3: the tab last used in each group, so returning to a group
+  // lands where the user left it (in memory only; the stored active tab is
+  // still the one thing persisted).
+  const lastInGroup = useRef<Partial<Record<ResultsGroup, ResultsTab>>>({})
 
   // ── Docked comparison rail ─────────────────────────────────────────────
   // The A-vs-B CompareView coexists on the right; the live Results tabs stay
@@ -560,6 +561,48 @@ export default function Results() {
     },
   }
 
+  // ── UX overhaul S3: groups ───────────────────────────────────────────
+  const tabVisible = (t: (typeof TABS)[number]) =>
+    (!t.multiOnly || uniquePeriods.length > 0) && (!t.expertOnly || uiMode === 'expert' || t.id === advancedTab)
+  const visibleTabIds = new Set<ResultsTab>(TABS.filter(tabVisible).map(t => t.id))
+  const activeGroup = groupOf(effectiveTab)
+  const groupTabs = activeGroup
+    ? (RESULT_GROUPS.find(g => g.id === activeGroup)!.tabs
+        .map(id => TABS.find(t => t.id === id)!)
+        .filter(t => visibleTabIds.has(t.id)))
+    : []
+  if (activeGroup) lastInGroup.current[activeGroup] = effectiveTab
+  const pickGroup = (g: ResultsGroup) => {
+    const tabs = RESULT_GROUPS.find(x => x.id === g)!.tabs.filter(id => visibleTabIds.has(id))
+    const remembered = lastInGroup.current[g]
+    pickTab(remembered && tabs.includes(remembered) ? remembered : tabs[0])
+  }
+  const renderTab = ({ id, label, Icon, tip }: (typeof TABS)[number]) => {
+    const active = effectiveTab === id
+    const advanced = id === advancedTab
+    return (
+      <button
+        key={id}
+        onClick={() => pickTab(id)}
+        title={advanced ? `${tip} — an advanced tab, shown because it was asked for; it leaves the strip when you pick another tab.` : tip}
+        data-testid={`results-tab-${id}`}
+        data-advanced={advanced ? 'true' : undefined}
+        className={`h-8 px-3 shrink-0 flex items-center gap-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors
+          ${active
+            ? 'border-accent text-accent'
+            : 'border-transparent text-muted hover:text-text'}`}
+      >
+        <Icon size={13} />
+        {label}
+        {advanced && (
+          <span className="ml-1 px-1 py-px rounded text-[9px] font-mono font-bold uppercase tracking-[0.08em] border border-accent/40">
+            Advanced
+          </span>
+        )}
+      </button>
+    )
+  }
+
   return (
     <div
       className="flex flex-col h-full text-sm"
@@ -611,34 +654,31 @@ export default function Results() {
           </button>
         </div>
       )}
-      {/* ── Tab strip ──────────────────────────────────────────────── */}
+      {/* ── Group strip + tab strip (UX overhaul S3, owner decision D1a) ── */}
+      {/* Results are grouped by the question they answer. The group row picks
+          a group; the row below holds that group's tabs, which keep their ids
+          (and test ids), so stored tabs, deep links and the assistant's
+          results_tab are unchanged. Asset detail is an inspector, not a
+          category: it sits on the right of the group row. */}
       <div className="flex items-center shrink-0 border-b border-border bg-panel px-2 gap-0 overflow-x-auto">
-        {TABS.filter(t => (!t.multiOnly || uniquePeriods.length > 0) && (!t.expertOnly || uiMode === 'expert' || t.id === advancedTab)).map(({ id, label, Icon, tip }) => {
-          const active = effectiveTab === id
-          const advanced = id === advancedTab
+        {RESULT_GROUPS.filter(g => g.tabs.some(id => visibleTabIds.has(id))).map(g => {
+          const active = activeGroup === g.id
           return (
             <button
-              key={id}
-              onClick={() => pickTab(id)}
-              title={advanced ? `${tip} — an advanced tab, shown because it was asked for; it leaves the strip when you pick another tab.` : tip}
-              data-testid={`results-tab-${id}`}
-              data-advanced={advanced ? 'true' : undefined}
-              className={`h-9 px-3 shrink-0 flex items-center gap-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors
-                ${active
-                  ? 'border-accent text-accent'
-                  : 'border-transparent text-muted hover:text-text'}`}
+              key={g.id}
+              onClick={() => pickGroup(g.id)}
+              title={g.question}
+              data-testid={`results-group-${g.id}`}
+              aria-pressed={active}
+              className={`h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
+                ${active ? 'border-accent text-text' : 'border-transparent text-muted hover:text-text'}`}
             >
-              <Icon size={13} />
-              {label}
-              {advanced && (
-                <span className="ml-1 px-1 py-px rounded text-[9px] font-mono font-bold uppercase tracking-[0.08em] border border-accent/40">
-                  Advanced
-                </span>
-              )}
+              {g.label}
             </button>
           )
         })}
         <div className="flex-1" />
+        {visibleTabIds.has('asset') && renderTab(TABS.find(t => t.id === 'asset')!)}
         {/* Docked comparison rail toggle — keeps the live results visible while
             an A-vs-B scenario comparison sits alongside on the right. */}
         <button
@@ -653,6 +693,12 @@ export default function Results() {
           Compare
         </button>
       </div>
+      {activeGroup && groupTabs.length > 0 && !(activeGroup === 'summary' && groupTabs.length === 1) && (
+        <div className="flex items-center shrink-0 border-b border-border bg-bg px-2 gap-0 overflow-x-auto"
+          data-testid="results-subtabs">
+          {groupTabs.map(t => renderTab(t))}
+        </div>
+      )}
 
       {/* ── Horizon filter (expandable) ──────────────────────────── */}
       <div className={`shrink-0 border-b border-border bg-bg ${isFiltered ? 'bg-warn/5' : ''}`}>

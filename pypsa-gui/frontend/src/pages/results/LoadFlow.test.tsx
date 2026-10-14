@@ -153,6 +153,38 @@ function renderPage() {
 
 it('renders a distinctive peak-flow KPI sourced from a single mocked line/snapshot', async () => {
   renderPage()
-  const match = await findKpiValue(f => f.includes('424.24 MW'))
+  // KPI tiles round to the R1 standard (3 s.f.), so the tile shows 424 MW.
+  const match = await findKpiValue('424 MW')
   expect(match).toBeTruthy()
+})
+
+// ── Result states (UX overhaul S2) ──────────────────────────────────────────
+it('says losses were not modelled instead of showing 0 MWh, and links to Solver settings', async () => {
+  // The default fixture has `enabled: false` — transmission_losses was off.
+  // One section-level state, not three identical tiles.
+  const { findAllByText, queryByText, getByRole } = renderPage()
+  expect((await findAllByText('Not modelled')).length).toBe(1)
+  expect(queryByText('Total energy lost')).toBeNull()
+  expect(document.querySelector('[data-kpi-value="0 MWh"]')).toBeNull()
+  getByRole('button', { name: 'Turn on in Solver settings' }).click()
+  expect(useUIStore.getState().activeSlidePanel).toBe('simparams')
+})
+
+it('shows real loss figures when losses were modelled, including a computed zero', async () => {
+  vi.mocked(resultsApi.getLosses).mockResolvedValue({
+    enabled: true, total_mwh: 0, peak_mw: 0, total_demand_mwh: 100,
+    loss_pct_of_demand: 0, by_branch: [],
+  })
+  const { queryByText } = renderPage()
+  await findKpiValue('0 MWh')
+  expect(queryByText('Not modelled')).toBeNull()
+})
+
+it('says line loading does not apply when the network has no lines', async () => {
+  vi.mocked(networkApi.getLines).mockResolvedValue([])
+  vi.mocked(resultsApi.getLineResults).mockResolvedValue({ index: [], columns: [], data: [] } as never)
+  const { findAllByText, queryByText } = renderPage()
+  expect((await findAllByText('Not applicable')).length).toBe(1)
+  expect(document.querySelector('[data-state="not_applicable"]')?.textContent).toMatch(/no lines/i)
+  expect(queryByText('Peak flow')).toBeNull()
 })

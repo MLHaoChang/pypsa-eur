@@ -319,7 +319,7 @@ export default function StorageCycling() {
           <ResponsiveContainer width="100%" height={220}>
             <BarChart
               data={carrierStats.map(c => ({ ...c, label: storageCarrierLabel(c.carrier) }))}
-              margin={{ top: 4, right: 12, left: 0, bottom: 4 }}
+              margin={{ top: 18, right: 12, left: 0, bottom: 4 }}
             >
               <CartesianGrid {...CHART_GRID} />
               <XAxis dataKey="label" {...CHART_AXIS} />

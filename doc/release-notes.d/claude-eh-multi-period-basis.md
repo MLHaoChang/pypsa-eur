@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): An Energy Hub study on a multi-period network now assembles its report instead of failing validation; the report states the cost as "NPV-discounted multi-period", matching the adequacy report's ``npv_multi_period`` basis.

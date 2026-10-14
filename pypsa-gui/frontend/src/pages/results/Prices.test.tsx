@@ -6,6 +6,18 @@ import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import Prices from './Prices'
 
+// A fixed-size chart, so recharts draws in jsdom (its ResponsiveContainer
+// measures 0 × 0 there and renders nothing).
+vi.mock('recharts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('recharts')>()
+  const { cloneElement } = await import('react')
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: React.ReactElement<{ width?: number; height?: number }> }) =>
+      cloneElement(children, { width: 600, height: 200 }),
+  }
+})
+
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
   return {
@@ -101,4 +113,12 @@ it('renders a distinctive per-bus price sourced from a single mocked bus/snapsho
   // table's <td> cells, which is what this test pins.
   const matches = (await screen.findAllByText('424.24')).filter(el => el.tagName === 'TD')
   expect(matches.length).toBe(3)
+})
+
+it('marks the mean on the price chart and the duration curve, rounded like the tile (S4b)', async () => {
+  const { container } = renderPage()
+  await screen.findAllByText('424.24')
+  const labels = Array.from(container.querySelectorAll('.recharts-reference-line text'))
+    .map(t => t.textContent)
+  expect(labels).toEqual(['mean 424.2 €/MWh', 'mean 424.2 €/MWh'])
 })

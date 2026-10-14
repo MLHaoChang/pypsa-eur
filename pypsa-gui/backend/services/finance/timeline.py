@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from services.finance.case import FinanceCase, FinanceRefused
+from services.finance.case import FinanceCase, FinanceRefused, cod_year_of, staged_assets
 from services.finance.replacements import counts_as_replaced, schedule
 
 
@@ -50,12 +50,21 @@ class Timeline:
         return np.where(self.operating_mask(), self.years - self.cod_year + 1, 0)
 
 
+def operating_years_of(case: FinanceCase, tl: Timeline, name: str) -> int:
+    """The operating years of owner asset `name` on the axis: from its own
+    COD (P5) to the end of the analysis period."""
+    return tl.analysis_years - (cod_year_of(case, name, tl.cod_year) - tl.cod_year)
+
+
 def build_timeline(case: FinanceCase) -> Timeline:
     """The case's axis (plan C2), or `FinanceRefused` with a stable code:
     `analysis_years_missing`, `financial_close_after_cod`, `cod_mismatch`,
     `capex_phasing_negative`, `capex_phasing_mismatch`,
     `replacement_unknown_asset`, `asset_lifetime_short`, `template_missing`,
-    `contract_tenor_below_one`, and the schedule's `replacement_rule_conflict:<asset>`
+    `contract_tenor_below_one`, the staged-build refusals (P5)
+    `staged_cod_outside_axis:<asset>`, `staged_capex_before_close:<asset>` and
+    `replacement_before_cod:<asset>:<year>`,
+    and the schedule's `replacement_rule_conflict:<asset>`
     and `part_lifetime_too_short:<asset>:<part>` (IC S0b plan S5). An asset of
     unknown lifetime is not checked here; `build_operating` flags it
     (`asset_lifetime_unknown:<asset>`). Under `part_lifetimes` a short-lived
@@ -76,12 +85,26 @@ def build_timeline(case: FinanceCase) -> Timeline:
         raise FinanceRefused("financial_close_after_cod",
                              f"financial close {fin.financial_close} is after COD {case.cod}")
     cods = set(fin.cod_by_asset.values())
-    if len(cods) > 1:
-        raise FinanceRefused("cod_mismatch",
-                             f"the owner's assets have different CODs {sorted(cods)} (P5)")
-    if cods and cods != {case.cod}:
-        raise FinanceRefused("cod_mismatch",
-                             f"cod_by_asset {sorted(cods)} differs from the case COD {case.cod}")
+    if case.asset_cod:
+        # Staged builds (P5): one COD per asset, the earliest the case's; a
+        # typed `cod_by_asset` must agree with the COD the case resolved.
+        if min(case.asset_cod.values()) != case.cod:
+            raise FinanceRefused("cod_mismatch",
+                                 f"the earliest asset COD {min(case.asset_cod.values())} is not "
+                                 f"the case COD {case.cod}")
+        for asset, typed in sorted(fin.cod_by_asset.items()):
+            resolved = case.asset_cod.get(asset, case.cod)
+            if typed != resolved:
+                raise FinanceRefused("cod_mismatch",
+                                     f"cod_by_asset {asset}: {typed} differs from its resolved COD "
+                                     f"{resolved}")
+    else:
+        if len(cods) > 1:
+            raise FinanceRefused("cod_mismatch",
+                                 f"the owner's assets have different CODs {sorted(cods)} (P5)")
+        if cods and cods != {case.cod}:
+            raise FinanceRefused("cod_mismatch",
+                                 f"cod_by_asset {sorted(cods)} differs from the case COD {case.cod}")
     if any(x < 0 for x in fin.capex_phasing):
         raise FinanceRefused("capex_phasing_negative", f"{fin.capex_phasing}")
     y0, cod_year = fin.financial_close.year, case.cod.year
@@ -95,6 +118,22 @@ def build_timeline(case: FinanceCase) -> Timeline:
                              "no construction year: capex_phasing must be [1.0]")
     tl = Timeline(y0=y0, cod_year=cod_year, base_year=case.base_year,
                   analysis_years=int(fin.analysis_years))
+    for asset in staged_assets(case, tl.cod_year):
+        year = cod_year_of(case, asset, tl.cod_year)
+        if year >= tl.cod_year + tl.analysis_years:
+            raise FinanceRefused(f"staged_cod_outside_axis:{asset}",
+                                 f"{asset}: COD {year} is after the last operating year "
+                                 f"{tl.cod_year + tl.analysis_years - 1}")
+        if year - fin.stage_capex_lead_years < tl.y0:
+            raise FinanceRefused(f"staged_capex_before_close:{asset}",
+                                 f"{asset}: its capex year {year - fin.stage_capex_lead_years} "
+                                 f"(COD {year} − {fin.stage_capex_lead_years} lead years) is before "
+                                 f"financial close {tl.y0}")
+        for r_year, r_asset, _amount in fin.replacement_capex:
+            if r_asset == asset and int(r_year) < year:
+                raise FinanceRefused(f"replacement_before_cod:{asset}:{int(r_year)}",
+                                     f"{asset}: a replacement in {int(r_year)} is before its "
+                                     f"COD {year} (nothing is there yet to replace)")
     names = {a.name for a in case.assets}
     for _, asset, _ in fin.replacement_capex:
         if asset not in names:
@@ -103,9 +142,10 @@ def build_timeline(case: FinanceCase) -> Timeline:
     # `part_lifetimes` conflict or a part lifetime below a year (S5).
     replacements = schedule(case, tl)
     for a in case.assets:
-        if a.lifetime_years is not None and a.lifetime_years < tl.analysis_years:
+        years = operating_years_of(case, tl, a.name)
+        if a.lifetime_years is not None and a.lifetime_years < years:
             if not counts_as_replaced(case, a, replacements):
                 raise FinanceRefused("asset_lifetime_short",
-                                     f"{a.name}: lifetime {a.lifetime_years:g} < analysis period "
-                                     f"{tl.analysis_years} with no replacement")
+                                     f"{a.name}: lifetime {a.lifetime_years:g} < its {years} "
+                                     f"operating years in the case with no replacement")
     return tl

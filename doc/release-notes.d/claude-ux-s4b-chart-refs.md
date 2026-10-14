@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Charts can mark what matters. A limit, a target or the mean is a dashed line in a semantic colour, labelled with its figure rounded as the KPI tiles round it, and an all-zero series reads as a sentence instead of empty axes. The price chart and the price duration curve now show the system mean.

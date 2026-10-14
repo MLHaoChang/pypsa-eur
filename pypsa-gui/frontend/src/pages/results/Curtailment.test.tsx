@@ -5,6 +5,7 @@ import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import Curtailment from './Curtailment'
+import { findKpiValue } from '../../test/kpi'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -91,6 +92,32 @@ it('renders a distinctive curtailed-energy KPI sourced from a single mocked snap
   // exactly one match; use `findAllByText` and assert on the known count
   // (2) instead, same resolution Dispatch.test.tsx used for its own
   // legitimate duplicate.
-  const matches = await screen.findAllByText((text) => text.includes('424.2'))
-  expect(matches.length).toBe(2)
+  // The by-carrier table keeps full precision ("424.2 MWh"); the KPI tile
+  // rounds to the R1 standard (3 s.f.): "424 MWh".
+  expect(await findKpiValue('424 MWh')).toBeTruthy()
+  expect(screen.getAllByText((text) => text.includes('424.2')).length).toBe(1)
+})
+
+// ── Result states (UX overhaul S2) ──────────────────────────────────────────
+it('says curtailment does not apply when the network has no renewable generators', async () => {
+  vi.mocked(networkApi.getGenerators).mockResolvedValue([])
+  renderPage()
+  // One section-level state for the whole tab, not three tiles and two blocks.
+  expect((await screen.findAllByText('Not applicable')).length).toBe(1)
+  expect(screen.queryByText('Curtailed energy')).toBeNull()
+  expect(document.querySelector('[data-kpi-value]')).toBeNull()
+  expect(screen.queryByText(/dispatched every available MW/)).toBeNull()
+})
+
+it('shows a computed zero with what makes it zero, and a sentence instead of an empty chart', async () => {
+  vi.mocked(resultsApi.getCurtailment).mockResolvedValue({
+    index: ['2026-01-01T00:00:00'], columns: ['SolarGen'], data: [[0]],
+  })
+  renderPage()
+  await screen.findByText('Curtailed energy')
+  const tile = document.querySelector('[data-state="zero"]')
+  expect(tile?.querySelector('[data-kpi-value="0 MWh"]')).not.toBeNull()
+  expect(tile?.textContent).toMatch(/all available renewable energy used/)
+  expect(screen.getByText(/No curtailment in this range/)).toBeTruthy()
+  expect(document.querySelector('.recharts-responsive-container')).toBeNull()
 })

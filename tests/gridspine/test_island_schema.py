@@ -356,7 +356,7 @@ def test_every_field_names_the_increment_that_reads_it():
     """FIELD_USERS maps each schema field to the later increments that read
     it (plan I1, "no orphan fields"). A field nobody reads, or a reader that
     is not an increment of the plan, fails here."""
-    increments = {"I2a", "I2b", "I2c", "I3a", "I3b", "I4", "I5", "I5b", "I6", "I7", "I8", "I9"}
+    increments = {"I2a", "I2b", "I2c", "I3a", "I3b", "I4", "I5", "I5b", "I6", "I7", "I8", "I9", "GFM-a"}
     assert FIELD_USERS, "the field table is empty"
     assert set(FIELD_USERS) == set(ALL_FIELDS), (
         f"in the schema but not the table: {sorted(set(ALL_FIELDS) - set(FIELD_USERS))}; "

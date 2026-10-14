@@ -158,8 +158,10 @@ Everything is validated before anything is written: the campus is built,
 the tables are made and checked, and only then do the files land. Each file
 is replaced atomically, so a refused campus leaves the run as it was.
 """
+import dataclasses
 import hashlib
 import json
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -174,7 +176,7 @@ from gridspine.ranking.campus import campus_metrics, island_metrics, select_camp
 from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
-from gridspine.static.campus_reactive import reactive_need, requirement_from, size_compensation
+from gridspine.static.campus_reactive import ibr_q_capability, reactive_need, requirement_from, size_compensation
 from gridspine.static.campus_compliance import campus_compliance
 from gridspine.static.campus_invest import ParallelRules, period_spans, select_assets
 from gridspine.static.campus_milp import select_assets_milp
@@ -188,6 +190,7 @@ from gridspine.templates.grid_codes import (  # noqa: F401  (re-exported: the ba
     confirm_limit,
     list_grid_codes,
     load_grid_code,
+    reported_requirements,
     uncovered_kv_ranges,
     unconfirmed,
     validate_profile,
@@ -207,6 +210,10 @@ SIZING_COMP_CSV = "campus_sizing_compensation.csv"
 REQUIREMENT_JSON = "campus_requirement.json"
 SHORT_CIRCUIT_CSV = "campus_short_circuit.csv"
 COMPLIANCE_CSV = "campus_compliance.csv"
+#: IEEE 2800's IBR reactive capability, when the profile states it.
+IBR_CAPABILITY_CSV = "campus_ibr_capability.csv"
+#: What the profile requires that a steady-state study cannot show.
+REPORTED_REQUIREMENTS_JSON = "campus_reported_requirements.json"
 INVESTMENT_CSV = "campus_investment.csv"
 COST_CSV = "campus_cost.csv"
 INVESTED_YAML = "campus_invested.yaml"
@@ -223,6 +230,7 @@ FREQ_PLANNED_CSV = "campus_freq_planned.csv"
 FREQ_UPS_CSV = "campus_freq_ups.csv"
 FREQ_SUMMARY_JSON = "campus_freq_summary.json"
 FREQ_CUTS_CSV = "campus_freq_cuts.csv"
+GFM_SETTINGS_JSON = "campus_gfm_settings.json"
 PSSE_DIR = "psse"
 #: ``island_static_campus``'s files, by ``IslandStatic`` table.
 ISLAND_STATIC_CSV = {
@@ -510,6 +518,74 @@ def cuts_campus(run_dir) -> pd.DataFrame:
     return cuts
 
 
+def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 400, margin=None) -> dict:
+    """Recommended grid-forming settings for a run whose frequency check has
+    run (``island_frequency_campus``): one droop and one equivalent inertia
+    for every GFM converter that make the island-hour events pass with margin
+    (``gfm_tuning.recommend_gfm_settings``), or, when none within the bounds
+    does, the capacity I7 would buy. The cases are the E1, E2, E3 and E5 rows
+    at the island hours, passing and failing alike (a setting must not break
+    a passing event), each rebuilt as the study ran it; E4 has no GFM in it and
+    E6 is not rebuilt, so neither is a case; the every-hour E1 sweep is left
+    to the cuts. ``margin`` defaults to the requirements'
+    ``gfm_tuning_margin`` (0.1 when absent; never ``gfm_margin``, which is
+    I2b's capacity margin). The search ranges are ledgered as assumed
+    (``ledger``). Writes ``campus_gfm_settings.json`` and returns it."""
+    from gridspine.static import frequency as F
+    from gridspine.static import gfm_tuning as T
+
+    run_dir = Path(run_dir)
+    events_path = run_dir / FREQ_EVENTS_CSV
+    if not events_path.is_file():
+        raise ContractError("the run has no frequency check (campus_freq_events.csv); run island_frequency_campus first")
+    campus = load_run_campus(run_dir)
+    tables = _island_tables(run_dir)
+    hourly, _ = campus_tables(run_dir)
+    iu = tables[0] if tables is not None else None
+    limits, req = F._limits(campus)
+    values = req["values"]
+    window, eq = values["rocof_window_ms"], F.equipment(campus)
+    if margin is None:
+        margin = float(values.get("gfm_tuning_margin", 0.1))
+    events = pd.read_csv(events_path)
+    events = events[events["event"].isin(["E1", "E2", "E3", "E5"])]
+    if "i_max_pu" in events:
+        events = events[events["i_max_pu"].isna()]              # Q8's reruns are sensitivities, not cases
+    ctx, cases, seen = {}, [], set()
+    for _, r in events.iterrows():
+        key = (int(r["period"]), int(r["hour"]), str(r["scenario"]), str(r["event"]),
+               str(r.get("unit")), round(float(r["dp_mw"]), 9))
+        if key in seen:
+            continue
+        seen.add(key)
+        built_ = F._event_run(campus, hourly, iu, r, ctx, (1e-3, 20.0), (5e-3, 10.0))
+        if built_ is None:
+            continue
+
+        def run(us, dt, t_end, r=r):
+            return F._event_run(campus, hourly, iu, r, ctx, (dt, t_end), (dt, t_end))[1](us, t_end)
+        cases.append(T.Case(f"{key[0]} h{key[1]} {key[2]} {key[3]}", built_[0], run))
+    rec = T.recommend_gfm_settings(cases, limits, equipment_=eq, window_ms=window, margin=margin,
+                                   allow_i_max=allow_i_max, max_sims=max_sims)
+    out = {"label": rec.label, "ledger": T.ledger(rec.bounds), "status": rec.status, "achievable": rec.achievable, "changed": rec.changed,
+           "settings": rec.settings,
+           "cases": rec.cases, "capacity": rec.capacity, "comparison": rec.comparison,
+           "simulations": rec.simulations, "max_simulations": max_sims, "margin": margin,
+           "bounds": dataclasses.asdict(rec.bounds), "allow_i_max": allow_i_max, "notes": rec.notes,
+           "excluded": ["E4 (no grid-forming converter in a UPS-bridged genset start)",
+                        "E6 (planned islanding is not rebuilt)", "the every-hour E1 sweep (see the cuts)"]}
+    _write_text_atomic(run_dir / GFM_SETTINGS_JSON, json.dumps(out, indent=2, default=_json_default))
+    return out
+
+
+def _json_default(x):
+    if isinstance(x, float) and not math.isfinite(x):
+        return None
+    if hasattr(x, "item"):
+        return x.item()
+    raise TypeError(f"not JSON serialisable: {type(x).__name__}")
+
+
 def psse_campus(run_dir, hours=None) -> list:
     """The PSS/E handoff of a ranked run (plan I8): one bundle per island
     critical hour (``island_hours``), or per ``hours`` given, under
@@ -596,8 +672,18 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
         bus_kv=dict(zip(net.bus["name"].astype(str), net.bus["vn_kv"].astype(float))),
     )
     _write_text_atomic(run_dir / COMPLIANCE_CSV, compliance.to_csv(index=False))
+    # Beside the compliance table, never in it (the measure loop reads that):
+    # the IBR capability, and the requirements no steady-state check can show.
+    ibr = ibr_q_capability(campus, code)
+    if ibr is not None:
+        _write_text_atomic(run_dir / IBR_CAPABILITY_CSV, ibr.to_csv(index=False))
+    else:
+        (run_dir / IBR_CAPABILITY_CSV).unlink(missing_ok=True)       # an earlier profile's table
+    reported = reported_requirements(code)
+    _write_text_atomic(run_dir / REPORTED_REQUIREMENTS_JSON, json.dumps(reported, indent=2))
     return {"transformers": sizing, "compensation": comp, "requirement": requirement,
-            "short_circuit": short_circuit, "compliance": compliance}
+            "short_circuit": short_circuit, "compliance": compliance, "ibr_capability": ibr,
+            "reported_requirements": reported}
 
 
 def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,

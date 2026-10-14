@@ -48,7 +48,7 @@
      design ink scale. */
   --color-text: #0a0e14;
   --color-muted: #6a7384;
-  --color-axis: #97a0ae;
+  --color-axis: #5f6876; /* ≥ 4.9 : 1 on every light surface (UX S4, A1); was #97a0ae, 2.6 : 1 */
   --color-legend: #475061;
 
   /* Crimson accent — same family as the dark theme's red, darkened so
@@ -72,6 +72,8 @@
   --color-warn: #d97706;
   --color-danger: #dc2626;
   --color-purple: #7c3aed;
+  /* Result states (components/ResultState.tsx): not run / running. */
+  --color-info: #2563eb;
 
   /* Voltage bands (>300 / 200–300 / 100–200 / <100 kV) */
   --color-v-red: #ef4444;
@@ -146,6 +148,7 @@
      is a visible lift so cards read as elevated rather than as flat regions of
      the same black — which is what the previous, much darker ramp did. */
   --color-bg: #151112;
+  --color-info: #7aa7ff; /* 7.1 : 1 on panel; #2563eb is only 3.3 : 1 here */
   --color-bg-2: #1b1617;
   --color-panel: #211b1c;
   --color-panel-2: #282122;
@@ -167,7 +170,7 @@
   --color-ink-200: #35262a;
   --color-text: #f4eaea;
   --color-muted: #b9a7a9;
-  --color-axis: #8b7679;
+  --color-axis: #9e8a8d; /* ≥ 4.8 : 1 on every dark surface (UX S4, A1); was #8b7679, 4.0 : 1 */
   --color-legend: #c6b3b5;
 
   /* accent-100 / accent-50 back accent-coloured text (chips, rings, active

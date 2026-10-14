@@ -51,6 +51,35 @@ profiles:
       value: 3.0
       clause: "not set by RfG/DCC; IEC TR 61000-3-7 indicative planning levels for infrequent rapid voltage changes at HV/EHV are about 3-5 % (not verified against the text here); 3 % used"
       source: assumed
+    # What a steady-state study cannot show, reported as "dynamic study needed"
+    # and never counted as passed (plan 2026-10-14 e2e demo, section 7.3). The
+    # clauses and ranges below were not re-read against the adopted text when
+    # they were added; check them before a decision rests on them.
+    dynamic_requirements:
+      - id: frequency_ranges
+        requirement: "Stay connected over the frequency ranges and times"
+        value: "49.0-51.0 Hz unlimited; 47.5-48.5 Hz and 48.5-49.0 Hz for TSO-specified times (at least 30 min at 47.5-48.5 Hz); 51.0-51.5 Hz 30 min (Continental Europe)"
+        clause: "DCC Art. 12(1) and Annex I, Table 1 (demand facilities); RfG Art. 13(1)(a) Table 2 (generating modules)"
+        source: code
+        applies_to: facility
+      - id: rocof
+        requirement: "Withstand a rate of change of frequency"
+        value: "TSO-specified"
+        clause: "RfG Art. 13(1)(b): the rate of change of frequency withstand capability is specified by the TSO"
+        source: code
+        applies_to: ibr
+      - id: frt
+        requirement: "Fault ride-through of the on-site power park modules (BESS, PV)"
+        value: "the TSO's voltage-against-time profile, within the RfG's ranges by module type"
+        clause: "RfG Art. 14(3)(a) (type B) and Art. 16(3)(a) (type D): the TSO specifies the voltage-against-time profile within the RfG's bounds"
+        source: code
+        applies_to: ibr
+      - id: lfsm_o
+        requirement: "Limited frequency sensitive mode, over-frequency"
+        value: "droop 2-12 %, threshold 50.2-50.5 Hz (TSO-specified within these)"
+        clause: "RfG Art. 13(2)"
+        source: code
+        applies_to: ibr
 
   generic_assumed:
     title: "Generic assumed limits (placeholder until a real grid code is supplied)"
@@ -77,3 +106,88 @@ profiles:
       v_max: 1.05
       clause: "generic placeholder until a real code is supplied: 0.95-1.05 pu design band for buses inside the campus"
       source: assumed
+
+  us_ieee2800_nerc:
+    title: "US: IEEE 2800-2022 (on-site IBR) and NERC PRC-029-1 / PRC-024-3, with the site's own range assumed"
+    notes: >-
+      What binds a data centre is narrower than the codes' titles suggest.
+      IEEE 2800-2022 and NERC PRC-029-1 are written for inverter-based
+      generating resources; whether a behind-the-meter BESS or PV at a load
+      site falls in PRC-029-1's scope (BES IBR, or non-BES IBR of 20 MVA or
+      more on a delivery system of 60 kV or above) is unverified, and IEEE 2800
+      applies where a transmission provider adopts it. No NERC standard yet sets
+      ride-through for large or computational loads (a Level 3 alert of May
+      2026; Project 2026-02 drafts CLO-001/002/003; FERC set a filing deadline
+      of 31 December 2026); binding load ride-through is regional (ERCOT
+      NOGRR282 / NPRR1308 from 1 August 2026). The site's reactive range below
+      is therefore assumed, IEEE 2800's capability is held to the on-site IBR,
+      and every dynamic requirement is reported as needing a dynamic study.
+      Sources gathered 14 October 2026: NERC PRC-029-1 and PRC-024-3 texts; the
+      IEEE SA 2800 webinar slides; MISO's PAC-2024-2 summary of IEEE 2800.
+    voltage_bands:
+      - kv_min: 0.0
+        kv_max: 69.0
+        v_min: 0.90
+        v_max: 1.10
+        clause: "not set by NERC or IEEE 2800 below transmission level; the transmission owner's FAC-001 criteria apply; +/-10 % used"
+        source: assumed
+      - kv_min: 69.0
+        kv_max: 1000.0
+        kv_max_inclusive: true
+        v_min: 0.90
+        v_max: 1.05
+        # The 30-minute tier is reported with the dynamic requirements, never
+        # enforced by the steady-state checks.
+        v_max_30min: 1.10
+        clause: "NERC PRC-029-1 Table 2 (FERC Order 909): continuous operation 0.90-1.05 pu at the high side of the main power transformer, above 1.05 pu for 1,800 s; aligned with IEEE 2800-2022"
+        source: code
+    q_range_demand:
+      value: 0.329
+      clause: "not set by any US code for a load: power factor 0.95 at the connection capacity used as a placeholder (FERC Order 827 and IEEE 2800 state +/-0.95 pf for generating resources, not for the load)"
+      source: assumed
+    q_range_ibr:
+      value: 0.3287
+      reference: "ICR at rated active power, at the reference point of applicability (default the point of measurement)"
+      clause: "IEEE 2800-2022 reactive power capability: inject or absorb at least 32.87 % of ICR (about +/-0.95 pf) at every active-power level; value as summarised by MISO PAC-2024-2, not read from the standard's own text"
+      source: code
+    rvc_limit_pct:
+      value: 3.0
+      clause: "no US code value found for rapid voltage change at the connection point; 3 % used"
+      source: assumed
+    dynamic_requirements:
+      - id: frt
+        requirement: "Frequency ride-through of the on-site IBR"
+        value: "58.8-61.2 Hz continuous; outside it for 299 s; may trip above 61.8 Hz or below 57.0 Hz"
+        clause: "NERC PRC-029-1 (aligned with IEEE 2800-2022 frequency ride-through)"
+        source: code
+        applies_to: ibr
+      - id: vrt
+        requirement: "Voltage ride-through of the on-site IBR (PV, BESS)"
+        value: "0.90-1.05 pu continuous; above 1.05 pu 1,800 s; above 1.10 pu 1.0 s; below 0.90 pu 6 s; below 0.70 pu 3 s; below 0.50 pu 1.2 s; below 0.25 pu 0.32 s"
+        clause: "NERC PRC-029-1 Table 2, at the high side of the main power transformer"
+        source: code
+        applies_to: ibr
+      - id: rocof
+        requirement: "Ride through a rate of change of frequency"
+        value: "5 Hz/s"
+        clause: "NERC PRC-029-1 R3; IEEE 2800-2022 RoCoF ride-through (absolute RoCoF up to 5.0 Hz/s)"
+        source: code
+        applies_to: ibr
+      - id: pfr
+        requirement: "Primary frequency response of the on-site IBR"
+        value: "droop 5 % (range 2-5 %), deadband 0.036 Hz (0.06 % of nominal)"
+        clause: "IEEE 2800-2022 primary frequency response defaults, as summarised by MISO PAC-2024-2"
+        source: code
+        applies_to: ibr
+      - id: prc024_no_trip
+        requirement: "Protection settings outside the no-trip zone (Eastern Interconnection)"
+        value: "59.5-60.5 Hz continuous; instantaneous trip only at or beyond 61.8 / 57.8 Hz; voltage no-trip curve per PRC-024-3 Attachment 2"
+        clause: "NERC PRC-024-3 (a settings audit, not a load-flow check)"
+        source: code
+        applies_to: ibr
+      - id: large_load_ride_through
+        requirement: "Ride-through of the data centre load itself"
+        value: "no binding NERC standard yet; regional rules (ERCOT NOGRR282 / NPRR1308) and pending NERC standards"
+        clause: "NERC Level 3 alert (May 2026); Project 2026-02; FERC order of 16 July 2026 (filing by 31 December 2026)"
+        source: assumed
+        applies_to: load

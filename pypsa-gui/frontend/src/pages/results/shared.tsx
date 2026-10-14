@@ -8,6 +8,8 @@ import {
 } from 'recharts'
 import { Download } from 'lucide-react'
 import Kpi from '../../components/Kpi'
+import { kpiFigure } from '../../utils/format'
+import type { ResultAction, ResultStateKind } from '../../components/ResultState'
 import toast from 'react-hot-toast'
 import { useQuery } from '@tanstack/react-query'
 import { isRenewableCarrier } from '../../utils/carriers'
@@ -896,7 +898,7 @@ export function ChartActions({ chartRef, onExportCSV, filename, className }: Cha
 // strip's headline tile, and `hint` (often a full-sentence formula) stays a
 // hover title so the strip reads calmly.
 export function KPI({
-  label, value, unit, hint, delta, deltaState, sub, accent,
+  label, value, unit, hint, delta, deltaState, sub, accent, state, reason, action,
 }: {
   label: string
   value: string
@@ -906,6 +908,9 @@ export function KPI({
   deltaState?: 'ok' | 'warn' | 'err'
   sub?: string
   accent?: boolean
+  state?: ResultStateKind
+  reason?: string
+  action?: ResultAction
 }) {
   return (
     <Kpi
@@ -917,6 +922,9 @@ export function KPI({
       deltaTone={deltaState === 'ok' ? 'good' : deltaState === 'err' ? 'bad' : deltaState}
       basis={sub}
       headline={accent}
+      state={state}
+      reason={reason}
+      action={action}
     />
   )
 }
@@ -943,10 +951,10 @@ export function ChartCard({
         shadow-[0_1px_0_rgba(10,14,20,0.04)] ${className ?? ''}`}
     >
       <header className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-2">
-        <div className="flex items-baseline gap-2 min-w-0">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] truncate">{title}</h3>
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
+          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] [overflow-wrap:anywhere]">{title}</h3>
           {count != null && <span className="font-mono text-[11px] text-muted shrink-0">{count}</span>}
-          {hint && <span className="text-[11px] text-muted truncate">{hint}</span>}
+          {hint && <span className="text-[11px] text-muted [overflow-wrap:anywhere]">{hint}</span>}
         </div>
         {right && <div className="flex items-center gap-2 shrink-0">{right}</div>}
       </header>
@@ -1038,11 +1046,77 @@ export const CHART_TOOLTIP = {
   itemStyle: { color: 'var(--color-text)', padding: '1px 0' } as CSSProperties,
 }
 
-// Y-axis label helper — the rotated unit caption every chart repeats. Returns
-// the `label` prop object styled to the design's axis treatment.
+// Y-axis unit caption every chart repeats. UX overhaul S4 (finding R6): it is
+// drawn HORIZONTALLY just above the axis, left-aligned, instead of rotated
+// inside the tick band where it ran over wide tick labels ("€30.0 M"). Charts
+// leave 18 px of top margin for it (pinned by chartStandard.test.tsx).
 export function yAxisLabel(value: string) {
-  return { value, angle: -90, position: 'insideLeft' as const, offset: 12,
-    style: { fontSize: 10, fill: 'var(--color-axis)' } as CSSProperties }
+  return {
+    value,
+    content: ({ viewBox }: { viewBox?: { x?: number; y?: number } }) => (
+      <text x={(viewBox?.x ?? 0) + 2} y={(viewBox?.y ?? 0) - 7} textAnchor="start"
+        fontSize={10.5} fill="var(--color-axis)">
+        {value}
+      </text>
+    ),
+  }
+}
+
+// ── Reference lines, the extreme point, all-zero series (UX overhaul S4b) ───
+// "Highlight what matters" in the chart standard: limits, targets and the mean
+// are dashed lines in a semantic colour (never the accent), labelled with the
+// figure rounded exactly as the KPI tile rounds it. Spread onto a recharts
+// <ReferenceLine {...refLine(...)} />.
+export type RefTone = 'limit' | 'target' | 'mean'
+
+const REF_STROKE: Record<RefTone, string> = {
+  limit: 'var(--color-danger)',
+  target: 'var(--color-success)',
+  mean: 'var(--color-axis)',
+}
+
+export function refLine(tone: RefTone, name: string, y: number, unit: string) {
+  const f = kpiFigure(String(y), unit)
+  const stroke = REF_STROKE[tone]
+  return {
+    y,
+    stroke,
+    strokeDasharray: '4 3',
+    strokeWidth: 1,
+    ifOverflow: 'extendDomain' as const,
+    label: {
+      value: `${name} ${f.value}${f.unit ? ` ${f.unit}` : ''}`,
+      position: 'insideTopRight' as const,
+      fontSize: 10.5,
+      fill: stroke,
+    },
+  }
+}
+
+/** The highest finite value of `key` (the first, on a tie), or null when no
+ *  value is above zero — there is no extreme worth marking then. */
+export function extremeOf<T extends Record<string, unknown>>(rows: readonly T[], key: keyof T & string) {
+  let best: { index: number; value: number } | null = null
+  rows.forEach((r, index) => {
+    const v = r[key]
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0 && (!best || v > best.value)) best = { index, value: v }
+  })
+  return best as { index: number; value: number } | null
+}
+
+/** True when every plotted value is zero or missing: draw <ChartZero>, not
+ *  empty axes. */
+export function isAllZero(rows: ReadonlyArray<Record<string, unknown>>, keys: readonly string[]) {
+  return rows.every(r => keys.every(k => {
+    const v = r[k]
+    return typeof v !== 'number' || !Number.isFinite(v) || v === 0
+  }))
+}
+
+export function ChartZero({ children }: { children: ReactNode }) {
+  return (
+    <p data-testid="chart-zero" className="py-8 text-center text-[12px] text-muted">{children}</p>
+  )
 }
 
 // ── Carrier colour palette ───────────────────────────────────────────────────
@@ -1319,7 +1393,7 @@ export function SeasonalLineCardGrid({
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={height}>
-                  <LineChart data={seasonRows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <LineChart data={seasonRows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid {...CHART_GRID} />
                     <XAxis dataKey="bucket" {...CHART_AXIS}
                       interval={23} tickFormatter={tickFmt} />

@@ -356,6 +356,11 @@ def _vintage_classes(layer: TaxLayer, v: tuple) -> tuple[DepreciationClass, ...]
         if own and tot > 0:
             import dataclasses
             return tuple(dataclasses.replace(c, share=c.share / tot, bonus=c.bonus) for c in own)
+        if own:
+            # An asset with no stage-1 basis (a later stage, P5) still names its
+            # classes: its vintage depreciates on them, in equal shares.
+            import dataclasses
+            return tuple(dataclasses.replace(c, share=1.0 / len(own)) for c in own)
     return layer.depreciation
 
 

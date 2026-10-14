@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A shared explanation line for KPI rows and charts. Text computed from the insight rules reads as plain muted text, with the rule ids shown on hover in Expert. Narration from the assistant carries an "Assistant" tag and a left border, so it is never mistaken for a computed figure.
