@@ -104,3 +104,17 @@ def test_a_driver_refusal_is_a_422_with_its_reason(hub, monkeypatch):
     with pytest.raises(HTTPException) as exc:
         _run(hub)
     assert exc.value.status_code == 422 and "grid-forming" in exc.value.detail
+
+
+def test_without_island_requirements_the_frequency_check_is_skipped(hub, monkeypatch):
+    """Unit blocks but no campus-level island requirements: I4–I5b run; I6,
+    which holds the island to them, does not."""
+    _sidecar(hub)
+    _island_campus(hub)
+    spec = yaml.safe_load((ce.campus_dir(hub) / ce.CAMPUS_FILE).read_text())
+    del spec["campus"]["island"]
+    ce.save_campus(hub, yaml.safe_dump(spec, sort_keys=False))
+    monkeypatch.setattr(ce.cs, "island_frequency_campus", lambda *a: pytest.fail("no island requirements"))
+    run = _run(hub)
+    assert all((run / n).is_file() for n in STATIC_FILES)
+    assert not any((run / n).exists() for n in FREQ_FILES)
