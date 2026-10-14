@@ -97,6 +97,38 @@ drives the generator the way the route does and is red without it. The
 route's own comments document the same trap for `set_acting_user` and the
 turn profile, which it binds from the event-loop task for that reason.
 
+## Replaying a recorded turn (`smoke/replay_session.py`)
+
+Every chat writes an event log of what the model saw (chat harness issue
+13): `<app data>/chat-events/<owner>/<session>.jsonl`. The replay tool forks
+a recorded session just before one of its turns and runs that turn again on
+another profile, in-process, then prints both trajectories (tools called,
+final text, usage). The original log is never written; the fork gets its
+own log beside it, naming the parent.
+
+After a battery run, with the same `PYPSAGUI_APP_DATA_DIR` (the stub still
+running for a stub replay, `ANTHROPIC_API_KEY` set for a live one):
+
+```bash
+F=$(ls "$PYPSAGUI_APP_DATA_DIR"/chat-events/*/*.jsonl | head -1)
+grep '"turn/start"' "$F" | cut -c1-120            # find W2's seq
+python smoke/replay_session.py --events "$F" --at 7 --profile stub-openai
+python smoke/replay_session.py --events "$F" --at 7 --profile anthropic-sonnet
+```
+
+The fork asks for the profile's own model and runs under that profile (its
+tools payload, token cap and fallback model).
+
+| Date | Commit | Recorded on | Replayed on | Result |
+|---|---|---|---|---|
+| 2026-10-14 | issue 13 part a | `stub-openai`, battery 5/5, W2 at seq 7 | `stub-openai` | identical: `start_workflow`, "Started: first, see what is there.", `in=6 cached=16 out=6`, completed |
+| 2026-10-14 | same | same | `anthropic-sonnet` (live) | completed in 15 s: `start_workflow`, then the `orient` step on its own (`get_meta`, `list_components` ×5, an `ask_user` card), as on the live battery rows above |
+
+**What the first replay found.** The fork was created with a placeholder
+model name, which the stub ignores and a vendor rejects, and with no profile,
+so the turn fell back to whatever the model name implied. Both are fixed and
+pinned in `tests/test_harness_replay.py`.
+
 ## What this does not establish
 
 A green run on the stub says nothing about a real model's behaviour, and a

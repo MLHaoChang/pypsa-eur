@@ -102,6 +102,16 @@ def test_code_overlap_blocks_even_when_clean(repos):
     assert "code       a.py" in res.stdout
 
 
+def test_identical_overlap_passes(repos):
+    """A cherry-pick of a change master already has leaves byte-identical files."""
+    remote, clone = repos
+    commit(remote, {"a.py": "a\nfix\n", "b.py": "b2\n"}, "master fix")
+    publish_pr(remote, {"a.py": "a\nfix\n"}, "cherry-pick of the fix")
+    res = run(clone)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "identical  a.py" in res.stdout
+
+
 def test_conflict_blocks(repos):
     remote, clone = repos
     commit(remote, {"b.py": "master\n"}, "master code")

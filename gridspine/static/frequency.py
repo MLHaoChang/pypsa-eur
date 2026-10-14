@@ -28,7 +28,13 @@ with Δf in Hz, powers in MW and M in MW·s/Hz:
 * a **frequency-watt** GFL unit: −K_fw·sign(Δf)·max(0, |Δf| − db) after its
   delay, ramp-limited, capped at ``fw_p_limit_mw`` and at its headroom (PV
   only curtails: it has no upward reserve);
-* a **PQ** GFL unit, and a UPS on line, do not respond.
+* a **PQ** GFL unit does not respond;
+* a **UPS** (plan I6b) carries its IT load ``it_mw`` on its battery when it
+  is off line: at an islanding if it ``transfers``, and whenever |Δf| leaves
+  its input window ``f_window_hz`` (a drop-out, logged). Back inside the
+  window it walks its load back in at ``it_mw / walk_in_s``. The IT load on
+  the battery is relief to the island balance; its energy is counted against
+  the UPS's stored energy (``e_mwh``, e(t−1) from I3a).
 
 The load damping D defaults to 0: a data centre is mostly constant power, so
 that is the conservative choice (ledgered).
@@ -36,8 +42,14 @@ that is the conservative choice (ledgered).
 **Labelled a screening** (``LABEL``): no voltage dynamics, no inter-unit
 oscillation, no current-limit dynamics.
 
-numpy only; no pandapower. ``units_from_campus`` reads I4's unit plan so
-both share one P0 and one K = P_n/R (plan N1).
+The engine is numpy only; no pandapower. ``units_from_campus`` reads I4's
+unit plan so both share one P0 and one K = P_n/R (plan N1).
+
+**I6b** adds E4 (``e4_ups_bridged``: the dead-bus pickup and the Q1 bridge
+check), E6 (``e6_planned``: the ramp time), the Q8 rerun
+(``i_max_sensitivity``), the EMT/RMS flags (``emt_flags``), and the sweeps:
+``e1_every_hour`` on I3a's lossless steps and ``campus_frequency_study`` at
+the island critical hours (I4's ΔP_AC, pandapower through I4 and I5).
 """
 import dataclasses
 import math
@@ -57,15 +69,19 @@ LEDGER = (
     f"a {ISO_DROOP:.0%} proportional droop (assumed)",
     "frequency: a GFM's current limit is i_max · S_n taken as MW; the screening sees active power only",
     "frequency: PV frequency-watt only curtails; it carries no upward reserve",
+    "frequency: a UPS walks its IT load back in linearly over walk_in_s, from the islanding or from the "
+    "moment the frequency is back inside its window; it drops off again whenever |Δf| leaves the window",
 )
 
 
 @dataclasses.dataclass(frozen=True)
 class Unit:
     """One unit of the island, as the frequency model sees it. ``model`` is
-    ``genset``, ``gfm_droop``, ``gfm_vsm``, ``gfl_fw`` or ``none``. Powers
-    in MW; ``r`` is the droop in pu on P_n; ``h`` H on S_n (a genset's H, a
-    VSM's H_v)."""
+    ``genset``, ``gfm_droop``, ``gfm_vsm``, ``gfl_fw``, ``ups`` or
+    ``none``. Powers in MW; ``r`` is the droop in pu on P_n; ``h`` H on S_n
+    (a genset's H, a VSM's H_v). A genset's ``start_s`` + ``sync_s`` is its
+    join time when cold (``ready_s``). A UPS's ``ups`` holds ``it_mw``,
+    ``walk_in_s``, ``f_window_hz``, ``transfers`` and ``e_mwh``."""
     name: str
     model: str
     p0: float
@@ -83,6 +99,14 @@ class Unit:
     join_s: float = 0.0
     i_max_mw: float = math.inf
     fw: dict = dataclasses.field(default_factory=dict)
+    start_s: float = 0.0
+    sync_s: float = 0.0
+    ups: dict = dataclasses.field(default_factory=dict)
+
+    @property
+    def ready_s(self):
+        """A cold genset's start plus synchronisation, s: when it can join."""
+        return self.start_s + self.sync_s
 
     @property
     def k(self):
@@ -106,7 +130,24 @@ class Trace:
     saturated: dict              # unit -> first time at a limit, s (absent: never)
     collapse: float | None       # the time of collapse, s, or None
     rocof0: float                # dΔf/dt at 0⁺, Hz/s
+    ups: dict = dataclasses.field(default_factory=dict)    # UPS -> UpsLog
     label: str = LABEL
+
+
+@dataclasses.dataclass
+class UpsLog:
+    """What a UPS did in the event: when it dropped off line (window
+    violations), the energy its battery gave, and when its IT load was back
+    on the island (``None``: still on its battery at the end)."""
+    drops: list
+    energy_mwh: float
+    t_online_s: float | None
+    e_mwh: float
+
+    @property
+    def autonomy_ok(self):
+        """The battery held out, and the load is back on the island."""
+        return self.t_online_s is not None and self.energy_mwh <= self.e_mwh + 1e-12
 
 
 def _gfm_m(u, f0):
@@ -127,7 +168,7 @@ def _balance(units, x, t, dp_event, f0, damping):
             if u.model == "genset" and t >= u.join_s:
                 m += 2.0 * u.h * u.s_n / f0
                 p += x[u.name]
-            elif u.model == "gfl_fw":
+            elif u.model in ("gfl_fw", "ups"):
                 p += x[u.name]
         for u in gfm:
             if u.name in sat:
@@ -192,18 +233,49 @@ def _fw_step(units, x, t, dt):
         x[u.name] += min(max(target - x[u.name], -step), step)
 
 
-def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0) -> Trace:
+def _ups_step(units, x, dt, log, t):
+    """A UPS off line, or past its window, carries its IT load; back inside
+    the window it walks the load back in. ``log`` gathers the drops and the
+    battery energy."""
+    for u in units:
+        if u.model != "ups":
+            continue
+        a, rec, before = u.ups, log[u.name], x[u.name]
+        if abs(x["df"]) > a["f_window_hz"]:
+            if before < a["it_mw"] - 1e-12:
+                rec["drops"].append(float(t))
+            x[u.name] = a["it_mw"]
+            rec["energy_mws"] += before * dt              # on its battery from the end of the step
+        elif before > 0.0:
+            rate = a["it_mw"] / a["walk_in_s"] if a["walk_in_s"] > 0 else math.inf
+            x[u.name] = max(0.0, before - rate * dt)
+            rec["energy_mws"] += 0.5 * (before + x[u.name]) * dt if rate * dt <= before else 0.5 * before ** 2 / rate
+            if x[u.name] == 0.0:
+                rec["t_online"] = float(t)
+        if x[u.name] > 0.0:
+            rec["t_online"] = None
+
+
+def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0, islanding=False) -> Trace:
     """Integrate the island frequency after ``dp_event(t)`` (MW, positive a
     deficit: load gained or generation lost) with ``units`` (``Unit``).
-    Fixed-step RK4 on Δf and the governors; the frequency-watt ramps and the
-    limits are applied after each step."""
+    Fixed-step RK4 on Δf and the governors; the frequency-watt ramps, the
+    UPS states and the limits are applied after each step. ``islanding``:
+    the event opens the PCC, so a UPS that ``transfers`` starts on its
+    battery. A ``dp_event`` with an ``advance(t, Δf, RoCoF)`` method is told
+    the state after each step and may change itself (E4's pickup)."""
     units = list(units)
     x = {"df": 0.0}
+    ups_log = {}
     for u in units:
         if u.model in ("genset", "gfl_fw"):
             x[u.name] = 0.0
         if u.model == "genset" and u.isochronous:
             x[f"{u.name}~i"] = 0.0
+        if u.model == "ups":
+            x[u.name] = u.ups["it_mw"] if islanding and u.ups["transfers"] else 0.0
+            ups_log[u.name] = {"drops": [], "energy_mws": 0.0, "t_online": None if x[u.name] > 0 else 0.0}
+    advance = getattr(dp_event, "advance", None)
     n = int(round(t_end / dt)) + 1
     t = np.linspace(0.0, (n - 1) * dt, n)
     df = np.zeros(n)
@@ -211,7 +283,8 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0) -> Trace:
     saturated, collapse = {}, None
     rocof0, _, _ = _balance(units, dict(x), 0.0, dp_event, f0, damping)
     if rocof0 is None:
-        return Trace(t[:1], df[:1], {k: v[:1] for k, v in dp.items()}, {}, 0.0, math.nan)
+        return Trace(t[:1], df[:1], {k: v[:1] for k, v in dp.items()}, {}, 0.0, math.nan,
+                     _ups_logs(units, ups_log))
 
     def deriv(state, tt):
         s = dict(state)
@@ -231,6 +304,8 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0) -> Trace:
     for i in range(n):
         tt = t[i]
         rocof, dps, sat = _balance(units, dict(x), tt, dp_event, f0, damping)
+        if rocof is not None and advance and advance(float(tt), x["df"], rocof):
+            rocof, dps, sat = _balance(units, dict(x), tt, dp_event, f0, damping)
         if rocof is None:
             collapse = float(tt)
             t, df = t[:i], df[:i]
@@ -242,8 +317,8 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0) -> Trace:
                 dp[u.name][i] = dps[u.name]
                 if u.name in sat:
                     saturated.setdefault(u.name, float(tt))
-            elif u.model in ("genset", "gfl_fw"):
-                dp[u.name][i] = x[u.name] if (u.model == "gfl_fw" or tt >= u.join_s) else 0.0
+            elif u.model in ("genset", "gfl_fw", "ups"):
+                dp[u.name][i] = x[u.name] if (u.model != "genset" or tt >= u.join_s) else 0.0
         if i == n - 1:
             break
         k1 = deriv(x, tt)
@@ -259,7 +334,13 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0) -> Trace:
             x[k] = x[k] + dt / 6.0 * (k1[k] + 2 * k2[k] + 2 * k3[k] + k4[k])
         _clamp(units, x, tt + dt)
         _fw_step(units, x, tt + dt, dt)
-    return Trace(t, df, dp, saturated, collapse, float(rocof0))
+        _ups_step(units, x, dt, ups_log, tt + dt)
+    return Trace(t, df, dp, saturated, collapse, float(rocof0), _ups_logs(units, ups_log))
+
+
+def _ups_logs(units, log):
+    return {u.name: UpsLog(log[u.name]["drops"], log[u.name]["energy_mws"] / 3600.0, log[u.name]["t_online"],
+                           u.ups["e_mwh"]) for u in units if u.model == "ups"}
 
 
 def native_droop_reference(genset, gfm, dp, t_end=5.0, dt=1e-3, f0=F0):
@@ -334,6 +415,7 @@ class Verdict:
     ok: bool
     binding: str | None          # the most sensitive limit broken, named
     failures: list               # every limit broken, as text
+    worst: float = 0.0           # the binding limit's relative exceedance (inf on collapse)
 
 
 def judge(m, limits, f0=F0, equipment=()) -> Verdict:
@@ -345,7 +427,7 @@ def judge(m, limits, f0=F0, equipment=()) -> Verdict:
     allows** (f0 − f_min, f_max − f0, the RoCoF limit, the band), so limits
     of different kinds compare."""
     if m.collapse is not None:
-        return Verdict(False, COLLAPSE, [COLLAPSE])
+        return Verdict(False, COLLAPSE, [COLLAPSE], math.inf)
     tr, st = limits["transition"], limits["steady_island"]
     f_ext, f_qss = f0 + m.nadir_hz, f0 + m.df_qss_hz
 
@@ -370,31 +452,42 @@ def judge(m, limits, f0=F0, equipment=()) -> Verdict:
         if hi == hi:
             checks.append(high(f"{label}, peak {f_ext:.2f} Hz against {hi:g} Hz", hi, f_ext))
     broken = sorted(((over, label) for label, over in checks if over > 1e-12), reverse=True)
-    return Verdict(not broken, broken[0][1] if broken else None, [label for _, label in broken])
+    return Verdict(not broken, broken[0][1] if broken else None, [label for _, label in broken],
+                   broken[0][0] if broken else 0.0)
 
 
 # ── units and events ───────────────────────────────────────────────────────
 
-def units_from_campus(campus, rows, online=None, cold=()):
+def units_from_campus(campus, rows, online=None, cold=(), soc=None):
     """The island's ``Unit`` list at one hour, from I4's unit plan (its P0
     and its references), so ΔP and K are shared with ``island_flow``.
-    ``cold`` gensets join at ``start_s`` + ``sync_s`` from P = 0."""
+    ``cold`` gensets join at ``start_s`` + ``sync_s`` from P = 0. A UPS
+    carries the hour's draw of its ``it_load``; its stored energy is
+    ``soc[uid]`` (e(t−1), I3a) when given, else the campus ``e_mwh``."""
     from gridspine.static.island_flow import IslandSettings, _build
 
     _, plan, _ = _build(campus, rows, online, IslandSettings())
+    soc = soc or {}
     out = []
     for uid, r in plan.iterrows():
         if r["role"] in ("offline", "load") or r["block"] is None:
             continue
         v = r["block"]["values"]
         p0, p_n, s_n = float(r["p0_mw"]), float(r["p_n"]), float(r["s_n"])
+        if r["kind"] == "ups":
+            it = sum(-float(plan.at[lid, "p0_mw"]) for lid in r["block"]["it_load"])
+            e = soc.get(uid, campus.units.at[uid, "e_mwh"])
+            out.append(Unit(uid, "ups", 0.0, p_n, s_n,
+                            ups={"it_mw": it, "walk_in_s": v["walk_in_s"], "f_window_hz": v["f_window_hz"],
+                                 "transfers": r["block"]["transfers_on_islanding"], "e_mwh": float(e)}))
+            continue
         if r["kind"] == "genset":
             join = (v["start_s"] + v["sync_s"]) if uid in cold else 0.0
             out.append(Unit(uid, "genset", 0.0 if uid in cold else p0, p_n, s_n, 0.0, p_n,
                             r=v["droop_pct"] / 100.0 if "droop_pct" in v else math.nan, h=v["H_s"], t_g=v["T_g_s"],
                             isochronous=r["block"]["governor"] == "isochronous",
                             step_mw=v["load_step_max_pct"] / 100.0 * p_n, ramp_mw_per_s=v["ramp_pu_per_s"] * p_n,
-                            join_s=join))
+                            join_s=join, start_s=v["start_s"], sync_s=v["sync_s"]))
             continue
         control = r["block"].get("control")
         lo = -p_n if r["kind"] == "bess" else 0.0
@@ -418,8 +511,9 @@ def step(dp_mw, at_s=0.0):
 
 def e1_islanding(units, import_mw, **kw):
     """E1: the PCC opens with ``import_mw`` crossing it (negative when the
-    site exports, an over-frequency). Cold gensets join on their own clock."""
-    return simulate(units, step(import_mw), **kw)
+    site exports, an over-frequency). Cold gensets join on their own clock;
+    a UPS that transfers starts on its battery and walks back in."""
+    return simulate(units, step(import_mw), islanding=True, **kw)
 
 
 def e2_load_step(units, step_mw, **kw):
@@ -437,3 +531,523 @@ def e3_unit_trip(units, name, **kw):
 def e5_pv_loss(units, lost_mw, **kw):
     """E5: PV output lost in the island (a cloud)."""
     return simulate(units, step(lost_mw), **kw)
+
+
+# ── I6b: the ups_bridged start, planned islanding, Q8 and the EMT flags ─────
+
+class Pickup:
+    """E4's load schedule, a ``dp_event`` that advances itself: the first
+    block at 0, then block k+1 once Δf is within ``band_hz`` of its settled
+    value after k blocks (−ΣP/ΣK, or 0 with an isochronous genset) and
+    |RoCoF| ≤ ``settle_hz_per_s``: the governors have recovered. A real
+    controller may wait a fixed interval instead (ledgered)."""
+
+    def __init__(self, blocks, k_mw_per_hz, isochronous, band_hz=0.1, settle_hz_per_s=0.05):
+        self.blocks, self.k, self.iso = list(blocks), k_mw_per_hz, isochronous
+        self.band, self.settle = band_hz, settle_hz_per_s
+        self.times = [0.0]
+
+    def __call__(self, t):
+        return sum(b for b, tk in zip(self.blocks, self.times) if t >= tk)
+
+    def settled(self, n):
+        """Δf settled after the first ``n`` blocks."""
+        if self.iso:
+            return 0.0
+        return -sum(self.blocks[:n]) / self.k if self.k else math.nan
+
+    def advance(self, t, df, rocof):
+        n = len(self.times)
+        if n == len(self.blocks) or t <= self.times[-1]:
+            return False
+        if abs(df - self.settled(n)) <= self.band and abs(rocof) <= self.settle:
+            self.times.append(t)
+            return True
+        return False
+
+
+@dataclasses.dataclass
+class Bridge:
+    """The Q1 bridge check for one UPS under ``ups_bridged``: its stored
+    energy at the IT load lasts ``autonomy_s``; it must last ``needed_s`` =
+    max(``bridge_s``, the gensets' ready time + the last block's pickup)."""
+    ups: str
+    it_mw: float
+    e_mwh: float
+    autonomy_s: float
+    needed_s: float
+    ok: bool
+
+
+@dataclasses.dataclass
+class BridgedStart:
+    """E4. ``trace`` runs from ``ready_s`` (the dead bus until then); the
+    blocks are picked up at ``block_times_s`` on that clock; ``blocks``
+    holds each block's ``Metrics``. ``complete``: every block was taken
+    within the horizon and the frequency settled after the last."""
+    trace: Trace
+    ready_s: float
+    block_times_s: list
+    blocks: list
+    complete: bool
+    bridge: list
+    dropped: list                # the gensets left out (N+k)
+
+
+def _segment(trace, t0, t1):
+    """The trace from ``t0`` to ``t1``, re-timed from 0."""
+    sel = (trace.t >= t0 - 1e-12) & (trace.t < t1 - 1e-12)
+    t, df = trace.t[sel] - t0, trace.df[sel]
+    rocof0 = (df[1] - df[0]) / (t[1] - t[0]) if len(t) > 1 else math.nan
+    return Trace(t, df, {k: v[sel] for k, v in trace.dp.items()},
+                 {k: v - t0 for k, v in trace.saturated.items() if t0 - 1e-12 <= v < t1 - 1e-12}, None, rocof0)
+
+
+def e4_ups_bridged(gensets, blocks, ups=(), bridge_s=0.0, redundancy_n=0, band_hz=0.1, settle_hz_per_s=0.05,
+                   window_ms=500.0, t_end=600.0, dt=5e-3, f0=F0) -> BridgedStart:
+    """E4, the ``ups_bridged`` start (plan I6b): the bus is dead, the UPSs
+    carry the IT load, the gensets start and, once every one is ready
+    (start + sync, the join I2b uses), pick up ``blocks`` one at a time
+    (``Pickup``). The ``redundancy_n`` largest gensets fail to start (N+k,
+    as I2b's pickup row). ``ups`` is ``(name, it_mw, e_mwh)`` per UPS, e_mwh
+    being e(t−1); the bridge check needs each to last max(``bridge_s``,
+    ready + the last pickup)."""
+    from gridspine.schema.contracts import ContractError
+
+    gens = sorted((g for g in gensets if g.model == "genset"), key=lambda g: (-g.p_n, g.name))
+    dropped, gens = [g.name for g in gens[:redundancy_n]], gens[redundancy_n:]
+    if not gens or not blocks:
+        raise ContractError("E4 needs a genset left at N+k and the pickup blocks")
+    ready = max(g.ready_s for g in gens)
+    units = [dataclasses.replace(g, p0=0.0, join_s=0.0) for g in gens]
+    iso = any(g.isochronous for g in units)
+    sched = Pickup(blocks, sum(g.k for g in units if not g.isochronous), iso, band_hz, settle_hz_per_s)
+    tr = simulate(units, sched, t_end=t_end, dt=dt, f0=f0)
+    complete = (len(sched.times) == len(sched.blocks) and tr.collapse is None
+                and abs(tr.df[-1] - sched.settled(len(sched.blocks))) <= band_hz)
+    edges = [*sched.times, math.inf]
+    per = [metrics(_segment(tr, a, b), window_ms, band_hz) for a, b in zip(edges, edges[1:])]
+    last = ready + sched.times[-1] if complete else math.inf
+    bridge = []
+    for name, it, e in ups:
+        autonomy = e * 3600.0 / it if it > 0 else math.inf
+        needed = max(bridge_s, last)
+        bridge.append(Bridge(name, it, e, autonomy, needed, autonomy >= needed))
+    return BridgedStart(tr, ready, list(sched.times), per, complete, bridge, dropped)
+
+
+@dataclasses.dataclass
+class PlannedIslanding:
+    """E6. ``ramp_s``: the time for the island's units to take over the
+    import before the PCC opens (inf, with the ``shortfall_mw``, when they
+    cannot); ``p0`` the dispatch at the opening; ``trace`` the opening with
+    the ``residual_mw`` left at the PCC (None when not feasible)."""
+    feasible: bool
+    ramp_s: float
+    shortfall_mw: float
+    p0: dict
+    trace: Trace | None
+
+
+def _ramp_room(u, tau, up):
+    """What ``u`` can take over by ``tau`` s of a planned ramp. Gensets ramp
+    at ``ramp_pu_per_s`` from their join; a GFM moves at once (a converter
+    ramps in milliseconds; ledgered); a frequency-watt unit at its ramp;
+    other units hold their dispatch."""
+    room = max(0.0, (u.hi - u.p0) if up else (u.p0 - u.lo))
+    if u.model == "genset":
+        return min(room, u.ramp_mw_per_s * max(0.0, tau - u.join_s))
+    if u.model in ("gfm_droop", "gfm_vsm"):
+        return room
+    if u.model == "gfl_fw":
+        return min(room, u.fw["ramp_mw_per_s"] * tau)
+    return 0.0
+
+
+def e6_planned(units, import_mw, residual_mw=0.0, **kw) -> PlannedIslanding:
+    """E6, ``planned`` islanding (plan I6b): the gensets and the storage
+    ramp to cover ``import_mw`` (negative: the export is taken back), then
+    the PCC opens with ``residual_mw`` left (≈ 0). Cold gensets start on
+    their clock and ramp from their join. The take-over is shared in
+    proportion to what each unit can give at the ramp time."""
+    units = list(units)
+    need, up = abs(import_mw), import_mw > 0
+
+    def room(tau):
+        return sum(_ramp_room(u, tau, up) for u in units)
+
+    full = max([0.0] + [u.join_s + ((u.hi - u.lo) / u.ramp_mw_per_s if u.ramp_mw_per_s else 0.0)
+                        for u in units if u.model == "genset"]
+               + [((u.hi - u.lo) / u.fw["ramp_mw_per_s"]) for u in units if u.model == "gfl_fw"])
+    if room(full) < need - 1e-9:
+        return PlannedIslanding(False, math.inf, need - room(full), {u.name: u.p0 for u in units}, None)
+    lo, hi = 0.0, full
+    if room(0.0) >= need:
+        hi = 0.0
+    for _ in range(200):
+        if hi - lo <= 1e-9:
+            break
+        mid = 0.5 * (lo + hi)
+        lo, hi = (lo, mid) if room(mid) >= need else (mid, hi)
+    tau = hi
+    total = room(tau)
+    sign = 1.0 if up else -1.0
+    shifted = []
+    for u in units:
+        share = _ramp_room(u, tau, up) * need / total if total > 0 else 0.0
+        shifted.append(dataclasses.replace(u, p0=u.p0 + sign * share, join_s=0.0) if u.model != "ups"
+                       else u)
+    trace = simulate(shifted, step(residual_mw), **kw)
+    return PlannedIslanding(True, tau, 0.0, {u.name: u.p0 for u in shifted}, trace)
+
+
+def i_max_sensitivity(units, run, values):
+    """Q8: ``run(units)`` again with every GFM's current limit at each of
+    ``values`` (pu of S_n, the requirements' ``i_max_sensitivity_pu``).
+    Returns ``[(i_max_pu, result)]``."""
+    out = []
+    for v in values:
+        varied = [dataclasses.replace(u, i_max_mw=v * u.s_n) if u.model in ("gfm_droop", "gfm_vsm") else u
+                  for u in units]
+        out.append((v, run(varied)))
+    return out
+
+
+#: The EMT/RMS recommendation thresholds (plan I6; assumed, ledgered).
+EMT_NADIR_MARGIN = 0.2       # of the allowed deviation f0 − f_min (or f_max − f0) left at the extreme
+EMT_SCR = 3.0                # short-circuit ratio below which the grid or the island is weak
+EMT_GFL_SHARE = 0.3          # of the online source MVA, grid-following
+EMT_GFM_SHARE = 0.5          # of the online source MVA, grid-forming
+LEDGER += (
+    f"frequency: EMT/RMS is recommended below a {EMT_NADIR_MARGIN:.0%} nadir margin, on GFM saturation, "
+    f"at SCR < {EMT_SCR:g} with a GFL share above {EMT_GFL_SHARE:.0%}, and in an island with SCR < {EMT_SCR:g} "
+    f"and a GFM share above {EMT_GFM_SHARE:.0%} (thresholds assumed)",
+    "frequency: E4 picks up the next block once the governors have recovered (within the band of the settled "
+    "frequency, |RoCoF| ≤ 0.05 Hz/s); the gensets are ready at the slowest one's start + sync",
+    "frequency: E6 takes a converter's ramp as instantaneous; gensets ramp at ramp_pu_per_s from their join",
+    "frequency: E2, E3 and E5 start from I4's island dispatch at the nominal frequency (secondary control "
+    "has restored it after the islanding)",
+)
+
+
+def emt_flags(m, limits, f0=F0, scr_pcc=math.nan, gfl_share=math.nan, island_scr=math.nan,
+              gfm_share=math.nan) -> list:
+    """Why a screened event should go to an EMT or RMS study (plan I6): a
+    nadir margin below ``EMT_NADIR_MARGIN`` of the transition limit's
+    allowed deviation, GFM saturation, SCR < 3 at the PCC with a large GFL
+    share, a high GFM share in a weak island. NaN inputs are not judged."""
+    flags = []
+    if m.collapse is not None:
+        flags.append(f"{COLLAPSE} at {m.collapse:.3f} s")
+    else:
+        tr = limits["transition"]
+        f = f0 + m.nadir_hz
+        margin = ((f - tr["f_min_hz"]) / (f0 - tr["f_min_hz"]) if m.nadir_hz < 0
+                  else (tr["f_max_hz"] - f) / (tr["f_max_hz"] - f0))
+        if margin < EMT_NADIR_MARGIN - 1e-9:
+            flags.append(f"nadir margin {margin:.0%} of the allowed deviation, below {EMT_NADIR_MARGIN:.0%}")
+    if m.saturated:
+        flags.append("grid-forming units saturate in the event: " + ", ".join(sorted(m.saturated)))
+    if scr_pcc < EMT_SCR and gfl_share > EMT_GFL_SHARE:
+        flags.append(f"SCR {scr_pcc:.2f} at the PCC with {gfl_share:.0%} grid-following")
+    if island_scr < EMT_SCR and gfm_share > EMT_GFM_SHARE:
+        flags.append(f"island SCR {island_scr:.2f} with {gfm_share:.0%} grid-forming")
+    return flags
+
+
+# ── the campus: its equipment, the EMT inputs and the hour sweeps ───────────
+
+def equipment(campus, f0=F0):
+    """The island's frequency-sensitive equipment for ``judge``: each UPS's
+    input window, f0 ± ``f_window_hz``, and each load's ``f_trip_hz`` (an
+    under-frequency trip below f0, an over-frequency trip above it)."""
+    out = []
+    for uid, b in sorted(campus.island["units"].items()):
+        v = b["values"]
+        if b["kind"] == "ups":
+            out.append((f"UPS window {uid}", f0 - v["f_window_hz"], f0 + v["f_window_hz"]))
+        elif b["kind"] == "load" and "f_trip_hz" in v:
+            f = v["f_trip_hz"]
+            out.append((f"{uid} trip", f, math.nan) if f < f0 else (f"{uid} trip", math.nan, f))
+    return out
+
+
+def emt_inputs(campus, rows):
+    """The inputs of ``emt_flags`` at one hour: the PCC's SCR on the
+    grid-following MVA, the grid-following and grid-forming shares of the
+    online source MVA, and the island's SCR (I5's minimum fault level at the
+    weakest converter bus over the converter MVA). The online sources are
+    those in service at the hour, plus every genset with island data (it
+    starts on islanding)."""
+    from gridspine.schema.island import GFM_CONTROLS
+    from gridspine.static.island_sc import island_fault_levels
+
+    status = rows.set_index("unit_id")["status"]
+    s = {"gfl": 0.0, "gfm": 0.0, "gen": 0.0}
+    sources, conv_buses = set(), set()
+    for uid, u in campus.units.iterrows():
+        if u["kind"] not in ("bess", "pv", "wind", "genset"):
+            continue
+        block = campus.island["units"].get(uid)
+        if not (int(status.get(uid, 0)) == 1 or (u["kind"] == "genset" and block)):
+            continue
+        sources.add(uid)
+        if u["kind"] == "genset":
+            s["gen"] += float(u["s_mva"])
+            continue
+        conv_buses.add(u["bus"])
+        s["gfm" if block and block.get("control") in GFM_CONTROLS else "gfl"] += float(u["s_mva"])
+    total = sum(s.values())
+    conv = s["gfl"] + s["gfm"]
+    sk_min = float(campus.net.ext_grid["s_sc_min_mva"].iloc[0])
+    island_scr = math.nan
+    if conv and sources:
+        levels = island_fault_levels(campus, online=sources).set_index("bus")
+        vn = dict(zip(campus.net.bus["name"].astype(str), campus.net.bus["vn_kv"]))
+        island_scr = min(math.sqrt(3.0) * vn[b] * float(levels.at[b, "ikss_min_ka"]) for b in conv_buses) / conv
+    return {"scr_pcc": sk_min / s["gfl"] if s["gfl"] else math.inf,
+            "gfl_share": s["gfl"] / total if total else 0.0,
+            "island_scr": island_scr,
+            "gfm_share": s["gfm"] / total if total else 0.0}
+
+
+def _limits(campus):
+    req = campus.island["requirements"]
+    if req is None:
+        from gridspine.schema.contracts import ContractError
+        raise ContractError("the frequency check needs the campus island requirements (campus.island)")
+    return {k: v["values"] for k, v in req["frequency_limits"].items()}, req
+
+
+def _hour_rows(hourly, period, hour):
+    sel = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)]
+    return sel[["unit_id", "p_mw", "status"]].reset_index(drop=True)
+
+
+def _cold(campus, rows, unit_rows=None):
+    """The gensets with island data that are not running at the hour: from
+    I3a's ``online`` where it has the unit, else not in service or at 0."""
+    online = {}
+    if unit_rows is not None:
+        online = {r["unit_id"]: r["online"] for _, r in unit_rows.iterrows() if r["online"] == r["online"]}
+    hour = rows.set_index("unit_id")
+    out = set()
+    for uid, b in campus.island["units"].items():
+        if b["kind"] != "genset":
+            continue
+        running = (online[uid] >= 0.5 if uid in online
+                   else int(hour.at[uid, "status"]) == 1 and float(hour.at[uid, "p_mw"]) > 0.0)
+        if not running:
+            out.add(uid)
+    return out
+
+
+def _event_row(key, event, dp_mw, trace, limits, window_ms, eq, f0, emt=None, **extra):
+    m = metrics(trace, window_ms)
+    v = judge(m, limits, f0, eq)
+    flags = emt_flags(m, limits, f0, **(emt or {}))
+    return {**key, "event": event, **extra, "dp_mw": dp_mw, "rocof0_hz_per_s": m.rocof0_hz_per_s,
+            "rocof_window_hz_per_s": m.rocof_window_hz_per_s, "nadir_hz": m.nadir_hz, "t_nadir_s": m.t_nadir_s,
+            "df_qss_hz": m.df_qss_hz, "t_return_s": m.t_return_s, "saturated": ", ".join(sorted(m.saturated)),
+            "collapse_s": m.collapse, "ok": v.ok, "binding": v.binding, "worst": v.worst,
+            "emt": "; ".join(flags)}
+
+
+def e1_every_hour(campus, hourly, island_hourly, island_unit_hourly=None, scenario="seamless",
+                  dt=5e-3, t_end=10.0, f0=F0):
+    """E1 at every hour (plan I6b): the PCC opens on I3a's lossless 0⁺ steps,
+    ``dp_up_mw`` (an import lost, under-frequency) and ``dp_down_mw`` (an
+    export lost, over-frequency), each run where it is above 0, on the
+    units at the hour; the gensets not running start and join on their
+    clock. A UPS that transfers is left out: I3a's steps already net its
+    transfer (the walk-in runs at the critical hours,
+    ``campus_frequency_study``); one that stays on line is kept, so a
+    drop-out from its window is seen (``ups_drops``).
+    Fast enough for every hour at the default 5 ms step; identical hours are
+    run once. Returns one row per (period, hour, direction)."""
+    import pandas as pd
+
+    from gridspine.schema.island import validate_island_hourly, validate_island_unit_hourly
+
+    limits, req = _limits(campus)
+    window, eq = req["values"]["rocof_window_ms"], equipment(campus, f0)
+    ih = validate_island_hourly(island_hourly)
+    ih = ih[ih["scenario"] == scenario]
+    iu = validate_island_unit_hourly(island_unit_hourly) if island_unit_hourly is not None else None
+    out, cache = [], {}
+    for _, r in ih.sort_values(["period", "hour"]).iterrows():
+        period, hour = int(r["period"]), int(r["hour"])
+        rows = _hour_rows(hourly, period, hour)
+        urows = iu[(iu["period"] == period) & (iu["hour"] == hour)] if iu is not None else None
+        units = [u for u in units_from_campus(campus, rows, cold=_cold(campus, rows, urows))
+                 if not (u.model == "ups" and u.ups["transfers"])]
+        key = {"period": period, "hour": hour, "scenario": scenario}
+        for direction, dp in (("import", r["dp_up_mw"]), ("export", -r["dp_down_mw"])):
+            if not abs(dp) > 1e-9 or (direction == "import") != (dp > 0):
+                continue
+            ck = (repr(units), round(dp, 9))
+            if ck not in cache:
+                cache[ck] = simulate(units, step(dp), t_end=t_end, dt=dt, f0=f0)
+            drops = sorted(n for n, rec in cache[ck].ups.items() if rec.drops)
+            out.append(_event_row(key, "E1", dp, cache[ck], limits, window, eq, f0, direction=direction,
+                                  dp_source="I3a lossless", ups_drops=", ".join(drops)))
+    return pd.DataFrame(out)
+
+
+@dataclasses.dataclass
+class FrequencyStudy:
+    """``campus_frequency_study``'s tables. ``events``: one row per event
+    run (E1 on I4's ΔP_AC, E2, E3, E5, each E4 block, the E6 opening, and
+    the Q8 reruns with their ``i_max_pu``); ``losses``: ΔP_AC against the
+    lossless import; ``bridge``: E4's Q1 check per UPS and, under
+    ``seamless``, each GFM's energy until the gensets join; ``planned``:
+    E6's ramp; ``ups``: what each UPS did in each event."""
+    events: object
+    losses: object
+    bridge: object
+    planned: object
+    ups: object
+    label: str = LABEL
+
+
+def _gfm_bridge(key, units, trace, soc):
+    """Under ``seamless``, the energy each GFM gives from the islanding until
+    the cold gensets have joined (plan I6, E1), against its e(t−1) where
+    I3a gives it. A trace shorter than the join is counted to its end and
+    says so."""
+    joins = [u.join_s for u in units if u.model == "genset" and u.join_s > 0]
+    if not joins:
+        return []
+    t_join = max(joins)
+    sel = trace.t <= t_join + 1e-12
+    out = []
+    for u in units:
+        if u.model not in ("gfm_droop", "gfm_vsm"):
+            continue
+        p = u.p0 + trace.dp[u.name][sel]
+        e = float(np.sum(0.5 * (p[1:] + p[:-1]) * np.diff(trace.t[sel]))) / 3600.0
+        e0 = soc.get(u.name, math.nan)
+        out.append({**key, "unit": u.name, "until_s": min(t_join, float(trace.t[-1])), "join_s": t_join,
+                    "energy_mwh": e, "e_mwh": e0, "ok": bool(e <= e0) if e0 == e0 else None})
+    return out
+
+
+def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_step_mw=None,
+                           dt=1e-3, t_end=20.0, f0=F0) -> FrequencyStudy:
+    """E1–E6 at the island critical ``hours``, ``[(period, hour)]`` (plan
+    I6b; I3b chooses them), in each of the campus's island ``scenarios``:
+
+    * ``seamless``: E1 on I4's ΔP_AC with the UPS transfers and walk-in, its
+      losses against the lossless import reported; then, from I4's island
+      dispatch, E2 (``load_step_mw``, else the largest pickup block, else the
+      hour's largest load), E3 (the unit with the largest |P|) and E5 (the
+      island's PV output lost); Q8 reruns E1 and E2 at each
+      ``i_max_sensitivity_pu``;
+    * ``ups_bridged``: E4 with the ``pickup_blocks`` at N+k, and the bridge
+      check on each UPS's e(t−1) (I3a's ``soc_start_mwh``, else ``e_mwh``);
+    * ``planned``: E6 on the same ΔP_AC, its ramp time.
+
+    Each event is judged against the limits and the equipment, and flagged
+    for EMT/RMS where ``emt_flags`` says so."""
+    import pandas as pd
+
+    from gridspine.schema.island import validate_island_unit_hourly
+    from gridspine.static.island_flow import island_flow
+
+    limits, req = _limits(campus)
+    rv = req["values"]
+    window, eq = rv["rocof_window_ms"], equipment(campus, f0)
+    iu = validate_island_unit_hourly(island_unit_hourly) if island_unit_hourly is not None else None
+    ev, losses, bridge, planned, ups = [], [], [], [], []
+    kw = {"t_end": t_end, "dt": dt, "f0": f0}
+
+    def log_ups(key, event, trace):
+        for name, rec in trace.ups.items():
+            ups.append({**key, "event": event, "ups": name, "drops": len(rec.drops),
+                        "first_drop_s": rec.drops[0] if rec.drops else math.nan, "energy_mwh": rec.energy_mwh,
+                        "e_mwh": rec.e_mwh, "t_online_s": rec.t_online_s, "autonomy_ok": rec.autonomy_ok})
+
+    for period, hour in hours:
+        key = {"period": int(period), "hour": int(hour)}
+        rows = _hour_rows(hourly, period, hour)
+        urows = iu[(iu["period"] == period) & (iu["hour"] == hour)] if iu is not None else None
+        soc, it = {}, {}
+        if urows is not None:
+            for _, r in urows.iterrows():
+                if r["soc_start_mwh"] == r["soc_start_mwh"]:
+                    soc[r["unit_id"]] = r["soc_start_mwh"]
+                if r["p_ups_it_mw"] == r["p_ups_it_mw"]:
+                    it[r["unit_id"]] = r["p_ups_it_mw"]
+        units = units_from_campus(campus, rows, cold=_cold(campus, rows, urows), soc=soc)
+        units = [dataclasses.replace(u, ups={**u.ups, "it_mw": it[u.name]}) if u.name in it else u for u in units]
+        lossless = -float((rows["p_mw"] * (rows["status"] == 1)).sum())
+        i4 = island_flow(campus, rows)
+        dp_ac = i4.delta_p_ac_mw if i4.viable else math.nan
+        losses.append({**key, "i4_viable": i4.viable, "i4_reason": i4.reason, "dp_ac_mw": dp_ac,
+                       "import_lossless_mw": lossless, "losses_mw": dp_ac - lossless})
+        emt = emt_inputs(campus, rows)
+        dp_e1 = dp_ac if i4.viable else lossless
+
+        for scenario in req["scenarios"]:
+            sk = {**key, "scenario": scenario}
+            if scenario == "seamless":
+                def e1(us):
+                    return e1_islanding(us, dp_e1, **kw)
+                tr = e1(units)
+                ev.append(_event_row(sk, "E1", dp_e1, tr, limits, window, eq, f0, emt,
+                                     dp_source="I4 ΔP_AC" if i4.viable else "lossless import"))
+                log_ups(sk, "E1", tr)
+                bridge += _gfm_bridge(sk, units, tr, soc)
+                if not i4.viable:
+                    continue
+                p_isl = i4.units.set_index("unit_id")["p_mw"]
+                isl = [dataclasses.replace(u, p0=float(p_isl[u.name]), join_s=0.0) if u.model != "ups" else u
+                       for u in units]
+                step_mw = load_step_mw
+                if step_mw is None:
+                    blocks = rv.get("pickup_blocks")
+                    step_mw = max(blocks) if blocks else float((-rows["p_mw"].clip(upper=0.0)).max())
+
+                def e2(us):
+                    return e2_load_step(us, step_mw, **kw)
+                tr = e2(isl)
+                ev.append(_event_row(sk, "E2", step_mw, tr, limits, window, eq, f0, emt))
+                log_ups(sk, "E2", tr)
+                sources = [u for u in isl if u.model not in ("ups", "none")]
+                if sources:
+                    lost = max(sources, key=lambda u: (abs(u.p0), u.p_n))
+                    tr = e3_unit_trip(isl, lost.name, **kw)
+                    ev.append(_event_row(sk, "E3", lost.p0, tr, limits, window, eq, f0, emt, unit=lost.name))
+                    log_ups(sk, "E3", tr)
+                pv = float(sum(p_isl[uid] for uid in p_isl.index if campus.units.at[uid, "kind"] == "pv"))
+                if pv > 1e-9:
+                    tr = e5_pv_loss(isl, pv, **kw)
+                    ev.append(_event_row(sk, "E5", pv, tr, limits, window, eq, f0, emt))
+                    log_ups(sk, "E5", tr)
+                for name, run, base, dp in (("E1", e1, units, dp_e1), ("E2", e2, isl, step_mw)):
+                    for v, tr in i_max_sensitivity(base, run, rv["i_max_sensitivity_pu"]):
+                        ev.append(_event_row(sk, name, dp, tr, limits, window, eq, f0, emt, i_max_pu=v))
+            elif scenario == "ups_bridged":
+                gens = [u for u in units if u.model == "genset"]
+                feeds = [(u.name, u.ups["it_mw"], u.ups["e_mwh"]) for u in units if u.model == "ups"]
+                res = e4_ups_bridged(gens, rv["pickup_blocks"], feeds, rv["bridge_s"], rv["genset_redundancy_n"],
+                                     window_ms=window, f0=f0)
+                for i, m in enumerate(res.blocks):
+                    v = judge(m, limits, f0, eq)
+                    ev.append({**sk, "event": "E4", "block": i + 1, "dp_mw": rv["pickup_blocks"][i],
+                               "t_block_s": res.ready_s + res.block_times_s[i],
+                               "rocof_window_hz_per_s": m.rocof_window_hz_per_s, "nadir_hz": m.nadir_hz,
+                               "t_nadir_s": m.t_nadir_s, "df_qss_hz": m.df_qss_hz, "t_return_s": m.t_return_s,
+                               "ok": v.ok, "binding": v.binding, "worst": v.worst,
+                               "emt": "; ".join(emt_flags(m, limits, f0))})
+                for b in res.bridge:
+                    bridge.append({**sk, "ups": b.ups, "it_mw": b.it_mw, "e_mwh": b.e_mwh, "autonomy_s": b.autonomy_s,
+                                   "needed_s": b.needed_s, "ok": b.ok, "pickup_complete": res.complete,
+                                   "ready_s": res.ready_s, "dropped": ", ".join(res.dropped)})
+            elif scenario == "planned":
+                res = e6_planned([u for u in units if u.model != "ups"], dp_e1, **kw)
+                planned.append({**sk, "import_mw": dp_e1, "feasible": res.feasible, "ramp_s": res.ramp_s,
+                                "shortfall_mw": res.shortfall_mw})
+                if res.trace is not None:
+                    ev.append(_event_row(sk, "E6", 0.0, res.trace, limits, window, eq, f0, emt))
+    return FrequencyStudy(*(pd.DataFrame(t) for t in (ev, losses, bridge, planned, ups)))

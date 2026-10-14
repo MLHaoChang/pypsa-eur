@@ -146,7 +146,7 @@ import yaml
 from gridspine.ingest.campus import Campus, build_campus
 from gridspine.producers.campus import CampusDraft, campus_hourly, draft_campus, is_solved, period_weightings
 from gridspine.producers.pypsa_nodal import load_solved_network
-from gridspine.ranking.campus import campus_metrics, select_campus_hours
+from gridspine.ranking.campus import campus_metrics, island_metrics, select_campus_hours
 from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
@@ -267,6 +267,11 @@ def prepare_campus(run_dir, campus: dict, network_path) -> dict:
     _write_text_atomic(run_dir / HOURLY_CSV, hourly.to_csv(index=False))
     _write_text_atomic(run_dir / PCC_CSV, pcc.to_csv(index=False))
     _write_text_atomic(run_dir / CAMPUS_MANIFEST, json.dumps(manifest, indent=2))
+    # The island tables (plan I3a) belong to the solve the run was prepared
+    # from; whoever writes them does so after this, so an earlier run's go.
+    from gridspine.schema.island import ISLAND_HOURLY_CSV, ISLAND_UNIT_HOURLY_CSV
+    for name in (ISLAND_UNIT_HOURLY_CSV, ISLAND_HOURLY_CSV):
+        (run_dir / name).unlink(missing_ok=True)
     return {"periods": periods, "units": manifest["units"], "hours_per_period": manifest["hours_per_period"]}
 
 
@@ -290,14 +295,41 @@ def load_run_campus(run_dir) -> Campus:
     return build_campus(yaml.safe_load(_require(Path(run_dir), CAMPUS_YAML).read_text()))
 
 
+def _island_tables(run_dir: Path):
+    """``(island_unit_hourly, island_hourly)`` of the run when the project's
+    solve wrote them (plan I3a; written by pypsa-gui beside
+    ``campus_hourly.csv``), else None. One without the other is refused."""
+    from gridspine.schema.island import (
+        ISLAND_HOURLY_CSV,
+        ISLAND_UNIT_HOURLY_CSV,
+        validate_island_hourly,
+        validate_island_unit_hourly,
+    )
+
+    paths = (run_dir / ISLAND_UNIT_HOURLY_CSV, run_dir / ISLAND_HOURLY_CSV)
+    have = [p.is_file() for p in paths]
+    if not any(have):
+        return None
+    if not all(have):
+        missing = [p.name for p, h in zip(paths, have) if not h]
+        raise ContractError(f"the run has one island table without the other ({missing} missing)")
+    return (validate_island_unit_hourly(pd.read_csv(paths[0], dtype={"unit_id": str})),
+            validate_island_hourly(pd.read_csv(paths[1])))
+
+
 def rank_campus(run_dir, k: int = DEFAULT_K) -> pd.DataFrame:
     """Rank the prepared run's hours and select the critical ones (k per
-    criterion, per period). Writes ``campus_metrics.csv`` and
+    criterion, per period), with the island criteria when the run has the
+    island tables (plan I3b). Writes ``campus_metrics.csv`` and
     ``campus_selected.csv``; returns the selection."""
     run_dir = Path(run_dir)
     hourly, pcc = campus_tables(run_dir)
     spec = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
     metrics = campus_metrics(hourly, pcc, spec)
+    island = _island_tables(run_dir)
+    if island is not None:
+        # Plan I3b: the island criteria join the base ones in one top-k union.
+        metrics = metrics.join(island_metrics(hourly, *island, spec), how="left").fillna(0.0)
     selection = select_campus_hours(metrics, k=k)
     _write_text_atomic(run_dir / METRICS_CSV, metrics.reset_index().to_csv(index=False))
     _write_text_atomic(run_dir / SELECTED_CSV,

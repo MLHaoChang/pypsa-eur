@@ -15,8 +15,10 @@ cards (S1c).
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
+
+from services.asset_schema.schema import part_columns
 
 GROUPS = ("identity", "size", "investment", "fom", "variable", "performance", "replacement", "provenance")
 
@@ -51,6 +53,7 @@ class FieldSpec:
     derived: bool = False         # written by derive / the solver; read-only
     reveal_when: dict[str, Any] | None = field(default=None, hash=False)
     part: str | None = None       # the investment part it belongs to (composite classes)
+    blank: str = "keep"           # what an emptied input saves: clear (null) | zero | keep (current value)
 
     @property
     def technical_name(self) -> str:
@@ -147,8 +150,8 @@ GENERATOR: tuple[FieldSpec, ...] = (
               "build year plus lifetime.", "years", "years", key_param=True),
     *_investment_common(),
     _money_per_mw_yr("capital_cost", "investment", "Capital cost (annualised)", "Derived: overnight cost × annuity("
-                     "discount rate, lifetime) + fixed O&M. The optimiser pays it on every MW it adds, for the share of "
-                     "a year your snapshots represent.", derived=True),
+                     "discount rate, lifetime); fixed O&M is charged on top. The optimiser pays it on every MW it adds, "
+                     "for the share of a year your snapshots represent.", derived=True),
     _money_per_mw_yr("fom_cost", "fom", "Fixed O&M", "Fixed operation and maintenance per installed unit per year, "
                      "paid on the whole capacity whatever the dispatch."),
     FieldSpec("marginal_cost", "variable", "Marginal cost", "Variable cost per MWh dispatched: fuel plus variable "
@@ -173,6 +176,12 @@ GENERATOR: tuple[FieldSpec, ...] = (
               "h", kind="int", reveal_when=_UC),
     FieldSpec("min_down_time", "performance", "Minimum down time", "Hours the unit stays off after a shut-down.",
               "h", "h", kind="int", reveal_when=_UC),
+    FieldSpec("e_sum_min", "performance", "Minimum energy", "Least energy the generator must produce over the "
+              "modelled horizon (Σ dispatch × weight). Empty for no lower bound.", "MWh", "MWh"),
+    FieldSpec("e_sum_max", "performance", "Maximum energy", "Most energy the generator may produce over the "
+              "modelled horizon, e.g. a fuel or water budget. Empty for no upper bound.", "MWh", "MWh"),
+    FieldSpec("control", "performance", "AC control", "Control type in the AC power flow only: PQ fixes P and Q, "
+              "PV holds the voltage, Slack absorbs the imbalance.", kind="enum", options=("PQ", "PV", "Slack")),
     *_outages(with_cf_flag=True),
 )
 
@@ -204,7 +213,7 @@ STORAGE_UNIT: tuple[FieldSpec, ...] = (
               "with.", "years", "years", derived=True),
     _money_per_mw_yr("capital_cost", "investment", "Capital cost (annualised)", "Derived from both parts: each "
                      "part's overnight cost annualised over its own lifetime, the energy part scaled by the "
-                     "duration, plus fixed O&M. Per kW of power.", derived=True),
+                     "duration; fixed O&M is charged on top. Per kW of power.", derived=True),
     _share("inv_power_fom_share", "fom", "Power part: fixed O&M", "Fixed O&M of the power part, as a share of its "
            "overnight cost per year.", part="power"),
     _share("inv_energy_fom_share", "fom", "Energy part: fixed O&M", "Fixed O&M of the storage block, as a share "
@@ -228,9 +237,25 @@ STORAGE_UNIT: tuple[FieldSpec, ...] = (
     *_outages(with_cf_flag=False),
 )
 
+# What an emptied input saves (S1b). `clear` sends null: an Optional column, or a bound the write model turns
+# into +inf ("no limit", "never retires"). Costs save 0, a deliberate "free". Everything else keeps its value:
+# a blank capacity or efficiency is a slip, not a decision.
+_ZERO = {"marginal_cost", "fom_cost", "curtailment_cost", "start_up_cost", "shut_down_cost"}
+_CLEAR = {"p_nom_max", "lifetime", "overnight_cost", "discount_rate", "ramp_limit_up", "ramp_limit_down",
+          "e_sum_min", "e_sum_max",
+          "outage_rate_value", "outage_rate_basis", "mttr_hours", "p_max_pu_includes_outages"}
+
+
+def _with_blank(component: str, specs: tuple[FieldSpec, ...]) -> tuple[FieldSpec, ...]:
+    clear = _CLEAR | set(part_columns(component))
+    return tuple(
+        f if f.derived else replace(f, blank="zero" if f.key in _ZERO else "clear" if f.key in clear else "keep")
+        for f in specs)
+
+
 _BY_CLASS: dict[str, tuple[FieldSpec, ...]] = {
-    "Generator": GENERATOR,
-    "StorageUnit": STORAGE_UNIT,
+    "Generator": _with_blank("Generator", GENERATOR),
+    "StorageUnit": _with_blank("StorageUnit", STORAGE_UNIT),
 }
 
 

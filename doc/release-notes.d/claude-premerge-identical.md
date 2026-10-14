@@ -1,0 +1,1 @@
+* Fix(agents): `scripts/coord/premerge.sh` lists a file changed on both sides but byte-identical on master and the PR head (for example a cherry-pick master already has) as `identical` instead of blocking on it.

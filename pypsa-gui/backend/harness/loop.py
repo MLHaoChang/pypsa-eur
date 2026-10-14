@@ -60,6 +60,7 @@ from __future__ import annotations
 import concurrent.futures
 import contextvars
 import logging
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -170,11 +171,15 @@ from harness.metrics import (  # noqa: E402, F401 — moved (issue 08); re-expor
 # across dispatches — spinning up a fresh ThreadPoolExecutor per call (up to
 # MAX_TOOL_CALLS_PER_TURN/turn) churns threads, and a `with ...:` form would
 # BLOCK on __exit__ waiting for a timed-out worker (defeating the timeout). The
-# pool is unbounded-ish (a small max) and a timed-out worker stays detached
-# (a Python thread can't be force-killed) — acceptable: the SSE thread is
-# freed, the orphan finishes or hangs harmlessly.
+# pool is bounded and a timed-out worker stays detached (a Python thread can't
+# be force-killed). The orphan does NOT hang harmlessly: it holds one of the
+# workers for as long as it hangs, so enough hung handlers anywhere in the
+# process starve every session. The dispatch site therefore cancels a call that
+# never got a worker instead of leaving it queued to run later.
+# Named so the saturation message quotes the real ceiling.
+TOOL_EXECUTOR_MAX_WORKERS: int = 8
 _TOOL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-    max_workers=8, thread_name_prefix="chat-tool",
+    max_workers=TOOL_EXECUTOR_MAX_WORKERS, thread_name_prefix="chat-tool",
 )
 
 from harness.results import (  # noqa: E402, F401 — moved (issue 08); re-exported
@@ -1235,6 +1240,9 @@ def run_turn(
             })
         except Exception:  # noqa: BLE001 — the WAL must never block the turn
             logger.exception("chat: failed to open the pending-turn record")
+        # Issue 13 (shadow): the session event log opens the turn the same way.
+        from harness import eventlog as _eventlog
+        _eventlog.turn_start(session, message)
         body = _run_turn_body(
             session,
             message,
@@ -1269,6 +1277,10 @@ def run_turn(
             usage_at_start=_usage_at_start,
             attachment_file_ids=attachment_file_ids,
         )
+        # Issue 13 (shadow): close the turn on the event log, one fsync.
+        from harness import eventlog as _eventlog
+        _eventlog.turn_end(session, _turn_end_reason(trace, _ended_by),
+                           usage_since(dict(session.usage_acc), _usage_at_start))
         _metric_record_duration(time.monotonic() - _t_start)
         with session._lock:
             session._turn_in_flight = False
@@ -1396,6 +1408,15 @@ def _persist_interrupted_turn(
         append_turn(ctx, record)
     except Exception:  # noqa: BLE001 — persistence is best-effort
         logger.exception("chat: failed to persist an interrupted turn")
+
+
+def _turn_end_reason(trace: "TurnTrace", ended_by: str | None) -> str:
+    """How a turn ended, for the event log's `turn/end` (issue 13)."""
+    if trace.completed:
+        return "completed"
+    if ended_by == "disconnected" or trace._done_reason == "aborted":
+        return "aborted"
+    return "error"
 
 
 def _outbound_vision_block_kinds(
@@ -1653,14 +1674,20 @@ def _run_turn_body(
     # `history_cache_anchor` still hits. Rewriting old turns' context each
     # turn would break that cache for a fidelity nobody asked for.
     ui_block = _format_ui_context(ui_context)
+    # Issue 13 (shadow): each addendum is its own event as well as part of
+    # the user message.
+    from harness import eventlog as _eventlog
+    _eventlog.context(session, "ui_context", ui_block)
     # The active workflow's step rides the same per-turn slot (issue 06):
     # after the context block (outside the untrusted fence), before the
     # user's words. Absent on a turn with no workflow, so nothing changes.
     wf_block = _workflow_addendum(session, ui_context)
+    _eventlog.context(session, "workflow_step", wf_block)
     if wf_block:
         ui_block = f"{ui_block}\n\n{wf_block}" if ui_block else wf_block
     if session.assurance_turn is not None:
         assurance_block = session.assurance_turn.request_content()
+        _eventlog.context(session, "checked_request", assurance_block)
         if assurance_block:
             ui_block = f"{ui_block}\n\n{assurance_block}" if ui_block else assurance_block
     if ui_block:
@@ -2344,7 +2371,12 @@ def _dispatch_real_tool_call(
                 "type": "tool_result",
                 "tool_use_id": tool_use_id,
                 "is_error": True,
-                "content": problem,
+                # The fifth is_error site. Validators interpolate the
+                # caller-supplied name with `!r`, which does not escape the
+                # fence delimiter, so a hostile name the model read from an
+                # earlier result came back here unfenced. Same builder as the
+                # other four sites.
+                "content": _error_result_content(problem, None, "invalid_tool_args"),
             })
             return
 
@@ -2434,16 +2466,18 @@ def _dispatch_real_tool_call(
 
         # #16 — per-tool execution deadline for NON-solver tools. A hung read/write
         # handler would otherwise freeze this SSE worker thread forever. We run it
-        # on a shared worker pool and abandon it after PER_TOOL_TIMEOUT_SECONDS,
-        # emitting tool_timeout. Solver tools (run_simulation / run_ac_pf_stage)
+        # on a shared worker pool and give up on it after PER_TOOL_TIMEOUT_SECONDS
+        # of EXECUTION, emitting tool_timeout; a call that never got a worker is
+        # cancelled and reported as tool_not_started. Solver tools (run_simulation / run_ac_pf_stage)
         # are EXCLUDED — they return immediately (spawning their own worker) and
         # issue 11 hands the turn off without awaiting that worker, so a
-        # timeout here would be wrong. A timed-out worker stays detached (a Python
-        # thread can't be force-killed): the SSE thread is freed, the orphan
-        # finishes or hangs harmlessly. CAVEAT (documented): an orphan that LATER
-        # acquires PyPSAService.get_lock() and mutates the network after we emitted
-        # tool_timeout will still land + autosave — the 30s default is generous so
-        # legitimate writes finish well inside it.
+        # timeout here would be wrong. A worker that blew its execution deadline
+        # stays detached (a Python thread can't be force-killed): the SSE thread
+        # is freed and the orphan runs on, holding a pool slot. CAVEAT, for that
+        # case only: an orphan that LATER acquires PyPSAService.get_lock() and
+        # mutates the network after we emitted tool_timeout will still land +
+        # autosave — the 30s default is generous so legitimate writes finish well
+        # inside it. A tool_not_started call was cancelled and cannot run at all.
         if tool_name in ("run_simulation", "run_ac_pf_stage"):
             result = handler(**(args or {}))
         else:
@@ -2468,14 +2502,57 @@ def _dispatch_real_tool_call(
                     from harness.effects import execute
                     return execute(checked_turn, tool_name, args, handler)
                 return handler(**(args or {}))
-            future = _TOOL_EXECUTOR.submit(
-                lambda: _ctx_snapshot.run(invoke_handler)
-            )
+            # PER_TOOL_TIMEOUT_SECONDS is a budget for RUNNING the handler.
+            # `future.result(timeout=...)` alone measured queue + run on a pool
+            # every session shares, so a call that never got a worker was
+            # reported as having "exceeded the execution deadline", and, since
+            # the future was abandoned rather than cancelled, it then ran once
+            # a slot freed, after the user had read the failure. So the pickup
+            # gets its own grace period of the same length, the execution
+            # deadline starts when the handler does, and a call still queued at
+            # the end of the grace period is cancelled. Worst case an SSE thread
+            # waits twice the budget, and only when the pool is jammed.
+            started = threading.Event()
+
+            def run_in_worker():
+                started.set()
+                return _ctx_snapshot.run(invoke_handler)
+
+            future = _TOOL_EXECUTOR.submit(run_in_worker)
             if checked_turn is not None and tool_name == "update_component":
                 from harness.effects import register_worker
                 register_worker(checked_turn, future)
             assistant_tasks.register_worker(task_ticket, future)
             try:
+                # `Future.cancel()` succeeds only while the call is still
+                # queued, and that success is the guarantee needed: it can no
+                # longer run behind the user's back. If cancel() loses the race
+                # the worker has just started, so it gets the full execution
+                # budget from here.
+                if (not started.wait(timeout=harness_budget.PER_TOOL_TIMEOUT_SECONDS)
+                        and future.cancel()):
+                    try:
+                        assistant_tasks.finish_step(task_ticket, error="tool_not_started")
+                    except Exception:
+                        logger.exception("Task not-started checkpoint unavailable")
+                    yield "tool_error", {
+                        "tool_use_id": tool_use_id,
+                        "tool_name": tool_name,
+                        "error_kind": "tool_not_started",
+                        "message": (
+                            f"tool {tool_name!r} never started: all "
+                            f"{TOOL_EXECUTOR_MAX_WORKERS} chat-tool workers were "
+                            f"busy for {harness_budget.PER_TOOL_TIMEOUT_SECONDS:g}s. "
+                            f"It was cancelled rather than left queued to run later."
+                        ),
+                    }
+                    tool_results_collector.append({
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "is_error": True,
+                        "content": "tool_not_started",
+                    })
+                    return
                 tool_deadline = time.monotonic() + harness_budget.PER_TOOL_TIMEOUT_SECONDS
                 if tool_name == "wait_for_job":
                     # A bounded local wait can publish progress without any

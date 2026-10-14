@@ -29,6 +29,10 @@ import { tip as docTip } from '../utils/propertyDocs'
 import { CARRIER_CATALOG_NAMES } from '../utils/carrierCatalog'
 import { vintageCloneToast } from '../utils/toasts'
 import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
+import { useAssetSchema } from '../hooks/useAssetSchema'
+import { useAssetProvenance } from '../hooks/useAssetProvenance'
+import { buildPatch, seedForm } from '../utils/assetForm'
+import { AssetFieldsEdit, assetReadoutItems, schemaFields } from './properties/AssetFields'
 import { GuideButton } from '../components/GuidedTour'
 
 import {
@@ -143,6 +147,17 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   const { data: carriers = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'), queryFn: networkApi.getCarriers, staleTime: 60_000 })
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses, staleTime: 30_000 })
   const globalLt = useGlobalDefaultLifetime()
+  // S1b: the fields come from the asset schema (services/asset_schema/fields.py).
+  // Investment is typed as the overnight cost; the annualised capital cost is
+  // derived (overnight × annuity + fixed O&M) and shown read-only.
+  const { data: schema } = useAssetSchema('Generator')
+  // U3: each field's provenance (default from the pack, customised, measured).
+  const provenance = useAssetProvenance('Generator', gen.name)
+  const specs = schemaFields(schema)
+  const asset = gen as unknown as Record<string, unknown>
+  // Curtailment cost prices spilled wind and solar; a thermal unit has none to spill.
+  const hidden: ReadonlySet<string> = isRenewableCarrier((form.carrier || gen.carrier) ?? '')
+    ? new Set() : new Set(['curtailment_cost'])
 
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteGenerator(gen.name),
@@ -158,68 +173,11 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
     mutationFn: () => updateAsset<Generator>(
       qc, useUIStore.getState().currentProject, 'generators', gen.name,
       (current) => {
-      const newName = form.name?.trim() || gen.name
-      const newBus = (form.bus as string | undefined)?.trim() || gen.bus
-      const payload: Partial<Generator> = {
-        name: newName, bus: newBus,
-        carrier: form.carrier || current.carrier,
-        // AC control mode (PQ/PV/Slack). Drives Stage 2 AC PF; falls back to
-        // the existing value if the dropdown wasn't touched. Coerce to the
-        // narrow string-union the type demands so the payload is type-safe.
-        control: ((form.control || current.control || 'PQ') as 'PQ' | 'PV' | 'Slack'),
-        p_nom: nf(form, 'p_nom', current.p_nom),
-        p_nom_extendable: form.p_nom_extendable === 'true',
-        p_nom_min: nf(form, 'p_nom_min', current.p_nom_min ?? 0),
-        p_min_pu: nf(form, 'p_min_pu', current.p_min_pu),
-        p_max_pu: nf(form, 'p_max_pu', current.p_max_pu),
-        // Cost fields: blank input ⇒ save 0, not the old value. nf()'s
-        // existing-value fallback was hiding deliberate clears (typical
-        // case: user sets overnight_cost and wipes capital_cost so the
-        // solver re-derives it from overnight × annuity on the next run).
-        marginal_cost: nf(form, 'marginal_cost', 0),
-        capital_cost: nf(form, 'capital_cost', 0),
-        fom_cost: nf(form, 'fom_cost', 0),
-        curtailment_cost: nf(form, 'curtailment_cost', 0),
-        efficiency: nf(form, 'efficiency', current.efficiency),
-        committable: form.committable === 'true',
-        // Phase 12h. Assigned EXPLICITLY, exactly like `committable` above,
-        // and never left to the `...current` spread: the spread carries the
-        // GET's value, so an unchecked box would keep re-saving the old
-        // `true` and the user could not clear the flag.
-        p_max_pu_includes_outages: form.p_max_pu_includes_outages === 'true',
-        build_year: ni(form, 'build_year', current.build_year ?? 2025),
-        start_up_cost: nf(form, 'start_up_cost', current.start_up_cost ?? 0),
-        shut_down_cost: nf(form, 'shut_down_cost', current.shut_down_cost ?? 0),
-        min_up_time: ni(form, 'min_up_time', current.min_up_time ?? 0),
-        min_down_time: ni(form, 'min_down_time', current.min_down_time ?? 0),
-      }
-      // Optional bounds + per-asset cost overrides. Assign UNCONDITIONALLY
-      // so blanking a field actually clears it on the backend — the
-      // `...current` spread above re-injects the previous value, and the
-      // old `if (X !== null) payload.X = X` gate skipped the assignment
-      // for blanks, making it impossible for the user to un-set a bound
-      // once entered. `null` in the payload routes through Pydantic's
-      // `Optional[float] = None` → PyPSA's sentinel (-/+inf for bounds,
-      // NaN for discount_rate/overnight_cost) which is "unbounded / use
-      // global default". Same semantic as never having typed a value.
-      payload.p_nom_max = no(form, 'p_nom_max')
-      payload.lifetime = no(form, 'lifetime')
-      payload.ramp_limit_up = no(form, 'ramp_limit_up')
-      payload.ramp_limit_down = no(form, 'ramp_limit_down')
-      // e_sum_min / e_sum_max: PyPSA's annual energy bounds. Same
-      // clearing semantic as p_nom_max / lifetime above.
-      payload.e_sum_min = no(form, 'e_sum_min')
-      payload.e_sum_max = no(form, 'e_sum_max')
-      payload.overnight_cost = no(form, 'overnight_cost')
-      // Per-asset discount rate. UI carries percent (7), backend wants decimal (0.07).
-      // null ⇒ NaN on the asset ⇒ solver fills with global at solve time.
-      const drPct = no(form, 'discount_rate_pct')
-      payload.discount_rate = drPct === null ? null : drPct / 100
-      // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
-      Object.assign(payload, outagePayload(form))
-      // Extras last: the chokepoint's ...current spread and the explicit
-      // payload.X = no(...) lines above would otherwise overwrite a value
-      // the user just typed.
+      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Generator>
+      payload.name = form.name?.trim() || gen.name
+      payload.bus = (form.bus as string | undefined)?.trim() || gen.bus
+      payload.carrier = form.carrier || current.carrier
+      // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Generator'))))
       return payload
     }),
@@ -234,27 +192,12 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   })
 
   const startEdit = () => {
-    const base = toFS(gen, ['name', 'bus', 'carrier', 'outage_rate_value', 'outage_rate_basis', 'mttr_hours',
-      // Phase 12h: the key MUST be in this list. `toFS` builds the whole
-      // form, the payload reads the form, and the save is a remove+add —
-      // so a key missing here is a flag silently cleared on every save of
-      // an unrelated field.
-      'p_max_pu_includes_outages',
-      'p_nom', 'p_nom_extendable', 'p_nom_min', 'p_nom_max',
-      'p_min_pu', 'p_max_pu', 'marginal_cost', 'capital_cost', 'fom_cost', 'overnight_cost',
-      'curtailment_cost',
-      'efficiency',
-      'committable', 'ramp_limit_up', 'ramp_limit_down', 'start_up_cost', 'shut_down_cost',
-      'min_up_time', 'min_down_time', 'e_sum_min', 'e_sum_max', 'build_year', 'lifetime'])
+    const base = seedForm(specs, asset)
     // Pre-fill lifetime from solver-config global when blank/inf — matches
     // user expectation that "all assets default to the global lifetime".
     base.lifetime = defaultLifetime(gen.lifetime, globalLt)
-    setForm(seedExtras(gen, {
-      ...base,
-      discount_rate_pct: discountRatePct(gen.discount_rate),
-      // Control mode: blank if unset (treat as default 'PQ' on save).
-      control: gen.control || 'PQ',
-    }, loadExtras(editScope('Generator'))))
+    if (!base.control) base.control = 'PQ'
+    setForm(seedExtras(gen, base, loadExtras(editScope('Generator'))))
     setOpen(true)
   }
 
@@ -268,50 +211,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, gen.name])
 
-  const isExt = form.p_nom_extendable === 'true'
-  const isCommit = form.committable === 'true'
-
-  // Items shared between the card-list view (CardShell + ExpandedProps) and the
-  // single-asset detail view (Section + Rows). Keeping them in one place avoids
-  // drift between the two layouts.
-  const items: ExpandedItem[] = [
-    // AC control mode (PQ / PV / Slack). Always shown so Stage 2 users can
-    // see at a glance which generator is currently their slack source.
-    { label: 'Control',       value: gen.control || 'PQ',                    tip: 'AC PF control type. PQ = fixed P,Q; PV = fixed P with voltage held; Slack = absorbs system imbalance.' },
-    { label: 'p_nom',         value: gen.p_nom,             unit: ' MW',     tip: docTip('generator.p_nom') },
-    { label: 'Extendable',    value: gen.p_nom_extendable,                   tip: docTip('generator.p_nom_extendable') },
-    { label: 'p_nom_min',     value: gen.p_nom_extendable ? gen.p_nom_min : null,    unit: ' MW', tip: docTip('generator.p_nom_min') },
-    { label: 'p_nom_max',     value: gen.p_nom_extendable ? gen.p_nom_max ?? null : null, unit: ' MW', tip: docTip('generator.p_nom_max') },
-    { label: 'p_min_pu',      value: gen.p_min_pu,                           tip: docTip('generator.p_min_pu') },
-    { label: 'p_max_pu',      value: gen.p_max_pu,                           tip: docTip('generator.p_max_pu') },
-    { label: 'Efficiency',    value: gen.efficiency,                         tip: docTip('generator.efficiency') },
-    { label: 'Marginal cost', value: gen.marginal_cost,     unit: ' €/MWh',  tip: docTip('generator.marginal_cost') },
-    { label: 'Capital cost',  value: gen.capital_cost,      unit: ' €/MW/yr',   tip: docTip('generator.capital_cost') },
-    { label: 'FOM cost',      value: gen.fom_cost ?? null,  unit: ' €/MW/yr', tip: docTip('generator.fom_cost') },
-    { label: 'Overnight cost', value: gen.overnight_cost ?? null, unit: ' €/MW', tip: docTip('generator.overnight_cost') },
-    // Per-asset discount rate (decimal in PyPSA, displayed as percent here).
-    // Null/NaN means "use solver-config global at solve time", which we
-    // render as empty so the row simply disappears from the read view.
-    { label: 'Discount rate',
-      value: gen.discount_rate != null && Number.isFinite(gen.discount_rate)
-        ? Number((gen.discount_rate * 100).toFixed(3)) : null,
-      unit: ' %',
-      tip: 'Per-asset discount rate used by PyPSA\'s native annuity. Blank means the global rate from Solver Settings is used.' },
-    // Curtailment cost row only renders for renewable carriers — visibleItems
-    // filters falsy/null/0 so non-renewables won't see the row even though
-    // the attribute exists.
-    { label: 'Curtailment cost', value: isRenewableCarrier(gen.carrier ?? '') ? gen.curtailment_cost ?? null : null,
-      unit: ' €/MWh', tip: docTip('generator.curtailment_cost') },
-    { label: 'Build year',    value: gen.build_year,                         tip: docTip('generator.build_year') },
-    { label: 'Lifetime',      value: gen.lifetime ?? null,  unit: ' yr',     tip: docTip('generator.lifetime') },
-    { label: 'Committable',   value: gen.committable,                        tip: docTip('generator.committable') },
-    { label: 'Ramp up',       value: gen.committable ? gen.ramp_limit_up ?? null : null, unit: ' pu/h', tip: docTip('generator.ramp_limit_up') },
-    { label: 'Ramp down',     value: gen.committable ? gen.ramp_limit_down ?? null : null, unit: ' pu/h', tip: docTip('generator.ramp_limit_down') },
-    { label: 'Start cost',    value: gen.committable ? gen.start_up_cost : null, unit: ' €', tip: docTip('generator.start_up_cost') },
-    { label: 'Shut cost',     value: gen.committable ? gen.shut_down_cost : null, unit: ' €', tip: docTip('generator.shut_down_cost') },
-    { label: 'Min up',        value: gen.committable ? gen.min_up_time : null,    unit: ' h', tip: docTip('generator.min_up_time') },
-    { label: 'Min down',      value: gen.committable ? gen.min_down_time : null,  unit: ' h', tip: docTip('generator.min_down_time') },
-  ]
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset, hidden)
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {
@@ -380,100 +280,27 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
 
   return (
     <EditShell title={gen.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
-      <TxtInput label="Name" k="name" fs={form} set={setForm} tip={docTip('generator.name')} />
-      <CarrierGroupSelect k="carrier" fs={form} set={setForm} carriers={carriers as Carrier[]} tip={docTip('generator.carrier')} />
-      <SectionHdr title="Topology" />
-      <BusSelect k="bus" fs={form} set={setForm} buses={buses as Bus[]} tip={docTip('generator.bus')} />
-      {/* AC PF control type. Only consumed by Stage 2 (post-solve AC Power
-          Flow); irrelevant for LOPF. PQ is the safe default — generator
-          dispatches at its solved P with q_set unchanged. PV holds the bus
-          voltage. Slack absorbs system imbalance and must be set on exactly
-          one generator (or one bus) per electrical island. */}
-      <label className="flex flex-col gap-0.5 mb-1.5">
-        <span className="text-[10px] text-muted">
-          <InfoTip text="AC PF control type. Consumed by Stage 2 (AC Power Flow) only. PQ = fixed P,Q; PV = fixed P with voltage held; Slack = absorbs system imbalance.">
-            Control
-          </InfoTip>
-        </span>
-        <select className="bg-bg border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:border-accent"
-          value={form.control ?? gen.control ?? 'PQ'}
-          onChange={e => setForm(p => ({ ...p, control: e.target.value }))}
-        >
-          <option value="PQ">PQ — Fixed P,Q (default)</option>
-          <option value="PV">PV — Fixed P, voltage held</option>
-          <option value="Slack">Slack — Absorbs imbalance</option>
-        </select>
-      </label>
-      <SectionHdr title="Capacity" />
-      <NumInput label="p_nom" k="p_nom" fs={form} set={setForm} unit="MW" tip={docTip('generator.p_nom')} />
-      <ChkInput label="Extendable" k="p_nom_extendable" fs={form} set={setForm} tip={docTip('generator.p_nom_extendable')} onCheck={autofillNomMin('p_nom', 'p_nom_min')} />
-      {/* Min/max bounds are only meaningful for extendable assets — PyPSA
-          ignores p_nom_min/p_nom_max when p_nom_extendable=False. Hiding them
-          keeps the form focused on what actually affects the optimiser. */}
-      {isExt && <NumInput label="p_nom_min" k="p_nom_min" fs={form} set={setForm} unit="MW" tip={docTip('generator.p_nom_min')} />}
-      {isExt && <NumInput label="p_nom_max" k="p_nom_max" fs={form} set={setForm} unit="MW" tip={docTip('generator.p_nom_max')} />}
-      {isExt && (
-        <div className="col-span-2 -mt-0.5">
-          <button type="button" onClick={() => setVintageOpen(true)}
-            className="text-[11px] text-accent hover:underline">
-            Per-period bounds…
-          </button>
-          <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
-        </div>
-      )}
+      {schema ? (
+        <AssetFieldsEdit
+          schema={schema} fs={form} set={setForm} current={asset}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]} hidden={hidden} provenance={provenance}
+          onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
+          after={{
+            p_nom_max: (
+              <div className="col-span-2 -mt-0.5">
+                <button type="button" onClick={() => setVintageOpen(true)}
+                  className="text-[11px] text-accent hover:underline">
+                  Per-period bounds…
+                </button>
+                <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
+              </div>
+            ),
+          }}
+        />
+      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
       {vintageOpen && (
         <VintagePeriodBoundsModal componentClass="Generator" name={gen.name} onClose={() => setVintageOpen(false)} />
       )}
-      <SectionHdr title="Operation" />
-      <NumInput label="p_max_pu" k="p_max_pu" fs={form} set={setForm} tip={docTip('generator.p_max_pu')} />
-      <NumInput label="Efficiency" k="efficiency" fs={form} set={setForm} tip={docTip('generator.efficiency')} />
-      <SectionHdr title="Costs" />
-      <NumInput label="Marginal cost" k="marginal_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('generator.marginal_cost')} />
-      <NumInput label="Capital cost" k="capital_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('generator.capital_cost')} />
-      <NumInput label="FOM cost" k="fom_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('generator.fom_cost')} />
-      <NumInput label="Overnight cost" k="overnight_cost" fs={form} set={setForm} unit="€/MW" tip={docTip('generator.overnight_cost')} />
-      {/* Per-asset discount rate. Leave blank to use the global rate from
-          Solver Settings. PyPSA's annuity uses this when overnight_cost is set. */}
-      <DiscountRateInput fs={form} set={setForm} tip="Discount rate used to annuitize overnight_cost for this asset. Leave blank to use the global rate from Solver Settings." />
-      {/* Curtailment cost surfaces only for renewable carriers — it's a
-          custom non-PyPSA attribute that solver_service reads at solve time
-          and injects as an extra_functionality LP term. For thermals the
-          field doesn't apply (no curtailment concept) so we keep the form
-          clean. The value still saves on every save, so toggling carrier to
-          renewable later doesn't lose the typed value. */}
-      {isRenewableCarrier(form.carrier || gen.carrier || '') && (
-        <NumInput label="Curtailment cost" k="curtailment_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('generator.curtailment_cost')} />
-      )}
-      <SectionHdr title="Lifecycle" />
-      <BuildYearSelect fs={form} set={setForm} tip={docTip('generator.build_year')} />
-      <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip={docTip('generator.lifetime')} />
-      <SectionHdr title="Adequacy" />
-      <OutageInputs fs={form} set={setForm} />
-      <IncludesOutagesInput fs={form} set={setForm} />
-      <SectionHdr title="Unit Commitment" />
-      <ChkInput label="Committable" k="committable" fs={form} set={setForm} tip={docTip('generator.committable')} />
-      {/* p_min_pu (minimum stable load fraction) is a Unit Commitment concept:
-          it forces a thermal plant to dispatch at least p_min_pu × p_nom when
-          on. PyPSA only enforces the floor when `committable` is true; outside
-          UC it's just a constant fraction that's almost always 0. Surfacing
-          it here keeps the form focused. */}
-      {isCommit && <>
-        <NumInput label="p_min_pu (min load)" k="p_min_pu" fs={form} set={setForm} tip={docTip('generator.p_min_pu')} />
-        <NumInput label="Ramp up" k="ramp_limit_up" fs={form} set={setForm} unit="pu/h" tip={docTip('generator.ramp_limit_up')} />
-        <NumInput label="Ramp down" k="ramp_limit_down" fs={form} set={setForm} unit="pu/h" tip={docTip('generator.ramp_limit_down')} />
-        <NumInput label="Start cost" k="start_up_cost" fs={form} set={setForm} unit="€" tip={docTip('generator.start_up_cost')} />
-        <NumInput label="Shut cost" k="shut_down_cost" fs={form} set={setForm} unit="€" tip={docTip('generator.shut_down_cost')} />
-        <NumInput label="Min up" k="min_up_time" fs={form} set={setForm} unit="h" tip={docTip('generator.min_up_time')} />
-        <NumInput label="Min down" k="min_down_time" fs={form} set={setForm} unit="h" tip={docTip('generator.min_down_time')} />
-      </>}
-      {/* Annual energy bounds — PyPSA-native. Blank ⇒ unbounded (PyPSA's
-          -inf / +inf defaults). Use for hydro reservoir inflow budgets,
-          take-or-pay PPAs, fuel-tank caps. Unit: MWh over the full snapshot
-          horizon (weighted by snapshot_weightings). */}
-      <NumInput label="E sum min" k="e_sum_min" fs={form} set={setForm} unit="MWh"
-                tip="Minimum total energy produced over the snapshot horizon. PyPSA: e_sum_min ≤ Σ_t (p_t × weight_t). Blank = no lower bound." />
-      <NumInput label="E sum max" k="e_sum_max" fs={form} set={setForm} unit="MWh"
-                tip="Maximum total energy produced over the snapshot horizon. PyPSA: Σ_t (p_t × weight_t) ≤ e_sum_max. Blank = no upper bound." />
       <ExtrasSection
         componentClass="Generator"
         fs={form}
@@ -499,7 +326,14 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: carriers = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'), queryFn: networkApi.getCarriers, staleTime: 60_000 })
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses, staleTime: 30_000 })
-  const globalLt = useGlobalDefaultLifetime()
+  // S1b: the fields come from the asset schema (services/asset_schema/fields.py).
+  // A battery is typed as its two overnight parts; capital cost, lifetime and
+  // fixed O&M are derived from them and shown read-only.
+  const { data: schema } = useAssetSchema('StorageUnit')
+  // U3: each field's provenance (default from the pack, customised, measured).
+  const provenance = useAssetProvenance('StorageUnit', su.name)
+  const specs = schemaFields(schema)
+  const asset = su as unknown as Record<string, unknown>
 
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteStorageUnit(su.name),
@@ -509,48 +343,15 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
 
   const saveMut = useMutation({
     // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
-    // this builder owns only the form→patch mapping.
+    // the schema's descriptors own the form→patch mapping.
     mutationFn: () => updateAsset<StorageUnit>(
       qc, useUIStore.getState().currentProject, 'storage_units', su.name,
       (current) => {
-      const newName = form.name?.trim() || su.name
-      const newBus = (form.bus as string | undefined)?.trim() || su.bus
-      const payload: Partial<StorageUnit> = {
-        name: newName, bus: newBus,
-        carrier: form.carrier || current.carrier,
-        p_nom: nf(form, 'p_nom', current.p_nom),
-        p_nom_extendable: form.p_nom_extendable === 'true',
-        p_nom_min: nf(form, 'p_nom_min', current.p_nom_min ?? 0),
-        max_hours: nf(form, 'max_hours', current.max_hours),
-        efficiency_store: nf(form, 'efficiency_store', current.efficiency_store),
-        efficiency_dispatch: nf(form, 'efficiency_dispatch', current.efficiency_dispatch),
-        standing_loss: nf(form, 'standing_loss', current.standing_loss),
-        cyclic_state_of_charge: form.cyclic_state_of_charge === 'true',
-        state_of_charge_initial: nf(form, 'state_of_charge_initial', current.state_of_charge_initial),
-        // Inflow (MW) — exogenous energy into the SoC equation. 0 = battery.
-        // Time-varying inflows go through the /timeseries upload path; this
-        // is only the scalar constant override.
-        inflow: nf(form, 'inflow', current.inflow ?? 0),
-        // Cost fields: blank ⇒ save 0 (deliberate clear), not the old value.
-        marginal_cost: nf(form, 'marginal_cost', 0),
-        capital_cost: nf(form, 'capital_cost', 0),
-        fom_cost: nf(form, 'fom_cost', 0),
-        build_year: ni(form, 'build_year', current.build_year ?? 2025),
-      }
-      // Optional bounds + per-asset overrides — assign unconditionally so
-      // blanking the field clears it on the backend (see GeneratorCard
-      // for the cleared-to-null rationale). The `...current` spread above
-      // re-injects the previous value; an explicit null override is the
-      // only way to un-set.
-      payload.p_nom_max = no(form, 'p_nom_max')
-      payload.overnight_cost = no(form, 'overnight_cost')
-      payload.lifetime = no(form, 'lifetime')
-      const drPct = no(form, 'discount_rate_pct')
-      payload.discount_rate = drPct === null ? null : drPct / 100
-      // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
-      Object.assign(payload, outagePayload(form))
-      // Extras last: the ...current spread and the explicit payload.X = no(...)
-      // lines above would otherwise overwrite a value the user just typed.
+      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<StorageUnit>
+      payload.name = form.name?.trim() || su.name
+      payload.bus = (form.bus as string | undefined)?.trim() || su.bus
+      payload.carrier = form.carrier || current.carrier
+      // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('StorageUnit'))))
       return payload
     }),
@@ -564,21 +365,9 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   })
 
   const startEdit = () => {
-    const base = toFS(su, ['name', 'bus', 'carrier', 'outage_rate_value', 'outage_rate_basis', 'mttr_hours', 'p_nom', 'p_nom_extendable',
-      'p_nom_min', 'p_nom_max', 'max_hours',
-      'efficiency_store', 'efficiency_dispatch', 'standing_loss',
-      'cyclic_state_of_charge', 'state_of_charge_initial',
-      'inflow',
-      'marginal_cost', 'capital_cost', 'fom_cost', 'overnight_cost', 'build_year'])
-    base.lifetime = defaultLifetime(su.lifetime, globalLt)
-    setForm(seedExtras(su, {
-      ...base,
-      discount_rate_pct: discountRatePct(su.discount_rate),
-    }, loadExtras(editScope('StorageUnit'))))
+    setForm(seedExtras(su, seedForm(specs, asset), loadExtras(editScope('StorageUnit'))))
     setOpen(true)
   }
-
-  const isExt = form.p_nom_extendable === 'true'
 
   // Asset-node double-click (plan 1 A2), as on the Generator card.
   const editRequest = useUIStore(s => s.propertiesEditRequest)
@@ -589,28 +378,11 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, su.name])
 
-  const items: ExpandedItem[] = [
-    { label: 'p_nom',          value: su.p_nom,                    unit: ' MW',    tip: docTip('storage_unit.p_nom') },
-    { label: 'Max hours',      value: su.max_hours,                unit: ' h',     tip: docTip('storage_unit.max_hours') },
-    { label: 'Extendable',     value: su.p_nom_extendable,                         tip: docTip('storage_unit.p_nom_extendable') },
-    { label: 'p_nom_min',      value: su.p_nom_extendable ? su.p_nom_min ?? null : null,             unit: ' MW', tip: docTip('storage_unit.p_nom_min') },
-    { label: 'p_nom_max',      value: su.p_nom_extendable ? su.p_nom_max ?? null : null,             unit: ' MW', tip: docTip('storage_unit.p_nom_max') },
-    { label: 'Store η',        value: su.efficiency_store,                         tip: docTip('storage_unit.efficiency_store') },
-    { label: 'Dispatch η',     value: su.efficiency_dispatch,                      tip: docTip('storage_unit.efficiency_dispatch') },
-    { label: 'Standing loss',  value: su.standing_loss,            unit: ' /h',    tip: docTip('storage_unit.standing_loss') },
-    { label: 'Cyclic SoC',     value: su.cyclic_state_of_charge,                   tip: docTip('storage_unit.cyclic_state_of_charge') },
-    { label: 'Initial SoC',    value: su.cyclic_state_of_charge ? null : su.state_of_charge_initial, tip: docTip('storage_unit.state_of_charge_initial') },
-    { label: 'Marginal cost',  value: su.marginal_cost,            unit: ' €/MWh', tip: docTip('storage_unit.marginal_cost') },
-    { label: 'Capital cost',   value: su.capital_cost,             unit: ' €/MW/yr',  tip: docTip('storage_unit.capital_cost') },
-    { label: 'FOM cost',       value: su.fom_cost ?? null,         unit: ' €/MW/yr', tip: docTip('storage_unit.fom_cost') },
-    { label: 'Overnight cost', value: su.overnight_cost ?? null,   unit: ' €/MW',    tip: docTip('storage_unit.overnight_cost') },
-    { label: 'Discount rate',
-      value: su.discount_rate != null && Number.isFinite(su.discount_rate)
-        ? Number((su.discount_rate * 100).toFixed(3)) : null,
-      unit: ' %',
-      tip: 'Per-asset discount rate. Blank means the global rate from Solver Settings is used.' },
-    { label: 'Build year',     value: su.build_year,                               tip: docTip('storage_unit.build_year') },
-  ]
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset)
+  // A unit priced the old way (one overnight cost, no parts) still has that
+  // cost; the card says so, since its parts are what the form types now.
+  const legacyOvernight = su.overnight_cost != null && Number.isFinite(su.overnight_cost)
+    && !(Number.isFinite(asset.inv_power_overnight as number) || Number.isFinite(asset.inv_energy_overnight as number))
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {
@@ -632,12 +404,14 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
         <VintageCloneButton
           assetName={su.name}
           defaultYear={(su.build_year || new Date().getFullYear()) + 10}
-          defaultCost={su.overnight_cost}
+          defaultCost={legacyOvernight ? su.overnight_cost : null}
           onClone={async (year, overnightCost) => {
+            // `...su` carries the investment parts (inv_*) with the rest, so
+            // a clone of a battery keeps both parts and their lifetimes.
             const payload: Partial<StorageUnit> = {
               ...su, name: `${su.name}_${year}`, build_year: year,
             }
-            if (overnightCost !== null) payload.overnight_cost = overnightCost
+            if (overnightCost !== null && legacyOvernight) payload.overnight_cost = overnightCost
             await networkApi.createStorageUnit(payload)
             qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'storage_units') })
             toast.success(`Cloned ${su.name} → ${payload.name}`)
@@ -663,53 +437,33 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
 
   return (
     <EditShell title={su.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
-      <TxtInput label="Name" k="name" fs={form} set={setForm} tip={docTip('storage_unit.name')} />
-      <CarrierGroupSelect k="carrier" fs={form} set={setForm} carriers={carriers as Carrier[]} tip={docTip('storage_unit.carrier')} />
-      <SectionHdr title="Topology" />
-      <BusSelect k="bus" fs={form} set={setForm} buses={buses as Bus[]} tip={docTip('storage_unit.bus')} />
-      <SectionHdr title="Capacity" />
-      <NumInput label="p_nom" k="p_nom" fs={form} set={setForm} unit="MW" tip={docTip('storage_unit.p_nom')} />
-      <NumInput label="Max hours" k="max_hours" fs={form} set={setForm} unit="h" tip={docTip('storage_unit.max_hours')} />
-      <ChkInput label="Extendable" k="p_nom_extendable" fs={form} set={setForm} tip={docTip('storage_unit.p_nom_extendable')} onCheck={autofillNomMin('p_nom', 'p_nom_min')} />
-      {isExt && <NumInput label="p_nom_min" k="p_nom_min" fs={form} set={setForm} unit="MW" tip={docTip('storage_unit.p_nom_min')} />}
-      {isExt && <NumInput label="p_nom_max" k="p_nom_max" fs={form} set={setForm} unit="MW" tip={docTip('storage_unit.p_nom_max')} />}
-      {isExt && (
-        <div className="col-span-2 -mt-0.5">
-          <button type="button" onClick={() => setVintageOpen(true)}
-            className="text-[11px] text-accent hover:underline">
-            Per-period bounds…
-          </button>
-          <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
-        </div>
-      )}
+      {schema ? (
+        <AssetFieldsEdit
+          schema={schema} fs={form} set={setForm} current={asset}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]} provenance={provenance}
+          onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
+          after={{
+            p_nom_max: (
+              <div className="col-span-2 -mt-0.5">
+                <button type="button" onClick={() => setVintageOpen(true)}
+                  className="text-[11px] text-accent hover:underline">
+                  Per-period bounds…
+                </button>
+                <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
+              </div>
+            ),
+            inv_energy_lifetime: legacyOvernight ? (
+              <p className="col-span-2 text-[10px] text-muted" data-testid="legacy-overnight-note">
+                Priced the old way: one overnight cost of {(su.overnight_cost! / 1000).toLocaleString()} €/kW.
+                Enter the two parts to replace it.
+              </p>
+            ) : undefined,
+          }}
+        />
+      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
       {vintageOpen && (
         <VintagePeriodBoundsModal componentClass="StorageUnit" name={su.name} onClose={() => setVintageOpen(false)} />
       )}
-      <SectionHdr title="Efficiency" />
-      <NumInput label="Store η" k="efficiency_store" fs={form} set={setForm} tip={docTip('storage_unit.efficiency_store')} />
-      <NumInput label="Dispatch η" k="efficiency_dispatch" fs={form} set={setForm} tip={docTip('storage_unit.efficiency_dispatch')} />
-      <NumInput label="Standing loss" k="standing_loss" fs={form} set={setForm} unit="/h" tip={docTip('storage_unit.standing_loss')} />
-      <SectionHdr title="State of Charge" />
-      <ChkInput label="Cyclic SoC" k="cyclic_state_of_charge" fs={form} set={setForm} tip={docTip('storage_unit.cyclic_state_of_charge')} />
-      <NumInput label="Initial SoC" k="state_of_charge_initial" fs={form} set={setForm} tip={docTip('storage_unit.state_of_charge_initial')} />
-      {/* Inflow — PyPSA's exogenous input to the SoC equation. Required for
-          hydro reservoir modelling (without it a reservoir is just a battery
-          with no fuel). Constant value here; time-varying inflow profiles
-          are uploaded via the TimeSeries tab (component=storage_units,
-          attribute=inflow). */}
-      <NumInput label="Inflow" k="inflow" fs={form} set={setForm} unit="MW"
-                tip="Exogenous energy into the SoC equation (e.g. river-flow rate × turbine head efficiency for hydro). Constant value here; for hourly profiles upload via the TimeSeries tab as storage_units/inflow." />
-      <SectionHdr title="Costs" />
-      <NumInput label="Marginal cost" k="marginal_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('storage_unit.marginal_cost')} />
-      <NumInput label="Capital cost" k="capital_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('storage_unit.capital_cost')} />
-      <NumInput label="FOM cost" k="fom_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('storage_unit.fom_cost')} />
-      <NumInput label="Overnight cost" k="overnight_cost" fs={form} set={setForm} unit="€/MW" tip={docTip('storage_unit.overnight_cost')} />
-      <DiscountRateInput fs={form} set={setForm} tip="Discount rate used to annuitize overnight_cost for this asset. Leave blank to use the global rate from Solver Settings." />
-      <SectionHdr title="Adequacy" />
-      <OutageInputs fs={form} set={setForm} />
-      <SectionHdr title="Lifecycle" />
-      <BuildYearSelect fs={form} set={setForm} tip={docTip('storage_unit.build_year')} />
-      <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip="Asset lifetime in years. Defaults to the global default_lifetime from Solver Settings." />
       <ExtrasSection
         componentClass="StorageUnit"
         fs={form}

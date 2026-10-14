@@ -9,7 +9,7 @@
 // could match stale nodes left by earlier tests. Dialog.test.tsx was the
 // first file to call `render()` more than once per file and is what
 // surfaced this.
-import { afterEach, beforeAll } from 'vitest'
+import { afterEach, beforeAll, vi } from 'vitest'
 import { cleanup } from '@testing-library/react'
 
 afterEach(() => {
@@ -162,4 +162,21 @@ beforeAll(() => {
     localStorage.removeItem('network-diagram:ui-mode')
     localStorage.removeItem('network-diagram:ui-mode-explicit')
   } catch { /* noop */ }
+})
+
+// S1b: the asset cards render from the backend's field descriptors
+// (`useAssetSchema`). Every test gets them synchronously from the generated
+// copy `src/test/fixtures/assetSchema.json`, which the backend test
+// `test_the_frontend_fixture_matches_the_descriptors` keeps equal to
+// `services/asset_schema/fields.py`. A test that wants the real hook calls
+// `vi.unmock('./src/hooks/useAssetSchema')`.
+vi.mock('./src/hooks/useAssetSchema', async () => {
+  const fixture = (await import('./src/test/fixtures/assetSchema.json')).default as Record<string, unknown>
+  return {
+    useAssetSchema: (componentClass: string | null) => ({
+      data: componentClass ? fixture[componentClass] : undefined,
+      isLoading: false,
+      isError: false,
+    }),
+  }
 })
