@@ -71,6 +71,10 @@ class TurnCoordinator:
             self._sessions[session_id] = _SessionState()
         return self._sessions[session_id]
 
+    def generation(self, session_id: str) -> int:
+        with self._lock:
+            return self._state(session_id).generation
+
     def active_lease(self, session_id: str) -> str | None:
         with self._lock:
             return self._state(session_id).lease_id

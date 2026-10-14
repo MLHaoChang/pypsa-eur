@@ -857,6 +857,7 @@ def chat_history(limit: int = 200,
                 "history_gap": history_gap,
                 "pending_turn": pending_turn,
                 "workflow": None,
+                "goal": None,
                 "bound_profile_id": None}
     # CH-6 — the CALLER's last turn, not the file's. The transcript is shared
     # by everyone on the project; a session is one user's. Searched over the
@@ -877,6 +878,8 @@ def chat_history(limit: int = 200,
     # The bound session's workflow step (issue 06 follow-up), so a reloaded
     # page shows the strip again while the server session is still resident.
     workflow_state = None
+    # And its goal (issue 17), for the goal strip, the same way.
+    goal_state = None
     # P28 A3 — the profile the resumed session is bound to (see the docstring).
     bound_profile_id: str | None = None
     if own_turns:
@@ -973,6 +976,8 @@ def chat_history(limit: int = 200,
                 configured = {p.id for p in llm_config.load_profiles()[0]}
                 bound_profile_id = live_id if live_id in configured else None
             workflow_state = chat_service._workflow_state_payload(sess)["workflow"]
+            from harness import goals as harness_goals
+            goal_state = harness_goals.payload(sess)["goal"]
             # Rebuild the in-memory message history so the next turn can
             # thread the prior conversation into the Anthropic SDK (INT-001
             # threading fix). Best-effort: skip turns missing required keys.
@@ -1053,6 +1058,7 @@ def chat_history(limit: int = 200,
         "history_gap": history_gap,
         "pending_turn": pending_turn,
         "workflow": workflow_state,
+        "goal": goal_state,
         "bound_profile_id": bound_profile_id,
     }
 
@@ -1793,6 +1799,49 @@ def chat_rewind(session_id: str, body: RewindRequest,
         return {"ok": False, "reason": "unknown_session", "dropped": 0}
     dropped = chat_service.rewind_session(session, turns=body.turns)
     return {"ok": True, "dropped": dropped}
+
+
+class GoalRequest(BaseModel):
+    """A person's control over the session's goal (issue 17)."""
+
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["pause", "resume", "stop"]
+
+
+@router.post("/{session_id}/goal")
+def chat_goal(session_id: str, body: GoalRequest,
+              actor: User | None = Depends(optional_user)) -> dict[str, Any]:
+    """
+    Pause, resume or stop the session's goal (`harness/goals.py`). Only a
+    person resumes a paused or blocked goal, here; a resume grants a fresh
+    set of rounds and starts no turn (the panel sends one). Stop clears the
+    goal and stops a running round. Never 404s, like /abort: a foreign
+    session is indistinguishable from an unknown one.
+    """
+    from harness import goals as harness_goals
+    try:
+        session = _resolve_owned_session(session_id, actor)
+    except HTTPException as exc:
+        if exc.status_code == 409 and (
+            (exc.detail or {}).get("error_kind") == "wrong_replica"
+        ):
+            return {
+                "ok": False,
+                "reason": "wrong_replica",
+                "owner_replica_id": (exc.detail or {}).get("owner_replica_id"),
+            }
+        raise
+    if session is None:
+        return {"ok": False, "reason": "unknown_session"}
+    if body.action == "pause":
+        state = harness_goals.pause(session, "user", by="user")
+    elif body.action == "resume":
+        state = harness_goals.resume(session)
+    else:
+        state = harness_goals.stop(session)
+        if session._turn_in_flight:
+            session.abort_event.set()
+    return {"ok": True, **state}
 
 
 @router.post("/{session_id}/abort")

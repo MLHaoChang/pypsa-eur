@@ -4798,6 +4798,23 @@ def end_workflow() -> dict:
     return {"ended": state["id"] if state else None}
 
 
+def set_goal(objective: str, max_rounds: int | None = None) -> dict:
+    """Set the session's goal with a round budget (issue 17): after this
+    turn, up to `max_rounds` rounds run on their own (`harness/goals.py`)."""
+    from harness import goals
+    return goals.set_goal(_workflow_session(), objective, max_rounds)
+
+
+def pause_goal(reason: str | None = None) -> dict:
+    from harness import goals
+    return goals.pause_goal_tool(_workflow_session(), reason)
+
+
+def complete_goal(summary: str | None = None) -> dict:
+    from harness import goals
+    return goals.complete_goal_tool(_workflow_session(), summary)
+
+
 # ── Conversation (2) ────────────────────────────────────────────────────────
 
 
@@ -7240,6 +7257,9 @@ DISPATCHERS: dict[str, Any] = {
     "ask_user": ask_user,
     "use_skill": use_skill,
     "start_workflow": start_workflow,
+    "set_goal": set_goal,
+    "pause_goal": pause_goal,
+    "complete_goal": complete_goal,
     "advance_workflow": advance_workflow,
     "end_workflow": end_workflow,
     # conversation (2)
