@@ -234,3 +234,26 @@ def test_a_staged_storage_lcos_reads_its_own_capex_and_clock():
     # Discharge degrades from bess's COD: year 1 of bess is 2035 (factor 1).
     d = 1.0 / 1.07 ** r.tl.index(2035) + 0.9 / 1.07 ** r.tl.index(2036)
     assert rec["pv_discharge_mwh"] > 10.0 * d
+
+
+# ── the report's cash lines ──────────────────────────────────────────────────
+
+
+def test_the_report_carries_the_stage_capex_and_its_lines_sum_to_equity_cash():
+    from services.finance.report import assemble_finance_sections
+
+    case = _case()
+    r = run_case(case, layers=LAYER)
+    lines = assemble_finance_sections(r, case).cashflow_lines
+    stage = [ln for ln in lines if ln.provenance.source == "stage_capex"]
+    assert [(ln.year, ln.asset, ln.value_stream) for ln in stage] == [(2034, "bess", "capex")]
+    assert stage[0].amount == pytest.approx(-STAGE)
+    for i, y in enumerate(r.tl.years):
+        total = sum(ln.amount for ln in lines if ln.year == int(y))
+        assert total == pytest.approx(float(r.cash["equity_post_tax"][i]), abs=1e-6), y
+
+
+def test_the_chat_tools_keep_the_stage_out_of_cfads():
+    from services.chat_tools import _ic_is_finance_source
+
+    assert _ic_is_finance_source("stage_capex")
