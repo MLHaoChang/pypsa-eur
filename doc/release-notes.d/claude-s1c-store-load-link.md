@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Expert Store, Link and Load cards render from the asset schema, like the StorageUnit and Generator cards. On a Store or Link the overnight cost is typed per kWh or kW, and the annualised capital cost is a read-only derived row. Efficiencies, limits and standing loss are typed as percentages.

@@ -10,8 +10,8 @@ Units: `unit_storage` is what the column holds; `unit_display` is what a person 
 (§3.4: money per kW, rates in %). `derived` fields are written by `derive` (or by PyPSA from the parts) and are
 shown read-only, never typed: investment is typed only as overnight parts (plan §10).
 
-S1a covers the classes S1b renders (Generator, StorageUnit); the other classes get their descriptors with their
-cards (S1c).
+S1a/S1b cover Generator and StorageUnit; S1c adds Store, Load and Link (single-part classes on PyPSA's own
+columns). Line (its per-km part) and Transformer follow.
 """
 from __future__ import annotations
 
@@ -237,12 +237,108 @@ STORAGE_UNIT: tuple[FieldSpec, ...] = (
     *_outages(with_cf_flag=False),
 )
 
+# ── Store (single part, sized in energy) ────────────────────────────────────
+
+_E_EXT = {"e_nom_extendable": True}
+_E_FREE = {"e_cyclic": False}
+
+STORE: tuple[FieldSpec, ...] = (
+    *_identity(
+        "store",
+        "Bus the store exchanges energy with. It has no power limit of its own: the Links and other components "
+        "on that bus set the charge and discharge rate.",
+        "Energy carrier held (H2, heat, battery, …). Used for grouping; does not change the energy balance.",
+    ),
+    FieldSpec("e_nom", "size", "Energy capacity", "Energy the store can hold. With extendable ticked, the existing "
+              "capacity the optimiser starts from.", "MWh", "MWh", key_param=True),
+    FieldSpec("e_nom_extendable", "size", "Extendable", "When ticked, the optimiser chooses the energy capacity "
+              "between the minimum and maximum and pays the annualised cost for every MWh it adds.",
+              kind="bool", key_param=True),
+    FieldSpec("e_nom_min", "size", "Minimum capacity", "Lower bound on the optimised energy capacity.", "MWh", "MWh",
+              reveal_when=_E_EXT),
+    FieldSpec("e_nom_max", "size", "Maximum capacity", "Upper bound on the optimised energy capacity. Leave empty "
+              "for no limit.", "MWh", "MWh", reveal_when=_E_EXT, key_param=True),
+    FieldSpec("overnight_cost", "investment", "Overnight cost", "Upfront cost per kWh of storage capacity, as if "
+              "built at once without financing. Annualised over the lifetime at the discount rate.", "EUR/kWh",
+              "EUR/MWh", _KW, key_param=True),
+    FieldSpec("lifetime", "investment", "Lifetime", "Technical and economic lifetime. The store retires after its "
+              "build year plus lifetime.", "years", "years", key_param=True),
+    *_investment_common(),
+    FieldSpec("capital_cost", "investment", "Capital cost (annualised)", "Derived: overnight cost × annuity("
+              "discount rate, lifetime); fixed O&M is charged on top. Per kWh of capacity.", "EUR/kWh/yr",
+              "EUR/MWh/yr", _KW, derived=True),
+    FieldSpec("fom_cost", "fom", "Fixed O&M", "Fixed operation and maintenance per kWh of capacity per year.",
+              "EUR/kWh/yr", "EUR/MWh/yr", _KW),
+    FieldSpec("marginal_cost", "variable", "Marginal cost", "Cost per MWh discharged.", "EUR/MWh", "EUR/MWh"),
+    _share("e_min_pu", "performance", "Minimum state of energy", "Lowest allowed fill level, as a share of the "
+           "energy capacity."),
+    _share("e_max_pu", "performance", "Maximum state of energy", "Highest allowed fill level, as a share of the "
+           "energy capacity."),
+    FieldSpec("e_cyclic", "performance", "Cyclic state of energy", "The fill level at the end must equal the start, "
+              "so the model cannot start with free energy.", kind="bool"),
+    FieldSpec("e_initial", "performance", "Initial energy", "Energy in the store at the first snapshot. Ignored "
+              "when the state of energy is cyclic.", "MWh", "MWh", reveal_when=_E_FREE),
+    _share("standing_loss", "performance", "Standing loss", "Share of the stored energy lost each hour "
+           "(self-discharge, boil-off)."),
+    *_outages(with_cf_flag=False),
+)
+
+# ── Load (no investment) ─────────────────────────────────────────────────────
+
+LOAD: tuple[FieldSpec, ...] = (
+    *_identity(
+        "load",
+        "Bus the demand is drawn from.",
+        "Energy carrier of the demand (AC, heat, H2, …). Used for grouping.",
+    ),
+    FieldSpec("p_set", "size", "Demand", "Active-power demand. A profile uploaded on the Time Series page replaces "
+              "this static value hour by hour.", "MW", "MW", key_param=True),
+    FieldSpec("q_set", "size", "Reactive demand", "Reactive-power demand, used by the AC power flow only.", "MVAr",
+              "MVAr"),
+    FieldSpec("sign", "performance", "Sign", "Power sign convention: −1 for a consumer (the default), +1 to make the "
+              "load inject power.", "", ""),
+)
+
+# ── Link (single part, priced per MW of its input, bus0) ─────────────────────
+
+LINK: tuple[FieldSpec, ...] = (
+    FieldSpec("name", "identity", "Name", "Unique link identifier. Time-series profiles are matched to this exact "
+              "name.", kind="text", required=True),
+    FieldSpec("carrier", "identity", "Carrier", "Technology carrier (electrolysis, fuel cell, DC, heat pump, …). "
+              "Drives grouping and canvas colours.", kind="carrier"),
+    FieldSpec("bus0", "identity", "From bus", "Input side: the bus the link draws from. Its capacity and cost are "
+              "per MW of this input.", kind="bus", required=True),
+    FieldSpec("bus1", "identity", "To bus", "Output side: the bus that receives the input × efficiency.",
+              kind="bus", required=True),
+    FieldSpec("p_nom", "size", "Capacity", "Rating on the input side (bus0). With extendable ticked, the existing "
+              "capacity the optimiser starts from.", "MW", "MW", key_param=True),
+    *_size_bounds(),
+    _money_per_mw("overnight_cost", "investment", "Overnight cost", "Upfront cost per kW of input capacity, as if "
+                  "built at once without financing. Annualised over the lifetime at the discount rate.",
+                  key_param=True),
+    FieldSpec("lifetime", "investment", "Lifetime", "Technical and economic lifetime. The link retires after its "
+              "build year plus lifetime.", "years", "years", key_param=True),
+    *_investment_common(),
+    _money_per_mw_yr("capital_cost", "investment", "Capital cost (annualised)", "Derived: overnight cost × annuity("
+                     "discount rate, lifetime); fixed O&M is charged on top. Per kW of input.", derived=True),
+    _money_per_mw_yr("fom_cost", "fom", "Fixed O&M", "Fixed operation and maintenance per kW of input per year."),
+    FieldSpec("marginal_cost", "variable", "Marginal cost", "Cost per MWh drawn from the input bus.", "EUR/MWh",
+              "EUR/MWh"),
+    _share("efficiency", "performance", "Efficiency", "Output per unit of input: MWh delivered to bus1 per MWh drawn "
+           "from bus0 (the COP for a heat pump, above 100 %)."),
+    _share("p_min_pu", "performance", "Minimum flow", "Lowest flow as a share of capacity. Negative lets the link "
+           "run backwards (−100 % for a bidirectional DC line)."),
+    _share("p_max_pu", "performance", "Maximum flow", "Highest flow as a share of capacity. A profile uploaded on "
+           "the Time Series page replaces this value hour by hour."),
+    *_outages(with_cf_flag=False),
+)
+
 # What an emptied input saves (S1b). `clear` sends null: an Optional column, or a bound the write model turns
 # into +inf ("no limit", "never retires"). Costs save 0, a deliberate "free". Everything else keeps its value:
 # a blank capacity or efficiency is a slip, not a decision.
 _ZERO = {"marginal_cost", "fom_cost", "curtailment_cost", "start_up_cost", "shut_down_cost"}
-_CLEAR = {"p_nom_max", "lifetime", "overnight_cost", "discount_rate", "ramp_limit_up", "ramp_limit_down",
-          "e_sum_min", "e_sum_max",
+_CLEAR = {"p_nom_max", "e_nom_max", "lifetime", "overnight_cost", "discount_rate", "ramp_limit_up",
+          "ramp_limit_down", "e_sum_min", "e_sum_max",
           "outage_rate_value", "outage_rate_basis", "mttr_hours", "p_max_pu_includes_outages"}
 
 
@@ -256,6 +352,9 @@ def _with_blank(component: str, specs: tuple[FieldSpec, ...]) -> tuple[FieldSpec
 _BY_CLASS: dict[str, tuple[FieldSpec, ...]] = {
     "Generator": _with_blank("Generator", GENERATOR),
     "StorageUnit": _with_blank("StorageUnit", STORAGE_UNIT),
+    "Store": _with_blank("Store", STORE),
+    "Load": _with_blank("Load", LOAD),
+    "Link": _with_blank("Link", LINK),
 }
 
 

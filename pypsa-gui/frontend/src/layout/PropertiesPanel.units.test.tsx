@@ -87,6 +87,15 @@ function expectAnnuityBadges(unit: 'MW' | 'MWh' | 'MVA') {
   expect(overnight).not.toContain('/yr')
 }
 
+// The read-out of a schema-rendered card (S1b, S1c).
+function expectSchemaBadges(unit: 'kW' | 'kWh') {
+  expect(rowText('Capital cost (annualised)')).toContain(`€/${unit}/yr`)
+  expect(rowText('Fixed O&M')).toContain(`€/${unit}/yr`)
+  const overnight = rowText('Overnight cost')
+  expect(overnight).toContain(`€/${unit}`)
+  expect(overnight).not.toContain('/yr')
+}
+
 beforeEach(() => { useUIStore.setState({ currentProject: 'Demo' }) })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
@@ -112,13 +121,15 @@ describe('capital-cost badges name the annuity per year', () => {
     expect(rowText('Power part: overnight cost')).toContain('€/kW')
     expect(rowText('Energy part: overnight cost')).toContain('€/kWh')
   })
+  // S1c: the Store and Link cards render from the asset schema too: money per
+  // kWh (a Store sizes energy) or per kW (a Link sizes power).
   it('Store card', () => {
     wrap(<StoreCard store={STORE} onRename={() => {}} />, [['stores', [STORE]]])
-    expectAnnuityBadges('MWh')
+    expectSchemaBadges('kWh')
   })
   it('Link card', () => {
     wrap(<LinkCard link={LINK} onRename={() => {}} />, [['links', [LINK]]])
-    expectAnnuityBadges('MW')
+    expectSchemaBadges('kW')
   })
   it('Line panel', async () => {
     wrap(<LinePanel name="L1" />, [['lines', [LINE]]])
@@ -143,6 +154,16 @@ function expectEditBadges(unit: 'MW' | 'MWh' | 'MVA') {
   expect(screen.queryByText(`Capital cost (€/${unit})`)).toBeNull()
 }
 
+// A schema-rendered card types the overnight cost and fixed O&M; the
+// annualised capital cost is a derived row with no input.
+function expectSchemaEditBadges(unit: 'kW' | 'kWh') {
+  expect(screen.getByText(`Overnight cost (€/${unit})`)).toBeTruthy()
+  expect(screen.getByText(`Fixed O&M (€/${unit}/yr)`)).toBeTruthy()
+  const cc = screen.getByTestId('asset-derived-capital_cost')
+  expect(cc.textContent).toContain(`€/${unit}/yr`)
+  expect(cc.querySelector('input')).toBeNull()
+}
+
 describe('edit-mode capital-cost badges name the annuity per year', () => {
   it('Generator edit form', () => {
     wrap(<GeneratorCard gen={GEN} onRename={() => {}} />, [['generators', [GEN]]])
@@ -165,12 +186,12 @@ describe('edit-mode capital-cost badges name the annuity per year', () => {
   it('Store edit form', () => {
     wrap(<StoreCard store={STORE} onRename={() => {}} />, [['stores', [STORE]]])
     fireEvent.click(screen.getByRole('button', { name: /^Edit / }))
-    expectEditBadges('MWh')
+    expectSchemaEditBadges('kWh')
   })
   it('Link edit form', () => {
     wrap(<LinkCard link={LINK} onRename={() => {}} />, [['links', [LINK]]])
     fireEvent.click(screen.getByRole('button', { name: /^Edit / }))
-    expectEditBadges('MW')
+    expectSchemaEditBadges('kW')
   })
   it('Line edit form', async () => {
     wrap(<LinePanel name="L1" />, [['lines', [LINE]]])
