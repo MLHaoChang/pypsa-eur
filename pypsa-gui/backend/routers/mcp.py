@@ -66,7 +66,12 @@ async def mcp_post(request: Request) -> Response:
     params = message.get("params") if isinstance(message.get("params"), dict) else {}
     if message["method"] == "initialize":
         client = params.get("clientInfo") if isinstance(params.get("clientInfo"), dict) else {}
-        session = mcp_server.open_session(user_id, client.get("name"))
+        try:
+            session = mcp_server.open_session(user_id, client.get("name"))
+        except mcp_server.SessionCapReached:
+            return JSONResponse(mcp_server._error(message["id"], -32003,
+                                                  "too many MCP sessions are waiting on cards"),
+                                status_code=429)
         return JSONResponse(mcp_server.initialize(message["id"], params),
                             headers={"Mcp-Session-Id": session.session_id})
     sid = request.headers.get("Mcp-Session-Id")
@@ -86,7 +91,17 @@ async def mcp_post(request: Request) -> Response:
                                 headers={"Retry-After": str(int(retry_after) + 1)})
     _bind(user_id)
     toolset = request.query_params.get("toolset")
-    reply = await run_in_threadpool(mcp_server.handle, session, message, toolset=toolset)
+    if message["method"] != "tools/call":
+        return JSONResponse(await run_in_threadpool(mcp_server.handle, session, message, toolset=toolset))
+    # One call at a time per session: a call waiting on a card holds a worker.
+    if not mcp_server.begin_call(session):
+        return JSONResponse(mcp_server._error(message["id"], -32002,
+                                              "a call is already running in this session"),
+                            status_code=409)
+    try:
+        reply = await run_in_threadpool(mcp_server.handle, session, message, toolset=toolset)
+    finally:
+        mcp_server.end_call(session)
     return JSONResponse(reply)
 
 

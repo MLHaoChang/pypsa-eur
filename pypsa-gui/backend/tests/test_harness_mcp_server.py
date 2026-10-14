@@ -243,3 +243,52 @@ def test_the_pending_list_shows_only_external_sessions(local_client, endpoint, p
     in_app = chat_service.get_or_create_session("in-app-session", owner_user_id=None)
     in_app.issue_confirmation(tool_name="probe_wipe", args={}, safety_tier="destructive")
     assert local_client.get("/api/chat/external/pending").json()["pending"] == []
+
+
+# ── hardening (the coordinator's review of #237) ───────────────────────────
+
+def test_a_non_ascii_token_is_refused_not_a_server_error(local_client, endpoint):
+    r = local_client.post("/api/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+                          headers={"Authorization": "Bearer caf\u00e9".encode("latin-1")})
+    assert r.status_code == 401
+
+
+def test_sessions_per_user_are_capped_evicting_the_oldest_idle(local_client, endpoint, monkeypatch):
+    from harness import mcp_server
+    monkeypatch.setattr(mcp_server, "MAX_SESSIONS_PER_USER", 3)
+    sids = [_open(local_client, endpoint)[0] for _ in range(3)]
+    newest, _ = _open(local_client, endpoint)                    # the fourth evicts the oldest
+    assert chat_service.get_session(sids[0]) is None
+    assert all(chat_service.get_session(s) is not None for s in sids[1:] + [newest])
+    assert _rpc(local_client, endpoint, "tools/list", sid=sids[0]).status_code == 404
+
+
+def test_a_session_waiting_on_a_card_is_never_evicted(local_client, endpoint, probes, monkeypatch):
+    from harness import mcp_server
+    monkeypatch.setattr(mcp_server, "MAX_SESSIONS_PER_USER", 1)
+    busy, _ = _open(local_client, endpoint)
+    t, out = _call_in_background(local_client, endpoint, busy, "probe_write")
+    card = _wait_for_pending(local_client, busy)
+    try:
+        r = _rpc(local_client, endpoint, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+        assert r.status_code == 429                              # no idle session to evict
+    finally:
+        local_client.post(f"/api/chat/{busy}/confirm", json={"token": card["confirmation_token"],
+                                                             "decision": "deny"})
+        t.join(10)
+
+
+def test_one_call_at_a_time_per_session(local_client, endpoint, probes):
+    sid, _ = _open(local_client, endpoint)
+    t, out = _call_in_background(local_client, endpoint, sid, "probe_write")
+    card = _wait_for_pending(local_client, sid)
+    try:
+        second = _rpc(local_client, endpoint, "tools/call", {"name": "probe_read", "arguments": {}},
+                      sid=sid, rid=8)
+        assert second.status_code == 409 and second.json()["error"]["code"] == -32002
+        assert probes == []
+    finally:
+        local_client.post(f"/api/chat/{sid}/confirm", json={"token": card["confirmation_token"],
+                                                            "decision": "deny"})
+        t.join(10)
+    assert _call(local_client, endpoint, sid, "probe_read")["isError"] is False   # free again

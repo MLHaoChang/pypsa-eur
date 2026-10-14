@@ -82,6 +82,14 @@ describe('isRevealed', () => {
     expect(isRevealed(MAX, { p_nom_extendable: 'false' })).toBe(false)
     expect(isRevealed(P_NOM, {})).toBe(true)
   })
+
+  it('a rule naming several values reveals on any of them (M5b: the carrier-scoped constraint types)', () => {
+    const CARRIER = spec('carrier', { reveal_when: { type: ['tech_capacity_expansion_limit', 'operational_limit'] } })
+    expect(isRevealed(CARRIER, { type: 'operational_limit' })).toBe(true)
+    expect(isRevealed(CARRIER, { type: 'tech_capacity_expansion_limit' })).toBe(true)
+    expect(isRevealed(CARRIER, { type: 'primary_energy' })).toBe(false)
+    expect(isRevealed(CARRIER, {})).toBe(false)
+  })
 })
 
 describe('displayValue', () => {

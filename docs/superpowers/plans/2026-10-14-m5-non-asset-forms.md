@@ -36,3 +36,20 @@ asset cards (`2026-10-13-s1-expert-asset-cards.md`) are the pattern.
 - **The raw tables:** the Buses and Carriers tabs now take the descriptors' labels and stored units, so the last
   short names (`COL_LABELS`) are gone.
 - `bus.coordinates` stays in `propertyDocs`: the coordinate pair is one row over two described fields.
+
+## M5b as built (14 Oct)
+
+- **The Carrier card** (`layout/properties/CarrierPanel.tsx`): a Carriers-tab row opens it in Properties (before,
+  the row click was skipped). It reads out the display name, the colour with a swatch, the unit and the CO₂
+  intensity with the descriptors' help, and edits through `AssetFieldsEdit`, `seedForm` and `buildPatch`; a cleared
+  text column saves "", a rename moves the selection. The header's "view results" action is hidden: a carrier is
+  not an asset.
+- **Reveal rules may name several values:** a tuple in a descriptor (a list on the wire) reveals on any of them. A
+  GlobalConstraint's carrier attribute shows for primary energy only, its carrier for the two carrier-scoped
+  limits.
+- **The GlobalConstraint form** (`pages/solver/GlobalConstraintForm.tsx`) replaces Solver Settings' hand-written add
+  form and adds edit in place (a row's Edit button). A field the chosen type does not read saves null, so an
+  operational limit never keeps "co2_emissions". The carrier keeps the grouped `CarrierSelect` with its explicit
+  "pick a carrier" choice, and the period is a choice among the model's periods.
+- **Found on the way, fixed first (#239):** PyPSA reads a carrier-scoped limit's carrier from `carrier_attribute`,
+  and the app wrote `carrier`, so those limits never bound. The service now writes both; the form relies on that.

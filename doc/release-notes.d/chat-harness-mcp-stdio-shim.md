@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): MCP clients that launch stdio servers can reach the desktop app's local MCP endpoint through `python pypsa-gui/backend/mcp_stdio.py`, which finds the current URL and token in the app data directory. The endpoint now allows one call at a time per agent session and at most eight sessions per user, and answers a malformed token with 401.

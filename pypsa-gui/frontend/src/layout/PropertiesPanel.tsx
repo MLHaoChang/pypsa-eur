@@ -34,6 +34,7 @@ import { useAssetProvenance } from '../hooks/useAssetProvenance'
 import { buildPatch, seedForm } from '../utils/assetForm'
 import { AssetFieldsEdit, assetReadoutItems, fieldHelp, schemaFields } from './properties/AssetFields'
 import { GuideButton } from '../components/GuidedTour'
+import CarrierPanel from './properties/CarrierPanel'
 
 import {
   TOOLTIP_VIEWPORT_MARGIN,
@@ -1989,7 +1990,7 @@ export default function PropertiesPanel() {
   const TYPE_LABELS: Record<string, string> = {
     Bus: 'Bus', Line: 'Line', Link: 'Link / HVDC', Transformer: 'Transformer',
     AssetGroup: 'Assets', Generator: 'Generator', StorageUnit: 'Storage Unit',
-    Store: 'Store', Load: 'Load',
+    Store: 'Store', Load: 'Load', Carrier: 'Carrier',
   }
 
   const displayName = selectedComponent.type === 'AssetGroup'
@@ -1999,7 +2000,8 @@ export default function PropertiesPanel() {
   const canDelete = selectedComponent.type === 'Bus' || selectedComponent.type === 'Line' || selectedComponent.type === 'Link' || selectedComponent.type === 'Transformer'
   // AssetGroup is a synthetic bus::category grouping, not a real network
   // component — it has no entry in Asset Detail's results registry.
-  const canViewResults = selectedComponent.type !== 'AssetGroup'
+  // A Carrier is not an asset either (M5b).
+  const canViewResults = selectedComponent.type !== 'AssetGroup' && selectedComponent.type !== 'Carrier'
 
   return (
     <aside className="shrink-0 bg-bg border-l border-border flex flex-col overflow-hidden shadow-lg" style={{ width: 300 }}>
@@ -2049,6 +2051,7 @@ export default function PropertiesPanel() {
         {selectedComponent.type === 'Load'        && <LoadPanel        key={selectedComponent.name} name={selectedComponent.name} />}
         {selectedComponent.type === 'AssetGroup'  && <AssetGroupPanel  key={selectedComponent.name} name={selectedComponent.name} />}
         {selectedComponent.type === 'Transformer' && <TransformerPanel key={selectedComponent.name} name={selectedComponent.name} />}
+        {selectedComponent.type === 'Carrier'     && <CarrierPanel     key={selectedComponent.name} name={selectedComponent.name} />}
       </div>
     </aside>
   )

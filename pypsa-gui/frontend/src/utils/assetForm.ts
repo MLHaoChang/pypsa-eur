@@ -117,12 +117,16 @@ export function buildPatch(specs: AssetFieldSpec[], fs: FS, current: Record<stri
   return out
 }
 
-/** Whether a field shows, given the form's current strings (`reveal_when`: every named field must match). */
+/**
+ * Whether a field shows, given the form's current strings (`reveal_when`: every named field must match; a list
+ * of values matches any of them).
+ */
 export function isRevealed(spec: AssetFieldSpec, fs: FS): boolean {
   if (!spec.reveal_when) return true
   return Object.entries(spec.reveal_when).every(([k, want]) => {
     const raw = fs[k] ?? ''
     if (typeof want === 'boolean') return (raw === 'true') === want
+    if (Array.isArray(want)) return want.map(String).includes(raw)
     return raw === String(want)
   })
 }

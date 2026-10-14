@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Plus, Trash2, AlertCircle, Leaf, ArrowRight } from 'lucide-react'
+import { Plus, Trash2, AlertCircle, Leaf, ArrowRight, Pencil } from 'lucide-react'
 import { simulationApi } from '../api/simulation'
 import { ensTargetWarning, RESERVE_MARGIN_CAVEAT } from './results/adequacy'
 import { networkApi } from '../api/network'
@@ -11,6 +11,7 @@ import { nk } from '../utils/queryKeys'
 import { invalidateNetworkQueries } from '../utils/projectActions'
 import { PageHeader } from '../components/PageKit'
 import CarrierSelect from '../components/CarrierSelect'
+import GlobalConstraintForm, { NEW_CONSTRAINT, type GlobalConstraintRow } from './solver/GlobalConstraintForm'
 
 // Two-tier UI: a "common" form per-solver covering ~6 parameters most users
 // touch, and an "advanced" key:value table that flows straight into
@@ -892,48 +893,17 @@ export default function SolverSettings() {
 }
 
 // ── Global constraints sub-section ──────────────────────────────────────────
-// Network-wide policy constraints stored in `n.global_constraints`. The five
-// canonical PyPSA types each surface a different set of contextual fields:
+// Network-wide policy constraints stored in `n.global_constraints`. The form
+// (add, and edit in place) is rendered from the asset schema's descriptors
+// (M5b, pages/solver/GlobalConstraintForm.tsx); each of PyPSA's five types
+// shows only the fields it reads.
 //
-//   primary_energy                  — carrier_attribute + sense + constant
-//                                     (CO2 cap, fuel-use cap, water consumption)
-//   transmission_volume_expansion_limit — sense + constant (MW·km)
-//   transmission_expansion_cost_limit   — sense + constant (€)
-//   tech_capacity_expansion_limit   — carrier + sense + constant (MW)
-//   operational_limit               — carrier + sense + constant (MWh)
-//
-// "Quick-add CO2 cap" button is the most common entry point — pre-populates
-// the form with carrier_attribute='co2_emissions' and sense='<='.
+// "CO2 cap preset" is the most common entry point: it fills the add form with
+// carrier_attribute='co2_emissions' and sense='<='.
 
-interface GlobalConstraint {
-  name: string
-  type: string
-  sense: string
-  constant: number
-  carrier_attribute?: string | null
-  carrier?: string | null
-  investment_period?: number | null
-}
+type GlobalConstraint = GlobalConstraintRow
 
-const CONSTRAINT_TYPES: Array<{ value: string; label: string; needs: ('carrier_attribute' | 'carrier')[]; unit: string; hint: string }> = [
-  { value: 'primary_energy',                       label: 'Primary energy (e.g. CO2 cap)',
-    needs: ['carrier_attribute'], unit: 't or unit-of-attribute',
-    hint: 'Caps Σ(carrier_attribute) over horizon. CO2 → carrier_attribute=co2_emissions.' },
-  { value: 'tech_capacity_expansion_limit',        label: 'Tech capacity expansion',
-    needs: ['carrier'], unit: 'MW',
-    hint: 'Per-carrier cap on new generation/storage capacity (e.g. ≤100 GW new wind).' },
-  { value: 'operational_limit',                    label: 'Operational limit',
-    needs: ['carrier'], unit: 'MWh',
-    hint: 'Per-carrier cap on dispatch over horizon (e.g. coal ≤ X TWh).' },
-  { value: 'transmission_volume_expansion_limit',  label: 'Transmission volume',
-    needs: [], unit: 'MW·km',
-    hint: 'Cap on total ΣMW·km of newly built transmission.' },
-  { value: 'transmission_expansion_cost_limit',    label: 'Transmission cost',
-    needs: [], unit: '€',
-    hint: 'Cap on total annualised CAPEX of new transmission.' },
-]
-
-function GlobalConstraints() {
+export function GlobalConstraints() {
   const qc = useQueryClient()
   const currentProject = useUIStore(s => s.currentProject)
   const { data: rawRows = [] } = useQuery({
@@ -952,47 +922,10 @@ function GlobalConstraints() {
     return [...arr].sort((a, b) => a - b)
   }, [invPeriods])
 
-  const [form, setForm] = useState<GlobalConstraint>({
-    name: '', type: 'primary_energy', sense: '<=', constant: 0,
-    carrier_attribute: 'co2_emissions',
-    investment_period: null,  // horizon-wide by default
-  })
-  const spec = CONSTRAINT_TYPES.find(t => t.value === form.type) ?? CONSTRAINT_TYPES[0]
-
-  const createMut = useMutation({
-    mutationFn: (body: GlobalConstraint) => networkApi.createGlobalConstraint({
-      name: body.name,
-      type: body.type,
-      sense: body.sense,
-      constant: Number(body.constant) || 0,
-      carrier_attribute: body.carrier_attribute || undefined,
-      carrier: body.carrier || undefined,
-      investment_period: body.investment_period ?? undefined,
-    }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['global_constraints'] })
-      toast.success('Constraint added')
-      // Reset form keeping the type so user can quickly add another of the same kind.
-      setForm(f => ({ ...f, name: '', constant: 0 }))
-    },
-    onError: (e: { response?: { data?: { detail?: unknown } } }) => {
-      // FastAPI returns string `detail` for HTTPException but array of
-      // {type, loc, msg, input} for Pydantic validation errors. Coerce
-      // before display so react-hot-toast doesn't crash trying to render
-      // raw objects as JSX (same fix as the Carriers tab handler).
-      const raw = e?.response?.data?.detail
-      const msg = typeof raw === 'string'
-        ? raw
-        : Array.isArray(raw)
-          ? raw.map((d) => {
-              const r = d as { loc?: unknown[]; msg?: string }
-              const field = Array.isArray(r.loc) ? r.loc.slice(1).join('.') : ''
-              return field ? `${field}: ${r.msg ?? 'invalid'}` : (r.msg ?? 'invalid')
-            }).join(' · ')
-          : 'Failed to add constraint'
-      toast.error(msg)
-    },
-  })
+  // The add form's starting row; a new key remounts it (the CO2 preset, Cancel).
+  const [addSeed, setAddSeed] = useState<{ row: GlobalConstraint; key: number }>({ row: NEW_CONSTRAINT, key: 0 })
+  const [editing, setEditing] = useState<string | null>(null)
+  const editRow = rows.find(r => r.name === editing) ?? null
 
   const deleteMut = useMutation({
     mutationFn: (name: string) => networkApi.deleteGlobalConstraint(name),
@@ -1003,16 +936,10 @@ function GlobalConstraints() {
     onError: () => toast.error('Failed to remove constraint'),
   })
 
-  const presetCO2 = () => setForm({
-    name: form.name || 'co2_cap',
-    type: 'primary_energy', sense: '<=', constant: form.constant || 100_000_000,
-    carrier_attribute: 'co2_emissions',
-  })
-
-  const onSubmit = () => {
-    if (!form.name.trim()) { toast.error('Pick a name'); return }
-    createMut.mutate(form)
-  }
+  const presetCO2 = () => setAddSeed(s => ({
+    key: s.key + 1,
+    row: { ...NEW_CONSTRAINT, name: 'co2_cap', constant: 100_000_000 },
+  }))
 
   return (
     <section className="border-t border-border pt-4">
@@ -1067,7 +994,11 @@ function GlobalConstraints() {
                     </td>
                     <td className="px-2 py-1 text-[11px] font-mono">{r.sense}</td>
                     <td className="px-2 py-1 text-[11px] font-mono text-right">{Number(r.constant).toLocaleString()}</td>
-                    <td className="px-2 py-1 text-right">
+                    <td className="px-2 py-1 text-right whitespace-nowrap">
+                      <button onClick={() => setEditing(r.name)} aria-label={`Edit constraint ${r.name}`}
+                        className="text-muted hover:text-accent mr-1.5" title="Edit">
+                        <Pencil size={11} />
+                      </button>
                       <button onClick={() => deleteMut.mutate(r.name)}
                         className="text-muted hover:text-danger" title="Delete">
                         <Trash2 size={11} />
@@ -1081,125 +1012,13 @@ function GlobalConstraints() {
         </div>
       )}
 
-      {/* Add new */}
-      <div className="border border-border rounded p-2.5 space-y-2 bg-panel/40">
-        <div className="text-[10px] text-muted uppercase tracking-wide">Add constraint</div>
-        <div className="grid grid-cols-2 gap-2">
-          <label className="flex flex-col gap-0.5 col-span-2">
-            <span className="text-[10px] text-muted">Type</span>
-            <select
-              value={form.type}
-              onChange={e => setForm(f => ({ ...f, type: e.target.value }))}
-              className="px-2 py-1 border border-border rounded text-xs bg-bg"
-            >
-              {CONSTRAINT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
-            <span className="text-[10px] text-muted">{spec.hint}</span>
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] text-muted">Name</span>
-            <input
-              type="text" value={form.name}
-              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-              placeholder="e.g. co2_cap"
-              className="px-2 py-1 border border-border rounded text-xs bg-bg font-mono"
-            />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] text-muted">Sense</span>
-            <select
-              value={form.sense}
-              onChange={e => setForm(f => ({ ...f, sense: e.target.value }))}
-              className="px-2 py-1 border border-border rounded text-xs bg-bg"
-            >
-              <option value="<=">≤</option>
-              <option value="==">=</option>
-              <option value=">=">≥</option>
-            </select>
-          </label>
-          {spec.needs.includes('carrier_attribute') && (
-            <label className="flex flex-col gap-0.5 col-span-2">
-              <span className="text-[10px] text-muted">Carrier attribute (e.g. co2_emissions)</span>
-              <input
-                type="text" value={form.carrier_attribute ?? ''}
-                onChange={e => setForm(f => ({ ...f, carrier_attribute: e.target.value }))}
-                placeholder="co2_emissions"
-                className="px-2 py-1 border border-border rounded text-xs bg-bg font-mono"
-              />
-            </label>
-          )}
-          {spec.needs.includes('carrier') && (
-            <div className="col-span-2">
-              <CarrierSelect
-                label="Carrier"
-                value={form.carrier ?? ''}
-                onChange={v => setForm(f => ({ ...f, carrier: v }))}
-                allowEmpty
-                placeholder="— pick a carrier —"
-                title="Operational-limit and capacity-expansion constraints are scoped by carrier. List comes from the project's n.carriers + the PyPSA-Eur catalog."
-                wrapperClassName="flex flex-col gap-0.5"
-              />
-              <span className="text-[10px] text-muted block mt-0.5">
-                Carriers come from <span className="font-medium text-text">n.carriers</span> +
-                the curated PyPSA-Eur catalog. Add new carriers via the
-                {' '}<span className="font-medium text-text">Carriers</span> tab at the bottom.
-              </span>
-            </div>
-          )}
-
-          {/* Investment-period scope. Default "Horizon-wide" applies the
-              constraint across ALL periods (Σ over the horizon, one shadow
-              price). Selecting a year scopes it to that single period —
-              useful for declining-budget CO2 pathways like 100 Mt in 2025,
-              80 Mt in 2030, etc. Hidden on flat (single-period) networks
-              since the constraint scope is always horizon = period there. */}
-          {periods.length > 0 && (
-            <label className="flex flex-col gap-0.5 col-span-2">
-              <span className="text-[10px] text-muted">
-                Investment period scope
-                <span className="ml-1 text-muted/70">— horizon-wide unless picked</span>
-              </span>
-              <select
-                value={form.investment_period == null ? '' : String(form.investment_period)}
-                onChange={e => {
-                  const v = e.target.value
-                  setForm(f => ({
-                    ...f,
-                    investment_period: v === '' ? null : Number(v),
-                  }))
-                }}
-                className="px-2 py-1 border border-border rounded text-xs bg-bg"
-              >
-                <option value="">Horizon-wide (Σ across every period)</option>
-                {periods.map(p => (
-                  <option key={p} value={p}>{p}</option>
-                ))}
-              </select>
-              <span className="text-[10px] text-muted">
-                Per-period scope is supported by <code>primary_energy</code>,
-                {' '}<code>operational_limit</code> and{' '}
-                <code>tech_capacity_expansion_limit</code>. The first two
-                surface a separate shadow price per period in the Emissions /
-                Prices tabs.
-              </span>
-            </label>
-          )}
-
-          <label className="flex flex-col gap-0.5 col-span-2">
-            <span className="text-[10px] text-muted">Constant ({spec.unit})</span>
-            <input
-              type="number" value={form.constant}
-              onChange={e => setForm(f => ({ ...f, constant: Number(e.target.value) }))}
-              className="px-2 py-1 border border-border rounded text-xs bg-bg font-mono"
-            />
-          </label>
-        </div>
-        <button
-          onClick={onSubmit}
-          disabled={createMut.isPending}
-          className="w-full flex items-center justify-center gap-1 px-2 py-1.5 bg-success/90 text-white rounded text-[11px] font-medium hover:bg-success disabled:opacity-40"
-        ><Plus size={11} /> {createMut.isPending ? 'Adding…' : 'Add constraint'}</button>
-      </div>
+      {editRow ? (
+        <GlobalConstraintForm key={`edit-${editRow.name}`} editing={editRow.name} seed={editRow} periods={periods}
+          onDone={() => setEditing(null)} />
+      ) : (
+        <GlobalConstraintForm key={`add-${addSeed.key}`} editing={null} seed={addSeed.row} periods={periods}
+          onDone={() => setAddSeed(s => ({ ...s, key: s.key + 1 }))} />
+      )}
 
       {/* Fuel-limit-per-period shortcut. Translates a (carrier, period, MWh)
           triple into one `operational_limit` global constraint per row —
