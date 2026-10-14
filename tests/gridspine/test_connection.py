@@ -150,9 +150,9 @@ def test_the_generic_band_applies_at_every_voltage(kv):
     assert (b["v_min"], b["v_max"]) == (0.90, 1.10) and b["source"] == "assumed"
 
 
-def test_both_profiles_are_listed():
+def test_the_shipped_profiles_are_listed():
     codes = list_grid_codes()
-    assert set(codes) == {"eu_rfg_dcc_ce", "generic_assumed"}
+    assert set(codes) == {"eu_rfg_dcc_ce", "generic_assumed", "us_ieee2800_nerc"}
     assert "generic" in codes["generic_assumed"].lower()
 
 

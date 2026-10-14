@@ -24,9 +24,32 @@ A profile that cites pages (any ``extracted`` limit, or a ``page`` on any
 limit) names its source in ``document``: ``{sha256, filename, title}``. The
 hash is of the uploaded file, which the project keeps under that hash.
 
-A profile may carry one optional key, ``campus_voltage``: a design band
-(``v_min``, ``v_max``, clause, tag) for the buses inside the campus. Without
-it a study holds those buses to the ``voltage_bands``.
+A profile may carry these optional keys:
+
+``campus_voltage``
+    A design band (``v_min``, ``v_max``, clause, tag) for the buses inside
+    the campus. Without it a study holds those buses to the ``voltage_bands``.
+``q_range_ibr``
+    A reactive CAPABILITY required of the on-site inverter-based resources,
+    as a fraction of their rating at rated active power (IEEE 2800), with a
+    ``reference`` saying what the fraction is of. Unlike ``q_range_demand``
+    (a band on the site's exchange at the connection point) it is checked per
+    unit, where the unit ratings are known.
+``voltage_bands[].v_max_30min``
+    A time-limited upper voltage above ``v_max`` (IEEE 2800 / PRC-029's 30
+    minutes). Reported with the dynamic requirements, never enforced.
+``dynamic_requirements``
+    What a steady-state study cannot show (ride-through, RoCoF, frequency
+    response, pending rules): ``{id, requirement, value, clause, source,
+    applies_to}`` each, ``applies_to`` one of ``ibr``, ``load``, ``facility``.
+    ``reported_requirements`` lists them with status ``reported``; they are
+    never passed and never counted in a verdict.
+``notes``
+    Text the report carries with the profile (scope, what is unverified).
+
+Any other key is loaded and logged as a warning: a project or extracted
+profile may carry extras, but a misspelt key would otherwise switch a check
+off without a word (``PROFILE_KEYS``).
 
 The shipped profiles live in one file, ``data/grid_codes.yaml``. A project
 keeps its own as one YAML file per profile, named ``<profile id>.yaml``, in
@@ -40,6 +63,7 @@ yaml/pandas only, like the rest of ``templates/``; never the unsafe full
 ``yaml.load``.
 """
 import copy
+import logging
 import math
 import re
 from pathlib import Path
@@ -55,7 +79,16 @@ _REQUIRED = ("title", "voltage_bands", "q_range_demand", "rvc_limit_pct")
 PROFILE_ID = re.compile(r"[a-z0-9_]{1,64}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _DOCUMENT_KEYS = ("sha256", "filename", "title")
-_SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage")
+_SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_ibr")
+#: Every key a profile may carry; any other is loaded with a warning.
+PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit_pct", "campus_voltage",
+                          "q_range_ibr", "dynamic_requirements", "notes", "document", "name"})
+#: Every key a voltage band may carry.
+BAND_KEYS = frozenset({"kv_min", "kv_max", "kv_max_inclusive", "v_min", "v_max", "v_max_30min",
+                       "clause", "source", "page", "quote"})
+_APPLIES_TO = ("ibr", "load", "facility")
+_DYNAMIC_KEYS = ("id", "requirement", "value", "clause", "source", "applies_to")
+_log = logging.getLogger(__name__)
 _BAND_PATH = re.compile(r"voltage_bands\[(0|[1-9][0-9]*)\]")
 
 
@@ -143,7 +176,9 @@ def _check_profile(name, p):
     missing = [k for k in _REQUIRED if k not in p]
     if missing:
         raise ContractError(f"{where} is missing {missing}")
-    for key in ("q_range_demand", "rvc_limit_pct"):
+    for key in ("q_range_demand", "rvc_limit_pct", "q_range_ibr"):
+        if key not in p:
+            continue                                   # q_range_ibr is optional; the others are required
         _check_limit(key, p[key], where)
         if not _is_number(p[key].get("value")) or p[key]["value"] <= 0:
             raise ContractError(f"{where}: {key} value must be a positive number, got {p[key].get('value')!r}")
@@ -161,8 +196,20 @@ def _check_profile(name, p):
             )
         if not b["kv_min"] < b["kv_max"]:
             raise ContractError(f"{where}: voltage_bands[{i}] kv_min must be below kv_max")
+        if "v_max_30min" in b and not (_is_number(b["v_max_30min"]) and b["v_max_30min"] > b["v_max"]):
+            raise ContractError(
+                f"{where}: voltage_bands[{i}].v_max_30min must be a number above v_max, got {b['v_max_30min']!r}"
+            )
     if "campus_voltage" in p:
         _check_campus_voltage(p["campus_voltage"], where)
+    if "dynamic_requirements" in p:
+        _check_dynamic(p["dynamic_requirements"], where)
+    if "notes" in p and not isinstance(p["notes"], str):
+        raise ContractError(f"{where}: notes must be text, got {type(p['notes']).__name__}")
+    unknown = sorted(set(p) - PROFILE_KEYS)
+    unknown += sorted(f"voltage_bands[{i}].{k}" for i, b in enumerate(bands) for k in set(b) - BAND_KEYS)
+    if unknown:
+        _log.warning("%s carries unknown key(s) %s; they are loaded but no check reads them", where, unknown)
     ordered = sorted(bands, key=lambda b: b["kv_min"])
     for a, b in zip(ordered, ordered[1:]):
         if b["kv_min"] < a["kv_max"]:
@@ -182,6 +229,44 @@ def _check_campus_voltage(cv, where):
         raise ContractError(
             f"{where}: campus_voltage needs 0 < v_min < v_max, got v_min={cv['v_min']} v_max={cv['v_max']}"
         )
+
+
+def _check_dynamic(rows, where):
+    if not isinstance(rows, list):
+        raise ContractError(f"{where}: dynamic_requirements must be a list, got {type(rows).__name__}")
+    seen = set()
+    for i, r in enumerate(rows):
+        at = f"dynamic_requirements[{i}]"
+        if not isinstance(r, dict):
+            raise ContractError(f"{where}: {at} must be a mapping")
+        for key in _DYNAMIC_KEYS:
+            if not isinstance(r.get(key), str) or not r[key].strip():
+                raise ContractError(f"{where}: {at} has no {key}; every dynamic requirement states "
+                                    f"{', '.join(_DYNAMIC_KEYS)}")
+        if r["source"] not in ("code", "assumed"):
+            raise ContractError(f"{where}: {at} has source {r['source']!r}; a dynamic requirement is code or assumed")
+        if r["applies_to"] not in _APPLIES_TO:
+            raise ContractError(f"{where}: {at} applies_to {r['applies_to']!r}; allowed {list(_APPLIES_TO)}")
+        if r["id"] in seen:
+            raise ContractError(f"{where}: {at} has duplicate id {r['id']!r}")
+        seen.add(r["id"])
+
+
+def reported_requirements(profile: dict) -> list:
+    """What the profile requires that a steady-state study cannot show, one
+    row each with status ``reported`` (never ``pass``): its
+    ``dynamic_requirements``, then every band's time-limited ``v_max_30min``.
+    A report lists them as "dynamic study needed"; no verdict counts them."""
+    out = [{**r, "status": "reported", "detail": f"{r['requirement']}: {r['value']} (dynamic study needed)"}
+           for r in profile.get("dynamic_requirements") or []]
+    for b in profile.get("voltage_bands") or []:
+        if "v_max_30min" in b:
+            value = f"up to {b['v_max_30min']:.2f} pu for 30 min at {b['kv_min']:g}-{b['kv_max']:g} kV"
+            out.append({"id": "v_max_30min", "requirement": "Operate above the continuous band for a limited time",
+                        "value": value, "clause": b["clause"], "source": b["source"], "applies_to": "facility",
+                        "status": "reported",
+                        "detail": f"time-limited voltage {value}: reported, not enforced (dynamic study needed)"})
+    return out
 
 
 def validate_profile(name: str, profile: dict) -> dict:
