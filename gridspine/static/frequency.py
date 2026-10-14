@@ -639,8 +639,42 @@ def _settle_time(trace, settled, band_hz, settle_hz_per_s):
     return float(trace.t[hit[0]]) if hit.size else math.inf
 
 
+#: E4 runs each block only until its tail is steady: |RoCoF| at most
+#: ``E4_STEADY_HZ_PER_S`` over the last ``E4_STEADY_HOLD_S``. The first run is
+#: ``E4_FIRST_S`` long, doubled while the tail still moves, up to ``t_end``.
+#: The settled value read from the last sample then differs from the full
+#: horizon's by at most the tolerance times the slowest time constant.
+E4_STEADY_HZ_PER_S = 1e-6
+E4_STEADY_HOLD_S = 5.0
+E4_FIRST_S = 20.0
+
+
+def _steady_tail(trace, hold_s=E4_STEADY_HOLD_S, tol=E4_STEADY_HZ_PER_S):
+    """True when the last ``hold_s`` of ``trace`` hold |RoCoF| ≤ ``tol``,
+    or the island has collapsed (nothing more to see)."""
+    if trace.collapse is not None:
+        return True
+    if trace.t[-1] < hold_s:
+        return False
+    sel = trace.t >= trace.t[-1] - hold_s - 1e-12
+    return float(np.max(np.abs(np.gradient(trace.df[sel], trace.t[sel])))) <= tol
+
+
+def _block_run(units, block, t_end, dt, f0, first_s=E4_FIRST_S):
+    """One E4 block, run until its tail is steady (``_steady_tail``): from
+    ``first_s``, doubled each time the tail still moves, at most ``t_end``.
+    A slow island (an isochronous genset, a ramp-limited one) is extended
+    rather than read early."""
+    t = min(first_s, t_end)
+    while True:
+        tr = simulate(units, step(block), t_end=t, dt=dt, f0=f0)
+        if t >= t_end or _steady_tail(tr):
+            return tr
+        t = min(2.0 * t, t_end)
+
+
 def e4_ups_bridged(gensets, blocks, ups=(), bridge_s=0.0, redundancy_n=0, band_hz=0.1, settle_hz_per_s=0.05,
-                   window_ms=500.0, t_end=600.0, dt=5e-3, f0=F0) -> BridgedStart:
+                   window_ms=500.0, t_end=600.0, dt=5e-3, f0=F0, steady_stop=True, cache=None) -> BridgedStart:
     """E4, the ``ups_bridged`` start (plan I6b): the bus is dead, the UPSs
     carry the IT load, the gensets start and, once every one is ready
     (start + sync, the join I2b uses), pick up ``blocks`` one at a time.
@@ -655,8 +689,13 @@ def e4_ups_bridged(gensets, blocks, ups=(), bridge_s=0.0, redundancy_n=0, band_h
     control restores f0, so the next block starts from nominal at the
     loading the earlier blocks left (each genset at its droop share), with
     its load-acceptance step and ramp counted afresh. Each block is
-    simulated on its own (``t_end`` each); ``trace`` joins them, each up to
-    its settling, the last whole."""
+    simulated on its own, until its tail is steady (``_block_run``; at most
+    ``t_end``; ``steady_stop`` False runs every block to ``t_end``); ``trace``
+    joins them, each up to its settling, the last whole.
+
+    ``cache`` (a dict): the pickup depends only on the gensets left at N+k
+    (their dispatch and join reset), the blocks and the run parameters, so
+    hours with the same fleet share one; the bridge check runs per call."""
     from gridspine.schema.contracts import ContractError
 
     gens, dropped = _remove_units([g for g in gensets if g.model == "genset"], redundancy_n)
@@ -664,11 +703,33 @@ def e4_ups_bridged(gensets, blocks, ups=(), bridge_s=0.0, redundancy_n=0, band_h
         raise ContractError("E4 needs a genset left at N+k and the pickup blocks")
     ready = max(g.ready_s for g in gens)
     units = [dataclasses.replace(g, p0=0.0, join_s=0.0) for g in gens]
+    key = (repr(units), tuple(float(b) for b in blocks), band_hz, settle_hz_per_s, window_ms, t_end, dt, f0,
+           steady_stop)
+    if cache is not None and key in cache:
+        trace, times, per, complete = cache[key]
+    else:
+        trace, times, per, complete = _e4_pickup(units, blocks, band_hz, settle_hz_per_s, window_ms, t_end, dt, f0,
+                                                 steady_stop)
+        if cache is not None:
+            cache[key] = (trace, times, per, complete)
+    last_pickup = ready + times[-1] if complete else math.inf
+    bridge = []
+    for name, it, e in ups:
+        autonomy = e * 3600.0 / it if it > 0 else math.inf
+        needed = max(bridge_s, last_pickup)
+        bridge.append(Bridge(name, it, e, autonomy, needed, autonomy >= needed))
+    return BridgedStart(trace, ready, times, per, complete, bridge, dropped)
+
+
+def _e4_pickup(units, blocks, band_hz, settle_hz_per_s, window_ms, t_end, dt, f0, steady_stop):
+    """E4's blocks on the reset gensets: ``(trace, block times, metrics,
+    complete)``."""
     iso = any(g.isochronous for g in units)
     k_droop = sum(g.k for g in units if not g.isochronous)
     times, per, parts, complete, clock = [], [], [], True, 0.0
     for i, block in enumerate(blocks):
-        tr = simulate(units, step(block), t_end=t_end, dt=dt, f0=f0)
+        tr = (_block_run(units, block, t_end, dt, f0) if steady_stop
+              else simulate(units, step(block), t_end=t_end, dt=dt, f0=f0))
         times.append(clock)
         per.append(metrics(tr, window_ms, band_hz))
         settled = 0.0 if iso else (-block / k_droop if k_droop else math.nan)
@@ -686,14 +747,7 @@ def e4_ups_bridged(gensets, blocks, ups=(), bridge_s=0.0, redundancy_n=0, band_h
         units = [dataclasses.replace(u, p0=u.p0 + float(tr.dp[u.name][j])) for u in units]
     t_all = np.concatenate([a for a, _ in parts])
     df_all = np.concatenate([b for _, b in parts])
-    trace = Trace(t_all, df_all, {}, {}, None, per[0].rocof0_hz_per_s)
-    last_pickup = ready + times[-1] if complete else math.inf
-    bridge = []
-    for name, it, e in ups:
-        autonomy = e * 3600.0 / it if it > 0 else math.inf
-        needed = max(bridge_s, last_pickup)
-        bridge.append(Bridge(name, it, e, autonomy, needed, autonomy >= needed))
-    return BridgedStart(trace, ready, times, per, complete, bridge, dropped)
+    return Trace(t_all, df_all, {}, {}, None, per[0].rocof0_hz_per_s), times, per, complete
 
 
 @dataclasses.dataclass
@@ -1081,6 +1135,7 @@ def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_
     iu = validate_island_unit_hourly(island_unit_hourly) if island_unit_hourly is not None else None
     ev, losses, bridge, planned, ups = [], [], [], [], []
     kw = {"t_end": t_end, "dt": dt, "f0": f0}
+    e4_cache = {}                                  # hours with the same fleet share one E4 pickup
 
     def log_ups(key, event, trace):
         for name, rec in trace.ups.items():
@@ -1141,7 +1196,7 @@ def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_
                 gens = [u for u in units if u.model == "genset"]
                 feeds = [(u.name, u.ups["it_mw"], u.ups["e_mwh"]) for u in units if u.model == "ups"]
                 res = e4_ups_bridged(gens, rv["pickup_blocks"], feeds, rv["bridge_s"], rv["genset_redundancy_n"],
-                                     window_ms=window, f0=f0)
+                                     window_ms=window, f0=f0, cache=e4_cache)
                 for i, m in enumerate(res.blocks):
                     v = judge(m, limits, f0, eq)
                     ev.append({**sk, "event": "E4", "block": i + 1, "dp_mw": rv["pickup_blocks"][i],
