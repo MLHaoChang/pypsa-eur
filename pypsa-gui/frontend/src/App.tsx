@@ -32,6 +32,7 @@ import SolveQueuePanel from './pages/SolveQueuePanel'
 import GridspinePanel from './pages/GridspinePanel'
 import DecisionPanel from './pages/decision/DecisionPanel'
 import ReportsPanel from './pages/ReportsPanel'
+import EconomicsPanel from './pages/economics/EconomicsPanel'
 import CampusElectricalPanel from './pages/CampusElectricalPanel'
 import { recoveryFor } from './utils/autoRecovery'
 import LocalSettings from './pages/LocalSettings'
@@ -112,7 +113,7 @@ class AppErrorBoundary extends React.Component<
 // breadcrumb header carries a Close affordance; Esc also closes (handled in
 // App's global key handler).
 // The eyebrow names the sidebar step the panel opens from (M2: BUILD, TIME,
-// RUN, RESULTS, STUDIES, REPORTS; the project's own panels say PROJECT).
+// ECONOMICS, RUN, RESULTS, STUDIES, REPORTS; the project's own panels say PROJECT).
 const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   overview:   { eyebrow: 'PROJECT',    title: 'Project info' },
   snapshots:  { eyebrow: 'REPORTS',    title: 'Network snapshots' },
@@ -121,6 +122,7 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   timeseries: { eyebrow: 'TIME',       title: 'Time series' },
   simparams:  { eyebrow: 'RUN',        title: 'Solver settings' },
   horizon:    { eyebrow: 'TIME',       title: 'Model horizon' },
+  economics:  { eyebrow: 'ECONOMICS',  title: 'Economics' },
   capacityBounds: { eyebrow: 'BUILD',  title: 'Capacity bounds' },
   issues:     { eyebrow: 'RUN',        title: 'Issues' },
   results:    { eyebrow: 'RESULTS',    title: 'Results' },
@@ -145,6 +147,7 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'simparams':  return <SolverSettings />
     case 'results':    return <Results />
     case 'horizon':    return <ModelHorizon />
+    case 'economics':  return <EconomicsPanel />
     case 'snapshots':  return <SnapshotsPanel />
     case 'issues':     return <IssuesPanel />
     case 'overview':   return <OverviewPanel />

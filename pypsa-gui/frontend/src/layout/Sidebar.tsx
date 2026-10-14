@@ -1479,7 +1479,7 @@ export default function Sidebar() {
   // Guided (spec §3.5) is a render condition only — `sections` below is untouched.
   const guided = uiMode === 'guided'
   const [sections, setSections] = useState<Record<FlyoutSection, boolean>>({
-    project: true, build: true, time: true, run: true, results: true, studies: true, reports: true,
+    project: true, build: true, time: true, economics: true, run: true, results: true, studies: true, reports: true,
   })
   const [activeFlyout, setActiveFlyout] = useState<FlyoutSection | null>(null)
   const [ioOpen, setIoOpen] = useState(false)

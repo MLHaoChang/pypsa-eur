@@ -48,6 +48,8 @@ function _normalizePanelId(raw: string): string {
     CampusElectrical: 'campusElectrical', campusElectrical: 'campusElectrical',
     // The guided investment study (decision study) slide panel.
     DecisionStudy: 'decision', decision: 'decision',
+    // Economics in Expert: the inputs that decide what the model charges.
+    Economics: 'economics', economics: 'economics',
   }
   return aliases[key] ?? key
 }
@@ -148,6 +150,7 @@ export function applyUiNavigate(d: {
     || panel === 'solveQueue' || panel === 'hubDesign'
     || panel === 'workspace' || panel === 'settings' || panel === 'gridspine'
     || panel === 'reports' || panel === 'campusElectrical' || panel === 'decision'
+    || panel === 'economics'
   ) {
     ui.setSlidePanel(panel as NonNullable<typeof ui.activeSlidePanel>)
   }

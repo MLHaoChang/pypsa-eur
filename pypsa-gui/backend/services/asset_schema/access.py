@@ -76,3 +76,51 @@ def upfront_per_unit(n, component_class: str, *, discount_rate: float | None = N
         parts = upfront_parts(n, component_class, name, discount_rate=discount_rate)
         values[name] = float("nan") if parts is None else sum(p.upfront_per_unit for p in parts)
     return pd.Series(values, dtype=float)
+
+
+#: What one unit of an asset's sizing variable is, per class: the basis of `upfront_per_unit`.
+SIZING = {
+    "Generator": ("p_nom", "MW"),
+    "Link": ("p_nom", "MW"),
+    "StorageUnit": ("p_nom", "MW"),
+    "Store": ("e_nom", "MWh"),
+    "Line": ("s_nom", "MVA"),
+    "Transformer": ("s_nom", "MVA"),
+}
+
+
+def _finite(v: float | None) -> float | None:
+    """JSON has no inf: an infinite value (a lifetime that never ends) is sent as None."""
+    return v if v is not None and math.isfinite(v) else None
+
+
+def asset_cost_rows(n, *, discount_rate: float | None = None, keep=None) -> list[dict]:
+    """Every asset of the investable classes with its upfront parts (Economics in Expert, plan
+    2026-10-14-economics-in-expert.md): one row per asset, `parts` empty when it is not priced. Money is in
+    EUR per unit of the sizing variable (`basis`); `capital_cost` and `fom_cost` are the asset's annual columns
+    as stored (derived where the asset is priced by parts). `keep(component_class, names)` filters the names
+    (the routes drop solver scaffolding)."""
+    out = []
+    for cls, (size_col, basis) in SIZING.items():
+        df = getattr(n, CLASS_ATTR[cls])
+        names = list(df.index)
+        if keep is not None:
+            names = keep(cls, names)
+        for name in names:
+            row = df.loc[name]
+            parts = upfront_parts(n, cls, name, discount_rate=discount_rate) or []
+            per_unit = sum(p.upfront_per_unit for p in parts)
+            size = number(row.get(size_col))
+            out.append({
+                "component": cls, "name": str(name), "carrier": str(row.get("carrier", "") or ""),
+                "basis": f"EUR/{basis}", "size_column": size_col, "size": _finite(size),
+                "extendable": bool(row.get(f"{size_col}_extendable", False)),
+                "parts": [{"name": p.name, "upfront_per_unit": _finite(p.upfront_per_unit),
+                           "lifetime": _finite(p.lifetime), "fom_share": _finite(p.fom_share),
+                           "derived_from_capital_cost": p.derived_from_capital_cost} for p in parts],
+                "upfront_per_unit": _finite(per_unit) if parts else None,
+                "upfront_total": _finite(per_unit * size) if parts and size is not None else None,
+                "capital_cost": _finite(number(row.get("capital_cost"))),
+                "fom_cost": _finite(number(row.get("fom_cost"))),
+            })
+    return out
