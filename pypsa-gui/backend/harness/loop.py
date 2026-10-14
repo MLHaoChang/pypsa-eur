@@ -2330,9 +2330,10 @@ def _dispatch_real_tool_call(
     # Resolve the handler BEFORE the confirmation gate.
     #
     # Scope, stated precisely because the obvious reading is wrong: this does
-    # NOT catch a hallucinated tool name. `_safety_tier_for` returns "read" for
-    # any name absent from `TOOLS`, so an invented name never reaches the
-    # confirmation gate in the first place.
+    # NOT catch a hallucinated tool name: an invented name has no dispatcher
+    # and no catalogue entry, and the offered-tools allowlist refuses it
+    # before this point. (`_safety_tier_for` answers "destructive" for a name
+    # absent from `TOOLS`, so one that did get here would be carded.)
     #
     # What it catches is a tool declared in `chat_tools_schema.TOOLS` with
     # `Safety: destructive` but missing from `DISPATCHERS` — a registration

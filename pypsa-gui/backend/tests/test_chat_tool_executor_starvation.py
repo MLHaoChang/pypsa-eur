@@ -35,6 +35,7 @@ import time
 import pytest
 
 from harness import budget as harness_budget
+from harness import catalogue
 from services import chat_service, chat_tools
 
 
@@ -68,6 +69,19 @@ def saturated_pool():
         release.set()
 
 
+def _probe(monkeypatch, name: str, handler) -> None:
+    """Register a read-tier probe tool: a dispatcher AND its catalogue entry.
+
+    A name absent from the catalogue resolves to the destructive tier and
+    would wait on a confirmation card (tests/test_uncatalogued_tool_tier.py),
+    so the probe is declared like any real tool."""
+    monkeypatch.setitem(chat_tools.DISPATCHERS, name, handler)
+    monkeypatch.setattr(catalogue, "TOOLS", [*catalogue.TOOLS, {
+        "name": name, "description": "Test probe. Safety: read",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    }])
+
+
 def _dispatch(tool_name: str):
     """Drive one tool_use through the real dispatch path; return (frames, results)."""
     collector: list[dict] = []
@@ -92,8 +106,7 @@ def test_a_tool_reported_as_failed_is_never_run_afterwards(
     """
     release, _workers = saturated_pool
     ran: list[int] = []
-    monkeypatch.setitem(chat_tools.DISPATCHERS, "starve_probe",
-                        lambda: (ran.append(1), {"ok": True})[1])
+    _probe(monkeypatch, "starve_probe", lambda: (ran.append(1), {"ok": True})[1])
     monkeypatch.setattr(harness_budget, "PER_TOOL_TIMEOUT_SECONDS", 0.5)
 
     frames, results = _dispatch("starve_probe")
@@ -124,7 +137,7 @@ def test_a_starved_tool_does_not_claim_it_exceeded_a_deadline(
     The operator needs to know the tool pool is full.
     """
     _release, _workers = saturated_pool
-    monkeypatch.setitem(chat_tools.DISPATCHERS, "starve_probe2", lambda: {"ok": True})
+    _probe(monkeypatch, "starve_probe2", lambda: {"ok": True})
     monkeypatch.setattr(harness_budget, "PER_TOOL_TIMEOUT_SECONDS", 0.5)
 
     frames, _results = _dispatch("starve_probe2")
@@ -154,8 +167,7 @@ def test_the_execution_deadline_is_measured_from_the_handler_start(
     budget; if this one ever goes flaky, widen `_BUDGET`, do not delete it.
     """
     release, _workers = saturated_pool
-    monkeypatch.setitem(chat_tools.DISPATCHERS, "slowish_probe",
-                        lambda: (time.sleep(1.2), {"ok": True})[1])
+    _probe(monkeypatch, "slowish_probe", lambda: (time.sleep(1.2), {"ok": True})[1])
     monkeypatch.setattr(harness_budget, "PER_TOOL_TIMEOUT_SECONDS", _BUDGET)
 
     freeing = threading.Timer(1.5, release.set)
