@@ -61,8 +61,9 @@ describe('the Summary tab (M3)', () => {
   it('shows the cost, its split and the new-build capital', async () => {
     renderTab()
     const card = await screen.findByTestId('summary-cost')
-    expect(await within(card).findByText('€10.00 M')).toBeTruthy()
-    expect(within(card).getByText('€9.00 M')).toBeTruthy()
+    // UX overhaul S3b: the headline follows the KPI tile standard (R1).
+    await within(card).findByText('€9.00 M')
+    expect(card.querySelector('[data-kpi-value="€10.0 M"]')).not.toBeNull()
     expect(within(card).getByText('€1.00 M')).toBeTruthy()
     expect(within(card).getByText('€3.00 M')).toBeTruthy()
   })
@@ -70,14 +71,16 @@ describe('the Summary tab (M3)', () => {
   it('shows the emissions and a binding cap with its shadow price', async () => {
     renderTab()
     const card = await screen.findByTestId('summary-emissions')
-    expect(await within(card).findByText('2.50 ktCO₂')).toBeTruthy()
+    await within(card).findByText(/binding/)
+    expect(card.querySelector('[data-kpi-value="2.50 kt CO₂"]')).not.toBeNull()
     expect(within(card).getByText(/binding · €85\.00\/t/)).toBeTruthy()
   })
 
   it('shows unserved energy, its cost at VoLL and the shed hours', async () => {
     renderTab()
     const card = await screen.findByTestId('summary-adequacy')
-    expect(await within(card).findByText('12.00 MWh')).toBeTruthy()
+    await within(card).findByText('€36.00 k')
+    expect(card.querySelector('[data-kpi-value="12.0 MWh"]')).not.toBeNull()
     expect(within(card).getByText('€36.00 k')).toBeTruthy()
     expect(within(card).getByText('4.0')).toBeTruthy()
   })
@@ -125,5 +128,13 @@ describe('the Summary tab (M3)', () => {
     for (const f of [api.getCostBreakdown, api.getEmissions, api.getStatistics, api.getLostLoad]) f.mockResolvedValue(null)
     renderTab()
     expect(await screen.findByTestId('summary-empty')).toBeTruthy()
+  })
+})
+
+describe('the Summary tab follows the tile standard (UX overhaul S3b)', () => {
+  it('titles its cards in sentence case, not forced capitals', async () => {
+    renderTab()
+    const title = await screen.findByText('Cost')
+    expect(title.className).not.toMatch(/uppercase/)
   })
 })

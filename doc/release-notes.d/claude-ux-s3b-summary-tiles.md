@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Results Summary headlines follow the KPI tile standard: rounded figures (€39.8 M, 135 kt CO₂) with the unit kept on the same line, and card titles in sentence case. The detail lines keep full precision.
