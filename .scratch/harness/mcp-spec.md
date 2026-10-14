@@ -408,9 +408,13 @@ Each step is its own PR, in this order (coordinator, 2026-10-14):
    at startup, an `Origin` check, `GET /api/chat/external/pending` and the
    panel's `ExternalAgentStrip`. Calls run through `dispatch_tool_call` with
    `guided=True`, so write and above are carded; the call blocks until the
-   card is answered or lapses. Left for a follow-up: the stdio shim
-   (`pypsa-gui mcp`, which reads the endpoint file so a client need not know
-   the desktop's ephemeral port).
+   card is answered or lapses. Follow-up (2026-10-14): the stdio shim,
+   `pypsa-gui/backend/mcp_stdio.py` (standard library only; reads the
+   endpoint file for every message), and the coordinator's review of #237:
+   the token compared as bytes (a non-ASCII header is a 401, not a 500), at
+   most 8 sessions per user (the oldest idle one evicted, 429 when all are
+   waiting on cards), one call in flight per session (409), and a README note
+   that on Windows the endpoint file relies on the app-data folder's ACL.
 
 ## Out of scope
 

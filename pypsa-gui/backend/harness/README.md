@@ -104,6 +104,28 @@ Borrowed designs (phase 5): `docs/superpowers/assessments/2026-10-06-deepseek-ha
    through `eventlog.apply` (`tests/test_harness_eventlog_truth.py` fails on
    one that does not).
 
+## Local MCP exposure (issue 11)
+
+On the desktop (local mode), an agent on this machine drives the app through
+`POST /api/mcp` (`mcp_server.py`, `routers/mcp.py`). At startup the app writes
+`<app data>/mcp-endpoint.json` with this launch's URL and bearer token. A
+client that speaks Streamable HTTP can use them directly. A stdio client runs
+`python pypsa-gui/backend/mcp_stdio.py`, which reads the file for every message
+and forwards it, so the desktop's per-launch port never has to be configured.
+The frozen desktop bundle deliberately has **no** `pypsa-gui mcp` subcommand
+(owner decision, 2026-10-14): the script stays standalone, and a bundle-only
+user connects an HTTP-capable client with the endpoint file instead.
+
+* Every call goes through `loop.dispatch_tool_call` with write and above
+  carded; the card waits in the panel's external-agent strip.
+* One call at a time per session (a second answers 409, JSON-RPC -32002); at
+  most `MAX_SESSIONS_PER_USER` sessions per user, the oldest idle one evicted
+  for a new one, and 429 when every one is waiting on a card.
+* The token is compared in constant time as bytes; a malformed header is a 401.
+* The endpoint file is written with mode 0600. **On Windows `chmod` does not
+  restrict it**: there it relies on the per-user app-data folder's ACL
+  (`%LOCALAPPDATA%`, readable by the user and administrators only).
+
 ## The harness tools
 
 ### Checked-answer contracts

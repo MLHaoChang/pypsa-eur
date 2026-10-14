@@ -34,3 +34,9 @@ built. Build steps 3 (dispatch extraction) and 4 (local exposure) in the spec.
 `routers/mcp.py`), the endpoint file, the pending-cards route and the panel strip
 (`ExternalAgentStrip`); spec §Build order step 4 lists what is in it. The stdio
 shim is the remaining follow-up.
+
+2026-10-14 (follow-up): the stdio shim `pypsa-gui/backend/mcp_stdio.py` and the
+hardening from the review of #237 (spec §Build order step 4). A shim inside the
+frozen desktop bundle (a `pypsa-gui mcp` subcommand) would be a launcher entry
+point. **Owner decision 2026-10-14: not now.** The standalone script stays as it
+is; do not add a bundle subcommand without a new decision.

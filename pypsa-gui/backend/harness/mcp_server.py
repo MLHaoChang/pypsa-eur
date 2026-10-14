@@ -27,6 +27,7 @@ import json
 import os
 import secrets
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -38,6 +39,16 @@ SESSION_PREFIX = "mcp-"
 SERVER_INFO = {"name": "pypsa-gui", "version": "1"}
 _DESTRUCTIVE = {"destructive", "execution", "execution_long_running"}
 _TOKEN: str | None = None
+# Bounds on what one token holder can tie up: open sessions per user (the
+# oldest idle one is evicted for a new one) and calls in flight per session
+# (a call waiting on a card holds a worker thread for up to its TTL).
+MAX_SESSIONS_PER_USER = 8
+_IN_FLIGHT: set[str] = set()
+_IN_FLIGHT_LOCK = threading.Lock()
+
+
+class SessionCapReached(Exception):
+    """Every one of the user's sessions has a call waiting; none to evict."""
 
 
 # ── the endpoint file ──────────────────────────────────────────────────────
@@ -84,9 +95,13 @@ def write_endpoint_file() -> Path:
 
 
 def token_matches(header: str | None) -> bool:
+    """Constant-time check of `Authorization: Bearer <token>`. Compared as
+    bytes: `compare_digest` raises on a non-ASCII str, which a client must
+    get as a refusal, never as a server error."""
     if not header or not header.startswith("Bearer "):
         return False
-    return secrets.compare_digest(header[len("Bearer "):], token())
+    given = header[len("Bearer "):].encode("utf-8", errors="surrogateescape")
+    return secrets.compare_digest(given, token().encode("ascii"))
 
 
 # ── what is exposed ────────────────────────────────────────────────────────
@@ -113,8 +128,33 @@ def exposed_tools(toolset: str | None = None) -> list[dict[str, Any]]:
 
 # ── sessions ───────────────────────────────────────────────────────────────
 
-def open_session(user_id: str | None, client_name: str | None) -> Any:
+def _user_sessions(user_id: str | None) -> list[Any]:
+    from harness.session import _SESSIONS, _SESSIONS_LOCK
     from services import chat_service
+    with _SESSIONS_LOCK:
+        sessions = [s for sid, s in _SESSIONS.items() if sid.startswith(SESSION_PREFIX)]
+    return [s for s in sessions if chat_service.session_owner_allows(s, user_id)]
+
+
+def _idle(session: Any) -> bool:
+    with session._lock:
+        waiting = bool(session.pending_confirmations)
+    with _IN_FLIGHT_LOCK:
+        running = session.session_id in _IN_FLIGHT
+    return not waiting and not running
+
+
+def open_session(user_id: str | None, client_name: str | None) -> Any:
+    """A new `mcp-` session for this user. At `MAX_SESSIONS_PER_USER` the
+    oldest idle one is closed first; if none is idle, `SessionCapReached`."""
+    from services import chat_service
+    mine = _user_sessions(user_id)
+    while len(mine) >= MAX_SESSIONS_PER_USER:
+        idle = sorted((s for s in mine if _idle(s)), key=lambda s: s.last_activity)
+        if not idle:
+            raise SessionCapReached
+        close_session(idle[0])
+        mine.remove(idle[0])
     sid = SESSION_PREFIX + uuid.uuid4().hex
     session = chat_service.get_or_create_session(sid, owner_user_id=user_id)
     session.mcp_client = (client_name or "MCP client")[:80]
@@ -128,7 +168,22 @@ def find_session(sid: str | None, user_id: str | None) -> Any | None:
     session = chat_service.get_session(sid)
     if session is None or not chat_service.session_owner_allows(session, user_id):
         return None
+    session.last_activity = time.monotonic()
     return session
+
+
+def begin_call(session: Any) -> bool:
+    """Claim the session's one call slot; False when a call is running."""
+    with _IN_FLIGHT_LOCK:
+        if session.session_id in _IN_FLIGHT:
+            return False
+        _IN_FLIGHT.add(session.session_id)
+        return True
+
+
+def end_call(session: Any) -> None:
+    with _IN_FLIGHT_LOCK:
+        _IN_FLIGHT.discard(session.session_id)
 
 
 def close_session(session: Any) -> None:
