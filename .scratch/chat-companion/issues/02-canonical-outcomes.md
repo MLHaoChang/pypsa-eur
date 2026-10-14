@@ -32,6 +32,14 @@ Native Chromium smoke exercises the real dock/ChatPanel, HTTP/SSE/digest handlin
 
 Local full-suite/build, combined CP-01 integration, exact-head remote CI and current-master premerge results are recorded in the publication description and durable validation record. Applicable [ADR-0002 live verification](../../../pypsa-gui/docs/adr/0002-chat-changes-need-a-live-api-probe.md) remains pending without a fresh capped paid-probe authorization. Independent domain review and real-use calibration remain pending by owner choice. No deployment, continuous media, unattended work, new case execution or full-application correctness claim is made.
 
+## Confirmed local publication evidence
+
+Application source `990a989a2a8a507d20511b9ee3e383369845c67b`: final full frontend **5,158 passed / 442 files**, 387.89 seconds, no skips reported. Focused final boundary **141 passed** overlaps that total. Production build passed; inherited bundle warnings remain. Final cache-control smoke passed with actual emitted revalidation headers; no remote HTTP/model calls are permitted by the fixture.
+
+Combined CP-01/CP-02 trial `50c82beefb23962107faab96ba1656cd622f4424`, tree `8ec10cbfab5ef63323cf0f910ad4f63546097777`: **147 focused checks passed**, and both native Chromium workflows passed (closed checked outcomes plus keyboard/touch/reduced-motion companion state). The handoff insertion and dock expectations require normal conflict reconciliation when the two PRs meet; the trial preserved CP-01's media-off expectations and CP-02's canonical-answer expectations. Neither feature branch was rewritten. Combined counts overlap other selections and are not summed. Artifacts: `/tmp/checked-browser-QE4wcB`, `/tmp/companion-browser-zXx871`.
+
+Master advanced to `2d5f512660a3f80f1a336efc9388850bc3f0f50e` with campus-island and non-asset schema work. Owned files do not overlap; project-route changes add a bundled island sidecar, not a changed answer/ownership contract. Recheck actual master immediately before merge. CI/current-master premerge are recorded after PR creation; these local results do not certify a future replacement source or live verification.
+
 ## Next scope
 
 CP-03: one source-bound walkthrough controller with displayed-data acknowledgements, historical source refusal and shared current load-flow UI/API/chat agreement. Activity/native job recovery remains CP-04; real speech and background responsibilities remain later slices.
