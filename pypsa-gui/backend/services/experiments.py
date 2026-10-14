@@ -276,9 +276,17 @@ def _read_record(root, experiment_id, project, owner):
             fields |= {'plan_sha256', 'preflight', 'operations'}
         if set(record) != fields:
             raise ValueError()
+        operations = record.get('operations', [])
+        if operations:
+            reference = {'kind': 'single-network-case-ledger', 'version': 1,
+                         'preflight_sha256': _digest(record.get('preflight'))}
+            if (record.get('version') != contract.VERSION or record.get('domain') != 'network'
+                    or len(record.get('cases', [])) != 1 or not isinstance(operations, list)
+                    or len(operations) != 1 or _digest(operations[0]) != _digest(reference)):
+                raise ValueError()
         if (type(record.get('version')) is not int or record.get('version') not in (1, contract.VERSION)
                 or record['experiment_id'] != experiment_id or record['status'] != 'planned'
-                or record.get('job_ids') or record.get('operations')
+                or record.get('job_ids')
                 or not isinstance(record.get('job_ids', []), list)
                 or not isinstance(record.get('operations', []), list)
                 or not isinstance(record['title'], str) or not 1 <= len(record['title']) <= 120
@@ -361,6 +369,15 @@ def _view(record: dict[str, Any], *, detail: bool = False) -> dict[str, Any]:
         out['cases'] = copy.deepcopy(record.get('cases') or [])
         out['limits'] = copy.deepcopy(record.get('limits') or {})
         out['request_id'] = record.get('request_id')
+    from harness.experiment_execution import describe
+    execution = describe(record)
+    if execution is not None:
+        out.update(status=execution['status'], executed=execution['executed'],
+            execution_available=True, execution=execution, note=execution['note'],
+            job_ids=[execution['job_id']] if execution['job_id'] else [])
+        if detail:
+            out['cases'][0].update(status=execution['status'],
+                job_id=execution['job_id'], run_id=execution['run_id'])
     return out
 
 
@@ -492,6 +509,9 @@ def prepare_experiment(experiment_id: str) -> dict:
         with _LOCK, _transaction(root):
             _load_index(root)
             record = _read_record(root, experiment_id, project, owner)
+            from harness.experiment_execution import _path
+            if record.get('operations') or _path(root, experiment_id).exists():
+                _refuse('experiment_already_armed', 'Inspect the existing execution ledger; preparation cannot replace its frozen inputs.')
             if record['domain'] != 'network':
                 _refuse('experiment_adapter_unavailable', 'This domain has no execution preflight adapter yet.')
             ctx = PyPSAService.get_active_context()

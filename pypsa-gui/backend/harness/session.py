@@ -145,6 +145,8 @@ class ChatSession:
     # Catalogue view; kept separate from project identity and permissions.
     toolset: str = "all"
     task_id: str | None = None
+    experiment_id: str | None = None
+    experiment_project_id: str | None = None
     job_wait_progress: dict[str, Any] | None = None
     # Private turn-local checked-answer state; cleared on every exit.
     assurance_turn: Any | None = None

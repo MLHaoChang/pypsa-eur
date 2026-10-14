@@ -749,7 +749,8 @@ def publish_queue_run(job: Any) -> dict | None:
             root, project_id, run_id=run_id, kind=kind, status=status,
             started_at=(token or {}).get('started_at'),
             mode=kind, job_id=job_id,
-            actor_id=(token or {}).get('actor_id'),
+            actor_id=(token or {}).get('actor_id') or (
+                str(job.enqueued_by_user_id) if getattr(job, 'enqueued_by_user_id', None) is not None else None),
             metrics=metrics, error=error,
             sections={'summary': summary} if status == 'completed' else None,
         )
