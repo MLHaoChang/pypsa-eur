@@ -13,6 +13,10 @@ export interface Carrier {
 export interface Line {
   // Adequacy occurrence attributes (custom GUI columns, spec §5.4).
   // null/NaN = unset → per-carrier library default at analysis time.
+  // S1c-2: the investment typed per MVA and km (GUI columns); the cost columns
+  // are derived from it times the length.
+  inv_per_km_overnight?: number | null
+  inv_per_km_fom_share?: number | null
   outage_rate_value?: number | null
   outage_rate_basis?: 'FOR' | 'EFORd' | null
   mttr_hours?: number | null

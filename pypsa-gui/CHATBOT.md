@@ -165,6 +165,14 @@ What the harness adds to the assistant (all read tier, see the README):
 - **Workflows.** `start_workflow` / `advance_workflow` / `end_workflow` keep
   the session on a step; the step's instructions ride every turn. Guided
   mode's rules are the `hub-design` workflow's preamble.
+- **Goals.** Ask the assistant to keep working toward something and it sets
+  a goal (`set_goal`) with a number of rounds (default 5, at most 20). The
+  goal strip above the composer shows it; after each turn the next round
+  starts on its own, marked "Goal: round n of N" in the chat, until the goal
+  is reached, the rounds run out, or something needs you: a card to approve,
+  a question, an error or a usage limit. Every change still asks you as it
+  does in a normal turn. Pause stops further rounds, Resume (only you can
+  resume) grants fresh rounds and continues, Stop clears the goal.
 - **Choice cards.** `ask_user` renders a question with options and a
   recommendation; your pick is sent as your next message. A card may show
   more context under the question, let you pick several options (tick them,

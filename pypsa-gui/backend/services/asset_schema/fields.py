@@ -11,7 +11,7 @@ Units: `unit_storage` is what the column holds; `unit_display` is what a person 
 shown read-only, never typed: investment is typed only as overnight parts (plan §10).
 
 S1a/S1b cover Generator and StorageUnit; S1c adds Store, Load and Link (single-part classes on PyPSA's own
-columns). Line (its per-km part) and Transformer follow.
+columns), then Line (one part priced per MVA and km, scaled by its length) and Transformer.
 """
 from __future__ import annotations
 
@@ -333,11 +333,91 @@ LINK: tuple[FieldSpec, ...] = (
     *_outages(with_cf_flag=False),
 )
 
+# ── Line (one part priced per MVA and km, S1c-2) ─────────────────────────────
+
+_S_EXT = {"s_nom_extendable": True}
+
+
+def _branch_identity(what: str, carrier_help: str | None, from_label: str, to_label: str) -> tuple[FieldSpec, ...]:
+    """`carrier_help` None: the class has no carrier column (PyPSA's Transformer)."""
+    carrier = (FieldSpec("carrier", "identity", "Carrier", carrier_help, kind="carrier"),) if carrier_help else ()
+    return (
+        FieldSpec("name", "identity", "Name", f"Unique {what} identifier.", kind="text", required=True),
+        *carrier,
+        FieldSpec("bus0", "identity", from_label, "The bus at one end.", kind="bus", required=True),
+        FieldSpec("bus1", "identity", to_label, "The bus at the other end.", kind="bus", required=True),
+    )
+
+
+def _s_nom_bounds(what: str) -> tuple[FieldSpec, ...]:
+    return (
+        FieldSpec("s_nom", "size", "Capacity", f"Apparent-power rating of the {what}. With extendable ticked, the "
+                  "existing capacity the optimiser starts from.", "MVA", "MVA", key_param=True),
+        FieldSpec("s_nom_extendable", "size", "Extendable", "When ticked, the optimiser chooses the capacity "
+                  "between the minimum and maximum and pays the annualised cost for every MVA it adds.",
+                  kind="bool", key_param=True),
+        FieldSpec("s_nom_min", "size", "Minimum capacity", "Lower bound on the optimised capacity.", "MVA", "MVA",
+                  reveal_when=_S_EXT),
+        FieldSpec("s_nom_max", "size", "Maximum capacity", "Upper bound on the optimised capacity. Leave empty "
+                  "for no limit.", "MVA", "MVA", reveal_when=_S_EXT, key_param=True),
+    )
+
+
+def _lifetime(what: str) -> FieldSpec:
+    return FieldSpec("lifetime", "investment", "Lifetime", f"Technical and economic lifetime. The {what} retires "
+                     "after its build year plus lifetime; leave empty for never.", "years", "years", key_param=True)
+
+
+LINE: tuple[FieldSpec, ...] = (
+    *_branch_identity("line", "AC for an AC line. Used for grouping and canvas colours.", "From bus", "To bus"),
+    *_s_nom_bounds("line"),
+    FieldSpec("length", "size", "Length", "Route length. The impedances and the investment are entered per km "
+              "and scale with it.", "km", "km", key_param=True),
+    FieldSpec("inv_per_km_overnight", "investment", "Overnight cost per km", "Upfront cost per MVA of capacity "
+              "and km of route, as catalogues publish it (e.g. HVAC overhead). Times the length, annualised over "
+              "the lifetime at the discount rate.", "EUR/MVA/km", "EUR/MVA/km", key_param=True),
+    _lifetime("line"),
+    *_investment_common(),
+    FieldSpec("capital_cost", "investment", "Capital cost (annualised)", "Derived: overnight cost per km × length "
+              "× annuity(discount rate, lifetime); fixed O&M is charged on top. Per MVA of capacity.",
+              "EUR/MVA/yr", "EUR/MVA/yr", derived=True),
+    _share("inv_per_km_fom_share", "fom", "Fixed O&M", "Fixed operation and maintenance per year, as a share of "
+           "the overnight cost."),
+    FieldSpec("fom_cost", "fom", "Fixed O&M (total)", "Derived: the overnight cost per km × length × the fixed "
+              "O&M share, per MVA of capacity per year.", "EUR/MVA/yr", "EUR/MVA/yr", derived=True),
+    *_outages(with_cf_flag=False),
+)
+
+# ── Transformer (single part, on PyPSA's own columns) ────────────────────────
+
+TRANSFORMER: tuple[FieldSpec, ...] = (
+    *_branch_identity("transformer", None, "HV bus", "LV bus"),
+    *_s_nom_bounds("transformer"),
+    FieldSpec("overnight_cost", "investment", "Overnight cost", "Upfront cost per MVA of rating, as if built at "
+              "once without financing. Annualised over the lifetime at the discount rate.", "EUR/MVA", "EUR/MVA",
+              key_param=True),
+    _lifetime("transformer"),
+    *_investment_common(),
+    FieldSpec("capital_cost", "investment", "Capital cost (annualised)", "Derived: overnight cost × annuity("
+              "discount rate, lifetime); fixed O&M is charged on top. Per MVA of rating.", "EUR/MVA/yr",
+              "EUR/MVA/yr", derived=True),
+    FieldSpec("fom_cost", "fom", "Fixed O&M", "Fixed operation and maintenance per MVA of rating per year.",
+              "EUR/MVA/yr", "EUR/MVA/yr"),
+    FieldSpec("v_nom_0", "performance", "Declared HV voltage", "Nominal voltage of the HV winding. Checked against "
+              "the HV bus.", "kV", "kV"),
+    FieldSpec("v_nom_1", "performance", "Declared LV voltage", "Nominal voltage of the LV winding. Checked against "
+              "the LV bus.", "kV", "kV"),
+    FieldSpec("r", "performance", "Resistance", "Series resistance in per unit of the rating.", "pu", "pu"),
+    FieldSpec("x", "performance", "Reactance", "Series reactance in per unit of the rating.", "pu", "pu"),
+    FieldSpec("tap_ratio", "performance", "Tap ratio", "Off-nominal turns ratio (1 = nominal)."),
+    FieldSpec("phase_shift", "performance", "Phase shift", "Phase shift between the windings.", "°", "°"),
+)
+
 # What an emptied input saves (S1b). `clear` sends null: an Optional column, or a bound the write model turns
 # into +inf ("no limit", "never retires"). Costs save 0, a deliberate "free". Everything else keeps its value:
 # a blank capacity or efficiency is a slip, not a decision.
 _ZERO = {"marginal_cost", "fom_cost", "curtailment_cost", "start_up_cost", "shut_down_cost"}
-_CLEAR = {"p_nom_max", "e_nom_max", "lifetime", "overnight_cost", "discount_rate", "ramp_limit_up",
+_CLEAR = {"p_nom_max", "e_nom_max", "s_nom_max", "v_nom_0", "v_nom_1", "lifetime", "overnight_cost", "discount_rate", "ramp_limit_up",
           "ramp_limit_down", "e_sum_min", "e_sum_max",
           "outage_rate_value", "outage_rate_basis", "mttr_hours", "p_max_pu_includes_outages"}
 
@@ -355,6 +435,8 @@ _BY_CLASS: dict[str, tuple[FieldSpec, ...]] = {
     "Store": _with_blank("Store", STORE),
     "Load": _with_blank("Load", LOAD),
     "Link": _with_blank("Link", LINK),
+    "Line": _with_blank("Line", LINE),
+    "Transformer": _with_blank("Transformer", TRANSFORMER),
 }
 
 

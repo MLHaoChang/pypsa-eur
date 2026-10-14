@@ -365,6 +365,29 @@ export interface WorkflowState {
   step_count: number
 }
 
+// ── The session's goal with a round budget (chat harness issue 17) ──────────
+//
+// `goal_state` arrives after set_goal / pause_goal / complete_goal, before
+// each unattended round and when the server pauses or blocks the goal;
+// `GET /chat/history` carries the same shape. Only a person resumes a paused
+// or blocked goal (`postChatGoal`).
+export type GoalPhase = 'active' | 'paused' | 'blocked' | 'complete'
+export interface GoalState {
+  objective: string
+  max_rounds: number
+  rounds_used: number
+  phase: GoalPhase
+  reason: string | null
+}
+
+export async function postChatGoal(
+  sessionId: string,
+  action: 'pause' | 'resume' | 'stop',
+): Promise<{ ok: boolean; goal?: GoalState | null; reason?: string }> {
+  const r = await client.post(`/chat/${sessionId}/goal`, { action })
+  return r.data
+}
+
 // ── U-1 — supplying the Anthropic API key from inside the app ──────────────
 //
 // The packaged app ships no `backend/.env` (it would carry a real key and the
@@ -453,6 +476,8 @@ export interface ChatHistory {
   last_session_id: string | null
   /** The bound session's workflow step (chat harness issue 06), or null. */
   workflow?: WorkflowState | null
+  /** The bound session's goal (chat harness issue 17), or null. */
+  goal?: GoalState | null
   bound_project: string | null
   // How many on-disk records were unreadable. Non-zero means `turns` is
   // INCOMPLETE — say so rather than rendering a quietly shorter conversation.

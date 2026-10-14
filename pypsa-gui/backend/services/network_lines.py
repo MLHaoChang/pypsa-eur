@@ -13,6 +13,7 @@ from services.network_geometry import (
     _impedance_preview,
     _line_haversine_km,
 )
+from services.network_crud import rederive_scaled_parts
 from services.pypsa_service import PyPSAService
 
 
@@ -44,6 +45,7 @@ def apply_recalculate_line_lengths() -> dict:
             old_length = float(n.lines.at[line_name, "length"])
             old = {k: float(n.lines.at[line_name, k]) for k in _IMPEDANCE_FIELDS}
             n.lines.at[line_name, "length"] = float(d_km)
+            rederive_scaled_parts(n, "Line", line_name)     # a per-km cost follows the length (S1c-2)
             updated += 1
             p = _impedance_preview(str(line_name), old_length, float(d_km), old)
             if p is not None:

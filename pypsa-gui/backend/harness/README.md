@@ -40,6 +40,7 @@ harness/
   approvals.py    every card's asked/decided record per owner and session; an approval that cannot be recorded does not run
   eventlog.py     the session event log: every model-visible input, append-only per owner and session; derive_messages, fork, torn-tail repair (shadow mode: chat.jsonl and the WAL unchanged)
   replay.py       fork a recorded session before one turn and run that turn again on another provider (smoke/replay_session.py)
+  goals.py        a goal with a round budget: set/pause/complete, what stops it after a turn, the per-turn goal block (rounds run in loop.run_turn)
   ratelimit.py    the /stream token bucket
   sse.py          the SSE framing of a yielded (event, payload)
   fence.py        the untrusted-content delimiters and the neutraliser
@@ -187,6 +188,18 @@ checked turn, never for a tool with its own `offset`/`page`/`cursor`, whose
 cut names that argument instead; a control tool, so every toolset view and
 the OpenAI tool selection keep it). `use_toolset` changes the session's
 catalogue view for the next model request, including within the same turn.
+`set_goal`, `pause_goal`, `complete_goal` (issue 17) keep a goal with a round
+budget on the session (default 5, ceiling 20); after a turn, `run_turn` runs
+the next round itself on the same stream, as the user message `Continue toward
+the goal (round n of N).` admitted through utterance admission (a queued
+correction goes first). It stops when the turn showed a Choice card (the
+user's answer is the next turn, then rounds go on), a declined or lapsed card
+(paused), an error, a budget refusal, a task step needing review, a changed
+admission generation or a checked turn (blocked), or when the rounds are used
+up (paused). Only a person resumes, at `POST /api/chat/{id}/goal`, with fresh
+rounds. `goal_state` frames carry it to the panel's goal strip, before the
+`error` or `session_done` that closes the stream; the event log has
+`goal/set`, `goal/round` and `goal/phase`.
 These controls do not change project access or confirmation rules.
 
 The workflow helpers in `services/workflow_tools.py` reuse existing services:

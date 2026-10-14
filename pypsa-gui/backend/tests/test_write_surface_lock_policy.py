@@ -237,6 +237,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/chat/{session_id}/confirm"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/rewind"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/abort"): (CHAT_SESSION, _R_CHAT_OWNED),
+    ("POST", "/api/chat/{session_id}/goal"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/import"): (CHAT_SESSION, _R_CHAT_HISTORY),
     ("POST", "/api/chat/skills/reload"): (NOT_PROJECT_DATA, _R_SKILL_REGISTRY),
     ("POST", "/api/durable-conversations"): (CHAT_SESSION, _R_DURABLE_THREAD),

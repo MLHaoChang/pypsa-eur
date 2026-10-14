@@ -210,6 +210,10 @@ def _recompute_lengths_for_bus(
             old_length = float(df.at[name, "length"])
             old = {k: float(df.at[name, k]) for k in _IMPEDANCE_FIELDS} if kind == "line" else None
             df.at[name, "length"] = float(d)
+            if kind == "line":
+                # A per-km cost follows the length (S1c-2). Lazy: network_crud imports this module.
+                from services.network_crud import rederive_scaled_parts
+                rederive_scaled_parts(n, "Line", name)
             updated += 1
             sources[key] = source
             if old is not None:

@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 238,
+  "tool_count": 241,
   "tools": [
     {
       "name": "list_components",
@@ -3239,6 +3239,69 @@
       "required": [],
       "safety_tier": "read",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_goal",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "objective",
+        "max_rounds"
+      ],
+      "required": [
+        "objective"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "49238031919745be891bb751357085dfadebade0736747a984f51a4335dd9128",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "pause_goal",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "reason"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "9b949e9b326ef176a205c24085457fde4099e5f7ac60917503f35f36b01e4bc4",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "complete_goal",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "summary"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "a5d009f89fcf54f9cb28622db5d5c68f4adbf32f3ecb55cadf340d7dc506b96d",
       "behavioral_fixture": "pending"
     },
     {

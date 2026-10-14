@@ -46,7 +46,8 @@ def upfront_parts(n, component_class: str, name: str, *,
             if overnight is None:
                 continue
             scale = float(row.get(spec.scale_by, 1.0)) if spec.scale_by else 1.0
-            out.append(UpfrontPart(spec.name, overnight * scale, number(row.get(spec.column("lifetime"))),
+            life = row.get(spec.column("lifetime")) if spec.own_lifetime else row.get("lifetime")
+            out.append(UpfrontPart(spec.name, overnight * scale, number(life),
                                    number(row.get(spec.column("fom_share")))))
         return out
     lifetime = number(row.get("lifetime"))

@@ -55,6 +55,11 @@ FRAME_PAYLOADS: dict[str, tuple[str, ...]] = {
     # After start_workflow / advance_workflow / end_workflow: the session's
     # workflow step for the panel's strip, or `workflow: null`.
     "workflow_state": ("workflow",),
+    # Issue 17: the session's goal for the panel's goal strip, or `goal:
+    # null`. After set_goal / pause_goal / complete_goal, before each round,
+    # and when the loop pauses or blocks the goal (before an `error` frame,
+    # since the panel closes the stream on it).
+    "goal_state": ("goal",),
 }
 
 FRAMES: frozenset[str] = frozenset(FRAME_PAYLOADS)
