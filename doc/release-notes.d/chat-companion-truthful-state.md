@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Label the companion's typed interaction "Chat here", expose actual response and decision status without simulated listening or speaking, and explain that continuous voice is unavailable while preserving reviewed dictation. Keep controls visible without hover and fit in-page chat to narrow screens.

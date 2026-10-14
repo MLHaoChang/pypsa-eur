@@ -9,6 +9,12 @@ no live-voice production code implemented.
 Development requires the [phased test-first contract](test-plan.md); record red,
 green and regression evidence in the [continuation handoff](session-handoff.md).
 
+2026-10-14 extension: the owner accepted the Dots assessment and requested a
+[companion implementation specification](../chat-companion/spec.md) and
+[ordered implementation plan](../../docs/superpowers/plans/2026-10-14-chat-companion-implementation.md).
+Use those for truthful UI, Activity, bounded follow-through, voice and opt-ins;
+existing whole-application and hosted Live release gates still apply.
+
 ## Goal
 
 A user can explicitly start a continuous spoken conversation, interrupt speech,
