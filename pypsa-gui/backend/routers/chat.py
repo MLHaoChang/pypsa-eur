@@ -1009,7 +1009,7 @@ def chat_history(limit: int = 200,
                     # A stream can start after this GET minted its session.
                     fresh_and_idle = not sess.messages and sess.turns_started == 0
                     if not sess._turn_in_flight and (not session_was_freshly_minted or fresh_and_idle):
-                        sess.messages.clear()
+                        sess.reset_history()
                         for rec in turns:
                             # Display only: an interrupted turn's assistant half
                             # is what the user saw, not provider messages, and

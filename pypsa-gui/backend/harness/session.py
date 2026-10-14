@@ -250,7 +250,21 @@ class ChatSession:
         if sanitised is None:
             return
         self.messages.append(sanitised)
+        # Issue 13: model-visible means logged, as stored here and with the
+        # trim that follows, so the log replays this deque exactly.
+        from harness import eventlog, history as _history
+        eventlog.message(self, sanitised)
+        limit = _history.SESSION_MESSAGES_MAX
+        if len(self.messages) > limit:
+            eventlog.record(self, "history/trim", limit=limit)
         trim_session_messages(self.messages)
+
+    def reset_history(self) -> None:
+        """Empty the provider history (the `/history` rehydration replays
+        chat.jsonl into it next), and log that it did (issue 13)."""
+        self.messages.clear()
+        from harness import eventlog
+        eventlog.record(self, "history/reset")
 
     # ── Confirmation lifecycle (F13 + v4-MINOR-3) ──────────────────────────
     def issue_confirmation(

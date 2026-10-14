@@ -97,3 +97,37 @@ break:
 - `tests/fixtures` holds no recorded sessions: record a corpus first, as the
   identity test's input.
 - A fork must not inherit assurance checkpoints, approvals or task tickets.
+
+2026-10-14 (part a, shadow mode): `harness/eventlog.py` writes
+`<app data>/chat-events/<sha(owner)>/<sha(session)>.jsonl` beside today's path
+(0700/0600, fsynced under `durable.transaction`, swept after 30 days): a
+header (`format`, `session_id`, `owner_user_id`, `parent`,
+`inherited_event_count`), then `turn/start {user, model}` (written at once,
+the WAL's job), `user/message | assistant/attempt | tool/result {message}` from
+`append_history_message` (after sanitising and a checked turn's
+replacement), `context/injected {kind: ui_context | workflow_step |
+checked_request, text}`, `history/trim {limit}`, `history/rewind {turns}`
+(`history.cut_turns`, shared with `rewind_session`), `history/reset` (the
+`/history` rehydration now calls `ChatSession.reset_history()`), and
+`turn/end {reason, usage}` with one fsync for the turn's batch. Redacted
+before the write; a failure is logged and never costs the turn.
+`derive_messages(events)` equals `session.messages` (the seed of the next
+provider request) for plain, tool, trimmed, rewound and rehydrated sessions.
+`read_events(path, repair=True)` closes a torn tail (a `tool/result`
+interrupted per unanswered call, `turn/end {interrupted}`) as an appended
+batch. `fork(path, at_seq)` names the parent and the inherited prefix in its
+header (shared, not copied) and carries only the owner and the history.
+`harness/replay.py` + `smoke/replay_session.py --events --at --profile`
+fork before a turn and run it again on a profile (its model, bound to it),
+printing both trajectories. Not changed (part b): chat.jsonl, the pending-turn WAL and the
+loop's provider input; `tool/call` is not a separate event (the tool_use
+blocks are in `assistant/attempt`); `approval/*` stay in issue 18's log.
+Tests: tests/test_harness_eventlog.py (16), tests/test_harness_replay.py (7),
+red first. `interrupted` classified `inline` in tool-error-kinds.json (the
+closer's literal; never on a live frame). W2 recorded on the stub (battery
+5/5) and replayed from its log on the stub (identical) and on live
+`anthropic-sonnet` (completed, the orient step taken on its own): see
+`docs/superpowers/runbooks/harness-parity-probe.md`. The first replay found
+the fork asking for a placeholder model with no profile; fixed and pinned.
+Gate: the chat regression in three shards, 3670 passed, 5 skipped, 1 failed
+(the manifest, now classified and passing). Part b (the switch-over) is a separate PR.

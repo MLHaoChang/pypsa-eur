@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The in-app assistant keeps a per-chat event log of everything the model saw (messages, per-turn context, history trims and rewinds), so a conversation can be rebuilt exactly, forked before any turn and replayed on another model (`pypsa-gui/backend/smoke/replay_session.py`). It runs beside the existing chat history and changes nothing users see yet.
