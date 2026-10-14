@@ -7,9 +7,10 @@ different lifetimes, which PyPSA cannot hold in one `overnight_cost`, so each pa
 (same mechanism as `outage_rate_value`: a column on the component frame, round-tripped through netCDF) and the
 annual `capital_cost` is derived from them (`derive`).
 
-Today the only composite class is the StorageUnit battery: a power part (inverter, per MW) and an energy part
-(storage block, per MWh, scaled by `max_hours` to a per-MW figure). HVDC links and Store + Link batteries follow
-in a later step (plan §10 S4).
+The StorageUnit battery has a power part (inverter, per MW) and an energy part (storage block, per MWh, scaled by
+`max_hours` to a per-MW figure). A Line has one part, priced per MVA and km and scaled by `length` (S1c-2): its
+cost per MVA follows every change of length, and it takes the line's own `lifetime`. HVDC links and Store + Link batteries follow in a later step
+(plan §10 S4).
 """
 from __future__ import annotations
 
@@ -25,18 +26,32 @@ class PartSpec:
     name: str
     basis: str            # what one unit of `overnight` buys: "per_MW", "per_MWh", ...
     prefix: str           # custom column prefix, e.g. "inv_power" -> inv_power_overnight
-    scale_by: str | None  # component column that turns this part into "per unit of p_nom" (max_hours for energy)
+    scale_by: str | None  # component column that turns this part into "per unit of the sizing variable"
+                          # (max_hours for a battery's energy part, length for a line)
     display_unit: str     # what catalogues publish and the UI shows
     stored_unit: str      # what the column holds
+    # False: the part has no lifetime column of its own and takes the asset's `lifetime` (a line's only part,
+    # so an unpriced existing line keeps its typed lifetime).
+    own_lifetime: bool = True
 
     def column(self, field: str) -> str:
         return f"{self.prefix}_{field}"
+
+    @property
+    def fields(self) -> tuple[str, ...]:
+        """The `PART_FIELDS` this part stores in its own columns."""
+        return PART_FIELDS if self.own_lifetime else tuple(f for f in PART_FIELDS if f != "lifetime")
 
 
 COMPOSITE: dict[str, tuple[PartSpec, ...]] = {
     "StorageUnit": (
         PartSpec("power", "per_MW", "inv_power", None, "EUR/kW", "EUR/MW"),
         PartSpec("energy", "per_MWh", "inv_energy", "max_hours", "EUR/kWh", "EUR/MWh"),
+    ),
+    # Catalogues publish line costs per MVA and km (PyPSA-Eur: "HVAC overhead", EUR/MW/km), so the display unit
+    # is the stored one.
+    "Line": (
+        PartSpec("per_km", "per_MVA_km", "inv_per_km", "length", "EUR/MVA/km", "EUR/MVA/km", own_lifetime=False),
     ),
 }
 
@@ -57,4 +72,4 @@ def composite_parts(component_class: str) -> tuple[PartSpec, ...]:
 
 def part_columns(component_class: str) -> list[str]:
     """Every custom column a composite class stores its parts in."""
-    return [p.column(f) for p in composite_parts(component_class) for f in PART_FIELDS]
+    return [p.column(f) for p in composite_parts(component_class) for f in p.fields]

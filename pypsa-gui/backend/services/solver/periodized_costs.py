@@ -212,7 +212,7 @@ def fill_periodized_cost_defaults(
     # Composite assets (a battery's power and energy parts): re-derive the annual `capital_cost` with the
     # discount rate in force, BEFORE the horizon scaling below scales it like any typed `capital_cost`.
     # Lazy import: `asset_schema` imports `_annuity` from this module.
-    from services.asset_schema.derive import derive_composite, effective_discount_rate, has_parts
+    from services.asset_schema.derive import derive_composite, effective_discount_rate, has_parts, part_scales
     from services.asset_schema.schema import CLASS_ATTR, COMPOSITE
 
     for comp_class in COMPOSITE:
@@ -228,7 +228,8 @@ def fill_periodized_cost_defaults(
             row = df.loc[name]
             rate = effective_discount_rate(row.get("discount_rate"), cfg.discount_rate)
             df.at[name, "capital_cost"] = derive_composite(
-                comp_class, row, max_hours=float(row.get("max_hours", 1.0)), discount_rate=rate,
+                comp_class, row, scales=part_scales(comp_class, row), discount_rate=rate,
+                asset_lifetime=row.get("lifetime"),
             )["capital_cost"]
         undo.append((CLASS_ATTR[comp_class], "capital_cost", idx, original))
 
