@@ -607,7 +607,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
         >
           <div ref={economicsRef}>
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={economicsBars} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <BarChart data={economicsBars} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="period" {...CHART_AXIS} />
                 <YAxis {...CHART_AXIS} tickFormatter={(v: number) => fmtCurrency(v, 0)} />
@@ -661,7 +661,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
         >
           <div ref={generationRef}>
             <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={generationRows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <BarChart data={generationRows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="period" {...CHART_AXIS} />
                 <YAxis {...CHART_AXIS}
@@ -704,7 +704,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
         >
           <div ref={storageRef}>
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={storageBars.rows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <BarChart data={storageBars.rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="period" {...CHART_AXIS} />
                 <YAxis {...CHART_AXIS} tickFormatter={(v: number) => fmtEnergy(v, 0)} />
@@ -762,7 +762,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
         >
           <div ref={curtailmentRef}>
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={curtailmentBars.rows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <BarChart data={curtailmentBars.rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="period" {...CHART_AXIS} />
                 <YAxis {...CHART_AXIS} tickFormatter={(v: number) => fmtEnergy(v, 0)} />
@@ -798,7 +798,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
         >
           <div ref={loadRef}>
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={loadByCarrier.rows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <BarChart data={loadByCarrier.rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="period" {...CHART_AXIS} />
                 <YAxis {...CHART_AXIS} tickFormatter={(v: number) => fmtEnergy(v, 0)} />

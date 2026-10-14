@@ -1577,7 +1577,7 @@ export default function Dispatch() {
           </p>
           <div ref={durationChartRef}>
             <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={durationCurves.rows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <AreaChart data={durationCurves.rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="ldc-load-grad" x1="0" x2="0" y1="0" y2="1">
                     <stop offset="0%" stopColor="#6b7280" stopOpacity={0.22} />
@@ -1591,7 +1591,7 @@ export default function Dispatch() {
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="pct" type="number" domain={[0, 100]}
                   tickFormatter={(v: number) => `${v.toFixed(0)} %`} {...CHART_AXIS} />
-                <YAxis {...CHART_AXIS} tickFormatter={(v: number) => fmtPower(v, 1)} label={yAxisLabel('MW')} />
+                <YAxis {...CHART_AXIS} width={64} tickFormatter={(v: number) => fmtPower(v, 1)} label={yAxisLabel('MW')} />
                 <RTooltip {...CHART_TOOLTIP}
                   labelFormatter={(v: number) => `${Number(v).toFixed(1)} % of hours`}
                   formatter={(v: number, n: string) => [fmtPower(v), n === 'residual' ? 'Residual load' : 'Load']} />
@@ -2087,7 +2087,7 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
           ) : (
             <ResponsiveContainer width="100%" height={full ? 320 : 190}>
               <ComposedChart data={rows} stackOffset="sign"
-                margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="bucket" {...CHART_AXIS}
                   interval={23} tickFormatter={tickFmt} />
@@ -3118,7 +3118,7 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
           <div ref={mainChartRef}>
             {perAsset && perAssetView ? (
               <ResponsiveContainer width="100%" height={180}>
-                <LineChart data={perAssetView.rows} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                <LineChart data={perAssetView.rows} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                   <YAxis {...CHART_AXIS}
@@ -3135,7 +3135,7 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
             ) : (
               <ResponsiveContainer width="100%" height={140}>
                 {isStorage ? (
-                  <LineChart data={aggView ?? agg} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                  <LineChart data={aggView ?? agg} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid {...CHART_GRID} />
                     <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                     <YAxis {...CHART_AXIS}
@@ -3145,7 +3145,7 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
                     <Line type="monotone" dataKey="value" stroke={style.color} strokeWidth={1.6} dot={false} />
                   </LineChart>
                 ) : (
-                  <AreaChart data={aggView ?? agg} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                  <AreaChart data={aggView ?? agg} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid {...CHART_GRID} />
                     <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                     <YAxis {...CHART_AXIS} label={yAxisLabel(yUnit)} />
@@ -3187,7 +3187,7 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
               </div>
               <div ref={curtailChartRef}>
                 <ResponsiveContainer width="100%" height={120}>
-                  <AreaChart data={curtailmentSeries} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                  <AreaChart data={curtailmentSeries} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid {...CHART_GRID} />
                     <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                     <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
@@ -3230,7 +3230,7 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
               </div>
               <div ref={lostLoadChartRef}>
                 <ResponsiveContainer width="100%" height={120}>
-                  <AreaChart data={lostLoadSeries} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                  <AreaChart data={lostLoadSeries} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid {...CHART_GRID} />
                     <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                     <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
@@ -3612,7 +3612,7 @@ function FullLoadHoursSection(props: {
         </header>
         <div className="p-3">
           <ResponsiveContainer width="100%" height={220}>
-            <ComposedChart data={categoryStats} margin={{ top: 4, right: 12, left: 0, bottom: 4 }}>
+            <ComposedChart data={categoryStats} margin={{ top: 18, right: 12, left: 0, bottom: 4 }}>
               <CartesianGrid {...CHART_GRID} />
               <XAxis dataKey="category" {...CHART_AXIS} interval={0}
                 angle={categoryStats.length > 5 ? -15 : 0}

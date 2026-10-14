@@ -377,7 +377,7 @@ export default function Prices() {
               <ResponsiveContainer width="100%" height={200}>
                 <LineChart
                   data={priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows}
-                  margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+                  margin={{ top: 18, right: 8, left: 0, bottom: 0 }}
                 >
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
@@ -430,7 +430,7 @@ export default function Prices() {
         >
           <div ref={durationChartRef}>
             <ResponsiveContainer width="100%" height={180}>
-              <AreaChart data={durationCurve} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <AreaChart data={durationCurve} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="price-duration-grad" x1="0" x2="0" y1="0" y2="1">
                     <stop offset="0%" stopColor="#0369a1" stopOpacity={0.28} />

@@ -780,7 +780,7 @@ export default function Economics() {
         >
           <div ref={profitChartRef}>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={profitChartData} margin={{ top: 5, right: 20, left: 30, bottom: 60 }}>
+              <BarChart data={profitChartData} margin={{ top: 18, right: 20, left: 30, bottom: 60 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="name" {...CHART_AXIS} angle={-30} textAnchor="end" height={80} interval={0} />
                 <YAxis {...CHART_AXIS} label={yAxisLabel('€')}
@@ -810,7 +810,7 @@ export default function Economics() {
         >
           <div ref={lcoeChartRef}>
             <ResponsiveContainer width="100%" height={Math.max(300, lcoeChartData.length * 22)}>
-              <BarChart data={lcoeChartData} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}>
+              <BarChart data={lcoeChartData} layout="vertical" margin={{ top: 18, right: 30, left: 100, bottom: 5 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis type="number" {...CHART_AXIS} label={yAxisLabel('€/MWh')} />
                 <YAxis dataKey="name" type="category" width={150}
