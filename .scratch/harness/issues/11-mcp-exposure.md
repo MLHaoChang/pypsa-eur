@@ -1,8 +1,8 @@
 # 11 — Expose the harness catalogue to external agents over MCP
 
-Status: needs-info (owner decision Q8, laid out as four options in `../mcp-spec.md` §B.4)
+Status: ready-for-agent (Q8 decided 2026-10-14: option 2, `../mcp-spec.md` Part B; starts after its blockers)
 Type: research
-Blocked by: 08
+Blocked by: 08 (done), issue 19's client core, the dispatch extraction (`../mcp-spec.md` §Build order, step 3)
 
 Question: should Claude Code, Codex CLI, Kimi or other agents drive a running
 pypsa-gui through the same catalogue? If yes: an MCP server in
@@ -23,3 +23,9 @@ What blocks exposure, from the code:
 
 Q8 is reopened on the draft as four scopes. The recommendation is read-only, on
 this machine only.
+
+2026-10-14 (decision): Q8 is option 2. The full catalogue is exposed on this
+machine only (desktop/local mode). Every write shows its card in the app's chat
+panel (gate g2, 300 s TTL), and an external agent's calls are carded at `write`
+and above in every mode. Web deployments are out, so no personal-token model is
+built. Build steps 3 (dispatch extraction) and 4 (local exposure) in the spec.
