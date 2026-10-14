@@ -9,6 +9,7 @@ technical_name, help, unit), so S2's guided ledger is a projection of it.
 from __future__ import annotations
 
 import json
+import pathlib
 import math
 
 import pypsa
@@ -38,6 +39,7 @@ CARD_KEYS = {
         "committable", "ramp_limit_up", "ramp_limit_down", "start_up_cost", "shut_down_cost",
         "min_up_time", "min_down_time",
         "outage_rate_value", "outage_rate_basis", "mttr_hours", "p_max_pu_includes_outages",
+        "control", "e_sum_min", "e_sum_max",
     },
     "StorageUnit": {
         "name", "carrier", "bus", "p_nom", "max_hours", "p_nom_extendable", "p_nom_min",
@@ -163,3 +165,58 @@ def test_route_unknown_class_is_400_and_lists_known(client, install_network):
     r = client.get(f"{ROUTE}/Widget")
     assert r.status_code == 400
     assert "StorageUnit" in r.json()["detail"]
+
+
+# ── S1b: what a blank field means on save ────────────────────────────────────
+
+@pytest.mark.parametrize("component", ["Generator", "StorageUnit"])
+def test_blank_policy_agrees_with_the_write_model(component):
+    """`clear` sends null, so the write model must accept None (an Optional
+    field, or a bound that coerces None to inf). `zero` and `keep` fields
+    must not be Optional: a blank there would otherwise be ambiguous."""
+    from models.schemas import GeneratorCreate, StorageUnitCreate
+
+    model = {"Generator": GeneratorCreate, "StorageUnit": StorageUnitCreate}[component]
+    for f in F.fields_for(component):
+        if f.derived or f.key not in model.model_fields:
+            continue
+        assert f.blank in ("clear", "zero", "keep"), (f.key, f.blank)
+        accepts_none = True
+        try:
+            model.model_validate({"name": "x", "bus": "b", f.key: None})
+        except Exception:  # noqa: BLE001 — pydantic.ValidationError
+            accepts_none = False
+        if f.blank == "clear":
+            assert accepts_none, f"{component}.{f.key} is 'clear' but the model refuses None"
+
+
+def test_costs_blank_to_zero_and_bounds_clear():
+    g = _fields("Generator")
+    for k in ("marginal_cost", "fom_cost", "curtailment_cost", "start_up_cost", "shut_down_cost"):
+        assert g[k].blank == "zero", k
+    for k in ("p_nom_max", "lifetime", "overnight_cost", "discount_rate", "outage_rate_value", "mttr_hours",
+              "e_sum_min", "e_sum_max"):
+        assert g[k].blank == "clear", k
+    su = _fields("StorageUnit")
+    for k in ("inv_power_overnight", "inv_energy_overnight", "inv_power_lifetime", "inv_energy_fom_share"):
+        assert su[k].blank == "clear", k
+    assert su["p_nom"].blank == "keep"
+
+
+# ── the frontend's copy of the descriptors (S1b) ─────────────────────────────
+
+FRONTEND_FIXTURE = (pathlib.Path(__file__).resolve().parents[2]
+                    / "frontend" / "src" / "test" / "fixtures" / "assetSchema.json")
+
+
+def fixture_payload() -> dict:
+    return {c: F.schema_payload(c) for c in F.known_components()}
+
+
+def test_the_frontend_fixture_matches_the_descriptors():
+    """The cards' tests render from `assetSchema.json`. Regenerate it after a
+    descriptor change with:
+    `python -c "import json,tests.test_asset_schema_fields as t;
+    t.FRONTEND_FIXTURE.write_text(json.dumps(t.fixture_payload(), indent=1, ensure_ascii=False) + chr(10))"`
+    run from pypsa-gui/backend."""
+    assert json.loads(FRONTEND_FIXTURE.read_text(encoding="utf-8")) == fixture_payload()

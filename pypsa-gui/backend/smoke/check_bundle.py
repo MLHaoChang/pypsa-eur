@@ -200,6 +200,7 @@ ROOTED = (
     # manifest per vendored version.
     "services/library/defaults_pack/versions/2026-10-05/manifest.json",
     "services/library/defaults_pack/versions/2026-10-07/manifest.json",
+    "services/library/defaults_pack/versions/2026-10-13/manifest.json",
 )
 
 

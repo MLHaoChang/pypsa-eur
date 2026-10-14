@@ -9,7 +9,8 @@
 #   scripts/coord/premerge.sh <pr-number>
 #
 # Exits non-zero on a conflict, a code-file overlap with master, or a failing
-# semantic test on the trial merge. Docs-only overlap is reported, not fatal.
+# semantic test on the trial merge. Docs-only overlap and files identical on
+# both sides are reported, not fatal.
 #
 # Environment:
 #   PREMERGE_REMOTE  remote to fetch from (default: origin)
@@ -80,7 +81,12 @@ if [[ -z $overlap ]]; then
   echo "none"
 else
   while IFS= read -r f; do
-    if [[ $f =~ $docs_only_re ]]; then
+    # Same blob on both sides (e.g. a cherry-pick master already has), or
+    # deleted on both: nothing to reconcile.
+    if [[ $(git rev-parse -q --verify "$master:$f" || true) == \
+      "$(git rev-parse -q --verify "$head:$f" || true)" ]]; then
+      echo "  identical  $f"
+    elif [[ $f =~ $docs_only_re ]]; then
       echo "  docs-only  $f"
     else
       echo "  code       $f"

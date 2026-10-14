@@ -10,13 +10,13 @@ One PR per item unless two are trivially small. The owner, or the gatekeeper on 
 
 | # | Item | Retires | Status |
 |---|---|---|---|
-| 1 | `series_store.delete_series` / `pinned_by` (+ `list_series`) in the facade; the study deletes through them | C3e (3 `ALLOWED_EXCEPTIONS`) | #173 |
-| 2 | Per-part `finance.case.scale_capex(case, f, *, asset=, part=)`; U2 switches; tornado figures pinned | the C5 "Per-part CAPEX bounds" workaround | #174 |
-| 3 | Freeze every engine field the study reads (`test_engine_facade_frozen.py`) | the WP7 freeze, N15 and Q15 exceptions | this PR (stacked on #173) |
-| 4 | Unrounded FOM / CAPEX / OPEX statistics | the `fom_rounded_by_pypsa_statistics` rows of `tests/fixtures/u2_deltas.json` | #175 |
-| 5 | A public "record a solve" helper | `tests/study_s4_support.record_engine_solve` writing `lp_bindings` internals | #176 |
-| 6 | A hand-typed price on a grid Link the tariff also prices: warn, show both, numbers unchanged | | #177 |
-| 7 | S3 seeds: templates and Energy Hub placeholders from the generic defaults pack (before U4) | hard-coded template costs | owner questions Q1/Q2 sent 2026-10-13 |
+| 1 | `series_store.delete_series` / `pinned_by` (+ `list_series`) in the facade; the study deletes through them | C3e (3 `ALLOWED_EXCEPTIONS`) | #173 (merged) |
+| 2 | Per-part `finance.case.scale_capex(case, f, *, asset=, part=)`; U2 switches; tornado figures pinned | the C5 "Per-part CAPEX bounds" workaround | #174 (merged) |
+| 3 | Freeze every engine field the study reads (`test_engine_facade_frozen.py`) | the WP7 freeze, N15 and Q15 exceptions | #178 (merged with #174) |
+| 4 | Unrounded FOM / CAPEX / OPEX statistics | the `fom_rounded_by_pypsa_statistics` rows of `tests/fixtures/u2_deltas.json` | #175 (merged) |
+| 5 | A public "record a solve" helper | `tests/study_s4_support.record_engine_solve` writing `lp_bindings` internals | #176 (merged) |
+| 6 | A hand-typed price on a grid Link the tariff also prices: warn, show both, numbers unchanged | | #177 (merged) |
+| 7 | S3 seeds: templates and Energy Hub placeholders from the generic defaults pack (before U4) | hard-coded template costs | this PR (findings `2026-10-13-ic-s3-seeds.md`) |
 
 ## 1. `delete_series` / `pinned_by`
 
@@ -81,7 +81,7 @@ a real solve of the same dispatch, a binding ratchet and demand tiers included.
 A preflight warning per metered Link with its own non-zero `marginal_cost` that the tariff also prices per MWh,
 naming both prices and their sum. Numbers unchanged.
 
-## 7. S3 seeds: open owner questions
+## 7. S3 seeds (owner answers 2026-10-13: Q1 a, Q2 a; see the findings note)
 
 Pack-derived (7 %, technology-data v0.14.0) vs today's literals, €/MW/yr: gas genset 60.2k / 62k, diesel 50.6k /
 45k, onwind 128.3k / 120k, utility PV 48.1k / 45k, BESS 2h 63.8k / 48k, BESS 4h 96.3k / 48k, fuel cell 283k / 90k.

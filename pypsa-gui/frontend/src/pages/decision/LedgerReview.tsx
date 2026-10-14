@@ -11,7 +11,7 @@
 import { useMemo, useState } from 'react'
 import type { LedgerPayload, LedgerRow, StudyError, StudyIntake, TornadoRow } from '../../api/decisionStudies'
 import {
-  LEDGER_STATUS_LABELS, PROVENANCE_LABELS, ROW_MEANING, TESTED_RANGE_LABELS, helpFor, needsAttentionReason,
+  CHANGED_IN_EXPERT_LABEL, LEDGER_STATUS_LABELS, PROVENANCE_LABELS, ROW_MEANING, TESTED_RANGE_LABELS, helpFor, needsAttentionReason,
 } from '../../utils/decisionVocabulary'
 import { isMoneyUnit, isPvRowUnused, ledgerCurrencyYearLabel, parseNeedsAttention } from './decisionModel'
 import { Button, Card, Chip, Refusal } from './DecisionUi'
@@ -61,6 +61,12 @@ function Row({ r, intake, attention, onSave, onReset, saving, tested }: {
         </span>
         <span className="text-[10.5px] text-muted">{PROVENANCE_LABELS[r.provenance]}</span>
         {r.sensitivity_flag && <span className="text-[10.5px] text-accent">matters most</span>}
+        {/* U3 rule 5: a value an Expert changed on an option fork. */}
+        {r.changed_by === 'expert' && (
+          <span data-testid="ledger-changed-in-expert" className="text-[10.5px] text-warn">
+            {CHANGED_IN_EXPERT_LABEL}
+          </span>
+        )}
       </div>
       {r.technical_name && <span className="font-mono text-[10px] text-muted">{r.technical_name}</span>}
       {meaning && <p className="text-[11.5px] text-muted">{meaning}</p>}
