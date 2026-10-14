@@ -100,11 +100,11 @@ def test_the_bridge_and_the_planned_ramp_are_summarised(tmp_path):
     run = write_run(tmp_path / "run", campus_spec(scenarios=("ups_bridged", "planned")))
     summary = D.island_frequency_campus(run)
     bridge = pd.read_csv(run / D.FREQ_BRIDGE_CSV)
-    assert bridge["ups"].tolist() == ["UPS1"] and bridge["it_mw"].tolist() == [20.0]     # I3a's, not the draw
+    assert bridge["unit"].tolist() == ["UPS1"] and bridge["it_mw"].tolist() == [20.0]     # I3a's, not the draw
     assert summary["bridge_failing_hours"] == [[2030, 0]]               # 1 MWh at 20 MW: 180 s against 600 s
     assert pd.read_csv(run / D.FREQ_PLANNED_CSV)["feasible"].tolist() == [True]
     assert summary["planned_infeasible_hours"] == []
-    assert not summary["every_hour_e1"] and (run / D.FREQ_E1_HOURLY_CSV).read_text() == ""
+    assert not summary["every_hour_e1"] and pd.read_csv(run / D.FREQ_E1_HOURLY_CSV).empty
 
 
 def test_a_planned_islanding_the_units_cannot_cover_is_summarised(tmp_path):
@@ -119,15 +119,28 @@ def test_a_gfm_bridge_row_without_its_stored_energy_is_not_a_failure(tmp_path):
     run = write_run(tmp_path / "run", campus_spec(), genset_online=0.0)
     summary = D.island_frequency_campus(run, every_hour=False)
     bridge = pd.read_csv(run / D.FREQ_BRIDGE_CSV)
-    assert bridge["unit"].tolist() == ["BESS1"] and bridge["ok"].isna().all()
+    assert bridge["unit"].tolist() == ["BESS1"] and bridge["kind"].tolist() == ["gfm"] and bridge["ok"].isna().all()
     assert summary["bridge_failing_hours"] == []
+
+
+@pytest.mark.parametrize("scenarios", [("seamless",), ("ups_bridged", "planned")])
+def test_every_table_carries_its_fixed_columns_whatever_ran(tmp_path, scenarios):
+    from gridspine.static import frequency as F
+
+    run = write_run(tmp_path / "run", campus_spec(scenarios=scenarios))
+    summary = D.island_frequency_campus(run)
+    for name, cols in ((D.FREQ_E1_HOURLY_CSV, F.E1_HOURLY_COLUMNS), (D.FREQ_EVENTS_CSV, F.EVENT_COLUMNS),
+                       (D.FREQ_LOSSES_CSV, F.LOSSES_COLUMNS), (D.FREQ_BRIDGE_CSV, F.BRIDGE_COLUMNS),
+                       (D.FREQ_PLANNED_CSV, F.PLANNED_COLUMNS), (D.FREQ_UPS_CSV, F.UPS_COLUMNS)):
+        assert tuple(pd.read_csv(run / name).columns) == cols, name
+    assert tuple(summary) == D.FREQ_SUMMARY_KEYS
 
 
 def test_the_every_hour_e1_can_be_skipped(tmp_path):
     run = write_run(tmp_path / "run", campus_spec())
     summary = D.island_frequency_campus(run, every_hour=False)
     assert not summary["every_hour_e1"] and summary["e1_failing_hours"] == []
-    assert (run / D.FREQ_E1_HOURLY_CSV).read_text() == ""
+    assert pd.read_csv(run / D.FREQ_E1_HOURLY_CSV).empty
 
 
 def test_the_frequency_check_needs_the_requirements_and_the_island_tables(tmp_path):

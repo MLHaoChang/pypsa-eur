@@ -2156,9 +2156,16 @@ in additive functions, on a ranked run.
   - **Writes:**
     - `campus_freq_e1_hourly.csv`, `campus_freq_events.csv`,
       `campus_freq_losses.csv`, `campus_freq_bridge.csv`,
-      `campus_freq_planned.csv` and `campus_freq_ups.csv`, an empty file
-      where a table has nothing;
+      `campus_freq_planned.csv` and `campus_freq_ups.csv`;
     - `campus_freq_summary.json`.
+  - **Fixed columns.** Each table carries its fixed columns whatever
+    events ran, header only where it has nothing, so I9b reads one shape.
+    The columns are `frequency.E1_HOURLY_COLUMNS`, `EVENT_COLUMNS`,
+    `LOSSES_COLUMNS`, `BRIDGE_COLUMNS`, `PLANNED_COLUMNS` and
+    `UPS_COLUMNS`; the summary's keys are
+    `campus_study.FREQ_SUMMARY_KEYS`.
+  - **The bridge table** holds E4's UPS rows (`kind` `ups`) and the GFM
+    rows until the gensets join (`kind` `gfm`), under one `unit` column.
   - **The summary** holds:
     - the label, the ledger and the scenarios;
     - the island hours;
@@ -2173,7 +2180,7 @@ in additive functions, on a ranked run.
   `<campus>_p<period>_h<hour>` and carries the frequency ledger in its
   README. A missing hour is refused.
 
-**Tests:** 10 in `tests/gridspine/test_campus_island_frequency_driver.py`,
+**Tests:** 12 in `tests/gridspine/test_campus_island_frequency_driver.py`,
 on a run directory written by hand:
 - the island hours;
 - the sweep at every hour against the events at the island hours only;
@@ -2182,6 +2189,8 @@ on a run directory written by hand:
 - an infeasible planned islanding;
 - a GFM bridge row without e(t−1) not counted;
 - skipping the sweep;
+- every table's fixed columns and the summary keys, under both scenario
+  sets;
 - both refusals;
 - the bundles per island hour, given hours, and a missing hour.
 

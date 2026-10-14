@@ -211,6 +211,10 @@ FREQ_PLANNED_CSV = "campus_freq_planned.csv"
 FREQ_UPS_CSV = "campus_freq_ups.csv"
 FREQ_SUMMARY_JSON = "campus_freq_summary.json"
 PSSE_DIR = "psse"
+#: The keys of ``campus_freq_summary.json``, in order (plan I6c).
+FREQ_SUMMARY_KEYS = ("label", "ledger", "scenarios", "island_hours", "every_hour_e1", "failing_hours",
+                     "bridge_failing_hours", "planned_infeasible_hours", "e1_failing_hours",
+                     "e1_failing_not_selected")
 MILP_HISTORY_CSV = "campus_milp_history.csv"
 MILP_COMPARISON_CSV = "campus_milp_comparison.csv"
 METHODS = ("least_cost", "milp")
@@ -373,8 +377,6 @@ def island_hours(run_dir) -> list:
     return [(int(r["period"]), int(r["hour"])) for _, r in sel.iterrows() if island & set(r["reasons"])]
 
 
-def _frame_csv(df: pd.DataFrame) -> str:
-    return df.to_csv(index=False) if len(df.columns) else ""
 
 
 def island_frequency_campus(run_dir, every_hour: bool = True) -> dict:
@@ -397,11 +399,11 @@ def island_frequency_campus(run_dir, every_hour: bool = True) -> dict:
     hours = island_hours(run_dir)
     scenarios = campus.island["requirements"]["scenarios"]
     sweep = (F.e1_every_hour(campus, hourly, hourly_island, unit)
-             if every_hour and "seamless" in scenarios else pd.DataFrame())
+             if every_hour and "seamless" in scenarios else pd.DataFrame(columns=list(F.E1_HOURLY_COLUMNS)))
     study = F.campus_frequency_study(campus, hourly, hours, island_unit_hourly=unit)
     for name, df in ((FREQ_E1_HOURLY_CSV, sweep), (FREQ_EVENTS_CSV, study.events), (FREQ_LOSSES_CSV, study.losses),
                      (FREQ_BRIDGE_CSV, study.bridge), (FREQ_PLANNED_CSV, study.planned), (FREQ_UPS_CSV, study.ups)):
-        _write_text_atomic(run_dir / name, _frame_csv(df))
+        _write_text_atomic(run_dir / name, df.to_csv(index=False))
 
     def failing(df):
         if df.empty:
