@@ -1,4 +1,5 @@
-"""Bounded workflow helpers over the existing project, solve and study services.
+"""
+Bounded workflow helpers over the existing project, solve and study services.
 
 No model calls, alternate queue, or confirmation bypass lives here. The sweep
 creates saved child projects in isolated contexts; it never activates them.
@@ -386,7 +387,40 @@ class SensitivityCase(BaseModel):
     changes: list[SensitivityChange] = Field(min_length=1, max_length=20)
 
 
-def _network_input_fingerprint(ctx):
+def _exact_frame_json(frame):
+    """Encode typed input values without pandas' JSON float rounding."""
+    from datetime import date, datetime
+    import pandas as pd
+
+    def scalar(value):
+        if value is None or value is pd.NA or value is pd.NaT:
+            return ['missing']
+        if isinstance(value, tuple):
+            return ['tuple', [scalar(item) for item in value]]
+        if isinstance(value, (datetime, date)):
+            return ['datetime', value.isoformat()]
+        if hasattr(value, 'item'):
+            value = value.item()
+        if isinstance(value, bool):
+            return ['bool', value]
+        if isinstance(value, int):
+            return ['int', str(value)]
+        if isinstance(value, float):
+            return ['float', value.hex()]
+        if isinstance(value, str):
+            return ['str', value]
+        _refuse('input_capture_unavailable', 'An input has an unsupported scalar type; exact preflight is unavailable.', 409)
+
+    return json.dumps({'columns': [scalar(v) for v in frame.columns.tolist()],
+        'index': [scalar(v) for v in frame.index.tolist()],
+        'index_names': [scalar(v) for v in frame.index.names],
+        'dtypes': [str(v) for v in frame.dtypes],
+        'values_by_column': [[scalar(v) for v in frame.iloc[:, position].tolist()]
+                             for position in range(len(frame.columns))]},
+        sort_keys=True, allow_nan=False)
+
+
+def _network_input_fingerprint(ctx, *, exact=False):
     """Hash model inputs, excluding solver outputs so a solve can be reused."""
     # PyPSA assigns a slack control while solving. Canonicalise controls on a
     # private copy, retaining user PV/slack choices, rather than mistaking the
@@ -395,17 +429,29 @@ def _network_input_fingerprint(ctx):
     n.determine_network_topology()
     for subnet in n.sub_networks.obj:
         subnet.find_bus_controls()
-    parts = [n.snapshots.to_series().to_json(date_format="iso"), n.snapshot_weightings.to_json(),
-             n.investment_period_weightings.to_json(),
-             json.dumps(asdict(ctx.solver_state["solver_config"]), sort_keys=True, default=str)]
+    def encode(frame):
+        return _exact_frame_json(frame) if exact else frame.to_json(date_format="iso")
+
+    if exact:
+        parts = ['exact-network-input/1', encode(n.snapshots.to_series().to_frame()),
+                 encode(n.snapshot_weightings), encode(n.investment_period_weightings)]
+    else:
+        # Preserve existing run/chart/cache identities byte-for-byte.
+        parts = [n.snapshots.to_series().to_json(date_format="iso"), n.snapshot_weightings.to_json(),
+                 n.investment_period_weightings.to_json()]
+    parts.append(json.dumps(asdict(ctx.solver_state["solver_config"]), sort_keys=True, default=str))
     for component in n.components:
         defaults = component.defaults
         columns = [name for name in defaults.index if "Input" in str(defaults.at[name, "status"]) and name in component.static.columns]
-        parts.append(component.static[columns].to_json())
+        if exact:
+            parts.append(str(component.name))
+            parts.append(_exact_frame_json(defaults.loc[columns, ['type', 'unit', 'status']]))
+        parts.append(_exact_frame_json(component.static[columns]) if exact else component.static[columns].to_json())
         for name in sorted(component.dynamic):
             if name in defaults.index and "Input" in str(defaults.at[name, "status"]):
-                parts.append(component.dynamic[name].to_json(date_format="iso"))
-    parts.extend(str(key) + series.to_json(date_format="iso") for key, series in sorted(ctx.user_ts.items()))
+                parts.append(encode(component.dynamic[name]))
+    parts.extend(str(key) + (encode(series.to_frame()) if exact else series.to_json(date_format="iso"))
+                 for key, series in sorted(ctx.user_ts.items()))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 

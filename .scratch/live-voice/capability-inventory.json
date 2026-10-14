@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 240,
+  "tool_count": 241,
   "tools": [
     {
       "name": "list_components",
@@ -5110,7 +5110,29 @@
         "request_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "d45a684b4a5d122878af81db42a3256450f391da06ae29ad1695d8208bfb9c59",
+      "schema_sha256": "b45737e812c528e106c8ca96fa9a50417263e72f7653bf516ec5569f30178525",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "prepare_experiment",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "experiment_id"
+      ],
+      "required": [
+        "experiment_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "add7aa39807e1175fd337d20587108cc688fda582690e35ca067c2eb5b731000",
       "behavioral_fixture": "pending"
     },
     {

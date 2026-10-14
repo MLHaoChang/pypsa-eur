@@ -271,6 +271,12 @@ TOOL_POLICY: dict[str, tuple[str, str]] = {
         "onto the network and changes no project input."
     )),
     "start_experiment": (CHAT_SESSION, _R_EXPERIMENT_PLAN),
+    "prepare_experiment": (CHAT_SESSION, (
+        "validates an owner-scoped experiment plan on private network copies "
+        "and records input/evidence fingerprints in `experiments/`. It "
+        "executes no case, changes no live network or solver config, and "
+        "grants no permission to dispatch a later effect."
+    )),
     "gridspine_set_dispatch_source": (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),
     "gridspine_update_config": (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),
     "gridspine_run_pipeline": (STUDY_NOT_LOCK_COORDINATED, _R_STUDY),

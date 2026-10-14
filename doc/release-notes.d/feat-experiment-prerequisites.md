@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Add bounded experiment planning caps and network preflight through the shared chat harness. Validate actual target schemas/units and private candidates, bind authorized baseline evidence and exact input digests, reject corrupt checkpoints and conflicting request retries, and preserve legacy reads. Preparation never starts cases or grants execution authority.
