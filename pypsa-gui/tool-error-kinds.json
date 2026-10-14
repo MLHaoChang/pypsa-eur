@@ -683,6 +683,10 @@
       "surface": "inline",
       "why": "GET /api/chat/{id}/progress refuses a negative cursor query; route-only, never a tool completion failure."
     },
+    "invalid_component_name": {
+      "surface": "inline",
+      "why": "A create, rename or import named a component with control, format or line-separator characters, an empty name, or one over 256 characters (OPEN-ITEMS item 8). Refused before anything changes; the message says which character, so the agent can pick another name."
+    },
     "task_checkpoint_failed": {
       "surface": "banner",
       "why": "Durable task progress could not be saved, so the user must inspect task state before retrying any potentially effectful operation."
