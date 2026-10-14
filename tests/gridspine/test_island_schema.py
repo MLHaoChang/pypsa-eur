@@ -221,10 +221,17 @@ def test_a_ups_needs_the_loads_it_protects_and_flags_are_booleans():
 
 def test_sidecar_only_fields_are_refused_in_a_campus_block():
     spec = genset()
-    spec["unit_mw"] = t(10.0)
+    spec["xd_pp"] = t(0.12)
     validate_unit_island("g", "genset", spec, sidecar=True)
-    with pytest.raises(ContractError, match="unit_mw"):
+    with pytest.raises(ContractError, match="xd_pp"):
         validate_unit_island("g", "genset", spec)
+
+
+def test_a_campus_genset_may_carry_its_unit_size_for_n_plus_k():
+    spec = {**genset(), "unit_mw": t(5.0, "datasheet")}
+    for sidecar in (False, True):
+        out = validate_unit_island("g", "genset", spec, sidecar=sidecar)
+        assert out["values"]["unit_mw"] == 5.0 and out["sources"]["unit_mw"] == "datasheet"
 
 
 # ── requirements ───────────────────────────────────────────────────────────

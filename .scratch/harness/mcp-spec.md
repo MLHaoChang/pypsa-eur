@@ -1,8 +1,11 @@
 # MCP — the harness as a client (issue 19) and as a server (issue 11)
 
-Status: draft for the owner, 2026-10-14. A document only: nothing here is built.
-Issues: `issues/19-mcp-client.md` (Q18 decided its defaults), `issues/11-mcp-exposure.md`
-(Q8 is open; §B.4 lays it out as choices).
+Status: decided 2026-10-14. The owner answered Q8 (option 2: the full catalogue,
+this machine only, every write carded in the app) and Q20 (external tools always
+ask), and kept the defaults below. Step 1 of the build order is merged (PR #220);
+the rest is not built yet.
+Issues: `issues/19-mcp-client.md` (Part A), `issues/11-mcp-exposure.md` (Part B).
+Build order: §Build order at the end.
 Builds on: spec §8 Q8 ("later, own spec"), §9 Q18 (admin only, zero servers by
 default, write tier unless the server marks a tool read-only, descriptions capped,
 results fenced), the harness contract (`pypsa-gui/backend/harness/README.md`).
@@ -20,7 +23,7 @@ Facts the design depends on, with the places they live:
 |---|---|---|
 | No MCP code or dependency anywhere; `mcp` is not installed and not in `gui-requirements.txt` or `pypsa-gui.spec` | — | A new pinned dependency, a measured `hiddenimports` entry, `smoke/check_bundle.py` |
 | Tools are the static module list `catalogue.TOOLS` (244), each with a `DISPATCHERS` entry and a `TOOL_ROUTES` entry; parity tests pin `len(TOOLS) == len(DISPATCHERS)` | `harness/catalogue.py`, `services/chat_tools.py` | External tools must NOT enter `TOOLS`; they need a per-session list beside it |
-| The tier is the `Safety: <tier>` text; an unknown or unmarked tool resolves to `read` (no card), documented as fail-open and kept safe only by a test over `TOOLS` | `confirm._safety_tier_for`, `catalogue.safety_tier_for` | An external tool looked up there would run **unconfirmed**. The external tier lookup must come first and fail closed |
+| The tier is the `Safety: <tier>` text. A name absent from `TOOLS` resolved to `read` (no card) until PR #220; it now resolves to `destructive` (a card in Expert and Guided). A declared tool without a marker still resolves to `read`, kept from existing by a test over `TOOLS` | `confirm._safety_tier_for`, `catalogue.safety_tier_for` | An external tool missing from the session's list is carded, never run unconfirmed. Its real tier still comes from the session's list, looked up first |
 | The tools payload is built per turn from `TOOLS` (`_tools_payload`, then `filter_tools`, then the 128-tool cut for `api.openai.com`); dispatch refuses a name not in the payload sent (`tool_not_offered`) | `providers/wiring.py`, `loop.py` | Adding the session's external tools to the payload is enough for the allowlist to cover them |
 | Checked mode's `tool_guard` fails closed for any tool it does not map | `assurance.py` | External tools are refused in checked turns with no change |
 | The card blocks the tool thread on a `threading.Event` released only by `POST /api/chat/{id}/confirm` from the session's owner; TTL 300 s; the token travels only in the SSE frame | `confirm.py`, `session.py`, `routers/chat.py` | Exposure (B) has no SSE consumer: the gate needs a new answer path |
@@ -117,10 +120,17 @@ Each server tool becomes one session-scoped entry, shaped like a `TOOLS` entry:
 | tier | `write` by default. Lowered to `read` only when the server sets `annotations.readOnlyHint: true` and `destructiveHint` is not true. Raised to `destructive` when `destructiveHint: true`. The admin's `tiers` override may raise any tool further, never lower it. |
 
 The tier for an external tool is looked up in the session's external list
-**before** `confirm._safety_tier_for`, and a name that matches the `mcp__`
-prefix but is not in the list resolves to `write`. This is the one change to
-the fail-open default: it applies only to `mcp__` names, so no built-in tool
-changes behaviour.
+**before** `confirm._safety_tier_for`. A name absent from that list falls
+through to `confirm._safety_tier_for`, which answers `destructive` for any name
+not in `TOOLS` (PR #220, build step 1), so it is carded in every mode.
+
+**External tools always ask (owner decision Q20, 2026-10-14).** In Expert, only
+the destructive tiers get a card (`confirm._confirm_tiers`); `write` is carded
+only in Guided. So that a third-party server's tools are confirmed by default,
+the gate cards an external tool whose tier is not `read` in Expert and Guided
+alike: `tier in _confirm_tiers(guided) or (external and tier != "read")`.
+Built-in tools are unchanged. A tool the server marks `readOnlyHint` runs
+without a card, as a built-in read does.
 
 ### A.4 Where it plugs in
 
@@ -133,7 +143,7 @@ changes behaviour.
 | Checked mode | unchanged: `tool_guard` refuses them (`capability_unsupported`) |
 | Project lock | `tool_edits_network` is false for every external tool; they are not lock-gated. `ROUTE_POLICY` gains one class, `EXTERNAL_MCP`, asserted for the sentinel |
 | Inventory | unchanged: runtime tools never enter `TOOLS`; the inventory sees only the new sentinel |
-| Card | `tool_pending_confirmation` keeps its name; its payload gains `external: {server}` so the panel can label the card "External tool from …". The args are shown as for any tool |
+| Card | The gate's condition gains `or (external and tier != "read")` (Q20, A.3). `tool_pending_confirmation` keeps its name; its payload gains `external: {server}` so the panel can label the card "External tool from …". The args are shown as for any tool |
 | Approvals | `approval/asked` records the full `mcp__…` name, as today |
 
 ### A.5 Results
@@ -188,8 +198,13 @@ records what the model was offered.
   - config validation and the env allowlist (the child sees no provider key);
   - the name and description shaping (cap, forged `Safety:` removed, delimiter
     neutralised);
-  - tier mapping, including the "`mcp__` unknown → write" rule;
-  - a write tool gets a card, a read-only one does not;
+  - tier mapping: `readOnlyHint` → read, `destructiveHint` → destructive,
+    otherwise write; admin overrides only raise;
+  - an `mcp__` name missing from the session's list is carded (it resolves
+    through the PR #220 fallback);
+  - a non-read-only external tool gets a card in **Expert and Guided** (Q20); a
+    `readOnlyHint` tool gets none; a built-in `write` tool still gets a card in
+    Guided only;
   - results fenced and spilled;
   - each error kind;
   - an abort sends a cancellation;
@@ -198,8 +213,8 @@ records what the model was offered.
   - checked mode refuses.
 - **Parity battery**: `smoke/run_chat_smoke.py --workflow` gains a stub stdio MCP
   server (`smoke/mcp_stub_server.py`) with one read tool and one write tool. The
-  probe asserts the read call runs without a card and the write call shows one,
-  on each wire.
+  probe asserts the read call runs without a card and the write call shows one
+  in Expert, on each wire.
 - **Frontend**: the settings section and the card's "External tool" label.
 
 ### A.9 Slices
@@ -214,7 +229,9 @@ records what the model was offered.
 ## Part B — exposure (issue 11), and Q8
 
 An external agent (Claude Code, Codex CLI, a Kimi agent) drives a running pypsa-gui
-through the same catalogue. **Whether, and how far, is Q8.**
+through the same catalogue. **Q8, decided 2026-10-14: option 2**, the full
+catalogue on this machine only (desktop/local mode), every write carded in the
+app's chat panel (gate g2), no web deployments and so no personal-token model.
 
 ### B.1 What exposure needs, whatever the scope
 
@@ -238,8 +255,8 @@ through the same catalogue. **Whether, and how far, is Q8.**
   - never `_UI_EVENT` tools (there is no panel stream to drive);
   - `read_result` stays, so oversized results remain reachable.
 - **Annotations**: `readOnlyHint` for `read`, `destructiveHint` for the
-  destructive tiers. A `?toolset=<domain>` query narrows the 244-tool list for
-  clients that load all tools up front.
+  destructive tiers. A `?toolset=<domain>` query narrows the full list (247
+  tools on 2026-10-14) for clients that load all tools up front.
 - **External tools are not re-exported**: tools that came from A's servers are
   never exposed again.
 - **Budgets**: the session and daily budgets do not apply (no model runs here),
@@ -248,9 +265,9 @@ through the same catalogue. **Whether, and how far, is Q8.**
 ### B.2 The two hard parts
 
 - **Authentication.** Web mode has cookie sessions only.
-  - An external agent needs a credential it can hold, which means a new
-    personal-token model: create, list, revoke and expire; stored as a hash like
-    sessions; bound to one user and their org; shown once.
+  - An external agent there would need a credential it can hold, which means a
+    new personal-token model. Q8 option 2 leaves web deployments out, so this
+    is **not built**: `/api/mcp` answers 404 unless local mode is on.
   - Desktop mode has no auth at all. A per-launch random token written to
     `<app data>/mcp-endpoint.json` (0600, with the ephemeral port) gives the
     endpoint more protection than the rest of the loopback API has today, at no
@@ -266,13 +283,27 @@ through the same catalogue. **Whether, and how far, is Q8.**
     approval outside pypsa-gui, which the card rule (contract rule 6) does not
     allow, so this spec does not propose it.
 
+  **Q8 chose g2.** How the card reaches the panel: the external agent's
+  session (`mcp-<random>`) is owned by the local user, and its pending cards
+  are listed by `GET /api/chat/external/pending` (the panel polls it, or it
+  rides the app's existing event stream if one is open). The panel shows them
+  in a strip whichever chat is open, labelled with the client's name, and
+  answers through the existing `POST /api/chat/{session_id}/confirm`. The MCP
+  call waits on the same event with the same 300 s TTL; a lapse is
+  `confirmation_expired`, returned to the agent as a tool error.
+
 ### B.3 What exposure does not change
 
-The tiers, the Guided write rule, auto-approve (destructive tiers only, never
-`write`), the parallel-destructive refusal, the project lock, the approvals
-record. An exposed write is exactly as guarded as an in-app one.
+The tiers, auto-approve (destructive tiers only, never `write`), the
+parallel-destructive refusal, the project lock, the approvals record. One
+thing is stricter: an external agent's calls are carded at `write` and above
+in every mode (the owner's "every write shows its card"), as in Guided, so an
+exposed write is at least as guarded as an in-app one.
 
 ### B.4 Q8 — External agents over MCP: how far?
+
+➡️ **Decided 2026-10-14: option 2** (full catalogue, this machine only). The
+options as they were asked:
 
 ❓ **Q8 (reopened on this draft)**: Q8 said "later, own spec". This is the spec.
 Which scope should exposure have?
@@ -312,15 +343,14 @@ Which scope should exposure have?
    - **Consequence**: nothing new to build or secure; external agents keep
      having no supported way in.
 
-Part A does not depend on the answer: the client can go ahead on Q18's defaults
-whichever option is picked, and B.1's dispatch extraction is shared work only
-for options 2 and 3.
+Part A did not depend on the answer. With option 2, B.1's dispatch extraction
+is needed and comes before the exposure itself (§Build order).
 
 ---
 
-## Defaults this draft takes (say if any is wrong)
+## Defaults inside Q18 (kept by the owner, 2026-10-14)
 
-These are engineering choices inside Q18, not owner questions:
+Engineering choices the draft took; the owner did not overrule any:
 
 - "admin" is read as **super-admin**, the install-level role that owns the LLM
   keys;
@@ -333,10 +363,30 @@ These are engineering choices inside Q18, not owner questions:
   unsupported;
 - the SDK is preferred over a hand-written client.
 
+## Build order
+
+Each step is its own PR, in this order (coordinator, 2026-10-14):
+
+1. **The tier fallback** (done, PR #220): a name absent from `TOOLS` resolves
+   to `destructive` in `confirm._safety_tier_for` and
+   `catalogue.safety_tier_for`, so an undeclared handler is carded in every
+   mode.
+2. **The client core** (Part A slice 1, issue 19): `harness/mcp_client.py`, the
+   config file, the payload, dispatch and tier seams, the Q20 gate condition,
+   results, error kinds, the `mcp/catalogue` event, the stub server. The
+   settings routes and panel (slice 2) follow as their own PR.
+3. **The dispatch extraction** (B.1): the loop's per-call path (allowlist →
+   `tool_guard` → validators → card → handler) becomes one function the loop
+   calls, with no behaviour change, pinned by the existing dispatch tests.
+4. **Local exposure** (Part B, issue 11): `harness/mcp_server.py` at
+   `/api/mcp` in local mode only, the per-launch token, the stdio shim, the
+   panel strip for external cards (g2), write-and-above carded in every mode.
+
 ## Out of scope
 
 - MCP servers declared by a project or a bundle.
 - Per-user (non-admin) servers.
 - A server's prompts or resources entering the prompt.
 - Re-exporting external tools.
+- Exposure on web deployments, and a personal API-token model (Q8 option 2).
 - Any change to a built-in tool's tier, route or semantics.

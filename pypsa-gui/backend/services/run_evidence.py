@@ -17,6 +17,8 @@ newest run. The model supplies run ids and section names only — never paths.
 
 Authority is the active project resolved through the project ACL on every read
 (``_authority``), the same pattern as ``assistant_tasks`` / ``durable_conversation``.
+A background publish (study watcher, report job) writes only into the project
+bound when its run STARTED (the start token); it never resolves one late.
 ``compare_project_runs`` computes deltas in software from recorded metrics only.
 Two runs are comparable only when both completed, share a mode, and share an input
 fingerprint (or the caller opts in with ``allow_input_changes``); otherwise the
@@ -796,17 +798,9 @@ def publish_study_run(study_key: str, record: dict) -> dict | None:
             return None
         token = record.get('_run_evidence')
         if not token:
-            # Late publish without a start marker — still attempt under authority.
-            try:
-                root, project_id, owner = _authority()
-            except HTTPException:
-                return None
-            token = {
-                'root': root, 'project_id': project_id, 'actor_id': owner,
-                'run_id': study_run_id(study_key),
-                'kind': _STUDY_KIND.get(study_key, study_key),
-                'started_at': _now(),
-            }
+            # No start marker: no project was bound when the study began. Never
+            # resolve one now; that names whichever project is active at finish.
+            return None
         summary = {
             'study_key': study_key,
             'status': record.get('status'),
@@ -841,8 +835,15 @@ def publish_study_run(study_key: str, record: dict) -> dict | None:
 
 
 def watch_study_run(study_key: str, record: dict) -> None:
-    """Daemon: wait until ``record['status']`` is terminal, then publish."""
-    start_study_run(study_key, record)
+    """
+    Daemon: wait until ``record['status']`` is terminal, then publish.
+
+    The run's project is bound HERE, from the request that started the study
+    (``start_study_run``'s token), and the publish writes only there. With no
+    project at start there is nothing to publish into, so no watcher starts.
+    """
+    if start_study_run(study_key, record) is None:
+        return
 
     def _watch() -> None:
         deadline = time.monotonic() + 6 * 60 * 60
@@ -853,10 +854,11 @@ def watch_study_run(study_key: str, record: dict) -> None:
             time.sleep(0.25)
         # Timed out still running — leave the running marker; do not invent a terminal.
 
-    # Run in the caller's context, as the study worker does: `_authority()`
-    # must resolve the REQUEST's project. A bare thread has no scoped context
-    # and fell through to the process-foreground self-heal, which could
-    # overwrite a network another thread had just installed with an empty one.
+    # Run in the caller's context, as the study worker does. The publish uses
+    # the start token, not `_authority()`, but a bare thread has no scoped
+    # context, and anything that reaches `PyPSAService` from it falls through
+    # to the process-foreground self-heal, which could overwrite a network
+    # another thread had just installed with an empty one.
     ctx = contextvars.copy_context()
     threading.Thread(
         target=lambda: ctx.run(_watch), daemon=True, name=f'run-evidence-{study_key}',
@@ -896,18 +898,8 @@ def publish_report_run(record: dict) -> dict | None:
             return None
         token = record.get('_run_evidence')
         if not token:
-            try:
-                root, project_id, owner = _authority()
-            except HTTPException:
-                return None
-            token = {
-                'root': root, 'project_id': project_id, 'actor_id': owner,
-                'run_id': report_run_id(
-                    record.get('report_id')
-                    if isinstance(record.get('report_id'), str) else None
-                ),
-                'kind': 'report', 'started_at': _now(),
-            }
+            # As for a study: the project is bound at start, never resolved late.
+            return None
         summary = {
             'report_id': record.get('report_id'),
             'mode': record.get('mode'),

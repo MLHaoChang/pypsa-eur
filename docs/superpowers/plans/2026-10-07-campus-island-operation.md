@@ -2343,6 +2343,160 @@ C11's loop: trial, verdict, cost.
 - termination at N;
 - no cuts when everything passes.
 
+### E4 revised: N+k by unit and frequency restoration between blocks (2026-10-14)
+
+**Why.** The I9b Data Center run failed `ups_bridged`'s bridge at all 9
+island hours. The cause was E4's pickup never completing, not the UPS
+energy: autonomy was about 655 s against `bridge_s` 600 s. Two causes, both
+in E4, were put to the owner:
+- **N+k removed the whole `GENSET_NEW`.** The draft dropped `unit_mw`, so
+  the campus held one 36.7 MW genset, while I2b's N+k removes one unit.
+- **Nothing restored the frequency between blocks.** The droop deviation
+  added up, 0.25 Hz per 5 MW block, until the 9th block found no capacity.
+
+**Owner, 2026-10-14: Q1 = A, Q2 = A.**
+- **`unit_mw` is a campus genset field.** It is optional in a campus block,
+  and the draft keeps it. `xd_pp` stays sidecar-only.
+  `units_from_campus` carries it on `Unit.unit_mw`.
+- **N+k by unit** (`_remove_units`). The k largest units fail to start, as
+  I2b: a whole genset, or one `unit_mw` of a genset that has several. Its
+  P_n, S_n, load step and ramp then scale down, and H stays on the
+  remaining MVA. `dropped` names each removal, `"NAME: 1 x U MW"` for one
+  unit.
+- **Restoration between blocks.** Once a block settles, secondary or
+  load-share control restores f0. The next block starts from nominal at the
+  loading the earlier blocks left, each genset at its droop share, with its
+  load-acceptance step and ramp counted afresh.
+  - This is the same assumption as E2, E3 and E5, and it is ledgered.
+  - Each block is simulated on its own, and its `Metrics` are judged from
+    nominal.
+  - "Settled" is Δf within the band of −block/ΣK (0 with an isochronous
+    genset) and |RoCoF| ≤ 0.05 Hz/s.
+  - The `Pickup` event and `_segment` are gone.
+- The column tuples are unchanged.
+
+**Tests** (test-first):
+- the schema takes `unit_mw` in a campus block, and the draft keeps it;
+- `units_from_campus` carries it;
+- N+1 takes one 5 MW unit from a 20 MW genset, checked against the 15 MW
+  genset by hand. Its load step scales too: the genset's 8.4 MW share of a
+  9 MW block exceeds the 7.5 MW left. Two units both come from it; a whole
+  genset with a larger unit goes first; a single-unit genset goes whole;
+- equal blocks respond alike (the same nadir, each settling at −block/K);
+- each block waits for the first settling of one step from nominal;
+- each block starts at the loading the earlier ones left, so the third 4 MW
+  block on a 10 MW genset finds 2 MW of room;
+- the earlier tests, adjusted to per-block settling.
+
+**Mutations.** 16 source edits:
+- **N+k:** `unit_mw` ignored, the largest by rating not by unit, S_n not
+  scaled, the step and ramp not scaled, the removal unnamed;
+- **settling:** the RoCoF or the band criterion dropped;
+- **restoration:** the loading not carried, the settled value summed over
+  blocks, the isochronous rule lost;
+- **the pickup:** completion without settling, the clock not advanced;
+- **the field:** `unit_mw` refused in the schema, `xd_pp` let through,
+  dropped by the draft, not carried to the unit.
+
+The first run killed 15. The step and ramp scaling survived because no
+block reached the step limit; a test was added where it does. All 16 are
+killed.
+### I7 as built: the gridspine cut derivation (2026-10-14)
+
+**Owner, 2026-10-14:** the pypsa-gui island session takes I7. This session
+writes the gridspine half, the cuts. The contract (`frequency.CUT_COLUMNS`,
+`campus_freq_cuts.csv`) was agreed with that session before it was frozen.
+
+**No closed form, the engine instead.** I6 has no closed-form nadir; it
+integrates the swing equation. Each failing event is rebuilt exactly as the
+study ran it (`_hour_units`, `_island_units`, shared with
+`campus_frequency_study`) and inverted on the same engine, with every unit's
+response parameters held at the current solution. The check and the cut
+therefore cannot disagree, and each cut stays linear in s_nom.
+
+**`cuts_for_event(units, run, limits)`** gives each failing event's cuts:
+- **`droop_gain`:** when the settled frequency is beyond what any limit
+  allows, ΔK = ΣK (|Δf_qss| / Δf_allowed − 1). Δf_allowed is the tightest of
+  the qss band and the steady, transition and equipment limits. This is exact
+  for a droop island, so `heuristic` is False unless a frequency-watt unit is
+  in it.
+- **`inertia`:** the least pure-inertia increment ΔM (MW·s, the I3a M = Σ
+  H·S) for which the transient limits pass, found by bisection on a new
+  `inertia` unit (H·S alone, no response, no limit). The target limits are
+  RoCoF, and a nadir or peak only when the settled value already meets that
+  limit; no inertia fixes a settled value. Each run is lengthened until the
+  trace has settled, so a heavy island whose nadir comes late is not read as
+  passing.
+- **`headroom_up`/`headroom_down`:** what the saturated GFMs were asked for
+  beyond their range, from the event re-run with their limits lifted.
+- **Collapse, or no droop to scale,** gives `feasible` False with the reason.
+- The rows of one event are alternatives; the user picks among them (Q6).
+
+**`propose_cuts(campus, hourly, events, sweep, island_hourly,
+island_unit_hourly)`:**
+- **Events:** the failing E1, E2, E3 and E5 at the island hours, Q8 reruns
+  aside, and E1 at every hour. No cut for E4 or E6.
+- **`current`:** I3a's value, so a cut tightens the hub LP's own
+  expression: `inertia_mws`, `k_mw_per_hz`, and the headroom summed over
+  the units in the island. `required = current + delta`.
+- **`note`:** says when the engine's M or ΣK differs from I3a's by more than
+  2 % (for E2–E5, which start after the gensets join, it is expected), and
+  when there is no I3a row.
+- **Feasibility:** only `seamless` has a 0⁺ row in the hub (pypsa-gui's I7), so
+  a cut in any other scenario is not feasible. `planned` gives no cut anyway,
+  since E6 is its event.
+- **One row per (period, hour, scenario, kind):** the tightest.
+
+**`campus_study.cuts_campus(run_dir)`** writes `campus_freq_cuts.csv` after
+`island_frequency_campus`, and refuses a run without it.
+
+**Also, from the gatekeeper's review of #226:** E4's joined trace no longer
+repeats an instant at a block boundary. Each block after the first starts
+just after its 0, and a test holds `diff(t) > 0`.
+
+**Tests:** 23 in `tests/gridspine/test_frequency_cuts.py`:
+- **inertia:** the closed-form oracle (the one-governor nadir inverted by
+  matrix exponential, matched within 0.5 %, and within 1 % on a heavy island
+  that needs the longer runs); the RoCoF cut f0 ΔP / (2 RoCoF_max) exactly;
+  the cut applied passes, and 3 % less does not;
+- **headroom:** the saturated GFM's shortfall removes its saturation, and
+  2 % less does not; the absorbing side asks for headroom down;
+- **droop:** K_req = ΔP / Δf_allowed exactly, with the tighter steady limit
+  taken; a settled value beyond the nadir limit asks for droop, not inertia;
+- **not fixable:** collapse, and an isochronous island;
+- **on the campus:** current from I3a and the note, the engine value without
+  I3a, the tightest per hour, no Q8 or E4 cuts, the scenario rule, the
+  every-hour E1, an empty table with its columns;
+- **the driver,** with `current` from the run's I3a tables;
+- **after the mutation run:**
+  - an equipment nadir alone asks for inertia;
+  - M and ΣK are counted as I2b counts them;
+  - the droop cut is exact unless a frequency-watt unit is in the island;
+  - an E3 cut is inverted without the tripped unit;
+  - the every-hour cut leaves a transferring UPS out, as the sweep does.
+
+**Mutations.** 28 source edits:
+- the pure-inertia unit at half weight;
+- equipment limits not counted as transient;
+- the droop GFM's inertia without 2R, and isochronous gain counted;
+- a coarse bisection;
+- the allowed deviation from one limit only, or without the qss band;
+- the settled-value guard and the settling extension removed;
+- the cap shrunk;
+- the headroom shortfall cut or the absorbing side lost;
+- collapse made feasible;
+- the I3a value replaced or its note dropped;
+- Q8 reruns, E4 and the sweep let in or out;
+- the sweep's UPS rule;
+- the scenario rule and the heuristic flag;
+- the tightest kept as the loosest;
+- `required` without `current`;
+- E3 without the trip;
+- the driver's refusal and its I3a table.
+
+The first run killed 22. The six survivors were closed by the tests above;
+all 28 are killed.
+
 ### I7 as built (2026-10-14)
 
 **Owner and coordinator decisions (2026-10-14):**
