@@ -90,6 +90,17 @@ def test_the_solve_fill_rederives_a_line_with_its_length_and_reverts():
     assert float(n.lines.at["ab", "capital_cost"]) == stored
 
 
+def test_the_part_survives_a_netcdf_round_trip(tmp_path):
+    n = _line_network()
+    path = tmp_path / "n.nc"
+    n.export_to_netcdf(path)
+    m = pypsa.Network(path)
+
+    for col, value in PART.items():
+        assert float(m.lines.at["ab", col]) == pytest.approx(value)
+    assert float(m.lines.at["ab", "capital_cost"]) == pytest.approx(_annual(), rel=1e-9)
+
+
 # ── the write path ─────────────────────────────────────────────────────────
 
 def _two_buses(install_network) -> None:
