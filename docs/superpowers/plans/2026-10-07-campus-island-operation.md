@@ -2163,6 +2163,72 @@ This follows the C6 and C9 conventions.
 - the report golden fixture;
 - a browser run of the panel.
 
+### I9a as built (2026-10-14)
+
+**The split (sent to the coordinator 2026-10-14, answer pending when
+written).** I9's results section needs the I4–I6 verdicts at the island
+hours, and nothing ran those engines over the hours yet. I9a is the
+pypsa-gui work that needs no such driver. I9b adds the I4–I6 tables once a
+driver writes them. The frequency half is under way from the grid-forming
+track: `island_frequency_campus` writes `campus_freq_*.csv` and
+`campus_freq_summary.json` (I6c).
+
+**Backend (`services/campus_electrical_service.py`,
+`routers/campus_electrical.py`):**
+- `get_island`, `save_island` and `run_island_study`, behind `GET`/`PUT
+  /{name}/island` and `POST /{name}/island/study`.
+  - Save validates with gridspine's schema: a 422 names the field and keeps
+    the old file; a 413 over 256 kB.
+  - Save drops the stale study.
+  - The study runs `island_study` on the saved project and is stored as
+    `campus_electrical/island_study.json`. It is the plain LOPF with HiGHS
+    and the island rows, not the project's own solver settings
+    (ledgered).
+- The writes check the edit lock.
+- The stored study travels in the bundle. The per-hour I3a tables do not,
+  like `campus_hourly.csv`.
+
+**Chat tools:**
+- `campus_island_config` is a read; `campus_set_island_config` and
+  `campus_run_island_study` are writes.
+- Each is a service call into the same function as its route.
+- The two write tools check the **named** project's edit lock in their
+  dispatchers, which `test_write_surface_lock_policy` follows. So they do
+  not join OPEN-ITEMS item 18's KNOWN_GAPS.
+- The assistant inventory was regenerated (231 → 234 tools).
+
+**Report (`services/campus_island_report.py`, `GET
+/{name}/island/report`):**
+- Tables for the requirements, units and control modes, costs, binding
+  rows with duals, ride-through/fuel/UC facts, and the island critical
+  hours (I3b).
+- Every table carries its model, the screening caveat
+  ("not a certificate"), and `assumed_rows`.
+- What is missing is listed, never invented.
+- A golden fixture pins the payload for the I2c hand case.
+
+**Panel (`CampusIslandSection.tsx`):**
+- A form for the scenarios, the ride-through numbers with their source
+  tags, N+k, linearised UC and each converter's control mode, over a JSON
+  editor that keeps the whole sidecar.
+- Save (a 422 shows inline) and Run island study.
+- The report tables, with assumed rows tagged.
+
+**Tests:**
+- service and routes (18);
+- chat tools (11), plus the existing contract, lock-policy, schema and
+  endpoint-map suites;
+- report and golden fixture (7);
+- bundle (6);
+- frontend section (8), plus the existing campus panel suites (164 in
+  all);
+- `tsc` is clean.
+- **Browser run** (local mode, Data Center template): the form renders, Run
+  island study solves the baseline and ups_bridged, and the costs read
+  3.754e7 → 3.975e7 (after #198's re-pricing). The binding row is
+  `Island-rocof-block`. All five tables show their model and caveat, and
+  25 assumed rows are tagged.
+
 ## Order, PRs and agents
 
 - **I1** comes first: everything reads the control modes and the data.
