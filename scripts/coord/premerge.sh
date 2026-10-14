@@ -8,15 +8,20 @@
 #
 #   scripts/coord/premerge.sh <pr-number>
 #
-# Exits non-zero on a conflict, a code-file overlap with master, or a failing
-# semantic test on the trial merge. Docs-only overlap and files identical on
-# both sides are reported, not fatal.
+# This is the whole merge gate: one command, nothing checked by hand. It exits
+# non-zero on a conflict, a code-file overlap with master, a failing semantic
+# test or catalogue inventory check on the trial merge, or any check run on the
+# head that is not success or skipped (or that it could not read). Docs-only
+# overlap and files identical on both sides are reported, not fatal.
 #
 # Environment:
 #   PREMERGE_REMOTE  remote to fetch from (default: origin)
 #   PREMERGE_BASE    base branch (default: master)
+#   PREMERGE_REPO    GitHub repo whose check runs are read
+#                    (default: MLHaoChang/pypsa-eur)
 #   PREMERGE_PYTHON  Python that runs the semantic tests (default: the repo's
-#                    pixi `test` env, then `default`, then python3)
+#                    pixi `test` env, then `default`, then ~/.venv-pypsa-gui
+#                    from .claude/hooks/session-start.sh, then python3)
 
 set -euo pipefail
 
@@ -25,19 +30,28 @@ usage() { echo "usage: $0 <pr-number>" >&2; exit 2; }
 pr=$1
 remote=${PREMERGE_REMOTE:-origin}
 base_branch=${PREMERGE_BASE:-master}
+gh_repo=${PREMERGE_REPO:-MLHaoChang/pypsa-eur}
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 
 # Overlap in these paths is harmless when the merge itself is clean.
 docs_only_re='^(docs/superpowers/OPEN-ITEMS\.md|docs/superpowers/plans/.*|doc/release-notes\.d/.*|doc/release_notes\.md)$'
-# A PR touching these must pass the semantic tests on the trial merge.
-semantic_re='^pypsa-gui/backend/routers/|(^|/)harness/catalogue|(^|/)harness/toolsets|(^|/)services/chat_tools|(^|/)chat_tools'
+# A PR touching these must pass the semantic tests on the trial merge: backend
+# routes (project routes and routers/mcp among them), chat tools, the project
+# ACL services and the harness MCP server.
+semantic_re='^pypsa-gui/backend/routers/|(^|/)harness/catalogue|(^|/)harness/toolsets|(^|/)harness/mcp_server|(^|/)services/chat_tools|(^|/)chat_tools|(^|/)services/project_(acl|registry)\.py$'
+# The one list of semantic tests; .claude/skills/steward/SKILL.md points here.
 semantic_tests=(
   tests/test_write_surface_lock_policy.py
   tests/test_chat_tools_handler_dependencies.py
   tests/test_chat_tools_argshape.py
+  tests/test_project_acl.py
+  tests/test_project_route_acl_policy.py
+  tests/test_harness_mcp_server.py
 )
+# A PR touching these must also keep the assistant inventory current.
+catalogue_re='(^|/)harness/catalogue'
 
 base_ref="refs/remotes/$remote/$base_branch"
 pr_ref="refs/premerge/pr-$pr"
@@ -97,14 +111,16 @@ fi
 
 echo
 echo "== semantic tests"
-if ! git diff --name-only "$mbase" "$head" | grep -Eq "$semantic_re"; then
-  echo "not needed (no route or chat-tool change)"
+changed=$(git diff --name-only "$mbase" "$head")
+if ! grep -Eq "$semantic_re" <<<"$changed"; then
+  echo "not needed (no route, chat-tool, project-ACL or MCP-server change)"
 elif ((conflict)); then
   echo "skipped: no trial merge while the PR conflicts"
 else
   py=${PREMERGE_PYTHON:-}
   if [[ -z $py ]]; then
-    for cand in "$root/.pixi/envs/test/bin/python" "$root/.pixi/envs/default/bin/python"; do
+    for cand in "$root/.pixi/envs/test/bin/python" "$root/.pixi/envs/default/bin/python" \
+      "$HOME/.venv-pypsa-gui/bin/python"; do
       [[ -x $cand ]] && { py=$cand; break; }
     done
   fi
@@ -117,6 +133,9 @@ else
   trap 'git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt"' EXIT
   git worktree add -q --detach "$wt" "$trial"
 
+  # Cloud containers export a PYTHONPATH naming the main checkout; replace it
+  # so every import resolves inside the trial merge.
+  export PYTHONPATH="$wt/pypsa-gui/backend:$wt"
   echo "trial merge $trial, python $py"
   if (cd "$wt/pypsa-gui/backend" && "$py" -m pytest -q -p no:cacheprovider --disable-warnings "${semantic_tests[@]}"); then
     echo "semantic tests: pass"
@@ -124,12 +143,47 @@ else
     echo "semantic tests: FAIL"
     fail=1
   fi
+
+  if grep -Eq "$catalogue_re" <<<"$changed"; then
+    echo
+    echo "== assistant inventory (harness/catalogue changed)"
+    if "$py" "$wt/pypsa-gui/backend/smoke/assistant_inventory.py" --check; then
+      echo "inventory: pass"
+    else
+      echo "inventory: FAIL"
+      fail=1
+    fi
+  fi
+fi
+
+echo
+echo "== checks"
+# Every check run on the head must be success or skipped. Anything else,
+# including a run still in progress, blocks; so does failing to read them.
+if runs=$(command -v gh >/dev/null &&
+  gh api "repos/$gh_repo/commits/$head/check-runs" --paginate \
+    --jq '.check_runs[] | [.status, (.conclusion // "-"), .name] | @tsv'); then
+  total=$(grep -c . <<<"$runs" || true)
+  bad=$(awk -F'\t' 'NF && !($1 == "completed" && ($2 == "success" || $2 == "skipped"))' <<<"$runs")
+  echo "$total check run(s) on $head"
+  if ((total == 0)); then
+    echo "  none yet"
+    fail=1
+  elif [[ -n $bad ]]; then
+    awk -F'\t' '{ printf "  %-11s %-15s %s\n", $1, $2, $3 }' <<<"$bad"
+    fail=1
+  else
+    echo "all success or skipped"
+  fi
+else
+  echo "checks: not read"
+  fail=1
 fi
 
 echo
 if ((fail)); then
   echo "RESULT: blocked"
 else
-  echo "RESULT: ok to merge (checks on head $head still apply)"
+  echo "RESULT: ok to merge $head"
 fi
 exit "$fail"
