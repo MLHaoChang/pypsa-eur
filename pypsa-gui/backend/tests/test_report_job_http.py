@@ -87,6 +87,33 @@ class _Holding(FakeProvider):
 
 # ── generate → status → done ────────────────────────────────────────────────
 
+def test_report_worker_blocks_reset_then_finished_record_is_cleared(
+        client, api_project, session_state, monkeypatch):
+    """Reset must preserve a live worker's controls, and drop its finished record."""
+    name = api_project("report-reset")
+    _store_eh_report(session_state(client))
+    hold = threading.Event()
+    _install_provider(monkeypatch, _Holding(_script(), hold))
+    try:
+        started = client.post(f"/api/projects/{name}/reports/generate", json={
+            "title": "Reset lifecycle", "sections": [EXECUTIVE_SUMMARY_ID, "fmea_top"],
+        })
+        assert started.status_code == 200, started.text
+        report_id = started.json()["report_id"]
+        reset = client.post("/api/network/reset")
+        assert reset.status_code == 409, reset.text
+        active = client.get(f"/api/projects/{name}/reports/generate/status")
+        assert active.status_code == 200
+        assert active.json()["report_id"] == report_id
+    finally:
+        hold.set()
+    finished = _poll(client, name)
+    assert finished["status"] == "done", finished
+    assert client.post("/api/network/reset").status_code == 200
+    # Reset clears the runtime slot, not the durable completed document.
+    assert client.get(f"/api/projects/{name}/reports/generate/status").status_code == 204
+    assert client.get(f"/api/projects/{name}/reports/{report_id}").status_code == 200
+
 def test_status_is_204_before_any_run(client, api_project):
     name = api_project("gen-204")
     r = client.get(f"/api/projects/{name}/reports/generate/status")

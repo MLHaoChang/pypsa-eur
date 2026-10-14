@@ -270,6 +270,9 @@ def test_abortable_studies_matches_the_routes_that_actually_exist():
             and re.search(r'@router\.post\("/\{study_id\}/findings/tornado/abort"\)',
                           studies_src)):
         have_abort.add("decision_study")
+    reports_src = pathlib.Path("routers/report_jobs.py").read_text()
+    if re.search(r'@router\.post\("/\{name\}/reports/generate/abort"\)', reports_src):
+        have_abort.add("report_job")
     assert have_abort == set(ABORTABLE_STUDIES), (
         f"studies with an /abort route: {sorted(have_abort)}; "
         f"ABORTABLE_STUDIES says: {sorted(ABORTABLE_STUDIES)}")
