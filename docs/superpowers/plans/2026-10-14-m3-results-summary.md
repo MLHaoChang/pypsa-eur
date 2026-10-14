@@ -63,13 +63,13 @@ Not touched: `AssistantDock`, `ChatPanel`, any backend route or service.
 - Card links open their tabs; Results opens on Summary per §5; the assistant's `results_tab: summary` opens it.
 - Inventory and control-matrix checks; the release-note fragment.
 
-## 5. Open points (to the owner, via the coordinator)
+## 5. Owner decisions (14 Oct, relayed by the coordinator)
 
-1. When Results opens on Summary.
-2. Whether Guided mode shows it.
-3. Whether "since last solve" deltas are in this slice.
+1. **Opening:** Results opens on Summary after each new solve and keeps the user's tab until the next one.
+2. **Guided:** Summary is Guided's first tab too, before Adequacy and FMEA.
+3. **"Since last solve" changes:** not in M3; a later slice (no endpoint keeps the previous solve's figures).
 
-## 6. As built (14 Oct, first cut, recommended answers assumed)
+## 6. As built (14 Oct)
 
 - `pages/results/summary.ts` (pure views: cost, emissions, capacities, the reserve-margin verdict) and
   `SummaryTab.tsx`; the status line also shows the LP objective, with a tooltip on how it differs from the
