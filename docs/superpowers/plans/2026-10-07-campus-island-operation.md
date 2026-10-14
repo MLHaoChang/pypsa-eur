@@ -2428,7 +2428,7 @@ written to `campus_freq_cuts.csv`.
   the applied cuts, each with Remove, plus Clear all.
 
 **Tests:**
-- `test_island_cuts.py` (27), with hand cases on the I2c hub:
+- `test_island_cuts.py` (24), with hand cases on the I2c hub:
   - inertia 25 MW·s buys p_nom 20;
   - droop 15 MW/Hz buys 30;
   - with a spinning genset, upward headroom 12 buys 8.5 and downward 12
