@@ -67,6 +67,26 @@ def test_part_scales_reads_each_parts_scale_column():
     assert part_scales("Generator", {"length": 12.5}) == {}
 
 
+def test_a_missing_length_is_one_kilometre_and_a_zero_length_charges_nothing():
+    """A length that was never set is one kilometre (the documented missing scale).
+    A length of zero is a real measurement: the line is free, not silently repriced."""
+    from services.asset_schema.derive import derive_composite, part_scales
+
+    for row in ({}, {"length": None}, {"length": float("nan")}):
+        assert part_scales("Line", row) == {"length": 1.0}
+    missing = derive_composite("Line", PART, scales=part_scales("Line", {"length": float("nan")}),
+                               discount_rate=RATE, asset_lifetime=LIFE)
+    assert missing["capital_cost"] == pytest.approx(_annual(length=1.0), rel=1e-12)
+    assert missing["fom_cost"] == pytest.approx(PER_KM * FOM_SHARE, rel=1e-12)
+
+    assert part_scales("Line", {"length": 0.0}) == {"length": 0.0}
+    zero = derive_composite("Line", PART, scales={"length": 0.0},
+                            discount_rate=RATE, asset_lifetime=LIFE)
+    assert zero["capital_cost"] == 0.0
+    assert zero["fom_cost"] == 0.0
+    assert zero["lifetime"] == LIFE
+
+
 def test_upfront_parts_of_a_line_are_per_mva():
     from services.asset_schema.access import upfront_parts
 

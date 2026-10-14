@@ -128,6 +128,29 @@ def test_nothing_but_the_log_changes_a_sessions_history():
 
 # ── a session not in memory is rebuilt from its log ────────────────────────
 
+def test_a_damaged_log_falls_back_to_the_transcript(client, seeded_identity, project, tools):
+    """Issue 13b: the log is the source of truth only while it can be read.
+    A broken line that is not a torn tail must not become a shorter history.
+    The session is rebuilt from chat.jsonl, which still has both turns."""
+    session = _owned(seeded_identity)
+    _turn(session, "first", _text_turn("one"))
+    _turn(session, "second", _text_turn("two"))
+    path = eventlog.path_for(session)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    second = next(i for i, line in enumerate(lines) if '"user": "second"' in line)
+    lines.insert(second, "{not-json")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    chat_service._reset_sessions_for_tests()
+
+    body = client.get("/api/chat/history").json()
+    assert [t["user"] for t in body["turns"]] == ["first", "second"]
+    assert body["pending_turn"] is None
+    rebuilt = chat_service.get_session(session.session_id)
+    users = [m["content"] for m in rebuilt.messages if m.get("role") == "user"]
+    assert users == ["first", "second"]
+    assert eventlog.path_for(rebuilt).read_bytes() == path.read_bytes()
+
+
 def test_a_session_not_in_memory_is_rebuilt_from_its_log(client, seeded_identity, project, tools):
     session = _owned(seeded_identity)
     _turn(session, "list my projects", _tool_turn("list_projects", {}), _text_turn("one: P1"))

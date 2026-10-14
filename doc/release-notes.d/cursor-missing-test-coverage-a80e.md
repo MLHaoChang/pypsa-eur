@@ -1,0 +1,1 @@
+* Test(pypsa-gui): A chat event log with a broken line in the middle is not replayed as a shorter history; the session falls back to the transcript. A line priced per kilometre treats a missing length as one kilometre and a length of zero as no charge.
