@@ -2483,7 +2483,7 @@ def _dispatch_real_tool_call(
         # fails partway can still have mutated the network, so marking on success
         # only would under-report. Over-marking costs a prompt about already-clean
         # work; under-marking costs the work itself.
-        if effect_fresh and tier != "read" and tool_name not in {"run_sensitivity_sweep", "start_experiment", "prepare_experiment", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
+        if effect_fresh and tier != "read" and tool_name not in {"run_sensitivity_sweep", "start_experiment", "prepare_experiment", "advance_experiment", "refresh_experiment", "cancel_experiment", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
             from services import dirty_state
             dirty_state.mark_dirty()
             # ★ P33b B2: the chat seam of the edit counter. Same placement and
@@ -2542,7 +2542,8 @@ def _dispatch_real_tool_call(
                 if checked_turn is not None and tool_name == "update_component":
                     from harness.effects import execute
                     return execute(checked_turn, tool_name, args, handler)
-                return handler(**(args or {}))
+                from harness.experiment_execution import invoke
+                return invoke(session, tool_name, args or {}, handler)
             # PER_TOOL_TIMEOUT_SECONDS is a budget for RUNNING the handler.
             # `future.result(timeout=...)` alone measured queue + run on a pool
             # every session shares, so a call that never got a worker was

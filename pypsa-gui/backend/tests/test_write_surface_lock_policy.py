@@ -271,6 +271,9 @@ TOOL_POLICY: dict[str, tuple[str, str]] = {
         "onto the network and changes no project input."
     )),
     "start_experiment": (CHAT_SESSION, _R_EXPERIMENT_PLAN),
+    "advance_experiment": (CHAT_SESSION, "arms one owned case ledger and offers an ordinary call; no case effect or execution approval"),
+    "refresh_experiment": (CHAT_SESSION, "checkpoints authorized job/evidence reads in the owner's ledger; no live network writes"),
+    "cancel_experiment": (CHAT_SESSION, "stops future owned case advancement; neither edits inputs nor aborts a job"),
     "prepare_experiment": (CHAT_SESSION, (
         "validates an owner-scoped experiment plan on private network copies "
         "and records input/evidence fingerprints in `experiments/`. It "

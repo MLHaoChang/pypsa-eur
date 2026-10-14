@@ -218,3 +218,14 @@ The companion decision is now in [spec.md](spec.md) under Companion launcher,
 
 Issue 12 can land before media. The next coverage slice is unchanged: finish
 issue 08's GUI control/parameter matrix, then issue 09's durable thread.
+
+## 2026-10-13 — first network case continuation
+
+2026-10-13 continuation from Cursor's Codex handoff: one network-case advancement
+adapter, owned durable dispatch reservation, normal execution confirmation,
+bounded ordinary waits and exact terminal run evidence. Adds no provider or
+hidden executor loop. Baseline/active context remain unchanged until an explicit
+ordinary project activation for evidence/export. See
+[the case contract](experiment-case-advancement.md). Two/multiple-case comparison,
+uncertain-effect retry reconciliation and additional domains remain pending.
+PR/CI/merge evidence belongs to its eventual publication; none is claimed here.

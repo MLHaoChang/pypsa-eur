@@ -466,6 +466,8 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
     from services.safe_names import fold
     if not isinstance(cases, list) or not 1 <= len(cases) <= 4:
         _refuse("invalid_sensitivity_cases", "Provide between 1 and 4 cases per sweep.")
+    from harness.experiment_execution import assert_sweep_admission
+    assert_sweep_admission(baseline_project_id, cases)
     try:
         parsed = [SensitivityCase.model_validate(case) for case in cases]
         requests = [CreateScenarioRequest(name=case.new_name, description="Harness sensitivity scenario") for case in parsed]
@@ -598,3 +600,4 @@ def _record_solve_inputs(network, config):
         ctx.network = network
         ctx.solver_state["solver_config"] = config
     network.meta["assistant_solve_input_fingerprint"] = _network_input_fingerprint(ctx)
+    network.meta["assistant_solve_exact_input_fingerprint"] = _network_input_fingerprint(ctx, exact=True)

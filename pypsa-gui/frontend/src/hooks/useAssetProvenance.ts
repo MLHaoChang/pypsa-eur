@@ -4,7 +4,7 @@
 // appears on the field in the Expert form").
 //
 // Keyed under the asset class's own network root (`storage_units`,
-// `generators`), so every invalidation that refreshes the class after an edit,
+// `generators`, …), so every invalidation that refreshes the class after an edit,
 // a save or a project swap refreshes the provenance too, and no shared key
 // list has to learn a new root.
 import { useQuery } from '@tanstack/react-query'
@@ -12,7 +12,10 @@ import { assetSchemaApi, type ProvenanceEntry } from '../api/assetSchema'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 
-const ROOT: Record<string, string> = { StorageUnit: 'storage_units', Generator: 'generators' }
+const ROOT: Record<string, string> = {
+  StorageUnit: 'storage_units', Generator: 'generators', Store: 'stores', Link: 'links', Load: 'loads',
+  Line: 'lines', Transformer: 'transformers',
+}
 
 export function assetProvenanceKey(project: string | null, componentClass: string, name: string): unknown[] {
   return nk(project, ROOT[componentClass] ?? componentClass, 'provenance', name)

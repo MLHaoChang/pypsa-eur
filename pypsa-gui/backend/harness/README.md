@@ -248,6 +248,18 @@ arguments, tool-result IDs, continuation, confirmation denial and independent
 session views without API credentials or spending. These transport tests do
 not certify that an arbitrary endpoint/model supports tool calling.
 
+### Single network experiment advancement
+
+`advance_experiment` arms one prepared case and offers an ordinary call; it does
+not execute it. The confirmed sensitivity/queue handler is wrapped by
+`experiment_execution.py` with an owner/project/input-bound durable reservation,
+attempt/time caps and no automatic resubmission. `refresh_experiment` requires
+terminal job success, exact saved/solver input identities and intact run evidence
+before returning the recorded objective. `cancel_experiment` stops advancement,
+not jobs. Explicit case activation and native evidence export remain ordinary
+tools. Strict checked policy stays unchanged. See the
+[case contract](../../../.scratch/live-voice/experiment-case-advancement.md).
+
 ## Splitting the loop
 
 `loop.py` is one module on purpose for now. The suite patches 27 of its

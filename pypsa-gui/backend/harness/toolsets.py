@@ -5,6 +5,7 @@ CONTROL_TOOLS = frozenset({
     "list_project_runs", "get_run_evidence", "compare_project_runs",
     "discuss_project_run", "export_run_evidence",
     "start_experiment", "prepare_experiment", "list_experiments", "get_experiment",
+    "advance_experiment", "refresh_experiment", "cancel_experiment",
     "list_tasks", "find_capabilities", "start_task", "get_task", "resume_task", "cancel_task", "resolve_task_step",
     "get_file_delivery", "inspect_import", "preview_project_changes", "apply_project_changes", "create_chart", "build_delivery",
     "ask_user", "use_skill", "start_workflow", "advance_workflow", "end_workflow",
