@@ -1,13 +1,15 @@
 import type { AnswerReceipt } from '../utils/answerAssurance'
 
-export function CheckedEvidenceCard({ answerId, receipt }: { answerId: string; receipt: AnswerReceipt }) {
+export function CheckedEvidenceCard({ answerId, receipt, sourceLabel }: { answerId: string; receipt: AnswerReceipt; sourceLabel?: string }) {
   const scope = receipt.request_scope
   const clarifying = receipt.result_slots?.some(s => s.disposition === 'needs_clarification') === true
   return <details className="mt-2 text-[11px] border border-border rounded p-2" data-testid="checked-evidence-card">
     <summary className="cursor-pointer">{clarifying ? 'Clarification needed' : receipt.request_complete === true ? 'Requested results checked' : 'Checked evidence and limitations'}</summary>
     <div className="mt-2 space-y-1">
-      {scope && <p>{scope.retain ? 'Retained run' : 'Current run'} · {scope.entity_id} · {scope.profile}</p>}
+      {scope && <p>{sourceLabel ?? (scope.retain ? 'Retained run' : 'Current run')} · {scope.entity_id} · {scope.profile}</p>}
       {scope?.start && <p>{scope.start} to {scope.end}</p>}
+      {scope?.cost_basis && <p>Cost basis: {scope.cost_basis.currency}, price year {scope.cost_basis.price_year};
+        {' '}annual fixed cost fraction {scope.cost_basis.annual_fixed_cost_fraction}</p>}
       {receipt.result_slots && <ul>{receipt.result_slots.map(s => <li key={s.metric}>
         {s.metric.replace(/_/g, ' ')}: {s.disposition.replace(/_/g, ' ')}
         {s.valid_snapshots !== undefined && ` (${s.valid_snapshots}/${s.requested_snapshots} snapshots)`}

@@ -3,6 +3,8 @@
 
 # Codex handoff — whole-application assistant / live voice
 
+2026-10-14 continuation: [CP-02 canonical companion outcomes](../chat-companion/issues/02-canonical-outcomes.md) records the next master-based UI/publication slice. [CP-01 / PR #235](https://github.com/MLHaoChang/pypsa-eur/pull/235) remains a separate dependency with its tested source preserved. These slices do not enable hosted voice or waive live/domain release gates.
+
 ## 2026-10-14 planning continuation
 
 For the owner's accepted Dots comparison, start with the new [companion specification](../chat-companion/spec.md), [implementation plan](../../docs/superpowers/plans/2026-10-14-chat-companion-implementation.md) and [pending acceptance matrix](../chat-companion/test-plan.md). These are pinned to master `4ac218cc98a1437950dd20c3f46233efac6cc159`; rebaseline before implementation. First slices: CP-01 truthful mode/state, then CP-02 readable source-bound outcomes.

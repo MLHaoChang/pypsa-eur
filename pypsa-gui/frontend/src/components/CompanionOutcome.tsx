@@ -1,49 +1,128 @@
-import { useChatStore } from '../store/chatStore'
+import { useEffect, useState } from 'react'
+import { useChatStore, type ChatMessage } from '../store/chatStore'
+import { useUIStore } from '../store/uiStore'
+import { getOwnedCheckedAnswer, type OwnedCheckedAnswer } from '../api/checkedAnswers'
+import { CheckedEvidenceCard } from './CheckedEvidenceCard'
+import ChatMarkdown from './ChatMarkdown'
 
 const UPLOAD_BLOB = /^\/api\/projects\/[^/?#]+\/uploads\/[0-9a-f]{16}\/blob$/
 
 export function downloadHref(result: unknown): { href: string; filename: string | null } | null {
-  if (!result || typeof result !== 'object' || !('download_url' in result)) return null
+  if (!result || typeof result !== 'object' || Array.isArray(result) || !('download_url' in result)
+    || '_assurance' in result) return null
   const record = result as { download_url?: unknown; filename?: unknown }
   const href = record.download_url
-  if (typeof href !== 'string' || !UPLOAD_BLOB.test(href)) return null
-  if (typeof record.filename === 'string') return { href, filename: record.filename }
-  return { href, filename: null }
+  if (typeof href !== 'string' || href.length > 512 || !UPLOAD_BLOB.test(href)) return null
+  return { href, filename: typeof record.filename === 'string' && record.filename.length <= 180 ? record.filename : null }
 }
 
-type Props = {
-  hidden?: boolean
-}
-
-function afterLastUser<T extends { role: string }>(messages: readonly T[]): readonly T[] {
+function afterLastUser(messages: readonly ChatMessage[]): readonly ChatMessage[] {
   let lastUser = -1
-  for (let i = 0; i < messages.length; i += 1) {
-    if (messages[i].role === 'user') lastUser = i
-  }
+  for (let i = 0; i < messages.length; i += 1) if (messages[i].role === 'user') lastUser = i
   return messages.slice(lastUser + 1)
 }
 
-/**
- * Live is presence-led: the assistant's sentence belongs in the console
- * transcript. This surface keeps only what a closed console cannot offer, the
- * current turn's download. Confirmations ride ConfirmationCard beside it.
- */
-export default function CompanionOutcome({ hidden = false }: Props) {
-  const messages = useChatStore((s) => s.messages)
-  const download = [...afterLastUser(messages)].reverse()
-    .map((m) => downloadHref(m.tool_result))
-    .find((hit) => hit) ?? null
-  if (!download || hidden) return null
-  return (
-    <div className="z-40 pointer-events-auto max-w-xs" data-no-panel-close>
-      <a
-        data-testid="companion-download"
-        href={download.href}
-        {...(typeof download.filename === 'string' ? { download: download.filename } : {})}
-        className="inline-flex rounded-full border border-border bg-bg-2 px-3 py-1.5 text-[11px] font-medium text-text shadow-lg hover:text-accent"
-      >
-        Download
-      </a>
+function checkedLabel(answer: OwnedCheckedAnswer): string {
+  const receipt = answer.receipt
+  if (receipt.result_slots?.some(s => s.disposition === 'needs_clarification')) return 'Clarification needed'
+  if (receipt.request_complete === true) return 'Requested results checked'
+  if (receipt.checked_block_ids.length === 0) return 'Requested results unavailable'
+  return 'Checked evidence and limitations'
+}
+
+function OutcomeCard({ message, checked, failed, download }: {
+  message: ChatMessage | null; checked: boolean; failed: boolean;
+  download: ReturnType<typeof downloadHref>;
+}) {
+  const [verified, setVerified] = useState<{ message: ChatMessage; answer: OwnedCheckedAnswer } | null>(null)
+  const [unavailable, setUnavailable] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const [revision, setRevision] = useState(0)
+  useEffect(() => {
+    setVerified(null)
+    setUnavailable(false)
+    if (!checked || failed || !message?.answer_id || !message.receipt) return
+    const controller = new AbortController()
+    void getOwnedCheckedAnswer(message, controller.signal).then(answer => {
+      if (!controller.signal.aborted) setVerified({ message, answer })
+    }).catch(() => {
+      if (!controller.signal.aborted) setUnavailable(true)
+    })
+    return () => controller.abort()
+  }, [message, checked, failed, revision])
+  useEffect(() => {
+    if (!checked) return
+    const refresh = () => { setVerified(null); setRevision(r => r + 1) }
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
+  }, [checked])
+  const answer = !failed && verified?.message === message ? verified.answer : null
+  const missing = checked && (failed || unavailable || !message?.answer_id || !message.receipt)
+  const ordinaryText = message?.content ?? ''
+  const tooLarge = new TextEncoder().encode(ordinaryText).byteLength > 64 * 1024
+  const body = checked ? answer?.text : tooLarge ? null : ordinaryText
+  const label = checked ? answer ? checkedLabel(answer) : missing ? 'Checked answer unavailable' : 'Checking saved answer'
+    : failed || message?.interrupted ? 'Response incomplete — not checked' : 'Answer not checked'
+  const openTranscript = () => useUIStore.getState().setAssistantDockOpen(true)
+  return <section data-testid="companion-outcome" data-no-panel-close
+    data-answer-id={answer?.answer_id} data-answer-sha256={answer?.receipt.content_sha256}
+    aria-label="Assistant answer"
+    className="w-80 max-w-[calc(100vw-3rem)] rounded-xl border border-border bg-bg-2 p-3 shadow-lg text-xs text-text">
+    <p className="font-medium" role="status">{label}</p>
+    {answer ? <p className="mt-1 break-words text-[10px] text-muted">
+      Project: {answer.project_id} · {answer.receipt.request_scope?.retain ? 'Retained evidence' : 'Recorded answer'}
+    </p> : !checked && <p className="mt-1 break-words text-[10px] text-muted">
+      {message?.origin_project !== undefined ? `Conversation: ${message.origin_project ?? 'Unsaved network'}` : 'Conversation source not recorded'}
+    </p>}
+    {body && <div className={`mt-2 overflow-auto break-words ${expanded ? 'max-h-[40vh]' : 'max-h-32'}`}
+      tabIndex={0} aria-label="Canonical answer text" data-testid="companion-answer-text">
+      <ChatMarkdown>{body}</ChatMarkdown>
+    </div>}
+    {tooLarge && !checked && <p className="mt-2">The full answer is available in the transcript.</p>}
+    {checked && !answer && <p className="mt-2 text-muted">
+      {missing ? 'No checked result is shown. Open the transcript or refresh evidence.' : 'Revalidating access, source and exact answer text.'}
+    </p>}
+    {answer && <div className="max-h-[25vh] overflow-auto break-words">
+      <CheckedEvidenceCard answerId={answer.answer_id} receipt={answer.receipt}
+        sourceLabel={answer.receipt.request_scope?.retain ? 'Retained evidence' : 'Recorded evidence'} />
+    </div>}
+    <div className="mt-2 flex flex-wrap gap-3">
+      {body && <button type="button" className="underline" aria-expanded={expanded}
+        onClick={() => setExpanded(v => !v)}>{expanded ? 'Collapse answer' : 'Expand answer'}</button>}
+      <button type="button" className="underline" onClick={openTranscript}>Open transcript</button>
+      {checked && <button type="button" className="underline" onClick={() => {
+        setVerified(null); setRevision(r => r + 1)
+      }}>Refresh evidence</button>}
+      {answer && <a className="underline" href={`/api/chat/answers/${encodeURIComponent(answer.answer_id)}`}
+        target="_blank" rel="noopener noreferrer">View answer record</a>}
+      {!checked && download && <a data-testid="companion-download" className="underline"
+        href={download.href} download={download.filename ?? undefined}>Download</a>}
     </div>
-  )
+  </section>
+}
+
+/** Latest completed turn only. No model paraphrase, timed dismissal or raw checked artifact admission. */
+export default function CompanionOutcome({ hidden = false }: { hidden?: boolean }) {
+  const messages = useChatStore(s => s.messages)
+  const streaming = useChatStore(s => s.streaming)
+  const error = useChatStore(s => s.error)
+  const session = useChatStore(s => s.sessionId)
+  const sequence = useChatStore(s => s.newChatSeq)
+  const generation = useChatStore(s => s.utteranceGeneration)
+  const profile = useChatStore(s => s.profileId ?? s.boundProfileId)
+  const project = useUIStore(s => s.currentProject)
+  const mismatch = useUIStore(s => s.projectMismatch)
+  const turn = afterLastUser(messages)
+  const message = [...turn].reverse().find(m => m.role === 'assistant' && m.content.trim()) ?? null
+  const user = [...messages].reverse().find(m => m.role === 'user')
+  const wrongProject = [message?.origin_project, user?.origin_project]
+    .some(origin => origin !== undefined && origin !== project)
+  const checked = error?.error_kind.startsWith('assurance_') === true
+    || user?.requiresChecked === true || turn.some(m => m.requiresChecked || m.receipt || m.answer_id
+    || (m.tool_result && typeof m.tool_result === 'object' && '_assurance' in m.tool_result))
+  const download = checked ? null : [...turn].reverse().map(m => downloadHref(m.tool_result)).find(Boolean) ?? null
+  if (hidden || streaming || mismatch || wrongProject
+    || (!message && !download && !error)) return null
+  const key = JSON.stringify([project, session, sequence, generation, profile, user?.id])
+  return <OutcomeCard key={key} message={message} checked={checked} failed={!!error} download={download} />
 }

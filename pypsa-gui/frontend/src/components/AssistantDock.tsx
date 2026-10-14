@@ -316,7 +316,7 @@ export default function AssistantDock() {
         >
           <ErrorBoundary label="The assistant crashed">
             <ConfirmationCard />
-            {liveOpen ? <CompanionOutcome hidden={walking} /> : null}
+            <CompanionOutcome />
           </ErrorBoundary>
         </CompanionLauncher>
       )}

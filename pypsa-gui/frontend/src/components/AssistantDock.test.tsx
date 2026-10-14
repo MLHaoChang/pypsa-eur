@@ -272,9 +272,9 @@ describe('assistant dock prominence', () => {
     expect(launcher().getAttribute('data-presence')).toBe('idle')
     expect(launcher().getAttribute('data-media-state')).toBe('off')
     expect(screen.getByTestId('companion-work-status').textContent).toBe('Ready for a message')
-    // The answer itself stays in the console transcript, not beside Live.
-    expect(screen.queryByText('There is one generator.')).toBeNull()
-    expect(screen.queryByTestId('companion-outcome')).toBeNull()
+    // Canonical text is also readable beside the collapsed companion.
+    expect(screen.getByText('There is one generator.')).toBeTruthy()
+    expect(screen.getByTestId('companion-outcome')).toBeTruthy()
     await act(async () => { vi.advanceTimersByTime(5_000) })
     expect(screen.queryByTestId('companion-live-echo')).toBeNull()
     expect(launcher().getAttribute('data-presence')).toBe('idle')
@@ -298,7 +298,7 @@ describe('assistant dock prominence', () => {
       })
     })
     expect(screen.getByTestId('companion-download').getAttribute('download')).toBe('chart.png')
-    expect(screen.queryByText('The chart is ready.')).toBeNull()
+    expect(screen.getByText('The chart is ready.')).toBeTruthy()
   })
 
   it('shows response work independently of whether in-page chat is open', async () => {
