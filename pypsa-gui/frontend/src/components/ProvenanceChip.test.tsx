@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProvenanceChip, provenanceTitle } from './ProvenanceChip'
 import { assetProvenanceKey, useAssetProvenance } from '../hooks/useAssetProvenance'
 import { useUIStore } from '../store/uiStore'
+import { invalidateAssetQueries } from '../utils/assetWrite'
 import type { ProvenanceEntry } from '../api/assetSchema'
 
 const provenance = vi.hoisted(() => vi.fn())
@@ -59,6 +60,10 @@ describe('useAssetProvenance', () => {
     expect(assetProvenanceKey('P', 'StorageUnit', 'battery').slice(0, 2)).toEqual(['storage_units', 'P'])
     await qc.invalidateQueries({ queryKey: ['storage_units', 'P'] })
     await waitFor(() => expect(provenance).toHaveBeenCalledTimes(2))
+    // Every asset save (and rename) goes through `updateAsset`, which calls
+    // this blanket invalidation: the provenance refreshes with it.
+    invalidateAssetQueries(qc, 'P')
+    await waitFor(() => expect(provenance).toHaveBeenCalledTimes(3))
   })
 
   it('asks nothing for a class without a schema', () => {
