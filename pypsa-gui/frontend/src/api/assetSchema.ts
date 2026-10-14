@@ -58,7 +58,40 @@ export interface ProvenanceEntry {
   illustrative: boolean
 }
 
+/** One investment part of an asset (`services/asset_schema/access.py` `upfront_parts`): EUR per unit of the
+ *  asset's sizing variable (`AssetCostRow.basis`). */
+export interface AssetCostPart {
+  name: string
+  upfront_per_unit: number | null
+  lifetime: number | null           // null: never retires
+  fom_share: number | null
+  derived_from_capital_cost: boolean
+}
+
+/** One investable asset in the Economics panel's Asset costs tab (`GET /network/asset_costs`). */
+export interface AssetCostRow {
+  component: string
+  name: string
+  carrier: string
+  basis: 'EUR/MW' | 'EUR/MWh' | 'EUR/MVA'
+  size_column: string
+  size: number | null
+  extendable: boolean
+  parts: AssetCostPart[]            // empty: not priced
+  upfront_per_unit: number | null
+  upfront_total: number | null
+  capital_cost: number | null       // annual, as stored (derived where priced by parts)
+  fom_cost: number | null
+  provenance: Record<string, ProvenanceEntry>
+}
+
+export interface AssetCostsPayload {
+  discount_rate: number
+  assets: AssetCostRow[]
+}
+
 export const assetSchemaApi = {
+  costs: () => client.get<AssetCostsPayload>('/network/asset_costs').then(r => r.data),
   get: (component: string) =>
     client.get<AssetSchema>(`/network/asset_schema/${component}`).then(r => r.data),
   provenance: (component: string, name: string) =>

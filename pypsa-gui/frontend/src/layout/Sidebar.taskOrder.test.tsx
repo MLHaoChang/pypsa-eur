@@ -60,13 +60,15 @@ async function renderSidebar() {
   return utils
 }
 
-const ORDER = ['build', 'time', 'run', 'results', 'studies', 'reports']
+// ECONOMICS between TIME and RUN (plan 2026-10-14-economics-in-expert.md).
+const ORDER = ['build', 'time', 'economics', 'run', 'results', 'studies', 'reports']
 
 // What each step holds. Planning → dynamics shows because the mocked project
 // list is empty (unknown is not "not a study", Sidebar.studies.test.tsx).
 const ROWS: Record<string, string[]> = {
   build: ['Assets', 'Capacity Bounds'],
   time: ['Model Horizon', 'Time Series'],
+  economics: ['Economics'],
   run: ['Solver Settings', 'Issues', 'Solve Queue'],
   results: ['Results'],
   studies: ['Decision study', 'Campus electrical', 'Planning → dynamics'],
@@ -100,7 +102,7 @@ beforeEach(() => {
 describe('M2 — Expert sidebar, expanded', () => {
   beforeEach(() => useUIStore.setState({ sidebarMode: 'expanded' }))
 
-  it('lists the six steps in the order of the work', async () => {
+  it('lists the seven steps in the order of the work', async () => {
     const { container } = await renderSidebar()
     const headers = Array.from(container.querySelectorAll('[data-testid^="sidebar-section-"]'))
       .map(el => el.getAttribute('data-testid')!.replace('sidebar-section-', ''))

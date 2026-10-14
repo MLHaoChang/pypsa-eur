@@ -2940,7 +2940,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "459d165e23cc24b40d4e1966e039a9ca1e7f34a7b9ca1c909b9f8b001b84da27",
+      "schema_sha256": "2b7d7a37ae302243a134dbfb2f10ff6cb4d1a2456947e27d0c1301589a5b388c",
       "behavioral_fixture": "pending"
     },
     {
@@ -5733,7 +5733,8 @@
     "hubDesign",
     "reports",
     "campusElectrical",
-    "decision"
+    "decision",
+    "economics"
   ],
   "tool_panel_enum": [
     "Results",
@@ -5792,7 +5793,9 @@
     "CampusElectrical",
     "campusElectrical",
     "DecisionStudy",
-    "decision"
+    "decision",
+    "Economics",
+    "economics"
   ],
   "slide_panels_not_in_tool_enum": [],
   "requested_aliases": {

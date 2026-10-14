@@ -760,6 +760,22 @@ def get_asset_schema(component: str) -> dict:
         )
 
 
+@router.get("/asset_costs")
+def get_asset_costs() -> dict:
+    """Every investable asset's upfront parts and annual costs, for the Economics panel's Asset costs tab
+    (plan 2026-10-14-economics-in-expert.md). Read-only: an asset is priced on its own card. A part priced only
+    through a typed annual `capital_cost` is back-calculated at the global discount rate and flagged."""
+    from services.asset_schema.access import asset_cost_rows
+    from services.network_crud import _global_discount_rate
+
+    n = PyPSAService.get_network()
+    rate = _global_discount_rate()
+    rows = asset_cost_rows(n, discount_rate=rate, keep=filter_transient_names)
+    for row in rows:
+        row["provenance"] = asset_provenance.get(n, row["component"], row["name"])
+    return {"discount_rate": rate, "assets": rows}
+
+
 @router.get("/asset_schema/{component}/provenance/{name}")
 def get_asset_provenance(component: str, name: str) -> dict:
     """Per-field provenance of one asset (`n.meta["asset_params"]`); fields never recorded are absent."""
