@@ -157,6 +157,17 @@ def acknowledge(owner, body):
         )
     ):
         raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
+    if body["version"] == 2:
+        binding = body["source_binding"]
+        keys = {"version", "project_id", "project_name", "scope", "source",
+                "input_sha256", "data_sha256", "window_from", "window_to"}
+        if (not isinstance(binding, dict) or set(binding) != keys
+                or type(binding.get("version")) is not int or binding["version"] != 1
+                or any(type(binding.get(k)) is not int or binding[k] < 0
+                       for k in ("window_from", "window_to"))
+                or any(not isinstance(binding.get(k), str)
+                       for k in keys - {"version", "window_from", "window_to"})):
+            raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
     try:
         with (
             network_guard(),

@@ -65,6 +65,15 @@ def test_source_ack_uses_http_owner_without_a_model_turn_actor(client, result_pr
         chat_tools.set_acting_user(previous)
 
 
+@pytest.mark.parametrize("key,value", [("version", True), ("window_from", False)])
+def test_boolean_alias_cannot_forge_a_typed_source_ack(client, result_project, key, value):
+    body = issued(result_project[0])
+    body["source_binding"][key] = value
+    assert client.post("/api/chat/ui-ack", json=body).status_code == 422
+    record = client.get("/api/chat/navigation/" + body["action_id"]).json()
+    assert record["outcome"] == "submitted"
+
+
 @pytest.mark.parametrize("fault", ["non_peak_flow", "weights", "failed_solve"])
 def test_mounted_target_with_stale_result_cannot_complete(client, result_project, fault):
     ctx = result_project[0]
