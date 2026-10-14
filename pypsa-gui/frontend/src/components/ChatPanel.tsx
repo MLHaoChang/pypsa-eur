@@ -62,7 +62,7 @@ import ApiKeySetup from './ApiKeySetup'
 import ChatLaunchGreeting from './ChatLaunchGreeting'
 import { buildUiContext } from '../utils/uiContext'
 import { plainWords } from '../pages/hubDesign/plainWords'
-import { getWorkflowMenu, postChatRewind, type ChoiceRequestFrame, type WorkflowContext, type WorkflowMenu, type WorkflowState } from '../api/chat'
+import { getWorkflowMenu, postChatGoal, postChatRewind, type ChoiceRequestFrame, type GoalState, type WorkflowContext, type WorkflowMenu, type WorkflowState } from '../api/chat'
 import * as speechOut from '../utils/speechOut'
 import { useUIStore, type UiMode } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
@@ -199,11 +199,23 @@ const GUIDED_TOOL_PHRASE: Record<string, string> = {
   abort_adequacy_study: 'ask the running study to stop',
   // The finance engine runs in the background (poll get_investment_case).
   run_investment_case: 'start the investment case',
+  // The decision study (U3): the run and the tornado start in the background
+  // (poll get_study_findings); the others answer at once.
+  start_decision_study: 'create the decision study',
+  set_study_parameter: 'change an assumption of the study',
+  run_decision_study: 'start the decision study run',
+  get_study_findings: 'read the study result',
+  explain_verdict: 'explain the verdict',
+  generate_study_report: 'write the decision report',
   // The chat harness's workflow tools (issue 06): start_workflow puts the
   // session on a step; the other two move or clear it. None runs anything.
   start_workflow: 'start the workflow',
   advance_workflow: 'move the workflow to its next step',
   end_workflow: 'leave the workflow',
+  // The goal tools (issue 17) change only the session's goal.
+  set_goal: 'set a goal to work toward',
+  pause_goal: 'pause the goal',
+  complete_goal: 'mark the goal reached',
   // Report jobs run in the background (poll get_report_status).
   generate_report: 'start writing the project report',
   regenerate_report_section: 'start rewriting one section of the report',
@@ -351,6 +363,91 @@ export function WorkflowStrip() {
       >
         Leave
       </button>
+    </div>
+  )
+}
+
+const GOAL_REASON: Record<string, string> = {
+  user: 'you paused it',
+  model: 'the assistant paused it',
+  rounds_used_up: 'its rounds are used up',
+  card_declined: 'a change was not approved',
+  aborted: 'the turn was stopped',
+  disconnected: 'the connection closed',
+  budget: 'a usage limit was reached',
+  error: 'a turn failed',
+  needs_review: 'a task step needs review',
+  generation_changed: 'the conversation was rebound',
+  checked_turn: 'checked answers are on',
+}
+
+/**
+ * The goal strip (chat harness issue 17): the session's goal and its round
+ * budget, from the `goal_state` frame and `/chat/history`. Pause stops
+ * further rounds after the running one; Resume (only a person resumes a
+ * paused or blocked goal) grants fresh rounds and sends a turn; Stop clears
+ * the goal and stops the running round.
+ */
+export function GoalStrip() {
+  const goal = useChatStore((s) => s.goal)
+  const sessionId = useChatStore((s) => s.sessionId)
+  const setGoal = useChatStore((s) => s.setGoal)
+  const sendRequest = useChatStore((s) => s.sendRequest)
+  const [busy, setBusy] = useState(false)
+  if (!goal || goal.phase === 'complete') return null
+  const act = async (action: 'pause' | 'resume' | 'stop') => {
+    if (!sessionId || busy) return
+    setBusy(true)
+    try {
+      const r = await postChatGoal(sessionId, action)
+      if (r.ok) {
+        setGoal(r.goal ?? null)
+        if (action === 'resume') {
+          sendRequest('Continue toward the goal.', { source: 'goal-strip', label: 'Resume the goal' })
+        }
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+  const button = 'px-1.5 py-0.5 rounded border border-border text-muted hover:text-text hover:border-accent/40 disabled:opacity-50'
+  const why = goal.reason ? (GOAL_REASON[goal.reason] ?? goal.reason) : null
+  return (
+    <div
+      className="mx-3 mt-2 px-2.5 py-1.5 text-[11px] rounded border border-accent/40 bg-accent/5 flex items-center gap-2"
+      data-testid="chat-goal-strip"
+      data-phase={goal.phase}
+    >
+      <span className="text-muted">Goal</span>
+      <span className="text-text font-medium truncate" data-testid="chat-goal-objective" title={goal.objective}>
+        {goal.objective}
+      </span>
+      <span className="text-muted">·</span>
+      <span className="text-text whitespace-nowrap" data-testid="chat-goal-rounds">
+        round {goal.rounds_used} of {goal.max_rounds}
+      </span>
+      {goal.phase !== 'active' && (
+        <span className="text-muted whitespace-nowrap" data-testid="chat-goal-phase">
+          {goal.phase}{why ? ` — ${why}` : ''}
+        </span>
+      )}
+      <span className="ml-auto flex gap-1">
+        {goal.phase === 'active' ? (
+          <button type="button" className={button} disabled={busy} onClick={() => { void act('pause') }}
+            data-testid="chat-goal-pause" title="No more rounds start on their own after this one">
+            Pause
+          </button>
+        ) : (
+          <button type="button" className={button} disabled={busy} onClick={() => { void act('resume') }}
+            data-testid="chat-goal-resume" title="Grant fresh rounds and continue">
+            Resume
+          </button>
+        )}
+        <button type="button" className={button} disabled={busy} onClick={() => { void act('stop') }}
+          data-testid="chat-goal-stop" title="Clear the goal and stop the running round">
+          Stop
+        </button>
+      </span>
     </div>
   )
 }
@@ -1447,6 +1544,8 @@ export default function ChatPanel() {
       setMessages(seeded)
       // The server session's workflow step, if it is still resident.
       setWorkflow(h.workflow ?? null)
+      // And its goal (issue 17).
+      useChatStore.getState().setGoal(h.goal ?? null)
       if (h.last_session_id) {
         setSessionId(h.last_session_id)
       }
@@ -2172,6 +2271,19 @@ export default function ChatPanel() {
       case 'workflow_state': {
         const d = _frame_data<{ workflow: WorkflowState | null }>(frame)
         setWorkflow(d.workflow ?? null)
+        break
+      }
+      case 'goal_state': {
+        // Issue 17. A round starting (rounds_used went up while active) gets
+        // a marker in the transcript, which also starts the round's own
+        // assistant bubble.
+        const d = _frame_data<{ goal: GoalState | null }>(frame)
+        const prev = useChatStore.getState().goal
+        const next = d.goal ?? null
+        if (next && next.phase === 'active' && next.rounds_used > (prev?.rounds_used ?? 0)) {
+          appendMessage({ role: 'system', content: `Goal: round ${next.rounds_used} of ${next.max_rounds}` })
+        }
+        useChatStore.getState().setGoal(next)
         break
       }
       case 'choice_request': {
@@ -3236,7 +3348,9 @@ export default function ChatPanel() {
             labelled with the chip (owner decision Q10) — the same path the
             hub-design cards use — so one click starts the flow. Absent until
             the menu is known; never a spinner, never an error. */}
-        {messages.length === 0 && Array.isArray(workflowMenu.data?.workflows)
+        {/* UX M8 (U3): without a usable assistant a chip would send into
+            nothing, so the menu waits for the key the greeting offers. */}
+        {messages.length === 0 && effectiveReady !== false && Array.isArray(workflowMenu.data?.workflows)
           && workflowMenu.data.workflows.length > 0 && (
           <ChatStarterChips
             prompts={workflowMenu.data.workflows.map((w) => ({
@@ -3357,6 +3471,7 @@ export default function ChatPanel() {
           no uploads exist. Each chip carries a checkbox controlling
           attach-to-next-message + a delete (trash) button. */}
       <WorkflowStrip />
+      <GoalStrip />
       <CheckedAnswerControl checked={optedIntoChecks || requiredChecks} required={requiredChecks}
         available={checksAvailable} loading={checkedCapabilities.isPending} failed={checkedCapabilities.isError}
         mode={checkedCapabilities.data?.mode} busy={streaming || pendingSendText != null}

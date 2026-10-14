@@ -30,6 +30,7 @@ import { CARRIER_CATALOG_NAMES } from '../utils/carrierCatalog'
 import { vintageCloneToast } from '../utils/toasts'
 import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
 import { useAssetSchema } from '../hooks/useAssetSchema'
+import { useAssetProvenance } from '../hooks/useAssetProvenance'
 import { buildPatch, seedForm } from '../utils/assetForm'
 import { AssetFieldsEdit, assetReadoutItems, schemaFields } from './properties/AssetFields'
 import { GuideButton } from '../components/GuidedTour'
@@ -46,34 +47,25 @@ import {
   FS,
   toFS,
   nf,
-  ni,
   no,
   SetFS,
   NumInput,
-  OutageInputs,
   EhBusInputs,
   EhLinkInputs,
   ehBusFS,
   ehBusPayload,
   ehLinkPayload,
-  IncludesOutagesInput,
-  outagePayload,
   useGlobalDiscountRate,
   useGlobalDefaultLifetime,
   useBuildYearOptions,
-  BuildYearSelect,
   defaultLifetime,
-  DiscountRateInput,
-  discountRatePct,
   TxtInput,
   CoordPairInput,
-  ChkInput,
   autofillNomMin,
   SelInput,
   categorizeCarriers,
   CarrierGroupSelect,
   SectionHdr,
-  BusSelect,
   MiniProfileChart,
   CardShell,
   EditShell,
@@ -150,6 +142,8 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   // Investment is typed as the overnight cost; the annualised capital cost is
   // derived (overnight × annuity + fixed O&M) and shown read-only.
   const { data: schema } = useAssetSchema('Generator')
+  // U3: each field's provenance (default from the pack, customised, measured).
+  const provenance = useAssetProvenance('Generator', gen.name)
   const specs = schemaFields(schema)
   const asset = gen as unknown as Record<string, unknown>
   // Curtailment cost prices spilled wind and solar; a thermal unit has none to spill.
@@ -208,7 +202,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, gen.name])
 
-  const items: ExpandedItem[] = assetReadoutItems(schema, asset, hidden)
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset, hidden, provenance)
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {
@@ -217,7 +211,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
         <Section title={title ?? 'Generator Properties'}>
           <Row label="Carrier" value={gen.carrier} tip={docTip('generator.carrier')} />
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
           ))}
         </Section>
         {showChart && hasProfile && (
@@ -280,7 +274,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       {schema ? (
         <AssetFieldsEdit
           schema={schema} fs={form} set={setForm} current={asset}
-          carriers={carriers as Carrier[]} buses={buses as Bus[]} hidden={hidden}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]} hidden={hidden} provenance={provenance}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
           after={{
             p_nom_max: (
@@ -327,6 +321,8 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   // A battery is typed as its two overnight parts; capital cost, lifetime and
   // fixed O&M are derived from them and shown read-only.
   const { data: schema } = useAssetSchema('StorageUnit')
+  // U3: each field's provenance (default from the pack, customised, measured).
+  const provenance = useAssetProvenance('StorageUnit', su.name)
   const specs = schemaFields(schema)
   const asset = su as unknown as Record<string, unknown>
 
@@ -373,7 +369,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, su.name])
 
-  const items: ExpandedItem[] = assetReadoutItems(schema, asset)
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset, undefined, provenance)
   // A unit priced the old way (one overnight cost, no parts) still has that
   // cost; the card says so, since its parts are what the form types now.
   const legacyOvernight = su.overnight_cost != null && Number.isFinite(su.overnight_cost)
@@ -386,7 +382,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
         <Section title={title ?? 'Storage Properties'}>
           <Row label="Carrier" value={su.carrier} tip={docTip('storage_unit.carrier')} />
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
           ))}
         </Section>
         <DetailFooter
@@ -435,7 +431,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       {schema ? (
         <AssetFieldsEdit
           schema={schema} fs={form} set={setForm} current={asset}
-          carriers={carriers as Carrier[]} buses={buses as Bus[]}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]} provenance={provenance}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
           after={{
             p_nom_max: (
@@ -485,6 +481,12 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   const { data: carriers = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'), queryFn: networkApi.getCarriers, staleTime: 60_000 })
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses, staleTime: 30_000 })
   const globalLt = useGlobalDefaultLifetime()
+  // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
+  // Investment is typed as the overnight cost per kWh; the annualised capital
+  // cost is derived and shown read-only.
+  const { data: schema } = useAssetSchema('Store')
+  const specs = schemaFields(schema)
+  const asset = store as unknown as Record<string, unknown>
 
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteStore(store.name),
@@ -493,43 +495,16 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   })
 
   const saveMut = useMutation({
-    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate.
+    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
+    // the schema's descriptors own the form→patch mapping.
     mutationFn: () => updateAsset<Store>(
       qc, useUIStore.getState().currentProject, 'stores', store.name,
       (current) => {
-      const newName = form.name?.trim() || store.name
-      const newBus = (form.bus as string | undefined)?.trim() || store.bus
-      const payload: Partial<Store> = {
-        name: newName, bus: newBus,
-        carrier: form.carrier || current.carrier,
-        e_nom: nf(form, 'e_nom', current.e_nom),
-        e_nom_extendable: form.e_nom_extendable === 'true',
-        e_nom_min: nf(form, 'e_nom_min', current.e_nom_min ?? 0),
-        e_min_pu: nf(form, 'e_min_pu', current.e_min_pu),
-        e_max_pu: nf(form, 'e_max_pu', current.e_max_pu),
-        e_initial: nf(form, 'e_initial', current.e_initial),
-        e_cyclic: form.e_cyclic === 'true',
-        // Cost fields: blank ⇒ save 0 (deliberate clear), not the old value.
-        capital_cost: nf(form, 'capital_cost', 0),
-        marginal_cost: nf(form, 'marginal_cost', 0),
-        fom_cost: nf(form, 'fom_cost', 0),
-        standing_loss: nf(form, 'standing_loss', current.standing_loss),
-      }
-      // Optional bounds + per-asset overrides — assign unconditionally so
-      // blanking clears the field on the backend (see GeneratorCard).
-      payload.e_nom_max = no(form, 'e_nom_max')
-      payload.overnight_cost = no(form, 'overnight_cost')
-      const drPct = no(form, 'discount_rate_pct')
-      payload.discount_rate = drPct === null ? null : drPct / 100
-      // Multi-period gates. build_year=0 ⇒ "exists from the start" (PyPSA
-      // default). lifetime=null ⇒ infinite (never retires); user can leave
-      // blank to fall back to the solver's default_lifetime at solve time.
-      payload.build_year = ni(form, 'build_year', current.build_year ?? 0)
-      payload.lifetime = no(form, 'lifetime')
-      // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
-      Object.assign(payload, outagePayload(form))
-      // Extras last: the ...current spread and the explicit payload.X = no(...)
-      // lines above would otherwise overwrite a value the user just typed.
+      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Store>
+      payload.name = form.name?.trim() || store.name
+      payload.bus = (form.bus as string | undefined)?.trim() || store.bus
+      payload.carrier = form.carrier || current.carrier
+      // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Store'))))
       return payload
     }),
@@ -543,11 +518,9 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   })
 
   const startEdit = () => {
-    const base = toFS(store, ['name', 'bus', 'carrier', 'outage_rate_value', 'outage_rate_basis', 'mttr_hours', 'e_nom', 'e_nom_extendable', 'e_nom_min', 'e_nom_max',
-      'e_min_pu', 'e_max_pu', 'e_initial', 'e_cyclic', 'capital_cost', 'marginal_cost', 'fom_cost',
-      'overnight_cost', 'standing_loss', 'build_year'])
+    const base = seedForm(specs, asset)
     base.lifetime = defaultLifetime(store.lifetime, globalLt)
-    setForm(seedExtras(store, { ...base, discount_rate_pct: discountRatePct(store.discount_rate) }, loadExtras(editScope('Store'))))
+    setForm(seedExtras(store, base, loadExtras(editScope('Store'))))
     setOpen(true)
   }
 
@@ -561,30 +534,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, store.name])
 
-  const isExt = form.e_nom_extendable === 'true'
-
-  const items: ExpandedItem[] = [
-    { label: 'e_nom',         value: store.e_nom,                              unit: ' MWh',   tip: docTip('store.e_nom') },
-    { label: 'Extendable',    value: store.e_nom_extendable,                                  tip: docTip('store.e_nom_extendable') },
-    { label: 'e_nom_min',     value: store.e_nom_extendable ? store.e_nom_min : null,        unit: ' MWh', tip: docTip('store.e_nom_min') },
-    { label: 'e_nom_max',     value: store.e_nom_extendable ? store.e_nom_max ?? null : null, unit: ' MWh', tip: docTip('store.e_nom_max') },
-    { label: 'e_min_pu',      value: store.e_min_pu,                                         tip: docTip('store.e_min_pu') },
-    { label: 'e_max_pu',      value: store.e_max_pu,                                         tip: docTip('store.e_max_pu') },
-    { label: 'e_initial',     value: store.e_cyclic ? null : store.e_initial,  unit: ' MWh', tip: docTip('store.e_initial') },
-    { label: 'Cyclic SoE',    value: store.e_cyclic,                                         tip: docTip('store.e_cyclic') },
-    { label: 'Capital cost',  value: store.capital_cost,                       unit: ' €/MWh/yr', tip: docTip('store.capital_cost') },
-    { label: 'Marginal cost', value: store.marginal_cost,                      unit: ' €/MWh', tip: docTip('store.marginal_cost') },
-    { label: 'FOM cost',      value: store.fom_cost ?? null,                   unit: ' €/MWh/yr', tip: docTip('store.fom_cost') },
-    { label: 'Overnight cost', value: store.overnight_cost ?? null,            unit: ' €/MWh',    tip: docTip('store.overnight_cost') },
-    { label: 'Discount rate',
-      value: store.discount_rate != null && Number.isFinite(store.discount_rate)
-        ? Number((store.discount_rate * 100).toFixed(3)) : null,
-      unit: ' %',
-      tip: 'Per-asset discount rate. Blank means the global rate from Solver Settings is used.' },
-    { label: 'Standing loss', value: store.standing_loss,                      unit: ' /h',   tip: docTip('store.standing_loss') },
-    { label: 'Build year',    value: store.build_year,                                       tip: docTip('store.build_year') },
-    { label: 'Lifetime',      value: store.lifetime ?? null,                   unit: ' yr',  tip: docTip('store.lifetime') },
-  ]
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset)
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {
@@ -623,49 +573,32 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
 
   return (
     <EditShell title={store.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
-      <TxtInput label="Name" k="name" fs={form} set={setForm} tip={docTip('store.name')} />
-      <CarrierGroupSelect k="carrier" fs={form} set={setForm} carriers={carriers as Carrier[]} tip={docTip('store.carrier')} />
-      <SectionHdr title="Topology" />
-      <BusSelect k="bus" fs={form} set={setForm} buses={buses as Bus[]} tip={docTip('store.bus')} />
       <div className="col-span-2 text-[9px] text-muted bg-border/20 rounded px-2 py-1.5 leading-tight">
         {isH2Store
-          ? <>A <strong>Store</strong> is a pure energy vessel — power throughput is unlimited and bounded only by connected Links (electrolyzers/fuel cells). Set <code>e_nom</code> for tank capacity. 1 MWh ≈ 29.8 kg H₂ (LHV).</>
-          : <>A <strong>Store</strong> has no intrinsic power limit — charge/discharge rate is set by connected components. Only energy capacity (<code>e_nom</code>) constrains storage.</>}
+          ? <>A <strong>Store</strong> is a pure energy vessel — power throughput is unlimited and bounded only by connected Links (electrolyzers/fuel cells). Set the energy capacity for the tank. 1 MWh ≈ 29.8 kg H₂ (LHV).</>
+          : <>A <strong>Store</strong> has no intrinsic power limit — charge/discharge rate is set by connected components. Only the energy capacity constrains storage.</>}
       </div>
-      <SectionHdr title="Energy Capacity" />
-      <NumInput label="e_nom (nominal)" k="e_nom" fs={form} set={setForm} unit="MWh" tip={docTip('store.e_nom')} />
-      <ChkInput label="Extendable" k="e_nom_extendable" fs={form} set={setForm} tip={docTip('store.e_nom_extendable')} onCheck={autofillNomMin('e_nom', 'e_nom_min')} />
-      {isExt && <NumInput label="e_nom_min" k="e_nom_min" fs={form} set={setForm} unit="MWh" tip={docTip('store.e_nom_min')} />}
-      {isExt && <NumInput label="e_nom_max" k="e_nom_max" fs={form} set={setForm} unit="MWh" tip={docTip('store.e_nom_max')} />}
-      {isExt && (
-        <div className="col-span-2 -mt-0.5">
-          <button type="button" onClick={() => setVintageOpen(true)}
-            className="text-[11px] text-accent hover:underline">
-            Per-period bounds…
-          </button>
-          <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
-        </div>
-      )}
+      {schema ? (
+        <AssetFieldsEdit
+          schema={schema} fs={form} set={setForm} current={asset}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]}
+          onCheck={{ e_nom_extendable: autofillNomMin('e_nom', 'e_nom_min') }}
+          after={{
+            e_nom_max: (
+              <div className="col-span-2 -mt-0.5">
+                <button type="button" onClick={() => setVintageOpen(true)}
+                  className="text-[11px] text-accent hover:underline">
+                  Per-period bounds…
+                </button>
+                <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
+              </div>
+            ),
+          }}
+        />
+      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
       {vintageOpen && (
         <VintagePeriodBoundsModal componentClass="Store" name={store.name} onClose={() => setVintageOpen(false)} />
       )}
-      <SectionHdr title="State of Energy Limits" />
-      <NumInput label="e_min_pu (SoE min)" k="e_min_pu" fs={form} set={setForm} tip={docTip('store.e_min_pu')} />
-      <NumInput label="e_max_pu (SoE max)" k="e_max_pu" fs={form} set={setForm} tip={docTip('store.e_max_pu')} />
-      <NumInput label="e_initial" k="e_initial" fs={form} set={setForm} tip={docTip('store.e_initial')} />
-      <ChkInput label="Cyclic SoE" k="e_cyclic" fs={form} set={setForm} tip={docTip('store.e_cyclic')} />
-      <SectionHdr title="Costs" />
-      <NumInput label="Capital cost" k="capital_cost" fs={form} set={setForm} unit="€/MWh/yr" tip={docTip('store.capital_cost')} />
-      <NumInput label="Marginal cost" k="marginal_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('store.marginal_cost')} />
-      <NumInput label="FOM cost" k="fom_cost" fs={form} set={setForm} unit="€/MWh/yr" tip={docTip('store.fom_cost')} />
-      <NumInput label="Overnight cost" k="overnight_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('store.overnight_cost')} />
-      <DiscountRateInput fs={form} set={setForm} tip="Discount rate used to annuitize overnight_cost for this asset. Leave blank to use the global rate from Solver Settings." />
-      <NumInput label="Standing loss" k="standing_loss" fs={form} set={setForm} unit="/h" tip={docTip('store.standing_loss')} />
-      <SectionHdr title="Adequacy" />
-      <OutageInputs fs={form} set={setForm} />
-      <SectionHdr title="Lifecycle (multi-period)" />
-      <BuildYearSelect fs={form} set={setForm} tip={docTip('store.build_year')} />
-      <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip="Asset lifetime in years. Defaults to the global default_lifetime from Solver Settings." />
       <ExtrasSection
         componentClass="Store"
         fs={form}
@@ -677,7 +610,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
 }
 
 // ── Load card ──────────────────────────────────────────────────────────────────
-function LoadCard({ load, onRename, mode = 'card', title }: {
+export function LoadCard({ load, onRename, mode = 'card', title }: {
   load: Load
   onRename?: (newName: string) => void
   mode?: 'card' | 'detail'
@@ -708,26 +641,24 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
     onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
+  // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
+  const { data: schema } = useAssetSchema('Load')
+  const specs = schemaFields(schema)
+  const asset = load as unknown as Record<string, unknown>
+
   const saveMut = useMutation({
-    mutationFn: () => {
-      const newName = form.name?.trim() || load.name
-      // `form.bus` carries the user's pick from the bus selector. Fall back
-      // to the existing load.bus when the form value is missing (e.g. legacy
-      // open before this field existed). The selector renders the current
-      // bus pre-selected so a user who doesn't touch it keeps the same bus.
-      const newBus = (form.bus as string | undefined)?.trim() || load.bus
-      // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
-      // this builder is only the form→patch mapping.
-      return updateAsset<Load>(
-        qc, useUIStore.getState().currentProject, 'loads', load.name,
-        (current) => ({
-          name: newName, bus: newBus,
-          carrier: form.carrier || current.carrier,
-          p_set: nf(form, 'p_set', current.p_set),
-          q_set: nf(form, 'q_set', current.q_set ?? 0),
-          sign: nf(form, 'sign', current.sign ?? -1),
-        }))
-    },
+    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
+    // the schema's descriptors own the form→patch mapping.
+    mutationFn: () => updateAsset<Load>(
+      qc, useUIStore.getState().currentProject, 'loads', load.name,
+      (current) => {
+        const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Load>
+        payload.name = form.name?.trim() || load.name
+        payload.bus = (form.bus as string | undefined)?.trim() || load.bus
+        payload.carrier = form.carrier || current.carrier
+        Object.assign(payload, extrasPatch(form, loadExtras(editScope('Load'))))
+        return payload
+      }),
     onSuccess: () => {
       setOpen(false)
       toast.success('Load saved')
@@ -738,7 +669,7 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
   })
 
   const startEdit = () => {
-    setForm(seedExtras(load, toFS(load, ['name', 'bus', 'carrier', 'p_set', 'q_set', 'sign']), loadExtras(editScope('Load'))))
+    setForm(seedExtras(load, seedForm(specs, asset), loadExtras(editScope('Load'))))
     setOpen(true)
   }
 
@@ -751,11 +682,7 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, load.name])
 
-  const items: ExpandedItem[] = [
-    { label: 'p_set (static)', value: load.p_set,        unit: ' MW',   tip: docTip('load.p_set') },
-    { label: 'q_set',          value: load.q_set,        unit: ' MVAr', tip: docTip('load.q_set') },
-    { label: 'Sign',           value: load.sign,                        tip: docTip('load.sign') },
-  ]
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset)
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {
@@ -814,14 +741,12 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
 
   return (
     <EditShell title={load.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
-      <TxtInput label="Name" k="name" fs={form} set={setForm} tip={docTip('load.name')} />
-      <CarrierGroupSelect k="carrier" fs={form} set={setForm} carriers={carriers as Carrier[]} tip={docTip('load.carrier')} />
-      <SectionHdr title="Topology" />
-      <BusSelect k="bus" fs={form} set={setForm} buses={buses as Bus[]} tip={docTip('load.bus')} />
-      <SectionHdr title="Set Points" />
-      <NumInput label="p_set (static)" k="p_set" fs={form} set={setForm} unit="MW" tip={docTip('load.p_set')} />
-      <NumInput label="q_set" k="q_set" fs={form} set={setForm} unit="MVAr" tip={docTip('load.q_set')} />
-      <NumInput label="Sign" k="sign" fs={form} set={setForm} tip={docTip('load.sign')} />
+      {schema ? (
+        <AssetFieldsEdit
+          schema={schema} fs={form} set={setForm} current={asset}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]}
+        />
+      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
       <SectionHdr title="Time Series" />
       <div className="flex items-center gap-2 py-1">
         <div className={`w-3 h-3 rounded-sm border flex items-center justify-center shrink-0 ${hasProfile ? 'bg-success border-success' : 'bg-bg border-border'}`}>
@@ -909,6 +834,12 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   const { data: carriers = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'), queryFn: networkApi.getCarriers, staleTime: 60_000 })
   const { data: buses = [] }    = useQuery({ queryKey: nk(currentProject, 'buses'),    queryFn: networkApi.getBuses,    staleTime: 30_000 })
   const globalLt = useGlobalDefaultLifetime()
+  // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
+  // Investment is typed as the overnight cost per kW of input; the annualised
+  // capital cost is derived and shown read-only.
+  const { data: schema } = useAssetSchema('Link')
+  const specs = schemaFields(schema)
+  const asset = link as unknown as Record<string, unknown>
 
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteLink(link.name),
@@ -924,36 +855,13 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
     mutationFn: () => updateAsset<Link>(
       qc, useUIStore.getState().currentProject, 'links', link.name,
       (current) => {
-      const newName = form.name?.trim() || link.name
-      const payload: Partial<Link> = {
-        name: newName,
-        bus0: form.bus0 || current.bus0,
-        bus1: form.bus1 || current.bus1,
-        carrier: form.carrier || current.carrier,
-        p_nom: nf(form, 'p_nom', current.p_nom),
-        p_nom_extendable: form.p_nom_extendable === 'true',
-        p_nom_min: nf(form, 'p_nom_min', current.p_nom_min ?? 0),
-        p_min_pu: nf(form, 'p_min_pu', current.p_min_pu ?? 0),
-        p_max_pu: nf(form, 'p_max_pu', current.p_max_pu ?? 1),
-        efficiency: nf(form, 'efficiency', current.efficiency),
-        // Cost fields: blank ⇒ save 0 (deliberate clear), not the old value.
-        marginal_cost: nf(form, 'marginal_cost', 0),
-        capital_cost: nf(form, 'capital_cost', 0),
-        fom_cost: nf(form, 'fom_cost', 0),
-        build_year: ni(form, 'build_year', current.build_year ?? 2025),
-      }
-      // Optional bounds + per-asset overrides — assign unconditionally so
-      // blanking clears the field on the backend (see GeneratorCard).
-      payload.p_nom_max = no(form, 'p_nom_max')
-      payload.lifetime = no(form, 'lifetime')
-      payload.overnight_cost = no(form, 'overnight_cost')
-      const drPct = no(form, 'discount_rate_pct')
-      payload.discount_rate = drPct === null ? null : drPct / 100
-      // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
-      Object.assign(payload, outagePayload(form))
+      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Link>
+      payload.name = form.name?.trim() || link.name
+      payload.bus0 = form.bus0 || current.bus0
+      payload.bus1 = form.bus1 || current.bus1
+      payload.carrier = form.carrier || current.carrier
       Object.assign(payload, ehLinkPayload(form, current))
-      // Extras last: the ...current spread and the explicit payload.X = no(...)
-      // lines above would otherwise overwrite a value the user just typed.
+      // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Link'))))
       return payload
     }),
@@ -967,15 +875,9 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   })
 
   const startEdit = () => {
-    const base = toFS(link, ['name', 'carrier', 'bus0', 'bus1', 'outage_rate_value', 'outage_rate_basis', 'mttr_hours', 'p_nom', 'p_nom_extendable', 'p_nom_min', 'p_nom_max',
-      'p_min_pu', 'p_max_pu', 'efficiency', 'marginal_cost', 'capital_cost', 'fom_cost',
-      'overnight_cost', 'build_year', 'lifetime'])
+    const base = seedForm(specs, asset)
     base.lifetime = defaultLifetime(link.lifetime, globalLt)
-    setForm(seedExtras(link, {
-      ...base,
-      discount_rate_pct: discountRatePct(link.discount_rate),
-      eh_role: link.eh_role ?? '',
-    }, loadExtras(editScope('Link'))))
+    setForm(seedExtras(link, { ...base, eh_role: link.eh_role ?? '' }, loadExtras(editScope('Link'))))
     setOpen(true)
   }
 
@@ -989,8 +891,6 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, link.name])
 
-  const isExt = form.p_nom_extendable === 'true'
-
   const bus0Obj = (buses as Bus[]).find(b => b.name === link.bus0)
   const bus1Obj = (buses as Bus[]).find(b => b.name === link.bus1)
   const flowLabel = category === 'electrolyzer'
@@ -999,27 +899,11 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
     ? `${bus0Obj?.carrier ?? 'H₂'} → ${bus1Obj?.carrier ?? 'AC'}`
     : `${link.bus0} → ${link.bus1}`
 
+  // Both ends lead the read-out: the schema's identity group is not in it.
   const items: ExpandedItem[] = [
-    { label: 'From bus (bus₀)', value: link.bus0,                                 tip: docTip('link.bus0') },
-    { label: 'To bus (bus₁)',   value: link.bus1,                                 tip: docTip('link.bus1') },
-    { label: 'p_nom',           value: link.p_nom,             unit: ' MW',       tip: docTip('link.p_nom') },
-    { label: 'Extendable',      value: link.p_nom_extendable,                     tip: docTip('link.p_nom_extendable') },
-    { label: 'p_nom_min',       value: link.p_nom_extendable ? link.p_nom_min : null, unit: ' MW', tip: docTip('link.p_nom_min') },
-    { label: 'p_nom_max',       value: link.p_nom_extendable ? link.p_nom_max ?? null : null, unit: ' MW', tip: docTip('link.p_nom_max') },
-    { label: 'Efficiency',      value: link.efficiency,                            tip: docTip('link.efficiency') },
-    { label: 'p_min_pu',        value: link.p_min_pu,                              tip: docTip('link.p_min_pu') },
-    { label: 'p_max_pu',        value: link.p_max_pu,                              tip: docTip('link.p_max_pu') },
-    { label: 'Marginal cost',   value: link.marginal_cost,     unit: ' €/MWh',     tip: docTip('link.marginal_cost') },
-    { label: 'Capital cost',    value: link.capital_cost,      unit: ' €/MW/yr',      tip: docTip('link.capital_cost') },
-    { label: 'FOM cost',        value: link.fom_cost ?? null,  unit: ' €/MW/yr',   tip: docTip('link.fom_cost') },
-    { label: 'Overnight cost',  value: link.overnight_cost ?? null, unit: ' €/MW',  tip: docTip('link.overnight_cost') },
-    { label: 'Discount rate',
-      value: link.discount_rate != null && Number.isFinite(link.discount_rate)
-        ? Number((link.discount_rate * 100).toFixed(3)) : null,
-      unit: ' %',
-      tip: 'Per-asset discount rate. Blank means the global rate from Solver Settings is used.' },
-    { label: 'Build year',      value: link.build_year,                            tip: docTip('link.build_year') },
-    { label: 'Lifetime',        value: link.lifetime ?? null,  unit: ' yr',        tip: docTip('link.lifetime') },
+    { label: 'From bus', value: link.bus0, tip: docTip('link.bus0') },
+    { label: 'To bus', value: link.bus1, tip: docTip('link.bus1') },
+    ...assetReadoutItems(schema, asset),
   ]
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
@@ -1101,8 +985,6 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
 
   return (
     <EditShell title={link.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
-      <TxtInput label="Name" k="name" fs={form} set={setForm} tip={docTip('link.name')} />
-      <CarrierGroupSelect k="carrier" fs={form} set={setForm} carriers={carriers as Carrier[]} tip={docTip('link.carrier')} />
       {(category === 'electrolyzer' || category === 'fuel_cell') && (
         <div className="col-span-2 text-[9px] text-muted bg-border/20 rounded px-2 py-1.5 leading-tight">
           {category === 'electrolyzer'
@@ -1110,63 +992,29 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
             : <>A <strong>fuel cell</strong> consumes H₂ (bus₀) and produces electricity (bus₁). Efficiency = AC MW out / H₂ MW in. Electrolyzer and fuel cell must always be modelled as separate Links.</>}
         </div>
       )}
-      <SectionHdr title="Topology" />
-      <label className="col-span-2 flex flex-col gap-0.5">
-        <span className="text-[9px] text-muted">
-          <InfoTip text={docTip('link.bus0')}>From bus (bus₀) — input / consumption</InfoTip>
-        </span>
-        <select value={form['bus0'] ?? ''} onChange={e => setForm(p => ({ ...p, bus0: e.target.value }))}
-          className="bg-bg border border-border rounded px-1.5 py-0.5 text-[10px] focus:outline-none focus:border-accent w-full">
-          {(buses as Bus[]).map(b => (
-            <option key={b.name} value={b.name}>{b.name}{b.carrier ? ` (${b.carrier})` : ''}</option>
-          ))}
-        </select>
-      </label>
-      <label className="col-span-2 flex flex-col gap-0.5">
-        <span className="text-[9px] text-muted">
-          <InfoTip text={docTip('link.bus1')}>To bus (bus₁) — output / production</InfoTip>
-        </span>
-        <select value={form['bus1'] ?? ''} onChange={e => setForm(p => ({ ...p, bus1: e.target.value }))}
-          className="bg-bg border border-border rounded px-1.5 py-0.5 text-[10px] focus:outline-none focus:border-accent w-full">
-          {(buses as Bus[]).map(b => (
-            <option key={b.name} value={b.name}>{b.name}{b.carrier ? ` (${b.carrier})` : ''}</option>
-          ))}
-        </select>
-      </label>
-      <SectionHdr title="Capacity" />
-      <NumInput label="p_nom" k="p_nom" fs={form} set={setForm} unit="MW" tip={docTip('link.p_nom')} />
-      <ChkInput label="Extendable" k="p_nom_extendable" fs={form} set={setForm} tip={docTip('link.p_nom_extendable')} onCheck={autofillNomMin('p_nom', 'p_nom_min')} />
-      {isExt && <NumInput label="p_nom_min" k="p_nom_min" fs={form} set={setForm} unit="MW" tip={docTip('link.p_nom_min')} />}
-      {isExt && <NumInput label="p_nom_max" k="p_nom_max" fs={form} set={setForm} unit="MW" tip={docTip('link.p_nom_max')} />}
-      {isExt && (
-        <div className="col-span-2 -mt-0.5">
-          <button type="button" onClick={() => setVintageOpen(true)}
-            className="text-[11px] text-accent hover:underline">
-            Per-period bounds…
-          </button>
-          <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
-        </div>
-      )}
+      {schema ? (
+        <AssetFieldsEdit
+          schema={schema} fs={form} set={setForm} current={asset}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]}
+          onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
+          after={{
+            p_nom_max: (
+              <div className="col-span-2 -mt-0.5">
+                <button type="button" onClick={() => setVintageOpen(true)}
+                  className="text-[11px] text-accent hover:underline">
+                  Per-period bounds…
+                </button>
+                <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
+              </div>
+            ),
+          }}
+        />
+      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
       {vintageOpen && (
         <VintagePeriodBoundsModal componentClass="Link" name={link.name} onClose={() => setVintageOpen(false)} />
       )}
-      <SectionHdr title="Operation" />
-      <NumInput label="Efficiency" k="efficiency" fs={form} set={setForm} tip={docTip('link.efficiency')} />
-      <NumInput label="p_min_pu" k="p_min_pu" fs={form} set={setForm} tip={docTip('link.p_min_pu')} />
-      <NumInput label="p_max_pu (static)" k="p_max_pu" fs={form} set={setForm} tip={docTip('link.p_max_pu')} />
-      <SectionHdr title="Costs" />
-      <NumInput label="Marginal cost" k="marginal_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('link.marginal_cost')} />
-      <NumInput label="Capital cost" k="capital_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('link.capital_cost')} />
-      <NumInput label="FOM cost" k="fom_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('link.fom_cost')} />
-      <NumInput label="Overnight cost" k="overnight_cost" fs={form} set={setForm} unit="€/MW" tip={docTip('link.overnight_cost')} />
-      <DiscountRateInput fs={form} set={setForm} tip="Discount rate used to annuitize overnight_cost for this asset. Leave blank to use the global rate from Solver Settings." />
-      <SectionHdr title="Adequacy" />
-      <OutageInputs fs={form} set={setForm} />
       <SectionHdr title="Energy Hub" />
       <EhLinkInputs fs={form} set={setForm} />
-      <SectionHdr title="Lifecycle" />
-      <BuildYearSelect fs={form} set={setForm} tip={docTip('link.build_year')} />
-      <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip={docTip('link.lifetime')} />
       <ExtrasSection
         componentClass="Link"
         fs={form}
@@ -1624,6 +1472,14 @@ export function LinePanel({ name }: { name: string }) {
   // input when the asset's own lifetime is blank/inf — same behaviour as
   // generators / storage / stores / links.
   const globalLt = useGlobalDefaultLifetime()
+  // S1c-2: the fields come from the asset schema (services/asset_schema/fields.py).
+  // Investment is typed per MVA and km; the backend derives the annualised
+  // capital cost and fixed O&M from it times the length. The topology stays
+  // read-only here, and r/x/b keep their own per-km block (they scale with
+  // the length too, but are stored as totals).
+  const { data: schema } = useAssetSchema('Line')
+  const specs = schemaFields(schema)
+  const asset = (line ?? {}) as unknown as Record<string, unknown>
 
   const numField = (key: string, fallback: number | null | undefined): number => {
     const v = parseFloat(form[key]); return isNaN(v) ? (fallback ?? 0) : v
@@ -1632,71 +1488,21 @@ export function LinePanel({ name }: { name: string }) {
   const updateMut = useMutation({
     // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate —
     // the spread keeps un-surfaced fields (`terrain_factor`, `num_parallel`,
-    // `v_ang_min/max`, `committable`, …) alive through remove+add.
+    // `v_ang_min/max`, `committable`, …) alive through remove+add; the
+    // schema's descriptors own the form→patch mapping.
     mutationFn: () => updateAsset<Line>(
       qc, useUIStore.getState().currentProject, 'lines', name,
       (current) => {
       if (!line) throw new Error('Line not found')
-      const newName = form.name?.trim() || name
-      const isExt = form.s_nom_extendable === 'true'
-      // r/x/b are entered per-km in the UI; PyPSA stores absolute Ohm / Siemens.
-      // Multiply by length on save. Per-km value of 0 (or empty) ⇒ absolute 0.
-      const lengthOut = numField('length', current.length)
-      const payload: Partial<Line> = {
-        name: newName, bus0: current.bus0, bus1: current.bus1, carrier: current.carrier || 'AC',
-        s_nom: numField('s_nom', current.s_nom), length: lengthOut,
-        r: numField('r_per_km', 0) * lengthOut,
-        x: numField('x_per_km', 0) * lengthOut,
-        b: numField('b_per_km', 0) * lengthOut,
-        // Cost fields: blank ⇒ save 0 (deliberate clear), not the old value.
-        capital_cost: numField('capital_cost', 0),
-        fom_cost: numField('fom_cost', 0),
-        // Only send overnight_cost when the user typed something. The
-        // helpers above coerce empty strings → 0, but we want None (NaN
-        // server-side) to signal "unset" so the discount-rate annuity
-        // recompute leaves capital_cost alone. The empty-string check
-        // here matches our `no()` helper used elsewhere.
-        // Assign overnight_cost unconditionally so blanking clears it on
-        // the backend — the `...current` spread above re-injects the
-        // previous value, and the old conditional spread skipped the
-        // assignment for blanks. null routes through Pydantic's
-        // `Optional[float] = None` to NaN on the asset.
-        overnight_cost: (() => {
-          const raw = (form.overnight_cost ?? '').trim()
-          if (!raw) return null
-          const v = parseFloat(raw)
-          return Number.isFinite(v) ? v : null
-        })(),
-        s_nom_extendable: isExt,
-        s_nom_min: isExt ? numField('s_nom_min', current.s_nom_min ?? 0) : 0,
-      }
-      // Optional bounds + per-asset overrides — assign unconditionally so
-      // blanking clears the field on the backend (see GeneratorCard).
-      // s_nom_max only applies when extendable; otherwise PyPSA ignores it.
-      if (isExt) {
-        const maxRaw = form.s_nom_max?.trim()
-        payload.s_nom_max = maxRaw ? parseFloat(maxRaw) : null
-      }
-      const drRaw = (form.discount_rate_pct ?? '').trim()
-      if (drRaw) {
-        const v = parseFloat(drRaw)
-        payload.discount_rate = Number.isFinite(v) ? v / 100 : null
-      } else {
-        payload.discount_rate = null
-      }
-      // Vintage attributes — same pattern as generators / storage / links.
-      payload.build_year = ni(form, 'build_year', current.build_year ?? 0)
-      const ltRaw = (form.lifetime ?? '').trim()
-      if (ltRaw) {
-        const v = parseFloat(ltRaw)
-        payload.lifetime = Number.isFinite(v) ? v : null
-      } else {
-        payload.lifetime = null
-      }
-      // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
-      Object.assign(payload, outagePayload(form))
-      // Extras last: the ...current spread and the explicit payload.X = no(...)
-      // lines above would otherwise overwrite a value the user just typed.
+      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Line>
+      payload.name = form.name?.trim() || name
+      // r/x/b are entered per km; PyPSA stores absolute Ohm / Siemens.
+      // Multiply by the length being saved. Per-km 0 (or empty) ⇒ absolute 0.
+      const lengthOut = payload.length ?? current.length
+      payload.r = numField('r_per_km', 0) * lengthOut
+      payload.x = numField('x_per_km', 0) * lengthOut
+      payload.b = numField('b_per_km', 0) * lengthOut
+      // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Line'))))
       return payload
     }),
@@ -1711,64 +1517,58 @@ export function LinePanel({ name }: { name: string }) {
 
   if (!line) return <p className="p-3 text-xs text-muted">Loading…</p>
 
+  // Derive per-km values from the stored absolute Ohm / Siemens via the
+  // current length. Length=0 ⇒ leave per-km blank (avoid division by zero;
+  // the user will set length first, then per-km values).
+  const storedLength = Number.isFinite(line.length) && line.length > 0 ? line.length : 0
+  const perKm = (v: number | null | undefined) =>
+    storedLength > 0 && v != null && Number.isFinite(v) ? v / storedLength : null
+
   const startEdit = () => {
-    // Derive per-km values from the stored absolute Ohm / Siemens via the
-    // current length. Length=0 ⇒ leave per-km blank (avoid division by zero;
-    // the user will set length first, then per-km values).
-    const L = Number.isFinite(line.length) && line.length > 0 ? line.length : 0
-    const perKm = (v: number | null | undefined) =>
-      L > 0 && v != null && Number.isFinite(v) ? String(v / L) : ''
-    setForm({
-      name: line.name,
-      s_nom: String(line.s_nom ?? ''), length: String(line.length ?? ''),
-      r_per_km: perKm(line.r), x_per_km: perKm(line.x), b_per_km: perKm(line.b),
-      capital_cost: String(line.capital_cost ?? ''),
-      fom_cost: String(line.fom_cost ?? 0),
-      // Render NaN / null overnight_cost as empty so the input is blank
-      // rather than showing "0" (which would confuse "actually zero" with
-      // "unset" on every save).
-      overnight_cost: line.overnight_cost == null || !Number.isFinite(line.overnight_cost) ? '' : String(line.overnight_cost),
-      s_nom_extendable: line.s_nom_extendable ? 'true' : 'false',
-      s_nom_min: String(line.s_nom_min ?? 0),
-      // Hide PyPSA's float('inf') sentinel — render an empty input so the
-      // user can leave "no upper bound" as the default.
-      s_nom_max: line.s_nom_max == null || !Number.isFinite(line.s_nom_max) ? '' : String(line.s_nom_max),
-      discount_rate_pct: discountRatePct(line.discount_rate),
-      // Vintage fields — same defaulting story as generators / storage:
-      // build_year falls back to the line's stored value (or 0 if unset),
-      // lifetime pre-fills from the solver-config global when the line
-      // doesn't already specify one.
-      build_year: String(line.build_year ?? 0),
-      lifetime: defaultLifetime(line.lifetime, globalLt),
-      // Adequacy occurrence trio — blank when unset/NaN (spec §5.4).
-      outage_rate_value: line.outage_rate_value != null && Number.isFinite(line.outage_rate_value) ? String(line.outage_rate_value) : '',
-      outage_rate_basis: line.outage_rate_basis ?? '',
-      mttr_hours: line.mttr_hours != null && Number.isFinite(line.mttr_hours) ? String(line.mttr_hours) : '',
-    })
+    const base = seedForm(specs, asset)
+    base.lifetime = defaultLifetime(line.lifetime, globalLt)
+    const km = (v: number | null | undefined) => { const p = perKm(v); return p === null ? '' : String(p) }
+    setForm(seedExtras(line, { ...base, r_per_km: km(line.r), x_per_km: km(line.x), b_per_km: km(line.b) },
+      loadExtras(editScope('Line'))))
     setEditing(true)
   }
 
-  const numInp = (label: string, key: string, unit?: string, lineTip?: string) => (
-    <label key={key} className="flex flex-col gap-0.5 mb-1.5">
-      <span className="text-[10px] text-muted">
-        <InfoTip text={lineTip}>{label}{unit ? ` (${unit})` : ''}</InfoTip>
-      </span>
-      <input className="bg-bg border border-border rounded px-2 py-1 text-xs font-mono text-text focus:outline-none focus:border-accent"
-        type="number" step="any" value={form[key] ?? ''}
-        onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))} />
-    </label>
-  )
+  // A line priced the old way (one overnight cost per MVA, no per-km cost)
+  // keeps that cost; the form says so, since the per-km cost replaces it.
+  const legacyOvernight = line.overnight_cost != null && Number.isFinite(line.overnight_cost)
+    && !(line.inv_per_km_overnight != null && Number.isFinite(line.inv_per_km_overnight))
 
-  const txtInp = (label: string, key: string, lineTip?: string) => (
-    <label key={key} className="flex flex-col gap-0.5 mb-1.5">
-      <span className="text-[10px] text-muted">
-        <InfoTip text={lineTip}>{label}</InfoTip>
-      </span>
-      <input className="bg-bg border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:border-accent"
-        type="text" value={form[key] ?? ''}
-        onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))} />
-    </label>
-  )
+  // r/x/b: per-km input + read-only computed total. PyPSA stores absolute
+  // Ohm / Siemens, but the natural physical quantity is per km — so the
+  // user enters r/x/b per km and we multiply by length on save. The total
+  // is shown live so the user can sanity-check what PyPSA actually
+  // receives. Length=0 falls back to "—" for the total.
+  const impedanceInputs = () => {
+    const L = numField('length', line.length)
+    const fmtTotal = (k: string, unit: string) => {
+      const v = parseFloat(form[k] ?? '')
+      if (!Number.isFinite(v) || L <= 0) return `— ${unit}`
+      return `= ${(v * L).toLocaleString(undefined, { maximumSignificantDigits: 6 })} ${unit}`
+    }
+    const row = (k: string, label: string, unit: string, total: string, tip?: string) => (
+      <label key={k} className="col-span-2 flex flex-col gap-0.5">
+        <span className="text-[10px] text-muted"><InfoTip text={tip}>{label} ({unit}/km)</InfoTip></span>
+        <input className="bg-bg border border-border rounded px-2 py-1 text-xs font-mono text-text focus:outline-none focus:border-accent"
+          type="number" step="any" value={form[k] ?? ''} aria-label={`${label} (${unit}/km)`}
+          onChange={e => setForm(p => ({ ...p, [k]: e.target.value }))} />
+        <span className="text-[10px] text-muted font-mono">{fmtTotal(k, total)}</span>
+      </label>
+    )
+    return (
+      <>
+        {row('r_per_km', 'Resistance r', 'Ω', 'Ω', docTip('line.r'))}
+        {row('x_per_km', 'Reactance x', 'Ω', 'Ω', docTip('line.x'))}
+        {row('b_per_km', 'Susceptance b', 'S', 'S', docTip('line.b'))}
+      </>
+    )
+  }
+
+  const items = assetReadoutItems(schema, asset)
 
   return (
     <div className="p-3">
@@ -1779,106 +1579,36 @@ export function LinePanel({ name }: { name: string }) {
       </Section>
       {editing ? (
         <Section title="Edit Parameters">
-          {txtInp('Name', 'name', docTip('line.name'))}
-          {numInp('s_nom', 's_nom', 'MVA', docTip('line.s_nom'))}
-          {numInp('Length', 'length', 'km', docTip('line.length'))}
-          {/* Per-km input + read-only computed total. PyPSA stores absolute
-              Ohm / Siemens, but the natural physical quantity is per-km — so
-              the user enters r/x/b per km and we multiply by length on save.
-              Total is shown live so the user can sanity-check what PyPSA
-              actually receives. Length=0 falls back to "—" for the total. */}
-          {(() => {
-            const L = numField('length', line.length)
-            const fmtTotal = (k: string, unit: string) => {
-              const perKm = parseFloat(form[k] ?? '')
-              if (!Number.isFinite(perKm) || L <= 0) return `— ${unit}`
-              const tot = perKm * L
-              return `= ${tot.toLocaleString(undefined, { maximumSignificantDigits: 6 })} ${unit}`
-            }
-            return (
-              <>
-                <label className="flex flex-col gap-0.5 mb-1.5">
-                  <span className="text-[10px] text-muted">
-                    <InfoTip text={docTip('line.r')}>Resistance r (Ω/km)</InfoTip>
-                  </span>
-                  <input className="bg-bg border border-border rounded px-2 py-1 text-xs font-mono text-text focus:outline-none focus:border-accent"
-                    type="number" step="any" value={form.r_per_km ?? ''}
-                    onChange={e => setForm(p => ({ ...p, r_per_km: e.target.value }))} />
-                  <span className="text-[10px] text-muted font-mono">{fmtTotal('r_per_km', 'Ω')}</span>
-                </label>
-                <label className="flex flex-col gap-0.5 mb-1.5">
-                  <span className="text-[10px] text-muted">
-                    <InfoTip text={docTip('line.x')}>Reactance x (Ω/km)</InfoTip>
-                  </span>
-                  <input className="bg-bg border border-border rounded px-2 py-1 text-xs font-mono text-text focus:outline-none focus:border-accent"
-                    type="number" step="any" value={form.x_per_km ?? ''}
-                    onChange={e => setForm(p => ({ ...p, x_per_km: e.target.value }))} />
-                  <span className="text-[10px] text-muted font-mono">{fmtTotal('x_per_km', 'Ω')}</span>
-                </label>
-                <label className="flex flex-col gap-0.5 mb-1.5">
-                  <span className="text-[10px] text-muted">
-                    <InfoTip text={docTip('line.b')}>Susceptance b (S/km)</InfoTip>
-                  </span>
-                  <input className="bg-bg border border-border rounded px-2 py-1 text-xs font-mono text-text focus:outline-none focus:border-accent"
-                    type="number" step="any" value={form.b_per_km ?? ''}
-                    onChange={e => setForm(p => ({ ...p, b_per_km: e.target.value }))} />
-                  <span className="text-[10px] text-muted font-mono">{fmtTotal('b_per_km', 'S')}</span>
-                </label>
-              </>
-            )
-          })()}
-          {/* Extendable toggle + conditional min/max — mirrors the
-              generator/storage/store/link pattern so all expandable assets
-              expose the same controls. capital_cost stays visible regardless,
-              since PyPSA still reports it via n.statistics() even when not
-              extendable (annualised cost basis). */}
-          <label className="flex items-center gap-1.5 cursor-pointer py-0.5 mb-1.5">
-            <input type="checkbox" checked={form.s_nom_extendable === 'true'}
-              onChange={e => {
-                const checked = e.target.checked
-                setForm(p => {
-                  const next = { ...p, s_nom_extendable: checked ? 'true' : 'false' }
-                  return autofillNomMin('s_nom', 's_nom_min')(checked, next)
-                })
-              }}
-              className="accent-accent" />
-            <span className="text-xs text-text">
-              <InfoTip text={docTip('line.s_nom_extendable')}>Extendable</InfoTip>
-            </span>
-          </label>
-          {form.s_nom_extendable === 'true' && (
-            <>
-              {numInp('s_nom_min', 's_nom_min', 'MVA', docTip('line.s_nom_min'))}
-              {numInp('s_nom_max', 's_nom_max', 'MVA', docTip('line.s_nom_max'))}
-              <div className="my-1">
-                <button type="button" onClick={() => setVintageOpen(true)}
-                  className="text-[11px] text-accent hover:underline">
-                  Per-period bounds…
-                </button>
-                <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
-              </div>
-            </>
-          )}
-          {vintageOpen && line && (
+          <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 mb-2">
+            {schema ? (
+              <AssetFieldsEdit
+                schema={schema} fs={form} set={setForm} current={asset} carriers={[]} buses={[]}
+                hidden={LINE_TOPOLOGY}
+                onCheck={{ s_nom_extendable: autofillNomMin('s_nom', 's_nom_min') }}
+                after={{
+                  length: impedanceInputs(),
+                  s_nom_max: (
+                    <div className="col-span-2 -mt-0.5">
+                      <button type="button" onClick={() => setVintageOpen(true)}
+                        className="text-[11px] text-accent hover:underline">
+                        Per-period bounds…
+                      </button>
+                      <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
+                    </div>
+                  ),
+                  inv_per_km_overnight: legacyOvernight ? (
+                    <p className="col-span-2 text-[10px] text-muted" data-testid="legacy-overnight-note">
+                      Priced the old way: one overnight cost of {line.overnight_cost!.toLocaleString()} €/MVA.
+                      Enter the cost per km to replace it.
+                    </p>
+                  ) : undefined,
+                }}
+              />
+            ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
+          </div>
+          {vintageOpen && (
             <VintagePeriodBoundsModal componentClass="Line" name={line.name} onClose={() => setVintageOpen(false)} />
           )}
-          {numInp('Capital cost', 'capital_cost', '€/MVA/yr', docTip('line.capital_cost'))}
-          {numInp('FOM cost', 'fom_cost', '€/MVA/yr', docTip('line.fom_cost'))}
-          {numInp('Overnight cost', 'overnight_cost', '€/MVA', docTip('line.overnight_cost'))}
-          <div className="mb-1.5">
-            <DiscountRateInput fs={form} set={setForm} tip="Discount rate used to annuitize overnight_cost. Leave blank to use the global rate from Solver Settings." />
-          </div>
-          {/* Vintage attributes — same controls as Generator / Link / Storage
-              so the multi-period validator has the same set of knobs across
-              every component class. Build year defaults to the first
-              investment period when blank; lifetime falls back to the global
-              default_lifetime from Solver Settings. */}
-          <div className="grid grid-cols-2 gap-1.5 mb-1.5">
-            <OutageInputs fs={form} set={setForm} />
-          </div>
-          <BuildYearSelect fs={form} set={setForm} tip={docTip('line.build_year')} />
-          <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr"
-            tip={docTip('line.lifetime')} />
           <div className="flex gap-2 mt-2">
             <button onClick={() => updateMut.mutate()} disabled={updateMut.isPending}
               className="flex-1 py-1.5 bg-accent text-white rounded text-xs font-semibold hover:bg-accent/90 transition-colors disabled:opacity-50">
@@ -1899,39 +1629,18 @@ export function LinePanel({ name }: { name: string }) {
       ) : (
         <>
           <Section title="Parameters">
-            <Row label="Length"      value={line.length}       unit=" km"   tip={docTip('line.length')} />
-            <Row label="s_nom"       value={line.s_nom}        unit=" MVA"  tip={docTip('line.s_nom')} />
+            {items.map(i => (
+              <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
+            ))}
             {/* Per-km + total pairs. PyPSA stores absolute Ohm / Siemens, but
                 the natural physical quantity is per-km — show both so the user
                 can sanity-check what's actually in the LP. */}
-            {(() => {
-              const L = Number.isFinite(line.length) && line.length > 0 ? line.length : 0
-              const perKm = (v: number | null | undefined) =>
-                L > 0 && v != null && Number.isFinite(v) ? v / L : null
-              return (
-                <>
-                  <Row label="r (per km)"   value={perKm(line.r)} unit=" Ω/km" tip={docTip('line.r')} />
-                  <Row label="r (total)"    value={line.r ?? null} unit=" Ω" />
-                  <Row label="x (per km)"   value={perKm(line.x)} unit=" Ω/km" tip={docTip('line.x')} />
-                  <Row label="x (total)"    value={line.x ?? null} unit=" Ω" />
-                  <Row label="b (per km)"   value={perKm(line.b)} unit=" S/km" tip={docTip('line.b')} />
-                  <Row label="b (total)"    value={line.b ?? null} unit=" S" />
-                </>
-              )
-            })()}
-            <Row label="Extendable"  value={line.s_nom_extendable}          tip={docTip('line.s_nom_extendable')} />
-            {line.s_nom_extendable && <Row label="s_nom_min" value={line.s_nom_min} unit=" MVA" tip={docTip('line.s_nom_min')} />}
-            {line.s_nom_extendable && <Row label="s_nom_max" value={line.s_nom_max ?? null} unit=" MVA" tip={docTip('line.s_nom_max')} />}
-            <Row label="Capital cost" value={line.capital_cost} unit=" €/MVA/yr" tip={docTip('line.capital_cost')} />
-            <Row label="FOM cost"     value={line.fom_cost ?? null} unit=" €/MVA/yr" tip={docTip('line.fom_cost')} />
-            <Row label="Overnight cost" value={line.overnight_cost ?? null} unit=" €/MVA" tip={docTip('line.overnight_cost')} />
-            <Row label="Discount rate"
-              value={line.discount_rate != null && Number.isFinite(line.discount_rate)
-                ? Number((line.discount_rate * 100).toFixed(3)) : null}
-              unit=" %"
-              tip="Per-asset discount rate. Blank means the global rate from Solver Settings is used." />
-            <Row label="Build year"  value={line.build_year}                         tip={docTip('line.build_year')} />
-            <Row label="Lifetime"    value={line.lifetime ?? null}  unit=" yr"       tip={docTip('line.lifetime')} />
+            <Row label="r (per km)"   value={perKm(line.r)} unit=" Ω/km" tip={docTip('line.r')} />
+            <Row label="r (total)"    value={line.r ?? null} unit=" Ω" />
+            <Row label="x (per km)"   value={perKm(line.x)} unit=" Ω/km" tip={docTip('line.x')} />
+            <Row label="x (total)"    value={line.x ?? null} unit=" Ω" />
+            <Row label="b (per km)"   value={perKm(line.b)} unit=" S/km" tip={docTip('line.b')} />
+            <Row label="b (total)"    value={line.b ?? null} unit=" S" />
           </Section>
           <button onClick={startEdit}
             className="w-full py-1.5 border border-border rounded text-xs text-muted hover:border-accent hover:text-accent transition-colors">
@@ -1942,6 +1651,9 @@ export function LinePanel({ name }: { name: string }) {
     </div>
   )
 }
+
+// The Line panel shows its ends and carrier read-only in "Topology".
+const LINE_TOPOLOGY: ReadonlySet<string> = new Set(['bus0', 'bus1', 'carrier'])
 
 // ── Transformer panel ──────────────────────────────────────────────────────────
 export function TransformerPanel({ name }: { name: string }) {
@@ -1958,69 +1670,27 @@ export function TransformerPanel({ name }: { name: string }) {
   // Solver-config global default_lifetime — used to pre-fill the lifetime
   // input when the transformer's own lifetime is blank/inf.
   const globalLt = useGlobalDefaultLifetime()
-
-  const numField = (key: string, fallback: number | null | undefined): number => {
-    const v = parseFloat(form[key]); return isNaN(v) ? (fallback ?? 0) : v
-  }
+  // S1c-2: the fields come from the asset schema (services/asset_schema/fields.py).
+  // Investment is typed as the overnight cost per MVA; the annualised capital
+  // cost is derived and shown read-only. The windings stay read-only here.
+  const { data: schema } = useAssetSchema('Transformer')
+  const specs = schemaFields(schema)
+  const asset = (tr ?? {}) as unknown as Record<string, unknown>
 
   const updateMut = useMutation({
     // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate —
     // the spread keeps un-surfaced Transformer fields (`tap_position`,
     // `tap_side`, `num_parallel`, `model`, `g`, `b`, `active`, `s_max_pu`)
-    // alive through the backend's remove+add cycle.
+    // alive through the backend's remove+add cycle; the schema's descriptors
+    // own the form→patch mapping. v_nom_0 / v_nom_1 always go back, so the
+    // backend re-validates them against the connected buses on every save.
     mutationFn: () => updateAsset<Transformer>(
       qc, useUIStore.getState().currentProject, 'transformers', name,
       (current) => {
       if (!tr) throw new Error('Transformer not found')
-      const newName = form.name?.trim() || name
-      const isExt = form.s_nom_extendable === 'true'
-      // Forward v_nom_0 / v_nom_1 so the backend re-validates against the
-      // connected buses on every save (catches voltage edits made elsewhere).
-      const payload: Partial<Transformer> = {
-        name: newName, bus0: current.bus0, bus1: current.bus1, type: current.type ?? '',
-        s_nom: numField('s_nom', current.s_nom),
-        r: numField('r', current.r),
-        x: numField('x', current.x),
-        tap_ratio: numField('tap_ratio', current.tap_ratio),
-        phase_shift: numField('phase_shift', current.phase_shift ?? 0),
-        // Cost fields: blank ⇒ save 0 (deliberate clear), not the old value.
-        capital_cost: numField('capital_cost', 0),
-        fom_cost: numField('fom_cost', 0),
-        // overnight_cost: assign unconditionally so blanking clears it on
-        // the backend (see GeneratorCard for the cleared-to-null rationale).
-        overnight_cost: (() => {
-          const raw = (form.overnight_cost ?? '').trim()
-          if (!raw) return null
-          const v = parseFloat(raw)
-          return Number.isFinite(v) ? v : null
-        })(),
-        v_nom_0: numField('v_nom_0', current.v_nom_0 ?? 0),
-        v_nom_1: numField('v_nom_1', current.v_nom_1 ?? 0),
-        s_nom_extendable: isExt,
-        s_nom_min: isExt ? numField('s_nom_min', current.s_nom_min ?? 0) : 0,
-      }
-      // Optional bounds + per-asset overrides — assign unconditionally.
-      if (isExt) {
-        const maxRaw = form.s_nom_max?.trim()
-        payload.s_nom_max = maxRaw ? parseFloat(maxRaw) : null
-      }
-      const drRaw = (form.discount_rate_pct ?? '').trim()
-      if (drRaw) {
-        const v = parseFloat(drRaw)
-        payload.discount_rate = Number.isFinite(v) ? v / 100 : null
-      } else {
-        payload.discount_rate = null
-      }
-      payload.build_year = ni(form, 'build_year', current.build_year ?? 0)
-      const ltRaw = (form.lifetime ?? '').trim()
-      if (ltRaw) {
-        const v = parseFloat(ltRaw)
-        payload.lifetime = Number.isFinite(v) ? v : null
-      } else {
-        payload.lifetime = null
-      }
-      // Extras last: the ...current spread and the explicit payload.X = no(...)
-      // lines above would otherwise overwrite a value the user just typed.
+      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Transformer>
+      payload.name = form.name?.trim() || name
+      // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Transformer'))))
       return payload
     }),
@@ -2036,46 +1706,13 @@ export function TransformerPanel({ name }: { name: string }) {
   if (!tr) return <p className="p-3 text-xs text-muted">Loading…</p>
 
   const startEdit = () => {
-    setForm({
-      name: tr.name,
-      s_nom: String(tr.s_nom ?? ''),
-      r: String(tr.r ?? ''),
-      x: String(tr.x ?? ''),
-      tap_ratio: String(tr.tap_ratio ?? '1'),
-      phase_shift: String(tr.phase_shift ?? '0'),
-      capital_cost: String(tr.capital_cost ?? '0'),
-      fom_cost: String(tr.fom_cost ?? '0'),
-      overnight_cost: tr.overnight_cost == null || !Number.isFinite(tr.overnight_cost) ? '' : String(tr.overnight_cost),
-      v_nom_0: String(tr.v_nom_0 ?? '0'),
-      v_nom_1: String(tr.v_nom_1 ?? '0'),
-      s_nom_extendable: tr.s_nom_extendable ? 'true' : 'false',
-      s_nom_min: String(tr.s_nom_min ?? 0),
-      s_nom_max: tr.s_nom_max == null || !Number.isFinite(tr.s_nom_max) ? '' : String(tr.s_nom_max),
-      discount_rate_pct: discountRatePct(tr.discount_rate),
-      // Vintage fields — same defaulting story as the rest of the panels.
-      build_year: String(tr.build_year ?? 0),
-      lifetime: defaultLifetime(tr.lifetime, globalLt),
-    })
+    const base = seedForm(specs, asset)
+    base.lifetime = defaultLifetime(tr.lifetime, globalLt)
+    setForm(seedExtras(tr, base, loadExtras(editScope('Transformer'))))
     setEditing(true)
   }
 
-  const numInp = (label: string, key: string, unit?: string) => (
-    <label key={key} className="flex flex-col gap-0.5 mb-1.5">
-      <span className="text-[10px] text-muted">{label}{unit ? ` (${unit})` : ''}</span>
-      <input className="bg-bg border border-border rounded px-2 py-1 text-xs font-mono text-text focus:outline-none focus:border-accent"
-        type="number" step="any" value={form[key] ?? ''}
-        onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))} />
-    </label>
-  )
-
-  const txtInp = (label: string, key: string) => (
-    <label key={key} className="flex flex-col gap-0.5 mb-1.5">
-      <span className="text-[10px] text-muted">{label}</span>
-      <input className="bg-bg border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:border-accent"
-        type="text" value={form[key] ?? ''}
-        onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))} />
-    </label>
-  )
+  const items = assetReadoutItems(schema, asset, TRANSFORMER_VOLTAGES)
 
   return (
     <div className="p-3">
@@ -2090,54 +1727,29 @@ export function TransformerPanel({ name }: { name: string }) {
       </Section>
       {editing ? (
         <Section title="Edit Parameters">
-          {txtInp('Name', 'name')}
-          {numInp('Declared v_nom₀', 'v_nom_0', 'kV')}
-          {numInp('Declared v_nom₁', 'v_nom_1', 'kV')}
-          {numInp('s_nom', 's_nom', 'MVA')}
-          {numInp('Resistance R', 'r', 'pu')}
-          {numInp('Reactance X', 'x', 'pu')}
-          {numInp('Tap ratio', 'tap_ratio')}
-          {numInp('Phase shift', 'phase_shift', '°')}
-          <label className="flex items-center gap-1.5 cursor-pointer py-0.5 mb-1.5">
-            <input type="checkbox" checked={form.s_nom_extendable === 'true'}
-              onChange={e => {
-                const checked = e.target.checked
-                setForm(p => {
-                  const next = { ...p, s_nom_extendable: checked ? 'true' : 'false' }
-                  return autofillNomMin('s_nom', 's_nom_min')(checked, next)
-                })
-              }}
-              className="accent-accent" />
-            <span className="text-xs text-text">Extendable</span>
-          </label>
-          {form.s_nom_extendable === 'true' && (
-            <>
-              {numInp('s_nom_min', 's_nom_min', 'MVA')}
-              {numInp('s_nom_max', 's_nom_max', 'MVA')}
-              <div className="my-1">
-                <button type="button" onClick={() => setVintageOpen(true)}
-                  className="text-[11px] text-accent hover:underline">
-                  Per-period bounds…
-                </button>
-                <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
-              </div>
-            </>
-          )}
-          {vintageOpen && tr && (
+          <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 mb-2">
+            {schema ? (
+              <AssetFieldsEdit
+                schema={schema} fs={form} set={setForm} current={asset} carriers={[]} buses={[]}
+                hidden={TRANSFORMER_TOPOLOGY}
+                onCheck={{ s_nom_extendable: autofillNomMin('s_nom', 's_nom_min') }}
+                after={{
+                  s_nom_max: (
+                    <div className="col-span-2 -mt-0.5">
+                      <button type="button" onClick={() => setVintageOpen(true)}
+                        className="text-[11px] text-accent hover:underline">
+                        Per-period bounds…
+                      </button>
+                      <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
+                    </div>
+                  ),
+                }}
+              />
+            ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
+          </div>
+          {vintageOpen && (
             <VintagePeriodBoundsModal componentClass="Transformer" name={tr.name} onClose={() => setVintageOpen(false)} />
           )}
-          {numInp('Capital cost', 'capital_cost', '€/MVA/yr')}
-          {numInp('FOM cost', 'fom_cost', '€/MVA/yr')}
-          {numInp('Overnight cost', 'overnight_cost', '€/MVA')}
-          <div className="mb-1.5">
-            <DiscountRateInput fs={form} set={setForm} tip="Discount rate used to annuitize overnight_cost. Leave blank to use the global rate from Solver Settings." />
-          </div>
-          {/* Vintage attributes — same controls as Line / Generator / Link /
-              Storage so multi-period validators have the same set of knobs
-              across every component class. */}
-          <BuildYearSelect fs={form} set={setForm} tip={docTip('transformer.build_year')} />
-          <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr"
-            tip={docTip('transformer.lifetime')} />
           <div className="flex gap-2 mt-2">
             <button onClick={() => updateMut.mutate()} disabled={updateMut.isPending}
               className="flex-1 py-1.5 bg-accent text-white rounded text-xs font-semibold hover:bg-accent/90 transition-colors disabled:opacity-50">
@@ -2158,22 +1770,9 @@ export function TransformerPanel({ name }: { name: string }) {
       ) : (
         <>
           <Section title="Parameters">
-            <Row label="s_nom"       value={tr.s_nom}             unit=" MVA" />
-            <Row label="Resistance R" value={tr.r ?? null}        unit=" pu" />
-            <Row label="Reactance X" value={tr.x}                 unit=" pu" />
-            <Row label="Tap ratio"   value={tr.tap_ratio} />
-            <Row label="Phase shift" value={tr.phase_shift ?? 0}  unit="°" />
-            <Row label="Extendable"  value={tr.s_nom_extendable} />
-            <Row label="Capital cost" value={tr.capital_cost}     unit=" €/MVA/yr" />
-            <Row label="FOM cost"     value={tr.fom_cost ?? null} unit=" €/MVA/yr" />
-            <Row label="Overnight cost" value={tr.overnight_cost ?? null} unit=" €/MVA" />
-            <Row label="Discount rate"
-              value={tr.discount_rate != null && Number.isFinite(tr.discount_rate)
-                ? Number((tr.discount_rate * 100).toFixed(3)) : null}
-              unit=" %"
-              tip="Per-asset discount rate. Blank means the global rate from Solver Settings is used." />
-            <Row label="Build year"  value={tr.build_year}                       tip={docTip('transformer.build_year')} />
-            <Row label="Lifetime"    value={tr.lifetime ?? null}  unit=" yr"     tip={docTip('transformer.lifetime')} />
+            {items.map(i => (
+              <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
+            ))}
           </Section>
           <button onClick={startEdit}
             className="w-full py-1.5 border border-border rounded text-xs text-muted hover:border-accent hover:text-accent transition-colors">
@@ -2184,6 +1783,11 @@ export function TransformerPanel({ name }: { name: string }) {
     </div>
   )
 }
+
+// The Transformer panel shows its windings' buses read-only in "Topology",
+// and their declared voltages in "Voltage step" (the read-out skips them).
+const TRANSFORMER_TOPOLOGY: ReadonlySet<string> = new Set(['bus0', 'bus1'])
+const TRANSFORMER_VOLTAGES: ReadonlySet<string> = new Set(['v_nom_0', 'v_nom_1'])
 
 // ── Link panel ─────────────────────────────────────────────────────────────────
 function LinkPanel({ name }: { name: string }) {

@@ -3,13 +3,12 @@
 **Date:** 2026-10-06
 **Severity:** HIGH: a cross-user write to a project's campus study, including
 an overwrite of the holder's edited campus file.
-**Status: OPEN, NOT FIXED.** Introduced by #79 (merged 2026-10-06, `af69613`)
-and caught the same day by `tests/test_write_surface_lock_policy.py`. That
-test went red on #80 merged with the new master, before #80 merged. It is
-recorded rather than fixed under the standing rule that a defect found along
-the way is recorded, not folded into someone else's work. Both tools are
-listed in that test's `KNOWN_GAPS`, and the test fails once they are fixed
-until the entries are deleted.
+**Status: FIXED** on 2026-10-07 by `_gridspine_project_for_write` in
+`services/chat_tools.py`, which all four write tools now use. It was recorded
+first, while it kept growing (#79 added two tools, #84 one, #91 one), and fixed
+afterwards on the owner's instruction. Tripwire:
+`tests/test_campus_tools_foreign_lock.py`. The reproductions below are the
+pre-fix behaviour and are kept verbatim as the evidence.
 **Scope:** the multi-user server only.
 
 ## The mechanism
@@ -89,7 +88,7 @@ these, which did not exist yet. Gating per tool will keep missing new tools,
 and that is why the write-surface test exists: it caught this one on the day
 it landed.
 
-## The fix (not applied)
+## The fix (applied 2026-10-07)
 
 Smallest: add both tools to the chat seam's gated set (`_check_foreign_lock`
 on the active project). One caveat applies. These tools take a `project_id`,

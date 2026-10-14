@@ -1,6 +1,6 @@
 # 17 — A goal with a round budget: bounded autonomous continuation
 
-Status: ready-for-agent (Q17 decided; re-scoped 2026-10-12: no longer blocked by 13, see Comments)
+Status: ready-for-agent (done 2026-10-14: goal on the session, rounds through admission, goal strip; Q17a/Q17b asked, built on the recommendations)
 Type: task
 Blocked by: 06 (done)
 
@@ -54,3 +54,40 @@ has an unused `goals` field and `reserve_budget` / `settle_budget`, and
 - Refuse goal rounds in strict or pilot-checked turns (prose is withheld).
 - Frames are closed and recent work avoided new ones: carry goal state in the
   tool result, or add `goal_state` to `harness/events.py` deliberately.
+
+2026-10-14 (done, one PR): `harness/goals.py`; tools `set_goal(objective,
+max_rounds)` (default 5, 1–20, `invalid_goal`; a second goal is
+`goal_already_set` until the first is complete), `pause_goal(reason)`,
+`complete_goal(summary)`, all read tier, control tools. The goal is on the
+ChatSession beside the workflow, not the durable thread: a thread is bound
+only for Live voice, so a typed chat would have had none (asked as Q17a,
+recommendation taken meanwhile). After a turn, `run_turn` asks
+`goals.after_turn` and runs the next round on the same stream as
+`Continue toward the goal (round n of N).` with a fresh `utterance_id` at
+the goal's admission generation; a queued correction is drained first.
+Stops: Choice card (waits, the answer's turn resumes rounds); declined,
+lapsed, revoked or unrecordable card → paused `card_declined`; abort →
+paused `aborted`; disconnect → paused `disconnected`; budget refusal →
+blocked `budget`; error / not completed → blocked `error` (set before the
+`error` frame, which closes the panel's stream); `task_step_uncertain` or the
+session's task in `needs_review` → blocked `needs_review`; admission
+generation moved (a rebind) → blocked `generation_changed`; checked turn →
+blocked `checked_turn`; rounds used up → paused `rounds_used_up`. A
+`session_done` is held while the goal is active so `goal_state` reaches the
+panel first. Only a person resumes (`POST /api/chat/{id}/goal`
+pause/resume/stop; resume re-arms at the current generation with fresh
+rounds and the panel sends the turn; stop clears it and aborts a running
+round). Per-turn goal block after the workflow step (`context/injected
+kind=goal`); event log `goal/set`, `goal/round`, `goal/phase`; `/history.goal`;
+`goal_state` frame added to `harness/events.py`. Panel: goal strip (Pause /
+Resume / Stop, why it stopped), a "Goal: round n of N" marker per round.
+set_goal asks no card (read tier like start_workflow; Q17b, recommendation
+taken meanwhile). Tests: tests/test_harness_goals.py (34, red first),
+ChatPanel.goalStrip.test.tsx (4), ChatPanel.goalFrame.test.tsx (2); the tool
+inventory regenerated (+3 tools). Live: anthropic-sonnet over HTTP set a
+3-round goal, ran rounds 1 and 2 on its own and completed it in round 2
+(27.7 s, no backend errors; event log goal/set, goal/round ×2, goal/phase
+complete). Gate: the chat regression in three shards, 3918 passed, 12
+skipped, 2 failed (the inventory, regenerated and passing); frontend 4985 of
+4987 with BottomPanel's paste timing failing only under the concurrent
+backend load (passes alone and on a rerun).

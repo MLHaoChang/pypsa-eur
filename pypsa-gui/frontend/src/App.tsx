@@ -697,8 +697,9 @@ export default function App() {
                     shown on both the blank schematic and the satellite/hybrid map */}
                 <SnapshotPicker />
               </div>
-              {/* Zone 4 — Bottom tabbed panel (canvas only) */}
-              <BottomPanel />
+              {/* Zone 4 — Bottom tabbed panel (canvas only). Not in Guided
+                  (UX M7, U3): the spreadsheet grids are Expert chrome. */}
+              {uiMode !== 'guided' && <BottomPanel />}
             </div>
 
             {/* Tab panel — max(560px, half) beside the canvas, full-width for Results. */}

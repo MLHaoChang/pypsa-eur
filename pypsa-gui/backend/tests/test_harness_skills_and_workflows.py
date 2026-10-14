@@ -144,7 +144,6 @@ def test_advance_and_end():
 
 
 @pytest.mark.parametrize("tool,args,kind", [
-    ("start_workflow", {"workflow_id": "investment-decision"}, "unknown_workflow"),  # planned
     ("start_workflow", {"workflow_id": "nope"}, "unknown_workflow"),
     ("advance_workflow", {"step": "orient"}, "no_active_workflow"),
 ])
@@ -154,6 +153,27 @@ def test_workflow_refusals_are_typed(tool, args, kind):
     session = chat_service.ChatSession(model="claude-sonnet-5")
     events, _ = _run(session, "x", _tool_turn(tool, args), _text_turn())
     assert dict(events)["tool_error"]["error_kind"] == kind
+
+
+def test_a_planned_workflow_cannot_be_started(monkeypatch):
+    """
+    No workflow is `planned` since U3 activated `investment-decision`; a
+    planned one is still refused like an unknown one.
+    """
+    import dataclasses
+
+    from harness import workflows
+    from services import chat_service
+    from tests.test_harness_layout import _plan_one
+
+    reg = dict(workflows.registry())
+    reg["investment-decision"] = dataclasses.replace(reg["investment-decision"], status="planned")
+    _plan_one(monkeypatch, reg)
+    session = chat_service.ChatSession(model="claude-sonnet-5")
+    events, _ = _run(session, "x", _tool_turn("start_workflow",
+                                              {"workflow_id": "investment-decision"}),
+                     _text_turn())
+    assert dict(events)["tool_error"]["error_kind"] == "unknown_workflow"
 
 
 def test_advancing_to_a_missing_step_is_typed():

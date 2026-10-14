@@ -197,8 +197,16 @@ function storedLastProjectId(): string | null {
   try { return localStorage.getItem(LAST_PROJECT_ID_KEY) || storedCurrentProject() || null } catch { return storedCurrentProject() }
 }
 
-function storedAutosave(): boolean {
-  try { return localStorage.getItem(AUTOSAVE_KEY) === 'true' } catch { return false }
+// UX M7 (U3): autosave is on by default in Guided. A choice the user made
+// (the key is written) wins in both modes; with none, the mode decides.
+function autosaveChosen(): boolean {
+  try { return localStorage.getItem(AUTOSAVE_KEY) !== null } catch { return false }
+}
+function storedAutosave(mode: UiMode): boolean {
+  try {
+    const v = localStorage.getItem(AUTOSAVE_KEY)
+    return v === null ? mode === 'guided' : v === 'true'
+  } catch { return mode === 'guided' }
 }
 
 // An open project tab. `lastInteractedAt` is an LRU signal (B9 eviction) —
@@ -685,7 +693,7 @@ export const useUIStore = create<UIStore>((set) => ({
   solvingReadOnly: false,
   currentProject: storedCurrentProject(),
   lastProjectId: storedLastProjectId(),
-  autosaveEnabled: storedAutosave(),
+  autosaveEnabled: storedAutosave(INITIAL_UI_MODE.mode),
   openTabs: (() => {
     const tabs = storedOpenTabs()
     const cur = storedCurrentProject()
@@ -715,11 +723,15 @@ export const useUIStore = create<UIStore>((set) => ({
     } catch { /* noop */ }
     set(s => {
       const patch: Partial<UIStore> = { uiMode: mode, uiModeExplicit: s.uiModeExplicit || explicit }
+      // UX M7: with no autosave choice of the user's, the mode decides.
+      if (!autosaveChosen()) patch.autosaveEnabled = mode === 'guided'
       // §3.7: a slide panel Guided has no navigation for is swapped for the
       // hub-design flow (or closed when there is no project). Results stays —
       // Guided keeps two of its tabs. Switching to Expert closes nothing.
+      // U3: the decision study is a Guided surface too (the Start card opens it).
       if (mode === 'guided' && s.activeSlidePanel != null
-          && s.activeSlidePanel !== 'hubDesign' && s.activeSlidePanel !== 'results') {
+          && s.activeSlidePanel !== 'hubDesign' && s.activeSlidePanel !== 'results'
+          && s.activeSlidePanel !== 'decision') {
         patch.activeSlidePanel = s.currentProject ? 'hubDesign' : null
       }
       return patch

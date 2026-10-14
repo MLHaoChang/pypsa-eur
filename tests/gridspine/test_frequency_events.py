@@ -1,0 +1,453 @@
+"""The island frequency events of I6b (plan 2026-10-07-campus-island-operation).
+
+Oracles:
+* a UPS that transfers on islanding is the import step less its IT load at
+  0+, its load walking back in linearly: the same trace as that ramped
+  event, its battery energy exactly L_it * walk_in / 2;
+* a UPS on line changes nothing until |Δf| leaves its window: it drops at
+  the first sample outside it, and stays on its battery while the settled
+  frequency is outside;
+* E4: the first block from rest is the one-governor step response; each
+  next block waits for the governors' recovery; the settled frequency is
+  -Σblocks / ΣK; the bridge needs max(bridge_s, ready + the last pickup),
+  checked on both sides; N+k drops the largest genset;
+* E6: the ramp time by hand (a converter at once, a cold genset from its
+  join at its ramp); the shortfall; the opening on the residual;
+* Q8: a higher current limit never deepens the nadir;
+* the EMT flags at their thresholds, both sides;
+* the sweeps: E1 at every hour on I3a's lossless steps equals the engine
+  run by hand; the study's E1 runs on I4's ΔP_AC and settles at I4's Δf, its
+  losses ΔP_AC − the lossless import.
+"""
+import dataclasses
+import math
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from gridspine.ingest.campus import build_campus
+from gridspine.schema.contracts import ContractError
+from gridspine.static import frequency as F
+from gridspine.static import island_flow as IF
+from tests.gridspine.test_frequency import bess, gen
+from tests.gridspine.test_island_flow import rows, spec
+from tests.gridspine.test_island_schema import requirements, t, ups
+
+F0 = 50.0
+
+
+def a_ups(it=6.0, walk_in=2.0, window=5.0, transfers=True, e=10.0, name="U"):
+    return F.Unit(name, "ups", 0.0, 10.0, 10.0, ups={"it_mw": it, "walk_in_s": walk_in, "f_window_hz": window,
+                                                      "transfers": transfers, "e_mwh": e})
+
+
+# ── the UPS ──────────────────────────────────────────────────────────────────
+
+def test_a_transferring_ups_relieves_its_it_load_at_0_plus_and_walks_it_back_in():
+    g, u = gen(t_g=1e12), a_ups(it=6.0, walk_in=2.0, window=1e9)       # no governor, no drop-out
+    tr = F.e1_islanding([g, u], 10.0, t_end=4.0)
+    m = 2 * 1.5 * 10.0 / F0
+    assert tr.rocof0 == pytest.approx(-(10.0 - 6.0) / m, rel=1e-12)
+    ramped = F.simulate([g], lambda tt: 10.0 - 6.0 * max(0.0, 1.0 - tt / 2.0), t_end=4.0)
+    # the relief is held over each 1 ms step: it lags the ramp by rate * dt / 2 over the walk-in
+    assert np.max(np.abs(tr.df - ramped.df)) <= (6.0 / 2.0) * 1e-3 / 2 * 2.0 / m * 1.01
+    finer = F.e1_islanding([g, u], 10.0, t_end=4.0, dt=1e-4)
+    fine_ramp = F.simulate([g], lambda tt: 10.0 - 6.0 * max(0.0, 1.0 - tt / 2.0), t_end=4.0, dt=1e-4)
+    assert np.max(np.abs(finer.df - fine_ramp.df)) <= (6.0 / 2.0) * 1e-4 / 2 * 2.0 / m * 1.01
+    rec = tr.ups["U"]
+    assert rec.energy_mwh == pytest.approx(6.0 * 2.0 / 2 / 3600.0, rel=1e-9)
+    assert rec.t_online_s == pytest.approx(2.0, abs=2e-3) and rec.drops == [] and rec.autonomy_ok
+    assert tr.dp["U"][0] == 6.0 and tr.dp["U"][-1] == 0.0
+
+
+def test_a_ups_that_stays_on_line_changes_nothing_inside_its_window():
+    g = gen()
+    alone = F.e1_islanding([g], 4.0, t_end=3.0)
+    with_ups = F.e1_islanding([g, a_ups(transfers=False)], 4.0, t_end=3.0)
+    assert np.array_equal(alone.df, with_ups.df)
+    assert with_ups.ups["U"].energy_mwh == 0.0 and with_ups.ups["U"].t_online_s == 0.0
+
+
+def test_a_transferring_ups_stays_on_line_in_an_event_inside_the_island():
+    g = gen()
+    alone = F.e2_load_step([g], 2.0, t_end=2.0)
+    tr = F.e2_load_step([g, a_ups(transfers=True)], 2.0, t_end=2.0)
+    assert np.array_equal(alone.df, tr.df) and tr.ups["U"].energy_mwh == 0.0
+
+
+def test_a_ups_drops_off_line_at_the_first_sample_outside_its_window():
+    g = gen()
+    alone = F.simulate([g], F.step(4.0), t_end=3.0)
+    tr = F.simulate([g, a_ups(it=1.0, walk_in=1.0, window=0.3, transfers=False)], F.step(4.0), t_end=3.0)
+    i = int(np.flatnonzero(np.abs(alone.df) > 0.3)[0])
+    assert tr.ups["U"].drops[0] == pytest.approx(alone.t[i])
+    assert np.array_equal(tr.df[:i + 1], alone.df[:i + 1])
+    assert F.metrics(tr).nadir_hz > F.metrics(alone).nadir_hz              # its load left the island
+
+
+def test_a_ups_drops_again_each_time_the_frequency_leaves_its_window():
+    # inertia only: Δf = -t for 1 s, then rises at 1 Hz/s; a 0.5 Hz window is left at 0.5 s and at 2.5 s
+    g = gen(t_g=1e12)
+    m = 2 * 1.5 * 10.0 / F0
+    tr = F.simulate([g, a_ups(it=1e-9, walk_in=1e-3, window=0.5, transfers=False)],
+                    lambda tt: m if tt < 1.0 else -m, t_end=3.0)
+    assert tr.ups["U"].drops == pytest.approx([0.5, 2.5], abs=2e-3)
+
+
+def test_a_dropped_ups_gives_its_it_load_from_the_drop_to_the_end():
+    m = 2 * 1.5 * 10.0 / F0
+    tr = F.simulate([gen(t_g=1e12), a_ups(it=1.0, window=0.5, transfers=False)], F.step(2 * m), t_end=3.0)
+    (t_drop,) = tr.ups["U"].drops
+    assert t_drop == pytest.approx(0.25, abs=2e-3)
+    assert tr.ups["U"].energy_mwh * 3600.0 == pytest.approx(1.0 * (3.0 - t_drop), rel=1e-9)
+
+
+def test_a_ups_whose_window_the_settled_frequency_leaves_stays_on_its_battery():
+    # the genset settles at -(4 - 1) / 5 = -0.6 Hz even with the UPS's 1 MW off: outside a 0.5 Hz window
+    tr = F.simulate([gen(), a_ups(it=1.0, window=0.5, transfers=False, e=1.0)], F.step(4.0), t_end=15.0)
+    rec = tr.ups["U"]
+    assert tr.df[-1] == pytest.approx(-0.6, abs=1e-3)
+    assert rec.t_online_s is None and not rec.autonomy_ok and rec.drops and tr.dp["U"][-1] == 1.0
+
+
+@pytest.mark.parametrize("e_mwh, ok", [(2.0 * 1.0 / 3600 * 1.001, True), (2.0 * 1.0 / 3600 * 0.999, False)])
+def test_the_ups_autonomy_is_its_battery_energy_against_what_it_gave(e_mwh, ok):
+    tr = F.e1_islanding([gen(), a_ups(it=2.0, walk_in=2.0, e=e_mwh)], 3.0, t_end=3.0)
+    assert tr.ups["U"].energy_mwh == pytest.approx(2.0 * 2.0 / 2 / 3600, rel=1e-9) and tr.ups["U"].drops == []
+    assert tr.ups["U"].autonomy_ok is ok
+
+
+# ── E4, the ups_bridged start ───────────────────────────────────────────────
+
+def cold_gen(name="G", p_n=10.0, start=10.0, sync=5.0, **kw):
+    return gen(name=name, p0=0.0, p_n=p_n, s_n=p_n, p_max=p_n, start_s=start, sync_s=sync, **kw)
+
+
+def test_e4_takes_the_first_block_from_rest_like_a_one_governor_step():
+    res = F.e4_ups_bridged([cold_gen()], [2.0, 2.0, 2.0], dt=1e-3, t_end=30.0)
+    first = F.metrics(F.simulate([dataclasses.replace(cold_gen(), join_s=0.0)], F.step(2.0), t_end=1.5))
+    assert res.ready_s == 15.0 and res.complete
+    assert res.blocks[0].nadir_hz == pytest.approx(first.nadir_hz, abs=1e-9)
+    assert res.blocks[0].t_nadir_s == pytest.approx(first.t_nadir_s, abs=1e-9)
+    assert res.trace.df[-1] == pytest.approx(-6.0 / 5.0, abs=1e-3)      # -Σblocks / K, K = 10 / (0.04 * 50)
+
+
+def test_e4_takes_each_next_block_once_the_governors_have_recovered():
+    sched_band, settle = 0.1, 0.05
+    res = F.e4_ups_bridged([cold_gen()], [2.0, 2.0, 2.0], band_hz=sched_band, settle_hz_per_s=settle,
+                           dt=1e-3, t_end=30.0)
+    times = res.block_times_s
+    assert times[0] == 0.0 and times[1] > times[0] and times[2] > times[1]
+    tr, k = res.trace, 5.0
+    for n, tk in enumerate(times[1:], start=1):
+        i = int(round(tk / 1e-3))
+        assert abs(tr.df[i] - (-2.0 * n / k)) <= sched_band
+        # not before: one sample earlier it was outside the band or still moving
+        prev = int(round(times[n - 1] / 1e-3))
+        rocof = np.gradient(tr.df, tr.t)
+        inside = (np.abs(tr.df - (-2.0 * n / k)) <= sched_band) & (np.abs(rocof) <= settle * 0.5)
+        assert not inside[prev + 1:i - 5].any()
+
+
+def test_an_isochronous_genset_settles_every_block_back_to_nominal():
+    res = F.e4_ups_bridged([cold_gen(isochronous=True)], [2.0, 2.0], dt=1e-3, t_end=60.0)
+    assert res.complete and abs(res.trace.df[-1]) <= 0.1
+
+
+def test_a_pickup_beyond_the_gensets_does_not_complete_and_fails_the_bridge():
+    res = F.e4_ups_bridged([cold_gen()], [6.0, 6.0], [("U", 6.0, 100.0)], bridge_s=60.0, dt=1e-3, t_end=30.0)
+    assert not res.complete
+    assert res.bridge[0].needed_s == math.inf and not res.bridge[0].ok
+
+
+@pytest.mark.parametrize("factor, ok", [(1.001, True), (0.999, False)])
+def test_the_bridge_needs_the_ready_time_plus_the_last_pickup_on_both_sides(factor, ok):
+    probe = F.e4_ups_bridged([cold_gen()], [2.0, 2.0], dt=1e-3, t_end=30.0)
+    needed = 15.0 + probe.block_times_s[-1]
+    e = 6.0 * needed / 3600.0 * factor
+    res = F.e4_ups_bridged([cold_gen()], [2.0, 2.0], [("U", 6.0, e)], bridge_s=1.0, dt=1e-3, t_end=30.0)
+    b = res.bridge[0]
+    assert b.needed_s == pytest.approx(needed) and b.autonomy_s == pytest.approx(needed * factor)
+    assert b.ok is ok
+
+
+def test_the_bridge_needs_bridge_s_when_that_is_longer():
+    res = F.e4_ups_bridged([cold_gen()], [2.0], [("U", 6.0, 6.0 * 600.0 / 3600.0 * 0.999)], bridge_s=600.0,
+                           dt=1e-3, t_end=30.0)
+    assert res.bridge[0].needed_s == 600.0 and not res.bridge[0].ok
+
+
+def test_n_plus_k_leaves_out_the_largest_genset_and_needs_one_left():
+    small, large = cold_gen("S", p_n=6.0, start=30.0), cold_gen("L", p_n=10.0, start=10.0)
+    res = F.e4_ups_bridged([small, large], [2.0], redundancy_n=1, dt=1e-3, t_end=30.0)
+    assert res.dropped == ["L"] and res.ready_s == 35.0                  # the small one's 30 + 5 s
+    assert F.e4_ups_bridged([small, large], [2.0], dt=1e-3, t_end=30.0).ready_s == 35.0
+    with pytest.raises(ContractError, match="N\\+k"):
+        F.e4_ups_bridged([large], [2.0], redundancy_n=1)
+
+
+# ── E6, planned islanding ──────────────────────────────────────────────────
+
+def test_e6_ramp_time_by_hand_the_bess_at_once_the_cold_genset_from_its_join():
+    g = cold_gen(join_s=15.0, ramp_mw_per_s=1.0)
+    b = bess(p0=0.0, p_max=3.0)
+    res = F.e6_planned([g, b], 8.0, t_end=1.0)
+    assert res.feasible and res.ramp_s == pytest.approx(15.0 + 5.0, abs=1e-6)      # 3 at once, 5 at 1 MW/s
+    assert res.p0 == pytest.approx({"G": 5.0, "B": 3.0}, abs=1e-6)
+    assert np.max(np.abs(res.trace.df)) < 1e-9                                     # ΔP ≈ 0 at the opening
+
+
+def test_e6_without_the_room_reports_the_shortfall():
+    res = F.e6_planned([cold_gen(join_s=15.0, ramp_mw_per_s=1.0), bess(p0=0.0, p_max=3.0)], 20.0)
+    assert not res.feasible and res.ramp_s == math.inf and res.shortfall_mw == pytest.approx(7.0)
+    assert res.trace is None
+
+
+def test_e6_takes_an_export_back_on_the_storage_at_once():
+    res = F.e6_planned([gen(p0=5.0, ramp_mw_per_s=0.5), bess(p0=0.0)], -2.0, t_end=1.0)
+    assert res.ramp_s == 0.0 and res.p0["B"] == pytest.approx(-2.0) and res.p0["G"] == 5.0
+
+
+def test_e6_takes_an_export_back_on_a_genset_by_its_room_down():
+    # 8 MW running on 10: 2 MW of room up, 8 down; 6 MW of export back at 1 MW/s
+    res = F.e6_planned([gen(p0=8.0, ramp_mw_per_s=1.0)], -6.0, t_end=0.5)
+    assert res.feasible and res.ramp_s == pytest.approx(6.0, abs=1e-6) and res.p0["G"] == pytest.approx(2.0)
+
+
+def test_e6_opens_on_the_residual_with_the_shifted_dispatch():
+    # shifted to 9 of 10 MW, the genset has 1 MW left for a 2 MW residual: the shift matters
+    res = F.e6_planned([gen(p0=5.0, ramp_mw_per_s=1.0)], 4.0, residual_mw=2.0, t_end=2.0)
+    assert res.ramp_s == pytest.approx(4.0, abs=1e-6) and res.p0["G"] == pytest.approx(9.0)
+    by_hand = F.simulate([gen(p0=9.0, ramp_mw_per_s=1.0)], F.step(2.0), t_end=2.0)
+    unshifted = F.simulate([gen(p0=5.0, ramp_mw_per_s=1.0)], F.step(2.0), t_end=2.0)
+    assert np.allclose(res.trace.df, by_hand.df, atol=1e-12)
+    assert not np.allclose(by_hand.df, unshifted.df, atol=1e-3)
+
+
+def test_e6_counts_a_frequency_watt_unit_at_its_ramp():
+    pv = F.Unit("PV", "gfl_fw", 0.0, 10.0, 10.0, -10.0, 10.0,
+                fw={"k_mw_per_hz": 1.0, "deadband_hz": 0.0, "delay_s": 9.0, "ramp_mw_per_s": 2.0, "p_limit_mw": 10.0})
+    res = F.e6_planned([pv], 4.0, t_end=0.5)
+    assert res.ramp_s == pytest.approx(2.0, abs=1e-6)                   # the setpoint ramps; no fw delay
+
+
+# ── Q8 and the EMT flags ────────────────────────────────────────────────────
+
+def test_q8_reruns_with_each_current_limit_and_a_higher_limit_never_deepens_the_nadir():
+    units = [gen(), bess(p_max=10.0, i_max_mw=1e9, s_n=2.0)]
+    runs = F.i_max_sensitivity(units, lambda us: (us, F.simulate(us, F.step(6.0), t_end=3.0)), [1.0, 1.5, 2.0])
+    assert [v for v, _ in runs] == [1.0, 1.5, 2.0]
+    for v, (us, _) in runs:
+        assert next(u for u in us if u.name == "B").i_max_mw == pytest.approx(v * 2.0)
+        assert next(u for u in us if u.name == "G").i_max_mw == math.inf
+    nadirs = [F.metrics(tr).nadir_hz for _, (_, tr) in runs]
+    assert nadirs[0] < nadirs[1] < nadirs[2]
+
+
+def lim(f_min=47.5, f_max=51.5):
+    one = {"rocof_hz_per_s": 1.0, "f_min_hz": f_min, "f_max_hz": f_max, "qss_band_hz": 1.0}
+    return {"transition": one, "steady_island": one}
+
+
+def m_at(nadir, saturated=None, collapse=None):
+    return F.Metrics(0.0, 0.0, 500.0, nadir, 1.0, nadir, 0.0, saturated or {}, collapse)
+
+
+@pytest.mark.parametrize("nadir, flagged", [(-2.0, False), (-2.001, True), (1.2, False), (1.201, True)])
+def test_the_nadir_margin_flag_at_its_threshold(nadir, flagged):
+    # 20 % of 2.5 Hz below and of 1.5 Hz above is left at -2.0 and +1.2 Hz
+    flags = F.emt_flags(m_at(nadir), lim())
+    assert any("nadir margin" in f for f in flags) is flagged
+
+
+def test_saturation_and_collapse_are_flagged():
+    assert F.emt_flags(m_at(-0.1, {"B": 0.2}), lim()) == ["grid-forming units saturate in the event: B"]
+    assert F.emt_flags(m_at(math.nan, collapse=0.3), lim())[0].startswith(F.COLLAPSE)
+
+
+@pytest.mark.parametrize("kw, flagged", [
+    ({"scr_pcc": 2.9, "gfl_share": 0.31}, True), ({"scr_pcc": 3.0, "gfl_share": 0.9}, False),
+    ({"scr_pcc": 1.0, "gfl_share": 0.3}, False), ({"island_scr": 2.9, "gfm_share": 0.51}, True),
+    ({"island_scr": 3.0, "gfm_share": 0.9}, False), ({"island_scr": 1.0, "gfm_share": 0.5}, False),
+    ({"scr_pcc": math.nan, "gfl_share": 0.9}, False)])
+def test_the_weak_grid_flags_need_both_conditions(kw, flagged):
+    assert bool(F.emt_flags(m_at(-0.1), lim(), **kw)) is flagged
+
+
+# ── the campus ──────────────────────────────────────────────────────────────
+
+def ups_campus(transfers=True, scenarios=("seamless", "ups_bridged", "planned"), walk_in=15.0, f_trip=None):
+    s = spec()
+    s["campus"]["units"]["UPS1"] = {"kind": "ups", "bus": "MV2", "p_mw": t(8.0), "e_mwh": t(2.0), "s_mva": t(9.0),
+                                    "island": {**ups(), "walk_in_s": t(walk_in), "it_load": ["DC_LOAD"],
+                                               "transfers_on_islanding": transfers}}
+    if f_trip:
+        s["campus"]["units"]["DC_LOAD"]["island"] = {"f_trip_hz": t(f_trip)}
+    req = requirements()
+    req.update(scenarios=list(scenarios), genset_redundancy_n=t(0), pickup_blocks=t([2.0, 3.0, 1.0]))
+    s["campus"]["island"] = req
+    return build_campus(s)
+
+
+def ups_rows(**kw):
+    return pd.concat([rows(**kw), pd.DataFrame({"unit_id": ["UPS1"], "p_mw": [0.0], "status": [1]})],
+                     ignore_index=True)
+
+
+def test_the_campus_ups_carries_its_it_loads_draw_and_its_stored_energy():
+    camp = ups_campus()
+    u = next(x for x in F.units_from_campus(camp, ups_rows(load=30.0)) if x.name == "UPS1")
+    assert u.ups == {"it_mw": 30.0, "walk_in_s": 15.0, "f_window_hz": 2.0, "transfers": True, "e_mwh": 2.0}
+    u = next(x for x in F.units_from_campus(camp, ups_rows(), soc={"UPS1": 0.7}) if x.name == "UPS1")
+    assert u.ups["e_mwh"] == 0.7
+    g = next(x for x in F.units_from_campus(camp, ups_rows()) if x.name == "GEN1")
+    assert (g.start_s, g.sync_s, g.ready_s) == (10.0, 5.0, 15.0)
+
+
+@pytest.mark.parametrize("f_trip, expect", [(48.0, ("DC_LOAD trip", 48.0, None)), (51.0, ("DC_LOAD trip", None, 51.0))])
+def test_the_equipment_is_each_ups_window_and_each_load_trip(f_trip, expect):
+    eq = dict((label, (lo, hi)) for label, lo, hi in F.equipment(ups_campus(f_trip=f_trip)))
+    assert eq["UPS window UPS1"] == (48.0, 52.0)
+    lo, hi = eq[expect[0]]
+    assert (lo if expect[1] else hi) == (expect[1] or expect[2])
+    assert math.isnan(hi if expect[1] else lo)
+
+
+def test_the_emt_inputs_by_hand():
+    camp = ups_campus()
+    e = F.emt_inputs(camp, ups_rows())
+    # PV1 16.5 MVA grid-following; BESS1 22 MVA grid-forming; GEN1 12.5 MVA
+    assert e["scr_pcc"] == pytest.approx(2000.0 / 16.5)
+    assert e["gfl_share"] == pytest.approx(16.5 / 51.0) and e["gfm_share"] == pytest.approx(22.0 / 51.0)
+    assert 0 < e["island_scr"] < math.inf
+    # a genset with island data counts even when it is not running: it starts on islanding
+    off = ups_rows()
+    off.loc[off["unit_id"] == "GEN1", ["p_mw", "status"]] = [0.0, 0]
+    assert F.emt_inputs(camp, off)["gfl_share"] == pytest.approx(16.5 / 51.0)
+
+
+def island_tables(dp_up=(10.0, 0.0), dp_down=(-10.0, 3.0), online=(1.0, 0.0)):
+    ih = pd.DataFrame({"period": [2030, 2030], "hour": [0, 1], "scenario": ["seamless"] * 2,
+                       "dp_up_mw": list(dp_up), "dp_down_mw": list(dp_down), "inertia_mws": [1.0, 1.0],
+                       "k_mw_per_hz": [1.0, 1.0], "critical_load_mw": [1.0, 1.0]})
+    iu = pd.DataFrame({"period": [2030] * 4, "hour": [0, 0, 1, 1], "unit_id": ["GEN1", "UPS1"] * 2,
+                       "soc_start_mwh": [math.nan, 1.5, math.nan, 0.5], "online": [online[0], math.nan, online[1], math.nan],
+                       "headroom_up_mw": [5.0, math.nan, 5.0, math.nan],
+                       "headroom_down_mw": [5.0, math.nan, 5.0, math.nan], "p_ups_it_mw": [math.nan, 20.0, math.nan, 20.0]})
+    return ih, iu
+
+
+def hourly():
+    return pd.concat([ups_rows().assign(period=2030, hour=h) for h in (0, 1)], ignore_index=True)
+
+
+def test_e1_at_every_hour_runs_i3a_s_lossless_steps_each_way_on_the_hours_units():
+    camp = ups_campus()
+    ih, iu = island_tables()
+    out = F.e1_every_hour(camp, hourly(), ih, iu)
+    assert list(zip(out["hour"], out["direction"])) == [(0, "import"), (1, "export")]
+    assert set(out["dp_source"]) == {"I3a lossless"}
+    # hour 0: the genset runs; hour 1: I3a says it is off, so it starts cold; no UPS in either
+    for hour, dp, cold in ((0, 10.0, set()), (1, -3.0, {"GEN1"})):
+        units = [u for u in F.units_from_campus(camp, ups_rows(), cold=cold) if u.model != "ups"]
+        m = F.metrics(F.simulate(units, F.step(dp), t_end=10.0, dt=5e-3))
+        row = out[out["hour"] == hour].iloc[0]
+        assert row["dp_mw"] == dp and row["nadir_hz"] == pytest.approx(m.nadir_hz, abs=1e-12)
+
+
+def test_e1_at_every_hour_runs_identical_hours_once(monkeypatch):
+    calls = []
+    real = F.simulate
+    monkeypatch.setattr(F, "simulate", lambda *a, **k: calls.append(1) or real(*a, **k))
+    ih, iu = island_tables(dp_up=(10.0, 10.0), dp_down=(-10.0, -10.0), online=(1.0, 1.0))
+    out = F.e1_every_hour(ups_campus(), hourly(), ih, iu)
+    assert len(out) == 2 and len(calls) == 1
+
+
+def test_e1_at_every_hour_runs_hours_with_the_same_step_but_other_units_apart(monkeypatch):
+    calls = []
+    real = F.simulate
+    monkeypatch.setattr(F, "simulate", lambda *a, **k: calls.append(1) or real(*a, **k))
+    ih, iu = island_tables(dp_up=(10.0, 10.0), dp_down=(-10.0, -10.0), online=(1.0, 1.0))
+    h = pd.concat([ups_rows(gen=5.0).assign(period=2030, hour=0), ups_rows(gen=9.0).assign(period=2030, hour=1)],
+                  ignore_index=True)
+    out = F.e1_every_hour(ups_campus(), h, ih, iu)
+    assert len(calls) == 2 and out["nadir_hz"].iloc[0] != out["nadir_hz"].iloc[1]
+
+
+def test_e1_at_every_hour_keeps_a_ups_on_line_to_see_its_drop_out_but_not_one_that_transfers():
+    ih, iu = island_tables(dp_up=(40.0, 40.0), online=(1.0, 1.0))
+    on_line = F.e1_every_hour(ups_campus(transfers=False), hourly(), ih, iu)
+    imports = on_line[on_line["direction"] == "import"]
+    assert list(imports["ups_drops"]) == ["UPS1", "UPS1"]                # 40 MW beyond 20 + 5 MW: below 48 Hz
+    transfers = F.e1_every_hour(ups_campus(transfers=True), hourly(), ih, iu)
+    assert set(transfers["ups_drops"]) == {""}
+
+
+def test_e1_at_every_hour_refuses_a_table_off_its_contract():
+    ih, iu = island_tables()
+    with pytest.raises(ContractError, match="island hourly table"):
+        F.e1_every_hour(ups_campus(), hourly(), ih.drop(columns="inertia_mws"), iu)
+
+
+def test_the_study_runs_e1_on_i4s_dp_ac_and_reports_the_losses():
+    camp = ups_campus(transfers=False, scenarios=("seamless",))
+    st = F.campus_frequency_study(camp, hourly(), [(2030, 0)], t_end=20.0)
+    i4 = IF.island_flow(camp, ups_rows())
+    loss = st.losses.iloc[0]
+    assert loss["dp_ac_mw"] == pytest.approx(i4.delta_p_ac_mw) and loss["import_lossless_mw"] == 10.0
+    assert loss["losses_mw"] == pytest.approx(i4.delta_p_ac_mw - 10.0)
+    e1 = st.events[(st.events["event"] == "E1") & st.events["i_max_pu"].isna()].iloc[0]
+    assert e1["dp_source"] == "I4 ΔP_AC" and e1["dp_mw"] == pytest.approx(i4.delta_p_ac_mw)
+    assert e1["df_qss_hz"] == pytest.approx(i4.df_hz, abs=1e-3)
+
+
+def test_the_study_runs_each_scenario_s_events():
+    camp = ups_campus()
+    _, iu = island_tables()
+    st = F.campus_frequency_study(camp, hourly(), [(2030, 0)], island_unit_hourly=iu, t_end=20.0)
+    ev = st.events
+    seamless = ev[ev["scenario"] == "seamless"]
+    assert sorted(seamless[seamless["i_max_pu"].isna()]["event"]) == ["E1", "E2", "E3", "E5"]
+    assert sorted(seamless["i_max_pu"].dropna()) == [1.2, 1.2, 1.5, 1.5, 2.0, 2.0]
+    assert seamless[seamless["event"] == "E2"]["dp_mw"].iloc[0] == 3.0           # the largest pickup block
+    i4 = IF.island_flow(camp, ups_rows()).units.set_index("unit_id")["p_mw"]
+    e3 = seamless[seamless["event"] == "E3"].iloc[0]
+    assert e3["unit"] == "GEN1" and e3["dp_mw"] == pytest.approx(i4["GEN1"])
+    assert seamless[seamless["event"] == "E5"]["dp_mw"].iloc[0] == pytest.approx(i4["PV1"])
+    # ups_bridged: three blocks, the bridge on I3a's IT load and e(t-1)
+    e4 = ev[ev["event"] == "E4"]
+    assert list(e4["block"]) == [1, 2, 3] and e4["t_block_s"].iloc[0] == 15.0
+    b = st.bridge.iloc[0]
+    assert (b["unit"], b["kind"], b["it_mw"], b["e_mwh"]) == ("UPS1", "ups", 20.0, 1.5)                # I3a's, not the 25 MW draw
+    assert b["autonomy_s"] == pytest.approx(1.5 * 3600 / 20.0) and b["needed_s"] == 600.0 and not b["ok"]
+    # planned: the BESS takes the import at once
+    p = st.planned.iloc[0]
+    assert p["feasible"] and p["ramp_s"] == 0.0
+    # the UPS's walk-in after E1, from I3a's e(t-1)
+    u = st.ups[st.ups["event"] == "E1"].iloc[0]
+    assert u["e_mwh"] == 1.5 and u["energy_mwh"] == pytest.approx(20.0 * 15.0 / 2 / 3600, rel=1e-9)
+
+
+def test_the_study_reports_the_gfm_energy_until_the_cold_genset_joins():
+    camp = ups_campus(transfers=False, scenarios=("seamless",))
+    _, iu = island_tables(online=(0.0, 0.0))
+    iu = pd.concat([iu, pd.DataFrame({"period": [2030], "hour": [0], "unit_id": ["BESS1"], "soc_start_mwh": [0.01],
+                                      "online": [1.0], "headroom_up_mw": [20.0], "headroom_down_mw": [20.0],
+                                      "p_ups_it_mw": [math.nan]})], ignore_index=True)
+    st = F.campus_frequency_study(camp, hourly(), [(2030, 0)], island_unit_hourly=iu, t_end=20.0)
+    b = st.bridge.set_index("unit").loc["BESS1"]
+    units = F.units_from_campus(camp, ups_rows(), cold={"GEN1"})
+    tr = F.e1_islanding(units, st.losses["dp_ac_mw"].iloc[0], t_end=20.0)
+    sel = tr.t <= 15.0 + 1e-12
+    p = 0.0 + tr.dp["BESS1"][sel]
+    assert b["join_s"] == 15.0 and b["until_s"] == 15.0
+    assert b["energy_mwh"] == pytest.approx(np.trapezoid(p, tr.t[sel]) / 3600.0, rel=1e-12)
+    assert b["energy_mwh"] > 10.0 * 15.0 / 3600 * 0.9 and b["e_mwh"] == 0.01 and not b["ok"]
+
+
+def test_the_study_needs_the_island_requirements():
+    camp = build_campus(spec())
+    with pytest.raises(ContractError, match="island requirements"):
+        F.campus_frequency_study(camp, rows().assign(period=2030, hour=0), [(2030, 0)])

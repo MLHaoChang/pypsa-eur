@@ -79,9 +79,10 @@ function wrap(node: React.ReactNode, seed: Array<[string, unknown]>) {
   return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>)
 }
 
-function expectAnnuityBadges(unit: 'MW' | 'MWh' | 'MVA') {
-  expect(rowText('Capital cost')).toContain(`€/${unit}/yr`)
-  expect(rowText('FOM cost')).toContain(`€/${unit}/yr`)
+// The read-out of a schema-rendered card (S1b, S1c).
+function expectSchemaBadges(unit: 'kW' | 'kWh') {
+  expect(rowText('Capital cost (annualised)')).toContain(`€/${unit}/yr`)
+  expect(rowText('Fixed O&M')).toContain(`€/${unit}/yr`)
   const overnight = rowText('Overnight cost')
   expect(overnight).toContain(`€/${unit}`)
   expect(overnight).not.toContain('/yr')
@@ -112,35 +113,46 @@ describe('capital-cost badges name the annuity per year', () => {
     expect(rowText('Power part: overnight cost')).toContain('€/kW')
     expect(rowText('Energy part: overnight cost')).toContain('€/kWh')
   })
+  // S1c: the Store and Link cards render from the asset schema too: money per
+  // kWh (a Store sizes energy) or per kW (a Link sizes power).
   it('Store card', () => {
     wrap(<StoreCard store={STORE} onRename={() => {}} />, [['stores', [STORE]]])
-    expectAnnuityBadges('MWh')
+    expectSchemaBadges('kWh')
   })
   it('Link card', () => {
     wrap(<LinkCard link={LINK} onRename={() => {}} />, [['links', [LINK]]])
-    expectAnnuityBadges('MW')
+    expectSchemaBadges('kW')
   })
+  // S1c-2: the Line and Transformer panels render from the asset schema.
+  // Money stays per MVA (catalogues publish branch costs that way); a line's
+  // investment is typed per km, so its read-out shows the derived totals.
   it('Line panel', async () => {
     wrap(<LinePanel name="L1" />, [['lines', [LINE]]])
-    await screen.findByText('Capital cost')
-    expectAnnuityBadges('MVA')
+    await screen.findByText('Capital cost (annualised)')
+    expect(rowText('Capital cost (annualised)')).toContain('€/MVA/yr')
+    expect(rowText('Fixed O&M (total)')).toContain('€/MVA/yr')
   })
   it('Transformer panel', async () => {
     wrap(<TransformerPanel name="T1" />, [['transformers', [TR]]])
-    await screen.findByText('Capital cost')
-    expect(rowText('Capital cost')).toContain('€/MVA/yr')
+    await screen.findByText('Capital cost (annualised)')
+    expect(rowText('Capital cost (annualised)')).toContain('€/MVA/yr')
+    expect(rowText('Fixed O&M')).toContain('€/MVA/yr')
+    const overnight = rowText('Overnight cost')
+    expect(overnight).toContain('€/MVA')
+    expect(overnight).not.toContain('/yr')
   })
 })
 
 // Edit mode and the quick-add form label the same fields, so they carry the
 // same badges. S0 fixed them without a test (gate S0 [S3]); these pin them.
-// The badge sits inside the input's label as "Capital cost (€/MW/yr)".
-function expectEditBadges(unit: 'MW' | 'MWh' | 'MVA') {
-  expect(screen.getByText(`Capital cost (€/${unit}/yr)`)).toBeTruthy()
-  expect(screen.getByText(`FOM cost (€/${unit}/yr)`)).toBeTruthy()
-  // The upfront figure stays per unit, never per year.
+// A schema-rendered card types the overnight cost and fixed O&M; the
+// annualised capital cost is a derived row with no input.
+function expectSchemaEditBadges(unit: 'kW' | 'kWh') {
   expect(screen.getByText(`Overnight cost (€/${unit})`)).toBeTruthy()
-  expect(screen.queryByText(`Capital cost (€/${unit})`)).toBeNull()
+  expect(screen.getByText(`Fixed O&M (€/${unit}/yr)`)).toBeTruthy()
+  const cc = screen.getByTestId('asset-derived-capital_cost')
+  expect(cc.textContent).toContain(`€/${unit}/yr`)
+  expect(cc.querySelector('input')).toBeNull()
 }
 
 describe('edit-mode capital-cost badges name the annuity per year', () => {
@@ -165,22 +177,29 @@ describe('edit-mode capital-cost badges name the annuity per year', () => {
   it('Store edit form', () => {
     wrap(<StoreCard store={STORE} onRename={() => {}} />, [['stores', [STORE]]])
     fireEvent.click(screen.getByRole('button', { name: /^Edit / }))
-    expectEditBadges('MWh')
+    expectSchemaEditBadges('kWh')
   })
   it('Link edit form', () => {
     wrap(<LinkCard link={LINK} onRename={() => {}} />, [['links', [LINK]]])
     fireEvent.click(screen.getByRole('button', { name: /^Edit / }))
-    expectEditBadges('MW')
+    expectSchemaEditBadges('kW')
   })
   it('Line edit form', async () => {
     wrap(<LinePanel name="L1" />, [['lines', [LINE]]])
     fireEvent.click(await screen.findByRole('button', { name: 'Edit Parameters' }))
-    expectEditBadges('MVA')
+    expect(screen.getByText('Overnight cost per km (€/MVA/km)')).toBeTruthy()
+    const cc = screen.getByTestId('asset-derived-capital_cost')
+    expect(cc.textContent).toContain('€/MVA/yr')
+    expect(cc.querySelector('input')).toBeNull()
   })
   it('Transformer edit form', async () => {
     wrap(<TransformerPanel name="T1" />, [['transformers', [TR]]])
     fireEvent.click(await screen.findByRole('button', { name: 'Edit Parameters' }))
-    expectEditBadges('MVA')
+    expect(screen.getByText('Overnight cost (€/MVA)')).toBeTruthy()
+    expect(screen.getByText('Fixed O&M (€/MVA/yr)')).toBeTruthy()
+    const cc = screen.getByTestId('asset-derived-capital_cost')
+    expect(cc.textContent).toContain('€/MVA/yr')
+    expect(cc.querySelector('input')).toBeNull()
   })
 })
 

@@ -42,6 +42,13 @@ for (const t of ['export_to_csv', 'export_to_excel', 'export_preview_png', 'expo
   GUIDED_WRITE_PURPOSE[t] = { header: 'Confirm: export a file',
     note: 'Writes a file you can download. Your network is not changed.' }
 }
+// The decision study (U3): what each write changes, in the user's words.
+GUIDED_WRITE_PURPOSE.start_decision_study = { header: 'Confirm: start a decision study',
+  note: 'Creates a new project for the study. The project open now is not changed.' }
+GUIDED_WRITE_PURPOSE.set_study_parameter = { header: 'Confirm: change an assumption',
+  note: 'Changes one value in the study’s assumptions. The last result no longer matches until the study runs again.' }
+GUIDED_WRITE_PURPOSE.generate_study_report = { header: 'Confirm: write the report',
+  note: 'Writes the decision report as a file you can download. The study is not changed.' }
 GUIDED_WRITE_PURPOSE.create_project_snapshot = { header: 'Confirm: save a copy',
   note: 'Saves a backup copy of the project as it is now. Your network is not changed.' }
 for (const t of ['load_project', 'activate_project']) {
@@ -70,6 +77,15 @@ const GUIDED_CARD_SUMMARY: Record<string, (a: Record<string, unknown>) => string
       : 'Run the reliability study for this site'
   },
   run_fmea_sweep: () => 'Run the equipment-failure check (FMEA)',
+  run_decision_study: (a) => a.stage === 'tornado'
+    ? 'Test the study’s best option against each key assumption’s range'
+    : 'Run the decision study: calculate every option',
+  start_decision_study: (a) => `Start the decision study “${_str(a.name) ?? 'new study'}” in a project of its own`,
+  set_study_parameter: (a) => {
+    const v = typeof a.value === 'number' && Number.isFinite(a.value) ? a.value : null
+    return `Set the assumption ${_str(a.key)?.replace(/_/g, ' ') ?? 'one assumption'}${v != null ? ` to ${v}${_str(a.unit) ? ` ${a.unit}` : ''}` : ''}`
+  },
+  generate_study_report: (a) => `Write the decision report (${_str(a.format) ?? 'docx'})`,
   run_simulation: () => 'Run a full calculation of the network',
   update_component: (a) => `Change the settings of ${_str(a.name) ?? 'one component'}`,
   bulk_update_components: (a) => {

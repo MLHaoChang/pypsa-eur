@@ -147,6 +147,10 @@
       "surface": "inline",
       "why": "The project's inline tariff differs from the Library item its ref names. The model explains and asks which to keep; a binding code surfaced by attach_tariff."
     },
+    "goal_already_set": {
+      "surface": "inline",
+      "why": "set_goal while the session already has a goal (chat harness issue 17). The model's own slip, answered in the tool result: complete the goal first; only the user resumes or stops one, from the goal strip."
+    },
     "inactive_acting_user": {
       "surface": "banner",
       "why": "The account stopped being active mid-turn. Nothing will work until it is fixed, and a gray tool line truncates that away — this is the correction the whole manifest generalises."
@@ -162,6 +166,14 @@
     "internal_error": {
       "surface": "inline",
       "why": "An unhandled server failure. It reaches the client on a turn-terminal `error` frame, which the banner renders directly from KIND_COPY — it is not yielded at any `tool_error` site."
+    },
+    "invalid_goal": {
+      "surface": "inline",
+      "why": "set_goal with an empty or over-long objective or max_rounds outside 1-20 (issue 17). The model corrects its own call; nothing for the user to fix."
+    },
+    "interrupted": {
+      "surface": "inline",
+      "why": "The session event log's synthetic closer for a tool call the process died during (chat harness issue 13), written when the log is read back for repair. It goes to the log and to the model's history, never on a live tool_error frame."
     },
     "invalid_base64": {
       "surface": "inline",
@@ -262,6 +274,10 @@
     "no_template": {
       "surface": "inline",
       "why": "A mapping plan was proposed or stored (POST/PUT …/template/plan, propose_report_mapping, set_report_mapping) for a report that has no template bound. The message names the remedy (bind one with set_report_template) and the model relays it within the turn."
+    },
+    "no_goal": {
+      "surface": "inline",
+      "why": "pause_goal or complete_goal with no goal set (issue 17). A harmless model slip; the strip already shows there is none."
     },
     "not_authorized": {
       "surface": "banner",
@@ -475,13 +491,21 @@
       "surface": "inline",
       "why": "Decision study (S4): asking for the run status or aborting a study that has never been run. A client-side sequencing slip, not a condition the user must act on."
     },
+    "study_report_format_invalid": {
+      "surface": "inline",
+      "why": "Decision study chat tool (U3): generate_study_report was asked for a format other than docx, xlsx or html. The model's slip; it reads the message and asks again."
+    },
     "study_request_too_large": {
       "surface": "inline",
       "why": "Decision study (F1 B2): a /studies request body over the size limit (the 25 MB load-file cap plus headroom), refused 413 by services/study/body_limit.py before it is parsed. Route-only, no chat tool posts a study body; the message tells the user to use a smaller file."
     },
     "study_running": {
       "surface": "inline",
-      "why": "Decision study (S4): a second run, a delete, or another study refused while a study runs on the base project. Route-only today; the message names the study and the user waits or aborts it."
+      "why": "Decision study (S4): a second run, a delete, or another study refused while a study runs on the base project. Reaches chat through the study tools (U3); the message names the study and the user waits or aborts it."
+    },
+    "study_stage_invalid": {
+      "surface": "inline",
+      "why": "Decision study chat tool (U3): run_decision_study was asked for a stage other than options or tornado. The model's slip; it reads the message and asks again."
     },
     "time_column_parse_error": {
       "surface": "banner",
@@ -678,6 +702,10 @@
     "invalid_progress_cursor": {
       "surface": "inline",
       "why": "GET /api/chat/{id}/progress refuses a negative cursor query; route-only, never a tool completion failure."
+    },
+    "invalid_component_name": {
+      "surface": "inline",
+      "why": "A create, rename or import named a component with control, format or line-separator characters, an empty name, or one over 256 characters (OPEN-ITEMS item 8). Refused before anything changes; the message says which character, so the agent can pick another name."
     },
     "task_checkpoint_failed": {
       "surface": "banner",

@@ -23,12 +23,14 @@ from services.asset_schema.derive import (
     derive_composite,
     effective_discount_rate,
     has_parts,
+    part_scales,
     split_parts,
 )
 from services.asset_schema.schema import CLASS_ATTR
 from services.asset_schema import fields as asset_fields
 from services.asset_schema import provenance as asset_provenance
 from services.carrier_catalog import ensure_carrier
+from services.component_names import require_valid_name
 from services.pypsa_service import PyPSAService
 from services.serialization import df_to_json
 from services.study_state import refuse_edit_during_live_study
@@ -324,14 +326,14 @@ def _global_discount_rate() -> float:
     return 0.07 if rate is None else float(rate)
 
 
-def _check_investment_parts(component_class: str, parts: dict, *, max_hours: Any) -> None:
-    """Refuse a priced part without a lifetime BEFORE anything is mutated (422)."""
+def _check_investment_parts(component_class: str, parts: dict, *, row: dict) -> None:
+    """Refuse a priced part without a lifetime BEFORE anything is mutated (422). `row`: the asset's other
+    columns as they will be written (they hold the parts' scales, `max_hours` or `length`)."""
     if not has_parts(component_class, parts):
         return
     try:
-        derive_composite(component_class, parts,
-                         max_hours=1.0 if max_hours is None else float(max_hours),
-                         discount_rate=_global_discount_rate())
+        derive_composite(component_class, parts, scales=part_scales(component_class, row),
+                         discount_rate=_global_discount_rate(), asset_lifetime=row.get("lifetime"))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -347,6 +349,20 @@ def _apply_investment_parts(n, component_class: str, name: str, parts: dict) -> 
     df = getattr(n, CLASS_ATTR[component_class])
     own_rate = df.at[name, "discount_rate"] if "discount_rate" in df.columns else None
     apply_parts(n, component_class, name, parts,
+                discount_rate=effective_discount_rate(own_rate, _global_discount_rate()))
+
+
+def rederive_scaled_parts(n, component_class: str, name: str) -> None:
+    """
+    Re-derive a composite asset's cost columns after one of its parts' scales changed outside the edit form
+    (a line's `length` rewritten from coordinates or map geometry). A no-op for an asset without priced
+    parts. The caller holds `PyPSAService.get_lock()`.
+    """
+    df = getattr(n, CLASS_ATTR[component_class])
+    if not has_parts(component_class, df.loc[name]):
+        return
+    own_rate = df.at[name, "discount_rate"] if "discount_rate" in df.columns else None
+    apply_parts(n, component_class, name, {},
                 discount_rate=effective_discount_rate(own_rate, _global_discount_rate()))
 
 
@@ -367,6 +383,8 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
     # /bulk writes, rename, and global-constraint mutations all benefit
     # without each having to call an invalidation helper here.
     n = PyPSAService.get_network()
+    # OPEN-ITEMS item 8: the character class of a NEW name, for every class.
+    require_valid_name(name, component_class=component_class)
     if component_class == "Bus":
         from services.commercial.settlement_inputs import reserved_bus_name
 
@@ -375,7 +393,7 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
             raise HTTPException(422, f"bus names starting 'ic:' are reserved (got {name!r})")
     kwargs, parts = split_parts(component_class, kwargs)
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
-    _check_investment_parts(component_class, parts, max_hours=kwargs.get("max_hours"))
+    _check_investment_parts(component_class, parts, row=kwargs)
     with PyPSAService.get_lock():
         df = getattr(n, attr)
         if name in df.index:
@@ -599,7 +617,11 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         merged = _merge_partial_update(n, attr, name, kwargs)
         merged, current_parts = split_parts(component_class, merged)
         parts = {**current_parts, **submitted_parts}
-        _check_investment_parts(component_class, parts, max_hours=merged.get("max_hours"))
+        _check_investment_parts(component_class, parts, row=merged)
+        if merged.get("name", name) != name:
+            # OPEN-ITEMS item 8. Before `ensure_carrier`, which can add a
+            # carrier: a refused rename must leave nothing behind.
+            require_valid_name(merged["name"], component_class=component_class)
         if component_class != "Carrier":
             ensure_carrier(n, merged.get("carrier", ""))
         new_name = merged.pop("name", name)

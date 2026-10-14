@@ -7,10 +7,11 @@ if a route still interpolates the name itself. It is the regression test for
 the defect recorded in
 `docs/superpowers/findings/2026-09-06-rename-accepts-any-name-and-it-reaches-a-header.md`.
 
-The names below are ones the product genuinely accepts today. Component names
-come from `POST /api/network/loads` and friends, which apply no character
-validation; project names come from rename, which checks only non-empty and
-unique. Both were verified by creating them through the real routes.
+The names below are ones the product genuinely holds. A component name with a
+control character can still sit in a saved network, which opens permissively
+(only creates, renames and new imports check names; OPEN-ITEMS item 8), so the
+component test installs it as that network would carry it. Project names come
+from rename, which checks only non-empty and unique.
 
 What this canNOT see, and why the last test exists: `TestClient` does not run
 h11's header validation, so a control character in a header reaches the test
@@ -50,10 +51,11 @@ def test_the_load_template_download_survives_a_hostile_component_name(
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2025-01-01", periods=3, freq="h"))
     n.add("Bus", "B1")
+    # Put there the way an EXISTING project carries it, not through the create
+    # route: a saved network opens permissively, so this sink must hold for a
+    # name the create route would refuse (OPEN-ITEMS item 8).
+    n.add("Load", name, bus="B1", p_set=5.0)
     install_network(n)
-
-    resp = client.post("/api/network/loads", json={"name": name, "bus": "B1", "p_set": 5.0})
-    assert resp.status_code == 201, resp.text
 
     resp = client.get("/api/network/loads/template", params={"load_name": name})
     assert resp.status_code == 200, resp.text

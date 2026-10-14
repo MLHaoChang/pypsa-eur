@@ -78,3 +78,35 @@ U3 needs only S1a + S1b, for the guided question's two assets (spec :442).
 - **Units:** the descriptors say EUR and the cards say € (`unitLabel`).
 - **Frontend tests** render from `src/test/fixtures/assetSchema.json`. It is generated from the backend descriptors, and `test_the_frontend_fixture_matches_the_descriptors` fails when they drift. `vitest.setup.ts` mocks `useAssetSchema` with it.
 - **A battery priced the old way** (one `overnight_cost`, no parts) keeps that cost and shows a note: enter the two parts to replace it. The clone button offers the overnight cost only for such a unit; a battery's parts ride along in the `...su` spread.
+
+## S1c decisions (14 Oct)
+
+- **S1c ships in two PRs.**
+  - **S1c-1:** Store, Load and Link.
+  - **S1c-2:** Line and Transformer. A line's investment is a per-km part: `inv_per_km_overnight`, with `overnight_cost = per_km × length` written by derive and re-derived when the line lengths are recalculated (`network_lines.apply_recalculate_line_lengths`). A Transformer has the same schema without that part.
+- **Store and Link price like the Generator.**
+  - The overnight cost is typed (€/kWh for a Store, which sizes energy; €/kW for a Link).
+  - `capital_cost` becomes a read-only derived row: overnight × annuity, as PyPSA charges it.
+  - A Store or Link priced by a bare `capital_cost` keeps it, and the row shows that column.
+- **Percentages:**
+  - Store: `e_min_pu`, `e_max_pu` and `standing_loss` are typed as %.
+  - Link: `efficiency`, `p_min_pu` and `p_max_pu` are typed as %.
+- **Reveal rules:** `e_initial` shows only while the Store is not cyclic. The capacity bounds show only while the asset is extendable.
+- **Kept outside the descriptors:** the Link card's Energy Hub inputs, the per-period bounds buttons, the Load profile UI and the extras section stay as they were. The descriptors render around them.
+
+### S1c-2 (Line, Transformer)
+
+- **A line's investment is one part priced per MVA and km** (`schema.COMPOSITE["Line"]`, columns `inv_per_km_overnight` and `inv_per_km_fom_share`).
+  - The part is scaled by `length`, as a battery's energy part is scaled by `max_hours`. `derive_composite` now takes each part's scale generally (`part_scales`).
+  - The part has no lifetime of its own (`PartSpec.own_lifetime=False`). It takes the line's `lifetime`, so `lifetime` stays typed, and an existing unpriced line keeps its retirement.
+  - The capital cost and fixed O&M are derived. The single `overnight_cost` per MVA is replaced, and a line priced that way keeps it and shows a note.
+- **Every writer of `length` re-derives the cost** (`network_crud.rederive_scaled_parts`):
+  - an edit (the update path re-applies the parts);
+  - "Recalculate from coordinates";
+  - a bus moved on the map (`_recompute_lengths_for_bus`);
+  - `POST /lengths/from_geometry`.
+- **Units:** branch money stays per MVA (€/MVA/km for a line, €/MVA for a transformer), the units catalogues publish. It is not converted to per kVA.
+- **Outside the descriptors:**
+  - the line's r/x/b keep their per-km block, after Length, because they are stored as totals;
+  - the topology (ends, carrier) and a transformer's windings stay read-only in their own sections.
+- **Transformer:** no carrier field (PyPSA's Transformer has none), and no outage fields (it had none before). A cleared declared voltage saves null.

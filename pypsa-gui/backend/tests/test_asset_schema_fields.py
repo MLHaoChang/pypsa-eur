@@ -25,7 +25,7 @@ ROUTE = "/api/network/asset_schema"
 # S0's investment parts). A descriptor may name these or a PyPSA attribute.
 CUSTOM_COLUMNS = {
     "outage_rate_value", "outage_rate_basis", "mttr_hours", "p_max_pu_includes_outages",
-    "curtailment_cost", "discount_rate",
+    "curtailment_cost", "discount_rate", "v_nom_0", "v_nom_1",
 }
 
 # Every key the hand-written edit cards let a user change today. S1 must not
@@ -48,7 +48,38 @@ CARD_KEYS = {
         "capital_cost", "fom_cost", "discount_rate", "build_year", "lifetime",
         "outage_rate_value", "outage_rate_basis", "mttr_hours",
     },
+    # S1c: the Store, Load and Link edit cards as they were before S1c.
+    "Store": {
+        "name", "bus", "carrier", "e_nom", "e_nom_extendable", "e_nom_min", "e_nom_max", "e_min_pu",
+        "e_max_pu", "e_initial", "e_cyclic", "capital_cost", "marginal_cost", "fom_cost", "overnight_cost",
+        "discount_rate", "standing_loss", "build_year", "lifetime",
+        "outage_rate_value", "outage_rate_basis", "mttr_hours",
+    },
+    "Load": {"name", "bus", "carrier", "p_set", "q_set", "sign"},
+    "Link": {
+        "name", "carrier", "bus0", "bus1", "p_nom", "p_nom_extendable", "p_nom_min", "p_nom_max",
+        "p_min_pu", "p_max_pu", "efficiency", "marginal_cost", "capital_cost", "fom_cost", "overnight_cost",
+        "discount_rate", "build_year", "lifetime", "outage_rate_value", "outage_rate_basis", "mttr_hours",
+    },
+    # S1c-2: the Line and Transformer panels before S1c-2. A line's r/x/b are typed per km by the panel's own
+    # block (they scale with length) and its single overnight cost is replaced by the per-km part.
+    "Line": {
+        "name", "s_nom", "length", "capital_cost", "fom_cost", "s_nom_extendable", "s_nom_min", "s_nom_max",
+        "discount_rate", "build_year", "lifetime", "outage_rate_value", "outage_rate_basis", "mttr_hours",
+    },
+    "Transformer": {
+        "name", "v_nom_0", "v_nom_1", "s_nom", "r", "x", "tap_ratio", "phase_shift", "s_nom_extendable",
+        "s_nom_min", "s_nom_max", "capital_cost", "fom_cost", "overnight_cost", "discount_rate", "build_year",
+        "lifetime",
+    },
 }
+
+ALL = sorted(F.known_components())
+ATTR = {"Generator": "generators", "StorageUnit": "storage_units", "Store": "stores", "Load": "loads",
+        "Link": "links", "Line": "lines", "Transformer": "transformers"}
+# The capacity each extendable class sizes.
+NOM = {"Generator": "p_nom", "StorageUnit": "p_nom", "Link": "p_nom", "Store": "e_nom", "Line": "s_nom",
+       "Transformer": "s_nom"}
 
 
 def _fields(component: str) -> dict[str, F.FieldSpec]:
@@ -61,16 +92,16 @@ def test_groups_are_the_spec_order():
     )
 
 
-@pytest.mark.parametrize("component", ["Generator", "StorageUnit"])
+@pytest.mark.parametrize("component", ALL)
 def test_fields_follow_group_order(component):
     order = [F.GROUPS.index(f.group) for f in F.fields_for(component)]
     assert order == sorted(order)
 
 
-@pytest.mark.parametrize("component", ["Generator", "StorageUnit"])
+@pytest.mark.parametrize("component", ALL)
 def test_every_field_is_a_real_column(component):
     n = pypsa.Network()
-    attr = {"Generator": "generators", "StorageUnit": "storage_units"}[component]
+    attr = ATTR[component]
     pypsa_attrs = set(getattr(n.components, attr).defaults.index)
     allowed = pypsa_attrs | CUSTOM_COLUMNS | set(part_columns(component))
     unknown = {f.key for f in F.fields_for(component)} - allowed
@@ -83,7 +114,7 @@ def test_no_card_field_is_lost(component):
 
 
 def test_capital_cost_is_derived_and_labelled_with_its_period():
-    for component in ("Generator", "StorageUnit"):
+    for component in sorted(NOM):
         cc = _fields(component)["capital_cost"]
         assert cc.derived is True
         assert cc.unit_display.endswith("/yr")
@@ -105,8 +136,9 @@ def test_battery_parts_are_typed_and_their_sums_derived():
 
 def test_display_scale_matches_the_units():
     expected = {("EUR/kW", "EUR/MW"): 1e-3, ("EUR/kWh", "EUR/MWh"): 1e-3,
-                ("EUR/kW/yr", "EUR/MW/yr"): 1e-3, ("%", "fraction"): 100.0}
-    for component in ("Generator", "StorageUnit"):
+                ("EUR/kW/yr", "EUR/MW/yr"): 1e-3, ("EUR/kWh/yr", "EUR/MWh/yr"): 1e-3,
+                ("%", "fraction"): 100.0}
+    for component in ALL:
         for f in F.fields_for(component):
             key = (f.unit_display, f.unit_storage)
             if key in expected:
@@ -116,7 +148,7 @@ def test_display_scale_matches_the_units():
 
 
 def test_reveal_rules_name_fields_of_the_same_class():
-    for component in ("Generator", "StorageUnit"):
+    for component in ALL:
         keys = set(_fields(component))
         for f in F.fields_for(component):
             for k in (f.reveal_when or {}):
@@ -124,14 +156,15 @@ def test_reveal_rules_name_fields_of_the_same_class():
 
 
 def test_extendable_bounds_reveal_only_when_extendable():
-    for component in ("Generator", "StorageUnit"):
+    for component, nom in NOM.items():
         fs = _fields(component)
-        assert fs["p_nom_min"].reveal_when == {"p_nom_extendable": True}
-        assert fs["p_nom_max"].reveal_when == {"p_nom_extendable": True}
+        assert fs[f"{nom}_min"].reveal_when == {f"{nom}_extendable": True}, component
+        assert fs[f"{nom}_max"].reveal_when == {f"{nom}_extendable": True}, component
+        assert fs[f"{nom}_max"].blank == "clear", component
 
 
 def test_every_field_has_a_label_and_help():
-    for component in ("Generator", "StorageUnit"):
+    for component in ALL:
         for f in F.fields_for(component):
             assert f.label.strip(), f.key
             assert f.help.strip(), f.key
@@ -169,21 +202,23 @@ def test_route_unknown_class_is_400_and_lists_known(client, install_network):
 
 # ── S1b: what a blank field means on save ────────────────────────────────────
 
-@pytest.mark.parametrize("component", ["Generator", "StorageUnit"])
+@pytest.mark.parametrize("component", ALL)
 def test_blank_policy_agrees_with_the_write_model(component):
     """`clear` sends null, so the write model must accept None (an Optional
     field, or a bound that coerces None to inf). `zero` and `keep` fields
     must not be Optional: a blank there would otherwise be ambiguous."""
-    from models.schemas import GeneratorCreate, StorageUnitCreate
+    from models import schemas as M
 
-    model = {"Generator": GeneratorCreate, "StorageUnit": StorageUnitCreate}[component]
+    model = getattr(M, f"{component}Create")
+    branch = component in ("Link", "Line", "Transformer")
+    required = {"name": "x", "bus0": "a", "bus1": "b"} if branch else {"name": "x", "bus": "b"}
     for f in F.fields_for(component):
         if f.derived or f.key not in model.model_fields:
             continue
         assert f.blank in ("clear", "zero", "keep"), (f.key, f.blank)
         accepts_none = True
         try:
-            model.model_validate({"name": "x", "bus": "b", f.key: None})
+            model.model_validate({**required, f.key: None})
         except Exception:  # noqa: BLE001 — pydantic.ValidationError
             accepts_none = False
         if f.blank == "clear":
@@ -220,3 +255,15 @@ def test_the_frontend_fixture_matches_the_descriptors():
     t.FRONTEND_FIXTURE.write_text(json.dumps(t.fixture_payload(), indent=1, ensure_ascii=False) + chr(10))"`
     run from pypsa-gui/backend."""
     assert json.loads(FRONTEND_FIXTURE.read_text(encoding="utf-8")) == fixture_payload()
+
+
+# ── S1c-2: the line's per-km part ────────────────────────────────────────────
+
+def test_a_lines_investment_is_typed_per_km_and_its_costs_derived():
+    ln = _fields("Line")
+    assert ln["inv_per_km_overnight"].unit_display == "EUR/MVA/km" and not ln["inv_per_km_overnight"].derived
+    assert not ln["lifetime"].derived                    # the part takes the line's own lifetime
+    for derived in ("capital_cost", "fom_cost"):
+        assert ln[derived].derived is True, derived
+    assert "overnight_cost" not in ln
+    assert set(part_columns("Line")) <= set(ln)

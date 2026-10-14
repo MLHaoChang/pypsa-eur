@@ -1193,6 +1193,14 @@ def run_turn(
     # What the turn showed, for the interrupted-turn record: the frames AFTER
     # the assurance projection, since the record is what the user saw.
     trace = TurnTrace()
+    # Issue 17: what decides whether the session's goal goes on after this
+    # turn, and a `session_done` (an abnormal end) held back while a goal is
+    # active: the panel closes the stream on it, so the goal's new state is
+    # sent first.
+    from harness import goals as _goals
+    goal_watch = _goals.Watch()
+    _held_done: dict[str, Any] | None = None
+    _checked = False
     _ended_by: str | None = None
     body = None
     try:
@@ -1240,6 +1248,10 @@ def run_turn(
             })
         except Exception:  # noqa: BLE001 — the WAL must never block the turn
             logger.exception("chat: failed to open the pending-turn record")
+        # Issue 13 (shadow): the session event log opens the turn the same way.
+        from harness import eventlog as _eventlog
+        _eventlog.turn_start(session, message)
+        _checked = session.assurance_turn is not None
         body = _run_turn_body(
             session,
             message,
@@ -1256,6 +1268,12 @@ def run_turn(
                     if payload is None:
                         continue
                 trace.note(event, payload)
+                goal_watch.note(event, payload)
+                if event == "error" and _goals.on_error(session):
+                    yield "goal_state", _goals.payload(session)
+                if event == "session_done" and _goals.active(session):
+                    _held_done = payload
+                    continue
                 yield event, payload
         except GeneratorExit:
             _ended_by = "disconnected"
@@ -1274,6 +1292,13 @@ def run_turn(
             usage_at_start=_usage_at_start,
             attachment_file_ids=attachment_file_ids,
         )
+        # Issue 13 (shadow): close the turn on the event log, one fsync.
+        from harness import eventlog as _eventlog
+        _eventlog.turn_end(session, _turn_end_reason(trace, _ended_by),
+                           usage_since(dict(session.usage_acc), _usage_at_start))
+        if _ended_by == "disconnected":
+            # Nobody is watching: no round may start on a stream that is gone.
+            _goals.pause(session, "disconnected", by="harness")
         _metric_record_duration(time.monotonic() - _t_start)
         with session._lock:
             session._turn_in_flight = False
@@ -1347,6 +1372,29 @@ def run_turn(
             _held_lease=_drain_lease,
             _held_generation=_drain_utt.generation,
         )
+        return
+
+    # Issue 17: the goal's next round, through utterance admission like any
+    # other utterance (a queued correction was drained above, first).
+    goal_before = _goals.payload(session)
+    next_round = _goals.after_turn(session, goal_watch, checked=_checked)
+    if _goals.payload(session) != goal_before or next_round is not None:
+        yield "goal_state", _goals.payload(session)
+    if next_round is not None:
+        yield from run_turn(
+            session,
+            next_round,
+            client=client,
+            provider=provider,
+            ui_context=ui_context,
+            strict_assurance=strict_assurance,
+            utterance_id=f"goal-{uuid.uuid4().hex}",
+            generation=session.goal["generation"],
+            binding_generation=binding_generation,
+        )
+        return
+    if _held_done is not None:
+        yield "session_done", _held_done
 
 
 def _persist_interrupted_turn(
@@ -1401,6 +1449,15 @@ def _persist_interrupted_turn(
         append_turn(ctx, record)
     except Exception:  # noqa: BLE001 — persistence is best-effort
         logger.exception("chat: failed to persist an interrupted turn")
+
+
+def _turn_end_reason(trace: "TurnTrace", ended_by: str | None) -> str:
+    """How a turn ended, for the event log's `turn/end` (issue 13)."""
+    if trace.completed:
+        return "completed"
+    if ended_by == "disconnected" or trace._done_reason == "aborted":
+        return "aborted"
+    return "error"
 
 
 def _outbound_vision_block_kinds(
@@ -1658,14 +1715,26 @@ def _run_turn_body(
     # `history_cache_anchor` still hits. Rewriting old turns' context each
     # turn would break that cache for a fidelity nobody asked for.
     ui_block = _format_ui_context(ui_context)
+    # Issue 13 (shadow): each addendum is its own event as well as part of
+    # the user message.
+    from harness import eventlog as _eventlog
+    _eventlog.context(session, "ui_context", ui_block)
     # The active workflow's step rides the same per-turn slot (issue 06):
     # after the context block (outside the untrusted fence), before the
     # user's words. Absent on a turn with no workflow, so nothing changes.
     wf_block = _workflow_addendum(session, ui_context)
+    _eventlog.context(session, "workflow_step", wf_block)
     if wf_block:
         ui_block = f"{ui_block}\n\n{wf_block}" if ui_block else wf_block
+    # The session's goal (issue 17) rides the same slot, after the step.
+    from harness import goals as _goals
+    goal_block = _goals.addendum(session)
+    _eventlog.context(session, "goal", goal_block)
+    if goal_block:
+        ui_block = f"{ui_block}\n\n{goal_block}" if ui_block else goal_block
     if session.assurance_turn is not None:
         assurance_block = session.assurance_turn.request_content()
+        _eventlog.context(session, "checked_request", assurance_block)
         if assurance_block:
             ui_block = f"{ui_block}\n\n{assurance_block}" if ui_block else assurance_block
     if ui_block:
@@ -2898,6 +2967,9 @@ def _dispatch_real_tool_call(
         # The panel's step strip follows the session's state (issue 06
         # follow-up); emitted after the result so the two frames agree.
         yield "workflow_state", _workflow_state_payload(session)
+    if tool_name in ("set_goal", "pause_goal", "complete_goal"):
+        from harness import goals as _goals
+        yield "goal_state", _goals.payload(session)
     # Issue 16: a result too large for the model is kept whole and replaced,
     # for the MODEL only, by a preview and a locator (`harness/spill.py`).
     # The frames above are unchanged; a checked turn and a self-paging tool
