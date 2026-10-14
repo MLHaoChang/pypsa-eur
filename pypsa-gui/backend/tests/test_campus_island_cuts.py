@@ -420,3 +420,16 @@ def test_the_verdict_counts_hours_not_cuts(saved):
     script.proposals.append([])
     out = cic.apply_loop(saved, solve=script.solve, rerun=script.rerun, stop_event=threading.Event())
     assert out["trials"][0]["verdict"] == "fails at 2 hours"
+
+
+def test_the_cut_contract_is_gridspines():
+    """pypsa-gui keeps the contract as literals (a frozen build may lack
+    gridspine); they are gridspine's own."""
+    from gridspine.drivers import campus_study as cs
+    from gridspine.static import frequency as F
+    from services.solver.island import CUT_KINDS
+
+    assert cic.CUT_COLUMNS == F.CUT_COLUMNS
+    assert cic.FREQ_CUTS_CSV == cs.FREQ_CUTS_CSV
+    assert set(CUT_KINDS) == set(F.CUT_KINDS)
+    assert F.CUT_SCENARIOS == ("seamless",)       # the scenarios the hub LP has 0⁺ rows for
