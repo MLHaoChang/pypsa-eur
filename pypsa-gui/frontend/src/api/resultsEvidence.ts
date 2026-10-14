@@ -30,7 +30,7 @@ export interface LoadflowView {
   skipped?: Array<{ name: string; class: string; reason: string }>
   skipped_truncated?: boolean
   missing_evidence?: string[]
-  series?: Array<{ name: string; class: string; flow: Array<number | null>; util_pct: Array<number | null> }>
+  series?: Array<{ name: string; class: string; asset_key?: string; name_truncated?: boolean; flow: Array<number | null>; util_pct: Array<number | null> }>
   series_index?: string[]
   series_truncated?: boolean
   window?: { from: number; to: number; weighted_hours: number | null; snapshots: number }

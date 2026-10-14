@@ -466,7 +466,9 @@ def _loadflow(source: str, limit: int, window_from: int | None,
             selected = {r["_native_name"] for r in rows[:10] if r["class"] == cls}
             chart_rows, _ = _summarise_class(n, cls, comp, t_accessor, source, win_index,
                                             weights, valid_mask, [], selected)
-            series.extend({"name": r["_native_name"][:512], "class": r["class"], **r["_series"]}
+            series.extend({"name": r["_native_name"][:512], "class": r["class"],
+                           "asset_key": hashlib.sha256((r["class"] + "/" + r["_native_name"]).encode()).hexdigest(),
+                           "name_truncated": len(r["_native_name"]) > 512, **r["_series"]}
                           for r in chart_rows)
     for r in rows:
         r.pop("_rank")

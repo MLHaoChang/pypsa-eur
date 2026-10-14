@@ -35,7 +35,7 @@ export default function BranchLoading({ from, to, enabled }: { from: number; to:
   const rows = data.rows ?? []
   const flow = rows.filter(r => r.peak_flow != null).map(r => r.peak_flow!)
   const chartRows = (data.series_index ?? []).map((stamp, i) => Object.fromEntries([
-    ['snapshot', stamp], ...(data.series ?? []).map(s => [`${s.class}: ${s.name}`, s.util_pct[i]]),
+    ['snapshot', stamp], ...(data.series ?? []).map(s => [s.asset_key ?? `${s.class}: ${s.name}`, s.util_pct[i]]),
   ]))
   return <section data-testid="branch-loading" data-result-tab="loadflow"
     data-result-binding={data.binding ? JSON.stringify(data.binding) : undefined}>
@@ -74,7 +74,10 @@ export default function BranchLoading({ from, to, enabled }: { from: number; to:
     {!!chartRows.length && <><h3 className="mt-4 mb-2">Loading against effective limit (%) · ranked branches</h3>
       {data.series_truncated && <p className="text-xs">Chart bounded to ten branches and the first 800 selected snapshots. Table statistics cover the entire selected window.</p>}
       <ResponsiveContainer width="100%" height={220}><LineChart data={chartRows}><XAxis dataKey="snapshot" hide /><YAxis unit="%" /><Tooltip /><Legend />
-        {(data.series ?? []).map((s, i) => <Line key={`${s.class}:${s.name}`} dataKey={`${s.class}: ${s.name}`} stroke={['#0ea5e9', '#16a34a', '#dc2626', '#d97706', '#7c3aed'][i % 5]} dot={false} connectNulls={false} />)}
+        {(data.series ?? []).map((s, i) => <Line key={s.asset_key ?? `${s.class}:${s.name}`}
+          dataKey={s.asset_key ?? `${s.class}: ${s.name}`}
+          name={`${s.class}: ${s.name}${s.name_truncated ? `… [${s.asset_key?.slice(0, 8)}]` : ''}`}
+          stroke={['#0ea5e9', '#16a34a', '#dc2626', '#d97706', '#7c3aed'][i % 5]} dot={false} connectNulls={false} />)}
       </LineChart></ResponsiveContainer></>}
   </section>
 }
