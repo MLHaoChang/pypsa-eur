@@ -211,3 +211,26 @@ def test_a_dated_tax_schedule_on_a_later_stage_is_refused():
     with pytest.raises(FinanceRefused) as e:
         run_case(_case(), layers=bonus)
     assert e.value.code == "staged_tax_schedule_not_supported:bess"
+
+
+# ── LCOS ─────────────────────────────────────────────────────────────────────
+
+
+def test_a_staged_storage_lcos_reads_its_own_capex_and_clock():
+    """bess's LCOS capex is its stage capex in 2034, not a share of the
+    stage-1 capex; its discharge degrades from its own COD."""
+    from services.finance.case import StorageYear
+
+    case = _case()
+    sy = StorageYear(discharge_mwh=10.0, charge_mwh=11.0, charge_import_cost=0.0,
+                     charge_surplus_cost=0.0)
+    t1, t2 = case.templates
+    case = dataclasses.replace(case, templates=(t1, dataclasses.replace(t2, storage={"bess": sy})))
+    r = run_case(case, layers=LAYER)
+    rec = r.lcos["assets"]["bess"]
+    i = r.tl.index(2034)
+    assert rec["pv_capex"] == pytest.approx(STAGE / 1.07 ** i)
+    assert rec["reasons"] == [] and rec["lcos_nominal_per_mwh"] is not None, rec
+    # Discharge degrades from bess's COD: year 1 of bess is 2035 (factor 1).
+    d = 1.0 / 1.07 ** r.tl.index(2035) + 0.9 / 1.07 ** r.tl.index(2036)
+    assert rec["pv_discharge_mwh"] > 10.0 * d
