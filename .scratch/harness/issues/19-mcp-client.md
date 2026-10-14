@@ -1,8 +1,8 @@
 # 19 — External tools over MCP: the harness as an MCP client
 
-Status: needs-info (Q18 decided 2026-10-06; the joint spec is drafted, `../mcp-spec.md` Part A, awaiting the owner's read with Q8)
+Status: ready-for-agent (spec decided 2026-10-14: `../mcp-spec.md` Part A, build step 2; step 1, the tier fallback, merged as PR #220)
 Type: research
-Blocked by: 08 (done), the MCP spec (with 11)
+Blocked by: 08 (done), the MCP spec (done), PR #220 (done)
 
 Source: assessment design 7; DeepSeek Harness `docs/subsystems/mcp.md`
 (stdio and Streamable HTTP transports, per-server connection plugins, tool
@@ -18,8 +18,10 @@ every provider? If yes:
 - Settings: a per-install list of servers (command or URL, env from the
   credential store, enabled flag), admin-only, never from a project bundle.
 - Catalogue: tools are added at session start under `mcp__<server>__<tool>`
-  with `Safety: write` unless the server marks the tool read-only, so the
-  confirmation card applies by default; results go through the untrusted
+  with `Safety: write` unless the server marks the tool read-only, and every
+  external tool not marked read-only gets the confirmation card in Expert and
+  Guided alike (owner decision Q20; a built-in `write` tool is carded only in
+  Guided); results go through the untrusted
   fence like any tool result (`harness/fence.py`).
 - Routes: `TOOL_ROUTES` sentinel `_MCP_CALL`; the layering test keeps MCP
   code in `harness/providers/` or a new `harness/mcp_client.py`, never the loop.
@@ -50,11 +52,21 @@ appear at runtime.
 
 The spec answers the open points above:
 
-- **Fail-open tier.** `confirm._safety_tier_for` fails open to `read` for a name
-  that is not in `TOOLS`. An `mcp__` name therefore resolves through the
-  session's external list first, and to `write` when it is not there.
+- **Fail-open tier.** `confirm._safety_tier_for` failed open to `read` for a
+  name that is not in `TOOLS`. PR #220 made it `destructive` for every such
+  name; an `mcp__` name resolves through the session's external list first and
+  falls through to that when it is not there. (Corrected 2026-10-14: the draft
+  said `write`, which in Expert gets no card.)
 - **Static guards.** External tools never enter `TOOLS`. The inventory and parity
   tests stay static; the payload and allowlist pick the tools up per session.
 - **Descriptions.** They are capped at 1024 characters and lose any forged
   `Safety:` text.
 - **Server child environment.** A stdio server sees only its own mapped keys.
+
+2026-10-14 (decisions): The owner answered Q20: every external tool not marked
+`readOnlyHint` gets a card in Expert too (`external and tier != "read"` in the
+gate); built-in tools are unchanged. The defaults in the spec stand (super-admin,
+tool list fixed per session, no images in the first release, no server
+instructions, prompts or resources, sampling and elicitation refused). Build
+order: the tier fallback (PR #220, done), then this issue's client core, then
+the dispatch extraction, then issue 11.

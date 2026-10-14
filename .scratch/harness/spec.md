@@ -325,3 +325,27 @@ servers whose tools join the catalogue for every provider?
 ➡️ Later, own spec with issue 11: admin only, zero servers by default,
 write tier unless the server marks a tool read-only, descriptions capped and
 results fenced.
+
+## §10. Owner decisions on the MCP spec (2026-10-14)
+
+Asked on the draft `mcp-spec.md`, relayed by the coordinator.
+
+| # | Decision |
+|---|---|
+| Q8 | (reopened) Option 2: the full catalogue is exposed to external agents on this machine only (desktop/local mode). Every write shows its card in the app's chat panel and a person answers it there (300 s TTL). No web deployments, so no personal API-token model. |
+| Q20 | External MCP tools always ask: every external tool not marked `readOnlyHint` gets the confirmation card in Expert as well as Guided. Built-in tools are unchanged (`write` stays carded in Guided only). |
+
+Q18's defaults stand as the spec states them. Separately, a tool name absent
+from the catalogue now resolves to the destructive tier (PR #220), so an
+undeclared handler is carded in every mode.
+
+The questions as asked, with the recommendations:
+
+❓ **Q8 — External agents over MCP: how far?** Read-only on this machine;
+full catalogue on this machine; full catalogue on web deployments too; not now.
+➡️ Recommended read-only on this machine; the owner chose the full catalogue
+on this machine.
+
+❓ **Q20 — Do external write tools need a card in Expert?** Yes, external tools
+always ask; or the same as built-in tools (Guided only).
+➡️ Yes, always ask (the owner chose the recommendation).
