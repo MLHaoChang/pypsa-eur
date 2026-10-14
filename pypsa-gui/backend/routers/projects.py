@@ -198,7 +198,16 @@ def _rm_onexc(func, path, _exc):  # noqa: ANN001 — shutil callback signature
         # untraversable, and the delete route answered 204. Re-raise instead.
         raise OSError(f"refusing to remove a symbolic link: {path}")
     try:
-        os.chmod(path, stat.S_IWRITE)
+        # ADD owner write to the current mode. `os.chmod(path, S_IWRITE)` alone
+        # clears the read-only attribute on Windows but SETS 0o200 on POSIX: a
+        # directory whose `rmdir` then fails (not empty: a file written into it
+        # mid-removal) was left untraversable, and the next `stat` of a file in
+        # it raised PermissionError (CI, 13 Oct). A directory also keeps owner
+        # read and traverse, so the retry can list it.
+        mode = stat.S_IMODE(os.lstat(path).st_mode) | stat.S_IWRITE
+        if os.path.isdir(path):
+            mode |= stat.S_IRWXU
+        os.chmod(path, mode)
     except OSError:
         pass
     func(path)  # re-raises if the path is still locked
