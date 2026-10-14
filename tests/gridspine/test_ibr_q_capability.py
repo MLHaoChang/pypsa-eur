@@ -87,3 +87,44 @@ def test_the_connection_table_reports_q_ibr_only_for_a_profile_that_has_it():
     for profile in (EU, load_grid_code("generic_assumed")):
         out = assess_connection(net, fac, branch_contingencies(net), profile)
         assert "q_ibr" not in set(out["check"])
+
+
+def test_the_total_is_the_plant_comparison_and_names_a_unit_short_of_its_own_share():
+    """Review probe: BESS 20 MW at S = 30 MVA has 22.36 Mvar, PV 15 MW at S =
+    15 MVA none; the plant needs 11.50 Mvar and has it. IEEE 2800 states the
+    requirement for the plant, so the TOTAL passes; the PV row still fails."""
+    got = by_unit(ibr_q_capability(campus(bess_s=30.0, pv_s=15.0), US))
+    assert got["PV1"]["status"] == "fail" and got["PV1"]["shortfall_mvar"] == pytest.approx(Q * 15.0)
+    assert got["BESS1"]["status"] == "pass"
+    tot = got["TOTAL"]
+    assert tot["status"] == "pass" and tot["shortfall_mvar"] == 0.0
+    assert tot["available_mvar"] == pytest.approx(math.sqrt(30.0 ** 2 - 20.0 ** 2))
+    assert tot["required_mvar"] == pytest.approx(Q * 35.0)
+    assert "plant meets" in tot["detail"] and "PV1 alone falls 4.93 Mvar short" in tot["detail"]
+
+
+def test_with_no_rated_unit_the_total_is_unknown_not_zero():
+    c = campus()
+    c.units.loc[["BESS1", "PV1"], "s_mva"] = float("nan")
+    tot = by_unit(ibr_q_capability(c, US))["TOTAL"]
+    assert tot["status"] == "reported"
+    for col in ("required_mvar", "available_mvar", "shortfall_mvar", "p_n_mw"):
+        assert math.isnan(tot[col]), col
+
+
+def test_the_total_counts_only_rated_units_in_p_n():
+    c = campus()
+    c.units.loc["PV1", "s_mva"] = float("nan")
+    tot = by_unit(ibr_q_capability(c, US))["TOTAL"]
+    assert tot["p_n_mw"] == pytest.approx(20.0)
+    assert tot["required_mvar"] == pytest.approx(Q * tot["p_n_mw"])
+
+
+def test_the_table_itself_says_it_is_screened_at_the_unit_terminals(tmp_path):
+    import pandas as pd
+
+    df = ibr_q_capability(campus(), US)
+    assert "basis" in df.columns and (df["basis"] == IBR_LABEL).all()
+    df.to_csv(tmp_path / "t.csv", index=False)
+    back = pd.read_csv(tmp_path / "t.csv")
+    assert back["basis"].str.startswith("screening at unit terminals").all()
