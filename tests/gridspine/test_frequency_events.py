@@ -142,6 +142,8 @@ def test_e4_restores_nominal_before_each_block_so_equal_blocks_respond_alike():
         assert m.df_qss_hz == pytest.approx(-2.0 / 5.0, abs=1e-3)            # one block over K, not the sum
     gaps = np.diff(res.block_times_s)
     assert gaps == pytest.approx([gaps[0]] * len(gaps), abs=1e-9)
+    # the joined trace's time strictly increases: no repeated instant at a block boundary (gatekeeper, #226)
+    assert (np.diff(res.trace.t) > 0).all() and len(res.trace.t) == len(res.trace.df)
 
 
 def test_each_block_waits_for_the_governors_to_recover_from_it():

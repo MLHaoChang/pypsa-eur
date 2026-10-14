@@ -38,7 +38,10 @@ selected hours an island criterion picked (``campus_freq_events.csv``,
 (``campus_freq_summary.json``) that names the failing hours and the hours
 the every-hour E1 fails but the ranking did not select. ``psse_campus``
 writes the PSS/E handoff (plan I8, ``gridspine.handoff.campus_bundle``), one
-bundle per island critical hour, under ``psse/``.
+bundle per island critical hour, under ``psse/``. ``cuts_campus`` then
+derives I7's frequency cuts for the hub (``campus_freq_cuts.csv``,
+``gridspine.static.frequency.propose_cuts``): the inertia, headroom and droop
+gain each failing hour needs, for the user to apply (plan Q6).
 
 ``island_static_campus`` runs the island steady state and short circuit at
 the same hours (plan I4, I5, I5b, ``gridspine.static.island_hours``): the
@@ -219,6 +222,7 @@ FREQ_BRIDGE_CSV = "campus_freq_bridge.csv"
 FREQ_PLANNED_CSV = "campus_freq_planned.csv"
 FREQ_UPS_CSV = "campus_freq_ups.csv"
 FREQ_SUMMARY_JSON = "campus_freq_summary.json"
+FREQ_CUTS_CSV = "campus_freq_cuts.csv"
 PSSE_DIR = "psse"
 #: ``island_static_campus``'s files, by ``IslandStatic`` table.
 ISLAND_STATIC_CSV = {
@@ -482,6 +486,28 @@ def island_static_campus(run_dir) -> dict:
     summary["models"] = {ISLAND_STATIC_CSV[name]: text for name, text in summary["models"].items()}
     _write_text_atomic(run_dir / ISLAND_STATIC_SUMMARY_JSON, json.dumps(summary, indent=2))
     return summary
+
+
+def cuts_campus(run_dir) -> pd.DataFrame:
+    """I7's frequency cuts for a run whose frequency check has run
+    (``island_frequency_campus``): the failing E1, E2, E3 and E5 events at
+    the island hours and E1 at every hour, each re-run and inverted
+    (``frequency.propose_cuts``), ``current`` from the run's I3a tables.
+    Writes ``campus_freq_cuts.csv`` (``frequency.CUT_COLUMNS``); returns it."""
+    from gridspine.static import frequency as F
+
+    run_dir = Path(run_dir)
+    events_path, sweep_path = run_dir / FREQ_EVENTS_CSV, run_dir / FREQ_E1_HOURLY_CSV
+    if not events_path.is_file() or not sweep_path.is_file():
+        raise ContractError("the run has no frequency check (campus_freq_events.csv); run island_frequency_campus first")
+    campus = load_run_campus(run_dir)
+    tables = _island_tables(run_dir)
+    hourly, _ = campus_tables(run_dir)
+    cuts = F.propose_cuts(campus, hourly, pd.read_csv(events_path), pd.read_csv(sweep_path),
+                          island_hourly=tables[1] if tables is not None else None,
+                          island_unit_hourly=tables[0] if tables is not None else None)
+    _write_text_atomic(run_dir / FREQ_CUTS_CSV, cuts.to_csv(index=False))
+    return cuts
 
 
 def psse_campus(run_dir, hours=None) -> list:
