@@ -1563,10 +1563,13 @@ export default function BottomPanel() {
   const handleRowClick = useCallback((row: Record<string, unknown>) => {
     const name = row.name as string
     const type = TAB_TYPES[activeTab]
-    // Carrier rows have no PropertiesPanel editor yet — the bulk-edit toolbar
-    // and inline cell edit cover the main co2_emissions / color use cases.
-    // Skip the panel open so the row-click doesn't surface an empty form.
-    if (type === 'Carrier') return
+    // A Carrier row opens its Properties card (M5b); it has no place on the
+    // map, so nothing is highlighted.
+    if (type === 'Carrier' && name) {
+      setSelectedComponent({ type, name })
+      openRightPanel()
+      return
+    }
     if (type && name) {
       const busName = (row.bus ?? row.bus0) as string | undefined
       setSelectedComponent({ type, name })
