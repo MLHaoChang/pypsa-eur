@@ -63,6 +63,9 @@ class FieldSpec:
         d = asdict(self)
         d["technical_name"] = self.key
         d["options"] = list(self.options)
+        if self.reveal_when:
+            # A rule naming several values is a tuple here and a list on the wire.
+            d["reveal_when"] = {k: list(v) if isinstance(v, tuple) else v for k, v in self.reveal_when.items()}
         return d
 
 
@@ -467,9 +470,9 @@ GLOBAL_CONSTRAINT: tuple[FieldSpec, ...] = (
     FieldSpec("constant", "identity", "Constant", "The bound, in the type's unit: t for a CO₂ cap, MW for capacity, "
               "MWh for dispatch, MW·km or € for transmission.", required=True, key_param=True),
     FieldSpec("carrier_attribute", "identity", "Carrier attribute", "For primary energy: the carrier column summed, "
-              "e.g. co2_emissions.", kind="text"),
+              "e.g. co2_emissions.", kind="text", reveal_when={"type": "primary_energy"}),
     FieldSpec("carrier", "identity", "Carrier", "For a capacity or operational limit: the carrier it applies to.",
-              kind="carrier"),
+              kind="carrier", reveal_when={"type": ("tech_capacity_expansion_limit", "operational_limit")}),
     FieldSpec("investment_period", "identity", "Investment period", "The period it binds in. Empty: the whole "
               "horizon.", "", "", kind="int"),
 )

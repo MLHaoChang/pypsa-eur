@@ -160,11 +160,11 @@ export const networkApi = {
     client.get<Array<Record<string, unknown>>>('/network/global_constraints').then(r => r.data),
   createGlobalConstraint: (body: {
     name: string; type: string; sense: string; constant: number
-    carrier_attribute?: string; carrier?: string; investment_period?: number
+    carrier_attribute?: string | null; carrier?: string | null; investment_period?: number | null
   }) => client.post<{ name: string }>('/network/global_constraints', body).then(r => r.data),
   updateGlobalConstraint: (name: string, body: {
     name: string; type: string; sense: string; constant: number
-    carrier_attribute?: string; carrier?: string; investment_period?: number
+    carrier_attribute?: string | null; carrier?: string | null; investment_period?: number | null
   }) => client.put<{ name: string }>(
     `/network/global_constraints/${encodeURIComponent(name)}`, body,
   ).then(r => r.data),

@@ -1013,7 +1013,9 @@
       "required": false,
       "key_param": false,
       "derived": false,
-      "reveal_when": null,
+      "reveal_when": {
+       "type": "primary_energy"
+      },
       "part": null,
       "blank": "clear",
       "technical_name": "carrier_attribute"
@@ -1031,7 +1033,12 @@
       "required": false,
       "key_param": false,
       "derived": false,
-      "reveal_when": null,
+      "reveal_when": {
+       "type": [
+        "tech_capacity_expansion_limit",
+        "operational_limit"
+       ]
+      },
       "part": null,
       "blank": "clear",
       "technical_name": "carrier"

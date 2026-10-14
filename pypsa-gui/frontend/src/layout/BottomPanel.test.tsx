@@ -645,6 +645,15 @@ describe('Carriers tab absorbed into the shared grid — D16', () => {
     expect(cell.querySelector('input[type="color"]')).toBeTruthy()
   })
 
+  it('a row opens the carrier’s Properties card (M5b)', async () => {
+    useUIStore.setState({ selectedComponent: null, rightPanelOpen: false })
+    renderPanel()
+    await userEvent.click(screen.getByText('Carriers'))
+    await userEvent.click(await screen.findByText('gas'))
+    expect(useUIStore.getState().selectedComponent).toEqual({ type: 'Carrier', name: 'gas' })
+    expect(useUIStore.getState().rightPanelOpen).toBe(true)
+  })
+
   it('keeps the CO2 help line', async () => {
     renderPanel()
     await userEvent.click(screen.getByText('Carriers'))

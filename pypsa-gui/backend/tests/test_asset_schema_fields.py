@@ -258,6 +258,17 @@ def test_m5_enums_are_the_options_the_forms_offer():
         "transmission_volume_expansion_limit", "transmission_expansion_cost_limit"}
 
 
+def test_m5b_constraint_fields_show_for_the_types_that_read_them():
+    """M5b: the form shows the summed carrier column only for primary energy, and the carrier only for the two
+    carrier-scoped limits; a rule naming several values (a tuple) reveals on any of them."""
+    gc = _fields("GlobalConstraint")
+    assert gc["carrier_attribute"].reveal_when == {"type": "primary_energy"}
+    assert gc["carrier"].reveal_when == {"type": ("tech_capacity_expansion_limit", "operational_limit")}
+    for f in F.fields_for("GlobalConstraint"):
+        for want in (f.reveal_when or {}).values():
+            assert set(want if isinstance(want, tuple) else (want,)) <= set(gc["type"].options), f.key
+
+
 def test_costs_blank_to_zero_and_bounds_clear():
     g = _fields("Generator")
     for k in ("marginal_cost", "fom_cost", "curtailment_cost", "start_up_cost", "shut_down_cost"):
