@@ -538,3 +538,15 @@ def test_a_headroom_cut_takes_current_from_i3a_s_unit_rows(monkeypatch):
     cuts = F.propose_cuts(camp, hourly(), st.events, island_hourly=ih, island_unit_hourly=iu)
     r = cuts[cuts["feasible"]].iloc[0]
     assert r["current"] == 5.0 and r["required"] == 6.0 and "no I3a unit rows" not in r["note"]   # GEN1's 5 MW
+
+
+def test_settle_run_reports_the_horizon_it_ran_when_it_never_settles():
+    # a ramp never settles: five runs at 10, 20, 40, 80 and 160 s, and the trace and the horizon are the last run's
+    calls = []
+    run = step_run(4.0)
+
+    def counting(us, t_end):
+        calls.append(t_end)
+        return run(us, t_end)
+    tr, t = F._settle_run(counting, [gen(t_g=1e12)], 10.0)
+    assert calls == [10.0, 20.0, 40.0, 80.0, 160.0] and t == 160.0 and tr.t[-1] == pytest.approx(160.0)

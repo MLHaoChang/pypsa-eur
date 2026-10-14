@@ -1,0 +1,1 @@
+* Fix(gridspine): In the island frequency check, a generator set at its output limit now holds that limit within each integration step. Before, it delivered slightly more than its limit (about 0.1 MW at a 5 ms step), so the settled frequency came out slightly too optimistic. The I7 cut notes also report the horizon a run actually reached.
