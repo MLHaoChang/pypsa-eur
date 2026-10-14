@@ -96,6 +96,9 @@ it('renders a distinctive per-bus price sourced from a single mocked bus/snapsho
   // matched `<tr>`) that the 3 matches are the row's Mean/Peak/Trough `<td>`
   // cells (`Prices.tsx:269-271`) at cellIndex 3/4/5 respectively — three
   // genuinely distinct render sites, not one node counted three times.
-  const matches = await screen.findAllByText('424.24')
+  // The three System KPI tiles (mean / peak / trough) also show 424.24 now that
+  // components/Kpi.tsx renders the number apart from its unit; count only the
+  // table's <td> cells, which is what this test pins.
+  const matches = (await screen.findAllByText('424.24')).filter(el => el.tagName === 'TD')
   expect(matches.length).toBe(3)
 })
