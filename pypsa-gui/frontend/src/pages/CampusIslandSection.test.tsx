@@ -100,6 +100,19 @@ describe('island section: the report', () => {
     expect([...rows].map(r => r.getAttribute('data-assumed'))).toEqual(['yes', 'no'])
   })
 
+  it('keeps a long cell to one line with the full text on hover, and scrolls a table in its own box', async () => {
+    const long = Array.from({ length: 40 }, (_, i) => `unit_${i}.droop_pct`).join('; ')
+    api.islandReport.mockResolvedValue({ ...REPORT, tables: [{ ...REPORT.tables[2], rows: [[0, 3, true, long]] }] })
+    renderSection()
+    const table = await screen.findByTestId('island-table-static_flow')
+    const cell = within(table).getByTitle(long)
+    expect(cell.textContent).toBe(long)
+    expect(cell.className).toMatch(/truncate/)
+    const box = table.querySelector('[data-testid="island-table-scroll"]') as HTMLElement
+    expect(box.className).toMatch(/overflow-auto/)
+    expect(box.className).toMatch(/max-h-/)
+  })
+
   it('says what is missing', async () => {
     renderSection()
     expect((await screen.findByTestId('island-missing')).textContent).toContain('campus run with island tables')

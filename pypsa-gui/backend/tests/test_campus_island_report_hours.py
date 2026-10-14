@@ -201,3 +201,20 @@ def test_every_table_names_its_group_in_the_plan_order(saved):
     assert [order.index(g) for g in groups] == sorted(order.index(g) for g in groups)
     assert {t["id"]: t["group"] for t in tables}["island_hours"] == "hours"
     assert {"inputs", "hours", "static", "frequency"} <= set(groups)
+
+
+def test_an_infinite_value_reads_as_inf_text_so_the_payload_is_strict_json(saved):
+    """A bridge with no end to its autonomy writes ``inf``; the route's JSON
+    allows no Infinity, so the report says ``inf`` as text."""
+    run = _run_dir(saved)
+    _freq(run)
+    cols = F.BRIDGE_COLUMNS
+    _write(run, cs.FREQ_BRIDGE_CSV, cols, [_row(cols, period=0, hour=3, scenario="seamless", unit="ups",
+                                                    kind="ups", ok=True, autonomy_s=float("inf"),
+                                                    needed_s=-float("inf"))])
+    report = island_report(saved)
+    json.dumps(report, allow_nan=False)                    # what the route does
+    t = _tables(report)["freq_bridge"]
+    at = {c: i for i, c in enumerate(t["columns"])}
+    assert t["rows"][0][at["autonomy_s"]] == "inf"
+    assert t["rows"][0][at["needed_s"]] == "-inf"

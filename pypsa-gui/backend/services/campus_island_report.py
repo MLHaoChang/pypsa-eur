@@ -24,6 +24,7 @@ columns are not the contract's is listed there too, never shown.
 from __future__ import annotations
 
 import json
+import math
 
 import pandas as pd
 
@@ -254,6 +255,18 @@ def _freq_tables(run_dir, missing) -> list:
     return tables
 
 
+def _finite(value):
+    """The payload with each infinite float as ``"inf"``/``"-inf"`` text (an
+    unbounded autonomy, say): the route's JSON allows no Infinity."""
+    if isinstance(value, float) and math.isinf(value):
+        return "inf" if value > 0 else "-inf"
+    if isinstance(value, dict):
+        return {k: _finite(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_finite(v) for v in value]
+    return value
+
+
 def island_report(project) -> dict:
     """``{caveat, tables, missing}`` for a hub project (see the module)."""
     from services import campus_electrical_service as ce
@@ -281,5 +294,5 @@ def island_report(project) -> dict:
     run_dir = ce.campus_dir(project) / "run"
     tables += _static_tables(run_dir, missing)
     tables += _freq_tables(run_dir, missing)
-    return json.loads(json.dumps({"caveat": CAVEAT, "tables": tables, "missing": missing},
-                                 default=ce._jsonable))
+    return _finite(json.loads(json.dumps({"caveat": CAVEAT, "tables": tables, "missing": missing},
+                                         default=ce._jsonable)))

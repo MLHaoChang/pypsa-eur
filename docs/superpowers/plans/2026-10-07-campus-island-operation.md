@@ -2706,6 +2706,28 @@ unchanged.
 - Draft: 3 edits (the engine pass-through, the service pass-through, the
   sidecar load), 3 of 3 killed on the first run.
 
+**Browser run** (local mode, the Data Center template). Steps: Run LOPF,
+save, Draft again, Run study. The template ships an island sidecar, so the
+draft carries island data, and Run wrote every I4–I6 file.
+- The panel shows 24 tables in the five groups, each with its model and
+  the caveat; 142 assumed rows are marked and nothing is missing.
+- At the 9 island hours (2030):
+  - I4: viable, gate ok, df ≈ −1.03 to −1.19 Hz;
+  - I5b: earth lost at GRID in both cases; the islanding case is not
+    determinable at DC_MV and IT_BUS;
+  - I6 (ups_bridged): the bridge fails at all 9 hours.
+
+The run found three gaps, each fixed test-first:
+- **Report not refreshed:** the campus Run left the island report query
+  stale. The panel's `refresh` now invalidates `ISLAND_REPORT_KEY` too.
+- **500 on infinite values:** an `inf` value (e.g. `autonomy_s`) made the
+  route return 500, because its JSON allows no Infinity. The report now
+  writes it as `"inf"`/`"-inf"` text (`_finite`).
+- **Section too tall:** long `assumed` cells wrapped, and the section grew
+  to ~90,700 px. Each table now scrolls in its own box (max 420 px, sticky
+  header), and a cell longer than 48 characters stays on one line with
+  the full text on hover. The section is now ~8,200 px.
+
 ## Order, PRs and agents
 
 - **I1** comes first: everything reads the control modes and the data.
