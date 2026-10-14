@@ -22,7 +22,15 @@ import pathlib
 
 try:
     from gridspine.schema.contracts import ContractError
-    from gridspine.schema.island import GFM_CONTROLS, validate_island_config
+    from gridspine.schema.island import (
+        GFM_CONTROLS,
+        ISLAND_HOURLY_CSV,
+        ISLAND_UNIT_HOURLY_COLUMNS,
+        ISLAND_UNIT_HOURLY_CSV,
+        validate_island_config,
+        validate_island_hourly,
+        validate_island_unit_hourly,
+    )
 
     GRIDSPINE_AVAILABLE = True
     GRIDSPINE_IMPORT_ERROR = None
@@ -35,6 +43,15 @@ except ImportError as exc:                      # pragma: no cover - build-shape
 
     validate_island_config = None
     GFM_CONTROLS = frozenset()
+    # The I3a hourly tables (plan I3a): without gridspine there are none to write.
+    ISLAND_UNIT_HOURLY_CSV = "island_unit_hourly.csv"
+    ISLAND_HOURLY_CSV = "island_hourly.csv"
+    ISLAND_UNIT_HOURLY_COLUMNS = ()
+
+    def validate_island_unit_hourly(df):
+        raise ContractError(f"the island tables need gridspine ({GRIDSPINE_IMPORT_ERROR})")
+
+    validate_island_hourly = validate_island_unit_hourly
 
 SIDECAR_NAME = "island_config.json"
 

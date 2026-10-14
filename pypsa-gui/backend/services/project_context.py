@@ -270,7 +270,7 @@ class ProjectContext:
 # LIFECYCLE — reset on every solve (status + the worker handles).
 LIFECYCLE_KEYS = (
     "status", "condition", "objective", "solve_time",
-    "thread", "stop_event", "log_queue", "last_failure",
+    "thread", "stop_event", "log_queue", "last_failure", "kind",
 )
 # RESULT_STATE — the side-results persisted to `results_state.pkl`. Order matches
 # the historical `_RESULTS_STATE_KEYS` tuple (the save/restore paths iterate it).
@@ -520,6 +520,12 @@ class ProjectSolverState:
     thread: Any = None            # the worker threading.Thread
     stop_event: Any = None        # threading.Event for abort
     log_queue: Any = None         # BufferedLogQueue (SSE source)
+    # Which worker owns `thread`: "lopf" / "ac_pf" (`/run`) or "queue" (the
+    # solve queue); read by `shutdown._context_solves`. Declared so `_state`
+    # carries it from the start: written but undeclared, it was an orphan key
+    # (`test_state_dict_keys_match_solver_state_fields`, red whenever a solve
+    # test ran first in the same process).
+    kind: Any = None
     # Actionable failure card from the last finished solve (None on success /
     # abort). Declared here so it's part of the canonical state shape — written
     # via `_state_update(last_failure=…)` in run_simulation's finally, reset

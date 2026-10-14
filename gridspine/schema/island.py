@@ -492,3 +492,113 @@ def validate_island_config(cfg) -> dict:
     req = validate_requirements(cfg["requirements"], "island_config.requirements")
     check_cross(units, req, "island_config", strict=False)
     return {"units": units, "requirements": req}
+
+
+# ── the hourly island contracts (plan I3a; owner option A, 2026-10-13) ──────
+#
+# gridspine owns the column sets and the validators; pypsa-gui produces the
+# values from its solved hub LP (``services/solver/island.py``) and writes
+# them beside ``campus_hourly.csv``. ``period`` and ``hour`` are keyed as in
+# ``schema/campus.py`` (the investment period, the snapshot's position in
+# it). Validators take a DataFrame and use only its own methods, so this
+# module stays pandas-free.
+
+#: One row per (period, hour, unit_id): gensets, bess and UPS units.
+#: ``soc_start_mwh`` is e(t−1), the energy held when an outage starts in hour
+#: t (storage only). ``online`` is u_g(t) under linearised UC, else the
+#: ``spinning`` flag (gensets), 1 for a bess, empty on a UPS.
+#: ``p_ups_it_mw`` is the IT load a UPS protects, empty on other units; a
+#: UPS row has no headroom.
+ISLAND_UNIT_HOURLY_COLUMNS = ("period", "hour", "unit_id", "soc_start_mwh", "online",
+                              "headroom_up_mw", "headroom_down_mw", "p_ups_it_mw")
+#: One row per (period, hour, scenario): the steps ΔP⁺ and ΔP⁻ (MW, positive
+#: when there is a step that way), M (MW·s), ΣK (MW/Hz) and the critical load.
+ISLAND_HOURLY_COLUMNS = ("period", "hour", "scenario", "dp_up_mw", "dp_down_mw",
+                         "inertia_mws", "k_mw_per_hz", "critical_load_mw")
+ISLAND_UNIT_HOURLY_CSV = "island_unit_hourly.csv"
+ISLAND_HOURLY_CSV = "island_hourly.csv"
+
+
+def _empty(v) -> bool:
+    return v is None or (isinstance(v, float) and math.isnan(v))
+
+
+def _fixed_columns(df, cols, where):
+    have = [str(c) for c in df.columns]
+    missing = [c for c in cols if c not in have]
+    if missing:
+        raise ContractError(f"{where} missing columns: {missing}")
+    extra = [c for c in have if c not in cols]
+    if extra:
+        raise ContractError(f"{where} has columns the contract does not carry: {extra}")
+    return df[list(cols)].reset_index(drop=True).copy()
+
+
+def _keys(out, key, where):
+    for col in ("period", "hour"):
+        vals = []
+        for v in out[col].tolist():
+            if isinstance(v, bool) or _empty(v) or not isinstance(v, (int, float)) or float(v) % 1:
+                raise ContractError(f"{where}: {col} must be integral, got {v!r}")
+            if v < 0:
+                raise ContractError(f"{where}: {col} must be non-negative, got {v!r}")
+            vals.append(int(v))
+        out[col] = vals
+    rows = list(zip(*(out[c].tolist() for c in key)))
+    seen, dup = set(), []
+    for r in rows:
+        if r in seen:
+            dup.append(r)
+        seen.add(r)
+    if dup:
+        raise ContractError(f"{where}: duplicate {key} rows: {dup[:5]}")
+
+
+def _numbers(out, col, where, *, required):
+    vals = []
+    for i, v in enumerate(out[col].tolist()):
+        if _empty(v):
+            if required(i):
+                raise ContractError(f"{where}: {col} is empty on row {i}")
+            vals.append(math.nan)
+            continue
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            raise ContractError(f"{where}: {col} must be a finite number, got {v!r} on row {i}")
+        vals.append(float(v))
+    out[col] = vals
+    return vals
+
+
+def validate_island_unit_hourly(df):
+    """``island_unit_hourly.csv``, checked: exactly its columns, unique
+    (period, hour, unit_id), finite numbers, ``online`` in [0, 1], and
+    headroom on every row but a UPS's (the rows that carry ``p_ups_it_mw``)."""
+    where = "island unit hourly table"
+    out = _fixed_columns(df, ISLAND_UNIT_HOURLY_COLUMNS, where)
+    if any(_empty(v) for v in out["unit_id"].tolist()):
+        raise ContractError(f"{where}: null unit_id")
+    out["unit_id"] = [str(v) for v in out["unit_id"].tolist()]
+    _keys(out, ("period", "hour", "unit_id"), where)
+    ups = [not _empty(v) for v in out["p_ups_it_mw"].tolist()]
+    _numbers(out, "p_ups_it_mw", where, required=lambda i: False)
+    _numbers(out, "soc_start_mwh", where, required=lambda i: False)
+    for col in ("headroom_up_mw", "headroom_down_mw"):
+        _numbers(out, col, where, required=lambda i: not ups[i])
+    for i, v in enumerate(_numbers(out, "online", where, required=lambda i: False)):
+        if not math.isnan(v) and not 0.0 <= v <= 1.0 + 1e-9:
+            raise ContractError(f"{where}: online must be in [0, 1], got {v!r} on row {i}")
+    return out
+
+
+def validate_island_hourly(df):
+    """``island_hourly.csv``, checked: exactly its columns, unique
+    (period, hour, scenario), a known scenario, and every value finite."""
+    where = "island hourly table"
+    out = _fixed_columns(df, ISLAND_HOURLY_COLUMNS, where)
+    bad = sorted({str(v) for v in out["scenario"].tolist() if v not in SCENARIOS})
+    if bad:
+        raise ContractError(f"{where}: scenario must be one of {list(SCENARIOS)}, got {bad}")
+    _keys(out, ("period", "hour", "scenario"), where)
+    for col in ISLAND_HOURLY_COLUMNS[3:]:
+        _numbers(out, col, where, required=lambda i: True)
+    return out
