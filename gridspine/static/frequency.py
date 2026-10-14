@@ -212,8 +212,19 @@ def _targets(units, x, t, f0):
             ref = -k * (x["df"] + (x[f"{u.name}~i"] / ISO_TI_S if u.isochronous else 0.0))
             dx[u.name] = _hold(u, x[u.name], (ref - x[u.name]) / u.t_g, t)
             if u.isochronous:
-                dx[f"{u.name}~i"] = x["df"]
+                dx[f"{u.name}~i"] = _hold_integral(u, x[u.name], x["df"], t)
     return dx
+
+
+def _hold_integral(u, p, df, t):
+    """Anti-windup for the isochronous integral: at a bound it does not
+    integrate an error that pushes the genset further out (Δf < 0 at its
+    upper bound, > 0 at its lower), so it does not wind up while the genset
+    is held and overshoot once released."""
+    lo, hi, _, _ = _genset_bounds(u, t)
+    if (p >= hi - 1e-12 and df < 0.0) or (p <= lo + 1e-12 and df > 0.0):
+        return 0.0
+    return df
 
 
 def _genset_bounds(u, t):

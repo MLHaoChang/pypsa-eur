@@ -2587,6 +2587,26 @@ two-former hub, 0.02 MW at 1 ms.
 - **With it, the gatekeeper's #228 nit:** when `_settle_run` exhausts its
   tries, it returns the horizon it last ran, not that horizon doubled.
 
+**The isochronous integral, after #256** (found during the E4 speed-up;
+the gatekeeper asked for it separately):
+- **The problem.** An isochronous genset's integral `~i` kept integrating
+  Δf while the genset was held at a bound. With a 0.5 MW load step and a
+  0.08 MW/s ramp, a 2 MW block held it for about 19 s. Once the ramp caught
+  up, the wound integral overshot by about 61.8 Hz in either direction.
+  #238's `_hold` covered only the governor state.
+- **The fix.** `_hold_integral` stops the integral at a bound while the
+  error pushes outward: Δf < 0 at the upper bound, Δf > 0 at the lower.
+  The frequency then comes back with 0.05 Hz of overshoot.
+- **Tests:**
+  - both bounds, with the excursion while held (23.54 Hz), the bounded
+    overshoot, and the windup shown with the hold removed;
+  - an unclamped isochronous genset, and one at full output whose error
+    pulls it back inside when load drops, give traces bit-identical to the
+    run without the hold.
+- **Mutations:** 6 edits (either bound's hold lost, the sign flipped, the
+  hold made unconditional, the tolerance widened, the hold removed), all
+  killed. The unconditional hold was closed by the "pulled back in" test.
+
 **Mutations.** 28 source edits:
 - the pure-inertia unit at half weight;
 - equipment limits not counted as transient;
