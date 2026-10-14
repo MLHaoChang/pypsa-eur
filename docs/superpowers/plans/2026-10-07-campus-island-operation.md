@@ -2630,6 +2630,16 @@ session, frozen 2026-10-14). Column tuples are in
   merges.
 - **Q2, option 1:** the island-hours drivers run inside the campus Run,
   after `rank_campus`, whenever the campus has island data.
+- **Q3, option 1:** Draft passes the project's island sidecar. Without it,
+  a drafted campus never had island data.
+
+**Draft** (an engine change, for the gatekeeper):
+- `campus_study.draft_from_project(network_path, island=None)` passes
+  `island` to I1's `draft_campus`. Without it the draft is unchanged.
+- `ce.draft` loads the project's sidecar (`load_island_config`). A sidecar
+  that does not validate refuses the draft with a 422 and writes nothing.
+- Units the sidecar does not name get I1's default blocks, every value
+  tagged `assumed`, so their rows are marked in the report.
 
 **Run** (`services/campus_electrical_service.py`):
 - `_run_island_hours(run_dir)` first removes the previous run's I4–I6
@@ -2671,7 +2681,14 @@ unchanged.
 - `test_campus_island_report_hours.py` (9): hand-written files to the
   contracts; exact columns, model, groups, assumed rows, off-contract
   refusal, the E1 filter and both summaries.
-- `test_campus_island_hours_run.py` (5): real runs on the hub fixture,
+- **Draft:**
+  - `tests/gridspine/test_campus_study.py` (+2): with the sidecar, the
+    draft equals I1's `draft_campus` of the same network; without it, the
+    draft is unchanged.
+  - `test_campus_island_hours_run.py` (+3): a drafted island project gets
+    the I4–I6 files on Run; a draft without a sidecar is byte-identical;
+    an invalid sidecar refuses the draft.
+- `test_campus_island_hours_run.py` (5 for Run): real runs on the hub fixture,
   covering:
   - the call order;
   - both drivers on an island campus;
@@ -2686,6 +2703,8 @@ unchanged.
   and a redundant `strip`), and all 3 are now closed: 16 of 16 killed.
 - Run wiring: 8 edits. 1 survived (the requirements condition) and is now
   closed: 8 of 8 killed.
+- Draft: 3 edits (the engine pass-through, the service pass-through, the
+  sidecar load), 3 of 3 killed on the first run.
 
 ## Order, PRs and agents
 
