@@ -200,7 +200,8 @@ def test_study_watcher_publishes_in_the_callers_context(monkeypatch):
         seen.append(PyPSAService._scoped())
         done.set()
 
-    monkeypatch.setattr(re_, 'start_study_run', lambda key, record: None)
+    # A started run (a token); with none, no watcher starts at all.
+    monkeypatch.setattr(re_, 'start_study_run', lambda key, record: {'run_id': 'stub'})
     monkeypatch.setattr(re_, 'publish_study_run', _publish)
     ctx = ProjectContext(network=pypsa.Network())
     token = PyPSAService._request_ctx.set(ctx)
@@ -212,3 +213,66 @@ def test_study_watcher_publishes_in_the_callers_context(monkeypatch):
     record['status'] = 'done'
     assert done.wait(5.0), 'the watcher never published'
     assert seen == [ctx]
+
+
+# ── the authority is bound when the watch starts, never resolved late ──────
+#
+# A watcher used to resolve `_authority()` again when its record turned
+# terminal if the start had no marker. Whatever project was active THEN got
+# the run: in tests, the next test's monkeypatched root (an `ad-mc-*` run from
+# `test_adequacy_mc_endpoint` landing in the foreground test's project); in the
+# app, the project a user had switched to while the study ran.
+
+def _refuse_authority():
+    from fastapi import HTTPException
+
+    raise HTTPException(409, {'error_kind': 'run_project_required', 'message': 'x'})
+
+
+def _watchers(key):
+    return [t for t in threading.enumerate() if t.name == f'run-evidence-{key}' and t.is_alive()]
+
+
+def test_a_study_with_no_authority_at_start_starts_no_watcher(tmp_path, monkeypatch):
+    monkeypatch.setattr(re_, '_authority', _refuse_authority)
+    record = {'status': 'running'}
+    re_.watch_study_run('margin_loop', record)
+    assert '_run_evidence' not in record
+    assert _watchers('margin_loop') == []
+
+    # Even when another project is active by the time the study finishes.
+    later = tmp_path / 'later'
+    later.mkdir()
+    monkeypatch.setattr(re_, '_authority', lambda: (later, PROJECT, OWNER))
+    record['status'] = 'done'
+    assert re_.publish_study_run('margin_loop', record) is None
+    assert not (later / 'run_evidence').exists()
+
+
+def test_a_watcher_publishes_into_the_project_bound_at_start(tmp_path, monkeypatch):
+    first, later = tmp_path / 'first', tmp_path / 'later'
+    first.mkdir()
+    later.mkdir()
+    monkeypatch.setattr(re_, '_authority', lambda: (first, PROJECT, OWNER))
+    record = {'status': 'running'}
+    re_.watch_study_run('mc', record)
+    run_id = record['_run_evidence']['run_id']
+
+    monkeypatch.setattr(re_, '_authority', lambda: (later, PROJECT, OWNER))
+    record['status'] = 'done'
+    deadline = time.monotonic() + 5.0
+    while _watchers('mc') and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert _watchers('mc') == []
+    assert (first / 'run_evidence' / run_id / 'manifest.json').is_file()
+    assert not (later / 'run_evidence').exists()
+
+
+def test_a_report_without_a_start_marker_is_not_published_late(tmp_path, monkeypatch):
+    """The report path had the same late fallback."""
+    later = tmp_path / 'later'
+    later.mkdir()
+    monkeypatch.setattr(re_, '_authority', lambda: (later, PROJECT, OWNER))
+    record = {'status': 'done', 'report_id': 'rep-late', 'mode': 'generate', 'version': 1}
+    assert re_.publish_report_run(record) is None
+    assert not (later / 'run_evidence').exists()
