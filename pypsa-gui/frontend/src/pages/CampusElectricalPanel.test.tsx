@@ -21,6 +21,7 @@ const api = vi.hoisted(() => ({
   state: vi.fn(), draft: vi.fn(), save: vi.fn(), run: vi.fn(), gridCodes: vi.fn(),
   library: vi.fn(), saveLibrary: vi.fn(), resetLibrary: vi.fn(),
   startMilp: vi.fn(), milpStatus: vi.fn(), cancelMilp: vi.fn(),
+  island: vi.fn(), islandReport: vi.fn(),
 }))
 vi.mock('../api/campusElectrical', async () => {
   const real = await vi.importActual<typeof import('../api/campusElectrical')>('../api/campusElectrical')
@@ -142,6 +143,18 @@ describe('CampusElectricalPanel', () => {
       k: 2, pf: 0.95, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true,
       invest: true, pcc_switchgear_by_operator: false, pcc_tap_control: 'campus',
     }))
+  })
+
+  it('reads the island report again after a run, which writes the island-hours results (I9b)', async () => {
+    api.state.mockResolvedValue({ ...empty, campus_yaml: YAML })
+    api.run.mockResolvedValue(sized())
+    api.island.mockResolvedValue({ config: null, study: null })
+    api.islandReport.mockResolvedValue({ caveat: '', tables: [], missing: [] })
+    renderPanel()
+    await waitFor(() => expect(api.islandReport).toHaveBeenCalledTimes(1))
+    await userEvent.click(await screen.findByRole('button', { name: 'Run study' }))
+    await waitFor(() => expect(api.run).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(api.islandReport).toHaveBeenCalledTimes(2))
   })
 
   it('buys assets from the library by default, and sends the setting when it is switched off', async () => {

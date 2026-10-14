@@ -10,13 +10,15 @@
 // - Run solves the islanding variants on the saved project;
 // - the report's tables are READ from `GET /island/report`, each with the
 //   model behind it, the screening caveat, and its assumed rows tagged.
-//   The panel derives nothing.
+//   The panel derives nothing; it heads each of the report's groups (the
+//   inputs, the hub-LP study, the island hours, and the island-hours
+//   results of I4–I6) as the report orders them.
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, Save } from 'lucide-react'
 import {
   campusApi, errorText, ISLAND_SCENARIOS,
-  type IslandConfig, type IslandReport, type IslandScenario, type IslandSource, type IslandTable,
+  type IslandConfig, type IslandGroup, type IslandReport, type IslandScenario, type IslandSource, type IslandTable,
 } from '../api/campusElectrical'
 import { Btn, PageSection, Tag } from '../components/PageKit'
 
@@ -36,6 +38,17 @@ const NUMBERS: [string, string][] = [
 
 type Tagged = { value: number; source: IslandSource }
 
+const GROUP_TITLES: Record<IslandGroup, string> = {
+  inputs: 'Inputs',
+  study: 'Island study (I2)',
+  hours: 'Island critical hours (I3b)',
+  static: 'Island steady state and short circuit (I4, I5, I5b)',
+  frequency: 'Island frequency (I6)',
+}
+
+/** A cell longer than this stays on one line, its full text on hover. */
+const LONG = 48
+
 function cell(v: unknown): string {
   if (v === null || v === undefined) return ''
   if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toPrecision(6).replace(/\.?0+$/, '')
@@ -51,19 +64,29 @@ function ReportTable({ table }: { table: IslandTable }) {
       <h4 className="text-[12.5px] font-semibold">{table.title}</h4>
       <p className="text-[11px] text-muted" data-testid="island-model">Model: {table.model}</p>
       <p className="text-[11px] text-muted italic mb-1" data-testid="island-caveat">{table.caveat}</p>
-      <table className="w-full text-[12px]">
-        <thead>
-          <tr>{table.columns.map(c => <th key={c} className="text-left font-medium pr-3">{c}</th>)}<th /></tr>
-        </thead>
-        <tbody>
-          {table.rows.map((row, i) => (
-            <tr key={i} data-assumed={assumed.has(i) ? 'yes' : 'no'}>
-              {row.map((v, j) => <td key={j} className="pr-3">{cell(v)}</td>)}
-              <td>{assumed.has(i) && <Tag tone="warn">assumed</Tag>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {/* A table scrolls in its own box, and a long cell (a list of assumed
+          inputs, a ledger reason) stays on one line with the full text on
+          hover, so an island-hours table of many rows keeps its height. */}
+      <div className="max-h-[420px] overflow-auto border border-border rounded" data-testid="island-table-scroll">
+        <table className="text-[12px] whitespace-nowrap">
+          <thead className="sticky top-0 bg-bg-2 z-10">
+            <tr>{table.columns.map(c => <th key={c} className="text-left font-medium px-2">{c}</th>)}<th /></tr>
+          </thead>
+          <tbody>
+            {table.rows.map((row, i) => (
+              <tr key={i} data-assumed={assumed.has(i) ? 'yes' : 'no'}>
+                {row.map((v, j) => {
+                  const text = cell(v)
+                  return text.length > LONG
+                    ? <td key={j} className="px-2 max-w-[320px] truncate" title={text}>{text}</td>
+                    : <td key={j} className="px-2">{text}</td>
+                })}
+                <td className="px-2">{assumed.has(i) && <Tag tone="warn">assumed</Tag>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -211,7 +234,16 @@ function IslandReportView({ report }: { report: IslandReport | undefined }) {
           Not yet available: {report.missing.join(', ')}.
         </p>
       )}
-      {report.tables.map(t => <ReportTable key={t.id} table={t} />)}
+      {report.tables.map((t, i) => (
+        <div key={t.id}>
+          {t.group !== report.tables[i - 1]?.group && (
+            <h3 className="text-[13px] font-semibold mt-3 mb-1" data-testid="island-group">
+              {GROUP_TITLES[t.group] ?? t.group}
+            </h3>
+          )}
+          <ReportTable table={t} />
+        </div>
+      ))}
     </div>
   )
 }

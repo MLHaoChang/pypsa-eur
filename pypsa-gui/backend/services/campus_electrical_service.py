@@ -877,7 +877,11 @@ def owner_assets_response(project, replacements: bool = False) -> dict:
 
 
 def draft(project, overwrite: bool = False) -> dict:
-    """Write the campus file from the project's solved network."""
+    """Write the campus file from the project's solved network, with the
+    island data of the project's island sidecar when it has one (campus
+    island plan I9b; owner, 2026-10-14)."""
+    from services.adequacy.island_config import SIDECAR_NAME, load_island_config
+
     require_capacity_expansion(project)
     nc = _network(project)
     d = campus_dir(project)
@@ -885,7 +889,8 @@ def draft(project, overwrite: bool = False) -> dict:
         raise HTTPException(status_code=409, detail="a campus file already exists; draft again with overwrite to replace your edits")
     with _netcdf_lock():
         try:
-            result = cs.draft_from_project(nc)
+            island = load_island_config(project_registry.project_dir(project) / SIDECAR_NAME)
+            result = cs.draft_from_project(nc, island=island)
         except ContractError as exc:
             raise _unprocessable(exc)
     text = yaml.safe_dump(result.spec, sort_keys=False)
@@ -1119,6 +1124,32 @@ def _write_island_tables(project, run_dir: Path, spec: dict, nc: Path) -> None:
         path.write_text(df.to_csv(index=False))
 
 
+def _island_hours_files() -> tuple:
+    """The island-hours drivers' files in a run directory (I4–I6)."""
+    return (*cs.ISLAND_STATIC_CSV.values(), cs.ISLAND_STATIC_SUMMARY_JSON,
+            cs.FREQ_E1_HOURLY_CSV, cs.FREQ_EVENTS_CSV, cs.FREQ_LOSSES_CSV, cs.FREQ_BRIDGE_CSV,
+            cs.FREQ_PLANNED_CSV, cs.FREQ_UPS_CSV, cs.FREQ_SUMMARY_JSON)
+
+
+def _run_island_hours(run_dir: Path) -> None:
+    """The island-hours checks of a ranked run (campus island plan I9b;
+    owner, 2026-10-14: inside the Run, whenever the campus has island data).
+    The steady state and short circuit (I4, I5, I5b) run when a unit has an
+    island block; the frequency check (I6) when the campus also has island
+    requirements and the run has the I3a island tables it reads. An earlier
+    run's files are removed first, so nothing stale is read as this run's."""
+    from services.adequacy.island_config import ISLAND_UNIT_HOURLY_CSV
+
+    for name in _island_hours_files():
+        (run_dir / name).unlink(missing_ok=True)
+    island = cs.load_run_campus(run_dir).island
+    if not island["units"]:
+        return
+    cs.island_static_campus(run_dir)
+    if island["requirements"] is not None and (run_dir / ISLAND_UNIT_HOURLY_CSV).is_file():
+        cs.island_frequency_campus(run_dir)
+
+
 def run(project, settings: dict) -> dict:
     """Prepare, rank and size the campus, then buy the electrical assets from
     the library (``invest``, default on); returns ``get_state``."""
@@ -1139,6 +1170,7 @@ def run(project, settings: dict) -> dict:
                 cs.prepare_campus(run_dir, spec, nc)
                 _write_island_tables(project, run_dir, spec, nc)
             cs.rank_campus(run_dir, k=s["k"])
+            _run_island_hours(run_dir)
             cs.size_campus(run_dir, criteria, profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs)
             _clear_investment(run_dir)               # the earlier run's purchases belong to its sizing, not this one's
             if s["invest"]:

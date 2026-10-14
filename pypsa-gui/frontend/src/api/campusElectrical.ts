@@ -462,8 +462,12 @@ export interface IslandConfig {
   }
 }
 
+/** The report's groups, in the plan's order (I9). */
+export type IslandGroup = 'inputs' | 'study' | 'hours' | 'static' | 'frequency'
+
 export interface IslandTable {
   id: string
+  group: IslandGroup
   title: string
   /** The model behind the table's verdicts. */
   model: string

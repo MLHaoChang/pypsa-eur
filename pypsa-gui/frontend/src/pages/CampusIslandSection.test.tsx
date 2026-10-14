@@ -36,12 +36,19 @@ const REPORT: IslandReport = {
   caveat: CAVEAT,
   missing: ['campus run with island tables'],
   tables: [
-    { id: 'requirements', title: 'Island requirements', model: 'island sidecar', caveat: CAVEAT,
+    { id: 'requirements', group: 'inputs', title: 'Island requirements', model: 'island sidecar', caveat: CAVEAT,
       columns: ['field', 'value', 'source'],
       rows: [['bridge_s', 600, 'assumed'], ['sustained_h', 24, 'datasheet']], assumed_rows: [0] },
-    { id: 'costs', title: 'Cost of island capability', model: 'hub LP, plain LOPF (HiGHS)', caveat: CAVEAT,
+    { id: 'costs', group: 'study', title: 'Cost of island capability', model: 'hub LP, plain LOPF (HiGHS)', caveat: CAVEAT,
       columns: ['scenario', 'status', 'objective', 'cost of island capability'],
       rows: [['ups_bridged', 'ok', 39810000, 2270000]], assumed_rows: [] },
+    { id: 'static_flow', group: 'static', title: 'Island load flow at the island hours (I4)',
+      model: 'steady-state island load flow (pandapower)', caveat: CAVEAT,
+      columns: ['period', 'hour', 'viable', 'assumed'],
+      rows: [[0, 3, true, 'g.droop_pct'], [0, 5, false, null]], assumed_rows: [0] },
+    { id: 'freq_events', group: 'frequency', title: 'Frequency events at the island hours (E1–E6)',
+      model: 'frequency screening', caveat: CAVEAT,
+      columns: ['period', 'hour', 'event', 'ok'], rows: [[0, 3, 'E1', false]], assumed_rows: [] },
   ],
 }
 
@@ -78,6 +85,32 @@ describe('island section: the report', () => {
     expect(rows[0].getAttribute('data-assumed')).toBe('yes')
     expect(rows[0].textContent).toMatch(/assumed/i)
     expect(rows[1].getAttribute('data-assumed')).toBe('no')
+  })
+
+  it('heads each group once, in the order the report gives', async () => {
+    renderSection()
+    await screen.findByTestId('island-table-freq_events')
+    const heads = screen.getAllByTestId('island-group').map(h => h.textContent)
+    expect(heads).toEqual([
+      'Inputs', 'Island study (I2)', 'Island steady state and short circuit (I4, I5, I5b)', 'Island frequency (I6)',
+    ])
+    expect(within(screen.getByTestId('island-table-static_flow')).getByTestId('island-model').textContent)
+      .toContain('pandapower')
+    const rows = screen.getByTestId('island-table-static_flow').querySelectorAll('tbody tr')
+    expect([...rows].map(r => r.getAttribute('data-assumed'))).toEqual(['yes', 'no'])
+  })
+
+  it('keeps a long cell to one line with the full text on hover, and scrolls a table in its own box', async () => {
+    const long = Array.from({ length: 40 }, (_, i) => `unit_${i}.droop_pct`).join('; ')
+    api.islandReport.mockResolvedValue({ ...REPORT, tables: [{ ...REPORT.tables[2], rows: [[0, 3, true, long]] }] })
+    renderSection()
+    const table = await screen.findByTestId('island-table-static_flow')
+    const cell = within(table).getByTitle(long)
+    expect(cell.textContent).toBe(long)
+    expect(cell.className).toMatch(/truncate/)
+    const box = table.querySelector('[data-testid="island-table-scroll"]') as HTMLElement
+    expect(box.className).toMatch(/overflow-auto/)
+    expect(box.className).toMatch(/max-h-/)
   })
 
   it('says what is missing', async () => {

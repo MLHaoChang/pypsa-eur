@@ -2552,6 +2552,21 @@ nothing to report is written header-only.
 - `campus_freq_summary.json`: the failing-hour lists, including
   `e1_failing_not_selected`.
 
+**The I4/I5/I5b island-hours contract, which I9b reads** (grid-forming
+session, frozen 2026-10-14). Column tuples are in
+`gridspine/static/island_hours.py`; file names are in
+`campus_study.ISLAND_STATIC_CSV` and `ISLAND_STATIC_SUMMARY_JSON`.
+- **Cases:** `islanding` (the units online at 0⁺, from I3a) and `steady`.
+  Under ups_bridged only `steady` applies (`CASE_NOTE`, in the ledger).
+- **Files:** flow, units, buses and branches (I4); short circuit, relays
+  and the Q8 `i_max` sensitivity (I5); unbalanced faults, earth reference
+  and earth relays (I5b).
+- **`assumed` column:** on the flow, sc, relay, unbalanced and earth-relay
+  tables, as "; "-joined `ELEMENT.param` names; empty means none. It marks
+  the report's assumed rows.
+- **The summary** has a `models` key (file → model text), which names each
+  table's model, plus the failing-hour lists.
+
 **Backend (`services/campus_electrical_service.py`,
 `routers/campus_electrical.py`):**
 - `get_island`, `save_island` and `run_island_study`, behind `GET`/`PUT
@@ -2607,6 +2622,111 @@ nothing to report is written header-only.
   3.754e7 → 3.975e7 (after #198's re-pricing). The binding row is
   `Island-rocof-block`. All five tables show their model and caveat, and
   25 assumed rows are tagged.
+
+### I9b as built (2026-10-14)
+
+**Owner decisions, 2026-10-14:**
+- **Q1, base:** stacked on #212's head, with the PR opened after #212
+  merges.
+- **Q2, option 1:** the island-hours drivers run inside the campus Run,
+  after `rank_campus`, whenever the campus has island data.
+- **Q3, option 1:** Draft passes the project's island sidecar. Without it,
+  a drafted campus never had island data.
+
+**Draft** (an engine change, for the gatekeeper):
+- `campus_study.draft_from_project(network_path, island=None)` passes
+  `island` to I1's `draft_campus`. Without it the draft is unchanged.
+- `ce.draft` loads the project's sidecar (`load_island_config`). A sidecar
+  that does not validate refuses the draft with a 422 and writes nothing.
+- Units the sidecar does not name get I1's default blocks, every value
+  tagged `assumed`, so their rows are marked in the report.
+
+**Run** (`services/campus_electrical_service.py`):
+- `_run_island_hours(run_dir)` first removes the previous run's I4–I6
+  files.
+- `island_static_campus` (I4, I5, I5b) runs when a unit has an island
+  block.
+- `island_frequency_campus` (I6) runs when the campus also has island
+  requirements and the run has the I3a tables it reads.
+- A driver's ContractError is a 422 with its reason.
+
+**Report** (`services/campus_island_report.py`):
+- **Table source:** each I4–I6 file becomes a table, read against its
+  gridspine column tuple: `island_hours.TABLES`, or the `frequency.*_COLUMNS`
+  for the frequency tables.
+- **Off-contract files:** a file whose header differs is listed in
+  `missing` ("columns differ from the contract") and not shown.
+- **Model:**
+  - static tables: the summary's `models` (file → text);
+  - frequency tables: the summary's `label`.
+- **Assumed rows:** rows with a non-empty `assumed` cell. An empty cell
+  reads as None, not NaN.
+- **E1 at every hour:** only its failing rows are shown, titled "n of N
+  rows".
+- **Summaries:** each driver summary is an `(item, value)` table. It holds
+  the failing-hour lists as `p<period> h<hour> …` and one `ledger` row per
+  ledger line, `CASE_NOTE` included.
+- **Groups:** every table names its `group`: inputs, study, hours, static
+  or frequency, in the plan's order.
+- **Without the sidecar:** the I4–I6 tables still show, since they come
+  from the campus's own island data (I1).
+
+**Panel:** a heading per group (`GROUP_TITLES`). The tables themselves are
+unchanged.
+
+**Bundle:** unchanged. It carries none of the campus run's per-hour tables
+(`campus_hourly`, `campus_selected`, I3a), so I4–I6 stay out too.
+
+**Tests:**
+- `test_campus_island_report_hours.py` (9): hand-written files to the
+  contracts; exact columns, model, groups, assumed rows, off-contract
+  refusal, the E1 filter and both summaries.
+- **Draft:**
+  - `tests/gridspine/test_campus_study.py` (+2): with the sidecar, the
+    draft equals I1's `draft_campus` of the same network; without it, the
+    draft is unchanged.
+  - `test_campus_island_hours_run.py` (+3): a drafted island project gets
+    the I4–I6 files on Run; a draft without a sidecar is byte-identical;
+    an invalid sidecar refuses the draft.
+- `test_campus_island_hours_run.py` (5 for Run): real runs on the hub fixture,
+  covering:
+  - the call order;
+  - both drivers on an island campus;
+  - I6 skipped without the I3a tables, and without island requirements;
+  - stale files removed;
+  - the 422 on a refusal.
+- The golden fixture gains `group` and the two new `missing` entries.
+- A panel test for the group headings.
+
+**Mutations:**
+- Report: 16 edits. 3 survived the first run (the static and hours groups,
+  and a redundant `strip`), and all 3 are now closed: 16 of 16 killed.
+- Run wiring: 8 edits. 1 survived (the requirements condition) and is now
+  closed: 8 of 8 killed.
+- Draft: 3 edits (the engine pass-through, the service pass-through, the
+  sidecar load), 3 of 3 killed on the first run.
+
+**Browser run** (local mode, the Data Center template). Steps: Run LOPF,
+save, Draft again, Run study. The template ships an island sidecar, so the
+draft carries island data, and Run wrote every I4–I6 file.
+- The panel shows 24 tables in the five groups, each with its model and
+  the caveat; 142 assumed rows are marked and nothing is missing.
+- At the 9 island hours (2030):
+  - I4: viable, gate ok, df ≈ −1.03 to −1.19 Hz;
+  - I5b: earth lost at GRID in both cases; the islanding case is not
+    determinable at DC_MV and IT_BUS;
+  - I6 (ups_bridged): the bridge fails at all 9 hours.
+
+The run found three gaps, each fixed test-first:
+- **Report not refreshed:** the campus Run left the island report query
+  stale. The panel's `refresh` now invalidates `ISLAND_REPORT_KEY` too.
+- **500 on infinite values:** an `inf` value (e.g. `autonomy_s`) made the
+  route return 500, because its JSON allows no Infinity. The report now
+  writes it as `"inf"`/`"-inf"` text (`_finite`).
+- **Section too tall:** long `assumed` cells wrapped, and the section grew
+  to ~90,700 px. Each table now scrolls in its own box (max 420 px, sticky
+  header), and a cell longer than 48 characters stays on one line with
+  the full text on hover. The section is now ~8,200 px.
 
 ## Order, PRs and agents
 

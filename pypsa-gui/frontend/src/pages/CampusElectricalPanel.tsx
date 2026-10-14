@@ -34,7 +34,7 @@ import { useUIStore } from '../store/uiStore'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
 import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
-import CampusIslandSection from './CampusIslandSection'
+import CampusIslandSection, { ISLAND_REPORT_KEY } from './CampusIslandSection'
 import CampusLibrarySection from './CampusLibrarySection'
 import { useCampusMilpJob } from './useCampusMilpJob'
 
@@ -138,8 +138,11 @@ function CampusView({ name }: { name: string }) {
       </PageBody>
     )
   }
-  const refresh = (data?: CampusState) =>
-    data ? qc.setQueryData(CAMPUS_KEY(name), data) : qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })
+  const refresh = (data?: CampusState) => {
+    // A run writes the island-hours results the island report reads (I9b).
+    void qc.invalidateQueries({ queryKey: ISLAND_REPORT_KEY(name) })
+    return data ? qc.setQueryData(CAMPUS_KEY(name), data) : qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })
+  }
   const onRunStart = () => { setOutcome(null); setLost(null) }
   const onRunLost = (settings: CampusSettings, why: string) => {
     setLost({ settings, why })
