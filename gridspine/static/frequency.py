@@ -77,7 +77,8 @@ LEDGER = (
 @dataclasses.dataclass(frozen=True)
 class Unit:
     """One unit of the island, as the frequency model sees it. ``model`` is
-    ``genset``, ``gfm_droop``, ``gfm_vsm``, ``gfl_fw``, ``ups`` or
+    ``genset``, ``gfm_droop``, ``gfm_vsm``, ``gfl_fw``, ``ups``,
+    ``inertia`` (H·S alone: no response and no limit; I7's inversion) or
     ``none``. Powers in MW; ``r`` is the droop in pu on P_n; ``h`` H on S_n
     (a genset's H, a VSM's H_v). A genset's ``start_s`` + ``sync_s`` is its
     join time when cold (``ready_s``). A UPS's ``ups`` holds ``it_mw``,
@@ -168,6 +169,8 @@ def _balance(units, x, t, dp_event, f0, damping):
             if u.model == "genset" and t >= u.join_s:
                 m += 2.0 * u.h * u.s_n / f0
                 p += x[u.name]
+            elif u.model == "inertia":                    # I7: inertia alone, no response, no limit
+                m += 2.0 * u.h * u.s_n / f0
             elif u.model in ("gfl_fw", "ups"):
                 p += x[u.name]
         for u in gfm:
@@ -960,6 +963,30 @@ def _gfm_bridge(key, units, trace, soc):
     return out
 
 
+def _hour_units(campus, hourly, iu, period, hour):
+    """``(rows, unit_rows, units, soc)`` of one hour as the study runs it:
+    the built units, the cold gensets, I3a's e(t−1) and UPS IT load."""
+    rows = _hour_rows(hourly, period, hour)
+    urows = iu[(iu["period"] == period) & (iu["hour"] == hour)] if iu is not None else None
+    soc, it = {}, {}
+    if urows is not None:
+        for _, r in urows.iterrows():
+            if r["soc_start_mwh"] == r["soc_start_mwh"]:
+                soc[r["unit_id"]] = r["soc_start_mwh"]
+            if r["p_ups_it_mw"] == r["p_ups_it_mw"]:
+                it[r["unit_id"]] = r["p_ups_it_mw"]
+    units = units_from_campus(campus, rows, online=built(rows), cold=cold_gensets(campus, rows, urows), soc=soc)
+    units = [dataclasses.replace(u, ups={**u.ups, "it_mw": it[u.name]}) if u.name in it else u for u in units]
+    return rows, urows, units, soc
+
+
+def _island_units(units, i4):
+    """The units at I4's island dispatch, every genset joined: the start of
+    E2, E3 and E5."""
+    p_isl = i4.units.set_index("unit_id")["p_mw"]
+    return [dataclasses.replace(u, p0=float(p_isl[u.name]), join_s=0.0) if u.model != "ups" else u for u in units]
+
+
 def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_step_mw=None,
                            dt=1e-3, t_end=20.0, f0=F0) -> FrequencyStudy:
     """E1–E6 at the island critical ``hours``, ``[(period, hour)]`` (plan
@@ -997,18 +1024,7 @@ def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_
 
     for period, hour in hours:
         key = {"period": int(period), "hour": int(hour)}
-        rows = _hour_rows(hourly, period, hour)
-        urows = iu[(iu["period"] == period) & (iu["hour"] == hour)] if iu is not None else None
-        soc, it = {}, {}
-        if urows is not None:
-            for _, r in urows.iterrows():
-                if r["soc_start_mwh"] == r["soc_start_mwh"]:
-                    soc[r["unit_id"]] = r["soc_start_mwh"]
-                if r["p_ups_it_mw"] == r["p_ups_it_mw"]:
-                    it[r["unit_id"]] = r["p_ups_it_mw"]
-        units = units_from_campus(campus, rows, online=built(rows), cold=cold_gensets(campus, rows, urows),
-                                  soc=soc)
-        units = [dataclasses.replace(u, ups={**u.ups, "it_mw": it[u.name]}) if u.name in it else u for u in units]
+        rows, urows, units, soc = _hour_units(campus, hourly, iu, period, hour)
         lossless = -float((rows["p_mw"] * (rows["status"] == 1)).sum())
         i4 = island_flow(campus, rows, online=built(rows))
         dp_ac = i4.delta_p_ac_mw if i4.viable else math.nan
@@ -1029,9 +1045,8 @@ def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_
                 bridge += _gfm_bridge(sk, units, tr, soc)
                 if not i4.viable:
                     continue
+                isl = _island_units(units, i4)
                 p_isl = i4.units.set_index("unit_id")["p_mw"]
-                isl = [dataclasses.replace(u, p0=float(p_isl[u.name]), join_s=0.0) if u.model != "ups" else u
-                       for u in units]
                 step_mw = load_step_mw
                 if step_mw is None:
                     blocks = rv.get("pickup_blocks")
@@ -1083,3 +1098,248 @@ def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_
     return FrequencyStudy(*(pd.DataFrame(t, columns=list(c)) for t, c in (
         (ev, EVENT_COLUMNS), (losses, LOSSES_COLUMNS), (bridge, BRIDGE_COLUMNS), (planned, PLANNED_COLUMNS),
         (ups, UPS_COLUMNS))))
+
+
+# ── I7: frequency cuts back into sizing ─────────────────────────────────────
+
+#: One row per (period, hour, scenario, kind): the tightest cut over that
+#: hour's failing events (plan I7; contract agreed with pypsa-gui's I7).
+#: ``required = current + delta``; ``current`` is the hub LP's own value from
+#: I3a; ``feasible`` False (``required`` inf) when no cut fixes the event.
+CUT_COLUMNS = ("period", "hour", "scenario", "event", "kind", "required", "current", "delta", "unit", "binding",
+               "derivation", "heuristic", "feasible", "note")
+CUT_KINDS = {"inertia": "MW·s", "headroom_up": "MW", "headroom_down": "MW", "droop_gain": "MW/Hz"}
+#: The scenarios whose cuts map onto the hub's 0⁺ rows (pypsa-gui's I7 has
+#: them for ``seamless`` only; ``planned`` gives none, E6 being its event).
+CUT_SCENARIOS = ("seamless",)
+#: No addition above this multiple of the current value is proposed.
+CUT_CAP = 100.0
+#: The engine's M or ΣK against I3a's beyond this is noted.
+CUT_MATCH_TOL = 0.02
+CUT_LABEL = "heuristic: the units' response parameters are held at the current solution"
+_CUT_DT, _CUT_T_END = 5e-3, 10.0
+
+
+def _transient(label):
+    return label.startswith("transition") or ", nadir" in label or ", peak" in label
+
+
+def _steady(label):
+    return label.startswith("steady island")
+
+
+def _response(units, f0=F0):
+    """``(M in MW·s, ΣK in MW/Hz)`` of ``units`` at 0⁺: joined gensets and
+    unsaturated GFMs, as I2b counts them (an isochronous genset adds no
+    gain)."""
+    m = k = 0.0
+    for u in units:
+        if u.model == "genset" and u.join_s <= 0.0:
+            m += u.h * u.s_n
+            k += 0.0 if u.isochronous else u.k
+        elif u.model == "gfm_vsm":
+            m += u.h * u.s_n
+            k += u.k
+        elif u.model == "gfm_droop":
+            m += u.tau_f * u.p_n / (2.0 * u.r)
+            k += u.k
+    return m, k
+
+
+def _bisect(passes, cap, rel=1e-3, iters=60):
+    """The least x in [0, cap] for which ``passes(x)`` (monotone), or inf."""
+    if not passes(cap):
+        return math.inf
+    lo, hi = 0.0, cap
+    for _ in range(iters):
+        if hi - lo <= rel * hi:
+            break
+        mid = 0.5 * (lo + hi)
+        lo, hi = (lo, mid) if passes(mid) else (mid, hi)
+    return hi
+
+
+def _settled_allowed(m, limits, f0, equipment_):
+    """How far the settled frequency may sit from f0 on its side: the
+    tightest of the steady qss band and the steady, transition and
+    equipment limits (a settled value outside any of them cannot be fixed
+    by inertia)."""
+    st, tr = limits["steady_island"], limits["transition"]
+    if m.df_qss_hz < 0:
+        sides = [f0 - st["f_min_hz"], f0 - tr["f_min_hz"], *[f0 - lo for _, lo, _ in equipment_ if lo == lo]]
+    else:
+        sides = [st["f_max_hz"] - f0, tr["f_max_hz"] - f0, *[hi - f0 for _, _, hi in equipment_ if hi == hi]]
+    return min([st["qss_band_hz"], *sides])
+
+
+def cuts_for_event(units, run, limits, f0=F0, equipment_=(), window_ms=500.0):
+    """The cuts one failing event asks for: ``[(kind, delta, binding,
+    derivation, feasible, note)]``. ``run(units, t_end)`` re-runs the event.
+
+    * the settled frequency beyond what any limit allows (``_settled_allowed``)
+      → ``droop_gain``: ΔK = ΣK (|Δf_qss| / Δf_allowed − 1);
+    * a transient limit (RoCoF; a nadir or peak, transition or equipment,
+      that the settled value meets) → ``inertia``: the least pure-inertia
+      increment ΔM (MW·s) for which those limits pass, by bisection on the
+      engine with the response held. Each run is lengthened until the trace
+      has settled, so a slow, heavy island is not read as passing;
+    * a GFM at a limit → ``headroom_up``/``_down``: what the saturated GFMs
+      were asked for beyond their range, from the event re-run without it."""
+    tr = run(units, _CUT_T_END)
+    m = metrics(tr, window_ms)
+    v = judge(m, limits, f0, equipment_)
+    if m.collapse is not None:
+        return [("inertia", math.inf, COLLAPSE, "collapse", False,
+                 "no machine joined and every GFM at a limit: the island needs a former, not a cut")]
+    out = []
+    m_now, k_now = _response(units, f0)
+    allowed = _settled_allowed(m, limits, f0, equipment_)
+    settled_ok = abs(m.df_qss_hz) <= allowed + 1e-9
+    if not settled_ok:
+        steady = [f for f in v.failures if _steady(f)] or [f for f in v.failures if not f.startswith("transition RoCoF")]
+        binding = steady[0] if steady else f"settled {m.df_qss_hz:.3f} Hz against {allowed:g} Hz allowed"
+        if k_now > 0:
+            dk = k_now * (abs(m.df_qss_hz) / allowed - 1.0) if allowed > 0 else math.inf
+            out.append(("droop_gain", dk, binding,
+                        "ΣK (|Δf_qss| / Δf_allowed − 1), Δf_allowed the tightest of the qss band and the steady, "
+                        "transition and equipment limits", dk < math.inf, ""))
+        else:
+            out.append(("droop_gain", math.inf, binding, "no droop gain in the island", False,
+                        "nothing with droop to scale: the island needs a droop unit"))
+
+    def fixable(f):
+        return f.startswith("transition RoCoF") or (_transient(f) and settled_ok)
+
+    target = [f for f in v.failures if fixable(f)]
+    if target:
+        qss = m.df_qss_hz
+
+        def passes(dm):
+            extra = Unit("~inertia", "inertia", 0.0, 0.0, 1.0, h=dm)
+            t_end = _CUT_T_END
+            for _ in range(5):
+                trace = run([*units, extra], t_end)
+                if trace.collapse is not None:
+                    return False
+                if abs(trace.df[-1] - qss) <= 0.02 * abs(qss) + 1e-3:
+                    break
+                t_end *= 2.0
+            vv = judge(metrics(trace, window_ms), limits, f0, equipment_)
+            return not any(fixable(f) for f in vv.failures)
+        dm = _bisect(passes, CUT_CAP * max(m_now, 1.0))
+        out.append(("inertia", dm, target[0], "engine bisection on a pure-inertia increment, response held",
+                    dm < math.inf, "" if dm < math.inf else f"no increment up to {CUT_CAP:g} x M passes"))
+    if m.saturated:
+        sat = [u for u in units if u.name in m.saturated]
+        free = [dataclasses.replace(u, p_min=-math.inf, p_max=math.inf, i_max_mw=math.inf)
+                if u.name in m.saturated else u for u in units]
+        tr_free = run(free, _CUT_T_END)
+        up = sum(max(0.0, float(np.max(u.p0 + tr_free.dp[u.name])) - u.hi) for u in sat)
+        down = sum(max(0.0, u.lo - float(np.min(u.p0 + tr_free.dp[u.name]))) for u in sat)
+        names = ", ".join(sorted(m.saturated))
+        for kind, d in (("headroom_up", up), ("headroom_down", down)):
+            if d > 1e-9:
+                out.append((kind, d, f"GFM at a limit: {names}",
+                            "the saturated GFMs' demand beyond their range, event re-run without it", True, ""))
+    return out
+
+
+def _i3a_current(kind, scenario, units, ih_row, urows, f0):
+    """``(current, note)`` for a cut: the hub LP's own value from I3a, else
+    the engine's, said so."""
+    m_now, k_now = _response(units, f0)
+    if kind in ("inertia", "droop_gain"):
+        engine = m_now if kind == "inertia" else k_now
+        col = "inertia_mws" if kind == "inertia" else "k_mw_per_hz"
+        if ih_row is None:
+            return engine, f"no I3a row for {scenario}: current is the engine's {engine:.4g} {CUT_KINDS[kind]}"
+        lp = float(ih_row[col])
+        off = abs(engine - lp) > CUT_MATCH_TOL * max(abs(lp), 1e-9)
+        return lp, (f"engine {engine:.4g} against I3a {col} {lp:.4g} {CUT_KINDS[kind]}" if off else "")
+    col = "headroom_up_mw" if kind == "headroom_up" else "headroom_down_mw"
+    formers = [u for u in units if u.model in ("genset", "gfm_droop", "gfm_vsm") and u.join_s <= 0.0]
+    if urows is None or not len(urows):
+        room = sum((u.hi - u.p0) if kind == "headroom_up" else (u.p0 - u.lo) for u in formers)
+        return room, f"no I3a unit rows: current is the engine's {room:.4g} MW"
+    names = {u.name for u in formers}
+    sel = urows[urows["unit_id"].isin(names)]
+    return float(sel[col].fillna(0.0).sum()), ""
+
+
+def propose_cuts(campus, hourly, events, sweep=None, island_hourly=None, island_unit_hourly=None, f0=F0):
+    """I7's cuts (``CUT_COLUMNS``) for the failing events of a frequency
+    study: E1, E2, E3 and E5 in ``events`` (``FrequencyStudy.events``, Q8
+    reruns aside) and E1 in ``sweep`` (``e1_every_hour``). Each event is
+    rebuilt as the study ran it and inverted by ``cuts_for_event``;
+    ``current`` is I3a's (``island_hourly``, ``island_unit_hourly``). No cut
+    for E4 or E6. One row per (period, hour, scenario, kind), the tightest."""
+    import pandas as pd
+
+    from gridspine.schema.island import validate_island_hourly, validate_island_unit_hourly
+    from gridspine.static.island_flow import island_flow
+
+    limits, req = _limits(campus)
+    window, eq = req["values"]["rocof_window_ms"], equipment(campus, f0)
+    ih = validate_island_hourly(island_hourly) if island_hourly is not None else None
+    iu = validate_island_unit_hourly(island_unit_hourly) if island_unit_hourly is not None else None
+    failing = []
+    if events is not None and len(events):
+        e = events[events["event"].isin(["E1", "E2", "E3", "E5"])]
+        if "i_max_pu" in e:
+            e = e[e["i_max_pu"].isna()]
+        failing += [r for _, r in e[~e["ok"].astype(bool)].iterrows()]
+    if sweep is not None and len(sweep):
+        failing += [r for _, r in sweep[~sweep["ok"].astype(bool)].iterrows()]
+    ctx, rows_out = {}, []
+    for r in failing:
+        period, hour, scenario, event = int(r["period"]), int(r["hour"]), str(r["scenario"]), str(r["event"])
+        if (period, hour) not in ctx:
+            rows, urows, units, _ = _hour_units(campus, hourly, iu, period, hour)
+            ctx[(period, hour)] = {"rows": rows, "urows": urows, "units": units, "isl": None}
+        c = ctx[(period, hour)]
+        dp = float(r["dp_mw"])
+        if event == "E1" and r.get("dp_source") == "I3a lossless":
+            units = [u for u in c["units"] if not (u.model == "ups" and u.ups["transfers"])]
+
+            def run(us, t_end, dp=dp):
+                return simulate(us, step(dp), t_end=t_end, dt=_CUT_DT, f0=f0)
+        elif event == "E1":
+            units = c["units"]
+
+            def run(us, t_end, dp=dp):
+                return e1_islanding(us, dp, t_end=t_end, dt=_CUT_DT, f0=f0)
+        else:
+            if c["isl"] is None:
+                i4 = island_flow(campus, c["rows"], online=built(c["rows"]))
+                c["isl"] = _island_units(c["units"], i4) if i4.viable else []
+            units = c["isl"]
+            if not units:
+                continue
+            if event == "E3":
+                lost = next(u for u in units if u.name == r["unit"])
+                units = [u for u in units if u.name != r["unit"]]
+                dp = lost.p0
+
+            def run(us, t_end, dp=dp):
+                return simulate(us, step(dp), t_end=t_end, dt=_CUT_DT, f0=f0)
+        ih_row = None
+        if ih is not None:
+            hit = ih[(ih["period"] == period) & (ih["hour"] == hour) & (ih["scenario"] == scenario)]
+            ih_row = hit.iloc[0] if len(hit) else None
+        fw = any(u.model == "gfl_fw" for u in units)
+        for kind, delta, binding, derivation, feasible, note in cuts_for_event(units, run, limits, f0, eq, window):
+            current, cnote = _i3a_current(kind, scenario, units, ih_row, c["urows"], f0)
+            if scenario not in CUT_SCENARIOS:
+                feasible, note = False, f"{scenario}: no 0+ row in the hub for this scenario"
+            notes = "; ".join(n for n in (note, cnote) if n)
+            rows_out.append({"period": period, "hour": hour, "scenario": scenario, "event": event, "kind": kind,
+                             "required": current + delta if feasible else math.inf, "current": current,
+                             "delta": delta if feasible else math.inf, "unit": CUT_KINDS[kind], "binding": binding,
+                             "derivation": derivation,
+                             "heuristic": kind != "droop_gain" or fw, "feasible": bool(feasible), "note": notes})
+    df = pd.DataFrame(rows_out, columns=list(CUT_COLUMNS))
+    if not len(df):
+        return df
+    df = df.sort_values("required", ascending=False, kind="stable")
+    df = df.drop_duplicates(["period", "hour", "scenario", "kind"], keep="first")
+    return df.sort_values(["period", "hour", "scenario", "kind"]).reset_index(drop=True)
