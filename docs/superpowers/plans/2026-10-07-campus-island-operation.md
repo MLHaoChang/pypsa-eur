@@ -2569,11 +2569,23 @@ The first pass, over 30 edits, left eight: three stale patterns, which were
 fixed, and five real survivors, which the tests above closed. A 31st edit
 (the cap's reference value) was added. All 31 are killed.
 
-**Found on the way, not fixed here (I6a, reported to the gatekeeper):**
-`_clamp` holds a genset at its limit only after each RK4 step. Within a step
-its governor state keeps winding up, so a genset at its limit gives about
+**Found on the way (I6a, reported to the gatekeeper), fixed after #228:**
+`_clamp` held a genset at its limit only after each RK4 step. Within a step
+its governor state kept winding up, so a genset at its limit gave about
 (target − x)·dt / (2 T_g) more than its limit: 0.11 MW at 5 ms in the
-two-former hub, 0.02 MW at 1 ms. The fix is anti-windup in `_targets`.
+two-former hub, 0.02 MW at 1 ms.
+- **The fix is anti-windup in `_targets`.** `_hold` stops a genset at a
+  bound from moving outward faster than the bound itself moves. That rate
+  is the ramp while the ramp binds, and 0 at its fixed 0..P_n range. The
+  RK4 stages then never count power beyond the limit.
+- **`_genset_bounds`** gives the range and how fast each bound moves; it is
+  shared with `_clamp`.
+- **Tests:**
+  - the genset at its limit holds it exactly, at 5 ms and 1 ms and on both
+    bounds, and the island settles at −3.4 Hz as the balance says;
+  - a genset on its ramp rides it, not a step behind.
+- **With it, the gatekeeper's #228 nit:** when `_settle_run` exhausts its
+  tries, it returns the horizon it last ran, not that horizon doubled.
 
 **Mutations.** 28 source edits:
 - the pure-inertia unit at half weight;
