@@ -66,7 +66,7 @@ describe('the Expert card with provenance', () => {
     ['max_hours', 'number'],
     ['outage_rate_basis', 'enum'],
     ['cyclic_state_of_charge', 'flag'],
-  ] as const)('the chip on %s (%s) sits in its own label, not a row of its own', (key) => {
+  ] as const)('the chip on %s (%s) sits in its own label, not a row of its own', (key, _kind) => {
     render(<div className="grid grid-cols-2"><AssetFieldsEdit schema={SCHEMA} fs={FORM}
       set={() => {}} current={BESS} carriers={[]} buses={[]} provenance={{ [key]: entry('customised') }} /></div>)
     const chip = screen.getByTestId(`asset-prov-${key}`)
