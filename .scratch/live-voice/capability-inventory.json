@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-13",
+  "generated_at": "2026-10-14",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 231,
+  "tool_count": 234,
   "tools": [
     {
       "name": "list_components",
@@ -4299,6 +4299,64 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "c2516f103a5d78e5c75ff13fb31a31febf7e33a4fb0cde85287b1b77e0e16f7d",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_island_config",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_set_island_config",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "config"
+      ],
+      "required": [
+        "project_id",
+        "config"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "a1aed3e4cbe57e40f9ca0ebee86efaecaf8753d4b88df023dcd13b8177469cbb",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_run_island_study",
+      "toolsets": [
+        "simulation",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "scenarios"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "14d6c1e5acfc0e709b9d1b861a66e12689f25bff21b7f8a6e1e16c6f38bfcb22",
       "behavioral_fixture": "pending"
     },
     {

@@ -2823,6 +2823,56 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id"],
     ),
     _t(
+        "campus_island_config",
+        "The island requirements of a capacity-expansion (hub) project and its "
+        "last island study: {config (the island_config.json sidecar as written: "
+        "units keyed by PyPSA name with their control mode, droop, inertia, "
+        "genset and UPS data; requirements with the ride-through, bridge, fuel, "
+        "N+k, scenarios ups_bridged|seamless|planned, frequency limits and "
+        "linearised_uc; every number {value, source} with source "
+        "measured|datasheet|assumed; null when the project has none), study "
+        "(null until campus_run_island_study has run with this config: "
+        "variants with each objective, cost_of_island_capability per scenario, "
+        "cost_of_seamless, the binding island rows with their hours and duals, "
+        "and the model)}. Every result is a screening on the hub LP, not a "
+        "certificate; say so, and say which values are assumed. 409 for a "
+        "project of another kind. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "campus_set_island_config",
+        "Save a hub project's island requirements: the whole island_config.json "
+        "sidecar as a JSON object, which replaces the project's copy. It is "
+        "validated by the island schema first, so a missing field, an untagged "
+        "number or ups_bridged without pickup_blocks is refused (422, naming "
+        "the field; 413 over 256 kB) and nothing is saved. Start from "
+        "campus_island_config, change only what the user asked, and keep every "
+        "source tag honest: a value from a datasheet is datasheet, a guess "
+        "stays assumed. You must ask before replacing a config the user "
+        "already saved. The last island study is dropped, since it was made "
+        "with the old config. Safety: write.",
+        {"project_id": {"type": "string"}, "config": {"type": "object"}},
+        ["project_id", "config"],
+    ),
+    _t(
+        "campus_run_island_study",
+        "Solve a hub project's islanding variants from its saved network and "
+        "island config: a baseline without the island rows and one solve per "
+        "scenario (default: the config's), so it can take minutes on a large "
+        "project. Returns {variants, cost_of_island_capability (per scenario, "
+        "against the baseline), cost_of_seamless (seamless minus ups_bridged, "
+        "or null), binding rows with hours and duals, model} and stores it for "
+        "campus_island_config. scenarios may name one the config does not "
+        "ship, to compare it. 422 when the project has no island config or a "
+        "scenario is refused. Safety: write.",
+        {"project_id": {"type": "string"},
+         "scenarios": {"type": "array", "minItems": 1, "maxItems": 3,
+                       "items": {"type": "string",
+                                 "enum": ["ups_bridged", "seamless", "planned"]}}},
+        ["project_id"],
+    ),
+    _t(
         "campus_get_library",
         "The asset library the campus study of a capacity-expansion (hub) "
         "project buys from: {yaml (the library as text: transformers, cables, "
@@ -3612,6 +3662,11 @@ TOOL_ROUTES: dict[str, list] = {
     "campus_get_investment": _SERVICE_CALL,
     # the joint optimisation (1, plan C12) — a read; no start or cancel tool
     "campus_get_milp": _SERVICE_CALL,
+    # campus island (3, campus island plan I9a) — service calls; the two
+    # write tools check the named project's lock in their dispatchers
+    "campus_island_config": _SERVICE_CALL,
+    "campus_set_island_config": _SERVICE_CALL,
+    "campus_run_island_study": _SERVICE_CALL,
     # campus grid codes (2) — service calls; no publish tool (plan C10)
     "campus_list_grid_codes": _SERVICE_CALL,
     "campus_extract_grid_code": _SERVICE_CALL,
@@ -3698,6 +3753,9 @@ _SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
     # writes its own files under the project directory; never the live one.
     "campus_draft_campus", "campus_run_study", "campus_set_library",
     "campus_extract_grid_code",
+    # campus island (I9a): the sidecar beside network.nc and the study JSON;
+    # the study solves copies of the SAVED network.
+    "campus_set_island_config", "campus_run_island_study",
     # master (assistant tasks, experiments, deliveries): task / experiment
     # records, a preview built on a side context (`build_context`), charts,
     # delivery and evidence files — none writes the live network.
