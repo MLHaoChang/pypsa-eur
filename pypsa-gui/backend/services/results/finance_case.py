@@ -1703,6 +1703,13 @@ def _canon(o):
         # a case without extras keeps its S0b hash (no generic empty-tuple rule).
         if isinstance(o, FinanceCase) and o.extra_assets == ():
             del out["extra_assets"]
+        # P5 (staged builds) likewise: a case without stages, at the default
+        # lead, keeps its pre-P5 hash.
+        if isinstance(o, FinanceCase):
+            if not o.asset_cod:
+                del out["asset_cod"]
+            if o.inputs.stage_capex_lead_years == 1 and isinstance(out.get("inputs"), dict):
+                out["inputs"].pop("stage_capex_lead_years", None)
         return out
     if hasattr(o, "model_dump"):
         return _canon(o.model_dump(mode="json"))

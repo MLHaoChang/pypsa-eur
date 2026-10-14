@@ -1,8 +1,6 @@
 import type { ComponentType, ReactNode } from 'react'
-import { Boxes, Clock, Coins, FileText, FlaskConical, Play, TrendingUp } from 'lucide-react'
-import BuildSection from './BuildSection'
-import TimeSection from './TimeSection'
-import EconomicsSection from './EconomicsSection'
+import { Boxes, FlaskConical, FolderOpen, Play, TrendingUp } from 'lucide-react'
+import ModelSection from './ModelSection'
 import RunSection from './RunSection'
 import ResultsSection from './ResultsSection'
 import StudiesSection from './StudiesSection'
@@ -12,9 +10,11 @@ import ReportsSection from './ReportsSection'
 // plan 2026-10-05 §11 M2): build the network, set its time, set its
 // economics, run it, read the results, take it further in a study, write it
 // up. The expanded sidebar and the icon strip both read this list, so the two
-// cannot drift apart. ECONOMICS got its step with its panel (plan
-// 2026-10-14-economics-in-expert.md).
-export type StepId = 'build' | 'time' | 'economics' | 'run' | 'results' | 'studies' | 'reports'
+// cannot drift apart. UX overhaul (owner decision Q6a): the same workflow
+// order, named by category — MODEL (assets, bounds, time, economics), RUN,
+// RESULTS, STUDIES (labelled Investment / Grid plan), PROJECT (scenarios,
+// snapshots, reports; id `reports`, kept stable). Panel ids are unchanged.
+export type StepId = 'model' | 'run' | 'results' | 'studies' | 'reports'
 
 export interface Step {
   id: StepId
@@ -25,11 +25,9 @@ export interface Step {
 }
 
 export const STEPS: Step[] = [
-  { id: 'build', title: 'BUILD', label: 'Build', icon: <Boxes size={18} />, Content: BuildSection },
-  { id: 'time', title: 'TIME', label: 'Time', icon: <Clock size={18} />, Content: TimeSection },
-  { id: 'economics', title: 'ECONOMICS', label: 'Economics', icon: <Coins size={18} />, Content: EconomicsSection },
+  { id: 'model', title: 'MODEL', label: 'Model', icon: <Boxes size={18} />, Content: ModelSection },
   { id: 'run', title: 'RUN', label: 'Run', icon: <Play size={18} />, Content: RunSection },
   { id: 'results', title: 'RESULTS', label: 'Results', icon: <TrendingUp size={18} />, Content: ResultsSection },
   { id: 'studies', title: 'STUDIES', label: 'Studies', icon: <FlaskConical size={18} />, Content: StudiesSection },
-  { id: 'reports', title: 'REPORTS', label: 'Reports', icon: <FileText size={18} />, Content: ReportsSection },
+  { id: 'reports', title: 'PROJECT', label: 'Project', icon: <FolderOpen size={18} />, Content: ReportsSection },
 ]

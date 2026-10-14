@@ -950,10 +950,10 @@ export function ChartCard({
         shadow-[0_1px_0_rgba(10,14,20,0.04)] ${className ?? ''}`}
     >
       <header className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-2">
-        <div className="flex items-baseline gap-2 min-w-0">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] truncate">{title}</h3>
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
+          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] [overflow-wrap:anywhere]">{title}</h3>
           {count != null && <span className="font-mono text-[11px] text-muted shrink-0">{count}</span>}
-          {hint && <span className="text-[11px] text-muted truncate">{hint}</span>}
+          {hint && <span className="text-[11px] text-muted [overflow-wrap:anywhere]">{hint}</span>}
         </div>
         {right && <div className="flex items-center gap-2 shrink-0">{right}</div>}
       </header>
@@ -1045,11 +1045,20 @@ export const CHART_TOOLTIP = {
   itemStyle: { color: 'var(--color-text)', padding: '1px 0' } as CSSProperties,
 }
 
-// Y-axis label helper — the rotated unit caption every chart repeats. Returns
-// the `label` prop object styled to the design's axis treatment.
+// Y-axis unit caption every chart repeats. UX overhaul S4 (finding R6): it is
+// drawn HORIZONTALLY just above the axis, left-aligned, instead of rotated
+// inside the tick band where it ran over wide tick labels ("€30.0 M"). Charts
+// leave 18 px of top margin for it (pinned by chartStandard.test.tsx).
 export function yAxisLabel(value: string) {
-  return { value, angle: -90, position: 'insideLeft' as const, offset: 12,
-    style: { fontSize: 10, fill: 'var(--color-axis)' } as CSSProperties }
+  return {
+    value,
+    content: ({ viewBox }: { viewBox?: { x?: number; y?: number } }) => (
+      <text x={(viewBox?.x ?? 0) + 2} y={(viewBox?.y ?? 0) - 7} textAnchor="start"
+        fontSize={10.5} fill="var(--color-axis)">
+        {value}
+      </text>
+    ),
+  }
 }
 
 // ── Carrier colour palette ───────────────────────────────────────────────────
@@ -1326,7 +1335,7 @@ export function SeasonalLineCardGrid({
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={height}>
-                  <LineChart data={seasonRows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <LineChart data={seasonRows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid {...CHART_GRID} />
                     <XAxis dataKey="bucket" {...CHART_AXIS}
                       interval={23} tickFormatter={tickFmt} />

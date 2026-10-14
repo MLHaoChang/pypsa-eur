@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Results charts are easier to read: the y-axis unit sits above the axis instead of running over the tick labels, currency and power axes are wide enough that ticks no longer wrap, chart titles and notes wrap instead of being cut off with an ellipsis, and axis text meets 4.5 : 1 contrast in both themes (it was 2.6 : 1 in light and 4.0 : 1 in dark).

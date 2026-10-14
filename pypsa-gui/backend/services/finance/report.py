@@ -235,6 +235,12 @@ def _cashflow_lines(result, case, packs: dict[str, str]) -> list:
                 one[tl.index(x.year)] = v
                 emit("capex", one, sign=-1.0, asset=x.asset, source="replacement_capex",
                      source_id=f"{x.asset}:{x.part}")
+    # Later stages (P5): one line per stage, its own source so a reader can
+    # tell growth capex (equity-funded, never in CFADS) from the stage-1 capex.
+    for asset, _cod, year, v in getattr(op, "stage_items", ()) or ():
+        one = np.zeros(len(years))
+        one[tl.index(year)] = v
+        emit("capex", one, sign=-1.0, asset=asset, source="stage_capex", source_id=asset)
     emit("terminal_value", getattr(result, "terminal", None) if getattr(result, "terminal", None)
          is not None else op.terminal, source="terminal_value")
     cf_op = getattr(result, "op_counterfactual", None)

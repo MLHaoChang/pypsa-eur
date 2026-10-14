@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Expert sidebar keeps the workflow order but names its steps by category: Model (assets, capacity bounds, model horizon, time series, economics), Run, Results, Studies (labelled Investment and Grid plan) and Project (scenarios, snapshots, reports). Every panel opens as before.

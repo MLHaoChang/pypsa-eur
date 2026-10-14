@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from services.finance.case import FinanceCase, effective_parts
+from services.finance.case import FinanceCase, cod_year_of, effective_parts
 from services.finance.cashflow import Operating, _templates_by_year, degradation_factor
 from services.finance.replacements import on_axis, remaining_life_terms, schedule
 from services.finance.timeline import Timeline
@@ -95,11 +95,15 @@ def storage_lcos(case: FinanceCase, op: Operating, tl: Timeline) -> dict:
     elif r is not None:
         real_rate = (1.0 + r) / (1.0 + fin.inflation) - 1.0
     by_year = _templates_by_year(case, tl)
-    k = tl.operating_k()
+
     opm = tl.operating_mask()
     n = tl.n
     assets = {a.name: a for a in case.assets}
-    total_overnight = sum(a.overnight_cost for a in case.assets if a.overnight_cost is not None)
+    # A later stage (P5) carries its own capex (`op.stage_items`); the
+    # stage-1 capex is shared among the others only.
+    stage_capex = {asset: (year, amount) for asset, _cod, year, amount in op.stage_items}
+    total_overnight = sum(a.overnight_cost for a in case.assets
+                          if a.overnight_cost is not None and a.name not in stage_capex)
     r_capex = fin.escalation.get("capex")
     rla = fin.terminal_value.method == "remaining_life_annuity"
     tv_terms, tv_reasons = remaining_life_terms(case, tl) if rla else ((), [])
@@ -111,7 +115,9 @@ def storage_lcos(case: FinanceCase, op: Operating, tl: Timeline) -> dict:
         if r is None:
             rs.append("wacc_nominal_missing")
         spec = fin.degradation_by_asset.get(a)
-        f = None if spec is None else degradation_factor(spec, k)
+        cod = cod_year_of(case, a, tl.cod_year)               # its own clock (P5)
+        k_a = np.where(tl.years >= cod, tl.years - cod + 1, 0)
+        f = None if spec is None else degradation_factor(spec, k_a)
         if f is None:
             rs.append(f"degradation_missing:{a}")
         dis, charge, om = np.zeros(n), np.zeros(n), np.zeros(n)
@@ -156,6 +162,9 @@ def storage_lcos(case: FinanceCase, op: Operating, tl: Timeline) -> dict:
             rs.append("capex_not_established")
         elif af is None or af.overnight_cost is None:
             rs.append(f"overnight_cost_missing:{a}")
+        elif a in stage_capex:
+            year, amount = stage_capex[a]
+            cap[tl.index(year)] = amount
         elif total_overnight > 0:
             cap = op.capex * (af.overnight_cost / total_overnight)
         if op.capex is not None:
