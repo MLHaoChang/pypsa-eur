@@ -3626,6 +3626,21 @@ def campus_run_island_study(project_id: str, scenarios: list[str] | None = None)
         return _h(project, list(scenarios) if scenarios else None)
 
 
+def campus_island_cuts(project_id: str) -> dict:
+    from services import campus_island_cuts as _cic
+    with _acting() as (db, user):
+        project = _gridspine_project(db, user, project_id)
+        return {**_cic.get_cuts(project), "job": _cic.apply_status(project)}
+
+
+def campus_apply_island_cuts(project_id: str) -> dict:
+    from services import campus_island_cuts as _cic
+    with _acting() as (db, user):
+        project = _gridspine_project(db, user, project_id)
+        _campus_check_lock(db, user, project)
+        return _cic.start_apply_job(project, user_id=user.id)
+
+
 def campus_get_library(project_id: str) -> dict:
     from services.campus_electrical_service import get_library as _h
     with _acting() as (db, user):
@@ -7378,6 +7393,8 @@ DISPATCHERS: dict[str, Any] = {
     "campus_island_config": campus_island_config,
     "campus_set_island_config": campus_set_island_config,
     "campus_run_island_study": campus_run_island_study,
+    "campus_island_cuts": campus_island_cuts,
+    "campus_apply_island_cuts": campus_apply_island_cuts,
     # campus grid codes (2): no publish tool, by design (plan C10)
     "campus_list_grid_codes": campus_list_grid_codes,
     "campus_extract_grid_code": campus_extract_grid_code,
