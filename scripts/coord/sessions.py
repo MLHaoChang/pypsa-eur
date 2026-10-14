@@ -5,7 +5,8 @@
 """
 Summarise a saved ``list_sessions`` result, one line per live session.
 
-Save the Claude Code Remote ``list_sessions`` output to a file, then run::
+Save the Claude Code Remote ``list_sessions`` output to a file (bare JSON, or
+the tool-results file as saved, wrapper included), then run::
 
     python scripts/coord/sessions.py sessions.json
 
@@ -46,9 +47,23 @@ def fmt(value):
     return str(value).replace("\n", " ")
 
 
+def load(text):
+    """Parse a saved result: bare JSON, or JSON inside the tool's text wrapper."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.index('{"ccr"') if '{"ccr"' in text else text.index("{")
+        return json.JSONDecoder().raw_decode(text, start)[0]
+
+
 def row(session):
+    summary = session.get("post_turn_summary") or {}
     status = session.get("session_status") or session.get("status")
-    category = session.get("status_category") or session.get("status_bucket")
+    category = (
+        summary.get("status_category")
+        or session.get("status_category")
+        or session.get("status_bucket")
+    )
     updated = session.get("updated_at") or ""
     return "  ".join(
         [
@@ -57,8 +72,12 @@ def row(session):
             fmt(updated[:16].replace("T", " ")),
             fmt(session.get("title")),
             fmt(strip_prefix(category, "SESSION_STATUS_BUCKET_")),
-            fmt(session.get("status_detail")),
-            fmt(session.get("needs_action")),
+            fmt(
+                summary.get("status_detail")
+                or session.get("status_detail")
+                or (session.get("external_metadata") or {}).get("task_summary")
+            ),
+            fmt(summary.get("needs_action", session.get("needs_action"))),
         ]
     )
 
@@ -75,7 +94,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("file", type=Path, help="saved list_sessions JSON")
     args = parser.parse_args(argv)
-    for session in live(sessions_from(json.loads(args.file.read_text()))):
+    for session in live(sessions_from(load(args.file.read_text()))):
         print(row(session))
     return 0
 
