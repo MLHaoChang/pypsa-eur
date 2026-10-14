@@ -93,3 +93,20 @@ U3 needs only S1a + S1b, for the guided question's two assets (spec :442).
   - Link: `efficiency`, `p_min_pu` and `p_max_pu` are typed as %.
 - **Reveal rules:** `e_initial` shows only while the Store is not cyclic. The capacity bounds show only while the asset is extendable.
 - **Kept outside the descriptors:** the Link card's Energy Hub inputs, the per-period bounds buttons, the Load profile UI and the extras section stay as they were. The descriptors render around them.
+
+### S1c-2 (Line, Transformer)
+
+- **A line's investment is one part priced per MVA and km** (`schema.COMPOSITE["Line"]`, columns `inv_per_km_overnight` and `inv_per_km_fom_share`).
+  - The part is scaled by `length`, as a battery's energy part is scaled by `max_hours`. `derive_composite` now takes each part's scale generally (`part_scales`).
+  - The part has no lifetime of its own (`PartSpec.own_lifetime=False`). It takes the line's `lifetime`, so `lifetime` stays typed, and an existing unpriced line keeps its retirement.
+  - The capital cost and fixed O&M are derived. The single `overnight_cost` per MVA is replaced, and a line priced that way keeps it and shows a note.
+- **Every writer of `length` re-derives the cost** (`network_crud.rederive_scaled_parts`):
+  - an edit (the update path re-applies the parts);
+  - "Recalculate from coordinates";
+  - a bus moved on the map (`_recompute_lengths_for_bus`);
+  - `POST /lengths/from_geometry`.
+- **Units:** branch money stays per MVA (€/MVA/km for a line, €/MVA for a transformer), the units catalogues publish. It is not converted to per kVA.
+- **Outside the descriptors:**
+  - the line's r/x/b keep their per-km block, after Length, because they are stored as totals;
+  - the topology (ends, carrier) and a transformer's windings stay read-only in their own sections.
+- **Transformer:** no carrier field (PyPSA's Transformer has none), and no outage fields (it had none before). A cleared declared voltage saves null.
