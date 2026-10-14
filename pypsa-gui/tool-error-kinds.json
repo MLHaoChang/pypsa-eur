@@ -163,6 +163,10 @@
       "surface": "inline",
       "why": "An unhandled server failure. It reaches the client on a turn-terminal `error` frame, which the banner renders directly from KIND_COPY — it is not yielded at any `tool_error` site."
     },
+    "interrupted": {
+      "surface": "inline",
+      "why": "The session event log's synthetic closer for a tool call the process died during (chat harness issue 13), written when the log is read back for repair. It goes to the log and to the model's history, never on a live tool_error frame."
+    },
     "invalid_base64": {
       "surface": "inline",
       "why": "Malformed payload into one tool call. The model can correct and retry."

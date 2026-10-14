@@ -1240,6 +1240,9 @@ def run_turn(
             })
         except Exception:  # noqa: BLE001 — the WAL must never block the turn
             logger.exception("chat: failed to open the pending-turn record")
+        # Issue 13 (shadow): the session event log opens the turn the same way.
+        from harness import eventlog as _eventlog
+        _eventlog.turn_start(session, message)
         body = _run_turn_body(
             session,
             message,
@@ -1274,6 +1277,10 @@ def run_turn(
             usage_at_start=_usage_at_start,
             attachment_file_ids=attachment_file_ids,
         )
+        # Issue 13 (shadow): close the turn on the event log, one fsync.
+        from harness import eventlog as _eventlog
+        _eventlog.turn_end(session, _turn_end_reason(trace, _ended_by),
+                           usage_since(dict(session.usage_acc), _usage_at_start))
         _metric_record_duration(time.monotonic() - _t_start)
         with session._lock:
             session._turn_in_flight = False
@@ -1401,6 +1408,15 @@ def _persist_interrupted_turn(
         append_turn(ctx, record)
     except Exception:  # noqa: BLE001 — persistence is best-effort
         logger.exception("chat: failed to persist an interrupted turn")
+
+
+def _turn_end_reason(trace: "TurnTrace", ended_by: str | None) -> str:
+    """How a turn ended, for the event log's `turn/end` (issue 13)."""
+    if trace.completed:
+        return "completed"
+    if ended_by == "disconnected" or trace._done_reason == "aborted":
+        return "aborted"
+    return "error"
 
 
 def _outbound_vision_block_kinds(
@@ -1658,14 +1674,20 @@ def _run_turn_body(
     # `history_cache_anchor` still hits. Rewriting old turns' context each
     # turn would break that cache for a fidelity nobody asked for.
     ui_block = _format_ui_context(ui_context)
+    # Issue 13 (shadow): each addendum is its own event as well as part of
+    # the user message.
+    from harness import eventlog as _eventlog
+    _eventlog.context(session, "ui_context", ui_block)
     # The active workflow's step rides the same per-turn slot (issue 06):
     # after the context block (outside the untrusted fence), before the
     # user's words. Absent on a turn with no workflow, so nothing changes.
     wf_block = _workflow_addendum(session, ui_context)
+    _eventlog.context(session, "workflow_step", wf_block)
     if wf_block:
         ui_block = f"{ui_block}\n\n{wf_block}" if ui_block else wf_block
     if session.assurance_turn is not None:
         assurance_block = session.assurance_turn.request_content()
+        _eventlog.context(session, "checked_request", assurance_block)
         if assurance_block:
             ui_block = f"{ui_block}\n\n{assurance_block}" if ui_block else assurance_block
     if ui_block:

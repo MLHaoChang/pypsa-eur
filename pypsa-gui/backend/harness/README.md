@@ -38,6 +38,8 @@ harness/
   session.py      ChatSession, PendingConfirmation, the session registry with its TTL and cap
   confirm.py      the confirmation gate: tiers, the Guided write rule, auto-approve, parallel-destructive
   approvals.py    every card's asked/decided record per owner and session; an approval that cannot be recorded does not run
+  eventlog.py     the session event log: every model-visible input, append-only per owner and session; derive_messages, fork, torn-tail repair (shadow mode: chat.jsonl and the WAL unchanged)
+  replay.py       fork a recorded session before one turn and run that turn again on another provider (smoke/replay_session.py)
   ratelimit.py    the /stream token bucket
   sse.py          the SSE framing of a yielded (event, payload)
   fence.py        the untrusted-content delimiters and the neutraliser
@@ -88,6 +90,12 @@ Borrowed designs (phase 5): `docs/superpowers/assessments/2026-10-06-deepseek-ha
    `providers/wiring.py`, and the layout test pins what is left in the loop
    (the capability refusals in the turn body). A new one goes into
    `providers/`, not into the loop.
+9. **Model-visible means logged.** Everything that reaches the provider
+   history goes through `ChatSession.append_history_message`,
+   `history.trim_session_messages`, `history.rewind_session` or
+   `ChatSession.reset_history`, and each of those writes the session's
+   event log (`eventlog.py`, issue 13). A new writer to `session.messages`
+   must log too, or `derive_messages` stops matching what the model saw.
 
 ## The harness tools
 
