@@ -266,10 +266,16 @@ def test_the_job_runs_the_loop_and_records_its_end(saved, monkeypatch):
 def test_a_second_job_for_the_project_is_a_409_while_one_runs(saved, monkeypatch):
     _propose(saved, [_row()])
     _ready(saved)
-    gate = threading.Event()
-    monkeypatch.setattr(cic, "_queue_solve", lambda project, user_id, stop: gate.wait(10) and 1.0)
+    gate, solving = threading.Event(), threading.Event()
+
+    def solve(project, user_id, stop):
+        solving.set()                            # the job has written its cuts by now
+        return gate.wait(10) and 1.0
+
+    monkeypatch.setattr(cic, "_queue_solve", solve)
     monkeypatch.setattr(cic, "_rerun", lambda project, settings: _propose(project, []))
     cic.start_apply_job(saved, user_id=None)
+    assert solving.wait(10)
     try:
         with pytest.raises(HTTPException) as exc:
             cic.start_apply_job(saved, user_id=None)
@@ -386,3 +392,31 @@ def test_the_cut_writes_are_refused_under_another_users_lock_and_the_reads_are_n
         assert _is_lock_refusal(resp), (method, path, resp.status_code, resp.text)
     for path in ("", "/apply"):
         assert other.get(f"{_BASE}{path}").status_code == 200
+
+
+# ── closing the mutation survivors ──────────────────────────────────────────
+
+
+def test_a_proposed_cut_equal_to_an_applied_one_is_not_added_again(saved):
+    _propose(saved, [_row(required=25.0)])
+    _loop(saved, Script(saved, proposals=[[]]))
+    _propose(saved, [_row(required=25.0)])
+    with pytest.raises(HTTPException) as exc:
+        _loop(saved, Script(saved, proposals=[]))
+    assert "nothing to apply" in exc.value.detail
+
+
+def test_of_two_proposed_cuts_at_one_hour_and_kind_the_tighter_is_applied(saved):
+    _propose(saved, [_row(required=25.0), _row(required=30.0), _row(required=20.0)])
+    script = Script(saved, proposals=[[]])
+    _loop(saved, script)
+    assert [c["required"] for c in script.calls[0][1]] == [30.0]
+
+
+def test_the_verdict_counts_hours_not_cuts(saved):
+    _propose(saved, [_row()])
+    script = Script(saved, proposals=[[_row(required=40.0), _row(kind="droop_gain", required=9.0, current=5.0),
+                                       _row(hour=2, required=30.0)]], objectives=[1.0, 2.0])
+    script.proposals.append([])
+    out = cic.apply_loop(saved, solve=script.solve, rerun=script.rerun, stop_event=threading.Event())
+    assert out["trials"][0]["verdict"] == "fails at 2 hours"

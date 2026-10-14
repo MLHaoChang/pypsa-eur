@@ -145,7 +145,7 @@ def test_a_cold_genset_gives_no_inertia_at_the_instant_and_is_no_candidate():
 
 
 def test_a_met_cut_costs_nothing_and_one_without_a_candidate_says_so():
-    assert _estimate({**_cut("inertia", 10.0), "current": 12.5})["estimate"] == 0.0
+    assert _estimate({**_cut("inertia", 10.0), "current": 12.5})["estimate"] == 0.0  # see also below
     n = _hub(load=10.0)
     n.storage_units.at["bess", "p_nom_extendable"] = False
     row = _estimate({**_cut("inertia", 25.0), "current": 12.5}, n=n)
@@ -197,3 +197,46 @@ def test_the_bundle_carries_the_applied_cuts_and_a_template_ships_none():
     assert island_mod.CUTS_FILE == "island_cuts.json"
     assert island_mod.CUTS_FILE in _BUNDLE_FILES
     assert island_mod.CUTS_FILE not in _TEMPLATE_SIDECARS
+
+
+# ── closing the mutation survivors ──────────────────────────────────────────
+
+
+def _spinning_genset_hub():
+    """The hand hub with a fixed 5 MW spinning genset at 1000/MWh, minimum
+    load 0.3 (1.5 MW), and a BESS that cannot charge. The genset cuts the
+    10 MW import step to 8.5 and gives 5 − 1.5 = 3.5 MW of upward headroom
+    (a constant: its p_nom is fixed), none downward. So the seamless step
+    alone buys a 5 MW BESS."""
+    n = _hub(load=10.0, gensets=[("g", 5.0)])
+    n.storage_units.at["bess", "p_min_pu"] = 0.0
+    island = _seamless(_units(gensets={"g": _genset(spinning=True, p_min_pu=_a(0.3))}))
+    return n, island
+
+
+@pytest.mark.parametrize("kind, p_nom", [(None, 5.0), ("headroom_up", 8.5), ("headroom_down", 12.0)])
+def test_upward_and_downward_headroom_are_told_apart(kind, p_nom):
+    """A 12 MW cut: upward, the genset's 3.5 MW counts, so the BESS needs
+    8.5; downward only the BESS absorbs, so it needs 12."""
+    n, island = _spinning_genset_hub()
+    island["cuts"] = [] if kind is None else [_cut(kind, 12.0, hour=1)]
+    _solve(n, island)
+    assert _p_nom(n) == pytest.approx(p_nom, abs=TOL)
+
+
+def test_a_cut_with_dispatch_terms_is_taken_at_its_own_snapshot_only():
+    n, island = _spinning_genset_hub()
+    island["cuts"] = [_cut("headroom_up", 12.0, hour=1)]
+    _solve(n, island)
+    c = n.model.constraints["Island-cut-headroom_up-2030-1"]
+    assert list(c.data.indexes["snapshot"]) == [n.snapshots[1]]
+
+
+def test_of_two_cuts_at_one_hour_and_kind_the_tighter_holds():
+    n = _solve(_hub(load=10.0), _with([_cut("inertia", 25.0, hour=1), _cut("inertia", 5.0, hour=1)]))
+    assert _p_nom(n) == pytest.approx(20.0, abs=TOL)
+
+
+def test_a_met_cut_names_no_candidate():
+    row = _estimate({**_cut("inertia", 10.0), "current": 12.5})
+    assert row["candidate"] is None and row["added_mw"] == 0.0
