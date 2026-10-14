@@ -69,7 +69,7 @@ def test_a_tool_turn_is_logged_in_order(tools):
     _turn(session, "list my projects", _tool_turn("list_projects", {}), _text_turn("two"))
     events = _events(session)
     assert _types(events) == ["turn/start", "user/message", "assistant/attempt",
-                              "tool/result", "assistant/attempt", "turn/end"]
+                              "tool/result", "assistant/attempt", "turn/record", "turn/end"]
     assert [e["seq"] for e in events] == sorted({e["seq"] for e in events})
     assert events[0]["user"] == "list my projects"
     assert events[-1]["reason"] == "completed"

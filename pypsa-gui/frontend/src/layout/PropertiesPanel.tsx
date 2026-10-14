@@ -485,6 +485,8 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   // Investment is typed as the overnight cost per kWh; the annualised capital
   // cost is derived and shown read-only.
   const { data: schema } = useAssetSchema('Store')
+  // U3: each field's provenance (default from the pack, customised, measured).
+  const provenance = useAssetProvenance('Store', store.name)
   const specs = schemaFields(schema)
   const asset = store as unknown as Record<string, unknown>
 
@@ -534,7 +536,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, store.name])
 
-  const items: ExpandedItem[] = assetReadoutItems(schema, asset)
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset, undefined, provenance)
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {
@@ -543,7 +545,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
         <Section title={title ?? 'Store Properties'}>
           <Row label="Carrier" value={store.carrier} tip={docTip('store.carrier')} />
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
           ))}
         </Section>
         <DetailFooter
@@ -580,7 +582,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
       </div>
       {schema ? (
         <AssetFieldsEdit
-          schema={schema} fs={form} set={setForm} current={asset}
+          schema={schema} fs={form} set={setForm} current={asset} provenance={provenance}
           carriers={carriers as Carrier[]} buses={buses as Bus[]}
           onCheck={{ e_nom_extendable: autofillNomMin('e_nom', 'e_nom_min') }}
           after={{
@@ -643,6 +645,8 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
 
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
   const { data: schema } = useAssetSchema('Load')
+  // U3: each field's provenance (default from the pack, customised, measured).
+  const provenance = useAssetProvenance('Load', load.name)
   const specs = schemaFields(schema)
   const asset = load as unknown as Record<string, unknown>
 
@@ -682,7 +686,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, load.name])
 
-  const items: ExpandedItem[] = assetReadoutItems(schema, asset)
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset, undefined, provenance)
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {
@@ -691,7 +695,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
         <Section title={title ?? 'Load Properties'}>
           <Row label="Carrier" value={load.carrier} tip={docTip('load.carrier')} />
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
           ))}
           <Row
             label="Profile"
@@ -743,7 +747,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
     <EditShell title={load.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
       {schema ? (
         <AssetFieldsEdit
-          schema={schema} fs={form} set={setForm} current={asset}
+          schema={schema} fs={form} set={setForm} current={asset} provenance={provenance}
           carriers={carriers as Carrier[]} buses={buses as Bus[]}
         />
       ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
@@ -838,6 +842,8 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   // Investment is typed as the overnight cost per kW of input; the annualised
   // capital cost is derived and shown read-only.
   const { data: schema } = useAssetSchema('Link')
+  // U3: each field's provenance (default from the pack, customised, measured).
+  const provenance = useAssetProvenance('Link', link.name)
   const specs = schemaFields(schema)
   const asset = link as unknown as Record<string, unknown>
 
@@ -903,7 +909,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   const items: ExpandedItem[] = [
     { label: 'From bus', value: link.bus0, tip: docTip('link.bus0') },
     { label: 'To bus', value: link.bus1, tip: docTip('link.bus1') },
-    ...assetReadoutItems(schema, asset),
+    ...assetReadoutItems(schema, asset, undefined, provenance),
   ]
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
@@ -914,7 +920,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
           <Row label="Carrier" value={link.carrier} tip={docTip('link.carrier')} />
           {categoryLabel && <Row label="Category" value={categoryLabel} />}
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
           ))}
         </Section>
         {showChart && hasProfile && (
@@ -994,7 +1000,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
       )}
       {schema ? (
         <AssetFieldsEdit
-          schema={schema} fs={form} set={setForm} current={asset}
+          schema={schema} fs={form} set={setForm} current={asset} provenance={provenance}
           carriers={carriers as Carrier[]} buses={buses as Bus[]}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
           after={{
@@ -1478,6 +1484,8 @@ export function LinePanel({ name }: { name: string }) {
   // read-only here, and r/x/b keep their own per-km block (they scale with
   // the length too, but are stored as totals).
   const { data: schema } = useAssetSchema('Line')
+  // U3: each field's provenance (default from the pack, customised, measured).
+  const provenance = useAssetProvenance('Line', name)
   const specs = schemaFields(schema)
   const asset = (line ?? {}) as unknown as Record<string, unknown>
 
@@ -1568,7 +1576,7 @@ export function LinePanel({ name }: { name: string }) {
     )
   }
 
-  const items = assetReadoutItems(schema, asset)
+  const items = assetReadoutItems(schema, asset, undefined, provenance)
 
   return (
     <div className="p-3">
@@ -1582,7 +1590,7 @@ export function LinePanel({ name }: { name: string }) {
           <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 mb-2">
             {schema ? (
               <AssetFieldsEdit
-                schema={schema} fs={form} set={setForm} current={asset} carriers={[]} buses={[]}
+                schema={schema} fs={form} set={setForm} current={asset} carriers={[]} buses={[]} provenance={provenance}
                 hidden={LINE_TOPOLOGY}
                 onCheck={{ s_nom_extendable: autofillNomMin('s_nom', 's_nom_min') }}
                 after={{
@@ -1674,6 +1682,8 @@ export function TransformerPanel({ name }: { name: string }) {
   // Investment is typed as the overnight cost per MVA; the annualised capital
   // cost is derived and shown read-only. The windings stay read-only here.
   const { data: schema } = useAssetSchema('Transformer')
+  // U3: each field's provenance (default from the pack, customised, measured).
+  const provenance = useAssetProvenance('Transformer', name)
   const specs = schemaFields(schema)
   const asset = (tr ?? {}) as unknown as Record<string, unknown>
 
@@ -1712,7 +1722,7 @@ export function TransformerPanel({ name }: { name: string }) {
     setEditing(true)
   }
 
-  const items = assetReadoutItems(schema, asset, TRANSFORMER_VOLTAGES)
+  const items = assetReadoutItems(schema, asset, TRANSFORMER_VOLTAGES, provenance)
 
   return (
     <div className="p-3">
@@ -1730,7 +1740,7 @@ export function TransformerPanel({ name }: { name: string }) {
           <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 mb-2">
             {schema ? (
               <AssetFieldsEdit
-                schema={schema} fs={form} set={setForm} current={asset} carriers={[]} buses={[]}
+                schema={schema} fs={form} set={setForm} current={asset} carriers={[]} buses={[]} provenance={provenance}
                 hidden={TRANSFORMER_TOPOLOGY}
                 onCheck={{ s_nom_extendable: autofillNomMin('s_nom', 's_nom_min') }}
                 after={{

@@ -145,6 +145,8 @@ class ChatSession:
     # Catalogue view; kept separate from project identity and permissions.
     toolset: str = "all"
     task_id: str | None = None
+    experiment_id: str | None = None
+    experiment_project_id: str | None = None
     job_wait_progress: dict[str, Any] | None = None
     # Private turn-local checked-answer state; cleared on every exit.
     assurance_turn: Any | None = None
@@ -253,22 +255,20 @@ class ChatSession:
         sanitised = _sanitise_history_message(msg)
         if sanitised is None:
             return
-        self.messages.append(sanitised)
-        # Issue 13: model-visible means logged, as stored here and with the
-        # trim that follows, so the log replays this deque exactly.
+        # Issue 13: the deque changes only through the event log, which
+        # records each change and folds it in (`eventlog.apply`), so the
+        # deque is the log's projection.
         from harness import eventlog, history as _history
         eventlog.message(self, sanitised)
         limit = _history.SESSION_MESSAGES_MAX
         if len(self.messages) > limit:
-            eventlog.record(self, "history/trim", limit=limit)
-        trim_session_messages(self.messages)
+            eventlog.apply(self, "history/trim", limit=limit)
 
     def reset_history(self) -> None:
-        """Empty the provider history (the `/history` rehydration replays
-        chat.jsonl into it next), and log that it did (issue 13)."""
-        self.messages.clear()
+        """Empty the provider history (a `/history` rebuild from chat.jsonl
+        replays into it next), through the event log (issue 13)."""
         from harness import eventlog
-        eventlog.record(self, "history/reset")
+        eventlog.apply(self, "history/reset")
 
     # ── Confirmation lifecycle (F13 + v4-MINOR-3) ──────────────────────────
     def issue_confirmation(

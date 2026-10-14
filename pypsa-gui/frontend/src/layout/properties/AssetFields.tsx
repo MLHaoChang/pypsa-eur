@@ -7,9 +7,9 @@ import { Fragment, type ReactNode } from 'react'
 import type { AssetFieldSpec, AssetSchema, ProvenanceEntry } from '../../api/assetSchema'
 import { ProvenanceChip } from '../../components/ProvenanceChip'
 import type { Bus, Carrier } from '../../api/types'
-import { derivedStored, displayValue, isRevealed } from '../../utils/assetForm'
+import { derivedStored, displayValue, isRevealed, unitLabel } from '../../utils/assetForm'
 import {
-  BusSelect, CarrierGroupSelect, ChkInput, InfoTip, NumInput, SectionHdr, TxtInput,
+  BusSelect, CarrierGroupSelect, ChkInput, FieldLabel, InfoTip, NumInput, SectionHdr, TxtInput,
   type ExpandedItem, type FS, type SetFS,
 } from './cardKit'
 
@@ -18,10 +18,8 @@ export function schemaFields(schema: AssetSchema | undefined): AssetFieldSpec[] 
   return schema ? schema.groups.flatMap(g => g.fields) : []
 }
 
-/** Units as the app writes them: the descriptors say EUR, the cards say €. */
-export function unitLabel(u: string): string {
-  return u.replace(/\bEUR\b/g, '€')
-}
+// `unitLabel` moved to utils/assetForm.ts (the raw-table headers use it too).
+export { unitLabel }
 
 function fmt(v: number): string {
   const abs = Math.abs(v)
@@ -68,11 +66,16 @@ export function assetReadoutItems(schema: AssetSchema | undefined, asset: Record
   return out
 }
 
-/** A field's chip on its own full-width row, so it never takes a grid cell. */
+/**
+ * A text, bus or carrier field's chip on its own full-width row (those inputs
+ * have no badge slot; a number, enum or flag carries its chip in its label).
+ */
 function chipRow(stamps: Stamps, key: string) {
   const chip = chipOf(stamps, key)
   return chip ? <div className="col-span-2 -mt-0.5">{chip}</div> : null
 }
+
+const LABEL_ONLY_KINDS: ReadonlySet<string> = new Set(['text', 'bus', 'carrier'])
 
 function DerivedRow({ spec, value, stamps }: { spec: AssetFieldSpec; value: unknown; stamps?: Stamps }) {
   const d = displayValue(spec, value)
@@ -92,10 +95,12 @@ function DerivedRow({ spec, value, stamps }: { spec: AssetFieldSpec; value: unkn
   )
 }
 
-function EnumInput({ spec, fs, set }: { spec: AssetFieldSpec; fs: FS; set: SetFS }) {
+function EnumInput({ spec, fs, set, badge }: { spec: AssetFieldSpec; fs: FS; set: SetFS; badge?: ReactNode }) {
   return (
     <label className="flex flex-col gap-0.5">
-      <span className="text-[9px] text-muted truncate"><InfoTip text={spec.help}>{spec.label}</InfoTip></span>
+      <FieldLabel className="text-[9px] text-muted truncate" badge={badge}>
+        <InfoTip text={spec.help}>{spec.label}</InfoTip>
+      </FieldLabel>
       <select value={fs[spec.key] ?? ''} onChange={e => set(p => ({ ...p, [spec.key]: e.target.value }))}
         className="bg-bg border border-border rounded px-1.5 py-0.5 text-[10px] font-mono focus:outline-none focus:border-accent w-full">
         <option value="">unset</option>
@@ -210,13 +215,15 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                   </>
                 )
                   : f.derived ? <DerivedRow spec={f} value={derivedStored(f.key, current)} stamps={provenance} />
-                  : f.kind === 'bool' ? <ChkInput label={f.label} k={f.key} fs={fs} set={set} tip={f.help} onCheck={onCheck?.[f.key]} />
+                  : f.kind === 'bool' ? <ChkInput label={f.label} k={f.key} fs={fs} set={set} tip={f.help} onCheck={onCheck?.[f.key]}
+                      badge={chipOf(provenance, f.key)} />
                   : f.kind === 'bus' ? <BusSelect k={f.key} fs={fs} set={set} buses={buses} tip={f.help} label={f.label} />
                   : f.kind === 'carrier' ? <CarrierGroupSelect k={f.key} fs={fs} set={set} carriers={carriers} tip={f.help} />
                   : f.kind === 'text' ? <TxtInput label={f.label} k={f.key} fs={fs} set={set} tip={f.help} />
-                  : f.kind === 'enum' ? <EnumInput spec={f} fs={fs} set={set} />
-                  : <NumInput label={f.label} k={f.key} fs={fs} set={set} unit={f.unit_display ? unitLabel(f.unit_display) : undefined} tip={f.help} />}
-                {!f.derived && f.key !== firstPart && chipRow(provenance, f.key)}
+                  : f.kind === 'enum' ? <EnumInput spec={f} fs={fs} set={set} badge={chipOf(provenance, f.key)} />
+                  : <NumInput label={f.label} k={f.key} fs={fs} set={set} unit={f.unit_display ? unitLabel(f.unit_display) : undefined} tip={f.help}
+                      badge={chipOf(provenance, f.key)} />}
+                {!f.derived && f.key !== firstPart && LABEL_ONLY_KINDS.has(f.kind) && chipRow(provenance, f.key)}
                 {f.key !== firstPart && after?.[f.key]}
               </Fragment>
             ))}

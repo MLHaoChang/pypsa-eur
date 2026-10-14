@@ -62,6 +62,7 @@ CLASS_ATTR = {
     "Link": "links",
     "Line": "lines",
     "Transformer": "transformers",
+    "Load": "loads",            # no investment parts; listed so its provenance is served like every card's
 }
 
 

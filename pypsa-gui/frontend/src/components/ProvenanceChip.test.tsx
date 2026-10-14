@@ -67,7 +67,8 @@ describe('useAssetProvenance', () => {
   })
 
   it('asks nothing for a class without a schema', () => {
-    render(<QueryClientProvider client={new QueryClient()}><Probe cls="Line" name="l1" /></QueryClientProvider>)
+    // A Bus has no asset schema (the S1c views, Line included, all do).
+    render(<QueryClientProvider client={new QueryClient()}><Probe cls="Bus" name="b1" /></QueryClientProvider>)
     expect(provenance).not.toHaveBeenCalled()
     expect(screen.getByTestId('out').textContent).toBe('')
   })

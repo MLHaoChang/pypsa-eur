@@ -5025,6 +5025,72 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "advance_experiment",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "experiment_id"
+      ],
+      "required": [
+        "experiment_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "add7aa39807e1175fd337d20587108cc688fda582690e35ca067c2eb5b731000",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "refresh_experiment",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "experiment_id"
+      ],
+      "required": [
+        "experiment_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "add7aa39807e1175fd337d20587108cc688fda582690e35ca067c2eb5b731000",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "cancel_experiment",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "experiment_id"
+      ],
+      "required": [
+        "experiment_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "add7aa39807e1175fd337d20587108cc688fda582690e35ca067c2eb5b731000",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "list_project_runs",
       "toolsets": [
         "project",

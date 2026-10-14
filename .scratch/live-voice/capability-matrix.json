@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-13",
+  "generated_at": "2026-10-14",
   "status": "control/parameter matrix for Network/topology; behavioral journeys remain pending on issue 05",
   "sources": [
     "pypsa-gui/frontend/src/layout/CreationForm.tsx",
@@ -281,32 +281,6 @@
       "component_class": "StorageUnit",
       "tool": "create_component",
       "attrs_path": "attrs.marginal_cost",
-      "eligibility": {
-        "project_kinds": [
-          "capacity_expansion",
-          null
-        ],
-        "ui_modes": [
-          "expert",
-          "guided"
-        ],
-        "requires_project": true
-      },
-      "gap": null,
-      "behavioral_fixture": "pending:issue-05-network-topology"
-    },
-    {
-      "family": "Network/topology/asset parameters",
-      "ui_surface": "creation_form",
-      "ui_target": "palette:battery.capital_cost",
-      "palette_id": "battery",
-      "field_key": "capital_cost",
-      "label": "Capital cost",
-      "parameter_type": "number",
-      "unit": "\u20ac/MW/yr",
-      "component_class": "StorageUnit",
-      "tool": "create_component",
-      "attrs_path": "attrs.capital_cost",
       "eligibility": {
         "project_kinds": [
           "capacity_expansion",
@@ -766,32 +740,6 @@
     {
       "family": "Network/topology/asset parameters",
       "ui_surface": "creation_form",
-      "ui_target": "palette:caes.capital_cost",
-      "palette_id": "caes",
-      "field_key": "capital_cost",
-      "label": "Capital cost",
-      "parameter_type": "number",
-      "unit": "\u20ac/MW/yr",
-      "component_class": "StorageUnit",
-      "tool": "create_component",
-      "attrs_path": "attrs.capital_cost",
-      "eligibility": {
-        "project_kinds": [
-          "capacity_expansion",
-          null
-        ],
-        "ui_modes": [
-          "expert",
-          "guided"
-        ],
-        "requires_project": true
-      },
-      "gap": null,
-      "behavioral_fixture": "pending:issue-05-network-topology"
-    },
-    {
-      "family": "Network/topology/asset parameters",
-      "ui_surface": "creation_form",
       "ui_target": "palette:chp.name",
       "palette_id": "chp",
       "field_key": "name",
@@ -925,7 +873,7 @@
       "ui_target": "palette:chp.p_nom",
       "palette_id": "chp",
       "field_key": "p_nom",
-      "label": "P nom (fuel in)",
+      "label": "Capacity (fuel in)",
       "parameter_type": "number",
       "unit": "MW",
       "component_class": "Link",
@@ -951,7 +899,7 @@
       "ui_target": "palette:chp.efficiency",
       "palette_id": "chp",
       "field_key": "efficiency",
-      "label": "\u03b7 electrical",
+      "label": "Electrical efficiency",
       "parameter_type": "number",
       "unit": null,
       "component_class": "Link",
@@ -977,7 +925,7 @@
       "ui_target": "palette:chp.efficiency2",
       "palette_id": "chp",
       "field_key": "efficiency2",
-      "label": "\u03b7 thermal",
+      "label": "Thermal efficiency",
       "parameter_type": "number",
       "unit": null,
       "component_class": "Link",
@@ -1026,15 +974,41 @@
     {
       "family": "Network/topology/asset parameters",
       "ui_surface": "creation_form",
-      "ui_target": "palette:chp.capital_cost",
+      "ui_target": "palette:chp.overnight_cost",
       "palette_id": "chp",
-      "field_key": "capital_cost",
-      "label": "Capital cost",
+      "field_key": "overnight_cost",
+      "label": "Overnight cost",
       "parameter_type": "number",
-      "unit": "\u20ac/MW/yr",
+      "unit": null,
       "component_class": "Link",
       "tool": "create_component",
-      "attrs_path": "attrs.capital_cost",
+      "attrs_path": "attrs.overnight_cost",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:chp.lifetime",
+      "palette_id": "chp",
+      "field_key": "lifetime",
+      "label": "Lifetime",
+      "parameter_type": "number",
+      "unit": null,
+      "component_class": "Link",
+      "tool": "create_component",
+      "attrs_path": "attrs.lifetime",
       "eligibility": {
         "project_kinds": [
           "capacity_expansion",
@@ -1185,7 +1159,7 @@
       "ui_target": "palette:electrolyzer.p_nom",
       "palette_id": "electrolyzer",
       "field_key": "p_nom",
-      "label": "P nom (elec in)",
+      "label": "Capacity (electricity in)",
       "parameter_type": "number",
       "unit": "MW",
       "component_class": "Link",
@@ -1211,7 +1185,7 @@
       "ui_target": "palette:electrolyzer.efficiency",
       "palette_id": "electrolyzer",
       "field_key": "efficiency",
-      "label": "Efficiency (\u03b7)",
+      "label": "Efficiency",
       "parameter_type": "number",
       "unit": null,
       "component_class": "Link",
@@ -1286,15 +1260,41 @@
     {
       "family": "Network/topology/asset parameters",
       "ui_surface": "creation_form",
-      "ui_target": "palette:electrolyzer.capital_cost",
+      "ui_target": "palette:electrolyzer.overnight_cost",
       "palette_id": "electrolyzer",
-      "field_key": "capital_cost",
-      "label": "Capital cost",
+      "field_key": "overnight_cost",
+      "label": "Overnight cost",
       "parameter_type": "number",
-      "unit": "\u20ac/MW/yr",
+      "unit": null,
       "component_class": "Link",
       "tool": "create_component",
-      "attrs_path": "attrs.capital_cost",
+      "attrs_path": "attrs.overnight_cost",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:electrolyzer.lifetime",
+      "palette_id": "electrolyzer",
+      "field_key": "lifetime",
+      "label": "Lifetime",
+      "parameter_type": "number",
+      "unit": null,
+      "component_class": "Link",
+      "tool": "create_component",
+      "attrs_path": "attrs.lifetime",
       "eligibility": {
         "project_kinds": [
           "capacity_expansion",
@@ -1624,32 +1624,6 @@
     {
       "family": "Network/topology/asset parameters",
       "ui_surface": "creation_form",
-      "ui_target": "palette:flywheel.capital_cost",
-      "palette_id": "flywheel",
-      "field_key": "capital_cost",
-      "label": "Capital cost",
-      "parameter_type": "number",
-      "unit": "\u20ac/MW/yr",
-      "component_class": "StorageUnit",
-      "tool": "create_component",
-      "attrs_path": "attrs.capital_cost",
-      "eligibility": {
-        "project_kinds": [
-          "capacity_expansion",
-          null
-        ],
-        "ui_modes": [
-          "expert",
-          "guided"
-        ],
-        "requires_project": true
-      },
-      "gap": null,
-      "behavioral_fixture": "pending:issue-05-network-topology"
-    },
-    {
-      "family": "Network/topology/asset parameters",
-      "ui_surface": "creation_form",
       "ui_target": "palette:fuel_cell.name",
       "palette_id": "fuel_cell",
       "field_key": "name",
@@ -1757,7 +1731,7 @@
       "ui_target": "palette:fuel_cell.p_nom",
       "palette_id": "fuel_cell",
       "field_key": "p_nom",
-      "label": "P nom (H\u2082 in)",
+      "label": "Capacity (H\u2082 in)",
       "parameter_type": "number",
       "unit": "MW",
       "component_class": "Link",
@@ -1783,7 +1757,7 @@
       "ui_target": "palette:fuel_cell.efficiency",
       "palette_id": "fuel_cell",
       "field_key": "efficiency",
-      "label": "Efficiency (\u03b7)",
+      "label": "Efficiency",
       "parameter_type": "number",
       "unit": null,
       "component_class": "Link",
@@ -1832,15 +1806,41 @@
     {
       "family": "Network/topology/asset parameters",
       "ui_surface": "creation_form",
-      "ui_target": "palette:fuel_cell.capital_cost",
+      "ui_target": "palette:fuel_cell.overnight_cost",
       "palette_id": "fuel_cell",
-      "field_key": "capital_cost",
-      "label": "Capital cost",
+      "field_key": "overnight_cost",
+      "label": "Overnight cost",
       "parameter_type": "number",
-      "unit": "\u20ac/MW/yr",
+      "unit": null,
       "component_class": "Link",
       "tool": "create_component",
-      "attrs_path": "attrs.capital_cost",
+      "attrs_path": "attrs.overnight_cost",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:fuel_cell.lifetime",
+      "palette_id": "fuel_cell",
+      "field_key": "lifetime",
+      "label": "Lifetime",
+      "parameter_type": "number",
+      "unit": null,
+      "component_class": "Link",
+      "tool": "create_component",
+      "attrs_path": "attrs.lifetime",
       "eligibility": {
         "project_kinds": [
           "capacity_expansion",
@@ -2170,32 +2170,6 @@
     {
       "family": "Network/topology/asset parameters",
       "ui_surface": "creation_form",
-      "ui_target": "palette:hydrogen.capital_cost",
-      "palette_id": "hydrogen",
-      "field_key": "capital_cost",
-      "label": "Capital cost",
-      "parameter_type": "number",
-      "unit": "\u20ac/MW/yr",
-      "component_class": "StorageUnit",
-      "tool": "create_component",
-      "attrs_path": "attrs.capital_cost",
-      "eligibility": {
-        "project_kinds": [
-          "capacity_expansion",
-          null
-        ],
-        "ui_modes": [
-          "expert",
-          "guided"
-        ],
-        "requires_project": true
-      },
-      "gap": null,
-      "behavioral_fixture": "pending:issue-05-network-topology"
-    },
-    {
-      "family": "Network/topology/asset parameters",
-      "ui_surface": "creation_form",
       "ui_target": "palette:line.name",
       "palette_id": "line",
       "field_key": "name",
@@ -2439,6 +2413,58 @@
       "component_class": "Line",
       "tool": "create_component",
       "attrs_path": "attrs.s_nom_extendable",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:line.inv_per_km_overnight",
+      "palette_id": "line",
+      "field_key": "inv_per_km_overnight",
+      "label": "Overnight cost per km",
+      "parameter_type": "number",
+      "unit": null,
+      "component_class": "Line",
+      "tool": "create_component",
+      "attrs_path": "attrs.inv_per_km_overnight",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:line.lifetime",
+      "palette_id": "line",
+      "field_key": "lifetime",
+      "label": "Lifetime",
+      "parameter_type": "number",
+      "unit": null,
+      "component_class": "Line",
+      "tool": "create_component",
+      "attrs_path": "attrs.lifetime",
       "eligibility": {
         "project_kinds": [
           "capacity_expansion",
@@ -2875,7 +2901,7 @@
       "ui_target": "palette:power_to_heat.p_nom",
       "palette_id": "power_to_heat",
       "field_key": "p_nom",
-      "label": "P nom (elec in)",
+      "label": "Capacity (electricity in)",
       "parameter_type": "number",
       "unit": "MW",
       "component_class": "Link",
@@ -2901,7 +2927,7 @@
       "ui_target": "palette:power_to_heat.efficiency",
       "palette_id": "power_to_heat",
       "field_key": "efficiency",
-      "label": "\u03b7 / COP",
+      "label": "Efficiency / COP",
       "parameter_type": "number",
       "unit": null,
       "component_class": "Link",
@@ -2950,15 +2976,41 @@
     {
       "family": "Network/topology/asset parameters",
       "ui_surface": "creation_form",
-      "ui_target": "palette:power_to_heat.capital_cost",
+      "ui_target": "palette:power_to_heat.overnight_cost",
       "palette_id": "power_to_heat",
-      "field_key": "capital_cost",
-      "label": "Capital cost",
+      "field_key": "overnight_cost",
+      "label": "Overnight cost",
       "parameter_type": "number",
-      "unit": "\u20ac/MW/yr",
+      "unit": null,
       "component_class": "Link",
       "tool": "create_component",
-      "attrs_path": "attrs.capital_cost",
+      "attrs_path": "attrs.overnight_cost",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:power_to_heat.lifetime",
+      "palette_id": "power_to_heat",
+      "field_key": "lifetime",
+      "label": "Lifetime",
+      "parameter_type": "number",
+      "unit": null,
+      "component_class": "Link",
+      "tool": "create_component",
+      "attrs_path": "attrs.lifetime",
       "eligibility": {
         "project_kinds": [
           "capacity_expansion",
@@ -3288,32 +3340,6 @@
     {
       "family": "Network/topology/asset parameters",
       "ui_surface": "creation_form",
-      "ui_target": "palette:psh.capital_cost",
-      "palette_id": "psh",
-      "field_key": "capital_cost",
-      "label": "Capital cost",
-      "parameter_type": "number",
-      "unit": "\u20ac/MW/yr",
-      "component_class": "StorageUnit",
-      "tool": "create_component",
-      "attrs_path": "attrs.capital_cost",
-      "eligibility": {
-        "project_kinds": [
-          "capacity_expansion",
-          null
-        ],
-        "ui_modes": [
-          "expert",
-          "guided"
-        ],
-        "requires_project": true
-      },
-      "gap": null,
-      "behavioral_fixture": "pending:issue-05-network-topology"
-    },
-    {
-      "family": "Network/topology/asset parameters",
-      "ui_surface": "creation_form",
       "ui_target": "palette:renewable.name",
       "palette_id": "renewable",
       "field_key": "name",
@@ -3522,15 +3548,41 @@
     {
       "family": "Network/topology/asset parameters",
       "ui_surface": "creation_form",
-      "ui_target": "palette:renewable.capital_cost",
+      "ui_target": "palette:renewable.overnight_cost",
       "palette_id": "renewable",
-      "field_key": "capital_cost",
-      "label": "Capital cost",
+      "field_key": "overnight_cost",
+      "label": "Overnight cost",
       "parameter_type": "number",
-      "unit": "\u20ac/MW/yr",
+      "unit": null,
       "component_class": "Generator",
       "tool": "create_component",
-      "attrs_path": "attrs.capital_cost",
+      "attrs_path": "attrs.overnight_cost",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:renewable.lifetime",
+      "palette_id": "renewable",
+      "field_key": "lifetime",
+      "label": "Lifetime",
+      "parameter_type": "number",
+      "unit": null,
+      "component_class": "Generator",
+      "tool": "create_component",
+      "attrs_path": "attrs.lifetime",
       "eligibility": {
         "project_kinds": [
           "capacity_expansion",
@@ -3756,15 +3808,41 @@
     {
       "family": "Network/topology/asset parameters",
       "ui_surface": "creation_form",
-      "ui_target": "palette:thermal.capital_cost",
+      "ui_target": "palette:thermal.overnight_cost",
       "palette_id": "thermal",
-      "field_key": "capital_cost",
-      "label": "Capital cost",
+      "field_key": "overnight_cost",
+      "label": "Overnight cost",
       "parameter_type": "number",
-      "unit": "\u20ac/MW/yr",
+      "unit": null,
       "component_class": "Generator",
       "tool": "create_component",
-      "attrs_path": "attrs.capital_cost",
+      "attrs_path": "attrs.overnight_cost",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:thermal.lifetime",
+      "palette_id": "thermal",
+      "field_key": "lifetime",
+      "label": "Lifetime",
+      "parameter_type": "number",
+      "unit": null,
+      "component_class": "Generator",
+      "tool": "create_component",
+      "attrs_path": "attrs.lifetime",
       "eligibility": {
         "project_kinds": [
           "capacity_expansion",
@@ -3938,15 +4016,41 @@
     {
       "family": "Network/topology/asset parameters",
       "ui_surface": "creation_form",
-      "ui_target": "palette:thermal_storage.capital_cost",
+      "ui_target": "palette:thermal_storage.overnight_cost",
       "palette_id": "thermal_storage",
-      "field_key": "capital_cost",
-      "label": "Capital cost",
+      "field_key": "overnight_cost",
+      "label": "Overnight cost",
       "parameter_type": "number",
-      "unit": "\u20ac/MWh/yr",
+      "unit": null,
       "component_class": "Store",
       "tool": "create_component",
-      "attrs_path": "attrs.capital_cost",
+      "attrs_path": "attrs.overnight_cost",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:thermal_storage.lifetime",
+      "palette_id": "thermal_storage",
+      "field_key": "lifetime",
+      "label": "Lifetime",
+      "parameter_type": "number",
+      "unit": null,
+      "component_class": "Store",
+      "tool": "create_component",
+      "attrs_path": "attrs.lifetime",
       "eligibility": {
         "project_kinds": [
           "capacity_expansion",
@@ -4276,15 +4380,41 @@
     {
       "family": "Network/topology/asset parameters",
       "ui_surface": "creation_form",
-      "ui_target": "palette:transformer.capital_cost",
+      "ui_target": "palette:transformer.overnight_cost",
       "palette_id": "transformer",
-      "field_key": "capital_cost",
-      "label": "Capital cost",
+      "field_key": "overnight_cost",
+      "label": "Overnight cost",
       "parameter_type": "number",
-      "unit": "\u20ac/MVA/yr",
+      "unit": null,
       "component_class": "Transformer",
       "tool": "create_component",
-      "attrs_path": "attrs.capital_cost",
+      "attrs_path": "attrs.overnight_cost",
+      "eligibility": {
+        "project_kinds": [
+          "capacity_expansion",
+          null
+        ],
+        "ui_modes": [
+          "expert",
+          "guided"
+        ],
+        "requires_project": true
+      },
+      "gap": null,
+      "behavioral_fixture": "pending:issue-05-network-topology"
+    },
+    {
+      "family": "Network/topology/asset parameters",
+      "ui_surface": "creation_form",
+      "ui_target": "palette:transformer.lifetime",
+      "palette_id": "transformer",
+      "field_key": "lifetime",
+      "label": "Lifetime",
+      "parameter_type": "number",
+      "unit": null,
+      "component_class": "Transformer",
+      "tool": "create_component",
+      "attrs_path": "attrs.lifetime",
       "eligibility": {
         "project_kinds": [
           "capacity_expansion",
@@ -4606,7 +4736,7 @@
     "permitted_statement": "Tested subsets only, labelled accordingly; no whole-application coverage claim."
   },
   "counts": {
-    "creation_controls": 165,
+    "creation_controls": 170,
     "editability_overrides": 3,
     "closed_sets": 3,
     "family_journeys": 14,

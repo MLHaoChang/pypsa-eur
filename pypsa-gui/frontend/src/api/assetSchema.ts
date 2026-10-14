@@ -4,6 +4,16 @@ import client from './client'
 // served by `GET /api/network/asset_schema/{component}`
 // (services/asset_schema/fields.py). `display = stored × scale`.
 
+/**
+ * The classes `GET /network/asset_schema/{component}` describes (the backend's
+ * `fields.known_components()`; pinned against the fixture by a test). A view
+ * that shows several classes asks only for these, so a Bus or Carrier tab
+ * makes no request the route would refuse.
+ */
+export const SCHEMA_CLASSES: ReadonlySet<string> = new Set([
+  'Generator', 'Line', 'Link', 'Load', 'Store', 'StorageUnit', 'Transformer',
+])
+
 export type AssetFieldKind = 'number' | 'int' | 'bool' | 'enum' | 'text' | 'bus' | 'carrier'
 export type AssetGroupId =
   | 'identity' | 'size' | 'investment' | 'fom' | 'variable' | 'performance' | 'replacement' | 'provenance'

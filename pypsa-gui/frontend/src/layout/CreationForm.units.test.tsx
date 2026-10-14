@@ -1,10 +1,9 @@
-// Every cost in the app is in EUR, and every `capital_cost` field is an
-// annuity, so its badge carries `/yr` on every creation form.
-//
-// The generator form said `$`, and five converter and storage forms kept a
-// bare `€/MW` beside a per-year quantity, the same trap the Properties card
-// had. This walks every creation item that carries a capital-cost field and
-// pins both facts, so a new item cannot ship the old badge.
+// Every cost in the app is in EUR, and since S1d no creation form types an
+// annuity (plan rule: no typed `capital_cost` anywhere). A priced item types
+// its OVERNIGHT cost, per unit of what it sizes, never per year: €/kW for a
+// generator or link, €/kWh for a store, €/MVA for a transformer, €/MVA/km for
+// a line. This walks every palette item and pins both facts, so a new item
+// cannot ship the old annuity field.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -27,11 +26,19 @@ vi.mock('../api/network', async (importOriginal) => {
   }
 })
 
-// Every palette item whose form carries a `capital_cost` field. Buses,
-// loads and the storage archetypes price nothing at creation.
-const PRICED_ITEMS = [
-  'thermal', 'renewable', 'transformer',
-  'electrolyzer', 'fuel_cell', 'power_to_heat', 'chp', 'thermal_storage',
+// Every palette item that prices its investment at creation, and the unit its
+// overnight cost is typed in. Buses and loads price nothing; the storage units
+// price their two parts on the card (STORAGE_PRICING_NOTE).
+const PRICED_ITEMS: Array<[string, string, string]> = [
+  ['thermal', 'Overnight cost', '€/kW'], ['renewable', 'Overnight cost', '€/kW'],
+  ['transformer', 'Overnight cost', '€/MVA'], ['line', 'Overnight cost per km', '€/MVA/km'],
+  ['electrolyzer', 'Overnight cost', '€/kW'], ['fuel_cell', 'Overnight cost', '€/kW'],
+  ['power_to_heat', 'Overnight cost', '€/kW'], ['chp', 'Overnight cost', '€/kW'],
+  ['thermal_storage', 'Overnight cost', '€/kWh'],
+]
+const ALL_ITEMS = [
+  ...PRICED_ITEMS.map(([id]) => id), 'bus', 'battery', 'psh', 'hydrogen', 'caes', 'flywheel',
+  'load_elec', 'load_h2', 'load_heat',
 ]
 
 const BUSES = [
@@ -52,14 +59,23 @@ function renderItem(id: string) {
 beforeEach(() => { useUIStore.setState({ currentProject: 'Demo', creationItem: null }) })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
-describe('creation-form cost badges', () => {
-  it.each(PRICED_ITEMS)('%s: EUR, and the capital-cost badge is per year', (id) => {
+function labels(): string[] {
+  return Array.from(document.querySelectorAll('label')).map(l => l.textContent ?? '')
+}
+
+describe('creation-form cost fields', () => {
+  it.each(ALL_ITEMS)('%s: no typed annuity, and no dollar sign', (id) => {
     renderItem(id)
-    const labels = Array.from(document.querySelectorAll('label'))
-      .map(l => l.textContent ?? '')
-    const capital = labels.filter(t => t.startsWith('Capital cost'))
-    expect(capital.length, `no Capital cost field on ${id}`).toBeGreaterThan(0)
-    for (const t of capital) expect(t).toMatch(/\(€\/(MW|MWh|MVA)\/yr\)/)
+    expect(labels().some(t => /^Capital cost/.test(t)), `a Capital cost field on ${id}`).toBe(false)
     expect(document.body.textContent ?? '').not.toContain('$/')
+  })
+
+  it.each(PRICED_ITEMS)('%s: the overnight cost is typed per unit, never per year', (id, label, unit) => {
+    renderItem(id)
+    const overnight = labels().filter(t => t.startsWith(label))
+    expect(overnight.length, `no ${label} field on ${id}`).toBe(1)
+    expect(overnight[0]).toContain(`(${unit})`)
+    expect(overnight[0]).not.toContain('/yr')
+    expect(labels().some(t => /^Lifetime/.test(t)), `no Lifetime field on ${id}`).toBe(true)
   })
 })

@@ -110,3 +110,26 @@ U3 needs only S1a + S1b, for the guided question's two assets (spec :442).
   - the line's r/x/b keep their per-km block, after Length, because they are stored as totals;
   - the topology (ends, carrier) and a transformer's windings stay read-only in their own sections.
 - **Transformer:** no carrier field (PyPSA's Transformer has none), and no outage fields (it had none before). A cleared declared voltage saves null.
+
+## S1d decisions (14 Oct)
+
+- **S1d ships in three PRs.**
+  - **S1d-1:** the raw-table headers (BottomPanel, GenerationStack).
+  - **S1d-2:** the CreationForm field specs.
+  - **S1d-3:** the propertyDocs tips and the chat tool's attribute docs.
+- **A raw table shows each column as stored.** It reads the class's descriptors for the label and appends the descriptor's **stored** unit (`storedHeader`): €/MW, a fraction. It never uses the card's display unit (€/kW, %).
+  - A Store's `capital_cost` now reads €/MWh/yr.
+  - COL_LABELS keeps only short names for columns no schema describes (Bus, Carrier), with no units. Those take the catalog's unit, as before.
+- **GenerationStack is not mounted anywhere in the app**; only its own test renders it. Its headers move to the descriptors, but its editable `capital_cost` cell stays. The grid has no per-column edit flag. Make the derived columns read-only if the page is ever routed again.
+
+### S1d-2 (CreationForm)
+
+- **What quick-add asks for, investment:** option 1 of the question put to the coordinator at 08:30 CEST, which was my default because no other pick came back.
+  - Generator, Link, Store and Transformer get the overnight cost and the lifetime. A Line gets its per-km cost and the lifetime.
+  - Storage units get a note to price their two parts on the card.
+  - No form types `capital_cost`.
+- **Units from the descriptors:** a described field takes its label, display unit and scale from them (`withDescriptor`). A variant keeps its own label where it says more ("Capacity (electricity in)"). `like` borrows a descriptor for a column the schema does not list: a CHP's `efficiency2` uses `efficiency`.
+- **Defaults and payload:**
+  - FIELD_MAP defaults, and the defaults a choice snaps in (a heat pump's COP, a transformer preset), stay in stored units and are shown converted.
+  - The payload divides by the scale.
+  - The form waits for the schema before it exists, so a default can never be shown in the wrong unit.

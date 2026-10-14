@@ -344,12 +344,31 @@ export function extrasPatch(fs: FS, keys: string[]): Record<string, unknown> {
 // ── Shared mini input helpers (defined inline in each card) ───────────────────
 export type SetFS = React.Dispatch<React.SetStateAction<FS>>
 
-export function NumInput({ label, k, fs, set, unit, tip }: { label: string; k: string; fs: FS; set: SetFS; unit?: string; tip?: string }) {
+/**
+ * A field label with an optional badge after it (U3's provenance chip). The
+ * label truncates; the badge never does. Without a badge the markup is the
+ * plain truncating span every input had before.
+ */
+export function FieldLabel({ className, badge, children }: {
+  className: string; badge?: React.ReactNode; children: React.ReactNode
+}) {
+  if (!badge) return <span className={className}>{children}</span>
+  return (
+    <span className="flex items-center min-w-0">
+      <span className={className}>{children}</span>
+      {badge}
+    </span>
+  )
+}
+
+export function NumInput({ label, k, fs, set, unit, tip, badge }: {
+  label: string; k: string; fs: FS; set: SetFS; unit?: string; tip?: string; badge?: React.ReactNode
+}) {
   return (
     <label className="flex flex-col gap-0.5">
-      <span className="text-[9px] text-muted truncate">
+      <FieldLabel className="text-[9px] text-muted truncate" badge={badge}>
         <InfoTip text={tip}>{label}{unit ? ` (${unit})` : ''}</InfoTip>
-      </span>
+      </FieldLabel>
       <input type="number" step="any" value={fs[k] ?? ''}
         onChange={e => set(p => ({ ...p, [k]: e.target.value }))}
         className="bg-bg border border-border rounded px-1.5 py-0.5 text-[10px] font-mono focus:outline-none focus:border-accent w-full" />
@@ -618,11 +637,12 @@ export function CoordPairInput({ fs, set, tip }: { fs: FS; set: SetFS; tip?: str
   )
 }
 
-export function ChkInput({ label, k, fs, set, tip, onCheck }: {
+export function ChkInput({ label, k, fs, set, tip, onCheck, badge }: {
   label: string; k: string; fs: FS; set: SetFS; tip?: string
   // Optional side-effect fired AFTER the boolean flips. Used by the Extendable
   // toggle to auto-fill *_nom_min from the current *_nom value — see callers.
   onCheck?: (checked: boolean, prev: FS) => FS
+  badge?: React.ReactNode
 }) {
   return (
     <label className="col-span-2 flex items-center gap-1.5 cursor-pointer py-0.5">
@@ -638,6 +658,7 @@ export function ChkInput({ label, k, fs, set, tip, onCheck }: {
       <span className="text-xs text-text">
         <InfoTip text={tip}>{label}</InfoTip>
       </span>
+      {badge}
     </label>
   )
 }

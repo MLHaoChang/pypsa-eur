@@ -74,7 +74,7 @@ from services.project_context import ProjectContext
 logger = logging.getLogger("pypsa_gui.chat")
 
 from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _message_is_tool_results, _is_turn_start, rewind_session, _drop_oldest_turn_group, TURN_SUMMARY_PREFIX, TURN_SUMMARY_MAX_CHARS, _SUMMARY_LINE_CHARS, _SUMMARY_MAX_LINES, is_turn_summary, _describe_dropped, _render_summary, _parse_summary, trim_session_messages, CHAT_FILENAME, _redact_for_persist, get_persist_path, read_all_turns, read_all_turns_with_gap, append_turn, _pending_turn_path_unlocked, begin_pending_turn, read_pending_turn, clear_pending_turn, flush_to_disk, _rotate_chat_jsonl_unlocked, SAVE_LINEAGE_REBIND_MOVE, SAVE_LINEAGE_COPY, SAVE_LINEAGE_SCENARIO_COPY, _project_chat_paths, handle_save_lineage, handle_rename_lineage, handle_snapshot_lineage, _chat_paths_in,
+    _message_is_tool_results, _is_turn_start, rewind_session, _drop_oldest_turn_group, TURN_SUMMARY_PREFIX, TURN_SUMMARY_MAX_CHARS, _SUMMARY_LINE_CHARS, _SUMMARY_MAX_LINES, is_turn_summary, _describe_dropped, _render_summary, _parse_summary, trim_session_messages, CHAT_FILENAME, _redact_for_persist, get_persist_path, read_all_turns, read_all_turns_with_gap, append_turn, flush_to_disk, _rotate_chat_jsonl_unlocked, SAVE_LINEAGE_REBIND_MOVE, SAVE_LINEAGE_COPY, SAVE_LINEAGE_SCENARIO_COPY, _project_chat_paths, handle_save_lineage, handle_rename_lineage, handle_snapshot_lineage, _chat_paths_in,
     TURN_USAGE_KEY, INTERRUPTED_KEY, INTERRUPTED_REASON_KEY, usage_since, is_interrupted_turn, TurnTrace,
 )
 
@@ -1231,26 +1231,19 @@ def run_turn(
             except Exception:
                 logger.exception("Shadow scope could not be prepared")
                 session.shadow_turn = None
-        # #20 — pending-turn WAL. Written HERE, before the body runs, because the
-        # window it protects opens the moment we start talking to the model and
-        # `append_turn` does not fire until the turn has already succeeded. The
-        # context is resolved the same way `_run_turn_body` resolves its P0 pin,
-        # and on the same `next()`, so both see the same project.
+        # #20 / issue 13 — the turn is on disk HERE, before the body runs,
+        # because the window a crash would land in opens the moment we start
+        # talking to the model: `turn/start` in the session event log, fsynced
+        # (it replaced the pending-turn WAL). A turn that started and never
+        # ended is what `/history` reports as interrupted. The context is
+        # resolved the same way `_run_turn_body` resolves its P0 pin, and on
+        # the same `next()`, so both see the same project.
         try:
             _wal_ctx = PyPSAService.get_active_context()
-            begin_pending_turn(_wal_ctx, {
-                "ts": time.time(),
-                "session_id": session.session_id,
-                "model": session.model,
-                # Redacted like the durable record in `append_turn` — this file is
-                # equally on-disk and equally reaches snapshot/copy bundles.
-                "user": _redact_for_persist(message),
-            })
-        except Exception:  # noqa: BLE001 — the WAL must never block the turn
-            logger.exception("chat: failed to open the pending-turn record")
-        # Issue 13 (shadow): the session event log opens the turn the same way.
+        except Exception:  # noqa: BLE001 — never blocks the turn
+            logger.exception("chat: could not resolve the turn's project")
         from harness import eventlog as _eventlog
-        _eventlog.turn_start(session, message)
+        _eventlog.turn_start(session, message, _wal_ctx)
         _checked = session.assurance_turn is not None
         body = _run_turn_body(
             session,
@@ -1345,11 +1338,6 @@ def run_turn(
         from services import chat_tools as _chat_tools  # noqa: PLC0415
         _chat_tools.set_turn_profile(None)
         _chat_tools.set_chat_session(None)
-        # Every exit reached from inside this process is an end the user can
-        # observe, so none of them should leave a "this turn was interrupted"
-        # record behind. Only a crash skips this line — which is the point.
-        if _wal_ctx is not None:
-            clear_pending_turn(_wal_ctx)
 
     if _drain_utt is not None and _drain_lease is not None:
         yield from run_turn(
@@ -1446,6 +1434,9 @@ def _persist_interrupted_turn(
             record[TURN_AUTHOR_KEY] = session.owner_user_id
         if attachment_file_ids:
             record["attachment_file_ids"] = list(attachment_file_ids)
+        # Issue 13: logged first, then projected to chat.jsonl.
+        from harness import eventlog
+        eventlog.turn_record(session, record)
         append_turn(ctx, record)
     except Exception:  # noqa: BLE001 — persistence is best-effort
         logger.exception("chat: failed to persist an interrupted turn")
@@ -2060,6 +2051,9 @@ def _run_turn_body(
                 if session.assurance_turn is not None:
                     turn_record.update(answer_id=session.assurance_turn.approved["answer_id"],
                                        receipt=session.assurance_turn.approved["receipt"])
+                # Issue 13: logged first, then projected to chat.jsonl.
+                from harness import eventlog as _eventlog
+                _eventlog.turn_record(session, turn_record)
                 append_turn(ctx, turn_record)
             except Exception:  # noqa: BLE001 — persistence is best-effort
                 logger.exception(
@@ -2489,7 +2483,7 @@ def _dispatch_real_tool_call(
         # fails partway can still have mutated the network, so marking on success
         # only would under-report. Over-marking costs a prompt about already-clean
         # work; under-marking costs the work itself.
-        if effect_fresh and tier != "read" and tool_name not in {"run_sensitivity_sweep", "start_experiment", "prepare_experiment", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
+        if effect_fresh and tier != "read" and tool_name not in {"run_sensitivity_sweep", "start_experiment", "prepare_experiment", "advance_experiment", "refresh_experiment", "cancel_experiment", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
             from services import dirty_state
             dirty_state.mark_dirty()
             # ★ P33b B2: the chat seam of the edit counter. Same placement and
@@ -2548,7 +2542,8 @@ def _dispatch_real_tool_call(
                 if checked_turn is not None and tool_name == "update_component":
                     from harness.effects import execute
                     return execute(checked_turn, tool_name, args, handler)
-                return handler(**(args or {}))
+                from harness.experiment_execution import invoke
+                return invoke(session, tool_name, args or {}, handler)
             # PER_TOOL_TIMEOUT_SECONDS is a budget for RUNNING the handler.
             # `future.result(timeout=...)` alone measured queue + run on a pool
             # every session shares, so a call that never got a worker was
