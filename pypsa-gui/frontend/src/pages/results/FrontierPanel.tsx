@@ -254,7 +254,7 @@ export function FrontierPanel() {
           {chart.length > 1 && (
             <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chart} margin={{ top: 8, right: 12, bottom: 24, left: 8 }}>
+                <LineChart data={chart} margin={{ top: 18, right: 12, bottom: 24, left: 8 }}>
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="ens" type="number" tick={{ fontSize: 10 }}
                     label={{ value: 'Unserved energy (MWh)', position: 'insideBottom',

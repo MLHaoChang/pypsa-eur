@@ -199,7 +199,7 @@ export default function Curtailment() {
             </p>
           ) : aggSeries && aggSeries.length > 0 ? (
             <ResponsiveContainer width="100%" height={280}>
-              <AreaChart data={aggSeries} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <AreaChart data={aggSeries} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="curtGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={ACCENT} stopOpacity={0.4} />

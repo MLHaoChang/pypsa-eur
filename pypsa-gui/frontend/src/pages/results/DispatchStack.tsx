@@ -352,7 +352,7 @@ export default function DispatchStack({
     >
       <div ref={chartRef}>
         <ResponsiveContainer width="100%" height={300}>
-          <ComposedChart data={rows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+          <ComposedChart data={rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}
             stackOffset="sign">
             <CartesianGrid {...CHART_GRID} />
             <XAxis

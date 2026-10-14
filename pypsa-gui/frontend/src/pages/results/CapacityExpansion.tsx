@@ -1063,10 +1063,10 @@ export default function CapacityExpansion() {
           </p>
           <div ref={waterfallChartRef}>
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={costWaterfall} margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
+              <BarChart data={costWaterfall} margin={{ top: 18, right: 16, left: 8, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="name" {...CHART_AXIS} />
-                <YAxis {...CHART_AXIS} tickFormatter={(v: number) => fmtCurrency(v, 1)}
+                <YAxis {...CHART_AXIS} width={72} tickFormatter={(v: number) => fmtCurrency(v, 1)}
                   label={yAxisLabel('EUR (annualised)')} />
                 <RTooltip
                   cursor={{ fill: 'rgba(0,0,0,0.04)' }}
@@ -1127,10 +1127,10 @@ export default function CapacityExpansion() {
         ) : (
           <div ref={capexChartRef}>
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={capexByClass} margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
+              <BarChart data={capexByClass} margin={{ top: 18, right: 16, left: 8, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="name" {...CHART_AXIS} />
-                <YAxis {...CHART_AXIS} tickFormatter={(v: number) => fmtCurrency(v, 1)}
+                <YAxis {...CHART_AXIS} width={72} tickFormatter={(v: number) => fmtCurrency(v, 1)}
                   label={yAxisLabel(costMode === 'lifetime' ? 'EUR (PV)' : 'EUR (annualised)')} />
                 <RTooltip {...CHART_TOOLTIP} formatter={(v: number) => fmtCurrency(v)} />
                 <Bar dataKey="capex" radius={[4, 4, 0, 0]}>
@@ -1175,7 +1175,7 @@ export default function CapacityExpansion() {
             </p>
             <div ref={perPeriodCapRef}>
               <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={perPeriod} margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
+                <BarChart data={perPeriod} margin={{ top: 18, right: 16, left: 8, bottom: 0 }}>
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="period" {...CHART_AXIS} />
                   <YAxis yAxisId="cap" {...CHART_AXIS}
@@ -1223,10 +1223,10 @@ export default function CapacityExpansion() {
             </p>
             <div ref={perPeriodClassRef}>
               <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={perPeriod} margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
+                <BarChart data={perPeriod} margin={{ top: 18, right: 16, left: 8, bottom: 0 }}>
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="period" {...CHART_AXIS} />
-                  <YAxis {...CHART_AXIS} tickFormatter={(v: number) => fmtCurrency(v, 1)}
+                  <YAxis {...CHART_AXIS} width={72} tickFormatter={(v: number) => fmtCurrency(v, 1)}
                     label={yAxisLabel(costMode === 'lifetime' ? 'EUR (PV)' : 'EUR (annualised)')} />
                   <RTooltip {...CHART_TOOLTIP} formatter={(v: number) => fmtCurrency(v)} />
                   <Legend {...CHART_LEGEND} />
