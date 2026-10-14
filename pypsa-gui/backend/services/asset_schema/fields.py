@@ -119,8 +119,9 @@ def _outages(with_cf_flag: bool) -> tuple[FieldSpec, ...]:
                "forced outage, e.g. 5 %. Empty uses the carrier's library default. Read by the adequacy and FMEA "
                "analysis only; the dispatch is unaffected."),
         FieldSpec("outage_rate_basis", "performance", "Outage-rate basis", "What the rate is: FOR (service-hours "
-                  "based, what NERC GADS class averages publish) or EFORd (demand based). The tool stores which one "
-                  "you entered and never converts between them.", kind="enum", options=("FOR", "EFORd")),
+                  "based, what NERC GADS class averages publish) or EFORd (demand based). They differ materially for "
+                  "peakers with reserve-shutdown hours; the tool stores which one you entered and never converts "
+                  "between them.", kind="enum", options=("FOR", "EFORd")),
         FieldSpec("mttr_hours", "performance", "Mean time to repair", "How long one forced outage lasts on "
                   "average. With the rate it implies an event frequency (8760 × rate / MTTR per year).", "h", "h"),
     )
@@ -344,7 +345,8 @@ def _branch_identity(what: str, carrier_help: str | None, from_label: str, to_la
     return (
         FieldSpec("name", "identity", "Name", f"Unique {what} identifier.", kind="text", required=True),
         *carrier,
-        FieldSpec("bus0", "identity", from_label, "The bus at one end.", kind="bus", required=True),
+        FieldSpec("bus0", "identity", from_label, "The bus at one end. A positive flow in the results runs from "
+                  "this bus to the other.", kind="bus", required=True),
         FieldSpec("bus1", "identity", to_label, "The bus at the other end.", kind="bus", required=True),
     )
 
@@ -369,7 +371,8 @@ def _lifetime(what: str) -> FieldSpec:
 
 
 LINE: tuple[FieldSpec, ...] = (
-    *_branch_identity("line", "AC for an AC line. Used for grouping and canvas colours.", "From bus", "To bus"),
+    *_branch_identity("line", "AC for an AC line. Used for grouping and canvas colours. A line joins buses of "
+                      "one carrier; join buses of different carriers with a Link.", "From bus", "To bus"),
     *_s_nom_bounds("line"),
     FieldSpec("length", "size", "Length", "Route length. The impedances and the investment are entered per km "
               "and scale with it.", "km", "km", key_param=True),

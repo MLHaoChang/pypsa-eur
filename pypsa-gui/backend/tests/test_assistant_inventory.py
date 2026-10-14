@@ -79,6 +79,7 @@ def isolated_reader(tmp_path, results, panels):
         'pypsa-gui/backend/harness/toolsets.py',
         'pypsa-gui/backend/models/energy_hub.py',
         'pypsa-gui/backend/services/adequacy/mc.py',
+        'pypsa-gui/backend/services/asset_schema/attrs_doc.py',
     ):
         target = tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)
