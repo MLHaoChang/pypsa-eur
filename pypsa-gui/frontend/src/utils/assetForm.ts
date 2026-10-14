@@ -29,7 +29,7 @@ export function storedHeader(schema: AssetSchema | undefined, key: string): stri
 type FS = Record<string, string>
 
 /** Twelve significant digits: enough for any money or rate, none of the float noise a scale adds. */
-function tidy(v: number): string {
+export function tidy(v: number): string {
   return String(Number(v.toPrecision(12)))
 }
 
