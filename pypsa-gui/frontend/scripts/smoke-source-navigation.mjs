@@ -67,6 +67,7 @@ createRoot(document.getElementById('root')).render(<QueryClientProvider client={
       await page.getByRole('cell',{name:'Line: L_p1',exact:true}).waitFor()
       assert((await page.getByRole('cell',{name:'Line: L_p1',exact:true}).locator('..').innerText()).includes('60.00'))
       await page.getByText('Line: L_zero — unavailable: rating_missing_or_zero',{exact:true}).waitFor()
+      await page.getByTestId('results-group-investment').click()
       await page.getByTestId('results-tab-prices').click()
       assert.equal(await page.getByTestId('results-active-tab').getAttribute('data-active-results-tab'),'prices')
       const before=loadflowReads
@@ -74,7 +75,7 @@ createRoot(document.getElementById('root')).render(<QueryClientProvider client={
       await page.getByRole('status').filter({hasText:'Retained loadflow evidence unavailable'}).waitFor()
       assert.equal(loadflowReads,before,'Historical view substituted current data')
       assert.equal(await page.getByTestId('branch-loading').count(),0)
-      await page.getByTestId('results-tab-summary').click(); await page.getByText('123 EUR',{exact:true}).waitFor()
+      await page.getByTestId('results-group-summary').click(); await page.getByText('123 EUR',{exact:true}).waitFor()
       assert.equal(await page.evaluate(()=>window.__ui.getState().discussedRun.runId),'old')
       assert.equal(await page.evaluate(()=>window.__ui.getState().discussedRun.baselineRunId),'base')
       assert(!requests.some(r=>r.method!=='GET'),'Read/navigation created work')
