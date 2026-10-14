@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A study's or report's run evidence is now always written to the project the run started in. A run that finished after the user switched projects could be recorded under the newly active project; a run started with no project now records nothing, instead of being filed under whichever project was active when it finished.
