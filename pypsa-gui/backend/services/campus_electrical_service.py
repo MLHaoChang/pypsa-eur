@@ -993,6 +993,102 @@ def _clear_investment(run_dir: Path) -> None:
         (run_dir / name).unlink(missing_ok=True)
 
 
+# ── the island sidecar and the island study (campus island plan, I9a) ──────
+
+#: The project's island sidecar is small; a cap like the campus file's.
+MAX_ISLAND_BYTES = 256_000
+ISLAND_STUDY_FILE = "island_study.json"
+
+
+def _island_paths(project) -> tuple[Path, Path]:
+    """(the sidecar beside the project's network, the last study's JSON)."""
+    from services.adequacy.island_config import SIDECAR_NAME
+    return (project_registry.project_dir(project) / SIDECAR_NAME,
+            campus_dir(project) / ISLAND_STUDY_FILE)
+
+
+def _jsonable(value):
+    """numpy scalars, arrays and pandas indexes as plain JSON values."""
+    import numpy as np
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (np.ndarray, pd.Index)):
+        return list(value.tolist())
+    if isinstance(value, (set, frozenset)):
+        return sorted(value)
+    return str(value)
+
+
+def get_island(project) -> dict:
+    """``{config, study}``: the project's island sidecar as written (None when
+    it has none) and the last island study (None when none has run since the
+    sidecar was saved)."""
+    require_capacity_expansion(project)
+    sidecar, study = _island_paths(project)
+    return {"config": json.loads(sidecar.read_text()) if sidecar.is_file() else None,
+            "study": json.loads(study.read_text()) if study.is_file() else None}
+
+
+def save_island(project, config: dict) -> dict:
+    """Validate the island sidecar with gridspine's schema and write it; a
+    bad one is a 422 naming the field and leaves the previous file. The
+    last study was made with the old sidecar, so it goes. Returns
+    ``get_island``."""
+    from services.adequacy.island_config import validate
+    from services.atomic_io import atomic_write_text
+
+    require_capacity_expansion(project)
+    text = json.dumps(config, indent=2)
+    if len(text.encode()) > MAX_ISLAND_BYTES:
+        raise HTTPException(status_code=413,
+                            detail=f"the island config is larger than {MAX_ISLAND_BYTES} bytes")
+    try:
+        validate(config)
+    except ContractError as exc:
+        raise _unprocessable(exc)
+    sidecar, study = _island_paths(project)
+    atomic_write_text(sidecar, text)
+    study.unlink(missing_ok=True)
+    return get_island(project)
+
+
+def run_island_study(project, scenarios=None) -> dict:
+    """The islanding variants of the saved project as separate solves
+    (``services.solver.island.island_study``): the cost of island capability
+    per scenario, the cost of seamless islanding and the binding rows with
+    their duals. ``scenarios`` defaults to the sidecar's. The solves are the
+    plain LOPF with HiGHS and the island rows, not the project's own solver
+    settings (ledgered). Stored beside the campus run and returned."""
+    import pypsa
+
+    from services.adequacy.island_config import load_island_config
+    from services.atomic_io import atomic_write_text
+    from services.solver.island import IslandRefusal, island_study
+
+    require_capacity_expansion(project)
+    sidecar, study_path = _island_paths(project)
+    nc = _network(project)
+    try:
+        island = load_island_config(sidecar)
+    except ContractError as exc:
+        raise _unprocessable(exc)
+    if island is None:
+        raise HTTPException(status_code=422, detail="the project has no island_config.json; "
+                                                    "save the island requirements first")
+    with _netcdf_lock():
+        n = pypsa.Network(str(nc))
+    try:
+        out = island_study(n, island, scenarios=scenarios)
+    except IslandRefusal as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    out = json.loads(json.dumps(out, default=_jsonable))
+    out["model"] = ("hub LP, plain LOPF (HiGHS) with the island rows; linearised unit commitment "
+                    "where the sidecar asks for it")
+    out["scenarios"] = list(scenarios or island["requirements"]["scenarios"])
+    atomic_write_text(study_path, json.dumps(out, indent=2))
+    return out
+
+
 def _write_island_tables(project, run_dir: Path, spec: dict, nc: Path) -> None:
     """The I3a island hourly tables beside ``campus_hourly.csv`` (campus
     island plan; owner option A): gridspine's contracts, valued by
