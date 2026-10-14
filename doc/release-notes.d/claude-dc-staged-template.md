@@ -1,1 +1,5 @@
 * Feat(pypsa-gui): New project template "Data Center Energy Hub (staged growth)": the data center campus planned over 2027, 2030 and 2035 from a projected load (IT 12 → 24 → 36 MW), with the utility energizing the 40 MW connection in steps (20 MW until 2030) and genset and battery candidates per period, so the plan says what to build when. Multi-period, with synthetic illustrative numbers.
+
+* Feat(pypsa-gui): A connection energized in steps is stored in MW (`links_t["eh_energization_mw"]`) and applied only for a solve, as p_max_pu = min(the Link's own, E / p_nom); a lever, the pack's import overlay or a connection agreement that rewrites p_nom then composes as min(schedule, cap). MC certification credits such an import at its horizon minimum, labelled, and the Site card shows what is firm until it is fully energized.
+
+* Fix(pypsa-gui): `project_templates/_build.py` builds every Energy Hub template again under `build-macos.sh` (the backend package is put on the path), and verifies a multi-period template with a multi-period solve.

@@ -222,7 +222,7 @@ _DC_IT_MW = 36.0                                   # the single-year template's 
 def _staged_datacenter(n: pypsa.Network, phases) -> pypsa.Network:
     """The single-year campus as a three-period plan: the week repeated in each
     period, the load scaled to ``phases``, the import capped per period by
-    ``DC_ENERGIZATION_MW`` (p_max_pu on the 40 MW link), and the two expansion
+    ``DC_ENERGIZATION_MW`` (an absolute MW schedule on the 40 MW link), and the two expansion
     candidates replaced by one candidate per period with that period as its
     ``build_year`` (explicit rows, not vintage bounds, so the finance adapter
     sees each stage)."""
@@ -248,9 +248,12 @@ def _staged_datacenter(n: pypsa.Network, phases) -> pypsa.Network:
         scale = it_mw / _DC_IT_MW
         for load in ("it_load", "cooling"):
             p_set.loc[y, load] = (p_set.loc[y, load] * scale).to_numpy()
-    cap = float(n.links.at["grid_import", "p_nom"])
-    n.links_t.p_max_pu = pd.DataFrame(
-        {"grid_import": np.repeat([DC_ENERGIZATION_MW[y] / cap for y in years], len(SNAPSHOTS))},
+    # The energization schedule in MW (`services.adequacy.energization`): a
+    # solve turns it into p_max_pu = min(own, E / p_nom), so a lever or an
+    # overlay that rewrites p_nom composes as min(E, cap) instead of
+    # rescaling a stored fraction (gatekeeper review of #266).
+    n.links_t["eh_energization_mw"] = pd.DataFrame(
+        {"grid_import": np.repeat([DC_ENERGIZATION_MW[y] for y in years], len(SNAPSHOTS))},
         index=snaps)
     n.remove("Generator", "genset_new")
     n.remove("StorageUnit", "bess_new")

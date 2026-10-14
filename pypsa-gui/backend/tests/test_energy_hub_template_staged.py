@@ -50,6 +50,9 @@ def staged():
 def solved(staged):
     probe = staged.copy()
     probe.snapshots.name = "snapshot"      # PyPSA's copy() drops the MultiIndex's name
+    from services.adequacy.energization import apply_energization
+
+    apply_energization(probe)                # as run_simulation does
     status, cond = probe.optimize(solver_name="highs", multi_investment_periods=True)
     assert (status, cond) == ("ok", "optimal")
     return probe
@@ -81,10 +84,14 @@ def test_the_it_load_and_cooling_ramp_with_the_projected_load(staged):
 
 
 def test_the_import_follows_the_energization_schedule(staged):
-    cap = float(staged.links.at["grid_import", "p_nom"])
-    pmax = staged.links_t.p_max_pu["grid_import"]
+    """In MW (`energization`), never as a p_nom fraction a lever would rescale."""
+    from services.adequacy.energization import energization_mw
+
+    assert "grid_import" not in staged.links_t.p_max_pu.columns
+    e = energization_mw(staged, "grid_import")
+    period = staged.snapshots.get_level_values(0)
     for y in YEARS:
-        assert (pmax.loc[y] * cap).to_numpy() == pytest.approx(T.DC_ENERGIZATION_MW[y])
+        assert e[period == y] == pytest.approx(T.DC_ENERGIZATION_MW[y])
 
 
 def test_one_candidate_per_period_that_outlives_the_horizon(staged):
@@ -174,8 +181,11 @@ def test_with_the_island_rows_the_plan_stages():
     (d / SIDECAR_NAME).write_text(json.dumps(T.ISLAND_CONFIG[TID]))
     isl = load_island_config(d / SIDECAR_NAME)
     isl["cuts"] = []
+    from services.adequacy.energization import apply_energization
+
     n = T.BUILDERS[TID]()
     n.snapshots.name = "snapshot"
+    apply_energization(n)                    # as run_simulation does
     status, cond = n.optimize(solver_name="highs", multi_investment_periods=True,
                               extra_functionality=I.island_extra_functionality(isl))
     assert (status, cond) == ("ok", "optimal")

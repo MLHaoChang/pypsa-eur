@@ -456,7 +456,15 @@ def _import_capacity_to_hub(n, link: str, far: set[str]) -> float:
     # horizon (neither its peak nor its trough stands for the whole study).
     if str(row.get("bus0")) in far:          # grid → hub: forward flow
         eff = float(row.get("efficiency", 1.0) or 1.0)
-        return max(p_nom * _pu("p_max_pu", 1.0), 0.0) * eff
+        forward = p_nom * _pu("p_max_pu", 1.0)
+        # A connection energized in steps is firm only at its horizon minimum
+        # (`energization.firm_energized_mw`), never at a horizon mean.
+        from services.adequacy.energization import firm_energized_mw
+
+        firm = firm_energized_mw(n, link)
+        if firm is not None:
+            forward = min(forward, firm)
+        return max(forward, 0.0) * eff
     # hub → grid: only a reverse flow (p_min_pu < 0) imports
     return max(-p_nom * _pu("p_min_pu", 0.0), 0.0)
 
@@ -603,11 +611,17 @@ def hub_boundary_copy(n, pack: ArchetypePack):
             continue
         b0, b1 = str(mc.links.at[link, "bus0"]), str(mc.links.at[link, "bus1"])
         hub_bus = b1 if b0 in far else b0
+        from services.adequacy.energization import firm_energized_mw
+
+        firm = firm_energized_mw(mc, link)
         units.append({
             "link": link, "bus": hub_bus, "capacity_mw": cap,
             "rate": float(params.at[link, "rate"]),
             "basis": str(params.at[link, "basis"]),
             "mttr_hours": float(params.at[link, "mttr_hours"]),
+            **({"capacity_note": (f"energized in steps: firm at the horizon minimum "
+                                  f"({firm:g} MW), not the full rating")}
+               if firm is not None else {}),
         })
 
     def _drop(component: str, attr: str, mask_fn) -> list[str]:

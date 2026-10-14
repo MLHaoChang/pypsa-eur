@@ -33,6 +33,9 @@ def _optimize(n):
         # PyPSA's Network.copy() drops a multi-period snapshot index's name,
         # which a storage unit's spillage variables then cannot select on
         probe.snapshots.name = "snapshot"
+    from services.adequacy.energization import apply_energization
+
+    apply_energization(probe)                     # as run_simulation does
     status, cond = probe.optimize(solver_name="highs",
                                   multi_investment_periods=_multi(n))
     return probe, status, cond
