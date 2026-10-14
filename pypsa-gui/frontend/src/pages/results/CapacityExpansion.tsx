@@ -103,6 +103,8 @@ interface RetiredRowBase {
 interface RetiredLineRow extends RetiredRowBase { length: number }
 interface RetiredStorageRow extends RetiredRowBase { max_hours: number; retired_energy: number }
 
+const NO_STORAGE = { state: 'not_applicable' as const, reason: 'This network has no storage.' }
+
 export default function CapacityExpansion() {
   const currentProject = useUIStore(s => s.currentProject)
   const filter = useResultsFilter()
@@ -122,9 +124,9 @@ export default function CapacityExpansion() {
     queryFn: resultsApi.getEconomicsByCarrier,
   })
 
-  const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
-  const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
-  const { data: stores = [] }       = useQuery({ queryKey: nk(currentProject, 'stores'),        queryFn: networkApi.getStores })
+  const { data: generators = [], isSuccess: generatorsLoaded } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })
+  const { data: storageUnits = [], isSuccess: storageUnitsLoaded } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
+  const { data: stores = [], isSuccess: storesLoaded } = useQuery({ queryKey: nk(currentProject, 'stores'), queryFn: networkApi.getStores })
   const { data: links = [] }        = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks })
   const { data: lines = [] }        = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines })
   const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'),  queryFn: networkApi.getTransformers })
@@ -893,6 +895,18 @@ export default function CapacityExpansion() {
   const scopeLabel = periodEntry ? `period ${filter.selectedPeriod}` : 'horizon (all periods)'
   // Sum storage-charge market cost across carriers (Meur → eur). Period
   // selector applies when by_period is populated; otherwise horizon total.
+  // Result states (UX overhaul S2): storage figures on a network with no
+  // storage do not apply; a storage CAPEX where nothing may expand, or a
+  // curtailment cost no generator carries, was not modelled. Neither reads as
+  // €0.00 or "—" any more; a real zero says it is one.
+  const storageLoaded = storageUnitsLoaded && storesLoaded
+  const noStorage = storageLoaded && storageUnits.length === 0 && stores.length === 0
+  const noExtendableStorage = storageLoaded
+    && !storageUnits.some(s => attr<boolean>(s, 'p_nom_extendable') === true)
+    && !stores.some(s => attr<boolean>(s, 'e_nom_extendable') === true)
+  const noCurtailmentCost = generatorsLoaded && cost.curtailment_cost === 0
+    && !generators.some(g => (attr<number>(g, 'curtailment_cost') ?? 0) > 0)
+
   const storageChargeCostEur = (() => {
     const carriers = econByCarrier?.by_carrier
     if (!carriers) return 0
@@ -1001,15 +1015,24 @@ export default function CapacityExpansion() {
               investment slices that are NOT folded into LP OPEX above. */}
           <KPI
             label="Storage charge cost"
-            value={Math.abs(storageChargeCostEur) > 1e-3 ? fmtCurrency(storageChargeCostEur) : '—'}
+            value={Math.abs(storageChargeCostEur) > 1e-3 ? fmtCurrency(storageChargeCostEur) : fmtCurrency(0)}
+            {...(noStorage ? NO_STORAGE : Math.abs(storageChargeCostEur) > 1e-3 ? {} : { state: 'zero' as const })}
             hint="Market accounting: bus_price × |storage charge| × weights (same as Dispatch Storage charge cost). Not part of LP variable OPEX — adding it to OPEX (horizon) recovers Dispatch OPEX (total) when gen cost is the only other term." />
           <KPI
             label="Curtailment cost"
-            value={cost.curtailment_cost > 0 ? fmtCurrency(cost.curtailment_cost) : '—'}
+            value={fmtCurrency(cost.curtailment_cost)}
+            {...(noCurtailmentCost
+              ? { state: 'not_modelled' as const, reason: 'No generator has a curtailment cost set.' }
+              : cost.curtailment_cost > 0 ? {} : { state: 'zero' as const })}
             hint="Σ curtailment_t × curtailment_cost over renewables that opted in (curtailment_cost > 0). Already weighted by snapshot × period years. Zero unless a renewable was given a curtailment_cost." />
           <KPI
             label={costMode === 'lifetime' ? 'Storage CAPEX (new, PV)' : 'Storage CAPEX (new)'}
             value={fmtCostOrUnavailable(displayStorageCapex)}
+            {...(noStorage
+              ? NO_STORAGE
+              : noExtendableStorage
+                ? { state: 'not_modelled' as const, reason: 'No storage was allowed to expand in this run.' }
+                : displayStorageCapex === 0 ? { state: 'zero' as const } : {})}
             hint="CAPEX-expansion across StorageUnit + Store assets only — the storage slice of total new investment. Multi-vintage assets contribute one term per build year." />
         </div>
       </section>

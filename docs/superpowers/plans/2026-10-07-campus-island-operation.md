@@ -2401,6 +2401,84 @@ in E4, were put to the owner:
 The first run killed 15. The step and ramp scaling survived because no
 block reached the step limit; a test was added where it does. All 16 are
 killed.
+### E4 performance: a steady-tail stop and one pickup per fleet (2026-10-14)
+
+**Why.** On master `island_frequency_campus` took about 713 s on
+eh_datacenter (the gatekeeper's profile). Each of the 9 island hours ran
+E4 at about 79 s: 11 blocks of 600 s at 5 ms, 120,001 steps each. Two
+changes caused it: #226 simulates each block on its own, and #238 computes
+the genset bounds in every RK4 stage. A block settles in about 1.4 s, so
+99.8 % of the steps were spent on a flat tail. The hours ran identical
+pickups, because E4 resets the gensets' dispatch and join.
+
+**Owner, 2026-10-14: option A.**
+- **A steady-tail stop** (`_block_run`, `_steady_tail`).
+  - Each block first runs `E4_FIRST_S` (20 s). The horizon doubles while
+    the last `E4_STEADY_HOLD_S` (5 s) still show |RoCoF| above
+    `E4_STEADY_HZ_PER_S` (1e-6 Hz/s), up to `t_end` (600 s).
+  - It is a steadiness test, not a short fixed horizon. A slow island, an
+    isochronous genset or a ramp-limited one, is run on rather than read
+    early. Δf_qss is still the last sample.
+  - It differs from the full horizon by at most the tolerance times the
+    slowest time constant. The tests hold it to 1e-6 Hz.
+  - `steady_stop=False` keeps the full horizon, and the equality tests use
+    it.
+- **One pickup per fleet.** `e4_ups_bridged(…, cache=)` keys the pickup on
+  everything that reaches the simulation: the gensets left at N+k (reset),
+  the blocks, band, settle, window, t_end, dt, f0 and the stop flag.
+  `campus_frequency_study` shares one cache across its hours, and only the
+  bridge check runs per hour.
+- Out of scope: cheaper per-stage bounds (option B). `_hold` and `_clamp`
+  are unchanged.
+
+**Tests:**
+- **eh_datacenter's fleet:** 4 × 10 MW and genset_new 36.67 MW in 10 MW
+  units, N+1, 11 × 5 MW blocks. The run matches the 600 s run block by
+  block: nadir, qss, RoCoF at 0⁺ and over the window, t_return,
+  saturation, the verdicts, the block times, completion and the bridge.
+  Each block needs one 20 s run, and it matches the gatekeeper's reference.
+- **A ramp-limited and an isochronous genset** match the 600 s run. The
+  ramp-limited one reads as not completing at a fixed 20 s; the stop runs
+  it to 80 s, where it completes.
+- **A block that never steadies** runs 20, 40, 80 and then 100 s (its
+  t_end), and does not complete.
+- **Two hours with the same fleet** at another dispatch, join and UPS
+  energy share one pickup and keep their own bridge. A change in the
+  blocks, dt, the gensets or f0 runs anew.
+- **The study** runs as many simulations for 4 identical hours as for 1,
+  with one bridge row per hour.
+- **The steady tail** holds over its whole window, not one flat moment. A
+  collapse ends the run, and a horizon shorter than the first run is the
+  run.
+
+**Measured** on eh_datacenter with the gatekeeper's scripts: 9 island
+hours, all CSVs compared.
+
+| | master | this change |
+|---|---|---|
+| `island_frequency_campus` | 726.1 s | 5.8 s |
+| simulations | 99 | 11 |
+| RK4 steps | 11,880,099 | 44,011 |
+
+- Every output CSV is identical except `df_qss_hz`, which moves by at most
+  3.2e-10 Hz between the stop and 600 s.
+- Nadir, t_return, RoCoF, the verdicts, the bridge rows and the cuts are
+  identical.
+
+**Mutations.** 13 edits:
+- the stop never taken, or taken at once;
+- the doubling uncapped, or the first run uncapped;
+- the tolerance loosened;
+- the hold shrunk to one sample;
+- a collapse not ending the run;
+- the key without the gensets, the blocks or f0;
+- the cache never filled, or not passed by the study;
+- the bridge without the ready time.
+
+The first pass left three: a horizon below the first run, the hold, and
+the collapse. The last two tests were added for them, and all 13 are
+killed.
+
 ### I7 as built: the gridspine cut derivation (2026-10-14)
 
 **Owner, 2026-10-14:** the pypsa-gui island session takes I7. This session
