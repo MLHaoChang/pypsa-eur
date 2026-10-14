@@ -8,6 +8,7 @@ import {
 } from 'recharts'
 import { Download } from 'lucide-react'
 import Kpi from '../../components/Kpi'
+import { kpiFigure } from '../../utils/format'
 import type { ResultAction, ResultStateKind } from '../../components/ResultState'
 import toast from 'react-hot-toast'
 import { useQuery } from '@tanstack/react-query'
@@ -1059,6 +1060,63 @@ export function yAxisLabel(value: string) {
       </text>
     ),
   }
+}
+
+// ── Reference lines, the extreme point, all-zero series (UX overhaul S4b) ───
+// "Highlight what matters" in the chart standard: limits, targets and the mean
+// are dashed lines in a semantic colour (never the accent), labelled with the
+// figure rounded exactly as the KPI tile rounds it. Spread onto a recharts
+// <ReferenceLine {...refLine(...)} />.
+export type RefTone = 'limit' | 'target' | 'mean'
+
+const REF_STROKE: Record<RefTone, string> = {
+  limit: 'var(--color-danger)',
+  target: 'var(--color-success)',
+  mean: 'var(--color-axis)',
+}
+
+export function refLine(tone: RefTone, name: string, y: number, unit: string) {
+  const f = kpiFigure(String(y), unit)
+  const stroke = REF_STROKE[tone]
+  return {
+    y,
+    stroke,
+    strokeDasharray: '4 3',
+    strokeWidth: 1,
+    ifOverflow: 'extendDomain' as const,
+    label: {
+      value: `${name} ${f.value}${f.unit ? ` ${f.unit}` : ''}`,
+      position: 'insideTopRight' as const,
+      fontSize: 10.5,
+      fill: stroke,
+    },
+  }
+}
+
+/** The highest finite value of `key` (the first, on a tie), or null when no
+ *  value is above zero — there is no extreme worth marking then. */
+export function extremeOf<T extends Record<string, unknown>>(rows: readonly T[], key: keyof T & string) {
+  let best: { index: number; value: number } | null = null
+  rows.forEach((r, index) => {
+    const v = r[key]
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0 && (!best || v > best.value)) best = { index, value: v }
+  })
+  return best as { index: number; value: number } | null
+}
+
+/** True when every plotted value is zero or missing: draw <ChartZero>, not
+ *  empty axes. */
+export function isAllZero(rows: ReadonlyArray<Record<string, unknown>>, keys: readonly string[]) {
+  return rows.every(r => keys.every(k => {
+    const v = r[k]
+    return typeof v !== 'number' || !Number.isFinite(v) || v === 0
+  }))
+}
+
+export function ChartZero({ children }: { children: ReactNode }) {
+  return (
+    <p data-testid="chart-zero" className="py-8 text-center text-[12px] text-muted">{children}</p>
+  )
 }
 
 // ── Carrier colour palette ───────────────────────────────────────────────────
