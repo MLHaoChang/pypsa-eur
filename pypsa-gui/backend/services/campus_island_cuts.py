@@ -213,3 +213,136 @@ def clear_cuts(project) -> dict:
     """Take every cut back, and the trials with them."""
     _cuts_path(project).unlink(missing_ok=True)
     return get_cuts(project)
+
+
+# ── the apply loop as a background job ──────────────────────────────────────
+#
+# As the campus MILP job: a ``record`` per project, served without ``thread``
+# and ``stop_event``; in memory, so after a restart there is no status and the
+# trials on disk still read back. One job per project: the solves themselves
+# queue behind every other solve (``services.solve_queue``).
+
+import contextvars  # noqa: E402
+import logging  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+
+logger = logging.getLogger(__name__)
+THREAD_NAME = "campus-island-cuts"
+_LOCK = threading.Lock()
+_JOBS: dict = {}
+
+
+def _job_key(project) -> str:
+    return str(project_registry.project_dir(project))
+
+
+def _public(record):
+    if not record:
+        return None
+    with _LOCK:
+        return {k: v for k, v in record.items() if k not in ("thread", "stop_event")}
+
+
+def _running(record) -> bool:
+    if not record or record.get("state") != "running":
+        return False
+    t = record.get("thread")
+    return t is None or t.ident is None or t.is_alive()
+
+
+def _queue_solve(project, user_id, stop_event) -> float | None:
+    """Re-solve the hub and save it, through the solve queue: it hydrates the
+    project, binds its directory (so the solve reads the sidecar and the
+    applied cuts), solves and saves. Returns the objective."""
+    from services.solve_queue import solve_queue
+    from services.study.runner import _wait
+
+    d = project_registry.project_dir(project)
+    cfg = d / "solver_config.json"
+    job, _ = solve_queue.enqueue_unique(
+        project.name, project_key=project_registry.registry_key(project), storage_dir=str(d),
+        solver_config_json=cfg.read_text() if cfg.is_file() else None, enqueued_by_user_id=user_id)
+    _wait(job, stop_event)
+    if job.status != "completed":
+        raise RuntimeError(f"the hub solve ended {job.status}" + (f": {job.error}" if job.error else ""))
+    return job.objective
+
+
+def _rerun(project, settings) -> None:
+    """The campus study again, with its last settings: I3a, I3b, I4–I6 and
+    the cuts the new dispatch still needs."""
+    from services import campus_electrical_service as ce
+
+    ce.run(project, settings)
+
+
+def _run_job(project, user_id, settings, record) -> None:
+    stop = record["stop_event"]
+    try:
+        out = apply_loop(project, solve=lambda p: _queue_solve(p, user_id, stop),
+                         rerun=lambda p: _rerun(p, settings), stop_event=stop)
+        with _LOCK:
+            record.update(state="cancelled" if out["stopped"] == "stopped by the user" else "done",
+                          finished_at=time.time(), stopped=out["stopped"], trials=len(out["trials"]),
+                          message=out["stopped"])
+    except Exception as exc:                                    # noqa: BLE001 - recorded on the job
+        logger.exception("campus island cuts job failed")
+        detail = getattr(exc, "detail", None) or str(exc) or type(exc).__name__
+        with _LOCK:
+            record.update(state="failed", finished_at=time.time(), error=str(detail), message="failed")
+
+
+def start_apply_job(project, user_id) -> dict:
+    """Start the apply loop (owner QA) as a background job and answer its
+    record. Refused, with nothing started, when the project's solve would
+    not read the cuts (island constraints off), when there is no campus run
+    to rerun, or when the run proposes nothing the hub can take; a 409 while
+    the project's job runs."""
+    from services import campus_electrical_service as ce
+
+    key = _job_key(project)
+    busy = HTTPException(status_code=409, detail="the frequency cuts are already being applied to this "
+                                                 "project; wait for it or cancel it")
+    if _running(_JOBS.get(key)):                 # first: a running job has already written its cuts
+        raise busy
+    d = project_registry.project_dir(project)
+    cfg_path = d / "solver_config.json"
+    cfg = json.loads(cfg_path.read_text()) if cfg_path.is_file() else {}
+    if not cfg.get("island_constraints"):
+        raise HTTPException(status_code=422, detail="island constraints are off in the solver settings, "
+                                                    "so the hub solve would not read the cuts; turn them on")
+    settings_path = ce.campus_dir(project) / ce.SETTINGS_FILE
+    if not settings_path.is_file():
+        raise HTTPException(status_code=422, detail="run the campus study first: the cuts come from its "
+                                                    "island hours, and each trial reruns it")
+    settings = json.loads(settings_path.read_text())
+    if not _new_cuts(_proposed_rows(project), _state(project)["cuts"]):
+        raise HTTPException(status_code=422, detail="nothing to apply: the last campus run proposes no "
+                                                    "cut the hub can take")
+    record = {"state": "running", "project": project.name, "started_at": time.time(), "finished_at": None,
+              "trials": 0, "max_trials": MAX_TRIALS, "stopped": None, "error": None,
+              "message": "applying the cuts", "thread": None, "stop_event": threading.Event()}
+    with _LOCK:
+        if _running(_JOBS.get(key)):
+            raise busy
+        _JOBS[key] = record
+    ctx = contextvars.copy_context()
+    thread = threading.Thread(target=lambda: ctx.run(_run_job, project, user_id, settings, record),
+                              daemon=True, name=THREAD_NAME)
+    record["thread"] = thread
+    thread.start()
+    return _public(record)
+
+
+def apply_status(project) -> dict | None:
+    return _public(_JOBS.get(_job_key(project)))
+
+
+def cancel_apply_job(project) -> dict | None:
+    """Ask the job to stop after the trial in hand (the solve running now
+    is aborted in the queue)."""
+    record = _JOBS.get(_job_key(project))
+    if _running(record):
+        record["stop_event"].set()
+    return _public(record)

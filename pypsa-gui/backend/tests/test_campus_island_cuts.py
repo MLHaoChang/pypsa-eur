@@ -197,3 +197,140 @@ def test_removing_a_cut_that_is_not_applied_is_a_404(saved):
     with pytest.raises(HTTPException) as exc:
         cic.remove_cut(saved, period=2030, hour=0, kind="inertia")
     assert exc.value.status_code == 404
+
+
+# ── the apply job: the loop in a thread, the solve through the queue ────────
+
+
+import time  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+
+def _ready(project, island_constraints=True, settings=True):  # noqa: F811
+    d = project_registry.project_dir(project)
+    (d / "solver_config.json").write_text(json.dumps({"island_constraints": island_constraints}))
+    if settings:
+        (ce.campus_dir(project) / ce.SETTINGS_FILE).write_text(json.dumps({"k": 1, "invest": False}))
+
+
+def _wait_done(project, timeout=20.0):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        rec = cic.apply_status(project)
+        if rec and rec["state"] != "running":
+            return rec
+        time.sleep(0.02)
+    raise AssertionError("the apply job did not finish")
+
+
+def test_the_job_is_refused_when_the_solve_would_not_read_the_cuts(saved):
+    _propose(saved, [_row()])
+    _ready(saved, island_constraints=False)
+    with pytest.raises(HTTPException) as exc:
+        cic.start_apply_job(saved, user_id=None)
+    assert exc.value.status_code == 422 and "island constraints" in exc.value.detail
+    assert cic.apply_status(saved) is None
+
+
+def test_the_job_is_refused_without_a_campus_run_to_rerun(saved):
+    _propose(saved, [_row()])
+    _ready(saved, settings=False)
+    with pytest.raises(HTTPException) as exc:
+        cic.start_apply_job(saved, user_id=None)
+    assert exc.value.status_code == 422 and "campus study" in exc.value.detail
+
+
+def test_the_job_is_refused_with_nothing_to_apply(saved):
+    _propose(saved, [])
+    _ready(saved)
+    with pytest.raises(HTTPException) as exc:
+        cic.start_apply_job(saved, user_id=None)
+    assert exc.value.status_code == 422 and "nothing to apply" in exc.value.detail
+    assert cic.apply_status(saved) is None
+
+
+def test_the_job_runs_the_loop_and_records_its_end(saved, monkeypatch):
+    _propose(saved, [_row()])
+    _ready(saved)
+    reruns = []
+    monkeypatch.setattr(cic, "_queue_solve", lambda project, user_id, stop: 2000.0)
+    monkeypatch.setattr(cic, "_rerun", lambda project, settings: (reruns.append(settings), _propose(project, [])))
+    rec = cic.start_apply_job(saved, user_id=None)
+    assert rec["state"] == "running" and "thread" not in rec
+    rec = _wait_done(saved)
+    assert rec["state"] == "done" and rec["stopped"] == "all pass" and rec["trials"] == 1
+    assert reruns == [{"k": 1, "invest": False}]               # the campus run's own settings
+    assert cic.get_cuts(saved)["trials"][0]["objective"] == 2000.0
+
+
+def test_a_second_job_for_the_project_is_a_409_while_one_runs(saved, monkeypatch):
+    _propose(saved, [_row()])
+    _ready(saved)
+    gate = threading.Event()
+    monkeypatch.setattr(cic, "_queue_solve", lambda project, user_id, stop: gate.wait(10) and 1.0)
+    monkeypatch.setattr(cic, "_rerun", lambda project, settings: _propose(project, []))
+    cic.start_apply_job(saved, user_id=None)
+    try:
+        with pytest.raises(HTTPException) as exc:
+            cic.start_apply_job(saved, user_id=None)
+        assert exc.value.status_code == 409
+    finally:
+        gate.set()
+    _wait_done(saved)
+
+
+def test_cancel_stops_the_loop_after_the_trial_in_hand(saved, monkeypatch):
+    _propose(saved, [_row(required=20.0)])
+    _ready(saved)
+    gate = threading.Event()
+    proposals = iter([[_row(required=30.0)], [_row(required=40.0)]])
+
+    def solve(project, user_id, stop):
+        gate.wait(10)
+        return 1.0
+
+    monkeypatch.setattr(cic, "_queue_solve", solve)
+    monkeypatch.setattr(cic, "_rerun", lambda project, settings: _propose(project, next(proposals)))
+    cic.start_apply_job(saved, user_id=None)
+    cic.cancel_apply_job(saved)
+    gate.set()
+    rec = _wait_done(saved)
+    assert rec["state"] == "cancelled" and rec["trials"] == 1
+
+
+def test_a_failed_solve_fails_the_job_with_its_reason(saved, monkeypatch):
+    _propose(saved, [_row()])
+    _ready(saved)
+
+    def boom(project, user_id, stop):
+        raise RuntimeError("the hub solve ended failed: infeasible")
+
+    monkeypatch.setattr(cic, "_queue_solve", boom)
+    cic.start_apply_job(saved, user_id=None)
+    rec = _wait_done(saved)
+    assert rec["state"] == "failed" and "infeasible" in rec["error"]
+
+
+def test_the_solve_goes_through_the_queue_with_the_projects_config(saved, monkeypatch):
+    from services import solve_queue as sq
+    from services.study import runner
+
+    _ready(saved)
+    seen = {}
+    job = SimpleNamespace(status="completed", objective=1234.5, error=None)
+
+    def enqueue_unique(name, **kw):
+        seen.update(name=name, **kw)
+        return job, True
+
+    monkeypatch.setattr(sq.solve_queue, "enqueue_unique", enqueue_unique)
+    monkeypatch.setattr(runner, "_wait", lambda j, stop: None)
+    assert cic._queue_solve(saved, 7, threading.Event()) == 1234.5
+    d = project_registry.project_dir(saved)
+    assert seen["name"] == saved.name and seen["storage_dir"] == str(d)
+    assert seen["project_key"] == project_registry.registry_key(saved)
+    assert json.loads(seen["solver_config_json"]) == {"island_constraints": True}
+    assert seen["enqueued_by_user_id"] == 7
+    job.status, job.error = "failed", "infeasible"
+    with pytest.raises(RuntimeError, match="infeasible"):
+        cic._queue_solve(saved, 7, threading.Event())
