@@ -12,9 +12,10 @@ connection agreement's firm cap) silently rescales it: a 30 MW lever rung read
 So the schedule is stored in MW, `links_t["eh_energization_mw"]`, and turned
 into `p_max_pu` only for a solve (`apply_energization`, called by
 `run_simulation` and undone after it): p_max_pu(t) = min(the Link's own
-p_max_pu(t), E(t) / p_nom). A rewritten `p_nom` then composes as
-min(E, cap). A firm-capacity reading (the MC certification's import credit)
-takes the horizon minimum, `firm_energized_mw`, and says so.
+p_max_pu(t), E(t) / p_nom). A rewritten fixed `p_nom` then composes as
+min(E, cap). The MC's sampled import unit composes hour by hour in MW
+(`capped_mw`); the two-state boundary credit takes the horizon minimum and
+discloses the minimum per period (`energized_mw_by_period`).
 """
 from __future__ import annotations
 
@@ -41,20 +42,45 @@ def energized_links(n) -> list[str]:
 
 
 def energization_mw(n, link: str) -> np.ndarray | None:
-    """E(t) in MW on the current snapshots, or None (no schedule, or a gap)."""
+    """E(t) in MW on the current snapshots, or None (no schedule). An hour
+    with no value (NaN: a period added after the schedule was written) has
+    no limit in that hour only; the other hours keep theirs."""
     store = energization_frame(n)
     if store is None or link not in store.columns:
         return None
-    col = store[link].reindex(n.snapshots)
-    if col.isna().any():
-        return None
-    return col.to_numpy(dtype=float)
+    return store[link].reindex(n.snapshots).to_numpy(dtype=float)
+
+
+def capped_mw(n, link: str, mw: np.ndarray) -> np.ndarray:
+    """min(mw, E) hour by hour; an hour without a schedule value is not
+    capped. The one composition every reader uses (the solve hook through
+    ``apply_energization``, the MC's sampled import unit)."""
+    e = energization_mw(n, link)
+    mw = np.asarray(mw, dtype=float)
+    if e is None:
+        return mw
+    return np.where(np.isfinite(e), np.minimum(mw, np.clip(e, 0.0, None)), mw)
 
 
 def firm_energized_mw(n, link: str) -> float | None:
     """The horizon minimum of the schedule (the MW firm in every period)."""
     e = energization_mw(n, link)
-    return None if e is None or not len(e) else float(np.min(e))
+    if e is None or not np.isfinite(e).any():
+        return None
+    return float(np.nanmin(e))
+
+
+def energized_mw_by_period(n, link: str) -> dict[str, float] | None:
+    """{period: the schedule's minimum in it} (one entry, "all", on a
+    single-period axis), or None without a schedule."""
+    e = energization_mw(n, link)
+    if e is None or not np.isfinite(e).any():
+        return None
+    if isinstance(n.snapshots, pd.MultiIndex):
+        level = n.snapshots.get_level_values(0)
+        return {str(p): float(np.nanmin(e[level == p])) for p in pd.unique(level)
+                if np.isfinite(e[level == p]).any()}
+    return {"all": float(np.nanmin(e))}
 
 
 def _base_pu(n, link: str) -> np.ndarray:
@@ -67,7 +93,14 @@ def _base_pu(n, link: str) -> np.ndarray:
 def apply_energization(n):
     """Write p_max_pu = min(own p_max_pu, E/p_nom) on every scheduled Link,
     for one solve. Returns the undo (idempotent). A Link whose p_nom is not
-    positive, or whose schedule has a gap, is left alone."""
+    positive is left alone; an hour without a schedule value keeps its own
+    p_max_pu.
+
+    E/p_nom uses the STATIC p_nom: it composes with a rewritten fixed p_nom
+    (the import_cap lever, the pack overlay, a firm agreement without a fee).
+    An extendable import Link (a firm agreement with a connection fee makes
+    the PoC extendable) is capped at E/p_nom of its static p_nom, not of its
+    solved size: not yet supported, see slice P5c."""
     saved: dict[str, pd.Series | None] = {}
     for link in energized_links(n):
         e = energization_mw(n, link)
@@ -76,7 +109,8 @@ def apply_energization(n):
             continue
         ts = n.links_t.p_max_pu
         saved[link] = ts[link].copy() if link in ts.columns else None
-        limit = np.minimum(_base_pu(n, link), np.clip(e, 0.0, None) / p_nom)
+        base = _base_pu(n, link)
+        limit = capped_mw(n, link, base * p_nom) / p_nom
         n.links_t.p_max_pu[link] = limit
 
     done = {"v": False}

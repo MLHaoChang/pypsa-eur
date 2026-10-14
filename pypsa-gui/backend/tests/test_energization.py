@@ -145,16 +145,69 @@ def test_readiness_reports_the_firm_import_beside_the_rating():
 def test_the_island_study_solves_its_copies_with_the_schedule_applied():
     """`island.island_study` (the campus cost-of-islanding study) solves
     copies outside run_simulation; each copy gets the schedule too."""
+    import pandas as pd
+
     from services.solver import island as I
 
-    n = _staged()
+    n = T.BUILDERS["eh_datacenter"]()                     # single-period
+    n.links_t[E.ATTR] = pd.DataFrame({"grid_import": 20.0}, index=n.snapshots)
     seen = []
 
     def solve(c, _extra, **_kw):
-        seen.append(_cap_by_period(c))
+        pu = c.links_t.p_max_pu["grid_import"] * float(c.links.at["grid_import", "p_nom"])
+        seen.append(round(float(pu.max()), 6))
         return "warning", "not solved in this test"
 
-    isl = {"requirements": {"scenarios": [], "values": {}}}
-    I.island_study(n, isl, scenarios=[], solve=solve)
-    assert seen == [{2027: 20.0, 2030: 40.0, 2035: 40.0}]
+    I.island_study(n, {"requirements": {"scenarios": [], "values": {}}}, scenarios=[], solve=solve)
+    assert seen == [20.0]
     assert "grid_import" not in n.links_t.p_max_pu.columns      # the network itself untouched
+
+
+def test_the_island_study_refuses_a_multi_period_network():
+    from services.solver import island as I
+
+    with pytest.raises(I.IslandRefusal, match="island_study_multi_period_unsupported"):
+        I.island_study(_staged(), {"requirements": {"scenarios": [], "values": {}}}, scenarios=[])
+
+
+def test_an_hour_without_a_schedule_value_is_uncapped_in_that_hour_only():
+    """A period added after the schedule was written has NaN rows: they get
+    no cap, and 2027 keeps its 20 MW."""
+    n = _staged()
+    period = n.snapshots.get_level_values(0)
+    n.links_t[E.ATTR].loc[period == 2035, "grid_import"] = np.nan
+    undo = E.apply_energization(n)
+    assert _cap_by_period(n) == {2027: 20.0, 2030: 40.0, 2035: 40.0}
+    undo()
+    assert E.firm_energized_mw(n, "grid_import") == pytest.approx(20.0)
+
+
+def test_the_mc_samples_the_import_hour_by_hour_at_the_schedule():
+    """`eh_stages.hub_fleet_scope` builds the sampled import unit from
+    cap × p_max_pu; it composes the schedule the same way the solve does."""
+    import threading
+
+    from services.adequacy import eh_stages as ST
+    from services.adequacy.eh_study_runner import _PACK_FACTORY, apply_pack_overrides
+    from services.solver_service import SolverConfig
+
+    meta = T.TEMPLATE_META["eh_datacenter_staged"]
+    pack = apply_pack_overrides(_PACK_FACTORY[meta["recommended_archetype"]](),
+                                meta["pack_overrides"])
+    n = _staged()
+    frozen = ST.freeze_fixed_plan(n, SolverConfig(voll=5000.0, multi_investment_periods=True),
+                                  threading.Lock(), overlay=pack.import_overlay,
+                                  import_model="sampled_unit")
+    [unit] = [u for u in frozen.mc_inputs.units if u.name == "link:grid_import"]
+    series = np.asarray(unit.capacity_series)
+    period = n.snapshots.get_level_values(0)
+    eff = float(n.links.at["grid_import", "efficiency"])
+    assert {y: round(float(series[period == y].max()), 6) for y in YEARS} == \
+        {2027: round(20.0 * eff, 6), 2030: round(40.0 * eff, 6), 2035: round(40.0 * eff, 6)}
+
+
+def test_the_boundary_credit_discloses_the_schedule_by_period():
+    from services.adequacy.energization import energized_mw_by_period
+
+    assert energized_mw_by_period(_staged(), "grid_import") == {
+        "2027": 20.0, "2030": 40.0, "2035": 40.0}

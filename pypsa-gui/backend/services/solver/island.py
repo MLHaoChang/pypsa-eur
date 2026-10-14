@@ -476,6 +476,13 @@ def island_study(n, island, *, scenarios=None, solve=None, tol=1e-6) -> dict:
 
     from services.adequacy.energization import apply_energization
 
+    if isinstance(n.snapshots, pd.MultiIndex):
+        # The variants are plain single-period LOPFs of copies (no
+        # multi_investment_periods; PyPSA's copy() also drops the MultiIndex
+        # name), so a multi-period network would crash mid-study.
+        raise IslandRefusal("island_study_multi_period_unsupported: the cost-of-islanding "
+                            "study runs single-period networks only; this network has "
+                            "investment periods")
     solve = solve or _default_solve
     scenarios = list(scenarios or island["requirements"]["scenarios"])
     variants = {}

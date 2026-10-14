@@ -800,8 +800,9 @@ def run_simulation(
                 # agreement so its cap composes; undone before it.
                 from services.adequacy.energization import apply_energization
 
-                _energization_undo = apply_energization(network)
+                _energization_undo = lambda: None   # noqa: E731
                 try:
+                    _energization_undo = apply_energization(network)
                     _real_restore, captured = _apply_modelling_assumptions(network, config, phase)
                 except BaseException:
                     _energization_undo()

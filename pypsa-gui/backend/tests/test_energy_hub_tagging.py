@@ -471,6 +471,9 @@ _PRE_P24_READINESS_KEYS = {
     "estimated_solves", "stages", "warnings",
 }
 _P24_READINESS_KEYS = {"pack_defaults", "outage_units", "import_p_nom_mw"}
+# E2E slice 8 (additive): the import firm in every period of a connection
+# energized in steps; None without an energization schedule.
+_E2E_READINESS_KEYS = {"import_firm_mw"}
 
 
 def _datacenter_readiness(client, install_network, **over):
@@ -494,7 +497,8 @@ def _datacenter_readiness(client, install_network, **over):
 
 def test_readiness_p24_keys_are_additive(client, install_network):
     body, _n, _meta, _ov = _datacenter_readiness(client, install_network)
-    assert set(body) == _PRE_P24_READINESS_KEYS | _P24_READINESS_KEYS
+    assert set(body) == _PRE_P24_READINESS_KEYS | _P24_READINESS_KEYS | _E2E_READINESS_KEYS
+    assert body["import_firm_mw"] is None          # the single-year campus has no schedule
     # the pre-existing keys keep their shape and values on the template
     assert body["archetype"] == "weak_flexible"
     assert body["import"]["links"] == ["grid_import"]

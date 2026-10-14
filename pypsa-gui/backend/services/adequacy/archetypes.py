@@ -613,14 +613,19 @@ def hub_boundary_copy(n, pack: ArchetypePack):
         hub_bus = b1 if b0 in far else b0
         from services.adequacy.energization import firm_energized_mw
 
+        from services.adequacy.energization import energized_mw_by_period
+
         firm = firm_energized_mw(mc, link)
+        by_period = energized_mw_by_period(mc, link)
         units.append({
             "link": link, "bus": hub_bus, "capacity_mw": cap,
             "rate": float(params.at[link, "rate"]),
             "basis": str(params.at[link, "basis"]),
             "mttr_hours": float(params.at[link, "mttr_hours"]),
-            **({"capacity_note": (f"energized in steps: firm at the horizon minimum "
-                                  f"({firm:g} MW), not the full rating")}
+            **({"capacity_note": (
+                f"energized in steps: credited at the horizon minimum ({firm:g} MW) as one "
+                "two-state unit; energized by period: "
+                + ", ".join(f"{p} {v:g} MW" for p, v in (by_period or {}).items()))}
                if firm is not None else {}),
         })
 

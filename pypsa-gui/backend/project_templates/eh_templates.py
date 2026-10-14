@@ -617,8 +617,8 @@ def solver_config(template_id: str) -> dict:
 
 # The island sidecar (plan 2026-10-07 campus island, I1): control modes, unit
 # dynamics and island requirements, keyed by PyPSA name. Its schema is
-# gridspine's (gridspine/schema/island.py), which cannot be imported here
-# (_build.py runs with only this directory on sys.path), so the content is a
+# gridspine's (gridspine/schema/island.py), which this module does not
+# import (it loads without gridspine on the path), so the content is a
 # plain mapping and tests/test_island_config.py validates it through
 # gridspine. Every number is {value, source}; all are "assumed" until the
 # client's datasheets arrive. Only templates listed here ship the file.
@@ -696,8 +696,8 @@ SOLVER_FILE = "solver_config.json"
 SIDECAR_FILES = (META_FILE, STRESS_FILE, SOLVER_FILE)
 # Written only for the templates in ISLAND_CONFIG.
 ISLAND_FILE = "island_config.json"
-# services.adequacy.stress.SCHEMA — not imported: _build.py runs with only
-# this directory on sys.path. A test pins the two equal.
+# services.adequacy.stress.SCHEMA — not imported, so this module loads
+# without the backend's packages at import time. A test pins the two equal.
 SCHEMA = 1
 
 
