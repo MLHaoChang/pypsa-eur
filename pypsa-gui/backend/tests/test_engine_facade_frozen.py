@@ -122,7 +122,8 @@ SIGNATURES: dict[str, str] = {
     "services.commercial.binding.bind_commercial":
         "(n, commercial, *, project_dir: 'pathlib.Path | None', "
         "resolve_ref: 'Callable[[object], pd.Series]', lock=None, "
-        "resolve_item: 'Callable[[object], dict] | None' = None) -> 'dict | None'",
+        "resolve_item: 'Callable[[object], dict] | None' = None, solver_cfg=None)"
+        " -> 'dict | None'",
     "services.library.series_store.resolve":
         "(db: 'DBSession', org_id: 'UUID', ref: 'PriceSeriesRef', *, root: 'Path | None' = None)"
         " -> 'pd.Series'",
@@ -137,8 +138,8 @@ SIGNATURES: dict[str, str] = {
         "(n, commercial) -> 'dict[str, float | None]'",
     # The context-level commercial binding (C, U1 follow-up b; GS Q15).
     "services.commercial.binding.bind_commercial_on_context":
-        "(ctx, commercial, *, user=None, in_flight: 'Callable[[object], bool] | None' = None)"
-        " -> 'dict | None'",
+        "(ctx, commercial, *, user=None, in_flight: 'Callable[[object], bool] | None' = None, "
+        "solver_cfg=None) -> 'dict | None'",
     # The generic defaults pack (A, U1 follow-up a) and the flat export series (e).
     "services.library.defaults_pack.loader.load_defaults_pack":
         "(version: 'str | None' = None) -> 'DefaultsPack'",
