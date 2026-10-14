@@ -114,6 +114,7 @@ Every refusal, a sidecar that fails validation included, is an
 from __future__ import annotations
 
 import contextlib
+import json
 import math
 import pathlib
 
@@ -153,9 +154,28 @@ def load_project_island() -> dict | None:
         return None
     from services.adequacy.island_config import ContractError
     try:
-        return load_island_config(pathlib.Path(storage) / SIDECAR_NAME)
+        island = load_island_config(pathlib.Path(storage) / SIDECAR_NAME)
     except ContractError as exc:
         raise IslandRefusal(f"{SIDECAR_NAME} is not a valid island config: {exc}") from exc
+    if island is not None:
+        island["cuts"] = load_applied_cuts(pathlib.Path(storage))
+    return island
+
+
+#: The frequency cuts the user applied (I7, owner QB), beside the sidecar.
+CUTS_FILE = "island_cuts.json"
+
+
+def load_applied_cuts(storage_dir) -> list[dict]:
+    """The applied cuts of the project at ``storage_dir`` (``[]`` without
+    ``island_cuts.json``); a file that is not JSON is refused by name."""
+    path = pathlib.Path(storage_dir) / CUTS_FILE
+    if not path.is_file():
+        return []
+    try:
+        return list(json.loads(path.read_text()).get("cuts") or [])
+    except (json.JSONDecodeError, AttributeError) as exc:
+        raise IslandRefusal(f"{CUTS_FILE} is not valid: {exc}") from exc
 
 
 _UNSET = object()
@@ -786,7 +806,7 @@ def _row(m, lhs: _Lin, rhs: _Lin, name, coord, refuse=None, facts=None) -> bool:
 
 #: The I7 cut kinds (gridspine ``frequency.cuts``): the 0⁺ quantity each
 #: bounds, in the unit of the I2b row it tightens.
-CUT_KINDS = ("inertia", "headroom_up", "headroom_down", "droop")
+CUT_KINDS = ("inertia", "headroom_up", "headroom_down", "droop_gain")
 
 
 def _cut_name(cut) -> str:
@@ -857,7 +877,7 @@ def _cut_coefficients(n, island) -> dict:
                 continue
             m_coef = (v["H_v_s"] / v["pf_rated"] if u["control"] == "gfm_vsm"
                       else v["tau_f_s"] / (2.0 * v["droop_pct"] / 100.0))
-            for kind, coef in (("inertia", m_coef), ("droop", 1.0 / (v["droop_pct"] / 100.0 * F0_HZ)),
+            for kind, coef in (("inertia", m_coef), ("droop_gain", 1.0 / (v["droop_pct"] / 100.0 * F0_HZ)),
                                ("headroom_up", 1.0), ("headroom_down", 1.0)):
                 out[kind].append((name, "StorageUnit", coef))
         elif u["kind"] == "genset" and (name in n.generators.index or name in n.links.index):
@@ -866,7 +886,7 @@ def _cut_coefficients(n, island) -> dict:
             if not bool(frame.at[name, "p_nom_extendable"]):
                 continue
             if u.get("governor") == "droop":
-                out["droop"].append((name, comp, eta / (v["droop_pct"] / 100.0 * F0_HZ)))
+                out["droop_gain"].append((name, comp, eta / (v["droop_pct"] / 100.0 * F0_HZ)))
             if u.get("spinning"):                    # online at 0⁺
                 out["inertia"].append((name, comp, v["H_s"] / v["cos_phi_r"] * eta))
                 out["headroom_up"].append((name, comp, eta))
@@ -1050,7 +1070,7 @@ def _instant_rows(n, m, sns, sns_p, coord, tag, period, *, island, gensets, gfm,
             p_out=p_out, nom_out=nom_out, on_out=on_out, online=online, p_store=p_store,
             k_sum=k_sum, margin=margin,
             rocof_max=rocof_max, df_qss=df_qss, cut_lhs=cut_lhs)
-        cut_lhs["droop"] = k_sum
+        cut_lhs["droop_gain"] = k_sum
         for cut in cuts:
             _cut_row(m, cut_lhs[cut["kind"]], cut, coord, facts)
 

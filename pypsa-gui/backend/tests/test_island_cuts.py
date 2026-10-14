@@ -44,7 +44,7 @@ def test_an_inertia_cut_buys_the_bess_its_inertia_needs():
 
 def test_a_droop_cut_buys_the_bess_its_gain_needs():
     """ΣK ≥ 15 MW/Hz at 0.5 MW/Hz per MW: p_nom = 30."""
-    n = _solve(_hub(load=10.0), _with([_cut("droop", 15.0, hour=1)]))
+    n = _solve(_hub(load=10.0), _with([_cut("droop_gain", 15.0, hour=1)]))
     assert _p_nom(n) == pytest.approx(30.0, abs=TOL)
 
 
@@ -63,11 +63,11 @@ def test_a_headroom_cut_buys_the_headroom(kind):
 
 def test_a_cut_is_one_row_at_its_own_hour():
     n = _hub(load=10.0)
-    _solve(n, _with([_cut("inertia", 25.0, hour=2), _cut("droop", 1.0, hour=3)]))
+    _solve(n, _with([_cut("inertia", 25.0, hour=2), _cut("droop_gain", 1.0, hour=3)]))
     rows = {name: c for name, c in n.model.constraints.items() if name.startswith("Island-cut-")}
-    assert sorted(rows) == ["Island-cut-droop-2030-3", "Island-cut-inertia-2030-2"]
+    assert sorted(rows) == ["Island-cut-droop_gain-2030-3", "Island-cut-inertia-2030-2"]
     assert all(c.data.sizes.get("snapshot", 1) == 1 for c in rows.values())
-    assert n._island_facts["cuts"] == {"applied": ["Island-cut-droop-2030-3", "Island-cut-inertia-2030-2"],
+    assert n._island_facts["cuts"] == {"applied": ["Island-cut-droop_gain-2030-3", "Island-cut-inertia-2030-2"],
                                        "not_applied": []}
 
 
@@ -115,7 +115,7 @@ def test_the_estimate_is_the_shortfall_over_the_bess_coefficient_times_its_cost(
     Droop: ΔK = 15 − 5 at 0.5 MW/Hz per MW is 20 MW = 2000. Headroom up:
     12 − 10 = 2 MW = 200."""
     for kind, required, current, mw, cost in (("inertia", 25.0, 12.5, 10.0, 1000.0),
-                                              ("droop", 15.0, 5.0, 20.0, 2000.0),
+                                              ("droop_gain", 15.0, 5.0, 20.0, 2000.0),
                                               ("headroom_up", 12.0, 10.0, 2.0, 200.0)):
         row = _estimate({**_cut(kind, required), "current": current})
         assert row["candidate"] == "bess", kind
@@ -151,3 +151,40 @@ def test_a_met_cut_costs_nothing_and_one_without_a_candidate_says_so():
     row = _estimate({**_cut("inertia", 25.0), "current": 12.5}, n=n)
     assert row["candidate"] is None and row["estimate"] is None
     assert "no extendable" in row["label"]
+
+
+# ── the applied cuts ride on the sidecar the solve reads (owner QB) ─────────
+
+
+import json  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from services.solver import island as island_mod  # noqa: E402
+from tests.test_campus_island_service import _config  # noqa: E402
+
+
+def _project_dir(tmp_path, monkeypatch, cuts=None):
+    (tmp_path / "island_config.json").write_text(json.dumps(_config()))
+    if cuts is not None:
+        (tmp_path / "island_cuts.json").write_text(json.dumps({"cuts": cuts, "trials": []}))
+    from services.pypsa_service import PyPSAService
+    monkeypatch.setattr(PyPSAService, "solve_target_context",
+                        staticmethod(lambda: SimpleNamespace(storage_dir=str(tmp_path))))
+
+
+def test_the_projects_applied_cuts_reach_the_solve(tmp_path, monkeypatch):
+    cuts = [_cut("inertia", 25.0, hour=2)]
+    _project_dir(tmp_path, monkeypatch, cuts)
+    assert island_mod.load_project_island()["cuts"] == cuts
+
+
+def test_without_a_cuts_file_the_solve_has_no_cuts(tmp_path, monkeypatch):
+    _project_dir(tmp_path, monkeypatch)
+    assert island_mod.load_project_island()["cuts"] == []
+
+
+def test_a_cuts_file_that_is_not_json_is_refused_with_its_name(tmp_path, monkeypatch):
+    _project_dir(tmp_path, monkeypatch)
+    (tmp_path / "island_cuts.json").write_text("{not json")
+    with pytest.raises(IslandRefusal, match="island_cuts.json"):
+        island_mod.load_project_island()
