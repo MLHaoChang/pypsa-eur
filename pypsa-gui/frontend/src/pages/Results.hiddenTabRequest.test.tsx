@@ -70,7 +70,12 @@ async function renderResults() {
   render(<QueryClientProvider client={client}><Results /></QueryClientProvider>)
   await act(async () => { await new Promise(r => setTimeout(r, 20)) })
 }
-const tabIds = () => Array.from(document.querySelectorAll('[data-testid^="results-tab-"]'))
+// UX overhaul S3: the group row shows every group with a visible tab; the
+// sub-row shows the active group's tabs. Read without clicking — a click is a
+// pick, and a pick clears the request these tests are about.
+const groupIds = () => Array.from(document.querySelectorAll('[data-testid^="results-group-"]'))
+  .map(el => el.getAttribute('data-testid')!.slice('results-group-'.length))
+const subTabIds = () => Array.from(document.querySelectorAll('[data-testid="results-subtabs"] [data-testid^="results-tab-"]'))
   .map(el => el.getAttribute('data-testid')!.slice('results-tab-'.length))
 
 beforeEach(() => {
@@ -82,13 +87,17 @@ describe('the temporary advanced tab in Guided', () => {
     useUIStore.setState({ uiMode: 'guided' })
     useUIStore.getState().requestResultsTab('economics')
     await renderResults()
-    expect(tabIds()).toEqual(['summary', 'economics', 'adequacy', 'fmea'])
+    // Its group joins the row, holding only the requested tab.
+    expect(groupIds()).toEqual(['summary', 'investment', 'reliability'])
+    expect(subTabIds()).toEqual(['economics'])
     const chip = screen.getByTestId('results-tab-economics')
     expect(chip.getAttribute('data-advanced')).toBe('true')
     expect(chip.textContent).toContain('Advanced')
     expect(chip.className).toContain('border-accent')
+    fireEvent.click(screen.getByTestId('results-group-reliability'))
     fireEvent.click(screen.getByTestId('results-tab-fmea'))
-    expect(tabIds()).toEqual(['summary', 'adequacy', 'fmea'])
+    expect(groupIds()).toEqual(['summary', 'reliability'])
+    expect(subTabIds()).toEqual(['adequacy', 'fmea'])
     expect(screen.getByTestId('fmea-stub')).toBeTruthy()
   })
 
@@ -96,7 +105,7 @@ describe('the temporary advanced tab in Guided', () => {
     useUIStore.setState({ uiMode: 'guided' })
     useUIStore.getState().requestAssetDetail({ componentClass: 'Generator', name: 'g1' })
     await renderResults()
-    expect(tabIds()).toEqual(['summary', 'adequacy', 'fmea', 'asset'])
+    expect(groupIds()).toEqual(['summary', 'reliability'])
     expect(screen.getByTestId('results-tab-asset').getAttribute('data-advanced')).toBe('true')
   })
 
@@ -104,7 +113,8 @@ describe('the temporary advanced tab in Guided', () => {
     useUIStore.setState({ uiMode: 'guided' })
     useUIStore.getState().requestResultsTab('fmea')
     await renderResults()
-    expect(tabIds()).toEqual(['summary', 'adequacy', 'fmea'])
+    expect(groupIds()).toEqual(['summary', 'reliability'])
+    expect(subTabIds()).toEqual(['adequacy', 'fmea'])
     expect(screen.getByTestId('fmea-stub')).toBeTruthy()
   })
 
@@ -112,7 +122,8 @@ describe('the temporary advanced tab in Guided', () => {
     useUIStore.setState({ uiMode: 'guided' })
     localStorage.setItem('results:active-tab', 'economics')
     await renderResults()
-    expect(tabIds()).toEqual(['summary', 'adequacy', 'fmea'])
+    expect(groupIds()).toEqual(['summary', 'reliability'])
+    expect(subTabIds()).toEqual(['adequacy', 'fmea'])
     expect(screen.getByTestId('adequacy-stub')).toBeTruthy()
   })
 
@@ -155,7 +166,7 @@ describe('picking a tab clears requestedTab (Guided → Expert → Guided)', () 
     // back in Guided it is a stored hidden tab and falls back.
     fireEvent.click(screen.getByTestId('results-tab-economics'))
     act(() => { useUIStore.setState({ uiMode: 'guided' }) })
-    expect(tabIds()).toEqual(['summary', 'adequacy', 'fmea'])
+    expect(groupIds()).toEqual(['summary', 'reliability'])
     expect(document.querySelector('[data-advanced]')).toBeNull()
     expect(screen.getByTestId('adequacy-stub')).toBeTruthy()
     expect(localStorage.getItem('results:active-tab')).toBe('economics')

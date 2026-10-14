@@ -59,3 +59,38 @@ export function splitValueUnit(s: string): { value: string; unit: string | undef
   if (!m) return { value: s, unit: undefined }
   return { value: m[1], unit: m[2] }
 }
+
+// ── KPI tile rounding (owner sign-off R1, 2026-10-14) ───────────────────────
+// Tiles are read at a glance, so they show three significant figures (money,
+// energy, power, emissions) or one decimal (prices, %, h/yr); tables keep full
+// precision. Emissions in tonnes scale to kt / Mt. Applied by
+// components/Kpi.tsx to the figure it is given, so a tile and its CSV can
+// never disagree by more than this display rounding.
+const FIGURE = /^([-+−]?)(€?)([-+−]?)(\d[\d,]*(?:\.\d+)?)$/
+const ONE_DECIMAL = (unit: string) => unit === '%' || unit === 'h/yr' || unit.startsWith('€/')
+
+function sigFig3(x: number): string {
+  if (x === 0) return '0'
+  const decimals = Math.max(0, 2 - Math.floor(Math.log10(Math.abs(x))))
+  // Rounding can carry into a new digit (999.6 → 1000); that is still 3 s.f.
+  return x.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+}
+
+export function kpiFigure(value: string, unit: string | undefined): { value: string; unit: string | undefined } {
+  const m = FIGURE.exec(value.trim())
+  if (!m) return { value, unit }
+  const sign = m[1] || m[3] ? '-' : ''
+  const euro = m[2]
+  let x = Number(m[4].replace(/,/g, ''))
+  if (!Number.isFinite(x)) return { value, unit }
+  let u = unit
+  if (u === 'tCO₂' || u === 'tCO2') {
+    if (x >= 1e6) { x /= 1e6; u = 'Mt CO₂' }
+    else if (x >= 1e3) { x /= 1e3; u = 'kt CO₂' }
+    else u = 't CO₂'
+  }
+  const digits = u !== undefined && ONE_DECIMAL(u)
+    ? x.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+    : sigFig3(x)
+  return { value: `${sign}${euro}${digits}`, unit: u }
+}
