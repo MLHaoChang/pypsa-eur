@@ -286,9 +286,13 @@ def test_every_check_is_present_once_and_the_net_is_not_mutated():
     before = (net.load.copy(), len(net.sgen), net.gen.copy())
     out = assess_connection(net, Facility(bus="BUS_02", load_mw=30.0, onsite_mw=10.0),
                             branch_contingencies(net), PROFILE, sk_min_mva=300.0)
-    assert sorted(out["check"]) == sorted(CHECKS)
+    # q_ibr is reported only for a profile that states q_range_ibr (IEEE 2800)
+    assert sorted(out["check"]) == sorted(c for c in CHECKS if c != "q_ibr")
     pd.testing.assert_frame_equal(net.load, before[0])
     assert len(net.sgen) == before[1]
+    us = assess_connection(net, Facility(bus="BUS_02", load_mw=30.0, onsite_mw=10.0),
+                           branch_contingencies(net), load_grid_code("us_ieee2800_nerc"), sk_min_mva=300.0)
+    assert sorted(us["check"]) == sorted(CHECKS)
 
 
 @pytest.mark.parametrize("fac, match", [

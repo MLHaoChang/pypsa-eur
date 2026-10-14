@@ -131,6 +131,66 @@ def requirement_from(profile: dict, p_ref_mw: float, pf: float | None = None) ->
     )
 
 
+#: The inverter-based resources IEEE 2800's reactive capability applies to.
+IBR_KINDS = ("bess", "pv", "wind")
+IBR_LABEL = ("screening at unit terminals: sqrt(S^2 - P_n^2) per inverter against the profile's q_range_ibr x P_n "
+             "at rated active power; the standard states it for the plant at its reference point, so collector "
+             "and transformer reactive losses are not counted")
+IBR_COLUMNS = ("unit", "kind", "p_n_mw", "s_mva", "required_mvar", "available_mvar", "shortfall_mvar", "status",
+               "detail", "clause", "source")
+
+
+def ibr_q_capability(campus, profile: dict):
+    """IEEE 2800's reactive capability of the on-site IBR (``IBR_LABEL``):
+    one row per BESS, PV or wind unit, then a ``TOTAL`` row comparing the
+    sums, or None when the profile states no ``q_range_ibr``. A unit without
+    a rating is ``reported``, never ``pass``; a shortfall ``fail`` row says
+    the inverter rating or the STATCOM that would cover it."""
+    if "q_range_ibr" not in profile:
+        return None
+    ibr = profile["q_range_ibr"]
+    frac = float(ibr["value"])
+    oversize = math.sqrt(1.0 + frac ** 2)
+    rows = []
+    for uid, u in campus.units.iterrows():
+        if u["kind"] not in IBR_KINDS:
+            continue
+        p_n, s = float(u["p_mw"]), float(u["s_mva"]) if u["s_mva"] == u["s_mva"] else math.nan
+        base = {"unit": str(uid), "kind": u["kind"], "p_n_mw": p_n, "s_mva": s, "clause": ibr["clause"],
+                "source": ibr["source"]}
+        if not (p_n > 0 and math.isfinite(s) and s > 0):
+            rows.append({**base, "required_mvar": frac * p_n if p_n > 0 else math.nan, "available_mvar": math.nan,
+                         "shortfall_mvar": math.nan, "status": "reported",
+                         "detail": f"{uid}: rating not given (P_n and the inverter S are needed)"})
+            continue
+        req = frac * p_n
+        avail = math.sqrt(max(s ** 2 - p_n ** 2, 0.0))
+        short = max(req - avail, 0.0)
+        if short <= 1e-9:
+            detail = f"{uid} supplies {avail:.2f} Mvar of the {req:.2f} Mvar required at rated P"
+        else:
+            detail = (f"{uid} can supply {avail:.2f} of the {req:.2f} Mvar required at rated P: oversize the "
+                      f"inverter to S >= {oversize:.3f} x P_n = {oversize * p_n:.2f} MVA, or add "
+                      f"{short:.2f} Mvar of STATCOM")
+        rows.append({**base, "required_mvar": req, "available_mvar": avail, "shortfall_mvar": short if short > 1e-9
+                     else 0.0, "status": "pass" if short <= 1e-9 else "fail", "detail": detail})
+    if not rows:
+        return None
+    rated = [r for r in rows if r["status"] != "reported"]
+    req_t = sum(r["required_mvar"] for r in rated)
+    avail_t = sum(r["available_mvar"] for r in rated)
+    status = ("reported" if any(r["status"] == "reported" for r in rows)
+              else "fail" if any(r["status"] == "fail" for r in rows) else "pass")
+    rows.append({"unit": "TOTAL", "kind": "ibr", "p_n_mw": sum(r["p_n_mw"] for r in rows), "s_mva": math.nan,
+                 "required_mvar": req_t, "available_mvar": avail_t,
+                 "shortfall_mvar": sum(r["shortfall_mvar"] for r in rated), "status": status,
+                 "detail": (f"on-site IBR: {avail_t:.2f} Mvar available against {req_t:.2f} Mvar required "
+                            f"({frac:g} x rating at rated P), screened at the unit terminals"
+                            + ("; a unit without a rating is not counted" if status == "reported" else "")),
+                 "clause": ibr["clause"], "source": ibr["source"]})
+    return pd.DataFrame(rows, columns=list(IBR_COLUMNS))
+
+
 def compensation_bus(campus) -> str:
     """Where compensation goes: the low-voltage side of the transformers
     connected to the PCC, else the PCC bus itself."""
