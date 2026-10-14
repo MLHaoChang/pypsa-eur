@@ -2343,6 +2343,128 @@ C11's loop: trial, verdict, cost.
 - termination at N;
 - no cuts when everything passes.
 
+### I7 as built (2026-10-14)
+
+**Owner and coordinator decisions (2026-10-14):**
+- **QA (owner), option 1:** one click runs the loop. It applies the cuts,
+  re-solves the hub, reruns the campus study, and repeats with the newly
+  proposed cuts until all pass or N = 3 trials. Every trial is reported, and
+  any cut can be removed.
+- **QB, option 1:** the applied cuts live in pypsa-gui's `island_cuts.json`,
+  beside the sidecar. `load_project_island` merges it in. There is no
+  gridspine schema change.
+- **QC, option 1:** no chat tools in this PR; a follow-up adds them.
+- **Split of work:** the grid-forming session writes the cut derivation in
+  gridspine (`frequency.cuts`, `cuts_campus`). This PR is the pypsa-gui
+  side.
+
+**The contract** (frozen with the grid-forming session): `CUT_COLUMNS`,
+written to `campus_freq_cuts.csv`.
+- **Columns:** period, hour, scenario, event, kind, required, current,
+  delta, unit, binding, derivation, heuristic, feasible, note.
+- **kind:**
+  - `inertia`: M in MW·s, the I2c M, doubled here for the RoCoF row's 2M;
+  - `headroom_up` / `headroom_down`: MW at 0⁺;
+  - `droop_gain`: ΣK in MW/Hz.
+- **current:** read from the run's I3a tables, so `required = current +
+  delta` bounds the expression the hub LP already has.
+- **No cuts for E4:** bridge-energy and pickup failures get none.
+
+**The rows** (`services/solver/island.py`):
+- **Shape:** a cut is `Island-cut-{kind}-{period}-{hour}`. It is built on
+  the left-hand side the I2b seamless rows already have: M (half the
+  RoCoF 2M), `up`, `down`, or `k_sum`. Snapshot terms are taken at the
+  cut's hour only; nominal terms are taken as they are.
+- **Tightest wins:** of several cuts at one (period, hour, kind), the
+  tightest is kept.
+- **Not applied, with a reason:** cuts for another scenario or period, or
+  when the sidecar has no seamless rows.
+- **Refused:** a cut past the period's hours, or of an unknown kind.
+- **`cut_estimates`:** the primal estimate. It meets the shortfall
+  `required − current` with the cheapest extendable candidate, using the
+  coefficients the rows count, and is labelled an estimate:
+  - a droop GFM gives τ_f/(2R) of M and 1/(R·f0) of K;
+  - a VSM gives H_v/pf of M;
+  - a spinning genset gives H/cos φ·η of M and η of upward headroom;
+  - a droop genset gives η/(R·f0) of K.
+
+**The service** (`services/campus_island_cuts.py`):
+- **`get_cuts`:** reads `campus_freq_cuts.csv` against the contract and
+  refuses a file whose columns differ.
+  - Each seamless, feasible cut is applicable and gets its estimate.
+  - Each other cut gets its reason.
+  - It also returns the applied cuts, the trials, `LIMIT` and `MAX_TRIALS`.
+- **`apply_loop(project, solve, rerun, stop_event)`:**
+  - Applies the proposed cuts that no applied cut already meets, then
+    re-solves and reruns.
+  - Stops at "all pass", "no cut can fix what still fails", "N reached" or
+    "stopped by the user".
+  - A loop with nothing to apply is refused before any solve.
+- **The background job** (`start_apply_job`):
+  - It is refused when island constraints are off (the solve would not
+    read the cuts), when there is no campus run to rerun, or when there is
+    nothing to apply. It returns 409 while the project's job runs.
+  - The thread re-solves through the solve queue, which binds the project
+    directory, so the sidecar and the cuts are read. It reruns the campus
+    study with its last settings.
+  - Cancel stops the loop after the trial in hand.
+- **`remove_cut` / `clear_cuts`:** take cuts back.
+- **Routes**, each write checking the edit lock: `GET`/`DELETE
+  /island/cuts`, `DELETE /island/cuts/{period}/{hour}/{kind}`, `POST
+  /island/cuts/apply` (202), `GET /island/cuts/apply`, `POST
+  /island/cuts/apply/cancel`.
+- **The bundle** carries `island_cuts.json`. Templates ship none.
+
+**The panel** (`CampusIslandCutsSection`, in the Island section):
+- **The limit** is stated first: bridge energy gets no cut.
+- **The proposed cuts:**
+  - each shows its hour, kind, current, required, the binding limit, the
+    cheapest unit, the MW added and the estimate;
+  - inertia and headroom cuts are tagged heuristic;
+  - each inapplicable cut shows its reason instead of an estimate.
+- **Apply / Cancel:** the job is polled while it runs. When it ends, the
+  cuts, the island report and the campus state are read again.
+- **Below:** the trials (trial, cuts added, hub objective, verdict) and
+  the applied cuts, each with Remove, plus Clear all.
+
+**Tests:**
+- `test_island_cuts.py` (27), with hand cases on the I2c hub:
+  - inertia 25 MW·s buys p_nom 20;
+  - droop 15 MW/Hz buys 30;
+  - with a spinning genset, upward headroom 12 buys 8.5 and downward 12
+    buys 12;
+  - the estimates: 1000, 2000 and 200; a cheaper genset 800.
+- `test_campus_island_cuts.py` (31), with the solve and rerun injected:
+  - fails once and passes after one cut;
+  - stops at N;
+  - stops when what still fails has no cut;
+  - nothing to apply;
+  - an equal or met cut is not re-added;
+  - the tightest cut is applied;
+  - the verdict counts hours;
+  - stop, the job, 409, cancel, a failed solve;
+  - the queue call;
+  - the routes and edit lock.
+- The panel (8).
+
+**Mutation testing:** 24 edits. 9 survived the first run, and each was
+closed by a test:
+- the snapshot selection (no test had dispatch terms);
+- the up/down swap and the constant (headroom was symmetric in every test);
+- the tightest-of-two, in the LP and in the loop;
+- a met cut's candidate;
+- the equal-required case;
+- the verdict's hour count;
+- the 409 race (the test now waits until the first job has written its
+  cuts).
+
+24 of 24 are now killed.
+
+**Data Center check of the E4 fix** (PR #226, run at the grid-forming
+session's request on a scratch copy): ups_bridged passes at all 9 island
+hours, with UPS autonomy ≈655 s against 600 s needed and all 11 pickup
+blocks passing. The earlier bridge failure was the modelling artefact.
+
 ### I8: multi-bus RMS and the client-grade handoff — step 4b (L; legal check first, owner Q4)
 
 **The licence (Q4).**
