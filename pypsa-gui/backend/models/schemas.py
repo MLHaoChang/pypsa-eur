@@ -143,6 +143,11 @@ class LineCreate(BaseModel):
     discount_rate: float | None = None
     terrain_factor: Finite = 1.0
     carrier: str = "AC"
+    # S1c-2: the investment typed per MVA and km (GUI columns, services/asset_schema). When priced, the
+    # cost columns are derived from it times `length` over the line's `lifetime`, and re-derived whenever
+    # the length changes.
+    inv_per_km_overnight: float | None = None
+    inv_per_km_fom_share: float | None = None
     # PyPSA vintage attributes — same defaults as Generators / Storage /
     # Links / Stores so multi-period validators don't single lines out.
     # `lifetime=inf` keeps a line buildable across every investment

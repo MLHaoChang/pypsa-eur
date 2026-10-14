@@ -25,7 +25,7 @@ ROUTE = "/api/network/asset_schema"
 # S0's investment parts). A descriptor may name these or a PyPSA attribute.
 CUSTOM_COLUMNS = {
     "outage_rate_value", "outage_rate_basis", "mttr_hours", "p_max_pu_includes_outages",
-    "curtailment_cost", "discount_rate",
+    "curtailment_cost", "discount_rate", "v_nom_0", "v_nom_1",
 }
 
 # Every key the hand-written edit cards let a user change today. S1 must not
@@ -61,13 +61,25 @@ CARD_KEYS = {
         "p_min_pu", "p_max_pu", "efficiency", "marginal_cost", "capital_cost", "fom_cost", "overnight_cost",
         "discount_rate", "build_year", "lifetime", "outage_rate_value", "outage_rate_basis", "mttr_hours",
     },
+    # S1c-2: the Line and Transformer panels before S1c-2. A line's r/x/b are typed per km by the panel's own
+    # block (they scale with length) and its single overnight cost is replaced by the per-km part.
+    "Line": {
+        "name", "s_nom", "length", "capital_cost", "fom_cost", "s_nom_extendable", "s_nom_min", "s_nom_max",
+        "discount_rate", "build_year", "lifetime", "outage_rate_value", "outage_rate_basis", "mttr_hours",
+    },
+    "Transformer": {
+        "name", "v_nom_0", "v_nom_1", "s_nom", "r", "x", "tap_ratio", "phase_shift", "s_nom_extendable",
+        "s_nom_min", "s_nom_max", "capital_cost", "fom_cost", "overnight_cost", "discount_rate", "build_year",
+        "lifetime",
+    },
 }
 
 ALL = sorted(F.known_components())
 ATTR = {"Generator": "generators", "StorageUnit": "storage_units", "Store": "stores", "Load": "loads",
-        "Link": "links"}
+        "Link": "links", "Line": "lines", "Transformer": "transformers"}
 # The capacity each extendable class sizes.
-NOM = {"Generator": "p_nom", "StorageUnit": "p_nom", "Link": "p_nom", "Store": "e_nom"}
+NOM = {"Generator": "p_nom", "StorageUnit": "p_nom", "Link": "p_nom", "Store": "e_nom", "Line": "s_nom",
+       "Transformer": "s_nom"}
 
 
 def _fields(component: str) -> dict[str, F.FieldSpec]:
@@ -198,7 +210,8 @@ def test_blank_policy_agrees_with_the_write_model(component):
     from models import schemas as M
 
     model = getattr(M, f"{component}Create")
-    required = {"name": "x", "bus0": "a", "bus1": "b"} if component == "Link" else {"name": "x", "bus": "b"}
+    branch = component in ("Link", "Line", "Transformer")
+    required = {"name": "x", "bus0": "a", "bus1": "b"} if branch else {"name": "x", "bus": "b"}
     for f in F.fields_for(component):
         if f.derived or f.key not in model.model_fields:
             continue
@@ -242,3 +255,15 @@ def test_the_frontend_fixture_matches_the_descriptors():
     t.FRONTEND_FIXTURE.write_text(json.dumps(t.fixture_payload(), indent=1, ensure_ascii=False) + chr(10))"`
     run from pypsa-gui/backend."""
     assert json.loads(FRONTEND_FIXTURE.read_text(encoding="utf-8")) == fixture_payload()
+
+
+# ── S1c-2: the line's per-km part ────────────────────────────────────────────
+
+def test_a_lines_investment_is_typed_per_km_and_its_costs_derived():
+    ln = _fields("Line")
+    assert ln["inv_per_km_overnight"].unit_display == "EUR/MVA/km" and not ln["inv_per_km_overnight"].derived
+    assert not ln["lifetime"].derived                    # the part takes the line's own lifetime
+    for derived in ("capital_cost", "fom_cost"):
+        assert ln[derived].derived is True, derived
+    assert "overnight_cost" not in ln
+    assert set(part_columns("Line")) <= set(ln)

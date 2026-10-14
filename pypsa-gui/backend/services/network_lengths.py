@@ -31,6 +31,7 @@ from services.network_geometry import (
     _branch_geometry_km,
     _impedance_preview,
 )
+from services.network_crud import rederive_scaled_parts
 from services.pypsa_service import PyPSAService
 
 log = logging.getLogger(__name__)
@@ -148,6 +149,8 @@ def apply_lengths_from_geometry(keys: list[str] | None) -> dict:
             old_length = float(df.at[name, "length"])
             old = {k: float(df.at[name, k]) for k in _IMPEDANCE_FIELDS} if kind == "line" else None
             df.at[name, "length"] = float(new_km)
+            if kind == "line":
+                rederive_scaled_parts(n, "Line", name)       # a per-km cost follows the length (S1c-2)
             sources[key] = source
             if old is not None:
                 p = _impedance_preview(name, old_length, float(new_km), old)
