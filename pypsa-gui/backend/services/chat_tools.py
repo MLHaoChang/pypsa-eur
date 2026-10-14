@@ -651,9 +651,11 @@ def _payload_or_no_data(kind: str, result: Any, message: str) -> Any:
     return result
 
 
-# What a 204 means on /api/results. Both halves are load-bearing: `lost_load`
-# and `adequacy` answer 204 on a perfectly good solve that simply shed nothing
-# / carried no target, so "not solved" alone would be a lie.
+# What a 204 means on /api/results. Both halves are load-bearing: several
+# kinds answer 204 when a solve produced none of their result. (Since UX
+# overhaul S2b `lost_load`, `adequacy` and `reserve_margin` answer 200 with
+# `voll_applied` / `configured: false` on a solve without that standard and
+# 204 only when nothing is solved; the message stays true for the rest.)
 _RESULTS_NO_DATA_MESSAGE = (
     "no result of this kind: the network has not been solved, its dispatch is "
     "stale relative to the current topology, or this solve produced none of "
@@ -2931,12 +2933,12 @@ _ADEQUACY_NO_DATA_HINTS: dict[str, str] = {
     "coupling_loop": "no coupling loop has run in this session",
     "margin_loop": "no margin loop has run in this session",
     "adequacy": (
-        "nothing has been solved, or the last solve ran without a "
-        "reliability target"
+        "nothing has been solved (a solve without a reliability target "
+        "answers configured: false instead)"
     ),
     "reserve_margin": (
-        "nothing has been solved, the last solve set no reserve margin, or "
-        "it produced no dispatch to judge one against"
+        "nothing has been solved, or it produced no dispatch to judge a margin "
+        "against (a solve without a margin answers configured: false instead)"
     ),
     "eh_study": "no Energy Hub reference-design study has run in this session",
     "eh_reference_design": (

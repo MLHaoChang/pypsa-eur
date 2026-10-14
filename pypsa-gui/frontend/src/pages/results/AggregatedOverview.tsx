@@ -79,7 +79,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
   // byte-identical to the old bare-reference request, and this tab must
   // stay on whole-horizon payloads (never pass a window).
   const { data: curtailTS }   = useQuery({ queryKey: nk(currentProject, 'results', 'curtailment'),      queryFn: () => resultsApi.getCurtailment() })
-  const { data: lostLoad }    = useQuery({ queryKey: nk(currentProject, 'results', 'lost_load'),        queryFn: () => resultsApi.getLostLoad() })
+  const { data: lostLoad, isSuccess: lostLoadRead }    = useQuery({ queryKey: nk(currentProject, 'results', 'lost_load'),        queryFn: () => resultsApi.getLostLoad() })
   const { data: cost }        = useQuery({ queryKey: nk(currentProject, 'results', 'cost_breakdown'),   queryFn: resultsApi.getCostBreakdown })
 
   const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
@@ -163,6 +163,12 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
       ? ((llMeta.total_cost_eur ?? 0) / llMeta.total_mwh) : 0
     return { mwh, cost: mwh * voll }
   }, [lostLoad, weightCtx, fullRange])
+  // UX overhaul S2b: null lost load inside a solved results tab means the
+  // solve had no VOLL — not modelled, never "—"; a VOLL solve that shed
+  // nothing is a computed zero.
+  const lostLoadState = lostLoadRead && !lostLoad
+    ? { state: 'not_modelled' as const, reason: 'The solve had no VOLL, so lost load was not modelled.' }
+    : lostLoadTotals && lostLoadTotals.mwh === 0 ? { state: 'zero' as const } : {}
 
   // Curtailment cost (whole horizon, weighted by objective column).
   const curtailmentCost = useMemo(() => {
@@ -532,10 +538,12 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                hint={'Σ max(p_max_pu × p_nom − p, 0) over renewable generators' + scaleHint} />
           <KPI label="Lost load"
                value={lostLoadTotals ? fmtEnergy(lostLoadTotals.mwh) : '—'}
-               hint={"Demand the LP couldn't serve — absorbed by VOLL slack generators per bus. Set Solver Settings → VOLL > 0 to enable." + scaleHint} />
+               hint={"Demand the LP couldn't serve — absorbed by VOLL slack generators per bus. Set Solver Settings → VOLL > 0 to enable." + scaleHint} 
+               {...lostLoadState} />
           <KPI label="Lost-load cost"
                value={lostLoadTotals ? fmtCurrency(lostLoadTotals.cost) : '—'}
-               hint={'MWh of lost load × the VOLL set in Solver Settings (e.g. 3000–10000 €/MWh).' + scaleHint} />
+               hint={'MWh of lost load × the VOLL set in Solver Settings (e.g. 3000–10000 €/MWh).' + scaleHint} 
+               {...lostLoadState} />
         </div>
       </section>
 

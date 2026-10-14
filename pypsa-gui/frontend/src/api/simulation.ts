@@ -1447,10 +1447,12 @@ export const resultsApi = {
   // this in an arrow; calling with no arguments is still byte-identical to
   // before.
   // Minimal AdequacyReport from the last target-constrained solve
-  // (GET /results/adequacy; 204 = no target / not solved). Shape:
+  // (GET /results/adequacy; 204 = not solved, 200 `{configured: false}` =
+  // solved without a target — both null here, as before S2b; the panels'
+  // "no target was applied" copy covers them). Shape:
   // pages/results/adequacy.tsx AdequacyReportPayload.
   getAdequacy: () => client.get('/results/adequacy')
-    .then(r => (r.status === 204 ? null : r.data)),
+    .then(r => (r.status === 204 || r.data?.configured === false ? null : r.data)),
   // COPT screening adequacy + FMECA ranking (Phase 2; 204 = no occurrence
   // data). Shape: pages/results/adequacy.tsx CoptPayload.
   getCopt: () => client.get('/results/copt')
@@ -1462,7 +1464,9 @@ export const resultsApi = {
   // load-scaling transforms applied and the restore has since reverted them.
   // Shape: `ReserveMarginPayload` above.
   getReserveMargin: () => client.get('/results/reserve_margin')
-    .then(r => (r.status === 204 ? null : r.data as ReserveMarginPayload)),
+    // S2b: 200 `{configured: false}` (solved without a margin) maps to null,
+    // like the 204 (not solved) it used to share with it.
+    .then(r => (r.status === 204 || r.data?.configured === false ? null : r.data as ReserveMarginPayload)),
   // Cost-vs-availability frontier (Phase 5; 204 = no study run this session).
   // Shape: pages/results/FrontierPanel.tsx FrontierPayload.
   getFrontier: () => client.get('/results/frontier')
@@ -1624,6 +1628,9 @@ export const resultsApi = {
     index: string[]; columns: string[]; data: number[][];
     total_mwh: number; total_cost_eur: number;
     voll_eur_per_mwh: number;
+    // UX overhaul S2b: whether VoLL was in the solve (solve-time settings,
+    // not the draft). Absent on older backends.
+    voll_applied?: boolean
     // Weighted loss-of-load hours, electrical buses, horizon scope (not the
     // sliced range). Absent on payloads from older backends.
     shed_hours?: { total: number; by_period: Record<string, number> };
@@ -1639,7 +1646,11 @@ export const resultsApi = {
     // there (api/ doesn't depend on pages/) so the shape is inlined; keep it
     // in sync if `TSPayload.range` ever changes.
     range?: { from: number; to: number; total: number; complete: boolean; capped: boolean }
-  }>('/results/lost_load', tsParams(undefined, range)).then(r => r.status === 204 ? null : r.data),
+  }>('/results/lost_load', tsParams(undefined, range)).then(r =>
+    // null = no lost load to show: not solved (204), or solved without VoLL
+    // (S2b `voll_applied: false`, whose totals are null, never 0). Inside a
+    // results tab — which needs a solve — null therefore means not modelled.
+    r.status === 204 || r.data?.voll_applied === false ? null : r.data),
   // Transmission-losses summary. `enabled=false` ⇒ the solve didn't model
   // losses, in which case totals/peak are 0 (intentional: the LoadFlow tab
   // renders "0 MWh" instead of a not-solved placeholder). For source='ac_pf',

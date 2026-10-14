@@ -284,6 +284,8 @@ RESULT_STATE_KEYS = (
     "eh_dtc_stress",
     "eh_dtc_planning",
     "last_reserve_margin",
+    # UX overhaul S2b: the settings the last successful solve used.
+    "last_solve_settings",
     # Edge Investment Case (P0 WP0.5): the report, the billing pass's
     # per-item frames, and the solved `ic_*` commercial terms the cost
     # breakdown needs to reconcile after a reload (spec §5.1).
@@ -550,6 +552,11 @@ class ProjectSolverState:
     # serves. Reset with the rest each solve, so a margin can never outlive
     # the plan that met it.
     last_reserve_margin: Any = None
+    # The settings the last SUCCESSFUL solve used (voll, whether an ENS target
+    # and a reserve margin were applied) — UX overhaul S2b. Lets the results
+    # routes say "solved without this standard" instead of a 204 that also
+    # means "not solved", and answer from the solve rather than the draft.
+    last_solve_settings: Any = None
     lopf_results: Any = None
     ac_pf_results: Any = None
     ac_pf_convergence: Any = None        # dict[snapshot_iso, bool] (legacy)

@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Kpi from '../../components/Kpi'
+import ResultState from '../../components/ResultState'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
 } from 'recharts'
@@ -69,7 +70,7 @@ export default function LostLoadTab() {
   // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
   // lost-load query below can be windowed before any payload exists.
   const { win, winValid, fetchRange } = useResultsWindow(currentProject)
-  const { data: lostLoad } = useQuery({
+  const { data: lostLoad, isSuccess: lostLoadRead } = useQuery({
     queryKey: nk(currentProject, 'results', 'lost_load', win.from, win.to),
     queryFn: () => resultsApi.getLostLoad(fetchRange),
     enabled: winValid,
@@ -172,8 +173,15 @@ export default function LostLoadTab() {
   // The `targeted` branch's old copy said "the reliability target ABOVE
   // reports what actually bound" — there is no longer anything above, so it
   // points at the tab that now carries it.
+  // Nothing to say until the query answers: an unread payload is neither
+  // "not modelled" nor "nothing shed".
+  if (!lostLoadRead && !lostLoad) return null
   if (!lostLoad || !totals || totals.mwh <= 0) {
     const targeted = (adequacy as AdequacyReportPayload | null | undefined)?.target != null
+    // `voll_applied` comes from the solve-time settings (S2b); older payloads
+    // without it fall back to the VoLL the capture carries.
+    const vollApplied = lostLoad != null
+      && (lostLoad.voll_applied ?? (lostLoad.voll_eur_per_mwh ?? 0) > 0)
     return (
       <div className="flex flex-col h-full overflow-auto p-4 gap-4">
         <header>
@@ -190,15 +198,20 @@ export default function LostLoadTab() {
               and how the plan scores under the screening and sampling engines, is on the
               Adequacy tab.
             </p>
+          ) : vollApplied ? (
+            // UX overhaul S2b: VoLL WAS in the solve and nothing was shed — a
+            // computed zero, not a missing setting.
+            <p>
+              No load was shed in this solve: with a VOLL of{' '}
+              {Math.round(lostLoad?.voll_eur_per_mwh ?? 0).toLocaleString('en-US')} €/MWh the plan
+              served all demand, so there is no lost-load breakdown to chart.
+            </p>
           ) : (
-            <>
-              <p>No lost-load data available.</p>
-              <p>
-                The LP only writes lost-load when run with <code className="font-mono">VOLL &gt; 0</code> in
-                solver settings AND the optimisation can't meet demand at any price ≤ VOLL. Set a VOLL
-                (e.g. 3000–10000 €/MWh) and re-run to populate this tab.
-              </p>
-            </>
+            <ResultState
+              state="not_modelled"
+              reason="Lost load was not modelled in this run: the solve had no VOLL. The LP only writes lost load when VOLL > 0 and demand cannot be met at any price up to VOLL (e.g. 3000–10000 €/MWh)."
+              action={{ label: 'Set VOLL in Solver settings', onClick: () => useUIStore.getState().setSlidePanel('simparams') }}
+            />
           )}
         </div>
       </div>
