@@ -1,6 +1,8 @@
 // Guided-mode spec §5.3 (Start): the three energy-hub templates from the
 // wizard's own table, created through the lifted wizard mutation; the open
 // template project's provenance; "Use my network" goes to the Site card.
+// U3 (owner decision 5): beside them, "Is this investment worth it?" — the
+// decision-study questions, started through the wizard's own entry hook.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -11,7 +13,17 @@ import { TEMPLATES } from '../../../layout/NewProjectWizard'
 import { useCreateFromTemplate } from '../../../hooks/useCreateFromTemplate'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { DC_TEMPLATE } from '../testFixtures'
+import { useDecisionStore } from '../../decision/decisionStore'
+import { ERROR_COPY } from '../../../utils/decisionVocabulary'
 import { StartCard } from './StartCard'
+
+const authMode = vi.hoisted(() => ({ authEnabled: false }))
+vi.mock('../../../auth/AuthModeProvider', () => ({ useAuthMode: () => authMode }))
+const availability = vi.hoisted(() => vi.fn())
+vi.mock('../../../api/decisionStudies', async (orig) => {
+  const actual = await orig<typeof import('../../../api/decisionStudies')>()
+  return { ...actual, decisionStudiesApi: { ...actual.decisionStudiesApi, availability } }
+})
 
 vi.mock('../../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/simulation')>()
@@ -24,7 +36,10 @@ vi.mock('../../../hooks/useCreateFromTemplate', async (importOriginal) => ({
 }))
 
 beforeEach(() => {
-  useUIStore.setState({ currentProject: 'Data Center Energy Hub' })
+  authMode.authEnabled = false
+  availability.mockReset().mockResolvedValue({ available: true })
+  useDecisionStore.setState({ active: null, draft: null, view: null, watch: null })
+  useUIStore.setState({ currentProject: 'Data Center Energy Hub', activeSlidePanel: 'hubDesign' })
   useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Data Center Energy Hub',
     ready: true, step: 'start' })
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(DC_TEMPLATE)
@@ -119,5 +134,40 @@ describe('StartCard', () => {
     mount()
     expect(screen.getByTestId('hub-start-template-eh_h2_hub').textContent).toMatch(/creating/i)
     expect((screen.getByTestId('hub-start-template-eh_datacenter') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('offers both questions side by side: reliability and investment', () => {
+    mount()
+    expect(screen.getByTestId('hub-start-reliable').textContent).toContain('Is my site reliable?')
+    expect(screen.getByTestId('hub-start-invest').textContent).toContain('Is this investment worth it?')
+    expect(screen.getByTestId('hub-start-invest').contains(screen.getByTestId('hub-start-templates'))).toBe(false)
+  })
+
+  it('a decision question opens its intake in the decision panel, on the open project', async () => {
+    const user = mount()
+    const b = screen.getByTestId('hub-start-question-bess_at_site') as HTMLButtonElement
+    expect(b.textContent).toContain('Do I need a battery at my site?')
+    await vi.waitFor(() => expect(b.disabled).toBe(false))
+    await user.click(b)
+    expect(availability).toHaveBeenCalledWith('Data Center Energy Hub')
+    expect(useDecisionStore.getState().draft).toMatchObject({ pathProject: 'Data Center Energy Hub',
+      name: 'Battery at my site' })
+    expect(useUIStore.getState().activeSlidePanel).toBe('decision')
+  })
+
+  it('in multi-user mode the decision question is disabled with the reason, and nothing is called', () => {
+    authMode.authEnabled = true
+    mount()
+    expect((screen.getByTestId('hub-start-question-bess_at_site') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('hub-start-invest-reason').textContent)
+      .toContain(ERROR_COPY.decision_studies_unavailable.title)
+    expect(availability).not.toHaveBeenCalled()
+  })
+
+  it('without a project the decision question says what to do first', () => {
+    useUIStore.setState({ currentProject: null })
+    mount()
+    expect((screen.getByTestId('hub-start-question-bess_at_site') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('hub-start-invest-reason').textContent).toMatch(/Create or open a project first/)
   })
 })

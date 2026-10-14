@@ -1025,6 +1025,11 @@ def batch_create_components(component_class: str, components: list[dict]) -> dic
         name = entry.get("name")
         if not name or not isinstance(name, str):
             raise HTTPException(400, f"entry {i} has no 'name'")
+        # OPEN-ITEMS item 8, in pass 1 so a bad entry refuses the whole batch
+        # (each create would also refuse it, but only after earlier ones landed).
+        from services.component_names import require_valid_name
+
+        require_valid_name(name, component_class=component_class)
         if name in existing:
             raise HTTPException(
                 409, f"entry {i}: {component_class} {name!r} already exists",
@@ -2669,6 +2674,137 @@ def explain_cashflow(detail: str = "summary") -> dict:
                          "positive raises the IRR); min-DSCR year: CFADS by stream, service "
                          "by tranche")
     return out
+
+
+# ── Decision study (6) — U3: the guided face's question, by chat ─────────────
+#
+# Thin wrappers over `routers/studies.py`, called in-process through `_route`
+# with the PATH project resolved by `_authorized_project`, exactly as the
+# worksheet tools do. Every refusal the routes raise passes through unchanged
+# (`decision_studies_unavailable` in multi-user mode, the run's `RunRefused`
+# codes, `findings_*`, `report_*`). `project` is the study's own base project
+# (`start_decision_study` returns it as `project`), except for
+# `start_decision_study`, where it is the project open now, which only
+# authorises the call and is never written. The reads are cut to the result cap
+# by `services/study/chat_view.py`.
+
+_STUDY_STAGES = ("options", "tornado")
+_STUDY_REPORT_FORMATS = ("docx", "xlsx", "html")
+
+
+def start_decision_study(project: str, question_id: str, name: str, intake: dict,
+                         base_project_name: str | None = None) -> dict:
+    """
+    Create a question-first study: its own base project, the pack's baseline
+    network and the seeded assumptions ledger (`create_study`).
+    """
+    from routers.studies import StudyCreate, create_study as _h
+    from services.study import chat_view
+
+    body = StudyCreate(question_id=question_id, name=name, intake=intake or {},
+                       project_name=base_project_name)
+    out = _route(_h, body, project=_authorized_project(project))
+    return {"study_id": out.get("study_id"), "project": out.get("base_project_name"),
+            "name": out.get("name"), "maturity": out.get("maturity"),
+            "budget": out.get("budget"),
+            "key_parameters": chat_view.key_parameters(out.get("ledger")),
+            "next_step": ("Offer each key parameter's default (with its source) and "
+                          "set_study_parameter on the user's answer; then "
+                          "run_decision_study runs the options.")}
+
+
+def set_study_parameter(project: str, study_id: str, key: str, value: float,
+                        unit: str, source: str | None = None) -> dict:
+    """
+    Set one assumptions-ledger row (`PUT .../ledger`, `ledger.apply_user_row`):
+    provenance `user`, status `customised`; the unit must be the row's.
+    """
+    from routers.studies import LedgerEdit, LedgerPut, put_ledger as _h
+    from services.study import chat_view
+
+    edit = LedgerEdit(key=key, value=value, unit=unit,
+                      **({"source": source} if source else {}))
+    out = _route(_h, study_id, LedgerPut(rows=[edit]), project=_authorized_project(project))
+    return chat_view.ledger_row_digest(out, key)
+
+
+def run_decision_study(project: str, study_id: str, stage: str = "options",
+                       fidelity: str = "quick_screen") -> dict:
+    """
+    Start a run: `options` solves every option (`POST .../run`); `tornado`
+    tests the best option against each key assumption's range
+    (`POST .../findings/tornado`). Both return at once; poll
+    `get_study_findings`.
+    """
+    from routers import studies as R
+    from services.study import chat_view
+
+    if stage not in _STUDY_STAGES:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "study_stage_invalid",
+            "message": f"stage must be one of {list(_STUDY_STAGES)}, got {_cut(stage, 40)!r}"})
+    ap = _authorized_project(project)
+    if stage == "tornado":
+        out = _route(R.start_findings_tornado, study_id, None, project=ap)
+    else:
+        out = _route(R.run_study, study_id, R.RunRequest(fidelity=fidelity), project=ap)
+    return {"stage": stage, "run": chat_view.run_digest(out),
+            "next_step": ("get_study_findings says how far the run is, and reads the "
+                          "result once it has finished.")}
+
+
+def get_study_findings(project: str, study_id: str) -> dict:
+    """
+    The last run's findings, cut to the verdict, the options and what is open.
+    While the options or the tornado still run, their progress instead.
+    """
+    from routers import studies as R
+    from services.study import chat_view
+
+    ap = _authorized_project(project)
+    for read in (R.get_study_run, R.get_findings_tornado):
+        try:
+            rec = _route(read, study_id, project=ap)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                continue
+            raise
+        if isinstance(rec, dict) and rec.get("status") in chat_view.RUNNING:
+            return {"running": chat_view.run_digest(rec),
+                    "next_step": "Call get_study_findings again when the run has finished."}
+    return chat_view.findings_digest(_route(R.get_findings, study_id, project=ap))
+
+
+def explain_verdict(project: str, study_id: str) -> dict:
+    """Why the verdict says what it says: drivers, caveats and sizing, in words."""
+    from routers.studies import get_findings as _h
+    from services.study import chat_view
+
+    return chat_view.verdict_explanation(_route(_h, study_id, project=_authorized_project(project)))
+
+
+def generate_study_report(project: str, study_id: str, format: str = "docx") -> dict:
+    """
+    Assemble the decision report from the last run (`POST .../report`) and
+    hand it over as a download chip in `format`.
+    """
+    from routers import studies as R
+
+    if format not in _STUDY_REPORT_FORMATS:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "study_report_format_invalid",
+            "message": f"format must be one of {list(_STUDY_REPORT_FORMATS)}, "
+                       f"got {_cut(format, 40)!r}"})
+    ap = _authorized_project(project)
+    out = _route(R.assemble_report, study_id, project=ap)
+    render = {"docx": R.get_report_docx, "xlsx": R.get_report_xlsx,
+              "html": R.get_report_html}[format]
+    resp = _route(render, study_id, project=ap)
+    mime = resp.media_type.split(";")[0]
+    filename = f"decision_report_{study_id[:8]}.{format}"
+    return {"file": _save_agent_export(resp.body, filename, mime),
+            "title": out.get("title"), "available": out.get("available"),
+            "stale": out.get("stale"), "stale_reasons": out.get("stale_reasons") or []}
 
 
 # ── Validation (3) ──────────────────────────────────────────────────────────
@@ -5502,6 +5638,8 @@ def reconstruct_network_from_image(
     # the existing create_component helper so the lineage / undo /
     # change_log machinery fires uniformly. Track created names so the
     # response can report them.
+    from services.component_names import name_problem
+
     created_buses: list[str] = []
     created_lines: list[str] = []
     n = PyPSAService.get_network()
@@ -5513,6 +5651,9 @@ def reconstruct_network_from_image(
                 bname = str(b.get("name") or "").strip()
                 if not bname or bname in existing_bus_names or bname.startswith("ic:"):
                     continue  # `ic:` is reserved (P2 WP2.2-0)
+                if name_problem(bname) is not None:  # OPEN-ITEMS item 8
+                    logger.warning("vision: bus name refused: %s", ascii(bname)[:80])
+                    continue
                 px = float(b.get("px") or 0.0)
                 py = float(b.get("py") or 0.0)
                 gx = (px - origin_x) * scale_x
@@ -5532,6 +5673,9 @@ def reconstruct_network_from_image(
                 bus0 = str(ln.get("bus0") or "").strip()
                 bus1 = str(ln.get("bus1") or "").strip()
                 if not lname or lname in existing_line_names:
+                    continue
+                if name_problem(lname) is not None:  # OPEN-ITEMS item 8
+                    logger.warning("vision: line name refused: %s", ascii(lname)[:80])
                     continue
                 if bus0 not in n.buses.index or bus1 not in n.buses.index:
                     logger.warning(
@@ -7207,6 +7351,13 @@ DISPATCHERS: dict[str, Any] = {
     "get_investment_case": get_investment_case,
     "solve_ppa_price": solve_ppa_price,
     "explain_cashflow": explain_cashflow,
+    # decision study (6) — U3
+    "start_decision_study": start_decision_study,
+    "set_study_parameter": set_study_parameter,
+    "run_decision_study": run_decision_study,
+    "get_study_findings": get_study_findings,
+    "explain_verdict": explain_verdict,
+    "generate_study_report": generate_study_report,
     # project_mgmt (21)
     "list_projects": list_projects,
     "read_result": read_result,

@@ -541,6 +541,16 @@ def apply_bulk_update(body: dict) -> dict:
 
             pending.append((_targets, coerced))
 
+        # OPEN-ITEMS item 8: every carrier the batch would CREATE, checked
+        # before the first write, so a bad one cannot leave a half-applied batch.
+        from services.component_names import require_valid_name
+
+        for _targets, coerced in pending:
+            carrier = coerced.get("carrier")
+            if (component_class != "Carrier" and isinstance(carrier, str) and carrier
+                    and carrier not in n.carriers.index):
+                require_valid_name(carrier, component_class="Carrier")
+
         for _targets, coerced in pending:
             # If the batch sets `carrier`, ensure the carrier row exists with
             # catalog metadata first — same auto-add behaviour as PUT.

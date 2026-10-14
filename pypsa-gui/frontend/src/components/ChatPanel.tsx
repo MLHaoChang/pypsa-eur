@@ -199,6 +199,14 @@ const GUIDED_TOOL_PHRASE: Record<string, string> = {
   abort_adequacy_study: 'ask the running study to stop',
   // The finance engine runs in the background (poll get_investment_case).
   run_investment_case: 'start the investment case',
+  // The decision study (U3): the run and the tornado start in the background
+  // (poll get_study_findings); the others answer at once.
+  start_decision_study: 'create the decision study',
+  set_study_parameter: 'change an assumption of the study',
+  run_decision_study: 'start the decision study run',
+  get_study_findings: 'read the study result',
+  explain_verdict: 'explain the verdict',
+  generate_study_report: 'write the decision report',
   // The chat harness's workflow tools (issue 06): start_workflow puts the
   // session on a step; the other two move or clear it. None runs anything.
   start_workflow: 'start the workflow',
@@ -3340,7 +3348,9 @@ export default function ChatPanel() {
             labelled with the chip (owner decision Q10) — the same path the
             hub-design cards use — so one click starts the flow. Absent until
             the menu is known; never a spinner, never an error. */}
-        {messages.length === 0 && Array.isArray(workflowMenu.data?.workflows)
+        {/* UX M8 (U3): without a usable assistant a chip would send into
+            nothing, so the menu waits for the key the greeting offers. */}
+        {messages.length === 0 && effectiveReady !== false && Array.isArray(workflowMenu.data?.workflows)
           && workflowMenu.data.workflows.length > 0 && (
           <ChatStarterChips
             prompts={workflowMenu.data.workflows.map((w) => ({

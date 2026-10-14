@@ -472,3 +472,16 @@ def test_the_invented_spare_conversion_is_a_pack_fuel_cell():
     rec = next(a for a in mut["applied"] if a["name"] == "eh_spare_conversion")
     assert rec["pricing"]["technology"] == "fuel-cell"
     undo()
+
+
+@pytest.mark.parametrize("sid,name", [("n1_generation", "eh_spare_gen"),
+                                      ("parallel_storage", "eh_spare_storage"),
+                                      ("n1_conversion", "eh_spare_conversion")])
+def test_the_disclosed_cost_of_a_priced_spare_is_its_annual_charge(sid, name):
+    """Gatekeeper note on #198: a disclosed `capital_cost` of 0 reads as free."""
+    n = _network()
+    undo, mut = R.apply_redundancy_scenario(n, sid)
+    rec = next(a for a in mut["applied"] if a["name"] == name)
+    assert rec["capital_cost"] > 0
+    assert rec["annualised_cost_eur_per_mw_yr"] == pytest.approx(rec["capital_cost"] + rec["fom_cost"])
+    undo()

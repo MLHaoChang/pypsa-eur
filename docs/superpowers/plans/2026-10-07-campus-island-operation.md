@@ -1946,6 +1946,263 @@ oscillation and no current-limit dynamics.
 Mutation testing killed 32 of 32. Round 1 left 9 survivors, closed by the
 extra cases above.
 
+### I6b as built (2026-10-14)
+
+**Scope.** This PR covers the I6a split's I6b items: E4, E6, the UPS, Q8,
+the EMT/RMS flags and the hour sweeps. **One item waits for I3b:** the
+wiring into `drivers/campus_study.py`, which passes I3b's island critical
+hours to `campus_frequency_study`. The sweeps take the hours as an argument.
+
+**The UPS in the engine** (`Unit` model `ups`):
+- It carries its IT load `it_mw` on its battery when it is off line:
+  - at an islanding (`simulate(..., islanding=True)`, which E1 sets) if
+    it `transfers_on_islanding`;
+  - whenever |Δf| leaves `f_window_hz`. That is a drop-out, logged at the
+    step it happens.
+- **Walk-in.** Back inside the window, it walks the load back in linearly
+  at `it_mw / walk_in_s`. A UPS that transfers starts that walk-in at
+  t = 0, so its walk-in ends at `walk_in_s`, as I2b's "late" test
+  assumes. If the frequency leaves the window again, it drops again.
+- **Effect on the balance.** The IT load on the battery is relief to the
+  island balance, a discrete state applied after each RK4 step, like the
+  frequency-watt ramp. The relief is held over each step, so it lags a
+  continuous ramp by rate·dt/2. A test pins that bound at 1 ms and at
+  0.1 ms.
+- **`UpsLog`** records:
+  - the drop times;
+  - the battery energy, which is exact for a linear walk-in (L_it·walk_in/2);
+  - when the load is back on the island (`None` if it is still on the
+    battery at the end);
+  - `autonomy_ok`, true only when the load is back and the energy given is
+    within e(t−1).
+- **`units_from_campus`** gives a UPS the hour's draw of its `it_load`. Its
+  energy is `soc[uid]`, I3a's `soc_start_mwh`, when given, and otherwise the
+  campus `e_mwh`. Gensets now carry `start_s` and `sync_s`, and
+  `ready_s` is their sum.
+
+**E4, `e4_ups_bridged`** (`ups_bridged`):
+- **The start.** The bus is dead and the UPSs carry the IT load. The
+  `genset_redundancy_n` largest gensets fail to start (N+k, as I2b's
+  pickup row). The rest are ready at the slowest one's `start_s + sync_s`.
+  That is the join I2b uses; the plan text said `start_s`.
+- **The pickup.** The blocks are picked up by a self-advancing `Pickup`
+  event. The first block is taken at the ready time. Each next block is
+  taken once Δf is within the band of its settled value (−ΣP/ΣK, or 0 with
+  an isochronous genset) and |RoCoF| ≤ 0.05 Hz/s. Both thresholds are
+  assumed and ledgered; a real controller may wait a fixed interval.
+- **Judging.** Each block gets its own `Metrics` and is judged against
+  the limits. A pickup is `complete` only if every block was taken and the
+  frequency settled after the last.
+- **The Q1 bridge check.** Each UPS's e(t−1) at its IT load must last
+  max(`bridge_s`, ready + the last block's pickup time). An incomplete
+  pickup fails it.
+
+**E6, `e6_planned`** (`planned`):
+- **The take-over.** The units take over the import before the PCC opens:
+  - a GFM moves at once (a converter ramps in milliseconds; ledgered);
+  - a genset ramps at `ramp_pu_per_s` from its join, a cold one after
+    start + sync;
+  - a frequency-watt unit moves at its ramp;
+  - the others hold their dispatch.
+- **The ramp time** is the first time their room covers the import. It is
+  found by bisection on a monotone sum.
+- **The share** is proportional to what each unit can give at that time.
+- **The opening** is then simulated on the shifted dispatch, with the
+  `residual_mw` left (0 by default).
+- **No room.** When the units cannot cover the import, the result is a
+  shortfall, not a time.
+
+**Q8, `i_max_sensitivity`.** It reruns any event with every GFM's current
+limit at each `i_max_sensitivity_pu`, on S_n.
+
+**EMT/RMS flags, `emt_flags`.** Each recommends a study, with assumed,
+ledgered thresholds:
+- the nadir margin is below 20 % of the transition limit's allowed
+  deviation, on the side the frequency went;
+- a GFM saturates;
+- SCR < 3 at the PCC (S_k,min over the grid-following MVA) with more than
+  30 % grid-following;
+- the island SCR < 3 (I5's minimum fault level at the weakest converter
+  bus, over the converter MVA) with more than 50 % grid-forming;
+- the frequency collapses.
+
+`emt_inputs(campus, rows)` computes the shares and the two SCRs.
+`equipment(campus)` gives `judge` each UPS's window, f0 ± `f_window_hz`, and
+each load's `f_trip_hz`, on its own side of f0.
+
+**The sweeps.**
+- **`e1_every_hour(campus, hourly, island_hourly, island_unit_hourly)`** runs
+  E1 at every `seamless` hour on I3a's lossless 0⁺ steps:
+  - `dp_up_mw` is an import lost, and `dp_down_mw` an export lost; each
+    is run where it is above 0.
+  - The units are those at the hour. A genset that I3a's `online` says is
+    off starts cold.
+  - A UPS that transfers is left out, because I3a's steps already net its
+    transfer.
+  - A UPS that stays on line is kept, so a drop-out from its window is
+    seen (`ups_drops`). The first mutation run found this: dropping every
+    UPS hid it.
+  - It runs at 5 ms over 10 s, about 30 ms per event; at that step the
+    plan's −0.555 Hz nadir is exact. Identical hours run once.
+  - The tables are checked against their contracts.
+- **`campus_frequency_study(campus, hourly, hours, island_unit_hourly)`** runs
+  at the critical hours, in each of the campus's scenarios:
+  - **`seamless`:**
+    - E1 runs on I4's ΔP_AC, with the UPS transfers and walk-in. Its
+      losses are reported as ΔP_AC minus the lossless import.
+    - Each GFM's energy from the islanding until the cold gensets join
+      is reported against its e(t−1) (I6's E1 item, in `bridge`).
+    - From I4's island dispatch at nominal frequency (secondary control
+      has restored it; ledgered):
+      - E2 is `load_step_mw`, else the largest pickup block, else the
+        hour's largest load;
+      - E3 trips the unit with the largest |P|;
+      - E5 loses the island's PV output.
+    - Q8 reruns E1 and E2.
+  - **`ups_bridged`:** E4, with I3a's `p_ups_it_mw` and `soc_start_mwh`.
+  - **`planned`:** E6 on the same ΔP_AC.
+  - **Output.** Every event is judged against the limits and the
+    equipment, and flagged for EMT/RMS where it applies. The tables are
+    `events`, `losses`, `bridge`, `planned` and `ups`. One hour of the test
+    campus takes about 6 s.
+
+**Tests:** 49 in `tests/gridspine/test_frequency_events.py`, against hand
+oracles:
+- **The UPS:**
+  - a transferring UPS is the ramped event, within the discretisation
+    bound, and its battery energy is exactly L_it·walk_in/2;
+  - on line inside its window it changes nothing, bit for bit;
+  - it drops at the first sample outside its window, and the trace is
+    unchanged up to that sample;
+  - it drops again at each excursion: by hand, 0.5 s and 2.5 s on an
+    inertia-only ramp;
+  - once dropped, its battery gives L_it from the drop to the end;
+  - a transferring UPS stays on line in an event inside the island;
+  - it stays on its battery when the settled frequency is outside its
+    window;
+  - the autonomy check is pinned on both sides.
+- **E4:**
+  - the first block equals the one-governor step response, within 1e-9;
+  - each next block waits for recovery;
+  - the frequency settles at −Σblocks/K;
+  - an isochronous genset returns to nominal;
+  - an over-large pickup does not complete;
+  - the bridge is pinned on both sides of ready + the last pickup, and of
+    `bridge_s`;
+  - N+k drops the largest genset.
+- **E6:**
+  - the ramp time by hand: 3 MW at once, then 5 MW at 1 MW/s from a 15 s
+    join, giving 20 s and the shares 5/3;
+  - the shortfall;
+  - an export taken back at once, on the storage, and on a genset by its
+    room down;
+  - the residual opening against the engine run by hand, on a dispatch
+    where the shift matters;
+  - the frequency-watt ramp, without its delay.
+- **Q8:** the limits on S_n, with the nadir rising with the limit.
+- **The flags:** each at its threshold, on both sides; nadir margins at
+  −2.0 and +1.2 Hz.
+- **The campus:**
+  - the UPS's IT draw and e(t−1);
+  - the equipment on both sides of f0;
+  - the EMT inputs by hand;
+  - `e1_every_hour` against the engine by hand;
+  - identical hours run once, and hours with the same step but other units
+    run apart;
+  - a UPS on line is kept and one that transfers is not;
+  - a table off its contract is refused;
+  - the study's E1 on I4's ΔP_AC settles at I4's Δf within 1 mHz;
+  - each scenario's events. E2 takes the largest of unequal blocks. The
+    bridge uses I3a's IT load (20 MW, not the 25 MW draw) and its e(t−1);
+  - the GFM energy until the join;
+  - the missing requirements refused.
+
+**Mutations.** 54 source edits, in four groups:
+- **the UPS:** the transfer without an islanding, the window, the
+  drop log, the energy, the walk-in, the online time, the autonomy, the IT
+  draw and e(t−1);
+- **E4:** both recovery criteria, the settled value, isochronous, N+k,
+  the ready time, completion and the bridge;
+- **E6:** the genset join, the GFM and frequency-watt room, the room
+  down, the share, the shifted opening and the shortfall;
+- **the rest:** Q8 on P_n, the flags, the equipment side, the EMT
+  inputs, the sweep's cold gensets, UPS rule, direction and cache, and the
+  study's lossless import, ΔP_AC, E2 step, E3 unit, I3a's IT load, island
+  dispatch and PV.
+
+The first run killed 44. The ten survivors were closed:
+- seven by the tests above;
+- two (E2 and the bridge IT load) by fixture values that tell the
+  alternatives apart;
+- one by the sweep's UPS rule.
+
+A 55th edit, which drops every UPS from the sweep, was added with that
+rule. All 55 are killed.
+
+### I6c as built: the driver at the I3b hours (2026-10-14)
+
+**What waited for I3b** is wired into `gridspine/drivers/campus_study.py`,
+in additive functions, on a ranked run.
+- **`island_hours(run_dir)`** gives the island critical hours: the
+  selected hours that an `ISLAND_CRITERIA` reason picked. Hours that only a
+  base criterion picked are not island hours.
+- **`island_frequency_campus(run_dir, every_hour=True)`**
+  - **Refuses** a campus without island requirements, and a run without
+    the island tables.
+  - **Runs:**
+    - `e1_every_hour` on the tables, when `seamless` is a scenario;
+    - `campus_frequency_study` at the island hours, with I3a's per-unit
+      table.
+  - **Writes:**
+    - `campus_freq_e1_hourly.csv`, `campus_freq_events.csv`,
+      `campus_freq_losses.csv`, `campus_freq_bridge.csv`,
+      `campus_freq_planned.csv` and `campus_freq_ups.csv`;
+    - `campus_freq_summary.json`.
+  - **Fixed columns.** Each table carries its fixed columns whatever
+    events ran, header only where it has nothing, so I9b reads one shape.
+    The columns are `frequency.E1_HOURLY_COLUMNS`, `EVENT_COLUMNS`,
+    `LOSSES_COLUMNS`, `BRIDGE_COLUMNS`, `PLANNED_COLUMNS` and
+    `UPS_COLUMNS`; the summary's keys are
+    `campus_study.FREQ_SUMMARY_KEYS`.
+  - **The bridge table** holds E4's UPS rows (`kind` `ups`) and the GFM
+    rows until the gensets join (`kind` `gfm`), under one `unit` column.
+  - **The summary** holds:
+    - the label, the ledger and the scenarios;
+    - the island hours;
+    - the failing event hours;
+    - the hours where the bridge fails, where a bridge row has no e(t−1)
+      to judge it and is not counted;
+    - the hours where planned islanding is infeasible;
+    - the hours where the every-hour E1 fails, and the ones among them the
+      ranking did not select. That is the plan's check on I3b's choice.
+- **`psse_campus(run_dir, hours=None)`** writes I8's bundle under `psse/`
+  for each island hour, or for the given hours. Each is named
+  `<campus>_p<period>_h<hour>` and carries the frequency ledger in its
+  README. A missing hour is refused.
+
+**Tests:** 12 in `tests/gridspine/test_campus_island_frequency_driver.py`,
+on a run directory written by hand:
+- the island hours;
+- the sweep at every hour against the events at the island hours only;
+- a missed hour, and a selected one that is not missed;
+- the bridge on I3a's IT load (20 MW, not the 25 MW draw);
+- an infeasible planned islanding;
+- a GFM bridge row without e(t−1) not counted;
+- skipping the sweep;
+- every table's fixed columns and the summary keys, under both scenario
+  sets;
+- both refusals;
+- the bundles per island hour, given hours, and a missing hour.
+
+**Mutations:** 14 edits to the driver. 11 were killed on the first run. The
+three survivors were:
+- the bridge's None rows;
+- the planned summary;
+- I3a's per-unit table not passed on.
+
+Each was closed by a test or a fixture value that tells the alternatives
+apart. 14 of 14 are now killed.
+
 ### I7: closing the loop — frequency cuts back into sizing (S–M; manual, owner Q6)
 
 When I6 fails at hours T_fail, **heuristic** cuts are proposed for I2b at

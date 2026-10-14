@@ -60,5 +60,10 @@ def ensure_carrier(n, carrier_name: str) -> None:
         return
     if carrier_name in n.carriers.index:
         return
+    # OPEN-ITEMS item 8: this CREATES a carrier, so its name is a new name. A
+    # carrier the network already has is referenced, not re-checked (above).
+    from services.component_names import require_valid_name
+
+    require_valid_name(carrier_name, component_class="Carrier")
     meta = CARRIER_CATALOG.get(carrier_name, {"nice_name": carrier_name, "color": "", "co2_emissions": 0.0})
     n.add("Carrier", carrier_name, **meta)

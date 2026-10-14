@@ -22,6 +22,9 @@ _GC_OPTIONAL = ("carrier_attribute", "carrier", "investment_period")
 
 def apply_create_global_constraint(body) -> dict:
     refuse_edit_during_live_study()  # P27a A1: not routed via _create_component
+    from services.component_names import require_valid_name
+
+    require_valid_name(body.name, component_class="GlobalConstraint")  # item 8
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
         if body.name in n.global_constraints.index:
@@ -63,6 +66,11 @@ def apply_update_global_constraint(name: str, body, *, merge_partial_update) -> 
             n, "global_constraints", name, body.model_dump(exclude_unset=True)
         )
         new_name = merged.pop("name", name)
+        if new_name != name:
+            from services.component_names import require_valid_name
+
+            # OPEN-ITEMS item 8; before the remove below.
+            require_valid_name(new_name, component_class="GlobalConstraint")
         if new_name != name and new_name in n.global_constraints.index:
             # remove + add would silently replace the existing constraint.
             raise HTTPException(409, f"GlobalConstraint '{new_name}' already exists")
