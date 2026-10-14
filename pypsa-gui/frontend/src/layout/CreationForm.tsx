@@ -6,6 +6,9 @@ import { useUIStore, type CreationRequest } from '../store/uiStore'
 import { isRevealed } from '../utils/attributeCatalog'
 import { extrasPatch, useSolveMode } from './properties/cardKit'
 import { useCatalog } from '../hooks/useCatalog'
+import { useAssetSchema } from '../hooks/useAssetSchema'
+import { SCHEMA_CLASSES, type AssetSchema } from '../api/assetSchema'
+import { tidy, unitLabel } from '../utils/assetForm'
 import { creationScope, loadExtras, saveExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
 import BusAutocomplete from '../components/BusAutocomplete'
@@ -29,12 +32,28 @@ interface FieldSpec {
   key: string
   label: string
   type: 'text' | 'number' | 'checkbox' | 'bus' | 'select'
+  // In the STORED unit (S1d): `withDescriptor` converts it for display.
   defaultValue?: string
   options?: string[]
   unit?: string
   required?: boolean
   half?: boolean
+  // S1d: the asset schema supplies a described field's label, unit and scale
+  // (display = stored × scale). `keepLabel` keeps a variant's own label where
+  // it says more ("Capacity (electricity in)"); `like` borrows another key's
+  // descriptor for a column the schema does not list (a CHP's efficiency2).
+  scale?: number
+  keepLabel?: boolean
+  like?: string
 }
+
+// S1d: investment is typed as the overnight cost (or a line's cost per km) and
+// the lifetime, never as an annuity (plan rule: no typed `capital_cost`
+// anywhere). Both may stay blank: an unpriced asset, and the solver's default
+// lifetime. A storage unit prices its two parts on its card after it is added
+// (STORAGE_PRICING_NOTE). The entries are written out, not spread from a
+// helper: the control-matrix reader (smoke/assistant_control_matrix.py)
+// parses each `{ key, label, type, ... }` literally.
 
 const genFields = (carrier: string): FieldSpec[] => [
   { key: 'name',             label: 'Name',          type: 'text',     required: true },
@@ -50,7 +69,8 @@ const genFields = (carrier: string): FieldSpec[] => [
   { key: 'p_nom_min',        label: 'P nom min',      type: 'number',   defaultValue: '0',    unit: 'MW',     half: true },
   { key: 'p_nom_max',        label: 'P nom max',      type: 'number',                         unit: 'MW',     half: true },
   { key: 'marginal_cost',    label: 'Marginal cost',  type: 'number',   defaultValue: '0',    unit: '€/MWh',  half: true },
-  { key: 'capital_cost',     label: 'Capital cost',   type: 'number',   defaultValue: '0',    unit: '€/MW/yr',   half: true },
+  { key: 'overnight_cost', label: 'Overnight cost', type: 'number', half: true },
+  { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
 ]
 
 const storFields = (carrier: string, hours = '4'): FieldSpec[] => [
@@ -68,7 +88,6 @@ const storFields = (carrier: string, hours = '4'): FieldSpec[] => [
   { key: 'p_nom_min',           label: 'P nom min',       type: 'number', defaultValue: '0',    unit: 'MW',    half: true },
   { key: 'p_nom_max',           label: 'P nom max',       type: 'number',                       unit: 'MW',    half: true },
   { key: 'marginal_cost',       label: 'Marginal cost',   type: 'number', defaultValue: '0',    unit: '€/MWh', half: true },
-  { key: 'capital_cost',        label: 'Capital cost',    type: 'number', defaultValue: '0',    unit: '€/MW/yr', half: true },
 ]
 
 // Bus-picker fields carry metadata so the renderer can restrict by carrier.
@@ -124,7 +143,8 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'tap_ratio',    label: 'Tap ratio',      type: 'number', defaultValue: '1.0',              half: true },
     { key: 'phase_shift',  label: 'Phase shift',    type: 'number', defaultValue: '0.0', unit: '°',   half: true },
     { key: 's_nom_extendable', label: 'Extendable', type: 'checkbox', defaultValue: 'false' },
-    { key: 'capital_cost', label: 'Capital cost',   type: 'number', defaultValue: '0', unit: '€/MVA/yr' },
+    { key: 'overnight_cost', label: 'Overnight cost', type: 'number', half: true },
+    { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
   ],
   line: [
     { key: 'name',             label: 'Name',         type: 'text',     required: true },
@@ -140,17 +160,20 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'b_per_km',         label: 'b',             type: 'number',   defaultValue: '0',   unit: 'S/km', half: true },
     { key: 's_nom',            label: 'S nom',         type: 'number',   defaultValue: '100', unit: 'MVA',  half: true },
     { key: 's_nom_extendable', label: 'S nom extendable', type: 'checkbox', defaultValue: 'false' },
+    { key: 'inv_per_km_overnight', label: 'Overnight cost per km', type: 'number', half: true },
+    { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
   ],
   electrolyzer: [
     { key: 'name',         label: 'Name',                    type: 'text',   required: true },
     { key: 'bus0',         label: 'Electricity bus (input)', type: 'bus',    required: true,  busCarrierFilter: 'non-h2' } as BusFieldSpec,
     { key: 'bus1',         label: 'H₂ bus (output)',         type: 'bus',    required: true,  busCarrierFilter: 'h2' } as BusFieldSpec,
     { key: 'carrier',      label: 'Carrier',                 type: 'text',   defaultValue: 'H2' },
-    { key: 'p_nom',        label: 'P nom (elec in)',         type: 'number', defaultValue: '100', unit: 'MW',    half: true },
-    { key: 'efficiency',   label: 'Efficiency (η)',          type: 'number', defaultValue: '0.70',               half: true },
+    { key: 'p_nom',        label: 'Capacity (electricity in)',         type: 'number', keepLabel: true, defaultValue: '100', unit: 'MW',    half: true },
+    { key: 'efficiency',   label: 'Efficiency',          type: 'number', keepLabel: true, defaultValue: '0.70',               half: true },
     { key: 'p_min_pu',     label: 'p_min_pu',               type: 'number', defaultValue: '0',                  half: true },
     { key: 'p_nom_extendable', label: 'Extendable',         type: 'checkbox', defaultValue: 'false' },
-    { key: 'capital_cost', label: 'Capital cost',           type: 'number', defaultValue: '0', unit: '€/MW/yr',   half: true },
+    { key: 'overnight_cost', label: 'Overnight cost', type: 'number', half: true },
+    { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
     { key: 'marginal_cost',label: 'Marginal cost',          type: 'number', defaultValue: '0', unit: '€/MWh',  half: true },
   ],
   fuel_cell: [
@@ -158,10 +181,11 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'bus0',         label: 'H₂ bus (input)',          type: 'bus',    required: true,  busCarrierFilter: 'h2' } as BusFieldSpec,
     { key: 'bus1',         label: 'Electricity bus (output)',type: 'bus',    required: true,  busCarrierFilter: 'non-h2' } as BusFieldSpec,
     { key: 'carrier',      label: 'Carrier',                 type: 'text',   defaultValue: 'H2' },
-    { key: 'p_nom',        label: 'P nom (H₂ in)',          type: 'number', defaultValue: '50',  unit: 'MW',   half: true },
-    { key: 'efficiency',   label: 'Efficiency (η)',          type: 'number', defaultValue: '0.55',              half: true },
+    { key: 'p_nom',        label: 'Capacity (H₂ in)',          type: 'number', keepLabel: true, defaultValue: '50',  unit: 'MW',   half: true },
+    { key: 'efficiency',   label: 'Efficiency',          type: 'number', keepLabel: true, defaultValue: '0.55',              half: true },
     { key: 'p_nom_extendable', label: 'Extendable',         type: 'checkbox', defaultValue: 'false' },
-    { key: 'capital_cost', label: 'Capital cost',           type: 'number', defaultValue: '0', unit: '€/MW/yr',  half: true },
+    { key: 'overnight_cost', label: 'Overnight cost', type: 'number', half: true },
+    { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
     { key: 'marginal_cost',label: 'Marginal cost',          type: 'number', defaultValue: '0', unit: '€/MWh', half: true },
   ],
   thermal:   genFields('gas'),
@@ -184,10 +208,11 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
       busCarrierFilter: 'electricity' } as BusFieldSpec,
     { key: 'bus1',         label: 'Heat bus (output)',       type: 'bus', required: true,
       busCarrierFilter: 'heat' } as BusFieldSpec,
-    { key: 'p_nom',        label: 'P nom (elec in)',         type: 'number', defaultValue: '50',  unit: 'MW',    half: true },
-    { key: 'efficiency',   label: 'η / COP',                 type: 'number', defaultValue: '3.5',                half: true },
+    { key: 'p_nom',        label: 'Capacity (electricity in)',         type: 'number', keepLabel: true, defaultValue: '50',  unit: 'MW',    half: true },
+    { key: 'efficiency',   label: 'Efficiency / COP',                 type: 'number', keepLabel: true, defaultValue: '3.5',                half: true },
     { key: 'p_nom_extendable', label: 'Extendable',          type: 'checkbox', defaultValue: 'false' },
-    { key: 'capital_cost', label: 'Capital cost',            type: 'number', defaultValue: '0',   unit: '€/MW/yr',  half: true },
+    { key: 'overnight_cost', label: 'Overnight cost', type: 'number', half: true },
+    { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
     { key: 'marginal_cost',label: 'Marginal cost',           type: 'number', defaultValue: '0',   unit: '€/MWh', half: true },
   ],
   // CHP: Link from a fuel bus → electricity (efficiency) + heat (efficiency2).
@@ -202,11 +227,12 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'bus2',         label: 'Heat bus (output)',       type: 'bus', required: true,
       busCarrierFilter: 'heat' } as BusFieldSpec,
     { key: 'carrier',      label: 'Carrier',                 type: 'text',   defaultValue: 'gas' },
-    { key: 'p_nom',        label: 'P nom (fuel in)',         type: 'number', defaultValue: '100', unit: 'MW',    half: true },
-    { key: 'efficiency',   label: 'η electrical',            type: 'number', defaultValue: '0.4',                half: true },
-    { key: 'efficiency2',  label: 'η thermal',               type: 'number', defaultValue: '0.4',                half: true },
+    { key: 'p_nom',        label: 'Capacity (fuel in)',         type: 'number', keepLabel: true, defaultValue: '100', unit: 'MW',    half: true },
+    { key: 'efficiency',   label: 'Electrical efficiency',            type: 'number', keepLabel: true, defaultValue: '0.4',                half: true },
+    { key: 'efficiency2',  label: 'Thermal efficiency', type: 'number', keepLabel: true, like: 'efficiency', defaultValue: '0.4',                half: true },
     { key: 'p_nom_extendable', label: 'Extendable',          type: 'checkbox', defaultValue: 'false' },
-    { key: 'capital_cost', label: 'Capital cost',            type: 'number', defaultValue: '0',   unit: '€/MW/yr',  half: true },
+    { key: 'overnight_cost', label: 'Overnight cost', type: 'number', half: true },
+    { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
     { key: 'marginal_cost',label: 'Marginal cost',           type: 'number', defaultValue: '0',   unit: '€/MWh', half: true },
   ],
   // Thermal storage: PyPSA Store on a heat bus (e_nom only — power capacity
@@ -219,7 +245,8 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'e_nom',            label: 'Energy capacity',type: 'number', defaultValue: '100', unit: 'MWh', half: true },
     { key: 'e_nom_extendable', label: 'Extendable',     type: 'checkbox', defaultValue: 'false', half: true },
     { key: 'e_cyclic',         label: 'Cyclic state-of-charge', type: 'checkbox', defaultValue: 'true' },
-    { key: 'capital_cost',     label: 'Capital cost',   type: 'number', defaultValue: '0',   unit: '€/MWh/yr' },
+    { key: 'overnight_cost', label: 'Overnight cost', type: 'number', half: true },
+    { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
   ],
   // Carrier-specific demand entries. The bus picker is filtered so the user
   // can't accidentally attach (e.g.) a hydrogen load to an AC bus.
@@ -382,9 +409,50 @@ const DEPENDENT_DEFAULTS: Record<string, (key: string, value: string) => Partial
   },
 }
 
+// ── Fields from the asset schema (S1d) ───────────────────────────────────────
+
+/**
+ * A field as the asset schema describes it: the descriptor's label (unless the
+ * variant keeps its own), its display unit and scale, and the default turned
+ * from the stored unit into the display one (0.95 → 95 %). A field the schema
+ * does not describe (a Bus's, r/x/b per km) is returned as it is.
+ */
+export function withDescriptor(f: FieldSpec, schema: AssetSchema | undefined): FieldSpec {
+  if (f.type !== 'number' && f.type !== 'checkbox') return f
+  const d = schema?.groups.flatMap(g => g.fields).find(x => x.key === (f.like ?? f.key))
+  if (!d) return f
+  const label = f.keepLabel ? f.label : d.label
+  if (f.type === 'checkbox') return { ...f, label }
+  const defaultValue = f.defaultValue === undefined || f.defaultValue === ''
+    ? f.defaultValue : tidy(parseFloat(f.defaultValue) * d.scale)
+  return { ...f, label, unit: d.unit_display ? unitLabel(d.unit_display) : undefined, scale: d.scale, defaultValue }
+}
+
+/** A stored-unit value (a dependent default) in a field's display unit. */
+function toDisplay(f: FieldSpec | undefined, stored: string): string {
+  return f?.scale && f.scale !== 1 && stored !== '' ? tidy(parseFloat(stored) * f.scale) : stored
+}
+
+// A storage unit's investment is its two parts (power and energy), each with
+// its own lifetime; the quick-add form leaves them to the asset's card.
+const STORAGE_PRICING_NOTE = 'Price the power and energy parts on the asset’s card after adding it.'
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
+/**
+ * Waits for the class's asset schema before the form exists: the form's
+ * starting values are display units, which only the schema knows (a default
+ * of 0.95 shown under "%" would save 0.0095).
+ */
 export default function CreationForm({ item }: { item: CreationRequest }) {
+  const cls = COMPONENT_TYPE[item.id] ?? ''
+  const described = SCHEMA_CLASSES.has(cls)
+  const { data: schema } = useAssetSchema(described ? cls : null)
+  if (described && !schema) return <p className="p-3 text-xs text-muted">Loading…</p>
+  return <CreationFormBody item={item} schema={schema} />
+}
+
+function CreationFormBody({ item, schema }: { item: CreationRequest; schema: AssetSchema | undefined }) {
   const currentProject = useUIStore(s => s.currentProject)
   // A drop onto the 3D site view (D16): the site restricts the terminal
   // bus to its members (offered AND validated), prefills the primary one,
@@ -403,7 +471,7 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
   const [picking, setPicking] = useState(false)
   const { data: catalog } = useCatalog(COMPONENT_TYPE[item.id] ?? null)
 
-  const fields = FIELD_MAP[item.id] ?? []
+  const fields = useMemo(() => (FIELD_MAP[item.id] ?? []).map(f => withDescriptor(f, schema)), [item.id, schema])
   const qKey = QUERY_KEY[item.id] ?? ''
   const prefix = AUTO_PREFIX[item.id] ?? 'Asset'
 
@@ -486,8 +554,13 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
       const next = { ...f, [k]: v }
       // Apply dependent-default rules for this asset type. Used by Power-to-Heat
       // to bump efficiency when the device type changes (carrier dropdown).
+      // The rules speak stored units (COP 3.5); the form holds display ones.
       const updates = DEPENDENT_DEFAULTS[item.id]?.(k, v)
-      if (updates) Object.assign(next, updates)
+      if (updates) {
+        for (const [key, stored] of Object.entries(updates)) {
+          if (stored !== undefined) next[key] = toDisplay(fields.find(x => x.key === key), stored)
+        }
+      }
       return next
     })
     if (errors[k]) setErrors(e => { const n = { ...e }; delete n[k]; return n })
@@ -543,7 +616,8 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
           // default — that is the long-standing behaviour and every existing
           // field declares one. A field with NO default (p_nom_max) is omitted
           // instead, so the model's own sentinel applies rather than a zero.
-          if (v !== '') payload[f.key] = parseFloat(v)
+          // Display → stored unit (S1d): €/kW → €/MW, % → a share.
+          if (v !== '') payload[f.key] = parseFloat(v) / (f.scale ?? 1)
           else if (f.defaultValue !== undefined) payload[f.key] = 0
         }
         else if (f.type === 'checkbox') payload[f.key] = v === 'true'
@@ -722,6 +796,12 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
               </div>
             )
           })}
+
+          {COMPONENT_TYPE[item.id] === 'StorageUnit' && (
+            <p className="col-span-2 text-[10px] text-muted" data-testid="storage-pricing-note">
+              {STORAGE_PRICING_NOTE}
+            </p>
+          )}
 
           {/* "+ Add parameter" (spec D23). Lists the component's Input
               attributes the form does not already show; default_text stands in
