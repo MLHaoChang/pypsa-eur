@@ -38,12 +38,11 @@ Merge one PR at a time:
 
 ## Dashboard
 
-The dashboard is https://claude.ai/artifact/GCvn8s9zSM6JfwsJ4bsATk. Its boards (prs, merged, sessions) are JSON files kept in the scratchpad `board/` folder.
+The dashboard is https://claude.ai/artifact/GCvn8s9zSM6JfwsJ4bsATk. All three boards share one dataset, `datasets/board`. Its file, `board.json`, is `{rows: [...]}`, and each row's `board` field (`prs`, `sessions` or `merged`) says which table shows it. The page splits the rows with one calc per board.
 
-To refresh a board:
-1. Edit its file.
-2. Upload it with Artifact `publish`, `asset: true`, `url` set to the dashboard. JSON files go one per call.
-3. In one `ArtifactData` batch, update `datasets/<id>` with `source.url` from the upload reply and `updated`.
+Each refresh is two calls:
+1. Edit `board.json` in the scratchpad, then upload it with Artifact `publish`, `asset: true`, `url` set to the dashboard.
+2. Make one `ArtifactData` update to `datasets/board`. It sets `source.url` from the upload reply and `updated: {at, by}`, with `if_version` taken from the last write's result.
 
 ## Time
 
