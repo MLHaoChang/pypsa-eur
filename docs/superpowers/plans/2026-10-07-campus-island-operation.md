@@ -2714,6 +2714,57 @@ closed by a test:
 
 24 of 24 are now killed.
 
+**The ratings refresh** (owner, 2026-10-14, option 1). The draft freezes
+each unit's size (`p_mw`, `s_mva`, `e_mwh`) into the user's campus file,
+and I6 reads inertia and droop from those sizes. So a trial that re-solves
+the hub to a bigger BESS would otherwise rerun the check on the old one,
+and the loop could not converge.
+- **`refresh_ratings`:** re-drafts from the re-solved hub in memory and
+  copies the three ratings by `pypsa_name`. Units newly built are added; one
+  whose bus the campus file lacks is listed, not added. Every other field
+  and edit stays. The file is saved only when something changed.
+- **Each trial** records its `refreshed` list, and the panel shows it, e.g.
+  "BESS p_mw 10 → 383".
+- **Tests:** ratings copied; a newly built unit added; a user's relay, a
+  transformer value and a BESS fault-current value surviving a refresh; no
+  change when nothing moved; the trial record.
+
+**The Run** calls gridspine's `cuts_campus` right after
+`island_frequency_campus`. The cuts file is removed with the other
+island-hours files when the check does not run. The pypsa-gui contract
+literals (`CUT_COLUMNS`, `FREQ_CUTS_CSV`, the cut kinds) are pinned to
+gridspine's by a test.
+
+**End to end** (`test_campus_island_cuts_e2e.py`, slow, ~7.5 min). This
+uses gridspine's real cuts (#228), the real campus Run, the cut rows in a
+real re-solve, and the refresh. The hand hub:
+- a 20 MW critical load, 8 MW of PV, a fixed 15 MW spinning droop genset,
+  and an extendable GFM droop BESS with a 10 MW floor;
+- solved without island constraints;
+- limits of 1 Hz/s and 1 Hz.
+
+**Results:**
+- **Before:** the island fails at every hour, and every feasible cut names
+  the BESS. The trip of the BESS (E3) is infeasible, with gridspine's N−1
+  note.
+- **One trial:** the BESS goes from 10 to about 383 MW. The inertia cuts
+  bind: about 500 MW·s for a 20 MW step at 1 Hz/s, at 1.25 MW·s per MW of
+  droop GFM. After the refresh the rerun passes everything a cut can fix,
+  so the loop stops at "no cut can fix what still fails", with only E3
+  left.
+- **Without the refresh:** nothing is fixed in the campus check.
+
+**Found on the way.** The end-to-end run found three things on the gridspine
+side, each now fixed:
+- **Cuts from a saturated trace:** the first #228 head derived droop and
+  inertia from the runaway, e.g. 726 MW/Hz for a 20 MW step, and the loop
+  diverged to a 1.6 GW BESS. Now they are derived on the event with the
+  saturated range lifted.
+- **E3 against a total with the tripped unit:** these cuts could never be
+  met. E3 is now infeasible, with an N−1 note.
+- **A zero-import hub:** it crashed `campus_hourly`, because PyPSA drops
+  all-zero series. Fixed in #231.
+
 **Data Center check of the E4 fix** (PR #226, run at the grid-forming
 session's request on a scratch copy): ups_bridged passes at all 9 island
 hours, with UPS autonomy ≈655 s against 600 s needed and all 11 pickup
