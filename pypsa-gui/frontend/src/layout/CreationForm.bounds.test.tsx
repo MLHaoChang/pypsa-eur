@@ -107,24 +107,24 @@ afterEach(() => {
 })
 
 describe('criterion 34 — the extendable bounds are revealed, not absent', () => {
-  it('hides P nom min / P nom max until Extendable is ticked', () => {
+  it('hides the minimum and maximum capacity until Extendable is ticked', () => {
     renderForm()
-    expect(screen.queryByText(/P nom min/i)).toBeNull()
-    expect(screen.queryByText(/P nom max/i)).toBeNull()
+    expect(screen.queryByText(/Minimum capacity/i)).toBeNull()
+    expect(screen.queryByText(/Maximum capacity/i)).toBeNull()
   })
 
   it('shows both once Extendable is ticked', () => {
     renderForm()
     toggleExtendable()
-    expect(screen.getByText(/P nom min/i)).toBeTruthy()
-    expect(screen.getByText(/P nom max/i)).toBeTruthy()
+    expect(screen.getByText(/Minimum capacity/i)).toBeTruthy()
+    expect(screen.getByText(/Maximum capacity/i)).toBeTruthy()
   })
 
   it('hides them again when Extendable is unticked', () => {
     renderForm()
     toggleExtendable()
     toggleExtendable()
-    expect(screen.queryByText(/P nom max/i)).toBeNull()
+    expect(screen.queryByText(/Maximum capacity/i)).toBeNull()
   })
 })
 
@@ -154,7 +154,7 @@ describe('the submit payload only carries fields the user could see', () => {
   it('posts a bound the user actually typed', async () => {
     renderForm()
     toggleExtendable()
-    fireEvent.change(fieldInput(/^P nom max/i), { target: { value: '900' } })
+    fireEvent.change(fieldInput(/^Maximum capacity/i), { target: { value: '900' } })
     await submit('G_typed')
     await waitFor(() => expect(vi.mocked(networkApi).createGenerator).toHaveBeenCalled())
     const payload = vi.mocked(networkApi).createGenerator.mock.calls[0][0] as Record<string, unknown>

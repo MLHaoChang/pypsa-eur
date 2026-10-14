@@ -81,33 +81,37 @@ describe('Q3 — the creation form prices in euro', () => {
   })
 })
 
-describe('Q5 — a battery can be sized and costed at creation', () => {
-  it('offers Extendable, marginal cost and capital cost', () => {
+describe('Q5 — a battery can be sized at creation; its parts are priced on its card', () => {
+  // S1d: no typed annuity anywhere (plan rule). A battery's investment is its
+  // two parts with their own lifetimes, priced on the Expert card; the form
+  // says so instead of offering a capital-cost field.
+  it('offers Extendable and marginal cost, and points to the card for the parts', () => {
     renderForm('battery', 'Battery')
     expect(fieldInput(/^Extendable/).type).toBe('checkbox')
     expect(fieldInput(/^Marginal cost/)).toBeTruthy()
-    expect(fieldInput(/^Capital cost/)).toBeTruthy()
+    expect(screen.queryByText(/^Capital cost/)).toBeNull()
+    expect(screen.getByTestId('storage-pricing-note').textContent).toContain('power and energy parts')
   })
 
   it('reveals the size bounds only when Extendable is ticked', () => {
     renderForm('battery', 'Battery')
-    expect(screen.queryByText(/P nom max/i)).toBeNull()
+    expect(screen.queryByText(/Maximum capacity/i)).toBeNull()
     toggleExtendable()
-    expect(screen.getByText(/P nom min/i)).toBeTruthy()
-    expect(screen.getByText(/P nom max/i)).toBeTruthy()
+    expect(screen.getByText(/Minimum capacity/i)).toBeTruthy()
+    expect(screen.getByText(/Maximum capacity/i)).toBeTruthy()
   })
 
-  it('posts the sizing and cost the user typed, under the edit card’s keys', async () => {
+  it('posts the sizing the user typed, under the edit card’s keys, and no capital cost', async () => {
     renderForm('battery', 'Battery')
     toggleExtendable()
-    fireEvent.change(fieldInput(/^P nom max/i), { target: { value: '50' } })
-    fireEvent.change(fieldInput(/^Capital cost/), { target: { value: '95700' } })
+    fireEvent.change(fieldInput(/^Maximum capacity/i), { target: { value: '50' } })
     await submit('BESS')
     await waitFor(() => expect(vi.mocked(networkApi).createStorageUnit).toHaveBeenCalled())
     const payload = vi.mocked(networkApi).createStorageUnit.mock.calls[0][0] as Record<string, unknown>
-    expect(payload).toMatchObject({
-      name: 'BESS', p_nom_extendable: true, p_nom_max: 50, capital_cost: 95700, marginal_cost: 0,
-    })
+    expect(payload).toMatchObject({ name: 'BESS', p_nom_extendable: true, p_nom_max: 50, marginal_cost: 0 })
+    expect(payload).not.toHaveProperty('capital_cost')
+    // Stored as a share: the 95 % default is 0.95.
+    expect(payload.efficiency_store).toBeCloseTo(0.95, 12)
   })
 
   it('does not post hidden bounds for a fixed-size battery', async () => {
