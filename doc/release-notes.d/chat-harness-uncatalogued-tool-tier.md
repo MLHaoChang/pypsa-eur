@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A chat tool name that is not in the catalogue now resolves to the destructive tier instead of read, so a handler registered without a declaration would get the confirmation card in Expert and Guided mode instead of running unconfirmed.

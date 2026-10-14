@@ -3881,10 +3881,10 @@ def safety_tier_for(tool_name: str) -> str:
     its description.
 
     The marker in the description IS the declaration — there is no separate
-    tier field to drift from it. Unknown / undocumented tools resolve to
-    "read", which is the conservative answer for the confirmation card (no
-    card) and the permissive one for the chat dispatch seam's lock gate; the
-    schema-parity tests keep the undocumented case from existing.
+    tier field to drift from it. A name absent from `TOOLS` resolves to
+    "destructive", as in `confirm._safety_tier_for`, so nothing undeclared
+    passes for a read. A declared tool without a marker resolves to "read";
+    the schema-parity tests keep that case from existing.
     """
     for tool in TOOLS:
         if tool["name"] == tool_name:
@@ -3893,4 +3893,4 @@ def safety_tier_for(tool_name: str) -> str:
                 if f"Safety: {tier}" in description:
                     return tier
             return "read"
-    return "read"
+    return "destructive"
