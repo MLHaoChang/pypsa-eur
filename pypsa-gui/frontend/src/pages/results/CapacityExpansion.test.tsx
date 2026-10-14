@@ -243,7 +243,7 @@ it('renders real PV figures untouched when every class resolved', async () => {
   renderPage()
   await switchToLifetimeMode()
 
-  expect(getKpiValueWithin(kpiCard('CAPEX (installed, PV)'), '€36.00 B')).toBeTruthy()
+  expect(getKpiValueWithin(kpiCard('CAPEX (installed, PV)'), '€36.0 B')).toBeTruthy()
   expect(screen.queryByText('unavailable')).toBeNull()
   expect(screen.queryByText(/upfront \(PV\) investment costs are unavailable/i)).toBeNull()
 })

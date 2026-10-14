@@ -9,7 +9,9 @@
 // `value` may arrive pre-formatted with its unit ("136.64 €/MWh"); without an
 // explicit `unit` the tile splits it (utils/format.ts::splitValueUnit) so the
 // unit renders smaller and can never wrap under the number.
-import { splitValueUnit } from '../utils/format'
+// The figure is then rounded to the tile standard (utils/format.ts::kpiFigure:
+// 3 significant figures, one decimal for prices, % and h/yr).
+import { kpiFigure, splitValueUnit } from '../utils/format'
 
 export type KpiTone = 'good' | 'warn' | 'bad'
 
@@ -34,7 +36,8 @@ export default function Kpi({
   headline?: boolean
   testId?: string
 }) {
-  const parts = unit !== undefined ? { value, unit } : splitValueUnit(value)
+  const raw = unit !== undefined ? { value, unit } : splitValueUnit(value)
+  const parts = kpiFigure(raw.value, raw.unit)
   return (
     <div
       data-testid={testId}

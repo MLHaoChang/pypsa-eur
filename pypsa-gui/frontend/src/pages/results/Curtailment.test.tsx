@@ -5,6 +5,7 @@ import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import Curtailment from './Curtailment'
+import { findKpiValue } from '../../test/kpi'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -91,6 +92,8 @@ it('renders a distinctive curtailed-energy KPI sourced from a single mocked snap
   // exactly one match; use `findAllByText` and assert on the known count
   // (2) instead, same resolution Dispatch.test.tsx used for its own
   // legitimate duplicate.
-  const matches = await screen.findAllByText((text) => text.includes('424.2'))
-  expect(matches.length).toBe(2)
+  // The by-carrier table keeps full precision ("424.2 MWh"); the KPI tile
+  // rounds to the R1 standard (3 s.f.): "424 MWh".
+  expect(await findKpiValue('424 MWh')).toBeTruthy()
+  expect(screen.getAllByText((text) => text.includes('424.2')).length).toBe(1)
 })
