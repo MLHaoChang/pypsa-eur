@@ -2173,6 +2173,20 @@ driver writes them. The frequency half is under way from the grid-forming
 track: `island_frequency_campus` writes `campus_freq_*.csv` and
 `campus_freq_summary.json` (I6c).
 
+**I6c's contract, which I9b reads** (from the grid-forming session,
+2026-10-14). Column tuples are in `gridspine.static.frequency`; summary keys
+are `campus_study.FREQ_SUMMARY_KEYS`. Columns are fixed, and a table with
+nothing to report is written header-only.
+- `campus_freq_e1_hourly.csv`: E1 at every hour.
+- `campus_freq_events.csv`: E1–E6 at the island hours, with the E3 unit,
+  the Q8 `i_max_pu` rerun and the E4 block.
+- `campus_freq_losses.csv`: the I4 viability and ΔP_AC.
+- `campus_freq_bridge.csv`: the UPS and GFM bridge energy and autonomy.
+- `campus_freq_planned.csv`: planned feasibility and ramp.
+- `campus_freq_ups.csv`: UPS drop-outs.
+- `campus_freq_summary.json`: the failing-hour lists, including
+  `e1_failing_not_selected`.
+
 **Backend (`services/campus_electrical_service.py`,
 `routers/campus_electrical.py`):**
 - `get_island`, `save_island` and `run_island_study`, behind `GET`/`PUT
