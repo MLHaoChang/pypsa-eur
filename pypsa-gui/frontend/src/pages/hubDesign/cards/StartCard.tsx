@@ -2,7 +2,14 @@
 // network already open. Templates come from the New-project wizard's own
 // table and are created by the wizard's own (lifted) mutation, so the G4
 // mode rule and the workbench navigation are the wizard's.
-import { FolderOpen, Hexagon } from 'lucide-react'
+//
+// U3 (owner decision 5): two paths side by side. "Is my site reliable?" is
+// the energy-hub flow above; "Is this investment worth it?" lists the
+// decision-study questions and starts one through the wizard's own entry hook
+// (`useDecisionEntry`): the intake opens in the decision panel, and the study
+// builds its own project, so the open one is not changed.
+import { FolderOpen, Hexagon, Scale } from 'lucide-react'
+import { GUIDED_QUESTIONS, useDecisionEntry } from '../../decision/useDecisionEntry'
 import { TEMPLATES } from '../../../layout/NewProjectWizard'
 import { useCreateFromTemplate } from '../../../hooks/useCreateFromTemplate'
 import { useUIStore } from '../../../store/uiStore'
@@ -63,35 +70,69 @@ export function StartCard() {
         </div>
       )}
 
-      <div className="flex flex-col gap-2">
-        <span className="text-[12px] font-semibold text-text">Start from an example site</span>
-        <div data-testid="hub-start-templates" className="grid gap-2 sm:grid-cols-3">
-          {HUB_TEMPLATES.map(t => {
-            const creating = create.isPending && create.variables === t.id
-            return (
-              <button key={t.id} type="button" data-testid={`hub-start-template-${t.id}`}
-                onClick={() => create.mutate(t.id)}
-                disabled={create.isPending || running}
-                title={running ? STUDY_RUNNING_SWITCH : `Create a new project from the ${t.name} example`}
-                className="flex flex-col gap-1 rounded-lg border border-border p-3 text-left hover:border-accent/60 hover:bg-accent/5 disabled:opacity-50">
-                <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-text">
-                  <Hexagon size={12} className="text-accent" /> {t.name}
-                  {creating && <span className="text-[10px] font-normal text-accent animate-pulse">creating…</span>}
-                </span>
-                <span className="text-[11px] leading-relaxed text-muted">{purpose(t.id, t.description)}</span>
-              </button>
-            )
-          })}
+      <section data-testid="hub-start-reliable" aria-labelledby="hub-start-reliable-h" className="flex flex-col gap-3">
+        <h3 id="hub-start-reliable-h" className="text-[13px] font-semibold text-text">Is my site reliable?</h3>
+        <div className="flex flex-col gap-2">
+          <span className="text-[12px] font-semibold text-text">Start from an example site</span>
+          <div data-testid="hub-start-templates" className="grid gap-2 sm:grid-cols-3">
+            {HUB_TEMPLATES.map(t => {
+              const creating = create.isPending && create.variables === t.id
+              return (
+                <button key={t.id} type="button" data-testid={`hub-start-template-${t.id}`}
+                  onClick={() => create.mutate(t.id)}
+                  disabled={create.isPending || running}
+                  title={running ? STUDY_RUNNING_SWITCH : `Create a new project from the ${t.name} example`}
+                  className="flex flex-col gap-1 rounded-lg border border-border p-3 text-left hover:border-accent/60 hover:bg-accent/5 disabled:opacity-50">
+                  <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-text">
+                    <Hexagon size={12} className="text-accent" /> {t.name}
+                    {creating && <span className="text-[10px] font-normal text-accent animate-pulse">creating…</span>}
+                  </span>
+                  <span className="text-[11px] leading-relaxed text-muted">{purpose(t.id, t.description)}</span>
+                </button>
+              )
+            })}
+          </div>
         </div>
-      </div>
 
-      <button type="button" data-testid="hub-start-own-network"
-        onClick={() => setStep('site', { user: true })}
-        disabled={!project}
-        title={project ? 'Design a hub on the network that is open now' : BLOCKED_NO_PROJECT}
-        className="self-start inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-[12px] text-text hover:border-accent hover:text-accent disabled:opacity-50">
-        <FolderOpen size={13} /> Use my network
-      </button>
+        <button type="button" data-testid="hub-start-own-network"
+          onClick={() => setStep('site', { user: true })}
+          disabled={!project}
+          title={project ? 'Design a hub on the network that is open now' : BLOCKED_NO_PROJECT}
+          className="self-start inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-[12px] text-text hover:border-accent hover:text-accent disabled:opacity-50">
+          <FolderOpen size={13} /> Use my network
+        </button>
+      </section>
+
+      <InvestQuestions project={project} />
     </CardShell>
+  )
+}
+
+/** "Is this investment worth it?": the decision-study questions (U3). */
+function InvestQuestions({ project }: { project: string | null }) {
+  const { reason, ready, start } = useDecisionEntry(project)
+  return (
+    <section data-testid="hub-start-invest" aria-labelledby="hub-start-invest-h"
+      className="flex flex-col gap-2 border-t border-border pt-3">
+      <h3 id="hub-start-invest-h" className="text-[13px] font-semibold text-text">Is this investment worth it?</h3>
+      <span className="text-[11px] text-muted">
+        A decision study answers one question with a verdict, a size and a report. It builds its own project, so
+        the one open now is not changed.
+      </span>
+      {reason && <span data-testid="hub-start-invest-reason" className="text-[11px] text-warn">{reason}</span>}
+      <div className="grid gap-2 sm:grid-cols-3">
+        {GUIDED_QUESTIONS.map(q => (
+          <button key={q.id} type="button" data-testid={`hub-start-question-${q.id}`}
+            onClick={() => start(q)} disabled={!ready}
+            title={reason ?? `Start the study: ${q.title}`}
+            className="flex flex-col gap-1 rounded-lg border border-border p-3 text-left hover:border-accent/60 hover:bg-accent/5 disabled:opacity-50">
+            <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-text">
+              <Scale size={12} className="text-accent" /> {q.title}
+            </span>
+            <span className="text-[11px] leading-relaxed text-muted">{q.blurb}</span>
+          </button>
+        ))}
+      </div>
+    </section>
   )
 }

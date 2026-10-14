@@ -156,6 +156,65 @@ def test_an_http_import_is_what_the_next_request_sees(on_project_x):
     assert client.get("/api/network/meta").json()["loaded_project"] is None
 
 
+def _csv_zip_bytes(*buses: str) -> bytes:
+    import zipfile
+    n = pypsa.Network()
+    for b in buses:
+        n.add("Bus", b)
+    with tempfile.TemporaryDirectory() as d:
+        n.export_to_csv_folder(d)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            for f in pathlib.Path(d).iterdir():
+                zf.write(f, f.name)
+        return buf.getvalue()
+
+
+def _xlsx_bytes(*buses: str) -> bytes:
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "buses"
+    ws.append(["name", "v_nom"])
+    for b in buses:
+        ws.append([b, 1.0])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _matpower_bytes() -> bytes:
+    # One MATPOWER bus numbered 7 becomes PyPSA bus "bus_7".
+    return (b"function mpc = x\nmpc.baseMVA = 100;\n"
+            b"mpc.bus = [\n7 3 0 0 0 0 1 1 0 1 1 1.1 0.9;\n];\n")
+
+
+@pytest.mark.parametrize("route, data, name, expected", [
+    ("netcdf", lambda: _nc_bytes("IMP0"), "other.nc", ["IMP0"]),
+    ("csv", lambda: _csv_zip_bytes("IMP0"), "other.zip", ["IMP0"]),
+    ("excel", lambda: _xlsx_bytes("IMP0"), "other.xlsx", ["IMP0"]),
+    ("matpower", _matpower_bytes, "other.m", ["bus_7"]),
+])
+def test_every_http_import_is_what_the_next_request_sees(
+    on_project_x, route, data, name, expected,
+):
+    """OPEN-ITEMS 12: each of the four raw imports, not only NetCDF, must move
+    the session off the project it imported over."""
+    client = on_project_x
+    r = client.post(
+        f"/api/io/import/{route}",
+        files={"file": (name, io.BytesIO(data()), "application/octet-stream")},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["buses"] == 1
+
+    assert _buses(client) == expected, (
+        f"/import/{route} reported 1 bus and the next request served the "
+        "previous project's 3: the session pointer still named it"
+    )
+    assert client.get("/api/network/meta").json()["loaded_project"] is None
+
+
 def test_a_refused_import_leaves_the_session_on_its_project(on_project_x):
     """Un-pointing happens on SUCCESS only. A refusal raises after the reset —
     which landed in the scratch slot — so the project is still resident and

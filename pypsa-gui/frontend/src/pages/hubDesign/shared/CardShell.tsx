@@ -12,6 +12,13 @@ import { useHubDesignStore } from '../hubDesignStore'
 import { useUIStore } from '../../../store/uiStore'
 import { useTerm } from './Term'
 import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
+import { useChatReadiness } from '../../../hooks/useChatProfiles'
+
+/** UX M8 (U3): why "Let the assistant do this" is off without a usable
+ *  assistant. The cards still work by hand; the setup is offered once,
+ *  centrally (`AssistantSetupCard`). */
+export const NO_ASSISTANT =
+  'The assistant is not set up yet: add an API key in the assistant panel. Everything on this card also works by hand.'
 
 const INTRO_KEY = {
   start: 'hub_start', site: 'hub_site', goal: 'hub_goal', results: 'hub_results',
@@ -39,6 +46,8 @@ export function DelegateButton({ testId, text, display, label = 'Let the assista
   disabled?: boolean; disabledTitle?: string
 }) {
   const mode = useUIStore(s => s.uiMode)
+  // `false` only when the chat says so; unknown (`undefined`) leaves it on.
+  const noAssistant = useChatReadiness().ready === false
   const send = () => {
     const texts = typeof text === 'string' ? [text] : text
     const labels = typeof display === 'string' ? [display] : display ?? []
@@ -49,8 +58,8 @@ export function DelegateButton({ testId, text, display, label = 'Let the assista
       ...(labels[i] ? { label: labels[i] } : {}), ...(group ? { group } : {}) }))
   }
   return (
-    <button type="button" data-testid={testId} onClick={send} disabled={disabled}
-      title={disabled && disabledTitle ? disabledTitle : delegateTitle(mode)}
+    <button type="button" data-testid={testId} onClick={send} disabled={disabled || noAssistant}
+      title={noAssistant ? NO_ASSISTANT : disabled && disabledTitle ? disabledTitle : delegateTitle(mode)}
       className="inline-flex items-center gap-1 px-2 py-1 border border-accent/60 rounded text-[11px] text-accent hover:bg-accent/10 disabled:opacity-50 disabled:hover:bg-transparent">
       <Sparkles size={12} /> {label}
     </button>

@@ -49,6 +49,10 @@ const GEN = { name: 'gas', bus: 'B1', carrier: 'gas', p_nom: 100, p_nom_extendab
   committable: false, control: 'PQ', build_year: 2025, lifetime: 25, ...COSTS } as never
 const SU = { name: 'bess', bus: 'B1', carrier: 'battery', p_nom: 10, p_nom_extendable: false,
   max_hours: 4, efficiency_store: 0.95, efficiency_dispatch: 0.95, marginal_cost: 1, ...COSTS } as never
+// A battery priced as its two parts, derived as S0's `derive_composite` does.
+const SU_PARTS = { ...(SU as object), overnight_cost: null, capital_cost: 95_712, fom_cost: 722, lifetime: 25,
+  inv_power_overnight: 213_900, inv_power_lifetime: 10, inv_power_fom_share: 0.0034,
+  inv_energy_overnight: 189_900, inv_energy_lifetime: 25, inv_energy_fom_share: 0 } as never
 const STORE = { name: 'tank', bus: 'H2', carrier: 'H2', e_nom: 100, e_nom_extendable: false,
   marginal_cost: 0, ...COSTS } as never
 const LINK = { name: 'ely', bus0: 'B1', bus1: 'H2', carrier: 'H2', p_nom: 5, p_nom_extendable: false,
@@ -83,25 +87,49 @@ function expectAnnuityBadges(unit: 'MW' | 'MWh' | 'MVA') {
   expect(overnight).not.toContain('/yr')
 }
 
+// The read-out of a schema-rendered card (S1b, S1c).
+function expectSchemaBadges(unit: 'kW' | 'kWh') {
+  expect(rowText('Capital cost (annualised)')).toContain(`€/${unit}/yr`)
+  expect(rowText('Fixed O&M')).toContain(`€/${unit}/yr`)
+  const overnight = rowText('Overnight cost')
+  expect(overnight).toContain(`€/${unit}`)
+  expect(overnight).not.toContain('/yr')
+}
+
 beforeEach(() => { useUIStore.setState({ currentProject: 'Demo' }) })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 describe('capital-cost badges name the annuity per year', () => {
+  // S1b: the Generator card renders from the asset schema: money per kW, the
+  // annualised capital cost derived (overnight × annuity + fixed O&M).
   it('Generator card', () => {
     wrap(<GeneratorCard gen={GEN} onRename={() => {}} />, [['generators', [GEN]]])
-    expectAnnuityBadges('MW')
+    expect(rowText('Capital cost (annualised)')).toContain('€/kW/yr')
+    expect(rowText('Fixed O&M')).toContain('€/kW/yr')
+    const overnight = rowText('Overnight cost')
+    expect(overnight).toContain('€/kW')
+    expect(overnight).not.toContain('/yr')
   })
+  // S1b: the StorageUnit card renders from the asset schema. Money reads per
+  // kW (§3.4 of the asset-parameterisation spec); the annualised capital cost
+  // is derived and says so; the battery's investment is its two parts.
   it('StorageUnit card', () => {
-    wrap(<StorageUnitCard su={SU} onRename={() => {}} />, [['storage_units', [SU]]])
-    expectAnnuityBadges('MW')
+    wrap(<StorageUnitCard su={SU_PARTS} onRename={() => {}} />, [['storage_units', [SU_PARTS]]])
+    const cc = rowText('Capital cost (annualised)')
+    expect(cc).toContain('€/kW/yr')
+    expect(cc).toContain('95.71')
+    expect(rowText('Power part: overnight cost')).toContain('€/kW')
+    expect(rowText('Energy part: overnight cost')).toContain('€/kWh')
   })
+  // S1c: the Store and Link cards render from the asset schema too: money per
+  // kWh (a Store sizes energy) or per kW (a Link sizes power).
   it('Store card', () => {
     wrap(<StoreCard store={STORE} onRename={() => {}} />, [['stores', [STORE]]])
-    expectAnnuityBadges('MWh')
+    expectSchemaBadges('kWh')
   })
   it('Link card', () => {
     wrap(<LinkCard link={LINK} onRename={() => {}} />, [['links', [LINK]]])
-    expectAnnuityBadges('MW')
+    expectSchemaBadges('kW')
   })
   it('Line panel', async () => {
     wrap(<LinePanel name="L1" />, [['lines', [LINE]]])
@@ -126,26 +154,44 @@ function expectEditBadges(unit: 'MW' | 'MWh' | 'MVA') {
   expect(screen.queryByText(`Capital cost (€/${unit})`)).toBeNull()
 }
 
+// A schema-rendered card types the overnight cost and fixed O&M; the
+// annualised capital cost is a derived row with no input.
+function expectSchemaEditBadges(unit: 'kW' | 'kWh') {
+  expect(screen.getByText(`Overnight cost (€/${unit})`)).toBeTruthy()
+  expect(screen.getByText(`Fixed O&M (€/${unit}/yr)`)).toBeTruthy()
+  const cc = screen.getByTestId('asset-derived-capital_cost')
+  expect(cc.textContent).toContain(`€/${unit}/yr`)
+  expect(cc.querySelector('input')).toBeNull()
+}
+
 describe('edit-mode capital-cost badges name the annuity per year', () => {
   it('Generator edit form', () => {
     wrap(<GeneratorCard gen={GEN} onRename={() => {}} />, [['generators', [GEN]]])
     fireEvent.click(screen.getByRole('button', { name: /^Edit / }))
-    expectEditBadges('MW')
+    expect(screen.getByText('Overnight cost (€/kW)')).toBeTruthy()
+    expect(screen.getByText('Fixed O&M (€/kW/yr)')).toBeTruthy()
+    // Derived, read-only: no typed annualised capital cost.
+    expect(screen.getByTestId('asset-derived-capital_cost').textContent).toContain('€/kW/yr')
+    expect(screen.getByTestId('asset-derived-capital_cost').querySelector('input')).toBeNull()
   })
   it('StorageUnit edit form', () => {
-    wrap(<StorageUnitCard su={SU} onRename={() => {}} />, [['storage_units', [SU]]])
+    wrap(<StorageUnitCard su={SU_PARTS} onRename={() => {}} />, [['storage_units', [SU_PARTS]]])
     fireEvent.click(screen.getByRole('button', { name: /^Edit / }))
-    expectEditBadges('MW')
+    // The parts are typed per kW / kWh; the annualised cost is derived, read-only.
+    expect(screen.getByLabelText('Power part: overnight cost (€/kW)')).toBeTruthy()
+    expect(screen.getByLabelText('Energy part: overnight cost (€/kWh)')).toBeTruthy()
+    expect(screen.getByTestId('asset-derived-capital_cost').textContent).toContain('€/kW/yr')
+    expect(screen.queryByText(/^Capital cost \(€\/MW\/yr\)$/)).toBeNull()
   })
   it('Store edit form', () => {
     wrap(<StoreCard store={STORE} onRename={() => {}} />, [['stores', [STORE]]])
     fireEvent.click(screen.getByRole('button', { name: /^Edit / }))
-    expectEditBadges('MWh')
+    expectSchemaEditBadges('kWh')
   })
   it('Link edit form', () => {
     wrap(<LinkCard link={LINK} onRename={() => {}} />, [['links', [LINK]]])
     fireEvent.click(screen.getByRole('button', { name: /^Edit / }))
-    expectEditBadges('MW')
+    expectSchemaEditBadges('kW')
   })
   it('Line edit form', async () => {
     wrap(<LinePanel name="L1" />, [['lines', [LINE]]])

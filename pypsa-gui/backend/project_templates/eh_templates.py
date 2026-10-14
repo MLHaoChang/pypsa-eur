@@ -93,6 +93,20 @@ def _tag_columns(n) -> None:
     n.links["eh_role"] = ""
 
 
+# ── Investment costs from the generic defaults pack (IC S3 seeds) ─────────
+# Owner 2026-10-13: every candidate is priced from the pack through the asset
+# schema (overnight parts; PyPSA or `derive.apply_parts` annuitises them at
+# the pack's discount rate), never from an annualised literal.
+TEMPLATE_PACK_VERSION = "2026-10-13"
+
+
+def _price(n, component: str, name: str, technology: str) -> None:
+    """Price one candidate from the pack (`defaults_pack.pricing.price_from_pack`)."""
+    from services.library.defaults_pack.pricing import price_from_pack
+
+    price_from_pack(n, component, name, technology, version=TEMPLATE_PACK_VERSION)
+
+
 # ── Data Center Energy Hub (weak_flexible) ─────────────────────────────────
 
 
@@ -153,15 +167,16 @@ def build_eh_datacenter() -> pypsa.Network:
           p_nom=40.0, max_hours=0.25, efficiency_store=0.95,
           efficiency_dispatch=0.95, cyclic_state_of_charge=True)
 
-    # Candidates the ENS-capped expansion may build (annualised €/MW/yr).
+    # Candidates the ENS-capped expansion may build, priced from the pack.
     n.add("Generator", "genset_new", bus="dc_mv", carrier="gas", p_nom=0.0,
-          p_nom_extendable=True, p_nom_max=40.0, capital_cost=62_000.0,
-          marginal_cost=165.0)
+          p_nom_extendable=True, p_nom_max=40.0, marginal_cost=165.0)
+    _price(n, "generators", "genset_new", "gas-genset")
     _outage(n, "generators", "genset_new", 0.03, 24.0)
     n.add("StorageUnit", "bess_new", bus="it_bus", carrier="battery",
           p_nom=0.0, p_nom_extendable=True, p_nom_max=30.0, max_hours=4.0,
-          capital_cost=48_000.0, efficiency_store=0.95,
-          efficiency_dispatch=0.95, cyclic_state_of_charge=True)
+          efficiency_store=0.95, efficiency_dispatch=0.95,
+          cyclic_state_of_charge=True)
+    _price(n, "storage_units", "bess_new", "battery")
 
     _tag_columns(n)
     n.buses.at["grid", "eh_poc"] = True
@@ -213,9 +228,11 @@ def build_eh_h2_hub() -> pypsa.Network:
     n.add("Generator", "solar_park", bus="hub", carrier="solar", p_nom=80.0,
           marginal_cost=0.0)
     n.add("Generator", "wind_new", bus="hub", carrier="wind", p_nom=0.0,
-          p_nom_extendable=True, p_nom_max=300.0, capital_cost=120_000.0)
+          p_nom_extendable=True, p_nom_max=300.0)
+    _price(n, "generators", "wind_new", "onwind")
     n.add("Generator", "solar_new", bus="hub", carrier="solar", p_nom=0.0,
-          p_nom_extendable=True, p_nom_max=150.0, capital_cost=45_000.0)
+          p_nom_extendable=True, p_nom_max=150.0)
+    _price(n, "generators", "solar_new", "solar-utility")
     wind, sun = _wind(), _solar()
     n.generators_t.p_max_pu = pd.DataFrame(
         {"wind_farm": wind, "wind_new": wind,
@@ -229,15 +246,17 @@ def build_eh_h2_hub() -> pypsa.Network:
     # grid connection is lost (DtC planning sizes it).
     n.add("Link", "fuel_cell", bus0="h2", bus1="hub", p_nom=10.0,
           p_nom_extendable=True, p_nom_min=10.0, p_nom_max=80.0,
-          capital_cost=90_000.0, efficiency=0.50, carrier="fuel cell")
+          efficiency=0.50, carrier="fuel cell")
+    _price(n, "links", "fuel_cell", "fuel-cell")
     n.add("Carrier", "battery", co2_emissions=0.0)
     n.add("StorageUnit", "site_battery", bus="hub", carrier="battery",
           p_nom=20.0, max_hours=2.0, efficiency_store=0.95,
           efficiency_dispatch=0.95, cyclic_state_of_charge=True)
     n.add("StorageUnit", "bess_new", bus="hub", carrier="battery", p_nom=0.0,
           p_nom_extendable=True, p_nom_max=200.0, max_hours=6.0,
-          capital_cost=48_000.0, efficiency_store=0.95,
-          efficiency_dispatch=0.95, cyclic_state_of_charge=True)
+          efficiency_store=0.95, efficiency_dispatch=0.95,
+          cyclic_state_of_charge=True)
+    _price(n, "storage_units", "bess_new", "battery")
 
     n.add("Load", "process_load", bus="hub", carrier="AC")
     n.add("Load", "h2_offtake", bus="h2", carrier="H2", p_set=25.0)
@@ -304,13 +323,14 @@ def build_eh_microgrid() -> pypsa.Network:
           p_nom=6.0, max_hours=4.0, efficiency_store=0.94,
           efficiency_dispatch=0.94, cyclic_state_of_charge=True)
     n.add("Generator", "diesel_new", bus="island", carrier="diesel", p_nom=0.0,
-          p_nom_extendable=True, p_nom_max=12.0, capital_cost=45_000.0,
-          marginal_cost=260.0)
+          p_nom_extendable=True, p_nom_max=12.0, marginal_cost=260.0)
+    _price(n, "generators", "diesel_new", "diesel-genset")
     _outage(n, "generators", "diesel_new", 0.05, 48.0)
     n.add("StorageUnit", "bess_new", bus="island", carrier="battery",
           p_nom=0.0, p_nom_extendable=True, p_nom_max=15.0, max_hours=4.0,
-          capital_cost=48_000.0, efficiency_store=0.94,
-          efficiency_dispatch=0.94, cyclic_state_of_charge=True)
+          efficiency_store=0.94, efficiency_dispatch=0.94,
+          cyclic_state_of_charge=True)
+    _price(n, "storage_units", "bess_new", "battery")
 
     n.add("Load", "residential", bus="island", carrier="AC")
     n.add("Load", "hospital_load", bus="hospital", carrier="AC")

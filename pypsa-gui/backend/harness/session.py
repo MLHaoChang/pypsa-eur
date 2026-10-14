@@ -250,7 +250,21 @@ class ChatSession:
         if sanitised is None:
             return
         self.messages.append(sanitised)
+        # Issue 13: model-visible means logged, as stored here and with the
+        # trim that follows, so the log replays this deque exactly.
+        from harness import eventlog, history as _history
+        eventlog.message(self, sanitised)
+        limit = _history.SESSION_MESSAGES_MAX
+        if len(self.messages) > limit:
+            eventlog.record(self, "history/trim", limit=limit)
         trim_session_messages(self.messages)
+
+    def reset_history(self) -> None:
+        """Empty the provider history (the `/history` rehydration replays
+        chat.jsonl into it next), and log that it did (issue 13)."""
+        self.messages.clear()
+        from harness import eventlog
+        eventlog.record(self, "history/reset")
 
     # ── Confirmation lifecycle (F13 + v4-MINOR-3) ──────────────────────────
     def issue_confirmation(
@@ -401,6 +415,31 @@ class ChatSession:
                     # state that the caller observes via this return value.
                     self.confirmation_decisions.pop(token, None)
                 return "expired"
+
+    def withdraw_confirmation(self, token: str) -> None:
+        """Forget a card that was never shown (issue 18: its `asked` record
+        could not be written, so the gate refused before the frame)."""
+        with self._lock:
+            self.pending_confirmations.pop(token, None)
+            self._decision_events.pop(token, None)
+            self.confirmation_decisions.pop(token, None)
+
+    def revoke_confirmations(self) -> list[str]:
+        """Release every open card as `revoked` (issue 18). A waiting gate
+        wakes at once with the decision 'revoked' instead of timing out as
+        'expired', and records it. Returns the revoked tokens."""
+        with self._lock:
+            tokens = list(self.pending_confirmations)
+            events = [self._decision_events.get(t) for t in tokens]
+            self.confirmation_decisions.clear()
+            for token in tokens:
+                self.confirmation_decisions[token] = "revoked"
+            self.pending_confirmations.clear()
+            self._decision_events.clear()
+        for event in events:
+            if event is not None:
+                event.set()
+        return tokens
 
     # ── Usage / result refs (v4-MINOR-3) ───────────────────────────────────
     def accrue_usage(self, **deltas: int) -> None:

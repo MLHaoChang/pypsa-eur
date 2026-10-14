@@ -198,7 +198,16 @@ def _rm_onexc(func, path, _exc):  # noqa: ANN001 — shutil callback signature
         # untraversable, and the delete route answered 204. Re-raise instead.
         raise OSError(f"refusing to remove a symbolic link: {path}")
     try:
-        os.chmod(path, stat.S_IWRITE)
+        # ADD owner write to the current mode. `os.chmod(path, S_IWRITE)` alone
+        # clears the read-only attribute on Windows but SETS 0o200 on POSIX: a
+        # directory whose `rmdir` then fails (not empty: a file written into it
+        # mid-removal) was left untraversable, and the next `stat` of a file in
+        # it raised PermissionError (CI, 13 Oct). A directory also keeps owner
+        # read and traverse, so the retry can list it.
+        mode = stat.S_IMODE(os.lstat(path).st_mode) | stat.S_IWRITE
+        if os.path.isdir(path):
+            mode |= stat.S_IRWXU
+        os.chmod(path, mode)
     except OSError:
         pass
     func(path)  # re-raises if the path is still locked
@@ -1232,6 +1241,11 @@ async def import_bundle(
         # `ic:` names the commercial reference frames' columns (P2 WP2.2-0):
         # refused before anything is swapped (review 0b #2).
         raise HTTPException(422, f"bus names starting 'ic:' are reserved: {reserved[:5]}")
+    # OPEN-ITEMS item 8, also before the swap: a new import may not bring in a
+    # name the create routes would refuse.
+    from services.component_names import invalid_names_in_netcdf, refuse_invalid_names
+
+    refuse_invalid_names(invalid_names_in_netcdf(nc_path))
     from services import dirty_state, undo_service
     with PyPSAService.get_lock():
         # A different project: a fresh context (own undo, counter 0, no result
@@ -1258,7 +1272,7 @@ async def import_bundle(
         active_project.set_active_project(db, session, _imported_project)
 
     cfg_path = dest / "solver_config.json"
-    from routers.simulation import _state, user_code_authorized
+    from routers.simulation import _state
     stripped_fields: list[str] = []
     if cfg_path.exists():
         cfg_data = json.loads(cfg_path.read_text())
@@ -1267,22 +1281,33 @@ async def import_bundle(
         # set it for a non-admin. A bundle is a SECOND writer of the same field
         # (`_solver_config_from_dict` keeps every live SolverConfig key), so
         # without this an unprivileged member reached the identical capability by
-        # uploading a zip -- verified end to end before this fix.
+        # uploading a zip -- verified end to end.
         #
-        # Stripped from the FILE as well as the loaded config, not just the
-        # loaded config: leaving it on disk plants it in a project an ADMIN may
-        # later open, and `load_project` would then hand it to a solve. That is
-        # the same escalation one session removed.
+        # STRIPPED UNCONDITIONALLY, for every importer including an org admin.
+        # Gating on `user_code_authorized(db, user)` asks "is the importer
+        # privileged", but the security question is "did the importer AUTHOR
+        # this code", and a bundle cannot answer it. An admin who imports a
+        # .pypsaproj.zip a colleague sent them got that colleague's Python
+        # exec()-ed, and `_compile_extra_functionality` runs the MODULE BODY,
+        # so side effects fire at compile time. `results_state.pkl` in the same
+        # archive already goes through the restricted unpickler for every
+        # importer; this field gets the same rule.
+        #
+        # Cost: an admin moving their OWN project by bundle loses the field and
+        # re-sets it through the gated PUT. `stripped` keeps that from being silent.
+        #
+        # Stripped from the FILE as well as the loaded config: leaving it on
+        # disk plants it in a project an admin may later open, and
+        # `load_project` would then hand it to a solve.
         #
         # Stripped and reported rather than 403-ing the whole import: the bundle
         # is already extracted by this point, and refusing here would leave a
         # half-imported project. The response names the field so this is never
         # a silent difference between what was uploaded and what was imported.
         if str(cfg_data.get("extra_functionality_code") or "").strip():
-            if not user_code_authorized(db, user):
-                cfg_data.pop("extra_functionality_code", None)
-                stripped_fields.append("extra_functionality_code")
-                cfg_path.write_text(json.dumps(cfg_data, indent=2))
+            cfg_data.pop("extra_functionality_code", None)
+            stripped_fields.append("extra_functionality_code")
+            cfg_path.write_text(json.dumps(cfg_data, indent=2))
         # Shared legacy-tolerant loader (filter unknown keys + coerce removed
         # enum values) — same path load_project uses, so a bundle from an older
         # GUI version imports instead of 500-ing on an unexpected key.
@@ -2977,6 +3002,23 @@ def load_project(
             f"was interrupted). Project loaded from the previous good copy.",
         )
 
+    # A load REPLACES this project's resident context with the copy on disk,
+    # and the registration below must not write the displaced one back
+    # (OPEN-ITEMS 13): memory would hold the disk copy while disk held the
+    # displaced edit. When that context is the caller's own, the UI has asked
+    # before discarding it ("discard and reload"). When it is NOT — the caller
+    # is on another project and this one is merely resident, e.g. the clone
+    # wizard's `load(src)` — nobody chose to discard it, so persist its unsaved
+    # work FIRST and the read below picks it up: memory and disk then agree on
+    # the edited copy and nothing is lost.
+    displaced = PyPSAService._contexts.get(registry_id)
+    if (
+        displaced is not None
+        and displaced is not PyPSAService.get_active_context()
+        and (displaced.results_unsaved or len(displaced.undo.stack) > 0)
+    ):
+        PyPSAService._save_evicted_ctx(registry_id, displaced)
+
     # The loaded project gets its own empty undo stack and a clean dirty flag:
     # `reset_network()` builds a fresh context (P33b gate B-1), so the clears
     # below apply to IT. They used to run before the swap — on the project
@@ -3123,7 +3165,8 @@ def load_project(
             with PyPSAService.get_lock():
                 PyPSAService.reset_network()
             raise _queue_solve_conflict(name)
-        PyPSAService.register(registry_id, ctx)
+        # No write-back of the displaced context: see `displaced` above.
+        PyPSAService.register(registry_id, ctx, write_back=False)
     # Persist the pointer, mirroring activate_project. Written AFTER the swap
     # succeeds so a failed load does not leave the session pointing at a project
     # it never reached. Without this, `resolve_for_session` reads the stale

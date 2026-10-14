@@ -542,6 +542,23 @@ def run_first_run_import() -> None:
 
 
 @asynccontextmanager
+def _load_skills_at_startup() -> None:
+    """Read both skill roots at boot (chat harness issue 14), so a user skill
+    the loader refuses (malformed, or named like a package skill) is logged
+    when the app starts rather than on the first chat turn. Never fails boot:
+    a broken skill costs that skill, not the app."""
+    try:
+        from harness import skills
+
+        loaded = skills.registry()
+        user = sum(1 for s in loaded.values() if s.source == "user")
+        if user or skills.refusals():
+            logger.info("startup: %d user skill(s) loaded, %d refused",
+                        user, len(skills.refusals()))
+    except Exception:  # noqa: BLE001 — a missing catalogue beats a dead app
+        logger.exception("startup: skill registry failed to load; continuing")
+
+
 async def lifespan(app: FastAPI):
     if local_mode.is_local_mode():
         # First run on a fresh machine has no app-data directory, no database
@@ -594,6 +611,7 @@ async def lifespan(app: FastAPI):
         logging.getLogger("pypsa_gui").exception(
             "solve-queue boot reconciliation failed; continuing without it"
         )
+    _load_skills_at_startup()
     # Ask macOS for the projects root NOW, on a thread, rather than letting
     # the first data request discover it is gated. On a granted machine this
     # costs microseconds; on a fresh build it is what turns an unbounded hang

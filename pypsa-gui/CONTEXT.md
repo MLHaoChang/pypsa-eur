@@ -173,8 +173,21 @@ _Avoid_: starter prompts, suggestions, quick actions
 A reusable procedure the assistant loads on demand: `harness/skills/<name>/SKILL.md`
 with `name` and `description` front matter, the same layout as the developer
 agents' `.claude/skills/`. The prompt carries only the catalogue line; the
-body arrives through the `use_skill` tool. `grill` is the first skill.
+body arrives through the `use_skill` tool. `grill` is the first skill. A
+**user skill** has the same layout under `<app data>/skills/`; it ranks after
+the package skills and is refused, never used, when a package skill has its
+name. Its provenance (`package` or `user`) is shown in the panel's listing,
+never in the prompt.
 _Avoid_: prompt template, macro, plugin
+
+**Event log**:
+A session's append-only record of everything the model saw (`harness/eventlog.py`):
+each message as it entered the provider history, the per-turn context, and the
+trims, rewinds and resets of that history, so the history can be rebuilt
+exactly, forked at a turn and replayed on another provider. Kept per user and
+chat under the app-data directory. Today it runs beside `chat.jsonl`, which
+still serves `/history`.
+_Avoid_: transcript (that is chat.jsonl), audit log
 
 **Choice card**:
 The card the panel renders when the assistant calls `ask_user`: a title, a

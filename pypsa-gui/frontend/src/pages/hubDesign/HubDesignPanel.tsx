@@ -10,6 +10,7 @@ import { useUIStore } from '../../store/uiStore'
 import { effectiveStep, flowState, initialStep, studyHasResults } from './flow'
 import { useHubDesignStore, type HubStep } from './hubDesignStore'
 import { StepRail } from './StepRail'
+import { AssistantSetupCard } from './shared/AssistantSetupCard'
 import { GoalCard } from './cards/GoalCard'
 import { ImproveCard } from './cards/ImproveCard'
 import { ResultsCard } from './cards/ResultsCard'
@@ -122,6 +123,7 @@ export default function HubDesignPanel() {
             onPick={s => setStep(s, { user: useUIStore.getState().guidedTourHolds === 0 })} />
           <GuideButton tourId="hub_design" testId="hub-guide-button" label="Guide" />
         </div>
+        <AssistantSetupCard />
         {project !== null && loadError !== null && (
           <div data-testid="hub-load-error" role="alert"
             className="flex flex-wrap items-center gap-2 rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">

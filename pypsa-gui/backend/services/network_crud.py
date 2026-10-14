@@ -26,7 +26,10 @@ from services.asset_schema.derive import (
     split_parts,
 )
 from services.asset_schema.schema import CLASS_ATTR
+from services.asset_schema import fields as asset_fields
+from services.asset_schema import provenance as asset_provenance
 from services.carrier_catalog import ensure_carrier
+from services.component_names import require_valid_name
 from services.pypsa_service import PyPSAService
 from services.serialization import df_to_json
 from services.study_state import refuse_edit_during_live_study
@@ -365,6 +368,8 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
     # /bulk writes, rename, and global-constraint mutations all benefit
     # without each having to call an invalidation helper here.
     n = PyPSAService.get_network()
+    # OPEN-ITEMS item 8: the character class of a NEW name, for every class.
+    require_valid_name(name, component_class=component_class)
     if component_class == "Bus":
         from services.commercial.settlement_inputs import reserved_bus_name
 
@@ -550,6 +555,29 @@ def _rename_component_safely_impl(n, component_class: str, old: str, new: str) -
         comp.dynamic[key] = comp.dynamic[key].rename(columns={old: new})
 
 
+def _typed_schema_fields(component_class: str, kwargs: dict) -> list[str]:
+    """The submitted keys a person types on this class's card (derived rows and the name excluded)."""
+    try:
+        specs = asset_fields.fields_for(component_class)
+    except KeyError:
+        return []
+    typed = {f.key for f in specs if not f.derived and f.key != "name"}
+    return [k for k in kwargs if k in typed]
+
+
+def _same_value(a, b) -> bool:
+    """Equal for provenance purposes: blank (None/NaN) equals blank, floats compare with a tolerance."""
+    a = float("nan") if a is None else a
+    b = float("nan") if b is None else b
+    try:
+        fa, fb = float(a), float(b)
+    except (TypeError, ValueError):
+        return a == b
+    if math.isnan(fa) or math.isnan(fb):
+        return math.isnan(fa) and math.isnan(fb)
+    return math.isclose(fa, fb, rel_tol=1e-12, abs_tol=1e-12)
+
+
 def _update_component(component_class: str, attr: str, name: str, kwargs: dict) -> dict:
     """
     Update by remove+add. `kwargs` should be the user's *partial* dict
@@ -562,17 +590,23 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
     """
     _refuse_edit_during_live_study()
     n = PyPSAService.get_network()
+    typed = _typed_schema_fields(component_class, kwargs)
     kwargs, submitted_parts = split_parts(component_class, kwargs)
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     with PyPSAService.get_lock():
         df = getattr(n, attr)
         if name not in df.index:
             raise HTTPException(404, f"{component_class} '{name}' not found")
+        before = {k: (df.at[name, k] if k in df.columns else None) for k in typed}
         # Read current row + overlay the user's partial dict (shared helper).
         merged = _merge_partial_update(n, attr, name, kwargs)
         merged, current_parts = split_parts(component_class, merged)
         parts = {**current_parts, **submitted_parts}
         _check_investment_parts(component_class, parts, max_hours=merged.get("max_hours"))
+        if merged.get("name", name) != name:
+            # OPEN-ITEMS item 8. Before `ensure_carrier`, which can add a
+            # carrier: a refused rename must leave nothing behind.
+            require_valid_name(merged["name"], component_class=component_class)
         if component_class != "Carrier":
             ensure_carrier(n, merged.get("carrier", ""))
         new_name = merged.pop("name", name)
@@ -615,6 +649,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         if new_name != name:
             _rename_component_safely(n, component_class, name, new_name)
             vintage_service.rename_asset(n, component_class, name, new_name)
+            asset_provenance.rename(n, component_class, name, new_name)
             # Same fix for the time-series store — _user_ts keys carry the
             # column name, and without this the profile would be silently
             # lost on the next save+reload (re-apply skips entries whose
@@ -629,6 +664,13 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
             # Transformer keeps its route. Best-effort: a sidecar problem
             # never fails a rename the model already did.
             _rename_map_route(component_class, name, new_name)
+        # An edit that CHANGES a typed field stamps it customised (S1a); the
+        # card sends its whole form, so an unchanged field is not an edit.
+        after = getattr(n, attr)
+        changed = [k for k, v in before.items()
+                   if k in after.columns and not _same_value(v, after.at[new_name, k])]
+        if changed:
+            asset_provenance.mark_customised(n, component_class, new_name, changed)
         _normalise_flag_column(n, attr)
     desc = (f"Renamed {component_class.lower()} '{name}' → '{new_name}'"
             if new_name != name else f"Updated {component_class.lower()} '{name}'")
@@ -667,6 +709,7 @@ def purge_component_side_data(n, component_class: str, attr: str, name: str) -> 
     """
     vintage_service.delete_bounds_for_asset(n, component_class, name)
     _user_ts_delete_asset(attr, name)
+    asset_provenance.drop(n, component_class, name)
 
 
 def _delete_component(component_class: str, attr: str, name: str) -> None:

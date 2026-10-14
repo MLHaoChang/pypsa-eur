@@ -28,6 +28,18 @@ From these it prepares a run directory that the ranking (C3) and the sizing
 It writes ``campus_metrics.csv`` and ``campus_selected.csv``, one row per
 selected (period, hour), with its reasons joined by ``;``.
 
+``island_frequency_campus`` runs the island frequency check (plan I6,
+``gridspine.static.frequency``) on a ranked run with island data: E1 at every
+hour of the ``seamless`` scenario on the island tables' steps
+(``campus_freq_e1_hourly.csv``), and E1–E6 at the island critical hours, the
+selected hours an island criterion picked (``campus_freq_events.csv``,
+``campus_freq_losses.csv``, ``campus_freq_bridge.csv``,
+``campus_freq_planned.csv``, ``campus_freq_ups.csv``), with a summary
+(``campus_freq_summary.json``) that names the failing hours and the hours
+the every-hour E1 fails but the ranking did not select. ``psse_campus``
+writes the PSS/E handoff (plan I8, ``gridspine.handoff.campus_bundle``), one
+bundle per island critical hour, under ``psse/``.
+
 ``size_campus`` solves every selected hour, intact and transformer N-1
 (``gridspine.static.campus_flow``). It writes the per-hour results
 (``campus_lf_trafo.csv``, ``campus_lf_bus.csv`` and ``campus_lf_pcc.csv``,
@@ -146,7 +158,7 @@ import yaml
 from gridspine.ingest.campus import Campus, build_campus
 from gridspine.producers.campus import CampusDraft, campus_hourly, draft_campus, is_solved, period_weightings
 from gridspine.producers.pypsa_nodal import load_solved_network
-from gridspine.ranking.campus import campus_metrics, select_campus_hours
+from gridspine.ranking.campus import campus_metrics, island_metrics, select_campus_hours
 from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
@@ -191,6 +203,18 @@ INVEST_HISTORY_CSV = "campus_invest_history.csv"
 INVEST_DISPATCH_CSV = "campus_invest_dispatch.csv"
 INVEST_SCOPE_JSON = "campus_invest_scope.json"
 INVEST_TAPS_CSV = "campus_invest_taps.csv"
+FREQ_E1_HOURLY_CSV = "campus_freq_e1_hourly.csv"
+FREQ_EVENTS_CSV = "campus_freq_events.csv"
+FREQ_LOSSES_CSV = "campus_freq_losses.csv"
+FREQ_BRIDGE_CSV = "campus_freq_bridge.csv"
+FREQ_PLANNED_CSV = "campus_freq_planned.csv"
+FREQ_UPS_CSV = "campus_freq_ups.csv"
+FREQ_SUMMARY_JSON = "campus_freq_summary.json"
+PSSE_DIR = "psse"
+#: The keys of ``campus_freq_summary.json``, in order (plan I6c).
+FREQ_SUMMARY_KEYS = ("label", "ledger", "scenarios", "island_hours", "every_hour_e1", "failing_hours",
+                     "bridge_failing_hours", "planned_infeasible_hours", "e1_failing_hours",
+                     "e1_failing_not_selected")
 MILP_HISTORY_CSV = "campus_milp_history.csv"
 MILP_COMPARISON_CSV = "campus_milp_comparison.csv"
 METHODS = ("least_cost", "milp")
@@ -267,6 +291,11 @@ def prepare_campus(run_dir, campus: dict, network_path) -> dict:
     _write_text_atomic(run_dir / HOURLY_CSV, hourly.to_csv(index=False))
     _write_text_atomic(run_dir / PCC_CSV, pcc.to_csv(index=False))
     _write_text_atomic(run_dir / CAMPUS_MANIFEST, json.dumps(manifest, indent=2))
+    # The island tables (plan I3a) belong to the solve the run was prepared
+    # from; whoever writes them does so after this, so an earlier run's go.
+    from gridspine.schema.island import ISLAND_HOURLY_CSV, ISLAND_UNIT_HOURLY_CSV
+    for name in (ISLAND_UNIT_HOURLY_CSV, ISLAND_HOURLY_CSV):
+        (run_dir / name).unlink(missing_ok=True)
     return {"periods": periods, "units": manifest["units"], "hours_per_period": manifest["hours_per_period"]}
 
 
@@ -290,14 +319,41 @@ def load_run_campus(run_dir) -> Campus:
     return build_campus(yaml.safe_load(_require(Path(run_dir), CAMPUS_YAML).read_text()))
 
 
+def _island_tables(run_dir: Path):
+    """``(island_unit_hourly, island_hourly)`` of the run when the project's
+    solve wrote them (plan I3a; written by pypsa-gui beside
+    ``campus_hourly.csv``), else None. One without the other is refused."""
+    from gridspine.schema.island import (
+        ISLAND_HOURLY_CSV,
+        ISLAND_UNIT_HOURLY_CSV,
+        validate_island_hourly,
+        validate_island_unit_hourly,
+    )
+
+    paths = (run_dir / ISLAND_UNIT_HOURLY_CSV, run_dir / ISLAND_HOURLY_CSV)
+    have = [p.is_file() for p in paths]
+    if not any(have):
+        return None
+    if not all(have):
+        missing = [p.name for p, h in zip(paths, have) if not h]
+        raise ContractError(f"the run has one island table without the other ({missing} missing)")
+    return (validate_island_unit_hourly(pd.read_csv(paths[0], dtype={"unit_id": str})),
+            validate_island_hourly(pd.read_csv(paths[1])))
+
+
 def rank_campus(run_dir, k: int = DEFAULT_K) -> pd.DataFrame:
     """Rank the prepared run's hours and select the critical ones (k per
-    criterion, per period). Writes ``campus_metrics.csv`` and
+    criterion, per period), with the island criteria when the run has the
+    island tables (plan I3b). Writes ``campus_metrics.csv`` and
     ``campus_selected.csv``; returns the selection."""
     run_dir = Path(run_dir)
     hourly, pcc = campus_tables(run_dir)
     spec = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
     metrics = campus_metrics(hourly, pcc, spec)
+    island = _island_tables(run_dir)
+    if island is not None:
+        # Plan I3b: the island criteria join the base ones in one top-k union.
+        metrics = metrics.join(island_metrics(hourly, *island, spec), how="left").fillna(0.0)
     selection = select_campus_hours(metrics, k=k)
     _write_text_atomic(run_dir / METRICS_CSV, metrics.reset_index().to_csv(index=False))
     _write_text_atomic(run_dir / SELECTED_CSV,
@@ -309,6 +365,94 @@ def selected_hours(run_dir) -> pd.DataFrame:
     """The stored selection: ``period``, ``hour``, ``reasons`` (a list)."""
     df = pd.read_csv(_require(Path(run_dir), SELECTED_CSV))
     return df.assign(reasons=df["reasons"].str.split(";"))
+
+
+def island_hours(run_dir) -> list:
+    """``[(period, hour)]`` of the stored selection that an island criterion
+    picked (plan I3b's ``ISLAND_CRITERIA``): the island critical hours."""
+    from gridspine.ranking.campus import ISLAND_CRITERIA
+
+    island = {reason for reason, _ in ISLAND_CRITERIA}
+    sel = selected_hours(run_dir)
+    return [(int(r["period"]), int(r["hour"])) for _, r in sel.iterrows() if island & set(r["reasons"])]
+
+
+
+
+def island_frequency_campus(run_dir, every_hour: bool = True) -> dict:
+    """The island frequency check of a ranked run (plan I6, see the module
+    docstring). Needs the campus island requirements and the island tables
+    (plan I3a). ``every_hour=False`` skips the every-hour E1. Returns the
+    summary it writes."""
+    from gridspine.static import frequency as F
+
+    run_dir = Path(run_dir)
+    campus = load_run_campus(run_dir)
+    if campus.island["requirements"] is None:
+        raise ContractError("the campus has no island requirements (campus.island); the frequency check needs them")
+    tables = _island_tables(run_dir)
+    if tables is None:
+        raise ContractError("the run has no island tables (island_unit_hourly.csv, island_hourly.csv); "
+                            "run the project's campus solve with its island sidecar first")
+    unit, hourly_island = tables
+    hourly, _ = campus_tables(run_dir)
+    hours = island_hours(run_dir)
+    scenarios = campus.island["requirements"]["scenarios"]
+    sweep = (F.e1_every_hour(campus, hourly, hourly_island, unit)
+             if every_hour and "seamless" in scenarios else pd.DataFrame(columns=list(F.E1_HOURLY_COLUMNS)))
+    study = F.campus_frequency_study(campus, hourly, hours, island_unit_hourly=unit)
+    for name, df in ((FREQ_E1_HOURLY_CSV, sweep), (FREQ_EVENTS_CSV, study.events), (FREQ_LOSSES_CSV, study.losses),
+                     (FREQ_BRIDGE_CSV, study.bridge), (FREQ_PLANNED_CSV, study.planned), (FREQ_UPS_CSV, study.ups)):
+        _write_text_atomic(run_dir / name, df.to_csv(index=False))
+
+    def failing(df):
+        if df.empty:
+            return []
+        bad = df[~df["ok"].astype(bool)]
+        return sorted({(int(p), int(h)) for p, h in zip(bad["period"], bad["hour"])})
+
+    sweep_fail = failing(sweep)
+    bridge_fail = (sorted({(int(r["period"]), int(r["hour"])) for _, r in study.bridge.iterrows()
+                           if r["ok"] is not None and not r["ok"]})        # None: no e(t−1) to judge
+                   if not study.bridge.empty else [])
+    infeasible = (sorted({(int(r["period"]), int(r["hour"])) for _, r in study.planned.iterrows() if not r["feasible"]})
+                  if not study.planned.empty else [])
+    summary = {
+        "label": F.LABEL,
+        "ledger": list(F.LEDGER),
+        "scenarios": scenarios,
+        "island_hours": [list(h) for h in hours],
+        "every_hour_e1": bool(len(sweep)),
+        "failing_hours": [list(h) for h in failing(study.events)],
+        "bridge_failing_hours": [list(h) for h in bridge_fail],
+        "planned_infeasible_hours": [list(h) for h in infeasible],
+        "e1_failing_hours": [list(h) for h in sweep_fail],
+        # E1 at every hour doubles as a check on the ranking's choice (plan I6)
+        "e1_failing_not_selected": [list(h) for h in sweep_fail if h not in set(hours)],
+    }
+    _write_text_atomic(run_dir / FREQ_SUMMARY_JSON, json.dumps(summary, indent=2))
+    return summary
+
+
+def psse_campus(run_dir, hours=None) -> list:
+    """The PSS/E handoff of a ranked run (plan I8): one bundle per island
+    critical hour (``island_hours``), or per ``hours`` given, under
+    ``psse/``, each named ``p<period>_h<hour>``. Returns the bundles."""
+    from gridspine.handoff.campus_bundle import export_campus_bundle
+    from gridspine.static.frequency import LEDGER
+
+    run_dir = Path(run_dir)
+    campus = load_run_campus(run_dir)
+    hourly, _ = campus_tables(run_dir)
+    out = run_dir / PSSE_DIR
+    bundles = []
+    for period, hour in (island_hours(run_dir) if hours is None else hours):
+        rows = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)][["unit_id", "p_mw", "status"]]
+        if rows.empty:
+            raise ContractError(f"the run has no hour {hour} in period {period}")
+        bundles.append(export_campus_bundle(out, campus, rows.reset_index(drop=True), f"p{period}_h{hour}",
+                                            ledger=LEDGER))
+    return bundles
 
 
 def _p_ref(campus, pcc: pd.DataFrame):

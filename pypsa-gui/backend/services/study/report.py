@@ -410,6 +410,10 @@ _PREFIX_HELP: tuple[tuple[str, str], ...] = (
     ("options_not_established", HELP["options_not_established"]),
     # U2 WP7: a finance-engine reason, named after the prefix.
     ("engine_reason:", "The finance engine could not establish part of the case; the reason is named."),
+    # U3 rule 5 (`services/study/asset_view`): an Expert edit on an option fork.
+    ("changed_in_expert:", (
+        "A value behind this row was changed in the Expert view on one of the study's options, so "
+        "that option no longer matches the study; run the study again, or set the value here.")),
 )
 _FALLBACK = "No explanation is recorded for this code."
 

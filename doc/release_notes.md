@@ -6,7 +6,7 @@
 <!-- Upcoming Release -->
 <!-- ================= -->
 
-* Feat(pypsa-gui): Add bounded experiment planning caps and network preflight through the shared chat harness. Validate actual target schemas/units and private candidates, bind authorized baseline evidence and exact input digests, reject corrupt checkpoints and conflicting request retries, and preserve legacy reads. Preparation never starts cases or grants execution authority.
+* Feat(pypsa-gui): Campus island I2c. Linearised unit commitment for the island sidecar's fixed-size gensets (`linearised_uc`, plain solve only, restored after the solve) replaces the spinning flag in the headroom, RoCoF and grid-forming MVA rows at the instant of islanding. `island_study` solves the islanding variants separately and reports the cost of island capability, the cost of seamless islanding and the binding rows with their duals.
 
 * Fix(pypsa-gui): Treat coupling and margin loop verdicts `met` and `unreachable` as finished study outcomes. `wait_for_job` no longer times out after a completed unreachable search, and a target that was met counts as success. Run evidence publishes the unreachable verdict instead of leaving a running marker.
 

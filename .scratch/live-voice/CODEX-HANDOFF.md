@@ -34,7 +34,7 @@ scope; this metadata tranche does not complete issue 10 or external release gate
 
 | Item | Value |
 | --- | --- |
-| Tools | **231** (inventory + GUI nav schemas match; behavioral/parameter coverage still pending) |
+| Tools | **238** (inventory + GUI nav schemas match; behavioral/parameter coverage still pending) |
 | Result tabs / panels | 14 tabs, 18 panels |
 | Full-coverage claim | **false** — see `capability-matrix.json` `full_coverage` and issue 08 |
 | Dev UI | API `:8000`, Vite `:5173`; login `admin@example.com` + password file `~/.local/share/PyPSA Studio/dev-admin-password` |

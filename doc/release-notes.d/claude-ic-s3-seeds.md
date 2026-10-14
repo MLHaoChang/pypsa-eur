@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Energy Hub templates and the redundancy scenarios price their investment candidates from the generic defaults pack (new version 2026-10-13 with gas and diesel gensets, onshore wind, fuel cell and electrolyser from technology-data v0.14.0), through the asset schema and with per-field provenance, instead of annualised placeholder costs.

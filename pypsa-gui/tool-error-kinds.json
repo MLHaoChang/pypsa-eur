@@ -47,6 +47,10 @@
       "surface": "inline",
       "why": "The user pressed stop. Announcing their own action in a banner is noise."
     },
+    "approval_unavailable": {
+      "surface": "banner",
+      "why": "The approval of a confirmed (or policy auto-approved) action could not be written to the approval log, so the action did not run: approvals fail closed (chat harness issue 18). Usually the app-data directory is full or not writable."
+    },
     "baseline_has_no_case": {
       "surface": "inline",
       "why": "Decision study (S5): the investment case was asked for the grid-only baseline, which every case is measured against. Route-only today; a client-side slip, nothing for the user to fix."
@@ -66,6 +70,10 @@
     "confirmation_denied": {
       "surface": "inline",
       "why": "The user denied the card. Their own decision, already visible on the card."
+    },
+    "confirmation_revoked": {
+      "surface": "inline",
+      "why": "The card was withdrawn because the conversation's scope changed (durable_conversation.rebind_scope); the action did not happen. Recorded as approval/decided revoked (chat harness issue 18)."
     },
     "confirmation_expired": {
       "surface": "banner",
@@ -154,6 +162,10 @@
     "internal_error": {
       "surface": "inline",
       "why": "An unhandled server failure. It reaches the client on a turn-terminal `error` frame, which the banner renders directly from KIND_COPY — it is not yielded at any `tool_error` site."
+    },
+    "interrupted": {
+      "surface": "inline",
+      "why": "The session event log's synthetic closer for a tool call the process died during (chat harness issue 13), written when the log is read back for repair. It goes to the log and to the model's history, never on a live tool_error frame."
     },
     "invalid_base64": {
       "surface": "inline",
@@ -467,13 +479,21 @@
       "surface": "inline",
       "why": "Decision study (S4): asking for the run status or aborting a study that has never been run. A client-side sequencing slip, not a condition the user must act on."
     },
+    "study_report_format_invalid": {
+      "surface": "inline",
+      "why": "Decision study chat tool (U3): generate_study_report was asked for a format other than docx, xlsx or html. The model's slip; it reads the message and asks again."
+    },
     "study_request_too_large": {
       "surface": "inline",
       "why": "Decision study (F1 B2): a /studies request body over the size limit (the 25 MB load-file cap plus headroom), refused 413 by services/study/body_limit.py before it is parsed. Route-only, no chat tool posts a study body; the message tells the user to use a smaller file."
     },
     "study_running": {
       "surface": "inline",
-      "why": "Decision study (S4): a second run, a delete, or another study refused while a study runs on the base project. Route-only today; the message names the study and the user waits or aborts it."
+      "why": "Decision study (S4): a second run, a delete, or another study refused while a study runs on the base project. Reaches chat through the study tools (U3); the message names the study and the user waits or aborts it."
+    },
+    "study_stage_invalid": {
+      "surface": "inline",
+      "why": "Decision study chat tool (U3): run_decision_study was asked for a stage other than options or tornado. The model's slip; it reads the message and asks again."
     },
     "time_column_parse_error": {
       "surface": "banner",
@@ -494,6 +514,10 @@
     "tool_not_offered": {
       "surface": "banner",
       "why": "The endpoint asked for a tool that was never offered this turn. On a branch whose point is aiming the assistant at arbitrary endpoints, the user should see it."
+    },
+    "tool_not_started": {
+      "surface": "inline",
+      "why": "The shared chat-tool pool had no free worker, so the call was cancelled before it ran. Inline for the same reason as tool_timeout -- the turn continues and the model can retry or route around it -- and distinct from it because nothing exceeded a deadline: the remedy is capacity, not a smaller request."
     },
     "tool_timeout": {
       "surface": "inline",
@@ -539,9 +563,13 @@
       "surface": "inline",
       "why": "Raised by the chat route for a session id it does not hold. Route-only; a turn cannot be running under a session that does not exist."
     },
+    "unknown_decision": {
+      "surface": "inline",
+      "why": "The confirmation gate got a decision outside approve/deny/expired/aborted/revoked. Defensive: /confirm only accepts approve or deny, so this should not arrive; the action did not run, and the approval log records it as unavailable (chat harness issue 18)."
+    },
     "unknown_skill": {
       "surface": "inline",
-      "why": "use_skill named a skill that is not in harness/skills. The model reads the message (it lists nothing; the catalogue is in its instructions) and corrects within the turn (chat harness issue 05)."
+      "why": "use_skill named a skill that is not in the registry (harness/skills or the install's <app data>/skills), or one marked model_invocable: false. The model reads the message (it lists nothing; the catalogue is in its instructions) and corrects within the turn (chat harness issues 05 and 14)."
     },
     "unknown_step_kind": {
       "surface": "inline",
@@ -662,6 +690,10 @@
     "invalid_progress_cursor": {
       "surface": "inline",
       "why": "GET /api/chat/{id}/progress refuses a negative cursor query; route-only, never a tool completion failure."
+    },
+    "invalid_component_name": {
+      "surface": "inline",
+      "why": "A create, rename or import named a component with control, format or line-separator characters, an empty name, or one over 256 characters (OPEN-ITEMS item 8). Refused before anything changes; the message says which character, so the agent can pick another name."
     },
     "task_checkpoint_failed": {
       "surface": "banner",

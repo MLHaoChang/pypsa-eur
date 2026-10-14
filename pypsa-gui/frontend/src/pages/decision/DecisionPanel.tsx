@@ -1,8 +1,7 @@
 // The `decision` SlidePanel (plan S8): the guided flow for one decision study.
 //
-// * Availability (review v2 BC-6, OPEN-ITEMS 1): in auth (multi-user) mode the
-//   backend refuses every study route, and in local mode without
-//   `PYPSAGUI_DECISION_STUDIES=1`; the panel then says why and offers nothing
+// * Availability (review v2 BC-6): in auth (multi-user) mode the backend
+//   refuses every study route; the panel then says why and offers nothing
 //   that would fail — it never crashes.
 // * Entry state: an incomplete study opens on its intake, a complete one on
 //   the hub (`decisionModel.entryState`); a new study is answered in draft and
@@ -38,6 +37,8 @@ import TariffStep from './TariffStep'
 import FinanceStep from './FinanceStep'
 import LedgerReview, { type LedgerEditOut } from './LedgerReview'
 import RunStep from './RunStep'
+import StudyAssist from './StudyAssist'
+import QuestionRail from './QuestionRail'
 import Verdict from './Verdict'
 import WhyHow from './WhyHow'
 import Robust from './Robust'
@@ -141,6 +142,8 @@ const NAV: DecisionView[] = ['hub', 'intake', 'options', 'tariff', 'finance', 'l
 function StudyView({ at, pollMs }: { at: StudyRef; pollMs: number }) {
   const { project, studyId } = at
   const qc = useQueryClient()
+  // U3: Guided walks the question-first rail; Expert keeps the section nav.
+  const guided = useUIStore(s => s.uiMode) === 'guided'
   const view = useDecisionStore(s => s.view)
   const setView = useDecisionStore(s => s.setView)
   const setWatch = useDecisionStore(s => s.setWatch)
@@ -247,8 +250,15 @@ function StudyView({ at, pollMs }: { at: StudyRef; pollMs: number }) {
     setExpertFor(null)
     if (!target) return
     const res = await switchToProject(target.projectRef, qc)
-    if (res.status === 'switched' || res.status === 'noop') useUIStore.getState().setSlidePanel(null)
-    else setExpertMsg(EXPERT_REFUSAL[res.status] ?? EXPERT_REFUSAL_FALLBACK)
+    if (res.status === 'switched' || res.status === 'noop') {
+      // U3 "Open in Expert": the fork opens in Expert mode on Results ->
+      // Investment, the tab that carries its investment case. The user's
+      // own click, so the mode choice is explicit.
+      const ui = useUIStore.getState()
+      ui.setUiMode('expert', { explicit: true })
+      ui.setSlidePanel('results')
+      ui.requestResultsTab('investment')
+    } else setExpertMsg(EXPERT_REFUSAL[res.status] ?? EXPERT_REFUSAL_FALLBACK)
   }
 
   if (studyErr) {
@@ -289,6 +299,9 @@ function StudyView({ at, pollMs }: { at: StudyRef; pollMs: number }) {
           {UI_LABELS.expertView}
         </Button>
       </div>
+      {guided ? (
+        <QuestionRail current={current} statuses={statuses} robust={f?.robustness.status === 'ok'} onOpen={setView} />
+      ) : (
       <nav aria-label="Decision study sections" className="flex flex-wrap gap-1 px-5 py-1.5 border-b border-border">
         {NAV.filter(v => runsPack(s) || !['intake', 'options', 'tariff', 'run', 'verdict', 'why', 'robust', 'report'].includes(v)).map(v => (
           <button key={v} type="button" aria-current={v === current ? 'page' : undefined} onClick={() => setView(v)}
@@ -297,6 +310,7 @@ function StudyView({ at, pollMs }: { at: StudyRef; pollMs: number }) {
           </button>
         ))}
       </nav>
+      )}
       {expertFor && (
         <div className="px-5 pt-3">
           <Banner tone="warn" testId="expert-warning" title={`Open ${OPTION_LABELS[expertFor] ?? expertFor} in the Expert view?`}>
@@ -310,6 +324,9 @@ function StudyView({ at, pollMs }: { at: StudyRef; pollMs: number }) {
       )}
       {expertMsg && <div className="px-5 pt-3"><Banner tone="warn" title={expertMsg} /></div>}
       <div className="flex-1 min-h-0 overflow-y-auto p-5">
+        {runsPack(s) && (current === 'ledger' || current === 'run' || current === 'verdict' || current === 'report') && (
+          <StudyAssist step={current} project={project} studyId={studyId} />
+        )}
         {!runsPack(s) && current !== 'hub' && current !== 'ledger' && current !== 'finance' ? (
           <Refusal error={{ status: 409, code: 'study_not_runnable', message: '' }} />
         ) : current === 'hub' ? (

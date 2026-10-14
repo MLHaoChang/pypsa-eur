@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The campus chat tools that write a project (`campus_draft_campus`, `campus_run_study`, `campus_set_library`, `campus_extract_grid_code`) now refuse with `project_locked` when another user holds that project's edit lock, as their HTTP routes already did. Reads stay open to everyone.

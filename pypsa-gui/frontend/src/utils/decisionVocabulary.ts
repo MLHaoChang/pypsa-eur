@@ -139,6 +139,8 @@ export const LEDGER_STATUS_LABELS: Record<LedgerStatus, string> = {
   customised: 'Customised',
   needs_attention: 'Needs attention',
 }
+/** U3 rule 5: a row whose value an Expert changed on an option fork. */
+export const CHANGED_IN_EXPERT_LABEL = 'Changed in Expert'
 export const PROVENANCE_LABELS: Record<Provenance, string> = {
   library: 'from the library',
   user: 'your value',
@@ -304,11 +306,7 @@ export interface ErrorCopy { title: string; action: string; rerun?: boolean }
 export const ERROR_COPY: Record<string, ErrorCopy> = {
   decision_studies_unavailable: {
     title: 'Decision studies are not available in multi-user mode yet.',
-    action: 'They need a fix to how time series are stored per user (OPEN-ITEMS 1). Use the desktop app for now.',
-  },
-  decision_studies_disabled: {
-    title: 'Decision studies are switched off.',
-    action: 'Start the desktop app with PYPSAGUI_DECISION_STUDIES=1 to switch them on.',
+    action: 'Use the desktop app for now.',
   },
   study_running: { title: 'The study is running.', action: 'Wait for it to finish, or stop it on the Run page.' },
   solver_in_flight: { title: 'Another solve is using this study’s project.', action: 'Wait for it to finish, then try again.' },
@@ -601,6 +599,10 @@ export const PREFIX_HELP: ReadonlyArray<readonly [string, string]> = [
   [
     "engine_reason:",
     "The finance engine could not establish part of the case; the reason is named."
+  ],
+  [
+    "changed_in_expert:",
+    "A value behind this row was changed in the Expert view on one of the study's options, so that option no longer matches the study; run the study again, or set the value here."
   ]
 ]
 // END PREFIX HELP MIRROR
@@ -703,3 +705,76 @@ export const TESTED_RANGE_LABELS = {
   tested: 'Range the robustness check tested',
   recentred: 'Re-centred on your value',
 } as const
+
+// ── U3: the decision panel's hand-offs to the assistant ───────────────────
+//
+// `delegate` sends (the user's own click; every write and run still shows a
+// confirmation card in Guided), `ask` only prefills the composer. The tool
+// names in the sent text are the study chat tools of `harness/catalogue.py`.
+
+export type AssistStep = 'ledger' | 'run' | 'verdict' | 'report'
+
+export const ASSIST_LABELS: Record<AssistStep, { delegate: string; ask: string }> = {
+  ledger: { delegate: 'Go through the key parameters with the assistant', ask: 'Ask about the assumptions' },
+  run: { delegate: 'Let the assistant run the study', ask: 'Ask what the run does' },
+  verdict: { delegate: 'Let the assistant explain the verdict', ask: 'Ask about the verdict' },
+  report: { delegate: 'Let the assistant write the report', ask: 'Ask about the report' },
+}
+
+/** The request each step sends; `project` is the study's base project. */
+export function assistText(step: AssistStep, project: string, studyId: string): string {
+  const ref = `the decision study ${studyId} in project "${project}"`
+  switch (step) {
+    case 'ledger':
+      return `For ${ref}: go through its key parameters with me one at a time, offering each default with its source, and set the ones I change with set_study_parameter.`
+    case 'run':
+      return `Run ${ref}: run_decision_study for the options, wait for it with get_study_findings, then run_decision_study with stage tornado and wait again. Then tell me the verdict in plain words.`
+    case 'verdict':
+      return `Explain the verdict of ${ref} in plain words with explain_verdict: what it says, which assumption could change it, and what was not established.`
+    case 'report':
+      return `Write the report of ${ref} with generate_study_report (Word) and tell me which generic defaults it relies on.`
+  }
+}
+
+export function assistQuestion(step: AssistStep): string {
+  switch (step) {
+    case 'ledger': return 'In my decision study, which assumptions matter most, and where do the defaults come from?'
+    case 'run': return 'What does running my decision study do, and how long will it take?'
+    case 'verdict': return 'What does the verdict of my decision study mean for me?'
+    case 'report': return 'What is in the decision report, and who is it for?'
+  }
+}
+
+// ── U3: the key-parameter list (owner decision 4) ─────────────────────────
+
+export const KEY_PARAMETER_LABELS = {
+  siteHeading: 'Your site and choices',
+  zone: 'Price zone',
+  connection: 'Grid connection',
+  load: 'Consumption',
+  tariff: 'Tariff',
+  tariffDefault: 'not chosen: the defaults’ illustrative tariff',
+  pv: 'Solar PV',
+  pvOff: 'Off',
+  pvOn: (kind: string) => `On (${kind})`,
+  loadUpload: (file: string) => `your meter file (${file})`,
+  loadProfile: (profile: string, mwh: number | null) =>
+    `${profile.replace(/_/g, ' ')} profile${mwh != null ? `, ${mwh.toLocaleString('en-US')} MWh a year` : ''}`,
+  notAnswered: 'not answered yet',
+  changedHeading: 'Other values you changed or that need a look',
+  defaultsSummary: (n: number, version: string) => `${n} more, from the generic defaults (${version})`,
+}
+
+// ── U3: the question-first rail (UX assessment §4.3) ──────────────────────
+
+export type RailStep = 'question' | 'site' | 'keyChoices' | 'run' | 'verdict' | 'improve' | 'report'
+export const RAIL_LABELS: Record<RailStep, string> = {
+  question: 'Question',
+  site: 'Site',
+  keyChoices: 'Key choices',
+  run: 'Run',
+  verdict: 'Verdict',
+  improve: 'Improve',
+  report: 'Report',
+}
+export const RAIL_NAV_LABEL = 'Decision study steps'

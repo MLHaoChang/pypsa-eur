@@ -8,10 +8,15 @@
 // A driver the robustness check moved shows the range it was tested over, read
 // from the findings' tornado rows, and a re-centred one is marked (plan F1-F,
 // F5; gate S9: the report and the workbooks already show it).
+//
+// U3, owner decision 4 (the key-parameter list): the site's answers and the
+// key drivers come first; every other row is collapsed as "from the generic
+// defaults (<version>)", except a row the user changed or that needs a look,
+// which stays in view.
 import { useMemo, useState } from 'react'
 import type { LedgerPayload, LedgerRow, StudyError, StudyIntake, TornadoRow } from '../../api/decisionStudies'
 import {
-  LEDGER_STATUS_LABELS, PROVENANCE_LABELS, ROW_MEANING, TESTED_RANGE_LABELS, helpFor, needsAttentionReason,
+  CHANGED_IN_EXPERT_LABEL, KEY_PARAMETER_LABELS as K, LEDGER_STATUS_LABELS, PROVENANCE_LABELS, ROW_MEANING, TESTED_RANGE_LABELS, helpFor, needsAttentionReason,
 } from '../../utils/decisionVocabulary'
 import { isMoneyUnit, isPvRowUnused, ledgerCurrencyYearLabel, parseNeedsAttention } from './decisionModel'
 import { Button, Card, Chip, Refusal } from './DecisionUi'
@@ -61,6 +66,12 @@ function Row({ r, intake, attention, onSave, onReset, saving, tested }: {
         </span>
         <span className="text-[10.5px] text-muted">{PROVENANCE_LABELS[r.provenance]}</span>
         {r.sensitivity_flag && <span className="text-[10.5px] text-accent">matters most</span>}
+        {/* U3 rule 5: a value an Expert changed on an option fork. */}
+        {r.changed_by === 'expert' && (
+          <span data-testid="ledger-changed-in-expert" className="text-[10.5px] text-warn">
+            {CHANGED_IN_EXPERT_LABEL}
+          </span>
+        )}
       </div>
       {r.technical_name && <span className="font-mono text-[10px] text-muted">{r.technical_name}</span>}
       {meaning && <p className="text-[11.5px] text-muted">{meaning}</p>}
@@ -130,10 +141,19 @@ export default function LedgerReview({ payload, intake, onSave, onReset, saving,
     for (const r of rows) if (r.status === 'needs_attention' && !m.has(r.key)) m.set(r.key, 'needs_attention')
     return m
   }, [payload, rows])
-  const ordered = [...rows.filter(r => r.sensitivity_flag), ...rows.filter(r => !r.sensitivity_flag)]
-  const keyCount = rows.filter(r => r.sensitivity_flag).length
+  const keyRows = rows.filter(r => r.sensitivity_flag)
+  const others = rows.filter(r => !r.sensitivity_flag)
+  const changed = others.filter(r => r.status !== 'default' || attention.has(r.key))
+  const defaults = others.filter(r => !changed.includes(r))
+  const keyCount = keyRows.length
+  const rowOf = (r: LedgerRow) => (
+    <Row key={r.key} r={r} intake={intake} attention={attention.get(r.key) ?? null}
+      onSave={onSave} onReset={onReset} saving={saving}
+      tested={tested.find(t => t.key === r.key) ?? null} />
+  )
   return (
     <Card title="Your assumptions" right={<a href={csvUrl} download className="text-accent text-[11px] hover:underline">Download as CSV</a>}>
+      <SiteAnswers intake={intake} />
       <p data-testid="ledger-key-count">
         These {keyCount} assumptions matter most for this question: please check them. Values marked
         “Default” come from the library ({payload.ledger.ledger_version}); your own values are marked “Customised”.
@@ -142,13 +162,53 @@ export default function LedgerReview({ payload, intake, onSave, onReset, saving,
         <p key={n} className="text-[11px] text-muted">{helpFor(n).text}</p>
       ))}
       {error && <Refusal error={error} />}
-      <ul className="flex flex-col gap-2">
-        {ordered.map(r => (
-          <Row key={r.key} r={r} intake={intake} attention={attention.get(r.key) ?? null}
-            onSave={onSave} onReset={onReset} saving={saving}
-            tested={tested.find(t => t.key === r.key) ?? null} />
-        ))}
-      </ul>
+      <ul className="flex flex-col gap-2">{keyRows.map(rowOf)}</ul>
+      {changed.length > 0 && (
+        <section data-testid="ledger-changed" className="flex flex-col gap-2">
+          <h4 className="text-[12px] font-semibold">{K.changedHeading}</h4>
+          <ul className="flex flex-col gap-2">{changed.map(rowOf)}</ul>
+        </section>
+      )}
+      {defaults.length > 0 && (
+        <details data-testid="ledger-defaults" className="flex flex-col gap-2">
+          <summary data-testid="ledger-defaults-summary" className="cursor-pointer text-[12px] text-muted">
+            {K.defaultsSummary(defaults.length, payload.ledger.ledger_version)}
+          </summary>
+          <ul className="flex flex-col gap-2 pt-2">{defaults.map(rowOf)}</ul>
+        </details>
+      )}
     </Card>
+  )
+}
+
+/** The intake answers the question is sensitive to (decision 4's first two groups). */
+function SiteAnswers({ intake }: { intake: StudyIntake }) {
+  const site = intake.site ?? {}
+  const load = intake.load ?? {}
+  const loadText = load.source === 'upload'
+    ? K.loadUpload(load.filename ?? 'uploaded')
+    : load.profile ? K.loadProfile(load.profile, typeof load.annual_mwh === 'number' ? load.annual_mwh : null)
+      : K.notAnswered
+  const t = intake.tariff
+  const tariffText = t?.custom?.name ?? t?.tariff_id ?? K.tariffDefault
+  const pv = intake.pv?.enabled ? K.pvOn(intake.pv.kind ?? 'rooftop') : K.pvOff
+  const items: Array<[string, string, string]> = [
+    ['zone', K.zone, site.zone ?? K.notAnswered],
+    ['connection', K.connection, typeof site.connection_mw === 'number' ? `${site.connection_mw} MW` : K.notAnswered],
+    ['load', K.load, loadText],
+    ['tariff', K.tariff, tariffText],
+    ['pv', K.pv, pv],
+  ]
+  return (
+    <section data-testid="ledger-site-answers" className="flex flex-col gap-1">
+      <h4 className="text-[12px] font-semibold">{K.siteHeading}</h4>
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5 text-[12px]">
+        {items.map(([id, label, value]) => (
+          <div key={id} data-testid={`ledger-site-${id}`} className="contents">
+            <dt className="text-muted">{label}</dt><dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   )
 }

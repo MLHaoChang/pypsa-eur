@@ -21,8 +21,9 @@ def test_unbound_menu_offers_open_project_only(client):
 
 
 @pytest.mark.parametrize("context,present,absent", [
-    ("expert", ["hub-design", "build-network", "explain-results"], ["open-project", "investment-decision"]),
-    ("guided", ["hub-design", "explain-results"], ["open-project", "build-network", "investment-decision"]),
+    # U3: `investment-decision` is active now that its study tools exist.
+    ("expert", ["hub-design", "build-network", "explain-results", "investment-decision"], ["open-project"]),
+    ("guided", ["hub-design", "explain-results", "investment-decision"], ["open-project", "build-network"]),
 ])
 def test_bound_menus_follow_the_registry(client, context, present, absent):
     r = client.get("/api/chat/workflows", params={"context": context})

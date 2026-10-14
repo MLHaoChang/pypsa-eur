@@ -4,8 +4,12 @@ Redundancy scenario enumeration (Phase 3a).
 Discrete options at a fixed availability target — cost vs achieved ENS —
 not FOR derating and not a joint MILP. Spec decision 5; plan Phase 3a.
 
-Scenario economics use synthetic placeholder costs (``cost_basis``) until
-pack/asset-derived train counts land. Sub-solves use a private sink and
+Scenario economics price every invented asset from the generic defaults pack
+(``REDUNDANCY_PACK_VERSION``, ``cost_basis`` ``defaults_pack:<version>``; IC S3
+seeds, owner 2026-10-13): the spare generator as a gas genset, the spare
+storage as the pack's 4 h battery (its cost per MW does not grow with the
+train count; the trains scale its size), the invented spare conversion as a
+fuel cell. Sub-solves use a private sink and
 never write the caller's solver state (cf. sweep.py § private sink).
 """
 from __future__ import annotations
@@ -40,6 +44,8 @@ MAX_TRAINS_BY_CLASS: dict[str, int] = {
 }
 
 _PLACEHOLDER_HEADROOM_MW = 50.0
+REDUNDANCY_PACK_VERSION = "2026-10-13"
+REDUNDANCY_COST_BASIS = f"defaults_pack:{REDUNDANCY_PACK_VERSION}"
 _PLACEHOLDER_STORAGE_MW = 40.0
 
 # Positive conversion identity only. Never treat bare AC/electricity as
@@ -276,7 +282,7 @@ def _na_mutation(scenario_id: str, reason: str) -> dict[str, Any]:
     return {
         "scenario_id": scenario_id,
         "applied": [],
-        "cost_basis": "synthetic_placeholder",
+        "cost_basis": REDUNDANCY_COST_BASIS,
         "not_applicable": True,
         "not_applicable_reason": reason,
     }
@@ -286,7 +292,8 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
     """Mutate ``n`` for a scenario; return ``(undo, mutation_record)``.
 
     ``mutation_record`` describes what changed so options are falsifiable.
-    Economics are ``synthetic_placeholder`` unless ``cost_basis == "none"``.
+    Economics are priced from the defaults pack (``REDUNDANCY_COST_BASIS``)
+    unless ``cost_basis == "none"``.
     When a scenario cannot enlarge the feasible set, ``not_applicable`` is set
     and ``applied`` is empty (monotone headroom; assessor D2).
     """
@@ -311,24 +318,33 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
     }
     applied: list[dict[str, Any]] = []
 
+    def _price(component: str, name: str, technology: str) -> dict[str, Any]:
+        from services.library.defaults_pack.pricing import price_from_pack
+
+        return price_from_pack(n, component, name, technology,
+                               version=REDUNDANCY_PACK_VERSION)
+
     if kind == "n1_generation":
         bus = _primary_load_bus(n)
         if "eh_spare_gen" not in n.generators.index:
             n.add(
                 "Generator", "eh_spare_gen", bus=bus, carrier="gas",
                 p_nom=0.0, p_nom_extendable=True,
-                p_nom_max=_PLACEHOLDER_HEADROOM_MW,
-                capital_cost=60.0, marginal_cost=180.0,
+                p_nom_max=_PLACEHOLDER_HEADROOM_MW, marginal_cost=180.0,
             )
+            pricing = _price("generators", "eh_spare_gen", "gas-genset")
             applied.append({
                 "component": "Generator",
                 "name": "eh_spare_gen",
                 "action": "add",
                 "bus": bus,
                 "p_nom_max": _PLACEHOLDER_HEADROOM_MW,
-                "capital_cost": 60.0,
+                "capital_cost": pricing["capital_cost"],
+                "fom_cost": pricing["fom_cost"],
+                "annualised_cost_eur_per_mw_yr": pricing["annualised_cost_eur_per_mw_yr"],
                 "marginal_cost": 180.0,
                 "carrier": "gas",
+                "pricing": pricing,
             })
     elif kind == "n1_conversion":
         link_name = _select_conversion_link(n)
@@ -389,12 +405,12 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
                     bus0=bus, bus1="eh_n1_conv_bus",
                     p_nom=0.0, p_nom_extendable=True,
                     p_nom_max=_PLACEHOLDER_HEADROOM_MW,
-                    capital_cost=40.0, efficiency=0.95,
-                    carrier="H2",
+                    efficiency=0.95, carrier="H2",
                 )
                 if "eh_role" not in n.links.columns:
                     n.links["eh_role"] = ""
                 n.links.at["eh_spare_conversion", "eh_role"] = "eh_n1_conversion"
+            conv_pricing = _price("links", "eh_spare_conversion", "fuel-cell")
             # Disclose every invented component (assessor B1) — the feeder is
             # firm nameplate with zero capital cost, not a mere link upgrade.
             applied.extend([
@@ -422,31 +438,36 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
                     "bus0": bus,
                     "bus1": "eh_n1_conv_bus",
                     "p_nom_max": _PLACEHOLDER_HEADROOM_MW,
-                    "capital_cost": 40.0,
+                    "capital_cost": conv_pricing["capital_cost"],
+                    "fom_cost": conv_pricing["fom_cost"],
+                    "annualised_cost_eur_per_mw_yr": conv_pricing["annualised_cost_eur_per_mw_yr"],
                     "carrier": "H2",
+                    "pricing": conv_pricing,
                 },
             ])
     elif kind == "parallel_storage":
         bus = _primary_load_bus(n)
         p_max = float(_PLACEHOLDER_STORAGE_MW) * float(trains)
-        capex = 80.0 * float(trains)
         if "eh_spare_storage" not in n.storage_units.index:
             n.add(
                 "StorageUnit", "eh_spare_storage", bus=bus, carrier="battery",
                 p_nom=0.0, p_nom_extendable=True,
-                p_nom_max=p_max,
-                max_hours=4.0, capital_cost=capex,
+                p_nom_max=p_max, max_hours=4.0,
                 efficiency_store=0.9, efficiency_dispatch=0.9,
             )
+            pricing = _price("storage_units", "eh_spare_storage", "battery")
             applied.append({
                 "component": "StorageUnit",
                 "name": "eh_spare_storage",
                 "action": "add",
                 "bus": bus,
                 "p_nom_max": p_max,
-                "capital_cost": capex,
+                "capital_cost": pricing["capital_cost"],
+                "fom_cost": pricing["fom_cost"],
+                "annualised_cost_eur_per_mw_yr": pricing["annualised_cost_eur_per_mw_yr"],
                 "max_hours": 4.0,
                 "trains": int(trains),
+                "pricing": pricing,
             })
     else:
         raise RedundancyScenarioError(
@@ -468,7 +489,7 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
     return undo, {
         "scenario_id": scenario_id,
         "applied": applied,
-        "cost_basis": "synthetic_placeholder",
+        "cost_basis": REDUNDANCY_COST_BASIS,
         "not_applicable": False,
         "trains": int(trains),
         "kind": kind,

@@ -960,6 +960,110 @@ it replaces nothing.
   difference equals the hand-worked cost of the extra BESS headroom.
 - Mutations.
 
+### I2c as built (2026-10-13)
+
+**`services/solver/island.py`**, in the same wrapper.
+- **Linearised UC (Q7).** It is on when the sidecar's
+  `requirements.linearised_uc` is on, and it applies only where the island
+  rows apply: opt-in, the plain solve, a sizing solve.
+  - `linearised_uc(n, island)` is a context manager. For the solve it sets
+    `committable` and the sidecar's `p_min_pu` on the fixed-size genset
+    Generators and Links, restores both afterwards, and yields
+    `linearized_unit_commitment=True` for `optimize`.
+  - `run_simulation` calls it on the plain solve only, through
+    `solve_uc(network, cfg)`. SCOPF, rolling and myopic are already refused
+    by the island rows, and the refusal now names linearised UC too.
+- **Extendable gensets are not committed** (owner, 2026-10-13, option A).
+  PyPSA's committable-extendable unit is big-M. Such a genset keeps I2b's
+  `spinning` rule, and the facts list it under `uc.not_committed` as
+  "not committed: extendable (big-M bilinear)". The template's 4 × 10 MW
+  fleet can therefore be committed while genset_new stays extendable.
+  - **This rewords the plan's test** "Linearised UC on an extendable genset
+    is refused, with a reason". `linearised_uc` is one sidecar-wide flag,
+    so "refused" now means the extendable genset is never made committable
+    and the reason is recorded. The solve is not refused.
+- **u_g(t) replaces the spinning flag** for the committed gensets in the 0⁺
+  rows that count units online:
+  - (b↑) headroom, u·p_max_pu·η·p_nom − η·p;
+  - (c) the GFM MVA at 0⁺;
+  - (d) RoCoF, as H·u·η·p_nom/cos φ_r.
+
+  PyPSA's own p ≥ u·p_min_pu·p_nom replaces I2b's `Island-min-load` row for
+  them. (e) is unchanged, because it already counts every genset once
+  joined. The facts say "linearised (u may be fractional)".
+- **Refusals:**
+  - a committed genset with no positive `p_min_pu` (sidecar, else the
+    network's), because its online headroom would cost no fuel (review B4);
+  - `linearised_uc` on with a fixed genset that was not committed for the
+    solve, which is a refusal rather than a silent fall-back to `spinning`.
+- **`island_study(n, island, scenarios=None, solve=None)`** solves copies
+  of the network:
+  - a baseline with no island rows;
+  - one solve per scenario, with the sidecar narrowed to that scenario
+    (`scenarios` can name one the sidecar does not ship).
+
+  It returns each variant's status and objective, the **cost of island
+  capability** (variant − baseline), the **cost of seamless islanding**
+  (seamless − ups_bridged), and `binding_rows`: every `Island-` row with a
+  non-zero dual, its hours (None for a static row) and its duals, in
+  objective units. A refused variant is recorded with its reason and has no
+  cost. The default solve is HiGHS. The endpoint, panel and copilot tools
+  are I9's.
+
+**The Data Center template.**
+- With no island rows it solves at **3.754e7** and buys no genset_new.
+- ups_bridged gives 3.981e7, so the cost of island capability is
+  **2.27e6 (+6.1 %)**.
+- I2b's "3.882e7" was the I2a rows alone, which is the `planned` variant.
+- `seamless`, with bess_new's cap lifted, gives 6.87e7, so the cost of
+  seamless islanding is **2.89e7**.
+
+**Tests** (`tests/test_island_study.py`, 25 collected):
+- UC buys exactly the online capacity each 0⁺ row needs, by hand:
+  - (b↑) u = 1/2. Each MW of minimum load also leaves the import, so the
+    step falls with it, and the row is 7 + 6u − p ≥ 10 − p.
+  - with p_max_pu 0.5, u = 2/3;
+  - (d) u = 8/75;
+  - (c) u = 2/3;
+  - a Link genset, through η.
+- Without UC, the cold genset must run 3 MW to cut the step. UC is cheaper
+  by 4·2.1·990.
+- The minimum load comes from PyPSA, not the spinning row. `p_min_pu` and
+  `committable` are restored after the solve.
+- The refusals: no minimum load, an uncommitted genset, and
+  rolling/SCOPF/myopic.
+- An extendable genset is not committed and keeps `spinning`.
+- `run_simulation` passes UC through and restores the network.
+- The cost of seamless equals the hand-worked 10 MW of BESS at 100/MW. The
+  cost of island capability equals the I2a reserve (2000).
+- The binding rows: the headroom duals sum to the BESS capital cost, and the
+  pickup row's dual is 1/ls. The LP may put a degenerate dual on one hour.
+- A refused variant; a scenario the sidecar does not ship; both template
+  figures.
+
+**Mutations.** 19 source edits, each run against the file:
+- UC ignored in the headroom, the MVA at 0⁺ and the RoCoF rows;
+- a committed genset counted at its full p_nom;
+- p_max_pu dropped, and a Link genset's η dropped;
+- I2b's spinning minimum-load row kept for a committed genset;
+- an extendable genset committed;
+- the refusals removed: no minimum load, an uncommitted genset, and the
+  strategy refusal's UC note;
+- `committable` and `p_min_pu` not restored, and the sidecar `p_min_pu`
+  not written;
+- `run_simulation` dropping the UC keyword;
+- the baseline keeping the rows, the variants not split, the seamless cost
+  reversed;
+- zero duals kept, and a static row given hours.
+
+All were killed except "zero duals kept", because no test had a built but
+slack row. The binding test now checks the slack steady-island MVA row,
+and it kills that edit.
+
+The first hand values for UC (u = 5/7, 8/15) left out that the committed
+genset's minimum load displaces import, the same correction I2b recorded for
+spinning inertia. The LP was right and the tests were corrected.
+
 ### I3a: the hourly island contract (S–M)
 
 I3b and I6 need data the hourly table does not carry. This increment adds
@@ -994,6 +1098,113 @@ module that loads a network file. Names are mapped by `pypsa_name`.
 - the producer never imports pypsa;
 - mutations.
 
+### I3a as built (2026-10-13)
+
+**Where it lives (owner, 2026-10-13, option A).** gridspine owns the
+contracts and pypsa-gui produces the values. This departs from the plan,
+which put the producer in `producers/campus.py`. The values are the I2b/I2c
+definitions (late relief, ΔP⁻ at 0⁺, N+k on ΣK, the committed u), which live
+in pypsa-gui. gridspine cannot import pypsa-gui, so a gridspine producer
+would have had to code every rule a second time.
+
+**`gridspine/schema/island.py`** (additive):
+- `ISLAND_UNIT_HOURLY_COLUMNS`, `ISLAND_HOURLY_COLUMNS` and their CSV
+  names;
+- `validate_island_unit_hourly` and `validate_island_hourly`. They are
+  pandas-free, like the module, and refuse:
+  - a missing or extra column;
+  - a duplicate key;
+  - a non-integral or negative period/hour;
+  - an unknown scenario;
+  - a non-finite value;
+  - `online` outside [0, 1];
+  - empty headroom on any row but a UPS's (the rows that carry
+    `p_ups_it_mw`).
+- `period` and `hour` are keyed as in `schema/campus.py`: the investment
+  period, or the first snapshot's year, and the position in the period.
+
+**`services/solver/island.py`: `island_hourly(n, island, unit_ids=None)`.**
+- **Reads the saved, solved project, not the LP.** The campus study reads
+  the network file, where the model is gone. The values therefore come from
+  the stored dispatch, `p_nom_opt`, `Generator`/`Link` `status` and state of
+  charge. X_u is free in the LP wherever its row does not bind, so it is
+  taken at its physical value, min(L_it, p_nom_u).
+- **Per scenario:**
+  - ΔP⁺ and ΔP⁻ use the same definition in every scenario: the step at the
+    PCC at 0⁺. Under `ups_bridged` the gensets then see the pickup blocks
+    (I6b's E4), and under `planned` the ramp removes the step (E6).
+  - M is the units online at 0⁺ under `seamless` and `planned`, and the
+    started gensets at N+k under `ups_bridged`, as I2b (d).
+  - ΣK is the same in every scenario.
+- **Per unit:**
+  - `soc_start_mwh` is e(t−1), with the LP's linkage: cyclic, initial, and
+    carried across periods.
+  - `online` is u under linearised UC, else the spinning flag. A bess is 1;
+    a UPS is empty.
+  - Headroom up is u·p_max_pu·η·p_nom − η·p for a genset, and p_nom − p_s
+    for a bess.
+  - Headroom down is η·p − u·p_min_pu·η·p_nom for an online genset, and
+    p_s + p_nom for a bess.
+  - `p_ups_it_mw` is set on UPS rows only.
+- Unit ids are mapped by `pypsa_name` to the campus ids. A unit the campus
+  lacks keeps its PyPSA name.
+
+**`services/campus_electrical_service.run`** writes `island_unit_hourly.csv`
+and `island_hourly.csv` into the run directory, beside `campus_hourly.csv`.
+It does so only when the project has an island sidecar. Without one, an
+earlier run's tables are removed. A sidecar that fails validation is a 422
+with the reason. The panel and report reading is I9's.
+
+**Tests:**
+- `tests/gridspine/test_island_hourly_contract.py` (18): each refusal.
+- `tests/test_island_hourly.py` (23), with hand values on a two-hour
+  network whose results are set by hand:
+  - ΔP⁺ 6/−7 with the late relief, 10/−3 with an early walk-in;
+  - ΔP⁻ −4/9;
+  - M 30.625/43.75 with the committed shares, 11.25 under `ups_bridged`,
+    and 36.25 with the spinning flag;
+  - ΣK 13;
+  - e(t−1) cyclic, from the initial SoC, and across two periods;
+  - headroom both ways for the bess and the committed gensets;
+  - the UPS row, the id mapping, and the unsolved refusal.
+- A real solve through a NetCDF round trip gives the same tables.
+- The Data Center template's `ups_bridged` M is 125 MW·s. That is exactly
+  the 2M = 250 its binding RoCoF block row asks of a 5 MW block, which
+  cross-checks the producer against the LP.
+- `tests/test_campus_island_tables.py` (3): the run writes the tables keyed
+  like `campus_hourly.csv`, removes stale ones, and refuses a bad sidecar.
+
+**Mutations.** 25 source edits:
+- the late relief dropped, or taken as L_it;
+- a strict `>` for "late";
+- ΔP⁻ over late UPSs only;
+- the import efficiency ignored;
+- the export not subtracted;
+- u ignored, and the spinning flag ignored;
+- the droop GFM's inertia without 2R;
+- the VSM's inertia on p;
+- N+k dropped from the `ups_bridged` M and from ΣK;
+- the GFMs dropped from ΣK;
+- e(t−1) from the wrong end, cyclic and not, and always within a period;
+- the bess headroom sign;
+- the genset's p_min_pu and availability ignored;
+- the id mapping ignored;
+- stale tables kept;
+- four validator relaxations.
+
+The first run counted collection errors as kills. The backend and the repo
+root both have a `tests` package, so the gridspine contract test cannot be
+collected in the backend's run. The runner was fixed to run the two
+separately, checked against a clean baseline, and moved to a scratch git
+worktree. On the honest run 21 were killed and 4 survived:
+- the walk-in at the join;
+- the import efficiency;
+- the VSM on p;
+- the availability.
+
+The fixture had pf 1, η 1 and p_max_pu 1, and no walk-in at the boundary.
+A test was added for each, and each now kills its edit.
+
 ### I3b: island critical hours — step 2 (S)
 
 New `ISLAND_CRITERIA` in `ranking/campus.py`, used when the study has
@@ -1022,6 +1233,73 @@ hours per period.
 - ties;
 - an empty island config adds nothing;
 - mutations.
+
+### I3b as built (2026-10-13)
+
+**Where it lives.** It is in gridspine, as the plan says (coordinator,
+2026-10-13; additive edits to `ranking/campus.py` and
+`drivers/campus_study.py`). Under I3a's option A the criteria read the I3a
+CSVs, so no formula is coded twice.
+
+**`gridspine/ranking/campus.py`.**
+- `island_metrics(hourly, unit, island, campus)` gives one row per (period,
+  hour):
+  - the worst ΔP⁺ and ΔP⁻ over the scenarios;
+  - `island_inertia_short_mws`, (max − M) of the lowest M over the
+    scenarios;
+  - `island_gfm_headroom_short_mw`, (max − x) of the upward headroom summed
+    over the bess whose campus `island.control` is GFM;
+  - `island_load_mw`;
+  - `island_gfl_share`, grid-following PV and wind over the campus
+    consumption, which is highest at low load;
+  - `island_energy_short_mwh`, (max − x) of e(t−1) summed over every bess.
+- `ISLAND_CRITERIA` names these seven criteria. `select_campus_hours` ranks
+  them with the base criteria when the columns are present: one top-k
+  union, with ties spread as before.
+- **(max − x) is per period.** Within a period a global max would only add a
+  constant, which leaves the ranking unchanged. A flat period would then be
+  positive and pick hours, though. Per period it is 0 and picks nothing.
+- **The module's cage is kept.** Its engine-free test allows only the
+  campus schema. `island_metrics` therefore takes tables already validated,
+  and the driver validates them.
+
+**`gridspine/drivers/campus_study.py`.**
+- `rank_campus` reads `island_unit_hourly.csv` and `island_hourly.csv`
+  when the run has them, validates them, and joins `island_metrics` into
+  the metrics. One table without the other is refused.
+- `prepare_campus` drops an earlier solve's island tables. pypsa-gui writes
+  them after it, so a gridspine-only re-prepare cannot rank stale ones.
+- Without island tables the metrics and the selection are exactly as
+  before (regression test).
+
+**Tests** (`tests/gridspine/test_campus_island_ranking.py`, 21):
+- each maximum and each minimum criterion picks its hand-worked hour;
+- the GFL share at low load, with a GFM PV not counted;
+- only GFM bess count for headroom, and every bess counts for energy;
+- the worst scenario, for the steps and for M;
+- the (max − x) values, per period, and a flat period picks nothing;
+- a constant series picks nothing;
+- ties;
+- the base selection unchanged without island columns;
+- through the driver: island hours join the base ones, a run without
+  tables is unchanged, a half pair is refused, and a re-prepare drops the
+  tables.
+
+**Mutations.** 14 edits:
+- the steps taken as a mean, or dropped;
+- the load dropped;
+- M taken as a max, or negated;
+- the global (max − x);
+- GFM headroom over every bess, and energy over GFM bess only;
+- the share counting a GFM PV, or not normalised;
+- the criteria not added;
+- the driver ignoring the tables, allowing a half pair, or keeping stale
+  ones.
+
+12 were killed on the first run. The mean survived because both scenarios
+carried the same series. The global transform survived because no test had
+a flat period beside a varying one. Two tests were added, and both edits
+are now killed.
 
 ### I4: island steady state by control mode — step 3a (M)
 
@@ -1667,6 +1945,263 @@ oscillation and no current-limit dynamics.
 **Tests and mutations:** 32 tests in `tests/gridspine/test_frequency.py`.
 Mutation testing killed 32 of 32. Round 1 left 9 survivors, closed by the
 extra cases above.
+
+### I6b as built (2026-10-14)
+
+**Scope.** This PR covers the I6a split's I6b items: E4, E6, the UPS, Q8,
+the EMT/RMS flags and the hour sweeps. **One item waits for I3b:** the
+wiring into `drivers/campus_study.py`, which passes I3b's island critical
+hours to `campus_frequency_study`. The sweeps take the hours as an argument.
+
+**The UPS in the engine** (`Unit` model `ups`):
+- It carries its IT load `it_mw` on its battery when it is off line:
+  - at an islanding (`simulate(..., islanding=True)`, which E1 sets) if
+    it `transfers_on_islanding`;
+  - whenever |Δf| leaves `f_window_hz`. That is a drop-out, logged at the
+    step it happens.
+- **Walk-in.** Back inside the window, it walks the load back in linearly
+  at `it_mw / walk_in_s`. A UPS that transfers starts that walk-in at
+  t = 0, so its walk-in ends at `walk_in_s`, as I2b's "late" test
+  assumes. If the frequency leaves the window again, it drops again.
+- **Effect on the balance.** The IT load on the battery is relief to the
+  island balance, a discrete state applied after each RK4 step, like the
+  frequency-watt ramp. The relief is held over each step, so it lags a
+  continuous ramp by rate·dt/2. A test pins that bound at 1 ms and at
+  0.1 ms.
+- **`UpsLog`** records:
+  - the drop times;
+  - the battery energy, which is exact for a linear walk-in (L_it·walk_in/2);
+  - when the load is back on the island (`None` if it is still on the
+    battery at the end);
+  - `autonomy_ok`, true only when the load is back and the energy given is
+    within e(t−1).
+- **`units_from_campus`** gives a UPS the hour's draw of its `it_load`. Its
+  energy is `soc[uid]`, I3a's `soc_start_mwh`, when given, and otherwise the
+  campus `e_mwh`. Gensets now carry `start_s` and `sync_s`, and
+  `ready_s` is their sum.
+
+**E4, `e4_ups_bridged`** (`ups_bridged`):
+- **The start.** The bus is dead and the UPSs carry the IT load. The
+  `genset_redundancy_n` largest gensets fail to start (N+k, as I2b's
+  pickup row). The rest are ready at the slowest one's `start_s + sync_s`.
+  That is the join I2b uses; the plan text said `start_s`.
+- **The pickup.** The blocks are picked up by a self-advancing `Pickup`
+  event. The first block is taken at the ready time. Each next block is
+  taken once Δf is within the band of its settled value (−ΣP/ΣK, or 0 with
+  an isochronous genset) and |RoCoF| ≤ 0.05 Hz/s. Both thresholds are
+  assumed and ledgered; a real controller may wait a fixed interval.
+- **Judging.** Each block gets its own `Metrics` and is judged against
+  the limits. A pickup is `complete` only if every block was taken and the
+  frequency settled after the last.
+- **The Q1 bridge check.** Each UPS's e(t−1) at its IT load must last
+  max(`bridge_s`, ready + the last block's pickup time). An incomplete
+  pickup fails it.
+
+**E6, `e6_planned`** (`planned`):
+- **The take-over.** The units take over the import before the PCC opens:
+  - a GFM moves at once (a converter ramps in milliseconds; ledgered);
+  - a genset ramps at `ramp_pu_per_s` from its join, a cold one after
+    start + sync;
+  - a frequency-watt unit moves at its ramp;
+  - the others hold their dispatch.
+- **The ramp time** is the first time their room covers the import. It is
+  found by bisection on a monotone sum.
+- **The share** is proportional to what each unit can give at that time.
+- **The opening** is then simulated on the shifted dispatch, with the
+  `residual_mw` left (0 by default).
+- **No room.** When the units cannot cover the import, the result is a
+  shortfall, not a time.
+
+**Q8, `i_max_sensitivity`.** It reruns any event with every GFM's current
+limit at each `i_max_sensitivity_pu`, on S_n.
+
+**EMT/RMS flags, `emt_flags`.** Each recommends a study, with assumed,
+ledgered thresholds:
+- the nadir margin is below 20 % of the transition limit's allowed
+  deviation, on the side the frequency went;
+- a GFM saturates;
+- SCR < 3 at the PCC (S_k,min over the grid-following MVA) with more than
+  30 % grid-following;
+- the island SCR < 3 (I5's minimum fault level at the weakest converter
+  bus, over the converter MVA) with more than 50 % grid-forming;
+- the frequency collapses.
+
+`emt_inputs(campus, rows)` computes the shares and the two SCRs.
+`equipment(campus)` gives `judge` each UPS's window, f0 ± `f_window_hz`, and
+each load's `f_trip_hz`, on its own side of f0.
+
+**The sweeps.**
+- **`e1_every_hour(campus, hourly, island_hourly, island_unit_hourly)`** runs
+  E1 at every `seamless` hour on I3a's lossless 0⁺ steps:
+  - `dp_up_mw` is an import lost, and `dp_down_mw` an export lost; each
+    is run where it is above 0.
+  - The units are those at the hour. A genset that I3a's `online` says is
+    off starts cold.
+  - A UPS that transfers is left out, because I3a's steps already net its
+    transfer.
+  - A UPS that stays on line is kept, so a drop-out from its window is
+    seen (`ups_drops`). The first mutation run found this: dropping every
+    UPS hid it.
+  - It runs at 5 ms over 10 s, about 30 ms per event; at that step the
+    plan's −0.555 Hz nadir is exact. Identical hours run once.
+  - The tables are checked against their contracts.
+- **`campus_frequency_study(campus, hourly, hours, island_unit_hourly)`** runs
+  at the critical hours, in each of the campus's scenarios:
+  - **`seamless`:**
+    - E1 runs on I4's ΔP_AC, with the UPS transfers and walk-in. Its
+      losses are reported as ΔP_AC minus the lossless import.
+    - Each GFM's energy from the islanding until the cold gensets join
+      is reported against its e(t−1) (I6's E1 item, in `bridge`).
+    - From I4's island dispatch at nominal frequency (secondary control
+      has restored it; ledgered):
+      - E2 is `load_step_mw`, else the largest pickup block, else the
+        hour's largest load;
+      - E3 trips the unit with the largest |P|;
+      - E5 loses the island's PV output.
+    - Q8 reruns E1 and E2.
+  - **`ups_bridged`:** E4, with I3a's `p_ups_it_mw` and `soc_start_mwh`.
+  - **`planned`:** E6 on the same ΔP_AC.
+  - **Output.** Every event is judged against the limits and the
+    equipment, and flagged for EMT/RMS where it applies. The tables are
+    `events`, `losses`, `bridge`, `planned` and `ups`. One hour of the test
+    campus takes about 6 s.
+
+**Tests:** 49 in `tests/gridspine/test_frequency_events.py`, against hand
+oracles:
+- **The UPS:**
+  - a transferring UPS is the ramped event, within the discretisation
+    bound, and its battery energy is exactly L_it·walk_in/2;
+  - on line inside its window it changes nothing, bit for bit;
+  - it drops at the first sample outside its window, and the trace is
+    unchanged up to that sample;
+  - it drops again at each excursion: by hand, 0.5 s and 2.5 s on an
+    inertia-only ramp;
+  - once dropped, its battery gives L_it from the drop to the end;
+  - a transferring UPS stays on line in an event inside the island;
+  - it stays on its battery when the settled frequency is outside its
+    window;
+  - the autonomy check is pinned on both sides.
+- **E4:**
+  - the first block equals the one-governor step response, within 1e-9;
+  - each next block waits for recovery;
+  - the frequency settles at −Σblocks/K;
+  - an isochronous genset returns to nominal;
+  - an over-large pickup does not complete;
+  - the bridge is pinned on both sides of ready + the last pickup, and of
+    `bridge_s`;
+  - N+k drops the largest genset.
+- **E6:**
+  - the ramp time by hand: 3 MW at once, then 5 MW at 1 MW/s from a 15 s
+    join, giving 20 s and the shares 5/3;
+  - the shortfall;
+  - an export taken back at once, on the storage, and on a genset by its
+    room down;
+  - the residual opening against the engine run by hand, on a dispatch
+    where the shift matters;
+  - the frequency-watt ramp, without its delay.
+- **Q8:** the limits on S_n, with the nadir rising with the limit.
+- **The flags:** each at its threshold, on both sides; nadir margins at
+  −2.0 and +1.2 Hz.
+- **The campus:**
+  - the UPS's IT draw and e(t−1);
+  - the equipment on both sides of f0;
+  - the EMT inputs by hand;
+  - `e1_every_hour` against the engine by hand;
+  - identical hours run once, and hours with the same step but other units
+    run apart;
+  - a UPS on line is kept and one that transfers is not;
+  - a table off its contract is refused;
+  - the study's E1 on I4's ΔP_AC settles at I4's Δf within 1 mHz;
+  - each scenario's events. E2 takes the largest of unequal blocks. The
+    bridge uses I3a's IT load (20 MW, not the 25 MW draw) and its e(t−1);
+  - the GFM energy until the join;
+  - the missing requirements refused.
+
+**Mutations.** 54 source edits, in four groups:
+- **the UPS:** the transfer without an islanding, the window, the
+  drop log, the energy, the walk-in, the online time, the autonomy, the IT
+  draw and e(t−1);
+- **E4:** both recovery criteria, the settled value, isochronous, N+k,
+  the ready time, completion and the bridge;
+- **E6:** the genset join, the GFM and frequency-watt room, the room
+  down, the share, the shifted opening and the shortfall;
+- **the rest:** Q8 on P_n, the flags, the equipment side, the EMT
+  inputs, the sweep's cold gensets, UPS rule, direction and cache, and the
+  study's lossless import, ΔP_AC, E2 step, E3 unit, I3a's IT load, island
+  dispatch and PV.
+
+The first run killed 44. The ten survivors were closed:
+- seven by the tests above;
+- two (E2 and the bridge IT load) by fixture values that tell the
+  alternatives apart;
+- one by the sweep's UPS rule.
+
+A 55th edit, which drops every UPS from the sweep, was added with that
+rule. All 55 are killed.
+
+### I6c as built: the driver at the I3b hours (2026-10-14)
+
+**What waited for I3b** is wired into `gridspine/drivers/campus_study.py`,
+in additive functions, on a ranked run.
+- **`island_hours(run_dir)`** gives the island critical hours: the
+  selected hours that an `ISLAND_CRITERIA` reason picked. Hours that only a
+  base criterion picked are not island hours.
+- **`island_frequency_campus(run_dir, every_hour=True)`**
+  - **Refuses** a campus without island requirements, and a run without
+    the island tables.
+  - **Runs:**
+    - `e1_every_hour` on the tables, when `seamless` is a scenario;
+    - `campus_frequency_study` at the island hours, with I3a's per-unit
+      table.
+  - **Writes:**
+    - `campus_freq_e1_hourly.csv`, `campus_freq_events.csv`,
+      `campus_freq_losses.csv`, `campus_freq_bridge.csv`,
+      `campus_freq_planned.csv` and `campus_freq_ups.csv`;
+    - `campus_freq_summary.json`.
+  - **Fixed columns.** Each table carries its fixed columns whatever
+    events ran, header only where it has nothing, so I9b reads one shape.
+    The columns are `frequency.E1_HOURLY_COLUMNS`, `EVENT_COLUMNS`,
+    `LOSSES_COLUMNS`, `BRIDGE_COLUMNS`, `PLANNED_COLUMNS` and
+    `UPS_COLUMNS`; the summary's keys are
+    `campus_study.FREQ_SUMMARY_KEYS`.
+  - **The bridge table** holds E4's UPS rows (`kind` `ups`) and the GFM
+    rows until the gensets join (`kind` `gfm`), under one `unit` column.
+  - **The summary** holds:
+    - the label, the ledger and the scenarios;
+    - the island hours;
+    - the failing event hours;
+    - the hours where the bridge fails, where a bridge row has no e(t−1)
+      to judge it and is not counted;
+    - the hours where planned islanding is infeasible;
+    - the hours where the every-hour E1 fails, and the ones among them the
+      ranking did not select. That is the plan's check on I3b's choice.
+- **`psse_campus(run_dir, hours=None)`** writes I8's bundle under `psse/`
+  for each island hour, or for the given hours. Each is named
+  `<campus>_p<period>_h<hour>` and carries the frequency ledger in its
+  README. A missing hour is refused.
+
+**Tests:** 12 in `tests/gridspine/test_campus_island_frequency_driver.py`,
+on a run directory written by hand:
+- the island hours;
+- the sweep at every hour against the events at the island hours only;
+- a missed hour, and a selected one that is not missed;
+- the bridge on I3a's IT load (20 MW, not the 25 MW draw);
+- an infeasible planned islanding;
+- a GFM bridge row without e(t−1) not counted;
+- skipping the sweep;
+- every table's fixed columns and the summary keys, under both scenario
+  sets;
+- both refusals;
+- the bundles per island hour, given hours, and a missing hour.
+
+**Mutations:** 14 edits to the driver. 11 were killed on the first run. The
+three survivors were:
+- the bridge's None rows;
+- the planned summary;
+- I3a's per-unit table not passed on.
+
+Each was closed by a test or a fixture value that tells the alternatives
+apart. 14 of 14 are now killed.
 
 ### I7: closing the loop — frequency cuts back into sizing (S–M; manual, owner Q6)
 

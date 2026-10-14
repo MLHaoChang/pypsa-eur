@@ -93,6 +93,7 @@ describe('CompanionLauncher', () => {
       <CompanionLauncher
         presence="listening"
         profileLabel="Model"
+        liveOpen
         onCompose={vi.fn()}
         onSpeak={vi.fn()}
         onLive={vi.fn()}
@@ -102,6 +103,60 @@ describe('CompanionLauncher', () => {
     expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('listening')
     expect(screen.getByTestId('companion-live').getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByTestId('companion-speak').getAttribute('aria-pressed')).toBeNull()
+  })
+
+  it('shows the character while closed and a grid node while Live is open', () => {
+    mockMotion(false)
+    const props = {
+      profileLabel: 'Model',
+      onCompose: vi.fn(),
+      onSpeak: vi.fn(),
+      onLive: vi.fn(),
+      onProfiles: vi.fn(),
+    }
+    const { rerender } = render(<CompanionLauncher {...props} />)
+    expect(screen.getByTestId('companion-character').getAttribute('data-shape')).toBe('character')
+    expect(screen.getByTestId('companion-live').getAttribute('aria-pressed')).toBe('false')
+    rerender(<CompanionLauncher {...props} presence="thinking" liveOpen />)
+    expect(screen.getByTestId('companion-character').getAttribute('data-shape')).toBe('live-node')
+    expect(screen.getByTestId('companion-live-node')).toBeTruthy()
+    expect(screen.getByTestId('companion-live').getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('flashes the user line and drops it when the echo clears, with no transcript card', () => {
+    mockMotion(false)
+    const props = {
+      profileLabel: 'Model',
+      liveOpen: true,
+      onCompose: vi.fn(),
+      onSpeak: vi.fn(),
+      onLive: vi.fn(),
+      onProfiles: vi.fn(),
+    }
+    const { rerender } = render(
+      <CompanionLauncher {...props} presence="thinking" liveEcho="List the projects" />,
+    )
+    expect(screen.getByTestId('companion-live-echo').textContent).toBe('List the projects')
+    expect(screen.queryByTestId('companion-outcome')).toBeNull()
+    rerender(<CompanionLauncher {...props} presence="listening" liveEcho="" />)
+    expect(screen.queryByTestId('companion-live-echo')).toBeNull()
+  })
+
+  it('omits an empty caption instead of rendering a blank line', () => {
+    mockMotion(false)
+    render(
+      <CompanionLauncher
+        profileLabel="Model"
+        liveOpen
+        liveCaption=""
+        onCompose={vi.fn()}
+        onSpeak={vi.fn()}
+        onLive={vi.fn()}
+        onProfiles={vi.fn()}
+      />,
+    )
+    expect(screen.queryByTestId('companion-live-caption')).toBeNull()
+    expect(screen.getByTestId('companion-live-input')).toBeTruthy()
   })
 
   it('keeps every decorative animation and transition behind prefers-reduced-motion: no-preference', () => {
@@ -119,5 +174,7 @@ describe('CompanionLauncher', () => {
     const gated = block.slice(gate)
     expect(gated).toMatch(/\.companion-idle\s*\{[^}]*animation:/)
     expect(gated).toMatch(/transition:/)
+    expect(gated).toMatch(/\.companion-live-echo\s*\{[^}]*animation:/)
+    expect(gated).toMatch(/\.companion-node-sector\s*\{[^}]*animation:/)
   })
 })

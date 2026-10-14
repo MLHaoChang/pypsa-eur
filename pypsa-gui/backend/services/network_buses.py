@@ -127,6 +127,9 @@ def apply_rename_bus(name: str, body: dict):
     new_name = (body.get("new_name") or "").strip()
     if not new_name:
         raise HTTPException(400, "new_name cannot be empty")
+    from services.component_names import require_valid_name
+
+    require_valid_name(new_name, component_class="Bus")  # OPEN-ITEMS item 8
     from services.commercial.settlement_inputs import reserved_bus_name
 
     if reserved_bus_name(new_name):

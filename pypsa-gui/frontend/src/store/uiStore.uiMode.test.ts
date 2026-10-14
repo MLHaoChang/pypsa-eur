@@ -281,3 +281,40 @@ describe('the storage listener (C10, multi-tab)', () => {
     expect(s.getState().activeSlidePanel).toBe('hubDesign')
   })
 })
+
+// U3: the decision study is a Guided surface (the Start card opens it).
+describe('switching to guided keeps the decision study open', () => {
+  it('decision stays', async () => {
+    const s = await freshStore({ [MODE_KEY]: 'expert' })
+    s.setState({ currentProject: 'P', activeSlidePanel: 'decision' })
+    s.getState().setUiMode('guided')
+    expect(s.getState().activeSlidePanel).toBe('decision')
+  })
+})
+
+// UX M7 (U3): autosave is on by default in Guided; a choice the user made
+// wins in both modes.
+describe('autosave per mode', () => {
+  const AUTOSAVE_KEY = 'network-diagram:autosave'
+
+  it('with no choice it follows the mode, at load and on a switch', async () => {
+    const g = await freshStore({ [MODE_KEY]: 'guided' })
+    expect(g.getState().autosaveEnabled).toBe(true)
+    g.getState().setUiMode('expert')
+    expect(g.getState().autosaveEnabled).toBe(false)
+    g.getState().setUiMode('guided')
+    expect(g.getState().autosaveEnabled).toBe(true)
+    expect(localStorage.getItem(AUTOSAVE_KEY)).toBeNull()
+
+    const e = await freshStore({ [MODE_KEY]: 'expert' })
+    expect(e.getState().autosaveEnabled).toBe(false)
+  })
+
+  it('a stored choice wins in Guided too', async () => {
+    const g = await freshStore({ [MODE_KEY]: 'guided', [AUTOSAVE_KEY]: 'false' })
+    expect(g.getState().autosaveEnabled).toBe(false)
+    g.getState().setUiMode('expert')
+    g.getState().setUiMode('guided')
+    expect(g.getState().autosaveEnabled).toBe(false)
+  })
+})
