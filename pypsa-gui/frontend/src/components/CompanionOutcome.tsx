@@ -117,7 +117,8 @@ export default function CompanionOutcome({ hidden = false }: { hidden?: boolean 
   const user = [...messages].reverse().find(m => m.role === 'user')
   const wrongProject = [message?.origin_project, user?.origin_project]
     .some(origin => origin !== undefined && origin !== project)
-  const checked = user?.requiresChecked === true || turn.some(m => m.requiresChecked || m.receipt || m.answer_id
+  const checked = error?.error_kind.startsWith('assurance_') === true
+    || user?.requiresChecked === true || turn.some(m => m.requiresChecked || m.receipt || m.answer_id
     || (m.tool_result && typeof m.tool_result === 'object' && '_assurance' in m.tool_result))
   const download = checked ? null : [...turn].reverse().map(m => downloadHref(m.tool_result)).find(Boolean) ?? null
   if (hidden || streaming || mismatch || wrongProject

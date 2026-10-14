@@ -199,4 +199,15 @@ describe('closed companion publication', () => {
     expect(screen.getByText('Checked answer unavailable')).toBeTruthy()
     expect(screen.queryByText(text)).toBeNull()
   })
+
+  it('does not reuse an older ordinary reply when a checked request is refused before admission', () => {
+    useChatStore.setState({ messages: [
+      { id: 'u1', role: 'user', content: 'Earlier ordinary request', ts: 1 },
+      { id: 'a1', role: 'assistant', content: 'Earlier unchecked 999 EUR.', ts: 2 },
+    ], error: { error_kind: 'assurance_unavailable', message: 'Checks unavailable' } })
+    render(<CompanionOutcome />)
+    expect(screen.getByText('Checked answer unavailable')).toBeTruthy()
+    expect(screen.queryByText('Earlier unchecked 999 EUR.')).toBeNull()
+    expect(screen.queryByText('Answer not checked')).toBeNull()
+  })
 })
