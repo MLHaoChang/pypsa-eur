@@ -10,20 +10,18 @@ import {
   commercialApi, NoCommercialConfigError, SolverInFlightError, type BillingPayload,
   type ValueFlowsPayload,
 } from '../../api/commercial'
-import type { CommercialConfig } from '../../api/types'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { CompletenessChips, type CompletenessRow } from '../../components/CompletenessChips'
 import { fmtAmount } from './investment/valueFlows'
 import ValueFlowsView from './investment/ValueFlowsView'
 import ParticipantsDesigner from './investment/ParticipantsDesigner'
-import TariffBuilder from './investment/TariffBuilder'
+import TariffSection from './investment/TariffSection'
 import LibraryBrowser from './investment/LibraryBrowser'
 import ContractsEditor from './investment/ContractsEditor'
 import FinanceInputsEditor from './investment/FinanceInputsEditor'
 import InvestmentCaseView from './investment/InvestmentCaseView'
-import { blankTariff } from './investment/tariffModel'
-import SiteConnectionForm from './SiteConnectionForm'
+import SiteConnectionSection from './investment/SiteConnectionSection'
 
 const SECTIONS = [
   { id: 'participants', label: 'Participants' },
@@ -45,42 +43,6 @@ export function loadFailure(error: unknown): string {
     : error instanceof NoCommercialConfigError
       ? 'Set the site connection first.'
       : 'It could not be loaded.'
-}
-
-/** The commercial root (IC U1 follow-up b): the form when it is missing (or a
- *  result says the config is), else a summary line that opens it. */
-function SiteConnectionSection({ config, needed }: { config: CommercialConfig | null | undefined
-                                                     needed: boolean }) {
-  const [editing, setEditing] = useState(false)
-  const root = config?.poc_link
-    ? { poc_link: config.poc_link, export_link: config.export_link ?? null,
-        timezone: config.timezone ?? null }
-    : null
-  if (needed || !root) {
-    return (
-      <section className="space-y-2 border border-border rounded p-2" data-testid="ic-site-connection"
-               aria-labelledby="ic-site-connection-title">
-        <h3 id="ic-site-connection-title" className="text-[12px] font-semibold">Site connection</h3>
-        <p className="text-[11px] text-muted">
-          Set the site's connection to the grid first: the bill, the participants and the
-          investment case are all read at the point of connection.</p>
-        <SiteConnectionForm initial={root} />
-      </section>
-    )
-  }
-  return (
-    <div className="space-y-2" data-testid="ic-site-connection">
-      <p className="text-[11px] text-muted" data-testid="ic-site-connection-summary">
-        Site connection: imports through {root.poc_link}
-        {root.export_link ? `, exports through ${root.export_link}` : ', no export link'}
-        {root.timezone ? `, site time ${root.timezone}` : ', snapshots in site time'}.{' '}
-        <button type="button" className="underline" aria-expanded={editing}
-                onClick={() => setEditing(e => !e)}>Edit site connection</button>
-      </p>
-      {editing && <SiteConnectionForm initial={root} onSaved={() => setEditing(false)}
-                                      onCancel={() => setEditing(false)} />}
-    </div>
-  )
 }
 
 export function completeness(billing: BillingPayload | null | undefined,
@@ -144,34 +106,6 @@ function BillSection({ billing, error }: { billing: BillingPayload | null | unde
           </tbody>
         </table>
       ))}
-    </div>
-  )
-}
-
-function TariffSection() {
-  const project = useUIStore(s => s.currentProject)
-  const current = useQuery({ queryKey: nk(project, 'commercial', 'config'),
-                             queryFn: () => commercialApi.getCommercial() })
-  if (current.isPending) return <p className="text-[11px] text-muted py-2">Loading the tariff…</p>
-  // A failed read must not open a blank builder whose save would replace the
-  // real tariff (WP3.7b review #11).
-  if (current.isError) {
-    return <p className="text-[11px] text-warn py-2" data-testid="ic-tariff-error">
-      The project's tariff could not be read; reload before editing it.</p>
-  }
-  const tariff = current.data?.import_tariff
-  const ref = current.data?.import_tariff_ref
-  return (
-    <div className="space-y-2">
-      <p className="text-[11px] text-muted">
-        {tariff ? `Editing the project's import tariff ${tariff.id}.`
-          : 'The project has no import tariff: build one.'}</p>
-      {ref && (
-        <p className="text-[11px] text-warn" data-testid="ic-tariff-library-ref">
-          This tariff is Library item {ref.id} v{ref.version}. Saving it as the project tariff
-          detaches it from the Library (the project keeps your edited copy).</p>
-      )}
-      <TariffBuilder key={tariff?.id ?? 'new'} initial={tariff ?? blankTariff()} />
     </div>
   )
 }
