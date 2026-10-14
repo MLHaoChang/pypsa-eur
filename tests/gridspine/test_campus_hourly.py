@@ -146,6 +146,38 @@ def test_an_asset_that_never_left_zero_has_no_saved_series_and_reads_as_zero(tmp
     assert (_unit(hourly, campus, "bess")["p_mw"] == 0.0).all()
 
 
+def _round_trip(n, tmp_path):
+    path = tmp_path / "n.nc"
+    n.export_to_netcdf(path)
+    return pypsa.Network(path)
+
+
+def test_a_self_supplied_site_that_never_imports_reads_as_zero_import(tmp_path):
+    """A hub that never imports comes back from NetCDF with no PCC link
+    column (an all-zero series is not saved), so the import is 0 MW, not a
+    KeyError on the link's name."""
+    n = solved_hub()
+    n.links_t.p0["grid_import"] = 0.0
+    n.links_t.p1["grid_import"] = -0.0
+    back = _round_trip(n, tmp_path)
+    assert "grid_import" not in back.links_t.p0.columns
+    _, pcc = campus_hourly(back, draft_campus(back).spec)
+    assert (pcc["import_mw"] == 0.0).all()
+
+
+def test_an_idle_grid_generator_at_the_pcc_reads_as_zero_import():
+    """The same for a PCC fed by a grid generator rather than a link: a
+    reloaded network whose grid generator never ran has no column for it."""
+    n = solved_hub()
+    n.remove("Link", "grid_import")
+    n.links_t.p0 = n.links_t.p0.drop(columns="grid_import", errors="ignore")
+    n.links_t.p1 = n.links_t.p1.drop(columns="grid_import", errors="ignore")
+    campus = draft_campus(n).spec
+    n.generators_t.p = n.generators_t.p.drop(columns="grid_supply")
+    _, pcc = campus_hourly(n, campus)
+    assert (pcc["import_mw"] == 0.0).all()
+
+
 def test_a_unit_with_no_project_name_is_refused():
     n = solved_hub()
     campus = draft_campus(n).spec

@@ -1,0 +1,1 @@
+* Fix(gridspine): A campus Run on a self-supplied site no longer crashes with `KeyError: 'grid_import'`. A solved hub that never imports reloads with no PCC link series, because PyPSA does not save an all-zero series, and the campus producer now reads that as zero import. The same applies to an idle grid generator at the PCC.
