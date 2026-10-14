@@ -34,6 +34,7 @@ import { useUIStore } from '../store/uiStore'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
 import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
+import CampusIslandSection from './CampusIslandSection'
 import CampusLibrarySection from './CampusLibrarySection'
 import { useCampusMilpJob } from './useCampusMilpJob'
 
@@ -168,6 +169,7 @@ function CampusView({ name }: { name: string }) {
                     onRunStart={onRunStart} onRunLost={onRunLost} />
       )}
       {state.data.results && <ResultsSection state={state.data} pending={pending} />}
+      <CampusIslandSection name={name} />
     </PageBody>
   )
 }

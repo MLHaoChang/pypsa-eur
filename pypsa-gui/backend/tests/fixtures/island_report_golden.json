@@ -1,0 +1,268 @@
+{
+  "caveat": "Screening, not a certificate: a steady-state hub LP, converter-aware fault current and aggregate-frequency screening of the site's island capability.",
+  "missing": [
+    "campus run with island tables"
+  ],
+  "tables": [
+    {
+      "assumed_rows": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "caveat": "Screening, not a certificate: a steady-state hub LP, converter-aware fault current and aggregate-frequency screening of the site's island capability.",
+      "columns": [
+        "field",
+        "value",
+        "source"
+      ],
+      "id": "requirements",
+      "model": "island sidecar (island_config.json): the study's inputs",
+      "rows": [
+        [
+          "bridge_s",
+          1.0,
+          "assumed"
+        ],
+        [
+          "genset_redundancy_n",
+          0,
+          "assumed"
+        ],
+        [
+          "gfm_margin",
+          0.0,
+          "assumed"
+        ],
+        [
+          "i_max_sensitivity_pu",
+          [
+            1.2,
+            1.5,
+            2.0
+          ],
+          "assumed"
+        ],
+        [
+          "pickup_blocks",
+          [
+            1.0
+          ],
+          "assumed"
+        ],
+        [
+          "relay_sensitivity",
+          1.5,
+          "assumed"
+        ],
+        [
+          "rocof_window_ms",
+          500.0,
+          "assumed"
+        ],
+        [
+          "sustained_h",
+          1.0,
+          "assumed"
+        ],
+        [
+          "steady_island.f_max_hz",
+          51.5,
+          "assumed"
+        ],
+        [
+          "steady_island.f_min_hz",
+          47.5,
+          "assumed"
+        ],
+        [
+          "steady_island.qss_band_hz",
+          1000000.0,
+          "assumed"
+        ],
+        [
+          "steady_island.rocof_hz_per_s",
+          1000000.0,
+          "assumed"
+        ],
+        [
+          "transition.f_max_hz",
+          51.5,
+          "assumed"
+        ],
+        [
+          "transition.f_min_hz",
+          47.5,
+          "assumed"
+        ],
+        [
+          "transition.qss_band_hz",
+          1000000.0,
+          "assumed"
+        ],
+        [
+          "transition.rocof_hz_per_s",
+          1000000.0,
+          "assumed"
+        ],
+        [
+          "scenarios",
+          [
+            "ups_bridged",
+            "seamless"
+          ],
+          "definition"
+        ],
+        [
+          "linearised_uc",
+          false,
+          "definition"
+        ],
+        [
+          "ride_through_storage",
+          [
+            "bess"
+          ],
+          "definition"
+        ]
+      ],
+      "title": "Island requirements"
+    },
+    {
+      "assumed_rows": [
+        0,
+        2
+      ],
+      "caveat": "Screening, not a certificate: a steady-state hub LP, converter-aware fault current and aggregate-frequency screening of the site's island capability.",
+      "columns": [
+        "unit",
+        "kind",
+        "control or governor",
+        "assumed fields"
+      ],
+      "id": "units",
+      "model": "island sidecar (island_config.json): the study's inputs",
+      "rows": [
+        [
+          "bess",
+          "bess",
+          "gfm_droop",
+          "droop_pct, i_max_pu, k_gfm_min, pf_rated, q_droop_pct, tau_f_s"
+        ],
+        [
+          "crit",
+          "load",
+          "",
+          ""
+        ],
+        [
+          "g",
+          "genset",
+          "droop",
+          "H_s, T_g_s, cos_phi_r, droop_pct, load_step_max_pct, q_droop_pct, ramp_pu_per_s, start_s, sync_s, xd_sat"
+        ]
+      ],
+      "title": "Island units and control modes"
+    },
+    {
+      "assumed_rows": [],
+      "caveat": "Screening, not a certificate: a steady-state hub LP, converter-aware fault current and aggregate-frequency screening of the site's island capability.",
+      "columns": [
+        "scenario",
+        "status",
+        "objective",
+        "cost of island capability"
+      ],
+      "id": "costs",
+      "model": "hub LP, plain LOPF (HiGHS) with the island rows; linearised unit commitment where the sidecar asks for it",
+      "rows": [
+        [
+          "baseline (no island rows)",
+          "ok",
+          400.0,
+          0.0
+        ],
+        [
+          "ups_bridged",
+          "ok",
+          400.0,
+          0.0
+        ],
+        [
+          "seamless",
+          "ok",
+          1400.0,
+          1000.0
+        ]
+      ],
+      "title": "Cost of island capability"
+    },
+    {
+      "assumed_rows": [],
+      "caveat": "Screening, not a certificate: a steady-state hub LP, converter-aware fault current and aggregate-frequency screening of the site's island capability.",
+      "columns": [
+        "scenario",
+        "row",
+        "hours binding",
+        "sum of duals"
+      ],
+      "id": "binding",
+      "model": "hub LP, plain LOPF (HiGHS) with the island rows; linearised unit commitment where the sidecar asks for it",
+      "rows": [
+        [
+          "seamless",
+          "Island-headroom-up",
+          1,
+          100.0
+        ]
+      ],
+      "title": "Binding island rows and their duals"
+    },
+    {
+      "assumed_rows": [],
+      "caveat": "Screening, not a certificate: a steady-state hub LP, converter-aware fault current and aggregate-frequency screening of the site's island capability.",
+      "columns": [
+        "scenario",
+        "N+k",
+        "fuel",
+        "unit commitment",
+        "committed gensets",
+        "surplus"
+      ],
+      "id": "facts",
+      "model": "hub LP, plain LOPF (HiGHS) with the island rows; linearised unit commitment where the sidecar asks for it",
+      "rows": [
+        [
+          "ups_bridged",
+          0,
+          "not checked",
+          "off",
+          "",
+          null
+        ],
+        [
+          "seamless",
+          0,
+          "not checked",
+          "off",
+          "",
+          "not curtailable: no gfl_fw unit"
+        ]
+      ],
+      "title": "Ride-through, fuel and unit commitment"
+    }
+  ]
+}

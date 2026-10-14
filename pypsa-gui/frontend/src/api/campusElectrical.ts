@@ -443,6 +443,44 @@ export interface GridCodeDraft {
   document: GridCodeDocument | null
 }
 
+// ── the island study (campus island plan, I9a) ──────────────────────────────
+
+export type IslandScenario = 'ups_bridged' | 'seamless' | 'planned'
+export const ISLAND_SCENARIOS: IslandScenario[] = ['ups_bridged', 'seamless', 'planned']
+export type IslandSource = 'measured' | 'datasheet' | 'assumed'
+/** Every number in the sidecar is `{value, source}`. */
+export interface Tagged<T = number> { value: T; source: IslandSource }
+
+/** The island sidecar as written (`island_config.json`), validated by the
+ *  backend's schema on save. Only the fields the form edits are typed. */
+export interface IslandConfig {
+  units: Record<string, { kind: string; control?: string; governor?: string; [k: string]: unknown }>
+  requirements: {
+    scenarios: IslandScenario[]
+    linearised_uc?: boolean
+    [k: string]: unknown
+  }
+}
+
+export interface IslandTable {
+  id: string
+  title: string
+  /** The model behind the table's verdicts. */
+  model: string
+  /** "Screening, not a certificate: ..." on every table (plan I9). */
+  caveat: string
+  columns: string[]
+  rows: unknown[][]
+  /** Indexes into `rows` of the rows resting on an assumed value. */
+  assumed_rows: number[]
+}
+
+export interface IslandReport { caveat: string; tables: IslandTable[]; missing: string[] }
+export interface IslandState { config: IslandConfig | null; study: Record<string, unknown> | null }
+
+/** The island study solves the project several times: give it the run's time. */
+export const ISLAND_STUDY_TIMEOUT_MS = 900_000
+
 const quiet = { skipErrorToast: true } as const
 
 /** A study run is one synchronous request: seconds to minutes of AC load flows
@@ -494,6 +532,24 @@ export const campusApi = {
   cancelMilp: (project: string) =>
     client.post<{ state: MilpJobState; cancelling: boolean }>(`${base(project)}/milp/cancel`, undefined, quiet)
       .then(r => r.data),
+
+  /** The island sidecar as written and the last island study (null each when absent). */
+  island: (project: string) =>
+    client.get<IslandState>(`${base(project)}/island`, quiet).then(r => r.data),
+
+  /** Save the island sidecar; 422 names the field, 413 over 256 kB. Drops the old study. */
+  saveIsland: (project: string, config: IslandConfig) =>
+    client.put<IslandState>(`${base(project)}/island`, { config }, quiet).then(r => r.data),
+
+  /** Solve the islanding variants (minutes on a large project). */
+  runIslandStudy: (project: string, scenarios?: IslandScenario[]) =>
+    client.post<Record<string, unknown>>(`${base(project)}/island/study`,
+      scenarios && scenarios.length ? { scenarios } : {},
+      { ...quiet, timeout: ISLAND_STUDY_TIMEOUT_MS }).then(r => r.data),
+
+  /** The island report: tables with their model, caveat and assumed rows. */
+  islandReport: (project: string) =>
+    client.get<IslandReport>(`${base(project)}/island/report`, quiet).then(r => r.data),
 
   /** The asset library a study buys from. */
   library: (project: string) =>
