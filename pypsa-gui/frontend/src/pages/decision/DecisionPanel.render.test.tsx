@@ -52,6 +52,8 @@ function renderPanel() {
 
 beforeEach(() => {
   authMode.authEnabled = false
+  // The panel's navigation depends on the mode (U3); tests that need Guided set it.
+  useUIStore.setState({ uiMode: 'expert' })
   for (const f of Object.values(api)) f.mockReset()
   switchToProject.mockClear()
   api.get.mockResolvedValue(study)
@@ -140,6 +142,38 @@ describe('the Expert view', () => {
     await waitFor(() => expect(switchToProject).toHaveBeenCalledWith(fork, expect.anything()))
     expect(switchToProject).not.toHaveBeenCalledWith(study.base_project, expect.anything())
   })
+
+  // U3 ("Open in Expert"): the fork opens in Expert mode on Results ->
+  // Investment, the tab that carries its investment case.
+  it('lands in Expert on the Investment tab of the fork', async () => {
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'decision', resultsTabRequest: null })
+    useDecisionStore.setState({ active: REF, view: 'verdict' })
+    renderPanel()
+    await screen.findByTestId('verdict-class')
+    const btn = screen.getByTestId('expert-view')
+    await waitFor(() => expect((btn as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(btn)
+    fireEvent.click(screen.getByRole('button', { name: 'Open anyway' }))
+    await waitFor(() => expect(useUIStore.getState().uiMode).toBe('expert'))
+    expect(useUIStore.getState().uiModeExplicit).toBe(true)
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    expect(useUIStore.getState().resultsTabRequest).toBe('investment')
+  })
+
+  it('stays where it is when the switch is refused', async () => {
+    switchToProject.mockResolvedValueOnce({ status: 'dirty' } as never)
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'decision', resultsTabRequest: null })
+    useDecisionStore.setState({ active: REF, view: 'verdict' })
+    renderPanel()
+    await screen.findByTestId('verdict-class')
+    const btn = screen.getByTestId('expert-view')
+    await waitFor(() => expect((btn as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(btn)
+    fireEvent.click(screen.getByRole('button', { name: 'Open anyway' }))
+    await waitFor(() => expect(switchToProject).toHaveBeenCalled())
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().activeSlidePanel).toBe('decision')
+  })
 })
 
 describe('a changed intake', () => {
@@ -198,5 +232,27 @@ describe('a new study in draft', () => {
     expect(body).toMatchObject({ question_id: 'bess_at_site', name: 'My battery', project_name: 'My battery',
       intake: { site: { zone: 'DE', connection_mw: 2 }, load: { source: 'upload', csv_text: 'x', filename: 'meter.csv' } } })
     await waitFor(() => expect(useDecisionStore.getState().active).toEqual({ project: 'My battery', studyId: study.study_id }))
+  })
+})
+
+// U3 (UX §4.3): Guided walks the question-first rail; Expert keeps the nav.
+describe('the study navigation per mode', () => {
+  it('Guided: the question rail, which opens the views', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    useDecisionStore.setState({ active: REF, view: 'hub' })
+    renderPanel()
+    const rail = await screen.findByTestId('decision-rail')
+    expect(screen.queryByRole('navigation', { name: 'Decision study sections' })).toBeNull()
+    expect(within(rail).getByTestId('decision-rail-question').getAttribute('aria-current')).toBe('step')
+    fireEvent.click(within(rail).getByTestId('decision-rail-keyChoices'))
+    expect(useDecisionStore.getState().view).toBe('ledger')
+  })
+
+  it('Expert: the section nav, no rail', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    useDecisionStore.setState({ active: REF, view: 'hub' })
+    renderPanel()
+    expect(await screen.findByRole('navigation', { name: 'Decision study sections' })).toBeTruthy()
+    expect(screen.queryByTestId('decision-rail')).toBeNull()
   })
 })

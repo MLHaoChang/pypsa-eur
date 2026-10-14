@@ -821,6 +821,8 @@ describe('P29 gate B1-1: start-only tools never say they finished', () => {
   const START_ONLY = [...new Set([...fromSchema,
     'run_simulation', 'run_ac_pf_stage', 'run_fmea_sweep', 'run_frontier_study', 'run_mc_study',
     'run_coupling_loop', 'run_margin_loop', 'run_eh_study', 'gridspine_run_pipeline',
+    // U3: the decision study's run and tornado start in the background.
+    'run_decision_study',
     // a background report job (poll get_report_status), not "Start …" worded
     'regenerate_report_section'])]
 

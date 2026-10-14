@@ -10,7 +10,7 @@ import LedgerReview from './LedgerReview'
 import TariffStep from './TariffStep'
 import { ledger, library, previewUpload, study } from './__fixtures__/payloads'
 import type { LedgerPayload } from '../../api/decisionStudies'
-import { CHANGED_IN_EXPERT_LABEL, ROW_MEANING, helpFor } from '../../utils/decisionVocabulary'
+import { CHANGED_IN_EXPERT_LABEL, KEY_PARAMETER_LABELS, ROW_MEANING, helpFor } from '../../utils/decisionVocabulary'
 
 afterEach(() => cleanup())
 
@@ -97,6 +97,41 @@ describe('the tariff step', () => {
     render(<TariffStep library={library} intake={study.intake} preview={null} previewError={null} onChoose={onChoose} saving={false} error={null} />)
     fireEvent.click(screen.getByRole('radio', { name: /time-of-use/i }))
     expect(onChoose).toHaveBeenCalledWith('tou_reference_illustrative')
+  })
+
+  // U3, owner decision 4: the key-parameter list. The site's answers and the
+  // key drivers are shown; everything else is collapsed as the generic
+  // defaults, unless the user changed it or it needs attention.
+  it('shows the site answers the question is sensitive to', () => {
+    render(<LedgerReview payload={ledger} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
+    const site = screen.getByTestId('ledger-site-answers')
+    expect(site.textContent).toContain('DE')
+    expect(site.textContent).toContain('2 MW')
+    expect(site.textContent).toContain('4,000 MWh a year')
+    expect(site.textContent).toContain('Two bands and a demand charge')
+    expect(within(site).getByTestId('ledger-site-pv').textContent).toContain(KEY_PARAMETER_LABELS.pvOff)
+  })
+
+  it('collapses the other rows as the generic defaults, naming the pack', () => {
+    render(<LedgerReview payload={ledger} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
+    const rest = screen.getByTestId('ledger-defaults')
+    expect(rest.tagName).toBe('DETAILS')
+    expect((rest as HTMLDetailsElement).open).toBe(false)
+    const others = ledger.ledger.rows.filter(r => !r.sensitivity_flag && r.status === 'default')
+    expect(within(rest).getAllByTestId(/^ledger-row-/)).toHaveLength(others.length)
+    expect(within(rest).getByTestId('ledger-defaults-summary').textContent)
+      .toContain(`${others.length} more, from the generic defaults (technology-data v0.14.0)`)
+    for (const k of ledger.ledger.rows.filter(r => r.sensitivity_flag)) {
+      expect(rest.contains(row(k.key))).toBe(false)
+    }
+  })
+
+  it('keeps a changed or flagged other row out of the collapsed defaults', () => {
+    const edited = { ...ledger, ledger: { ...ledger.ledger, rows: ledger.ledger.rows.map(r =>
+      r.key === 'pv_rooftop_eur_per_kw' ? { ...r, status: 'customised' as const, provenance: 'user' as const } : r) } }
+    render(<LedgerReview payload={edited} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
+    expect(screen.getByTestId('ledger-defaults').contains(row('pv_rooftop_eur_per_kw'))).toBe(false)
+    expect(screen.getByTestId('ledger-changed').contains(row('pv_rooftop_eur_per_kw'))).toBe(true)
   })
 
   // U3 rule 5: a value an Expert changed on an option fork shows on its row,
