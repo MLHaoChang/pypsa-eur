@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import Kpi from './Kpi'
-import { splitValueUnit } from '../utils/format'
+import { kpiFigure, splitValueUnit } from '../utils/format'
 
 afterEach(cleanup)
 
@@ -31,7 +31,7 @@ describe('Kpi', () => {
 
   it('keeps the unit on the value line, never wrapping', () => {
     render(<Kpi label="System mean" value="136.64 €/MWh" />)
-    const value = screen.getByText('136.64')
+    const value = screen.getByText('136.6')
     const unit = screen.getByText('€/MWh')
     expect(value.parentElement).toBe(unit.parentElement)
     expect(value.parentElement!.className).toMatch(/whitespace-nowrap/)
@@ -39,7 +39,7 @@ describe('Kpi', () => {
 
   it('uses an explicit unit as given and does not split the value', () => {
     render(<Kpi label="Peak load" value="40.00" unit="MW" />)
-    expect(screen.getByText('40.00')).toBeTruthy()
+    expect(screen.getByText('40.0')).toBeTruthy()
     expect(screen.getByText('MW')).toBeTruthy()
   })
 
@@ -66,6 +66,43 @@ describe('Kpi', () => {
 describe('Kpi figure lookup', () => {
   it('exposes the whole figure on the value line', () => {
     render(<Kpi label="Total emissions" value="424.2 tCO₂" />)
-    expect(document.querySelector('[data-kpi-value="424.2 tCO₂"]')).not.toBeNull()
+    expect(document.querySelector('[data-kpi-value="424 t CO₂"]')).not.toBeNull()
+  })
+})
+
+describe('kpiFigure — the signed-off tile rounding (R1)', () => {
+  it.each([
+    // money: 3 significant figures, scale kept
+    ['€39.75', 'M', '€39.8', 'M'],
+    ['€2.21', 'M', '€2.21', 'M'],
+    ['€801.23', undefined, '€801', undefined],
+    ['€36.00', 'B', '€36.0', 'B'],
+    ['-€1.234', 'k', '-€1.23', 'k'],
+    // energy / power: 3 significant figures
+    ['9.687', 'GWh', '9.69', 'GWh'],
+    ['424.24', 'MWh', '424', 'MWh'],
+    ['40.00', 'MW', '40.0', 'MW'],
+    ['0.000', 'MWh', '0', 'MWh'],
+    // emissions scale to kt / Mt
+    ['134,902.1', 'tCO₂', '135', 'kt CO₂'],
+    ['1,234,567', 'tCO₂', '1.23', 'Mt CO₂'],
+    ['424.2', 'tCO₂', '424', 't CO₂'],
+    // price, h/yr and %: one decimal
+    ['136.64', '€/MWh', '136.6', '€/MWh'],
+    ['0.000', '%', '0.0', '%'],
+    ['19.83', '%', '19.8', '%'],
+    ['0.6', 'h/yr', '0.6', 'h/yr'],
+  ])('%s %s → %s %s', (value, unit, outValue, outUnit) => {
+    expect(kpiFigure(value, unit)).toEqual({ value: outValue, unit: outUnit })
+  })
+
+  it.each([['—', undefined], ['Site transformer', undefined], ['unavailable', undefined]])(
+    'leaves %s alone', (value, unit) => {
+      expect(kpiFigure(value, unit)).toEqual({ value, unit })
+    })
+
+  it('rounds what the tile shows', () => {
+    render(<Kpi label="Total system cost" value="€39.75 M" testId="k" />)
+    expect(screen.getByTestId('k').querySelector('[data-kpi-value="€39.8 M"]')).not.toBeNull()
   })
 })

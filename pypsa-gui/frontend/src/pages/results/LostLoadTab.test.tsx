@@ -5,6 +5,7 @@ import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import LostLoadTab from './LostLoadTab'
+import { findKpiValue } from '../../test/kpi'
 
 // `getCopt` / `getMc` / `startMc` / `getElccCandidates` are no longer reached
 // from this tab — the surfaces that fetched them moved to the Adequacy tab —
@@ -93,8 +94,10 @@ it('renders a distinctive lost-load KPI sourced from a single mocked snapshot', 
   // and Y-axis "Lost load (MW)" label contain no "424.2" substring, so they
   // don't inflate the count (confirmed by dumping the full rendered body
   // text during development — see task-24-report.md).
-  const matches = await screen.findAllByText((text) => text.includes('424.2'))
-  expect(matches.length).toBe(3)
+  // The two tables keep full precision ("424.2 MWh"); the KPI tile rounds to
+  // the R1 standard (3 s.f.): "424 MWh".
+  expect(await findKpiValue('424 MWh')).toBeTruthy()
+  expect(screen.getAllByText((text) => text.includes('424.2')).length).toBe(2)
 })
 
 /** The no-lost-load branch with a reliability target SET and MET (ENS 0). */

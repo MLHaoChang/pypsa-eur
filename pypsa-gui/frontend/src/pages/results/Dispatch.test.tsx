@@ -188,7 +188,8 @@ it('renders a distinctive thermal dispatch value sourced from the mocked results
   // card container) that the 2 matches are the "Thermal" and "Total
   // generation" cards (:1258/:1260) — two genuinely distinct render sites,
   // not one node counted twice.
-  const matches = await findAllKpiValues('424.24 MWh')
+  // KPI tiles round to the R1 standard (3 s.f.), so the tile shows 424 MWh.
+  const matches = await findAllKpiValues('424 MWh')
   expect(matches.length).toBe(2)
 })
 
