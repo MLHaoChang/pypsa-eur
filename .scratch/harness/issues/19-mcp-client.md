@@ -1,6 +1,6 @@
 # 19 — External tools over MCP: the harness as an MCP client
 
-Status: needs-info (Q18 decided 2026-10-06: later, in one spec with issue 11; the defaults below are the owner's)
+Status: needs-info (Q18 decided 2026-10-06; the joint spec is drafted, `../mcp-spec.md` Part A, awaiting the owner's read with Q8)
 Type: research
 Blocked by: 08 (done), the MCP spec (with 11)
 
@@ -42,3 +42,19 @@ per-request selection and dispatch allowlist (`providers/wiring`),
 checked-mode `tool_guard` (fails closed for unmapped tools), and the
 `smoke/assistant_inventory.py --check` CI step, which would flag tools that
 appear at runtime.
+
+2026-10-14: Specified in `.scratch/harness/mcp-spec.md` Part A, in two slices:
+
+1. the client core, with no UI;
+2. the settings routes and panel.
+
+The spec answers the open points above:
+
+- **Fail-open tier.** `confirm._safety_tier_for` fails open to `read` for a name
+  that is not in `TOOLS`. An `mcp__` name therefore resolves through the
+  session's external list first, and to `write` when it is not there.
+- **Static guards.** External tools never enter `TOOLS`. The inventory and parity
+  tests stay static; the payload and allowlist pick the tools up per session.
+- **Descriptions.** They are capped at 1024 characters and lose any forged
+  `Safety:` text.
+- **Server child environment.** A stdio server sees only its own mapped keys.

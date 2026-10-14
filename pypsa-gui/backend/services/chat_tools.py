@@ -3593,6 +3593,39 @@ def campus_run_study(project_id: str, k: int | None = None, pf: float | None = N
         return _h(_gridspine_project_for_write(db, user, project_id), settings)
 
 
+def _campus_check_lock(db, user, project) -> None:
+    """The edit-lock check the campus HTTP handlers run, for the project a
+    tool NAMES (which need not be the active one). The island write tools
+    call it; the older campus write tools do not (OPEN-ITEMS item 18)."""
+    from types import SimpleNamespace
+
+    from routers.projects import _check_project_lock
+
+    _check_project_lock(db, SimpleNamespace(id=project.id, name=project.name), user)
+
+
+def campus_island_config(project_id: str) -> dict:
+    from services.campus_electrical_service import get_island as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def campus_set_island_config(project_id: str, config: dict) -> dict:
+    from services.campus_electrical_service import save_island as _h
+    with _acting() as (db, user):
+        project = _gridspine_project(db, user, project_id)
+        _campus_check_lock(db, user, project)
+        return _h(project, config)
+
+
+def campus_run_island_study(project_id: str, scenarios: list[str] | None = None) -> dict:
+    from services.campus_electrical_service import run_island_study as _h
+    with _acting() as (db, user):
+        project = _gridspine_project(db, user, project_id)
+        _campus_check_lock(db, user, project)
+        return _h(project, list(scenarios) if scenarios else None)
+
+
 def campus_get_library(project_id: str) -> dict:
     from services.campus_electrical_service import get_library as _h
     with _acting() as (db, user):
@@ -7341,6 +7374,10 @@ DISPATCHERS: dict[str, Any] = {
     "campus_set_library": campus_set_library,
     "campus_get_investment": campus_get_investment,
     "campus_get_milp": campus_get_milp,
+    # campus island (3, campus island plan I9a)
+    "campus_island_config": campus_island_config,
+    "campus_set_island_config": campus_set_island_config,
+    "campus_run_island_study": campus_run_island_study,
     # campus grid codes (2): no publish tool, by design (plan C10)
     "campus_list_grid_codes": campus_list_grid_codes,
     "campus_extract_grid_code": campus_extract_grid_code,

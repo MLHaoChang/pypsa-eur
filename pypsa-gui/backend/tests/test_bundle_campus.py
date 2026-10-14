@@ -23,10 +23,14 @@ CAMPUS_FILES = {
     "campus_electrical/run/campus_cost.csv": "period,capex_eur\n2030,1\n",
     "campus_electrical/run/campus_compliance_invested.csv": "check,status_with_measures\npcc_reactive,pass\n",
     "campus_electrical/run/campus_invest_scope.json": '{"pcc_switchgear": "campus"}',
+    "campus_electrical/island_study.json": '{"cost_of_seamless": 1000.0}',
 }
 NOT_CARRIED = {
     "campus_electrical/settings.json": "{}",
     "campus_electrical/run/campus_hourly.csv": "a,b\n1,2\n",
+    # The I3a island tables are per-hour run data, like campus_hourly.csv.
+    "campus_electrical/run/island_hourly.csv": "a,b\n1,2\n",
+    "campus_electrical/run/island_unit_hourly.csv": "a,b\n1,2\n",
     "campus_electrical/grid_codes/documents/x.pdf": "%PDF-1.7",
 }
 
@@ -52,6 +56,7 @@ def test_the_tuple_names_the_services_files():
     assert f"{campus_dir}/run/{ce.USED_LIBRARY_FILE}" in _BUNDLE_CAMPUS_FILES
     for const in (ce.cs.INVESTMENT_CSV, ce.cs.COST_CSV, ce.cs.COMPLIANCE_INVESTED_CSV, ce.cs.INVEST_SCOPE_JSON):
         assert f"{campus_dir}/run/{const}" in _BUNDLE_CAMPUS_FILES, const
+    assert f"{campus_dir}/{ce.ISLAND_STUDY_FILE}" in _BUNDLE_CAMPUS_FILES
     assert set(_BUNDLE_CAMPUS_FILES) == set(CAMPUS_FILES)
 
 
