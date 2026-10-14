@@ -29,3 +29,8 @@ machine only (desktop/local mode). Every write shows its card in the app's chat
 panel (gate g2, 300 s TTL), and an external agent's calls are carded at `write`
 and above in every mode. Web deployments are out, so no personal-token model is
 built. Build steps 3 (dispatch extraction) and 4 (local exposure) in the spec.
+
+2026-10-14 (built, build step 4): `/api/mcp` in local mode (`harness/mcp_server.py`,
+`routers/mcp.py`), the endpoint file, the pending-cards route and the panel strip
+(`ExternalAgentStrip`); spec §Build order step 4 lists what is in it. The stdio
+shim is the remaining follow-up.

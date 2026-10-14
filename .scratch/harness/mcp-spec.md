@@ -402,6 +402,15 @@ Each step is its own PR, in this order (coordinator, 2026-10-14):
 4. **Local exposure** (Part B, issue 11): `harness/mcp_server.py` at
    `/api/mcp` in local mode only, the per-launch token, the stdio shim, the
    panel strip for external cards (g2), write-and-above carded in every mode.
+   Built (2026-10-14): `harness/mcp_server.py` and `routers/mcp.py`
+   (initialize, tools/list, tools/call, ping, DELETE; JSON responses, no
+   server-initiated stream), the token and URL in `mcp-endpoint.json` written
+   at startup, an `Origin` check, `GET /api/chat/external/pending` and the
+   panel's `ExternalAgentStrip`. Calls run through `dispatch_tool_call` with
+   `guided=True`, so write and above are carded; the call blocks until the
+   card is answered or lapses. Left for a follow-up: the stdio shim
+   (`pypsa-gui mcp`, which reads the endpoint file so a client need not know
+   the desktop's ephemeral port).
 
 ## Out of scope
 

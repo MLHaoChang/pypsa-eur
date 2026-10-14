@@ -40,6 +40,7 @@ harness/
   approvals.py    every card's asked/decided record per owner and session; an approval that cannot be recorded does not run
   eventlog.py     the session event log: every model-visible input, append-only per owner and session; derive_messages, fork, torn-tail repair; the source of truth (the deque is its fold, a chat not in memory is rebuilt from it, interrupted turns are read off it, chat.jsonl is its projection)
   replay.py       fork a recorded session before one turn and run that turn again on another provider (smoke/replay_session.py)
+  mcp_server.py   local MCP exposure (issue 11): the protocol behind /api/mcp (routers/mcp.py), the exposed catalogue, one `mcp-` chat session per agent, the per-launch token, the cards waiting in the panel
   mcp_client.py   external tools from admin-listed MCP servers (issue 19): the server list, the stdio and HTTP JSON-RPC client, the per-session tool list and tiers, the dispatcher
   goals.py        a goal with a round budget: set/pause/complete, what stops it after a turn, the per-turn goal block (rounds run in loop.run_turn)
   ratelimit.py    the /stream token bucket
