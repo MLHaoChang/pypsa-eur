@@ -52,7 +52,7 @@ vi.mock('../api/network', () => ({
 
 import Results from './Results'
 
-const ALL_IDS = ['overview', 'capex', 'dispatch', 'loadflow', 'prices', 'economics', 'emissions',
+const ALL_IDS = ['summary', 'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'economics', 'emissions',
   'curtailment', 'lostload', 'adequacy', 'storage', 'fmea', 'investment', 'asset']
 
 async function renderResults() {
@@ -79,15 +79,15 @@ beforeEach(() => {
 describe('Results in Guided mode', () => {
   beforeEach(() => useUIStore.setState({ uiMode: 'guided' }))
 
-  it('shows exactly the adequacy and FMEA tabs', async () => {
+  it('shows exactly the summary, adequacy and FMEA tabs (M3: Summary in Guided too)', async () => {
     await renderResults()
-    expect(tabIds()).toEqual(['adequacy', 'fmea'])
+    expect(tabIds()).toEqual(['summary', 'adequacy', 'fmea'])
   })
 
-  it('shows exactly two tabs on a multi-period run too', async () => {
+  it('shows exactly those three tabs on a multi-period run too', async () => {
     snapState.periods = [2030, 2040]
     await renderResults()
-    expect(tabIds()).toEqual(['adequacy', 'fmea'])
+    expect(tabIds()).toEqual(['summary', 'adequacy', 'fmea'])
   })
 
   it('a stored hidden tab renders adequacy and is not rewritten', async () => {
@@ -130,7 +130,7 @@ describe('Results in Expert mode', () => {
     expect(tabIds()).toEqual(ALL_IDS.filter(id => id !== 'overview'))
   })
 
-  it('multi-period: all fourteen tabs, in order', async () => {
+  it('multi-period: all fifteen tabs, in order', async () => {
     snapState.periods = [2030, 2040]
     await renderResults()
     expect(await screen.findByTestId('results-tab-overview')).toBeTruthy()

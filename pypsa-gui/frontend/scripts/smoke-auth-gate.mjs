@@ -5,6 +5,8 @@
  *
  * Usage: node scripts/smoke-auth-gate.mjs [baseUrl]
  */
+import { devCredentials } from './dev-credentials.mjs'
+
 const base = (process.argv[2] || 'http://127.0.0.1:5173').replace(/\/$/, '')
 
 function fail(msg) {
@@ -71,10 +73,7 @@ ok('login page explains a stopped backend')
 const loginRes = await fetch(`${base}/api/auth/login`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    email: 'admin@example.com',
-    password: 'admin-pass-123',
-  }),
+  body: JSON.stringify(devCredentials()),
 })
 if (!loginRes.ok) fail(`login API failed: ${loginRes.status} ${await loginRes.text()}`)
 const setCookie = loginRes.headers.getSetCookie?.() || []
