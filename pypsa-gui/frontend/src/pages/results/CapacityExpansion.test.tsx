@@ -246,7 +246,7 @@ it('renders real PV figures untouched when every class resolved', async () => {
   renderPage()
   await switchToLifetimeMode()
 
-  expect(getKpiValueWithin(kpiCard('CAPEX (installed, PV)'), '€36.00 B')).toBeTruthy()
+  expect(getKpiValueWithin(kpiCard('CAPEX (installed, PV)'), '€36.0 B')).toBeTruthy()
   expect(screen.queryByText('unavailable')).toBeNull()
   expect(screen.queryByText(/upfront \(PV\) investment costs are unavailable/i)).toBeNull()
 })
@@ -406,7 +406,7 @@ it('shows a computed zero storage CAPEX when storage could expand but was not bu
   await screen.findByText('Storage CAPEX (new)')
   const tile = kpiCard('Storage CAPEX (new)')
   expect(tile.closest('[data-state]')?.getAttribute('data-state')).toBe('zero')
-  expect(getKpiValueWithin(tile, '€0.00')).toBeTruthy()
+  expect(getKpiValueWithin(tile, '€0')).toBeTruthy()
 })
 
 it('says curtailment cost was not modelled when no generator carries one', async () => {

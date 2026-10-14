@@ -170,7 +170,8 @@ it('renders a distinctive thermal generation value sourced from the mocked resul
   // (shared.tsx `KPI`, :653-692) — rather than searching the whole document.
   const thermalLabel = await screen.findByText('Thermal')
   const card = thermalLabel.parentElement as HTMLElement
-  expect(getKpiValueWithin(card, '424.24 MWh')).toBeTruthy()
+  // KPI tiles round to the R1 standard (3 s.f.), so the tile shows 424 MWh.
+  expect(getKpiValueWithin(card, '424 MWh')).toBeTruthy()
 })
 
 // isPartialPayload is the tripwire for the one mistake this whole plan exists

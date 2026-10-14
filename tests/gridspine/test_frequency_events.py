@@ -168,6 +168,19 @@ def test_an_isochronous_genset_settles_every_block_back_to_nominal():
     assert res.complete and all(abs(m.df_qss_hz) <= 0.1 for m in res.blocks)
 
 
+def test_e4_on_an_isochronous_ramp_limited_genset_has_a_bounded_nadir(monkeypatch):
+    # regression (gatekeeper, #256 review): the isochronous integral wound up while the genset was held at its
+    # ramp, and the 2 MW block read a +61.8 Hz "nadir". Held, the extreme is the excursion while ramping
+    gens, blocks = [cold_gen(isochronous=True, step_mw=0.5, ramp_mw_per_s=0.08)], [2.0, 2.0]
+    res = F.e4_ups_bridged(gens, blocks)
+    assert res.complete
+    for m in res.blocks:
+        assert m.nadir_hz == pytest.approx(-23.541, abs=1e-3) and abs(m.df_qss_hz) < 1e-4
+    monkeypatch.setattr(F, "_hold_integral", lambda u, p, df, t: df)
+    wound = F.e4_ups_bridged(gens, blocks)
+    assert wound.blocks[0].nadir_hz == pytest.approx(61.80, abs=0.01)
+
+
 def test_a_pickup_beyond_the_gensets_does_not_complete_and_fails_the_bridge():
     res = F.e4_ups_bridged([cold_gen()], [6.0, 6.0], [("U", 6.0, 100.0)], bridge_s=60.0, dt=1e-3, t_end=30.0)
     assert not res.complete
