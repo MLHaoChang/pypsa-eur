@@ -1,0 +1,425 @@
+<title>Studio UX Overhaul</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Fraunces:opsz,wght@9..144,600&display=swap">
+<style>
+/* Layout: a single reading column for the proposal; each "before | after" pair is a two-up row that stacks on phones.
+   Page chrome follows the viewer's theme; the mockup frames reproduce PyPSA Studio's own dark tokens on purpose. */
+:root{
+  --bg:#f7f4f3; --surface:#ffffff; --fg:#231b1c; --muted:#6b5a5c; --line:#e4dbda;
+  --accent:#c62828; --ok:#1b7f43; --warn:#a15c00; --info:#2f5f9e;
+  --f-display:"Fraunces",Georgia,serif; --f-body:"Inter",system-ui,-apple-system,sans-serif; --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  /* app tokens (index.css, dark) used only inside .app mockups */
+  --a-bg:#151112; --a-bg2:#1b1617; --a-panel:#211b1c; --a-border:#2e2729; --a-border2:#3d3437;
+  --a-text:#f4eaea; --a-muted:#b9a7a9; --a-axis:#a8979a; --a-accent:#ff5252; --a-accent700:#e03131;
+  --a-ok:#3ccf7a; --a-warn:#f0a63a; --a-info:#7aa7ff;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#141011;--surface:#1c1718;--fg:#f1e8e8;--muted:#b4a3a5;--line:#2f2829;--accent:#ff6b63;--ok:#4fd08a;--warn:#f0a63a;--info:#86aef5;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#141011;--surface:#1c1718;--fg:#f1e8e8;--muted:#b4a3a5;--line:#2f2829;--accent:#ff6b63;--ok:#4fd08a;--warn:#f0a63a;--info:#86aef5;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.6 var(--f-body);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:32px 64px}
+.wrap{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:56px}
+h1{font:600 clamp(32px,5vw,48px)/1.1 var(--f-display);margin:0;text-wrap:balance;letter-spacing:-.01em}
+h2{font:600 28px/1.2 var(--f-display);margin:0 0 6px;text-wrap:balance}
+h3{font:600 16px/1.3 var(--f-body);margin:0}
+p{margin:0;max-width:68ch}
+.meta{color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 18px}
+.lead{font-size:17px;max-width:62ch}
+section{display:flex;flex-direction:column;gap:18px}
+.eyebrow{font:600 11px/1 var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.sub{color:var(--muted);max-width:70ch}
+.chip{display:inline-block;font:600 11px/1 var(--f-mono);padding:4px 7px;border-radius:4px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.chip.m{color:var(--info);border-color:color-mix(in srgb,var(--info) 40%,transparent)}
+.chip.o{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+.chip.rec{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+.tl{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.tl li{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:baseline}
+.tl b{font-weight:600}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:640px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:600 11px/1.3 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:color-mix(in srgb,var(--line) 35%,transparent)}
+tr:last-child td{border-bottom:0}
+td code,p code,li code{font:12.5px var(--f-mono);background:color-mix(in srgb,var(--line) 50%,transparent);padding:1px 4px;border-radius:3px}
+.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+figure{margin:0;display:flex;flex-direction:column;gap:6px;min-width:0}
+figure img{display:block;width:100%;border-radius:6px;border:1px solid var(--line)}
+figcaption{font-size:12.5px;color:var(--muted)}
+figcaption b{color:var(--fg);font-weight:600}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+.pair>*{min-width:0}
+.pair.stack{grid-template-columns:1fr}
+.pair.stack figure img{max-width:760px}
+.tag{font:600 11px/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;display:block}
+.tag.after{color:var(--ok)}
+@media (max-width:760px){.pair{grid-template-columns:1fr}}
+.decisions{display:grid;gap:16px}
+.dec{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:18px;display:flex;flex-direction:column;gap:10px}
+.dec ol{margin:0;padding-left:20px;display:grid;gap:6px}
+.dec li span{color:var(--muted)}
+details{border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+summary{cursor:pointer;padding:12px 14px;font-weight:600}
+details>.scroll{border:0;border-top:1px solid var(--line);border-radius:0}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- app mockups (fixed app look, dark) ---------- */
+.app{background:var(--a-bg);color:var(--a-text);border:1px solid var(--a-border2);border-radius:10px;font:12px/1.45 var(--f-body);overflow:hidden;color-scheme:dark}
+.app .bar{display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--a-border);background:var(--a-bg2);flex-wrap:wrap}
+.app .crumb{font:600 9.5px var(--f-mono);letter-spacing:.1em;color:var(--a-accent);text-transform:uppercase}
+.app .ttl{font-weight:600;font-size:14px}
+.app .runmeta{margin-left:auto;font:11px var(--f-mono);color:var(--a-muted)}
+.gtabs{display:flex;gap:2px;padding:0 10px;border-bottom:1px solid var(--a-border);background:var(--a-panel);overflow-x:auto}
+.gtabs span{padding:9px 10px;font-weight:500;color:var(--a-muted);white-space:nowrap;border-bottom:2px solid transparent}
+.gtabs span.on{color:var(--a-text);border-color:var(--a-accent)}
+.gtabs .dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-left:6px;vertical-align:middle;background:var(--a-ok)}
+.gtabs .dot.w{background:var(--a-warn)} .gtabs .dot.n{background:transparent;border:1px solid var(--a-muted)}
+.abody{padding:14px;display:flex;flex-direction:column;gap:14px}
+.grp{display:flex;flex-direction:column;gap:8px}
+.grph{display:flex;align-items:baseline;gap:10px}
+.grph h4{margin:0;font-size:13px;font-weight:600}
+.grph .q{color:var(--a-muted);font-size:11px}
+.grph a{margin-left:auto;color:var(--a-accent);font-size:11px;text-decoration:none;white-space:nowrap}
+.kgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.kpi{background:var(--a-panel);border:1px solid var(--a-border);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;min-height:92px}
+.kpi .l{color:var(--a-muted);font-size:12px;line-height:1.3}
+.kpi .v{font:600 22px/1.1 var(--f-body);font-variant-numeric:tabular-nums;white-space:nowrap;letter-spacing:-.01em}
+.kpi .v small{font-size:13px;font-weight:500;color:var(--a-muted);margin-left:3px}
+.kpi .b{color:var(--a-muted);font-size:11px;margin-top:auto}
+.kpi.head{border-color:var(--a-border2);background:#271f20}
+.kpi.head .v{font-size:26px}
+.pill{align-self:flex-start;font:600 10.5px/1 var(--f-body);padding:4px 7px;border-radius:999px;white-space:nowrap}
+.pill.ok{color:var(--a-ok);background:rgba(60,207,122,.12)}
+.pill.nr{color:var(--a-info);background:rgba(122,167,255,.13)}
+.pill.nm{color:var(--a-warn);background:rgba(240,166,58,.13)}
+.pill.na{color:var(--a-muted);background:rgba(185,167,169,.12)}
+.kpi .act{align-self:flex-start;margin-top:auto;font:600 11px var(--f-body);color:var(--a-text);border:1px solid var(--a-border2);border-radius:6px;padding:4px 8px;background:var(--a-bg2)}
+.kpi .why{color:var(--a-muted);font-size:11.5px;line-height:1.35}
+.oldkpi{background:var(--a-panel);border:1px solid var(--a-border);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-height:96px}
+.oldkpi .l{font:700 9px/1.4 var(--f-body);letter-spacing:.14em;text-transform:uppercase;color:var(--a-muted)}
+.oldkpi .v{font:600 19px/1.15 var(--f-mono);color:var(--a-text)}
+.oldkpi.acc{border-left:3px solid var(--a-accent)}
+.chart{background:var(--a-panel);border:1px solid var(--a-border);border-radius:8px;padding:10px 12px}
+.chart .ct{font-weight:600;font-size:13px}
+.chart .cs{color:var(--a-muted);font-size:11px}
+.chart svg{display:block;width:100%;height:auto;margin-top:6px}
+.schem{display:flex;gap:4px;height:120px;font:600 10.5px var(--f-mono);color:var(--a-text)}
+.schem div{border-radius:5px;display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;background:var(--a-panel);border:1px solid var(--a-border2)}
+.schem .cv{background:#1f2a24;border-color:#2d4a37}
+.schem .bad{background:#3a1214;border-color:#7a2a2c}
+.verdict{background:rgba(60,207,122,.08);border:1px solid rgba(60,207,122,.3);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.verdict b{font-size:15px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+
+<header style="display:flex;flex-direction:column;gap:14px">
+  <span class="eyebrow">PyPSA Studio · design proposal</span>
+  <h1>Studio UX Overhaul</h1>
+  <div class="meta"><span>2026-10-14</span><span>Baseline master <code>b2f6a5a</code>, M3 PR #245 at <code>4fab3bd</code></span><span>Status: waiting on owner decisions D1–D4</span></div>
+  <p class="lead">I walked every surface of the running app in Expert and Guided on the Data Center Energy Hub template, before and after solving. This page shows what I found, a proposed structure for features and results, design rules, and mockups. Each finding is labelled <span class="chip m">M</span> measured (a screenshot, a source grep or a contrast calculation) or <span class="chip o">O</span> opinion.</p>
+</header>
+
+<section>
+  <span class="eyebrow">In short</span>
+  <h2>Five problems, one fix each</h2>
+  <ul class="tl">
+    <li><span class="chip m">M</span><span><b>Results don't lead with key results.</b> 14 flat tabs, only 7 visible at 1440 px, and the panel opens on Capacity Expansion. <b>Fix:</b> Summary first (M3), then four groups: Investment, Grid plan, Reliability, Operation.</span></li>
+    <li><span class="chip m">M</span><span><b>Results that haven't run read as zero.</b> Transmission losses show "0 MWh" when losses were not modelled, and the Guided Results step is just greyed out. <b>Fix:</b> one result-state component with six states, and no number unless one was computed.</span></li>
+    <li><span class="chip m">M</span><span><b>Metrics are inconsistent.</b> There are seven KPI tile implementations, the same cost appears as €39.75 M, €39.7m and 31.5M, and dates come in three formats. <b>Fix:</b> one <code>Kpi</code> component and one <code>format.ts</code>.</span></li>
+    <li><span class="chip m">M</span><span><b>The workspace is crowded.</b> With a panel open, the canvas shrinks to about 220 px. The assistant dock keeps 420 px even when it can't answer. <b>Fix:</b> at most three columns at once, and the dock collapses to a rail.</span></li>
+    <li><span class="chip m">M</span><span><b>Charts are hard to read.</b> Axis titles overlap the ticks, some ticks have no units, chart titles are cut off, and no targets or limits are drawn. <b>Fix:</b> one <code>ChartCard</code> standard with reference lines and highlights.</span></li>
+  </ul>
+</section>
+
+<section id="decisions">
+  <span class="eyebrow">For the owner</span>
+  <h2>Decisions D1–D4</h2>
+  <p class="sub">These go through the coordinator as interactive choices. Nothing in a section is built until you've picked its design.</p>
+  <div class="decisions">
+    <div class="dec"><h3>D1 · Results grouping</h3><ol>
+      <li><b>Two levels: Summary · Investment · Grid plan · Reliability · Operation</b> <span class="chip rec">recommended</span><br><span>Five top tabs, and none of them overflow. Existing tab ids keep working for the assistant and deep links. Layout tests are updated deliberately.</span></li>
+      <li><b>Keep one flat strip, reordered, with group dividers</b><br><span>The smallest change. The strip still overflows at 1440 px with the dock open.</span></li>
+      <li><b>Groups only inside Summary</b><br><span>Summary is grouped, but the detail tabs stay as they are today.</span></li></ol></div>
+    <div class="dec"><h3>D2 · Where Emissions and Prices live</h3><ol>
+      <li><b>Emissions under Operation, Prices under Investment</b> <span class="chip rec">recommended</span><br><span>Each sits with the question it answers: emissions come from dispatch, and prices drive revenue. This keeps four groups.</span></li>
+      <li><b>A fifth group, "Markets &amp; environment"</b><br><span>Gives these two more prominence, at the cost of one more tab and a group that guided chapters don't use.</span></li></ol></div>
+    <div class="dec"><h3>D3 · Metrics that weren't modelled</h3><ol>
+      <li><b>A "Not modelled" pill, no number, and the setting that turns it on</b> <span class="chip rec">recommended</span><br><span>Meets the "never shown as zero" rule. It's a display change only, but the agreed list of which metrics count as not modelled comes back for your review.</span></li>
+      <li><b>Keep showing 0, with a "not modelled" caption (as Load Flow does today)</b><br><span>No new component, but a reader can still copy the 0 into a report.</span></li></ol></div>
+    <div class="dec"><h3>D4 · Which slices start first</h3><ol>
+      <li><b>S1 KPI and format standard + S2 result states, now; S3 grouping after M3 merges</b> <span class="chip rec">recommended</span><br><span>The lowest risk and the most visible gain, with no collision with M3's Results.tsx work.</span></li>
+      <li><b>S3 grouping first</b><br><span>The structure is visible sooner, but it has to wait for M3 and rebase onto it.</span></li>
+      <li><b>S5 workspace density first</b><br><span>Fixes the crowding first. It needs the companion stream's agreement on the AssistantDock change.</span></li></ol></div>
+  </div>
+</section>
+
+<section id="findings">
+  <span class="eyebrow">Assessment</span>
+  <h2>What I found, surface by surface</h2>
+  <p class="sub">Captured at 1440×900, dark theme (the shipped default), with no assistant key configured. Three states: unsolved, Guided hub study certified (0.6 h/yr against a 3 h/yr goal), and Expert LOPF optimal (4.78 s, €39.75 M).</p>
+
+  <h3>Entry: login, projects, new project</h3>
+  <div class="shots">
+    <figure><img src="shots/01-login.jpg" alt="Login page with prefilled review credentials" loading="lazy"><figcaption><b>L1</b> The shipped login page pre-fills <code>admin-pass-123</code> and prints it as a "Review account". It is wrong for this install. <span class="chip m">M</span></figcaption></figure>
+    <figure><img src="shots/03-projects.jpg" alt="Projects home" loading="lazy"><figcaption><b>P1–P2</b> Your projects are below the fold behind three paragraphs of tenancy copy. The five creation cards use different names from the six wizard tabs. <span class="chip m">M</span></figcaption></figure>
+    <figure><img src="shots/05-wiz-template.jpg" alt="Template picker" loading="lazy"><figcaption><b>P3</b> Shows a developer path and pack ids (<code>weak_flexible</code>). One card says both "5 nodes" and "10 buses". <span class="chip m">M</span></figcaption></figure>
+  </div>
+
+  <h3>Workspace shell</h3>
+  <div class="shots">
+    <figure><img src="shots/35-expert-economics.jpg" alt="Expert workspace with Economics panel" loading="lazy"><figcaption><b>W1</b> Sidebar 240 + canvas ≈220 + panel 560 + dock 420 px. The canvas legend covers half the canvas. <span class="chip m">M</span></figcaption></figure>
+    <figure><img src="shots/40-run-dialog.jpg" alt="Workspace during a solve" loading="lazy"><figcaption><b>W3, W8</b> Run state appears four times. The Log prints raw Python <code>LogRecord</code> reprs. <span class="chip m">M</span></figcaption></figure>
+    <figure><img src="shots/30-expert-canvas.jpg" alt="Expert mode still showing the Guided panel" loading="lazy"><figcaption><b>W2, W4</b> Expert still shows Guided's "Hub design" panel. Sidebar chrome takes about 290 of 900 px. <span class="chip m">M</span></figcaption></figure>
+    <figure><img src="shots/80-res-capex-1280.jpg" alt="Results at 1280px" loading="lazy"><figcaption><b>W7</b> At 1280 px, "Run LOPF" wraps and the KPI labels run to three lines. <span class="chip m">M</span></figcaption></figure>
+  </div>
+
+  <h3>Guided</h3>
+  <div class="shots">
+    <figure><img src="shots/14-guided-results-unsolved.jpg" alt="Guided before running" loading="lazy"><figcaption><b>G2</b> Before the run, Results is a greyed-out step that doesn't say what it will show or how to get there. <span class="chip m">M</span></figcaption></figure>
+    <figure><img src="shots/17-guided-results.jpg" alt="Guided results step" loading="lazy"><figcaption><b>G1, G3</b> Raw ids (<code>site_transformer</code>), two money styles in one card, and "no shortfall" listed as a risk. <span class="chip m">M</span></figcaption></figure>
+    <figure><img src="shots/19-guided-full-report.jpg" alt="Guided full report" loading="lazy"><figcaption><b>G4</b> "Open full report" goes to the Expert-density Adequacy panel, with stage chips, caveat prose and <code>€39.7m</code>. <span class="chip m">M</span></figcaption></figure>
+  </div>
+
+  <h3>Results (Expert, solved)</h3>
+  <div class="shots">
+    <figure><img src="shots/50-res-capacity-expansion.jpg" alt="Capacity expansion tab" loading="lazy"><figcaption><b>R1, R3, R6</b> Only 7 of 14 tabs are visible. "—" sits beside "€0.00". The axis title overlaps the ticks, and a chart title is cut off. <span class="chip m">M</span></figcaption></figure>
+    <figure><img src="shots/52-res-load-flow.jpg" alt="Load flow tab" loading="lazy"><figcaption><b>R2, R3</b> Market value and revenue sit under Load Flow. Losses show "0 MWh" although they were not modelled. <span class="chip m">M</span></figcaption></figure>
+    <figure><img src="shots/69-res-prices.jpg" alt="Prices tab" loading="lazy"><figcaption><b>R4, R6</b> Two of four values wrap ("136.64 / €/MWh"). The hourly chart's ticks have no unit. <span class="chip m">M</span></figcaption></figure>
+    <figure><img src="shots/63-res-lostload.jpg" alt="Lost load tab" loading="lazy"><figcaption><b>R3, G5</b> "No lost-load data available", while Guided reports 0.6 h/yr of shortfall on the same project. <span class="chip m">M</span></figcaption></figure>
+    <figure><img src="shots/62-res-curtailment.jpg" alt="Curtailment tab" loading="lazy"><figcaption><b>R3</b> Empty 0–4 MW axes for an all-zero series. A different KPI tile style. <span class="chip m">M</span></figcaption></figure>
+    <figure><img src="shots/67-res-investment.jpg" alt="Investment tab" loading="lazy"><figcaption><b>E2, R2</b> A Results tab hosts the Site connection input form, the same one as in Economics. <span class="chip m">M</span></figcaption></figure>
+  </div>
+
+  <details>
+    <summary>All findings as a table (34 rows)</summary>
+    <div class="scroll"><table>
+      <thead><tr><th>#</th><th>Finding</th><th>Kind</th><th>M/O</th></tr></thead>
+      <tbody>
+        <tr><td>L1</td><td>The login HTML pre-fills and prints <code>admin-pass-123</code> (<code>index.html:395,402</code>).</td><td>Hygiene</td><td>M</td></tr>
+        <tr><td>P1</td><td>The projects list is below the fold, behind tenancy copy and jargon.</td><td>Crowded</td><td>M</td></tr>
+        <tr><td>P2</td><td>Two creation menus with different names.</td><td>Inconsistent</td><td>M</td></tr>
+        <tr><td>P3</td><td>A developer path and pack ids in template cards. "5 nodes" vs "10 buses".</td><td>Hard to read</td><td>M</td></tr>
+        <tr><td>P4</td><td>Decision study is offered, then refused in multi-user mode.</td><td>Misleading</td><td>M</td></tr>
+        <tr><td>P5</td><td>A template create 403 with no visible error (account had no workspace; may be environment-specific).</td><td>Bug, repro</td><td>M</td></tr>
+        <tr><td>W1</td><td>The canvas gets about 220 px with a panel open. The dock is 420 px even when unconfigured.</td><td>Crowded</td><td>M</td></tr>
+        <tr><td>W2</td><td>Sidebar chrome takes about 290 of 900 px.</td><td>Crowded</td><td>M</td></tr>
+        <tr><td>W3</td><td>The project name appears 5×. Run state appears 3–4×.</td><td>Redundant</td><td>M</td></tr>
+        <tr><td>W4</td><td>The Guided panel stays open in Expert.</td><td>Inconsistent</td><td>M</td></tr>
+        <tr><td>W5</td><td>Autosave reads "on" in Guided and "off" in Expert.</td><td>Inconsistent, repro</td><td>M</td></tr>
+        <tr><td>W6</td><td>A read-only banner naming the same user as the editor (seen once).</td><td>Bug, repro</td><td>M</td></tr>
+        <tr><td>W7</td><td>Wrapping at 1280 px.</td><td>Crowded</td><td>M</td></tr>
+        <tr><td>W8</td><td>Raw Python log reprs.</td><td>Hard to read</td><td>M</td></tr>
+        <tr><td>W9</td><td>The API key is requested three times on one screen.</td><td>Crowded</td><td>M</td></tr>
+        <tr><td>G1</td><td>Raw ids in Guided.</td><td>Hard to read</td><td>M</td></tr>
+        <tr><td>G2</td><td>The Results step is locked before a run.</td><td>Not-run state</td><td>M</td></tr>
+        <tr><td>G3</td><td>Two money styles, and a non-risk listed as a risk.</td><td>Inconsistent</td><td>M</td></tr>
+        <tr><td>G4</td><td>The full report has Expert density.</td><td>Density</td><td>M</td></tr>
+        <tr><td>G5</td><td>"Solved" means a study run in Guided and an LOPF in Expert.</td><td>Misgrouped state</td><td>M</td></tr>
+        <tr><td>G6</td><td>No grid plan or operation in Guided Results.</td><td>Missing groups</td><td>M</td></tr>
+        <tr><td>E1</td><td>Sidebar groups mix stage and category. Versioning sits under Reports.</td><td>Misgrouped</td><td>M</td></tr>
+        <tr><td>E2</td><td>"Economics" names an input panel and a results tab. A form is duplicated.</td><td>Misgrouped</td><td>M</td></tr>
+        <tr><td>E3</td><td>Campus electrical starts from a raw YAML textarea.</td><td>Hard to use</td><td>O</td></tr>
+        <tr><td>R1</td><td>14 tabs, 7 visible, no overflow cue, no summary on master.</td><td>Crowded</td><td>M</td></tr>
+        <tr><td>R2</td><td>Results not grouped by question.</td><td>Misgrouped</td><td>M</td></tr>
+        <tr><td>R3</td><td>Not modelled or not run shown as 0 or "—".</td><td>Not-run state</td><td>M</td></tr>
+        <tr><td>R4</td><td>Seven KPI implementations. Labels in caps, values wrap.</td><td>Inconsistent</td><td>M</td></tr>
+        <tr><td>R5</td><td>Mixed money, energy and emission precision. Three date formats.</td><td>Inconsistent</td><td>M</td></tr>
+        <tr><td>R6</td><td>Axis titles overlap ticks, unitless ticks, cut-off titles, no reference lines.</td><td>Hard to read</td><td>M</td></tr>
+        <tr><td>R7</td><td>Method prose comes before the numbers.</td><td>Hard to read</td><td>O</td></tr>
+        <tr><td>R8</td><td>Asset Detail cuts off a value.</td><td>Clipped</td><td>M</td></tr>
+        <tr><td>A1–A3</td><td>Contrast: axis text 4.0 : 1, white on accent 3.2 : 1, disabled text 2.1 : 1 (AA needs 4.5 : 1).</td><td>Accessibility</td><td>M</td></tr>
+        <tr><td>A4</td><td>Ten arbitrary text sizes. 893 uses of 10 px.</td><td>Inconsistent</td><td>M</td></tr>
+      </tbody></table></div>
+  </details>
+</section>
+
+<section id="ia">
+  <span class="eyebrow">Proposal</span>
+  <h2>One vocabulary for tools, results, Guided chapters and reports</h2>
+  <p class="sub">Each category answers one question. The same four names appear in the Expert sidebar, in the Results groups, in the Guided steps and in the report chapters. Project-wide things (scenarios, snapshots, reports, the queue) stay outside them.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Category</th><th>Question</th><th>Inputs and tools</th><th>Results (today's tabs)</th></tr></thead>
+    <tbody>
+      <tr><td><b>Investment</b></td><td>What do we build, and what does it cost and earn?</td><td>Assets, capacity bounds, Economics (rates, costs, tariffs, finance), Decision study</td><td>Capacity Expansion, Economics, Prices, Investment</td></tr>
+      <tr><td><b>Grid plan</b></td><td>Can the network and the connection carry it?</td><td>Network, Campus electrical, Grid codes</td><td>Load Flow, grid-code compliance, short circuit</td></tr>
+      <tr><td><b>Reliability</b></td><td>Does the critical load stay on?</td><td>ENS target, reserve margin, outage data, stress scenarios</td><td>Adequacy, Lost load, FMEA</td></tr>
+      <tr><td><b>Operation</b></td><td>How does it run hour by hour?</td><td>Horizon, time series, dispatch and solver settings, island operation</td><td>Dispatch, Storage cycling, Curtailment, Emissions</td></tr>
+      <tr><td><i>Project</i></td><td>—</td><td>Scenarios, Snapshots, Reports, Solve queue, Issues</td><td>Compare (rail), Asset detail (drawer)</td></tr>
+    </tbody></table></div>
+  <p class="sub">The group layer is presentation only. <code>ResultsTab</code> ids stay the same, so the assistant's navigation and deep links keep working. If a group becomes a navigable target, the assistant inventory is regenerated with its tool, never by hand.</p>
+</section>
+
+<section id="mockups">
+  <span class="eyebrow">Before and after</span>
+  <h2>Results open on the answer, grouped, and say what hasn't run</h2>
+  <p class="sub">The mockup uses this run's real numbers and shows all four groups. Grid plan shows the states that today read as 0 or "—".</p>
+  <div class="pair stack">
+    <figure><span class="tag">Before · Capacity Expansion opens first</span><img src="shots/50-res-capacity-expansion.jpg" alt="Current results first view" loading="lazy"></figure>
+    <div><span class="tag after">After · Summary, grouped</span>
+      <div class="app" role="img" aria-label="Mockup of grouped results summary">
+        <div class="bar"><span class="crumb">Results</span><span class="ttl">Data Center Energy Hub</span><span class="runmeta">LOPF optimal · 4.8 s · 2030-07-01 → 07-07</span></div>
+        <div class="gtabs"><span class="on">Summary</span><span>Investment<i class="dot"></i></span><span>Grid plan<i class="dot w"></i></span><span>Reliability<i class="dot"></i></span><span>Operation<i class="dot"></i></span></div>
+        <div class="abody">
+          <div class="grp"><div class="grph"><h4>Investment</h4><span class="q">What to build, what it costs</span><a href="#mockups">Details →</a></div>
+            <div class="kgrid">
+              <div class="kpi head"><span class="l">Total system cost</span><span class="v">€39.8<small>M/yr</small></span><span class="b">annualised · whole horizon</span></div>
+              <div class="kpi"><span class="l">New investment</span><span class="v">€2.21<small>M/yr</small></span><span class="b">annualised CAPEX of new build</span></div>
+              <div class="kpi"><span class="l">Operating cost</span><span class="v">€37.5<small>M/yr</small></span><span class="b">fuel, grid energy, O&amp;M</span></div>
+              <div class="kpi"><span class="l">Mean site price</span><span class="v">136.6<small>€/MWh</small></span><span class="b">hourly, all buses</span></div>
+            </div></div>
+          <div class="grp"><div class="grph"><h4>Grid plan</h4><span class="q">Can the connection carry it</span><a href="#mockups">Details →</a></div>
+            <div class="kgrid">
+              <div class="kpi"><span class="l">Peak grid import</span><span class="v">40.0<small>MW</small></span><span class="b">connection limit 40 MW</span></div>
+              <div class="kpi"><span class="l">Line loading</span><span class="pill na">Not applicable</span><span class="why">This network has no lines.</span></div>
+              <div class="kpi"><span class="l">Transmission losses</span><span class="pill nm">Not modelled</span><span class="why">Losses were off in this run.</span><span class="act">Turn on in Solver settings</span></div>
+              <div class="kpi"><span class="l">Grid-code compliance</span><span class="pill nr">Not run yet</span><span class="why">Comes from the Campus electrical study.</span><span class="act">Run Campus electrical</span></div>
+            </div></div>
+          <div class="grp"><div class="grph"><h4>Reliability</h4><span class="q">Does the critical load stay on</span><a href="#mockups">Details →</a></div>
+            <div class="kgrid">
+              <div class="kpi head"><span class="l">Shortfall (LOLE)</span><span class="v">0.6<small>h/yr</small></span><span class="pill ok">Meets 3 h/yr goal</span></div>
+              <div class="kpi"><span class="l">Energy not served</span><span class="v">3.78<small>MWh/yr</small></span><span class="b">Monte Carlo, 2 000 draws</span></div>
+              <div class="kpi"><span class="l">Top risk</span><span class="v" style="font-size:16px">Site transformer</span><span class="b">criticality ≈ €7.89 M/yr</span></div>
+            </div></div>
+          <div class="grp"><div class="grph"><h4>Operation</h4><span class="q">How it runs hour by hour</span><a href="#mockups">Details →</a></div>
+            <div class="kgrid">
+              <div class="kpi"><span class="l">Emissions</span><span class="v">135<small>kt CO₂</small></span><span class="b">91 % from grid energy</span></div>
+              <div class="kpi"><span class="l">Curtailment</span><span class="v">0<small>MWh</small></span><span class="b">all available solar used</span></div>
+              <div class="kpi"><span class="l">Renewable delivered</span><span class="v">9.69<small>GWh</small></span><span class="b">rooftop PV</span></div>
+            </div></div>
+        </div>
+      </div>
+      <p class="sub" style="font-size:12.5px;margin-top:8px">Group dots: green when everything in the group has run, amber when something has not run or was not modelled. "0 MWh" curtailment is a computed zero, so it shows a number. Losses, line loading and grid code show states instead. Reliability figures come from the Guided hub study on the same project, which also resolves G5.</p>
+    </div>
+  </div>
+
+  <h2 style="margin-top:20px">One KPI tile</h2>
+  <div class="pair">
+    <div><span class="tag">Before · four tile styles across tabs</span>
+      <div class="app" style="padding:12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+        <div class="oldkpi acc"><span class="l">System mean</span><span class="v">136.64<br>€/MWh</span></div>
+        <div class="oldkpi"><span class="l">Total new investment (annualised)</span><span class="v">€2.21 M</span></div>
+        <div class="oldkpi"><span class="l">Storage charge cost</span><span class="v">—</span></div>
+        <div class="oldkpi"><span class="l">Total energy lost</span><span class="v">0 MWh</span></div>
+      </div></div>
+    <div><span class="tag after">After · label, value + unit, basis, state</span>
+      <div class="app" style="padding:12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+        <div class="kpi"><span class="l">Mean site price</span><span class="v">136.6<small>€/MWh</small></span><span class="b">hourly · all buses</span></div>
+        <div class="kpi"><span class="l">New investment</span><span class="v">€2.21<small>M/yr</small></span><span class="b">annualised CAPEX</span></div>
+        <div class="kpi"><span class="l">Storage charging cost</span><span class="v">€0</span><span class="b">computed zero · batteries did not cycle</span></div>
+        <div class="kpi"><span class="l">Transmission losses</span><span class="pill nm">Not modelled</span><span class="act">Turn on in Solver settings</span></div>
+      </div></div>
+  </div>
+  <div class="scroll"><table>
+    <thead><tr><th>Part</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td>Label</td><td>Sentence case, 12 px, muted, at most 2 lines. No all-caps.</td></tr>
+      <tr><td>Value</td><td>22 px, tabular figures, 3 significant figures. The unit is 13 px and muted on the same line, and never wraps.</td></tr>
+      <tr><td>Basis</td><td>11 px: what it covers ("annualised · whole horizon", "vs 3 h/yr goal").</td></tr>
+      <tr><td>State</td><td>A pill for not run yet, not modelled, not applicable or out of date, plus the action that resolves it.</td></tr>
+      <tr><td>Headline</td><td>One per group, shown by size and fill. No coloured rail.</td></tr>
+      <tr><td>Grid</td><td><code>auto-fill, minmax(180px,1fr)</code>, equal heights, 12 px gap. KPIs come first in every tab, then charts, tables and method notes.</td></tr>
+    </tbody></table></div>
+
+  <h2 style="margin-top:20px">One chart standard</h2>
+  <div class="pair">
+    <figure><span class="tag">Before · Prices, hourly</span><img src="shots/69-res-prices.jpg" alt="Current prices chart" loading="lazy"><figcaption>No unit on the ticks, a rotated axis title, ambiguous <code>07-01 10:00</code> dates, nothing highlighted.</figcaption></figure>
+    <div><span class="tag after">After · same data (grid bus, 168 h of this run)</span>
+      <div class="app" style="padding:12px"><div class="chart">
+        <div class="ct">Grid import price peaks at 110 €/MWh every evening</div>
+        <div class="cs">€/MWh · hourly · 2030-07-01 → 07-07 · grid bus</div>
+        <svg viewBox="0 0 640 232" role="img" aria-label="Line chart of grid import price, flat at 70 euro per megawatt-hour overnight and peaking at 110 at 19:00 each day; mean 78.3">
+          <g font-family="Inter,system-ui,sans-serif" font-size="10.5" fill="#a8979a">
+            <line x1="48" x2="628" y1="200" y2="200" stroke="#3d3437"/>
+            <line x1="48" x2="628" y1="141.3" y2="141.3" stroke="#2e2729"/>
+            <line x1="48" x2="628" y1="82.7" y2="82.7" stroke="#2e2729"/>
+            <line x1="48" x2="628" y1="24" y2="24" stroke="#2e2729"/>
+            <text x="42" y="203.5" text-anchor="end">60</text>
+            <text x="42" y="144.8" text-anchor="end">80</text>
+            <text x="42" y="86.2" text-anchor="end">100</text>
+            <text x="42" y="27.5" text-anchor="end">120 €/MWh</text>
+            <text x="48" y="218" text-anchor="middle">Jul 01</text><text x="131.4" y="218" text-anchor="middle">Jul 02</text><text x="214.7" y="218" text-anchor="middle">Jul 03</text><text x="298.1" y="218" text-anchor="middle">Jul 04</text><text x="381.4" y="218" text-anchor="middle">Jul 05</text><text x="464.8" y="218" text-anchor="middle">Jul 06</text><text x="548.1" y="218" text-anchor="middle">Jul 07</text>
+          </g>
+          <line x1="48" x2="628" y1="146.4" y2="146.4" stroke="#b9a7a9" stroke-dasharray="4 4"/>
+          <text x="626" y="141" text-anchor="end" font-family="Inter,system-ui,sans-serif" font-size="10.5" fill="#d3c2c4">mean 78.3</text>
+          <polyline fill="none" stroke="#7aa7ff" stroke-width="1.8" stroke-linejoin="round" points="48.0,170.7 51.5,170.7 54.9,170.7 58.4,170.7 61.9,170.7 65.4,170.7 68.8,170.7 72.3,170.7 75.8,170.7 79.3,170.7 82.7,170.7 86.2,170.6 89.7,170.4 93.1,169.4 96.6,165.5 100.1,154.8 103.6,132.6 107.0,99.5 110.5,67.1 114.0,53.3 117.5,67.1 120.9,99.5 124.4,132.6 127.9,154.8 131.4,170.7 134.8,170.7 138.3,170.7 141.8,170.7 145.2,170.7 148.7,170.7 152.2,170.7 155.7,170.7 159.1,170.7 162.6,170.7 166.1,170.7 169.6,170.6 173.0,170.4 176.5,169.4 180.0,165.5 183.4,154.8 186.9,132.6 190.4,99.5 193.9,67.1 197.3,53.3 200.8,67.1 204.3,99.5 207.8,132.6 211.2,154.8 214.7,170.7 218.2,170.7 221.7,170.7 225.1,170.7 228.6,170.7 232.1,170.7 235.5,170.7 239.0,170.7 242.5,170.7 246.0,170.7 249.4,170.7 252.9,170.6 256.4,170.4 259.9,169.4 263.3,165.5 266.8,154.8 270.3,132.6 273.7,99.5 277.2,67.1 280.7,53.3 284.2,67.1 287.6,99.5 291.1,132.6 294.6,154.8 298.1,170.7 301.5,170.7 305.0,170.7 308.5,170.7 312.0,170.7 315.4,170.7 318.9,170.7 322.4,170.7 325.8,170.7 329.3,170.7 332.8,170.7 336.3,170.6 339.7,170.4 343.2,169.4 346.7,165.5 350.2,154.8 353.6,132.6 357.1,99.5 360.6,67.1 364.0,53.3 367.5,67.1 371.0,99.5 374.5,132.6 377.9,154.8 381.4,170.7 384.9,170.7 388.4,170.7 391.8,170.7 395.3,170.7 398.8,170.7 402.3,170.7 405.7,170.7 409.2,170.7 412.7,170.7 416.1,170.7 419.6,170.6 423.1,170.4 426.6,169.4 430.0,165.5 433.5,154.8 437.0,132.6 440.5,99.5 443.9,67.1 447.4,53.3 450.9,67.1 454.3,99.5 457.8,132.6 461.3,154.8 464.8,170.7 468.2,170.7 471.7,170.7 475.2,170.7 478.7,170.7 482.1,170.7 485.6,170.7 489.1,170.7 492.6,170.7 496.0,170.7 499.5,170.7 503.0,170.6 506.4,170.4 509.9,169.4 513.4,165.5 516.9,154.8 520.3,132.6 523.8,99.5 527.3,67.1 530.8,53.3 534.2,67.1 537.7,99.5 541.2,132.6 544.6,154.8 548.1,170.7 551.6,170.7 555.1,170.7 558.5,170.7 562.0,170.7 565.5,170.7 569.0,170.7 572.4,170.7 575.9,170.7 579.4,170.7 582.9,170.7 586.3,170.6 589.8,170.4 593.3,169.4 596.7,165.5 600.2,154.8 603.7,132.6 607.2,99.5 610.6,67.1 614.1,53.3 617.6,67.1 621.1,99.5 624.5,132.6 628.0,154.8"/>
+          <circle cx="114.0" cy="53.3" r="4" fill="#ff5252"/>
+          <text x="122" y="47" font-family="Inter,system-ui,sans-serif" font-size="11" font-weight="600" fill="#f4eaea">110 €/MWh · 19:00 daily</text>
+        </svg>
+        <div class="cs" style="margin-top:4px">Site buses clear at 165–167 €/MWh. Shown in the Per-bus view.</div>
+      </div></div>
+      <p class="sub" style="font-size:12.5px;margin-top:8px">The title states the finding. The subtitle carries the unit, the resolution and the window. The unit is on the top tick, so there is no rotated axis title. The mean is a reference line, the peak is annotated, and the axis text is 4.5 : 1.</p>
+    </div>
+  </div>
+
+  <h2 style="margin-top:20px">Guided Results step</h2>
+  <div class="pair">
+    <figure><span class="tag">Before</span><img src="shots/17-guided-results.jpg" alt="Current guided results" loading="lazy"></figure>
+    <div><span class="tag after">After · same components as Expert, plain names</span>
+      <div class="app"><div class="abody">
+        <div class="verdict"><b>Meets the goal: about 0.6 hours of shortfall a year, under your 3-hour limit.</b><span style="color:var(--a-muted)">From the reliability study: Monte Carlo, 2 000 draws on this week's weather.</span></div>
+        <div class="kgrid">
+          <div class="kpi head"><span class="l">Yearly cost of this design</span><span class="v">€39.8<small>M/yr</small></span><span class="b">before any shortfall costs</span></div>
+          <div class="kpi"><span class="l">Biggest risk</span><span class="v" style="font-size:16px">Site transformer</span><span class="b">criticality ≈ €7.89 M/yr</span></div>
+          <div class="kpi"><span class="l">Grid connection</span><span class="pill nr">Not checked yet</span><span class="act">Next: Grid plan step</span></div>
+          <div class="kpi"><span class="l">Hour-by-hour operation</span><span class="pill nr">Not run yet</span><span class="act">Next: Control step</span></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><span class="act" style="font:600 11.5px var(--f-body);border:1px solid var(--a-border2);border-radius:6px;padding:6px 10px">Open the report</span><span style="font:600 11.5px var(--f-body);border-radius:6px;padding:6px 10px;background:var(--a-accent700);color:#fff">Next: Improve →</span></div>
+      </div></div>
+      <p class="sub" style="font-size:12.5px;margin-top:8px">The step labels and explanations belong to the E2E guided session. This mockup shows only the shared parts: the verdict, KPI tiles, states and display names. Grid connection has not been checked yet, so it shows a state rather than "no shortfall".</p>
+    </div>
+  </div>
+
+  <h2 style="margin-top:20px">Workspace: at most three columns</h2>
+  <div class="pair">
+    <div><span class="tag">Before · 1440 px, panel open</span>
+      <div class="app" style="padding:12px"><div class="schem">
+        <div style="flex:240">Sidebar<br>240</div><div class="cv bad" style="flex:220">Canvas<br>≈220</div><div style="flex:560">Panel 560</div><div class="bad" style="flex:420">Assistant<br>420 (no key)</div></div></div></div>
+    <div><span class="tag after">After · panel open</span>
+      <div class="app" style="padding:12px"><div class="schem">
+        <div style="flex:56">Rail</div><div class="cv" style="flex:300">Canvas<br>≈300</div><div style="flex:1000">Panel ≈1000<br>(Results full width)</div><div style="flex:48">Dock<br>rail</div></div></div>
+      <p class="sub" style="font-size:12.5px;margin-top:8px">The sidebar collapses to icons while a panel is open. The dock becomes a rail unless pinned (this change goes to the coordinator because it touches the companion stream's file). Status shows in one place.</p></div>
+  </div>
+</section>
+
+<section id="rules">
+  <span class="eyebrow">Design rules</span>
+  <h2>Units, spacing, type</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Quantity</th><th>KPI</th><th>Table</th></tr></thead>
+    <tbody>
+      <tr><td>Money</td><td class="num">€39.8 M · €2.21 M · €801</td><td>One unit per column, in the header</td></tr>
+      <tr><td>Energy</td><td class="num">9.69 GWh · 3.78 MWh</td><td>Column unit chosen from the column's largest value</td></tr>
+      <tr><td>Power</td><td class="num">40.0 MW</td><td>Same rule</td></tr>
+      <tr><td>Emissions</td><td class="num">135 kt CO₂</td><td class="num">t CO₂ column</td></tr>
+      <tr><td>Price</td><td class="num">136.6 €/MWh</td><td>Same</td></tr>
+      <tr><td>Reliability</td><td class="num">0.6 h/yr</td><td>Same</td></tr>
+      <tr><td>Time</td><td class="num">2030-07-01 14:00</td><td>ISO, 24 h, everywhere. Axis ticks <span class="num">Jul 01</span>, with the year in the subtitle</td></tr>
+    </tbody></table></div>
+  <ul class="tl">
+    <li><span class="chip">type</span><span>Five sizes (11, 12, 13, 16, 22 px) replace ten arbitrary ones. All spacing is on a 4 px grid.</span></li>
+    <li><span class="chip">colour</span><span>Primary buttons use <code>accent-700</code> (4.5 : 1). Axis and secondary text go up to at least 4.5 : 1. Carrier colours come only from <code>colourForCarrier</code>. Good, warning and bad are never shown in the accent colour.</span></li>
+    <li><span class="chip">copy</span><span>Guided shows display names, never ids. No developer paths. Method prose goes behind "How this is computed".</span></li>
+  </ul>
+</section>
+
+<section id="slices">
+  <span class="eyebrow">Plan</span>
+  <h2>Slices, by value and risk</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Slice</th><th>What</th><th>Value</th><th>Risk</th><th>Coordinates with</th></tr></thead>
+    <tbody>
+      <tr><td><b>S1</b></td><td><code>format.ts</code> and the <code>Kpi</code> standard. Migrate six results KPI variants.</td><td>High</td><td>Low</td><td>M3 adopts it after #245</td></tr>
+      <tr><td><b>S2</b></td><td><code>ResultState</code> (six states) on Summary, Load Flow, Capacity Expansion, Curtailment and Lost load.</td><td>High</td><td>Low–med</td><td>Owner signs off the per-metric states</td></tr>
+      <tr><td><b>S3</b></td><td>Results group layer, Asset detail drawer, input form moved out of Results.</td><td>High</td><td>Medium</td><td>After M3. Inventory regenerated</td></tr>
+      <tr><td><b>S4</b></td><td><code>ChartCard</code>, axes, reference lines, contrast tokens.</td><td>Med–high</td><td>Low–med</td><td>—</td></tr>
+      <tr><td><b>S5</b></td><td>Three-column shell, dock rail, sidebar chrome, single status.</td><td>Med–high</td><td>Medium</td><td>Companion stream (AssistantDock)</td></tr>
+      <tr><td><b>S6</b></td><td>Guided Results never locked, same cards, display names, Guided-density report.</td><td>High</td><td>Medium</td><td>E2E guided session</td></tr>
+      <tr><td><b>S7</b></td><td>Projects first, one creation menu, template copy, login hint.</td><td>Medium</td><td>Low</td><td>—</td></tr>
+      <tr><td><b>S8</b></td><td>Expert sidebar regrouped by category.</td><td>Medium</td><td>Med–high</td><td>Last</td></tr>
+    </tbody></table></div>
+  <p class="sub">Each slice is a small PR off master. Tests are written first, snapshot and layout tests are updated deliberately, and each PR carries a release-note fragment. No engine or number changes. Rounding rules come to you before they ship.</p>
+</section>
+
+</div>
