@@ -23,36 +23,60 @@ const source = path.join(root, 'src', `${entry}.tsx`)
 const artifacts = await fs.mkdtemp(path.join(os.tmpdir(), 'checked-browser-'))
 const approvedText = 'StorageUnit Battery: total direct cost 51 EUR. Charging electricity purchases are excluded.'
 const unsafe = 'Invented cost 999 EUR and guaranteed profit.'
-let server, browser
+const receipt = {
+  policy_version: '1', content_sha256: createHash('sha256').update(approvedText).digest('hex'),
+  evidence_ids: ['browser-evidence'], checked_block_ids: ['total_cost'], limitations: ['Direct costs only.'],
+  reviewer_status: 'not_required', request_complete: true,
+  request_scope: { profile: 'storage-unit-cost/1', project_id: 'browser-project', entity_id: 'Battery' },
+  result_slots: [{ metric: 'total_cost', disposition: 'answered' }],
+}
+let server, browser, activePage
 try {
   await fs.writeFile(html, `<!doctype html><html><body><div id="root"></div><script type="module" src="/src/${entry}.tsx"></script></body></html>`)
   await fs.writeFile(source, `
 import React from 'react'
 import {createRoot} from 'react-dom/client'
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query'
-import ChatPanel from './components/ChatPanel'
+import AssistantDock from './components/AssistantDock'
 import {useUIStore} from './store/uiStore'
 import './index.css'
 useUIStore.setState({currentProject:'Demo', projectMismatch:null, assistantDockOpen:true,
   selectedComponent:{type:'StorageUnit',name:'Battery'}})
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}>
-  <div style={{width:380,height:780}}><ChatPanel/></div></QueryClientProvider>)
+  <div style={{display:'flex',height:'100vh'}}><AssistantDock/></div></QueryClientProvider>)
 `)
   server = await createServer({ configFile: false, root, appType: 'mpa', plugins: [react(), tailwindcss()],
     server: { host: '127.0.0.1', port: 0 } })
   await server.listen()
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN || undefined,
     headless: true, args: ['--no-sandbox'] })
-  const page = await browser.newPage({ viewport: { width: 420, height: 850 } })
+  const page = await browser.newPage({ viewport: { width: 420, height: 850 }, hasTouch: true })
+  activePage = page
+  page.setDefaultTimeout(10000)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.route(url => url.protocol.startsWith('http') && url.hostname !== '127.0.0.1', route => route.abort())
   const errors = [], requests = [], paths = []
   page.on('pageerror', error => { errors.push(error.message); console.error('BROWSER_PAGE_ERROR:', error.message) })
   let mode = 'pilot'
+  let recordMode = 'valid'
   // Match HTTP API paths, never Vite's /src/api/*.ts module imports.
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
     const url = new URL(route.request().url())
     paths.push(url.pathname)
     let data = {}
-    if (url.pathname.endsWith('/reliability/capabilities')) data = { version: 1, mode,
+    if (url.pathname.endsWith('/reliability/context')) {
+      assert.equal(route.request().headers()['cache-control'], 'no-cache')
+      data = { version: 1, project_id: 'browser-project' }
+    }
+    else if (url.pathname.endsWith('/chat/answers/browser-answer')) {
+      assert.equal(route.request().headers()['cache-control'], 'no-cache')
+      if (recordMode === 'unavailable') return route.fulfill({ status: 409,
+        json: { detail: { error_kind: 'answer_evidence_unavailable' } } })
+      data = { version: 1, answer_id: 'browser-answer', turn_id: 'browser-turn',
+        project_id: 'browser-project', text: recordMode === 'tampered' ? unsafe : approvedText,
+        verdict: 'passed', receipt }
+    }
+    else if (url.pathname.endsWith('/reliability/capabilities')) data = { version: 1, mode,
       profiles: { 'storage-unit-cost/1': { enabled: true } } }
     else if (url.pathname.endsWith('/chat/profiles')) data = { active_profile_id: 'fixture',
       profiles: [{ id: 'fixture', label: 'Fixture model', model: 'fixture', wire: 'openai', chat_ready: true }] }
@@ -79,13 +103,8 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
       if (body.assurance) {
         stream = frame('token', { delta: unsafe }) + frame('thinking', { delta: unsafe }) + stream
         stream += frame('token', { delta: unsafe }) + frame('answer_approved', {
-          version: 1, turn_id: 'browser-turn', answer_id: 'browser-answer', verdict: 'passed', receipt: {
-            policy_version: '1', content_sha256: createHash('sha256').update(approvedText).digest('hex'),
-            evidence_ids: ['browser-evidence'], checked_block_ids: ['total_cost'], limitations: ['Direct costs only.'],
-            reviewer_status: 'not_required', request_complete: true,
-            request_scope: { profile: 'storage-unit-cost/1', entity_id: 'Battery' },
-            result_slots: [{ metric: 'total_cost', disposition: 'answered' }],
-          } }) + frame('token', { delta: approvedText }) + frame('turn_done', { answer_id: 'browser-answer' })
+          version: 1, turn_id: 'browser-turn', answer_id: 'browser-answer', verdict: 'passed', receipt,
+        }) + frame('token', { delta: approvedText }) + frame('turn_done', { answer_id: 'browser-answer' })
       } else stream += frame('token', { delta: 'An explicitly ordinary reply.' }) + frame('turn_done', {})
       return route.fulfill({ contentType: 'text/event-stream', body: stream })
     }
@@ -111,6 +130,36 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
   assert.deepEqual(requests[0].ui_context.selected_component, { class: 'StorageUnit', name: 'Battery' })
   assert(!(await page.locator('body').innerText()).includes(unsafe))
   await page.getByText('Requested results checked', { exact: true }).waitFor()
+  await page.getByTestId('assistant-dock-collapse').click()
+  const card = page.getByTestId('companion-outcome')
+  await card.getByText(approvedText, { exact: true }).waitFor()
+  assert.equal(await card.getAttribute('data-answer-id'), 'browser-answer')
+  assert.equal(await card.getAttribute('data-answer-sha256'), receipt.content_sha256)
+  await page.setViewportSize({ width: 320, height: 600 })
+  const bounds = await card.boundingBox()
+  assert(bounds.x >= 0 && bounds.x + bounds.width <= 320, 'Card overflows narrow viewport')
+  const companion = await page.getByTestId('companion-launcher').boundingBox()
+  assert(companion.y >= 0 && companion.y + companion.height <= 600, 'Companion overflows short viewport')
+  await card.getByRole('button', { name: 'Expand answer', exact: true }).tap()
+  assert.equal(await card.getByTestId('companion-answer-text').innerText(), approvedText)
+  await page.screenshot({ path: path.join(artifacts, 'closed-answer.png'), fullPage: true })
+  recordMode = 'tampered'
+  await card.getByRole('button', { name: 'Refresh evidence', exact: true }).click()
+  await card.getByText('Checked answer unavailable', { exact: true }).waitFor()
+  assert(!(await card.innerText()).includes(unsafe))
+  assert(!(await card.innerText()).includes(approvedText))
+  assert.equal(await card.getByRole('link', { name: 'View answer record', exact: true }).count(), 0)
+  recordMode = 'unavailable'
+  const refusedRecord = page.waitForResponse(response => response.url().includes('/chat/answers/browser-answer') && response.status() === 409)
+  await card.getByRole('button', { name: 'Refresh evidence', exact: true }).click()
+  await refusedRecord
+  await card.getByText('Checked answer unavailable', { exact: true }).waitFor()
+  recordMode = 'valid'
+  await card.getByRole('button', { name: 'Refresh evidence', exact: true }).click()
+  await card.getByText(approvedText, { exact: true }).waitFor()
+  await page.setViewportSize({ width: 420, height: 850 })
+  await card.getByRole('button', { name: 'Open transcript', exact: true }).click()
+  assert.equal(requests.length, 1, 'Opening transcript submitted a new request')
   await page.screenshot({ path: path.join(artifacts, 'checked-answer.png'), fullPage: true })
   await page.getByTestId('chat-input').fill('A checked follow-up.')
   await page.getByTestId('chat-send').click()
@@ -128,9 +177,18 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
   assert.deepEqual(errors, [])
   const result = { passed: true, browser: 'native Chromium', api: 'mocked', model_calls: 0,
     keyboard_opt_in: true, sse_and_native_digest: true, unsafe_output_withheld: true,
-    rollback_preserves_choice_and_draft: true, explicit_opt_out_only: true, requests: requests.length, artifacts }
+    rollback_preserves_choice_and_draft: true, explicit_opt_out_only: true, requests: requests.length,
+    closed_canonical_answer: true, checked_record_revalidated: true, tampered_and_unavailable_withheld: true,
+    narrow_touch_reduced_motion: true, artifacts }
   await fs.writeFile(path.join(artifacts, 'result.json'), JSON.stringify(result, null, 2))
   console.log(JSON.stringify(result))
+} catch (error) {
+  if (activePage) {
+    await fs.writeFile(path.join(artifacts, 'failed.html'), await activePage.content())
+    await activePage.screenshot({ path: path.join(artifacts, 'failed.png'), fullPage: true })
+  }
+  console.error(JSON.stringify({ artifacts }))
+  throw error
 } finally {
   await browser?.close()
   await server?.close()

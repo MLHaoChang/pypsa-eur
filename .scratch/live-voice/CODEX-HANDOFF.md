@@ -3,6 +3,8 @@
 
 # Codex handoff — whole-application assistant / live voice
 
+2026-10-14 continuation: [CP-02 canonical companion outcomes](../chat-companion/issues/02-canonical-outcomes.md) records the next master-based UI/publication slice. [CP-01 / PR #235](https://github.com/MLHaoChang/pypsa-eur/pull/235) remains a separate dependency with its tested source preserved. These slices do not enable hosted voice or waive live/domain release gates.
+
 **Audience:** next agent (Codex or Cursor) starting from **master**.  
 **Date:** 2026-10-13.  
 **Master tip at handoff write:** `8a4927f9d` (includes #129 Moonshot alias, #126 run refs UI, #127 experiment persist, #130 resume discussed-run rehydration).

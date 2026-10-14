@@ -382,6 +382,12 @@ html {
   transform: none;
 }
 
+/* Answers/decisions may grow; keep the whole companion reachable on short screens. */
+.companion-launcher {
+  max-height: calc(100dvh - 3rem);
+  overflow-y: auto;
+}
+
 .companion-character-wrap {
   transform-origin: center bottom;
 }

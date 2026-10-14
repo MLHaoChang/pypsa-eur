@@ -1,13 +1,18 @@
-import { describe, it, expect } from 'vitest'
+import { beforeEach, describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { useChatStore } from '../store/chatStore'
 import CompanionOutcome from './CompanionOutcome'
+import { useUIStore } from '../store/uiStore'
 
 const BLOB = '/api/projects/Demo/uploads/0123456789abcdef/blob'
 const LATER_BLOB = '/api/projects/Demo/uploads/fedcba9876543210/blob'
 
 describe('CompanionOutcome', () => {
-  it('keeps a download chip and never parks the assistant sentence beside Live', () => {
+  beforeEach(() => {
+    useChatStore.setState({ messages: [], streaming: false, error: null })
+    useUIStore.setState({ currentProject: 'Demo', projectMismatch: null })
+  })
+  it('shows the canonical ordinary answer with the current download', () => {
     useChatStore.setState({
       messages: [
         { id: '1', role: 'assistant', content: 'The network file is ready.', ts: 1 },
@@ -18,7 +23,8 @@ describe('CompanionOutcome', () => {
       ],
     })
     render(<CompanionOutcome />)
-    expect(screen.queryByTestId('companion-outcome')).toBeNull()
+    expect(screen.getByText('The network file is ready.')).toBeTruthy()
+    expect(screen.getByText('Answer not checked')).toBeTruthy()
     const anchor = screen.getByTestId('companion-download')
     expect(anchor.getAttribute('href')).toBe(BLOB)
     expect(anchor.getAttribute('download')).toBe('chart.png')
@@ -75,7 +81,7 @@ describe('CompanionOutcome', () => {
     })
     render(<CompanionOutcome />)
     expect(screen.queryByTestId('companion-download')).toBeNull()
-    expect(screen.queryByTestId('companion-outcome')).toBeNull()
+    expect(screen.getByText('Nothing to download.')).toBeTruthy()
   })
 
   it('renders nothing when hidden', () => {
@@ -92,11 +98,12 @@ describe('CompanionOutcome', () => {
     expect(screen.queryByTestId('companion-download')).toBeNull()
   })
 
-  it('renders nothing when the turn has no downloadable result', () => {
+  it('renders an answer even when the turn has no downloadable result', () => {
     useChatStore.setState({
       messages: [{ id: '1', role: 'assistant', content: 'Ready.', ts: 1 }],
     })
-    const { container } = render(<CompanionOutcome />)
-    expect(container.firstChild).toBeNull()
+    render(<CompanionOutcome />)
+    expect(screen.getByText('Ready.')).toBeTruthy()
+    expect(screen.queryByTestId('companion-download')).toBeNull()
   })
 })

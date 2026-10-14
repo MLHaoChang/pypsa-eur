@@ -7,7 +7,8 @@ export interface AnswerReceipt {
   limitations: string[]
   reviewer_status: string
   request_complete?: boolean
-  request_scope?: { profile: string; entity_id?: string; project_id?: string; start?: string; end?: string; retain?: boolean }
+  request_scope?: { profile: string; entity_id?: string; project_id?: string; start?: string; end?: string; retain?: boolean;
+    cost_basis?: { currency: 'EUR'; price_year: number; annual_fixed_cost_fraction: number } }
   result_slots?: { metric: string; disposition: 'answered' | 'unavailable' | 'needs_clarification'; reason?: string; valid_snapshots?: number; requested_snapshots?: number }[]
 }
 
@@ -41,7 +42,14 @@ export function parseApproval(value: Record<string, unknown>): ApprovedAnswerFra
       || ['entity_id', 'project_id', 'start', 'end'].some(k => {
         const v = scope[k as keyof typeof scope]
         return v !== undefined && (typeof v !== 'string' || v.length > 128)
-      }) || (scope.retain !== undefined && typeof scope.retain !== 'boolean')))
+      }) || (scope.retain !== undefined && typeof scope.retain !== 'boolean')
+      || (scope.cost_basis !== undefined && (!scope.cost_basis || typeof scope.cost_basis !== 'object'
+        || Array.isArray(scope.cost_basis) || scope.cost_basis.currency !== 'EUR'
+        || !Number.isInteger(scope.cost_basis.price_year) || scope.cost_basis.price_year < 1900 || scope.cost_basis.price_year > 2200
+        || typeof scope.cost_basis.annual_fixed_cost_fraction !== 'number'
+        || !Number.isFinite(scope.cost_basis.annual_fixed_cost_fraction)
+        || scope.cost_basis.annual_fixed_cost_fraction < 0 || scope.cost_basis.annual_fixed_cost_fraction > 1
+        || Object.keys(scope.cost_basis).some(k => !['currency', 'price_year', 'annual_fixed_cost_fraction'].includes(k))))))
     || (receipt.result_slots !== undefined && (!Array.isArray(receipt.result_slots) || receipt.result_slots.length > 20
       || receipt.result_slots.some(s => !s || typeof s.metric !== 'string' || s.metric.length > 64
         || (typeof s.disposition !== 'string' || !['answered', 'unavailable', 'needs_clarification'].includes(s.disposition))

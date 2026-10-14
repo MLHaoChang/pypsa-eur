@@ -11,6 +11,22 @@ const receipt: AnswerReceipt = {
   request_scope: { profile: 'generator-cost/1', entity_id: 'G1', retain: true },
   result_slots: [{ metric: 'total_cost', disposition: 'unavailable', reason: 'invalid_or_missing_raw_data' }],
 }
+it('displays the declared cost basis and rejects malformed basis metadata', () => {
+  const scoped = { ...receipt, request_scope: { ...receipt.request_scope!, cost_basis: {
+    currency: 'EUR' as const, price_year: 2026, annual_fixed_cost_fraction: 0.5,
+  } } }
+  render(<CheckedEvidenceCard answerId="answer-1" receipt={scoped} sourceLabel="Recorded evidence" />)
+  expect(screen.getByText(/Cost basis: EUR, price year 2026; annual fixed cost fraction 0.5/)).toBeTruthy()
+  expect(screen.getByText(/Recorded evidence/)).toBeTruthy()
+  const frame = { version: 1, answer_id: 'a', turn_id: 't', verdict: 'limited', receipt: scoped }
+  expect(parseApproval(frame)).not.toBeNull()
+  for (const cost_basis of [
+    { ...scoped.request_scope.cost_basis, currency: 'USD' },
+    { ...scoped.request_scope.cost_basis, price_year: '2026' },
+    { ...scoped.request_scope.cost_basis, annual_fixed_cost_fraction: NaN },
+    { ...scoped.request_scope.cost_basis, annual_fixed_cost_fraction: -1 },
+  ]) expect(parseApproval({ ...frame, receipt: { ...scoped, request_scope: { ...scoped.request_scope, cost_basis } } })).toBeNull()
+})
 it('shows unavailable slots, retained scope and interpretation limits without claiming completeness', () => {
   render(<CheckedEvidenceCard answerId="answer-1" receipt={receipt} />)
   expect(screen.getByText('Checked evidence and limitations')).toBeTruthy()

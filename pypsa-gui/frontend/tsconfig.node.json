@@ -18,6 +18,7 @@
   },
   "include": [
     "vitest.setup.ts",
+    "src/test/fixtures/assetSchema.json",
     "vite.config.ts",
     "vite.auth-gate.ts",
     "vite.auth-gate.test.ts",

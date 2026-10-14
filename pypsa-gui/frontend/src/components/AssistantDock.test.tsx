@@ -260,9 +260,9 @@ describe('assistant dock prominence', () => {
       })
     })
     expect(launcher().getAttribute('data-presence')).toBe('speaking')
-    // The answer itself stays in the console transcript, not beside Live.
-    expect(screen.queryByText('There is one generator.')).toBeNull()
-    expect(screen.queryByTestId('companion-outcome')).toBeNull()
+    // Canonical text is also readable beside the collapsed companion.
+    expect(screen.getByText('There is one generator.')).toBeTruthy()
+    expect(screen.getByTestId('companion-outcome')).toBeTruthy()
     await act(async () => { vi.advanceTimersByTime(5_000) })
     expect(screen.queryByTestId('companion-live-echo')).toBeNull()
     expect(launcher().getAttribute('data-presence')).toBe('listening')
@@ -285,7 +285,7 @@ describe('assistant dock prominence', () => {
       })
     })
     expect(screen.getByTestId('companion-download').getAttribute('download')).toBe('chart.png')
-    expect(screen.queryByText('The chart is ready.')).toBeNull()
+    expect(screen.getByText('The chart is ready.')).toBeTruthy()
   })
 
   it('leaves the node idle when a console turn streams while Live is closed', async () => {

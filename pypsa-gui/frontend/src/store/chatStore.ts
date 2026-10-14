@@ -42,6 +42,9 @@ export interface ChatMessage {
   // the UI can gate the `<details>` on presence rather than length.
   thinking?: string
   answer_id?: string
+  /** Live approval identity and the project at publication, not current UI guesses. */
+  answer_turn_id?: string
+  origin_project?: string | null
   receipt?: AnswerReceipt
   /** Retrying a checked question must not silently become ordinary chat. */
   requiresChecked?: boolean
@@ -277,7 +280,7 @@ interface ChatState {
    * a fresh assistant message is created. Keeps `token` SSE frames from
    * producing one-row-per-token spam in the message list.
    */
-  appendTokenDelta: (delta: string) => void
+  appendTokenDelta: (delta: string, originProject?: string | null) => void
   /**
    * Same accumulation shape as `appendTokenDelta`, but writes the trailing
    * assistant bubble's `thinking` field instead of `content` — `thinking`
@@ -479,12 +482,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     messages: [...s.messages, { ...msg, id: newMessageId(), ts: Date.now() }],
   })),
   setMessages: (msgs) => set({ messages: msgs }),
-  appendTokenDelta: (delta) => set((s) => {
+  appendTokenDelta: (delta, originProject) => set((s) => {
     if (!delta) return s
     const last = s.messages[s.messages.length - 1]
     if (last && last.role === 'assistant') {
       // Append the delta to the trailing assistant bubble.
-      const updated: ChatMessage = { ...last, content: last.content + delta }
+      const updated: ChatMessage = { ...last, content: last.content + delta,
+        ...(originProject !== undefined ? { origin_project: originProject } : {}) }
       return { messages: [...s.messages.slice(0, -1), updated] }
     }
     // No active assistant message — start a fresh one.
@@ -492,6 +496,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       messages: [...s.messages, {
         id: newMessageId(), ts: Date.now(),
         role: 'assistant', content: delta,
+        ...(originProject !== undefined ? { origin_project: originProject } : {}),
       }],
     }
   }),

@@ -1511,6 +1511,7 @@ export default function ChatPanel() {
             id: `replay-u-${counter++}`,
             role: 'user',
             content: t.user,
+            origin_project: h.bound_project,
             attachment_file_ids: t.attachment_file_ids,
             ...(t.requires_checked === true || (t.answer_id && t.receipt) ? { requiresChecked: true } : {}),
             ts: Math.round((t.ts || 0) * 1000),
@@ -1536,6 +1537,7 @@ export default function ChatPanel() {
             content: assistantText,
             answer_id: t.answer_id,
             receipt: t.receipt,
+            origin_project: h.bound_project,
             ts: Math.round((t.ts || 0) * 1000),
             ...(t.interrupted ? { interrupted: t.interrupted_reason || 'unknown' } : {}),
           })
@@ -2060,6 +2062,14 @@ export default function ChatPanel() {
           project: useUIStore.getState().currentProject, completed: false,
         }
         setSessionId(d.session_id)
+        if (d.assurance?.mode === 'strict') {
+          // Server-required checking survives on the closed surface too.
+          // This policy hint is never approval or checked evidence.
+          const rows = useChatStore.getState().messages
+          let lastUser = -1
+          rows.forEach((m, i) => { if (m.role === 'user') lastUser = i })
+          useChatStore.setState({ messages: rows.map((m, i) => i === lastUser ? { ...m, requiresChecked: true } : m) })
+        }
         // A new turn answers (or moves past) any Choice card still showing.
         setChoice(null)
         // P28 A3 — the frame names the profile the session is bound to. Kept
@@ -2090,7 +2100,7 @@ export default function ChatPanel() {
         // Accumulate into the active assistant bubble instead of spawning
         // one bubble per delta — keeps the message list readable when
         // Sonnet streams 2k tokens of output.
-        appendTokenDelta(d.delta)
+        appendTokenDelta(d.delta, streamProjectRef.current)
         break
       }
       case 'thinking': {
@@ -2433,7 +2443,8 @@ export default function ChatPanel() {
                 return
               }
               appendMessage({ role: 'assistant', content: state.text,
-                answer_id: approved.answer_id, receipt: approved.receipt })
+                answer_id: approved.answer_id, answer_turn_id: approved.turn_id,
+                origin_project: state.project, receipt: approved.receipt })
               if (speak && useUIStore.getState().assistantSpeakEnabled) {
                 speechOut.speak(speechOut.plainTextForSpeech(state.text))
               }
@@ -2548,6 +2559,7 @@ export default function ChatPanel() {
     voiceTurnRef.current = opts?.fromCard ? false : dictatedRef.current
     appendMessage({
       role: 'user', content: text,
+      origin_project: streamProjectRef.current,
       attachment_file_ids: attachIds.length > 0 ? attachIds : undefined,
       ...(opts?.label ? { display: opts.label } : {}),
       ...(requestedChecks ? { requiresChecked: true } : {}),
@@ -3498,7 +3510,10 @@ export default function ChatPanel() {
       )}
       <div
         className="flex flex-col border-t border-border bg-bg-2 shrink-0"
-        style={{ height: promptHeight }}
+        // Three 44px touch controls plus settings/gaps must fit inside the
+        // composer; overflowing upward would cover the answer-check toggle.
+        // Clamp layout without rewriting the user's saved resize preference.
+        style={{ height: promptHeight, minHeight: isCoarsePointer ? 200 : undefined }}
         data-testid="chat-prompt-container"
       >
         <div
