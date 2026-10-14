@@ -34,7 +34,7 @@ demo-only hacks in shared code).
 | 7 | Expert → Campus electrical → Draft from project | **"the project is not solved; solve it and save, then draft the campus"**. The guided study solved a private copy, so the project itself is unsolved | **seam broken**: stage 2 → 3 has no handoff |
 | 8 | Run LOPF | Header **Optimal**, status bar `Completed` but **`Obj: —`**. Hub design Results now says **"These results are from an earlier study; the network was solved since. Run again to refresh."** | meeting stage 3's prerequisite makes stage 2 stale |
 | 9 | Draft from project | Draft made; "storage unit **bess_new: built at 0 MW**" left out. The LOPF builds no battery, though the EH study's plan may differ | works; the two solves disagree on the design |
-| 10 | Campus electrical → Run study | The button reads **Running…**, but the header still says **Idle** and there is no progress or wait message. The request is synchronous: at 100 % CPU in `gridspine/static/frequency.py` `e4_ups_bridged → simulate` (I6, eleven 5 MW pickup blocks, RK4 in pure Python) for **over 6 minutes** so far. RESULT: _pending_ | stage 3 can run for many minutes with no "please wait" |
+| 10 | Campus electrical → Run study | The button reads **Running…**, but the header still says **Idle** and there is no progress or wait message. The request is synchronous: at 100 % CPU in `gridspine/static/frequency.py` `e4_ups_bridged → simulate` (I6, eleven 5 MW pickup blocks, RK4 in pure Python) for **over 9 minutes** (still running when this plan was sent; the result is added on the next update) | stage 3 can run for many minutes with no "please wait" |
 | 11 | Reports → Generate report… | Dialog with a **Template** picker (built-in default; user .docx upload exists), language, 13 sections, **all reliability** (target, MC, cost, frontier, sizing, redundancy, levers, DtC, FMEA, TEA, gates, multi-energy). The panel also says "Open a Project to list its reports" while one is open. Generating needs the LLM | partial: no investment case, electrical, grid-code or control section; needs a key |
 | — | Investment (stage 1) | `GET /api/results/investment_case` → 204 (none run). Running one on the template refuses with **`value_flows_not_configured`**: the template ships no commercial config (`services/results/finance_case.py:1489`). The Investment, Economics and Capacity tabs are **Expert-only** (`Results.tsx:66-86`) | **not wired** for this case |
 
@@ -193,6 +193,57 @@ plan or a microgrid plan consists of.
   plus `get_plan_status`. It asks the user back with Choice cards at each decision: target, investment level,
   grid code, control mode, report template.
 
+### 4.1 Owner requirements added 14 Oct (relayed by the coordinator)
+
+1. **The AI-guided walkthrough is the top priority**: a smooth path from projected load to results, with the
+   assistant leading each step.
+2. **Guidance continues once results exist.**
+   - Every result tab shows its key results, highlighted, and explains them in each section or as a summary.
+   - When the user switches tabs, the assistant follows and explains the tab they're on.
+   - Both work the same in Guided and Expert: built once and shared, never keyed to the mode toggle.
+   - Builds on M3's Summary tab (gatekeeper, PR #245).
+3. **The report is structured**:
+   - an executive summary first;
+   - one chapter each for the investment case, the reliability case, the grid/electrical case and the control
+     case;
+   - a conclusion;
+   - each chapter carries its stage's key results and flagged items;
+   - it uses the template choice and upload.
+
+The UX/UI overhaul session (session_015QMvmyA2gE13qRZc7E49hf) owns the information architecture: the category
+grouping (Investment, Grid plan, Reliability, Control), the KPI card and chart standard, how not-yet-run
+results look, and the layout. This plan renders highlights through **its** KPI/card standard, not a parallel one;
+the split is in §4.3.
+
+### 4.2 Highlights and explanations: what is computed and what is narrated
+
+One rule: **every number and every severity is computed; the assistant only narrates.** The owner can then see
+which is which on screen and in the report.
+
+| Layer | Produced by | What it contains | Where it shows | Without an API key |
+|---|---|---|---|---|
+| **Key results** (computed) | A per-tab **insight rule set** in the backend (`services/insights/<tab>.py`), pure functions over the stored result records (EH study, investment case, campus state, island report, solve results) | 3–6 KPIs per tab, each with value, unit, Unavailable flag (ADR-0001), source record and run id | The KPI cards at the top of each tab (UX session's card) and the report chapters | shown |
+| **Flags** (computed) | The same rule set: a threshold or condition per rule, with severity `info / attention / action` and a fixed sentence template filled with the computed numbers (for example "MC LOLE did not converge after 2,000 draws"; "LOLE 0.60 h/yr is under the 3 h/yr target"; "unresolved need: 12 Mvar reactive at the PCC"; "E4 block 3 nadir 47.3 Hz, under the 47.5 Hz limit") | rule id, severity, sentence, the view that shows it | Highlighted rows and cards in the tab, a flag list per section, the plan status, the report | shown |
+| **Section summary** (computed) | Fixed templates over the KPIs and flags ("Certified: about 0.6 h/yr of shortfall, under the 3 h/yr goal", the style Hub design already uses) | one or two sentences per tab/section | Under the KPI row | shown |
+| **Explanation** (narrated) | The assistant, given the tab's insight payload through one read tool, `get_tab_insights(tab)`, and the existing number audit (`services/reports/number_audit`; answer assurance) | Why it matters, what drives it, what to do next, answers to follow-ups; may only quote numbers present in the payload | The assistant dock; the report's prose paragraphs | absent; the computed layers stand alone |
+| **Follow the tab** (narrated, triggered) | A tab-change event from the UI (debounced, opt-out) → the assistant reads `get_tab_insights` for the new tab and posts a short explanation | 2–4 sentences plus the top flag | The assistant dock | a computed "On this tab" card from the summary layer instead |
+
+So the highlights exist with or without an LLM, in both modes, and the assistant's text can always be checked
+against the numbers beside it. Rule sets are per tab, not per case: a data center, hydrogen hub or microgrid gets
+the same rules, and a case definition only chooses which tabs and stages it shows.
+
+### 4.3 Proposed split with the UX/UI session and M3
+
+| Piece | Owner |
+|---|---|
+| Category IA, KPI card and chart standard, not-yet-run states, layout | UX/UI session |
+| Results Summary tab | gatekeeper (M3, PR #245) |
+| Insight rule sets and the `/insights` payload; the plan status; `get_tab_insights` / `get_plan_status` | this session |
+| Rendering insights inside each tab, using the UX card component | this session, once the card exists (until then, M3's KPI tiles) |
+| The guided walkthrough (workflow, Guided stage cards, busy banner) | this session |
+| Follow-the-tab in the dock | this session's hook and event; the companion stream owns `AssistantDock.tsx`/`ChatPanel.tsx`, so the dock-side change goes to them or is agreed first |
+| The structured report | this session |
+
 ## 5. Slices
 
 Each slice is a small PR off master, test-first, with a release-note fragment. Gatekeeper OK is needed where
@@ -209,13 +260,21 @@ handler-dependency, argshape and ACL suites, and regenerates the inventory.
 | **D5** | **Reliability trade-off**: frontier enabled for this case, each point with LOLE and asset mix; Guided card with the cost-vs-reliability curve, the chosen point and stress/VOLL sensitivities | `frontier.py`, pack defaults, card | **G** if the frontier changes |
 | **D6** | **Electrical in Guided**: a card for grid-code choice, Run, and the needed assets (kind, size, cost) highlighted; carry unresolved needs into the investment case (the bug) | campus panel pieces, `results.py` | R, **G** (IC) |
 | **D7** | **Control strategy**: re-check islanding after the stage-3 assets; highlight failing checks; a chat tool that reads the I4–I6 report; then (later) recommended GFM settings by bisection on droop, H and i_max | campus service, frequency driver | **G** |
-| **D8** | **Report**: evidence sections for investment, electrical/grid code and control; a "Data center plan" outline from the case definition; a deterministic no-LLM fallback; template upload is reused | `services/reports/*` | — |
+| **D8** | **Structured report**: executive summary → investment case → reliability case → grid/electrical case → control case → conclusion. Each chapter takes its key results and flags from the insight rule sets (D12), so every number is computed, and the LLM writes only the prose around them (number-audited). Without a key, the chapters render from the computed summaries. The outline comes from the case definition; the existing template choice and upload are reused | `services/reports/*` | — |
+| **D12** | **Insight rule sets**: `services/insights/` per results tab (KPIs, flags with severity, computed summary), `GET …/insights?tab=`, the `get_tab_insights` tool; the first tabs are adequacy/EH, investment, campus and island | new module, router, catalogue | R |
+| **D13** | **Highlights in every tab**: the KPI row, flag list and summary rendered in each Results tab and the campus sections, shared by Guided and Expert, with the UX card | frontend tabs | — |
+| **D14** | **Follow the tab**: a debounced tab-change event that the assistant explains, with the computed "On this tab" card as the no-key fallback | dock (companion stream), event | agree first |
 | **D9** | **The `datacenter-plan` workflow** and its case file; offered on the data center template | `harness/workflows/`, case file | — |
 | **D10** | **Projected load and energization**: milestone years (for example 2027/2030/2035 IT load) | depends on the owner's answer (§6 Q2) | **G** |
 | **D11** | **End-to-end smoke**: a Playwright script like `smoke-reports.mjs` that drives the whole plan on the template, with a fake provider for the assistant | `frontend/scripts/` | — |
 
-**Proposed order:** D0, D1, D2 → D3, D4 → D5, D6 → D7, D8, D9 → D11, with D10 when the owner decides.
-D1 and D2 come first because every later card needs the busy state and the plan status.
+**Proposed order (the guided walkthrough first, per the owner):**
+1. D1 (campus job + busy banner), D2 (plan status), D12 (insight rules) — the shared spine.
+2. D9 (the `datacenter-plan` workflow) with D3 (stage 2 → 3 handoff) and D4 (investment runs on the case) — the
+   walkthrough runs end to end.
+3. D13 and D14 (highlights in every tab; follow the tab).
+4. D8 (structured report).
+5. D5, D6, D7 (deepen reliability, electrical, control); D0 alongside; D11 last; D10 when the owner decides.
 
 ## 6. Questions for the owner (sent through the coordinator)
 
@@ -236,5 +295,9 @@ D1 and D2 come first because every later card needs the busy state and the plan 
 6. **Live assistant testing.** (a) **An app API key for this session's environment** (Recommended), so the AI
    guidance can be verified live. (b) The fake provider and tests only; stage claims about the assistant stay
    unverified live.
+8. **Follow the tab.** (a) **On a tab switch the computed "On this tab" card updates at once; the assistant adds
+   a short explanation only when the chat is open, and the user can turn that off** (Recommended): it costs no
+   tokens on fast clicking, and works without a key. (b) The assistant explains every switch automatically,
+   which costs tokens on every click. (c) Only an "Explain this tab" button, so nothing is proactive.
 7. **Control-strategy depth.** (a) **Screening plus flags first, recommended GFM settings later**
    (Recommended). (b) Recommended settings in the first demo; gridspine work, gatekeeper.
