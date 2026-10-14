@@ -118,3 +118,31 @@ def test_without_island_requirements_the_frequency_check_is_skipped(hub, monkeyp
     run = _run(hub)
     assert all((run / n).is_file() for n in STATIC_FILES)
     assert not any((run / n).exists() for n in FREQ_FILES)
+
+
+# ── Draft passes the sidecar (owner, 2026-10-14, Q3 option 1) ─────────────
+
+
+def test_a_drafted_island_project_gets_the_island_hours_checks_on_run(hub):
+    _sidecar(hub)
+    out = ce.draft(hub)
+    spec = yaml.safe_load(out["campus_yaml"])["campus"]
+    assert "island" in spec                                   # the sidecar's requirements
+    assert any("island" in u for u in spec["units"].values())
+    run = _run(hub)
+    assert all((run / n).is_file() for n in (*STATIC_FILES, *FREQ_FILES))
+
+
+def test_a_draft_without_a_sidecar_is_byte_identical(hub):
+    n = cs.load_solved_network(ce._network(hub))
+    out = ce.draft(hub)
+    assert out["campus_yaml"] == yaml.safe_dump(draft_campus(n).spec, sort_keys=False)
+    assert (ce.campus_dir(hub) / ce.CAMPUS_FILE).read_text() == out["campus_yaml"]
+
+
+def test_a_sidecar_that_does_not_validate_refuses_the_draft_with_its_reason(hub):
+    _sidecar(hub, scenarios=["ups_bridged"])                  # ups_bridged needs pickup_blocks
+    with pytest.raises(HTTPException) as exc:
+        ce.draft(hub)
+    assert exc.value.status_code == 422 and "pickup_blocks" in exc.value.detail
+    assert not (ce.campus_dir(hub) / ce.CAMPUS_FILE).exists()

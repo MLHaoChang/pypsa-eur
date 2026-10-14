@@ -877,7 +877,11 @@ def owner_assets_response(project, replacements: bool = False) -> dict:
 
 
 def draft(project, overwrite: bool = False) -> dict:
-    """Write the campus file from the project's solved network."""
+    """Write the campus file from the project's solved network, with the
+    island data of the project's island sidecar when it has one (campus
+    island plan I9b; owner, 2026-10-14)."""
+    from services.adequacy.island_config import SIDECAR_NAME, load_island_config
+
     require_capacity_expansion(project)
     nc = _network(project)
     d = campus_dir(project)
@@ -885,7 +889,8 @@ def draft(project, overwrite: bool = False) -> dict:
         raise HTTPException(status_code=409, detail="a campus file already exists; draft again with overwrite to replace your edits")
     with _netcdf_lock():
         try:
-            result = cs.draft_from_project(nc)
+            island = load_island_config(project_registry.project_dir(project) / SIDECAR_NAME)
+            result = cs.draft_from_project(nc, island=island)
         except ContractError as exc:
             raise _unprocessable(exc)
     text = yaml.safe_dump(result.spec, sort_keys=False)

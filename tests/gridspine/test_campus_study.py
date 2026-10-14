@@ -452,3 +452,37 @@ def test_a_run_prepared_before_the_weightings_were_recorded_takes_the_gaps(tmp_p
     assert {"purchase", "build_year", "service_to", "replaces", "lineage", "commissioned",
             "commissioned_source"} <= set(inv.columns)
     assert "capex_replacement_eur" in pd.read_csv(run / COST_CSV).columns
+
+
+def _island_sidecar():
+    from gridspine.schema.island import validate_island_config
+    from tests.gridspine.test_island_schema import limits, t
+
+    return validate_island_config({"units": {}, "requirements": {
+        "bridge_s": t(600.0), "sustained_h": t(24.0), "scenarios": ["seamless"], "frequency_limits": limits(),
+        "rocof_window_ms": t(500.0), "gfm_margin": t(0.1)}})
+
+
+def test_a_draft_with_the_island_sidecar_is_i1s_draft_of_the_saved_project(project):
+    """``island=`` (campus island plan I9b) passes the sidecar to I1's
+    ``draft_campus``: the oracle is that draft of the same network."""
+    from gridspine.drivers.campus_study import load_solved_network
+    from gridspine.producers.campus import draft_campus
+
+    island = _island_sidecar()
+    draft = draft_from_project(project, island=island)
+    assert draft.spec == draft_campus(load_solved_network(project), island=island).spec
+    assert "island" in draft.spec["campus"]
+    assert all("island" in u for u in draft.spec["campus"]["units"].values() if u["kind"] in ("pv", "bess"))
+
+
+def test_a_draft_without_the_sidecar_is_unchanged(project):
+    import yaml
+
+    from gridspine.drivers.campus_study import load_solved_network
+    from gridspine.producers.campus import draft_campus
+
+    plain = draft_from_project(project, island=None)
+    assert yaml.safe_dump(plain.spec, sort_keys=False) == yaml.safe_dump(
+        draft_campus(load_solved_network(project)).spec, sort_keys=False)
+    assert "island" not in plain.spec["campus"]
