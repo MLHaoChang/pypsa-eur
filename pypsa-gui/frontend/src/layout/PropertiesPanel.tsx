@@ -56,7 +56,6 @@ import {
   ehBusFS,
   ehBusPayload,
   ehLinkPayload,
-  IncludesOutagesInput,
   outagePayload,
   useGlobalDiscountRate,
   useGlobalDefaultLifetime,
@@ -67,13 +66,11 @@ import {
   discountRatePct,
   TxtInput,
   CoordPairInput,
-  ChkInput,
   autofillNomMin,
   SelInput,
   categorizeCarriers,
   CarrierGroupSelect,
   SectionHdr,
-  BusSelect,
   MiniProfileChart,
   CardShell,
   EditShell,
@@ -485,6 +482,12 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   const { data: carriers = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'), queryFn: networkApi.getCarriers, staleTime: 60_000 })
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses, staleTime: 30_000 })
   const globalLt = useGlobalDefaultLifetime()
+  // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
+  // Investment is typed as the overnight cost per kWh; the annualised capital
+  // cost is derived and shown read-only.
+  const { data: schema } = useAssetSchema('Store')
+  const specs = schemaFields(schema)
+  const asset = store as unknown as Record<string, unknown>
 
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteStore(store.name),
@@ -493,43 +496,16 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   })
 
   const saveMut = useMutation({
-    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate.
+    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
+    // the schema's descriptors own the form→patch mapping.
     mutationFn: () => updateAsset<Store>(
       qc, useUIStore.getState().currentProject, 'stores', store.name,
       (current) => {
-      const newName = form.name?.trim() || store.name
-      const newBus = (form.bus as string | undefined)?.trim() || store.bus
-      const payload: Partial<Store> = {
-        name: newName, bus: newBus,
-        carrier: form.carrier || current.carrier,
-        e_nom: nf(form, 'e_nom', current.e_nom),
-        e_nom_extendable: form.e_nom_extendable === 'true',
-        e_nom_min: nf(form, 'e_nom_min', current.e_nom_min ?? 0),
-        e_min_pu: nf(form, 'e_min_pu', current.e_min_pu),
-        e_max_pu: nf(form, 'e_max_pu', current.e_max_pu),
-        e_initial: nf(form, 'e_initial', current.e_initial),
-        e_cyclic: form.e_cyclic === 'true',
-        // Cost fields: blank ⇒ save 0 (deliberate clear), not the old value.
-        capital_cost: nf(form, 'capital_cost', 0),
-        marginal_cost: nf(form, 'marginal_cost', 0),
-        fom_cost: nf(form, 'fom_cost', 0),
-        standing_loss: nf(form, 'standing_loss', current.standing_loss),
-      }
-      // Optional bounds + per-asset overrides — assign unconditionally so
-      // blanking clears the field on the backend (see GeneratorCard).
-      payload.e_nom_max = no(form, 'e_nom_max')
-      payload.overnight_cost = no(form, 'overnight_cost')
-      const drPct = no(form, 'discount_rate_pct')
-      payload.discount_rate = drPct === null ? null : drPct / 100
-      // Multi-period gates. build_year=0 ⇒ "exists from the start" (PyPSA
-      // default). lifetime=null ⇒ infinite (never retires); user can leave
-      // blank to fall back to the solver's default_lifetime at solve time.
-      payload.build_year = ni(form, 'build_year', current.build_year ?? 0)
-      payload.lifetime = no(form, 'lifetime')
-      // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
-      Object.assign(payload, outagePayload(form))
-      // Extras last: the ...current spread and the explicit payload.X = no(...)
-      // lines above would otherwise overwrite a value the user just typed.
+      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Store>
+      payload.name = form.name?.trim() || store.name
+      payload.bus = (form.bus as string | undefined)?.trim() || store.bus
+      payload.carrier = form.carrier || current.carrier
+      // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Store'))))
       return payload
     }),
@@ -543,11 +519,9 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   })
 
   const startEdit = () => {
-    const base = toFS(store, ['name', 'bus', 'carrier', 'outage_rate_value', 'outage_rate_basis', 'mttr_hours', 'e_nom', 'e_nom_extendable', 'e_nom_min', 'e_nom_max',
-      'e_min_pu', 'e_max_pu', 'e_initial', 'e_cyclic', 'capital_cost', 'marginal_cost', 'fom_cost',
-      'overnight_cost', 'standing_loss', 'build_year'])
+    const base = seedForm(specs, asset)
     base.lifetime = defaultLifetime(store.lifetime, globalLt)
-    setForm(seedExtras(store, { ...base, discount_rate_pct: discountRatePct(store.discount_rate) }, loadExtras(editScope('Store'))))
+    setForm(seedExtras(store, base, loadExtras(editScope('Store'))))
     setOpen(true)
   }
 
@@ -561,30 +535,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, store.name])
 
-  const isExt = form.e_nom_extendable === 'true'
-
-  const items: ExpandedItem[] = [
-    { label: 'e_nom',         value: store.e_nom,                              unit: ' MWh',   tip: docTip('store.e_nom') },
-    { label: 'Extendable',    value: store.e_nom_extendable,                                  tip: docTip('store.e_nom_extendable') },
-    { label: 'e_nom_min',     value: store.e_nom_extendable ? store.e_nom_min : null,        unit: ' MWh', tip: docTip('store.e_nom_min') },
-    { label: 'e_nom_max',     value: store.e_nom_extendable ? store.e_nom_max ?? null : null, unit: ' MWh', tip: docTip('store.e_nom_max') },
-    { label: 'e_min_pu',      value: store.e_min_pu,                                         tip: docTip('store.e_min_pu') },
-    { label: 'e_max_pu',      value: store.e_max_pu,                                         tip: docTip('store.e_max_pu') },
-    { label: 'e_initial',     value: store.e_cyclic ? null : store.e_initial,  unit: ' MWh', tip: docTip('store.e_initial') },
-    { label: 'Cyclic SoE',    value: store.e_cyclic,                                         tip: docTip('store.e_cyclic') },
-    { label: 'Capital cost',  value: store.capital_cost,                       unit: ' €/MWh/yr', tip: docTip('store.capital_cost') },
-    { label: 'Marginal cost', value: store.marginal_cost,                      unit: ' €/MWh', tip: docTip('store.marginal_cost') },
-    { label: 'FOM cost',      value: store.fom_cost ?? null,                   unit: ' €/MWh/yr', tip: docTip('store.fom_cost') },
-    { label: 'Overnight cost', value: store.overnight_cost ?? null,            unit: ' €/MWh',    tip: docTip('store.overnight_cost') },
-    { label: 'Discount rate',
-      value: store.discount_rate != null && Number.isFinite(store.discount_rate)
-        ? Number((store.discount_rate * 100).toFixed(3)) : null,
-      unit: ' %',
-      tip: 'Per-asset discount rate. Blank means the global rate from Solver Settings is used.' },
-    { label: 'Standing loss', value: store.standing_loss,                      unit: ' /h',   tip: docTip('store.standing_loss') },
-    { label: 'Build year',    value: store.build_year,                                       tip: docTip('store.build_year') },
-    { label: 'Lifetime',      value: store.lifetime ?? null,                   unit: ' yr',  tip: docTip('store.lifetime') },
-  ]
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset)
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {
@@ -623,49 +574,32 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
 
   return (
     <EditShell title={store.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
-      <TxtInput label="Name" k="name" fs={form} set={setForm} tip={docTip('store.name')} />
-      <CarrierGroupSelect k="carrier" fs={form} set={setForm} carriers={carriers as Carrier[]} tip={docTip('store.carrier')} />
-      <SectionHdr title="Topology" />
-      <BusSelect k="bus" fs={form} set={setForm} buses={buses as Bus[]} tip={docTip('store.bus')} />
       <div className="col-span-2 text-[9px] text-muted bg-border/20 rounded px-2 py-1.5 leading-tight">
         {isH2Store
-          ? <>A <strong>Store</strong> is a pure energy vessel — power throughput is unlimited and bounded only by connected Links (electrolyzers/fuel cells). Set <code>e_nom</code> for tank capacity. 1 MWh ≈ 29.8 kg H₂ (LHV).</>
-          : <>A <strong>Store</strong> has no intrinsic power limit — charge/discharge rate is set by connected components. Only energy capacity (<code>e_nom</code>) constrains storage.</>}
+          ? <>A <strong>Store</strong> is a pure energy vessel — power throughput is unlimited and bounded only by connected Links (electrolyzers/fuel cells). Set the energy capacity for the tank. 1 MWh ≈ 29.8 kg H₂ (LHV).</>
+          : <>A <strong>Store</strong> has no intrinsic power limit — charge/discharge rate is set by connected components. Only the energy capacity constrains storage.</>}
       </div>
-      <SectionHdr title="Energy Capacity" />
-      <NumInput label="e_nom (nominal)" k="e_nom" fs={form} set={setForm} unit="MWh" tip={docTip('store.e_nom')} />
-      <ChkInput label="Extendable" k="e_nom_extendable" fs={form} set={setForm} tip={docTip('store.e_nom_extendable')} onCheck={autofillNomMin('e_nom', 'e_nom_min')} />
-      {isExt && <NumInput label="e_nom_min" k="e_nom_min" fs={form} set={setForm} unit="MWh" tip={docTip('store.e_nom_min')} />}
-      {isExt && <NumInput label="e_nom_max" k="e_nom_max" fs={form} set={setForm} unit="MWh" tip={docTip('store.e_nom_max')} />}
-      {isExt && (
-        <div className="col-span-2 -mt-0.5">
-          <button type="button" onClick={() => setVintageOpen(true)}
-            className="text-[11px] text-accent hover:underline">
-            Per-period bounds…
-          </button>
-          <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
-        </div>
-      )}
+      {schema ? (
+        <AssetFieldsEdit
+          schema={schema} fs={form} set={setForm} current={asset}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]}
+          onCheck={{ e_nom_extendable: autofillNomMin('e_nom', 'e_nom_min') }}
+          after={{
+            e_nom_max: (
+              <div className="col-span-2 -mt-0.5">
+                <button type="button" onClick={() => setVintageOpen(true)}
+                  className="text-[11px] text-accent hover:underline">
+                  Per-period bounds…
+                </button>
+                <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
+              </div>
+            ),
+          }}
+        />
+      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
       {vintageOpen && (
         <VintagePeriodBoundsModal componentClass="Store" name={store.name} onClose={() => setVintageOpen(false)} />
       )}
-      <SectionHdr title="State of Energy Limits" />
-      <NumInput label="e_min_pu (SoE min)" k="e_min_pu" fs={form} set={setForm} tip={docTip('store.e_min_pu')} />
-      <NumInput label="e_max_pu (SoE max)" k="e_max_pu" fs={form} set={setForm} tip={docTip('store.e_max_pu')} />
-      <NumInput label="e_initial" k="e_initial" fs={form} set={setForm} tip={docTip('store.e_initial')} />
-      <ChkInput label="Cyclic SoE" k="e_cyclic" fs={form} set={setForm} tip={docTip('store.e_cyclic')} />
-      <SectionHdr title="Costs" />
-      <NumInput label="Capital cost" k="capital_cost" fs={form} set={setForm} unit="€/MWh/yr" tip={docTip('store.capital_cost')} />
-      <NumInput label="Marginal cost" k="marginal_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('store.marginal_cost')} />
-      <NumInput label="FOM cost" k="fom_cost" fs={form} set={setForm} unit="€/MWh/yr" tip={docTip('store.fom_cost')} />
-      <NumInput label="Overnight cost" k="overnight_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('store.overnight_cost')} />
-      <DiscountRateInput fs={form} set={setForm} tip="Discount rate used to annuitize overnight_cost for this asset. Leave blank to use the global rate from Solver Settings." />
-      <NumInput label="Standing loss" k="standing_loss" fs={form} set={setForm} unit="/h" tip={docTip('store.standing_loss')} />
-      <SectionHdr title="Adequacy" />
-      <OutageInputs fs={form} set={setForm} />
-      <SectionHdr title="Lifecycle (multi-period)" />
-      <BuildYearSelect fs={form} set={setForm} tip={docTip('store.build_year')} />
-      <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip="Asset lifetime in years. Defaults to the global default_lifetime from Solver Settings." />
       <ExtrasSection
         componentClass="Store"
         fs={form}
@@ -677,7 +611,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
 }
 
 // ── Load card ──────────────────────────────────────────────────────────────────
-function LoadCard({ load, onRename, mode = 'card', title }: {
+export function LoadCard({ load, onRename, mode = 'card', title }: {
   load: Load
   onRename?: (newName: string) => void
   mode?: 'card' | 'detail'
@@ -708,26 +642,24 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
     onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
+  // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
+  const { data: schema } = useAssetSchema('Load')
+  const specs = schemaFields(schema)
+  const asset = load as unknown as Record<string, unknown>
+
   const saveMut = useMutation({
-    mutationFn: () => {
-      const newName = form.name?.trim() || load.name
-      // `form.bus` carries the user's pick from the bus selector. Fall back
-      // to the existing load.bus when the form value is missing (e.g. legacy
-      // open before this field existed). The selector renders the current
-      // bus pre-selected so a user who doesn't touch it keeps the same bus.
-      const newBus = (form.bus as string | undefined)?.trim() || load.bus
-      // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
-      // this builder is only the form→patch mapping.
-      return updateAsset<Load>(
-        qc, useUIStore.getState().currentProject, 'loads', load.name,
-        (current) => ({
-          name: newName, bus: newBus,
-          carrier: form.carrier || current.carrier,
-          p_set: nf(form, 'p_set', current.p_set),
-          q_set: nf(form, 'q_set', current.q_set ?? 0),
-          sign: nf(form, 'sign', current.sign ?? -1),
-        }))
-    },
+    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
+    // the schema's descriptors own the form→patch mapping.
+    mutationFn: () => updateAsset<Load>(
+      qc, useUIStore.getState().currentProject, 'loads', load.name,
+      (current) => {
+        const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Load>
+        payload.name = form.name?.trim() || load.name
+        payload.bus = (form.bus as string | undefined)?.trim() || load.bus
+        payload.carrier = form.carrier || current.carrier
+        Object.assign(payload, extrasPatch(form, loadExtras(editScope('Load'))))
+        return payload
+      }),
     onSuccess: () => {
       setOpen(false)
       toast.success('Load saved')
@@ -738,7 +670,7 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
   })
 
   const startEdit = () => {
-    setForm(seedExtras(load, toFS(load, ['name', 'bus', 'carrier', 'p_set', 'q_set', 'sign']), loadExtras(editScope('Load'))))
+    setForm(seedExtras(load, seedForm(specs, asset), loadExtras(editScope('Load'))))
     setOpen(true)
   }
 
@@ -751,11 +683,7 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, load.name])
 
-  const items: ExpandedItem[] = [
-    { label: 'p_set (static)', value: load.p_set,        unit: ' MW',   tip: docTip('load.p_set') },
-    { label: 'q_set',          value: load.q_set,        unit: ' MVAr', tip: docTip('load.q_set') },
-    { label: 'Sign',           value: load.sign,                        tip: docTip('load.sign') },
-  ]
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset)
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {
@@ -814,14 +742,12 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
 
   return (
     <EditShell title={load.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
-      <TxtInput label="Name" k="name" fs={form} set={setForm} tip={docTip('load.name')} />
-      <CarrierGroupSelect k="carrier" fs={form} set={setForm} carriers={carriers as Carrier[]} tip={docTip('load.carrier')} />
-      <SectionHdr title="Topology" />
-      <BusSelect k="bus" fs={form} set={setForm} buses={buses as Bus[]} tip={docTip('load.bus')} />
-      <SectionHdr title="Set Points" />
-      <NumInput label="p_set (static)" k="p_set" fs={form} set={setForm} unit="MW" tip={docTip('load.p_set')} />
-      <NumInput label="q_set" k="q_set" fs={form} set={setForm} unit="MVAr" tip={docTip('load.q_set')} />
-      <NumInput label="Sign" k="sign" fs={form} set={setForm} tip={docTip('load.sign')} />
+      {schema ? (
+        <AssetFieldsEdit
+          schema={schema} fs={form} set={setForm} current={asset}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]}
+        />
+      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
       <SectionHdr title="Time Series" />
       <div className="flex items-center gap-2 py-1">
         <div className={`w-3 h-3 rounded-sm border flex items-center justify-center shrink-0 ${hasProfile ? 'bg-success border-success' : 'bg-bg border-border'}`}>
@@ -909,6 +835,12 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   const { data: carriers = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'), queryFn: networkApi.getCarriers, staleTime: 60_000 })
   const { data: buses = [] }    = useQuery({ queryKey: nk(currentProject, 'buses'),    queryFn: networkApi.getBuses,    staleTime: 30_000 })
   const globalLt = useGlobalDefaultLifetime()
+  // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
+  // Investment is typed as the overnight cost per kW of input; the annualised
+  // capital cost is derived and shown read-only.
+  const { data: schema } = useAssetSchema('Link')
+  const specs = schemaFields(schema)
+  const asset = link as unknown as Record<string, unknown>
 
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteLink(link.name),
@@ -924,36 +856,13 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
     mutationFn: () => updateAsset<Link>(
       qc, useUIStore.getState().currentProject, 'links', link.name,
       (current) => {
-      const newName = form.name?.trim() || link.name
-      const payload: Partial<Link> = {
-        name: newName,
-        bus0: form.bus0 || current.bus0,
-        bus1: form.bus1 || current.bus1,
-        carrier: form.carrier || current.carrier,
-        p_nom: nf(form, 'p_nom', current.p_nom),
-        p_nom_extendable: form.p_nom_extendable === 'true',
-        p_nom_min: nf(form, 'p_nom_min', current.p_nom_min ?? 0),
-        p_min_pu: nf(form, 'p_min_pu', current.p_min_pu ?? 0),
-        p_max_pu: nf(form, 'p_max_pu', current.p_max_pu ?? 1),
-        efficiency: nf(form, 'efficiency', current.efficiency),
-        // Cost fields: blank ⇒ save 0 (deliberate clear), not the old value.
-        marginal_cost: nf(form, 'marginal_cost', 0),
-        capital_cost: nf(form, 'capital_cost', 0),
-        fom_cost: nf(form, 'fom_cost', 0),
-        build_year: ni(form, 'build_year', current.build_year ?? 2025),
-      }
-      // Optional bounds + per-asset overrides — assign unconditionally so
-      // blanking clears the field on the backend (see GeneratorCard).
-      payload.p_nom_max = no(form, 'p_nom_max')
-      payload.lifetime = no(form, 'lifetime')
-      payload.overnight_cost = no(form, 'overnight_cost')
-      const drPct = no(form, 'discount_rate_pct')
-      payload.discount_rate = drPct === null ? null : drPct / 100
-      // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
-      Object.assign(payload, outagePayload(form))
+      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Link>
+      payload.name = form.name?.trim() || link.name
+      payload.bus0 = form.bus0 || current.bus0
+      payload.bus1 = form.bus1 || current.bus1
+      payload.carrier = form.carrier || current.carrier
       Object.assign(payload, ehLinkPayload(form, current))
-      // Extras last: the ...current spread and the explicit payload.X = no(...)
-      // lines above would otherwise overwrite a value the user just typed.
+      // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Link'))))
       return payload
     }),
@@ -967,15 +876,9 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   })
 
   const startEdit = () => {
-    const base = toFS(link, ['name', 'carrier', 'bus0', 'bus1', 'outage_rate_value', 'outage_rate_basis', 'mttr_hours', 'p_nom', 'p_nom_extendable', 'p_nom_min', 'p_nom_max',
-      'p_min_pu', 'p_max_pu', 'efficiency', 'marginal_cost', 'capital_cost', 'fom_cost',
-      'overnight_cost', 'build_year', 'lifetime'])
+    const base = seedForm(specs, asset)
     base.lifetime = defaultLifetime(link.lifetime, globalLt)
-    setForm(seedExtras(link, {
-      ...base,
-      discount_rate_pct: discountRatePct(link.discount_rate),
-      eh_role: link.eh_role ?? '',
-    }, loadExtras(editScope('Link'))))
+    setForm(seedExtras(link, { ...base, eh_role: link.eh_role ?? '' }, loadExtras(editScope('Link'))))
     setOpen(true)
   }
 
@@ -989,8 +892,6 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, link.name])
 
-  const isExt = form.p_nom_extendable === 'true'
-
   const bus0Obj = (buses as Bus[]).find(b => b.name === link.bus0)
   const bus1Obj = (buses as Bus[]).find(b => b.name === link.bus1)
   const flowLabel = category === 'electrolyzer'
@@ -999,27 +900,11 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
     ? `${bus0Obj?.carrier ?? 'H₂'} → ${bus1Obj?.carrier ?? 'AC'}`
     : `${link.bus0} → ${link.bus1}`
 
+  // Both ends lead the read-out: the schema's identity group is not in it.
   const items: ExpandedItem[] = [
-    { label: 'From bus (bus₀)', value: link.bus0,                                 tip: docTip('link.bus0') },
-    { label: 'To bus (bus₁)',   value: link.bus1,                                 tip: docTip('link.bus1') },
-    { label: 'p_nom',           value: link.p_nom,             unit: ' MW',       tip: docTip('link.p_nom') },
-    { label: 'Extendable',      value: link.p_nom_extendable,                     tip: docTip('link.p_nom_extendable') },
-    { label: 'p_nom_min',       value: link.p_nom_extendable ? link.p_nom_min : null, unit: ' MW', tip: docTip('link.p_nom_min') },
-    { label: 'p_nom_max',       value: link.p_nom_extendable ? link.p_nom_max ?? null : null, unit: ' MW', tip: docTip('link.p_nom_max') },
-    { label: 'Efficiency',      value: link.efficiency,                            tip: docTip('link.efficiency') },
-    { label: 'p_min_pu',        value: link.p_min_pu,                              tip: docTip('link.p_min_pu') },
-    { label: 'p_max_pu',        value: link.p_max_pu,                              tip: docTip('link.p_max_pu') },
-    { label: 'Marginal cost',   value: link.marginal_cost,     unit: ' €/MWh',     tip: docTip('link.marginal_cost') },
-    { label: 'Capital cost',    value: link.capital_cost,      unit: ' €/MW/yr',      tip: docTip('link.capital_cost') },
-    { label: 'FOM cost',        value: link.fom_cost ?? null,  unit: ' €/MW/yr',   tip: docTip('link.fom_cost') },
-    { label: 'Overnight cost',  value: link.overnight_cost ?? null, unit: ' €/MW',  tip: docTip('link.overnight_cost') },
-    { label: 'Discount rate',
-      value: link.discount_rate != null && Number.isFinite(link.discount_rate)
-        ? Number((link.discount_rate * 100).toFixed(3)) : null,
-      unit: ' %',
-      tip: 'Per-asset discount rate. Blank means the global rate from Solver Settings is used.' },
-    { label: 'Build year',      value: link.build_year,                            tip: docTip('link.build_year') },
-    { label: 'Lifetime',        value: link.lifetime ?? null,  unit: ' yr',        tip: docTip('link.lifetime') },
+    { label: 'From bus', value: link.bus0, tip: docTip('link.bus0') },
+    { label: 'To bus', value: link.bus1, tip: docTip('link.bus1') },
+    ...assetReadoutItems(schema, asset),
   ]
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
@@ -1101,8 +986,6 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
 
   return (
     <EditShell title={link.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
-      <TxtInput label="Name" k="name" fs={form} set={setForm} tip={docTip('link.name')} />
-      <CarrierGroupSelect k="carrier" fs={form} set={setForm} carriers={carriers as Carrier[]} tip={docTip('link.carrier')} />
       {(category === 'electrolyzer' || category === 'fuel_cell') && (
         <div className="col-span-2 text-[9px] text-muted bg-border/20 rounded px-2 py-1.5 leading-tight">
           {category === 'electrolyzer'
@@ -1110,63 +993,29 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
             : <>A <strong>fuel cell</strong> consumes H₂ (bus₀) and produces electricity (bus₁). Efficiency = AC MW out / H₂ MW in. Electrolyzer and fuel cell must always be modelled as separate Links.</>}
         </div>
       )}
-      <SectionHdr title="Topology" />
-      <label className="col-span-2 flex flex-col gap-0.5">
-        <span className="text-[9px] text-muted">
-          <InfoTip text={docTip('link.bus0')}>From bus (bus₀) — input / consumption</InfoTip>
-        </span>
-        <select value={form['bus0'] ?? ''} onChange={e => setForm(p => ({ ...p, bus0: e.target.value }))}
-          className="bg-bg border border-border rounded px-1.5 py-0.5 text-[10px] focus:outline-none focus:border-accent w-full">
-          {(buses as Bus[]).map(b => (
-            <option key={b.name} value={b.name}>{b.name}{b.carrier ? ` (${b.carrier})` : ''}</option>
-          ))}
-        </select>
-      </label>
-      <label className="col-span-2 flex flex-col gap-0.5">
-        <span className="text-[9px] text-muted">
-          <InfoTip text={docTip('link.bus1')}>To bus (bus₁) — output / production</InfoTip>
-        </span>
-        <select value={form['bus1'] ?? ''} onChange={e => setForm(p => ({ ...p, bus1: e.target.value }))}
-          className="bg-bg border border-border rounded px-1.5 py-0.5 text-[10px] focus:outline-none focus:border-accent w-full">
-          {(buses as Bus[]).map(b => (
-            <option key={b.name} value={b.name}>{b.name}{b.carrier ? ` (${b.carrier})` : ''}</option>
-          ))}
-        </select>
-      </label>
-      <SectionHdr title="Capacity" />
-      <NumInput label="p_nom" k="p_nom" fs={form} set={setForm} unit="MW" tip={docTip('link.p_nom')} />
-      <ChkInput label="Extendable" k="p_nom_extendable" fs={form} set={setForm} tip={docTip('link.p_nom_extendable')} onCheck={autofillNomMin('p_nom', 'p_nom_min')} />
-      {isExt && <NumInput label="p_nom_min" k="p_nom_min" fs={form} set={setForm} unit="MW" tip={docTip('link.p_nom_min')} />}
-      {isExt && <NumInput label="p_nom_max" k="p_nom_max" fs={form} set={setForm} unit="MW" tip={docTip('link.p_nom_max')} />}
-      {isExt && (
-        <div className="col-span-2 -mt-0.5">
-          <button type="button" onClick={() => setVintageOpen(true)}
-            className="text-[11px] text-accent hover:underline">
-            Per-period bounds…
-          </button>
-          <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
-        </div>
-      )}
+      {schema ? (
+        <AssetFieldsEdit
+          schema={schema} fs={form} set={setForm} current={asset}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]}
+          onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
+          after={{
+            p_nom_max: (
+              <div className="col-span-2 -mt-0.5">
+                <button type="button" onClick={() => setVintageOpen(true)}
+                  className="text-[11px] text-accent hover:underline">
+                  Per-period bounds…
+                </button>
+                <span className="ml-2 text-[10px] text-muted">override Min/Max per investment period</span>
+              </div>
+            ),
+          }}
+        />
+      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
       {vintageOpen && (
         <VintagePeriodBoundsModal componentClass="Link" name={link.name} onClose={() => setVintageOpen(false)} />
       )}
-      <SectionHdr title="Operation" />
-      <NumInput label="Efficiency" k="efficiency" fs={form} set={setForm} tip={docTip('link.efficiency')} />
-      <NumInput label="p_min_pu" k="p_min_pu" fs={form} set={setForm} tip={docTip('link.p_min_pu')} />
-      <NumInput label="p_max_pu (static)" k="p_max_pu" fs={form} set={setForm} tip={docTip('link.p_max_pu')} />
-      <SectionHdr title="Costs" />
-      <NumInput label="Marginal cost" k="marginal_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('link.marginal_cost')} />
-      <NumInput label="Capital cost" k="capital_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('link.capital_cost')} />
-      <NumInput label="FOM cost" k="fom_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('link.fom_cost')} />
-      <NumInput label="Overnight cost" k="overnight_cost" fs={form} set={setForm} unit="€/MW" tip={docTip('link.overnight_cost')} />
-      <DiscountRateInput fs={form} set={setForm} tip="Discount rate used to annuitize overnight_cost for this asset. Leave blank to use the global rate from Solver Settings." />
-      <SectionHdr title="Adequacy" />
-      <OutageInputs fs={form} set={setForm} />
       <SectionHdr title="Energy Hub" />
       <EhLinkInputs fs={form} set={setForm} />
-      <SectionHdr title="Lifecycle" />
-      <BuildYearSelect fs={form} set={setForm} tip={docTip('link.build_year')} />
-      <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip={docTip('link.lifetime')} />
       <ExtrasSection
         componentClass="Link"
         fs={form}

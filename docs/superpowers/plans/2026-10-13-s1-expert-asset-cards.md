@@ -78,3 +78,18 @@ U3 needs only S1a + S1b, for the guided question's two assets (spec :442).
 - **Units:** the descriptors say EUR and the cards say € (`unitLabel`).
 - **Frontend tests** render from `src/test/fixtures/assetSchema.json`. It is generated from the backend descriptors, and `test_the_frontend_fixture_matches_the_descriptors` fails when they drift. `vitest.setup.ts` mocks `useAssetSchema` with it.
 - **A battery priced the old way** (one `overnight_cost`, no parts) keeps that cost and shows a note: enter the two parts to replace it. The clone button offers the overnight cost only for such a unit; a battery's parts ride along in the `...su` spread.
+
+## S1c decisions (14 Oct)
+
+- **S1c ships in two PRs.**
+  - **S1c-1:** Store, Load and Link.
+  - **S1c-2:** Line and Transformer. A line's investment is a per-km part: `inv_per_km_overnight`, with `overnight_cost = per_km × length` written by derive and re-derived when the line lengths are recalculated (`network_lines.apply_recalculate_line_lengths`). A Transformer has the same schema without that part.
+- **Store and Link price like the Generator.**
+  - The overnight cost is typed (€/kWh for a Store, which sizes energy; €/kW for a Link).
+  - `capital_cost` becomes a read-only derived row: overnight × annuity, as PyPSA charges it.
+  - A Store or Link priced by a bare `capital_cost` keeps it, and the row shows that column.
+- **Percentages:**
+  - Store: `e_min_pu`, `e_max_pu` and `standing_loss` are typed as %.
+  - Link: `efficiency`, `p_min_pu` and `p_max_pu` are typed as %.
+- **Reveal rules:** `e_initial` shows only while the Store is not cyclic. The capacity bounds show only while the asset is extendable.
+- **Kept outside the descriptors:** the Link card's Energy Hub inputs, the per-period bounds buttons, the Load profile UI and the extras section stay as they were. The descriptors render around them.
