@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase} from 'lucide-react'
+import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase} from 'lucide-react'
 import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
@@ -23,6 +23,8 @@ import FmeaTab from './results/FmeaTab'
 import InvestmentTab from './results/InvestmentTab'
 import StorageCycling from './results/StorageCycling'
 import AssetDetail from './results/asset/AssetDetail'
+import SummaryTab from './results/SummaryTab'
+import type { SimulationStatus } from '../api/types'
 import { PageHeader } from '../components/PageKit'
 import {
   desiredFromDrag,
@@ -39,13 +41,13 @@ import {
 // at the top so the user always sees solve metadata regardless of tab.
 
 type ResultsTab =
-  | 'overview' | 'capex' | 'dispatch' | 'loadflow' | 'prices' | 'emissions'
+  | 'summary' | 'overview' | 'capex' | 'dispatch' | 'loadflow' | 'prices' | 'emissions'
   | 'economics' | 'curtailment' | 'lostload' | 'adequacy' | 'storage'
   | 'asset' | 'fmea' | 'investment'
 const RESULTS_TAB_KEY = 'results:active-tab'
 
 const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
-  'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
+  'summary', 'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
   'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset',
   'fmea', 'investment',
 ])
@@ -55,7 +57,18 @@ function loadInitialTab(): ResultsTab {
     const v = localStorage.getItem(RESULTS_TAB_KEY)
     if (v && VALID_TABS.has(v as ResultsTab)) return v as ResultsTab
   } catch { /* ignore */ }
-  return 'dispatch'
+  return 'summary'
+}
+
+// M3 (plan 2026-10-14-m3-results-summary.md): Results opens on Summary after
+// each new solve, then keeps the tab the user picks until the next one. A
+// solve is told apart by its condition, objective and solve time; the last
+// one seen is remembered beside the active tab.
+const SOLVE_SEEN_KEY = 'results:solve-seen'
+
+function solveSignature(s: SimulationStatus | undefined): string | null {
+  if (!s || s.running || s.objective == null) return null
+  return `${s.condition ?? ''}|${s.objective}|${s.solve_time ?? ''}`
 }
 
 // `multiOnly` tabs appear only for multi-period results — the Overview
@@ -64,6 +77,7 @@ function loadInitialTab(): ResultsTab {
 // (guided-mode spec §3.5): Guided keeps adequacy and FMEA, the two the
 // hub-design flow reads.
 const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip: string; multiOnly?: boolean; expertOnly?: boolean }> = [
+  { id: 'summary',    label: 'Summary',            Icon: Gauge,            tip: 'The solve at a glance: cost, emissions, adequacy and the key capacities, each linking to its tab' },
   { id: 'overview',   label: 'Overview',           Icon: Layers,           tip: 'Per-period economics, generation mix & storage — the whole horizon at a glance', multiOnly: true, expertOnly: true },
   { id: 'capex',      label: 'Capacity Expansion', Icon: TrendingUp,       tip: 'CAPEX, OPEX, sized assets', expertOnly: true },
   { id: 'dispatch',   label: 'Dispatch',           Icon: Activity,         tip: 'Per-snapshot generation, storage, loads', expertOnly: true },
@@ -89,6 +103,7 @@ const GUIDED_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>(
 // so opening the docked comparison rail starts on the same metric. Most IDs
 // match; only the four below differ between the two tab vocabularies.
 const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
+  summary: 'overview',
   overview: 'overview',
   capex: 'capacity',
   dispatch: 'dispatch',
@@ -353,6 +368,19 @@ export default function Results() {
     queryFn: simulationApi.getStatus,
     refetchInterval: (q) => (q.state.data?.running ? 1500 : false),
   })
+
+  // A solve not seen on this page yet opens Summary, unless a tab was asked
+  // for explicitly (the assistant's results_tab, an asset link): that wins.
+  const signature = solveSignature(status)
+  useEffect(() => {
+    if (!signature) return
+    let seen: string | null = null
+    try { seen = localStorage.getItem(SOLVE_SEEN_KEY) } catch { /* ignore */ }
+    if (seen === signature) return
+    try { localStorage.setItem(SOLVE_SEEN_KEY, signature) } catch { /* ignore */ }
+    if (requestedTab == null) setTab('summary')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature])
 
   // ── Horizon filter ─────────────────────────────────────────────────────
   // An expandable date-from / date-to filter at the top of the panel. When
@@ -745,6 +773,7 @@ export default function Results() {
               const t = (effectiveTab === 'overview' && uniquePeriods.length === 0) ? 'dispatch' : effectiveTab
               return (
                 <>
+                  {t === 'summary'     && <SummaryTab onOpenTab={pickTab} />}
                   {t === 'overview'    && <AggregatedResultsBody />}
                   {t === 'capex'       && <CapacityExpansion />}
                   {t === 'dispatch'    && <Dispatch />}
