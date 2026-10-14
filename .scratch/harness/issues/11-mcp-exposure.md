@@ -38,4 +38,5 @@ shim is the remaining follow-up.
 2026-10-14 (follow-up): the stdio shim `pypsa-gui/backend/mcp_stdio.py` and the
 hardening from the review of #237 (spec §Build order step 4). A shim inside the
 frozen desktop bundle (a `pypsa-gui mcp` subcommand) would be a launcher entry
-point; not built.
+point. **Owner decision 2026-10-14: not now.** The standalone script stays as it
+is; do not add a bundle subcommand without a new decision.

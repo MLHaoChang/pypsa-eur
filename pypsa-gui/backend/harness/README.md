@@ -112,6 +112,9 @@ On the desktop (local mode), an agent on this machine drives the app through
 client that speaks Streamable HTTP can use them directly. A stdio client runs
 `python pypsa-gui/backend/mcp_stdio.py`, which reads the file for every message
 and forwards it, so the desktop's per-launch port never has to be configured.
+The frozen desktop bundle deliberately has **no** `pypsa-gui mcp` subcommand
+(owner decision, 2026-10-14): the script stays standalone, and a bundle-only
+user connects an HTTP-capable client with the endpoint file instead.
 
 * Every call goes through `loop.dispatch_tool_call` with write and above
   carded; the card waits in the panel's external-agent strip.
