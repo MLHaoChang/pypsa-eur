@@ -1,6 +1,6 @@
 # Plan: Economics in Expert
 
-**Date:** 2026-10-14. **Status:** file split agreed with IC (14 Oct); E0 is IC's, E1 is built. **Owner decision:** the owner picked this slice
+**Date:** 2026-10-14. **Status:** file split agreed with IC (14 Oct); E0 merged (#229); E1 and E2 built, shipped together in one PR. **Owner decision:** the owner picked this slice
 on 14 Oct (relayed by the coordinator), after S1 (Expert asset cards from the asset schema) was finished.
 **Source:** the umbrella plan `2026-10-05-one-investment-engine-two-faces.md` §11, row "Economics in Expert: M4
 cost-mode control becomes the S1 asset cards of §10; S2 Economics section hosting IC's editors"; the UX
@@ -92,3 +92,12 @@ Rules:
 - The rates form sends only `discount_rate` and `inflation_rate` (the route merges a partial config) and shares the
   `solverConfig` query with Solver Settings.
 - The assistant: `ui_open_panel` takes `economics` / `Economics`.
+
+## 8. E2 as built (14 Oct, same PR as E1)
+
+E0 (#229) landed before E1 had a PR, so E2 rides in the same PR: one CI cycle instead of two.
+- Basis mounts IC's `SiteConnectionSection` with the Investment tab's query (`nk(project, 'commercial', 'config')`,
+  shared cache) and `needed` = no `poc_link`. Before a solve no result says the root is missing, so that is the
+  whole condition (IC's note on E0).
+- Tariffs & contracts mounts `TariffSection`, `ContractsEditor` and `ParticipantsDesigner`; Library mounts
+  `LibraryBrowser`. None is changed.

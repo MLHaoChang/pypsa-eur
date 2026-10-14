@@ -12,6 +12,20 @@ import type { AssetCostsPayload, ProvenanceEntry } from '../../api/assetSchema'
 vi.mock('../results/investment/FinanceInputsEditor', () => ({
   default: () => <div data-testid="ic-finance-inputs" />,
 }))
+// IC's editors, mounted as they are (E0): stubs that show what the panel passes.
+vi.mock('../results/investment/SiteConnectionSection', () => ({
+  default: ({ config, needed }: { config: { poc_link?: string } | null; needed: boolean }) =>
+    <div data-testid="ic-site" data-needed={String(needed)} data-poc={config?.poc_link ?? ''} />,
+}))
+vi.mock('../results/investment/TariffSection', () => ({ default: () => <div data-testid="ic-tariff" /> }))
+vi.mock('../results/investment/ContractsEditor', () => ({ default: () => <div data-testid="ic-contracts" /> }))
+vi.mock('../results/investment/ParticipantsDesigner', () => ({ default: () => <div data-testid="ic-participants" /> }))
+vi.mock('../results/investment/LibraryBrowser', () => ({ default: () => <div data-testid="ic-library" /> }))
+const getCommercial = vi.hoisted(() => vi.fn())
+vi.mock('../../api/commercial', async (orig) => {
+  const actual = await orig<typeof import('../../api/commercial')>()
+  return { ...actual, commercialApi: { ...actual.commercialApi, getCommercial } }
+})
 const costs = vi.hoisted(() => vi.fn())
 vi.mock('../../api/assetSchema', async (orig) => {
   const actual = await orig<typeof import('../../api/assetSchema')>()
@@ -63,6 +77,7 @@ function renderPanel(cfg: Record<string, unknown> = { discount_rate: 0.07, infla
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: 'economics', selectedComponent: null })
   costs.mockResolvedValue(PAYLOAD)
+  getCommercial.mockResolvedValue({})
 })
 afterEach(() => { cleanup(); vi.clearAllMocks(); useUIStore.setState({ currentProject: null, activeSlidePanel: null }) })
 
@@ -142,5 +157,35 @@ describe('navigation', () => {
     useUIStore.setState({ activeSlidePanel: null })
     applyUiNavigate({ kind: 'navigate', panel_id: id })
     expect(useUIStore.getState().activeSlidePanel).toBe('economics')
+  })
+})
+
+describe('E2: the site connection and IC’s editors', () => {
+  it('a project with no site connection gets the form on the Basis tab, before any solve', async () => {
+    getCommercial.mockResolvedValue({})
+    renderPanel()
+    const site = await screen.findByTestId('ic-site')
+    expect(site.getAttribute('data-needed')).toBe('true')
+    expect(getCommercial).toHaveBeenCalled()
+  })
+
+  it('a project with one gets its summary', async () => {
+    getCommercial.mockResolvedValue({ poc_link: 'grid_import' })
+    renderPanel()
+    const site = await screen.findByTestId('ic-site')
+    expect(site.getAttribute('data-needed')).toBe('false')
+    expect(site.getAttribute('data-poc')).toBe('grid_import')
+  })
+
+  it('the Tariffs & contracts tab mounts the tariff, contracts and participants editors', () => {
+    renderPanel()
+    fireEvent.click(screen.getByRole('tab', { name: 'Tariffs & contracts' }))
+    for (const id of ['ic-tariff', 'ic-contracts', 'ic-participants']) expect(screen.getByTestId(id)).toBeTruthy()
+  })
+
+  it('the Library tab mounts the library browser', () => {
+    renderPanel()
+    fireEvent.click(screen.getByRole('tab', { name: 'Library' }))
+    expect(screen.getByTestId('ic-library')).toBeTruthy()
   })
 })
