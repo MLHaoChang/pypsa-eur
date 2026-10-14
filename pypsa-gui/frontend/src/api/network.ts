@@ -1,5 +1,5 @@
 import client from './client'
-import type { Bus, Carrier, CatalogPayload, Generator, GeneratorProfileMeta, Line, Link, LinkProfileMeta, Load, LoadProfileMeta, LoadAggregate, LoadSection, StorageUnit, Store, Transformer, TransformerType, SnapshotInfo, NetworkMeta, TimeseriesData, TimeseriesInfo } from './types'
+import type { Bus, Carrier, CatalogPayload, ShuntImpedance, Generator, GeneratorProfileMeta, Line, Link, LinkProfileMeta, Load, LoadProfileMeta, LoadAggregate, LoadSection, StorageUnit, Store, Transformer, TransformerType, SnapshotInfo, NetworkMeta, TimeseriesData, TimeseriesInfo } from './types'
 import type { RescalePreview } from '../utils/rescale'
 import type { LengthSource } from './mapLayout'
 
@@ -154,6 +154,13 @@ export const networkApi = {
       '/network/snapshots/weightings.csv', fd,
     ).then(r => r.data)
   },
+
+  // Shunt impedances (M5c): a conductance and susceptance to ground at a bus
+  getShuntImpedances: () => client.get<ShuntImpedance[]>('/network/shunt_impedances').then(r => r.data),
+  createShuntImpedance: (s: Partial<ShuntImpedance>) => client.post('/network/shunt_impedances', s),
+  updateShuntImpedance: (name: string, s: Partial<ShuntImpedance>) =>
+    client.put(`/network/shunt_impedances/${encodeURIComponent(name)}`, s),
+  deleteShuntImpedance: (name: string) => client.delete(`/network/shunt_impedances/${encodeURIComponent(name)}`),
 
   // Global constraints (network-wide policy: CO2 cap, capacity-expansion limits, ...)
   getGlobalConstraints: () =>

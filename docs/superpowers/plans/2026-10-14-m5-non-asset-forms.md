@@ -53,3 +53,15 @@ asset cards (`2026-10-13-s1-expert-asset-cards.md`) are the pattern.
   "pick a carrier" choice, and the period is a choice among the model's periods.
 - **Found on the way, fixed first (#239):** PyPSA reads a carrier-scoped limit's carrier from `carrier_attribute`,
   and the app wrote `carrier`, so those limits never bound. The service now writes both; the form relies on that.
+
+## M5c as built (14 Oct)
+
+- **The API** (`networkApi.get/create/update/deleteShuntImpedance`, the `ShuntImpedance` type) over the routes that
+  already existed, and `shunt_impedances` as an asset-write root, so a chat edit to a shunt invalidates its cache
+  like every other writable class (the derived write-surface test asks for it).
+- **A Shunts tab** in the bottom panel (name, bus, g, b; the shared grid, its bulk edit and paste), and `Shunts` in
+  the assistant's `bottom_tab` enum (`harness/catalogue.py`, the one chat-schema change; the inventory hash of
+  `ui_open_panel` moves with it).
+- **A Properties card** (`layout/properties/ShuntPanel.tsx`): the bus, conductance and susceptance with the
+  descriptors' help, the shared edit form with a bus picker, a rename followed by the selection, and Delete in the
+  panel header. It says that only the AC power flow reads a shunt.

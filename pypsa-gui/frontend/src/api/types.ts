@@ -10,6 +10,10 @@ export interface Bus {
 export interface Carrier {
   name: string; co2_emissions: number; color: string; nice_name: string; unit: string
 }
+/** M5c: a shunt to ground at a bus (`n.shunt_impedances`), read only by the AC power flow. */
+export interface ShuntImpedance {
+  name: string; bus: string; g: number; b: number
+}
 export interface Line {
   // Adequacy occurrence attributes (custom GUI columns, spec §5.4).
   // null/NaN = unset → per-carrier library default at analysis time.

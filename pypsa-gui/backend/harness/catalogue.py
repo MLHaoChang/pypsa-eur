@@ -94,7 +94,7 @@ RESULTS_TAB_ENUM = [
 ]
 BOTTOM_TAB_ENUM = [
     "Log", "History", "Buses", "Lines", "Transformers", "Generators",
-    "Storage", "Stores", "Loads", "Links", "Carriers",
+    "Storage", "Stores", "Loads", "Links", "Carriers", "Shunts",
 ]
 COMPARE_FOCUS_ENUM = [
     "overview", "capacity", "dispatch", "economics", "emissions", "prices",
