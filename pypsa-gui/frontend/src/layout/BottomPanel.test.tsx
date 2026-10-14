@@ -257,8 +257,31 @@ describe('AssetTable active cell — added by Task 11', () => {
 describe('AssetTable headers — D15', () => {
   it('renders the curated COL_LABELS entry where one exists', async () => {
     renderPanel()
-    // COL_LABELS maps v_nom → 'V nom (kV)' (BottomPanel.tsx:46-60).
+    // COL_LABELS maps v_nom → 'V nom'; the catalog appends its unit (kV).
     expect(await screen.findByText('V nom (kV)')).toBeTruthy()
+  })
+
+  // S1d: a described class reads its asset schema — the label and the STORED
+  // unit — so a Store's capital cost is per MWh, which the one shared
+  // 'CC (€/MW/yr)' label used to get wrong.
+  it("a Store's columns read their descriptor labels and stored units", async () => {
+    vi.mocked(networkApi.getStores).mockResolvedValue([{
+      name: 'tank', bus: 'H2', carrier: 'H2', e_nom: 100, e_nom_extendable: false, capital_cost: 1000,
+      marginal_cost: 0,
+    }] as never)
+    renderPanel()
+    await userEvent.click(screen.getByText('Stores'))
+    expect(await screen.findByText('Energy capacity (MWh)')).toBeTruthy()
+    expect(screen.getByText('Capital cost (annualised) (€/MWh/yr)')).toBeTruthy()
+    expect(screen.queryByText('CC (€/MW/yr)')).toBeNull()
+  })
+})
+
+describe('SCHEMA_CLASSES — the classes the asset-schema route describes', () => {
+  it('matches the backend descriptors (the fixture is generated from them)', async () => {
+    const { SCHEMA_CLASSES } = await import('../api/assetSchema')
+    const fixture = (await import('../test/fixtures/assetSchema.json')).default as Record<string, unknown>
+    expect([...SCHEMA_CLASSES].sort()).toEqual(Object.keys(fixture).sort())
   })
 })
 

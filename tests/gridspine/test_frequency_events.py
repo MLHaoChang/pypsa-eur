@@ -321,10 +321,29 @@ def test_the_emt_inputs_by_hand():
     assert e["scr_pcc"] == pytest.approx(2000.0 / 16.5)
     assert e["gfl_share"] == pytest.approx(16.5 / 51.0) and e["gfm_share"] == pytest.approx(22.0 / 51.0)
     assert 0 < e["island_scr"] < math.inf
-    # a genset with island data counts even when it is not running: it starts on islanding
-    off = ups_rows()
-    off.loc[off["unit_id"] == "GEN1", ["p_mw", "status"]] = [0.0, 0]
-    assert F.emt_inputs(camp, off)["gfl_share"] == pytest.approx(16.5 / 51.0)
+    # a genset built but not running counts: it starts on islanding; one not built in the period does not
+    idle = ups_rows()
+    idle.loc[idle["unit_id"] == "GEN1", "p_mw"] = 0.0
+    assert F.emt_inputs(camp, idle)["gfl_share"] == pytest.approx(16.5 / 51.0)
+    absent = ups_rows()
+    absent.loc[absent["unit_id"] == "GEN1", ["p_mw", "status"]] = [0.0, 0]
+    assert F.emt_inputs(camp, absent)["gfl_share"] == pytest.approx(16.5 / 38.5)
+
+
+def test_a_unit_not_built_in_the_period_is_not_in_the_island():
+    camp = ups_campus(transfers=False, scenarios=("seamless",))
+    h = hourly()
+    h.loc[h["unit_id"] == "BESS1", "status"] = 0
+    ih, iu = island_tables(online=(1.0, 1.0))
+    sweep = F.e1_every_hour(camp, h, ih, iu)
+    rows0 = h[h["hour"] == 0][["unit_id", "p_mw", "status"]].reset_index(drop=True)
+    units = F.units_from_campus(camp, rows0, online=F.built(rows0))          # the UPS stays on line: kept
+    assert "BESS1" not in {u.name for u in units} and "UPS1" in {u.name for u in units}
+    by_hand = F.metrics(F.simulate(units, F.step(10.0), t_end=10.0, dt=5e-3))
+    assert sweep.iloc[0]["nadir_hz"] == pytest.approx(by_hand.nadir_hz, abs=1e-12)
+    # without the BESS the genset cannot form the island; counting the unbuilt BESS would make it viable
+    st = F.campus_frequency_study(camp, h, [(2030, 0)], t_end=5.0)
+    assert not st.losses.iloc[0]["i4_viable"] and IF.island_flow(camp, rows0).viable
 
 
 def island_tables(dp_up=(10.0, 0.0), dp_down=(-10.0, 3.0), online=(1.0, 0.0)):

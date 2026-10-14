@@ -1424,6 +1424,7 @@ def run_simulation(
                     _record_solve_inputs(network, config)
                 except Exception as exc:
                     network.meta.pop("assistant_solve_input_fingerprint", None)
+                    network.meta.pop("assistant_solve_exact_input_fingerprint", None)
                     phase(f"Result input provenance unavailable: {type(exc).__name__}")
     except KeyboardInterrupt:
         # The abort watcher injected this to cancel the native HiGHS solve mid-

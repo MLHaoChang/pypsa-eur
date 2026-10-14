@@ -48,3 +48,15 @@ See [the contract](../experiment-prerequisites.md) and
 [remaining implementation plan](../../../docs/superpowers/plans/2026-10-13-assistant-remaining-work.md).
 Case advancement, effect reconciliation, comparison/cancel/resume and additional
 domain recipes remain open. This is input preflight, not domain or release approval.
+
+2026-10-13: First single-network-case adapter adds ordinary `advance_experiment`,
+`refresh_experiment` and `cancel_experiment` controls and a durable dispatch ledger.
+It uses the existing confirmed one-case sensitivity/queue path; no activation,
+hidden tool loop or task-rebinding exemption. Reservations survive interruption,
+duplicate calls cannot resubmit, attempt/time caps stop advancement, and partial
+child IDs survive. Completion requires actual terminal success, exact saved/solved
+inputs and intact owner/job/run evidence. Explicit native evidence export remains
+an ordinary case-project action. See [the contract](../experiment-case-advancement.md).
+Two/multiple cases, compatible comparisons, explicit uncertain-effect retry
+reconciliation and commercial/reliability/GridSpine adapters remain open. This
+slice does not close issue 10 or establish whole-application checked coverage.

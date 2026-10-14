@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Store, Load, Link, Line and Transformer views now show the same provenance chips as the battery and generator cards ("Default", "Customised", "Measured"), in the read-out and on each field. In the edit form a number, choice or tick-box field carries its chip in its own label, so the two-column layout keeps its pairs.

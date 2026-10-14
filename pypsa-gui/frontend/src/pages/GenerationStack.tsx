@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createColumnHelper } from '@tanstack/react-table'
 import { DataGrid } from '../components/DataGrid'
@@ -7,6 +7,9 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { updateAsset } from '../utils/assetWrite'
 import type { Generator, StorageUnit, Store } from '../api/types'
+import type { AssetSchema } from '../api/assetSchema'
+import { useAssetSchema } from '../hooks/useAssetSchema'
+import { storedHeader } from '../utils/assetForm'
 import toast from 'react-hot-toast'
 
 const TABS = ['Generators', 'Storage Units', 'Stores'] as const
@@ -33,21 +36,28 @@ function CarrierChips({ data }: { data: { carrier: string; p_nom?: number }[] })
   )
 }
 
+// S1d: each header is the asset schema's label with its STORED unit (the grid
+// shows and writes the column as stored), the words the Expert card uses; the
+// key itself only until the schema has loaded.
+const headerIn = (schema: AssetSchema | undefined) => (key: string) => storedHeader(schema, key) ?? key
+
 // ── Generator tab ─────────────────────────────────────────────────────────────
 const genHelper = createColumnHelper<Generator>()
-const genCols = [
-  genHelper.accessor('name', { header: 'Name', size: 160 }),
-  genHelper.accessor('bus', { header: 'Bus', size: 120 }),
-  genHelper.accessor('carrier', { header: 'Carrier', size: 100 }),
-  genHelper.accessor('p_nom', { header: 'p_nom (MW)', size: 110 }),
-  genHelper.accessor('p_nom_extendable', { header: 'Extendable', size: 90, cell: i => i.getValue() ? '✓' : '' }),
-  genHelper.accessor('marginal_cost', { header: 'MC (€/MWh)', size: 110 }),
-  genHelper.accessor('capital_cost', { header: 'CC (€/MW/yr)', size: 110 }),
-  genHelper.accessor('efficiency', { header: 'η', size: 70 }),
+const genCols = (h: (key: string) => string) => [
+  genHelper.accessor('name', { header: h('name'), size: 160 }),
+  genHelper.accessor('bus', { header: h('bus'), size: 120 }),
+  genHelper.accessor('carrier', { header: h('carrier'), size: 100 }),
+  genHelper.accessor('p_nom', { header: h('p_nom'), size: 110 }),
+  genHelper.accessor('p_nom_extendable', { header: h('p_nom_extendable'), size: 90, cell: i => i.getValue() ? '✓' : '' }),
+  genHelper.accessor('marginal_cost', { header: h('marginal_cost'), size: 110 }),
+  genHelper.accessor('capital_cost', { header: h('capital_cost'), size: 110 }),
+  genHelper.accessor('efficiency', { header: h('efficiency'), size: 70 }),
 ]
 
 function GeneratorsTab() {
   const qc = useQueryClient()
+  const { data: schema } = useAssetSchema('Generator')
+  const columns = useMemo(() => genCols(headerIn(schema)), [schema])
   const { setSelectedComponent } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
   const { data: gens = [], isLoading } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })
@@ -74,7 +84,7 @@ function GeneratorsTab() {
       <CarrierChips data={gens as { carrier: string; p_nom?: number }[]} />
       <div className="flex-1 overflow-hidden">
         <DataGrid
-          columns={genCols as Parameters<typeof DataGrid>[0]['columns']}
+          columns={columns as Parameters<typeof DataGrid>[0]['columns']}
           data={gens as unknown as Record<string, unknown>[]}
           isLoading={isLoading}
           onDelete={(row) => del.mutate(row as unknown as Generator)}
@@ -90,19 +100,21 @@ function GeneratorsTab() {
 
 // ── Storage Units tab ─────────────────────────────────────────────────────────
 const suHelper = createColumnHelper<StorageUnit>()
-const suCols = [
-  suHelper.accessor('name', { header: 'Name', size: 160 }),
-  suHelper.accessor('bus', { header: 'Bus', size: 120 }),
-  suHelper.accessor('carrier', { header: 'Carrier', size: 100 }),
-  suHelper.accessor('p_nom', { header: 'p_nom (MW)', size: 110 }),
-  suHelper.accessor('max_hours', { header: 'Max hours', size: 90 }),
-  suHelper.accessor('efficiency_store', { header: 'η store', size: 80 }),
-  suHelper.accessor('efficiency_dispatch', { header: 'η dispatch', size: 90 }),
-  suHelper.accessor('capital_cost', { header: 'CC (€/MW/yr)', size: 110 }),
+const suCols = (h: (key: string) => string) => [
+  suHelper.accessor('name', { header: h('name'), size: 160 }),
+  suHelper.accessor('bus', { header: h('bus'), size: 120 }),
+  suHelper.accessor('carrier', { header: h('carrier'), size: 100 }),
+  suHelper.accessor('p_nom', { header: h('p_nom'), size: 110 }),
+  suHelper.accessor('max_hours', { header: h('max_hours'), size: 90 }),
+  suHelper.accessor('efficiency_store', { header: h('efficiency_store'), size: 80 }),
+  suHelper.accessor('efficiency_dispatch', { header: h('efficiency_dispatch'), size: 90 }),
+  suHelper.accessor('capital_cost', { header: h('capital_cost'), size: 110 }),
 ]
 
 function StorageUnitsTab() {
   const qc = useQueryClient()
+  const { data: schema } = useAssetSchema('StorageUnit')
+  const columns = useMemo(() => suCols(headerIn(schema)), [schema])
   const currentProject = useUIStore(s => s.currentProject)
   const { data: sus = [], isLoading } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
   const del = useMutation({
@@ -113,7 +125,7 @@ function StorageUnitsTab() {
   return (
     <div className="flex-1 overflow-hidden">
       <DataGrid
-        columns={suCols as Parameters<typeof DataGrid>[0]['columns']}
+        columns={columns as Parameters<typeof DataGrid>[0]['columns']}
         data={sus as unknown as Record<string, unknown>[]}
         isLoading={isLoading}
         onDelete={(row) => del.mutate(row as unknown as StorageUnit)}
@@ -124,18 +136,20 @@ function StorageUnitsTab() {
 
 // ── Stores tab ────────────────────────────────────────────────────────────────
 const stHelper = createColumnHelper<Store>()
-const stCols = [
-  stHelper.accessor('name', { header: 'Name', size: 160 }),
-  stHelper.accessor('bus', { header: 'Bus', size: 120 }),
-  stHelper.accessor('carrier', { header: 'Carrier', size: 100 }),
-  stHelper.accessor('e_nom', { header: 'e_nom (MWh)', size: 110 }),
-  stHelper.accessor('e_nom_extendable', { header: 'Extendable', size: 90, cell: i => i.getValue() ? '✓' : '' }),
-  stHelper.accessor('capital_cost', { header: 'CC (€/MWh/yr)', size: 110 }),
-  stHelper.accessor('marginal_cost', { header: 'MC (€/MWh)', size: 110 }),
+const stCols = (h: (key: string) => string) => [
+  stHelper.accessor('name', { header: h('name'), size: 160 }),
+  stHelper.accessor('bus', { header: h('bus'), size: 120 }),
+  stHelper.accessor('carrier', { header: h('carrier'), size: 100 }),
+  stHelper.accessor('e_nom', { header: h('e_nom'), size: 110 }),
+  stHelper.accessor('e_nom_extendable', { header: h('e_nom_extendable'), size: 90, cell: i => i.getValue() ? '✓' : '' }),
+  stHelper.accessor('capital_cost', { header: h('capital_cost'), size: 110 }),
+  stHelper.accessor('marginal_cost', { header: h('marginal_cost'), size: 110 }),
 ]
 
 function StoresTab() {
   const qc = useQueryClient()
+  const { data: schema } = useAssetSchema('Store')
+  const columns = useMemo(() => stCols(headerIn(schema)), [schema])
   const currentProject = useUIStore(s => s.currentProject)
   const { data: stores = [], isLoading } = useQuery({ queryKey: nk(currentProject, 'stores'), queryFn: networkApi.getStores })
   const del = useMutation({
@@ -146,7 +160,7 @@ function StoresTab() {
   return (
     <div className="flex-1 overflow-hidden">
       <DataGrid
-        columns={stCols as Parameters<typeof DataGrid>[0]['columns']}
+        columns={columns as Parameters<typeof DataGrid>[0]['columns']}
         data={stores as unknown as Record<string, unknown>[]}
         isLoading={isLoading}
         onDelete={(row) => del.mutate(row as unknown as Store)}

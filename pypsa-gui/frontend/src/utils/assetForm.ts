@@ -3,7 +3,28 @@
 // (`FS`); these functions turn stored values into them and back, one rule per
 // descriptor: `display = stored × scale`, the blank policy, never a derived
 // field. Pure, so the cards stay thin and the rules are tested once.
-import type { AssetFieldSpec } from '../api/assetSchema'
+import type { AssetFieldSpec, AssetSchema } from '../api/assetSchema'
+
+/** Units as the app writes them: the descriptors say EUR, the cards say €. */
+export function unitLabel(u: string): string {
+  return u.replace(/\bEUR\b/g, '€')
+}
+
+// Stored units that only restate their label ("Build year (year)").
+const SELF_EVIDENT_UNITS = new Set(['year'])
+
+/**
+ * A raw-table column header from the asset schema (S1d): the descriptor's
+ * label with its STORED unit, since the bottom grid and the generation stack
+ * show the column as stored (€/MW, a fraction), not as a card displays it
+ * (€/kW, %). Null when the schema does not describe the column.
+ */
+export function storedHeader(schema: AssetSchema | undefined, key: string): string | null {
+  const f = schema?.groups.flatMap(g => g.fields).find(x => x.key === key)
+  if (!f) return null
+  const unit = f.unit_storage && !SELF_EVIDENT_UNITS.has(f.unit_storage) ? ` (${unitLabel(f.unit_storage)})` : ''
+  return `${f.label}${unit}`
+}
 
 type FS = Record<string, string>
 

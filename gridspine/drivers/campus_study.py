@@ -40,6 +40,15 @@ the every-hour E1 fails but the ranking did not select. ``psse_campus``
 writes the PSS/E handoff (plan I8, ``gridspine.handoff.campus_bundle``), one
 bundle per island critical hour, under ``psse/``.
 
+``island_static_campus`` runs the island steady state and short circuit at
+the same hours (plan I4, I5, I5b, ``gridspine.static.island_hours``): the
+island flow after the gensets join (``campus_island_flow*.csv``), and the
+fault levels, relays, unbalanced faults, earth reference and earth-fault
+relays as the island forms and once it is steady (``campus_island_sc.csv``,
+``campus_island_relays*.csv``, ``campus_island_sc_unbalanced.csv``,
+``campus_island_earth*.csv``), with a summary
+(``campus_island_summary.json``) of what fails.
+
 ``size_campus`` solves every selected hour, intact and transformer N-1
 (``gridspine.static.campus_flow``). It writes the per-hour results
 (``campus_lf_trafo.csv``, ``campus_lf_bus.csv`` and ``campus_lf_pcc.csv``,
@@ -211,6 +220,20 @@ FREQ_PLANNED_CSV = "campus_freq_planned.csv"
 FREQ_UPS_CSV = "campus_freq_ups.csv"
 FREQ_SUMMARY_JSON = "campus_freq_summary.json"
 PSSE_DIR = "psse"
+#: ``island_static_campus``'s files, by ``IslandStatic`` table.
+ISLAND_STATIC_CSV = {
+    "flow": "campus_island_flow.csv",
+    "flow_units": "campus_island_flow_units.csv",
+    "flow_bus": "campus_island_flow_bus.csv",
+    "flow_branch": "campus_island_flow_branch.csv",
+    "sc": "campus_island_sc.csv",
+    "relays": "campus_island_relays.csv",
+    "relays_imax": "campus_island_relays_imax.csv",
+    "unbalanced": "campus_island_sc_unbalanced.csv",
+    "earth": "campus_island_earth.csv",
+    "earth_relays": "campus_island_earth_relays.csv",
+}
+ISLAND_STATIC_SUMMARY_JSON = "campus_island_summary.json"
 #: The keys of ``campus_freq_summary.json``, in order (plan I6c).
 FREQ_SUMMARY_KEYS = ("label", "ledger", "scenarios", "island_hours", "every_hour_e1", "failing_hours",
                      "bridge_failing_hours", "planned_infeasible_hours", "e1_failing_hours",
@@ -431,6 +454,31 @@ def island_frequency_campus(run_dir, every_hour: bool = True) -> dict:
         "e1_failing_not_selected": [list(h) for h in sweep_fail if h not in set(hours)],
     }
     _write_text_atomic(run_dir / FREQ_SUMMARY_JSON, json.dumps(summary, indent=2))
+    return summary
+
+
+def island_static_campus(run_dir) -> dict:
+    """The island steady state and short circuit of a ranked run at its
+    island critical hours (plan I4, I5, I5b; see the module docstring).
+    Needs the campus island data; reads I3a's per-unit table when the run
+    has the island tables, for which gensets run at each hour. Returns the
+    summary it writes."""
+    from gridspine.static import island_hours as IH
+
+    run_dir = Path(run_dir)
+    campus = load_run_campus(run_dir)
+    if not campus.island["units"]:
+        raise ContractError("the campus has no island data (no unit has an island block); "
+                            "the island steady state and short circuit need it")
+    tables = _island_tables(run_dir)
+    hourly, _ = campus_tables(run_dir)
+    hours = island_hours(run_dir)
+    study = IH.island_static_study(campus, hourly, hours, tables[0] if tables is not None else None)
+    for name, fname in ISLAND_STATIC_CSV.items():
+        _write_text_atomic(run_dir / fname, getattr(study, name).to_csv(index=False))
+    summary = IH.summary(study, hours)
+    summary["models"] = {ISLAND_STATIC_CSV[name]: text for name, text in summary["models"].items()}
+    _write_text_atomic(run_dir / ISLAND_STATIC_SUMMARY_JSON, json.dumps(summary, indent=2))
     return summary
 
 

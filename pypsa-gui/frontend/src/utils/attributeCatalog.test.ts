@@ -7,6 +7,8 @@ import {
   resolveEditor, toCatalogMap,
 } from './attributeCatalog'
 import type { CatalogAttribute } from '../api/types'
+import type { AssetSchema } from '../api/assetSchema'
+import assetSchemaFixture from '../test/fixtures/assetSchema.json'
 
 function attr(over: Partial<CatalogAttribute> & { name: string }): CatalogAttribute {
   return {
@@ -209,9 +211,11 @@ describe('resolveEditor — D4 rows 1 to 6, in order', () => {
 })
 
 describe('columnHeaderLabel — D15', () => {
-  const COL_LABELS = { v_nom: 'V nom (kV)', p_nom: 'P nom (MW)' }
+  // S1d: curated labels are short names without a unit; the unit comes from
+  // the asset schema (stored unit) or, without one, from the catalog.
+  const COL_LABELS = { v_nom: 'V nom', p_nom: 'P nom' }
 
-  it('prefers a curated COL_LABELS entry', () => {
+  it('prefers a curated COL_LABELS entry, with the catalog unit appended', () => {
     expect(columnHeaderLabel('p_nom', GEN, COL_LABELS)).toBe('P nom (MW)')
   })
 
@@ -226,6 +230,36 @@ describe('columnHeaderLabel — D15', () => {
 
   it('uses the bare column name for a column with no catalog entry', () => {
     expect(columnHeaderLabel('my_custom_col', GEN, {})).toBe('my_custom_col')
+  })
+
+  // S1d: the grid shows stored values, so a described column reads its
+  // descriptor's label with the STORED unit (€/MW, never the card's €/kW).
+  describe('with the class asset schema', () => {
+    const fixture = assetSchemaFixture as Record<string, AssetSchema>
+
+    it('a described column reads its label and stored unit', () => {
+      expect(columnHeaderLabel('capital_cost', GEN, COL_LABELS, fixture.Generator))
+        .toBe('Capital cost (annualised) (€/MW/yr)')
+      expect(columnHeaderLabel('overnight_cost', GEN, COL_LABELS, fixture.Generator)).toBe('Overnight cost (€/MW)')
+    })
+
+    it("a Store's capital cost is per MWh of energy, not per MW", () => {
+      expect(columnHeaderLabel('capital_cost', GEN, COL_LABELS, fixture.Store))
+        .toBe('Capital cost (annualised) (€/MWh/yr)')
+    })
+
+    it('a share reads as a fraction, the stored value the grid shows', () => {
+      expect(columnHeaderLabel('efficiency', GEN, COL_LABELS, fixture.Generator)).toBe('Efficiency (fraction)')
+    })
+
+    it('a unit that restates the label is left out', () => {
+      expect(columnHeaderLabel('build_year', GEN, COL_LABELS, fixture.Generator)).toBe('Build year')
+    })
+
+    it('the schema wins over a curated label; a column it does not describe falls back', () => {
+      expect(columnHeaderLabel('p_nom', GEN, COL_LABELS, fixture.Generator)).toBe('Capacity (MW)')
+      expect(columnHeaderLabel('my_custom_col', GEN, COL_LABELS, fixture.Generator)).toBe('my_custom_col')
+    })
   })
 })
 

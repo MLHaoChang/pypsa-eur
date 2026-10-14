@@ -38,7 +38,7 @@ harness/
   session.py      ChatSession, PendingConfirmation, the session registry with its TTL and cap
   confirm.py      the confirmation gate: tiers, the Guided write rule, auto-approve, parallel-destructive
   approvals.py    every card's asked/decided record per owner and session; an approval that cannot be recorded does not run
-  eventlog.py     the session event log: every model-visible input, append-only per owner and session; derive_messages, fork, torn-tail repair (shadow mode: chat.jsonl and the WAL unchanged)
+  eventlog.py     the session event log: every model-visible input, append-only per owner and session; derive_messages, fork, torn-tail repair; the source of truth (the deque is its fold, a chat not in memory is rebuilt from it, interrupted turns are read off it, chat.jsonl is its projection)
   replay.py       fork a recorded session before one turn and run that turn again on another provider (smoke/replay_session.py)
   goals.py        a goal with a round budget: set/pause/complete, what stops it after a turn, the per-turn goal block (rounds run in loop.run_turn)
   ratelimit.py    the /stream token bucket
@@ -46,7 +46,7 @@ harness/
   fence.py        the untrusted-content delimiters and the neutraliser
   results.py      tool-result shaping: coercion, truncation, the per-turn result budget, error content
   spill.py        oversized results kept whole per owner and session; the model gets a preview and a locator for `read_result`
-  history.py      the in-memory trim and turn summary, chat.jsonl persistence, the pending-turn WAL, lineage
+  history.py      the in-memory trim and turn summary, chat.jsonl persistence (a projection of the event log), lineage
   metrics.py      the process-wide chat metrics behind GET /api/chat/metrics
 ```
 
@@ -91,12 +91,16 @@ Borrowed designs (phase 5): `docs/superpowers/assessments/2026-10-06-deepseek-ha
    `providers/wiring.py`, and the layout test pins what is left in the loop
    (the capability refusals in the turn body). A new one goes into
    `providers/`, not into the loop.
-9. **Model-visible means logged.** Everything that reaches the provider
-   history goes through `ChatSession.append_history_message`,
-   `history.trim_session_messages`, `history.rewind_session` or
-   `ChatSession.reset_history`, and each of those writes the session's
-   event log (`eventlog.py`, issue 13). A new writer to `session.messages`
-   must log too, or `derive_messages` stops matching what the model saw.
+9. **Model-visible means logged.** The session event log (`eventlog.py`,
+   issue 13) is the source of truth: `ChatSession.messages` changes only
+   through `eventlog.apply`, which records an event and folds it in with the
+   step `derive_messages` uses (`append_history_message`, its trim,
+   `rewind_session` and `reset_history` all go through it), so the deque IS
+   the log's projection. A session not in memory is rebuilt from its log; the
+   log's `turn/start` replaced the pending-turn WAL; each `chat.jsonl` record
+   is a `turn/record` event first. A new writer to `session.messages` goes
+   through `eventlog.apply` (`tests/test_harness_eventlog_truth.py` fails on
+   one that does not).
 
 ## The harness tools
 
@@ -243,6 +247,18 @@ HTTP streams, real project/queue handlers and HiGHS solves. It checks streamed
 arguments, tool-result IDs, continuation, confirmation denial and independent
 session views without API credentials or spending. These transport tests do
 not certify that an arbitrary endpoint/model supports tool calling.
+
+### Single network experiment advancement
+
+`advance_experiment` arms one prepared case and offers an ordinary call; it does
+not execute it. The confirmed sensitivity/queue handler is wrapped by
+`experiment_execution.py` with an owner/project/input-bound durable reservation,
+attempt/time caps and no automatic resubmission. `refresh_experiment` requires
+terminal job success, exact saved/solver input identities and intact run evidence
+before returning the recorded objective. `cancel_experiment` stops advancement,
+not jobs. Explicit case activation and native evidence export remain ordinary
+tools. Strict checked policy stays unchanged. See the
+[case contract](../../../.scratch/live-voice/experiment-case-advancement.md).
 
 ## Splitting the loop
 

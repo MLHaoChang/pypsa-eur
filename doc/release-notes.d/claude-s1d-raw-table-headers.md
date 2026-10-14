@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The bottom data grid and the Generation Stack name a component's columns with the same words as its Expert card, each with the unit the column is stored in. A Store's capital cost now reads per MWh per year; it used to share the generators' "€/MW/yr" label.

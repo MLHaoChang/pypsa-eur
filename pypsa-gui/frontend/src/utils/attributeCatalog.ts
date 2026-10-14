@@ -1,4 +1,6 @@
 import type { CatalogAttribute } from '../api/types'
+import type { AssetSchema } from '../api/assetSchema'
+import { storedHeader } from './assetForm'
 
 // ── Attribute catalog helpers ────────────────────────────────────────────────
 // Pure: no React, no DOM (spec D2). Answers four questions about a grid cell —
@@ -186,20 +188,23 @@ export function resolveEditor(
 }
 
 /**
- * Column header text (D15). A curated COL_LABELS entry wins — it is
- * hand-written and already carries its unit ('V nom (kV)'). Otherwise the
- * catalog's unit is appended, so Lines read `r (Ohm)`, `x (Ohm)`, `b (S)`.
+ * Column header text (D15, S1d). First the class's asset schema: the
+ * descriptor's label with its stored unit (`storedHeader`), the same words
+ * the Expert card uses. Then a curated COL_LABELS short name, then the bare
+ * column name; either takes the catalog's unit, so Lines read `r (Ohm)` and
+ * Buses `V nom (kV)`. No unit is written by hand here.
  *
  * `colLabels` is passed in rather than imported: this module must not depend
  * on layout/BottomPanel.tsx (D2).
  */
 export function columnHeaderLabel(
-  column: string, catalog: CatalogMap, colLabels: Record<string, string>,
+  column: string, catalog: CatalogMap, colLabels: Record<string, string>, schema?: AssetSchema,
 ): string {
-  const curated = colLabels[column]
-  if (curated) return curated
+  const described = storedHeader(schema, column)
+  if (described) return described
+  const name = colLabels[column] ?? column
   const unit = catalog.get(column)?.unit
-  return unit ? `${column} (${unit})` : column
+  return unit ? `${name} (${unit})` : name
 }
 
 /**
