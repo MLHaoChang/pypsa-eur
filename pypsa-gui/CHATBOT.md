@@ -275,21 +275,29 @@ them per deployment.
 
 A turn is written to `chat.jsonl` only once it has *completed*, so a backend
 that dies mid-response would previously lose the user's own message with no
-trace of it anywhere. A pending record is now written at turn start
-(`chat.jsonl.pending`, via tmp + rename + fsync) and removed when the turn
-ends. It survives a crash precisely because the code that removes it never
-runs — so its presence after a restart *is* the signal.
+trace of it anywhere. Every chat has an event log under the app's data
+directory (`backend/harness/eventlog.py`), and its `turn/start` (the user's
+message, the project, the time) is written and fsynced before the model is
+called; `turn/end` follows when the turn ends. A `turn/start` with no
+`turn/end` after a restart *is* the signal. (Until issue 13 part b this was a
+separate `chat.jsonl.pending` file.)
+
+The same log is the conversation's source of truth: what the model is sent
+each turn is its projection (with secrets redacted, as in `chat.jsonl`), a
+chat the server no longer holds in memory is rebuilt from it with its tool
+calls and results, and each `chat.jsonl` record is logged before it is
+written.
 
 `GET /api/chat/history` therefore reports two extra fields:
 
 | Field | Meaning |
 |---|---|
-| `pending_turn` | A turn that started and was never answered. Reported **once**, then cleared. It is NOT added to `turns` — it has no assistant half, and writing it into the transcript would fabricate a conversation that did not happen. |
+| `pending_turn` | The caller's latest turn on this project that started and was never answered. Reported **once**, then its log is closed. It is NOT added to `turns` — it has no assistant half, and writing it into the transcript would fabricate a conversation that did not happen. |
 | `history_gap` | How many on-disk records were unreadable. Non-zero means `turns` is incomplete. |
 
-A pending record whose session still has a turn in flight is left alone: a
-second tab polling `/history` must not report a running turn as interrupted,
-nor delete the record protecting it.
+A turn whose session still has a turn in flight is left alone: a second tab
+polling `/history` must not report a running turn as interrupted, nor close
+its log under it.
 
 ## Aborting a turn
 

@@ -771,37 +771,33 @@ def reload_chat_skills(user: User | None = Depends(optional_user)) -> dict[str, 
     return _skills_listing()
 
 
-def _recover_pending_turn(ctx: Any) -> dict[str, Any] | None:
+def _recover_pending_turn(ctx: Any, actor_id: str | None) -> dict[str, Any] | None:
     """
-    Resolve the WAL record left by an interrupted turn (#20), or None.
+    The caller's turn on this project that started and never ended (#20,
+    issue 13), or None: a `turn/start` with no `turn/end` in one of their
+    session event logs, which is what a crash mid-turn leaves (it replaced
+    the pending-turn WAL).
 
-    Two cases have to be told apart, and the file alone cannot do it — a
-    pending record looks identical whether the turn died with the process or
-    is streaming right now in another tab:
-
-      * The owning session is in this process AND has a turn in flight. The
-        turn is alive. Report nothing and — critically — leave the file
-        alone: deleting it here would strip a running turn of the protection
-        it is currently relying on.
-      * Otherwise (the usual post-restart case, where SESSIONS is empty).
-        Nobody is going to finish this turn. Report it, then clear it, so one
-        interruption produces one notice rather than a permanent banner.
+    A turn whose session is in this process is alive (a second tab polling
+    while it runs), so it is neither reported nor closed. Otherwise nobody is
+    going to finish it: it is reported once, and its log closed
+    (`turn/end {interrupted}`), so one interruption is one notice.
 
     The turn is deliberately NOT promoted into `turns`. It was never
     answered; writing it into the transcript would fabricate a record of a
     conversation that did not happen. Reporting it lets the panel say "this
     message was interrupted" and let the user decide whether to resend.
     """
-    pending = chat_service.read_pending_turn(ctx)
-    if pending is None:
+    from harness import eventlog
+
+    def live(session_id: str) -> bool:
+        return chat_service.get_session(session_id) is not None
+
+    try:
+        return eventlog.interrupted_turn(actor_id, ctx, live=live)
+    except Exception:  # noqa: BLE001 — a read of past turns never fails on this
+        logger.exception("chat history: could not check for an interrupted turn")
         return None
-    owner = chat_service.get_session(str(pending.get("session_id") or ""))
-    if owner is not None:
-        with owner._lock:
-            if owner._turn_in_flight:
-                return None
-    chat_service.clear_pending_turn(ctx)
-    return pending
 
 
 @router.get("/history")
@@ -826,8 +822,9 @@ def chat_history(limit: int = 200,
         on a healthy transcript. Non-zero means the list above is INCOMPLETE,
         which the panel must say rather than render a quietly shorter
         conversation.
-      * `pending_turn`: a turn that started and never finished — recovered
-        from the WAL (#20), reported ONCE, then cleared. None normally.
+      * `pending_turn`: the caller's turn on this project that started and
+        never finished — read off their session event logs (#20, issue 13),
+        reported ONCE, then its log closed. None normally.
       * `bound_profile_id` (P28 A3, D-3): the profile the resumed session is
         bound to — the one its next turn runs on when the request names none
         (`/stream` keeps a bound session's binding). A freshly minted session
@@ -850,7 +847,7 @@ def chat_history(limit: int = 200,
             turns, str(actor.id) if actor is not None else assurance_records.actor_id(),
             strict=assurance.strict_configured(),
         )
-    pending_turn = _recover_pending_turn(ctx)
+    pending_turn = _recover_pending_turn(ctx, str(actor.id) if actor is not None else None)
     if not turns:
         return {"turns": [], "last_session_id": None,
                 "bound_project": ctx.loaded_project,
@@ -1010,10 +1007,21 @@ def chat_history(limit: int = 200,
                 with network_guard():
                     recovered_scope = candidate(sess, ctx, last_rec)
             if sess is not None:
+                from harness import eventlog as harness_eventlog
                 with sess._lock:
                     # A stream can start after this GET minted its session.
                     fresh_and_idle = not sess.messages and sess.turns_started == 0
-                    if not sess._turn_in_flight and (not session_was_freshly_minted or fresh_and_idle):
+                    rebuild = not sess._turn_in_flight and (not session_was_freshly_minted or fresh_and_idle)
+                    # Issue 13: the session's event log is the source of truth.
+                    # A live session already IS its projection, so there is
+                    # nothing to rebuild; one this GET minted (a restart, an
+                    # eviction) is rebuilt from it exactly, tool calls and
+                    # results included. chat.jsonl below is only for a session
+                    # recorded before the log existed.
+                    from_log = rebuild and harness_eventlog.exists(sess)
+                    if from_log and session_was_freshly_minted and not harness_eventlog.resume(sess):
+                        from_log = False
+                    if rebuild and not from_log:
                         sess.reset_history()
                         for rec in turns:
                             # Display only: an interrupted turn's assistant half
@@ -1040,11 +1048,23 @@ def chat_history(limit: int = 200,
                                     **({"_approved_answer_id": rec["answer_id"]}
                                        if rec.get("answer_id") else {}),
                                 })
-                        if recovered_scope is not None:
-                            assistants = [m for m in sess.messages if m.get("role") == "assistant"]
-                            if assistants and assistants[-1].get("_approved_answer_id") == recovered_scope["anchor"]:
-                                sess.assurance_context = recovered_scope
-                                sess.assurance_checkpoint_project = ctx.project_uuid
+                    if rebuild and recovered_scope is not None:
+                        assistants = [m for m in sess.messages if m.get("role") == "assistant"]
+                        anchored = bool(assistants) and (
+                            assistants[-1].get("_approved_answer_id") == recovered_scope["anchor"])
+                        if from_log:
+                            # A history rebuilt from the session's own log
+                            # holds no co-member's turns, so the shared
+                            # transcript decides as the chat.jsonl rebuild
+                            # did: a newer answered turn by anyone else means
+                            # the checked scope is not recovered.
+                            answered = [r for r in turns if isinstance(r.get("assistant"), list)
+                                        and not chat_service.is_interrupted_turn(r)]
+                            anchored = anchored and bool(answered) and (
+                                answered[-1].get("answer_id") == recovered_scope["anchor"])
+                        if anchored:
+                            sess.assurance_context = recovered_scope
+                            sess.assurance_checkpoint_project = ctx.project_uuid
 
     return {
         # The author key is how THIS route picks a session; it is not part of

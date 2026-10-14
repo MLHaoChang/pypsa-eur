@@ -185,8 +185,9 @@ A session's append-only record of everything the model saw (`harness/eventlog.py
 each message as it entered the provider history, the per-turn context, and the
 trims, rewinds and resets of that history, so the history can be rebuilt
 exactly, forked at a turn and replayed on another provider. Kept per user and
-chat under the app-data directory. Today it runs beside `chat.jsonl`, which
-still serves `/history`.
+chat under the app-data directory. It is the conversation's source of truth:
+what the model is sent is its projection, and `chat.jsonl` (which still serves
+`/history`) is written from it.
 _Avoid_: transcript (that is chat.jsonl), audit log
 
 **Goal**:
