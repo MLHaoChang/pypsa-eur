@@ -15,6 +15,8 @@ import { nk } from '../utils/queryKeys'
 const ROOT: Record<string, string> = {
   StorageUnit: 'storage_units', Generator: 'generators', Store: 'stores', Link: 'links', Load: 'loads',
   Line: 'lines', Transformer: 'transformers',
+  // M5: the non-asset components with a schema.
+  Bus: 'buses', Carrier: 'carriers', GlobalConstraint: 'global_constraints', ShuntImpedance: 'shunt_impedances',
 }
 
 export function assetProvenanceKey(project: string | null, componentClass: string, name: string): unknown[] {

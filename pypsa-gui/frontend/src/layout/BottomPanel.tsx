@@ -61,15 +61,11 @@ const TAB_COLUMNS: Record<Tab, string[]> = {
   Carriers:     ['name', 'co2_emissions', 'nice_name', 'color', 'unit'],
 }
 
-// Short names for the columns NO asset schema describes (a Bus's, a Carrier's).
-// No units here: a described column takes its descriptor's label and stored
-// unit, everything else the catalog's unit (`columnHeaderLabel`, S1d), so one
-// list can no longer tell a Store "€/MW/yr".
-const COL_LABELS: Record<string, string> = {
-  v_nom: 'V nom', sub_network: 'Sub-net',
-  // Carrier columns
-  co2_emissions: 'CO₂, primary energy', nice_name: 'Display name',
-}
+// Column headers: a described column takes its descriptor's label and stored
+// unit, everything else its name and the catalog's unit (`columnHeaderLabel`,
+// S1d). M5 described the Bus and Carrier tables too, so the short-name list
+// (COL_LABELS) that covered them is gone.
+const NO_SHORT_NAMES: Record<string, string> = {}
 
 const TAB_TYPES: Record<Tab, string | null> = {
   Log: null, History: null, Buses: 'Bus', Lines: 'Line', Transformers: 'Transformer',
@@ -389,7 +385,7 @@ function AssetTable({
   // S1d: a described class's headers come from its asset schema (label +
   // stored unit), the words its Expert card uses.
   const { data: schema } = useAssetSchema(SCHEMA_CLASSES.has(componentClass) ? componentClass : null)
-  const headerOf = (col: string) => columnHeaderLabel(col, catalog, COL_LABELS, schema)
+  const headerOf = (col: string) => columnHeaderLabel(col, catalog, NO_SHORT_NAMES, schema)
   const { data: tsList = [] } = useQuery({
     queryKey: nk(currentProject, 'timeseries'),
     queryFn: networkApi.listTimeseries,

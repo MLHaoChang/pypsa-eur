@@ -53,7 +53,7 @@ class FieldSpec:
     derived: bool = False         # written by derive / the solver; read-only
     reveal_when: dict[str, Any] | None = field(default=None, hash=False)
     part: str | None = None       # the investment part it belongs to (composite classes)
-    blank: str = "keep"           # what an emptied input saves: clear (null) | zero | keep (current value)
+    blank: str = "keep"           # what an emptied input saves: clear (null) | zero | empty ("") | keep (current)
 
     @property
     def technical_name(self) -> str:
@@ -416,6 +416,73 @@ TRANSFORMER: tuple[FieldSpec, ...] = (
     FieldSpec("phase_shift", "performance", "Phase shift", "Phase shift between the windings.", "°", "°"),
 )
 
+# ── Bus, Carrier, GlobalConstraint, ShuntImpedance (M5: the non-asset components) ──
+# No investment: identity and technical fields only. Their help folds in the Bus card's old propertyDocs tips
+# (plan 2026-10-14-m5-non-asset-forms.md).
+
+BUS: tuple[FieldSpec, ...] = (
+    FieldSpec("name", "identity", "Name", "Unique bus identifier. Every component attached to the bus names it, so a "
+              "rename re-points them all.", kind="text", required=True),
+    FieldSpec("carrier", "identity", "Carrier", "Energy carrier modelled at this bus (AC, DC, H2, heat, gas, …). It "
+              "decides which assets can attach and which energy balance the bus enters.", kind="carrier"),
+    FieldSpec("control", "identity", "Control", "Power-flow control for the non-linear AC power flow: PQ (a load), PV "
+              "(regulated voltage) or Slack (the reference). For the linear optimisation only the slack matters.",
+              kind="enum", options=("PQ", "PV", "Slack")),
+    FieldSpec("country", "identity", "Country", "ISO country code, for grouping, country-level statistics and "
+              "policy constraints.", kind="text"),
+    FieldSpec("sub_network", "identity", "Sub-network", "Manual region label for the 'region' clustering mode: buses "
+              "sharing it collapse to one node. Empty: determined from the electrical topology.", kind="text"),
+    FieldSpec("x", "identity", "Longitude", "Geographic longitude, east positive. Places the bus on the map and "
+              "sets the length of a line recalculated from coordinates; the optimisation does not read it.",
+              "°E", "°E"),
+    FieldSpec("y", "identity", "Latitude", "Geographic latitude, north positive. Places the bus on the map and sets "
+              "the length of a line recalculated from coordinates; the optimisation does not read it.", "°N", "°N"),
+    FieldSpec("v_nom", "performance", "Nominal voltage", "The bus's nominal voltage. Lines are coloured by voltage "
+              "class; a transformer's declared voltages are checked against it.", "kV", "kV", key_param=True),
+)
+
+CARRIER: tuple[FieldSpec, ...] = (
+    FieldSpec("name", "identity", "Name", "Unique carrier name. Buses and assets name it; a rename re-points them.",
+              kind="text", required=True),
+    FieldSpec("nice_name", "identity", "Display name", "How the carrier is shown in charts and tables. Empty: its "
+              "name.", kind="text"),
+    FieldSpec("color", "identity", "Colour", "Its colour on the map and in charts, as a CSS colour (e.g. #1f77b4).",
+              kind="text"),
+    FieldSpec("unit", "identity", "Unit", "Unit of the energy it carries, for display. Empty: MWh.", kind="text"),
+    FieldSpec("co2_emissions", "performance", "CO₂ emissions", "Emissions per MWh of primary energy burnt. A "
+              "generator's emissions are this divided by its efficiency; a CO₂ cap sums them.", "t/MWh", "t/MWh",
+              key_param=True),
+)
+
+GLOBAL_CONSTRAINT_TYPES = ("primary_energy", "tech_capacity_expansion_limit", "operational_limit",
+                           "transmission_volume_expansion_limit", "transmission_expansion_cost_limit")
+
+GLOBAL_CONSTRAINT: tuple[FieldSpec, ...] = (
+    FieldSpec("name", "identity", "Name", "Unique constraint name.", kind="text", required=True),
+    FieldSpec("type", "identity", "Type", "What the constraint caps: primary energy (a CO₂ cap), new capacity of a "
+              "carrier, a carrier's dispatch, or the volume or cost of new transmission.", kind="enum",
+              options=GLOBAL_CONSTRAINT_TYPES, key_param=True),
+    FieldSpec("sense", "identity", "Sense", "How the sum compares with the constant.", kind="enum",
+              options=("<=", "==", ">="), key_param=True),
+    FieldSpec("constant", "identity", "Constant", "The bound, in the type's unit: t for a CO₂ cap, MW for capacity, "
+              "MWh for dispatch, MW·km or € for transmission.", required=True, key_param=True),
+    FieldSpec("carrier_attribute", "identity", "Carrier attribute", "For primary energy: the carrier column summed, "
+              "e.g. co2_emissions.", kind="text"),
+    FieldSpec("carrier", "identity", "Carrier", "For a capacity or operational limit: the carrier it applies to.",
+              kind="carrier"),
+    FieldSpec("investment_period", "identity", "Investment period", "The period it binds in. Empty: the whole "
+              "horizon.", "", "", kind="int"),
+)
+
+SHUNT_IMPEDANCE: tuple[FieldSpec, ...] = (
+    FieldSpec("name", "identity", "Name", "Unique shunt identifier.", kind="text", required=True),
+    FieldSpec("bus", "identity", "Bus", "Bus the shunt connects to ground.", kind="bus", required=True),
+    FieldSpec("g", "performance", "Conductance", "Shunt conductance; absorbs active power in the AC power flow.",
+              "S", "S"),
+    FieldSpec("b", "performance", "Susceptance", "Shunt susceptance; positive injects reactive power (a capacitor), "
+              "negative absorbs it (a reactor).", "S", "S"),
+)
+
 # What an emptied input saves (S1b). `clear` sends null: an Optional column, or a bound the write model turns
 # into +inf ("no limit", "never retires"). Costs save 0, a deliberate "free". Everything else keeps its value:
 # a blank capacity or efficiency is a slip, not a decision.
@@ -425,11 +492,20 @@ _CLEAR = {"p_nom_max", "e_nom_max", "s_nom_max", "v_nom_0", "v_nom_1", "lifetime
           "outage_rate_value", "outage_rate_basis", "mttr_hours", "p_max_pu_includes_outages"}
 
 
+# M5: per class. `empty` sends "" (a text column the write model types `str = ""`: an emptied country or display
+# name is a decision, and null would be refused); GlobalConstraint's optional columns clear to null.
+_EMPTY_BY_CLASS = {"Bus": {"country", "sub_network"}, "Carrier": {"nice_name", "color", "unit"}}
+_CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"}}
+
+
 def _with_blank(component: str, specs: tuple[FieldSpec, ...]) -> tuple[FieldSpec, ...]:
-    clear = _CLEAR | set(part_columns(component))
-    return tuple(
-        f if f.derived else replace(f, blank="zero" if f.key in _ZERO else "clear" if f.key in clear else "keep")
-        for f in specs)
+    clear = _CLEAR | set(part_columns(component)) | _CLEAR_BY_CLASS.get(component, set())
+    empty = _EMPTY_BY_CLASS.get(component, set())
+
+    def policy(key: str) -> str:
+        return "empty" if key in empty else "zero" if key in _ZERO else "clear" if key in clear else "keep"
+
+    return tuple(f if f.derived else replace(f, blank=policy(f.key)) for f in specs)
 
 
 _BY_CLASS: dict[str, tuple[FieldSpec, ...]] = {
@@ -440,6 +516,10 @@ _BY_CLASS: dict[str, tuple[FieldSpec, ...]] = {
     "Link": _with_blank("Link", LINK),
     "Line": _with_blank("Line", LINE),
     "Transformer": _with_blank("Transformer", TRANSFORMER),
+    "Bus": _with_blank("Bus", BUS),
+    "Carrier": _with_blank("Carrier", CARRIER),
+    "GlobalConstraint": _with_blank("GlobalConstraint", GLOBAL_CONSTRAINT),
+    "ShuntImpedance": _with_blank("ShuntImpedance", SHUNT_IMPEDANCE),
 }
 
 

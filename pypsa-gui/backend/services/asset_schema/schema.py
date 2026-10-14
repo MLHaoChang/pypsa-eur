@@ -63,6 +63,11 @@ CLASS_ATTR = {
     "Line": "lines",
     "Transformer": "transformers",
     "Load": "loads",            # no investment parts; listed so its provenance is served like every card's
+    # M5: the non-asset components, described for their forms; provenance is served the same way.
+    "Bus": "buses",
+    "Carrier": "carriers",
+    "GlobalConstraint": "global_constraints",
+    "ShuntImpedance": "shunt_impedances",
 }
 
 
