@@ -205,6 +205,38 @@ def test_a_genset_with_no_ramp_limit_starts_at_its_join_without_a_nan():
     assert np.isfinite(tr.df).all()
 
 
+def iso_windup():
+    """The isochronous integral without anti-windup: it integrates Δf at every
+    state, as before the fix."""
+    return lambda u, p, df, t: df
+
+
+@pytest.mark.parametrize("p0, dp", [(0.0, 2.0), (8.0, -2.0)], ids=["upper bound", "lower bound"])
+def test_an_isochronous_genset_held_at_a_bound_does_not_wind_up_its_integral(monkeypatch, p0, dp):
+    # 2 MW on a genset with a 0.5 MW load step and a 0.08 MW/s ramp: held at its bound for about 19 s while the
+    # frequency runs away. Integrating that error, the integral overshoots by about 61.8 Hz once the ramp
+    # catches up; frozen at the bound, the frequency comes back with 0.05 Hz of overshoot
+    g = gen(isochronous=True, p0=p0, step_mw=0.5, ramp_mw_per_s=0.08)
+    tr = F.simulate([g], F.step(dp), t_end=200.0, dt=5e-3)
+    away = np.sign(dp)                                                   # +1: the frequency falls first
+    assert abs(tr.df[-1]) < 1e-4
+    assert np.max(-away * tr.df) == pytest.approx(23.541, abs=1e-3)     # the excursion while held
+    assert np.max(away * tr.df) < 0.1                                    # no overshoot back past f0
+    monkeypatch.setattr(F, "_hold_integral", iso_windup())
+    wound = F.simulate([g], F.step(dp), t_end=200.0, dt=5e-3)
+    assert np.max(away * wound.df) > 30.0                                # what the windup did
+
+
+@pytest.mark.parametrize("p0, dp", [(5.0, 2.0), (10.0, -2.0)], ids=["unclamped", "at its bound, pulled back in"])
+def test_the_integral_hold_changes_nothing_unless_the_error_pushes_outward(monkeypatch, p0, dp):
+    # unclamped, or at full output when load drops (the error pulls the genset back inside its range): the
+    # integral integrates as it did without the hold, to the bit
+    g = gen(isochronous=True, p0=p0)
+    held = F.simulate([g], F.step(dp), t_end=30.0, dt=5e-3)
+    monkeypatch.setattr(F, "_hold_integral", iso_windup())
+    assert np.array_equal(held.df, F.simulate([g], F.step(dp), t_end=30.0, dt=5e-3).df)
+
+
 def fw_pv(**kw):
     base = dict(name="PV", model="gfl_fw", p0=8.0, p_n=10.0, s_n=10.0, p_min=0.0, p_max=8.0,
                 fw={"k_mw_per_hz": 10.0, "deadband_hz": 0.2, "delay_s": 0.2, "ramp_mw_per_s": 20.0,

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The investment case now refuses a capacity built in a later investment period through vintage bounds (`staged_build_vintage_bounds_not_supported`) instead of financing all of it at the first COD, and its counterfactual bill reads the load as the solve scaled it (`load_scalers`), not the unscaled profile.

@@ -283,7 +283,7 @@ def island_report(project) -> dict:
         tables += [_requirements(island), _units(island)]
         study = state["study"]
         if study is None:
-            missing.append("island study")
+            missing.append("cost of islanding study")       # I2c, not the I4-I6 checks
         else:
             tables += [_costs(study), _binding(study), _facts(study)]
     hours = _island_hours(ce.campus_dir(project) / "run" / "campus_selected.csv")

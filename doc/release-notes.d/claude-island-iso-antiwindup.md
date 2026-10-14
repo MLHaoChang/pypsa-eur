@@ -1,0 +1,1 @@
+* Fix(gridspine): In the island frequency check, an isochronous generator set held at its load-step or ramp limit no longer winds up its integral. Before, the frequency overshot by tens of hertz once the ramp caught up; it now returns to nominal without overshoot. An isochronous set that never reaches a limit behaves exactly as before.
