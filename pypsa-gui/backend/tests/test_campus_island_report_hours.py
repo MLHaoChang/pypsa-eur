@@ -103,6 +103,7 @@ def test_every_static_table_is_shown_with_the_contract_columns_and_its_model(sav
         assert t["columns"] == list(columns), name
         assert t["model"] == IH.MODELS[name], name
         assert t["caveat"] == CAVEAT
+        assert t["group"] == "static", name
         assert t["rows"] == [] and t["assumed_rows"] == []
     assert STATIC_MISSING not in island_report(saved)["missing"]
 
@@ -158,6 +159,7 @@ def test_every_frequency_table_is_shown_with_the_frequency_model(saved):
         assert t["columns"] == list(columns), fname
         assert t["model"] == F.LABEL, fname
         assert t["caveat"] == CAVEAT
+        assert t["group"] == "frequency", fname
     assert FREQ_MISSING not in report["missing"]
 
 
@@ -186,11 +188,16 @@ def test_the_frequency_summary_names_what_fails(saved):
 
 
 def test_every_table_names_its_group_in_the_plan_order(saved):
+    from gridspine.ranking.campus import ISLAND_CRITERIA
+
     run = _run_dir(saved)
     _static(run)
     _freq(run)
-    groups = [t["group"] for t in island_report(saved)["tables"]]
-    assert groups and all(groups)
+    reason = ISLAND_CRITERIA[0][0]
+    pd.DataFrame({"period": [0], "hour": [3], "reasons": [reason]}).to_csv(run / cs.SELECTED_CSV, index=False)
+    tables = island_report(saved)["tables"]
+    groups = [t["group"] for t in tables]
     order = ["inputs", "study", "hours", "static", "frequency"]
     assert [order.index(g) for g in groups] == sorted(order.index(g) for g in groups)
-    assert {"static", "frequency"} <= set(groups)
+    assert {t["id"]: t["group"] for t in tables}["island_hours"] == "hours"
+    assert {"inputs", "hours", "static", "frequency"} <= set(groups)

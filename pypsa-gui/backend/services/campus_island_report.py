@@ -212,8 +212,8 @@ def _static_tables(run_dir, missing) -> list:
         df = _read(run_dir / fname, columns, missing)
         if df is None:
             continue
-        assumed = ([i for i, v in enumerate(df["assumed"]) if isinstance(v, str) and v.strip()]
-                   if "assumed" in columns else [])
+        # an empty cell (no assumed input) reads as None
+        assumed = [i for i, v in enumerate(df["assumed"]) if v] if "assumed" in columns else []
         tables.append(_table(f"static_{name}", _STATIC_TITLES[name], models.get(fname, MODELS[name]),
                              columns, df.values.tolist(), assumed, group="static"))
     return tables
