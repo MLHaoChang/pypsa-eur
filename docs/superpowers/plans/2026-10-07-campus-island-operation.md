@@ -2497,7 +2497,7 @@ just after its 0, and a test holds `diff(t) > 0`.
 The first run killed 22. The six survivors were closed by the tests above;
 all 28 are killed.
 
-### I7 as built (2026-10-14)
+### I7 as built: the pypsa-gui preview and loop (2026-10-14)
 
 **Owner and coordinator decisions (2026-10-14):**
 - **QA (owner), option 1:** one click runs the loop. It applies the cuts,
