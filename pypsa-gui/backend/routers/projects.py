@@ -132,6 +132,9 @@ _BUNDLE_CAMPUS_FILES = (
     "campus_electrical/run/campus_cost.csv",
     "campus_electrical/run/campus_compliance_invested.csv",
     "campus_electrical/run/campus_invest_scope.json",
+    # The last island study (campus island plan I9a): a result like the cost,
+    # made from the sidecar the project bundle already carries.
+    "campus_electrical/island_study.json",
 )
 
 # Per-project subdirectories that travel alongside the bundle FILES on every

@@ -78,6 +78,17 @@ class LibraryText(BaseModel):
     yaml: str
 
 
+class IslandConfigBody(BaseModel):
+    #: The raw sidecar; gridspine's schema validates it in the service (422
+    #: naming the field) and the service caps its size (413).
+    config: dict
+
+
+class IslandStudyBody(BaseModel):
+    scenarios: list[Literal["ups_bridged", "seamless", "planned"]] | None = Field(
+        None, min_length=1, max_length=3)
+
+
 class RunSettings(BaseModel):
     k: int = Field(ce.DEFAULTS["k"], ge=1, le=50)
     pf: float | None = Field(None, gt=0, le=1)
@@ -208,6 +219,47 @@ def cancel_milp(
     """Ask the running job to stop; it keeps the best point found so far."""
     _check_lock(proj, db, user)
     return ce.cancel_milp_job(_row(proj, db))
+
+
+# ── the island sidecar and study (campus island plan, I9a) ──────────────────
+
+@router.get("/{name}/island")
+def get_island(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """The island sidecar as written, and the last island study."""
+    return ce.get_island(_row(proj, db))
+
+
+@router.get("/{name}/island/report")
+def island_report(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """The island report: its tables, each with the model behind it, the
+    screening caveat and the rows that rest on assumed values."""
+    from services.campus_island_report import island_report as _report
+    return _report(_row(proj, db))
+
+
+@router.put("/{name}/island")
+def save_island(
+    body: IslandConfigBody,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Save the island sidecar, validated by gridspine's schema."""
+    _check_lock(proj, db, user)
+    return ce.save_island(_row(proj, db), body.config)
+
+
+@router.post("/{name}/island/study")
+async def run_island_study(
+    body: IslandStudyBody,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Solve the islanding variants (a baseline and one solve per scenario)
+    and report the cost of island capability and of seamless islanding."""
+    _check_lock(proj, db, user)
+    return await run_in_threadpool(ce.run_island_study, _row(proj, db), body.scenarios)
 
 
 # ── the asset library (plan C9) ────────────────────────────────────────────
