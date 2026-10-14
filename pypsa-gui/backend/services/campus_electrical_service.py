@@ -717,9 +717,11 @@ def extra_owner_assets(project, replacements: bool = False) -> list:
     Plan C14: the table has one row per purchase, an asset bought again at the
     end of its life as ``renew`` rows. By default only the first purchases are
     listed, exactly as before C14 (same entries, same names, same
-    ``build_year``): the IC refuses a ``build_year`` after the case COD
-    (``extra_asset_staged_build``) and its ``part_lifetimes`` rule would buy a
-    listed replacement a second time, so the IC must opt in.
+    ``build_year``): the IC takes a ``build_year`` after the case COD as a
+    later stage, which must fall on an investment period (P5c,
+    ``staged_cod_not_active_period``; it was ``extra_asset_staged_build``), and
+    its ``part_lifetimes`` rule would buy a listed replacement a second time,
+    so the IC must opt in.
     ``replacements=True`` lists every purchase, the renewals too (an existing
     asset's included), each with its own ``build_year`` (the first service year
     of the new unit); the first purchases keep their names and the renewals
