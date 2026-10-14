@@ -4,7 +4,8 @@ defaults pack version 2026-10-07 = 2026-10-05 unchanged plus the campus equipmen
 `lump` (EUR/unit) and `per_bay` (EUR/bay) and the existing `per_km` (EUR/km).
 
 - G-1. A new version, never an edit: both versions load and are pinned, 2026-10-05's pin is unchanged, every
-  2026-10-05 row is in 2026-10-07 unchanged; the latest version is 2026-10-07.
+  2026-10-05 row is in 2026-10-07 unchanged; 2026-10-07 follows 2026-10-05 (2026-10-13, IC S3,
+  is the latest since).
 - G-2. The bases and their unit conversions; the basis / overnight-unit rule covers `lump`.
 - G-3. One `investment` part per campus entry, `technology = "<kind>.<id lowercased>"`, three rows (overnight,
   lifetime, fom_share), illustrative, `source = "assumed (gridspine campus_assets.yaml placeholder)"`, money in
@@ -59,8 +60,8 @@ def test_both_versions_load_and_are_pinned_and_the_latest_is_the_new_one(new, ol
     pinned = json.loads((FIXTURES / "pack_hashes.json").read_text())["generic_defaults"]
     assert pinned[OLD] == "962a0184861c1c594fdf4029ed5e7d55e241ab1aadfad5d52412df76ad2a4f78"
     assert old.hash == pinned[OLD] and new.hash == pinned[NEW] and new.hash != old.hash
-    assert loader.available_versions()[-2:] == (OLD, NEW)
-    assert loader.load_defaults_pack().version == NEW
+    versions = loader.available_versions()
+    assert versions[versions.index(OLD) + 1] == NEW           # consecutive (the latest: S3's test)
 
 
 def test_every_old_row_is_in_the_new_version_unchanged(new, old):

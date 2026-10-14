@@ -391,14 +391,13 @@ def user_code_authorized(db, actor) -> bool:
     """
     True iff `actor` may set `extra_functionality_code` in this deployment.
 
-    The ONE definition of that authorization, because the PUT below is not the
-    only writer of the field: `routers/projects.import_bundle` takes a bundle's
-    `solver_config.json`, and `_solver_config_from_dict` filters to the live
-    `SolverConfig` field set — of which this is one. A member refused here
-    reached the identical capability through a zip until both edges shared this
-    predicate (found by an independent QA review, 2026-09-12; see
-    tests/test_user_code_import_bypass.py). A field is only as gated as its
-    least-guarded writer.
+    It guards only the PUT below. `routers/projects.import_bundle` is a second
+    writer of the field (`_solver_config_from_dict` keeps every live
+    `SolverConfig` key), and it once shared this predicate. That was the wrong
+    gate: this asks whether the caller is privileged, while a bundle raises a
+    question of authorship it cannot answer, so an admin importing a
+    colleague's zip ran the colleague's code. The import now strips the field
+    for every importer (see tests/test_user_code_import_bypass.py).
 
     Both conditions are required, and neither overrides the other: the operator
     opted in via the process-wide flag, AND the caller is an org admin. Local

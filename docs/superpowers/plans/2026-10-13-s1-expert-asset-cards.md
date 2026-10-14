@@ -64,3 +64,17 @@ U3 needs only S1a + S1b, for the guided question's two assets (spec :442).
    that writes defaults stamps them through `provenance.record`.
 2. The route sits in `routers/network.py` beside `/catalog/{component}` and is cached the same way (project-free).
    `carrier` only changes defaults and reveal rules, never the field set.
+
+## S1b decisions (13 Oct)
+
+- **Blank policy on the descriptor** (`FieldSpec.blank`):
+  - `clear` sends null: an Optional column, or a bound the write model turns into ±inf;
+  - `zero` for costs, a deliberate "free";
+  - `keep` for everything else, where a blank capacity is a slip.
+  
+  `test_blank_policy_agrees_with_the_write_model` keeps the descriptors honest against `models/schemas.py`.
+- **Generator descriptors gain** `control`, `e_sum_min` and `e_sum_max`, which the old card had and S1a missed.
+- **A composite asset's parts render as one table** (Part × Overnight / Life / FOM), as in the spec's battery card. In the two-column card, "Power part: overnight cost" would truncate. Each input keeps the full label as its accessible name. Derived rows take a full line.
+- **Units:** the descriptors say EUR and the cards say € (`unitLabel`).
+- **Frontend tests** render from `src/test/fixtures/assetSchema.json`. It is generated from the backend descriptors, and `test_the_frontend_fixture_matches_the_descriptors` fails when they drift. `vitest.setup.ts` mocks `useAssetSchema` with it.
+- **A battery priced the old way** (one `overnight_cost`, no parts) keeps that cost and shows a note: enter the two parts to replace it. The clone button offers the overnight cost only for such a unit; a battery's parts ride along in the `...su` spread.
