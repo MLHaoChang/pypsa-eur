@@ -134,6 +134,30 @@ def test_a_file_off_the_contract_is_listed_missing_and_not_shown(saved):
     assert "static_flow" in _tables(report)
 
 
+@pytest.mark.parametrize("fname, columns, table", [
+    (cs.FREQ_EVENTS_CSV, F.EVENT_COLUMNS, "freq_events"),
+    (cs.FREQ_E1_HOURLY_CSV, F.E1_HOURLY_COLUMNS, "freq_e1_hourly"),
+])
+def test_a_frequency_table_written_before_trip_s_still_shows_with_it_empty(saved, fname, columns, table):
+    # a run made before the trip floor (#269) has no trip_s, which sat next to collapse_s mid-header: it reads as
+    # empty, and the report says the run predates the floor so an empty trip_s is not read as "no trip"
+    run = _run_dir(saved)
+    _freq(run)
+    old = [c for c in columns if c != "trip_s"]
+    assert old.index("collapse_s") + 1 < len(old)                      # trip_s was in the middle, not at the end
+    _write(run, fname, old, [_row(old, period=0, hour=3, scenario="seamless", event="E1", ok=False)])
+    report = island_report(saved)
+    shown = _tables(report)[table]
+    assert shown["columns"] == list(columns) and not any("columns differ" in m for m in report["missing"])
+    assert shown["rows"][0][list(columns).index("trip_s")] is None
+    assert f"{fname} written before the trip floor: re-run for trip times" in report["missing"]
+    # a current file carries no such note, and any other difference is still off the contract
+    _freq(run)
+    assert not any("trip floor" in m for m in island_report(saved)["missing"])
+    _write(run, fname, old[:-1], [])
+    assert f"{fname} (columns differ from the contract)" in island_report(saved)["missing"]
+
+
 def test_the_static_summary_names_what_fails_and_carries_the_ledger_and_case_note(saved):
     _static(_run_dir(saved), summary={"not_viable_hours": [[0, 5, "no grid-forming unit"]]})
     t = _tables(island_report(saved))["static_summary"]
