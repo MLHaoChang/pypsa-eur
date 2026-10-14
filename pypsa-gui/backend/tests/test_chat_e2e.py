@@ -1146,8 +1146,8 @@ def test_safety_tier_for_read_destructive_execution():
     assert chat_service._safety_tier_for("list_components") == "read"
     assert chat_service._safety_tier_for("delete_component") == "destructive"
     assert chat_service._safety_tier_for("run_simulation") == "execution"
-    # Unknown tool fails closed — defaults to read (no confirmation card)
-    assert chat_service._safety_tier_for("nonexistent_tool") == "read"
+    # Unknown tool fails closed: destructive, so it would get the card
+    assert chat_service._safety_tier_for("nonexistent_tool") == "destructive"
 
 
 # ─────────────────────────────────────────────────────────────────────────

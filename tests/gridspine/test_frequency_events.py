@@ -130,29 +130,42 @@ def test_e4_takes_the_first_block_from_rest_like_a_one_governor_step():
     assert res.ready_s == 15.0 and res.complete
     assert res.blocks[0].nadir_hz == pytest.approx(first.nadir_hz, abs=1e-9)
     assert res.blocks[0].t_nadir_s == pytest.approx(first.t_nadir_s, abs=1e-9)
-    assert res.trace.df[-1] == pytest.approx(-6.0 / 5.0, abs=1e-3)      # -Σblocks / K, K = 10 / (0.04 * 50)
 
 
-def test_e4_takes_each_next_block_once_the_governors_have_recovered():
-    sched_band, settle = 0.1, 0.05
-    res = F.e4_ups_bridged([cold_gen()], [2.0, 2.0, 2.0], band_hz=sched_band, settle_hz_per_s=settle,
-                           dt=1e-3, t_end=30.0)
-    times = res.block_times_s
-    assert times[0] == 0.0 and times[1] > times[0] and times[2] > times[1]
-    tr, k = res.trace, 5.0
-    for n, tk in enumerate(times[1:], start=1):
-        i = int(round(tk / 1e-3))
-        assert abs(tr.df[i] - (-2.0 * n / k)) <= sched_band
-        # not before: one sample earlier it was outside the band or still moving
-        prev = int(round(times[n - 1] / 1e-3))
-        rocof = np.gradient(tr.df, tr.t)
-        inside = (np.abs(tr.df - (-2.0 * n / k)) <= sched_band) & (np.abs(rocof) <= settle * 0.5)
-        assert not inside[prev + 1:i - 5].any()
+def test_e4_restores_nominal_before_each_block_so_equal_blocks_respond_alike():
+    # owner, 2026-10-14 (Q2 = A): secondary control restores f0 once a block settles; the next block starts
+    # from nominal at the accumulated loading. Unsaturated, equal blocks then give equal responses.
+    res = F.e4_ups_bridged([cold_gen()], [2.0, 2.0, 2.0], dt=1e-3, t_end=30.0)
+    assert res.complete
+    for m in res.blocks:
+        assert m.nadir_hz == pytest.approx(res.blocks[0].nadir_hz, abs=1e-9)
+        assert m.df_qss_hz == pytest.approx(-2.0 / 5.0, abs=1e-3)            # one block over K, not the sum
+    gaps = np.diff(res.block_times_s)
+    assert gaps == pytest.approx([gaps[0]] * len(gaps), abs=1e-9)
+    # the joined trace's time strictly increases: no repeated instant at a block boundary (gatekeeper, #226)
+    assert (np.diff(res.trace.t) > 0).all() and len(res.trace.t) == len(res.trace.df)
+
+
+def test_each_block_waits_for_the_governors_to_recover_from_it():
+    band, settle = 0.1, 0.05
+    res = F.e4_ups_bridged([cold_gen()], [2.0, 2.0], band_hz=band, settle_hz_per_s=settle, dt=1e-3, t_end=30.0)
+    one = F.simulate([dataclasses.replace(cold_gen(), join_s=0.0)], F.step(2.0), t_end=30.0, dt=1e-3)
+    rocof = np.gradient(one.df, one.t)
+    ok = (np.abs(one.df - (-2.0 / 5.0)) <= band) & (np.abs(rocof) <= settle)
+    first = one.t[int(np.flatnonzero(ok & (one.t > 0))[0])]
+    assert res.block_times_s == pytest.approx([0.0, first], abs=2e-3)
+
+
+def test_each_block_starts_at_the_loading_the_earlier_blocks_left():
+    # 10 MW genset with a 5 MW load-acceptance step: after 4 + 4 MW the third 4 MW block has 2 MW of room
+    res = F.e4_ups_bridged([cold_gen()], [4.0, 4.0, 4.0], dt=1e-3, t_end=30.0)
+    assert not res.complete and len(res.block_times_s) == 3
+    assert res.blocks[2].nadir_hz < res.blocks[0].nadir_hz - 1.0
 
 
 def test_an_isochronous_genset_settles_every_block_back_to_nominal():
     res = F.e4_ups_bridged([cold_gen(isochronous=True)], [2.0, 2.0], dt=1e-3, t_end=60.0)
-    assert res.complete and abs(res.trace.df[-1]) <= 0.1
+    assert res.complete and all(abs(m.df_qss_hz) <= 0.1 for m in res.blocks)
 
 
 def test_a_pickup_beyond_the_gensets_does_not_complete_and_fails_the_bridge():
@@ -185,6 +198,39 @@ def test_n_plus_k_leaves_out_the_largest_genset_and_needs_one_left():
     assert F.e4_ups_bridged([small, large], [2.0], dt=1e-3, t_end=30.0).ready_s == 35.0
     with pytest.raises(ContractError, match="N\\+k"):
         F.e4_ups_bridged([large], [2.0], redundancy_n=1)
+
+
+def test_n_plus_k_removes_one_unit_of_a_modular_genset():
+    # owner, 2026-10-14 (Q1 = A), as I2b: N+1 takes one 5 MW unit from the 20 MW genset, not all of it
+    big = cold_gen("BIG", p_n=20.0, unit_mw=5.0, step_mw=10.0, ramp_mw_per_s=2.0)
+    small = cold_gen("S", p_n=1.0)                                         # a smaller unit than BIG's 5 MW
+    res = F.e4_ups_bridged([big, small], [2.0], redundancy_n=1, dt=1e-3, t_end=30.0)
+    assert res.dropped == ["BIG: 1 x 5 MW"] and res.complete
+    left = [dataclasses.replace(big, p_n=15.0, s_n=15.0, p_max=15.0, step_mw=big.step_mw * 0.75,
+                                ramp_mw_per_s=big.ramp_mw_per_s * 0.75, join_s=0.0),
+            dataclasses.replace(small, join_s=0.0)]
+    by_hand = F.metrics(F.simulate(left, F.step(2.0), t_end=30.0, dt=1e-3))
+    assert res.blocks[0].nadir_hz == pytest.approx(by_hand.nadir_hz, abs=1e-9)
+    # the load step scales with the unit gone: BIG's 8.4 MW share of 9 MW is beyond the 7.5 MW left, within 10 MW
+    nine = F.e4_ups_bridged([big, small], [9.0], redundancy_n=1, dt=1e-3, t_end=30.0)
+    hand9 = F.metrics(F.simulate(left, F.step(9.0), t_end=30.0, dt=1e-3))
+    assert nine.blocks[0].nadir_hz == pytest.approx(hand9.nadir_hz, abs=1e-9)
+    unscaled = [dataclasses.replace(left[0], step_mw=big.step_mw, ramp_mw_per_s=big.ramp_mw_per_s), left[1]]
+    assert F.metrics(F.simulate(unscaled, F.step(9.0), t_end=30.0, dt=1e-3)).nadir_hz > hand9.nadir_hz + 1e-3
+    # two units out: BIG's 5 MW units stay the largest, so both come from it
+    two = F.e4_ups_bridged([big, small], [2.0], redundancy_n=2, dt=1e-3, t_end=30.0)
+    assert two.dropped == ["BIG: 1 x 5 MW", "BIG: 1 x 5 MW"]
+    # a whole genset with a larger unit goes first
+    six = F.e4_ups_bridged([big, cold_gen("S6", p_n=6.0)], [2.0], redundancy_n=1, dt=1e-3, t_end=30.0)
+    assert six.dropped == ["S6"]
+
+
+def test_a_whole_unit_genset_is_removed_whole():
+    one = cold_gen("ONE", p_n=5.0, unit_mw=5.0)
+    res = F.e4_ups_bridged([one, cold_gen("S", p_n=6.0)], [2.0], redundancy_n=1, dt=1e-3, t_end=30.0)
+    assert res.dropped == ["S"]                                             # the largest unit is S's 6 MW
+    res = F.e4_ups_bridged([one, cold_gen("T", p_n=4.0)], [2.0], redundancy_n=1, dt=1e-3, t_end=30.0)
+    assert res.dropped == ["ONE"]
 
 
 # ── E6, planned islanding ──────────────────────────────────────────────────
@@ -278,6 +324,10 @@ def test_the_weak_grid_flags_need_both_conditions(kw, flagged):
 # ── the campus ──────────────────────────────────────────────────────────────
 
 def ups_campus(transfers=True, scenarios=("seamless", "ups_bridged", "planned"), walk_in=15.0, f_trip=None):
+    return build_campus(ups_campus_spec(transfers, scenarios, walk_in, f_trip))
+
+
+def ups_campus_spec(transfers=True, scenarios=("seamless", "ups_bridged", "planned"), walk_in=15.0, f_trip=None):
     s = spec()
     s["campus"]["units"]["UPS1"] = {"kind": "ups", "bus": "MV2", "p_mw": t(8.0), "e_mwh": t(2.0), "s_mva": t(9.0),
                                     "island": {**ups(), "walk_in_s": t(walk_in), "it_load": ["DC_LOAD"],
@@ -287,7 +337,7 @@ def ups_campus(transfers=True, scenarios=("seamless", "ups_bridged", "planned"),
     req = requirements()
     req.update(scenarios=list(scenarios), genset_redundancy_n=t(0), pickup_blocks=t([2.0, 3.0, 1.0]))
     s["campus"]["island"] = req
-    return build_campus(s)
+    return s
 
 
 def ups_rows(**kw):
@@ -302,7 +352,11 @@ def test_the_campus_ups_carries_its_it_loads_draw_and_its_stored_energy():
     u = next(x for x in F.units_from_campus(camp, ups_rows(), soc={"UPS1": 0.7}) if x.name == "UPS1")
     assert u.ups["e_mwh"] == 0.7
     g = next(x for x in F.units_from_campus(camp, ups_rows()) if x.name == "GEN1")
-    assert (g.start_s, g.sync_s, g.ready_s) == (10.0, 5.0, 15.0)
+    assert (g.start_s, g.sync_s, g.ready_s) == (10.0, 5.0, 15.0) and math.isnan(g.unit_mw)
+    s = ups_campus_spec()
+    s["campus"]["units"]["GEN1"]["island"]["unit_mw"] = t(2.5, "datasheet")
+    g = next(x for x in F.units_from_campus(build_campus(s), ups_rows()) if x.name == "GEN1")
+    assert g.unit_mw == 2.5
 
 
 @pytest.mark.parametrize("f_trip, expect", [(48.0, ("DC_LOAD trip", 48.0, None)), (51.0, ("DC_LOAD trip", None, 51.0))])

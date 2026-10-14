@@ -33,6 +33,9 @@ DESTRUCTIVE_TIERS = frozenset(["destructive", "execution", "execution_long_runni
 # are carded one after the other (dispatch is sequential and blocks on each).
 GUIDED_CONFIRM_TIERS = DESTRUCTIVE_TIERS | frozenset(["write"])
 
+# A tool name absent from the catalogue gets the card in every mode.
+UNKNOWN_TOOL_TIER = "destructive"
+
 
 def _confirm_tiers(guided: bool) -> frozenset[str]:
     """The tiers that go through the confirmation card this turn."""
@@ -88,19 +91,15 @@ def _safety_tier_for(tool_name: str) -> str:
     execution_long_running) by grepping the documented `Safety: <tier>`
     marker in its description.
 
-    THIS DEFAULT IS FAIL-**OPEN**, and the docstring used to claim the
-    opposite ("fails closed"). An unknown or unmarked tool resolves to
-    "read", and "read" is precisely the tier that gets NO confirmation card
-    — so a destructive tool whose author forgot the marker would execute
-    unconfirmed. The old wording named the behaviour ("no confirmation
-    card") while mislabelling its direction, which is how it survived
-    review.
+    A name that is NOT in `TOOLS` resolves to "destructive": the card in
+    Expert and Guided, and the parallel-destructive refusal. It used to
+    resolve to "read" (no card), so a handler registered without a
+    declaration, or a tool that arrives at runtime, would have run
+    unconfirmed (tests/test_uncatalogued_tool_tier.py).
 
-    The default is left as-is deliberately: making it confirmable would
-    start gating tools that are legitimately unmarked-as-read, changing
-    behaviour for the whole registry to defend against a case that does not
-    currently exist. What keeps it safe instead is
-    `test_every_tool_safety_marker_resolves_to_known_tier`
+    A tool that IS in `TOOLS` but carries no marker still resolves to
+    "read". That default is fail-open and left as-is deliberately: what
+    keeps it safe is `test_every_tool_safety_marker_resolves_to_known_tier`
     (tests/test_chat_tools_dispatch.py), which asserts every TOOLS entry
     carries a marker resolving to its own literal tier — so a missing marker
     is a CI failure rather than a silent runtime fail-open.
@@ -116,7 +115,7 @@ def _safety_tier_for(tool_name: str) -> str:
                 if f"Safety: {tier}" in desc:
                     return tier
             return "read"
-    return "read"
+    return UNKNOWN_TOOL_TIER
 
 
 def _confirm_destructive_tool(

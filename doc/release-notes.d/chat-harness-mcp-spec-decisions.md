@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): Record the owner's MCP decisions in the chat harness spec: external agents get the full tool catalogue on this machine only, with every write confirmed in the app; external MCP tools not marked read-only always ask, in Expert too; and the build order.

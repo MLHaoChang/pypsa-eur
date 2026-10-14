@@ -61,12 +61,14 @@ _CONVERTER_OPTIONAL = ("neg_seq",)
 
 _GENSET_REQUIRED = ("q_droop_pct", "H_s", "T_g_s", "ramp_pu_per_s", "start_s", "sync_s",
                     "load_step_max_pct", "cos_phi_r", "xd_sat")
-_GENSET_OPTIONAL = ("droop_pct", "p_min_pu", "r_n_ohm", "ik_sustained_pu", "x2_pu", "x0_pu")
+_GENSET_OPTIONAL = ("droop_pct", "p_min_pu", "r_n_ohm", "ik_sustained_pu", "x2_pu", "x0_pu", "unit_mw")
 _GENSET_ENUMS = {"governor": GOVERNORS, "excitation": EXCITATIONS, "neutral_earthing": EARTHINGS}
 _GENSET_FLAGS = ("spinning", "unit_transformer", "unit_transformer_oltc")
 #: Fields only the hub sidecar carries: a campus unit is already built, so it
-#: has its own rating and x''d at unit level.
-_SIDECAR_ONLY = {"genset": ("unit_mw", "xd_pp")}
+#: has its own x''d at unit level. ``unit_mw`` is carried into the campus
+#: (owner, 2026-10-14): a campus genset may be several units, and I6's E4
+#: removes N+k of them as I2b does.
+_SIDECAR_ONLY = {"genset": ("xd_pp",)}
 
 _UPS_REQUIRED = ("walk_in_s", "f_window_hz")
 _LOAD_OPTIONAL = ("f_trip_hz",)
@@ -187,7 +189,7 @@ FIELD_USERS = {
     "relay_sensitivity": ("I5",),
     "unit_transformer": ("I5",),
     "unit_transformer_oltc": ("I5",),
-    "unit_mw": ("I2a",),
+    "unit_mw": ("I2a", "I6"),
     "xd_pp": ("I5",),
     # UPS
     "it_load": ("I2a", "I2b", "I3a", "I6"),
