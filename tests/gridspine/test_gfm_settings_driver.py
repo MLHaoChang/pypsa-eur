@@ -32,3 +32,34 @@ def test_it_needs_the_frequency_check(tmp_path):
     run = write_run(tmp_path / "run", campus_spec())
     with pytest.raises(ContractError, match="island_frequency_campus"):
         D.gfm_settings_campus(run)
+
+
+def test_the_tuning_margin_is_its_own_key_never_gfm_margin(tmp_path):
+    from tests.gridspine.test_island_schema import t
+    s = campus_spec()
+    s["campus"]["island"]["gfm_margin"] = t(0.95)            # I2b's capacity margin
+    run = write_run(tmp_path / "a", s)
+    D.island_frequency_campus(run, every_hour=False)
+    assert D.gfm_settings_campus(run, max_sims=60)["margin"] == pytest.approx(0.1)
+    s["campus"]["island"]["gfm_tuning_margin"] = t(0.2)
+    run = write_run(tmp_path / "b", s)
+    D.island_frequency_campus(run, every_hour=False)
+    assert D.gfm_settings_campus(run, max_sims=60)["margin"] == pytest.approx(0.2)
+
+
+def test_the_tuning_margin_must_be_below_one(tmp_path):
+    from tests.gridspine.test_island_schema import t
+    s = campus_spec()
+    s["campus"]["island"]["gfm_tuning_margin"] = t(1.0)
+    with pytest.raises(ContractError, match=r"gfm_tuning_margin must be in \[0, 1\)"):
+        D.load_run_campus(write_run(tmp_path / "run", s))
+
+
+def test_the_bounds_are_ledgered_as_assumed(tmp_path):
+    run = write_run(tmp_path / "run", campus_spec())
+    D.island_frequency_campus(run, every_hour=False)
+    out = D.gfm_settings_campus(run, max_sims=60)
+    text = " ".join(out["ledger"])
+    for word in ("droop", "H", "tau_f", "i_max", "assumed"):
+        assert word in text
+    assert any("1–10 %" in x or "1-10 %" in x for x in out["ledger"])

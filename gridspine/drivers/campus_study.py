@@ -522,8 +522,10 @@ def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 4
     at the island hours, passing and failing alike (a setting must not break
     a passing event), each rebuilt as the study ran it; E4 has no GFM in it and
     E6 is not rebuilt, so neither is a case; the every-hour E1 sweep is left
-    to the cuts. ``margin`` defaults to the requirements' ``gfm_margin``.
-    Writes ``campus_gfm_settings.json`` and returns it."""
+    to the cuts. ``margin`` defaults to the requirements'
+    ``gfm_tuning_margin`` (0.1 when absent; never ``gfm_margin``, which is
+    I2b's capacity margin). The search ranges are ledgered as assumed
+    (``ledger``). Writes ``campus_gfm_settings.json`` and returns it."""
     from gridspine.static import frequency as F
     from gridspine.static import gfm_tuning as T
 
@@ -539,7 +541,7 @@ def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 4
     values = req["values"]
     window, eq = values["rocof_window_ms"], F.equipment(campus)
     if margin is None:
-        margin = float(values.get("gfm_margin", 0.1))
+        margin = float(values.get("gfm_tuning_margin", 0.1))
     events = pd.read_csv(events_path)
     events = events[events["event"].isin(["E1", "E2", "E3", "E5"])]
     if "i_max_pu" in events:
@@ -560,7 +562,7 @@ def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 4
         cases.append(T.Case(f"{key[0]} h{key[1]} {key[2]} {key[3]}", built_[0], run))
     rec = T.recommend_gfm_settings(cases, limits, equipment_=eq, window_ms=window, margin=margin,
                                    allow_i_max=allow_i_max, max_sims=max_sims)
-    out = {"label": rec.label, "status": rec.status, "achievable": rec.achievable, "changed": rec.changed,
+    out = {"label": rec.label, "ledger": T.ledger(rec.bounds), "status": rec.status, "achievable": rec.achievable, "changed": rec.changed,
            "settings": rec.settings,
            "cases": rec.cases, "capacity": rec.capacity, "comparison": rec.comparison,
            "simulations": rec.simulations, "max_simulations": max_sims, "margin": margin,

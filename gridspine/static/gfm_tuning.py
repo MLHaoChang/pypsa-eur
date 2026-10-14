@@ -8,7 +8,9 @@ the island's frequency events pass, with margin, before anything is bought?**
 
 The settings are one droop ``d`` (percent on P_n) and one equivalent inertia
 ``H`` (s on S_n) for every GFM converter, so the converters keep sharing in
-proportion to their ratings. A VSM takes ``H_v = H``; a droop GFM takes the
+proportion to their ratings. When the current settings pass, each unit keeps
+its own (a mixed fleet is left as it is); a search starts from common settings,
+every GFM at the first one's droop and H, and says so in the notes. A VSM takes ``H_v = H``; a droop GFM takes the
 low-pass constant that gives the same synthetic inertia, ``tau_f = 2 H S_n R
 / P_n`` (``frequency._gfm_m``: M = P_n tau_f / (R f0) = 2 H S_n / f0). The
 current-limit ``i_max`` is hardware: it is held unless ``allow_i_max``, when
@@ -21,7 +23,8 @@ grid-forming converter in it and is never a case; the driver leaves it out.
 **Margin.** A case passes with margin ``m`` when ``frequency.judge`` passes it
 against limits shrunk by ``m`` (``shrunk``): the RoCoF limit times (1 − m),
 each frequency limit moved toward f0 by m of what it allows, the settled band
-times (1 − m).
+times (1 − m). ``0 ≤ m < 1``. The margin covers the grid-code limits only:
+equipment, UPS and protection limits are used as given (a note says so).
 
 **Search.** Fixed horizons only (never a settle-lengthening loop): ``search``
 ``(dt, t_end)`` while searching, ``verify`` once at the end. In order:
@@ -38,12 +41,19 @@ times (1 − m).
 
 Steps 3 and 4 assume a stronger setting never makes a case worse (lower droop,
 more inertia), which holds while no converter saturates; the final verify is
-what the answer rests on. Every simulation is counted against ``max_sims``;
-the search stops, not achievable, when the budget would be exceeded.
+what the answer rests on. Every simulation is counted against ``max_sims``,
+and ``len(cases)`` of them are reserved for the final after-check, so a
+search that finished is always verified; the search stops, ``incomplete``
+(never a capacity verdict), when the budget would be exceeded, and so does a
+result whose after-check ran out of budget. One written exception: the
+capacity fallback of a not-achievable island runs I7's existing path
+(``frequency.cuts_for_event``, with its own bounded tries, ``_settle_run``
+included) outside the cap; those simulations are counted in the reported
+total and named in a note ("capacity fallback: N extra simulations").
 
 **Not achievable.** The corner settings and, for each case that still fails,
-``frequency.cuts_for_event``'s rows: the inertia, headroom or droop gain the
-hub must buy (I7). **Comparison.** Each converter run as ``gfl_fw`` (when it
+``frequency.cuts_for_event``'s rows against the shrunk limits: the inertia,
+headroom or droop gain the hub must buy (I7). **Comparison.** Each converter run as ``gfl_fw`` (when it
 has a frequency-watt block), ``gfm_droop`` and ``gfm_vsm`` at the
 recommended settings, its worst RoCoF at 0+ (where a grid-following unit adds
 no inertia) and over the window (where a fast frequency-watt block can still
@@ -70,7 +80,7 @@ BISECT_STEPS = 8
 
 @dataclasses.dataclass(frozen=True)
 class Bounds:
-    """The settings' search ranges (ledgered as assumed)."""
+    """The settings' search ranges (ledgered as assumed, ``ledger``)."""
     droop_pct: tuple[float, float] = (1.0, 10.0)
     h_s: tuple[float, float] = (0.5, 10.0)
     tau_f_s: tuple[float, float] = (0.01, 1.0)
@@ -78,6 +88,19 @@ class Bounds:
 
 
 GFM_BOUNDS = Bounds()
+MARGIN_NOTE = ("the margin covers the grid-code limits only (frequency_limits); equipment, UPS and "
+               "protection limits are used as given")
+
+
+def ledger(bounds: Bounds = GFM_BOUNDS) -> list:
+    """The search ranges as ledger lines, each assumed."""
+    (d0, d1), (h0, h1), (t0, t1) = bounds.droop_pct, bounds.h_s, bounds.tau_f_s
+    return [f"gfm settings: droop searched over {d0:g}–{d1:g} % on P_n (assumed)",
+            f"gfm settings: equivalent inertia H searched over {h0:g}–{h1:g} s on S_n (assumed)",
+            f"gfm settings: a droop GFM's tau_f held within {t0:g}–{t1:g} s (assumed)",
+            f"gfm settings: i_max raised to at most {bounds.i_max_pu_max:g} pu of S_n, only with allow_i_max, "
+            "never lowered (assumed)",
+            "gfm settings: " + MARGIN_NOTE + " (assumed)"]
 
 
 @dataclasses.dataclass
@@ -117,7 +140,9 @@ class _Budget(Exception):
 
 
 def shrunk(limits: dict, margin: float, f0: float = F.F0) -> dict:
-    """``limits`` with each one tightened by ``margin`` of what it allows."""
+    """``limits`` with each one tightened by ``margin`` (0 ≤ m < 1) of what it allows."""
+    if not (isinstance(margin, (int, float)) and 0.0 <= margin < 1.0):
+        raise ValueError(f"margin must be in [0, 1), got {margin!r}")
     out = copy.deepcopy(limits)
     keep = 1.0 - margin
     for part in ("transition", "steady_island"):
@@ -148,8 +173,8 @@ def _with(u, d_pct: float, h: float, bounds: Bounds, i_max_pu: float | None):
     else:
         lo, hi = bounds.tau_f_s
         kw["tau_f"] = min(max(2.0 * h * u.s_n * r / u.p_n, lo), hi)
-    if i_max_pu is not None:
-        kw["i_max_mw"] = i_max_pu * u.s_n
+    if i_max_pu is not None:                     # a raise, never a cut
+        kw["i_max_mw"] = max(u.i_max_mw, i_max_pu * u.s_n)
     return dataclasses.replace(u, **kw)
 
 
@@ -165,10 +190,11 @@ def recommend_gfm_settings(cases, limits, *, f0=F.F0, equipment_=(), window_ms=5
     cases = list(cases)
     tight = shrunk(limits, margin, f0)
     sims = [0]
+    cap = [max_sims - len(cases)]   # the after-check's len(cases) runs are reserved
     notes: list[str] = []
 
     def measured(case, units, horizon, lim):
-        if sims[0] >= max_sims:
+        if sims[0] >= cap[0]:
             raise _Budget()
         sims[0] += 1
         dt, t_end = horizon
@@ -197,18 +223,25 @@ def recommend_gfm_settings(cases, limits, *, f0=F.F0, equipment_=(), window_ms=5
             settings.setdefault(u.name, {"model": u.model, "current": _settings_of(u)})
     if gfm0 is None:
         notes.append("no grid-forming converter in any case: nothing to tune")
+    else:
+        notes.append(MARGIN_NOTE)
     d_cur = 100.0 * gfm0.r if gfm0 is not None else math.nan
     h_cur = _h_of(gfm0) if gfm0 is not None else math.nan
     (d_lo, d_hi), (h_lo, h_hi) = bounds.droop_pct, bounds.h_s
-    before = []
+    # rec None: every unit keeps its own current settings.
+    rec, before = None, []
     try:
         for c in cases:
             v = judged(c, c.units, verify, tight)
             before.append((v.ok, v.binding))
         if all(ok for ok, _ in before) or gfm0 is None:
-            rec = {"d": d_cur, "h": h_cur, "i_max_pu": None}
             achievable, changed = all(ok for ok, _ in before), False
         else:
+            own = {(round(s["current"]["droop_pct"], 9), round(s["current"]["H_equivalent_s"], 9))
+                   for s in settings.values()}
+            notes.append(f"the search starts from common settings: every grid-forming converter at one droop and "
+                         f"one H, from {gfm0.name}'s current {d_cur:g} % and {h_cur:g} s"
+                         + ("; the units' own settings differ and are replaced" if len(own) > 1 else ""))
             rec, achievable = _search(passes, d_cur, h_cur, d_lo, d_hi, h_lo, h_hi, search, verify, bounds,
                                       allow_i_max, notes)
             changed = True
@@ -218,35 +251,56 @@ def recommend_gfm_settings(cases, limits, *, f0=F.F0, equipment_=(), window_ms=5
         notes.append(f"search incomplete (cap {max_sims} reached)"
                      + (": the best settings found so far are reported" if best else
                         ": no passing setting found yet; the current settings are reported"))
-        rec = ({k: best[k] for k in ("d", "h", "i_max_pu")} if best
-               else {"d": d_cur, "h": h_cur, "i_max_pu": None})
+        rec = {k: best[k] for k in ("d", "h", "i_max_pu")} if best else None
         achievable, changed = None, bool(best)
         before += [(False, "not run (budget)")] * (len(cases) - len(before))
 
-    after, capacity = [], []
+    cap[0] = max_sims
+    after, finals = [], []
     for c, (ok0, b0) in zip(cases, before):
-        units = apply(c.units, rec["d"], rec["h"], bounds, rec["i_max_pu"]) if gfm0 is not None else c.units
+        units = c.units if rec is None else apply(c.units, rec["d"], rec["h"], bounds, rec["i_max_pu"])
         try:
             v = judged(c, units, verify, tight)
             ok1, b1 = v.ok, v.binding
         except _Budget:
             ok1, b1 = False, "not run (budget)"
         after.append({"key": c.key, "ok_before": ok0, "binding_before": b0, "ok_after": ok1, "binding_after": b1})
-        if not ok1 and achievable is False and b1 != "not run (budget)":
-            dt, t_end = verify
+        finals.append(units)
+    if achievable is not None and any(x["binding_after"] == "not run (budget)" for x in after):
+        # Unreachable while the reservation holds; never report an unverified answer.
+        notes[:] = [n for n in notes if "capacity is needed" not in n]
+        notes.append(f"search incomplete (cap {max_sims} reached at the verification step)")
+        achievable = None
+    capacity = []
+    if achievable is False:
+        dt, t_end = verify
+        extra = [0]
+        for c, units, x in zip(cases, finals, after):
+            if x["ok_after"]:
+                continue
+
+            def run(us, t, c=c):
+                extra[0] += 1
+                return c.run(us, dt, t)
             for kind, delta, binding, derivation, feasible, note in F.cuts_for_event(
-                    units, lambda us, t, c=c, dt=dt: c.run(us, dt, t), limits, f0, equipment_, window_ms,
-                    t_end=t_end, failing=b1, where=f"dt {dt:g} s, t_end {t_end:g} s"):
+                    units, run, tight, f0, equipment_, window_ms,
+                    t_end=t_end, failing=x["binding_after"], where=f"dt {dt:g} s, t_end {t_end:g} s"):
                 capacity.append({"case": c.key, "kind": kind, "delta": delta, "unit": F.CUT_KINDS[kind],
                                  "binding": binding, "derivation": derivation, "feasible": bool(feasible),
                                  "note": note})
+        sims[0] += extra[0]
+        notes.append(f"capacity fallback: {extra[0]} extra simulations via cuts_for_event "
+                     "(I7's own bounded tries, outside the cap)")
     for name, s in settings.items():
-        u = next(u for c in cases for u in _gfms(c.units) if u.name == name)
-        s["recommended"] = _settings_of(_with(u, rec["d"], rec["h"], bounds, rec["i_max_pu"]))
+        if rec is None:
+            s["recommended"] = dict(s["current"])
+        else:
+            u = next(u for c in cases for u in _gfms(c.units) if u.name == name)
+            s["recommended"] = _settings_of(_with(u, rec["d"], rec["h"], bounds, rec["i_max_pu"]))
     comparison = []
     if gfm0 is not None:
         try:
-            comparison = _compare(cases, rec, bounds, measured, search, tight)
+            comparison = _compare(cases, rec, (d_cur, h_cur), bounds, measured, search, tight)
         except _Budget:
             notes.append(f"the GFM/GFL comparison stopped at the budget of {max_sims} simulations")
     status = ("incomplete" if achievable is None else "not_achievable" if not achievable
@@ -305,9 +359,20 @@ def _settings_of(u) -> dict:
     return out
 
 
-def _compare(cases, rec, bounds, measured, horizon, tight) -> list:
+def _compare(cases, rec, ref, bounds, measured, horizon, tight) -> list:
     """Each converter as gfl_fw / gfm_droop / gfm_vsm at the recommended
-    settings (the other GFMs at them too), at the ``search`` horizon."""
+    settings (the other GFMs at them too), at the ``search`` horizon. ``rec``
+    None: every unit at its own current settings (a non-GFM run as a GFM at
+    ``ref``, the first GFM's droop and H)."""
+
+    def tuned(orig, u):
+        if rec is not None:
+            return _with(u, rec["d"], rec["h"], bounds, rec["i_max_pu"])
+        if orig.model == u.model:
+            return u
+        d, h = (100.0 * orig.r, _h_of(orig)) if orig.model in GFM_MODELS else ref
+        return _with(u, d, h, bounds, None)
+
     names = sorted({u.name for c in cases for u in c.units if u.model in CONVERTER_MODELS})
     out = []
     for name in names:
@@ -321,13 +386,13 @@ def _compare(cases, rec, bounds, measured, horizon, tight) -> list:
                         if model == "gfl_fw" and not u.fw:
                             skipped = "no frequency-watt block for this unit"
                             break
-                        u = dataclasses.replace(u, model=model)
+                        orig, u = u, dataclasses.replace(u, model=model)
                         if model in GFM_MODELS:
                             if math.isnan(u.r):
-                                u = dataclasses.replace(u, r=rec["d"] / 100.0)
-                            u = _with(u, rec["d"], rec["h"], bounds, rec["i_max_pu"])
+                                u = dataclasses.replace(u, r=(rec["d"] if rec else ref[0]) / 100.0)
+                            u = tuned(orig, u)
                     elif u.model in GFM_MODELS:
-                        u = _with(u, rec["d"], rec["h"], bounds, rec["i_max_pu"])
+                        u = tuned(u, u)
                     units.append(u)
                 if skipped:
                     break

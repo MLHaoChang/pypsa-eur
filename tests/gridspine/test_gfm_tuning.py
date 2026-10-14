@@ -106,15 +106,24 @@ def test_an_impossible_island_is_not_achievable_and_names_the_capacity():
 
 
 def test_raising_i_max_is_only_tried_when_allowed():
-    units = [gen(p0=5.0), bess("gfm_vsm", h=1.0, i_max_mw=10.5)]
-    limits = lim(f_min=49.0)
-    c = case(units, 9.0)
-    held = T.recommend_gfm_settings([c], limits)
-    assert held.settings["B"]["recommended"]["i_max_pu"] == pytest.approx(1.05)
-    allowed = T.recommend_gfm_settings([c], limits, allow_i_max=True)
-    if allowed.settings["B"]["recommended"]["i_max_pu"] != pytest.approx(1.05):
-        assert allowed.settings["B"]["recommended"]["i_max_pu"] == pytest.approx(1.5)
-        assert any("hardware" in n for n in allowed.notes)
+    """A lone VSM at 1.0 pu (10 MW) against a 12 MW loss collapses at every
+    setting; at 1.5 pu (15 MW) the corner passes. The raised branch is reached."""
+    units = [bess("gfm_vsm", h=1.0, i_max_mw=10.0, p_max=20.0)]
+    c = case(units, 12.0)
+    held = T.recommend_gfm_settings([c], lim())
+    assert held.status == "not_achievable"
+    assert held.settings["B"]["recommended"]["i_max_pu"] == pytest.approx(1.0)
+    allowed = T.recommend_gfm_settings([c], lim(), allow_i_max=True)
+    assert allowed.status == "recommended" and allowed.achievable
+    assert allowed.settings["B"]["recommended"]["i_max_pu"] == pytest.approx(1.5)
+    assert any("hardware" in n for n in allowed.notes)
+    assert all(x["ok_after"] for x in allowed.cases)
+
+
+def test_raising_i_max_never_lowers_a_unit_already_above_it():
+    lo, hi = bess("gfm_vsm", i_max_mw=10.0), bess("gfm_vsm", name="B2", i_max_mw=17.0)
+    got = {u.name: u.i_max_mw / u.s_n for u in T.apply([lo, hi], 4.0, 1.0, i_max_pu=1.5)}
+    assert got == {"B": pytest.approx(1.5), "B2": pytest.approx(1.7)}
 
 
 def test_the_cap_stops_the_search_as_incomplete_never_as_a_capacity_verdict():
@@ -149,3 +158,85 @@ def test_without_a_gfm_nothing_is_tuned():
     assert r.settings == {} and not r.changed and any("no grid-forming" in n for n in r.notes)
     assert math.isnan(float("nan"))
     assert dataclasses.is_dataclass(r)
+
+
+def test_a_cap_that_cuts_the_verification_is_never_reported_as_passing():
+    """Item 1: at cap 13 the search finished but the after-check ran out of
+    budget; around it, ``recommended``/``unchanged`` only when every case
+    reads ok_after True."""
+    c = case(island(), 4.0)
+    for cap in range(1, 31):
+        r = T.recommend_gfm_settings([c], lim(rocof=0.9), max_sims=cap)
+        if r.status in ("recommended", "unchanged"):
+            assert all(x["ok_after"] is True for x in r.cases), cap
+        assert all(x["binding_after"] != "not run (budget)" for x in r.cases) or r.status == "incomplete", cap
+    r = T.recommend_gfm_settings([c], lim(rocof=0.9), max_sims=13)
+    assert r.status == "incomplete" or all(x["ok_after"] for x in r.cases)
+
+
+def test_the_cap_check_is_what_stops_the_search():
+    """Removing the max_sims check would run past the cap."""
+    c = case(island(), 4.0)
+    for cap in (2, 5, 9):
+        r = T.recommend_gfm_settings([c], lim(rocof=0.9), max_sims=cap)
+        assert r.simulations <= cap and r.status == "incomplete"
+
+
+@pytest.mark.parametrize("m", [-0.5, 1.0, 1.5])
+def test_shrunk_refuses_a_margin_outside_0_to_1(m):
+    with pytest.raises(ValueError, match="margin"):
+        T.shrunk(lim(rocof=1.0), m)
+    with pytest.raises(ValueError, match="margin"):
+        T.recommend_gfm_settings([case(island(), 2.0)], lim(), margin=m)
+
+
+def test_the_capacity_fallback_is_judged_against_the_shrunk_limits(monkeypatch):
+    seen = []
+
+    def spy(units, run, limits, *a, **k):
+        seen.append(limits)
+        return []
+    monkeypatch.setattr(F, "cuts_for_event", spy)
+    c = case([bess("gfm_vsm", h=1.0, p0=0.0)], 30.0)
+    r = T.recommend_gfm_settings([c], lim(rocof=1.0, f_min=47.5), margin=0.1)
+    assert r.status == "not_achievable" and seen
+    assert all(s["transition"]["rocof_hz_per_s"] == pytest.approx(0.9) for s in seen)
+
+
+def test_every_simulation_is_counted_including_the_capacity_fallback(monkeypatch):
+    calls = [0]
+    real = F.simulate
+
+    def counted(*a, **k):
+        calls[0] += 1
+        return real(*a, **k)
+    monkeypatch.setattr(F, "simulate", counted)
+    c = case([bess("gfm_vsm", h=1.0, p0=0.0)], 30.0)
+    r = T.recommend_gfm_settings([c], lim(rocof=1.0, f_min=47.5))
+    assert r.status == "not_achievable"
+    assert r.simulations == calls[0]
+    assert any(n.startswith("capacity fallback:") and "extra simulations via cuts_for_event" in n
+               for n in r.notes)
+
+
+def mixed():
+    return [gen(p0=5.0), bess("gfm_vsm", h=1.0), bess("gfm_vsm", name="B2", r=0.06, h=3.0)]
+
+
+def test_a_passing_mixed_fleet_keeps_each_units_own_settings():
+    r = T.recommend_gfm_settings([case(mixed(), 2.0)], lim())
+    assert r.status == "unchanged" and not r.changed
+    for name in ("B", "B2"):
+        assert r.settings[name]["recommended"] == r.settings[name]["current"]
+    assert r.settings["B2"]["recommended"]["droop_pct"] == pytest.approx(6.0)
+
+
+def test_a_searched_mixed_fleet_starts_from_common_settings_and_says_so():
+    r = T.recommend_gfm_settings([case(mixed(), 6.0)], lim(rocof=0.7))
+    assert r.changed
+    assert any("common settings" in n for n in r.notes)
+
+
+def test_the_margin_note_says_equipment_limits_are_used_as_given():
+    r = T.recommend_gfm_settings([case(island(), 2.0)], lim())
+    assert any("grid-code limits only" in n and "used as given" in n for n in r.notes)
