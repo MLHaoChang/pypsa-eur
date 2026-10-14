@@ -1,6 +1,6 @@
 # 13 — The session event log: "model-visible means logged", replay and fork
 
-Status: ready-for-agent (Q15 decided; re-scoped 2026-10-12 against master's checked answers and durable thread, see Comments)
+Status: ready-for-agent (done 2026-10-14: part a shadow log, PR #204; part b the log is the source of truth, see Comments)
 Type: task
 Blocked by: 08 (done), PR MLHaoChang/pypsa-eur#86 merged (done)
 
@@ -131,3 +131,41 @@ closer's literal; never on a live frame). W2 recorded on the stub (battery
 the fork asking for a placeholder model with no profile; fixed and pinned.
 Gate: the chat regression in three shards, 3670 passed, 5 skipped, 1 failed
 (the manifest, now classified and passing). Part b (the switch-over) is a separate PR.
+
+2026-10-14 (part b, the switch-over; owner: "the loop builds from
+derive_messages(events), the WAL is retired, and chat.jsonl becomes a
+projection of events"):
+- The fold: `eventlog._apply(messages, event)` is the one step of
+  `derive_messages`; `eventlog.apply(session, type, **fields)` records the
+  event and folds the logged (redacted) event into `session.messages`.
+  `append_history_message`, its trim, `rewind_session`, `reset_history` and
+  `fork` go through it, so the deque IS `derive_messages(events)` by
+  construction, and the loop's seed (`list(session.messages)`) is the log's
+  projection. Consequence: earlier turns reach the model redacted, as
+  chat.jsonl already stores them. A tripwire
+  (`test_nothing_but_the_log_changes_a_sessions_history`) fails on any
+  production `.messages` mutation outside `eventlog.py`. An event that cannot
+  be redacted is not written, but still folded.
+- Resume: `/history` rebuilds a session it mints (a restart, an eviction)
+  from its log (`eventlog.resume`, torn tail closed first), tool calls and
+  results included, and the session goes on in the same file; a live session
+  is not rebuilt at all (it already is its projection). chat.jsonl rebuild
+  stays only for a session recorded before the log existed.
+- WAL retired: `begin/read/clear_pending_turn` and `chat.jsonl.pending` are
+  gone. `turn/start` gains `project` and `ts`; `/history`'s `pending_turn`
+  is `eventlog.interrupted_turn(caller, ctx)`: the caller's latest
+  `turn/start` on this project with no `turn/end`, in a session not in this
+  process, reported once (its log closed with `turn/end {interrupted}`).
+  Unlike the WAL it is per session, not one slot per project, and only the
+  caller's own turn is reported (CH-6).
+- Projection: each chat.jsonl record (completed and interrupted) is a
+  `turn/record {record}` event flushed before the loop appends the line
+  (`eventlog.project_chat(events)` reads them back); `append_turn` stays at
+  the loop's call site. The chat import route still writes chat.jsonl
+  directly (no session, no log).
+Tests: tests/test_harness_eventlog_truth.py (9, red first); the four WAL
+tests in test_chat_pending_turn_wal.py moved there; the secret-scrubbing
+precondition test's third sink is now the event log; the 13a sequence pin
+gains `turn/record`. Parity: stub 5/5; live anthropic-sonnet 5/5 twice, and
+once 5 prompts passing with one cross-prompt check failing (its message not
+captured; W2 made three tool calls that run), no backend errors.

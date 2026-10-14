@@ -457,16 +457,17 @@ export interface ChatTurn {
 }
 
 // A turn that started and never finished, recovered from the server's
-// pending-turn WAL. Carries the user's message only — there is no assistant
+// session event log (a `turn/start` with no `turn/end`; it replaced the
+// pending-turn WAL). Carries the user's message only — there is no assistant
 // half, which is precisely what makes it worth reporting.
 export interface InterruptedTurn {
   ts: number
   session_id: string
   model: ChatModel
   user: string
-  // NO `profile_id` here, deliberately, and not an oversight: the pending-turn
-  // WAL record (`chat_service.begin_pending_turn`) writes only ts/session_id/
-  // model/user. It exists to say "your message was interrupted" and let the
+  // NO `profile_id` here, deliberately, and not an oversight: the server
+  // reports only ts/session_id/model/user from the turn's `turn/start`
+  // (`eventlog.interrupted_turn`). It exists to say "your message was interrupted" and let the
   // user resend — it is never promoted into the transcript, so it needs no
   // provenance. `ChatTurn` (a real, answered turn) does carry `profile_id`.
 }
