@@ -50,8 +50,9 @@
  *   --project NAME      project name (default smoke_reports)
  *   --keep              do not delete the project's reports at the end
  *   SMOKE_EMAIL / SMOKE_PASSWORD   the sign-in when /api/health says
- *                       auth_enabled (defaults: admin@example.com /
- *                       admin-pass-123, as scripts/smoke-auth-gate.mjs)
+ *                       auth_enabled (defaults: admin@example.com and the
+ *                       generated dev-admin-password file; see
+ *                       scripts/dev-credentials.mjs)
  *   PLAYWRIGHT_BROWSERS_PATH       honoured by Playwright when --browser
  *
  * Generation needs a usable LLM profile on the backend (an API key or a local
@@ -69,6 +70,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { devCredentials } from './dev-credentials.mjs'
 
 // ── args ────────────────────────────────────────────────────────────────────
 
@@ -185,7 +187,7 @@ async function signIn() {
   if (!authEnabled) { note('auth_enabled=false (local mode): no login, no CSRF'); return true }
   const login = await api('/api/auth/login', {
     method: 'POST',
-    json: { email: process.env.SMOKE_EMAIL || 'admin@example.com', password: process.env.SMOKE_PASSWORD || 'admin-pass-123' },
+    json: devCredentials(),
   })
   step('POST /api/auth/login', login.res.ok, short(login.data))
   step('the login set a session cookie and a CSRF token', Boolean(cookieHeader) && Boolean(csrfToken))
