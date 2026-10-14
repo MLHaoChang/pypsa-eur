@@ -170,14 +170,37 @@ def test_the_stage_is_equity_funded_and_leaves_debt_and_dscr_alone():
     assert eq[y] == pytest.approx(STAGE)
 
 
+# bess on its own, shorter schedule, so the stage's class is pinned (not pv's)
+LAYER5 = (TaxLayer(name="corp", rate=0.25,
+                   depreciation=(DepreciationClass("pv:sl_10", 1.0, sl_half_year(10)),
+                                 DepreciationClass("bess:sl_5", 0.0, sl_half_year(5)))),)
+
+
 def test_tax_depreciates_the_stage_from_its_cod_on_its_own_class():
-    staged = run_case(_case(), layers=LAYER)
-    free = run_case(_case(bess_cost=0.0), layers=LAYER)
+    staged = run_case(_case(), layers=LAYER5)
+    free = run_case(_case(bess_cost=0.0), layers=LAYER5)
     extra = staged.tax.depreciation["corp"] - free.tax.depreciation["corp"]
     i = staged.tl.index(2035)
     assert extra[:i].sum() == pytest.approx(0.0)
-    assert extra[i] == pytest.approx(STAGE * sl_half_year(10)[0])
-    assert extra[i + 1] == pytest.approx(STAGE * sl_half_year(10)[1])
+    sched = sl_half_year(5)
+    assert extra[i:i + len(sched)] == pytest.approx([STAGE * f for f in sched])
+    assert extra[i + len(sched):].sum() == pytest.approx(0.0)
+
+
+def test_a_zero_cost_assets_replacement_depreciates_on_its_own_class():
+    """An unstaged asset with no stage-1 basis (overnight 0) and a replacement:
+    the replacement depreciates on the asset's own class. Master dropped it (a
+    latent bug the _vintage_classes change fixes; the release note says so)."""
+    def case(rep):
+        return _case(bess_cost=0.0, asset_cod={}, fin_over={
+            "cod_by_asset": {"pv": COD1, "bess": COD1}, "replacement_capex": rep,
+            "escalation": {"opex": 0.0, "tariff": 0.0, "export": 0.0, "capex": 0.0}})
+    with_rep = run_case(case([(2034, "bess", 100.0)]), layers=LAYER5)
+    without = run_case(case([]), layers=LAYER5)
+    extra = with_rep.tax.depreciation["corp"] - without.tax.depreciation["corp"]
+    i = with_rep.tl.index(2034)
+    assert extra[:i].sum() == pytest.approx(0.0)
+    assert extra[i:i + 6] == pytest.approx([10.0, 20.0, 20.0, 20.0, 20.0, 10.0])
 
 
 # ── refusals ─────────────────────────────────────────────────────────────────
@@ -189,6 +212,7 @@ def test_tax_depreciates_the_stage_from_its_cod_on_its_own_class():
     ({"cod_by_asset": {"pv": COD1, "bess": date(2045, 1, 1)}},
      {"pv": COD1, "bess": date(2045, 1, 1)}, "staged_cod_outside_axis:bess"),
     ({"stage_capex_lead_years": 6}, None, "staged_capex_before_close:bess"),
+    ({"replacement_capex": [(2033, "bess", 100.0)]}, None, "replacement_before_cod:bess:2033"),
 ])
 def test_the_staged_refusals(over, asset_cod, code):
     with pytest.raises(FinanceRefused) as e:
@@ -232,8 +256,10 @@ def test_a_staged_storage_lcos_reads_its_own_capex_and_clock():
     assert rec["pv_capex"] == pytest.approx(STAGE / 1.07 ** i)
     assert rec["reasons"] == [] and rec["lcos_nominal_per_mwh"] is not None, rec
     # Discharge degrades from bess's COD: year 1 of bess is 2035 (factor 1).
-    d = 1.0 / 1.07 ** r.tl.index(2035) + 0.9 / 1.07 ** r.tl.index(2036)
-    assert rec["pv_discharge_mwh"] > 10.0 * d
+    # on bess's own clock: Σ 10·0.9^(y−2035)/1.07^i over its operating years
+    want = sum(10.0 * 0.9 ** (y - 2035) / 1.07 ** r.tl.index(y) for y in range(2035, 2041))
+    assert want == pytest.approx(28.98456, abs=1e-5)
+    assert rec["pv_discharge_mwh"] == pytest.approx(want)
 
 
 # ── the report's cash lines ──────────────────────────────────────────────────
