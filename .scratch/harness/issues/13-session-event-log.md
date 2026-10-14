@@ -150,7 +150,11 @@ projection of events"):
   from its log (`eventlog.resume`, torn tail closed first), tool calls and
   results included, and the session goes on in the same file; a live session
   is not rebuilt at all (it already is its projection). chat.jsonl rebuild
-  stays only for a session recorded before the log existed.
+  stays only for a session recorded before the log existed. A rebuilt history
+  holds only the session's own turns (the chat.jsonl rebuild replayed every
+  turn in the window, co-members' included); the checked-answer scope is
+  still recovered only when the newest answered turn in the shared transcript
+  is the anchored answer (`test_newer_peer_message_cannot_become_the_owned_scope`).
 - WAL retired: `begin/read/clear_pending_turn` and `chat.jsonl.pending` are
   gone. `turn/start` gains `project` and `ts`; `/history`'s `pending_turn`
   is `eventlog.interrupted_turn(caller, ctx)`: the caller's latest
@@ -163,6 +167,10 @@ projection of events"):
   (`eventlog.project_chat(events)` reads them back); `append_turn` stays at
   the loop's call site. The chat import route still writes chat.jsonl
   directly (no session, no log).
+Gate: the chat regression in three shards, 4079 passed, 10 skipped, 5 failed:
+two were that recovery rule (fixed as above), three were source-reading lock
+tests that ran while history.py was being edited; the affected set rerun on
+the final code: 293 passed, 7 skipped, 0 failed.
 Tests: tests/test_harness_eventlog_truth.py (9, red first); the four WAL
 tests in test_chat_pending_turn_wal.py moved there; the secret-scrubbing
 precondition test's third sink is now the event log; the 13a sequence pin

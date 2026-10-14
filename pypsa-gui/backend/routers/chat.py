@@ -1050,7 +1050,19 @@ def chat_history(limit: int = 200,
                                 })
                     if rebuild and recovered_scope is not None:
                         assistants = [m for m in sess.messages if m.get("role") == "assistant"]
-                        if assistants and assistants[-1].get("_approved_answer_id") == recovered_scope["anchor"]:
+                        anchored = bool(assistants) and (
+                            assistants[-1].get("_approved_answer_id") == recovered_scope["anchor"])
+                        if from_log:
+                            # A history rebuilt from the session's own log
+                            # holds no co-member's turns, so the shared
+                            # transcript decides as the chat.jsonl rebuild
+                            # did: a newer answered turn by anyone else means
+                            # the checked scope is not recovered.
+                            answered = [r for r in turns if isinstance(r.get("assistant"), list)
+                                        and not chat_service.is_interrupted_turn(r)]
+                            anchored = anchored and bool(answered) and (
+                                answered[-1].get("answer_id") == recovered_scope["anchor"])
+                        if anchored:
                             sess.assurance_context = recovered_scope
                             sess.assurance_checkpoint_project = ctx.project_uuid
 
