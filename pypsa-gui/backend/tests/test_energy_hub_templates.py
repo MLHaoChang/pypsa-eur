@@ -11,6 +11,7 @@ import json
 import pathlib
 import sys
 
+import pandas as pd
 import pytest
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
@@ -21,13 +22,30 @@ import eh_templates as T  # noqa: E402
 IDS = sorted(T.BUILDERS)
 
 
+def _multi(n):
+    return n.snapshots.nlevels > 1
+
+
+def _optimize(n):
+    """Solve a copy; a staged template is multi-period (its own solver config)."""
+    probe = n.copy()
+    status, cond = probe.optimize(solver_name="highs",
+                                  multi_investment_periods=_multi(n))
+    return probe, status, cond
+
+
+def _year_sums(n, column):
+    """Each modelled year's weighting sums to 8760 h (one per period if staged)."""
+    w = n.snapshot_weightings[column]
+    return list(w.groupby(level=0).sum()) if _multi(n) else [float(w.sum())]
+
+
 @pytest.mark.parametrize("tid", IDS)
 def test_template_is_feasible_tagged_and_mttr_safe(tid):
     n = T.BUILDERS[tid]()
-    probe = n.copy()
-    status, cond = probe.optimize(solver_name="highs")
+    _probe, status, cond = _optimize(n)
     assert (status, cond) == ("ok", "optimal")
-    assert abs(float(n.snapshot_weightings["generators"].sum()) - 8760.0) < 1e-6
+    assert all(abs(x - 8760.0) < 1e-6 for x in _year_sums(n, "generators"))
     assert n.buses["eh_poc"].dtype == bool and n.buses["eh_poc"].any()
     assert n.buses["eh_critical"].any()
     assert (n.links["eh_role"] == "grid_import").sum() >= 1
@@ -180,25 +198,28 @@ def test_storage_integrates_physical_hours_while_costs_still_scale_to_a_year(tid
     by one hour of power per hourly snapshot. PyPSA uses the ``stores``
     weighting as elapsed hours in the SoC balance, so it must be 1."""
     n = T.BUILDERS[tid]()
-    assert abs(float(n.snapshot_weightings["objective"].sum()) - 8760.0) < 1e-6
-    assert abs(float(n.snapshot_weightings["generators"].sum()) - 8760.0) < 1e-6
+    for column in ("objective", "generators"):
+        assert all(abs(x - 8760.0) < 1e-6 for x in _year_sums(n, column))
     # pinned directly: a template whose storage happens to sit idle in the
     # solve below would otherwise pass the behavioural check vacuously
     assert (n.snapshot_weightings["stores"] == 1.0).all()
     if n.storage_units.empty:
         return
-    probe = n.copy()
-    status, cond = probe.optimize(solver_name="highs")
+    probe, status, cond = _optimize(n)
     assert (status, cond) == ("ok", "optimal")
     su_t = probe.storage_units_t
+    # each period's first snapshot wraps cyclically within its period; skip it
+    first = (n.snapshots.get_level_values(0) != pd.Index(n.snapshots.get_level_values(0)).to_series().shift().to_numpy()
+             if _multi(n) else n.snapshots == n.snapshots[0])
     for s in probe.storage_units.index:
         eff_in = float(probe.storage_units.at[s, "efficiency_store"])
         eff_out = float(probe.storage_units.at[s, "efficiency_dispatch"])
         soc = su_t.state_of_charge[s].to_numpy()
         step = (eff_in * su_t.p_store[s] - su_t.p_dispatch[s] / eff_out).to_numpy()
         prev = soc[:-1]
-        # one hour of power per snapshot (index 0 wraps cyclically; skip it)
-        assert abs(soc[1:] - prev - step[1:]).max() < 1e-4, s
+        # one hour of power per snapshot (a period's first wraps; skip it)
+        gap = abs(soc[1:] - prev - step[1:])[~first[1:]]
+        assert gap.max() < 1e-4, s
 
 
 def test_the_datacenter_ups_carries_the_it_load_it_protects():

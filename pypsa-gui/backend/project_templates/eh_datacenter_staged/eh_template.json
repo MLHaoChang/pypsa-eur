@@ -1,0 +1,73 @@
+{
+  "description": "The data center campus planned from a projected load: IT grows 12 \u2192 24 \u2192 36 MW over 2027, 2030 and 2035 while the utility energizes the 40 MW connection in steps (20 MW until 2030). Genset and battery candidates per period, so the plan says what to build when. Multi-period; tagged for an Energy Hub study.",
+  "dtc_attribution": "per_load",
+  "energization": [
+    {
+      "available_import_mw": 20.0,
+      "connection_mw": 40.0,
+      "note": "utility energization schedule (assumed)",
+      "source": "assumed",
+      "year": 2027
+    },
+    {
+      "available_import_mw": 40.0,
+      "connection_mw": 40.0,
+      "note": "utility energization schedule (assumed)",
+      "source": "assumed",
+      "year": 2030
+    },
+    {
+      "available_import_mw": 40.0,
+      "connection_mw": 40.0,
+      "note": "utility energization schedule (assumed)",
+      "source": "assumed",
+      "year": 2035
+    }
+  ],
+  "id": "eh_datacenter_staged",
+  "ledger": [
+    {
+      "item": "depreciation of the staged assets",
+      "note": "a deliberate deviation: a dated degressive election on a later stage is refused by the investment case (P5), so the staged assets are planned on straight-line AfA",
+      "source": "assumed",
+      "value": "straight-line AfA (not degressive)"
+    }
+  ],
+  "name": "Data Center Energy Hub (staged growth)",
+  "pack_overrides": {
+    "import_p_nom_mw": 40.0
+  },
+  "period_years": {
+    "2027": 3,
+    "2030": 5,
+    "2035": 10
+  },
+  "projected_load": [
+    {
+      "it_mw": 12.0,
+      "note": "synthetic illustrative fit-out ramp; replace with the client's load projection",
+      "pue": 1.3,
+      "year": 2027
+    },
+    {
+      "it_mw": 24.0,
+      "note": "synthetic illustrative fit-out ramp; replace with the client's load projection",
+      "pue": 1.3,
+      "year": 2030
+    },
+    {
+      "it_mw": 36.0,
+      "note": "synthetic illustrative fit-out ramp; replace with the client's load projection",
+      "pue": 1.3,
+      "year": 2035
+    }
+  ],
+  "provenance": "synthetic illustrative data (P19 template) \u2014 representative week, public-catalogue-range costs; replace with project data before any decision",
+  "recommended_archetype": "weak_flexible",
+  "stages": null,
+  "study_notes": [
+    "Each period is the same representative July week, with the period's load and import cap.",
+    "Candidates are one row per period (build_year = the period): the plan says what to build when.",
+    "The energization schedule caps the import at 20 MW in 2027: the site bridges the gap itself."
+  ]
+}

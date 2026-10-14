@@ -1431,6 +1431,8 @@ _TEMPLATE_DEFAULT_NAMES = {
     "eh_datacenter": "Data Center Energy Hub",
     "eh_h2_hub": "Industrial Hydrogen Hub",
     "eh_microgrid": "Island Microgrid",
+    # E2E demo plan 2026-10-14, slice 8.
+    "eh_datacenter_staged": "Data Center Energy Hub (staged growth)",
 }
 
 # Sidecars a template directory may carry beside network.nc (P19): the EH
