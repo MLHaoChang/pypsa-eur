@@ -1,0 +1,1 @@
+* Refactor(pypsa-gui): The Investment tab's Site connection and Tariff sections now live in their own files under `pages/results/investment/`, so Expert → Economics can mount them too. No behaviour change.
