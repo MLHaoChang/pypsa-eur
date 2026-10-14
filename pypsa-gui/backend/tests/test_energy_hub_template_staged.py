@@ -25,19 +25,40 @@ YEARS = [2027, 2030, 2035]
 
 
 def _digest(n) -> str:
+    """A build's fingerprint that does not depend on the pandas or PyPSA
+    version: only the attributes that differ from PyPSA's defaults, numbers
+    rounded to 1e-6 and hashed as bytes (a JSON or CSV dump of the frames
+    differed between this venv and CI's)."""
+    import numpy as np
+    import pandas as pd
+
     h = hashlib.sha256()
+
+    def feed(label, df, defaults):
+        h.update(label.encode())
+        h.update("|".join(map(str, df.index)).encode())
+        for c in sorted(df.columns):
+            col = df[c]
+            d = defaults.get(c)
+            if d is not None and len(col) and (col.astype(object) == d).all():
+                continue
+            h.update(str(c).encode())
+            if pd.api.types.is_numeric_dtype(col) and not pd.api.types.is_bool_dtype(col):
+                h.update(np.round(col.to_numpy(dtype=float), 6).tobytes())
+            else:
+                h.update("|".join(map(str, col.tolist())).encode())
+
     for c in sorted(n.components.keys()):
         comp = n.components[c]
-        if len(comp.static):
-            h.update(c.encode())
-            h.update(comp.static.sort_index(axis=1).to_json(
-                orient="split", double_precision=10).encode())
+        if not len(comp.static):
+            continue
+        defaults = {a: comp.attrs.at[a, "default"] for a in comp.attrs.index
+                    if a in comp.static.columns}
+        feed(c, comp.static, defaults)
         for attr, ts in sorted(comp.dynamic.items()):
             if len(ts.columns):
-                h.update(f"{c}.{attr}".encode())
-                h.update(ts.sort_index(axis=1).to_json(
-                    orient="split", double_precision=10).encode())
-    h.update(n.snapshot_weightings.to_json(orient="split", double_precision=10).encode())
+                feed(f"{c}.{attr}", ts, {})
+    feed("weights", n.snapshot_weightings, {})
     return h.hexdigest()[:16]
 
 
@@ -60,7 +81,7 @@ def solved(staged):
 
 def test_the_single_year_template_is_unchanged():
     # the digest of master's build_eh_datacenter() before staging was added
-    assert _digest(T.build_eh_datacenter()) == "921e5526675e79eb"
+    assert _digest(T.build_eh_datacenter()) == "84c80723f0e72176"
 
 
 def test_three_periods_each_a_year_of_hours_with_their_own_length(staged):
