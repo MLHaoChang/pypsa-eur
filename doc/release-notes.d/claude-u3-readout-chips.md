@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The provenance chips ("Default", "Customised", "Measured") now also show on a battery or generator card's collapsed read-out, not only in its edit form, so a study opened in Expert shows at a glance which values are still the defaults pack's. A value with no record shows as before.

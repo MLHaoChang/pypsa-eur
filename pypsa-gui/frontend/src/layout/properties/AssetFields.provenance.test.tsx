@@ -2,12 +2,14 @@
 // A card with no `provenance` prop renders exactly as before (no chip
 // nodes); each status shows its own chip on the field it stamps; a derived
 // row shows only its own key's stamp, never one inferred from its parts.
+// The collapsed read-out carries the same chips, so "open in Expert" shows
+// what is still the pack's default without opening the form.
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import fixture from '../../test/fixtures/assetSchema.json'
 import type { AssetSchema, ProvenanceEntry } from '../../api/assetSchema'
-import { AssetFieldsEdit } from './AssetFields'
-import type { FS } from './cardKit'
+import { AssetFieldsEdit, assetReadoutItems } from './AssetFields'
+import { ExpandedProps, type FS } from './cardKit'
 
 const SCHEMA = (fixture as Record<string, unknown>).StorageUnit as AssetSchema
 const BESS: Record<string, unknown> = {
@@ -69,5 +71,41 @@ describe('the Expert card with provenance', () => {
       current={BESS} carriers={[]} buses={[]} provenance={{ capital_cost: entry('customised') }} /></div>)
     expect(screen.getByTestId('asset-derived-capital_cost')
       .contains(screen.getByTestId('asset-prov-capital_cost'))).toBe(true)
+  })
+})
+
+describe('the collapsed read-out', () => {
+  function readout(provenance?: Record<string, ProvenanceEntry>): string {
+    const { container } = render(<ExpandedProps items={assetReadoutItems(SCHEMA, BESS, undefined, provenance)} />)
+    const out = container.innerHTML
+    cleanup()
+    return out
+  }
+
+  it('renders exactly as before without stamps', () => {
+    const before = readout()
+    expect(before).not.toContain('asset-prov-')
+    expect(readout({})).toBe(before)
+    expect(readout({ not_a_field: entry('default') })).toBe(before)
+    expect(assetReadoutItems(SCHEMA, BESS, undefined, {})).toEqual(assetReadoutItems(SCHEMA, BESS))
+  })
+
+  it.each([
+    ['default', 'inv_power_overnight', 'Default'],
+    ['customised', 'efficiency_store', 'Customised'],
+    ['measured', 'max_hours', 'Measured'],
+  ] as const)('a %s stamp shows its chip on the %s row', (status, key, label) => {
+    render(<ExpandedProps items={assetReadoutItems(SCHEMA, BESS, undefined, { [key]: entry(status) })} />)
+    const chip = screen.getByTestId(`asset-prov-${key}`)
+    expect(chip.getAttribute('data-status')).toBe(status)
+    expect(chip.textContent).toContain(label)
+    expect(document.querySelectorAll('[data-testid^="asset-prov-"]')).toHaveLength(1)
+  })
+
+  it('a derived row shows its own stamp only', () => {
+    render(<ExpandedProps items={assetReadoutItems(SCHEMA, BESS, undefined,
+      { inv_power_overnight: entry('default'), inv_energy_overnight: entry('default') })} />)
+    expect(screen.queryByTestId('asset-prov-capital_cost')).toBeNull()
+    expect(screen.queryByTestId('asset-prov-lifetime')).toBeNull()
   })
 })
