@@ -853,6 +853,27 @@ def _event_row(key, event, dp_mw, trace, limits, window_ms, eq, f0, emt=None, **
             "emt": "; ".join(flags)}
 
 
+#: The fixed columns of the sweep and the study tables (plan I6c): a table
+#: carries every column whatever events ran, empty where one does not apply.
+_METRIC_COLUMNS = ("dp_mw", "rocof0_hz_per_s", "rocof_window_hz_per_s", "nadir_hz", "t_nadir_s", "df_qss_hz",
+                   "t_return_s", "saturated", "collapse_s", "ok", "binding", "worst", "emt")
+E1_HOURLY_COLUMNS = ("period", "hour", "scenario", "event", "direction", "dp_source", "ups_drops", *_METRIC_COLUMNS)
+#: ``unit``: E3's tripped unit; ``i_max_pu``: a Q8 rerun; ``block``,
+#: ``t_block_s``: an E4 block.
+EVENT_COLUMNS = ("period", "hour", "scenario", "event", "dp_source", "unit", "i_max_pu", "block", "t_block_s",
+                 *_METRIC_COLUMNS)
+LOSSES_COLUMNS = ("period", "hour", "i4_viable", "i4_reason", "dp_ac_mw", "import_lossless_mw", "losses_mw")
+#: ``kind`` ``ups``: E4's Q1 check (``it_mw``, ``autonomy_s``, ``needed_s``,
+#: the pickup); ``gfm``: the energy a GFM gives until the gensets join
+#: (``energy_mwh``, ``join_s``, ``until_s``). ``ok`` is empty where there is
+#: no e(t−1) to judge.
+BRIDGE_COLUMNS = ("period", "hour", "scenario", "unit", "kind", "e_mwh", "ok", "it_mw", "autonomy_s", "needed_s",
+                  "pickup_complete", "ready_s", "dropped", "energy_mwh", "join_s", "until_s")
+PLANNED_COLUMNS = ("period", "hour", "scenario", "import_mw", "feasible", "ramp_s", "shortfall_mw")
+UPS_COLUMNS = ("period", "hour", "scenario", "event", "ups", "drops", "first_drop_s", "energy_mwh", "e_mwh",
+               "t_online_s", "autonomy_ok")
+
+
 def e1_every_hour(campus, hourly, island_hourly, island_unit_hourly=None, scenario="seamless",
                   dt=5e-3, t_end=10.0, f0=F0):
     """E1 at every hour (plan I6b): the PCC opens on I3a's lossless 0⁺ steps,
@@ -891,7 +912,7 @@ def e1_every_hour(campus, hourly, island_hourly, island_unit_hourly=None, scenar
             drops = sorted(n for n, rec in cache[ck].ups.items() if rec.drops)
             out.append(_event_row(key, "E1", dp, cache[ck], limits, window, eq, f0, direction=direction,
                                   dp_source="I3a lossless", ups_drops=", ".join(drops)))
-    return pd.DataFrame(out)
+    return pd.DataFrame(out, columns=list(E1_HOURLY_COLUMNS))
 
 
 @dataclasses.dataclass
@@ -927,8 +948,8 @@ def _gfm_bridge(key, units, trace, soc):
         p = u.p0 + trace.dp[u.name][sel]
         e = float(np.sum(0.5 * (p[1:] + p[:-1]) * np.diff(trace.t[sel]))) / 3600.0
         e0 = soc.get(u.name, math.nan)
-        out.append({**key, "unit": u.name, "until_s": min(t_join, float(trace.t[-1])), "join_s": t_join,
-                    "energy_mwh": e, "e_mwh": e0, "ok": bool(e <= e0) if e0 == e0 else None})
+        out.append({**key, "unit": u.name, "kind": "gfm", "until_s": min(t_join, float(trace.t[-1])),
+                    "join_s": t_join, "energy_mwh": e, "e_mwh": e0, "ok": bool(e <= e0) if e0 == e0 else None})
     return out
 
 
@@ -1041,7 +1062,8 @@ def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_
                                "ok": v.ok, "binding": v.binding, "worst": v.worst,
                                "emt": "; ".join(emt_flags(m, limits, f0))})
                 for b in res.bridge:
-                    bridge.append({**sk, "ups": b.ups, "it_mw": b.it_mw, "e_mwh": b.e_mwh, "autonomy_s": b.autonomy_s,
+                    bridge.append({**sk, "unit": b.ups, "kind": "ups", "it_mw": b.it_mw, "e_mwh": b.e_mwh,
+                                   "autonomy_s": b.autonomy_s,
                                    "needed_s": b.needed_s, "ok": b.ok, "pickup_complete": res.complete,
                                    "ready_s": res.ready_s, "dropped": ", ".join(res.dropped)})
             elif scenario == "planned":
@@ -1050,4 +1072,6 @@ def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_
                                 "shortfall_mw": res.shortfall_mw})
                 if res.trace is not None:
                     ev.append(_event_row(sk, "E6", 0.0, res.trace, limits, window, eq, f0, emt))
-    return FrequencyStudy(*(pd.DataFrame(t) for t in (ev, losses, bridge, planned, ups)))
+    return FrequencyStudy(*(pd.DataFrame(t, columns=list(c)) for t, c in (
+        (ev, EVENT_COLUMNS), (losses, LOSSES_COLUMNS), (bridge, BRIDGE_COLUMNS), (planned, PLANNED_COLUMNS),
+        (ups, UPS_COLUMNS))))
