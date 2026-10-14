@@ -199,6 +199,35 @@ def test_reading_without_repair_never_writes():
     assert path.read_bytes() == before
 
 
+def test_a_corrupt_line_in_the_middle_is_not_a_history():
+    """A torn write is only the last line. A broken line earlier means the log
+    cannot be read: it is not folded up to the break, and nothing is rewritten.
+    `resume` leaves the session alone so the caller can fall back to chat.jsonl."""
+    session = _session()
+    _turn(session, "first", _text_turn("one"))
+    _turn(session, "second", _text_turn("two"))
+    path = eventlog.path_for(session)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    second = next(i for i, line in enumerate(lines) if '"user": "second"' in line)
+    assert 0 < second < len(lines) - 1
+    lines.insert(second, "{not-json")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    before = path.read_bytes()
+
+    with pytest.raises(json.JSONDecodeError):
+        eventlog.read_events(path)
+    with pytest.raises(json.JSONDecodeError):
+        eventlog.read_events(path, repair=True)
+    assert path.read_bytes() == before
+
+    from harness.session import ChatSession
+    fresh = ChatSession(model="m", owner_user_id=session.owner_user_id)
+    fresh.session_id = session.session_id
+    fresh.messages.append({"role": "user", "content": "keep me"})
+    assert eventlog.resume(fresh) is False
+    assert list(fresh.messages) == [{"role": "user", "content": "keep me"}]
+
+
 # ── fork ───────────────────────────────────────────────────────────────────
 
 def test_a_fork_shares_the_prefix_and_owns_nothing_else(tools):

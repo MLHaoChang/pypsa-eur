@@ -26,14 +26,13 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
 
 ## Merge gate
 
-The coordinator merges a PR when all of these hold on the exact head SHA:
+The coordinator merges a PR when `scripts/coord/premerge.sh <pr>` exits 0 and GitHub reports the PR mergeable. The script is the whole gate and the one source for what it checks:
 
-- every check run is success or skipped;
-- GitHub reports the PR mergeable;
+- every check run on the head SHA is success or skipped (in progress, unreadable or none yet blocks);
 - no file **overlaps** what master changed since the PR's merge-base. Docs-only overlap (`docs/superpowers/OPEN-ITEMS.md`, `docs/superpowers/plans/*`, release notes) is fine when the merge is clean, and so is a file identical on both sides (a cherry-pick master already has);
-- a PR that adds or changes a backend route or chat tool passes the **semantic tests** (`test_write_surface_lock_policy.py`, `test_chat_tools_handler_dependencies.py`, `test_chat_tools_argshape.py`) on a trial merge with current master.
+- a PR that touches a path in its `semantic_re` passes the `semantic_tests` it lists on a trial merge with current master, plus the assistant inventory check when it touches `harness/catalogue*`.
 
-`scripts/coord/premerge.sh <pr>` checks the last two: it fetches master and the PR head, prints the head SHA, merge-base and how far behind the PR is, tests for conflicts, classifies each overlapping file, and runs the semantic tests on a trial merge when the PR touches routers or chat tools. It exits non-zero when the PR is blocked.
+It prints the head SHA, merge-base and how far behind the PR is, then one section per check, and exits non-zero when the PR is blocked.
 
 ## Merging master into a PR
 

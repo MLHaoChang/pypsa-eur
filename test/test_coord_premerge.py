@@ -2,11 +2,12 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Overlap, conflict and semantic-test gating of ``scripts/coord/premerge.sh``."""
+"""Overlap, conflict, semantic-test and check-run gating of ``scripts/coord/premerge.sh``."""
 
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -62,13 +63,35 @@ def publish_pr(remote, files, msg="pr"):
     return sha
 
 
-def run(clone, **env):
+GREEN = [("completed", "success", "Unit"), ("completed", "skipped", "Docs")]
+
+
+def run(clone, runs=GREEN, gh_exit=0, with_gh=True, **env):
+    """Run premerge.sh; a fake gh reports `runs` as (status, conclusion, name)."""
+    bin_dir = clone.parent / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    if with_gh:
+        gh = bin_dir / "gh"
+        rows = "".join("\t".join(r) + "\n" for r in runs)
+        gh.write_text(
+            f"#!{sys.executable}\n"
+            "import sys\n"
+            f"sys.stdout.write({rows!r})\n"
+            f"sys.exit({gh_exit})\n"
+        )
+        gh.chmod(0o755)
+        path = f"{bin_dir}:{os.environ['PATH']}"
+    else:
+        # Only the tools the script needs, so a real gh cannot leak in.
+        for tool in ("git", "bash", "awk", "grep", "sed", "comm", "sort", "mktemp"):
+            (bin_dir / tool).symlink_to(shutil.which(tool))
+        path = str(bin_dir)
     return subprocess.run(
         ["bash", str(SCRIPT), "7"],
         cwd=clone,
         capture_output=True,
         text=True,
-        env={**os.environ, **env},
+        env={**os.environ, "PATH": path, **env},
     )
 
 
@@ -146,3 +169,80 @@ def test_unrelated_change_skips_semantic_tests(repos, tmp_path):
     res = run(clone, PREMERGE_PYTHON=fake_python(tmp_path, 1))
     assert res.returncode == 0, res.stdout + res.stderr
     assert "not needed" in res.stdout
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "pypsa-gui/backend/services/project_acl.py",
+        "pypsa-gui/backend/harness/mcp_server.py",
+        "pypsa-gui/backend/routers/mcp.py",
+    ],
+)
+def test_acl_and_mcp_changes_run_all_six_semantic_tests(repos, tmp_path, path):
+    remote, clone = repos
+    publish_pr(remote, {path: "x\n"})
+    res = run(clone, PREMERGE_PYTHON=fake_python(tmp_path, 0))
+    assert res.returncode == 0, res.stdout + res.stderr
+    for test in (
+        "test_project_acl.py",
+        "test_project_route_acl_policy.py",
+        "test_harness_mcp_server.py",
+    ):
+        assert test in res.stdout
+    assert "assistant inventory" not in res.stdout
+
+
+def test_catalogue_change_checks_the_inventory(repos, tmp_path):
+    remote, clone = repos
+    publish_pr(remote, {"pypsa-gui/backend/harness/catalogue.py": "x\n"})
+    res = run(clone, PREMERGE_PYTHON=fake_python(tmp_path, 0))
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "smoke/assistant_inventory.py --check" in res.stdout
+    assert "inventory: pass" in res.stdout
+
+
+def test_green_checks_are_counted(repos):
+    remote, clone = repos
+    publish_pr(remote, {"a.py": "a2\n"})
+    res = run(clone)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "2 check run(s)" in res.stdout
+    assert "all success or skipped" in res.stdout
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        ("completed", "failure", "GUI backend"),
+        ("in_progress", "-", "GUI backend shard 1/4"),
+        ("completed", "cancelled", "Integration"),
+    ],
+)
+def test_a_run_not_success_or_skipped_blocks_and_is_named(repos, row):
+    remote, clone = repos
+    publish_pr(remote, {"a.py": "a2\n"})
+    res = run(clone, runs=[("completed", "success", "Unit"), row])
+    assert res.returncode == 1
+    checks = res.stdout.split("== checks")[1]
+    assert "2 check run(s)" in checks
+    assert row[2] in checks
+    assert "Unit" not in checks
+    assert "RESULT: blocked" in res.stdout
+
+
+def test_no_runs_yet_blocks(repos):
+    remote, clone = repos
+    publish_pr(remote, {"a.py": "a2\n"})
+    res = run(clone, runs=[])
+    assert res.returncode == 1
+    assert "none yet" in res.stdout
+
+
+@pytest.mark.parametrize("kw", [{"gh_exit": 1}, {"with_gh": False}])
+def test_unreadable_checks_block(repos, kw):
+    remote, clone = repos
+    publish_pr(remote, {"a.py": "a2\n"})
+    res = run(clone, **kw)
+    assert res.returncode == 1
+    assert "checks: not read" in res.stdout

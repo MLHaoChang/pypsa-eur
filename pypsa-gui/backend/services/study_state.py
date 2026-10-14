@@ -122,6 +122,12 @@ def study_in_flight_detail(state, doing: str, *,
             continue
     if key is None:
         return None
+    if key == "report_job":
+        return {
+            "error_kind": "study_in_flight", "study": key,
+            "message": (f"Cannot {doing} while report generation is running. "
+                        "Wait for it to finish, or abort it, and retry."),
+        }
     label = STUDY_LABELS.get(key, key)
     verb = doing.split()[0]
     return {

@@ -133,9 +133,13 @@ export default function Emissions() {
         <div className={`grid gap-3 ${scopeCaps.length === 1 ? 'grid-cols-3' : 'grid-cols-1'}`}>
           <KPI accent label={`Total emissions (${scopeLabel})`}
                value={`${view.total_tCO2.toLocaleString(undefined, { maximumFractionDigits: 1 })} tCO₂`}
-               hint={zeroUnexplained
-                 ? 'No carrier in this network has a CO₂ intensity, so every emissions figure is zero. Set one under the Carrier tab, or use the fix offered in Issues.'
-                 : "Σ dispatch × snapshot_weight × period.years × co2_emissions / efficiency. Matches PyPSA's primary-energy accounting."} />
+               hint="Σ dispatch × snapshot_weight × period.years × co2_emissions / efficiency. Matches PyPSA's primary-energy accounting."
+               {...(zeroUnexplained
+                 ? {
+                     state: 'not_modelled' as const,
+                     reason: 'No carrier in this network has a CO₂ intensity, so emissions were not counted. Set one under the Carrier tab, or use the fix offered in Issues.',
+                   }
+                 : view.total_tCO2 === 0 ? { state: 'zero' as const } : {})} />
           {scopeCaps.length === 1 && (
             <>
               <KPI label="Shadow price (marginal abatement)"

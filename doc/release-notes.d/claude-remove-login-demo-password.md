@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The login page no longer pre-fills or prints a review email and password. Sign in to a dev install with the generated password in `~/.local/share/PyPSA Studio/dev-admin-password`; the local smoke scripts read the same file or `SMOKE_PASSWORD`.

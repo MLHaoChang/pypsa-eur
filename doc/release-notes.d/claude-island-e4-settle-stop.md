@@ -1,0 +1,1 @@
+* Perf(gridspine): The island frequency check's `ups_bridged` start (E4) runs each pickup block only until its frequency is steady, extended up to 600 s for a slow island. It also runs once for all island hours with the same genset fleet. The results are unchanged; on the Data Center template the check takes seconds instead of about 12 minutes.

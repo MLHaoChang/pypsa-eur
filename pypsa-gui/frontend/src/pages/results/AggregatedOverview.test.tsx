@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, cleanup, within } from '@testing-library/react'
+import { render, screen, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import AggregatedOverview, { isPartialPayload } from './AggregatedOverview'
 import type { WeightCtx, SnapshotWeightRow } from './shared'
+import { getKpiValueWithin } from '../../test/kpi'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -169,7 +170,7 @@ it('renders a distinctive thermal generation value sourced from the mocked resul
   // (shared.tsx `KPI`, :653-692) — rather than searching the whole document.
   const thermalLabel = await screen.findByText('Thermal')
   const card = thermalLabel.parentElement as HTMLElement
-  expect(within(card).getByText('424.24 MWh')).toBeTruthy()
+  expect(getKpiValueWithin(card, '424.24 MWh')).toBeTruthy()
 })
 
 // isPartialPayload is the tripwire for the one mistake this whole plan exists

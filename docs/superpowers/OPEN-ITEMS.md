@@ -269,11 +269,10 @@ suite carries **124 pre-existing failures**, all from `No module named
 
 ### 20. `login.html` prefills and prints a review credential
 
-`frontend/public/login.html:391-402` ships `admin@example.com` /
-`admin-pass-123` as the input values and in a visible "Review account" line, and
-auth mode serves that page (`static_gate.decide_route` passes `/login.html`
-through). Fine for a review build; a credential in a shipped page otherwise. One
-decision (strip before release, or gate the prefill on a build flag) and a test
-that the served page carries no password value. Source:
-`notes/2026-09-29-3d-site-view-phase2-qa.md` §7, "Other findings". Numbered 13
-until 2026-10-13.
+**Closed 2026-10-14** (owner decision: strip it). `frontend/index.html` and
+`frontend/public/login.html` no longer pre-fill an email or password and no
+longer print a "Review account" line; `vite.auth-gate.test.ts` fails if either
+copy carries a credential again. The dev account's password is the single line
+in `~/.local/share/PyPSA Studio/dev-admin-password` (see `AGENTS.md` and the
+README's SQLite path). Source: `notes/2026-09-29-3d-site-view-phase2-qa.md` §7,
+"Other findings". Numbered 13 until 2026-10-13.

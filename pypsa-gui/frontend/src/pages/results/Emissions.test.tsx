@@ -6,6 +6,7 @@ import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import type { Carrier } from '../../api/types'
 import Emissions from './Emissions'
+import { findKpiValue } from '../../test/kpi'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -84,7 +85,7 @@ it('renders the distinctive total emissions KPI sourced from the mocked results 
   renderPage()
   // total_tCO2.toLocaleString(undefined, { maximumFractionDigits: 1 }) rounds
   // 424.24 to "424.2" (Emissions.tsx:135).
-  const match = await screen.findByText((text) => text.includes('424.2') && text.includes('tCO'))
+  const match = await findKpiValue(f => f.includes('424.2') && f.includes('tCO'))
   expect(match).toBeTruthy()
 })
 
@@ -118,8 +119,10 @@ describe('Emissions — the zero-emissions explanation', () => {
 
     renderPage()
 
-    await screen.findByText('0 tCO₂')
+    await findKpiValue('0 tCO₂')
     expect(screen.queryByTitle(EXPLANATION)).toBeNull()
+    expect(screen.queryByText(EXPLANATION)).toBeNull()
+    expect(document.querySelector('[data-kpi-value="0 tCO₂"]')!.closest('[data-state]')!.getAttribute('data-state')).toBe('zero')
   })
 
   it('explains the zero when no carrier has any CO2 intensity', async () => {
@@ -131,8 +134,12 @@ describe('Emissions — the zero-emissions explanation', () => {
 
     renderPage()
 
-    await screen.findByText('0 tCO₂')
-    expect(screen.getByTitle(EXPLANATION)).toBeDefined()
+    // UX overhaul S2: no emission factor means emissions were not modelled,
+    // so the tile names that state and shows the explanation as its reason
+    // instead of printing 0 tCO₂.
+    expect(await screen.findByText('Not modelled')).toBeDefined()
+    expect(screen.getByText(EXPLANATION)).toBeDefined()
+    expect(document.querySelector('[data-kpi-value="0 tCO₂"]')).toBeNull()
   })
 
   it('never explains a genuinely non-zero total', async () => {
@@ -149,7 +156,7 @@ describe('Emissions — the zero-emissions explanation', () => {
 
     renderPage()
 
-    await screen.findByText('123.4 tCO₂')
+    await findKpiValue('123.4 tCO₂')
     expect(screen.queryByTitle(EXPLANATION)).toBeNull()
   })
 })
