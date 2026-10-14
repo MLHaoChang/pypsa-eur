@@ -124,7 +124,7 @@ U3 needs only S1a + S1b, for the guided question's two assets (spec :442).
 
 ### S1d-2 (CreationForm)
 
-- **What quick-add asks for, investment:** option 1 of the question put to the coordinator at 08:30 CEST, which was my default because no other pick came back.
+- **What quick-add asks for, investment:** option 1 of the question put to the coordinator at 08:30 CEST, my default while no other pick came back; the owner confirmed it on 14 Oct.
   - Generator, Link, Store and Transformer get the overnight cost and the lifetime. A Line gets its per-km cost and the lifetime.
   - Storage units get a note to price their two parts on the card.
   - No form types `capital_cost`.
@@ -133,3 +133,18 @@ U3 needs only S1a + S1b, for the guided question's two assets (spec :442).
   - FIELD_MAP defaults, and the defaults a choice snaps in (a heat pump's COP, a transformer preset), stay in stored units and are shown converted.
   - The payload divides by the scale.
   - The form waits for the schema before it exists, so a default can never be shown in the wrong unit.
+
+### S1d-3 (property tips, chat attribute docs)
+
+- **Tooltips:** a described class's tooltips are its descriptors' `help`.
+  - The panels' own rows read it too, through `fieldHelp(schema, key)`: a branch's ends and carrier, an asset's carrier and bus.
+  - `propertyDocs` keeps only what no schema describes: the Bus card, and the line's per-km r/x/b. A test keeps a described field from coming back there.
+  - Before the old tips were removed, each one was compared with its descriptor. Three facts the descriptors lacked were folded in:
+    - a positive flow runs from bus0;
+    - a line joins buses of one carrier;
+    - FOR and EFORd differ for peakers.
+- **Dead code removed:** `OutageInputs` and `IncludesOutagesInput` in cardKit, which no card has rendered since S1b/S1c, and their test. Its invariant moved to the backend: `p_max_pu_includes_outages` is described for the Generator only.
+- **The chat tool documents its attrs** (`services/asset_schema/attrs_doc.py`).
+  - `create_component.attrs` carries one line per described class, in the card's order: each typed column with its **stored** unit, the enum options, `*` for required, then the derived columns not to send, and the investment parts with their scale. The chat writes stored values, so it gets no display units.
+  - `batch_create_components` points at that list rather than repeating it.
+  - The text rides in the catalogue on every turn, so it is kept compact (about 3,500 characters; a test caps it at 4,000). Every attribute it names is accepted by the class's create schema.
