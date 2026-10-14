@@ -2623,6 +2623,70 @@ session, frozen 2026-10-14). Column tuples are in
   `Island-rocof-block`. All five tables show their model and caveat, and
   25 assumed rows are tagged.
 
+### I9b as built (2026-10-14)
+
+**Owner decisions, 2026-10-14:**
+- **Q1, base:** stacked on #212's head, with the PR opened after #212
+  merges.
+- **Q2, option 1:** the island-hours drivers run inside the campus Run,
+  after `rank_campus`, whenever the campus has island data.
+
+**Run** (`services/campus_electrical_service.py`):
+- `_run_island_hours(run_dir)` first removes the previous run's I4–I6
+  files.
+- `island_static_campus` (I4, I5, I5b) runs when a unit has an island
+  block.
+- `island_frequency_campus` (I6) runs when the campus also has island
+  requirements and the run has the I3a tables it reads.
+- A driver's ContractError is a 422 with its reason.
+
+**Report** (`services/campus_island_report.py`):
+- **Table source:** each I4–I6 file becomes a table, read against its
+  gridspine column tuple: `island_hours.TABLES`, or the `frequency.*_COLUMNS`
+  for the frequency tables.
+- **Off-contract files:** a file whose header differs is listed in
+  `missing` ("columns differ from the contract") and not shown.
+- **Model:**
+  - static tables: the summary's `models` (file → text);
+  - frequency tables: the summary's `label`.
+- **Assumed rows:** rows with a non-empty `assumed` cell. An empty cell
+  reads as None, not NaN.
+- **E1 at every hour:** only its failing rows are shown, titled "n of N
+  rows".
+- **Summaries:** each driver summary is an `(item, value)` table. It holds
+  the failing-hour lists as `p<period> h<hour> …` and one `ledger` row per
+  ledger line, `CASE_NOTE` included.
+- **Groups:** every table names its `group`: inputs, study, hours, static
+  or frequency, in the plan's order.
+- **Without the sidecar:** the I4–I6 tables still show, since they come
+  from the campus's own island data (I1).
+
+**Panel:** a heading per group (`GROUP_TITLES`). The tables themselves are
+unchanged.
+
+**Bundle:** unchanged. It carries none of the campus run's per-hour tables
+(`campus_hourly`, `campus_selected`, I3a), so I4–I6 stay out too.
+
+**Tests:**
+- `test_campus_island_report_hours.py` (9): hand-written files to the
+  contracts; exact columns, model, groups, assumed rows, off-contract
+  refusal, the E1 filter and both summaries.
+- `test_campus_island_hours_run.py` (5): real runs on the hub fixture,
+  covering:
+  - the call order;
+  - both drivers on an island campus;
+  - I6 skipped without the I3a tables, and without island requirements;
+  - stale files removed;
+  - the 422 on a refusal.
+- The golden fixture gains `group` and the two new `missing` entries.
+- A panel test for the group headings.
+
+**Mutations:**
+- Report: 16 edits. 3 survived the first run (the static and hours groups,
+  and a redundant `strip`), and all 3 are now closed: 16 of 16 killed.
+- Run wiring: 8 edits. 1 survived (the requirements condition) and is now
+  closed: 8 of 8 killed.
+
 ## Order, PRs and agents
 
 - **I1** comes first: everything reads the control modes and the data.
