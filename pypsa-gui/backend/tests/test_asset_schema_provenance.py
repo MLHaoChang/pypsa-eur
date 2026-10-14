@@ -144,3 +144,20 @@ def test_provenance_route(client, install_network):
                         "fields": {"marginal_cost": P.get(n, "Generator", "gas")
                                    ["marginal_cost"]}}
     assert client.get(f"{ROUTE}/Generator/provenance/nope").status_code == 404
+
+
+def test_every_described_class_serves_its_provenance(client, install_network):
+    """S1c: each schema-rendered card reads its stamps through the route, Load included (no investment, so
+    not in the parts registry, but its typed fields are stamped like any other)."""
+    from services.asset_schema.fields import known_components
+
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    n.add("Load", "demand", bus="B1", p_set=40.0)
+    install_network(n)
+    assert client.put("/api/network/loads/demand", json={"name": "demand", "bus": "B1", "p_set": 55.0}).status_code == 200
+    r = client.get(f"{ROUTE}/Load/provenance/demand")
+    assert r.status_code == 200, r.text
+    assert r.json()["fields"]["p_set"]["status"] == "customised"
+    for component in known_components():
+        assert client.get(f"{ROUTE}/{component}/provenance/nobody").status_code == 404, component

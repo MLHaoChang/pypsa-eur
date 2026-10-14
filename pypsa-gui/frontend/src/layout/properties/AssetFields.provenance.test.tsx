@@ -60,6 +60,26 @@ describe('the Expert card with provenance', () => {
     expect(document.querySelectorAll('[data-testid^="asset-prov-"]')).toHaveLength(1)
   })
 
+  // The S1c follow-up: a number, enum or flag carries its chip in its own
+  // label, so the two-column grid keeps its pairs (no full-width chip row).
+  it.each([
+    ['max_hours', 'number'],
+    ['outage_rate_basis', 'enum'],
+    ['cyclic_state_of_charge', 'flag'],
+  ] as const)('the chip on %s (%s) sits in its own label, not a row of its own', (key) => {
+    render(<div className="grid grid-cols-2"><AssetFieldsEdit schema={SCHEMA} fs={FORM}
+      set={() => {}} current={BESS} carriers={[]} buses={[]} provenance={{ [key]: entry('customised') }} /></div>)
+    const chip = screen.getByTestId(`asset-prov-${key}`)
+    expect(chip.closest('label')?.querySelector('input, select')).toBeTruthy()
+    expect(chip.closest('.col-span-2.-mt-0\\.5')).toBeNull()
+  })
+
+  it('a text field, with no badge slot, keeps its chip on a row below it', () => {
+    render(<div className="grid grid-cols-2"><AssetFieldsEdit schema={SCHEMA} fs={FORM}
+      set={() => {}} current={BESS} carriers={[]} buses={[]} provenance={{ name: entry('customised') }} /></div>)
+    expect(screen.getByTestId('asset-prov-name').closest('label')).toBeNull()
+  })
+
   it('a derived row shows its own stamp, never one inferred from its parts', () => {
     render(<div className="grid grid-cols-2"><AssetFieldsEdit schema={SCHEMA} fs={FORM} set={() => {}}
       current={BESS} carriers={[]} buses={[]}
