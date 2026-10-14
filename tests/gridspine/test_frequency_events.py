@@ -168,6 +168,19 @@ def test_an_isochronous_genset_settles_every_block_back_to_nominal():
     assert res.complete and all(abs(m.df_qss_hz) <= 0.1 for m in res.blocks)
 
 
+def test_e4_on_an_isochronous_ramp_limited_genset_has_a_bounded_nadir(monkeypatch):
+    # regression (gatekeeper, #256 review): the isochronous integral wound up while the genset was held at its
+    # ramp, and the 2 MW block read a +61.8 Hz "nadir". Held, the extreme is the excursion while ramping
+    gens, blocks = [cold_gen(isochronous=True, step_mw=0.5, ramp_mw_per_s=0.08)], [2.0, 2.0]
+    res = F.e4_ups_bridged(gens, blocks)
+    assert res.complete
+    for m in res.blocks:
+        assert m.nadir_hz == pytest.approx(-23.541, abs=1e-3) and abs(m.df_qss_hz) < 1e-4
+    monkeypatch.setattr(F, "_hold_integral", lambda u, p, df, t: df)
+    wound = F.e4_ups_bridged(gens, blocks)
+    assert wound.blocks[0].nadir_hz == pytest.approx(61.80, abs=0.01)
+
+
 def test_a_pickup_beyond_the_gensets_does_not_complete_and_fails_the_bridge():
     res = F.e4_ups_bridged([cold_gen()], [6.0, 6.0], [("U", 6.0, 100.0)], bridge_s=60.0, dt=1e-3, t_end=30.0)
     assert not res.complete
@@ -198,6 +211,152 @@ def test_n_plus_k_leaves_out_the_largest_genset_and_needs_one_left():
     assert F.e4_ups_bridged([small, large], [2.0], dt=1e-3, t_end=30.0).ready_s == 35.0
     with pytest.raises(ContractError, match="N\\+k"):
         F.e4_ups_bridged([large], [2.0], redundancy_n=1)
+
+
+# ── E4 runs each block until its tail is steady, and once per fleet ────────
+
+def eh_datacenter_fleet():
+    """eh_datacenter's gensets (template ISLAND_CONFIG): 4 x 10 MW and genset_new
+    36.67 MW in 10 MW units; H 1.5 s on MVA = MW / 0.8, R 4 %, T_g 0.5 s, 50 %
+    load step, 0.2 pu/s ramp, 10 s start + 5 s sync."""
+    def g(name, p_n, **kw):
+        return F.Unit(name, "genset", 0.0, p_n, p_n / 0.8, 0.0, p_n, r=0.04, h=1.5, t_g=0.5, step_mw=0.5 * p_n,
+                      ramp_mw_per_s=0.2 * p_n, start_s=10.0, sync_s=5.0, join_s=15.0, **kw)
+    return [g(f"genset_{i}", 10.0) for i in range(1, 5)] + [g("genset_new", 36.67, unit_mw=10.0)]
+
+
+EH_LIMITS = {"transition": {"rocof_hz_per_s": 1.0, "f_min_hz": 47.5, "f_max_hz": 51.5, "qss_band_hz": 1.0},
+             "steady_island": {"rocof_hz_per_s": 1.0, "f_min_hz": 47.5, "f_max_hz": 51.5, "qss_band_hz": 1.0}}
+
+
+def assert_same_e4(a, b):
+    """The steady-tail run against the full horizon: every block's figures and
+    verdict, the block times, completion and the bridge."""
+    assert a.complete == b.complete and a.ready_s == b.ready_s and a.dropped == b.dropped
+    assert a.block_times_s == pytest.approx(b.block_times_s, abs=1e-9)
+    assert len(a.blocks) == len(b.blocks)
+    for x, y in zip(a.blocks, b.blocks):
+        for f in ("nadir_hz", "df_qss_hz", "rocof0_hz_per_s", "rocof_window_hz_per_s"):
+            assert getattr(x, f) == pytest.approx(getattr(y, f), abs=1e-6), f
+        assert x.t_return_s == y.t_return_s and x.saturated == y.saturated
+        assert F.judge(x, EH_LIMITS).failures == F.judge(y, EH_LIMITS).failures
+    assert [(u.ups, u.needed_s, u.ok) for u in a.bridge] == [(u.ups, u.needed_s, u.ok) for u in b.bridge]
+
+
+def test_e4_on_eh_datacenter_stops_each_block_once_settled_and_matches_the_600_s_run():
+    # gatekeeper's reference (hour 2030/0, last block): nadir -0.3118, qss -0.150, t_return 0.795, ends at 13.7 s
+    feeds = [("UPS", 36.0, 10.0)]
+    kw = dict(redundancy_n=1, bridge_s=600.0, t_end=600.0, dt=5e-3)
+    calls, real = [], F.simulate
+
+    def counting(*a, **k):
+        calls.append(k["t_end"])
+        return real(*a, **k)
+    F.simulate = counting
+    try:
+        fast = F.e4_ups_bridged(eh_datacenter_fleet(), [5.0] * 11, feeds, **kw)
+    finally:
+        F.simulate = real
+    full = F.e4_ups_bridged(eh_datacenter_fleet(), [5.0] * 11, feeds, steady_stop=False, **kw)
+    assert_same_e4(fast, full)
+    assert calls == [F.E4_FIRST_S] * 11                     # each block steady within its first 20 s
+    m = fast.blocks[-1]
+    assert fast.complete and fast.dropped == ["genset_new: 1 x 10 MW"]
+    assert m.nadir_hz == pytest.approx(-0.3118, abs=1e-4) and m.df_qss_hz == pytest.approx(-0.15, abs=1e-4)
+    assert m.t_return_s == pytest.approx(0.795, abs=1e-9) and fast.block_times_s[-1] == pytest.approx(13.7)
+
+
+@pytest.mark.parametrize("kw", [dict(step_mw=0.5, ramp_mw_per_s=0.08), dict(isochronous=True)],
+                         ids=["ramp-limited", "isochronous"])
+def test_a_slow_island_is_run_on_until_steady_not_read_at_a_fixed_short_horizon(kw):
+    # the ramp-limited genset takes about 39 s to take a 2 MW block: at a fixed 20 s it has not, and E4 would
+    # read it as not completing; the steady-tail stop runs it on (20, 40, 80 s) and matches the 600 s run
+    gens, blocks = [cold_gen(**kw)], [2.0, 2.0]
+    fast = F.e4_ups_bridged(gens, blocks)
+    assert_same_e4(fast, F.e4_ups_bridged(gens, blocks, steady_stop=False))
+    assert fast.complete
+    if "ramp_mw_per_s" in kw:
+        assert not F.e4_ups_bridged(gens, blocks, steady_stop=False, t_end=20.0).complete
+        assert fast.block_times_s[-1] > 20.0
+
+
+def test_the_steady_tail_holds_over_its_whole_window_not_one_flat_moment():
+    t = np.arange(0.0, 20.0 + 1e-9, 5e-3)
+    moving = np.where(t < 19.0, -0.01 * (19.0 - t), 0.0)          # still falling until the last second
+    trace = F.Trace(t, moving, {}, {}, None, 0.0)
+    assert not F._steady_tail(trace)
+    flat = F.Trace(t, np.where(t < 14.0, moving, 0.0), {}, {}, None, 0.0)   # flat for the last 6 s
+    assert F._steady_tail(flat)
+    assert F._steady_tail(F.Trace(t[:2], moving[:2], {}, {}, 0.005, 0.0))     # a collapse ends the run
+    assert not F._steady_tail(F.Trace(t[t <= 4.0], 0.0 * t[t <= 4.0], {}, {}, None, 0.0))  # shorter than the hold
+
+
+def test_a_block_that_never_steadies_runs_to_t_end_and_does_not_complete():
+    # 6 MW on a 10 MW genset with a 5 MW load step: the first block never settles, so it runs the whole horizon
+    calls, real = [], F.simulate
+
+    def counting(*a, **k):
+        calls.append(k["t_end"])
+        return real(*a, **k)
+    F.simulate = counting
+    try:
+        res = F.e4_ups_bridged([cold_gen(step_mw=5.0, ramp_mw_per_s=0.0)], [6.0, 6.0], t_end=100.0)
+    finally:
+        F.simulate = real
+    assert not res.complete and calls == [20.0, 40.0, 80.0, 100.0]
+    # a horizon shorter than the first run is the run
+    calls.clear()
+    F.simulate = counting
+    try:
+        F.e4_ups_bridged([cold_gen()], [2.0], t_end=10.0)
+    finally:
+        F.simulate = real
+    assert calls == [10.0]
+
+
+def test_hours_with_the_same_fleet_share_one_e4_pickup_and_keep_their_own_bridge():
+    gens, blocks = [cold_gen()], [2.0, 2.0]
+    calls, real = [], F.simulate
+
+    def counting(*a, **k):
+        calls.append(1)
+        return real(*a, **k)
+    cache = {}
+    F.simulate = counting
+    try:
+        one = F.e4_ups_bridged(gens, blocks, [("U", 6.0, 1.0)], cache=cache)
+        n = len(calls)
+        # another hour: the same gensets at another dispatch and join, another UPS energy
+        moved = [dataclasses.replace(gens[0], p0=4.0, join_s=0.0)]
+        two = F.e4_ups_bridged(moved, blocks, [("U", 6.0, 0.001)], cache=cache)
+        assert len(calls) == n and two.blocks is one.blocks
+        assert one.bridge[0].ok and not two.bridge[0].ok              # the bridge is each hour's own
+        # anything that reaches the simulation is in the key
+        for other in (dict(blocks=[2.0, 3.0]), dict(dt=1e-3), dict(gensets=[cold_gen(h=2.0)]), dict(f0=60.0)):
+            args = dict(gensets=gens, blocks=blocks, cache=cache)
+            args.update(other)
+            F.e4_ups_bridged(**args)
+            assert len(calls) > n
+            n = len(calls)
+    finally:
+        F.simulate = real
+
+
+def test_the_study_runs_e4_once_for_identical_hours():
+    camp = ups_campus(scenarios=("ups_bridged",))
+    ih, iu = island_tables(online=(1.0, 1.0))
+    counts = []
+    real = F.simulate
+    for hours in ([(2030, 0)], [(2030, 0), (2030, 1), (2030, 0), (2030, 1)]):
+        calls = []
+        F.simulate = lambda *a, **k: calls.append(1) or real(*a, **k)            # noqa: E731
+        try:
+            st = F.campus_frequency_study(camp, hourly(), hours, island_unit_hourly=iu)
+        finally:
+            F.simulate = real
+        counts.append(len(calls))
+        assert len(st.bridge[st.bridge["kind"] == "ups"]) == len(hours)           # one bridge check per hour
+    assert counts[0] == counts[1] > 0
 
 
 def test_n_plus_k_removes_one_unit_of_a_modular_genset():

@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi, simulationApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
-import type { Line } from '../../api/types'
+import type { Line, StorageUnit } from '../../api/types'
 import CapacityExpansion from './CapacityExpansion'
 import { getKpiValueWithin } from '../../test/kpi'
 
@@ -176,14 +176,17 @@ it('shows the unavailable marker — not €0 — in the PV CAPEX KPIs', async (
   // Verified by restoring the `?? 0` on `displayCapex`: this assertion is what
   // catches it.
   vi.mocked(resultsApi.getCostBreakdown).mockResolvedValue(unavailablePayload())
+  // Storage CAPEX can only be "unavailable" when there is storage that could
+  // be built; with none the tile says Not applicable (UX overhaul S2).
+  vi.mocked(networkApi.getStorageUnits).mockResolvedValue([extendableBattery])
   renderPage()
   await switchToLifetimeMode()
 
   expect(within(kpiCard('CAPEX (installed, PV)')).getByText('unavailable')).toBeTruthy()
   expect(within(kpiCard('Total new investment (PV)')).getByText('unavailable')).toBeTruthy()
   expect(within(kpiCard('Storage CAPEX (new, PV)')).getByText('unavailable')).toBeTruthy()
-  // …and the em-dash keeps its own, different meaning on the same strip.
-  expect(within(kpiCard('Curtailment cost')).getByText('—')).toBeTruthy()
+  // …and a curtailment cost nobody configured says so, distinct from unavailable.
+  expect(within(kpiCard('Curtailment cost')).getByText('Not modelled')).toBeTruthy()
 })
 
 it('refuses to print a total system cost built on an unknown CAPEX', async () => {
@@ -374,4 +377,41 @@ it('heads the per-unit CAPEX without /yr in total-investment (PV) mode', async (
   await switchToLifetimeMode()
   expect(screen.getAllByText('CAPEX €/MW')).toHaveLength(2)
   expect(screen.queryByText('CAPEX €/MW/yr')).toBeNull()
+})
+
+// ── Result states (UX overhaul S2) ──────────────────────────────────────────
+const extendableBattery = {
+  name: 'Battery', bus: 'Bus 0', carrier: 'battery', p_nom: 0, p_nom_extendable: true,
+} as unknown as StorageUnit
+
+it('says storage tiles do not apply when the network has no storage', async () => {
+  renderPage()
+  await screen.findByText('Storage charge cost')
+  expect(within(kpiCard('Storage charge cost')).getByText('Not applicable')).toBeTruthy()
+  expect(within(kpiCard('Storage CAPEX (new)')).getByText('Not applicable')).toBeTruthy()
+  expect(within(kpiCard('Storage CAPEX (new)')).queryByText('€0.00')).toBeNull()
+})
+
+it('says storage CAPEX was not modelled when no storage may expand', async () => {
+  vi.mocked(networkApi.getStorageUnits).mockResolvedValue([{ ...extendableBattery, p_nom_extendable: false }])
+  renderPage()
+  await screen.findByText('Storage CAPEX (new)')
+  expect(within(kpiCard('Storage CAPEX (new)')).getByText('Not modelled')).toBeTruthy()
+  expect(within(kpiCard('Storage CAPEX (new)')).getByText(/No storage was allowed to expand/)).toBeTruthy()
+})
+
+it('shows a computed zero storage CAPEX when storage could expand but was not built', async () => {
+  vi.mocked(networkApi.getStorageUnits).mockResolvedValue([extendableBattery])
+  renderPage()
+  await screen.findByText('Storage CAPEX (new)')
+  const tile = kpiCard('Storage CAPEX (new)')
+  expect(tile.closest('[data-state]')?.getAttribute('data-state')).toBe('zero')
+  expect(getKpiValueWithin(tile, '€0')).toBeTruthy()
+})
+
+it('says curtailment cost was not modelled when no generator carries one', async () => {
+  renderPage()
+  await screen.findByText('Curtailment cost')
+  expect(within(kpiCard('Curtailment cost')).getByText('Not modelled')).toBeTruthy()
+  expect(within(kpiCard('Curtailment cost')).queryByText('—')).toBeNull()
 })
