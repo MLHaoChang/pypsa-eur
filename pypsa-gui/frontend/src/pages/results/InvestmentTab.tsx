@@ -33,6 +33,8 @@ const SECTIONS = [
   { id: 'case', label: 'Investment case' },
 ] as const
 type SectionId = typeof SECTIONS[number]['id']
+// The sections that edit inputs: Expert → Economics edits the same ones (E3).
+const INPUT_SECTIONS: ReadonlySet<SectionId> = new Set(['tariff', 'library', 'contracts', 'finance'])
 
 export { fmtAmount }
 
@@ -120,6 +122,8 @@ export default function InvestmentTab() {
                                 queryFn: () => commercialApi.getCommercial() })
   const [section, setSection] = useState<SectionId>('participants')
   const [designing, setDesigning] = useState(false)
+  const expert = useUIStore(s => s.uiMode === 'expert')
+  const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
 
   const onKey = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
@@ -171,6 +175,13 @@ export default function InvestmentTab() {
       </div>
       <div role="tabpanel" id={`ic-panel-${section}`} aria-labelledby={`ic-tab-${section}`}
            tabIndex={0}>
+        {expert && INPUT_SECTIONS.has(section) && (
+          <p className="text-[11px] text-muted pb-2" data-testid="ic-edit-in-economics">
+            These inputs are also under Expert → Economics.{' '}
+            <button type="button" className="underline"
+                    onClick={() => setSlidePanel('economics')}>Open Economics</button>
+          </p>
+        )}
         {section === 'bill' && (
           <BillSection billing={billing.data} error={billing.isError ? billing.error : null} />
         )}

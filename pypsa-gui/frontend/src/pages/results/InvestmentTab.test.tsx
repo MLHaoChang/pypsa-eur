@@ -239,3 +239,43 @@ describe('InvestmentTab site connection (IC U1 follow-up b)', () => {
     expect(screen.queryByTestId('site-connection-form')).toBeNull()
   })
 })
+
+// E3 (Economics in Expert): the inputs are also edited under Expert → Economics;
+// the tab says so on its input sections and opens that panel. Guided has no
+// Economics step, so it never shows the link.
+describe('InvestmentTab → Economics', () => {
+  beforeEach(() => {
+    vi.mocked(commercialApi.getBilling).mockResolvedValue(BILLING as never)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(FLOWS as never)
+  })
+  afterEach(() => useUIStore.setState({ uiMode: 'expert', activeSlidePanel: null }))
+
+  it('an input section links to Economics in Expert, and the link opens it', async () => {
+    useUIStore.setState({ uiMode: 'expert', activeSlidePanel: 'results' })
+    renderTab()
+    for (const name of ['Tariff', 'Finance inputs']) {
+      fireEvent.click(screen.getByRole('tab', { name }))
+      expect((await screen.findByTestId('ic-edit-in-economics')).textContent)
+        .toMatch(/Expert → Economics/)
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Open Economics' }))
+    expect(useUIStore.getState().activeSlidePanel).toBe('economics')
+  })
+
+  it('an output section has no link', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    renderTab()
+    for (const name of ['Bill', 'Investment case', 'Participants']) {
+      fireEvent.click(screen.getByRole('tab', { name }))
+      expect(screen.queryByTestId('ic-edit-in-economics')).toBeNull()
+    }
+  })
+
+  it('Guided, which has no Economics step, never shows it', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    renderTab()
+    fireEvent.click(screen.getByRole('tab', { name: 'Tariff' }))
+    await screen.findByText(/import tariff/)
+    expect(screen.queryByTestId('ic-edit-in-economics')).toBeNull()
+  })
+})
