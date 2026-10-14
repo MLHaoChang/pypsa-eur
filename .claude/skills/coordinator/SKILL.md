@@ -24,11 +24,10 @@ Work from a checkout of current master. Before a sweep, run `git switch master &
 
 Merge one PR at a time:
 
-1. Run `scripts/coord/premerge.sh <pr>`. Done when it ends in `RESULT: ok to merge`.
-2. Read the check runs on premerge's `head:` SHA. Every run must be success or skipped.
-3. For gridspine and IC engine changes, get the gatekeeper's OK (session_01Fz66v1SpJnjGHky1RbUuqC), recorded in the state file.
-4. Call `merge_pull_request` with `expectedHeadSha` set to the full 40-character `head:` line. Done when GitHub reports the PR merged.
-5. Tell each dependent session the state file lists for this PR, then go on to the next PR. Each premerge run measures against the new master.
+1. Run `scripts/coord/premerge.sh <pr>`. It covers conflicts, overlap, the semantic tests on a trial merge and every check run on the head. Done when it ends in `RESULT: ok to merge <sha>`.
+2. For gridspine and IC engine changes, get the gatekeeper's OK (session_01Fz66v1SpJnjGHky1RbUuqC) for that same SHA, recorded in the state file.
+3. Call `merge_pull_request` with `expectedHeadSha` set to the full 40-character `head:` line. GitHub's mergeable state is the one check premerge leaves out; a refused merge reports it. Done when GitHub reports the PR merged.
+4. Tell each dependent session the state file lists for this PR, then go on to the next PR. Each premerge run measures against the new master.
 
 **A blocked PR:**
 - **Code overlap or a conflict.** Ask the PR's session to merge master in, as a merge commit, then wait for CI on the new head.

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
@@ -8,6 +8,7 @@ import Dispatch, { linkFlowTotals, type LinkPort } from './Dispatch'
 import {
   buildMultiPeriodWindowFixture, COLUMNS, WINDOW, TIMESTEPS_PER_PERIOD,
 } from './__fixtures__/multiPeriodWindow'
+import { findAllKpiValues } from '../../test/kpi'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -187,7 +188,7 @@ it('renders a distinctive thermal dispatch value sourced from the mocked results
   // card container) that the 2 matches are the "Thermal" and "Total
   // generation" cards (:1258/:1260) — two genuinely distinct render sites,
   // not one node counted twice.
-  const matches = await screen.findAllByText('424.24 MWh')
+  const matches = await findAllKpiValues('424.24 MWh')
   expect(matches.length).toBe(2)
 })
 

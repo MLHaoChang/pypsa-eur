@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import LoadFlow from './LoadFlow'
+import { findKpiValue } from '../../test/kpi'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -152,6 +153,6 @@ function renderPage() {
 
 it('renders a distinctive peak-flow KPI sourced from a single mocked line/snapshot', async () => {
   renderPage()
-  const match = await screen.findByText((text) => text.includes('424.24 MW'))
+  const match = await findKpiValue(f => f.includes('424.24 MW'))
   expect(match).toBeTruthy()
 })
