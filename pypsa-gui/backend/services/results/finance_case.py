@@ -625,20 +625,23 @@ def _site_loads(n, parsed, sides) -> list[str]:
             if str(n.loads.at[ld, "bus"]) in sides.site and electric(str(n.loads.at[ld, "bus"]))]
 
 
-def _later_vintage_build(n, comp: str, name: str, first) -> tuple[int, float] | None:
-    """(build year, capacity) of the first capacity `name` builds after the
-    `first` period through vintage bounds, or None. The bounds fold their
-    build-year clones back into the parent row after the solve, so the
-    parent's own `build_year` does not show it; the per-period breakdown in
-    `n.meta["vintage_results"]` does (`vintage_service`, P5a H1)."""
+def _later_build_year(n, comp: str, name: str, first) -> tuple[int, float] | None:
+    """(build year, capacity) of the first capacity `name` builds in a build
+    year after the `first` period through vintage bounds, or None. The bounds
+    clone the parent once per build year for the solve and fold the clones
+    back into the parent row afterwards, so the parent's own `build_year`
+    does not show a later build; the per-build-year breakdown in
+    `n.meta["vintage_results"]` does (`vintage_service`, P5a H1). A single
+    build that stays active across several periods is one build year, not a
+    staged build."""
     meta = getattr(n, "meta", None)
     root = meta.get("vintage_results") if isinstance(meta, dict) else None
     by_class = root.get(comp) if isinstance(root, dict) else None
     entry = by_class.get(str(name)) if isinstance(by_class, dict) else None
-    periods = entry.get("periods") if isinstance(entry, dict) else None
-    for per in sorted((p for p in periods or () if isinstance(p, dict)),
-                      key=lambda p: _fin(p.get("build_year")) or 0.0):
-        year, built = _fin(per.get("build_year")), _fin(per.get("p_nom_opt"))
+    builds = entry.get("periods") if isinstance(entry, dict) else None   # one per build year
+    for build in sorted((b for b in builds or () if isinstance(b, dict)),
+                        key=lambda b: _fin(b.get("build_year")) or 0.0):
+        year, built = _fin(build.get("build_year")), _fin(build.get("p_nom_opt"))
         if year is not None and built is not None and year > first and built > 1e-6:
             return int(year), built
     return None
@@ -1542,7 +1545,7 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                     raise FinanceRefused("staged_build_not_supported",
                                          f"{comp} {name!r} is built in {int(by)}, after the "
                                          f"first period {first} (P5)")
-            later = _later_vintage_build(n, comp, name, first)
+            later = _later_build_year(n, comp, name, first)
             if later is not None:
                 raise FinanceRefused("staged_build_vintage_bounds_not_supported",
                                      f"{comp} {name!r} builds {later[1]:g} in {later[0]}, after "

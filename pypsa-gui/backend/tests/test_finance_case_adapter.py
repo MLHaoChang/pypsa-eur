@@ -636,6 +636,12 @@ def test_a_vintage_bound_build_in_a_later_period_is_refused(reset_backend):
         {"build_year": 2040, "lifetime": 25, "p_nom_opt": 0.0}]
     _case(n, cfg, _fin(annualise=True))                  # nothing staged: no refusal
 
+    # One build year whose capacity stays active in both periods is not a
+    # staged build (the false positive to guard against).
+    n.meta["vintage_results"]["Generator"]["pv"]["periods"] = [
+        {"build_year": 2030, "lifetime": 25, "p_nom_opt": total}]
+    _case(n, cfg, _fin(annualise=True))
+
 
 def test_the_counterfactual_load_follows_the_solves_load_scalers():
     """P5a, H2. `load_scalers` scale the demand for the solve only and the
@@ -660,6 +666,12 @@ def test_the_counterfactual_load_follows_the_solves_load_scalers():
     assert served.tolist() == [10.0, 10.0, 15.0, 15.0]
     assert shed.tolist() == [0.0] * 4 and reasons == []
     assert n.loads_t.p_set["it"].tolist() == [10.0] * 4          # the network is not touched
+
+    # Served = the scaled demand − the shed the (scaled) solve reported.
+    ll = pd.DataFrame({"it": [0.0, 1.0, 0.0, 4.0]}, index=n.snapshots)
+    served, shed, reasons = _served_load(n, cfg, ["it"], {"lost_load_t": ll})
+    assert served.tolist() == [10.0, 9.0, 15.0, 11.0]
+    assert shed.tolist() == [0.0, 1.0, 0.0, 4.0] and reasons == []
 
     cfg.load_scalers = {}
     served, _shed, _r = _served_load(n, cfg, ["it"], None)
