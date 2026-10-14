@@ -40,6 +40,7 @@ export const COMPONENT_QUERY_ROOTS = [
   'stores',
   'loads',
   'transformers',
+  'shunt_impedances',
   // Writable by the generic `update_component` / `delete_component` chat
   // tools (chat_tools_schema `_COMP_UPDATE_ROUTES` / `_COMP_DELETE_ROUTES`
   // both list it) and cached by SolverSettings, so a chat edit to a CO2 cap
@@ -134,6 +135,7 @@ const ENDPOINTS = {
   stores:        ep(networkApi.getStores,       networkApi.updateStore),
   loads:         ep(networkApi.getLoads,        networkApi.updateLoad),
   transformers:  ep(networkApi.getTransformers, networkApi.updateTransformer),
+  shunt_impedances: ep(networkApi.getShuntImpedances, networkApi.updateShuntImpedance),
 }
 
 export type WritableRoot = keyof typeof ENDPOINTS
@@ -149,6 +151,7 @@ const ROOT_CLASS: Record<WritableRoot, string> = {
   stores: 'Store',
   loads: 'Load',
   transformers: 'Transformer',
+  shunt_impedances: 'ShuntImpedance',
 }
 
 /**

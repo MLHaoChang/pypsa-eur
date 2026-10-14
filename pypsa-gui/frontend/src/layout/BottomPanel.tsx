@@ -36,7 +36,7 @@ function storedH() {
   try { return parseInt(localStorage.getItem(HEIGHT_KEY) ?? '') || DEFAULT_H } catch { return DEFAULT_H }
 }
 
-const TABS = ['Log', 'History', 'Buses', 'Lines', 'Transformers', 'Generators', 'Storage', 'Stores', 'Loads', 'Links', 'Carriers'] as const
+const TABS = ['Log', 'History', 'Buses', 'Lines', 'Transformers', 'Generators', 'Storage', 'Stores', 'Loads', 'Links', 'Carriers', 'Shunts'] as const
 type Tab = typeof TABS[number]
 
 /** Row count above which any bulk write asks first (spec D18, criterion 27). */
@@ -59,6 +59,8 @@ const TAB_COLUMNS: Record<Tab, string[]> = {
   // that feeds the primary_energy global constraint (CO2 caps). The bulk
   // editor here is the canonical place to set per-fuel co2_emissions.
   Carriers:     ['name', 'co2_emissions', 'nice_name', 'color', 'unit'],
+  // Shunts to ground (n.shunt_impedances, M5c): read by the AC power flow only.
+  Shunts:       ['name', 'bus', 'g', 'b'],
 }
 
 // Column headers: a described column takes its descriptor's label and stored
@@ -70,7 +72,7 @@ const NO_SHORT_NAMES: Record<string, string> = {}
 const TAB_TYPES: Record<Tab, string | null> = {
   Log: null, History: null, Buses: 'Bus', Lines: 'Line', Transformers: 'Transformer',
   Generators: 'Generator', Storage: 'StorageUnit', Stores: 'Store',
-  Loads: 'Load', Links: 'Link', Carriers: 'Carrier',
+  Loads: 'Load', Links: 'Link', Carriers: 'Carrier', Shunts: 'ShuntImpedance',
 }
 
 // Component class → TanStack-Query queryKey used by the asset tables in
@@ -80,7 +82,7 @@ const TAB_TYPES: Record<Tab, string | null> = {
 const TAB_TO_API_KEY: Record<string, string> = {
   Bus: 'buses', Line: 'lines', Transformer: 'transformers',
   Generator: 'generators', StorageUnit: 'storage_units', Store: 'stores',
-  Load: 'loads', Link: 'links', Carrier: 'carriers',
+  Load: 'loads', Link: 'links', Carrier: 'carriers', ShuntImpedance: 'shunt_impedances',
 }
 
 // ── Per-tab column visibility (persisted) ────────────────────────────────────
@@ -1508,6 +1510,7 @@ export default function BottomPanel() {
   const { data: sus          = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
   const { data: stores       = [] } = useQuery({ queryKey: nk(currentProject, 'stores'),        queryFn: networkApi.getStores })
   const { data: carriers     = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'),      queryFn: networkApi.getCarriers })
+  const { data: shunts       = [] } = useQuery({ queryKey: nk(currentProject, 'shunt_impedances'), queryFn: networkApi.getShuntImpedances })
 
   // Component rows carry no string index signature, so TS rejects a direct
   // cast to Record<string, unknown>[]; route through `unknown` (the table
@@ -1524,6 +1527,7 @@ export default function BottomPanel() {
     Loads:        loads        as unknown as Record<string, unknown>[],
     Links:        links        as unknown as Record<string, unknown>[],
     Carriers:     carriers     as unknown as Record<string, unknown>[],
+    Shunts:       shunts       as unknown as Record<string, unknown>[],
   }
 
   const onHandleMouseDown = useCallback((e: React.MouseEvent) => {

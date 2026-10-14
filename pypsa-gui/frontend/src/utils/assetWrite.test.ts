@@ -46,7 +46,7 @@ describe('COMPONENT_QUERY_ROOTS', () => {
     // component counts render in the status bar.
     for (const root of [
       'buses', 'carriers', 'lines', 'links', 'generators',
-      'storage_units', 'stores', 'loads', 'transformers', 'meta',
+      'storage_units', 'stores', 'loads', 'transformers', 'shunt_impedances', 'meta',
     ]) {
       expect(COMPONENT_QUERY_ROOTS, `missing root: ${root}`).toContain(root)
     }
@@ -329,7 +329,7 @@ describe('COMPONENT_QUERY_ROOTS covers the real write surface, not a remembered 
     Bus: 'buses', Carrier: 'carriers', Line: 'lines', Link: 'links',
     Generator: 'generators', StorageUnit: 'storage_units', Store: 'stores',
     Load: 'loads', Transformer: 'transformers',
-    GlobalConstraint: 'global_constraints',
+    GlobalConstraint: 'global_constraints', ShuntImpedance: 'shunt_impedances',
   }
 
   it('finds the real classes (guards the derivation itself against a silent no-match)', () => {

@@ -35,6 +35,7 @@ import { buildPatch, seedForm } from '../utils/assetForm'
 import { AssetFieldsEdit, assetReadoutItems, fieldHelp, schemaFields } from './properties/AssetFields'
 import { GuideButton } from '../components/GuidedTour'
 import CarrierPanel from './properties/CarrierPanel'
+import ShuntPanel from './properties/ShuntPanel'
 
 import {
   TOOLTIP_VIEWPORT_MARGIN,
@@ -1914,6 +1915,9 @@ export default function PropertiesPanel() {
       } else if (selectedComponent.type === 'Transformer') {
         await networkApi.deleteTransformer(selectedComponent.name)
         qc.invalidateQueries({ queryKey: nk(proj, 'transformers') })
+      } else if (selectedComponent.type === 'ShuntImpedance') {
+        await networkApi.deleteShuntImpedance(selectedComponent.name)
+        qc.invalidateQueries({ queryKey: nk(proj, 'shunt_impedances') })
       }
     },
     onSuccess: () => {
@@ -1990,18 +1994,19 @@ export default function PropertiesPanel() {
   const TYPE_LABELS: Record<string, string> = {
     Bus: 'Bus', Line: 'Line', Link: 'Link / HVDC', Transformer: 'Transformer',
     AssetGroup: 'Assets', Generator: 'Generator', StorageUnit: 'Storage Unit',
-    Store: 'Store', Load: 'Load', Carrier: 'Carrier',
+    Store: 'Store', Load: 'Load', Carrier: 'Carrier', ShuntImpedance: 'Shunt impedance',
   }
 
   const displayName = selectedComponent.type === 'AssetGroup'
     ? selectedComponent.name.split('::')[0]
     : selectedComponent.name
 
-  const canDelete = selectedComponent.type === 'Bus' || selectedComponent.type === 'Line' || selectedComponent.type === 'Link' || selectedComponent.type === 'Transformer'
+  const canDelete = selectedComponent.type === 'Bus' || selectedComponent.type === 'Line' || selectedComponent.type === 'Link' || selectedComponent.type === 'Transformer' || selectedComponent.type === 'ShuntImpedance'
   // AssetGroup is a synthetic bus::category grouping, not a real network
   // component — it has no entry in Asset Detail's results registry.
-  // A Carrier is not an asset either (M5b).
+  // A Carrier is not an asset either (M5b), and a shunt has no results of its own (M5c).
   const canViewResults = selectedComponent.type !== 'AssetGroup' && selectedComponent.type !== 'Carrier'
+    && selectedComponent.type !== 'ShuntImpedance'
 
   return (
     <aside className="shrink-0 bg-bg border-l border-border flex flex-col overflow-hidden shadow-lg" style={{ width: 300 }}>
@@ -2052,6 +2057,7 @@ export default function PropertiesPanel() {
         {selectedComponent.type === 'AssetGroup'  && <AssetGroupPanel  key={selectedComponent.name} name={selectedComponent.name} />}
         {selectedComponent.type === 'Transformer' && <TransformerPanel key={selectedComponent.name} name={selectedComponent.name} />}
         {selectedComponent.type === 'Carrier'     && <CarrierPanel     key={selectedComponent.name} name={selectedComponent.name} />}
+        {selectedComponent.type === 'ShuntImpedance' && <ShuntPanel key={selectedComponent.name} name={selectedComponent.name} />}
       </div>
     </aside>
   )

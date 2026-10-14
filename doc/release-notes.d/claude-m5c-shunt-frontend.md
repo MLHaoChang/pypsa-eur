@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Shunt impedances (capacitors and reactors to ground, read by the AC power flow) can be seen and edited in the app: a Shunts tab in the bottom panel lists them, and a row opens a Properties card where the bus, conductance and susceptance can be changed, the shunt renamed or deleted. The assistant can open the Shunts tab.

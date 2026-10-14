@@ -20,7 +20,7 @@ vi.mock('../api/network', async (importOriginal) => {
       ...actual.networkApi,
       getBuses: vi.fn(), getLines: vi.fn(), getLinks: vi.fn(),
       getTransformers: vi.fn(), getGenerators: vi.fn(), getLoads: vi.fn(),
-      getStorageUnits: vi.fn(), getStores: vi.fn(), getCarriers: vi.fn(),
+      getStorageUnits: vi.fn(), getStores: vi.fn(), getCarriers: vi.fn(), getShuntImpedances: vi.fn(),
       bulkUpdate: vi.fn(), getCatalog: vi.fn(), listTimeseries: vi.fn(),
     },
   }
@@ -100,7 +100,7 @@ beforeEach(() => {
   api.getBuses.mockReset().mockResolvedValue(buses(5) as never)
   for (const fn of [api.getLines, api.getLinks, api.getTransformers,
     api.getGenerators, api.getLoads, api.getStorageUnits, api.getStores,
-    api.getCarriers]) {
+    api.getCarriers, api.getShuntImpedances]) {
     fn.mockReset().mockResolvedValue([] as never)
   }
   api.bulkUpdate.mockReset()
@@ -660,6 +660,28 @@ describe('Carriers tab absorbed into the shared grid — D16', () => {
     // /primary/ alone is ambiguous: COL_LABELS.co2_emissions is
     // 'CO₂ (t/MWh primary)', so the column header matches it too.
     expect(await screen.findByText(/output-MWh/)).toBeTruthy()
+  })
+})
+
+describe('the Shunts tab (M5c)', () => {
+  beforeEach(() => {
+    vi.mocked(networkApi).getShuntImpedances.mockResolvedValue(
+      [{ name: 'cap1', bus: 'B0', g: 0, b: 0.02 }] as never)
+  })
+
+  it('lists the shunts, and a row opens the shunt’s Properties card', async () => {
+    useUIStore.setState({ selectedComponent: null, rightPanelOpen: false })
+    renderPanel()
+    await userEvent.click(screen.getByText('Shunts'))
+    await userEvent.click(await screen.findByText('cap1'))
+    expect(useUIStore.getState().selectedComponent).toEqual({ type: 'ShuntImpedance', name: 'cap1' })
+    expect(useUIStore.getState().rightPanelOpen).toBe(true)
+  })
+
+  it('is requested by the name the assistant’s bottom_tab enum uses', async () => {
+    renderPanel()
+    act(() => { useUIStore.getState().requestBottomTab('Shunts') })
+    expect(await screen.findByText('cap1')).toBeTruthy()
   })
 })
 

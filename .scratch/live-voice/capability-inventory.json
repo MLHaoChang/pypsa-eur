@@ -2940,7 +2940,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "2b7d7a37ae302243a134dbfb2f10ff6cb4d1a2456947e27d0c1301589a5b388c",
+      "schema_sha256": "321144cfbed0bbe04f50295441d863fb0e3403e6fdcdb6b34fc393a17a6cb4d6",
       "behavioral_fixture": "pending"
     },
     {
