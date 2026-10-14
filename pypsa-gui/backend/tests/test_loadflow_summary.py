@@ -284,6 +284,23 @@ def test_ac_pf_requested_without_a_result_is_typed_unavailable(solved):
     assert out['status'] == 'unavailable' and out['unavailable_kind'] == 'ac_pf_not_available'
 
 
+def test_lopf_missing_after_ac_never_substitutes_live_ac_flows(solved):
+    _install_ac(solved['network'])
+    PyPSAService.get_solver_state()['lopf_results'] = None
+    out = lf.get_loadflow_summary(source='lopf')
+    assert out['unavailable_kind'] == 'lopf_snapshot_unavailable' and 'top' not in out
+
+
+def test_partial_lopf_snapshot_never_borrows_the_other_terminal_from_live_ac(solved):
+    n = solved['network']
+    _install_ac(n)
+    PyPSAService.get_solver_state()['lopf_results'] = {'lines_t.p0': n.lines_t.p0.copy()}
+    n.lines_t.p1.loc[:, 'L_p1'] = -9000
+    out = lf.get_loadflow_summary(source='lopf', limit=25)
+    row = _by_name(out)['L_p1']
+    assert row['peak_flow'] == 40 and row['terminals'] == 'bus0_only'
+
+
 def test_unaligned_ac_convergence_cannot_certify_loading(solved):
     _install_ac(solved['network'])
     PyPSAService.get_solver_state()['ac_pf_convergence_list'] = []

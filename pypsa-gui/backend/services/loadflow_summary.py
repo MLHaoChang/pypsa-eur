@@ -161,6 +161,10 @@ def _gate(n: Any, solve: dict, source: str) -> dict | None:
             return _unavailable("ac_pf_not_available",
                                 "No AC power-flow result exists; run the AC PF stage or use source='lopf'.",
                                 solve=solve)
+    elif PyPSAService.get_solver_state().get("ac_pf_results") is not None:
+        if not isinstance(PyPSAService.get_solver_state().get("lopf_results"), dict):
+            return _unavailable("lopf_snapshot_unavailable",
+                                "The LOPF snapshot is missing after AC PF; live AC flows are not substituted.")
     return None
 
 
@@ -195,8 +199,9 @@ def _frame(n: Any, accessor: str, attr: str, source: str, names: pd.Index,
            win_index: pd.Index) -> pd.DataFrame | None:
     from routers.results import _result_df
 
-    if source == "ac_pf":
-        snapshot = PyPSAService.get_solver_state().get("ac_pf_results")
+    state = PyPSAService.get_solver_state()
+    if source == "ac_pf" or state.get("ac_pf_results") is not None:
+        snapshot = state.get(f"{source}_results")
         if not isinstance(snapshot, dict) or f"{accessor}.{attr}" not in snapshot:
             return None
     df = _result_df(n, accessor, attr, source)
