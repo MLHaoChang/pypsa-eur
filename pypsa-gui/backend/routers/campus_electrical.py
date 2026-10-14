@@ -176,17 +176,20 @@ def save_campus(
     return ce.save_campus(_row(proj, db), body.yaml)
 
 
-@router.post("/{name}/run")
+@router.post("/{name}/run", status_code=202)
 async def run(
     body: RunSettings,
     proj: AuthorizedProject = ProjectAccessDep,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
-    """Prepare, rank and size the campus at its critical hours, then buy the
-    electrical assets from the library unless ``invest`` is false."""
+    """Queue the study (prepare, rank and size the campus at its critical
+    hours, then buy the electrical assets from the library unless ``invest``
+    is false) as a solve-queue job of kind ``campus``, and answer the job. It
+    runs for minutes: follow it in ``GET /{name}`` (``run_job``, with its
+    stage) or the solve queue, and abort it there."""
     _check_lock(proj, db, user)
-    return await run_in_threadpool(ce.run, _row(proj, db), body.model_dump())
+    return await run_in_threadpool(ce.enqueue_run, _row(proj, db), body.model_dump(), user)
 
 
 # ── the joint optimisation (MILP) as a background job (plan C12) ────────────

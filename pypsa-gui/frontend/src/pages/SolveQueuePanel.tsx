@@ -358,11 +358,12 @@ function JobRow({ job, onAbort, onRequeue, onDismiss }: {
                 {REDACTED_PROJECT_LABEL}
               </span>
             )}
-            {job.kind === 'gridspine' && (
+            {(job.kind === 'gridspine' || job.kind === 'campus') && (
               // A study has no objective and no network to preview; the label
               // is what tells the reader why this row's completed line is empty.
-              <span className="text-[9.5px] font-semibold uppercase tracking-wide px-1.5 py-px rounded border border-border text-muted" title="Planning → dynamics study">
-                study
+              <span className="text-[9.5px] font-semibold uppercase tracking-wide px-1.5 py-px rounded border border-border text-muted"
+                    title={job.kind === 'campus' ? 'Campus electrical study' : 'Planning → dynamics study'}>
+                {job.kind === 'campus' ? 'campus' : 'study'}
               </span>
             )}
             {job.status === 'queued' && job.position != null && (
@@ -370,8 +371,9 @@ function JobRow({ job, onAbort, onRequeue, onDismiss }: {
             )}
           </div>
           <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted">
-            {job.status === 'completed' && job.kind !== 'gridspine' && <span>{fmtObjective(job.objective)}{job.solve_time != null ? ` · ${job.solve_time}s` : ''}</span>}
+            {job.status === 'completed' && job.kind !== 'gridspine' && job.kind !== 'campus' && <span>{fmtObjective(job.objective)}{job.solve_time != null ? ` · ${job.solve_time}s` : ''}</span>}
             {job.status === 'completed' && job.kind === 'gridspine' && <span>Study finished — open Planning → dynamics for the results</span>}
+            {job.status === 'completed' && job.kind === 'campus' && <span>Campus electrical study finished — open Campus electrical for the results</span>}
             {job.status === 'failed' && <span className="text-danger truncate" title={job.error ?? job.condition ?? ''}>{job.error ?? job.condition ?? 'Failed'}</span>}
             {job.status === 'aborted' && (
               <span>{job.condition === 'superseded' ? 'Superseded by a newer run' : 'Aborted by user'}</span>

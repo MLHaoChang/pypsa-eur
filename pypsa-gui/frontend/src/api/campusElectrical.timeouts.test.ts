@@ -23,13 +23,14 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks())
 
 describe('campusApi: the long calls carry their own timeout', () => {
-  it('runs the study with a timeout of many minutes, far past the 30 s default', async () => {
+  it('queues the study with an ordinary request: it answers with the job, not the results', async () => {
     await campusApi.run('Hub A', SETTINGS)
     const [url, body, cfg] = post.mock.calls[0]
     expect(url).toBe('/campus-electrical/Hub%20A/run')
     expect(body).toEqual(SETTINGS)
-    expect(cfg).toEqual(expect.objectContaining({ skipErrorToast: true, timeout: CAMPUS_RUN_TIMEOUT_MS }))
-    expect(CAMPUS_RUN_TIMEOUT_MS).toBeGreaterThanOrEqual(10 * 60_000)
+    expect(cfg).toEqual(expect.objectContaining({ skipErrorToast: true }))
+    expect(cfg?.timeout).toBeUndefined()
+    expect(CAMPUS_RUN_TIMEOUT_MS).toBeGreaterThanOrEqual(10 * 60_000)      // the MILP start still makes a run
   })
 
   it('starts the joint optimisation with the same timeout: it makes the least-cost run first', async () => {
