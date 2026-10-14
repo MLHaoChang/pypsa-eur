@@ -2139,6 +2139,70 @@ The first run killed 44. The ten survivors were closed:
 A 55th edit, which drops every UPS from the sweep, was added with that
 rule. All 55 are killed.
 
+### I6c as built: the driver at the I3b hours (2026-10-14)
+
+**What waited for I3b** is wired into `gridspine/drivers/campus_study.py`,
+in additive functions, on a ranked run.
+- **`island_hours(run_dir)`** gives the island critical hours: the
+  selected hours that an `ISLAND_CRITERIA` reason picked. Hours that only a
+  base criterion picked are not island hours.
+- **`island_frequency_campus(run_dir, every_hour=True)`**
+  - **Refuses** a campus without island requirements, and a run without
+    the island tables.
+  - **Runs:**
+    - `e1_every_hour` on the tables, when `seamless` is a scenario;
+    - `campus_frequency_study` at the island hours, with I3a's per-unit
+      table.
+  - **Writes:**
+    - `campus_freq_e1_hourly.csv`, `campus_freq_events.csv`,
+      `campus_freq_losses.csv`, `campus_freq_bridge.csv`,
+      `campus_freq_planned.csv` and `campus_freq_ups.csv`;
+    - `campus_freq_summary.json`.
+  - **Fixed columns.** Each table carries its fixed columns whatever
+    events ran, header only where it has nothing, so I9b reads one shape.
+    The columns are `frequency.E1_HOURLY_COLUMNS`, `EVENT_COLUMNS`,
+    `LOSSES_COLUMNS`, `BRIDGE_COLUMNS`, `PLANNED_COLUMNS` and
+    `UPS_COLUMNS`; the summary's keys are
+    `campus_study.FREQ_SUMMARY_KEYS`.
+  - **The bridge table** holds E4's UPS rows (`kind` `ups`) and the GFM
+    rows until the gensets join (`kind` `gfm`), under one `unit` column.
+  - **The summary** holds:
+    - the label, the ledger and the scenarios;
+    - the island hours;
+    - the failing event hours;
+    - the hours where the bridge fails, where a bridge row has no e(t−1)
+      to judge it and is not counted;
+    - the hours where planned islanding is infeasible;
+    - the hours where the every-hour E1 fails, and the ones among them the
+      ranking did not select. That is the plan's check on I3b's choice.
+- **`psse_campus(run_dir, hours=None)`** writes I8's bundle under `psse/`
+  for each island hour, or for the given hours. Each is named
+  `<campus>_p<period>_h<hour>` and carries the frequency ledger in its
+  README. A missing hour is refused.
+
+**Tests:** 12 in `tests/gridspine/test_campus_island_frequency_driver.py`,
+on a run directory written by hand:
+- the island hours;
+- the sweep at every hour against the events at the island hours only;
+- a missed hour, and a selected one that is not missed;
+- the bridge on I3a's IT load (20 MW, not the 25 MW draw);
+- an infeasible planned islanding;
+- a GFM bridge row without e(t−1) not counted;
+- skipping the sweep;
+- every table's fixed columns and the summary keys, under both scenario
+  sets;
+- both refusals;
+- the bundles per island hour, given hours, and a missing hour.
+
+**Mutations:** 14 edits to the driver. 11 were killed on the first run. The
+three survivors were:
+- the bridge's None rows;
+- the planned summary;
+- I3a's per-unit table not passed on.
+
+Each was closed by a test or a fixture value that tells the alternatives
+apart. 14 of 14 are now killed.
+
 ### I7: closing the loop — frequency cuts back into sizing (S–M; manual, owner Q6)
 
 When I6 fails at hours T_fail, **heuristic** cuts are proposed for I2b at
