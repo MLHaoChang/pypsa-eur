@@ -6,6 +6,7 @@ import { resultsApi, simulationApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import type { Line } from '../../api/types'
 import CapacityExpansion from './CapacityExpansion'
+import { getKpiValueWithin } from '../../test/kpi'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -223,7 +224,7 @@ it('keeps the annualised figures, which do not depend on the failed resolve', as
 
   // Default mode is Annualised — no banner, and real numbers.
   await screen.findByText('CAPEX (installed)')
-  expect(within(kpiCard('CAPEX (installed)')).getByText('€8.07 B')).toBeTruthy()
+  expect(getKpiValueWithin(kpiCard('CAPEX (installed)'), '€8.07 B')).toBeTruthy()
   expect(within(kpiCard('CAPEX (installed)')).queryByText('unavailable')).toBeNull()
   expect(screen.queryByText(/upfront \(PV\) investment costs are unavailable/i)).toBeNull()
 })
@@ -242,7 +243,7 @@ it('renders real PV figures untouched when every class resolved', async () => {
   renderPage()
   await switchToLifetimeMode()
 
-  expect(within(kpiCard('CAPEX (installed, PV)')).getByText('€36.00 B')).toBeTruthy()
+  expect(getKpiValueWithin(kpiCard('CAPEX (installed, PV)'), '€36.00 B')).toBeTruthy()
   expect(screen.queryByText('unavailable')).toBeNull()
   expect(screen.queryByText(/upfront \(PV\) investment costs are unavailable/i)).toBeNull()
 })

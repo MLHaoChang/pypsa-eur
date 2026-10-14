@@ -1,0 +1,207 @@
+// M3 (plan 2026-10-14-m3-results-summary.md): the answer-first Results page.
+// One status line and four cards (cost, emissions, adequacy, key capacities),
+// each read from an endpoint the detailed tabs already use, with the same
+// query keys so the cache is shared, and a link into its tab. Absent is never
+// shown as zero: a quantity the solve did not model says so, and a standard
+// that was not set is not shown as met.
+import type { ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { ArrowRight } from 'lucide-react'
+import { resultsApi, simulationApi } from '../../api/simulation'
+import { useUIStore } from '../../store/uiStore'
+import { nk } from '../../utils/queryKeys'
+import { useResultsFilter } from './filterContext'
+import { fmtCurrency, fmtEnergy } from './shared'
+import {
+  capacityRows, costView, emissionsView, reserveMarginVerdict,
+  type EmissionsPayload, type LostLoadPayload, type ReserveMarginSummary,
+} from './summary'
+import type { AdequacyReportPayload } from './adequacy'
+
+/** The Results tabs a card links to. */
+export type SummaryLink = 'capex' | 'emissions' | 'lostload' | 'adequacy' | 'economics'
+
+const MAX_CAPACITY_ROWS = 6
+
+function fmtTonnes(t: number): string {
+  const a = Math.abs(t)
+  if (a >= 1e6) return `${(t / 1e6).toFixed(2)} MtCO₂`
+  if (a >= 1e3) return `${(t / 1e3).toFixed(2)} ktCO₂`
+  return `${t.toFixed(a >= 1 ? 1 : 3)} tCO₂`
+}
+
+function fmtCapacity(v: number, unit: 'MW' | 'MWh'): string {
+  if (Math.abs(v) >= 1e3) return `${(v / 1e3).toFixed(2)} ${unit === 'MW' ? 'GW' : 'GWh'}`
+  return `${v.toFixed(v >= 10 ? 0 : 1)} ${unit}`
+}
+
+function Card({ title, testId, link, linkLabel, onOpen, hint, children }: {
+  title: string; testId: string; link: SummaryLink; linkLabel: string
+  onOpen: (t: SummaryLink) => void; hint?: string; children: ReactNode
+}) {
+  return (
+    <section data-testid={testId} title={hint}
+      className="rounded-[10px] border border-border bg-bg-2 px-4 py-3 flex flex-col gap-2 min-w-0">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted">{title}</h3>
+        <button type="button" onClick={() => onOpen(link)}
+          className="text-[10.5px] text-accent hover:underline inline-flex items-center gap-1">
+          {linkLabel} <ArrowRight size={10} />
+        </button>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function Headline({ value, sub }: { value: string; sub?: ReactNode }) {
+  return (
+    <div>
+      <div className="font-mono text-[20px] font-semibold leading-none text-text tabular-nums">{value}</div>
+      {sub && <div className="mt-1 text-[10.5px] text-muted">{sub}</div>}
+    </div>
+  )
+}
+
+function Line({ label, value, tone }: { label: string; value: ReactNode; tone?: 'ok' | 'warn' }) {
+  const color = tone === 'ok' ? 'text-success' : tone === 'warn' ? 'text-warn' : 'text-text'
+  return (
+    <div className="flex items-baseline justify-between gap-2 text-[11px]">
+      <span className="text-muted">{label}</span>
+      <span className={`font-mono tabular-nums ${color}`}>{value}</span>
+    </div>
+  )
+}
+
+function Absent({ children }: { children: ReactNode }) {
+  return <p className="text-[11px] text-muted italic">{children}</p>
+}
+
+export default function SummaryTab({ onOpenTab }: { onOpenTab: (t: SummaryLink) => void }) {
+  const project = useUIStore(s => s.currentProject)
+  const { selectedPeriod } = useResultsFilter()
+  const { data: status } = useQuery({ queryKey: nk(project, 'simulationStatus'), queryFn: simulationApi.getStatus })
+  const { data: cost } = useQuery({ queryKey: nk(project, 'results', 'cost_breakdown'), queryFn: resultsApi.getCostBreakdown })
+  const { data: emissions } = useQuery({ queryKey: nk(project, 'results', 'emissions'), queryFn: resultsApi.getEmissions })
+  const { data: lostLoad, isSuccess: lostLoadRead } = useQuery({
+    queryKey: nk(project, 'results', 'lost_load'), queryFn: () => resultsApi.getLostLoad(),
+  })
+  const { data: margin } = useQuery({ queryKey: nk(project, 'results', 'reserve_margin'), queryFn: () => resultsApi.getReserveMargin() })
+  const { data: adequacy } = useQuery({ queryKey: nk(project, 'results', 'adequacy'), queryFn: resultsApi.getAdequacy })
+  const { data: stats } = useQuery({ queryKey: nk(project, 'results_statistics'), queryFn: resultsApi.getStatistics })
+
+  const c = costView(cost, selectedPeriod)
+  const e = emissionsView(emissions as EmissionsPayload | null | undefined, selectedPeriod)
+  const caps = capacityRows(stats as Record<string, unknown>[] | null | undefined, selectedPeriod)
+  const ll = (lostLoad ?? null) as LostLoadPayload | null
+  const rm = reserveMarginVerdict(margin as ReserveMarginSummary | null | undefined)
+  const target = (adequacy ?? null) as AdequacyReportPayload | null
+
+  if (!c && !e && !caps.length) {
+    return (
+      <div className="p-6 text-[12px] text-muted" data-testid="summary-empty">
+        No results yet: run the model, and its cost, emissions, reliability and capacities are summarised here.
+      </div>
+    )
+  }
+
+  const scope = selectedPeriod != null ? `period ${selectedPeriod}` : 'horizon'
+  const shedHours = ll?.shed_hours == null ? null
+    : selectedPeriod != null ? ll.shed_hours.by_period[String(selectedPeriod)] ?? null : ll.shed_hours.total
+
+  return (
+    <div className="p-4 flex flex-col gap-3" data-testid="results-summary">
+      {status && (
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] text-muted" data-testid="summary-status">
+          <span>Solve: <span className="text-text font-medium">{status.condition ?? status.status ?? '—'}</span></span>
+          {status.solve_time != null && <span>{Number(status.solve_time).toFixed(1)} s</span>}
+          {status.objective != null && (
+            <span title="The LP objective (n.objective + its constant). The cost card below is the reported system cost from n.statistics(); the two differ by what the objective counts (e.g. existing fixed costs, shed load).">
+              LP objective <span className="font-mono text-text">{fmtCurrency(status.objective)}</span>
+            </span>
+          )}
+          <span>Showing the {scope}</span>
+        </div>
+      )}
+      <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
+        <Card title="Cost" testId="summary-cost" link="capex" linkLabel="Capacity Expansion" onOpen={onOpenTab}
+          hint="From /results/cost_breakdown (n.statistics(): annualised capital cost with fixed O&M, plus operating cost). Shed load is not included; see Adequacy.">
+          {c ? (
+            <>
+              <Headline value={fmtCurrency(c.total)} sub="total system cost per year" />
+              <Line label="Capital cost (annualised)" value={fmtCurrency(c.capital)} />
+              <Line label="Operating cost" value={fmtCurrency(c.operating)} />
+              {c.newBuild != null && (
+                <span title="Annualised capital of capacity this solve built: max(0, optimal − installed) × capital cost, as on the Capacity Expansion tab.">
+                  <Line label="of which new build" value={fmtCurrency(c.newBuild)} />
+                </span>
+              )}
+            </>
+          ) : <Absent>No cost breakdown for this solve.</Absent>}
+        </Card>
+
+        <Card title="Emissions" testId="summary-emissions" link="emissions" linkLabel="Emissions" onOpen={onOpenTab}
+          hint="From /results/emissions: dispatch × carrier CO₂ intensity ÷ efficiency. Caps are the primary-energy global constraints on co2_emissions; the price is their shadow price.">
+          {e ? (
+            <>
+              <Headline value={fmtTonnes(e.total_tCO2)} />
+              {e.caps.length ? e.caps.map(cap => (
+                <Line key={cap.name} label={`Cap ${cap.name}${cap.cap_tCO2 != null ? ` (${fmtTonnes(cap.cap_tCO2)})` : ''}`}
+                  tone={cap.binding ? 'warn' : 'ok'}
+                  value={cap.binding ? `binding · ${fmtCurrency(cap.shadow_price_eur_per_tCO2)}/t` : 'not binding'} />
+              )) : <Absent>No CO₂ cap set.</Absent>}
+            </>
+          ) : <Absent>No emissions for this solve.</Absent>}
+        </Card>
+
+        <Card title="Adequacy" testId="summary-adequacy" link="lostload" linkLabel="Lost load" onOpen={onOpenTab}
+          hint="Unserved energy is the VoLL slack dispatch the solve captured (/results/lost_load). LOLE and EUE come from an adequacy study: open the Adequacy tab.">
+          {ll ? (
+            <>
+              <Headline value={fmtEnergy(ll.total_mwh)} sub={`unserved energy${selectedPeriod != null ? ' (horizon)' : ''}`} />
+              <Line label="Cost at VoLL (not in the total)" value={fmtCurrency(ll.total_cost_eur)} />
+              {shedHours != null && <Line label="Hours with shed load" value={shedHours.toFixed(1)} tone={shedHours > 0 ? 'warn' : 'ok'} />}
+            </>
+          ) : lostLoadRead ? (
+            <Absent>Unserved energy not modelled: no value of lost load was set, so the solve could not shed load.</Absent>
+          ) : null}
+          {rm && <Line label="Reserve margin" value={rm.text} tone={rm.met ? 'ok' : 'warn'} />}
+          {target && (
+            <Line label="Reliability target"
+              value={`${fmtEnergy(target.target.system.achieved_ens_mwh)} of ${fmtEnergy(target.target.system.cap_mwh)}`}
+              tone={target.target.binding === 'voll' ? 'ok' : 'warn'} />
+          )}
+          <button type="button" onClick={() => onOpenTab('adequacy')}
+            className="self-start text-[10.5px] text-accent hover:underline">LOLE and EUE: Adequacy</button>
+        </Card>
+
+        <Card title="Key capacities" testId="summary-capacity" link="capex" linkLabel="Capacity Expansion" onOpen={onOpenTab}
+          hint="From /results/statistics (PyPSA n.statistics()): optimal capacity, and new build as max(0, optimal − installed). A multi-period horizon shows the last period's fleet unless a period is selected.">
+          {caps.length ? (
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr className="text-[9.5px] text-muted text-left">
+                  <th className="font-normal">Carrier</th>
+                  <th className="font-normal text-right">Capacity</th>
+                  <th className="font-normal text-right">New build</th>
+                </tr>
+              </thead>
+              <tbody>
+                {caps.slice(0, MAX_CAPACITY_ROWS).map(r => (
+                  <tr key={`${r.component}-${r.carrier}`} data-testid={`summary-cap-${r.component}-${r.carrier}`}>
+                    <td className="truncate" title={r.component}>{r.carrier || r.component}</td>
+                    <td className="text-right font-mono tabular-nums">{fmtCapacity(r.capacity, r.unit)}</td>
+                    <td className="text-right font-mono tabular-nums">{r.newBuild > 0 ? fmtCapacity(r.newBuild, r.unit) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : <Absent>No capacities for this solve.</Absent>}
+          {caps.length > MAX_CAPACITY_ROWS && (
+            <p className="text-[10px] text-muted">and {caps.length - MAX_CAPACITY_ROWS} more</p>
+          )}
+        </Card>
+      </div>
+    </div>
+  )
+}
