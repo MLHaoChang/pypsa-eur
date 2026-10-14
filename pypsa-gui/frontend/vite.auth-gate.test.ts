@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   assertLoginHtml,
@@ -21,6 +23,16 @@ describe('auth HTML gate', () => {
     expect(html).toContain(LOGIN_PAGE_MARKER)
     expect(html).toContain('Sign in')
     expect(html).not.toMatch(/src\/main\.tsx/)
+  })
+
+  it('ships no credential in either copy of the login page', () => {
+    const copies = [readLoginIndexHtml(), readFileSync(resolve(__dirname, 'public/login.html'), 'utf8')]
+    for (const html of copies) {
+      expect(html).not.toMatch(/id="password"[^>]*\svalue=/)
+      expect(html).not.toMatch(/id="email"[^>]*\svalue=/)
+      expect(html).not.toContain('Review account')
+      expect(html).not.toContain('admin-pass-123')
+    }
   })
 
   it('ships the landing page background image reference', () => {
