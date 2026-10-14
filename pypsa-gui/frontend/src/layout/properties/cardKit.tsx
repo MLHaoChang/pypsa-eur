@@ -149,13 +149,16 @@ export function InfoTip({ text, children }: { text?: string; children: React.Rea
 }
 
 // ── Read-only row ──────────────────────────────────────────────────────────────
-export function Row({ label, value, unit, tip }: { label: string; value: unknown; unit?: string; tip?: string }) {
+export function Row({ label, value, unit, tip, badge }: {
+  label: string; value: unknown; unit?: string; tip?: string; badge?: React.ReactNode
+}) {
   if (value == null || value === '' || value === false) return null
   const display = typeof value === 'boolean' ? '✓' : typeof value === 'number' ? (value as number).toLocaleString(undefined, { maximumFractionDigits: 4 }) : String(value)
   return (
     <div className="flex justify-between items-baseline py-0.5 border-b border-border/50 last:border-0">
       <span className="text-xs text-muted shrink-0 mr-2">
         <InfoTip text={tip}>{label}</InfoTip>
+        {badge}
       </span>
       <span className="text-xs font-mono text-text text-right">{display}{unit ? <span className="text-muted ml-0.5">{unit}</span> : null}</span>
     </div>
@@ -175,7 +178,7 @@ export function Section({ title, children }: { title: string; children: React.Re
 // Used by every asset card (Generator / StorageUnit / Store / Load / Link) so
 // that each card shows its full parameter list expanded by default — the user
 // can hover for descriptions and click the Edit pencil to mutate values.
-export type ExpandedItem = { label: string; value: unknown; unit?: string; tip?: string }
+export type ExpandedItem = { label: string; value: unknown; unit?: string; tip?: string; badge?: React.ReactNode }
 export function ExpandedProps({ items }: { items: ExpandedItem[] }) {
   // Filter out empty / false / null values so the layout stays tight when an
   // attribute isn't set on this asset.
@@ -184,7 +187,7 @@ export function ExpandedProps({ items }: { items: ExpandedItem[] }) {
   return (
     <div className="mt-1.5 pt-1.5 border-t border-border/40">
       {visible.map(i => (
-        <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} />
+        <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
       ))}
     </div>
   )

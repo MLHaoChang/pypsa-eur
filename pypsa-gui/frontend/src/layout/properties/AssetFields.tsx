@@ -29,35 +29,43 @@ function fmt(v: number): string {
   return v.toLocaleString(undefined, { maximumFractionDigits: digits })
 }
 
-/** The collapsed card's read-out: every established value, in display units, except identity. */
-export function assetReadoutItems(schema: AssetSchema | undefined, asset: Record<string, unknown>,
-  hidden: ReadonlySet<string> = new Set()): ExpandedItem[] {
-  const fs: FS = Object.fromEntries(Object.entries(asset).map(([k, v]) => [k, String(v)]))
-  const out: ExpandedItem[] = []
-  for (const f of schemaFields(schema)) {
-    if (f.group === 'identity' || hidden.has(f.key) || !isRevealed(f, fs)) continue
-    const v = f.derived ? derivedStored(f.key, asset) : asset[f.key]
-    if (f.kind === 'bool') {
-      if (v === true) out.push({ label: f.label, value: true, tip: f.help })
-      continue
-    }
-    if (f.kind === 'number' || f.kind === 'int') {
-      const d = displayValue(f, v)
-      if (d === null || (d === 0 && !f.key_param)) continue
-      out.push({ label: f.label, value: f.kind === 'int' ? d : fmt(d), unit: f.unit_display ? ` ${unitLabel(f.unit_display)}` : undefined, tip: f.help })
-      continue
-    }
-    if (v !== null && v !== undefined && v !== '') out.push({ label: f.label, value: String(v), tip: f.help })
-  }
-  return out
-}
-
 /** U3: the field's own provenance stamp (S1a); none renders nothing. */
 type Stamps = Record<string, ProvenanceEntry> | undefined
 
 function chipOf(stamps: Stamps, key: string) {
   const entry = stamps?.[key]
   return entry ? <ProvenanceChip entry={entry} testId={`asset-prov-${key}`} /> : null
+}
+
+/**
+ * The collapsed card's read-out: every established value, in display units,
+ * except identity. A stamped field's row carries its provenance chip (U3);
+ * an unstamped one has no `badge` key at all, so the items are as before.
+ */
+export function assetReadoutItems(schema: AssetSchema | undefined, asset: Record<string, unknown>,
+  hidden: ReadonlySet<string> = new Set(), stamps?: Stamps): ExpandedItem[] {
+  const fs: FS = Object.fromEntries(Object.entries(asset).map(([k, v]) => [k, String(v)]))
+  const out: ExpandedItem[] = []
+  const push = (f: AssetFieldSpec, item: ExpandedItem) => {
+    const badge = chipOf(stamps, f.key)
+    out.push(badge ? { ...item, badge } : item)
+  }
+  for (const f of schemaFields(schema)) {
+    if (f.group === 'identity' || hidden.has(f.key) || !isRevealed(f, fs)) continue
+    const v = f.derived ? derivedStored(f.key, asset) : asset[f.key]
+    if (f.kind === 'bool') {
+      if (v === true) push(f, { label: f.label, value: true, tip: f.help })
+      continue
+    }
+    if (f.kind === 'number' || f.kind === 'int') {
+      const d = displayValue(f, v)
+      if (d === null || (d === 0 && !f.key_param)) continue
+      push(f, { label: f.label, value: f.kind === 'int' ? d : fmt(d), unit: f.unit_display ? ` ${unitLabel(f.unit_display)}` : undefined, tip: f.help })
+      continue
+    }
+    if (v !== null && v !== undefined && v !== '') push(f, { label: f.label, value: String(v), tip: f.help })
+  }
+  return out
 }
 
 /** A field's chip on its own full-width row, so it never takes a grid cell. */
