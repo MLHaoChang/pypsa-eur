@@ -57,7 +57,7 @@ async function renderSidebar() {
   return utils
 }
 
-const STEP_IDS = ['build', 'time', 'run', 'results', 'studies', 'reports']
+const STEP_IDS = ['model', 'run', 'results', 'studies', 'reports']
 
 // The six PROJECT rows Guided hides (§3.5) and the four it keeps. In Expert,
 // Snapshots and Scenarios are REPORTS rows and the rest sit behind the footer
@@ -179,11 +179,11 @@ describe('Sidebar in Expert mode', () => {
   it('switching modes live re-renders the sidebar', async () => {
     useUIStore.setState({ sidebarMode: 'expanded' })
     await renderSidebar()
-    expect(screen.getByTestId('sidebar-section-build')).toBeTruthy()
+    expect(screen.getByTestId('sidebar-section-model')).toBeTruthy()
     act(() => { useUIStore.setState({ uiMode: 'guided' }) })
-    expect(screen.queryByTestId('sidebar-section-build')).toBeNull()
+    expect(screen.queryByTestId('sidebar-section-model')).toBeNull()
     expect(screen.getByTestId('sidebar-section-project')).toBeTruthy()
     act(() => { useUIStore.setState({ uiMode: 'expert' }) })
-    expect(screen.getByTestId('sidebar-section-build')).toBeTruthy()
+    expect(screen.getByTestId('sidebar-section-model')).toBeTruthy()
   })
 })

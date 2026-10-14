@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Cable, FlaskConical, Scale } from 'lucide-react'
 import { useUIStore } from '../../store/uiStore'
 import { projectsApi } from '../../api/projects'
-import { SItem, usePanelToggle } from './SidebarRows'
+import { SItem, SubHdr, usePanelToggle } from './SidebarRows'
 
 // STUDIES: the study tools that take a solved model further — the decision
 // study (should this site invest?), the campus electrical design of a hub,
@@ -25,11 +25,15 @@ export default function StudiesSection({ onCloseModal }: { onCloseModal?: () => 
     <div className="pb-1">
       {/* S8: the decision panel (guided investment study). It lists this
           project's decision studies, or the one last opened. */}
+      {/* Q6a: studies labelled by the category they answer. Reliability
+          studies live on the Results Adequacy tab and in Guided. */}
+      <SubHdr title="Investment" />
       <SItem icon={<Scale size={15} />} label="Decision study"
         title="Answer an investment question (do I need a battery?) with a verdict, a size, a value and a report."
         active={activeSlidePanel === 'decision'}
         onClick={() => toggle('decision')}
       />
+      <SubHdr title="Grid plan" />
       <SItem icon={<Cable size={15} />} label="Campus electrical"
         title="Take a solved hub to its electrical design: transformers, reactive compensation, short circuit and PCC grid-code compliance at the critical hours (AC load flow)."
         active={activeSlidePanel === 'campusElectrical'}
