@@ -27,6 +27,24 @@
   "id": "eh_datacenter_staged",
   "ledger": [
     {
+      "item": "discount rate",
+      "note": "the solve discounts each period's costs at it (auto_discount_periods)",
+      "source": "assumed",
+      "value": "7 % nominal (the solver settings' discount_rate)"
+    },
+    {
+      "item": "PUE",
+      "note": "metadata: cooling is the single-year template's profile scaled with the IT load, so the modelled peak-to-IT ratio is about 1.46 in 2035",
+      "source": "assumed",
+      "value": "1.3 design figure"
+    },
+    {
+      "item": "battery inverter replacement",
+      "note": "bess_new_2027's inverter ends in 2037 and bess_new_2030's in 2040, inside the 2045 horizon; the investment case flags it (part_not_replaced) until the template's finance inputs add the replacement (slice P5c)",
+      "source": "assumed",
+      "value": "after 10 years (inv_power_lifetime)"
+    },
+    {
       "item": "depreciation of the staged assets",
       "note": "a deliberate deviation: a dated degressive election on a later stage is refused by the investment case (P5), so the staged assets are planned on straight-line AfA",
       "source": "assumed",

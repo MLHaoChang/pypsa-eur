@@ -95,6 +95,16 @@ def test_one_candidate_per_period_that_outlives_the_horizon(staged):
     horizon_end = YEARS[-1] + T.DC_PERIOD_YEARS[YEARS[-1]]          # 2045
     for df in (gens, bess):
         assert ((df.build_year + df.lifetime) >= horizon_end).all()
+    # A part that ends inside the horizon (the battery inverter, 10 y) is
+    # stated in the ledger, never hidden behind the row's 25-year lifetime.
+    parts = [c for c in bess.columns if c.startswith("inv_") and c.endswith("_lifetime")]
+    short = sorted({(name, c) for name, row in bess.iterrows() for c in parts
+                    if row[c] == row[c] and row.build_year + row[c] < horizon_end})
+    assert short, "the inverter really does end inside the horizon"
+    ledger = " ".join(f"{r['item']} {r['note']}" for r in T.TEMPLATE_META[TID]["ledger"])
+    for name, _c in short:
+        if name.endswith(("2027", "2030")):
+            assert name in ledger and "part_not_replaced" in ledger, name
 
 
 def test_the_plan_solves_and_respects_the_20_mw_cap_in_2027(solved):
@@ -116,7 +126,8 @@ def test_the_meta_and_solver_config_say_staged_and_multi_period():
     assert meta["ledger"] and meta["ledger"][0]["source"] == "assumed"
     cfg = T.solver_config(TID)
     assert cfg["multi_investment_periods"] is True and cfg["auto_discount_periods"] is True
-    assert cfg["voll"] == T.SOLVER_CONFIG["voll"]
+    assert cfg["voll"] == T.SOLVER_CONFIG["voll"] and cfg["discount_rate"] == 0.07
+    assert any(r["item"] == "discount rate" for r in meta["ledger"])
 
 
 def test_the_island_sidecar_names_every_per_period_candidate(staged):
@@ -136,3 +147,15 @@ def test_the_committed_sidecars_are_written(staged):
     d = TPL_DIR / TID
     meta = json.loads((d / T.META_FILE).read_text())
     assert meta["id"] == TID
+
+
+@pytest.mark.parametrize("tid", sorted(T.BUILDERS))
+def test_the_build_scripts_verify_step_solves_every_template(tid):
+    """`_build.py` verifies each template before exporting it; a crash there
+    stops the loop and leaves later templates without a network.nc."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_tpl_build", TPL_DIR / "_build.py")
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
+    build._verify_feasible(T.BUILDERS[tid](), tid, T.solver_config(tid))

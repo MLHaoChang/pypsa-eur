@@ -37,10 +37,17 @@ LOAD_SHAPE = (
 )
 
 
-def _verify_feasible(n: pypsa.Network, label: str) -> None:
-    """Solve a copy with HiGHS and assert the LOPF is feasible."""
+def _verify_feasible(n: pypsa.Network, label: str, solver_config: dict | None = None) -> None:
+    """Solve a copy with HiGHS and assert the LOPF is feasible. A template
+    whose solver settings say ``multi_investment_periods`` is solved that way
+    (its MultiIndex snapshots need it)."""
     test = n.copy()
-    status, condition = test.optimize(solver_name="highs")
+    multi = bool((solver_config or {}).get("multi_investment_periods"))
+    if isinstance(test.snapshots, pd.MultiIndex):
+        # PyPSA's Network.copy() drops a multi-period snapshot index's name,
+        # which a storage unit's spillage variables then cannot select on.
+        test.snapshots.name = "snapshot"
+    status, condition = test.optimize(solver_name="highs", multi_investment_periods=multi)
     if status != "ok" or condition != "optimal":
         raise SystemExit(
             f"[{label}] template is NOT feasible: status={status} condition={condition}"
@@ -269,7 +276,9 @@ def main() -> None:
         n = builder()
         if n is None:
             continue
-        _verify_feasible(n, template_id)
+        _verify_feasible(n, template_id,
+                         eh_templates.solver_config(template_id)
+                         if template_id in eh_templates.TEMPLATE_META else None)
         _export(n, template_id)
         if template_id in eh_templates.TEMPLATE_META:
             # P19: metadata, stress registry and solver settings the

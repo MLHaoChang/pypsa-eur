@@ -483,6 +483,18 @@ TEMPLATE_META: dict[str, dict] = {
             for y, _it, _pue in DC_PHASES],
         "period_years": {str(y): DC_PERIOD_YEARS[y] for y, _it, _pue in DC_PHASES},
         "ledger": [
+            {"item": "discount rate", "value": "7 % nominal (the solver settings' discount_rate)",
+             "source": "assumed",
+             "note": "the solve discounts each period's costs at it (auto_discount_periods)"},
+            {"item": "PUE", "value": "1.3 design figure",
+             "source": "assumed",
+             "note": "metadata: cooling is the single-year template's profile scaled with the IT "
+                     "load, so the modelled peak-to-IT ratio is about 1.46 in 2035"},
+            {"item": "battery inverter replacement", "value": "after 10 years (inv_power_lifetime)",
+             "source": "assumed",
+             "note": "bess_new_2027's inverter ends in 2037 and bess_new_2030's in 2040, inside the "
+                     "2045 horizon; the investment case flags it (part_not_replaced) until the "
+                     "template's finance inputs add the replacement (slice P5c)"},
             {"item": "depreciation of the staged assets",
              "value": "straight-line AfA (not degressive)",
              "source": "assumed",
@@ -590,7 +602,7 @@ SOLVER_CONFIG_EXTRA: dict[str, dict] = {
     # The staged campus is multi-period; the solve discounts the periods
     # (auto_discount_periods) at the config's discount rate.
     "eh_datacenter_staged": {"island_constraints": True, "multi_investment_periods": True,
-                             "auto_discount_periods": True},
+                             "auto_discount_periods": True, "discount_rate": 0.07},
 }
 
 
