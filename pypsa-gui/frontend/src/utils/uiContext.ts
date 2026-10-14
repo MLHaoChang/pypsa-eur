@@ -35,6 +35,7 @@
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { useHubDesignStore, type HubStep } from '../pages/hubDesign/hubDesignStore'
+import { displayedResultsSource, type ResultsSourceBinding } from './resultsSource'
 
 export interface UiContext {
   panel?: string
@@ -42,6 +43,8 @@ export interface UiContext {
   selected_component?: { class: string; name: string }
   compare_rail_open?: boolean
   snapshot_index?: number
+  results_tab?: string
+  results_source?: ResultsSourceBinding
   // Guided-mode spec §6.2 — present ONLY in Guided (review B9): an Expert
   // context carries neither key, so its request body is unchanged.
   ui_mode?: 'guided'
@@ -57,6 +60,15 @@ export function buildUiContext(): UiContext | null {
   const ctx: UiContext = {}
 
   if (s.activeSlidePanel) ctx.panel = s.activeSlidePanel
+  if (s.activeSlidePanel === 'results') {
+    const tab = document.querySelector<HTMLElement>('[data-active-results-tab]')?.dataset.activeResultsTab
+    if (tab) {
+      ctx.results_tab = tab
+      const source = displayedResultsSource(tab)
+      // Identifiers/window positions only. Never send numerical result rows.
+      if (source?.project_name === s.currentProject) ctx.results_source = source
+    }
+  }
 
   // A half-built selection is a real state — `selectedComponent` is written
   // from several canvas call sites. `{class: 'Generator'}` with no name names

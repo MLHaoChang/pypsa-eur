@@ -286,6 +286,15 @@ def _format_ui_context(ui_context: dict[str, Any] | None) -> str | None:
     add("snapshot index", ui_context.get("snapshot_index"))
     add("comparison rail open", ui_context.get("compare_rail_open"))
 
+    source = ui_context.get("results_source")
+    if isinstance(source, dict) and source.get("scope") in ("current", "historical"):
+        # Browser hints name the source, not its facts or an authorization.
+        # Tools must re-read owned evidence; result rows remain outside this seam.
+        for key in ("scope", "project_id", "source", "run_id", "section",
+                    "baseline_run_id", "window_from", "window_to",
+                    "data_sha256", "input_sha256"):
+            add("displayed result " + key, source.get(key))
+
     selected = ui_context.get("selected_component")
     if isinstance(selected, dict):
         klass = _sanitise_ui_value(selected.get("class"))

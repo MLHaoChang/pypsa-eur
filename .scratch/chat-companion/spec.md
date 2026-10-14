@@ -202,3 +202,5 @@ Use the [implementation plan](../../docs/superpowers/plans/2026-10-14-chat-compa
 Independent domain review and representative real-use calibration remain pending by owner choice. Readiness of one reasoning credential is not readiness of STT/TTS, LiveKit, every Provider, hosted routing or real devices. Recheck actual configuration at implementation time.
 
 Implementation progress is tracked separately in [the CP-01 issue](issues/01-truthful-state.md); its newer source baseline and actual evidence do not change the planning baseline or imply later requirements are implemented.
+
+CP-03's bounded core is tracked in [the source-navigation issue](issues/03-source-navigation.md). Current source-attested walkthroughs cover branch loading; historical views read native retained artifacts. Additional current-tab adapters and historical harness completion ACKs remain explicit follow-ups. Mounted-view success is not data or domain certification.

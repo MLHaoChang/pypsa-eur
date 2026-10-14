@@ -197,10 +197,9 @@ export default function Results() {
   if (
     resultsTabRequest
     && TABS.some((item) => item.id === resultsTabRequest)
-    && resultsTabRequest !== tab
   ) {
-    setTab(resultsTabRequest as ResultsTab)
-    setRequestedTab(resultsTabRequest as ResultsTab)
+    if (resultsTabRequest !== tab) setTab(resultsTabRequest as ResultsTab)
+    if (requestedTab !== resultsTabRequest) setRequestedTab(resultsTabRequest as ResultsTab)
   }
   useEffect(() => {
     if (!resultsTabRequest) return

@@ -717,6 +717,7 @@ export const useUIStore = create<UIStore>((set) => ({
   uiMode: INITIAL_UI_MODE.mode,
   uiModeExplicit: INITIAL_UI_MODE.explicit,
   setUiMode: (mode, opts) => {
+    navigationChanged()
     const explicit = opts?.explicit === true
     try {
       localStorage.setItem(UI_MODE_KEY, mode)
@@ -787,14 +788,14 @@ export const useUIStore = create<UIStore>((set) => ({
   },
   toggleRightPanel: () => set(s => ({ rightPanelOpen: !s.rightPanelOpen })),
   openRightPanel: () => set({ rightPanelOpen: true }),
-  setSelectedComponent: (c) => set(s => ({
+  setSelectedComponent: (c) => { navigationChanged(); set(s => ({
     selectedComponent: c,
     // P30 (B10): an edit request belongs to one component; moving the
     // selection anywhere else drops it.
     propertiesEditRequest: s.propertiesEditRequest && c
       && c.type === s.propertiesEditRequest.type && c.name === s.propertiesEditRequest.name
       ? s.propertiesEditRequest : null,
-  })),
+  })) },
   setHighlightedComponent: (c) => set({ highlightedComponent: c }),
   setProjectName: (name) => {
     try { localStorage.setItem(PROJECT_NAME_KEY, name) } catch { /* noop */ }
@@ -821,6 +822,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setPendingNodePosition: (p) => set({ pendingNodePosition: p }),
   setCanvasMode: (mode) => set({ canvasMode: mode }),
   setCanvasView: (view) => {
+    navigationChanged()
     try { localStorage.setItem(CANVAS_VIEW_KEY, view) } catch { /* noop */ }
     set({ canvasView: view })
   },

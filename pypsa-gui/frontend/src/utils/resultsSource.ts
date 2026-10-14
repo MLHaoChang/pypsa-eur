@@ -31,7 +31,14 @@ export function displayedResultsSource(tab: string, root: Document | HTMLElement
     try {
       const value = JSON.parse(element.dataset.resultBinding ?? '') as ResultsSourceBinding
       if (value.version === 1 && typeof value.project_id === 'string'
-        && /^(?:current|historical)$/.test(value.scope) && /^[a-f0-9]{64}$/.test(value.data_sha256)) return value
+        && /^(?:current|historical)$/.test(value.scope) && /^[a-f0-9]{64}$/.test(value.data_sha256)) {
+        const keys = ['version', 'project_id', 'project_name', 'scope', 'data_sha256', 'input_sha256',
+          'source', 'window_from', 'window_to', 'run_id', 'section', 'baseline_run_id']
+        return Object.fromEntries(keys.filter(k => Object.prototype.hasOwnProperty.call(value, k)
+          && (value[k as keyof ResultsSourceBinding] === null || typeof value[k as keyof ResultsSourceBinding] === 'string'
+            || typeof value[k as keyof ResultsSourceBinding] === 'number' && Number.isFinite(value[k as keyof ResultsSourceBinding])))
+          .map(k => [k, value[k as keyof ResultsSourceBinding]])) as unknown as ResultsSourceBinding
+      }
     } catch { /* A malformed or unavailable view remains unacknowledged. */ }
   }
   return null
