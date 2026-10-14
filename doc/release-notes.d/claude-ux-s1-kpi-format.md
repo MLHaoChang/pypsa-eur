@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Results KPI tiles share one component: a sentence-case label, the value with its unit kept on one line (no more "136.64 / €/MWh" wrapping), a basis line, and a headline tile marked by fill rather than a red rail. Number formatting moves to one module, `utils/format.ts`; displayed figures are unchanged.

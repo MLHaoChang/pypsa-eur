@@ -400,9 +400,16 @@ import, so `uvicorn --reload` does not pick it up:
 
 ```bash
 cd pypsa-gui/backend
+pw_file="$HOME/.local/share/PyPSA Studio/dev-admin-password"
+mkdir -p "$(dirname "$pw_file")"
+[ -s "$pw_file" ] || python -c "import secrets; print(secrets.token_urlsafe(18))" > "$pw_file"
+chmod 600 "$pw_file"
 pixi run python tools/bootstrap_super_admin.py \
-  --email admin@example.com --password 'admin-pass-123'
+  --email admin@example.com --password "$(cat "$pw_file")"
 ```
+
+Sign in as `admin@example.com` with the single line in that file. The login
+page ships no credential, so nothing is pre-filled.
 
 `auth_dev.db` is gitignored (`pypsa-gui/.gitignore`: `backend/*.db`). No
 `alembic upgrade head` is needed — the bootstrap tool creates the tables.

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Campus electrical labels a transformer group that the investment step buys as "planned", with the drafted rating's verdict as context, instead of a bare "adequate" beside a purchase; the island section names the missing cost-of-islanding study (I2c) rather than "island study", so it is not read as the island checks the campus run already completed.

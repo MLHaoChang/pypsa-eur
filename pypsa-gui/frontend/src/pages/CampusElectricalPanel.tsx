@@ -32,7 +32,7 @@ import { Play, RefreshCw, Save, Square, Wand2, Workflow } from 'lucide-react'
 import {
   campusApi, errorText, isActiveRun, isNoAnswer, isOtherKind,
   type CampusRunJob, type CampusRunStage, type CampusSettings, type CampusState, type CheckStatus, type ComplianceRow,
-  type InvestedComplianceRow, type MilpJobRecord,
+  type InvestedComplianceRow, type InvestmentRow, type MilpJobRecord, type TransformerSizing,
 } from '../api/campusElectrical'
 import { solveQueueApi } from '../api/solveQueue'
 import { useUIStore } from '../store/uiStore'
@@ -488,6 +488,29 @@ function RunJobStatus({ job, onAbort, aborting }: { job: CampusRunJob; onAbort: 
   return null
 }
 
+/** The first purchase the investment step chose for a transformer group (its
+ *  need is `transformer <group>`), or undefined when the run bought nothing. */
+function boughtFor(rows: InvestmentRow[] | null, group: string): InvestmentRow | undefined {
+  return rows?.find(i => i.need === `transformer ${group}` && i.status === 'chosen' && !i.existing
+                         && (i.purchase ?? 1) === 1)
+}
+
+/** The sizing verdict describes the campus file's drafted rating. When the
+ *  investment buys the group anyway (for N-1, or because the drafted rating is
+ *  a placeholder), the group is planned, and the verdict is shown as context. */
+function TrafoVerdict({ t, bought }: { t: TransformerSizing; bought: InvestmentRow | undefined }) {
+  const verdict = t.adequate ? 'adequate' : 'undersized'
+  if (!bought) return <Tag tone={t.adequate ? 'ok' : 'err'}>{verdict}</Tag>
+  return (
+    <span className="whitespace-nowrap">
+      <Tag tone="accent">planned</Tag>{' '}
+      <span className="text-muted">
+        (drafted rating {verdict}; bought as {bought.units} × {bought.library_id}{t.n_minus_1 ? ' for N-1' : ''})
+      </span>
+    </span>
+  )
+}
+
 function StatusTag({ s }: { s: CheckStatus }) {
   return <Tag tone={STATUS_TONE[s]}>{STATUS_TEXT[s]}</Tag>
 }
@@ -590,7 +613,7 @@ function ResultsSection({ state, pending }: { state: CampusState; pending: boole
                   <td className="pr-3 tabular-nums">{t.n_minus_1 ? `${num(t.max_s_n1_mva)} MVA` : '—'}</td>
                   <td className="pr-3 tabular-nums">{num(t.required_unit_mva)} MVA</td>
                   <td className="pr-3 whitespace-nowrap tabular-nums">{t.units} × {num(t.recommended_unit_mva)} MVA</td>
-                  <td><Tag tone={t.adequate ? 'ok' : 'err'}>{t.adequate ? 'adequate' : 'undersized'}</Tag></td>
+                  <td data-testid={`trafo-verdict-${t.group}`}><TrafoVerdict t={t} bought={boughtFor(r.investment, t.group)} /></td>
                 </tr>
               ))}
             </tbody>

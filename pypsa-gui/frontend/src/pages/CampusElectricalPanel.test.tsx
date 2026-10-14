@@ -255,6 +255,41 @@ describe('CampusElectricalPanel', () => {
     expect(screen.getByTestId('compliance-pcc_voltage').textContent).toContain('not re-checked')
   })
 
+  it('labels a transformer group the investment buys as planned, not as a bare verdict', async () => {
+    // A drafted rating can pass while the investment still buys the group
+    // (a placeholder 1 x 100 MVA beside 3 x 25 MVA bought for N-1): the verdict
+    // describes the drafted rating, so it is shown as context, not as the answer.
+    const s = sized()
+    const site = { ...s.results!.transformers[0], group: 'SITE_TRANSFO', unit_rating_mva: 100, adequate: true,
+                   n_minus_1: true, recommended_unit_mva: 50 }
+    const buy = (need: string, library_id: string, units: number): InvestmentRow => ({
+      need, library_id, kind: 'transformer', units, length_km: null, invest_period: 2030, capex_eur: 1,
+      opex_eur_per_a: 0, annualised_eur_per_a: 0, existing: false, status: 'chosen', reason: null,
+      action: 'buy', purchase: 1, build_year: 2030,
+    })
+    api.state.mockResolvedValue({ ...s, results: { ...s.results!,
+      transformers: [s.results!.transformers[0], site],
+      investment: [buy('transformer SITE_TRANSFO', 'TR_33_11_25', 3), buy('transformer GRID_IMPORT', 'TR_132_33_63', 1)],
+      cost: [], history: [], unresolved: [] } })
+    renderPanel()
+    const v = await screen.findByTestId('trafo-verdict-SITE_TRANSFO')
+    expect(v.textContent).toMatch(/planned/i)
+    expect(v.textContent).toContain('drafted rating adequate')
+    expect(v.textContent).toContain('bought as 3 × TR_33_11_25 for N-1')
+    const g = screen.getByTestId('trafo-verdict-GRID_IMPORT')
+    expect(g.textContent).toMatch(/planned/i)
+    expect(g.textContent).toContain('drafted rating undersized')
+    expect(g.textContent).toContain('bought as 1 × TR_132_33_63')
+    expect(g.textContent).not.toContain('N-1')
+  })
+
+  it('keeps the bare verdict when the run bought nothing', async () => {
+    api.state.mockResolvedValue(sized())
+    renderPanel()
+    const v = await screen.findByTestId('trafo-verdict-GRID_IMPORT')
+    expect(v.textContent).toBe('undersized')
+  })
+
   it('shows the transformer and compensation recommendations', async () => {
     api.state.mockResolvedValue(sized())
     renderPanel()

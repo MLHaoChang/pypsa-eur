@@ -75,7 +75,11 @@ def test_without_a_study_the_report_says_it_has_not_run(project):  # noqa: F811
     ce.save_island(project, _config())
     report = island_report(project)
     assert "costs" not in _tables(report)
-    assert "island study" in report["missing"]
+    # The missing item names the cost-of-islanding study (I2c), not "island
+    # study": the campus run's own island checks (I4-I6) are listed apart, so
+    # a reader must not take this line to mean they did not run.
+    assert "cost of islanding study" in report["missing"]
+    assert "island study" not in report["missing"]
 
 
 def test_the_report_matches_the_golden_fixture(project):  # noqa: F811

@@ -7,6 +7,7 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { devCredentials } from './dev-credentials.mjs'
 
 const [, , routePath = '/projects', outFile = '/tmp/shot.png', w = '1440', h = '900'] = process.argv
 const BASE = 'http://127.0.0.1:5173'
@@ -53,7 +54,7 @@ try {
   const loginRes = await fetch(`${BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'admin@example.com', password: 'admin-pass-123' }),
+    body: JSON.stringify(devCredentials()),
   })
   if (!loginRes.ok) throw new Error(`login failed ${loginRes.status}`)
   const raw = (loginRes.headers.getSetCookie?.() ?? [])[0] ?? loginRes.headers.get('set-cookie')
