@@ -2466,8 +2466,8 @@ def solve_ppa_price(target_irr: float, target_year: int,
 
 # The engine's own sources in the report's cashflow lines (report.py
 # `_cashflow_lines`); every other source is an operating line.
-_IC_FINANCE_SOURCES = frozenset({"capex", "replacement_capex", "terminal_value", "itc", "ptc",
-                                 "grant", "debt", "debt_draws", "dsra", "reserve_interest"})
+_IC_FINANCE_SOURCES = frozenset({"capex", "replacement_capex", "stage_capex", "terminal_value", "itc",
+                                 "ptc", "grant", "debt", "debt_draws", "dsra", "reserve_interest"})
 _IC_AVOIDED = "avoided_supply_cost (counterfactual)"
 
 

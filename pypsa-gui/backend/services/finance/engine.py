@@ -43,7 +43,7 @@ import numpy as np
 from scipy.optimize import brentq
 
 from services.finance.case import (
-    CONTRACT_CLASS, DEGRADATION_SOURCE, FinanceCase, FinanceRefused, TemplateLine,
+    CONTRACT_CLASS, DEGRADATION_SOURCE, FinanceCase, FinanceRefused, TemplateLine, staged_assets,
 )
 from services.finance.cashflow import Operating, build_operating
 from services.finance.debt import Debt, build_debt
@@ -185,6 +185,15 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
     if not debt.established():
         reasons["debt"] = debt.reasons
     inc = build_incentives(case, tl, op, pack)
+    stages = staged_assets(case, tl.cod_year)
+    for line in inc.lines:
+        # An incentive's eligibility and amount are dated by the case COD, so a
+        # later stage's would be wrong (P5; E2E demo plan 2026-10-14 §7.1).
+        hit = [a for a in line.assets if a in stages]
+        if hit and np.any(line.cash != 0.0):
+            raise FinanceRefused(f"staged_incentive_not_supported:{hit[0]}",
+                                 f"incentive {line.index} ({line.kind}) applies to {hit[0]}, "
+                                 f"built after the case COD (P5)")
     flags += inc.flags
     if not inc.established():
         reasons["incentives"] = inc.reasons
@@ -213,7 +222,10 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
             for a in case.assets:
                 if a.overnight_cost is None:
                     continue
-                share = a.overnight_cost * (1.0 + (fin.contingency_share or 0.0))
+                # A later stage is not in the stage-1 basis; its class still
+                # resolves, and its capex depreciates as a vintage (P5).
+                share = 0.0 if a.name in stages else \
+                    a.overnight_cost * (1.0 + (fin.contingency_share or 0.0))
                 owner_assets.append(OwnerAsset(
                     a.name, a.carrier or "", share + idc * share / capex_total if capex_total else 0.0))
             res = resolve_tax_layers(pack, fin, owner_assets, case.cod)
@@ -236,13 +248,15 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
         # bill (WP4.5 review B1).
         terminal = np.zeros(n)
         terminal[last] = fin.terminal_value.value * float(inc_net[last])
+    if layers and stages:
+        _refuse_dated_stage_classes(tuple(layers), stages)
     if not tax_reasons and layers:
         layers = _with_itc_classes(tuple(layers), inc.itc_assets)
         basis = capex_total + debt.idc_total - inc.grant_basis_reduction
         basis_u = capex_total - inc.grant_basis_reduction
         if inc.grant_basis_reduction:
             flags.append("grant_reduces_basis_pro_rata")
-        vintages = _replacement_vintages(case, tl)
+        vintages = _replacement_vintages(case, tl) + _stage_vintages(case, tl, op)
         if fin.terminal_value.method == "book_value":
             try:
                 probe = compute_tax(tl, layers, ebitda=np.zeros(n), basis=basis,
@@ -292,7 +306,9 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
             inc.established():                   # a grant unresolved → no headline (review B4)
         ebitda = inc_net + terminal
         cash["ebitda"] = ebitda
-        base = ebitda - op.capex - op.replacement + inc.grant
+        # A later stage is equity-funded growth capex (P5): in project and
+        # equity cash, never in CFADS (the debt reads `op.capex` only).
+        base = ebitda - op.capex - op.stage_capex - op.replacement + inc.grant
         cash["project_pre_tax"] = base
         cash["cfads"] = debt.cfads
         if debt.established():
@@ -437,6 +453,25 @@ def _asset_costs(op: Operating, case: FinanceCase) -> np.ndarray:
         if arr is not None and key not in shared:
             out += np.clip(-arr, 0.0, None)
     return out
+
+
+def _stage_vintages(case: FinanceCase, tl: Timeline, op: Operating) -> tuple:
+    """(axis index, amount, asset) per later stage (P5): its capex, placed in
+    service and depreciated from its own COD year on its own classes."""
+    return tuple((tl.index(cod), amount, asset) for asset, cod, _year, amount in op.stage_items)
+
+
+def _refuse_dated_stage_classes(layers: tuple[TaxLayer, ...], stages: tuple[str, ...]) -> None:
+    """A later stage on a dated depreciation schedule is refused (P5): a bonus
+    share or a declining-balance election is resolved against the case COD or
+    acquisition date, not the stage's (`staged_tax_schedule_not_supported:<asset>`)."""
+    for layer in layers:
+        for c in layer.depreciation:
+            asset, sep, cls = c.name.rpartition(":")
+            if sep and asset in stages and (c.bonus > 0 or cls.startswith("db_")):
+                raise FinanceRefused(f"staged_tax_schedule_not_supported:{asset}",
+                                     f"{asset} is built after the case COD on the dated "
+                                     f"schedule {cls} of layer {layer.name} (P5)")
 
 
 def _replacement_vintages(case: FinanceCase, tl: Timeline) -> tuple:

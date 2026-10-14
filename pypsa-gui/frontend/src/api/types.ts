@@ -1118,6 +1118,8 @@ export interface FinanceInputs {
   replacement_capex?: Array<[number, string, number]>
   /** `part_lifetimes`: each part re-bought at the end of its lifetime at its upfront cost (IC S0b S5). */
   replacement_rule?: 'fixed' | 'part_lifetimes'
+  /** Years before a staged asset's COD that its capex is paid (equity-funded; P5, default 1). */
+  stage_capex_lead_years?: number
   terminal_value?: TerminalValueRule
   wacc_nominal?: number | null
   cost_of_equity?: number | null

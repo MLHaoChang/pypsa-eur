@@ -291,7 +291,7 @@ export default function LostLoadTab() {
         <div className="p-3">
           {agg && agg.length > 0 ? (
             <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={agg} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <AreaChart data={agg} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="llGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={ACCENT} stopOpacity={0.4} />

@@ -60,19 +60,19 @@ async function renderSidebar() {
   return utils
 }
 
-// ECONOMICS between TIME and RUN (plan 2026-10-14-economics-in-expert.md).
-const ORDER = ['build', 'time', 'economics', 'run', 'results', 'studies', 'reports']
+// UX overhaul (owner decision Q6a): the workflow order, named by category —
+// MODEL (assets, bounds, time, economics), RUN, RESULTS, STUDIES, PROJECT.
+// The PROJECT step keeps the id `reports`; panel ids are unchanged.
+const ORDER = ['model', 'run', 'results', 'studies', 'reports']
 
 // What each step holds. Planning → dynamics shows because the mocked project
 // list is empty (unknown is not "not a study", Sidebar.studies.test.tsx).
 const ROWS: Record<string, string[]> = {
-  build: ['Assets', 'Capacity Bounds'],
-  time: ['Model Horizon', 'Time Series'],
-  economics: ['Economics'],
+  model: ['Assets', 'Capacity Bounds', 'Model Horizon', 'Time Series', 'Economics'],
   run: ['Solver Settings', 'Issues', 'Solve Queue'],
   results: ['Results'],
   studies: ['Decision study', 'Campus electrical', 'Planning → dynamics'],
-  reports: ['Reports', 'Snapshots', 'Scenarios'],
+  reports: ['Scenarios', 'Snapshots', 'Reports'],
 }
 
 // The project's actions, now behind the footer card's menu.
@@ -102,7 +102,7 @@ beforeEach(() => {
 describe('M2 — Expert sidebar, expanded', () => {
   beforeEach(() => useUIStore.setState({ sidebarMode: 'expanded' }))
 
-  it('lists the seven steps in the order of the work', async () => {
+  it('lists the five steps in the order of the work', async () => {
     const { container } = await renderSidebar()
     const headers = Array.from(container.querySelectorAll('[data-testid^="sidebar-section-"]'))
       .map(el => el.getAttribute('data-testid')!.replace('sidebar-section-', ''))
@@ -116,7 +116,7 @@ describe('M2 — Expert sidebar, expanded', () => {
 
   it('drops the old kind-based headers', async () => {
     await renderSidebar()
-    for (const old of ['PROJECT', 'DATA', 'SIMULATION']) expect(screen.queryByText(old)).toBeNull()
+    for (const old of ['BUILD', 'TIME', 'DATA', 'SIMULATION']) expect(screen.queryByText(old)).toBeNull()
   })
 
   it('a step collapses and opens again', async () => {
@@ -164,7 +164,7 @@ describe('M2 — Expert sidebar, expanded', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByTestId('sidebar-project-menu-list')).toBeNull()
     fireEvent.click(screen.getByTestId('sidebar-project-menu'))
-    fireEvent.mouseDown(screen.getByTestId('sidebar-group-build'))
+    fireEvent.mouseDown(screen.getByTestId('sidebar-group-model'))
     expect(screen.queryByTestId('sidebar-project-menu-list')).toBeNull()
   })
 })
@@ -193,5 +193,23 @@ describe('M2 — Expert sidebar, icon strip', () => {
     await act(async () => { await new Promise(r => setTimeout(r, 10)) })
     const flyout = screen.getByTestId('sidebar-flyout')
     for (const label of PROJECT_MENU_ROWS) expect(within(flyout).getByText(label)).toBeTruthy()
+  })
+})
+
+describe('Q6a — studies are labelled by category', () => {
+  beforeEach(() => useUIStore.setState({ sidebarMode: 'expanded' }))
+
+  it('files the decision study under Investment and the electrical studies under Grid plan', async () => {
+    await renderSidebar()
+    const group = screen.getByTestId('sidebar-group-studies')
+    const text = group.textContent ?? ''
+    expect(text.indexOf('Investment')).toBeLessThan(text.indexOf('Decision study'))
+    expect(text.indexOf('Grid plan')).toBeGreaterThan(text.indexOf('Decision study'))
+    expect(text.indexOf('Grid plan')).toBeLessThan(text.indexOf('Campus electrical'))
+  })
+
+  it('names the last step PROJECT', async () => {
+    await renderSidebar()
+    expect(within(screen.getByTestId('sidebar-group-reports')).getByText('PROJECT')).toBeTruthy()
   })
 })

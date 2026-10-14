@@ -1243,7 +1243,7 @@ export default function LoadFlow() {
                   />
                 ) : (
                   <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={voltageChart.rows} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                    <LineChart data={voltageChart.rows} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                       <CartesianGrid {...CHART_GRID} />
                       <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                       <YAxis {...CHART_AXIS} domain={['auto', 'auto']}
@@ -1400,7 +1400,7 @@ export default function LoadFlow() {
               />
             ) : (
               <ResponsiveContainer width="100%" height={180}>
-                <LineChart data={topChart.rows} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                <LineChart data={topChart.rows} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                   <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
@@ -1536,7 +1536,7 @@ export default function LoadFlow() {
                   />
                 ) : (
                   <ResponsiveContainer width="100%" height={180}>
-                    <LineChart data={topTrafoChart.rows} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                    <LineChart data={topTrafoChart.rows} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                       <CartesianGrid {...CHART_GRID} />
                       <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                       <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
@@ -1615,7 +1615,7 @@ export default function LoadFlow() {
           <ResponsiveContainer width="100%" height={200}>
             <LineChart
               data={priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows}
-              margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
+              margin={{ top: 18, right: 4, left: 0, bottom: 0 }}
             >
               <CartesianGrid {...CHART_GRID} />
               <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
