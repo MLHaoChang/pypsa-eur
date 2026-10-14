@@ -224,12 +224,68 @@ A dash or a 0 is never used to stand in for any state other than Ready or Comput
 - **E2E guided demo (session_01X4NV…):** this session owns the IA, the shell and the shared components (`Kpi`, `ResultState`, `ChartCard`, group navigation). The E2E session owns the guided steps, the explanations and highlights, and the report chapters. Its chapter names use the four category names, and it builds its views from these components.
 - **M3:** lands first. S1–S3 build on its Summary rather than replacing it.
 
-## 6. Decisions for the owner
+## 6. Owner decisions (2026-10-14, via the coordinator)
 
-Sent through the coordinator, at most four per message.
+| # | Question | Decision |
+|---|---|---|
+| D1 | Results grouping | (a) Two levels: Summary · Investment · Grid plan · Reliability · Operation, with sub-tabs. Existing tab ids stay. |
+| D2 | Emissions and Prices | (a) Emissions under Operation, Prices under Investment. |
+| D3 | Metrics that weren't modelled | (a) A "Not modelled" pill with no number, plus the setting that turns it on. The per-metric list is in §7, signed off. |
+| D3-backend | The 10 cases the payload can't tell apart | (a) This session builds S2b: `voll_applied` on lost_load; `configured` on adequacy and reserve margin; a tri-state `binding` on emissions caps. Until it lands those 10 show "Not available for this run". |
+| D4 | First slices | (a) S1 and S2 now; S3 after M3 (#245) merges. |
+| L1 | Login credential | Removed now as its own PR (#249, merged). |
+| R1 | Tile rounding | (a) 3 significant figures for money, energy, power and emissions; one decimal for prices, % and h/yr; ISO 24 h dates everywhere. Tables keep full precision. |
+| G5 | Guided "certified" vs Expert "Not solved yet" | The E2E session's slice 10 owns the fix. ResultState gains `study_only` ("From the study"), agreed with E2E. |
 
-- **D1:** Results grouping.
-- **D2:** Placement of Emissions and Prices.
-- **D3:** How not-modelled metrics are shown.
-- **D4:** Which slices to start with.
-- **Second batch:** the dock rail default, removing the login hint, and the Expert sidebar regrouping.
+Still to ask, as the second batch: the dock rail default, and the Expert sidebar regrouping.
+
+**Progress so far:**
+- Merged: L1 #249, S1 #252.
+- Open: S2a #257, S1b #261 (R1 rounding), S2b #262.
+
+## 7. Signed-off result-state list (D3)
+
+This list comes from a code sweep of `frontend/src/pages/results` on master `bb933c3`. Codes:
+- **NM**: not modelled or not configured.
+- **NA**: not applicable (the asset doesn't exist).
+- **NR**: not run.
+- **CZ**: a genuinely computed zero.
+- **FE-ok**: the frontend can already tell the cases apart.
+- **BE**: needs the S2b backend field.
+
+S2a (#257) covers rows 1–5, 8–14 and 30. S2b (#262) covers 18, 19, 26 (lost load) and 27. Rows 28 and 29 (adequacy and reserve margin) get their fields in S2b but are mapped to the existing "no target applied" copy in the panels. The remaining FE-ok rows (Dispatch per-carrier, Economics, Storage cycling) are the next S2 follow-up.
+
+| # | Tab | Metric | Shows today | Condition | Turn-on setting | Tell apart? |
+|---|---|---|---|---|---|---|
+| 1–3 | Load Flow | Total energy lost, peak loss, % of demand | `0 MWh` / `0 MW` / `0.000 %` | NM: `losses.enabled === false` (`transmission_losses` off or SCLOPF). NA: no lines | Solver Settings → Enable transmission losses | FE-ok |
+| 4 | Load Flow | Peak flow | `—` or `0.00 MW` | NA: no lines. NR | add lines / run | FE-ok |
+| 5 | Load Flow | Mean loading | `—` | NA: no lines. NR | same | FE-ok |
+| 6 | Load Flow | Lines table | "Lines (0)" plus "No line flow time-series." | NA vs NR | same | FE-ok |
+| 7 | Load Flow | Top-loaded lines chart | "No data." | NA vs NR | same | FE-ok |
+| 8 | Capacity Expansion | Storage charge cost | `—` | NA: no storage. CZ: storage that didn't charge | add storage | NA FE-ok; €0-charge vs never-charged needs BE |
+| 9 | Capacity Expansion | Curtailment cost | `—` | NM: no generator has `curtailment_cost > 0`. CZ: has one, nothing curtailed | per-generator `curtailment_cost` | FE-ok |
+| 10 | Capacity Expansion | Storage CAPEX (new) | `€0.00` | NA: no storage. NM: none extendable. CZ: extendable, built 0 | mark storage extendable | FE-ok |
+| 11 | Capacity Expansion | Total new investment | `€0.00` | NM: nothing extendable. CZ: nothing built | set `*_nom_extendable` | FE-ok |
+| 12 | Curtailment | Curtailed / delivered / rate | `0.0 MWh` / `0.00 %` | NA: no renewables | add renewables | FE-ok |
+| 13 | Curtailment | Curtailment over time | flat zero chart | CZ: show a sentence when max = 0 | — | FE-ok |
+| 14 | Curtailment | By-carrier table | "dispatched every available MW" with no renewables | NA vs CZ | add renewables | FE-ok |
+| 15 | Dispatch | Curtailment toggle and chart | drawn flat at 0 | `hasCurtailment` checks only length | — | FE-ok |
+| 16 | Dispatch | Storage discharged / charged | `0 MWh` | NA: no storage | add storage | FE-ok |
+| 17 | Dispatch | Renewable curtailment | `—` or `0 MWh · 0.0 %` | NA vs CZ | — | FE-ok |
+| 18 | Dispatch | Lost load / Lost-load cost | `—` | NM: VoLL = 0. CZ: VoLL set, no shed. NR | Solver Settings → VOLL | BE (S2b) |
+| 19 | Dispatch (per carrier) | Lost load / cost | `—` | as 18 | VOLL | BE (S2b) |
+| 20 | Dispatch (per carrier) | Storage discharge / charge | `0 MWh` | NA: no storage on carrier | add storage | FE-ok |
+| 21 | Dispatch (per carrier) | Gen — links | `—` | NA: no links onto carrier vs CZ | — | FE-ok |
+| 22 | Dispatch (per carrier) | Curtailment | `—` | NA: no renewables on carrier vs CZ | — | FE-ok |
+| 23 | Dispatch (per carrier) | Storage charge cost | `—` | as 8 | — | Partial |
+| 24 | Dispatch (per carrier) | Curtailment cost | `—` | as 9 | `curtailment_cost` | FE-ok |
+| 25 | Dispatch (per carrier) | LCOE | `—` | NA: no dispatch on carrier | — | FE-ok |
+| 26 | Overview | Storage, curtailment, lost load, lost-load cost | `0 MWh` / `—` | as 16, 17, 18 | as those | storage and curtailment FE-ok; lost load BE (S2b) |
+| 27 | Lost load | Whole-tab empty state | "Set a VOLL" even when VOLL was set | `voll` at solve time | VOLL | BE (S2b) |
+| 28 | Adequacy | Target chips / no-target note | "No reliability target…" | NM (no ENS target) vs NR | Solver Settings → ENS target (needs VOLL > 0) | BE (S2b `configured`) |
+| 29 | Adequacy | Reserve-margin panel | "No firm-capacity standard…" | NM (no `reserve_margin`) vs NR | Solver Settings → Reserve margin | BE (S2b `configured`) |
+| 30 | Emissions | Total emissions | `0 tCO₂` | NM: no carrier has `co2_emissions > 0` | Carrier tab → co2_emissions | FE-ok |
+| 31 | Emissions | Shadow price / cap slack | `—` | cap inactive vs not binding | CO₂ cap global constraint | BE (S2b tri-state `binding`) |
+| 32 | Economics | Charge cost (storage) | `€0.00` | NA: no storage | add storage | FE-ok |
+| 33 | Economics | System LCOE/LCOS, avg capture price | `—` | NA: nothing dispatched vs NR | — | FE-ok |
+| 34 | Storage cycling | Cycles / empty state | `0.00` when unbuilt; "needs extendable storage" with no storage | NA vs NR | add storage | FE-ok |
