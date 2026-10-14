@@ -2552,6 +2552,21 @@ nothing to report is written header-only.
 - `campus_freq_summary.json`: the failing-hour lists, including
   `e1_failing_not_selected`.
 
+**The I4/I5/I5b island-hours contract, which I9b reads** (grid-forming
+session, frozen 2026-10-14). Column tuples are in
+`gridspine/static/island_hours.py`; file names are in
+`campus_study.ISLAND_STATIC_CSV` and `ISLAND_STATIC_SUMMARY_JSON`.
+- **Cases:** `islanding` (the units online at 0⁺, from I3a) and `steady`.
+  Under ups_bridged only `steady` applies (`CASE_NOTE`, in the ledger).
+- **Files:** flow, units, buses and branches (I4); short circuit, relays
+  and the Q8 `i_max` sensitivity (I5); unbalanced faults, earth reference
+  and earth relays (I5b).
+- **`assumed` column:** on the flow, sc, relay, unbalanced and earth-relay
+  tables, as "; "-joined `ELEMENT.param` names; empty means none. It marks
+  the report's assumed rows.
+- **The summary** has a `models` key (file → model text), which names each
+  table's model, plus the failing-hour lists.
+
 **Backend (`services/campus_electrical_service.py`,
 `routers/campus_electrical.py`):**
 - `get_island`, `save_island` and `run_island_study`, behind `GET`/`PUT

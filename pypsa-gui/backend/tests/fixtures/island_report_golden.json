@@ -1,7 +1,9 @@
 {
   "caveat": "Screening, not a certificate: a steady-state hub LP, converter-aware fault current and aggregate-frequency screening of the site's island capability.",
   "missing": [
-    "campus run with island tables"
+    "campus run with island tables",
+    "island steady state and short circuit at the island hours (I4, I5, I5b)",
+    "island frequency check at the island hours (I6)"
   ],
   "tables": [
     {
@@ -29,6 +31,7 @@
         "value",
         "source"
       ],
+      "group": "inputs",
       "id": "requirements",
       "model": "island sidecar (island_config.json): the study's inputs",
       "rows": [
@@ -153,6 +156,7 @@
         "control or governor",
         "assumed fields"
       ],
+      "group": "inputs",
       "id": "units",
       "model": "island sidecar (island_config.json): the study's inputs",
       "rows": [
@@ -186,6 +190,7 @@
         "objective",
         "cost of island capability"
       ],
+      "group": "study",
       "id": "costs",
       "model": "hub LP, plain LOPF (HiGHS) with the island rows; linearised unit commitment where the sidecar asks for it",
       "rows": [
@@ -219,6 +224,7 @@
         "hours binding",
         "sum of duals"
       ],
+      "group": "study",
       "id": "binding",
       "model": "hub LP, plain LOPF (HiGHS) with the island rows; linearised unit commitment where the sidecar asks for it",
       "rows": [
@@ -242,6 +248,7 @@
         "committed gensets",
         "surplus"
       ],
+      "group": "study",
       "id": "facts",
       "model": "hub LP, plain LOPF (HiGHS) with the island rows; linearised unit commitment where the sidecar asks for it",
       "rows": [

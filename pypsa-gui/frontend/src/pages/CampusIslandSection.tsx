@@ -10,13 +10,15 @@
 // - Run solves the islanding variants on the saved project;
 // - the report's tables are READ from `GET /island/report`, each with the
 //   model behind it, the screening caveat, and its assumed rows tagged.
-//   The panel derives nothing.
+//   The panel derives nothing; it heads each of the report's groups (the
+//   inputs, the hub-LP study, the island hours, and the island-hours
+//   results of I4–I6) as the report orders them.
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, Save } from 'lucide-react'
 import {
   campusApi, errorText, ISLAND_SCENARIOS,
-  type IslandConfig, type IslandReport, type IslandScenario, type IslandSource, type IslandTable,
+  type IslandConfig, type IslandGroup, type IslandReport, type IslandScenario, type IslandSource, type IslandTable,
 } from '../api/campusElectrical'
 import { Btn, PageSection, Tag } from '../components/PageKit'
 
@@ -35,6 +37,14 @@ const NUMBERS: [string, string][] = [
 ]
 
 type Tagged = { value: number; source: IslandSource }
+
+const GROUP_TITLES: Record<IslandGroup, string> = {
+  inputs: 'Inputs',
+  study: 'Island study (I2)',
+  hours: 'Island critical hours (I3b)',
+  static: 'Island steady state and short circuit (I4, I5, I5b)',
+  frequency: 'Island frequency (I6)',
+}
 
 function cell(v: unknown): string {
   if (v === null || v === undefined) return ''
@@ -211,7 +221,16 @@ function IslandReportView({ report }: { report: IslandReport | undefined }) {
           Not yet available: {report.missing.join(', ')}.
         </p>
       )}
-      {report.tables.map(t => <ReportTable key={t.id} table={t} />)}
+      {report.tables.map((t, i) => (
+        <div key={t.id}>
+          {t.group !== report.tables[i - 1]?.group && (
+            <h3 className="text-[13px] font-semibold mt-3 mb-1" data-testid="island-group">
+              {GROUP_TITLES[t.group] ?? t.group}
+            </h3>
+          )}
+          <ReportTable table={t} />
+        </div>
+      ))}
     </div>
   )
 }
