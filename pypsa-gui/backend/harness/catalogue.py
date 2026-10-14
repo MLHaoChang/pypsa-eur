@@ -3951,7 +3951,9 @@ _SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
     "gridspine_assess_connection",
     # campus (master #84/#89/#91): the study reads the SAVED network.nc and
     # writes its own files under the project directory; never the live one.
-    "campus_draft_campus", "campus_run_study", "campus_set_library",
+    # (campus_run_study left the list with slice D1: it queues a job,
+    # execution_long_running tier, not a service-call write)
+    "campus_draft_campus", "campus_set_library",
     "campus_extract_grid_code",
     # campus island (I9a): the sidecar beside network.nc and the study JSON;
     # the study solves copies of the SAVED network.
