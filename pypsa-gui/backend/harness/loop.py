@@ -2097,7 +2097,7 @@ def _run_turn_body(
             {
                 "tool_use_id": b.get("id"),
                 "name": b.get("name"),
-                "safety_tier": _safety_tier_for(b.get("name", "")),
+                "safety_tier": _tool_tier(session, b.get("name", "")),
             }
             for b in tool_uses
         ]
@@ -2279,6 +2279,13 @@ def _forget_turn_undo(session: ChatSession) -> None:
     ]
 
 
+def _tool_tier(session: ChatSession, tool_name: str) -> str:
+    """An external MCP tool's tier from the session's list (issue 19), else
+    the catalogue's (`destructive` for a name it does not know)."""
+    from harness import mcp_client
+    return mcp_client.tier_for(session, tool_name) or _safety_tier_for(tool_name)
+
+
 def _dispatch_real_tool_call(
     session: ChatSession,
     tu: dict[str, Any],
@@ -2318,7 +2325,9 @@ def _dispatch_real_tool_call(
             tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
                                            "is_error": True, "content": "validation_error"})
             return
-    tier = _safety_tier_for(tool_name)
+    from harness import mcp_client
+    external = mcp_client.server_for(session, tool_name)   # an MCP tool's server (issue 19)
+    tier = _tool_tier(session, tool_name)
 
     yield "tool_request", {
         "tool_use_id": tool_use_id,
@@ -2349,7 +2358,7 @@ def _dispatch_real_tool_call(
     # `tool_request` has already fired above, so the audit trail is intact, and
     # the confirmation gate below is unchanged for every tool that exists.
     from services.chat_tools import DISPATCHERS
-    handler = DISPATCHERS.get(tool_name)
+    handler = DISPATCHERS.get(tool_name) or mcp_client.dispatcher_for(session, tool_name)
     if handler is None:
         yield "tool_error", {
             "tool_use_id": tool_use_id,
@@ -2451,6 +2460,7 @@ def _dispatch_real_tool_call(
         tier=tier,
         tool_results_collector=tool_results_collector,
         guided=guided or (session.assurance_turn is not None and tool_name == "update_component"),
+        external=external,
     )
     if not approved:
         return
@@ -2484,7 +2494,7 @@ def _dispatch_real_tool_call(
         # fails partway can still have mutated the network, so marking on success
         # only would under-report. Over-marking costs a prompt about already-clean
         # work; under-marking costs the work itself.
-        if effect_fresh and tier != "read" and tool_name not in {"run_sensitivity_sweep", "start_experiment", "prepare_experiment", "advance_experiment", "refresh_experiment", "cancel_experiment", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
+        if effect_fresh and tier != "read" and not external and tool_name not in {"run_sensitivity_sweep", "start_experiment", "prepare_experiment", "advance_experiment", "refresh_experiment", "cancel_experiment", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
             from services import dirty_state
             dirty_state.mark_dirty()
             # ★ P33b B2: the chat seam of the edit counter. Same placement and
@@ -2500,7 +2510,7 @@ def _dispatch_real_tool_call(
         # Same seam, same reason: the HTTP middleware's undo snapshot never runs
         # for an in-process call either. After the confirmation gate, so a refused
         # tool costs no snapshot. See `_snapshot_for_turn_undo`.
-        if effect_fresh:
+        if effect_fresh and not external:     # an MCP tool edits no project
             _snapshot_for_turn_undo(session, tool_name)
 
         # Execute via the chat_tools dispatcher. `handler` was resolved above the

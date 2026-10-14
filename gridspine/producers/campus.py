@@ -534,22 +534,33 @@ def campus_hourly(n, campus):
     pcc_bus = c["pcc"].get("pypsa_name")
     if not pcc_bus:
         raise ContractError("the campus PCC has no pypsa_name, so the project cannot give its import")
+    # As for a unit (`_injection`): a saved network drops a series that never
+    # left 0 MW, so a self-supplied site's PCC link (or idle grid generator)
+    # comes back with no column. In a solved network its flow is 0, not a
+    # KeyError; a network with no dispatch results at all is refused.
+    def _flow(frame, name):
+        if name in frame.columns:
+            return frame[name].astype(float)
+        if not solved:
+            raise ContractError(f"the PCC flow through {name} is not in the project; is the project solved?")
+        return pd.Series(0.0, index=n.snapshots)
+
     links = n.links
     flow = pd.Series(0.0, index=n.snapshots)
     touching = 0
     for lname in links.index:
         if links.at[lname, "bus0"] == pcc_bus:
-            flow = flow + n.links_t.p0[lname].astype(float)
+            flow = flow + _flow(n.links_t.p0, lname)
             touching += 1
         elif links.at[lname, "bus1"] == pcc_bus:
-            flow = flow + n.links_t.p1[lname].astype(float)
+            flow = flow + _flow(n.links_t.p1, lname)
             touching += 1
     if not touching:
         grid = [g for g in n.generators.index if n.generators.at[g, "bus"] == pcc_bus
                 and str(n.generators.at[g, "carrier"]).lower() in GRID_CARRIERS]
         if not grid:
             raise ContractError(f"nothing in the project connects the PCC bus {pcc_bus!r} to the campus")
-        flow = n.generators_t.p[grid].astype(float).sum(axis=1)
+        flow = sum((_flow(n.generators_t.p, g) for g in grid), pd.Series(0.0, index=n.snapshots))
     weight = n.snapshot_weightings["objective"]
     pcc = pd.concat([
         pd.DataFrame({"period": period, "hour": np.arange(len(sns)),
