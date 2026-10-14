@@ -50,10 +50,18 @@ def fmt(value):
 def load(text):
     """Parse a saved result: bare JSON, or JSON inside the tool's text wrapper."""
     try:
-        return json.loads(text)
+        payload = json.loads(text)
     except json.JSONDecodeError:
         start = text.index('{"ccr"') if '{"ccr"' in text else text.index("{")
         return json.JSONDecoder().raw_decode(text, start)[0]
+    # A result saved as the tool's content blocks: [{"type": "text", "text": ...}].
+    if (
+        isinstance(payload, list)
+        and payload
+        and all(isinstance(b, dict) and b.get("type") == "text" for b in payload)
+    ):
+        return load("".join(b.get("text", "") for b in payload))
+    return payload
 
 
 def row(session):

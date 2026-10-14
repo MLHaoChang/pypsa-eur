@@ -75,3 +75,14 @@ def test_saved_tool_output_wrapper(tmp_path):
     lines = run(tmp_path, text)
     assert len(lines) == 2
     assert "Old work" not in "\n".join(lines)
+
+
+def test_saved_content_blocks(tmp_path):
+    wrapped = (
+        '<other-session nonce="x">\nRecord:\n    '
+        + json.dumps(PAYLOAD)
+        + "\n</other-session>"
+    )
+    lines = run(tmp_path, json.dumps([{"type": "text", "text": wrapped}]))
+    assert len(lines) == 2
+    assert "PR #1 merged" in lines[0]
