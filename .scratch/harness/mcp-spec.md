@@ -225,6 +225,11 @@ records what the model was offered.
 `mcp-types` into the bundle and a `pixi.lock` regeneration. The rest is as
 A.1–A.6, with the differences noted in A.4. An external tool is also never
 auto-approved (`PYPSA_GUI_CHAT_AUTO_APPROVE_TIERS` does not apply to it).
+Limits a misbehaving server cannot pass: a protocol version outside the four
+the client speaks fails the server at initialize; one JSON-RPC message over
+1 MB (either transport) fails the call or, on stdio, drops the connection
+without buffering it; at most 64 tools per server; every request has the
+per-tool deadline.
 Tests: `tests/test_harness_mcp_client.py` against `smoke/mcp_stub_server.py`;
 the parity battery's MCP probe is left for slice 2.
 

@@ -20,6 +20,9 @@ behind the same confirmation card and untrusted fence as the built-in tools.
 * **What a server cannot do.** Its `instructions` are dropped; its prompts
   and resources are not read; its own requests (sampling, elicitation,
   roots) are answered "method not found"; images in results are dropped.
+* **Limits.** A protocol version outside `SUPPORTED_VERSIONS`, a message
+  over `MAX_MESSAGE_BYTES`, or a call past the per-tool budget fails that
+  server or call cleanly; at most `MAX_TOOLS_PER_SERVER` tools per server.
 * **No SDK.** The protocol subset used here (initialize, tools/list,
   tools/call, cancellation, ping) is plain JSON-RPC over a stdio subprocess
   or Streamable HTTP (`httpx`), so the bundle gains no dependency (spec A.7).
@@ -35,7 +38,7 @@ import os
 import re
 import subprocess
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -45,6 +48,11 @@ from fastapi import HTTPException
 logger = logging.getLogger(__name__)
 
 PROTOCOL_VERSION = "2025-06-18"
+# The versions this client speaks; a server answering any other is refused.
+SUPPORTED_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
+# Hard limits, so a misbehaving server can neither flood nor hang the loop:
+MAX_MESSAGE_BYTES = 1_000_000      # one JSON-RPC message, either transport
+MAX_TOOLS_PER_SERVER = 64          # the rest of a longer list is not offered
 PREFIX = "mcp__"
 NAME_MAX = 64                 # the tool-name limit both wires share
 DESCRIPTION_CAP = 1024
@@ -190,11 +198,16 @@ class _Connection:
     def __init__(self, cfg: ServerConfig) -> None:
         self.cfg = cfg
         self._ids = itertools.count(1)
+        self.version = PROTOCOL_VERSION
 
     def initialize(self) -> None:
-        self.request("initialize", {"protocolVersion": PROTOCOL_VERSION, "capabilities": {},
-                                    "clientInfo": {"name": "pypsa-gui", "version": "1"}},
-                     timeout=_call_timeout())
+        result = self.request("initialize", {"protocolVersion": PROTOCOL_VERSION, "capabilities": {},
+                                             "clientInfo": {"name": "pypsa-gui", "version": "1"}},
+                              timeout=_call_timeout())
+        version = result.get("protocolVersion")
+        if version not in SUPPORTED_VERSIONS:
+            raise _Failure(_PROTOCOL, f"{self.cfg.id}: unsupported protocol version {version!r}")
+        self.version = version
         # The server's `instructions` are deliberately not kept.
         self.notify("notifications/initialized", {})
 
@@ -205,9 +218,12 @@ class _Connection:
             page = self.request("tools/list", params, timeout=_call_timeout())
             tools.extend(t for t in page.get("tools") or [] if isinstance(t, dict))
             cursor = page.get("nextCursor")
-            if not cursor:
+            if not cursor or len(tools) >= MAX_TOOLS_PER_SERVER:
                 break
-        return tools
+        if len(tools) > MAX_TOOLS_PER_SERVER:
+            logger.warning("mcp: %s lists %d tools; the first %d are offered",
+                           self.cfg.id, len(tools), MAX_TOOLS_PER_SERVER)
+        return tools[:MAX_TOOLS_PER_SERVER]
 
     def request(self, method: str, params: dict[str, Any], *, timeout: float) -> dict[str, Any]:
         raise NotImplementedError
@@ -272,8 +288,30 @@ class _StdioConnection(_Connection):
         except (OSError, ValueError) as exc:
             raise _Failure(_UNAVAILABLE, f"{self.cfg.id}: the server is gone") from exc
 
+    def _lines(self):
+        """Lines from the server, each at most MAX_MESSAGE_BYTES; a longer one
+        is never buffered whole: it breaks the connection."""
+        while True:
+            line = self.proc.stdout.readline(MAX_MESSAGE_BYTES + 1)
+            if not line:
+                return
+            if len(line) > MAX_MESSAGE_BYTES and not line.endswith("\n"):
+                logger.warning("mcp: %s sent a message over %d bytes; disconnecting",
+                               self.cfg.id, MAX_MESSAGE_BYTES)
+                self._fail_all(_PROTOCOL)
+                self.close()
+                return
+            yield line
+
+    def _fail_all(self, kind: dict[str, str]) -> None:
+        with self._pending_lock:
+            for slot in self._pending.values():
+                if slot[1] is None:
+                    slot[2] = kind
+                    slot[0].set()
+
     def _read(self) -> None:
-        for line in self.proc.stdout:
+        for line in self._lines():
             try:
                 message = json.loads(line)
             except ValueError:
@@ -292,13 +330,11 @@ class _StdioConnection(_Connection):
             if slot is not None:
                 slot[1] = message
                 slot[0].set()
-        with self._pending_lock:                      # the server exited: fail every waiter
-            for slot in self._pending.values():
-                slot[0].set()
+        self._fail_all(_UNAVAILABLE)                  # the server exited: fail every waiter
 
     def request(self, method: str, params: dict[str, Any], *, timeout: float) -> dict[str, Any]:
         rid = next(self._ids)
-        slot: list[Any] = [threading.Event(), None]
+        slot: list[Any] = [threading.Event(), None, None]   # done, reply, failure kind
         with self._pending_lock:
             self._pending[rid] = slot
         try:
@@ -313,7 +349,9 @@ class _StdioConnection(_Connection):
             with self._pending_lock:
                 self._pending.pop(rid, None)
         if slot[1] is None:
-            raise _Failure(_UNAVAILABLE, f"{self.cfg.id}: the server exited")
+            kind = slot[2] or _UNAVAILABLE
+            raise _Failure(kind, f"{self.cfg.id}: the server "
+                           + ("sent an oversized message" if kind is _PROTOCOL else "exited"))
         return _unwrap(slot[1])
 
     def notify(self, method: str, params: dict[str, Any]) -> None:
@@ -350,6 +388,17 @@ def _sse_messages(text: str) -> list[dict[str, Any]]:
     return [m for m in messages if isinstance(m, dict)]
 
 
+@dataclass(frozen=True)
+class _Reply:
+    status_code: int
+    headers: dict[str, str]
+    content: bytes
+
+    def header(self, name: str) -> str:
+        lowered = name.lower()
+        return next((v for k, v in self.headers.items() if k.lower() == lowered), "")
+
+
 class _HttpConnection(_Connection):
     def __init__(self, cfg: ServerConfig) -> None:
         super().__init__(cfg)
@@ -361,7 +410,7 @@ class _HttpConnection(_Connection):
         headers = {"Accept": "application/json, text/event-stream",
                    "Content-Type": "application/json"}
         if self.initialized:
-            headers["MCP-Protocol-Version"] = PROTOCOL_VERSION
+            headers["MCP-Protocol-Version"] = self.version
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
         if self.cfg.key and os.environ.get(self.cfg.key):
@@ -371,15 +420,24 @@ class _HttpConnection(_Connection):
     def _post(self, message: dict[str, Any], timeout: float):
         import httpx
         try:
-            response = self.client.post(self.cfg.url, json=message, headers=self._headers(),
-                                        timeout=timeout)
+            with self.client.stream("POST", self.cfg.url, json=message, headers=self._headers(),
+                                    timeout=timeout) as response:
+                declared = response.headers.get("Content-Length", "")
+                if declared.isdigit() and int(declared) > MAX_MESSAGE_BYTES:
+                    raise _Failure(_PROTOCOL, f"{self.cfg.id}: a reply over {MAX_MESSAGE_BYTES} bytes")
+                body = bytearray()
+                for chunk in response.iter_bytes():
+                    body.extend(chunk)
+                    if len(body) > MAX_MESSAGE_BYTES:
+                        raise _Failure(_PROTOCOL, f"{self.cfg.id}: a reply over {MAX_MESSAGE_BYTES} bytes")
+                reply = _Reply(response.status_code, dict(response.headers), bytes(body))
         except httpx.TimeoutException as exc:
             raise _Failure(_TIMEOUT, f"{self.cfg.id}: no answer within {timeout:.1f}s") from exc
         except httpx.HTTPError as exc:
             raise _Failure(_UNAVAILABLE, f"{self.cfg.id}: {type(exc).__name__}") from exc
-        if response.headers.get("Mcp-Session-Id"):
-            self.session_id = response.headers["Mcp-Session-Id"]
-        return response
+        if reply.header("Mcp-Session-Id"):
+            self.session_id = reply.header("Mcp-Session-Id")
+        return reply
 
     def request(self, method: str, params: dict[str, Any], *, timeout: float) -> dict[str, Any]:
         rid = next(self._ids)
@@ -395,11 +453,12 @@ class _HttpConnection(_Connection):
             raise
         if response.status_code >= 400:
             raise _Failure(_UNAVAILABLE, f"{self.cfg.id}: HTTP {response.status_code}")
-        if "text/event-stream" in response.headers.get("Content-Type", ""):
-            candidates = _sse_messages(response.text)
+        text = response.content.decode("utf-8", errors="replace")
+        if "text/event-stream" in response.header("Content-Type"):
+            candidates = _sse_messages(text)
         else:
             try:
-                body = response.json()
+                body = json.loads(text)
             except ValueError as exc:
                 raise _Failure(_PROTOCOL, f"{self.cfg.id}: the reply is not JSON") from exc
             candidates = body if isinstance(body, list) else [body]

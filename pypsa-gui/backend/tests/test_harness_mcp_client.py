@@ -396,3 +396,59 @@ def test_the_loop_reaches_the_client_through_its_three_lookups_only():
             and node.value.id == "mcp_client"}
     assert used == {"tier_for", "server_for", "dispatcher_for"}
 
+
+
+# ── limits a misbehaving server cannot get past ────────────────────────────
+
+def _fake_http(monkeypatch, servers, *, version="2025-06-18", tools=None, call_body=None):
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if "id" not in body:
+            return httpx.Response(202)
+        if body["method"] == "initialize":
+            result = {"protocolVersion": version, "capabilities": {}, "serverInfo": {"name": "f"}}
+        elif body["method"] == "tools/list":
+            result = {"tools": tools if tools is not None else
+                      [{"name": "t", "inputSchema": {"type": "object"}, "annotations": {"readOnlyHint": True}}]}
+        else:
+            if call_body is not None:
+                return httpx.Response(200, content=call_body, headers={"Content-Type": "application/json"})
+            result = {"content": [{"type": "text", "text": "ok"}]}
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": body["id"], "result": result})
+    monkeypatch.setattr(mcp_client, "_http_client", lambda: httpx.Client(transport=httpx.MockTransport(handler)))
+    servers({"id": "fake", "transport": "http", "url": "https://fake.example/mcp"})
+
+
+def test_an_unknown_protocol_version_is_refused(servers, monkeypatch):
+    _fake_http(monkeypatch, servers, version="1999-01-01")
+    session = _session()
+    assert mcp_client.session_tools(session) == []
+    events = [e for e in eventlog.read_events(eventlog.path_for(session)) if e["type"] == "mcp/catalogue"]
+    assert events[0]["servers"][0]["error"] == "mcp_protocol_error"
+
+
+def test_a_server_listing_too_many_tools_is_cut(servers, monkeypatch):
+    many = [{"name": f"t{i}", "inputSchema": {"type": "object"}} for i in range(mcp_client.MAX_TOOLS_PER_SERVER + 50)]
+    _fake_http(monkeypatch, servers, tools=many)
+    assert len(mcp_client.session_tools(_session())) == mcp_client.MAX_TOOLS_PER_SERVER
+
+
+def test_an_oversized_reply_is_refused(servers, monkeypatch):
+    from fastapi import HTTPException
+    huge = json.dumps({"jsonrpc": "2.0", "id": 3, "result": {"content": [
+        {"type": "text", "text": "x" * (mcp_client.MAX_MESSAGE_BYTES + 10)}]}})
+    _fake_http(monkeypatch, servers, call_body=huge)
+    session = _session()
+    mcp_client.session_tools(session)
+    with pytest.raises(HTTPException) as exc:
+        mcp_client.dispatcher_for(session, "mcp__fake__t")()
+    assert exc.value.detail["error_kind"] == "mcp_protocol_error"
+
+
+def test_an_oversized_stdio_line_is_dropped_not_buffered(servers, tmp_path, monkeypatch):
+    monkeypatch.setattr(mcp_client, "MAX_MESSAGE_BYTES", 2048)
+    servers(_stub(args=[str(STUB), "--forged"]))                  # tools/list is ~2.5 KB
+    session = _session()
+    assert mcp_client.session_tools(session) == []
+    events = [e for e in eventlog.read_events(eventlog.path_for(session)) if e["type"] == "mcp/catalogue"]
+    assert events[0]["servers"][0]["error"] in {"mcp_timeout", "mcp_protocol_error"}
