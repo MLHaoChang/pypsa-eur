@@ -137,3 +137,36 @@ def test_a_link_records_what_it_wrote_with_the_efficiency_scaled_range():
     assert set(got) == {"overnight_cost", "lifetime", "fom_cost", "discount_rate"}
     over = _row("fuel-cell.investment.overnight")
     assert got["overnight_cost"]["range"] == pytest.approx([0.5 * over.range.low, 0.5 * over.range.high])
+
+
+# ── the disclosed annual charge (gatekeeper note on #198, option a) ──
+
+
+def test_a_single_part_asset_discloses_its_annuity_fom_and_lp_charge():
+    """`capital_cost` is the annuity alone (as everywhere in the GUI), `fom_cost` beside it,
+    and `annualised_cost_eur_per_mw_yr` is what PyPSA's periodized cost charges per MW-year."""
+    from pypsa.costs import periodized_cost
+
+    from services.library.defaults_pack.pricing import price_from_pack
+    from services.solver.periodized_costs import _annuity
+
+    n = _net()
+    out = price_from_pack(n, "generators", "g", "gas-genset", version=VERSION)
+    row = n.generators.loc["g"]
+    annuity = row["overnight_cost"] * _annuity(row["discount_rate"], row["lifetime"])
+    assert out["capital_cost"] == pytest.approx(annuity, rel=1e-12) and out["capital_cost"] > 0
+    assert out["fom_cost"] == pytest.approx(row["fom_cost"])
+    charged = periodized_cost(0.0, row["overnight_cost"], row["discount_rate"], row["lifetime"],
+                              row["fom_cost"])
+    assert out["annualised_cost_eur_per_mw_yr"] == pytest.approx(charged, rel=1e-12)
+    assert row["capital_cost"] == 0.0               # the column PyPSA ignores is still 0
+
+
+def test_a_battery_discloses_its_derived_annuity_and_fom():
+    from services.library.defaults_pack.pricing import price_from_pack
+
+    n = _net()
+    out = price_from_pack(n, "storage_units", "s", "battery", version=VERSION)
+    row = n.storage_units.loc["s"]
+    assert out["capital_cost"] == pytest.approx(row["capital_cost"])
+    assert out["annualised_cost_eur_per_mw_yr"] == pytest.approx(row["capital_cost"] + row["fom_cost"])
