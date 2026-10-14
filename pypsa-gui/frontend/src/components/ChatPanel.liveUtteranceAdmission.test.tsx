@@ -9,6 +9,11 @@ import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
 import { createChatStream, getChatHistory } from '../api/chat'
 import ChatPanel from './ChatPanel'
+import AssistantDock from './AssistantDock'
+
+vi.mock('../api/durableConversations', () => ({
+  ensureLiveDurableThread: vi.fn().mockResolvedValue({ thread_id: 't-live', generation: 1 }),
+}))
 
 vi.mock('../hooks/useSpeechToText', () => ({
   useSpeechToText: () => ({
@@ -67,11 +72,11 @@ vi.mock('../api/llmSettings', async (importOriginal) => {
   }
 })
 
-function renderPanel() {
+function renderPanel(withDock = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
-      <ChatPanel />
+      {withDock ? <AssistantDock /> : <ChatPanel />}
     </QueryClientProvider>,
   )
 }
@@ -90,11 +95,13 @@ beforeEach(() => {
   useUIStore.setState({
     currentProject: 'Demo', activeSlidePanel: null, assistantDockOpen: true,
     projectMismatch: null,
+    assistantEntry: null,
   })
   useChatStore.setState({
     sessionId: 'live-sess', pending: null, messages: [], error: null,
     profileId: null, streaming: false, streamCleanup: null,
     requestQueue: [], activeRequest: null, utteranceGeneration: 1,
+    choice: null, durableThreadId: null,
   })
 })
 
@@ -164,4 +171,53 @@ it('non-live card queue omits utterance admission fields', async () => {
   expect(req.message).toBe('Improve the battery')
   expect(req.utterance_id).toBeUndefined()
   expect(req.generation).toBeUndefined()
+})
+
+it('Chat here uses the real typed admission path without claiming capture or playback', async () => {
+  useUIStore.setState({ assistantDockOpen: false })
+  renderPanel(true)
+  fireEvent.click(await screen.findByRole('button', { name: 'Chat here' }))
+  expect(screen.getByRole('button', { name: 'Start voice' }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByText(/Continuous voice is not connected/)).toBeTruthy()
+  const launcher = screen.getByTestId('companion-launcher')
+  expect(launcher.getAttribute('data-media-state')).toBe('off')
+  expect(screen.getByTestId('companion-work-status').textContent).toBe('Ready for a message')
+  fireEvent.change(screen.getByRole('textbox', { name: 'Message the assistant' }), {
+    target: { value: 'List the generators' },
+  })
+  fireEvent.click(screen.getByTestId('companion-live-send'))
+  await waitFor(() => expect(vi.mocked(createChatStream)).toHaveBeenCalledOnce())
+  expect(lastStreamReq()).toMatchObject({ message: 'List the generators', input_mode: 'text', generation: 1 })
+  expect(typeof lastStreamReq().utterance_id).toBe('string')
+  expect(screen.getByTestId('companion-work-status').textContent).toBe('Response in progress')
+  const onFrame = vi.mocked(createChatStream).mock.calls[0][1]
+  act(() => onFrame({ event: 'turn_done', data: { stop_reason: 'end_turn' } }))
+  expect(launcher.getAttribute('data-media-state')).toBe('off')
+  expect(launcher.getAttribute('data-presence')).toBe('idle')
+  expect(screen.getByTestId('companion-work-status').textContent).toBe('Ready for a message')
+  expect(useUIStore.getState().assistantDockOpen).toBe(false)
+})
+
+it('pending decisions remain distinct from media and closing in-page chat does not abort work', async () => {
+  useUIStore.setState({ assistantDockOpen: false })
+  renderPanel(true)
+  fireEvent.click(await screen.findByRole('button', { name: 'Chat here' }))
+  fireEvent.change(screen.getByRole('textbox', { name: 'Message the assistant' }), {
+    target: { value: 'Run a simulation' },
+  })
+  fireEvent.click(screen.getByTestId('companion-live-send'))
+  await waitFor(() => expect(vi.mocked(createChatStream)).toHaveBeenCalledOnce())
+  const onFrame = vi.mocked(createChatStream).mock.calls[0][1]
+  act(() => onFrame({ event: 'tool_pending_confirmation', data: {
+    tool_use_id: 'solve-1', tool_name: 'run_simulation', args: {}, safety_tier: 'execute',
+    confirmation_token: 'tok', ttl_seconds: 60, expires_at_epoch_ms: Date.now() + 60_000,
+  } }))
+  expect(screen.getByTestId('companion-work-status').textContent).toBe('Needs approval')
+  expect(screen.getByTestId('companion-launcher').getAttribute('data-media-state')).toBe('off')
+  const cleanup = useChatStore.getState().streamCleanup
+  fireEvent.click(screen.getByRole('button', { name: 'Close chat here' }))
+  expect(useChatStore.getState().streamCleanup).toBe(cleanup)
+  expect(useChatStore.getState().pending?.tool_use_id).toBe('solve-1')
+  expect(screen.getByTestId('companion-confirmation')).toBeTruthy()
+  expect(screen.getByTestId('companion-work-status').textContent).toBe('Needs approval')
 })

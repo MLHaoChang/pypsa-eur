@@ -5,7 +5,7 @@ import { useUIStore } from '../store/uiStore'
 import { useChatProfiles, useChatReadiness } from '../hooks/useChatProfiles'
 import ChatPanel from './ChatPanel'
 import { ConfirmationCard } from './ConfirmationCard'
-import CompanionLauncher, { type CompanionPresence } from './CompanionLauncher'
+import CompanionLauncher, { type CompanionWorkState } from './CompanionLauncher'
 import CompanionOutcome from './CompanionOutcome'
 import { KEY_RESULT_TABS, keyResultsWalkRequested, openProjectList, openProjectRequested, startKeyResultsWalk } from './liveWalk'
 import { ErrorBoundary } from './ErrorBoundary'
@@ -13,8 +13,6 @@ import { ensureLiveDurableThread } from '../api/durableConversations'
 
 // Matches the companion-echo-fade animation in index.css.
 const LIVE_ECHO_MS = 1_600
-// How long the node stays on 'speaking' after a Live turn's stream closes.
-const LIVE_SPEAK_MS = 1_800
 
 function clearTimer(timer: { current: number | null }) {
   if (timer.current != null) window.clearTimeout(timer.current)
@@ -51,19 +49,29 @@ export default function AssistantDock() {
   const profilesQuery = useChatProfiles()
   const { effectiveProfileId, ready } = useChatReadiness()
   const streaming = useChatStore((s) => s.streaming)
-  const [presence, setPresence] = useState<CompanionPresence>('idle')
+  const pending = useChatStore((s) => s.pending)
+  const choice = useChatStore((s) => s.choice)
+  const queued = useChatStore((s) => s.requestQueue.length > 0)
+  const error = useChatStore((s) => s.error)
   const [liveOpen, setLiveOpen] = useState(false)
   const [liveCaption, setLiveCaption] = useState('')
   const [liveEcho, setLiveEcho] = useState('')
   const [walking, setWalking] = useState(false)
   const walkCancel = useRef<(() => void) | null>(null)
   const echoTimer = useRef<number | null>(null)
-  const speakTimer = useRef<number | null>(null)
-  const sawStream = useRef(false)
+  const liveGeneration = useRef(0)
+  // Conversation/decision state is independent of in-page text and audio.
+  // No continuous capture/playback exists here yet, so media remains off.
+  const workState: CompanionWorkState = pending ? 'waiting_for_approval'
+    : choice ? 'waiting_for_input'
+    : streaming || walking ? 'running'
+    : queued ? 'queued'
+    : error ? 'failed'
+    : 'idle'
   useEffect(() => () => {
     walkCancel.current?.()
     clearTimer(echoTimer)
-    clearTimer(speakTimer)
+    liveGeneration.current += 1
   }, [])
 
   const stopWalk = useCallback(() => {
@@ -81,48 +89,23 @@ export default function AssistantDock() {
     }, LIVE_ECHO_MS)
   }, [])
 
-  // Live is presence-led: the transcript stays in the console. While Live is
-  // open the node thinks for as long as the stream runs and speaks briefly
-  // when it closes, then goes back to listening.
-  useEffect(() => {
-    if (!liveOpen || walking) return
-    if (streaming) {
-      sawStream.current = true
-      clearTimer(speakTimer)
-      setPresence('thinking')
-      return
-    }
-    if (!sawStream.current) return
-    sawStream.current = false
-    setPresence('speaking')
-    clearTimer(speakTimer)
-    speakTimer.current = window.setTimeout(() => {
-      setPresence((current) => (current === 'speaking' ? 'listening' : current))
-      speakTimer.current = null
-    }, LIVE_SPEAK_MS)
-  }, [streaming, liveOpen, walking])
-
   const forwardToHarness = useCallback((text: string) => {
     if (ready !== true) return
     window.dispatchEvent(new CustomEvent('companion:live-utterance', { detail: text }))
   }, [ready])
 
   const onLiveSubmit = useCallback((text: string) => {
-    clearTimer(speakTimer)
     if (keyResultsWalkRequested(text)) {
       stopWalk()
       setLiveEcho('')
       setWalking(true)
-      setPresence('thinking')
       setLiveCaption('Opening each results tab.')
       walkCancel.current = startKeyResultsWalk({
         onStep: (tab, index, last) => {
           setLiveCaption(`Tab ${index + 1} of ${KEY_RESULT_TABS.length}. ${tab.label}. ${tab.blurb}`)
-          setPresence(last ? 'speaking' : 'thinking')
           if (last) setWalking(false)
         },
         onPaceMiss: () => {
-          setPresence('listening')
           setLiveCaption('Could not hold the tab. The pause did not come from the dev server.')
           setWalking(false)
         },
@@ -134,7 +117,6 @@ export default function AssistantDock() {
       stopWalk()
       setLiveEcho('')
       openProjectList()
-      setPresence('speaking')
       setLiveCaption('Opening the project list.')
       forwardToHarness(text)
       return
@@ -151,7 +133,6 @@ export default function AssistantDock() {
           source: 'live',
           openDock: false,
         })
-        setPresence('listening')
         setLiveCaption(
           queued
             ? 'Queued — will send when the assistant is free.'
@@ -162,11 +143,9 @@ export default function AssistantDock() {
       stopWalk()
       setLiveCaption('')
       flashEcho(text)
-      setPresence('thinking')
       forwardToHarness(text)
       return
     }
-    setPresence('listening')
     setLiveCaption('Add an API key for the assistant first. Tab changes and opening a project still work without one.')
   }, [flashEcho, forwardToHarness, ready, stopWalk])
   const profileLabel =
@@ -287,7 +266,8 @@ export default function AssistantDock() {
       </div>
       {!assistantDockOpen && (
         <CompanionLauncher
-          presence={presence}
+          workState={workState}
+          navigating={walking}
           profileLabel={profileLabel}
           liveOpen={liveOpen}
           liveCaption={liveCaption}
@@ -310,22 +290,21 @@ export default function AssistantDock() {
             if (liveOpen) {
               stopWalk()
               clearTimer(echoTimer)
-              clearTimer(speakTimer)
-              sawStream.current = false
+              liveGeneration.current += 1
               setLiveOpen(false)
-              setPresence('idle')
               setLiveCaption('')
               setLiveEcho('')
               return
             }
+            const generation = ++liveGeneration.current
             setLiveOpen(true)
-            setPresence('listening')
-            setLiveCaption('Listening. Ask to walk through the key results in each tab, or to open a project.')
+            setLiveCaption('Type a message here, or open reviewed dictation in the assistant.')
             // Issue 02/09 — bind or rebind the durable parent thread so Live
             // utteranceGeneration tracks the authoritative conversation.
             void ensureLiveDurableThread().catch(() => {
+              if (liveGeneration.current !== generation) return
               setLiveCaption(
-                'Listening, but the durable conversation could not be bound. Typed chat still works.',
+                'The durable conversation could not be bound. Open the assistant to continue with typed chat.',
               )
             })
           }}

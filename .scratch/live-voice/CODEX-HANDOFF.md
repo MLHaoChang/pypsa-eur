@@ -5,6 +5,18 @@
 
 2026-10-14 continuation: [CP-02 canonical companion outcomes](../chat-companion/issues/02-canonical-outcomes.md) records the next master-based UI/publication slice. [CP-01 / PR #235](https://github.com/MLHaoChang/pypsa-eur/pull/235) remains a separate dependency with its tested source preserved. These slices do not enable hosted voice or waive live/domain release gates.
 
+## 2026-10-14 planning continuation
+
+For the owner's accepted Dots comparison, start with the new [companion specification](../chat-companion/spec.md), [implementation plan](../../docs/superpowers/plans/2026-10-14-chat-companion-implementation.md) and [pending acceptance matrix](../chat-companion/test-plan.md). These are pinned to master `4ac218cc98a1437950dd20c3f46233efac6cc159`; rebaseline before implementation. First slices: CP-01 truthful mode/state, then CP-02 readable source-bound outcomes.
+
+PRs #185 and #188 are already merged: bounded prerequisites and one network case are implemented. Their merge commits are `301ba9bb6afa37bc0083c7c407e5f5d118719701` and `5be393bcd2cd2055928025fcd838f39d5d02c72f`. Do not repeat them. Two-case comparison/reconciliation and the other new companion capabilities remain planned. The older baseline/status prose below is historical; this planning continuation creates no application implementation or new test evidence. Hosted/device gates, independent domain review and real-use calibration remain pending.
+
+## Earlier handoff
+
+Implementation continuation: [CP-01 progress/evidence](../chat-companion/issues/01-truthful-state.md)
+uses newer master `f2b15c5b2caae8fc1259396158355007a670f531`. Its local UI
+implementation does not enable continuous media or complete live/domain gates.
+
 **Audience:** next agent (Codex or Cursor) starting from **master**.  
 **Date:** 2026-10-13.  
 **Master tip at handoff write:** `8a4927f9d` (includes #129 Moonshot alias, #126 run refs UI, #127 experiment persist, #130 resume discussed-run rehydration).

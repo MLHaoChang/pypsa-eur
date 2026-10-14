@@ -53,7 +53,7 @@ describe('AssistantDock', () => {
     useUIStore.setState({ assistantDockOpen: false, assistantEntry: null })
     useChatStore.setState({
       pending: null, durableThreadId: null, utteranceGeneration: 1,
-      streaming: false, messages: [],
+      streaming: false, messages: [], choice: null, error: null, requestQueue: [],
     })
     chatPanelMounts.current = 0
     ensureLiveDurableThread.mockClear()
@@ -159,7 +159,10 @@ describe('assistant dock prominence', () => {
   beforeEach(() => {
     localStorage.clear()
     useUIStore.setState({ assistantDockOpen: false, assistantEntry: null })
-    useChatStore.setState({ pending: null, durableThreadId: null, utteranceGeneration: 1 })
+    useChatStore.setState({
+      pending: null, durableThreadId: null, utteranceGeneration: 1,
+      streaming: false, messages: [], choice: null, error: null, requestQueue: [],
+    })
     ensureLiveDurableThread.mockClear()
   })
 
@@ -172,14 +175,19 @@ describe('assistant dock prominence', () => {
     expect(useUIStore.getState().assistantEntry).toBe('speak')
   })
 
-  it('does not open the console when Live is clicked', async () => {
+  it('opens in-page text with truthful labels and focus without opening the console', async () => {
     const user = userEvent.setup()
     render(<AssistantDock />)
     await user.click(screen.getByTestId('companion-live'))
     expect(useUIStore.getState().assistantDockOpen).toBe(false)
     expect(useUIStore.getState().assistantEntry).toBeNull()
-    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('listening')
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('idle')
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-media-state')).toBe('off')
+    expect(screen.getByTestId('companion-live').textContent).toBe('Chat here')
+    expect(screen.getByRole('button', { name: 'Start voice' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByText(/Continuous voice is not connected/)).toBeTruthy()
     expect(screen.getByTestId('companion-live-input')).toBeTruthy()
+    expect(document.activeElement).toBe(screen.getByTestId('companion-live-input'))
   })
 
   it('opens the console on the profile list from the profile chip', async () => {
@@ -233,14 +241,16 @@ describe('assistant dock prominence', () => {
     await user.click(screen.getByTestId('companion-live-send'))
     expect(useUIStore.getState().assistantDockOpen).toBe(false)
     expect(heard).toEqual(['List the generators'])
-    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('thinking')
+    // The ChatPanel stub does not start a stream; submitting text alone
+    // cannot claim execution or playback.
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('idle')
     expect(screen.getByTestId('companion-live-echo').textContent).toBe('List the generators')
     expect(screen.queryByTestId('companion-live-caption')).toBeNull()
     expect(screen.queryByTestId('companion-outcome')).toBeNull()
     window.removeEventListener('companion:live-utterance', onUtterance)
   })
 
-  it('moves the node through thinking and speaking with the stream, then clears the echo', async () => {
+  it('reflects actual response state and never fabricates playback after stream completion', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     vi.useFakeTimers({ shouldAdvanceTime: true })
     render(<AssistantDock />)
@@ -259,13 +269,16 @@ describe('assistant dock prominence', () => {
         ],
       })
     })
-    expect(launcher().getAttribute('data-presence')).toBe('speaking')
+    expect(launcher().getAttribute('data-presence')).toBe('idle')
+    expect(launcher().getAttribute('data-media-state')).toBe('off')
+    expect(screen.getByTestId('companion-work-status').textContent).toBe('Ready for a message')
     // Canonical text is also readable beside the collapsed companion.
     expect(screen.getByText('There is one generator.')).toBeTruthy()
     expect(screen.getByTestId('companion-outcome')).toBeTruthy()
     await act(async () => { vi.advanceTimersByTime(5_000) })
     expect(screen.queryByTestId('companion-live-echo')).toBeNull()
-    expect(launcher().getAttribute('data-presence')).toBe('listening')
+    expect(launcher().getAttribute('data-presence')).toBe('idle')
+    expect(launcher().getAttribute('data-media-state')).toBe('off')
   })
 
   it('keeps the download chip for a Live turn that produced a file', async () => {
@@ -288,10 +301,12 @@ describe('assistant dock prominence', () => {
     expect(screen.getByText('The chart is ready.')).toBeTruthy()
   })
 
-  it('leaves the node idle when a console turn streams while Live is closed', async () => {
+  it('shows response work independently of whether in-page chat is open', async () => {
     render(<AssistantDock />)
     await act(async () => { useChatStore.setState({ streaming: true }) })
-    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('idle')
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('thinking')
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-media-state')).toBe('off')
+    expect(screen.getByTestId('companion-work-status').textContent).toBe('Response in progress')
     await act(async () => { useChatStore.setState({ streaming: false }) })
     expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('idle')
   })
@@ -335,6 +350,20 @@ describe('assistant dock prominence', () => {
     expect(queue[0].text).toBe('Latest correction')
     expect(useUIStore.getState().assistantDockOpen).toBe(false)
     useChatStore.setState({ streaming: false, requestQueue: [] })
+  })
+
+  it('does not allow an old binding failure to change a reopened chat caption', async () => {
+    let rejectBind!: (error: Error) => void
+    ensureLiveDurableThread.mockImplementationOnce(() => new Promise((_, reject) => { rejectBind = reject }))
+    const user = userEvent.setup()
+    render(<AssistantDock />)
+    await user.click(screen.getByRole('button', { name: 'Chat here' }))
+    await user.click(screen.getByRole('button', { name: 'Close chat here' }))
+    await user.click(screen.getByRole('button', { name: 'Chat here' }))
+    await act(async () => rejectBind(new Error('late bind failure')))
+    expect(screen.getByTestId('companion-live-caption').textContent).toBe(
+      'Type a message here, or open reviewed dictation in the assistant.',
+    )
   })
 
   it('walks the results tabs from the live composer and leaves the console closed', async () => {

@@ -87,11 +87,11 @@ describe('CompanionLauncher', () => {
     expect(root.getAttribute('data-hovered')).toBe('false')
   })
 
-  it('marks a listening presence only when that presence is passed in', () => {
+  it('shows response work separately from unavailable audio', () => {
     mockMotion(false)
     render(
       <CompanionLauncher
-        presence="listening"
+        workState="running"
         profileLabel="Model"
         liveOpen
         onCompose={vi.fn()}
@@ -100,7 +100,9 @@ describe('CompanionLauncher', () => {
         onProfiles={vi.fn()}
       />,
     )
-    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('listening')
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('thinking')
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-media-state')).toBe('off')
+    expect(screen.getByTestId('companion-work-status').textContent).toBe('Response in progress')
     expect(screen.getByTestId('companion-live').getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByTestId('companion-speak').getAttribute('aria-pressed')).toBeNull()
   })
@@ -117,7 +119,7 @@ describe('CompanionLauncher', () => {
     const { rerender } = render(<CompanionLauncher {...props} />)
     expect(screen.getByTestId('companion-character').getAttribute('data-shape')).toBe('character')
     expect(screen.getByTestId('companion-live').getAttribute('aria-pressed')).toBe('false')
-    rerender(<CompanionLauncher {...props} presence="thinking" liveOpen />)
+    rerender(<CompanionLauncher {...props} workState="running" liveOpen />)
     expect(screen.getByTestId('companion-character').getAttribute('data-shape')).toBe('live-node')
     expect(screen.getByTestId('companion-live-node')).toBeTruthy()
     expect(screen.getByTestId('companion-live').getAttribute('aria-pressed')).toBe('true')
@@ -134,11 +136,11 @@ describe('CompanionLauncher', () => {
       onProfiles: vi.fn(),
     }
     const { rerender } = render(
-      <CompanionLauncher {...props} presence="thinking" liveEcho="List the projects" />,
+      <CompanionLauncher {...props} workState="running" liveEcho="List the projects" />,
     )
     expect(screen.getByTestId('companion-live-echo').textContent).toBe('List the projects')
     expect(screen.queryByTestId('companion-outcome')).toBeNull()
-    rerender(<CompanionLauncher {...props} presence="listening" liveEcho="" />)
+    rerender(<CompanionLauncher {...props} workState="idle" liveEcho="" />)
     expect(screen.queryByTestId('companion-live-echo')).toBeNull()
   })
 
@@ -169,9 +171,10 @@ describe('CompanionLauncher', () => {
     const outside = block.slice(0, gate)
     expect(outside).not.toMatch(/animation\s*:/)
     expect(outside).not.toMatch(/transition\s*:/)
-    // Under reduced motion the actions stay visible rather than hiding until hover.
+    // Actions are discoverable without hover on every pointer/motion path.
     expect(outside).toMatch(/\.companion-actions\s*\{[^}]*opacity:\s*1/)
     const gated = block.slice(gate)
+    expect(gated).not.toMatch(/opacity:\s*0\s*;/)
     expect(gated).toMatch(/\.companion-idle\s*\{[^}]*animation:/)
     expect(gated).toMatch(/transition:/)
     expect(gated).toMatch(/\.companion-live-echo\s*\{[^}]*animation:/)

@@ -1,13 +1,23 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Mic, Pencil } from 'lucide-react'
 
 // Clears toasts above the chip (max-w 12rem) plus bottom-6 / right-6 (24px).
 export const COMPANION_TOAST_OFFSET = 220
 
-export type CompanionPresence = 'idle' | 'listening' | 'thinking' | 'speaking'
+export type CompanionWorkState = 'idle' | 'running' | 'queued' | 'waiting_for_approval' | 'waiting_for_input' | 'failed'
+
+const WORK_LABELS: Record<CompanionWorkState, string> = {
+  idle: 'Ready for a message',
+  running: 'Response in progress',
+  queued: 'Message queued',
+  waiting_for_approval: 'Needs approval',
+  waiting_for_input: 'Needs your answer',
+  failed: 'Response interrupted',
+}
 
 type Props = {
-  presence?: CompanionPresence
+  workState?: CompanionWorkState
+  navigating?: boolean
   profileLabel: string
   onCompose: () => void
   onSpeak: () => void
@@ -39,8 +49,8 @@ function useReducedMotion(): boolean {
 
 /**
  * Live's presence: a grid node (a bus with its line ring). The CSS animates a
- * part per presence: the halo breathes while listening, the sector turns while
- * thinking, the ring pulses while speaking.
+ * sector turns while response/navigation work runs. Decoration never implies
+ * that capture or playback has started.
  */
 function LiveNode({ lit }: { lit: boolean }) {
   return (
@@ -67,22 +77,30 @@ function LiveNode({ lit }: { lit: boolean }) {
 }
 
 export default function CompanionLauncher({
-  presence = 'idle', profileLabel, onCompose, onSpeak, onLive, onProfiles,
+  workState = 'idle', navigating = false, profileLabel, onCompose, onSpeak, onLive, onProfiles,
   liveOpen = false, liveCaption = '', liveEcho = '', modelKeyMissing = false, onLiveSubmit,
   children,
 }: Props) {
   const reduce = useReducedMotion()
   const [hovered, setHovered] = useState(false)
   const [draft, setDraft] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const voiceReasonId = useId()
+  useEffect(() => {
+    if (liveOpen) inputRef.current?.focus()
+  }, [liveOpen])
+  const presence = workState === 'running' ? 'thinking' : 'idle'
   const lit = presence !== 'idle'
   const echo = liveEcho.trim()
   const caption = liveCaption.trim()
   return (
     <div
-      className="companion-launcher fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2"
+      className="companion-launcher fixed bottom-6 right-6 z-40 flex max-w-[calc(100vw-3rem)] flex-col items-end gap-2"
       data-testid="companion-launcher"
       data-no-panel-close
       data-presence={presence}
+      data-work-state={workState}
+      data-media-state="off"
       data-motion={reduce ? 'off' : 'on'}
       data-hovered={hovered ? 'true' : 'false'}
       data-live={liveOpen ? 'open' : 'closed'}
@@ -94,9 +112,15 @@ export default function CompanionLauncher({
       }}
     >
       {children}
+      {(liveOpen || workState !== 'idle') && (
+        <p role="status" aria-atomic="true" data-testid="companion-work-status"
+          className="rounded-lg border border-border bg-bg-2 px-3 py-1 text-[11px] text-text">
+          {navigating && workState === 'running' ? 'Opening results views' : WORK_LABELS[workState]}
+        </p>
+      )}
       {liveOpen && (
         <form
-          className="w-72 rounded-2xl border border-border bg-bg-2 p-3 shadow-lg"
+          className="w-72 max-w-full rounded-2xl border border-border bg-bg-2 p-3 shadow-lg"
           data-testid="companion-live-composer"
           onSubmit={(e: FormEvent) => {
             e.preventDefault()
@@ -124,10 +148,11 @@ export default function CompanionLauncher({
           <div className="flex items-center gap-2">
             <input
               data-testid="companion-live-input"
+              ref={inputRef}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder="Walk me through the key results in each tab"
-              aria-label="Say something to the assistant"
+              aria-label="Message the assistant"
               className="min-w-0 flex-1 rounded-full border border-border bg-bg px-3 py-1.5 text-[12px] text-text"
             />
             <button
@@ -197,13 +222,20 @@ export default function CompanionLauncher({
           type="button"
           onClick={onLive}
           data-testid="companion-live"
-          aria-label="Start a live conversation on this page"
+          aria-label={liveOpen ? 'Close chat here' : 'Chat here'}
           aria-pressed={liveOpen}
-          title="Talk with the assistant here. This stays on the current page."
+          title={liveOpen ? 'Close in-page chat. Running work and pending approvals remain.' : 'Type to the assistant on this page.'}
           className={`px-3 py-2 hover:text-accent ${liveOpen ? 'text-accent' : 'text-text'}`}
         >
-          Live
+          Chat here
         </button>
+      </div>
+      <div className="max-w-72 rounded-lg border border-border bg-bg-2 px-3 py-2 text-[10px] text-muted">
+        <button type="button" disabled aria-describedby={voiceReasonId}
+          className="font-medium text-muted disabled:cursor-not-allowed">
+          Start voice
+        </button>
+        <p id={voiceReasonId}>Continuous voice is not connected. Use reviewed dictation for speech.</p>
       </div>
     </div>
   )
