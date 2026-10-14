@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Results KPI tiles round to one standard: three significant figures for money, energy, power and emissions (€39.8 M, 9.69 GWh, 40.0 MW), emissions in t / kt / Mt CO₂, and one decimal for prices, percentages and hours per year. Tables keep full precision.
