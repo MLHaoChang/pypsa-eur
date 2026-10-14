@@ -614,6 +614,58 @@ def test_multi_period_templates_and_a_staged_build(reset_backend):
     assert _refused(n, cfg, _fin(annualise=True)).code == "staged_build_not_supported"
 
 
+@pytest.mark.live_solve
+def test_a_vintage_bound_build_in_a_later_period_is_refused(reset_backend):
+    """P5a, H1. Vintage bounds fold their build-year clones back into the
+    parent row (`vintage_service`), so the parent's `build_year` alone hides
+    a capacity built in a later period, and the case would buy it all at the
+    first COD. The persisted breakdown is read: any capacity built after the
+    first period refuses; a later vintage that built nothing does not."""
+    n, cfg = _solve(_network(multi=True), _commercial(OWNED), multi=True)
+    total = float(n.generators.at["pv", "p_nom_opt"])
+    n.meta["vintage_results"] = {"Generator": {"pv": {
+        "initial_capacity": 0.0, "capacity_field": "p_nom",
+        "periods": [{"build_year": 2030, "lifetime": 25, "p_nom_opt": total - 0.5},
+                    {"build_year": 2040, "lifetime": 25, "p_nom_opt": 0.5}]}}}
+    refused = _refused(n, cfg, _fin(annualise=True))
+    assert refused.code == "staged_build_vintage_bounds_not_supported"
+    assert "pv" in str(refused) and "2040" in str(refused)
+
+    n.meta["vintage_results"]["Generator"]["pv"]["periods"] = [
+        {"build_year": 2030, "lifetime": 25, "p_nom_opt": total},
+        {"build_year": 2040, "lifetime": 25, "p_nom_opt": 0.0}]
+    _case(n, cfg, _fin(annualise=True))                  # nothing staged: no refusal
+
+
+def test_the_counterfactual_load_follows_the_solves_load_scalers():
+    """P5a, H2. `load_scalers` scale the demand for the solve only and the
+    network's `p_set` is restored after it, so the counterfactual must read
+    the demand as the LP saw it, or a ramped period's bill-without-assets is
+    computed on the unramped load."""
+    import pypsa
+    from types import SimpleNamespace
+
+    from services.results.finance_case import _served_load
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.MultiIndex.from_product([[2030, 2040], [0, 1]]))
+    n.investment_periods = [2030, 2040]
+    n.add("Bus", "site")
+    n.add("Load", "it", bus="site", carrier="electricity",
+          p_set=pd.Series(10.0, index=n.snapshots))
+    cfg = SimpleNamespace(multi_investment_periods=True, load_scalers={"2040": 1.5},
+                          load_scalers_by_carrier={}, voll=0.0, dsr_price_eur_per_mwh=0.0,
+                          dsr_share_of_load=0.0, dsr_buses=None)
+    served, shed, reasons = _served_load(n, cfg, ["it"], None)
+    assert served.tolist() == [10.0, 10.0, 15.0, 15.0]
+    assert shed.tolist() == [0.0] * 4 and reasons == []
+    assert n.loads_t.p_set["it"].tolist() == [10.0] * 4          # the network is not touched
+
+    cfg.load_scalers = {}
+    served, _shed, _r = _served_load(n, cfg, ["it"], None)
+    assert served.tolist() == [10.0] * 4
+
+
 # ── owners, contracts, overnight costs, dates ───────────────────────────────
 
 

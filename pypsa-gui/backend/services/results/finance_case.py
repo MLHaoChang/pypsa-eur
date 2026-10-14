@@ -8,7 +8,8 @@ engine imports nothing from `services.results`; the router injects a
 `build_case` callable). It refuses with `FinanceRefused(code)` — stable codes:
 
   value_flows_not_configured, value_flows_invalid, owner_has_no_assets,
-  owner_ambiguous, staged_build_not_supported, template_not_annual:<hours>,
+  owner_ambiguous, staged_build_not_supported,
+  staged_build_vintage_bounds_not_supported, template_not_annual:<hours>,
   cod_missing, cod_mismatch, counterfactual_not_established:lossy_poc,
   owner_asset_missing, stream_unmapped:<stream>.
 
@@ -624,14 +625,41 @@ def _site_loads(n, parsed, sides) -> list[str]:
             if str(n.loads.at[ld, "bus"]) in sides.site and electric(str(n.loads.at[ld, "bus"]))]
 
 
+def _later_vintage_build(n, comp: str, name: str, first) -> tuple[int, float] | None:
+    """(build year, capacity) of the first capacity `name` builds after the
+    `first` period through vintage bounds, or None. The bounds fold their
+    build-year clones back into the parent row after the solve, so the
+    parent's own `build_year` does not show it; the per-period breakdown in
+    `n.meta["vintage_results"]` does (`vintage_service`, P5a H1)."""
+    meta = getattr(n, "meta", None)
+    root = meta.get("vintage_results") if isinstance(meta, dict) else None
+    by_class = root.get(comp) if isinstance(root, dict) else None
+    entry = by_class.get(str(name)) if isinstance(by_class, dict) else None
+    periods = entry.get("periods") if isinstance(entry, dict) else None
+    for per in sorted((p for p in periods or () if isinstance(p, dict)),
+                      key=lambda p: _fin(p.get("build_year")) or 0.0):
+        year, built = _fin(per.get("build_year")), _fin(per.get("p_nom_opt"))
+        if year is not None and built is not None and year > first and built > 1e-6:
+            return int(year), built
+    return None
+
+
 def _served_load(n, cfg, loads: list[str], lost_load) -> tuple[np.ndarray, np.ndarray,
                                                                   list[str]]:
     """(served load MW, shed MW, reasons it is not established) per snapshot."""
     from services.commercial import settlement_inputs as _SI
 
+    from services.adequacy.demand import lp_demand_frame
+
+    # The demand as the LP saw it: `load_scalers` scale it for the solve
+    # only, and `p_set` is restored afterwards (P5a, H2).
+    frame = lp_demand_frame(n, cfg)
     demand = np.zeros(len(n.snapshots))
     for ld in loads:
-        demand += _series(n, "loads_t", "p_set", ld, n.loads.at[ld, "p_set"])
+        if frame is not None and ld in frame.columns:
+            demand += frame[ld].reindex(n.snapshots).to_numpy(dtype=float)
+        else:
+            demand += float(n.loads.at[ld, "p_set"])
     shed = np.zeros(len(n.snapshots))
     reasons: list[str] = []
     buses = {str(n.loads.at[ld, "bus"]) for ld in loads}
@@ -1514,6 +1542,11 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                     raise FinanceRefused("staged_build_not_supported",
                                          f"{comp} {name!r} is built in {int(by)}, after the "
                                          f"first period {first} (P5)")
+            later = _later_vintage_build(n, comp, name, first)
+            if later is not None:
+                raise FinanceRefused("staged_build_vintage_bounds_not_supported",
+                                     f"{comp} {name!r} builds {later[1]:g} in {later[0]}, after "
+                                     f"the first period {first}, through vintage bounds (P5)")
 
     # C3: the template must be a year.
     info: dict[str, tuple[int, float]] = {}
