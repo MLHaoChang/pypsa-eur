@@ -159,3 +159,28 @@ def test_the_build_scripts_verify_step_solves_every_template(tid):
     build = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(build)
     build._verify_feasible(T.BUILDERS[tid](), tid, T.solver_config(tid))
+
+
+def test_with_the_island_rows_the_plan_stages():
+    """The island rows (on in the template's solver settings) drive the build:
+    a genset in more than one period, and the 2027 import at its 20 MW cap."""
+    import json
+    import tempfile
+
+    from services.adequacy.island_config import SIDECAR_NAME, load_island_config
+    from services.solver import island as I
+
+    d = pathlib.Path(tempfile.mkdtemp())
+    (d / SIDECAR_NAME).write_text(json.dumps(T.ISLAND_CONFIG[TID]))
+    isl = load_island_config(d / SIDECAR_NAME)
+    isl["cuts"] = []
+    n = T.BUILDERS[TID]()
+    n.snapshots.name = "snapshot"
+    status, cond = n.optimize(solver_name="highs", multi_investment_periods=True,
+                              extra_functionality=I.island_extra_functionality(isl))
+    assert (status, cond) == ("ok", "optimal")
+    built = {y: float(n.generators.at[f"genset_new_{y}", "p_nom_opt"])
+             + float(n.storage_units.at[f"bess_new_{y}", "p_nom_opt"]) for y in YEARS}
+    assert sum(1 for v in built.values() if v > 0.1) >= 2, built
+    assert built[2035] > built[2027], built
+    assert n.links_t.p0["grid_import"].loc[2027].max() == pytest.approx(20.0, abs=1e-4)

@@ -504,7 +504,9 @@ TEMPLATE_META: dict[str, dict] = {
         "study_notes": [
             "Each period is the same representative July week, with the period's load and import cap.",
             "Candidates are one row per period (build_year = the period): the plan says what to build when.",
-            "The energization schedule caps the import at 20 MW in 2027: the site bridges the gap itself.",
+            "The energization schedule caps the import at 20 MW in 2027.",
+            "Load is picked up in 2.5 MW blocks after an islanding (assumed): the island rows then "
+            "follow the load, so the plan stages — a small genset in 2027 and 2030, the bulk in 2035.",
         ],
         "provenance": PROVENANCE,
     },
@@ -675,6 +677,10 @@ def _staged_island(cfg: dict) -> dict:
         units[f"genset_new_{y}"] = copy.deepcopy(gen)
         units[f"bess_new_{y}"] = copy.deepcopy(bess)
     out["requirements"]["ride_through_storage"] = [f"bess_new_{y}" for y, _it, _pue in DC_PHASES]
+    # The halls are fitted out in smaller steps: 2.5 MW pickup blocks (the
+    # single-year campus's 5 MW blocks need 36.7 MW more genset inertia in
+    # every period, whatever its load, so the plan could not stage).
+    out["requirements"]["pickup_blocks"] = {"value": [2.5] * 22, "source": "assumed"}
     return out
 
 

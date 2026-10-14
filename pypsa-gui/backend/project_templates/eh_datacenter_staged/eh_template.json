@@ -86,6 +86,7 @@
   "study_notes": [
     "Each period is the same representative July week, with the period's load and import cap.",
     "Candidates are one row per period (build_year = the period): the plan says what to build when.",
-    "The energization schedule caps the import at 20 MW in 2027: the site bridges the gap itself."
+    "The energization schedule caps the import at 20 MW in 2027.",
+    "Load is picked up in 2.5 MW blocks after an islanding (assumed): the island rows then follow the load, so the plan stages \u2014 a small genset in 2027 and 2030, the bulk in 2035."
   ]
 }
