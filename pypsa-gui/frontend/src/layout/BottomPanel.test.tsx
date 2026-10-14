@@ -164,8 +164,8 @@ describe('AssetTable search and sort — behaviour as of e8614a35', () => {
   it('clicking a column header sorts, and clicking again reverses', async () => {
     renderPanel()
     await screen.findByText('B0')
-    // The header renders COL_LABELS['v_nom'], not the raw column name.
-    const header = screen.getByText('V nom (kV)')
+    // The header renders the Bus descriptor's label (M5), not the raw column name.
+    const header = await screen.findByText('Nominal voltage (kV)')
     await userEvent.click(header)
     const asc = renderedNames()
     await userEvent.click(header)
@@ -255,10 +255,11 @@ describe('AssetTable active cell — added by Task 11', () => {
 })
 
 describe('AssetTable headers — D15', () => {
-  it('renders the curated COL_LABELS entry where one exists', async () => {
+  // M5: the Bus table reads its descriptors too (the short names it had are gone).
+  it("a Bus's columns read their descriptor labels and stored units", async () => {
     renderPanel()
-    // COL_LABELS maps v_nom → 'V nom'; the catalog appends its unit (kV).
-    expect(await screen.findByText('V nom (kV)')).toBeTruthy()
+    expect(await screen.findByText('Nominal voltage (kV)')).toBeTruthy()
+    expect(screen.queryByText('V nom (kV)')).toBeNull()
   })
 
   // S1d: a described class reads its asset schema — the label and the STORED

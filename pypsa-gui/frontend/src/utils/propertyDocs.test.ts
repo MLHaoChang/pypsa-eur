@@ -17,6 +17,8 @@ const SCHEMAS = fixture as unknown as Record<string, AssetSchema>
 const PREFIX: Record<string, string> = {
   generator: 'Generator', storage_unit: 'StorageUnit', store: 'Store', load: 'Load',
   link: 'Link', line: 'Line', transformer: 'Transformer',
+  // M5: the non-asset components.
+  bus: 'Bus', carrier: 'Carrier', global_constraint: 'GlobalConstraint', shunt_impedance: 'ShuntImpedance',
 }
 
 function described(cls: string): Set<string> {

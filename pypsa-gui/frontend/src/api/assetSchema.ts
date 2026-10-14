@@ -12,6 +12,8 @@ import client from './client'
  */
 export const SCHEMA_CLASSES: ReadonlySet<string> = new Set([
   'Generator', 'Line', 'Link', 'Load', 'Store', 'StorageUnit', 'Transformer',
+  // M5: the non-asset components.
+  'Bus', 'Carrier', 'GlobalConstraint', 'ShuntImpedance',
 ])
 
 export type AssetFieldKind = 'number' | 'int' | 'bool' | 'enum' | 'text' | 'bus' | 'carrier'
@@ -34,8 +36,8 @@ export interface AssetFieldSpec {
   derived: boolean
   reveal_when: Record<string, unknown> | null
   part: string | null
-  /** What an emptied input saves: null, 0, or the current value. */
-  blank: 'clear' | 'zero' | 'keep'
+  /** What an emptied input saves: null, 0, "" (a text column typed `str`), or the current value. */
+  blank: 'clear' | 'zero' | 'empty' | 'keep'
 }
 
 export interface AssetSchemaGroup {

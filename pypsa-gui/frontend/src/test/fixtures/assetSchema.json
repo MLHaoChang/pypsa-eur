@@ -1,4 +1,276 @@
 {
+ "Bus": {
+  "component": "Bus",
+  "groups": [
+   {
+    "id": "identity",
+    "label": "Identity",
+    "fields": [
+     {
+      "key": "name",
+      "group": "identity",
+      "label": "Name",
+      "help": "Unique bus identifier. Every component attached to the bus names it, so a rename re-points them all.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "text",
+      "options": [],
+      "required": true,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "name"
+     },
+     {
+      "key": "carrier",
+      "group": "identity",
+      "label": "Carrier",
+      "help": "Energy carrier modelled at this bus (AC, DC, H2, heat, gas, …). It decides which assets can attach and which energy balance the bus enters.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "carrier",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "carrier"
+     },
+     {
+      "key": "control",
+      "group": "identity",
+      "label": "Control",
+      "help": "Power-flow control for the non-linear AC power flow: PQ (a load), PV (regulated voltage) or Slack (the reference). For the linear optimisation only the slack matters.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "enum",
+      "options": [
+       "PQ",
+       "PV",
+       "Slack"
+      ],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "control"
+     },
+     {
+      "key": "country",
+      "group": "identity",
+      "label": "Country",
+      "help": "ISO country code, for grouping, country-level statistics and policy constraints.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "text",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "empty",
+      "technical_name": "country"
+     },
+     {
+      "key": "sub_network",
+      "group": "identity",
+      "label": "Sub-network",
+      "help": "Manual region label for the 'region' clustering mode: buses sharing it collapse to one node. Empty: determined from the electrical topology.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "text",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "empty",
+      "technical_name": "sub_network"
+     },
+     {
+      "key": "x",
+      "group": "identity",
+      "label": "Longitude",
+      "help": "Geographic longitude, east positive. Places the bus on the map and sets the length of a line recalculated from coordinates; the optimisation does not read it.",
+      "unit_display": "°E",
+      "unit_storage": "°E",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "x"
+     },
+     {
+      "key": "y",
+      "group": "identity",
+      "label": "Latitude",
+      "help": "Geographic latitude, north positive. Places the bus on the map and sets the length of a line recalculated from coordinates; the optimisation does not read it.",
+      "unit_display": "°N",
+      "unit_storage": "°N",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "y"
+     }
+    ]
+   },
+   {
+    "id": "performance",
+    "label": "Technical performance",
+    "fields": [
+     {
+      "key": "v_nom",
+      "group": "performance",
+      "label": "Nominal voltage",
+      "help": "The bus's nominal voltage. Lines are coloured by voltage class; a transformer's declared voltages are checked against it.",
+      "unit_display": "kV",
+      "unit_storage": "kV",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": true,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "v_nom"
+     }
+    ]
+   }
+  ]
+ },
+ "Carrier": {
+  "component": "Carrier",
+  "groups": [
+   {
+    "id": "identity",
+    "label": "Identity",
+    "fields": [
+     {
+      "key": "name",
+      "group": "identity",
+      "label": "Name",
+      "help": "Unique carrier name. Buses and assets name it; a rename re-points them.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "text",
+      "options": [],
+      "required": true,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "name"
+     },
+     {
+      "key": "nice_name",
+      "group": "identity",
+      "label": "Display name",
+      "help": "How the carrier is shown in charts and tables. Empty: its name.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "text",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "empty",
+      "technical_name": "nice_name"
+     },
+     {
+      "key": "color",
+      "group": "identity",
+      "label": "Colour",
+      "help": "Its colour on the map and in charts, as a CSS colour (e.g. #1f77b4).",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "text",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "empty",
+      "technical_name": "color"
+     },
+     {
+      "key": "unit",
+      "group": "identity",
+      "label": "Unit",
+      "help": "Unit of the energy it carries, for display. Empty: MWh.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "text",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "empty",
+      "technical_name": "unit"
+     }
+    ]
+   },
+   {
+    "id": "performance",
+    "label": "Technical performance",
+    "fields": [
+     {
+      "key": "co2_emissions",
+      "group": "performance",
+      "label": "CO₂ emissions",
+      "help": "Emissions per MWh of primary energy burnt. A generator's emissions are this divided by its efficiency; a CO₂ cap sums them.",
+      "unit_display": "t/MWh",
+      "unit_storage": "t/MWh",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": true,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "co2_emissions"
+     }
+    ]
+   }
+  ]
+ },
  "Generator": {
   "component": "Generator",
   "groups": [
@@ -634,6 +906,153 @@
       "part": null,
       "blank": "clear",
       "technical_name": "p_max_pu_includes_outages"
+     }
+    ]
+   }
+  ]
+ },
+ "GlobalConstraint": {
+  "component": "GlobalConstraint",
+  "groups": [
+   {
+    "id": "identity",
+    "label": "Identity",
+    "fields": [
+     {
+      "key": "name",
+      "group": "identity",
+      "label": "Name",
+      "help": "Unique constraint name.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "text",
+      "options": [],
+      "required": true,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "name"
+     },
+     {
+      "key": "type",
+      "group": "identity",
+      "label": "Type",
+      "help": "What the constraint caps: primary energy (a CO₂ cap), new capacity of a carrier, a carrier's dispatch, or the volume or cost of new transmission.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "enum",
+      "options": [
+       "primary_energy",
+       "tech_capacity_expansion_limit",
+       "operational_limit",
+       "transmission_volume_expansion_limit",
+       "transmission_expansion_cost_limit"
+      ],
+      "required": false,
+      "key_param": true,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "type"
+     },
+     {
+      "key": "sense",
+      "group": "identity",
+      "label": "Sense",
+      "help": "How the sum compares with the constant.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "enum",
+      "options": [
+       "<=",
+       "==",
+       ">="
+      ],
+      "required": false,
+      "key_param": true,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "sense"
+     },
+     {
+      "key": "constant",
+      "group": "identity",
+      "label": "Constant",
+      "help": "The bound, in the type's unit: t for a CO₂ cap, MW for capacity, MWh for dispatch, MW·km or € for transmission.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": true,
+      "key_param": true,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "constant"
+     },
+     {
+      "key": "carrier_attribute",
+      "group": "identity",
+      "label": "Carrier attribute",
+      "help": "For primary energy: the carrier column summed, e.g. co2_emissions.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "text",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "clear",
+      "technical_name": "carrier_attribute"
+     },
+     {
+      "key": "carrier",
+      "group": "identity",
+      "label": "Carrier",
+      "help": "For a capacity or operational limit: the carrier it applies to.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "carrier",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "clear",
+      "technical_name": "carrier"
+     },
+     {
+      "key": "investment_period",
+      "group": "identity",
+      "label": "Investment period",
+      "help": "The period it binds in. Empty: the whole horizon.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "int",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "clear",
+      "technical_name": "investment_period"
      }
     ]
    }
@@ -1575,6 +1994,95 @@
       "part": null,
       "blank": "keep",
       "technical_name": "sign"
+     }
+    ]
+   }
+  ]
+ },
+ "ShuntImpedance": {
+  "component": "ShuntImpedance",
+  "groups": [
+   {
+    "id": "identity",
+    "label": "Identity",
+    "fields": [
+     {
+      "key": "name",
+      "group": "identity",
+      "label": "Name",
+      "help": "Unique shunt identifier.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "text",
+      "options": [],
+      "required": true,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "name"
+     },
+     {
+      "key": "bus",
+      "group": "identity",
+      "label": "Bus",
+      "help": "Bus the shunt connects to ground.",
+      "unit_display": "",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "bus",
+      "options": [],
+      "required": true,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "bus"
+     }
+    ]
+   },
+   {
+    "id": "performance",
+    "label": "Technical performance",
+    "fields": [
+     {
+      "key": "g",
+      "group": "performance",
+      "label": "Conductance",
+      "help": "Shunt conductance; absorbs active power in the AC power flow.",
+      "unit_display": "S",
+      "unit_storage": "S",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "g"
+     },
+     {
+      "key": "b",
+      "group": "performance",
+      "label": "Susceptance",
+      "help": "Shunt susceptance; positive injects reactive power (a capacitor), negative absorbs it (a reactor).",
+      "unit_display": "S",
+      "unit_storage": "S",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "keep",
+      "technical_name": "b"
      }
     ]
    }
