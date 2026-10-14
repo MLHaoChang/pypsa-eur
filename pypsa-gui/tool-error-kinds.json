@@ -718,6 +718,22 @@
     "unsupported_assurance_version": {
       "surface": "inline",
       "why": "Admission rejects an unsupported checked-answer protocol version before model/tool execution; the client must use a supported version."
+    },
+    "mcp_unavailable": {
+      "surface": "inline",
+      "why": "An external MCP server (chat harness issue 19) did not start, went away, or no longer lists the tool. The turn continues and the model can say the external tool is unavailable; the admin fixes the server list."
+    },
+    "mcp_timeout": {
+      "surface": "inline",
+      "why": "An external MCP tool did not answer within the per-tool budget; the request was cancelled on the server. Like tool_timeout, the model can route around it."
+    },
+    "mcp_tool_error": {
+      "surface": "inline",
+      "why": "An external MCP tool answered isError. Its own message, fenced, goes back to the model, which can correct its arguments or tell the user."
+    },
+    "mcp_protocol_error": {
+      "surface": "inline",
+      "why": "An external MCP server answered with a JSON-RPC error or a malformed reply. A server-side fault the model can only report; no UI copy would help."
     }
   }
 }

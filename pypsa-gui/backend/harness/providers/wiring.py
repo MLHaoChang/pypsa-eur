@@ -360,7 +360,13 @@ def _tools_payload_for_profile(profile: Any, query: str = "", history=None) -> l
     tools = _tools_payload()
     from services import chat_tools
     session = chat_tools.chat_session()
-    tools = filter_tools(tools, getattr(session, "toolset", "all"))
+    toolset = getattr(session, "toolset", "all")
+    tools = filter_tools(tools, toolset)
+    if toolset in (None, "all"):
+        # External MCP tools (issue 19) go after the built-in prefix, so it
+        # stays cached; a narrowed toolset leaves them out.
+        from harness import mcp_client
+        tools = tools + mcp_client.session_tools(session)
     if profile.wire != "openai":
         return tools
     base = profile.base_url

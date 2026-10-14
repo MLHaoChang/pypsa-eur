@@ -127,6 +127,7 @@ def _confirm_destructive_tool(
     tier: str,
     tool_results_collector: list[dict[str, Any]],
     guided: bool = False,
+    external: str | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, bool]:
     """
     Gate a destructive tool on the user's confirmation. Returns whether to
@@ -150,15 +151,19 @@ def _confirm_destructive_tool(
     (`GUIDED_CONFIRM_TIERS`, P25 gate B1); `AUTO_APPROVE_TIERS` never contains
     `write`, so a Guided write always asks.
 
+    An external MCP tool (`external` is its server id; issue 19, owner
+    decision Q20) is gated whenever its tier is not `read`, in Expert as in
+    Guided, is never auto-approved, and its card says which server it is.
+
     Phase E of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`;
     see `tests/test_chat_confirmation_gate_seam.py`.
     """
-    if tier not in _confirm_tiers(guided):
+    if tier not in _confirm_tiers(guided) and not (external and tier != "read"):
         return True
     from harness import approvals
 
     link = approvals.links(session, args)
-    if tier in AUTO_APPROVE_TIERS:
+    if tier in AUTO_APPROVE_TIERS and not external:
         # Issue 18: the log says why no card appeared, and an approval that
         # cannot be put on record does not run (fail closed).
         if approvals.decided(session, call_id=tool_use_id, tool=tool_name, tier=tier,
@@ -180,7 +185,7 @@ def _confirm_destructive_tool(
                          f"approval for {tool_name!r} could not be recorded",
                          tool_results_collector)
         return False
-    yield "tool_pending_confirmation", {
+    card = {
         "tool_use_id": tool_use_id,
         "tool_name": tool_name,
         "args": args,
@@ -188,6 +193,9 @@ def _confirm_destructive_tool(
         "confirmation_token": pc.token,
         "ttl_seconds": harness_session.CONFIRMATION_TTL_SECONDS,
     }
+    if external:
+        card["external"] = {"server": external}
+    yield "tool_pending_confirmation", card
     decision = session.wait_for_decision(pc.token)
     outcome, by = _DECISION_OUTCOMES.get(decision, ("unavailable", "system"))
     recorded = approvals.decided(session, call_id=tool_use_id, tool=tool_name, tier=tier,

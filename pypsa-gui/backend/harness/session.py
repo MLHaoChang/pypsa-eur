@@ -144,6 +144,10 @@ class ChatSession:
     goal: dict[str, Any] | None = None
     # Catalogue view; kept separate from project identity and permissions.
     toolset: str = "all"
+    # External MCP tools (issue 19): listed once per session by
+    # `harness.mcp_client.session_tools`; None until then.
+    external_tools: list[dict[str, Any]] | None = None
+    external_servers: dict[str, Any] | None = None
     task_id: str | None = None
     experiment_id: str | None = None
     experiment_project_id: str | None = None

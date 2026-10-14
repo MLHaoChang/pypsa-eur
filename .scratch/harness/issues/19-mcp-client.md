@@ -70,3 +70,9 @@ tool list fixed per session, no images in the first release, no server
 instructions, prompts or resources, sampling and elicitation refused). Build
 order: the tier fallback (PR #220, done), then this issue's client core, then
 the dispatch extraction, then issue 11.
+
+2026-10-14 (slice 1 built): `harness/mcp_client.py` and its seams in the loop,
+the gate and the tools payload, without the SDK (spec A.8a says why and what
+differs from A.4: no `TOOL_ROUTES` sentinel, external tools only in the `all`
+toolset, `find_capabilities` unchanged). Slice 2: the settings routes and panel
+section, the `PYPSA_GUI_MCP_KEY__` family in `is_managed_key`, the parity probe.
