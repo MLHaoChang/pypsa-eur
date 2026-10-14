@@ -7,7 +7,7 @@ import { Fragment, type ReactNode } from 'react'
 import type { AssetFieldSpec, AssetSchema, ProvenanceEntry } from '../../api/assetSchema'
 import { ProvenanceChip } from '../../components/ProvenanceChip'
 import type { Bus, Carrier } from '../../api/types'
-import { derivedStored, displayValue, isRevealed } from '../../utils/assetForm'
+import { derivedStored, displayValue, isRevealed, unitLabel } from '../../utils/assetForm'
 import {
   BusSelect, CarrierGroupSelect, ChkInput, FieldLabel, InfoTip, NumInput, SectionHdr, TxtInput,
   type ExpandedItem, type FS, type SetFS,
@@ -18,10 +18,8 @@ export function schemaFields(schema: AssetSchema | undefined): AssetFieldSpec[] 
   return schema ? schema.groups.flatMap(g => g.fields) : []
 }
 
-/** Units as the app writes them: the descriptors say EUR, the cards say €. */
-export function unitLabel(u: string): string {
-  return u.replace(/\bEUR\b/g, '€')
-}
+// `unitLabel` moved to utils/assetForm.ts (the raw-table headers use it too).
+export { unitLabel }
 
 function fmt(v: number): string {
   const abs = Math.abs(v)

@@ -10,6 +10,8 @@ import { nk } from '../utils/queryKeys'
 import { coerceForColumn } from '../utils/coerce'
 import { useSimulationStore } from '../store/simulationStore'
 import { useCatalog } from '../hooks/useCatalog'
+import { useAssetSchema } from '../hooks/useAssetSchema'
+import { SCHEMA_CLASSES } from '../api/assetSchema'
 import {
   CLOSED_SETS, buildSeriesIndex, columnHeaderLabel, columnHeaderTooltip,
   isBooleanDtype, readOnlyReason, resolveEditability, resolveEditor,
@@ -59,19 +61,14 @@ const TAB_COLUMNS: Record<Tab, string[]> = {
   Carriers:     ['name', 'co2_emissions', 'nice_name', 'color', 'unit'],
 }
 
+// Short names for the columns NO asset schema describes (a Bus's, a Carrier's).
+// No units here: a described column takes its descriptor's label and stored
+// unit, everything else the catalog's unit (`columnHeaderLabel`, S1d), so one
+// list can no longer tell a Store "€/MW/yr".
 const COL_LABELS: Record<string, string> = {
-  v_nom: 'V nom (kV)', s_nom: 'S nom (MVA)', p_nom: 'P nom (MW)',
-  v_nom_0: 'V₀ (kV)', v_nom_1: 'V₁ (kV)', tap_ratio: 'Tap',
-  p_set: 'P set (MW)', q_set: 'Q set (MVAr)', max_hours: 'Max hrs',
-  efficiency_store: 'η store', efficiency_dispatch: 'η disp',
-  p_nom_extendable: 'Extendable', marginal_cost: 'MC (€/MWh)', capital_cost: 'CC (€/MW/yr)',
-  sub_network: 'Sub-net',
-  // Store-specific. e_nom is energy capacity (MWh); e_initial seeds SoC at t=0;
-  // e_cyclic (bool) ties initial SoC = final SoC for cyclic operation.
-  e_nom: 'E nom (MWh)', e_nom_extendable: 'Extendable', e_initial: 'E init (MWh)',
-  e_cyclic: 'Cyclic', standing_loss: 'Stand. loss',
+  v_nom: 'V nom', sub_network: 'Sub-net',
   // Carrier columns
-  co2_emissions: 'CO₂ (t/MWh primary)', nice_name: 'Display name',
+  co2_emissions: 'CO₂, primary energy', nice_name: 'Display name',
 }
 
 const TAB_TYPES: Record<Tab, string | null> = {
@@ -389,6 +386,10 @@ function AssetTable({
     () => toCatalogMap(catalogPayload?.attributes ?? []),
     [catalogPayload],
   )
+  // S1d: a described class's headers come from its asset schema (label +
+  // stored unit), the words its Expert card uses.
+  const { data: schema } = useAssetSchema(SCHEMA_CLASSES.has(componentClass) ? componentClass : null)
+  const headerOf = (col: string) => columnHeaderLabel(col, catalog, COL_LABELS, schema)
   const { data: tsList = [] } = useQuery({
     queryKey: nk(currentProject, 'timeseries'),
     queryFn: networkApi.listTimeseries,
@@ -1024,7 +1025,7 @@ function AssetTable({
                       disabled={col === 'name'}  // anchor column — never hidden
                     />
                     <span className="font-mono text-[11px]">{col}</span>
-                    {COL_LABELS[col] && <span className="text-[10px] text-muted">— {COL_LABELS[col]}</span>}
+                    {headerOf(col) !== col && <span className="text-[10px] text-muted">— {headerOf(col)}</span>}
                   </label>
                 ))}
               </div>
@@ -1108,13 +1109,13 @@ function AssetTable({
                 <th
                   key={col}
                   onClick={() => handleSort(col)}
-                  // D15: a curated COL_LABELS entry wins; otherwise the catalog
-                  // unit is appended, so Lines read `r (Ohm)`. The tooltip
-                  // additionally states the per-km split for r/x/b.
+                  // D15 / S1d: the asset schema's label and stored unit; else a
+                  // curated name or the column, with the catalog unit, so Lines
+                  // read `r (Ohm)`. The tooltip states the per-km split for r/x/b.
                   title={columnHeaderTooltip(componentClass, col, catalog) ?? undefined}
                   className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted uppercase tracking-wide cursor-pointer hover:text-text whitespace-nowrap select-none"
                 >
-                  {columnHeaderLabel(col, catalog, COL_LABELS)}
+                  {headerOf(col)}
                   {sortCol === col && (
                     <span className="ml-0.5 text-accent">{sortDir === 'asc' ? '↑' : '↓'}</span>
                   )}
