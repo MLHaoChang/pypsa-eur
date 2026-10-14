@@ -109,7 +109,7 @@ def price_from_pack(n, component: str, name: str, technology: str, *,
             # FOM per MW: the overnight cost × the share's range
             "fom_cost": (_row(pack, f"{technology}.investment.fom_share"), overnight),
             "discount_rate": (None, 1.0)})   # capital_cost: derived on every class
-    from services.solver.periodized_costs import _annuity
+    from pypsa.costs import annuity as _annuity   # PyPSA's own; an IC package never imports the solver
 
     # The disclosure states what the LP charges per MW-year: `capital_cost` the annuity alone
     # (its meaning everywhere in the GUI; the column itself stays 0, PyPSA annuitises
