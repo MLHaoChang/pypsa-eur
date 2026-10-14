@@ -85,8 +85,9 @@ card and fence as the built-in tools.
 
 ### A.2 Lifecycle
 
-- **Module**: `harness/mcp_client.py` owns every connection; the loop never
-  imports it.
+- **Module**: `harness/mcp_client.py` owns every connection; the loop reaches
+  it only through `tier_for`, `server_for` and `dispatcher_for` (pinned by
+  `tests/test_harness_mcp_client.py`).
   - Connect lazily, at the first session start after the config changes.
   - Keep the connection per server, process-wide.
   - Reconnect on failure with the existing retry schedule (`budget.py`).
@@ -137,9 +138,9 @@ without a card, as a built-in read does.
 | Seam | Change |
 |---|---|
 | Tools payload | `providers/wiring._tools_payload_for_profile` appends `session.external_tools` after `TOOLS` (so the built-in prefix stays cached); the OpenAI 128-cut ranks them like any tool, control tools first |
-| Dispatch | `TOOL_ROUTES` gains the sentinel `_MCP_CALL` (in `NON_HTTP_SENTINELS`); the loop's handler lookup asks `mcp_client.dispatcher_for(session, name)` when `DISPATCHERS` has no entry. Order unchanged: allowlist → `tool_guard` → validators → card → handler |
-| Toolsets | external tools appear in the `all` domain and a new `external` domain only; `filter_tools`' substring match never pulls them into the built-in domains |
-| `find_capabilities` | searches the session's external tools after the static index (no `lru_cache` over them), marking hits `external: true` |
+| Dispatch | The loop's handler lookup asks `mcp_client.dispatcher_for(session, name)` when `DISPATCHERS` has no entry. Order unchanged: allowlist → `tool_guard` → validators → card → handler. (Built without a `TOOL_ROUTES` sentinel: external tools never enter `TOOLS`, so nothing routes them; the loop skips the dirty mark and the undo snapshot for them, since they edit no project.) |
+| Toolsets | external tools are offered only while the session's toolset is `all`; a narrowed toolset leaves them out. (An `external` domain for `use_toolset` is left for a later slice: it changes that tool's schema and the inventory.) |
+| `find_capabilities` | later slice: it still searches the static catalogue only |
 | Checked mode | unchanged: `tool_guard` refuses them (`capability_unsupported`) |
 | Project lock | `tool_edits_network` is false for every external tool; they are not lock-gated. `ROUTE_POLICY` gains one class, `EXTERNAL_MCP`, asserted for the sentinel |
 | Inventory | unchanged: runtime tools never enter `TOOLS`; the inventory sees only the new sentinel |
@@ -188,9 +189,9 @@ records what the model was offered.
 - **Fallback**: if the SDK's footprint or pins clash, a hand-written client over
   `httpx` plus a subprocess for stdio is the fallback. It needs only the four
   methods in A.2.
-- **Layering**: `tests/test_harness_layout.py` gains a check that only
-  `harness/mcp_client.py` (and, for B, `harness/mcp_server.py`) imports `mcp`,
-  and that `loop.py` imports neither.
+- **Layering**: only `harness/mcp_client.py` (and, for B,
+  `harness/mcp_server.py`) speaks the protocol; `loop.py` touches the client
+  through its three lookups only.
 
 ### A.8 Tests and parity
 
@@ -216,6 +217,16 @@ records what the model was offered.
   probe asserts the read call runs without a card and the write call shows one
   in Expert, on each wire.
 - **Frontend**: the settings section and the card's "External tool" label.
+
+### A.8a What slice 1 built (2026-10-14)
+
+`harness/mcp_client.py`, without the SDK: the A.7 fallback, because the SDK
+(mcp 2.3.0) brings `httpx2`, `opentelemetry-api`, `pyjwt[crypto]` and
+`mcp-types` into the bundle and a `pixi.lock` regeneration. The rest is as
+A.1–A.6, with the differences noted in A.4. An external tool is also never
+auto-approved (`PYPSA_GUI_CHAT_AUTO_APPROVE_TIERS` does not apply to it).
+Tests: `tests/test_harness_mcp_client.py` against `smoke/mcp_stub_server.py`;
+the parity battery's MCP probe is left for slice 2.
 
 ### A.9 Slices
 

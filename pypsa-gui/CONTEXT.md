@@ -200,6 +200,16 @@ change still needs its card. Only the user resumes a paused or blocked goal,
 from the goal strip.
 _Avoid_: task (that is a durable assistant task), plan
 
+**External tool**:
+A tool from an MCP server an install's super-admin listed in
+`<app data>/mcp-servers.json` (`harness/mcp_client.py`), offered to the
+assistant as `mcp__<server>__<tool>` beside the built-in catalogue, for every
+provider. Its list is fixed for the chat session. Unless the server marks it
+read-only, it gets the confirmation card in Expert as well as Guided, and its
+results are fenced like any tool result. There are none until an admin lists a
+server.
+_Avoid_: plugin, connector, integration
+
 **Choice card**:
 The card the panel renders when the assistant calls `ask_user`: a title, a
 question, options with one marked recommended, and a free-text field. A pick
