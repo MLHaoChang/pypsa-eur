@@ -256,7 +256,8 @@ app's chat panel (gate g2), no web deployments and so no personal-token model.
   forwards to it.
 - **Dispatch through the same path as the loop**: the loop's per-call dispatch
   (allowlist → `tool_guard` → validators → card → handler) is extracted into
-  one function both callers use, so the external caller cannot skip a step.
+  one function both callers use, so the external caller cannot skip a step
+  (`harness.loop.dispatch_tool_call`, build step 3).
 - **The caller's identity and project**: each MCP connection gets its own chat
   session (`ChatSession`, owner = the authenticated user, id `mcp-<random>`),
   with the acting-user ContextVars and a turn cell bound as `chat_stream` binds
@@ -394,6 +395,10 @@ Each step is its own PR, in this order (coordinator, 2026-10-14):
 3. **The dispatch extraction** (B.1): the loop's per-call path (allowlist →
    `tool_guard` → validators → card → handler) becomes one function the loop
    calls, with no behaviour change, pinned by the existing dispatch tests.
+   Built as `harness.loop.dispatch_tool_call` (the allowlist moved into it
+   from `_dispatch_tool_uses`; `_dispatch_real_tool_call` keeps its name and
+   module, so every monkeypatch still lands), pinned by
+   `tests/test_harness_dispatch_entry.py`.
 4. **Local exposure** (Part B, issue 11): `harness/mcp_server.py` at
    `/api/mcp` in local mode only, the per-launch token, the stdio shim, the
    panel strip for external cards (g2), write-and-above carded in every mode.
