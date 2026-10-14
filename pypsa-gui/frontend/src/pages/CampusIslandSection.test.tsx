@@ -159,7 +159,7 @@ describe('island section: the form', () => {
     const user = userEvent.setup()
     await screen.findByTestId('island-form')
     await waitFor(() => expect(api.islandReport).toHaveBeenCalledTimes(1))
-    await user.click(screen.getByRole('button', { name: /Run island study/ }))
+    await user.click(screen.getByRole('button', { name: /Run cost-of-islanding study/ }))
     await waitFor(() => expect(api.runIslandStudy).toHaveBeenCalledWith('Hub A'))
     await waitFor(() => expect(api.islandReport).toHaveBeenCalledTimes(2))
   })
@@ -169,7 +169,7 @@ describe('island section: the form', () => {
     const user = userEvent.setup()
     await screen.findByTestId('island-form')
     await user.click(screen.getByLabelText('seamless'))
-    expect((screen.getByRole('button', { name: /Run island study/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: /Run cost-of-islanding study/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('says when the project has no island requirements', async () => {

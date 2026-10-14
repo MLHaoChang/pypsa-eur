@@ -216,7 +216,7 @@ export default function CampusIslandSection({ name }: { name: string }) {
             <Save size={13} /> Save island config
           </Btn>
           <Btn onClick={() => run.mutate()} disabled={run.isPending || !saved || dirty}>
-            <Play size={13} /> {run.isPending ? 'Solving the variants…' : 'Run island study'}
+            <Play size={13} /> {run.isPending ? 'Solving the variants…' : 'Run cost-of-islanding study'}
           </Btn>
         </div>
 
