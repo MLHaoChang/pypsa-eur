@@ -281,16 +281,7 @@ TOOL_POLICY: dict[str, tuple[str, str]] = {
 
 # Recorded, reproduced, open defects. Each MUST still be a gap. When one is
 # fixed, `test_every_known_gap_is_still_a_gap` fails until its line is deleted.
-_ITEM_18 = (
-    "OPEN-ITEMS item 18: calls the campus service directly, skipping the "
-    "`_check_lock` its HTTP handler runs. "
-    "findings/2026-10-06-campus-chat-tools-bypass-the-lock-check.md"
-)
 KNOWN_GAPS: dict[str, str] = {
-    "campus_draft_campus": _ITEM_18,
-    "campus_run_study": _ITEM_18,
-    "campus_extract_grid_code": _ITEM_18,  # #84, same shape, found the day it merged
-    "campus_set_library": _ITEM_18,  # #91, replaces the project's asset library
 }
 
 

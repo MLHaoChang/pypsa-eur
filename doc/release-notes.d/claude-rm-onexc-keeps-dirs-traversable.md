@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Removing a project directory no longer leaves it unreadable on Linux and macOS when the removal fails part-way. The removal error handler added write permission by setting the mode to `0o200`, which also took away read and traverse, so a study fork that could not be deleted at once stayed behind and later reads of it failed with `PermissionError`.
