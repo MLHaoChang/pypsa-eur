@@ -262,14 +262,17 @@ def island_report(project) -> dict:
     state = ce.get_island(project)
     tables, missing = [], []
     if state["config"] is None:
-        return {"caveat": CAVEAT, "tables": [], "missing": ["island_config.json"]}
-    island = validate(state["config"])
-    tables += [_requirements(island), _units(island)]
-    study = state["study"]
-    if study is None:
-        missing.append("island study")
+        # The island-hours results below come from the campus's own island
+        # data (I1), so they are shown without the sidecar too.
+        missing.append("island_config.json")
     else:
-        tables += [_costs(study), _binding(study), _facts(study)]
+        island = validate(state["config"])
+        tables += [_requirements(island), _units(island)]
+        study = state["study"]
+        if study is None:
+            missing.append("island study")
+        else:
+            tables += [_costs(study), _binding(study), _facts(study)]
     hours = _island_hours(ce.campus_dir(project) / "run" / "campus_selected.csv")
     if hours is None:
         missing.append("campus run with island tables")
