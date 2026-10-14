@@ -253,6 +253,39 @@ the same rules, and a case definition only chooses which tabs and stages it show
 
 ## 5. Slices
 
+### 5.0 Revised order after the owner's answers (14 Oct, relayed by the coordinator)
+
+The owner's answers:
+- Q1 (a) all five stages, thin.
+- Q2 (b) **build P5**.
+- Q3 (a) the template's numbers.
+- Q4 **add IEEE 2800/NERC** beside EU RfG/DCC.
+- Q5 (a) docx and PDF with the chapter outline.
+- Q6 (a) a key will be added. Until then the fake provider; live-assistant claims stay unverified.
+- Q7 (b) **recommended GFM settings in the first demo**.
+- Q8 (a) a computed card, and the assistant only when the chat is open.
+
+This session builds P5 and the GFM settings; the gatekeeper reviews and OKs each engine PR. **Engine first**, then the
+walkthrough. Designs are in §7 and go to the gatekeeper before any code.
+
+| # | Slice | Main files | Gates |
+|---|---|---|---|
+| 1 | **P5a: finance safety.** Close H1: refuse `staged_build_vintage_bounds_not_supported` when a vintage-bound parent was built in more than one period, instead of financing it all in year 1. Fix H2: the counterfactual's served load applies the solve's `load_scale_factors` | `services/results/finance_case.py`, tests | **G** |
+| 2 | **P5b: per-asset COD and staged capex** in the engine: `FinanceCase.asset_cod`, `Operating.stage_capex`, per-asset clocks for degradation, replacements, terminal value and LCOS; tax vintages; equity-funded later stages | `services/finance/{case,timeline,cashflow,replacements,engine,lcos,report,export_xlsx}.py`, `models/finance.py`, tests | **G** |
+| 3 | **P5c: adapter.** Staged builds stop being refused: rule P5-a (a stage's COD year is a period year), stages from `build_year` and from campus extras, a stage table in the report; the remaining refusals listed in §7.1 | `services/results/finance_case.py`, tests | **G** |
+| 4 | **GFM-a: recommender engine** `gridspine/static/gfm_tuning.py`: bounds, margin, analytic warm start, bisection, a capacity fallback through `cuts_for_event`, and the GFM-vs-GFL comparison; E4 excluded | `gridspine/static/gfm_tuning.py` (new), a small `judge` refactor in `frequency.py`, `gridspine/drivers/campus_study.py`, tests | **G** |
+| 5 | **GFM-b: product.** Routes `GET/POST …/island/gfm-settings[/apply]` (apply writes the sidecar and the campus YAML under the edit lock and marks the study and hub stale); chat tools `campus_island_gfm_settings` (read) and `campus_apply_gfm_settings` (write, card); a `CampusIslandGfmSection` | `services/campus_island_tuning.py` (new), router, `chat_tools.py`, `catalogue.py`, frontend section, inventory | R |
+| 6 | **Grid codes: IEEE 2800 / NERC** profiles beside `eu_rfg_dcc_ce` (design §7.3); the fields steady-state checks can test, the rest as "dynamic study needed" flags | `gridspine/templates/data/grid_codes.yaml`, maybe `campus_compliance.py`, tests | **G** |
+| 7 | **D1: campus run as a background job** with progress, Abort, the busy banner and `wait_for_job` (the GFM and grid-code runs need it to be usable) | `campus_electrical_service.py`, router, panel | R |
+| 8 | **Data center template, multi-period.** Milestone periods with an IT-load ramp, staged candidates per period, a commercial config so the investment case runs out of the box (D4) | `project_templates/eh_templates.py`, sidecars | **G** (IC inputs) |
+| 9 | D2 plan status and D12 insight rules (the spine) | new `services/plan_status.py`, `services/insights/`, router, catalogue | R |
+| 10 | D9 + D3: the `datacenter-plan` workflow and the stage 2 → 3 handoff | `harness/workflows/`, EH study service | R |
+| 11 | D13 + D14: highlights in every tab; follow the tab (card first, assistant when the chat is open) | frontend tabs, dock (agreed with the companion stream) | — |
+| 12 | D8: structured report (executive summary, investment, reliability, grid, control, conclusion) | `services/reports/*` | — |
+| 13 | D5/D6/D7 deepening, D0 small fixes, D11 end-to-end smoke | various | per slice |
+
+The tables below (D0–D14) keep the original slice definitions.
+
 Each slice is a small PR off master, test-first, with a release-note fragment. Gatekeeper OK is needed where
 marked **G** (gridspine/ or IC engine semantics). **R** means a new route or chat tool: it runs the lock-policy,
 handler-dependency, argshape and ACL suites, and regenerates the inventory.
@@ -308,3 +341,129 @@ handler-dependency, argshape and ACL suites, and regenerates the inventory.
    which costs tokens on every click. (c) Only an "Explain this tab" button, so nothing is proactive.
 7. **Control-strategy depth.** (a) **Screening plus flags first, recommended GFM settings later**
    (Recommended). (b) Recommended settings in the first demo; gridspine work, gatekeeper.
+
+## 7. Engine designs (for the gatekeeper's OK before code)
+
+### 7.1 P5: multi-period finance of staged builds
+
+**What exists.** P5 was named, not designed. The P0/P1 roadmap (`2026-09-26-edge-investment-case-p0-p1.md:692`)
+gives it flex archetypes. P4 rule C2 (`2026-09-30-edge-investment-case-p4.md:57-66`) gives it per-asset CODs and
+staged builds. G1/G2 (`2026-10-07-ic-g1-g2-campus-equipment.md:108-116`) refuse later campus purchases until P5.
+The engine already steps period templates over years (`cashflow._templates_by_year`, C3) and holds year-indexed
+arrays. Only the single COD (`timeline.py:79-84`, `finance_case._cod`) and the refusal
+(`finance_case.py:1505-1516`) stand in the way.
+
+**Two hazards on master now, fixed first (slice 1):**
+- **H1.** Vintage bounds clone build-year rows for the solve and fold them back into the parent, with the
+  breakdown in `n.meta["vintage_results"]` (`vintage_service.py:877-890`). The refusal reads only the parent's
+  `build_year`, so a ramp built through vintages gets past it and is financed as if it were all bought in year 1.
+  Fix: refuse `staged_build_vintage_bounds_not_supported` when a parent has more than one period with
+  `p_nom_opt > 0`. A later slice may split it into `<parent>@<year>` assets.
+- **H2.** `_served_load` (`finance_case.py:633`) reads the raw `loads_t.p_set`, so the counterfactual bill
+  ignores `load_scalers`. Fix: apply `load_scale_factors(n, cfg)`. The same applies to
+  `commercial/connection.py:498`.
+
+**Design (slices 2–3).**
+1. **Model.**
+   - `FinanceCase.asset_cod: dict[str, date]` (in the hash). `case.cod` = the earliest.
+   - `Operating.stage_capex` (array), apart from `capex`, so stage 1 is computed exactly as today.
+   - `FinanceInputs.stage_capex_lead_years = 1`.
+2. **Per-asset COD.** The typed date, else 1 January of `build_year`.
+   - **Rule P5-a:** a later stage's COD year must equal an investment period year, because the template that
+     dispatches it starts there. Otherwise refuse `staged_cod_not_period:<asset>`.
+   - Campus extras with a later `build_year` become stages under the same rule, replacing
+     `extra_asset_staged_build`.
+3. **Templates.** C3's step function is unchanged, with no interpolation: each period is what the LP dispatched.
+   A staged asset's lines and energy start in its period because PyPSA leaves inactive assets out.
+   - Refuse `asset_retires_in_horizon:<asset>` when build_year + lifetime ends inside the case horizon, since a
+     replacement would contradict the dispatch.
+4. **Staged capex.**
+   - Each stage costs Σ overnight × (1 + contingency) × (1 + r_capex)^(y − base_year), placed in
+     y = COD year − lead. It must be ≥ y0. Escalation uses the `capex` class, as replacements already do.
+   - Project and equity cash subtract it.
+   - It is **equity-funded**: debt sizes on stage 1 only, flagged `staged_capex_equity_funded`. CFADS
+     subtracts it.
+   - Tax depreciates it as `vintages`, reusing the replacement path (`tax.py:250-279`).
+5. **Per-asset clocks.** Degradation operating year k, replacement schedule (`replacements._generated`),
+   `remaining_life_terms`, `asset_lifetime_short` and the LCOS capex share all run from the asset's own COD.
+6. **Metrics.**
+   - NPV, IRR, payback, LCOE and LCOS use the same year arrays; there are no new formulas.
+   - `payback_sustained` is reported, because mid-life capex makes it meaningful.
+   - DSCR, LLCR and PLCR stay stage-1 debt metrics.
+7. **Still refused:**
+   - an asset in service before the first period;
+   - a stage COD that is not a period year;
+   - a network retirement inside the horizon;
+   - incentives, ITC/PTC or dated tax schedules on a later-stage asset (`staged_incentive_not_supported:<a>`),
+     because `case.cod` drives eligibility;
+   - debt on later stages;
+   - vintage-bound parents until they are split;
+   - myopic-freeze results;
+   - interpolation between periods.
+8. **Tests.**
+   - Rewrite the four pins: `test_finance_case_adapter.py:590-614`, `test_finance_case_extra_assets.py:371-379`,
+     `test_finance_cashflow.py:139-143,219` and `test_finance_case_upfront_parts.py:259-270`.
+   - New `test_finance_staged.py`: a two-stage hand case checked against hand-computed numbers (capex year,
+     escalation, vintages, degradation k, replacements, terminal value), every refusal, and H1/H2 regressions.
+   - One live-solve staged data center case: 2027, 2030 and 2035 with a load ramp.
+
+### 7.2 Recommended GFM settings
+
+**What exists.**
+- `frequency.py` screens fixed settings: k = P_n/(R·f0); inertia from a genset's H, a VSM's H_v, or τ_f·P_n/(2R)
+  for a droop GFM; i_max as a P cap.
+- `cuts_for_event` inverts a failing event into capacity: ΔM, ΔK and headroom.
+- The island schema has lower bounds only (`gridspine/schema/island.py:102-130`).
+- Nothing tunes the settings.
+- E4 (`e4_ups_bridged`) uses gensets only (`frequency.py:651`), so GFM settings cannot change it, and the
+  recommender skips it. This also keeps the recommender away from the slow code the gatekeeper is looking at.
+
+**Design (slices 4–5).**
+- **Module.** A new module `gridspine/static/gfm_tuning.py` with
+  `recommend_gfm_settings(cases, limits, *, bounds=GFM_BOUNDS, margin, search=(5e-3, 10), verify=(1e-3, 20)) -> Recommendation`.
+- **Cases.** E1/E2/E3/E5 (seamless) and E6 (planned) at the island hours, built like `_event_run` and
+  deduplicated on `(repr(units), dp)`.
+- **Bounds (ledgered as assumed).**
+  - droop 1–10 %;
+  - H_v 0.5–10 s;
+  - τ_f 0.01–1 s;
+  - i_max fixed at its current value, because raising it is hardware and so capacity. With `allow_i_max`, up
+    to 1.5 pu.
+- **Margin.** Judge against limits shrunk by `gfm_margin`. A `_checks()` helper is refactored out of `judge`
+  with no change in behaviour, so a slack value can be reported.
+- **Search.** One setting per unit across all hours, since these are firmware constants, with common scalars
+  across GFMs so they keep sharing proportionally:
+  1. If the current settings pass with margin, keep them.
+  2. Warm start analytically: K_req = ΔP_max/Δf_allowed·(1+m) − K_gensets; M_req = f0·ΔP/(2·RoCoF·(1−m)) −
+     M_gensets; cap H by 0⁺ inertial saturation.
+  3. Bisect droop on the steady checks.
+  4. Bisect H on the transient checks.
+  5. At most two rounds.
+  6. Verify once at the study's step.
+  - Expected cost: about 32 short runs per case at about 0.06 s each, so seconds to a minute.
+- **Fallback.** No in-bounds setting passes → best-bounded settings plus `cuts_for_event` rows ("settings
+  exhausted; capacity needed → I7").
+- **Comparison.** Each converter run as gfl_fw, gfm_droop or gfm_vsm at the recommended settings: RoCoF,
+  nadir, qss, slack and saturation.
+- **Output.** A `Recommendation`: settings per unit (current → recommended), case results before and after,
+  the binding case, `achievable`, capacity rows, the comparison, and the label "heuristic screening".
+- **Product (slice 5).**
+  - Run on demand, not inside the campus run.
+  - "Apply" writes the sidecar **and** the campus YAML island blocks (the run reads the YAML,
+    `campus_electrical_service.py:1160-1175`) under the edit lock.
+  - Apply marks the island study stale, and the hub too, because droop, H_v and τ_f change the I2b inertia
+    and droop rows.
+  - Chat tools: a read tool and a write tool with a confirmation card.
+- **Demo note.** The template runs only `ups_bridged`, so GFM settings matter only once **seamless** is on.
+  The template notes say a 30 MW BESS cannot form a seamless island, so the demo will most likely show "no
+  in-bounds setting passes → capacity needed" first, and pass after I7 or a larger BESS. That is the honest
+  result; it is not to be tuned away.
+- **Tests (`tests/gridspine/test_gfm_tuning.py`).**
+  - A passing island is left unchanged.
+  - Closed forms: H_v for a RoCoF-only case, and droop for a qss case.
+  - Bounds and the saturation cap hold.
+  - Saturation with a fixed i_max gives `achievable=False`, with headroom equal to `cuts_for_event`.
+  - Final settings pass `judge` on the shrunk limits at the study step.
+  - E4 is never called.
+  - The `simulate` call count stays bounded.
+  - GFL → GFM improves RoCoF.
