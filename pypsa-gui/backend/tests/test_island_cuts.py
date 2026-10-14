@@ -94,3 +94,60 @@ def test_a_cut_past_the_periods_hours_is_refused():
 def test_a_cut_of_an_unknown_kind_is_refused():
     with pytest.raises(IslandRefusal, match="kind"):
         _solve(_hub(load=10.0), _with([_cut("damping", 1.0)]))
+
+
+# ── the primal estimate (Q6): the cheapest candidate that meets the cut ─────
+
+
+from services.solver.island import cut_estimates  # noqa: E402
+from tests.test_island_rows import _a, _genset  # noqa: E402
+
+
+def _estimate(cut, n=None, units=None):
+    n = n if n is not None else _hub(load=10.0)
+    island = _seamless(units or _units())
+    (row,) = cut_estimates(n, island, [cut])
+    return row
+
+
+def test_the_estimate_is_the_shortfall_over_the_bess_coefficient_times_its_cost():
+    """Inertia: ΔM = 25 − 12.5 at 1.25 MW·s/MW is 10 MW at 100/MW = 1000.
+    Droop: ΔK = 15 − 5 at 0.5 MW/Hz per MW is 20 MW = 2000. Headroom up:
+    12 − 10 = 2 MW = 200."""
+    for kind, required, current, mw, cost in (("inertia", 25.0, 12.5, 10.0, 1000.0),
+                                              ("droop", 15.0, 5.0, 20.0, 2000.0),
+                                              ("headroom_up", 12.0, 10.0, 2.0, 200.0)):
+        row = _estimate({**_cut(kind, required), "current": current})
+        assert row["candidate"] == "bess", kind
+        assert row["added_mw"] == pytest.approx(mw), kind
+        assert row["estimate"] == pytest.approx(cost), kind
+        assert row["label"].startswith("estimate")
+
+
+def test_the_cheapest_candidate_wins():
+    """A spinning extendable genset at 120/MW gives H/cos φ = 1.5/0.8 =
+    1.875 MW·s per MW: 12.5 MW·s of it is 6.667 MW = 800, below the BESS's
+    1000."""
+    n = _hub(load=10.0)
+    n.add("Generator", "g", bus="site", p_nom_extendable=True, capital_cost=120.0, marginal_cost=1000.0)
+    units = _units(gensets={"g": _genset(spinning=True, p_min_pu=_a(0.3))})
+    row = _estimate({**_cut("inertia", 25.0), "current": 12.5}, n=n, units=units)
+    assert row["candidate"] == "g"
+    assert row["added_mw"] == pytest.approx(12.5 / 1.875)
+    assert row["estimate"] == pytest.approx(800.0)
+
+
+def test_a_cold_genset_gives_no_inertia_at_the_instant_and_is_no_candidate():
+    n = _hub(load=10.0)
+    n.add("Generator", "g", bus="site", p_nom_extendable=True, capital_cost=1.0, marginal_cost=1000.0)
+    units = _units(gensets={"g": _genset()})               # not spinning
+    assert _estimate({**_cut("inertia", 25.0), "current": 12.5}, n=n, units=units)["candidate"] == "bess"
+
+
+def test_a_met_cut_costs_nothing_and_one_without_a_candidate_says_so():
+    assert _estimate({**_cut("inertia", 10.0), "current": 12.5})["estimate"] == 0.0
+    n = _hub(load=10.0)
+    n.storage_units.at["bess", "p_nom_extendable"] = False
+    row = _estimate({**_cut("inertia", 25.0), "current": 12.5}, n=n)
+    assert row["candidate"] is None and row["estimate"] is None
+    assert "no extendable" in row["label"]

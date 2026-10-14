@@ -836,6 +836,72 @@ def _sort_cuts(cuts, labels, seamless) -> tuple[dict, list]:
     return {label: list(v.values()) for label, v in by_label.items()}, not_applied
 
 
+ESTIMATE_LABEL = ("estimate (primal): the cheapest extendable candidate that meets the cut, "
+                  "times its capital cost; not a solve")
+
+
+def _cut_coefficients(n, island) -> dict:
+    """``{kind: [(candidate, component, coef per MW of p_nom)]}``: the
+    extendable units and what one MW of each adds to the quantity a cut
+    bounds, as the I2b rows count it (M: a droop GFM's τ_f/(2R), a VSM's
+    H_v/pf, a spinning genset's H/cos φ·η; ΣK: 1/(R·f0), ·η for a genset;
+    headroom: 1 for GFM storage, η for a spinning genset upward)."""
+    from services.adequacy.island_config import GFM_CONTROLS
+
+    units = island["units"]
+    out = {kind: [] for kind in CUT_KINDS}
+    for name, u in units.items():
+        v = u["values"]
+        if u["kind"] == "bess" and u.get("control") in GFM_CONTROLS and name in n.storage_units.index:
+            if not bool(n.storage_units.at[name, "p_nom_extendable"]):
+                continue
+            m_coef = (v["H_v_s"] / v["pf_rated"] if u["control"] == "gfm_vsm"
+                      else v["tau_f_s"] / (2.0 * v["droop_pct"] / 100.0))
+            for kind, coef in (("inertia", m_coef), ("droop", 1.0 / (v["droop_pct"] / 100.0 * F0_HZ)),
+                               ("headroom_up", 1.0), ("headroom_down", 1.0)):
+                out[kind].append((name, "StorageUnit", coef))
+        elif u["kind"] == "genset" and (name in n.generators.index or name in n.links.index):
+            comp, eta = _genset_out(n, name)
+            frame = n.generators if comp == "Generator" else n.links
+            if not bool(frame.at[name, "p_nom_extendable"]):
+                continue
+            if u.get("governor") == "droop":
+                out["droop"].append((name, comp, eta / (v["droop_pct"] / 100.0 * F0_HZ)))
+            if u.get("spinning"):                    # online at 0⁺
+                out["inertia"].append((name, comp, v["H_s"] / v["cos_phi_r"] * eta))
+                out["headroom_up"].append((name, comp, eta))
+    return out
+
+
+def cut_estimates(n, island, cuts) -> list[dict]:
+    """The primal estimate of each cut (I7, owner Q6): the shortfall
+    ``required − current`` met by the cheapest extendable candidate,
+    ``added_mw`` of it at its capital cost. A cut already met costs 0; one
+    no candidate can meet has no estimate, and says why."""
+    coefs = _cut_coefficients(n, island)
+    rows = []
+    for cut in cuts:
+        short = max(float(cut["required"]) - float(cut.get("current") or 0.0), 0.0)
+        row = {**cut, "shortfall": short, "candidate": None, "added_mw": None, "estimate": None,
+               "label": ESTIMATE_LABEL}
+        if short == 0.0:
+            row.update(added_mw=0.0, estimate=0.0)
+        else:
+            best = None
+            for name, comp, coef in coefs.get(cut["kind"], ()):
+                frame = getattr(n, _LIST_NAMES[comp])
+                mw = short / coef
+                cost = mw * float(frame.at[name, "capital_cost"])
+                if best is None or cost < best[2]:
+                    best = (name, mw, cost)
+            if best is None:
+                row["label"] = f"no extendable unit adds {cut['kind']}; no estimate"
+            else:
+                row.update(candidate=best[0], added_mw=best[1], estimate=best[2])
+        rows.append(row)
+    return rows
+
+
 def _add_soc_before(lin: _Lin, n, sns, sns_p, name, coef):
     """lin += coef·e(t−1) for one StorageUnit (its initial SoC as a constant
     where PyPSA starts from it)."""
