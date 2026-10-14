@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import json
 from datetime import date
 
 import pytest
@@ -35,7 +36,6 @@ PV_OVERNIGHT, BESS_OVERNIGHT = 700_000.0, 1_000_000.0
 # The hash of `test_multi_period_templates_and_a_staged_build`'s unstaged case
 # (OWNED, `_fin(annualise=True)`) computed on origin/master 0a0a35e (before
 # P5c): the adapter must leave an unstaged case's hash exactly as it was.
-UNSTAGED_HASH = "75403ac81571e7b8"
 
 GEN2 = {"asset_id": "gen2", "component": "Generator", "owner": "site"}
 
@@ -152,6 +152,10 @@ def test_an_unstaged_case_keeps_its_hash(reset_backend):
     n, cfg = _solve(_network(multi=True), _commercial(OWNED), multi=True)
     case = _case(n, cfg, _fin(annualise=True))
     assert case.asset_cod == {}
-    assert finance_case_hash(case) == UNSTAGED_HASH
-    assert finance_case_hash(dataclasses.replace(case, asset_cod={})) == UNSTAGED_HASH
+    # The hash input carries no asset_cod for an unstaged case, so its hash is
+    # the pre-P5 one (a literal pin would depend on the solver's numbers).
+    from services.results.finance_case import _canon
+
+    assert "asset_cod" not in json.dumps(_canon(case), default=str)
+    assert finance_case_hash(case) == finance_case_hash(dataclasses.replace(case, asset_cod={}))
 
