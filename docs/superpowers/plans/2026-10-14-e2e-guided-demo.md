@@ -467,3 +467,57 @@ arrays. Only the single COD (`timeline.py:79-84`, `finance_case._cod`) and the r
   - E4 is never called.
   - The `simulate` call count stays bounded.
   - GFL → GFM improves RoCoF.
+
+### 7.3 IEEE 2800 / NERC grid-code profiles
+
+**What exists.**
+- Profiles in `gridspine/templates/data/grid_codes.yaml`, loaded by `gridspine/templates/grid_codes.py`, carry four
+  limit kinds:
+  - `voltage_bands` by kV;
+  - `q_range_demand` (Q/P_ref of the site's import capacity);
+  - `rvc_limit_pct`;
+  - `campus_voltage`.
+- Each limit carries a clause and a source tag (`code | assumed | extracted`).
+- The loader ignores unknown top-level keys, so a new field loads silently and nothing reads it.
+- The GUI upload extracts and confirms only the four kinds.
+- Island frequency limits (RoCoF, f_min/f_max, qss) live in the island requirements, not in the profile.
+
+**What the standards say** (sources gathered 14 Oct; full table and URLs in the session's research notes):
+- **IEEE 2800-2022 covers IBR plants on transmission and sub-transmission, not loads.** It applies where a TSO
+  or ISO adopts it.
+  - Reactive capability: ±32.87 % of the IBR's ICR (about ±0.95 pf) at the RPA (default: the POM).
+  - Continuous voltage: 0.90–1.05 pu, with 1.05–1.10 for 30 min.
+  - RoCoF ride-through: 5 Hz/s.
+  - PFR: 5 % droop, 0.036 Hz deadband (secondary source).
+- **NERC PRC-029-1 (FERC Order 909): IBR ride-through.**
+  - Frequency: 58.8–61.2 Hz continuous; 299 s beyond that; may trip past 61.8 / 57.0.
+  - Voltage (Table 2): 0.90–1.05 continuous, tiered below and above.
+  - It covers BES IBR and non-BES IBR ≥ 20 MVA on a delivery system ≥ 60 kV. A behind-the-meter BESS or PV at a
+    data center is **probably out of scope (unverified)**.
+- **NERC PRC-024-3:** generator protection no-trip zones; a settings audit, not a load-flow check.
+- **Large loads (data centers): no binding NERC ride-through standard yet.**
+  - There is a Level 3 alert (May 2026).
+  - Project 2026-02 drafts CLO-001/002/003 (interconnection, studies, modelling), not ride-through.
+  - FERC ordered the standards filed by 31 Dec 2026.
+  - Binding load ride-through today is regional: ERCOT NOGRR282 / NPRR1308 from 1 Aug 2026; PJM is filing.
+- **Unverified:** the 2800 VRT tiers, the PRC-029 effective date, the 2800 FRT table beyond NERC's "in alignment
+  with" statement, the BES exclusion for behind-the-meter IBR, and the ERCOT curve values.
+
+**Design (slice 6).** One new profile, `us_ieee2800_nerc`, beside `eu_rfg_dcc_ce`, honest about what binds a data
+center:
+
+| Field | Value | Tag | Note |
+|---|---|---|---|
+| `voltage_bands` ≥ 69 kV | 0.90–1.05 continuous, with the new optional `v_max_30min` 1.10 | `code` (2800 cl. 7.2; PRC-029 Table 2) | the 30-min tier is reported, not enforced, by the existing checks |
+| `voltage_bands` 0–69 kV | 0.90–1.10 | `assumed` | NERC sets no steady-state band; the TO's FAC-001 criteria do |
+| `q_range_demand` | 0.329 (±0.95 pf) on the site's import | `assumed` | 2800/Order 827 state this for the IBR at ICR, not the load; the clause says so |
+| `q_range_ibr` (new, optional) | 0.3287 of on-site IBR ICR at the POM | `code` (2800) | a small new check in `campus_reactive.requirement_from` / `connection.py`: the BESS+PV's Q capability against ±32.87 % of their rating |
+| `rvc_limit_pct` | 3 % | `assumed` | no US code value found |
+| `dynamic_requirements` (new, optional, data only) | 2800/PRC-029 FRT 58.8–61.2 Hz, the VRT table, RoCoF 5 Hz/s, PFR 5 %/0.036 Hz, PRC-024-3 zones, large-load VRT (pending, regional) | cited per row | listed in the results and report as **"dynamic study needed"** flags, never as passed checks |
+
+- New fields are optional, so `generic_assumed`, the GUI template, extraction and confirmation keep working.
+  Extraction of the new kinds comes later.
+- Each new profile carries a 0 kV band (`test_campus_grid_code.py:429`).
+- `test_connection.py:153`, which pins exactly two profiles, is updated to the three.
+- The same `dynamic_requirements` list is added to `eu_rfg_dcc_ce` (RfG FRT/LFSM, RoCoF), so both codes report
+  what a steady-state study cannot show.
