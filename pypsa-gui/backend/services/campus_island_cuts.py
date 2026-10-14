@@ -162,11 +162,63 @@ def _verdict(proposed) -> str:
     return f"fails at {len(hours)} hour" + ("" if len(hours) == 1 else "s")
 
 
+#: The ratings a trial refreshes from the re-solved hub (owner, 2026-10-14):
+#: the size of each unit. Every other field, and every other part of the
+#: campus file, is the user's and stays.
+RATING_FIELDS = ("p_mw", "s_mva", "e_mwh")
+
+
+def refresh_ratings(project) -> list[dict]:
+    """Bring the campus file's unit sizes up to the re-solved hub: re-draft
+    in memory, copy each unit's ``RATING_FIELDS`` by ``pypsa_name``, and add
+    the units the solve newly built. Saved (validated) only when something
+    changed. Returns what changed: ``{unit, field, from, to}`` per rating,
+    ``{unit, added: True}`` per new unit, ``{unit, added: False, reason}``
+    for one that cannot be added."""
+    import yaml
+
+    from services import campus_electrical_service as ce
+    from services.adequacy.island_config import SIDECAR_NAME, load_island_config
+
+    path = ce.campus_dir(project) / ce.CAMPUS_FILE
+    spec = yaml.safe_load(path.read_text())
+    campus = spec["campus"]
+    island = load_island_config(project_registry.project_dir(project) / SIDECAR_NAME)
+    with ce._netcdf_lock():
+        draft = ce.cs.draft_from_project(ce._network(project), island=island).spec["campus"]
+    mine = {u.get("pypsa_name"): uid for uid, u in campus["units"].items() if u.get("pypsa_name")}
+    changed = []
+    for uid, unit in draft["units"].items():
+        name = unit.get("pypsa_name")
+        if name is None:
+            continue
+        if name in mine:
+            target = campus["units"][mine[name]]
+            for field in RATING_FIELDS:
+                if field not in unit:
+                    continue
+                old, new = (target.get(field) or {}).get("value"), unit[field]["value"]
+                if old is None or not math.isclose(float(old), float(new), rel_tol=1e-9, abs_tol=1e-9):
+                    target[field] = {**(target.get(field) or {}), "value": new}
+                    changed.append({"unit": mine[name], "field": field, "from": old, "to": new})
+        elif unit.get("bus") not in campus["buses"]:
+            changed.append({"unit": uid, "added": False,
+                            "reason": f"its bus {unit.get('bus')} is not in the campus file"})
+        else:
+            new_id = uid if uid not in campus["units"] else f"{uid}_{name}"
+            campus["units"][new_id] = unit
+            changed.append({"unit": new_id, "added": True})
+    if changed:
+        ce.save_campus(project, yaml.safe_dump(spec, sort_keys=False))
+    return changed
+
+
 def apply_loop(project, *, solve, rerun, stop_event) -> dict:
     """Apply, re-solve, rerun, until nothing fails, nothing more can be cut,
     ``MAX_TRIALS``, or ``stop_event`` (owner QA). ``solve(project)`` re-solves
-    and saves the hub and returns its objective; ``rerun(project)`` reruns
-    the campus study, which proposes the next cuts."""
+    and saves the hub and returns its objective; ``rerun(project)`` brings
+    the campus file's ratings up to it and reruns the campus study, which
+    proposes the next cuts, and returns what it refreshed."""
     state = _state(project)
     new = _new_cuts(_proposed_rows(project), state["cuts"])
     if not new:
@@ -177,10 +229,10 @@ def apply_loop(project, *, solve, rerun, stop_event) -> dict:
         state["cuts"] = _merge(state["cuts"], new)
         _write(project, state)
         objective = solve(project)
-        rerun(project)
+        refreshed = rerun(project) or []
         proposed = _proposed_rows(project)
         trial = {"trial": len(state["trials"]) + 1, "added": new, "objective": objective,
-                 "verdict": _verdict(proposed)}
+                 "refreshed": refreshed, "verdict": _verdict(proposed)}
         state["trials"].append(trial)
         trials.append(trial)
         _write(project, state)
@@ -269,12 +321,15 @@ def _queue_solve(project, user_id, stop_event) -> float | None:
     return job.objective
 
 
-def _rerun(project, settings) -> None:
-    """The campus study again, with its last settings: I3a, I3b, I4–I6 and
-    the cuts the new dispatch still needs."""
+def _rerun(project, settings) -> list[dict]:
+    """The campus file's ratings brought up to the re-solved hub, then the
+    campus study again with its last settings: I3a, I3b, I4–I6 and the cuts
+    the new sizes still need. Returns what was refreshed."""
     from services import campus_electrical_service as ce
 
+    refreshed = refresh_ratings(project)
     ce.run(project, settings)
+    return refreshed
 
 
 def _run_job(project, user_id, settings, record) -> None:

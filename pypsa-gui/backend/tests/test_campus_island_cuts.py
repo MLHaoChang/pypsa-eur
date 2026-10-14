@@ -433,3 +433,94 @@ def test_the_cut_contract_is_gridspines():
     assert cic.FREQ_CUTS_CSV == cs.FREQ_CUTS_CSV
     assert set(CUT_KINDS) == set(F.CUT_KINDS)
     assert F.CUT_SCENARIOS == ("seamless",)       # the scenarios the hub LP has 0⁺ rows for
+
+
+# ── a trial refreshes the campus file's ratings (owner, 2026-10-14) ─────────
+
+
+import yaml  # noqa: E402
+
+from tests.test_campus_electrical_service import hub_network  # noqa: E402
+
+
+def _ext_network(bess=10.0, pv2=0.0):
+    """The campus service's hub with an extendable BESS and an extendable
+    second PV, solved at ``bess`` and ``pv2`` MW."""
+    n = hub_network(priced=True)
+    n.storage_units.loc["bess", ["p_nom_extendable", "p_nom_opt"]] = [True, bess]
+    n.add("Generator", "pv2", bus="mv", carrier="solar", p_nom_extendable=True, p_nom_opt=pv2)
+    return n
+
+
+@pytest.fixture
+def ext_hub(user_and_db):  # noqa: F811
+    db, user = user_and_db
+    row = project_registry.create_root(db, user, "Refresh Hub")
+    _ext_network().export_to_netcdf(str(project_registry.ensure_project_dir(row) / "network.nc"))
+    ce.draft(row)
+    return row
+
+
+def _resolve(project, **sizes):
+    """As a trial's re-solve leaves the hub: the extendables at new sizes."""
+    _ext_network(**sizes).export_to_netcdf(str(project_registry.project_dir(project) / "network.nc"))
+
+
+def _campus(project):
+    return yaml.safe_load((ce.campus_dir(project) / ce.CAMPUS_FILE).read_text())["campus"]
+
+
+def test_a_refresh_copies_the_resolved_ratings_into_the_campus_file(ext_hub):
+    _resolve(ext_hub, bess=20.0)
+    refreshed = cic.refresh_ratings(ext_hub)
+    bess = _campus(ext_hub)["units"]["BESS"]
+    assert bess["p_mw"]["value"] == pytest.approx(20.0)
+    assert bess["e_mwh"]["value"] == pytest.approx(40.0)          # max_hours 2
+    assert bess["s_mva"]["value"] == pytest.approx(20.0 / 0.95)
+    assert {(r["unit"], r["field"]) for r in refreshed} == {("BESS", "p_mw"), ("BESS", "e_mwh"), ("BESS", "s_mva")}
+    p_mw = next(r for r in refreshed if r["field"] == "p_mw")
+    assert (p_mw["from"], p_mw["to"]) == (pytest.approx(10.0), pytest.approx(20.0))
+
+
+def test_a_unit_the_solve_newly_builds_is_added(ext_hub):
+    assert "PV2" not in _campus(ext_hub)["units"]                  # built at 0 MW in the first draft
+    _resolve(ext_hub, pv2=5.0)
+    refreshed = cic.refresh_ratings(ext_hub)
+    pv2 = _campus(ext_hub)["units"]["PV2"]
+    assert pv2["pypsa_name"] == "pv2" and pv2["p_mw"]["value"] == pytest.approx(5.0)
+    assert {"unit": "PV2", "added": True} in [{k: r[k] for k in ("unit", "added")} for r in refreshed]
+
+
+def test_the_users_own_edits_survive_a_refresh(ext_hub):
+    """A relay the user added, a transformer value and a BESS fault-current
+    value they set from a datasheet: none is a rating, so all stay."""
+    spec = yaml.safe_load((ce.campus_dir(ext_hub) / ce.CAMPUS_FILE).read_text())
+    campus = spec["campus"]
+    trafo = next(iter(campus["transformers"]))
+    campus["transformers"][trafo]["vk_percent"] = {"value": 10.0, "source": "datasheet"}
+    campus["units"]["BESS"]["k_sc"] = {"value": 1.5, "source": "datasheet"}
+    campus["relays"] = [{"name": "R1", "branch": trafo, "fault_bus": "MV", "timing": "time_delayed",
+                         "i_pickup_ka": {"value": 0.5, "source": "datasheet"}}]
+    ce.save_campus(ext_hub, yaml.safe_dump(spec, sort_keys=False))
+    _resolve(ext_hub, bess=20.0)
+    cic.refresh_ratings(ext_hub)
+    after = _campus(ext_hub)
+    assert after["transformers"][trafo]["vk_percent"] == {"value": 10.0, "source": "datasheet"}
+    assert after["units"]["BESS"]["k_sc"] == {"value": 1.5, "source": "datasheet"}
+    assert after["relays"] == campus["relays"]
+    assert after["units"]["BESS"]["p_mw"]["value"] == pytest.approx(20.0)
+
+
+def test_an_unchanged_hub_refreshes_nothing_and_leaves_the_file_as_it_was(ext_hub):
+    before = (ce.campus_dir(ext_hub) / ce.CAMPUS_FILE).read_text()
+    assert cic.refresh_ratings(ext_hub) == []
+    assert (ce.campus_dir(ext_hub) / ce.CAMPUS_FILE).read_text() == before
+
+
+def test_a_trial_records_what_it_refreshed(saved):
+    _propose(saved, [_row()])
+    script = Script(saved, proposals=[[]])
+    real = script.rerun
+    script.rerun = lambda p: (real(p), [{"unit": "BESS", "field": "p_mw", "from": 10.0, "to": 20.0}])[1]
+    out = _loop(saved, script)
+    assert out["trials"][0]["refreshed"] == [{"unit": "BESS", "field": "p_mw", "from": 10.0, "to": 20.0}]
