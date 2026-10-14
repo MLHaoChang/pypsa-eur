@@ -1078,3 +1078,18 @@ def test_a_sibling_folder_sharing_the_name_prefix_is_outside(tmp_path):
     (tmp_path / "grid_codes_evil").mkdir()
     with pytest.raises(HTTPException):
         gc._inside(base, "../grid_codes_evil/x.yaml")
+
+
+def test_a_quoted_ibr_reactive_capability_is_quote_checked_like_the_other_limits(hub, fake_api):
+    """q_range_ibr (IEEE 2800) is a limit: an extracted, quoted value is
+    looked up in the document like q_range_demand."""
+    _extracted_in(hub, fake_api, tool_input())
+    edited = yaml.safe_load(gc.get_draft(hub, "tso")["yaml"])
+    edited["q_range_ibr"] = {"value": 0.48, "reference": "ICR at rated active power", "clause": "Art. 15",
+                             "page": 2, "source": "extracted",
+                             "quote": "The reactive range shall not exceed 48 percent of the maximum import capacity."}
+    out = gc.save_draft(hub, "tso", yaml.safe_dump(edited, sort_keys=False))
+    assert out["review"]["limits"]["q_range_ibr"] == {"quote_found": True, "found_on_page": 2}
+    edited["q_range_ibr"]["quote"] = "a sentence the document never says"
+    out = gc.save_draft(hub, "tso", yaml.safe_dump(edited, sort_keys=False))
+    assert out["review"]["limits"]["q_range_ibr"] == {"quote_found": False, "found_on_page": None}

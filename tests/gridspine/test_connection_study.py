@@ -49,7 +49,8 @@ def test_every_check_at_every_selected_hour_with_the_facility_on_each_row(run):
     rows = assess_facility(out, FACILITY)
     assert sorted(rows["hour"].unique()) == hours
     for hour in hours:
-        assert sorted(rows.loc[rows["hour"] == hour, "check"]) == sorted(CHECKS)
+        # q_ibr is reported only for a profile that states q_range_ibr (IEEE 2800)
+        assert sorted(rows.loc[rows["hour"] == hour, "check"]) == sorted(c for c in CHECKS if c != "q_ibr")
     assert (rows["bus"] == "BUS_16").all() and (rows["load_mw"] == 300.0).all()
     assert rows["assessment_id"].nunique() == 1
     assert (rows["profile"] == "eu_rfg_dcc_ce").all()

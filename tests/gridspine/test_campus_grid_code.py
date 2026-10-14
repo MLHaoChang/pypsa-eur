@@ -238,7 +238,7 @@ def test_a_project_file_that_is_not_a_profile_is_refused(tmp_path):
         load_grid_code("junk", extra_dirs=[tmp_path])
 
 
-@pytest.mark.parametrize("shipped", ["eu_rfg_dcc_ce", "generic_assumed"])
+@pytest.mark.parametrize("shipped", ["eu_rfg_dcc_ce", "generic_assumed", "us_ieee2800_nerc"])
 def test_a_project_profile_may_not_shadow_a_shipped_one(tmp_path, shipped):
     _write(tmp_path, shipped, extracted())
     with pytest.raises(ContractError, match=f"{shipped}.*shipped"):

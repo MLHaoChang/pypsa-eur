@@ -244,6 +244,15 @@ def assess_connection(net, fac: Facility, contingencies, profile: dict, criteria
         rows.append(_row(check, "fail" if breaches else "pass", float(state[1][poc]), "pu", limit,
                          detail, q_frac["clause"], q_frac["source"]))
 
+    # IEEE 2800's IBR reactive capability: a capability per inverter at rated
+    # P, which needs inverter ratings a Facility does not carry. Reported, so
+    # a profile that states it never reads as covered here.
+    if "q_range_ibr" in profile:
+        ibr = profile["q_range_ibr"]
+        rows.append(_row("q_ibr", "reported", None, "Mvar", None,
+                         f"on-site IBR reactive capability {ibr['value']:g} x rating at rated P: not checked here "
+                         "(needs inverter ratings; see the campus study)", ibr["clause"], ibr["source"]))
+
     # SCR, reported
     if sk_min_mva is not None:
         if fac.onsite_mw > 0 and fac.onsite_converter:
