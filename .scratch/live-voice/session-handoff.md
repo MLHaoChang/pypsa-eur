@@ -229,3 +229,27 @@ ordinary project activation for evidence/export. See
 [the case contract](experiment-case-advancement.md). Two/multiple-case comparison,
 uncertain-effect retry reconciliation and additional domains remain pending.
 PR/CI/merge evidence belongs to its eventual publication; none is claimed here.
+
+## 2026-10-14 — companion planning after Dots assessment
+
+Owner requested a plan and implementation specification, not application changes.
+Planning baseline is master `4ac218cc98a1437950dd20c3f46233efac6cc159`.
+The [specification](../chat-companion/spec.md),
+[14-slice implementation plan](../../docs/superpowers/plans/2026-10-14-chat-companion-implementation.md)
+and [42-case pending acceptance matrix](../chat-companion/test-plan.md) cover
+truthful companion UX, Activity/Needs-you, experiment recovery/comparison,
+durable work, continuous voice, budgets, scoped preferences and schedules.
+Start CP-01 then CP-02. PRs #185/#188 are already merged; no repeat source
+preparation or merge is needed. This entry claims no new application tests,
+paid probes, deployment, production activation or independent domain review.
+
+## 2026-10-14 — CP-01 truthful companion implementation
+
+Rebaselined onto master `f2b15c5b2caae8fc1259396158355007a670f531` (incoming
+Harness dispatch-entry and Investment editor changes do not overlap this UI slice).
+The [CP-01 issue](../chat-companion/issues/01-truthful-state.md) records truthful
+Chat here labels, independent conversation/decision state, unavailable continuous
+voice, discoverable controls and narrow-screen behavior. Existing internal Live
+admission IDs remain compatible. Readable ordinary outcomes and Activity/job
+recovery remain CP-02/04. Applicable live-path verification remains pending; no
+paid calls, deployment or independent domain review were performed.

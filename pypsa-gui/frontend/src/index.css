@@ -404,8 +404,6 @@ html {
   }
 
   .companion-actions {
-    opacity: 0;
-    transform: translateY(10px);
     transition: opacity 180ms ease, transform 180ms ease;
   }
 
@@ -420,23 +418,14 @@ html {
     animation: companion-echo-fade 1.6s ease forwards;
   }
 
-  .companion-launcher[data-presence='listening'] .companion-node-halo {
-    animation: companion-listen-ring 1.8s ease-in-out infinite;
-  }
-
   .companion-launcher[data-presence='thinking'] .companion-node-sector {
     transform-origin: 48px 48px;
     animation: companion-think-spin 1.1s linear infinite;
   }
 
-  .companion-launcher[data-presence='speaking'] .companion-node-ring {
-    animation: companion-speak-pulse 1s ease-in-out infinite;
-  }
 }
 
-.companion-launcher[data-presence='listening'] .companion-character-wrap,
-.companion-launcher[data-presence='thinking'] .companion-character-wrap,
-.companion-launcher[data-presence='speaking'] .companion-character-wrap {
+.companion-launcher[data-presence='thinking'] .companion-character-wrap {
   filter: drop-shadow(0 0 14px var(--color-accent));
 }
 
@@ -451,18 +440,8 @@ html {
   100% { transform: translateY(0) scale(1); }
 }
 
-@keyframes companion-listen-ring {
-  0%, 100% { opacity: 0.2; }
-  50% { opacity: 0.55; }
-}
-
 @keyframes companion-think-spin {
   to { transform: rotate(360deg); }
-}
-
-@keyframes companion-speak-pulse {
-  0%, 100% { stroke-opacity: 0.45; }
-  50% { stroke-opacity: 0.95; }
 }
 
 @keyframes companion-echo-fade {
