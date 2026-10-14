@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): In Expert mode, the Investment tab's input sections (Tariff, Library, Contracts, Finance inputs) say the same inputs are under Expert → Economics, with an "Open Economics" link. The tab keeps every editor; Guided shows no link.
