@@ -29,6 +29,10 @@ def _multi(n):
 def _optimize(n):
     """Solve a copy; a staged template is multi-period (its own solver config)."""
     probe = n.copy()
+    if _multi(n):
+        # PyPSA's Network.copy() drops a multi-period snapshot index's name,
+        # which a storage unit's spillage variables then cannot select on
+        probe.snapshots.name = "snapshot"
     status, cond = probe.optimize(solver_name="highs",
                                   multi_investment_periods=_multi(n))
     return probe, status, cond
