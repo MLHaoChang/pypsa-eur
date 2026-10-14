@@ -404,6 +404,15 @@ Discovery is advisory: dispatch still checks the exact catalogue offered to
 that model request. Metadata searches cache the catalogue index; normal tool
 selection keeps original catalogue order for prefix reuse.
 
+`start_experiment` persists bounded version-2 plans without executing cases.
+`prepare_experiment` checks current static network targets, schema units/ranges,
+private candidate validity and authorized baseline evidence, then stores an exact
+input preflight digest. Corrupt checkpoints and changed-payload request retries
+refuse. Legacy plans remain readable; unsupported domains stay persistence-only.
+Preparation is not execution approval: `execution_available` remains false and
+Guided write confirmation still applies. See the
+[prerequisite contract](../../../.scratch/live-voice/experiment-prerequisites.md).
+
 `start_task(title, steps, request_id)` persists an owner/project-scoped plan
 with 1–12 ordinary calls. Create/activate/import a project first: rebinding
 and task-control tools cannot be steps. `list_tasks`, `get_task` and
@@ -590,7 +599,7 @@ live results. `window_from` and `window_to` are snapshot indexes;
 
 `start_experiment` writes `<project>/experiments/<uuid>.json` plus
 `experiments/index.json`. The returned view has `status: "planned"`,
-`executed: false`, empty `job_ids`, and a note that nothing ran. The call
+`executed: false`, `execution_available: false`, empty `job_ids`, and no case-execution receipts. The call
 does not queue a solve or apply a change. A later slice is what advances a
 case, through ordinary harness tools and approvals.
 
@@ -599,10 +608,10 @@ case, through ordinary harness tools and approvals.
 - Each case has 1–12 changes: `{path, value, value_type}` and an optional `unit` of 1–24 characters.
 - `value_type` is `number` (finite, and not a boolean), `boolean`, `string`, or `enum`. String and enum values are 1–120 characters.
 - `path` starts with an identifier of at most 32 characters, then one to six dotted segments.
-- `title` is 1–120 characters. `request_id` is 1–64 characters. The same `request_id` for the same owner and project returns the existing plan when that file is still readable.
+- `title` is 1–120 characters. `request_id` is 1–64 characters. The same owner/project/request returns the existing canonical plan; changed payloads return `experiment_request_conflict`.
 - `baseline_run_id`, when set, is stored as a string of 1–64 characters. This call does not look the run up.
-- `limits`, when set, must be an object and is stored as given.
-- `list_experiments` (`limit` 1–20) returns the newest plans this owner has in the active project, without case bodies. The index keeps 100 ids. `get_experiment` returns cases, limits, and `job_ids`. A malformed id, a missing file, or another owner's record is `experiment_not_found`. Unreadable JSON is `experiment_unreadable`.
+- `limits` contains bounded `max_cases`, `max_tool_attempts`, `max_elapsed_seconds`, `max_cost_usd` and `failure_policy`; omitted fields receive explicit defaults. Unknown fields and invalid caps refuse. These are caps, not permission to run cases or incur charges; see the prerequisite contract above.
+- `list_experiments` (`limit` 1–20) returns the newest owned plans, without case bodies, and the complete owned count. The project store caps at 100 records without discarding old plans. `get_experiment` returns cases, limits, `job_ids` and preflight state. Bad ids/missing or foreign records return `experiment_not_found`; corrupt/uncertain checkpoints or inconsistent indexes return `experiment_checkpoint_unreadable` rather than creating replacements.
 
 ```json
 {
@@ -622,5 +631,10 @@ case, through ordinary harness tools and approvals.
 }
 ```
 
-`start_experiment` is write-tier, with the same Guided confirmation rule as
+`prepare_experiment` validates supported network prerequisites on private copies,
+stores exact current/candidate input digests and warning counts, and leaves
+execution unavailable. Legacy reads remain compatible; successful explicit
+preflight upgrades compatible records. Old ambiguous caps must be replanned.
+
+`start_experiment` and `prepare_experiment` are write-tier, with the same Guided confirmation rule as
 `discuss_project_run`. `list_experiments` and `get_experiment` are read-tier.
