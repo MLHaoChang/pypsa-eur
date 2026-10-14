@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import Kpi from '../../components/Kpi'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
 } from 'recharts'
@@ -200,15 +201,6 @@ export default function Curtailment() {
           )}
         </div>
       </section>
-    </div>
-  )
-}
-
-function Kpi({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="rounded-[8px] border border-border bg-bg p-3" title={hint}>
-      <div className="text-[10px] text-muted uppercase tracking-wide">{label}</div>
-      <div className="text-[20px] font-mono tabular-nums text-text mt-0.5">{value}</div>
     </div>
   )
 }
