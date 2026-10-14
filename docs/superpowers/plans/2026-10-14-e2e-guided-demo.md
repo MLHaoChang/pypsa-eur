@@ -271,11 +271,13 @@ walkthrough. Designs are in §7 and go to the gatekeeper before any code.
 | # | Slice | Main files | Gates |
 |---|---|---|---|
 | 1 | **P5a: finance safety.** Close H1: refuse `staged_build_vintage_bounds_not_supported` when a vintage-bound parent was built in more than one period, instead of financing it all in year 1. Fix H2: the counterfactual's served load applies the solve's `load_scale_factors` | `services/results/finance_case.py`, tests | **G** |
+| 1b | **FCA stress hours follow `load_scalers`.** `commercial/connection.py:498` `_site_load` ranks the FCA curtailment hours on the unscaled `p_set`. Until 1b lands, the FCA stress entry on a multi-period project with `load_scalers` is **not** scaled, so it may pick the wrong hours. 1b threads the LP demand through `bind_commercial` and re-binds when `load_scalers` change; the test checks that the ranked hours move when a scaler reshapes the load (gatekeeper, 14 Oct) | `services/commercial/{connection,binding}.py`, `routers/simulation.py`, `services/study/compile.py`, tests | **G** |
 | 2 | **P5b: per-asset COD and staged capex** in the engine: `FinanceCase.asset_cod`, `Operating.stage_capex`, per-asset clocks for degradation, replacements, terminal value and LCOS; tax vintages; equity-funded later stages | `services/finance/{case,timeline,cashflow,replacements,engine,lcos,report,export_xlsx}.py`, `models/finance.py`, tests | **G** |
 | 3 | **P5c: adapter.** Staged builds stop being refused: rule P5-a (a stage's COD year is a period year), stages from `build_year` and from campus extras, a stage table in the report; the remaining refusals listed in §7.1 | `services/results/finance_case.py`, tests | **G** |
 | 4 | **GFM-a: recommender engine** `gridspine/static/gfm_tuning.py`: bounds, margin, analytic warm start, bisection, a capacity fallback through `cuts_for_event`, and the GFM-vs-GFL comparison; E4 excluded | `gridspine/static/gfm_tuning.py` (new), a small `judge` refactor in `frequency.py`, `gridspine/drivers/campus_study.py`, tests | **G** |
 | 5 | **GFM-b: product.** Routes `GET/POST …/island/gfm-settings[/apply]` (apply writes the sidecar and the campus YAML under the edit lock and marks the study and hub stale); chat tools `campus_island_gfm_settings` (read) and `campus_apply_gfm_settings` (write, card); a `CampusIslandGfmSection` | `services/campus_island_tuning.py` (new), router, `chat_tools.py`, `catalogue.py`, frontend section, inventory | R |
 | 6 | **Grid codes: IEEE 2800 / NERC** profiles beside `eu_rfg_dcc_ce` (design §7.3); the fields steady-state checks can test, the rest as "dynamic study needed" flags | `gridspine/templates/data/grid_codes.yaml`, maybe `campus_compliance.py`, tests | **G** |
+| 6b | **Two misleading campus labels** (owner, 14 Oct). SITE_TRANSFO's "ADEQUATE" beside a purchase becomes "planned (placeholder rating adequate; bought as 3 × 25 MVA for N-1)" (`CampusElectricalPanel.tsx:511`). "Not yet available: island study" becomes "Cost of islanding study: not run yet", since it means I9a, not the island checks the run did complete | `CampusElectricalPanel.tsx`, `CampusIslandSection.tsx`, tests | — |
 | 7 | **D1: campus run as a background job** with progress, Abort, the busy banner and `wait_for_job` (the GFM and grid-code runs need it to be usable) | `campus_electrical_service.py`, router, panel | R |
 | 8 | **Data center template, multi-period.** Milestone periods with an IT-load ramp, staged candidates per period, a commercial config so the investment case runs out of the box (D4) | `project_templates/eh_templates.py`, sidecars | **G** (IC inputs) |
 | 9 | D2 plan status and D12 insight rules (the spine) | new `services/plan_status.py`, `services/insights/`, router, catalogue | R |
@@ -521,3 +523,36 @@ center:
 - `test_connection.py:153`, which pins exactly two profiles, is updated to the three.
 - The same `dynamic_requirements` list is added to `eu_rfg_dcc_ce` (RfG FRT/LFSM, RoCoF), so both codes report
   what a steady-state study cannot show.
+
+### 7.4 Gatekeeper review (14 Oct): changes folded in
+
+- **Slice 1:** name the check by build year; test that a single build active across several periods is not
+  refused; test served = scaled demand − shed. The FCA ranking is slice 1b.
+- **P5:**
+  - P5-a becomes "COD year == the asset's first active period" (`staged_cod_not_active_period:<asset>`, giving
+    both years).
+  - Equity-funded stage capex goes into project and equity cash only; CFADS, DSCR, LLCR and PLCR are unchanged,
+    with a test that DSCR in a stage year does not change.
+  - `asset_retires_in_horizon` applies only inside the modelled periods.
+  - Tax depreciates each stage from its own COD.
+  - A lead before y0 is refused, not clipped.
+- **GFM:**
+  - Fixed horizons only (no `_settle_run`).
+  - A hard cap on `simulate` calls, reported, with a test asserting the exact count.
+  - The recommender runs as a background job on the solver's job/progress path.
+  - The `_checks()` refactor must leave `judge` output unchanged on the frequency suite.
+  - It merges after (or rebases on) I6's E4 fix in `frequency.py`.
+- **Grid codes:**
+  - `q_ibr_lead`/`q_ibr_lag` rows in `gridspine/schema/connection.py` CHECKS, not `campus_compliance`.
+  - A known-key test for the built-in profiles; the loader warns on unknown keys.
+  - `reported` status for `v_max_30min` and `dynamic_requirements`, kept out of every verdict and count.
+  - The PRC-029 scope caveat goes in the profile notes.
+  - A byte-identical connection-table test for the two existing profiles.
+- **UX split (agreed with the UX session):**
+  - Stage ids are `investment`, `grid_plan`, `reliability` and `operation` (label "Operation & control").
+  - KPI payloads use its `ResultState` enum (`ready | zero | not_run | not_modelled | not_applicable | stale`)
+    with `reason` and `action`, in place of a boolean Unavailable.
+  - Flags render through its `Highlight`; an `Explain` callout with `origin: computed | assistant` is requested.
+- **G5 (UX session):** Guided says "certified" while Expert says "Not solved yet". This is the stage 2 → 3 handoff
+  (slice 10). How `ResultState` shows "the study ran, the project is not solved" is to be agreed with the UX
+  session.
