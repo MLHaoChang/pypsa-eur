@@ -13,6 +13,7 @@ describe('ResultState', () => {
     ['not_applicable', 'Not applicable'],
     ['stale', 'Out of date'],
     ['unavailable', 'Not available for this run'],
+    ['study_only', 'From the study'],
   ] as const)('labels %s as "%s"', (state, label) => {
     expect(STATE_PILL[state].label).toBe(label)
     render(<ResultState state={state} reason="Why." />)
@@ -30,7 +31,7 @@ describe('ResultState', () => {
 })
 
 describe('Kpi with a result state', () => {
-  it.each(['not_run', 'running', 'not_modelled', 'not_applicable', 'unavailable'] as const)(
+  it.each(['not_run', 'running', 'not_modelled', 'not_applicable', 'unavailable', 'study_only'] as const)(
     'never shows a number or a dash for %s', state => {
       render(<Kpi label="Total energy lost" value="0 MWh" state={state} reason="Losses were off." testId="k" />)
       const tile = screen.getByTestId('k')

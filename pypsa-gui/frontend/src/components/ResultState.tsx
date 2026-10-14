@@ -12,6 +12,8 @@
 //   not_applicable — the network has nothing it could apply to (no lines…)
 //   stale          — inputs changed since the run; the old value is dimmed
 //   unavailable    — the run's payload cannot tell which of the above holds
+//   study_only     — a study ran on a copy of the project; the project itself
+//                    is not solved, so figures from its own solve do not exist
 //
 // When every tile in a group shares one non-value state (losses not modelled,
 // no lines), render one <ResultState> for the group instead of repeating the
@@ -21,6 +23,7 @@ import type { ReactNode } from 'react'
 
 export type ResultStateKind =
   | 'ready' | 'zero' | 'not_run' | 'running' | 'not_modelled' | 'not_applicable' | 'stale' | 'unavailable'
+  | 'study_only'
 
 export type NonValueState = Exclude<ResultStateKind, 'ready' | 'zero'>
 
@@ -36,6 +39,7 @@ export const STATE_PILL: Record<NonValueState, { label: string; tone: string }> 
   not_applicable: { label: 'Not applicable', tone: 'text-muted bg-muted/12' },
   stale: { label: 'Out of date', tone: 'text-warn bg-warn/12' },
   unavailable: { label: 'Not available for this run', tone: 'text-muted bg-muted/12' },
+  study_only: { label: 'From the study', tone: 'text-info bg-info/12' },
 }
 
 export function StatePill({ state }: { state: NonValueState }) {
