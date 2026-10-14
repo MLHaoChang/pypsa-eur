@@ -1128,7 +1128,7 @@ def _island_hours_files() -> tuple:
     """The island-hours drivers' files in a run directory (I4–I6)."""
     return (*cs.ISLAND_STATIC_CSV.values(), cs.ISLAND_STATIC_SUMMARY_JSON,
             cs.FREQ_E1_HOURLY_CSV, cs.FREQ_EVENTS_CSV, cs.FREQ_LOSSES_CSV, cs.FREQ_BRIDGE_CSV,
-            cs.FREQ_PLANNED_CSV, cs.FREQ_UPS_CSV, cs.FREQ_SUMMARY_JSON)
+            cs.FREQ_PLANNED_CSV, cs.FREQ_UPS_CSV, cs.FREQ_SUMMARY_JSON, cs.FREQ_CUTS_CSV)
 
 
 def _run_island_hours(run_dir: Path) -> None:
@@ -1136,8 +1136,9 @@ def _run_island_hours(run_dir: Path) -> None:
     owner, 2026-10-14: inside the Run, whenever the campus has island data).
     The steady state and short circuit (I4, I5, I5b) run when a unit has an
     island block; the frequency check (I6) when the campus also has island
-    requirements and the run has the I3a island tables it reads. An earlier
-    run's files are removed first, so nothing stale is read as this run's."""
+    requirements and the run has the I3a island tables it reads, and with it
+    the cuts its failures would need (I7). An earlier run's files are removed
+    first, so nothing stale is read as this run's."""
     from services.adequacy.island_config import ISLAND_UNIT_HOURLY_CSV
 
     for name in _island_hours_files():
@@ -1148,6 +1149,7 @@ def _run_island_hours(run_dir: Path) -> None:
     cs.island_static_campus(run_dir)
     if island["requirements"] is not None and (run_dir / ISLAND_UNIT_HOURLY_CSV).is_file():
         cs.island_frequency_campus(run_dir)
+        cs.cuts_campus(run_dir)                  # I7: the cuts what fails would need
 
 
 def run(project, settings: dict) -> dict:

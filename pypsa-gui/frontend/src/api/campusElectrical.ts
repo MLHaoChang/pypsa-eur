@@ -482,6 +482,73 @@ export interface IslandTable {
 export interface IslandReport { caveat: string; tables: IslandTable[]; missing: string[] }
 export interface IslandState { config: IslandConfig | null; study: Record<string, unknown> | null }
 
+// ── the frequency cuts (campus island plan, I7; owner Q6: manual) ───────────
+
+export type CutKind = 'inertia' | 'headroom_up' | 'headroom_down' | 'droop_gain'
+
+/** One cut the last campus run proposes (gridspine `campus_freq_cuts.csv`),
+ * with whether the hub LP can take it and, when it can, its primal estimate. */
+export interface ProposedCut {
+  period: number
+  hour: number
+  scenario: string
+  event: string
+  kind: CutKind
+  required: number | 'inf'
+  current: number | null
+  delta: number | 'inf' | null
+  unit: string
+  binding: string | null
+  derivation: string | null
+  heuristic: boolean
+  feasible: boolean
+  note: string | null
+  applicable: boolean
+  reason: string
+  candidate: string | null
+  added_mw: number | null
+  estimate: number | null
+  label: string
+}
+
+/** A cut the hub solve reads (`island_cuts.json`). */
+export interface AppliedCut { period: number; hour: number; scenario: string; kind: CutKind; required: number }
+
+/** What a trial brought up to the re-solved hub in the campus file. */
+export type RefreshedRating =
+  | { unit: string; field: 'p_mw' | 's_mva' | 'e_mwh'; from: number | null; to: number }
+  | { unit: string; added: true }
+  | { unit: string; added: false; reason: string }
+
+export interface CutTrial {
+  trial: number
+  added: AppliedCut[]
+  objective: number | null
+  refreshed?: RefreshedRating[]
+  verdict: string
+}
+
+export interface IslandCuts {
+  limit: string
+  max_trials: number
+  proposed: ProposedCut[]
+  applied: AppliedCut[]
+  trials: CutTrial[]
+}
+
+export type CutJobState = 'running' | 'done' | 'cancelled' | 'failed'
+
+export interface CutJobRecord {
+  state: CutJobState
+  started_at: number
+  finished_at: number | null
+  trials: number
+  max_trials: number
+  stopped: string | null
+  error: string | null
+  message: string
+}
+
 /** The island study solves the project several times: give it the run's time. */
 export const ISLAND_STUDY_TIMEOUT_MS = 900_000
 
@@ -550,6 +617,28 @@ export const campusApi = {
     client.post<Record<string, unknown>>(`${base(project)}/island/study`,
       scenarios && scenarios.length ? { scenarios } : {},
       { ...quiet, timeout: ISLAND_STUDY_TIMEOUT_MS }).then(r => r.data),
+
+  /** The proposed cuts with their estimates, the applied cuts and the trials. */
+  islandCuts: (project: string) =>
+    client.get<IslandCuts>(`${base(project)}/island/cuts`, quiet).then(r => r.data),
+
+  /** Start the apply loop (a background job, 202 with its record). */
+  applyIslandCuts: (project: string) =>
+    client.post<CutJobRecord>(`${base(project)}/island/cuts/apply`, {}, quiet).then(r => r.data),
+
+  islandCutsStatus: (project: string) =>
+    client.get<CutJobRecord | null>(`${base(project)}/island/cuts/apply`, quiet).then(r => r.data ?? null),
+
+  cancelIslandCuts: (project: string) =>
+    client.post<CutJobRecord | null>(`${base(project)}/island/cuts/apply/cancel`, {}, quiet)
+      .then(r => r.data),
+
+  removeIslandCut: (project: string, cut: Pick<AppliedCut, 'period' | 'hour' | 'kind'>) =>
+    client.delete<IslandCuts>(`${base(project)}/island/cuts/${cut.period}/${cut.hour}/${cut.kind}`, quiet)
+      .then(r => r.data),
+
+  clearIslandCuts: (project: string) =>
+    client.delete<IslandCuts>(`${base(project)}/island/cuts`, quiet).then(r => r.data),
 
   /** The island report: tables with their model, caveat and assumed rows. */
   islandReport: (project: string) =>

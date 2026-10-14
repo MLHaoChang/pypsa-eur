@@ -21,6 +21,7 @@ import {
   type IslandConfig, type IslandGroup, type IslandReport, type IslandScenario, type IslandSource, type IslandTable,
 } from '../api/campusElectrical'
 import { Btn, PageSection, Tag } from '../components/PageKit'
+import CampusIslandCutsSection from './CampusIslandCutsSection'
 
 export const ISLAND_KEY = (name: string) => ['campusElectrical', 'island', name] as const
 export const ISLAND_REPORT_KEY = (name: string) => ['campusElectrical', 'islandReport', name] as const
@@ -220,6 +221,7 @@ export default function CampusIslandSection({ name }: { name: string }) {
         </div>
 
         <IslandReportView report={report.data} />
+        {saved && <CampusIslandCutsSection name={name} />}
       </PageSection>
     </div>
   )
