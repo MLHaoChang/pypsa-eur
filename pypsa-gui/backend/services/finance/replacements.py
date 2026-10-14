@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from services.finance.case import (
-    AssetFinance, AssetPart, FinanceCase, FinanceRefused, effective_parts,
+    AssetFinance, AssetPart, FinanceCase, FinanceRefused, cod_year_of, effective_parts,
 )
 
 if TYPE_CHECKING:
@@ -66,6 +66,13 @@ class Replacement:
 
 def _finite(life: float | None) -> bool:
     return life is not None and math.isfinite(life)
+
+
+def _clock(case: FinanceCase, tl: Timeline, name: str) -> tuple[int, int]:
+    """(COD year, operating years on the axis) of owner asset `name`: a later
+    stage's clock starts at its own COD (P5)."""
+    cod = cod_year_of(case, name, tl.cod_year)
+    return cod, tl.analysis_years - (cod - tl.cod_year)
 
 
 def _repurchases(life: float, analysis_years: int) -> list[int]:
@@ -113,12 +120,13 @@ def _generated(case: FinanceCase, tl: Timeline) -> list[tuple[Replacement, int, 
     """(the replacement, its k, its part) for every `part_lifetimes` purchase."""
     out = []
     for ai, a in enumerate(case.assets):
+        cod, years = _clock(case, tl, a.name)
         for pi, p in enumerate(effective_parts(a)):
             if p.overnight_cost is None or not _finite(p.lifetime_years):
                 continue
-            for k in _repurchases(p.lifetime_years, tl.analysis_years):
-                out.append(((replacement_year(tl.cod_year, k, p.lifetime_years), ai, pi),
-                            Replacement(replacement_year(tl.cod_year, k, p.lifetime_years),
+            for k in _repurchases(p.lifetime_years, years):
+                out.append(((replacement_year(cod, k, p.lifetime_years), ai, pi),
+                            Replacement(replacement_year(cod, k, p.lifetime_years),
                                         a.name, p.name, p.overnight_cost, PART_LIFETIMES), k, p))
     out.sort(key=lambda x: x[0])
     return [(r, k, p) for _key, r, k, p in out]
@@ -143,21 +151,23 @@ def notes(case: FinanceCase, tl: Timeline) -> tuple[list[str], list[str]]:
     flags: list[str] = []
     if case.inputs.replacement_rule == PART_LIFETIMES:
         for a in case.assets:
+            _cod, years = _clock(case, tl, a.name)
             for p in effective_parts(a):
                 if p.overnight_cost is None:
                     continue                    # the capex already reads overnight_cost_missing
                 if p.lifetime_years is None:
                     reasons.append(f"part_lifetime_missing:{a.name}:{p.name}")
                 elif math.isfinite(p.lifetime_years) and not float(p.lifetime_years).is_integer() \
-                        and _repurchases(p.lifetime_years, tl.analysis_years):
+                        and _repurchases(p.lifetime_years, years):
                     flags.append(f"part_lifetime_rounded:{a.name}:{p.name}")
         return reasons, flags
     named = {asset for _y, asset, _x in case.inputs.replacement_capex}
     for a in case.assets:
         if a.name in named:
             continue
+        _cod, years = _clock(case, tl, a.name)
         for p in effective_parts(a):
-            if _finite(p.lifetime_years) and p.lifetime_years < tl.analysis_years:
+            if _finite(p.lifetime_years) and p.lifetime_years < years:
                 flags.append(f"part_not_replaced:{a.name}:{p.name}")
     return reasons, flags
 
@@ -254,15 +264,21 @@ def remaining_life_terms(case: FinanceCase, tl: Timeline
             if p.overnight_cost is None or not _finite(life) or life < 1.0:
                 reasons.append(f"terminal_part_unknown:{a.name}:{p.name}")
                 continue
-            start: float = tl.cod_year
+            cod, years = _clock(case, tl, a.name)
+            start: float = cod
             base = p.overnight_cost
             bought = None                                   # (year, unescalated amount)
+            if cod > tl.cod_year:
+                # A later stage's first purchase is paid in its stage-capex
+                # year, escalated like the stage capex (P5; no contingency, as
+                # a replacement's base).
+                bought = (cod - fin.stage_capex_lead_years, p.overnight_cost)
             if fin.replacement_rule == PART_LIFETIMES:
-                ks = _repurchases(life, tl.analysis_years)
+                ks = _repurchases(life, years)
                 if ks:
                     k = ks[-1]
-                    start = tl.cod_year + k * life          # unrounded (GS's last_buy)
-                    bought = (replacement_year(tl.cod_year, k, life), p.overnight_cost)
+                    start = cod + k * life                  # unrounded (GS's last_buy)
+                    bought = (replacement_year(cod, k, life), p.overnight_cost)
             else:
                 mine = [(y, x) for y, x in entries.get(a.name, ()) if on_axis(tl, y)]
                 if mine:
