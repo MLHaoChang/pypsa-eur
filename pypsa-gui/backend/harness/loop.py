@@ -780,30 +780,16 @@ def _dispatch_tool_uses(
             return _ToolDispatchOutcome(
                 tool_call_count=tool_call_count, stop_turn=True,
             )
-        # Refused before the confirmation card and the dispatcher lookup: a
-        # card is how the USER authorises a tool the model asked for, and this
-        # tool was never on offer to ask for.
-        if tu.get("name") not in offered_tool_names:
-            yield "tool_error", {
-                "tool_use_id": tu.get("id"),
-                "tool_name": tu.get("name"),
-                "error_kind": "tool_not_offered",
-                "message": (
-                    "the endpoint requested a tool that was not offered "
-                    "for this turn; refusing to run it."
-                ),
-            }
-            tool_results_for_next_turn.append({
-                "type": "tool_result",
-                "tool_use_id": tu.get("id"),
-                "is_error": True,
-                "content": "tool_not_offered",
-            })
-            continue
-        yield from _dispatch_real_tool_call(
-            session, tu, tool_results_for_next_turn, turn_ctx=turn_ctx,
+        # The one per-call path (MCP build step 3): the allowlist refuses a
+        # tool never on offer before the card and the dispatcher lookup, then
+        # the guard, validators, card and handler run in order.
+        dispatched = yield from dispatch_tool_call(
+            session, tu, tool_results_for_next_turn,
+            offered_tool_names=offered_tool_names, turn_ctx=turn_ctx,
             result_char_budget=char_budget, guided=guided,
         )
+        if not dispatched:
+            continue
         # If the agent just dispatched a rebinding tool (activate_project /
         # load_project / save_project_as / rename_project /
         # restore_project_snapshot / create_project_from_template /
@@ -2277,6 +2263,58 @@ def _forget_turn_undo(session: ChatSession) -> None:
     session._undo_snapshotted = [
         done for done in session._undo_snapshotted if done is not stack
     ]
+
+
+def dispatch_tool_call(
+    session: ChatSession,
+    tu: dict[str, Any],
+    tool_results_collector: list[dict[str, Any]],
+    *,
+    offered_tool_names: set[str | None] | None = None,
+    turn_ctx: Any | None = None,
+    result_char_budget: dict[str, int] | None = None,
+    guided: bool = False,
+) -> Generator[tuple[str, dict[str, Any]], None, bool]:
+    """
+    THE per-call dispatch path (MCP build step 3): the offered-tools allowlist,
+    then `_dispatch_real_tool_call` (handler lookup, checked-mode guard,
+    validators, the confirmation card and its approval records, the handler).
+    The turn loop calls it for every tool use; local MCP exposure calls the
+    same function, so no caller can skip a step.
+
+    `offered_tool_names` is the C-1 allowlist, the names this turn actually
+    sent (see `_dispatch_tool_uses`). A tool outside it is refused before the
+    card and the dispatcher lookup: a card is how the user authorises a tool
+    the model asked for, and this tool was never on offer to ask for. None
+    skips the check, for a caller that offers the whole catalogue.
+
+    Yields the call's frames, appends exactly one `tool_result` for `tu` to
+    `tool_results_collector`, and returns False when the allowlist refused
+    the call (nothing ran), True otherwise. Pinned by
+    tests/test_harness_dispatch_entry.py.
+    """
+    if offered_tool_names is not None and tu.get("name") not in offered_tool_names:
+        yield "tool_error", {
+            "tool_use_id": tu.get("id"),
+            "tool_name": tu.get("name"),
+            "error_kind": "tool_not_offered",
+            "message": (
+                "the endpoint requested a tool that was not offered "
+                "for this turn; refusing to run it."
+            ),
+        }
+        tool_results_collector.append({
+            "type": "tool_result",
+            "tool_use_id": tu.get("id"),
+            "is_error": True,
+            "content": "tool_not_offered",
+        })
+        return False
+    yield from _dispatch_real_tool_call(
+        session, tu, tool_results_collector, turn_ctx=turn_ctx,
+        result_char_budget=result_char_budget, guided=guided,
+    )
+    return True
 
 
 def _tool_tier(session: ChatSession, tool_name: str) -> str:

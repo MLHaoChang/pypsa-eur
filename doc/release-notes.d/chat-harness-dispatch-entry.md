@@ -1,0 +1,1 @@
+* Refactor(pypsa-gui): The chat harness runs every tool call through one per-call dispatch path (offered-tools allowlist, checked-mode guard, validators, confirmation card, handler), `harness.loop.dispatch_tool_call`, so local MCP exposure can reuse it without skipping a step. No behaviour change.
