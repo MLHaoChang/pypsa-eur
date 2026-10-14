@@ -140,3 +140,21 @@ def test_readiness_reports_the_firm_import_beside_the_rating():
     n = _staged()
     assert _import_firm_mw(n, ["grid_import"]) == pytest.approx(20.0)
     assert _import_firm_mw(T.BUILDERS["eh_datacenter"](), ["grid_import"]) is None
+
+
+def test_the_island_study_solves_its_copies_with_the_schedule_applied():
+    """`island.island_study` (the campus cost-of-islanding study) solves
+    copies outside run_simulation; each copy gets the schedule too."""
+    from services.solver import island as I
+
+    n = _staged()
+    seen = []
+
+    def solve(c, _extra, **_kw):
+        seen.append(_cap_by_period(c))
+        return "warning", "not solved in this test"
+
+    isl = {"requirements": {"scenarios": [], "values": {}}}
+    I.island_study(n, isl, scenarios=[], solve=solve)
+    assert seen == [{2027: 20.0, 2030: 40.0, 2035: 40.0}]
+    assert "grid_import" not in n.links_t.p_max_pu.columns      # the network itself untouched
