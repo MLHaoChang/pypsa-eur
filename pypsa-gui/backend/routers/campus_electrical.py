@@ -229,6 +229,14 @@ def get_island(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depen
     return ce.get_island(_row(proj, db))
 
 
+@router.get("/{name}/island/report")
+def island_report(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """The island report: its tables, each with the model behind it, the
+    screening caveat and the rows that rest on assumed values."""
+    from services.campus_island_report import island_report as _report
+    return _report(_row(proj, db))
+
+
 @router.put("/{name}/island")
 def save_island(
     body: IslandConfigBody,
