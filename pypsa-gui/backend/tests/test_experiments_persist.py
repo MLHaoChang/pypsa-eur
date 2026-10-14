@@ -84,7 +84,7 @@ def test_request_id_deduplicates(roots):
         title='A', domain='network', cases=_cases()[:1], request_id='same',
     )
     second = ex.start_experiment(
-        title='B', domain='network', cases=_cases()[:1], request_id='same',
+        title='A', domain='network', cases=_cases()[:1], request_id='same',
     )
     assert first['experiment_id'] == second['experiment_id']
     assert ex.list_experiments()['total_count'] == 1
@@ -140,7 +140,7 @@ def test_string_and_enum_changes_round_trip(roots):
             ],
         }],
         request_id='str-1',
-        limits={'max_cost': 10},
+        limits={'max_cost_usd': 10},
     )
     loaded = ex.get_experiment(out['experiment_id'])
     assert out['title'] == 'Carrier case'
@@ -155,7 +155,8 @@ def test_string_and_enum_changes_round_trip(roots):
         'value': 'North',
         'value_type': 'string',
     }
-    assert loaded['limits'] == {'max_cost': 10}
+    assert loaded['limits']['max_cost_usd'] == 10
+    assert loaded['limits']['failure_policy'] == 'stop'
     assert loaded['executed'] is False
 
 
@@ -252,21 +253,18 @@ def test_experiment_id_cannot_read_outside_the_experiments_directory(roots, tmp_
         assert failure.value.detail.get('title') != 'LEAKED-SECRET'
 
 
-def test_corrupt_index_does_not_block_a_new_plan(roots, tmp_path):
+def test_corrupt_index_blocks_a_new_plan(roots, tmp_path):
     index = tmp_path / PROJECT / 'experiments' / 'index.json'
     index.parent.mkdir(parents=True, exist_ok=True)
     index.write_text('{not json')
-    out = ex.start_experiment(
-        title='After corruption',
-        domain='gridspine',
-        cases=_cases()[:1],
-        request_id='fresh',
-    )
-    assert out['executed'] is False
-    assert out['domain'] == 'gridspine'
-    listed = ex.list_experiments()
-    assert listed['total_count'] == 1
-    assert listed['items'][0]['experiment_id'] == out['experiment_id']
+    with pytest.raises(HTTPException) as error:
+        ex.start_experiment(
+            title='After corruption', domain='gridspine',
+            cases=_cases()[:1], request_id='fresh',
+        )
+    assert error.value.detail['error_kind'] == 'experiment_checkpoint_unreadable'
+    assert index.read_text() == '{not json'
+    assert list(index.parent.glob('*.json')) == [index]
 
 
 @pytest.mark.parametrize('limit', [0, 21, True, False, 1.5, '10'])
@@ -278,7 +276,7 @@ def test_list_limit_must_be_an_integer_from_1_to_20(roots, limit):
 
 
 def test_catalogue_and_dispatcher():
-    for name in ('start_experiment', 'list_experiments', 'get_experiment'):
+    for name in ('start_experiment', 'prepare_experiment', 'list_experiments', 'get_experiment'):
         assert name in chat_tools.DISPATCHERS
         assert name in toolsets.CONTROL_TOOLS
         assert catalogue.TOOL_ROUTES[name] == ['_service_call_']
