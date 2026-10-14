@@ -101,6 +101,15 @@ def test_a_sidecar_xd_pp_replaces_the_drafted_typical_value():
     assert "xd_pp" not in units["genset_1"][1]["island"]
 
 
+def test_the_draft_keeps_a_gensets_unit_size():
+    cfg = sidecar()
+    cfg["units"]["genset_1"]["unit_mw"] = t(5.0, "datasheet")
+    units = by_pypsa(drafted(cfg).spec["campus"]["units"])
+    island = units["genset_1"][1]["island"]
+    assert island["unit_mw"] == t(5.0, "datasheet")
+    assert "unit_mw" not in units["genset_2"][1]["island"]
+
+
 def test_unnamed_converters_and_gensets_get_default_blocks_tagged_assumed():
     units = by_pypsa(drafted().spec["campus"]["units"])
     pv = units["rooftop_pv"][1]["island"]

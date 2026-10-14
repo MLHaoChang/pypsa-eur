@@ -2343,6 +2343,65 @@ C11's loop: trial, verdict, cost.
 - termination at N;
 - no cuts when everything passes.
 
+### E4 revised: N+k by unit and frequency restoration between blocks (2026-10-14)
+
+**Why.** The I9b Data Center run failed `ups_bridged`'s bridge at all 9
+island hours. The cause was E4's pickup never completing, not the UPS
+energy: autonomy was about 655 s against `bridge_s` 600 s. Two causes, both
+in E4, were put to the owner:
+- **N+k removed the whole `GENSET_NEW`.** The draft dropped `unit_mw`, so
+  the campus held one 36.7 MW genset, while I2b's N+k removes one unit.
+- **Nothing restored the frequency between blocks.** The droop deviation
+  added up, 0.25 Hz per 5 MW block, until the 9th block found no capacity.
+
+**Owner, 2026-10-14: Q1 = A, Q2 = A.**
+- **`unit_mw` is a campus genset field.** It is optional in a campus block,
+  and the draft keeps it. `xd_pp` stays sidecar-only.
+  `units_from_campus` carries it on `Unit.unit_mw`.
+- **N+k by unit** (`_remove_units`). The k largest units fail to start, as
+  I2b: a whole genset, or one `unit_mw` of a genset that has several. Its
+  P_n, S_n, load step and ramp then scale down, and H stays on the
+  remaining MVA. `dropped` names each removal, `"NAME: 1 x U MW"` for one
+  unit.
+- **Restoration between blocks.** Once a block settles, secondary or
+  load-share control restores f0. The next block starts from nominal at the
+  loading the earlier blocks left, each genset at its droop share, with its
+  load-acceptance step and ramp counted afresh.
+  - This is the same assumption as E2, E3 and E5, and it is ledgered.
+  - Each block is simulated on its own, and its `Metrics` are judged from
+    nominal.
+  - "Settled" is Δf within the band of −block/ΣK (0 with an isochronous
+    genset) and |RoCoF| ≤ 0.05 Hz/s.
+  - The `Pickup` event and `_segment` are gone.
+- The column tuples are unchanged.
+
+**Tests** (test-first):
+- the schema takes `unit_mw` in a campus block, and the draft keeps it;
+- `units_from_campus` carries it;
+- N+1 takes one 5 MW unit from a 20 MW genset, checked against the 15 MW
+  genset by hand. Its load step scales too: the genset's 8.4 MW share of a
+  9 MW block exceeds the 7.5 MW left. Two units both come from it; a whole
+  genset with a larger unit goes first; a single-unit genset goes whole;
+- equal blocks respond alike (the same nadir, each settling at −block/K);
+- each block waits for the first settling of one step from nominal;
+- each block starts at the loading the earlier ones left, so the third 4 MW
+  block on a 10 MW genset finds 2 MW of room;
+- the earlier tests, adjusted to per-block settling.
+
+**Mutations.** 16 source edits:
+- **N+k:** `unit_mw` ignored, the largest by rating not by unit, S_n not
+  scaled, the step and ramp not scaled, the removal unnamed;
+- **settling:** the RoCoF or the band criterion dropped;
+- **restoration:** the loading not carried, the settled value summed over
+  blocks, the isochronous rule lost;
+- **the pickup:** completion without settling, the clock not advanced;
+- **the field:** `unit_mw` refused in the schema, `xd_pp` let through,
+  dropped by the draft, not carried to the unit.
+
+The first run killed 15. The step and ramp scaling survived because no
+block reached the step limit; a test was added where it does. All 16 are
+killed.
+
 ### I8: multi-bus RMS and the client-grade handoff — step 4b (L; legal check first, owner Q4)
 
 **The licence (Q4).**
