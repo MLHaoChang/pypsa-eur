@@ -420,7 +420,7 @@ def test_the_study_runs_each_scenario_s_events():
     e4 = ev[ev["event"] == "E4"]
     assert list(e4["block"]) == [1, 2, 3] and e4["t_block_s"].iloc[0] == 15.0
     b = st.bridge.iloc[0]
-    assert (b["ups"], b["it_mw"], b["e_mwh"]) == ("UPS1", 20.0, 1.5)                # I3a's, not the 25 MW draw
+    assert (b["unit"], b["kind"], b["it_mw"], b["e_mwh"]) == ("UPS1", "ups", 20.0, 1.5)                # I3a's, not the 25 MW draw
     assert b["autonomy_s"] == pytest.approx(1.5 * 3600 / 20.0) and b["needed_s"] == 600.0 and not b["ok"]
     # planned: the BESS takes the import at once
     p = st.planned.iloc[0]

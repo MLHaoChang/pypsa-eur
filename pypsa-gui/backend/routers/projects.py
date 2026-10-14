@@ -1241,6 +1241,11 @@ async def import_bundle(
         # `ic:` names the commercial reference frames' columns (P2 WP2.2-0):
         # refused before anything is swapped (review 0b #2).
         raise HTTPException(422, f"bus names starting 'ic:' are reserved: {reserved[:5]}")
+    # OPEN-ITEMS item 8, also before the swap: a new import may not bring in a
+    # name the create routes would refuse.
+    from services.component_names import invalid_names_in_netcdf, refuse_invalid_names
+
+    refuse_invalid_names(invalid_names_in_netcdf(nc_path))
     from services import dirty_state, undo_service
     with PyPSAService.get_lock():
         # A different project: a fresh context (own undo, counter 0, no result

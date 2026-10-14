@@ -211,7 +211,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, gen.name])
 
-  const items: ExpandedItem[] = assetReadoutItems(schema, asset, hidden)
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset, hidden, provenance)
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {
@@ -220,7 +220,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
         <Section title={title ?? 'Generator Properties'}>
           <Row label="Carrier" value={gen.carrier} tip={docTip('generator.carrier')} />
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
           ))}
         </Section>
         {showChart && hasProfile && (
@@ -378,7 +378,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, su.name])
 
-  const items: ExpandedItem[] = assetReadoutItems(schema, asset)
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset, undefined, provenance)
   // A unit priced the old way (one overnight cost, no parts) still has that
   // cost; the card says so, since its parts are what the form types now.
   const legacyOvernight = su.overnight_cost != null && Number.isFinite(su.overnight_cost)
@@ -391,7 +391,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
         <Section title={title ?? 'Storage Properties'}>
           <Row label="Carrier" value={su.carrier} tip={docTip('storage_unit.carrier')} />
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
           ))}
         </Section>
         <DetailFooter
