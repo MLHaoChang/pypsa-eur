@@ -47,14 +47,13 @@ interface FieldSpec {
   like?: string
 }
 
-// S1d: investment is typed as the overnight cost and the lifetime, never as an
-// annuity (plan rule: no typed `capital_cost` anywhere). Both may stay blank:
-// an unpriced asset, and the solver's default lifetime. A storage unit prices
-// its two parts on its card after it is added (STORAGE_PRICING_NOTE).
-const investment = (overnight = 'overnight_cost'): FieldSpec[] => [
-  { key: overnight,  label: 'Overnight cost', type: 'number', half: true },
-  { key: 'lifetime', label: 'Lifetime',       type: 'number', half: true },
-]
+// S1d: investment is typed as the overnight cost (or a line's cost per km) and
+// the lifetime, never as an annuity (plan rule: no typed `capital_cost`
+// anywhere). Both may stay blank: an unpriced asset, and the solver's default
+// lifetime. A storage unit prices its two parts on its card after it is added
+// (STORAGE_PRICING_NOTE). The entries are written out, not spread from a
+// helper: the control-matrix reader (smoke/assistant_control_matrix.py)
+// parses each `{ key, label, type, ... }` literally.
 
 const genFields = (carrier: string): FieldSpec[] => [
   { key: 'name',             label: 'Name',          type: 'text',     required: true },
@@ -70,7 +69,8 @@ const genFields = (carrier: string): FieldSpec[] => [
   { key: 'p_nom_min',        label: 'P nom min',      type: 'number',   defaultValue: '0',    unit: 'MW',     half: true },
   { key: 'p_nom_max',        label: 'P nom max',      type: 'number',                         unit: 'MW',     half: true },
   { key: 'marginal_cost',    label: 'Marginal cost',  type: 'number',   defaultValue: '0',    unit: '€/MWh',  half: true },
-  ...investment(),
+  { key: 'overnight_cost', label: 'Overnight cost', type: 'number', half: true },
+  { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
 ]
 
 const storFields = (carrier: string, hours = '4'): FieldSpec[] => [
@@ -143,7 +143,8 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'tap_ratio',    label: 'Tap ratio',      type: 'number', defaultValue: '1.0',              half: true },
     { key: 'phase_shift',  label: 'Phase shift',    type: 'number', defaultValue: '0.0', unit: '°',   half: true },
     { key: 's_nom_extendable', label: 'Extendable', type: 'checkbox', defaultValue: 'false' },
-    ...investment(),
+    { key: 'overnight_cost', label: 'Overnight cost', type: 'number', half: true },
+    { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
   ],
   line: [
     { key: 'name',             label: 'Name',         type: 'text',     required: true },
@@ -159,18 +160,20 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'b_per_km',         label: 'b',             type: 'number',   defaultValue: '0',   unit: 'S/km', half: true },
     { key: 's_nom',            label: 'S nom',         type: 'number',   defaultValue: '100', unit: 'MVA',  half: true },
     { key: 's_nom_extendable', label: 'S nom extendable', type: 'checkbox', defaultValue: 'false' },
-    ...investment('inv_per_km_overnight'),
+    { key: 'inv_per_km_overnight', label: 'Overnight cost per km', type: 'number', half: true },
+    { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
   ],
   electrolyzer: [
     { key: 'name',         label: 'Name',                    type: 'text',   required: true },
     { key: 'bus0',         label: 'Electricity bus (input)', type: 'bus',    required: true,  busCarrierFilter: 'non-h2' } as BusFieldSpec,
     { key: 'bus1',         label: 'H₂ bus (output)',         type: 'bus',    required: true,  busCarrierFilter: 'h2' } as BusFieldSpec,
     { key: 'carrier',      label: 'Carrier',                 type: 'text',   defaultValue: 'H2' },
-    { key: 'p_nom',        label: 'Capacity (electricity in)', keepLabel: true,         type: 'number', defaultValue: '100', unit: 'MW',    half: true },
-    { key: 'efficiency',   label: 'Efficiency', keepLabel: true,          type: 'number', defaultValue: '0.70',               half: true },
+    { key: 'p_nom',        label: 'Capacity (electricity in)',         type: 'number', keepLabel: true, defaultValue: '100', unit: 'MW',    half: true },
+    { key: 'efficiency',   label: 'Efficiency',          type: 'number', keepLabel: true, defaultValue: '0.70',               half: true },
     { key: 'p_min_pu',     label: 'p_min_pu',               type: 'number', defaultValue: '0',                  half: true },
     { key: 'p_nom_extendable', label: 'Extendable',         type: 'checkbox', defaultValue: 'false' },
-    ...investment(),
+    { key: 'overnight_cost', label: 'Overnight cost', type: 'number', half: true },
+    { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
     { key: 'marginal_cost',label: 'Marginal cost',          type: 'number', defaultValue: '0', unit: '€/MWh',  half: true },
   ],
   fuel_cell: [
@@ -178,10 +181,11 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'bus0',         label: 'H₂ bus (input)',          type: 'bus',    required: true,  busCarrierFilter: 'h2' } as BusFieldSpec,
     { key: 'bus1',         label: 'Electricity bus (output)',type: 'bus',    required: true,  busCarrierFilter: 'non-h2' } as BusFieldSpec,
     { key: 'carrier',      label: 'Carrier',                 type: 'text',   defaultValue: 'H2' },
-    { key: 'p_nom',        label: 'Capacity (H₂ in)', keepLabel: true,          type: 'number', defaultValue: '50',  unit: 'MW',   half: true },
-    { key: 'efficiency',   label: 'Efficiency', keepLabel: true,          type: 'number', defaultValue: '0.55',              half: true },
+    { key: 'p_nom',        label: 'Capacity (H₂ in)',          type: 'number', keepLabel: true, defaultValue: '50',  unit: 'MW',   half: true },
+    { key: 'efficiency',   label: 'Efficiency',          type: 'number', keepLabel: true, defaultValue: '0.55',              half: true },
     { key: 'p_nom_extendable', label: 'Extendable',         type: 'checkbox', defaultValue: 'false' },
-    ...investment(),
+    { key: 'overnight_cost', label: 'Overnight cost', type: 'number', half: true },
+    { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
     { key: 'marginal_cost',label: 'Marginal cost',          type: 'number', defaultValue: '0', unit: '€/MWh', half: true },
   ],
   thermal:   genFields('gas'),
@@ -204,10 +208,11 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
       busCarrierFilter: 'electricity' } as BusFieldSpec,
     { key: 'bus1',         label: 'Heat bus (output)',       type: 'bus', required: true,
       busCarrierFilter: 'heat' } as BusFieldSpec,
-    { key: 'p_nom',        label: 'Capacity (electricity in)', keepLabel: true,         type: 'number', defaultValue: '50',  unit: 'MW',    half: true },
-    { key: 'efficiency',   label: 'Efficiency / COP', keepLabel: true,                 type: 'number', defaultValue: '3.5',                half: true },
+    { key: 'p_nom',        label: 'Capacity (electricity in)',         type: 'number', keepLabel: true, defaultValue: '50',  unit: 'MW',    half: true },
+    { key: 'efficiency',   label: 'Efficiency / COP',                 type: 'number', keepLabel: true, defaultValue: '3.5',                half: true },
     { key: 'p_nom_extendable', label: 'Extendable',          type: 'checkbox', defaultValue: 'false' },
-    ...investment(),
+    { key: 'overnight_cost', label: 'Overnight cost', type: 'number', half: true },
+    { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
     { key: 'marginal_cost',label: 'Marginal cost',           type: 'number', defaultValue: '0',   unit: '€/MWh', half: true },
   ],
   // CHP: Link from a fuel bus → electricity (efficiency) + heat (efficiency2).
@@ -222,11 +227,12 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'bus2',         label: 'Heat bus (output)',       type: 'bus', required: true,
       busCarrierFilter: 'heat' } as BusFieldSpec,
     { key: 'carrier',      label: 'Carrier',                 type: 'text',   defaultValue: 'gas' },
-    { key: 'p_nom',        label: 'Capacity (fuel in)', keepLabel: true,         type: 'number', defaultValue: '100', unit: 'MW',    half: true },
-    { key: 'efficiency',   label: 'Electrical efficiency', keepLabel: true,            type: 'number', defaultValue: '0.4',                half: true },
-    { key: 'efficiency2',  label: 'Thermal efficiency', keepLabel: true, like: 'efficiency', type: 'number', defaultValue: '0.4',                half: true },
+    { key: 'p_nom',        label: 'Capacity (fuel in)',         type: 'number', keepLabel: true, defaultValue: '100', unit: 'MW',    half: true },
+    { key: 'efficiency',   label: 'Electrical efficiency',            type: 'number', keepLabel: true, defaultValue: '0.4',                half: true },
+    { key: 'efficiency2',  label: 'Thermal efficiency', type: 'number', keepLabel: true, like: 'efficiency', defaultValue: '0.4',                half: true },
     { key: 'p_nom_extendable', label: 'Extendable',          type: 'checkbox', defaultValue: 'false' },
-    ...investment(),
+    { key: 'overnight_cost', label: 'Overnight cost', type: 'number', half: true },
+    { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
     { key: 'marginal_cost',label: 'Marginal cost',           type: 'number', defaultValue: '0',   unit: '€/MWh', half: true },
   ],
   // Thermal storage: PyPSA Store on a heat bus (e_nom only — power capacity
@@ -239,7 +245,8 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'e_nom',            label: 'Energy capacity',type: 'number', defaultValue: '100', unit: 'MWh', half: true },
     { key: 'e_nom_extendable', label: 'Extendable',     type: 'checkbox', defaultValue: 'false', half: true },
     { key: 'e_cyclic',         label: 'Cyclic state-of-charge', type: 'checkbox', defaultValue: 'true' },
-    ...investment(),
+    { key: 'overnight_cost', label: 'Overnight cost', type: 'number', half: true },
+    { key: 'lifetime', label: 'Lifetime', type: 'number', half: true },
   ],
   // Carrier-specific demand entries. The bus picker is filtered so the user
   // can't accidentally attach (e.g.) a hydrogen load to an AC bus.
