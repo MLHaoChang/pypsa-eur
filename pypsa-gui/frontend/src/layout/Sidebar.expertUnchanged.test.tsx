@@ -16,6 +16,9 @@ import Sidebar from './Sidebar'
 // pins that Guided mode changes nothing in Expert, not that Expert never
 // changes. Re-record with `npx vitest run src/layout/Sidebar.expertUnchanged.test.tsx -u`
 // and check the diff is exactly the entry that was added.
+// UX overhaul (owner decision Q6a, 2026-10-14): BUILD / TIME / ECONOMICS merge
+// into MODEL, STUDIES gains Investment / Grid plan sub-labels, and REPORTS is
+// renamed PROJECT with its rows reordered Scenarios, Snapshots, Reports.
 // The Studies group (2026-10-05) moved Planning → dynamics, Campus electrical
 // and Reports out of Simulation under their own header: owner's request.
 // M2 (2026-10-13, plan 2026-10-05 §11) re-recorded both: the Expert sidebar
