@@ -39,6 +39,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.asset_schema.attrs_doc import ATTRS_DOC
+
 
 # Reused enum constants (kept module-level so test_chat_tools_dispatch can
 # import them for parametrised testing without re-grepping the file).
@@ -427,7 +429,8 @@ TOOLS: list[dict[str, Any]] = [
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
             "name": {"type": "string"},
-            "attrs": {"type": "object"},
+            # S1d-3: the attributes each class takes, generated from the asset schema's descriptors.
+            "attrs": {"type": "object", "description": ATTRS_DOC},
         },
         ["component_class", "name", "attrs"],
     ),
@@ -504,7 +507,9 @@ TOOLS: list[dict[str, Any]] = [
             "components": {
                 "type": "array",
                 "items": {"type": "object"},
-                "description": "One object per component: {name, ...attributes}.",
+                "description": "One object per component: {name, ...attributes}. The attributes, "
+                               "their units and the derived columns not to send are those listed "
+                               "under create_component's attrs.",
             },
         },
         ["component_class", "components"],

@@ -32,7 +32,7 @@ import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
 import { useAssetSchema } from '../hooks/useAssetSchema'
 import { useAssetProvenance } from '../hooks/useAssetProvenance'
 import { buildPatch, seedForm } from '../utils/assetForm'
-import { AssetFieldsEdit, assetReadoutItems, schemaFields } from './properties/AssetFields'
+import { AssetFieldsEdit, assetReadoutItems, fieldHelp, schemaFields } from './properties/AssetFields'
 import { GuideButton } from '../components/GuidedTour'
 
 import {
@@ -209,7 +209,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
     return (
       <>
         <Section title={title ?? 'Generator Properties'}>
-          <Row label="Carrier" value={gen.carrier} tip={docTip('generator.carrier')} />
+          <Row label="Carrier" value={gen.carrier} tip={fieldHelp(schema, 'carrier')} />
           {visibleItems.map(i => (
             <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
           ))}
@@ -380,7 +380,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
     return (
       <>
         <Section title={title ?? 'Storage Properties'}>
-          <Row label="Carrier" value={su.carrier} tip={docTip('storage_unit.carrier')} />
+          <Row label="Carrier" value={su.carrier} tip={fieldHelp(schema, 'carrier')} />
           {visibleItems.map(i => (
             <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
           ))}
@@ -543,7 +543,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
     return (
       <>
         <Section title={title ?? 'Store Properties'}>
-          <Row label="Carrier" value={store.carrier} tip={docTip('store.carrier')} />
+          <Row label="Carrier" value={store.carrier} tip={fieldHelp(schema, 'carrier')} />
           {visibleItems.map(i => (
             <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
           ))}
@@ -693,7 +693,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
     return (
       <>
         <Section title={title ?? 'Load Properties'}>
-          <Row label="Carrier" value={load.carrier} tip={docTip('load.carrier')} />
+          <Row label="Carrier" value={load.carrier} tip={fieldHelp(schema, 'carrier')} />
           {visibleItems.map(i => (
             <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
           ))}
@@ -907,8 +907,8 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
 
   // Both ends lead the read-out: the schema's identity group is not in it.
   const items: ExpandedItem[] = [
-    { label: 'From bus', value: link.bus0, tip: docTip('link.bus0') },
-    { label: 'To bus', value: link.bus1, tip: docTip('link.bus1') },
+    { label: 'From bus', value: link.bus0, tip: fieldHelp(schema, 'bus0') },
+    { label: 'To bus', value: link.bus1, tip: fieldHelp(schema, 'bus1') },
     ...assetReadoutItems(schema, asset, undefined, provenance),
   ]
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
@@ -917,7 +917,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
     return (
       <>
         <Section title={title ?? 'Link Properties'}>
-          <Row label="Carrier" value={link.carrier} tip={docTip('link.carrier')} />
+          <Row label="Carrier" value={link.carrier} tip={fieldHelp(schema, 'carrier')} />
           {categoryLabel && <Row label="Category" value={categoryLabel} />}
           {visibleItems.map(i => (
             <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
@@ -1581,9 +1581,9 @@ export function LinePanel({ name }: { name: string }) {
   return (
     <div className="p-3">
       <Section title="Topology">
-        <Row label="From bus" value={line.bus0} tip={docTip('line.bus0')} />
-        <Row label="To bus"   value={line.bus1} tip={docTip('line.bus1')} />
-        <Row label="Carrier"  value={line.carrier} tip={docTip('line.carrier')} />
+        <Row label="From bus" value={line.bus0} tip={fieldHelp(schema, 'bus0')} />
+        <Row label="To bus"   value={line.bus1} tip={fieldHelp(schema, 'bus1')} />
+        <Row label="Carrier"  value={line.carrier} tip={fieldHelp(schema, 'carrier')} />
       </Section>
       {editing ? (
         <Section title="Edit Parameters">
@@ -1805,12 +1805,13 @@ function LinkPanel({ name }: { name: string }) {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: links = [] } = useQuery({ queryKey: nk(currentProject, 'links'), queryFn: networkApi.getLinks })
   const link = (links as Link[]).find((l: Link) => l.name === name)
+  const { data: schema } = useAssetSchema('Link')
   if (!link) return <p className="p-3 text-xs text-muted">Loading…</p>
   return (
     <div className="p-3">
       <Section title="Topology">
-        <Row label="From bus" value={link.bus0} tip={docTip('link.bus0')} />
-        <Row label="To bus"   value={link.bus1} tip={docTip('link.bus1')} />
+        <Row label="From bus" value={link.bus0} tip={fieldHelp(schema, 'bus0')} />
+        <Row label="To bus"   value={link.bus1} tip={fieldHelp(schema, 'bus1')} />
       </Section>
       <LinkCard key={link.name} link={link} mode="detail" onRename={n => setSelectedComponent({ type: 'Link', name: n })} />
     </div>
@@ -1823,11 +1824,12 @@ function GeneratorPanel({ name }: { name: string }) {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: generators = [] } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })
   const gen = (generators as Generator[]).find(g => g.name === name)
+  const { data: schema } = useAssetSchema('Generator')
   if (!gen) return <p className="p-3 text-xs text-muted">Loading…</p>
   return (
     <div className="p-3">
       <Section title="Connected to">
-        <Row label="Bus" value={gen.bus} tip={docTip('generator.bus')} />
+        <Row label="Bus" value={gen.bus} tip={fieldHelp(schema, 'bus')} />
       </Section>
       <GeneratorCard key={gen.name} gen={gen} mode="detail" onRename={n => setSelectedComponent({ type: 'Generator', name: n })} />
     </div>
@@ -1839,11 +1841,12 @@ function StorageUnitPanel({ name }: { name: string }) {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: sus = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
   const su = (sus as StorageUnit[]).find(s => s.name === name)
+  const { data: schema } = useAssetSchema('StorageUnit')
   if (!su) return <p className="p-3 text-xs text-muted">Loading…</p>
   return (
     <div className="p-3">
       <Section title="Connected to">
-        <Row label="Bus" value={su.bus} tip={docTip('storage_unit.bus')} />
+        <Row label="Bus" value={su.bus} tip={fieldHelp(schema, 'bus')} />
       </Section>
       <StorageUnitCard key={su.name} su={su} mode="detail" onRename={n => setSelectedComponent({ type: 'StorageUnit', name: n })} />
     </div>
@@ -1859,11 +1862,12 @@ function StorePanel({ name }: { name: string }) {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: stores = [] } = useQuery({ queryKey: nk(currentProject, 'stores'), queryFn: networkApi.getStores })
   const store = (stores as Store[]).find(s => s.name === name)
+  const { data: schema } = useAssetSchema('Store')
   if (!store) return <p className="p-3 text-xs text-muted">Loading…</p>
   return (
     <div className="p-3">
       <Section title="Connected to">
-        <Row label="Bus" value={store.bus} tip={docTip('store.bus')} />
+        <Row label="Bus" value={store.bus} tip={fieldHelp(schema, 'bus')} />
       </Section>
       <StoreCard key={store.name} store={store} mode="detail" onRename={n => setSelectedComponent({ type: 'Store', name: n })} />
     </div>
@@ -1875,11 +1879,12 @@ function LoadPanel({ name }: { name: string }) {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: loads = [] } = useQuery({ queryKey: nk(currentProject, 'loads'), queryFn: networkApi.getLoads })
   const load = (loads as Load[]).find(l => l.name === name)
+  const { data: schema } = useAssetSchema('Load')
   if (!load) return <p className="p-3 text-xs text-muted">Loading…</p>
   return (
     <div className="p-3">
       <Section title="Connected to">
-        <Row label="Bus" value={load.bus} tip={docTip('load.bus')} />
+        <Row label="Bus" value={load.bus} tip={fieldHelp(schema, 'bus')} />
       </Section>
       <LoadCard key={load.name} load={load} mode="detail" onRename={n => setSelectedComponent({ type: 'Load', name: n })} />
     </div>
