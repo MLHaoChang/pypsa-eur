@@ -2916,6 +2916,41 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id"],
     ),
     _t(
+        "campus_island_cuts",
+        "The frequency cuts of a hub project's island study (I7) and the apply "
+        "job: {limit, max_trials, proposed, applied, trials, job}. proposed: "
+        "the cuts the last campus run's island frequency check needs at each "
+        "failing hour, each with its kind (inertia MW·s, headroom_up / "
+        "headroom_down MW, droop_gain MW/Hz), required against current, the "
+        "binding limit, and either applicable with the cheapest extendable unit, "
+        "the MW it adds and an estimate (primal: that unit's capital cost, not "
+        "a solve), or the reason it has no row. applied: the cuts the hub solve "
+        "reads. trials: each loop trial's cuts, hub objective, campus sizes "
+        "refreshed and verdict. job: the running or last apply loop (null when "
+        "none). Inertia and headroom cuts are heuristic (the units' response "
+        "held at the current solution): say so, say an estimate is an "
+        "estimate, and say which inputs are assumed. Bridge-energy and pickup "
+        "failures get no cut. 409 for a project of another kind. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "campus_apply_island_cuts",
+        "Apply a hub project's proposed frequency cuts as a background loop of "
+        "at most 3 trials: each writes the cuts the hub solve reads, re-solves "
+        "and saves the hub through the solve queue, refreshes the sizes of the "
+        "extendable units in the campus file (p_mw, s_mva, e_mwh; every other "
+        "edit kept), and reruns the campus study, until nothing fails, nothing "
+        "more can be cut, or 3 trials. Returns the job record; read progress "
+        "and the trials with campus_island_cuts. Show the user the proposed "
+        "cuts and their estimates (campus_island_cuts) before you call it. 422 "
+        "when island constraints are off in the solver settings, there is no "
+        "campus run, or nothing can be applied; 409 while a loop runs. "
+        "Safety: execution_long_running.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
         "campus_get_library",
         "The asset library the campus study of a capacity-expansion (hub) "
         "project buys from: {yaml (the library as text: transformers, cables, "
@@ -3813,6 +3848,8 @@ TOOL_ROUTES: dict[str, list] = {
     "campus_island_config": _SERVICE_CALL,
     "campus_set_island_config": _SERVICE_CALL,
     "campus_run_island_study": _SERVICE_CALL,
+    "campus_island_cuts": _SERVICE_CALL,
+    "campus_apply_island_cuts": _SERVICE_CALL,
     # campus grid codes (2) — service calls; no publish tool (plan C10)
     "campus_list_grid_codes": _SERVICE_CALL,
     "campus_extract_grid_code": _SERVICE_CALL,

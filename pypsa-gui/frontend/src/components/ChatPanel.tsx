@@ -196,6 +196,9 @@ const GUIDED_TOOL_PHRASE: Record<string, string> = {
   run_coupling_loop: 'start the planning loop that adjusts the shortfall limit',
   run_margin_loop: 'start the planning loop that adds backup capacity',
   gridspine_run_pipeline: 'start the planning and dynamics study',
+  // campus island I7: the frequency-cut loop runs in the background (poll campus_island_cuts)
+  campus_apply_island_cuts: 'start applying the frequency cuts',
+  campus_island_cuts: 'read the frequency cuts',
   solve_queue_enqueue: 'add the project to the solve queue',
   abort_adequacy_study: 'ask the running study to stop',
   // The finance engine runs in the background (poll get_investment_case).

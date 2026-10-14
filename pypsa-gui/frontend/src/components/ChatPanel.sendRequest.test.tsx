@@ -635,6 +635,8 @@ describe('P26 gate B2: Guided cards name what they touch', () => {
     'import_matpower', 'clear_audit_log', 'undo_last', 'clear_chat_history',
     'apply_demand_from_excel', 'delete_upload', 'reconstruct_network_from_image', 'clear_uploads',
     'set_active_profile', 'gridspine_run_pipeline',
+    // campus island I7: the frequency-cut loop (execution_long_running)
+    'campus_apply_island_cuts',
   ]
   it.each(DESTRUCTIVE_AND_EXECUTION)('%s has its own summary (not the fallback)', (tool) => {
     expect(guidedCardSummary(tool, {})).not.toMatch(/^The assistant wants to use/)
@@ -642,6 +644,10 @@ describe('P26 gate B2: Guided cards name what they touch', () => {
 
   it.each<[string, Record<string, unknown>, string]>([
     ['delete_component', { component_class: 'Generator', name: 'genset_1' }, 'Delete genset_1 from the network'],
+    // The card names the project and what the loop does to it (coordinator, I7 tools).
+    ['campus_apply_island_cuts', { project_id: 'Hub A' },
+      'Apply the frequency cuts to Hub A: re-solve and save the hub, update the sizes in its campus file '
+      + 'and rerun the island check, up to 3 times'],
     ['cascade_delete_bus', { name: 'it_bus' }, 'Delete the bus it_bus and everything connected to it'],
     ['batch_delete_components', { component_class: 'Load', names: ['a', 'b', 'c', 'd', 'e', 'f'] },
       'Delete 6 components from the network: a, b, c, d, e and 1 more'],
@@ -823,6 +829,8 @@ describe('P29 gate B1-1: start-only tools never say they finished', () => {
     'run_coupling_loop', 'run_margin_loop', 'run_eh_study', 'gridspine_run_pipeline',
     // U3: the decision study's run and tornado start in the background.
     'run_decision_study',
+    // campus island I7: the frequency-cut loop runs in the background (poll campus_island_cuts)
+    'campus_apply_island_cuts',
     // a background report job (poll get_report_status), not "Start …" worded
     'regenerate_report_section'])]
 

@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 247,
+  "tool_count": 249,
   "tools": [
     {
       "name": "list_components",
@@ -4420,6 +4420,42 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "14d6c1e5acfc0e709b9d1b861a66e12689f25bff21b7f8a6e1e16c6f38bfcb22",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_island_cuts",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_apply_island_cuts",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "execution_long_running",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },
     {

@@ -77,6 +77,9 @@ const GUIDED_CARD_SUMMARY: Record<string, (a: Record<string, unknown>) => string
       : 'Run the reliability study for this site'
   },
   run_fmea_sweep: () => 'Run the equipment-failure check (FMEA)',
+  // campus island I7: the loop re-solves and saves the hub and rewrites the campus file's sizes.
+  campus_apply_island_cuts: (a) => `Apply the frequency cuts to ${_str(a.project_id) ?? 'this project'}: `
+    + 're-solve and save the hub, update the sizes in its campus file and rerun the island check, up to 3 times',
   run_decision_study: (a) => a.stage === 'tornado'
     ? 'Test the study’s best option against each key assumption’s range'
     : 'Run the decision study: calculate every option',
