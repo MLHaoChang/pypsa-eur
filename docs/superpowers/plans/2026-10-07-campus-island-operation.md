@@ -2479,6 +2479,73 @@ The first pass left three: a horizon below the first run, the hold, and
 the collapse. The last two tests were added for them, and all 13 are
 killed.
 
+### The trip floor: a run beyond protection is a trip, not a number (2026-10-14)
+
+**Why.** The owner asked how −23.54 Hz could be valid. It is Δf, so that
+trace reached about 26.5 Hz. `simulate` declared a collapse only when
+nothing had headroom. With a genset joined, the linear model kept
+integrating far below any protection, and the tables showed a nadir with
+no physical meaning. `judge` already failed such runs.
+
+**Representation (option 1, agreed with the gatekeeper).**
+- `trip_floor(limits, equipment)` gives a `TripFloor`, from the lowest
+  limit and the highest:
+  - the transition and steady-island f_min and f_max;
+  - each piece of equipment's low and high: a UPS window, or a load's
+    `f_trip_hz`.
+  - An undefined side (NaN) is skipped. Each side is named by what sets it.
+- `simulate(…, floor=)` stops at the first sample beyond it. `Trace.trip`
+  holds (t, what), for example "Δf below the 47.5 Hz floor (transition
+  f_min)". `floor=None` keeps today's run.
+- `Metrics.trip` is set, and the figures are NaN as for a collapse.
+  `judge` binds "trip: … at t = 3.21 s" with `worst` inf.
+- **The CSVs** get `trip_s`, next to `collapse_s`, in the sweep and study
+  tables, E4 rows included.
+- **The study and the sweep** pass the campus floor to every event, E1 to
+  E6 and the Q8 reruns. It is in the sweep's and E4's cache keys.
+- **E4:** a tripped block does not settle, so it reads `complete=False`.
+  The blocks after it are not attempted and the bridge needs inf, as at a
+  collapse. The trip is checked before the steady-tail stop.
+- **I7** re-runs without the floor, so a tripped event gets the cuts of the
+  same event without it. That is sound because the floor is at or below
+  every limit `judge` checks: a run that passes never reaches it, and the
+  floor changes the label and the figures, never the verdict.
+- **Where a UPS window sets the floor,** the run stops before that UPS's
+  transfer is modelled. The verdict is the same, because the window has
+  failed.
+
+**Contract.** `trip_s` is a new column, and nothing in pypsa-gui reads
+`collapse_s`. The island report checks each CSV's header against the
+column tuples, so a run written before this change shows its frequency
+tables as "columns differ" until it is re-run. The I2c and E2E sessions
+have been told.
+
+**Tests:**
+- the floor is the lowest limit, named; a UPS window can set it; NaN sides
+  are skipped;
+- a run inside the floor is bit-identical to the run without it;
+- a run beyond it stops at the first crossing, with the trip, the label,
+  NaN figures and worst inf, on both sides;
+- E4 reads a tripped block as not completing, and the floor is in its
+  cache key;
+- the sweep reports the trip, and its cuts equal those of the sweep
+  without the floor;
+- the existing unbuilt-BESS test now reads that genset-only island as a
+  trip, where it used to read +131 Hz;
+- the study runs every event against the campus floor: E1 trips at the UPS
+  window's 52 Hz ceiling, and an E4 block at the 47.5 Hz floor, whose
+  pickup then does not complete.
+- **Mutations:** 16 edits, 13 killed. The three left are equivalent, and
+  their guards stay as the gatekeeper asked:
+  - skipping a NaN high: `max` never picks a NaN after the first, defined
+    limit;
+  - `_settle_time` on a trip: a runaway trace never settles;
+  - the floor in the sweep's cache key: that cache lives within one call
+    and one floor.
+- **eh_datacenter** with the gatekeeper's scripts: every CSV is unchanged
+  against master to 1e-6, and `trip_s` is empty in every row (no hour comes
+  near the floor). It takes 6.1 s.
+
 ### I7 as built: the gridspine cut derivation (2026-10-14)
 
 **Owner, 2026-10-14:** the pypsa-gui island session takes I7. This session

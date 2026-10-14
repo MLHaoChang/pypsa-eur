@@ -180,13 +180,25 @@ def _summary_table(tid, title, summary, keys, group) -> dict:
     return _table(tid, title, summary.get("label", ""), ("item", "value"), rows, group=group)
 
 
+#: Columns a later contract added (``trip_s``: the frequency check's trip
+#: floor). A run written before them reads them as empty, not as off the contract.
+_LATER_COLUMNS = frozenset({"trip_s"})
+
+
 def _read(path, columns, missing):
     """The CSV's rows, or None (listed in ``missing``) when its header is not
-    ``columns``. Empty cells read as None."""
+    ``columns``, or ``columns`` without the later ones (``_LATER_COLUMNS``).
+    Those read as empty, and ``missing`` says the run predates them, so an
+    empty ``trip_s`` is not read as "no trip". Empty cells read as None."""
     df = pd.read_csv(path)
-    if list(df.columns) != list(columns):
-        missing.append(f"{path.name} (columns differ from the contract)")
-        return None
+    have, want = list(df.columns), list(columns)
+    if have != want:
+        if have != [c for c in want if c not in _LATER_COLUMNS]:
+            missing.append(f"{path.name} (columns differ from the contract)")
+            return None
+        # empty is not "no trip": the run predates the floor
+        missing.append(f"{path.name} written before the trip floor: re-run for trip times")
+    df = df.reindex(columns=want)
     return df.astype(object).where(pd.notna(df), None)
 
 
