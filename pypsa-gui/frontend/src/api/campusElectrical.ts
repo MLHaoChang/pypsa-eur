@@ -514,10 +514,17 @@ export interface ProposedCut {
 /** A cut the hub solve reads (`island_cuts.json`). */
 export interface AppliedCut { period: number; hour: number; scenario: string; kind: CutKind; required: number }
 
+/** What a trial brought up to the re-solved hub in the campus file. */
+export type RefreshedRating =
+  | { unit: string; field: 'p_mw' | 's_mva' | 'e_mwh'; from: number | null; to: number }
+  | { unit: string; added: true }
+  | { unit: string; added: false; reason: string }
+
 export interface CutTrial {
   trial: number
   added: AppliedCut[]
   objective: number | null
+  refreshed?: RefreshedRating[]
   verdict: string
 }
 

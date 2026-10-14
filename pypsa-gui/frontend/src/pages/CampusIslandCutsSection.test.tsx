@@ -35,7 +35,8 @@ const CUTS: IslandCuts = {
                           reason: 'collapse: no grid-forming unit', candidate: null, added_mw: null, estimate: null })],
   applied: [{ period: 2030, hour: 1, scenario: 'seamless', kind: 'headroom_up', required: 12 }],
   trials: [{ trial: 1, added: [{ period: 2030, hour: 1, scenario: 'seamless', kind: 'headroom_up', required: 12 }],
-             objective: 2000, verdict: 'fails at 1 hour' }],
+             objective: 2000, verdict: 'fails at 1 hour',
+             refreshed: [{ unit: 'BESS', field: 'p_mw', from: 10, to: 20 }, { unit: 'PV2', added: true }] }],
 }
 const running: CutJobRecord = { state: 'running', started_at: 1, finished_at: null, trials: 1, max_trials: 3,
                                 stopped: null, error: null, message: 'applying the cuts' }
@@ -133,6 +134,9 @@ describe('frequency cuts: the record', () => {
     expect(row.textContent).toMatch(/headroom_up/)
     expect(row.textContent).toMatch(/2[,.\s]?000/)
     expect(row.textContent).toContain('fails at 1 hour')
+    // what the trial brought up to the re-solved hub in the campus file
+    expect(row.textContent).toMatch(/BESS p_mw 10 → 20/)
+    expect(row.textContent).toMatch(/PV2 added/)
   })
 
   it('takes one cut back, or all of them', async () => {

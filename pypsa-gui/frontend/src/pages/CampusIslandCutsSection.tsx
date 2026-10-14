@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, Square, Trash2 } from 'lucide-react'
-import { campusApi, errorText, type AppliedCut, type ProposedCut } from '../api/campusElectrical'
+import { campusApi, errorText, type AppliedCut, type ProposedCut, type RefreshedRating } from '../api/campusElectrical'
 import { Btn, Tag } from '../components/PageKit'
 import { ISLAND_REPORT_KEY } from './CampusIslandSection'
 
@@ -26,6 +26,10 @@ const num = (v: number | 'inf' | null | undefined, digits = 4) =>
   v === null || v === undefined ? '' : v === 'inf' ? '∞'
     : v.toLocaleString('en-US', { maximumSignificantDigits: digits })
 const cost = (v: number | null) => (v === null ? '' : v.toLocaleString('en-US', { maximumFractionDigits: 0 }))
+/** One line per refreshed rating or added unit (owner: each trial lists them). */
+const refreshedText = (r: RefreshedRating) =>
+  'field' in r ? `${r.unit} ${r.field} ${num(r.from)} → ${num(r.to)}`
+    : r.added ? `${r.unit} added` : `${r.unit} not added: ${r.reason}`
 const TH = 'text-left font-medium px-2'
 const TD = 'px-2'
 
@@ -114,13 +118,15 @@ export default function CampusIslandCutsSection({ name }: { name: string }) {
           <h4 className="text-[12.5px] font-semibold">Trials</h4>
           <table className="text-[12px] whitespace-nowrap" data-testid="cuts-trials">
             <thead><tr><th className={TH}>trial</th><th className={TH}>cuts added</th>
-              <th className={TH}>hub objective</th><th className={TH}>verdict</th></tr></thead>
+              <th className={TH}>hub objective</th><th className={TH}>campus sizes refreshed</th>
+              <th className={TH}>verdict</th></tr></thead>
             <tbody>
               {data.trials.map(t => (
                 <tr key={t.trial}>
                   <td className={TD}>{t.trial}</td>
                   <td className={TD}>{t.added.map(c => `${c.kind} p${c.period} h${c.hour} ≥ ${num(c.required)}`).join('; ')}</td>
                   <td className={TD}>{cost(t.objective)}</td>
+                  <td className={TD}>{(t.refreshed ?? []).map(refreshedText).join('; ') || 'none'}</td>
                   <td className={TD}>{t.verdict}</td>
                 </tr>
               ))}
