@@ -4,6 +4,7 @@ import { resultsEvidenceApi } from '../../api/resultsEvidence'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { downloadCSV, KPI, fmtPower } from './shared'
+import ResultState, { type NonValueState } from '../../components/ResultState'
 
 const number = (value: number | null | undefined, unit = '') =>
   value == null ? 'Unavailable' : `${value.toFixed(2)}${unit}`
@@ -21,8 +22,16 @@ export default function BranchLoading({ from, to, enabled }: { from: number; to:
   const data = query.data
   if (!enabled || query.isPending || query.isFetching) return <p role="status">Loading matching load-flow evidence…</p>
   if (query.isError) return <p role="status">Load-flow evidence unavailable. Try again after checking the project and solve.</p>
-  if (data?.status !== 'ok') return <p role="status">{data?.message ?? 'Load-flow evidence unavailable.'}</p>
+  if (data?.status !== 'ok') {
+    const states: Record<string, NonValueState> = { no_ac_branches: 'not_applicable',
+      not_solved: 'not_run', solve_in_progress: 'running', solve_inputs_changed: 'stale', stale_results: 'stale' }
+    return <div role="status"><ResultState state={states[data?.unavailable_kind ?? ''] ?? 'unavailable'} reason={data?.message ?? 'Load-flow evidence unavailable.'} /></div>
+  }
   if (!data.binding || data.binding.project_name !== project) return <p role="status">Matching project evidence unavailable.</p>
+  if (data.binding.scope !== 'current' || data.binding.source !== source
+    || data.binding.window_from !== from || data.binding.window_to !== to
+    || !/^[a-f0-9]{64}$/.test(data.binding.input_sha256 ?? '')
+    || !/^[a-f0-9]{64}$/.test(data.binding.data_sha256)) return <p role="status">Matching source and window evidence unavailable.</p>
   const rows = data.rows ?? []
   const flow = rows.filter(r => r.peak_flow != null).map(r => r.peak_flow!)
   const chartRows = (data.series_index ?? []).map((stamp, i) => Object.fromEntries([
@@ -34,7 +43,7 @@ export default function BranchLoading({ from, to, enabled }: { from: number; to:
       {' '}Larger terminal magnitude; configured rating, or optimized rating for extendable branches; snapshot-weighted means and hours; time-varying s_max_pu limits.</p>
     <p className="text-xs text-muted mb-2">Window {data.window?.from}–{data.window?.to} · {data.window?.snapshots} snapshots · {number(data.window?.weighted_hours, ' weighted h')}. {data.claims?.reason}</p>
     <div className="grid grid-cols-2 gap-2 mb-3">
-      <KPI label="Peak flow" value={source === 'lopf' ? fmtPower(flow.length ? Math.max(...flow) : null) : 'See each branch basis below'} hint="Larger terminal magnitude over ranked lines and transformers in this window. MW proxies and MVA apparent powers are not combined." />
+      <KPI label={data.rows_truncated ? 'Peak flow (shown branches)' : 'Peak flow'} value={source === 'lopf' ? fmtPower(flow.length ? Math.max(...flow) : null) : 'See each branch basis below'} hint="Larger terminal magnitude over the shown ranked lines and transformers in this window. MW proxies and MVA apparent powers are not combined." />
       <KPI label="Ranked branches" value={String(rows.length)} hint="Missing ratings or result evidence are listed separately, never counted as zero loading." />
     </div>
     <button type="button" className="text-xs underline mb-2" onClick={() => downloadCSV('loadflow_loading.csv',

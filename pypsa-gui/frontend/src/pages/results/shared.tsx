@@ -8,6 +8,7 @@ import {
 } from 'recharts'
 import { Download } from 'lucide-react'
 import Kpi from '../../components/Kpi'
+import type { ResultAction, ResultStateKind } from '../../components/ResultState'
 import toast from 'react-hot-toast'
 import { useQuery } from '@tanstack/react-query'
 import { isRenewableCarrier } from '../../utils/carriers'
@@ -896,7 +897,7 @@ export function ChartActions({ chartRef, onExportCSV, filename, className }: Cha
 // strip's headline tile, and `hint` (often a full-sentence formula) stays a
 // hover title so the strip reads calmly.
 export function KPI({
-  label, value, unit, hint, delta, deltaState, sub, accent,
+  label, value, unit, hint, delta, deltaState, sub, accent, state, reason, action,
 }: {
   label: string
   value: string
@@ -906,6 +907,9 @@ export function KPI({
   deltaState?: 'ok' | 'warn' | 'err'
   sub?: string
   accent?: boolean
+  state?: ResultStateKind
+  reason?: string
+  action?: ResultAction
 }) {
   return (
     <Kpi
@@ -917,6 +921,9 @@ export function KPI({
       deltaTone={deltaState === 'ok' ? 'good' : deltaState === 'err' ? 'bad' : deltaState}
       basis={sub}
       headline={accent}
+      state={state}
+      reason={reason}
+      action={action}
     />
   )
 }

@@ -40,7 +40,7 @@ afterEach(() => cleanup())
 
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo', resultSource: 'lopf' })
-  vi.mocked(resultsEvidenceApi.loadflow).mockResolvedValue({ status: 'ok', binding: { version: 1, project_id: 'project-1', project_name: 'Demo', scope: 'current', data_sha256: 'a'.repeat(64) }, rows: [{ name: 'Line 1', class: 'Line', basis: 'active_power_proxy', util_pct: 42.424, rating_pct: 42.424, mean_util_pct: 42.424, peak_flow: 424.24, mean_flow: 424.24, peak_at: '2026-01-01', h_at_limit: 0, h_over_limit: 0, rating: { value: 1000, basis: 'configured' }, s_max_pu: { min: 1, max: 1 } }] })
+  vi.mocked(resultsEvidenceApi.loadflow).mockResolvedValue({ status: 'ok', binding: { version: 1, project_id: 'project-1', project_name: 'Demo', scope: 'current', source: 'lopf', window_from: 0, window_to: 0, input_sha256: 'b'.repeat(64), data_sha256: 'a'.repeat(64) }, rows: [{ name: 'Line 1', class: 'Line', basis: 'active_power_proxy', util_pct: 42.424, rating_pct: 42.424, mean_util_pct: 42.424, peak_flow: 424.24, mean_flow: 424.24, peak_at: '2026-01-01', h_at_limit: 0, h_over_limit: 0, rating: { value: 1000, basis: 'configured' }, s_max_pu: { min: 1, max: 1 } }] })
   const emptyTs = { index: [], columns: [], data: [] }
   vi.mocked(resultsApi.getAcPfStatus).mockReset().mockResolvedValue({ available: false })
   // Single line, single snapshot: max(|p0|) over one point equals that
@@ -159,4 +159,36 @@ it('renders a distinctive peak-flow KPI sourced from a single mocked line/snapsh
   renderPage()
   const match = await findKpiValue(f => f.includes('424.24 MW'))
   expect(match).toBeTruthy()
+})
+
+// ── Result states (UX overhaul S2) ──────────────────────────────────────────
+it('says losses were not modelled instead of showing 0 MWh, and links to Solver settings', async () => {
+  // The default fixture has `enabled: false` — transmission_losses was off.
+  // One section-level state, not three identical tiles.
+  const { findAllByText, queryByText, getByRole } = renderPage()
+  expect((await findAllByText('Not modelled')).length).toBe(1)
+  expect(queryByText('Total energy lost')).toBeNull()
+  expect(document.querySelector('[data-kpi-value="0 MWh"]')).toBeNull()
+  getByRole('button', { name: 'Turn on in Solver settings' }).click()
+  expect(useUIStore.getState().activeSlidePanel).toBe('simparams')
+})
+
+it('shows real loss figures when losses were modelled, including a computed zero', async () => {
+  vi.mocked(resultsApi.getLosses).mockResolvedValue({
+    enabled: true, total_mwh: 0, peak_mw: 0, total_demand_mwh: 100,
+    loss_pct_of_demand: 0, by_branch: [],
+  })
+  const { queryByText } = renderPage()
+  await findKpiValue('0 MWh')
+  expect(queryByText('Not modelled')).toBeNull()
+})
+
+it('says branch loading does not apply when the network has no lines or transformers', async () => {
+  vi.mocked(resultsEvidenceApi.loadflow).mockResolvedValue({ status: 'unavailable', unavailable_kind: 'no_ac_branches', message: 'This network has no lines or transformers.' })
+  vi.mocked(networkApi.getLines).mockResolvedValue([])
+  vi.mocked(resultsApi.getLineResults).mockResolvedValue({ index: [], columns: [], data: [] } as never)
+  const { findAllByText, queryByText } = renderPage()
+  expect((await findAllByText('Not applicable')).length).toBe(1)
+  expect(document.querySelector('[data-state="not_applicable"]')?.textContent).toMatch(/no lines/i)
+  expect(queryByText('Peak flow')).toBeNull()
 })

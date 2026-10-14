@@ -6,7 +6,7 @@ import { resultsEvidenceApi, type LoadflowView } from '../../api/resultsEvidence
 import { useUIStore } from '../../store/uiStore'
 vi.mock('../../api/resultsEvidence', () => ({ resultsEvidenceApi: { loadflow: vi.fn() } }))
 const view: LoadflowView = {
-  status: 'ok', binding: { version: 1, project_id: 'project-1', project_name: 'Demo', scope: 'current', source: 'lopf', window_from: 1, window_to: 2, data_sha256: 'a'.repeat(64) },
+  status: 'ok', binding: { version: 1, project_id: 'project-1', project_name: 'Demo', scope: 'current', source: 'lopf', input_sha256: 'b'.repeat(64), window_from: 1, window_to: 2, data_sha256: 'a'.repeat(64) },
   window: { from: 1, to: 2, snapshots: 2, weighted_hours: 2 },
   rows: [{ name: 'L_p1', class: 'Line', basis: 'active_power_proxy', util_pct: 60, rating_pct: 60, mean_util_pct: 50, peak_flow: 60, mean_flow: 50, peak_at: 'hour 1', h_at_limit: 0, h_over_limit: 0, rating: { value: 100, basis: 'configured' }, s_max_pu: { min: 1, max: 1 } }],
   skipped: [{ name: 'Unrated', class: 'Line', reason: 'rating_missing_or_zero' }],
