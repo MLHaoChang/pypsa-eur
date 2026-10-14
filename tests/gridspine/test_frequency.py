@@ -163,6 +163,48 @@ def test_the_load_acceptance_step_and_ramp_hold_the_governor():
     assert tr.dp["G"][-1] == pytest.approx(1.0 + 0.5 * 3.0, abs=1e-3)
 
 
+def test_a_genset_at_its_limit_holds_it_inside_the_rk4_step():
+    # G at 12 of 15 MW gives 3 MW; B (5 MW/Hz, no limit) the other 17: settled exactly at -3.4 Hz. Without
+    # anti-windup the RK4 stages count G's governor beyond its limit, (ref - x) dt / (2 T_g): 0.11 MW at 5 ms
+    g = gen(p0=12.0, p_n=15.0, s_n=15.0, p_max=15.0)
+    b = bess(p_min=-math.inf, p_max=math.inf, i_max_mw=math.inf)
+    for dt in (5e-3, 1e-3):
+        tr = F.simulate([g, b], F.step(20.0), t_end=40.0, dt=dt)
+        assert tr.dp["G"][-1] == 3.0 and F.metrics(tr).df_qss_hz == pytest.approx(-17.0 / 5.0, abs=1e-9)
+    # and at the lower bound: a 30 MW export lost backs G off to 0 MW (its governor asks for -27), B absorbs 18
+    tr = F.simulate([g, b], F.step(-30.0), t_end=40.0, dt=5e-3)
+    assert tr.dp["G"][-1] == -12.0 and F.metrics(tr).df_qss_hz == pytest.approx(18.0 / 5.0, abs=1e-9)
+
+
+def test_a_genset_on_its_ramp_beside_a_former_is_counted_on_the_moving_bound():
+    # G steps 1 MW and ramps 0.5 MW/s to its 15 MW, B (no limit) carries the rest. On the ramp the bound moves:
+    # the 5 ms run matches a 0.5 ms one (held still at the bound it would lag, 8e-3 Hz at 2 s); at its fixed
+    # limit the ramp no longer applies, so the island settles at the balance's -17 / 5 Hz exactly
+    g = gen(p0=12.0, p_n=15.0, s_n=15.0, p_max=15.0, step_mw=1.0, ramp_mw_per_s=0.5)
+    b = bess(p_min=-math.inf, p_max=math.inf, i_max_mw=math.inf)
+    coarse, fine = (F.simulate([g, b], F.step(20.0), t_end=40.0, dt=dt) for dt in (5e-3, 5e-4))
+    at = lambda tr: tr.df[int(np.searchsorted(tr.t, 2.0))]                          # noqa: E731
+    assert at(coarse) == pytest.approx(at(fine), abs=1e-6)
+    assert coarse.dp["G"][-1] == 3.0 and F.metrics(coarse).df_qss_hz == pytest.approx(-17.0 / 5.0, abs=1e-9)
+
+
+def test_a_genset_on_its_ramp_rides_it_without_lagging():
+    # the bound moves at the ramp, so held at it the governor moves with it, not a step behind
+    g = gen(t_g=0.01, step_mw=1.0, ramp_mw_per_s=0.5)                # alone: its governor asks for more
+    tr = F.simulate([g], F.step(4.0), t_end=3.0, dt=5e-3)
+    on = tr.t > 0.05
+    assert np.allclose(tr.dp["G"][on], 1.0 + 0.5 * tr.t[on], atol=1e-9)
+
+
+def test_a_genset_with_no_ramp_limit_starts_at_its_join_without_a_nan():
+    # the bounds at the join itself: an unlimited ramp times no time elapsed is 0, not inf x 0
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        tr = F.simulate([gen()], F.step(4.0), t_end=1.0, dt=5e-3)
+    assert np.isfinite(tr.df).all()
+
+
 def fw_pv(**kw):
     base = dict(name="PV", model="gfl_fw", p0=8.0, p_n=10.0, s_n=10.0, p_min=0.0, p_max=8.0,
                 fw={"k_mw_per_hz": 10.0, "deadband_hz": 0.2, "delay_s": 0.2, "ramp_mw_per_s": 20.0,

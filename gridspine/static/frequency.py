@@ -210,18 +210,40 @@ def _targets(units, x, t, f0):
                 continue
             k = u.p_n / ((u.r if u.r == u.r and u.r else ISO_DROOP) * f0)
             ref = -k * (x["df"] + (x[f"{u.name}~i"] / ISO_TI_S if u.isochronous else 0.0))
-            dx[u.name] = (ref - x[u.name]) / u.t_g
+            dx[u.name] = _hold(u, x[u.name], (ref - x[u.name]) / u.t_g, t)
             if u.isochronous:
                 dx[f"{u.name}~i"] = x["df"]
     return dx
+
+
+def _genset_bounds(u, t):
+    """``(lo, hi, rate_lo, rate_hi)``: a joined genset's ΔP range at ``t``,
+    its step plus ramp since joining within 0..P_n, and how fast each bound
+    moves (the ramp while it binds, else 0)."""
+    elapsed = t - u.join_s
+    room = u.step_mw + (u.ramp_mw_per_s * elapsed if elapsed > 0.0 else 0.0)
+    lo, hi = max(-room, 0.0 - u.p0), min(room, u.p_n - u.p0)
+    ramp = u.ramp_mw_per_s
+    return lo, hi, -ramp if -room > 0.0 - u.p0 else 0.0, ramp if room < u.p_n - u.p0 else 0.0
+
+
+def _hold(u, p, dp_dt, t):
+    """Anti-windup: a genset at a bound moves no faster outward than the
+    bound does, so the RK4 stages inside a step never count power beyond
+    it (``_clamp`` alone holds it only after the step)."""
+    lo, hi, rate_lo, rate_hi = _genset_bounds(u, t)
+    if p >= hi - 1e-12:
+        dp_dt = min(dp_dt, rate_hi)
+    if p <= lo + 1e-12:
+        dp_dt = max(dp_dt, rate_lo)
+    return dp_dt
 
 
 def _clamp(units, x, t):
     """Hold the genset and fw states to their limits after a step."""
     for u in units:
         if u.model == "genset" and t >= u.join_s:
-            room = u.step_mw + u.ramp_mw_per_s * (t - u.join_s)
-            lo, hi = max(-room, 0.0 - u.p0), min(room, u.p_n - u.p0)
+            lo, hi, _, _ = _genset_bounds(u, t)
             x[u.name] = min(max(x[u.name], lo), hi)
 
 
@@ -1218,14 +1240,15 @@ def _settle_run(run, units, t_end, tries=5):
     has settled (Δf moved less than 0.5 % + 1 mHz over its second half) or
     collapsed; ``(trace, t)``."""
     t = t_end
-    for _ in range(tries):
+    for i in range(tries):
+        if i:
+            t *= 2.0
         trace = run(units, t)
         if trace.collapse is not None:
             break
         half = trace.df[int(np.searchsorted(trace.t, 0.5 * trace.t[-1]))]
         if abs(trace.df[-1] - half) <= 0.005 * abs(trace.df[-1]) + 1e-3:
             break
-        t *= 2.0
     return trace, t
 
 

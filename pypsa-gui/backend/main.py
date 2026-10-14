@@ -76,6 +76,7 @@ from routers import (
     changelog,
     chat,
     dictation,
+    mcp,
     durable_conversation,
     clustering,
     adequacy_worksheet,
@@ -580,6 +581,13 @@ async def lifespan(app: FastAPI):
         # startup" meaning the second thing, and a reviewer planning the
         # desktop splash reasonably read it as the first.
         run_first_run_import()
+        # Local MCP exposure (issue 11): this launch's URL and bearer token,
+        # for an agent on this machine. Never fails boot.
+        try:
+            from harness import mcp_server
+            mcp_server.write_endpoint_file()
+        except Exception:  # noqa: BLE001 — no endpoint file costs MCP clients, not the app
+            logging.getLogger("pypsa_gui").exception("could not write the MCP endpoint file")
     PyPSAService.initialize()
     # Decision-study forks a crash left behind (plan 2026-09-28 guided
     # investment study MVP-1, S9; gate S6 [N7]): throw-away tornado variants
@@ -1341,6 +1349,8 @@ app.include_router(uploads.router, prefix="/api/projects", tags=["uploads"])
 # confirmation card lifecycle + abort endpoint. The router is mounted under
 # /api/chat; Phase 3 wires the real LLM call without changing route shapes.
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+# Local MCP exposure (chat harness issue 11): 404 unless local mode is on.
+app.include_router(mcp.router, prefix="/api", tags=["mcp"])
 app.include_router(dictation.router, prefix="/api/dictation", tags=["dictation"])
 app.include_router(
     durable_conversation.router,

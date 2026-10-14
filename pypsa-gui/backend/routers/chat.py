@@ -694,6 +694,16 @@ def get_chat_profiles(
     }
 
 
+@router.get("/external/pending")
+def external_pending(request: Request) -> dict:
+    """The confirmation cards external MCP agents are waiting on (issue 11),
+    for the panel's strip; answered through `POST /{session_id}/confirm`."""
+    from harness import mcp_server
+    user = getattr(request.state, "auth_user", None)
+    user_id = str(user.id) if getattr(user, "id", None) is not None else None
+    return {"pending": mcp_server.pending_cards(user_id)}
+
+
 @router.get("/workflows")
 def get_chat_workflows(
     context: Literal["unbound", "expert", "guided"] = "unbound",

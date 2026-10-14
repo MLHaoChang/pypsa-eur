@@ -19,6 +19,50 @@ from services.study_state import refuse_edit_during_live_study
 
 _GC_OPTIONAL = ("carrier_attribute", "carrier", "investment_period")
 
+# PyPSA (1.1) reads the carrier of these two types from `carrier_attribute`
+# (`define_operational_limit` queries `carrier == glc.carrier_attribute`;
+# `define_tech_capacity_expansion_limit` groups by it). `carrier` is not a
+# GlobalConstraint attribute, but the GUI's forms and the chat write the
+# carrier there, so a limit stored only in `carrier` never reached the LP.
+# Both columns are kept equal for these types: `carrier_attribute` for the
+# solve, `carrier` for the tables and the fuel-limit grid that read it.
+_CARRIER_SCOPED = ("operational_limit", "tech_capacity_expansion_limit")
+
+
+def _named(v: Any) -> bool:
+    return isinstance(v, str) and v != ""
+
+
+def _scope_carrier(row: dict, sent: dict) -> None:
+    """Write a carrier-scoped limit's carrier into both columns. What the request sent wins over the stored row,
+    and `carrier` over `carrier_attribute` (the forms clear the attribute a type does not read)."""
+    if row.get("type") not in _CARRIER_SCOPED:
+        return
+    candidates = (sent.get("carrier"), sent.get("carrier_attribute"), row.get("carrier"), row.get("carrier_attribute"))
+    carrier = next((v for v in candidates if _named(v)), None)
+    if carrier is not None:
+        row["carrier"] = carrier
+        row["carrier_attribute"] = carrier
+
+
+def repair_carrier_scoped_limits(n) -> int:
+    """A project saved before the fix: a carrier-scoped limit whose `carrier_attribute` names no carrier of the
+    network (PyPSA's default "co2_emissions", or empty) takes the carrier from `carrier`. In memory only: the file
+    changes on the next save. Returns how many rows it repaired."""
+    gc = n.global_constraints
+    if gc.empty or "carrier" not in gc.columns:
+        return 0
+    carriers = set(n.carriers.index)
+    repaired = 0
+    for name in gc.index:
+        if gc.at[name, "type"] not in _CARRIER_SCOPED:
+            continue
+        carrier, attr = gc.at[name, "carrier"], gc.at[name, "carrier_attribute"]
+        if _named(carrier) and attr != carrier and not (_named(attr) and attr in carriers):
+            gc.at[name, "carrier_attribute"] = carrier
+            repaired += 1
+    return repaired
+
 
 def apply_create_global_constraint(body) -> dict:
     refuse_edit_during_live_study()  # P27a A1: not routed via _create_component
@@ -41,6 +85,7 @@ def apply_create_global_constraint(body) -> dict:
             if v is None or v == "":
                 continue
             kwargs[opt] = v
+        _scope_carrier(kwargs, kwargs)
         n.add("GlobalConstraint", body.name, **kwargs)
     change_log_service.log(
         "add", "GlobalConstraint", body.name,
@@ -62,9 +107,9 @@ def apply_update_global_constraint(name: str, body, *, merge_partial_update) -> 
         # the Pydantic schema defaults (which was the B2 footgun before).
         # NOTE: deliberately NOT routed through _update_component — that injects
         # ensure_carrier (wrong for a GlobalConstraint). Shared MERGE only.
-        merged = merge_partial_update(
-            n, "global_constraints", name, body.model_dump(exclude_unset=True)
-        )
+        sent = body.model_dump(exclude_unset=True)
+        merged = merge_partial_update(n, "global_constraints", name, sent)
+        _scope_carrier(merged, sent)
         new_name = merged.pop("name", name)
         if new_name != name:
             from services.component_names import require_valid_name

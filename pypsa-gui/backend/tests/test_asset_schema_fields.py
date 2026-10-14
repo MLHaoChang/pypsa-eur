@@ -28,6 +28,10 @@ CUSTOM_COLUMNS = {
     "curtailment_cost", "discount_rate", "v_nom_0", "v_nom_1",
 }
 
+# M5: GUI columns one class's create model declares (models/schemas.py `BusCreate.country`, `CarrierCreate.unit`,
+# `GlobalConstraintCreate.carrier`), allowed for that class only.
+CUSTOM_BY_CLASS = {"Bus": {"country"}, "Carrier": {"unit"}, "GlobalConstraint": {"carrier"}}
+
 # Every key the hand-written edit cards let a user change today. S1 must not
 # lose one (capital_cost moves to a derived row; overnight_cost on a battery
 # is replaced by its parts).
@@ -56,6 +60,8 @@ CARD_KEYS = {
         "outage_rate_value", "outage_rate_basis", "mttr_hours",
     },
     "Load": {"name", "bus", "carrier", "p_set", "q_set", "sign"},
+    # M5: the Bus card's edit form before M5 (coordinates as x/y).
+    "Bus": {"name", "v_nom", "carrier", "control", "country", "sub_network", "x", "y"},
     "Link": {
         "name", "carrier", "bus0", "bus1", "p_nom", "p_nom_extendable", "p_nom_min", "p_nom_max",
         "p_min_pu", "p_max_pu", "efficiency", "marginal_cost", "capital_cost", "fom_cost", "overnight_cost",
@@ -76,7 +82,10 @@ CARD_KEYS = {
 
 ALL = sorted(F.known_components())
 ATTR = {"Generator": "generators", "StorageUnit": "storage_units", "Store": "stores", "Load": "loads",
-        "Link": "links", "Line": "lines", "Transformer": "transformers"}
+        "Link": "links", "Line": "lines", "Transformer": "transformers",
+        # M5: the non-asset components.
+        "Bus": "buses", "Carrier": "carriers", "GlobalConstraint": "global_constraints",
+        "ShuntImpedance": "shunt_impedances"}
 # The capacity each extendable class sizes.
 NOM = {"Generator": "p_nom", "StorageUnit": "p_nom", "Link": "p_nom", "Store": "e_nom", "Line": "s_nom",
        "Transformer": "s_nom"}
@@ -103,7 +112,7 @@ def test_every_field_is_a_real_column(component):
     n = pypsa.Network()
     attr = ATTR[component]
     pypsa_attrs = set(getattr(n.components, attr).defaults.index)
-    allowed = pypsa_attrs | CUSTOM_COLUMNS | set(part_columns(component))
+    allowed = pypsa_attrs | CUSTOM_COLUMNS | set(part_columns(component)) | CUSTOM_BY_CLASS.get(component, set())
     unknown = {f.key for f in F.fields_for(component)} - allowed
     assert not unknown, unknown
 
@@ -211,11 +220,17 @@ def test_blank_policy_agrees_with_the_write_model(component):
 
     model = getattr(M, f"{component}Create")
     branch = component in ("Link", "Line", "Transformer")
-    required = {"name": "x", "bus0": "a", "bus1": "b"} if branch else {"name": "x", "bus": "b"}
+    required = ({"name": "x", "bus0": "a", "bus1": "b"} if branch
+                else {"name": "x"} if component in ("Bus", "Carrier")
+                else {"name": "x", "constant": 1.0} if component == "GlobalConstraint"
+                else {"name": "x", "bus": "b"})
     for f in F.fields_for(component):
         if f.derived or f.key not in model.model_fields:
             continue
-        assert f.blank in ("clear", "zero", "keep"), (f.key, f.blank)
+        assert f.blank in ("clear", "zero", "empty", "keep"), (f.key, f.blank)
+        if f.blank == "empty":
+            # `empty` sends "": the model must take it (a `str = ""` column).
+            model.model_validate({**required, f.key: ""})
         accepts_none = True
         try:
             model.model_validate({**required, f.key: None})
@@ -223,6 +238,24 @@ def test_blank_policy_agrees_with_the_write_model(component):
             accepts_none = False
         if f.blank == "clear":
             assert accepts_none, f"{component}.{f.key} is 'clear' but the model refuses None"
+
+
+def test_m5_text_columns_blank_to_empty_and_constraint_options_clear():
+    """M5: a Bus's country or sub-network and a Carrier's display fields save "" when emptied (the old Bus form
+    did; null would be refused); a GlobalConstraint's optional carrier, attribute and period save null."""
+    bus, car, gc = _fields("Bus"), _fields("Carrier"), _fields("GlobalConstraint")
+    assert {k: bus[k].blank for k in ("country", "sub_network")} == {"country": "empty", "sub_network": "empty"}
+    assert {car[k].blank for k in ("nice_name", "color", "unit")} == {"empty"}
+    assert {gc[k].blank for k in ("carrier_attribute", "carrier", "investment_period")} == {"clear"}
+    assert bus["carrier"].blank == "keep" and bus["v_nom"].blank == "keep"
+
+
+def test_m5_enums_are_the_options_the_forms_offer():
+    assert _fields("Bus")["control"].options == ("PQ", "PV", "Slack")
+    assert _fields("GlobalConstraint")["sense"].options == ("<=", "==", ">=")
+    assert set(_fields("GlobalConstraint")["type"].options) == {
+        "primary_energy", "tech_capacity_expansion_limit", "operational_limit",
+        "transmission_volume_expansion_limit", "transmission_expansion_cost_limit"}
 
 
 def test_costs_blank_to_zero_and_bounds_clear():

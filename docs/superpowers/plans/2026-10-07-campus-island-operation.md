@@ -2569,11 +2569,23 @@ The first pass, over 30 edits, left eight: three stale patterns, which were
 fixed, and five real survivors, which the tests above closed. A 31st edit
 (the cap's reference value) was added. All 31 are killed.
 
-**Found on the way, not fixed here (I6a, reported to the gatekeeper):**
-`_clamp` holds a genset at its limit only after each RK4 step. Within a step
-its governor state keeps winding up, so a genset at its limit gives about
+**Found on the way (I6a, reported to the gatekeeper), fixed after #228:**
+`_clamp` held a genset at its limit only after each RK4 step. Within a step
+its governor state kept winding up, so a genset at its limit gave about
 (target − x)·dt / (2 T_g) more than its limit: 0.11 MW at 5 ms in the
-two-former hub, 0.02 MW at 1 ms. The fix is anti-windup in `_targets`.
+two-former hub, 0.02 MW at 1 ms.
+- **The fix is anti-windup in `_targets`.** `_hold` stops a genset at a
+  bound from moving outward faster than the bound itself moves. That rate
+  is the ramp while the ramp binds, and 0 at its fixed 0..P_n range. The
+  RK4 stages then never count power beyond the limit.
+- **`_genset_bounds`** gives the range and how fast each bound moves; it is
+  shared with `_clamp`.
+- **Tests:**
+  - the genset at its limit holds it exactly, at 5 ms and 1 ms and on both
+    bounds, and the island settles at −3.4 Hz as the balance says;
+  - a genset on its ramp rides it, not a step behind.
+- **With it, the gatekeeper's #228 nit:** when `_settle_run` exhausts its
+  tries, it returns the horizon it last ran, not that horizon doubled.
 
 **Mutations.** 28 source edits:
 - the pure-inertia unit at half weight;
@@ -2596,6 +2608,179 @@ two-former hub, 0.02 MW at 1 ms. The fix is anti-windup in `_targets`.
 
 The first run killed 22. The six survivors were closed by the tests above;
 all 28 are killed.
+
+### I7 as built: the pypsa-gui preview and loop (2026-10-14)
+
+**Owner and coordinator decisions (2026-10-14):**
+- **QA (owner), option 1:** one click runs the loop. It applies the cuts,
+  re-solves the hub, reruns the campus study, and repeats with the newly
+  proposed cuts until all pass or N = 3 trials. Every trial is reported, and
+  any cut can be removed.
+- **QB, option 1:** the applied cuts live in pypsa-gui's `island_cuts.json`,
+  beside the sidecar. `load_project_island` merges it in. There is no
+  gridspine schema change.
+- **QC, option 1:** no chat tools in this PR; a follow-up adds them.
+- **Split of work:** the grid-forming session writes the cut derivation in
+  gridspine (`frequency.cuts`, `cuts_campus`). This PR is the pypsa-gui
+  side.
+
+**The contract** (frozen with the grid-forming session): `CUT_COLUMNS`,
+written to `campus_freq_cuts.csv`.
+- **Columns:** period, hour, scenario, event, kind, required, current,
+  delta, unit, binding, derivation, heuristic, feasible, note.
+- **kind:**
+  - `inertia`: M in MW·s, the I2c M, doubled here for the RoCoF row's 2M;
+  - `headroom_up` / `headroom_down`: MW at 0⁺;
+  - `droop_gain`: ΣK in MW/Hz.
+- **current:** read from the run's I3a tables, so `required = current +
+  delta` bounds the expression the hub LP already has.
+- **No cuts for E4:** bridge-energy and pickup failures get none.
+
+**The rows** (`services/solver/island.py`):
+- **Shape:** a cut is `Island-cut-{kind}-{period}-{hour}`. It is built on
+  the left-hand side the I2b seamless rows already have: M (half the
+  RoCoF 2M), `up`, `down`, or `k_sum`. Snapshot terms are taken at the
+  cut's hour only; nominal terms are taken as they are.
+- **Tightest wins:** of several cuts at one (period, hour, kind), the
+  tightest is kept.
+- **Not applied, with a reason:** cuts for another scenario or period, or
+  when the sidecar has no seamless rows.
+- **Refused:** a cut past the period's hours, or of an unknown kind.
+- **`cut_estimates`:** the primal estimate. It meets the shortfall
+  `required − current` with the cheapest extendable candidate, using the
+  coefficients the rows count, and is labelled an estimate:
+  - a droop GFM gives τ_f/(2R) of M and 1/(R·f0) of K;
+  - a VSM gives H_v/pf of M;
+  - a spinning genset gives H/cos φ·η of M and η of upward headroom;
+  - a droop genset gives η/(R·f0) of K.
+
+**The service** (`services/campus_island_cuts.py`):
+- **`get_cuts`:** reads `campus_freq_cuts.csv` against the contract and
+  refuses a file whose columns differ.
+  - Each seamless, feasible cut is applicable and gets its estimate.
+  - Each other cut gets its reason.
+  - It also returns the applied cuts, the trials, `LIMIT` and `MAX_TRIALS`.
+- **`apply_loop(project, solve, rerun, stop_event)`:**
+  - Applies the proposed cuts that no applied cut already meets, then
+    re-solves and reruns.
+  - Stops at "all pass", "no cut can fix what still fails", "N reached" or
+    "stopped by the user".
+  - A loop with nothing to apply is refused before any solve.
+- **The background job** (`start_apply_job`):
+  - It is refused when island constraints are off (the solve would not
+    read the cuts), when there is no campus run to rerun, or when there is
+    nothing to apply. It returns 409 while the project's job runs.
+  - The thread re-solves through the solve queue, which binds the project
+    directory, so the sidecar and the cuts are read. It reruns the campus
+    study with its last settings.
+  - Cancel stops the loop after the trial in hand.
+- **`remove_cut` / `clear_cuts`:** take cuts back.
+- **Routes**, each write checking the edit lock: `GET`/`DELETE
+  /island/cuts`, `DELETE /island/cuts/{period}/{hour}/{kind}`, `POST
+  /island/cuts/apply` (202), `GET /island/cuts/apply`, `POST
+  /island/cuts/apply/cancel`.
+- **The bundle** carries `island_cuts.json`. Templates ship none.
+
+**The panel** (`CampusIslandCutsSection`, in the Island section):
+- **The limit** is stated first: bridge energy gets no cut.
+- **The proposed cuts:**
+  - each shows its hour, kind, current, required, the binding limit, the
+    cheapest unit, the MW added and the estimate;
+  - inertia and headroom cuts are tagged heuristic;
+  - each inapplicable cut shows its reason instead of an estimate.
+- **Apply / Cancel:** the job is polled while it runs. When it ends, the
+  cuts, the island report and the campus state are read again.
+- **Below:** the trials (trial, cuts added, hub objective, verdict) and
+  the applied cuts, each with Remove, plus Clear all.
+
+**Tests:**
+- `test_island_cuts.py` (24), with hand cases on the I2c hub:
+  - inertia 25 MW·s buys p_nom 20;
+  - droop 15 MW/Hz buys 30;
+  - with a spinning genset, upward headroom 12 buys 8.5 and downward 12
+    buys 12;
+  - the estimates: 1000, 2000 and 200; a cheaper genset 800.
+- `test_campus_island_cuts.py` (31), with the solve and rerun injected:
+  - fails once and passes after one cut;
+  - stops at N;
+  - stops when what still fails has no cut;
+  - nothing to apply;
+  - an equal or met cut is not re-added;
+  - the tightest cut is applied;
+  - the verdict counts hours;
+  - stop, the job, 409, cancel, a failed solve;
+  - the queue call;
+  - the routes and edit lock.
+- The panel (8).
+
+**Mutation testing:** 24 edits. 9 survived the first run, and each was
+closed by a test:
+- the snapshot selection (no test had dispatch terms);
+- the up/down swap and the constant (headroom was symmetric in every test);
+- the tightest-of-two, in the LP and in the loop;
+- a met cut's candidate;
+- the equal-required case;
+- the verdict's hour count;
+- the 409 race (the test now waits until the first job has written its
+  cuts).
+
+24 of 24 are now killed.
+
+**The ratings refresh** (owner, 2026-10-14, option 1). The draft freezes
+each unit's size (`p_mw`, `s_mva`, `e_mwh`) into the user's campus file,
+and I6 reads inertia and droop from those sizes. So a trial that re-solves
+the hub to a bigger BESS would otherwise rerun the check on the old one,
+and the loop could not converge.
+- **`refresh_ratings`:** re-drafts from the re-solved hub in memory and
+  copies the three ratings by `pypsa_name`. Units newly built are added; one
+  whose bus the campus file lacks is listed, not added. Every other field
+  and edit stays. The file is saved only when something changed.
+- **Each trial** records its `refreshed` list, and the panel shows it, e.g.
+  "BESS p_mw 10 → 383".
+- **Tests:** ratings copied; a newly built unit added; a user's relay, a
+  transformer value and a BESS fault-current value surviving a refresh; no
+  change when nothing moved; the trial record.
+
+**The Run** calls gridspine's `cuts_campus` right after
+`island_frequency_campus`. The cuts file is removed with the other
+island-hours files when the check does not run. The pypsa-gui contract
+literals (`CUT_COLUMNS`, `FREQ_CUTS_CSV`, the cut kinds) are pinned to
+gridspine's by a test.
+
+**End to end** (`test_campus_island_cuts_e2e.py`, slow, ~7.5 min). This
+uses gridspine's real cuts (#228), the real campus Run, the cut rows in a
+real re-solve, and the refresh. The hand hub:
+- a 20 MW critical load, 8 MW of PV, a fixed 15 MW spinning droop genset,
+  and an extendable GFM droop BESS with a 10 MW floor;
+- solved without island constraints;
+- limits of 1 Hz/s and 1 Hz.
+
+**Results:**
+- **Before:** the island fails at every hour, and every feasible cut names
+  the BESS. The trip of the BESS (E3) is infeasible, with gridspine's N−1
+  note.
+- **One trial:** the BESS goes from 10 to about 383 MW. The inertia cuts
+  bind: about 500 MW·s for a 20 MW step at 1 Hz/s, at 1.25 MW·s per MW of
+  droop GFM. After the refresh the rerun passes everything a cut can fix,
+  so the loop stops at "no cut can fix what still fails", with only E3
+  left.
+- **Without the refresh:** nothing is fixed in the campus check.
+
+**Found on the way.** The end-to-end run found three things on the gridspine
+side, each now fixed:
+- **Cuts from a saturated trace:** the first #228 head derived droop and
+  inertia from the runaway, e.g. 726 MW/Hz for a 20 MW step, and the loop
+  diverged to a 1.6 GW BESS. Now they are derived on the event with the
+  saturated range lifted.
+- **E3 against a total with the tripped unit:** these cuts could never be
+  met. E3 is now infeasible, with an N−1 note.
+- **A zero-import hub:** it crashed `campus_hourly`, because PyPSA drops
+  all-zero series. Fixed in #231.
+
+**Data Center check of the E4 fix** (PR #226, run at the grid-forming
+session's request on a scratch copy): ups_bridged passes at all 9 island
+hours, with UPS autonomy ≈655 s against 600 s needed and all 11 pickup
+blocks passing. The earlier bridge failure was the modelling artefact.
 
 ### I8: multi-bus RMS and the client-grade handoff — step 4b (L; legal check first, owner Q4)
 

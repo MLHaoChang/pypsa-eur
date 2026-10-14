@@ -1,6 +1,7 @@
-// Hover tooltips for the Properties Panel fields the asset schema does not
-// describe: the Bus card, and a line's impedances typed per km (the panel's
-// own block; PyPSA stores absolute Ω and S).
+// Hover tooltips for the Properties Panel rows the asset schema does not
+// describe: a bus's coordinate pair (one row over x and y), and a line's
+// impedances typed per km (the panel's own block; PyPSA stores absolute Ω and S).
+// M5 folded the Bus card's field tooltips into its descriptors.
 //
 // S1d-3: every field of a described class (Generator, StorageUnit, Store,
 // Load, Link, Line, Transformer) takes its tooltip from its descriptor's
@@ -12,20 +13,6 @@
 
 export const PROPERTY_DOCS: Record<string, string> = {
   // ── Bus ──────────────────────────────────────────────────────────────────
-  'bus.name':
-    'Unique identifier for the bus. Must be unique across the network and is used as foreign key by every component connected to it.',
-  'bus.v_nom':
-    'Nominal voltage of the bus in kV. Lines are coloured by voltage class on the canvas; AC topology and transformer ratios reference this value.',
-  'bus.carrier':
-    'Energy carrier modelled at this bus (AC / DC / H₂ / heat / gas / …). Determines which assets can attach and how the optimisation handles its energy balance.',
-  'bus.control':
-    'Power-flow control mode for non-linear AC solves: PQ (load), PV (regulated voltage), or Slack (reference). For linear OPF only the slack matters.',
-  'bus.country':
-    'ISO country code for grouping and policy constraints (CO₂ caps, country-level statistics, country-coloured maps).',
-  'bus.x':
-    'Geographic longitude (°E). Used to position the bus on the canvas; not used by the optimisation itself.',
-  'bus.y':
-    'Geographic latitude (°N). Used to position the bus on the canvas; not used by the optimisation itself.',
   'bus.coordinates':
     'Geographic position (longitude °E, latitude °N) used to place the bus on the canvas.',
 

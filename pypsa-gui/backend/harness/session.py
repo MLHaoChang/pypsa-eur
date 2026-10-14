@@ -148,6 +148,9 @@ class ChatSession:
     # `harness.mcp_client.session_tools`; None until then.
     external_tools: list[dict[str, Any]] | None = None
     external_servers: dict[str, Any] | None = None
+    # The client name of an external agent's session (`mcp-…`, issue 11),
+    # shown on its cards in the panel; None for an in-app chat.
+    mcp_client: str | None = None
     task_id: str | None = None
     experiment_id: str | None = None
     experiment_project_id: str | None = None

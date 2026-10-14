@@ -45,8 +45,6 @@ import {
   DetailFooter,
   VintageCloneButton,
   FS,
-  toFS,
-  nf,
   no,
   SetFS,
   NumInput,
@@ -62,7 +60,6 @@ import {
   TxtInput,
   CoordPairInput,
   autofillNomMin,
-  SelInput,
   categorizeCarriers,
   CarrierGroupSelect,
   SectionHdr,
@@ -1272,10 +1269,16 @@ function BusPanel({ name }: { name: string }) {
   const thermalGens   = busGens.filter(g => !isRenewableCarrier(g.carrier))
   const renewableGens = busGens.filter(g => isRenewableCarrier(g.carrier))
 
+  // M5: the fields come from the asset schema (services/asset_schema/fields.py), as on the asset cards; the
+  // coordinate pair and the Energy Hub tags stay hand-written around them.
+  const { data: schema } = useAssetSchema('Bus')
+  const provenance = useAssetProvenance('Bus', name)
+  const specs = schemaFields(schema)
+
   const startEdit = () => {
     if (!bus) return
     setForm(seedExtras(bus, {
-      ...toFS(bus, ['name', 'v_nom', 'carrier', 'control', 'country', 'sub_network', 'x', 'y']),
+      ...seedForm(specs, bus as unknown as Record<string, unknown>),
       ...ehBusFS(bus),
     }, loadExtras(editScope('Bus'))))
     setEditing(true)
@@ -1301,21 +1304,16 @@ function BusPanel({ name }: { name: string }) {
       const newName = form.name?.trim() || bus.name
       const resp = await updateAsset<Bus>(
         qc, useUIStore.getState().currentProject, 'buses', bus.name,
-        (current) => ({
-          name: newName,
-          v_nom: nf(form, 'v_nom', current.v_nom),
-          carrier: form.carrier || current.carrier,
-          control: form.control || current.control,
-          country: form.country ?? current.country,
-          // sub_network drives the "region" cluster mode: buses sharing the same
-          // user-set label collapse to one node. Empty string means "auto-determine"
-          // and falls through to PyPSA's `determine_network_topology` in the
-          // /api/network/cluster handler.
-          sub_network: form.sub_network ?? current.sub_network,
-          x: nf(form, 'x', current.x),
-          y: nf(form, 'y', current.y),
-          ...ehBusPayload(form, current),
-        }))
+        (current) => {
+          // The descriptors own the typed fields' patch; a blank sub-network saves "" (the
+          // "region" clustering mode then determines it from the topology).
+          const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Bus>
+          payload.name = newName
+          payload.carrier = form.carrier || current.carrier
+          Object.assign(payload, ehBusPayload(form, current))
+          Object.assign(payload, extrasPatch(form, loadExtras(editScope('Bus'))))
+          return payload
+        })
       // updateBus's typed response — the chokepoint is row-agnostic, so the
       // shape is reasserted where it is consumed.
       return resp as { name: string; rescale: RescalePreview[] }
@@ -1362,11 +1360,14 @@ function BusPanel({ name }: { name: string }) {
     <div className="p-3 space-y-3">
       {bus && !editing && (
         <Section title="Bus Properties">
-          <Row label="Voltage"     value={bus.v_nom}    unit=" kV" tip={docTip('bus.v_nom')} />
-          <Row label="Carrier"     value={bus.carrier}  tip={docTip('bus.carrier')} />
-          <Row label="Control"     value={bus.control}  tip={docTip('bus.control')} />
-          <Row label="Country"     value={bus.country}  tip={docTip('bus.country')} />
-          <Row label="Sub-network" value={bus.sub_network || '—'} tip="Manual region label for the 'region' clustering mode. Buses sharing this value collapse to one node. Empty = auto-determine from electrical topology." />
+          {/* The schema's non-identity fields (the nominal voltage), with their provenance chips. */}
+          {assetReadoutItems(schema, bus as unknown as Record<string, unknown>, undefined, provenance).map(i => (
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
+          ))}
+          <Row label="Carrier"     value={bus.carrier}  tip={fieldHelp(schema, 'carrier')} />
+          <Row label="Control"     value={bus.control}  tip={fieldHelp(schema, 'control')} />
+          <Row label="Country"     value={bus.country}  tip={fieldHelp(schema, 'country')} />
+          <Row label="Sub-network" value={bus.sub_network || '—'} tip={fieldHelp(schema, 'sub_network')} />
           {/* isPlaced (utils/geo, D4-compliant single import) — not a bare
               `bus.x != null` check. PyPSA's Bus.x/y default to 0.0, so an
               unplaced bus always has non-null x/y and the old check rendered
@@ -1383,15 +1384,14 @@ function BusPanel({ name }: { name: string }) {
       )}
       {bus && editing && (
         <EditShell title={bus.name} onSave={() => updateMut.mutate()} onCancel={() => setEditing(false)} saving={updateMut.isPending}>
-          <TxtInput label="Name" k="name" fs={form} set={setForm} tip={docTip('bus.name')} />
-          <NumInput label="Voltage" k="v_nom" fs={form} set={setForm} unit="kV" tip={docTip('bus.v_nom')} />
-          <SelInput label="Control" k="control" fs={form} set={setForm} options={['PQ', 'PV', 'Slack']} tip={docTip('bus.control')} />
-          <CarrierGroupSelect k="carrier" fs={form} set={setForm} carriers={carriers as Carrier[]} tip={docTip('bus.carrier')} />
-          <TxtInput label="Country" k="country" fs={form} set={setForm} tip={docTip('bus.country')} />
-          <TxtInput label="Sub-network" k="sub_network" fs={form} set={setForm} tip="Manual region label for the 'region' clustering mode. Buses sharing this value collapse to one node. Empty = auto-determine from electrical topology." />
-          <CoordPairInput fs={form} set={setForm} tip={docTip('bus.coordinates')} />
-          <NumInput label="Longitude (x)" k="x" fs={form} set={setForm} tip={docTip('bus.x')} />
-          <NumInput label="Latitude (y)" k="y" fs={form} set={setForm} tip={docTip('bus.y')} />
+          {schema ? (
+            <AssetFieldsEdit
+              schema={schema} fs={form} set={setForm} current={bus as unknown as Record<string, unknown>}
+              provenance={provenance} carriers={carriers as Carrier[]} buses={[]}
+              // A "lat, lng" pair fills both coordinates at once, before the two fields.
+              after={{ sub_network: <CoordPairInput fs={form} set={setForm} tip={docTip('bus.coordinates')} /> }}
+            />
+          ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
           <div className="col-span-2 flex items-end justify-between gap-2">
             <div className="flex-1"><SectionHdr title="Energy Hub" /></div>
             <GuideButton tourId="eh_tagging" testId="eh-bus-guide-button" label="How to tag" />

@@ -72,6 +72,7 @@ import { insertAtCursor } from '../utils/speechToText'
 import ChatMarkdown from './ChatMarkdown'
 import { UploadProgressToast } from './UploadProgressToast'
 import { ConfirmationCard } from './ConfirmationCard'
+import ExternalAgentStrip from './ExternalAgentStrip'
 export { guidedCardSummary } from './ConfirmationCard'
 
 // Phase D — extensions accepted by the file picker / drag-drop overlay.
@@ -3484,6 +3485,7 @@ export default function ChatPanel() {
           attach-to-next-message + a delete (trash) button. */}
       <WorkflowStrip />
       <GoalStrip />
+      <ExternalAgentStrip />
       <CheckedAnswerControl checked={optedIntoChecks || requiredChecks} required={requiredChecks}
         available={checksAvailable} loading={checkedCapabilities.isPending} failed={checkedCapabilities.isError}
         mode={checkedCapabilities.data?.mode} busy={streaming || pendingSendText != null}

@@ -689,7 +689,7 @@
         "attrs"
       ],
       "safety_tier": "write",
-      "schema_sha256": "2363c7d4b3218328b50232eed8ebf76af91f57edc9850429ae80928c3e612aa3",
+      "schema_sha256": "1064243f3e1d37c95fd676705e100e82f1cde572a84ebf242becd587c5afcb0d",
       "behavioral_fixture": "pending"
     },
     {

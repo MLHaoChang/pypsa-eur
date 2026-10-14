@@ -31,7 +31,8 @@ hub, user_and_db = _ces.hub, _ces.user_and_db          # the campus service's fi
 
 STATIC_FILES = (*cs.ISLAND_STATIC_CSV.values(), cs.ISLAND_STATIC_SUMMARY_JSON)
 FREQ_FILES = (cs.FREQ_E1_HOURLY_CSV, cs.FREQ_EVENTS_CSV, cs.FREQ_LOSSES_CSV, cs.FREQ_BRIDGE_CSV,
-              cs.FREQ_PLANNED_CSV, cs.FREQ_UPS_CSV, cs.FREQ_SUMMARY_JSON)
+              cs.FREQ_PLANNED_CSV, cs.FREQ_UPS_CSV, cs.FREQ_SUMMARY_JSON,
+              cs.FREQ_CUTS_CSV)                  # I7: the cuts the frequency check proposes
 
 
 def _island_campus(project):
@@ -65,11 +66,13 @@ def test_a_campus_with_island_data_and_a_sidecar_runs_both_drivers_after_ranking
     _sidecar(hub)
     _island_campus(hub)
     calls = []
-    for name in ("rank_campus", "island_static_campus", "island_frequency_campus", "size_campus"):
+    for name in ("rank_campus", "island_static_campus", "island_frequency_campus", "cuts_campus",
+                 "size_campus"):
         real = getattr(ce.cs, name)
         monkeypatch.setattr(ce.cs, name, lambda *a, _n=name, _r=real, **k: calls.append(_n) or _r(*a, **k))
     run = _run(hub)
-    assert calls == ["rank_campus", "island_static_campus", "island_frequency_campus", "size_campus"]
+    assert calls == ["rank_campus", "island_static_campus", "island_frequency_campus", "cuts_campus",
+                     "size_campus"]
     assert all((run / n).is_file() for n in (*STATIC_FILES, *FREQ_FILES))
     report = island_report(hub)
     ids = {t["id"] for t in report["tables"]}
@@ -84,6 +87,7 @@ def test_without_the_island_tables_the_frequency_check_is_skipped(hub, monkeypat
     _island_campus(hub)
     (project_registry.project_dir(hub) / "island_config.json").unlink()
     monkeypatch.setattr(ce.cs, "island_frequency_campus", lambda *a: pytest.fail("no island tables"))
+    monkeypatch.setattr(ce.cs, "cuts_campus", lambda *a: pytest.fail("no frequency check, so no cuts"))
     run = _run(hub)
     assert all((run / n).is_file() for n in STATIC_FILES)
     assert not any((run / n).exists() for n in FREQ_FILES)

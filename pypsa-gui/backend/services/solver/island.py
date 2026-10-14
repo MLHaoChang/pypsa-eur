@@ -114,6 +114,7 @@ Every refusal, a sidecar that fails validation included, is an
 from __future__ import annotations
 
 import contextlib
+import json
 import math
 import pathlib
 
@@ -153,9 +154,28 @@ def load_project_island() -> dict | None:
         return None
     from services.adequacy.island_config import ContractError
     try:
-        return load_island_config(pathlib.Path(storage) / SIDECAR_NAME)
+        island = load_island_config(pathlib.Path(storage) / SIDECAR_NAME)
     except ContractError as exc:
         raise IslandRefusal(f"{SIDECAR_NAME} is not a valid island config: {exc}") from exc
+    if island is not None:
+        island["cuts"] = load_applied_cuts(pathlib.Path(storage))
+    return island
+
+
+#: The frequency cuts the user applied (I7, owner QB), beside the sidecar.
+CUTS_FILE = "island_cuts.json"
+
+
+def load_applied_cuts(storage_dir) -> list[dict]:
+    """The applied cuts of the project at ``storage_dir`` (``[]`` without
+    ``island_cuts.json``); a file that is not JSON is refused by name."""
+    path = pathlib.Path(storage_dir) / CUTS_FILE
+    if not path.is_file():
+        return []
+    try:
+        return list(json.loads(path.read_text()).get("cuts") or [])
+    except (json.JSONDecodeError, AttributeError) as exc:
+        raise IslandRefusal(f"{CUTS_FILE} is not valid: {exc}") from exc
 
 
 _UNSET = object()
@@ -586,6 +606,10 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
             eff = float(n.links.at[g, "efficiency"]) if comp == "Link" else 1.0
             unit_rating[g] = float(frame.at[g, "p_nom"]) * eff
 
+    labels = {_period_label(p, s_p): (p, s_p) for p, s_p in _periods(sns)}
+    cuts_by, not_applied = _sort_cuts(island.get("cuts") or (), labels, "seamless" in scenarios)
+    facts["cuts"] = {"applied": [], "not_applied": not_applied}
+
     def active(names, comp_of, period):
         label = "ALL" if period is None else period
         out = []
@@ -649,11 +673,16 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
         # scenarios ask for. B(t) comes back as a linear quantity.
         joins_p = max((units[g]["values"]["start_s"] + units[g]["values"]["sync_s"]
                        for g in g_p), default=0.0)
+        cuts_p = cuts_by.get(_period_label(period, sns_p), [])
+        for cut in cuts_p:
+            if cut["hour"] >= len(sns_p):
+                raise IslandRefusal(f"island cut {cut['kind']} at period {cut['period']} hour "
+                                    f"{cut['hour']}: the period has {len(sns_p)} hours")
         bridge = _instant_rows(
             n, m, sns, sns_p, coord, tag, period, island=island, gensets=g_p, gfm=gfm_p,
             upss=ups_p, l_c=l_c, unit_rating=unit_rating, joins_s=joins_p, k=k,
             links=pcc, fw_units=fw, delta_p_plus=delta_p_plus, facts=facts, active=active,
-            committed=committed)
+            committed=committed, cuts=cuts_p)
 
         # (a) energy: Σ η·e(t−1) − Σ_window d·Δ ≥ B(t) for storage in RT ∩ GFM.
         cyclic_all = all(bool(n.storage_units.at[s, "cyclic_state_of_charge"]) for s in rt_p) \
@@ -685,6 +714,7 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
             "critical_peak_mw": float(l_c.max()) if len(l_c) else 0.0,
             "u_max_mw": u_max}
 
+    facts["cuts"]["applied"].sort()
     facts["fuel"] = _fuel(n, m, sns, units, gensets, vals, critical)
     n._island_facts = facts
     emit(f"N+{k} ride-through over {vals['sustained_h']:g} h from every hour; "
@@ -774,6 +804,124 @@ def _row(m, lhs: _Lin, rhs: _Lin, name, coord, refuse=None, facts=None) -> bool:
     return True
 
 
+#: The I7 cut kinds (gridspine ``frequency.cuts``): the 0⁺ quantity each
+#: bounds, in the unit of the I2b row it tightens.
+CUT_KINDS = ("inertia", "headroom_up", "headroom_down", "droop_gain")
+
+
+def _cut_name(cut) -> str:
+    return f"Island-cut-{cut['kind']}-{cut['period']}-{cut['hour']}"
+
+
+def _cut_row(m, lhs: _Lin, cut, coord, facts):
+    """``lhs`` ≥ ``required`` at the cut's hour only (I7): the snapshot terms
+    of ``lhs`` are taken at that hour, the nominal terms as they are."""
+    hour = cut["hour"]
+    terms = [t.isel(snapshot=[hour]) if "snapshot" in t.dims else t for t in lhs.terms]
+    const = float(lhs.const.iloc[hour]) if isinstance(lhs.const, pd.Series) else float(lhs.const)
+    name = _cut_name(cut)
+    if not terms:
+        if cut["required"] - const > 1e-6:
+            raise IslandRefusal(f"{name}: short by {cut['required'] - const:.4g} with nothing "
+                                "this solve can size")
+        return
+    expr = terms[0]
+    for t in terms[1:]:
+        expr = expr + t
+    m.add_constraints(expr >= cut["required"] - const, name=name)
+    facts["cuts"]["applied"].append(name)
+
+
+def _sort_cuts(cuts, labels, seamless) -> tuple[dict, list]:
+    """The cuts by period label, the tightest per (kind, period, hour), and
+    those with no row here, each with its reason."""
+    by_label: dict = {}
+    not_applied = []
+    for cut in cuts:
+        if cut["kind"] not in CUT_KINDS:
+            raise IslandRefusal(f"island cut kind {cut['kind']!r} is not one of {', '.join(CUT_KINDS)}")
+        if cut["scenario"] != "seamless":
+            not_applied.append({**cut, "reason": f"{cut['scenario']}: only seamless cuts have rows "
+                                                 "(the 0⁺ rows I2b builds)"})
+        elif not seamless:
+            not_applied.append({**cut, "reason": "the sidecar's scenarios have no seamless rows"})
+        elif int(cut["period"]) not in labels:
+            not_applied.append({**cut, "reason": f"no period {cut['period']} in this solve"})
+        else:
+            key = (cut["kind"], int(cut["hour"]))
+            same = by_label.setdefault(int(cut["period"]), {})
+            if key not in same or cut["required"] > same[key]["required"]:
+                same[key] = {**cut, "period": int(cut["period"]), "hour": int(cut["hour"]),
+                             "required": float(cut["required"])}
+    return {label: list(v.values()) for label, v in by_label.items()}, not_applied
+
+
+ESTIMATE_LABEL = ("estimate (primal): the cheapest extendable candidate that meets the cut, "
+                  "times its capital cost; not a solve")
+
+
+def _cut_coefficients(n, island) -> dict:
+    """``{kind: [(candidate, component, coef per MW of p_nom)]}``: the
+    extendable units and what one MW of each adds to the quantity a cut
+    bounds, as the I2b rows count it (M: a droop GFM's τ_f/(2R), a VSM's
+    H_v/pf, a spinning genset's H/cos φ·η; ΣK: 1/(R·f0), ·η for a genset;
+    headroom: 1 for GFM storage, η for a spinning genset upward)."""
+    from services.adequacy.island_config import GFM_CONTROLS
+
+    units = island["units"]
+    out = {kind: [] for kind in CUT_KINDS}
+    for name, u in units.items():
+        v = u["values"]
+        if u["kind"] == "bess" and u.get("control") in GFM_CONTROLS and name in n.storage_units.index:
+            if not bool(n.storage_units.at[name, "p_nom_extendable"]):
+                continue
+            m_coef = (v["H_v_s"] / v["pf_rated"] if u["control"] == "gfm_vsm"
+                      else v["tau_f_s"] / (2.0 * v["droop_pct"] / 100.0))
+            for kind, coef in (("inertia", m_coef), ("droop_gain", 1.0 / (v["droop_pct"] / 100.0 * F0_HZ)),
+                               ("headroom_up", 1.0), ("headroom_down", 1.0)):
+                out[kind].append((name, "StorageUnit", coef))
+        elif u["kind"] == "genset" and (name in n.generators.index or name in n.links.index):
+            comp, eta = _genset_out(n, name)
+            frame = n.generators if comp == "Generator" else n.links
+            if not bool(frame.at[name, "p_nom_extendable"]):
+                continue
+            if u.get("governor") == "droop":
+                out["droop_gain"].append((name, comp, eta / (v["droop_pct"] / 100.0 * F0_HZ)))
+            if u.get("spinning"):                    # online at 0⁺
+                out["inertia"].append((name, comp, v["H_s"] / v["cos_phi_r"] * eta))
+                out["headroom_up"].append((name, comp, eta))
+    return out
+
+
+def cut_estimates(n, island, cuts) -> list[dict]:
+    """The primal estimate of each cut (I7, owner Q6): the shortfall
+    ``required − current`` met by the cheapest extendable candidate,
+    ``added_mw`` of it at its capital cost. A cut already met costs 0; one
+    no candidate can meet has no estimate, and says why."""
+    coefs = _cut_coefficients(n, island)
+    rows = []
+    for cut in cuts:
+        short = max(float(cut["required"]) - float(cut.get("current") or 0.0), 0.0)
+        row = {**cut, "shortfall": short, "candidate": None, "added_mw": None, "estimate": None,
+               "label": ESTIMATE_LABEL}
+        if short == 0.0:
+            row.update(added_mw=0.0, estimate=0.0)
+        else:
+            best = None
+            for name, comp, coef in coefs.get(cut["kind"], ()):
+                frame = getattr(n, _LIST_NAMES[comp])
+                mw = short / coef
+                cost = mw * float(frame.at[name, "capital_cost"])
+                if best is None or cost < best[2]:
+                    best = (name, mw, cost)
+            if best is None:
+                row["label"] = f"no extendable unit adds {cut['kind']}; no estimate"
+            else:
+                row.update(candidate=best[0], added_mw=best[1], estimate=best[2])
+        rows.append(row)
+    return rows
+
+
 def _add_soc_before(lin: _Lin, n, sns, sns_p, name, coef):
     """lin += coef·e(t−1) for one StorageUnit (its initial SoC as a constant
     where PyPSA starts from it)."""
@@ -837,7 +985,7 @@ def _add_nominal(lin: _Lin, n, comp, name, coef):
 
 def _instant_rows(n, m, sns, sns_p, coord, tag, period, *, island, gensets, gfm, upss, l_c,
                   unit_rating, joins_s, k, links, fw_units, delta_p_plus, facts, active,
-                  committed=()):
+                  committed=(), cuts=()):
     """The rows of the islanding instant for one period (I2b), by the
     scenario matrix; returns B(t), the seamless GFM bridge energy in MWh."""
     units, req = island["units"], island["requirements"]
@@ -913,6 +1061,7 @@ def _instant_rows(n, m, sns, sns_p, coord, tag, period, *, island, gensets, gfm,
     k_sum.plus(-k * k_max)
 
     bridge = _Lin(sns_p)
+    cut_lhs: dict = {}
     if seamless:
         bridge = _seamless_rows(
             n, m, sns, sns_p, coord, tag, units=units, gensets=gensets, spinning=spinning,
@@ -920,7 +1069,10 @@ def _instant_rows(n, m, sns, sns_p, coord, tag, period, *, island, gensets, gfm,
             delta_p_plus=delta_p_plus, facts=facts, active=active, period=period,
             p_out=p_out, nom_out=nom_out, on_out=on_out, online=online, p_store=p_store,
             k_sum=k_sum, margin=margin,
-            rocof_max=rocof_max, df_qss=df_qss)
+            rocof_max=rocof_max, df_qss=df_qss, cut_lhs=cut_lhs)
+        cut_lhs["droop_gain"] = k_sum
+        for cut in cuts:
+            _cut_row(m, cut_lhs[cut["kind"]], cut, coord, facts)
 
     if bridged:
         block = max(vals["pickup_blocks"])
@@ -951,9 +1103,11 @@ def _instant_rows(n, m, sns, sns_p, coord, tag, period, *, island, gensets, gfm,
 
 def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gfm, upss, l_c,
                    joins_s, links, fw_units, delta_p_plus, facts, active, period, p_out,
-                   nom_out, on_out, online, p_store, k_sum, margin, rocof_max, df_qss):
+                   nom_out, on_out, online, p_store, k_sum, margin, rocof_max, df_qss,
+                   cut_lhs=None):
     """The ``seamless`` rows: the steps ΔP⁺ and ΔP⁻, headroom both ways, the
-    MVA and inertia online at 0⁺, the droop gain, and B(t)."""
+    MVA and inertia online at 0⁺, the droop gain, and B(t). ``cut_lhs``
+    receives the 0⁺ quantities the I7 cuts bound (M, headroom both ways)."""
     def spec(x):
         return units[x]["values"]
 
@@ -1070,6 +1224,8 @@ def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gf
     for side, dp in (("up", dp_up), ("down", dp_down)):
         _row(m, _Lin(sns_p).add(two_m), dp.scaled(F0_HZ / rocof_max),
              f"Island-rocof-{side}{tag}", coord, facts=facts)
+    if cut_lhs is not None:
+        cut_lhs.update(inertia=two_m.scaled(0.5), headroom_up=up, headroom_down=down)
     # (e) quasi-steady state, both steps, once the gensets have joined.
     for side, dp in (("up", dp_up), ("down", dp_down_joined)):
         _row(m, _Lin(sns_p).add(k_sum.scaled(df_qss)), dp,

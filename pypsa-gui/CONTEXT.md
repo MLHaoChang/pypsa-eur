@@ -210,6 +210,15 @@ results are fenced like any tool result. There are none until an admin lists a
 server.
 _Avoid_: plugin, connector, integration
 
+**External agent**:
+An agent on the same machine (Claude Code, Codex, a Kimi agent) that drives
+the running app through `/api/mcp` (`harness/mcp_server.py`), local mode only,
+with the token in `<app data>/mcp-endpoint.json`. It gets the catalogue
+without the assistant's own control tools, in a chat session of its own
+(`mcp-…`); every call it makes that writes waits for a person to approve its
+card in the chat panel.
+_Avoid_: bot, integration, remote client
+
 **Choice card**:
 The card the panel renders when the assistant calls `ask_user`: a title, a
 question, options with one marked recommended, and a free-text field. A pick

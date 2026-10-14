@@ -244,6 +244,23 @@ export async function postChatConfirm(
   return r.data
 }
 
+/** A confirmation card an external MCP agent's call waits on (chat harness
+ * issue 11). Answered with `postChatConfirm(session_id, …)`. */
+export interface ExternalCard {
+  session_id: string
+  client: string
+  tool_name: string
+  args: Record<string, unknown>
+  safety_tier: string
+  confirmation_token: string
+  ttl_seconds: number
+}
+
+export async function getExternalPending(): Promise<ExternalCard[]> {
+  const r = await client.get('/chat/external/pending')
+  return (r.data?.pending ?? []) as ExternalCard[]
+}
+
 export async function postChatAbort(sessionId: string): Promise<{ ok: boolean }> {
   const r = await client.post(`/chat/${sessionId}/abort`)
   return r.data

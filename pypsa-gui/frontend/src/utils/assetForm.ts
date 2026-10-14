@@ -84,6 +84,7 @@ export function seedForm(specs: AssetFieldSpec[], asset: Record<string, unknown>
 function blankValue(spec: AssetFieldSpec, current: Record<string, unknown>): unknown {
   if (spec.blank === 'clear') return null
   if (spec.blank === 'zero') return 0
+  if (spec.blank === 'empty') return ''
   return current[spec.key]
 }
 
