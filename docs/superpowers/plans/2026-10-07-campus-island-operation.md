@@ -2203,6 +2203,114 @@ three survivors were:
 Each was closed by a test or a fixture value that tells the alternatives
 apart. 14 of 14 are now killed.
 
+### I4, I5 and I5b at the island hours, as built (2026-10-14)
+
+**Owner, 2026-10-14:** this session writes the island-hours driver for I4,
+I5 and I5b. It follows the I6c pattern, and the I9b panel reads its files.
+
+**`gridspine/static/island_hours.py`** (new):
+- **`island_cases(campus, rows, unit_rows)`** gives each case's units:
+  - `steady`: every unit built in the hour's period (`status` 1);
+  - `islanding`: the same, less the gensets not running at the hour.
+    Whether a genset runs comes from I3a's `online`, else from the
+    dispatch (`frequency.cold_gensets`).
+- **`island_static_hour` / `island_static_study`** run:
+  - **I4:** `island_flow` on the `steady` units, with its `check_gate`;
+  - **I5 and I5b, in both cases:** `island_fault_levels`, `relay_check`,
+    `unbalanced_fault_levels`, `earth_reference` and
+    `earth_fault_relay_check`.
+- **The tables** are tagged by (period, hour), or (period, hour, case) for
+  short circuit. Each has fixed columns (`*_COLUMNS`), header only where it
+  has nothing. `relay_check`'s per-limit columns (`relay_ka_at_<v>`, Q8) are
+  long in `relays_imax`.
+- **`assumed`, for the I9 report** (asked by the I9b session). The flow,
+  fault-level, relay, unbalanced and earth-fault relay tables end in an
+  `assumed` column. It names, `; `-joined as `ELEMENT.param`, the inputs
+  whose `campus.params` source is `assumed` among the units in the row's
+  case and the branches (`assumed_inputs`). Each model lists only what it
+  reads:
+  - **flow:** the droops, ratings and power factors, every branch field,
+    and a load's pf (its draw is the dispatch);
+  - **fault levels and relays:** k_sc, rx_sc, x''d, x_d,sat, i_max,
+    k_gfm_min, cos φ and S_n, and the branches' series impedance;
+  - **unbalanced and earth-fault relays:** the fault-level set plus
+    x2/x0, R_N, the cable capacitance and zero sequence, and the defaults
+    the model drafts where data is missing (a genset's x2/x0, a cable's
+    zero sequence, a vector group or a neutral earthing).
+  - **relays** add the default `relay_sensitivity`, the grid's max case,
+    and the relay's own assumed pickup.
+- **`models`** names the model behind each table (`MODELS`). The driver
+  keys it by file name.
+- **The ledger** says which cases apply in which scenario (`CASE_NOTE`).
+  `islanding` is the seamless and planned instant. Under `ups_bridged` the
+  bus is dead at 0⁺ and the gensets start cold, so only `steady` applies.
+- **`summary`** (`SUMMARY_KEYS`) lists:
+  - the hours not viable, with I4's reason;
+  - the hours off the gate;
+  - the blind phase and earth-fault relays, by case;
+  - the buses whose earth reference is lost on islanding;
+  - what cannot be determined: an earth-fault relay's verdict, or a bus
+    whose unbalanced fault has no negative-sequence path.
+
+**`drivers/campus_study.py`:**
+- **`island_static_campus(run_dir)`** runs the study at `island_hours`,
+  reading I3a's per-unit table when the run has the island tables. It
+  writes `ISLAND_STATIC_CSV` and `campus_island_summary.json`.
+- A campus without island data is refused.
+
+**A fix to I6 on the way.** The frequency study built its units and I4's
+ΔP_AC with `online=None`, so a unit not built in the period would form the
+island and add inertia. Both now take `frequency.built(rows)`. `emt_inputs`
+likewise counts only built sources. A genset that is built but idle still
+counts, since it starts on islanding.
+
+**Tests:** 20 in `tests/gridspine/test_island_hours.py`, plus 1 in
+`test_frequency_events.py`:
+- the two cases, from I3a and from the dispatch, with an unbuilt unit in
+  neither;
+- each table equals its function run by hand on that case's units;
+- the genset raises the steady fault level;
+- fixed columns, empty and full;
+- the summary on hand-written tables;
+- through the driver: the files, the island hours, I3a's `online` against
+  the dispatch, and the refusal;
+- the assumed inputs:
+  - a given input is dropped, and a unit outside the island adds
+    nothing;
+  - each model names only what it reads;
+  - given sequence data is not drafted;
+  - the tables carry them, with a relay's own pickup;
+- the gate problems in the flow row;
+- the models, keyed by file through the driver;
+- the case note;
+- the I6 study without the unbuilt BESS.
+
+**Mutations.** 42 source edits:
+- **the cases:** islanding as steady, I3a's `online` ignored, every unit
+  rather than the built ones;
+- **the flow on the wrong units**, the gate text dropped;
+- **each fault table on the wrong units**, and the Q8 limits lost;
+- **the cable branch labelled as a transformer**, and I3a's per-unit table
+  dropped;
+- **each summary list emptied or widened**, and the ledger, models and case
+  note lost;
+- **`assumed`:**
+  - the source ignored;
+  - units outside the island counted;
+  - a load's rating counted;
+  - every branch field for every model;
+  - the sensitivity, the grid fields, the drafted x2/x0, the cable zero
+    sequence and the earthing assumption lost;
+  - a relay's own pickup lost;
+  - the flow and unbalanced rows given another model's list;
+- **the driver:** the refusal, I3a's table, the hours and the models'
+  file keys;
+- **the I6 fix:** `built`, the EMT sources and I4's online set.
+
+The first run, of the first 15 edits, left one survivor, the gate text,
+which no failing gate reached. A test that forces the gate to fail was
+added. On the full run all 42 are killed.
+
 ### I7: closing the loop — frequency cuts back into sizing (S–M; manual, owner Q6)
 
 When I6 fails at hours T_fail, **heuristic** cuts are proposed for I2b at
