@@ -1,8 +1,8 @@
 // The capital-cost badge names an annuity, so it carries `/yr`, on every
 // component card and panel.
 //
-// `capital_cost` is PyPSA's ANNUALISED investment cost (€/MW/yr — its own
-// tooltip in propertyDocs.ts says so), while `overnight_cost` is the upfront
+// `capital_cost` is PyPSA's ANNUALISED investment cost (€/MW/yr — its
+// descriptor's help says so), while `overnight_cost` is the upfront
 // figure (€/MW). Both rows sat side by side with the same `€/MW` badge, so a
 // reader typed an overnight number into the annuity field and the LP charged
 // it every year. The badge is the only place the difference is visible

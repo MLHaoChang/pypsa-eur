@@ -689,7 +689,7 @@
         "attrs"
       ],
       "safety_tier": "write",
-      "schema_sha256": "a39b621bdd1f2bf6351d6edd23fad3feda486bd31b0a6ac2c9827fbc4f9530ee",
+      "schema_sha256": "2363c7d4b3218328b50232eed8ebf76af91f57edc9850429ae80928c3e612aa3",
       "behavioral_fixture": "pending"
     },
     {
@@ -885,7 +885,7 @@
         "components"
       ],
       "safety_tier": "write",
-      "schema_sha256": "c1602ef31e52f656e63f4991bcb5a6dc77fd200abc8adddbfae713ace3ba0a5a",
+      "schema_sha256": "d76cd744ddf39fb31405ffa0f79734f86ee54103ceabdad7c0b9c7b78083245a",
       "behavioral_fixture": "pending"
     },
     {
