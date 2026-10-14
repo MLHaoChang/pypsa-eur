@@ -178,6 +178,20 @@ def test_an_idle_grid_generator_at_the_pcc_reads_as_zero_import():
     assert (pcc["import_mw"] == 0.0).all()
 
 
+def test_an_unsolved_project_with_only_load_units_is_refused_not_read_as_zero_import():
+    """Zero flow for a missing PCC column holds only on a solved network: an
+    unsolved one has no dispatch at all, and is refused, as for a unit."""
+    n = solved_hub()
+    for name in ("pv", "bess", "grid_supply"):
+        n.remove("StorageUnit" if name == "bess" else "Generator", name)
+    campus = draft_campus(n).spec
+    for ts, attr in (("generators_t", "p"), ("storage_units_t", "p"), ("loads_t", "p"),
+                     ("links_t", "p0"), ("links_t", "p1")):
+        setattr(getattr(n, ts), attr, pd.DataFrame(index=n.snapshots))
+    with pytest.raises(ContractError, match="solved"):
+        campus_hourly(n, campus)
+
+
 def test_a_unit_with_no_project_name_is_refused():
     n = solved_hub()
     campus = draft_campus(n).spec

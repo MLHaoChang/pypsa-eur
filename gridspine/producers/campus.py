@@ -536,10 +536,13 @@ def campus_hourly(n, campus):
         raise ContractError("the campus PCC has no pypsa_name, so the project cannot give its import")
     # As for a unit (`_injection`): a saved network drops a series that never
     # left 0 MW, so a self-supplied site's PCC link (or idle grid generator)
-    # comes back with no column. Its flow is 0, not a KeyError.
+    # comes back with no column. In a solved network its flow is 0, not a
+    # KeyError; a network with no dispatch results at all is refused.
     def _flow(frame, name):
         if name in frame.columns:
             return frame[name].astype(float)
+        if not solved:
+            raise ContractError(f"the PCC flow through {name} is not in the project; is the project solved?")
         return pd.Series(0.0, index=n.snapshots)
 
     links = n.links
