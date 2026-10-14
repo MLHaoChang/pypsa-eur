@@ -1,0 +1,72 @@
+// UX overhaul S4: the chart standard (docs/superpowers/plans/2026-10-14-ux-overhaul.md
+// §3 "Chart standard", findings R6 and A1). Guards the shared pieces every
+// results chart is built from.
+import { readFileSync, readdirSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { isValidElement, type ReactElement } from 'react'
+import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { ChartCard, yAxisLabel } from './shared'
+
+afterEach(cleanup)
+
+const here = resolve(__dirname)
+
+function luminance(hex: string): number {
+  const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map(x => (x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4))
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+}
+const contrast = (a: string, b: string) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+  return (hi + 0.05) / (lo + 0.05)
+}
+
+describe('the y-axis unit (R6)', () => {
+  it('is drawn horizontally above the axis, never rotated over the tick labels', () => {
+    const label = yAxisLabel('MW') as { content: (p: { viewBox: { x: number; y: number } }) => ReactElement }
+    const el = label.content({ viewBox: { x: 10, y: 30 } })
+    expect(isValidElement(el)).toBe(true)
+    const { container } = render(<svg>{el}</svg>)
+    const text = container.querySelector('text')!
+    expect(text.textContent).toBe('MW')
+    expect(text.getAttribute('transform')).toBeNull()
+    expect(Number(text.getAttribute('y'))).toBeLessThan(30)
+    expect(text.getAttribute('text-anchor')).toBe('start')
+  })
+
+  it('has room: every results chart leaves at least 18 px above the plot for it', () => {
+    const offenders: string[] = []
+    for (const f of readdirSync(here).filter(f => f.endsWith('.tsx') && !f.endsWith('.test.tsx'))) {
+      const src = readFileSync(resolve(here, f), 'utf8')
+      for (const m of src.matchAll(/margin=\{\{\s*top:\s*(\d+)/g)) {
+        if (Number(m[1]) < 18) offenders.push(`${f}: top ${m[1]}`)
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+})
+
+describe('ChartCard titles (R6)', () => {
+  it('wrap instead of being cut off with an ellipsis', () => {
+    render(<ChartCard title="System-cost waterfall" hint="annualised, horizon (all periods)"><div /></ChartCard>)
+    const title = screen.getByText('System-cost waterfall')
+    expect(title.className).not.toMatch(/\btruncate\b/)
+    expect(screen.getByText('annualised, horizon (all periods)').className).not.toMatch(/\btruncate\b/)
+  })
+})
+
+describe('axis text contrast (A1)', () => {
+  const css = readFileSync(resolve(here, '../../index.css'), 'utf8')
+  const light = css.slice(css.indexOf('@theme'), css.indexOf(':root[data-theme="dark"]'))
+  const dark = css.slice(css.indexOf(':root[data-theme="dark"]'))
+  const token = (block: string, name: string) =>
+    new RegExp(`--color-${name}:\\s*(#[0-9a-fA-F]{6})`).exec(block)![1]
+
+  it.each([['light', light], ['dark', dark]] as const)('reaches 4.5 : 1 on every chart surface in %s', (_, block) => {
+    const axis = token(block, 'axis')
+    for (const surface of ['bg', 'bg-2', 'panel']) {
+      expect(contrast(axis, token(block, surface))).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+})
