@@ -219,7 +219,7 @@ def _attach_island(n, spec, island, pypsa_ids, skipped):
         if block["kind"] != u["kind"]:
             raise ContractError(
                 f"island_config.units.{name} says kind {block['kind']!r}, but the project drafts it as {u['kind']!r}")
-        out = _retag(block, drop=("unit_mw", "xd_pp"))
+        out = _retag(block, drop=("xd_pp",))
         if "xd_pp" in block["values"]:
             u["xd_pp"] = {"value": block["values"]["xd_pp"], "source": block["sources"]["xd_pp"]}
         if block["kind"] == "ups":

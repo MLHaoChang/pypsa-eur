@@ -102,6 +102,7 @@ class Unit:
     start_s: float = 0.0
     sync_s: float = 0.0
     ups: dict = dataclasses.field(default_factory=dict)
+    unit_mw: float = math.nan     # a genset of several units: one unit's MW (N+k removes units; NaN: one unit)
 
     @property
     def ready_s(self):
@@ -487,7 +488,8 @@ def units_from_campus(campus, rows, online=None, cold=(), soc=None):
                             r=v["droop_pct"] / 100.0 if "droop_pct" in v else math.nan, h=v["H_s"], t_g=v["T_g_s"],
                             isochronous=r["block"]["governor"] == "isochronous",
                             step_mw=v["load_step_max_pct"] / 100.0 * p_n, ramp_mw_per_s=v["ramp_pu_per_s"] * p_n,
-                            join_s=join, start_s=v["start_s"], sync_s=v["sync_s"]))
+                            join_s=join, start_s=v["start_s"], sync_s=v["sync_s"],
+                            unit_mw=v.get("unit_mw", math.nan)))
             continue
         control = r["block"].get("control")
         lo = -p_n if r["kind"] == "bess" else 0.0
@@ -535,37 +537,6 @@ def e5_pv_loss(units, lost_mw, **kw):
 
 # ── I6b: the ups_bridged start, planned islanding, Q8 and the EMT flags ─────
 
-class Pickup:
-    """E4's load schedule, a ``dp_event`` that advances itself: the first
-    block at 0, then block k+1 once Δf is within ``band_hz`` of its settled
-    value after k blocks (−ΣP/ΣK, or 0 with an isochronous genset) and
-    |RoCoF| ≤ ``settle_hz_per_s``: the governors have recovered. A real
-    controller may wait a fixed interval instead (ledgered)."""
-
-    def __init__(self, blocks, k_mw_per_hz, isochronous, band_hz=0.1, settle_hz_per_s=0.05):
-        self.blocks, self.k, self.iso = list(blocks), k_mw_per_hz, isochronous
-        self.band, self.settle = band_hz, settle_hz_per_s
-        self.times = [0.0]
-
-    def __call__(self, t):
-        return sum(b for b, tk in zip(self.blocks, self.times) if t >= tk)
-
-    def settled(self, n):
-        """Δf settled after the first ``n`` blocks."""
-        if self.iso:
-            return 0.0
-        return -sum(self.blocks[:n]) / self.k if self.k else math.nan
-
-    def advance(self, t, df, rocof):
-        n = len(self.times)
-        if n == len(self.blocks) or t <= self.times[-1]:
-            return False
-        if abs(df - self.settled(n)) <= self.band and abs(rocof) <= self.settle:
-            self.times.append(t)
-            return True
-        return False
-
-
 @dataclasses.dataclass
 class Bridge:
     """The Q1 bridge check for one UPS under ``ups_bridged``: its stored
@@ -583,8 +554,9 @@ class Bridge:
 class BridgedStart:
     """E4. ``trace`` runs from ``ready_s`` (the dead bus until then); the
     blocks are picked up at ``block_times_s`` on that clock; ``blocks``
-    holds each block's ``Metrics``. ``complete``: every block was taken
-    within the horizon and the frequency settled after the last."""
+    holds each block's ``Metrics``, judged from nominal (f0 restored between
+    blocks). ``complete``: every block settled within its horizon.
+    ``dropped`` names what N+k removed: a genset, or ``"NAME: 1 x U MW"``."""
     trace: Trace
     ready_s: float
     block_times_s: list
@@ -594,46 +566,96 @@ class BridgedStart:
     dropped: list                # the gensets left out (N+k)
 
 
-def _segment(trace, t0, t1):
-    """The trace from ``t0`` to ``t1``, re-timed from 0."""
-    sel = (trace.t >= t0 - 1e-12) & (trace.t < t1 - 1e-12)
-    t, df = trace.t[sel] - t0, trace.df[sel]
-    rocof0 = (df[1] - df[0]) / (t[1] - t[0]) if len(t) > 1 else math.nan
-    return Trace(t, df, {k: v[sel] for k, v in trace.dp.items()},
-                 {k: v - t0 for k, v in trace.saturated.items() if t0 - 1e-12 <= v < t1 - 1e-12}, None, rocof0)
+def _remove_units(gens, k):
+    """N+k as I2b (owner, 2026-10-14): ``k`` times, the largest unit fails
+    to start: a whole genset, or one ``unit_mw`` of a genset that has
+    several (its rating, MVA, load step and ramp scale down; H stays on the
+    remaining MVA). Returns ``(gensets left, what was removed)``."""
+    gens, removed = list(gens), []
+    for _ in range(k):
+        if not gens:
+            break
+
+        def unit(g):
+            return g.unit_mw if g.unit_mw == g.unit_mw and 0 < g.unit_mw < g.p_n else g.p_n
+        g = max(gens, key=lambda g: (unit(g), g.p_n, g.name))
+        u = unit(g)
+        if u >= g.p_n - 1e-9:
+            gens.remove(g)
+            removed.append(g.name)
+            continue
+        f = (g.p_n - u) / g.p_n
+        gens[gens.index(g)] = dataclasses.replace(g, p_n=g.p_n - u, s_n=g.s_n * f, p_max=g.hi * f,
+                                                  step_mw=g.step_mw * f, ramp_mw_per_s=g.ramp_mw_per_s * f)
+        removed.append(f"{g.name}: 1 x {u:g} MW")
+    return gens, removed
+
+
+def _settle_time(trace, settled, band_hz, settle_hz_per_s):
+    """The first time after 0 that Δf is within ``band_hz`` of ``settled``
+    and |RoCoF| ≤ ``settle_hz_per_s``: the governors have recovered (inf if
+    never within the trace)."""
+    if trace.collapse is not None or len(trace.t) < 2:
+        return math.inf
+    rocof = np.gradient(trace.df, trace.t)
+    ok = (np.abs(trace.df - settled) <= band_hz) & (np.abs(rocof) <= settle_hz_per_s) & (trace.t > 0)
+    hit = np.flatnonzero(ok)
+    return float(trace.t[hit[0]]) if hit.size else math.inf
 
 
 def e4_ups_bridged(gensets, blocks, ups=(), bridge_s=0.0, redundancy_n=0, band_hz=0.1, settle_hz_per_s=0.05,
                    window_ms=500.0, t_end=600.0, dt=5e-3, f0=F0) -> BridgedStart:
     """E4, the ``ups_bridged`` start (plan I6b): the bus is dead, the UPSs
     carry the IT load, the gensets start and, once every one is ready
-    (start + sync, the join I2b uses), pick up ``blocks`` one at a time
-    (``Pickup``). The ``redundancy_n`` largest gensets fail to start (N+k,
-    as I2b's pickup row). ``ups`` is ``(name, it_mw, e_mwh)`` per UPS, e_mwh
-    being e(t−1); the bridge check needs each to last max(``bridge_s``,
-    ready + the last pickup)."""
+    (start + sync, the join I2b uses), pick up ``blocks`` one at a time.
+    The ``redundancy_n`` largest units fail to start (N+k as I2b's pickup
+    row, ``_remove_units``). ``ups`` is ``(name, it_mw, e_mwh)`` per UPS,
+    e_mwh being e(t−1); the bridge check needs each to last
+    max(``bridge_s``, ready + the last pickup).
+
+    **Between blocks** (owner, 2026-10-14; ledgered): once a block has
+    settled (Δf within ``band_hz`` of −block/ΣK, or of 0 with an isochronous
+    genset, and |RoCoF| ≤ ``settle_hz_per_s``), secondary or load-share
+    control restores f0, so the next block starts from nominal at the
+    loading the earlier blocks left (each genset at its droop share), with
+    its load-acceptance step and ramp counted afresh. Each block is
+    simulated on its own (``t_end`` each); ``trace`` joins them, each up to
+    its settling, the last whole."""
     from gridspine.schema.contracts import ContractError
 
-    gens = sorted((g for g in gensets if g.model == "genset"), key=lambda g: (-g.p_n, g.name))
-    dropped, gens = [g.name for g in gens[:redundancy_n]], gens[redundancy_n:]
+    gens, dropped = _remove_units([g for g in gensets if g.model == "genset"], redundancy_n)
     if not gens or not blocks:
         raise ContractError("E4 needs a genset left at N+k and the pickup blocks")
     ready = max(g.ready_s for g in gens)
     units = [dataclasses.replace(g, p0=0.0, join_s=0.0) for g in gens]
     iso = any(g.isochronous for g in units)
-    sched = Pickup(blocks, sum(g.k for g in units if not g.isochronous), iso, band_hz, settle_hz_per_s)
-    tr = simulate(units, sched, t_end=t_end, dt=dt, f0=f0)
-    complete = (len(sched.times) == len(sched.blocks) and tr.collapse is None
-                and abs(tr.df[-1] - sched.settled(len(sched.blocks))) <= band_hz)
-    edges = [*sched.times, math.inf]
-    per = [metrics(_segment(tr, a, b), window_ms, band_hz) for a, b in zip(edges, edges[1:])]
-    last = ready + sched.times[-1] if complete else math.inf
+    k_droop = sum(g.k for g in units if not g.isochronous)
+    times, per, parts, complete, clock = [], [], [], True, 0.0
+    for i, block in enumerate(blocks):
+        tr = simulate(units, step(block), t_end=t_end, dt=dt, f0=f0)
+        times.append(clock)
+        per.append(metrics(tr, window_ms, band_hz))
+        settled = 0.0 if iso else (-block / k_droop if k_droop else math.nan)
+        t_set = _settle_time(tr, settled, band_hz, settle_hz_per_s)
+        last = i == len(blocks) - 1
+        cut = tr.t <= (tr.t[-1] if last or t_set == math.inf else t_set) + 1e-12
+        parts.append((tr.t[cut] + clock, tr.df[cut]))
+        if t_set == math.inf:
+            complete = False
+            break
+        clock += t_set
+        j = int(np.flatnonzero(tr.t >= t_set - 1e-12)[0])
+        units = [dataclasses.replace(u, p0=u.p0 + float(tr.dp[u.name][j])) for u in units]
+    t_all = np.concatenate([a for a, _ in parts])
+    df_all = np.concatenate([b for _, b in parts])
+    trace = Trace(t_all, df_all, {}, {}, None, per[0].rocof0_hz_per_s)
+    last_pickup = ready + times[-1] if complete else math.inf
     bridge = []
     for name, it, e in ups:
         autonomy = e * 3600.0 / it if it > 0 else math.inf
-        needed = max(bridge_s, last)
+        needed = max(bridge_s, last_pickup)
         bridge.append(Bridge(name, it, e, autonomy, needed, autonomy >= needed))
-    return BridgedStart(tr, ready, list(sched.times), per, complete, bridge, dropped)
+    return BridgedStart(trace, ready, times, per, complete, bridge, dropped)
 
 
 @dataclasses.dataclass
@@ -724,6 +746,9 @@ LEDGER += (
     f"and a GFM share above {EMT_GFM_SHARE:.0%} (thresholds assumed)",
     "frequency: E4 picks up the next block once the governors have recovered (within the band of the settled "
     "frequency, |RoCoF| ≤ 0.05 Hz/s); the gensets are ready at the slowest one's start + sync",
+    "frequency: E4 assumes secondary or load-share control restores f0 between pickup blocks, so each block "
+    "starts from nominal at the accumulated loading (owner, 2026-10-14); N+k removes the k largest units, a "
+    "genset's unit_mw where it has several",
     "frequency: E6 takes a converter's ramp as instantaneous; gensets ramp at ramp_pu_per_s from their join",
     "frequency: E2, E3 and E5 start from I4's island dispatch at the nominal frequency (secondary control "
     "has restored it after the islanding)",
