@@ -139,7 +139,7 @@ def _apply_turn_tool_result_budget(
 _ERROR_DETAIL_CAP: int = 1000
 
 
-def _error_result_content(detail: Any, exc: BaseException, error_kind: str) -> str:
+def _error_result_content(detail: Any, exc: BaseException | None, error_kind: str) -> str:
     """
     The MODEL-FACING content of an `is_error` tool_result: a typed kind we
     author, then the free-text detail, fenced.
@@ -183,7 +183,7 @@ def _error_result_content(detail: Any, exc: BaseException, error_kind: str) -> s
         free_text = str(message) if message is not None else None
     elif detail is not None:
         free_text = str(detail)
-    else:
+    elif exc is not None:
         free_text = str(exc)
 
     if not free_text:
@@ -306,9 +306,10 @@ def _result_to_anthropic_content(result: Any, marker_hint: str | None = None) ->
     said the opposite (that leaving is_error unwrapped was a deliberate choice
     pending a decision) for one session after that decision was made and acted
     on; an independent QA review caught the contradiction. Kept as a pointer
-    rather than deleted, because the reasoning still matters: three of the four
-    is_error sites pass a typed constant and need no fence, and the fourth
-    passes exception text, which does.
+    rather than deleted, because the reasoning still matters: three of the five
+    is_error sites pass a typed constant and need no fence, the fourth passes
+    exception text, and the fifth passes pre-dispatch validator text that
+    interpolates caller-supplied names. The last two need the fence.
     """
     # Person-identifying members go before anything else touches the payload,
     # so every branch below (and any future one) is covered by one call.
