@@ -944,6 +944,11 @@ class PyPSAService:
                 "frames: %s", bad[:5])
         normalise_flag_column(n)
         normalise_eh_columns(n)
+        # A carrier-scoped limit saved with its carrier only in `carrier` never
+        # bound; repair it in memory (services/network_global_constraints.py).
+        from services.network_global_constraints import repair_carrier_scoped_limits
+
+        repair_carrier_scoped_limits(n)
 
     # ── Active-context solver state ──────────────────────────────────────────
     # The solver lifecycle + result state of the ACTIVE project. The simulation
