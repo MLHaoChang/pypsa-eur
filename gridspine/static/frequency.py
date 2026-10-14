@@ -777,8 +777,8 @@ def emt_inputs(campus, rows):
     grid-following MVA, the grid-following and grid-forming shares of the
     online source MVA, and the island's SCR (I5's minimum fault level at the
     weakest converter bus over the converter MVA). The online sources are
-    those in service at the hour, plus every genset with island data (it
-    starts on islanding)."""
+    those built in the hour's period (``status`` 1), running or not: a
+    genset with island data starts on islanding."""
     from gridspine.schema.island import GFM_CONTROLS
     from gridspine.static.island_sc import island_fault_levels
 
@@ -789,7 +789,7 @@ def emt_inputs(campus, rows):
         if u["kind"] not in ("bess", "pv", "wind", "genset"):
             continue
         block = campus.island["units"].get(uid)
-        if not (int(status.get(uid, 0)) == 1 or (u["kind"] == "genset" and block)):
+        if int(status.get(uid, 0)) != 1:              # not built in the period
             continue
         sources.add(uid)
         if u["kind"] == "genset":
@@ -824,7 +824,13 @@ def _hour_rows(hourly, period, hour):
     return sel[["unit_id", "p_mw", "status"]].reset_index(drop=True)
 
 
-def _cold(campus, rows, unit_rows=None):
+def built(rows):
+    """The units that exist in the hour's period (``status`` 1 in the campus
+    hourly table): the island holds these and no others."""
+    return {str(u) for u, st in zip(rows["unit_id"], rows["status"]) if int(st) == 1}
+
+
+def cold_gensets(campus, rows, unit_rows=None):
     """The gensets with island data that are not running at the hour: from
     I3a's ``online`` where it has the unit, else not in service or at 0."""
     online = {}
@@ -900,7 +906,8 @@ def e1_every_hour(campus, hourly, island_hourly, island_unit_hourly=None, scenar
         period, hour = int(r["period"]), int(r["hour"])
         rows = _hour_rows(hourly, period, hour)
         urows = iu[(iu["period"] == period) & (iu["hour"] == hour)] if iu is not None else None
-        units = [u for u in units_from_campus(campus, rows, cold=_cold(campus, rows, urows))
+        units = [u for u in units_from_campus(campus, rows, online=built(rows),
+                                              cold=cold_gensets(campus, rows, urows))
                  if not (u.model == "ups" and u.ups["transfers"])]
         key = {"period": period, "hour": hour, "scenario": scenario}
         for direction, dp in (("import", r["dp_up_mw"]), ("export", -r["dp_down_mw"])):
@@ -999,10 +1006,11 @@ def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_
                     soc[r["unit_id"]] = r["soc_start_mwh"]
                 if r["p_ups_it_mw"] == r["p_ups_it_mw"]:
                     it[r["unit_id"]] = r["p_ups_it_mw"]
-        units = units_from_campus(campus, rows, cold=_cold(campus, rows, urows), soc=soc)
+        units = units_from_campus(campus, rows, online=built(rows), cold=cold_gensets(campus, rows, urows),
+                                  soc=soc)
         units = [dataclasses.replace(u, ups={**u.ups, "it_mw": it[u.name]}) if u.name in it else u for u in units]
         lossless = -float((rows["p_mw"] * (rows["status"] == 1)).sum())
-        i4 = island_flow(campus, rows)
+        i4 = island_flow(campus, rows, online=built(rows))
         dp_ac = i4.delta_p_ac_mw if i4.viable else math.nan
         losses.append({**key, "i4_viable": i4.viable, "i4_reason": i4.reason, "dp_ac_mw": dp_ac,
                        "import_lossless_mw": lossless, "losses_mw": dp_ac - lossless})
