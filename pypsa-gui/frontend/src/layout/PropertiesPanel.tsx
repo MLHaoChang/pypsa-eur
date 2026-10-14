@@ -30,6 +30,7 @@ import { CARRIER_CATALOG_NAMES } from '../utils/carrierCatalog'
 import { vintageCloneToast } from '../utils/toasts'
 import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
 import { useAssetSchema } from '../hooks/useAssetSchema'
+import { useAssetProvenance } from '../hooks/useAssetProvenance'
 import { buildPatch, seedForm } from '../utils/assetForm'
 import { AssetFieldsEdit, assetReadoutItems, schemaFields } from './properties/AssetFields'
 import { GuideButton } from '../components/GuidedTour'
@@ -147,6 +148,8 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   // Investment is typed as the overnight cost; the annualised capital cost is
   // derived (overnight × annuity + fixed O&M) and shown read-only.
   const { data: schema } = useAssetSchema('Generator')
+  // U3: each field's provenance (default from the pack, customised, measured).
+  const provenance = useAssetProvenance('Generator', gen.name)
   const specs = schemaFields(schema)
   const asset = gen as unknown as Record<string, unknown>
   // Curtailment cost prices spilled wind and solar; a thermal unit has none to spill.
@@ -277,7 +280,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       {schema ? (
         <AssetFieldsEdit
           schema={schema} fs={form} set={setForm} current={asset}
-          carriers={carriers as Carrier[]} buses={buses as Bus[]} hidden={hidden}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]} hidden={hidden} provenance={provenance}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
           after={{
             p_nom_max: (
@@ -324,6 +327,8 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   // A battery is typed as its two overnight parts; capital cost, lifetime and
   // fixed O&M are derived from them and shown read-only.
   const { data: schema } = useAssetSchema('StorageUnit')
+  // U3: each field's provenance (default from the pack, customised, measured).
+  const provenance = useAssetProvenance('StorageUnit', su.name)
   const specs = schemaFields(schema)
   const asset = su as unknown as Record<string, unknown>
 
@@ -432,7 +437,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       {schema ? (
         <AssetFieldsEdit
           schema={schema} fs={form} set={setForm} current={asset}
-          carriers={carriers as Carrier[]} buses={buses as Bus[]}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]} provenance={provenance}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
           after={{
             p_nom_max: (
