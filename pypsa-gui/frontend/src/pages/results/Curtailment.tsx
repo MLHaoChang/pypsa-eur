@@ -1,5 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import Kpi from '../../components/Kpi'
+import ResultState from '../../components/ResultState'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
 } from 'recharts'
@@ -37,7 +39,7 @@ export default function Curtailment() {
     queryFn: () => resultsApi.getCurtailment(fetchRange),
     enabled: winValid,
   })
-  const { data: generators = [] } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })
+  const { data: generators = [], isSuccess: generatorsLoaded } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })
   // WeightCtx + timeline assembled by the shared hook (fetches /snapshots +
   // /investmentPeriods) — same recipe as the Dispatch tab so the per-period ×
   // snapshot-weight scaling of the curtailment KPI matches.
@@ -105,6 +107,16 @@ export default function Curtailment() {
 
   const periodLabel = filter.selectedPeriod != null ? `period ${filter.selectedPeriod}` : 'horizon'
 
+  // Result states (UX overhaul S2). With no renewable generator there is
+  // nothing that could be curtailed: say so rather than print 0.0 MWh. With
+  // renewables and nothing curtailed, the 0 is a computed result and says
+  // what makes it zero.
+  const noRenewables = generatorsLoaded && renewableNames.size === 0
+  const nothingCurtailed = !noRenewables && totals.curt === 0
+  const tileState = nothingCurtailed
+    ? { state: 'zero' as const, basis: 'all available renewable energy used' }
+    : {}
+
   return (
     <div className="flex flex-col h-full overflow-auto p-4 gap-4">
       {/* Truncated-window banner — see FIX 1 secondary in the
@@ -122,14 +134,19 @@ export default function Curtailment() {
         </p>
       </header>
 
+      {noRenewables ? (
+        <ResultState state="not_applicable" reason="This network has no renewable generators, so nothing can be curtailed." />
+      ) : (<>
       {/* KPI strip */}
       <div className="grid grid-cols-3 gap-3">
         <Kpi label="Curtailed energy" value={fmtEnergy(totals.curt)}
-             hint="Σ curtailed MW × snapshot_weighting × period_years over renewable generators." />
+             hint="Σ curtailed MW × snapshot_weighting × period_years over renewable generators."
+             {...tileState} />
         <Kpi label="Delivered renewable" value={fmtEnergy(totals.delivered)}
              hint="Σ renewable dispatch over the same range, for context." />
         <Kpi label="Curtailment rate" value={`${totals.pct.toFixed(2)} %`}
-             hint="curtailed ÷ (curtailed + delivered)." />
+             hint="curtailed ÷ (curtailed + delivered)."
+             {...tileState} />
       </div>
 
       {/* Per-carrier table */}
@@ -176,7 +193,11 @@ export default function Curtailment() {
           <span className="ml-2 text-[10px] text-muted">aggregated MW · {periodLabel}</span>
         </header>
         <div className="p-3">
-          {aggSeries && aggSeries.length > 0 ? (
+          {nothingCurtailed ? (
+            <p className="text-[12px] text-muted py-2">
+              No curtailment in this range: all available renewable energy was used.
+            </p>
+          ) : aggSeries && aggSeries.length > 0 ? (
             <ResponsiveContainer width="100%" height={280}>
               <AreaChart data={aggSeries} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                 <defs>
@@ -200,15 +221,7 @@ export default function Curtailment() {
           )}
         </div>
       </section>
-    </div>
-  )
-}
-
-function Kpi({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="rounded-[8px] border border-border bg-bg p-3" title={hint}>
-      <div className="text-[10px] text-muted uppercase tracking-wide">{label}</div>
-      <div className="text-[20px] font-mono tabular-nums text-text mt-0.5">{value}</div>
+      </>)}
     </div>
   )
 }

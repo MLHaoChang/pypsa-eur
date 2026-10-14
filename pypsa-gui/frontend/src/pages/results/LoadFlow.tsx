@@ -16,6 +16,7 @@ import { type TSPayload, fmtPower, shortStamp, downloadCSV, KPI, ChartActions, S
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import { useUIStore } from '../../store/uiStore'
+import ResultState from '../../components/ResultState'
 import { nk } from '../../utils/queryKeys'
 
 // ── Load Flow tab ─────────────────────────────────────────────────────────────
@@ -111,6 +112,11 @@ export default function LoadFlow() {
     enabled: acPfAvailable,
   })
   const lossesData = resultSource === 'ac_pf' ? lossesAcPf : lossesLopf
+
+  // Result states (UX overhaul S2): a figure the run did not model, or that
+  // cannot apply to this network, says so instead of reading as 0 or "—".
+  const openSolverSettings = () => useUIStore.getState().setSlidePanel('simparams')
+  const lossesNotModelled = lossesData != null && !lossesData.enabled
   // AC-PF-only result series. Only fetched when Stage 2 is available — keeps
   // the network round-trip empty for plain-LOPF runs where these endpoints
   // would return 204. Each returns a TSPayload (snapshot × asset) or null.
@@ -145,8 +151,9 @@ export default function LoadFlow() {
     negative_hours?: number
   }
 
-  const { data: lines = [] } = useQuery({ queryKey: nk(currentProject, 'lines'), queryFn: networkApi.getLines })
+  const { data: lines = [], isSuccess: linesLoaded } = useQuery({ queryKey: nk(currentProject, 'lines'), queryFn: networkApi.getLines })
   const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'), queryFn: networkApi.getTransformers })
+  const noLines = linesLoaded && lines.length === 0
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
 
   const tsLines = linesTS as TSPayload | null
@@ -596,14 +603,18 @@ export default function LoadFlow() {
             </div>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <KPI label="Peak flow"
-               value={fmtPower(kpis.peakFlow)}
-               hint="Maximum |p0| observed across all lines and snapshots in the active range." />
-          <KPI label="Mean loading"
-               value={kpis.meanLoading != null ? `${kpis.meanLoading.toFixed(1)} %` : '—'}
-               hint="Average of per-line peak loading %. See the Prices tab for marginal-price KPIs." />
-        </div>
+        {noLines ? (
+          <ResultState state="not_applicable" reason="This network has no lines, so there is no line flow or loading." />
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            <KPI label="Peak flow"
+                 value={fmtPower(kpis.peakFlow)}
+                 hint="Maximum |p0| observed across all lines and snapshots in the active range." />
+            <KPI label="Mean loading"
+                 value={kpis.meanLoading != null ? `${kpis.meanLoading.toFixed(1)} %` : '—'}
+                 hint="Average of per-line peak loading %. See the Prices tab for marginal-price KPIs." />
+          </div>
+        )}
       </section>
 
       {/* ── Time-series view mode (weekly / monthly / full timeframe) ─────── */}
@@ -1002,20 +1013,20 @@ export default function LoadFlow() {
       <section>
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Transmission losses</h3>
-          {lossesData && !lossesData.enabled && (
-            <span className="text-[10px] text-muted">
-              Losses were not modelled in the last solve (transmission_losses=off) — totals are zero.
-            </span>
-          )}
         </div>
-        <div className="grid grid-cols-3 gap-2">
-          <KPI label="Total energy lost"
-            value={lossesData ? `${lossesData.total_mwh.toLocaleString(undefined, { maximumFractionDigits: 2 })} MWh` : '—'} />
-          <KPI label="Peak loss"
-            value={lossesData ? `${lossesData.peak_mw.toLocaleString(undefined, { maximumFractionDigits: 2 })} MW` : '—'} />
-          <KPI label="% of demand"
-            value={lossesData ? `${lossesData.loss_pct_of_demand.toFixed(3)} %` : '—'} />
-        </div>
+        {lossesNotModelled ? (
+          <ResultState state="not_modelled" reason="Transmission losses were not modelled in this run."
+            action={{ label: 'Turn on in Solver settings', onClick: openSolverSettings }} />
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            <KPI label="Total energy lost"
+              value={lossesData ? `${lossesData.total_mwh.toLocaleString(undefined, { maximumFractionDigits: 2 })} MWh` : '—'} />
+            <KPI label="Peak loss"
+              value={lossesData ? `${lossesData.peak_mw.toLocaleString(undefined, { maximumFractionDigits: 2 })} MW` : '—'} />
+            <KPI label="% of demand"
+              value={lossesData ? `${lossesData.loss_pct_of_demand.toFixed(3)} %` : '—'} />
+          </div>
+        )}
         {lossesData && lossesData.by_branch.length > 0 && lossesData.total_mwh > 0 && (
           <div className="mt-2 border border-border rounded overflow-auto max-h-48">
             <table className="w-full text-xs border-collapse">

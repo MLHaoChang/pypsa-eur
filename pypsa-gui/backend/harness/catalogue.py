@@ -87,6 +87,7 @@ SAFETY_PANEL_ENUM = [
     "Economics", "economics",
 ]
 RESULTS_TAB_ENUM = [
+    "summary",      # M3: the answer-first tab Results opens on after a solve
     "overview", "capex", "dispatch", "loadflow", "prices", "economics",
     "emissions", "curtailment", "lostload", "storage", "asset",
     "investment",   # IC P3 WP3.4 (the Investment tab, WP3.5)

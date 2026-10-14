@@ -2940,7 +2940,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "321144cfbed0bbe04f50295441d863fb0e3403e6fdcdb6b34fc393a17a6cb4d6",
+      "schema_sha256": "535d08b87cd1d8212e9807dbf0ce164820993e831bf0d047f14db4f145af8106",
       "behavioral_fixture": "pending"
     },
     {
@@ -5220,7 +5220,7 @@
         "run_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "2cbcdc755f7663d691b1b2de5c25420b4a70c294afa85729b38641907c2feba7",
+      "schema_sha256": "f387e7960eb347f88bd6bbb61bb4d8ecff9b5c83069a13777410c64fe886ccf2",
       "behavioral_fixture": "pending"
     },
     {
@@ -5678,6 +5678,10 @@
   ],
   "result_tabs": [
     {
+      "id": "summary",
+      "label": "Summary"
+    },
+    {
       "id": "overview",
       "label": "Overview"
     },
@@ -5735,6 +5739,7 @@
     }
   ],
   "tool_result_tabs": [
+    "summary",
     "overview",
     "capex",
     "dispatch",

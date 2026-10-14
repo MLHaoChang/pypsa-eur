@@ -7,6 +7,8 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend,
 } from 'recharts'
 import { Download } from 'lucide-react'
+import Kpi from '../../components/Kpi'
+import type { ResultAction, ResultStateKind } from '../../components/ResultState'
 import toast from 'react-hot-toast'
 import { useQuery } from '@tanstack/react-query'
 import { isRenewableCarrier } from '../../utils/carriers'
@@ -735,49 +737,9 @@ export function averageScaling(
 }
 
 // ── Number formatting ────────────────────────────────────────────────────────
-// fmtEnergy expects MWh (PyPSA's natural unit when summing MW × hourly
-// snapshots). It scales up to GWh / TWh once the magnitude crosses 1000 /
-// 1e6 MWh respectively; below 1 MWh it stays in MWh (three decimals, P31 C3). The previous code
-// formatted MWh as if they were Wh, producing absurd labels (e.g. 1234 MWh
-// as "1.23 kWh").
-export function fmtEnergy(mwh: number | null | undefined, digits = 2): string {
-  if (mwh == null || !Number.isFinite(mwh)) return '—'
-  const a = Math.abs(mwh)
-  if (a >= 1e6) return `${(mwh / 1e6).toFixed(digits)} TWh`
-  if (a >= 1e3) return `${(mwh / 1e3).toFixed(digits)} GWh`
-  if (a >= 1)   return `${mwh.toFixed(digits)} MWh`
-  // P31 C3: below 1 MWh stay in MWh with three decimals (not "250.00 kWh"
-  // beside MWh / GWh cells), and zero reads "0 MWh" (not "0.00 kWh").
-  if (mwh === 0) return '0 MWh'
-  return `${mwh.toFixed(3)} MWh`
-}
-
-/** A MWh value as a bare number, for a column whose header carries the unit
- *  ("ΔEUE (MWh)"): never scaled to kWh / GWh, so the header stays true for
- *  every cell. Two decimals with grouping from 1 MWh, three below, "0" for
- *  zero, "—" for a missing value (P31 C3). */
-export function fmtMwhNumber(mwh: number | null | undefined): string {
-  if (mwh == null || !Number.isFinite(mwh)) return '—'
-  if (mwh === 0) return '0'
-  if (Math.abs(mwh) < 1) return mwh.toFixed(3)
-  return mwh.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-export function fmtCurrency(eur: number | null | undefined, digits = 2): string {
-  if (eur == null || !Number.isFinite(eur)) return '—'
-  const a = Math.abs(eur)
-  if (a >= 1e9) return `€${(eur / 1e9).toFixed(digits)} B`
-  if (a >= 1e6) return `€${(eur / 1e6).toFixed(digits)} M`
-  if (a >= 1e3) return `€${(eur / 1e3).toFixed(digits)} k`
-  return `€${eur.toFixed(digits)}`
-}
-
-export function fmtPower(mw: number | null | undefined, digits = 2): string {
-  if (mw == null || !Number.isFinite(mw)) return '—'
-  const a = Math.abs(mw)
-  if (a >= 1e3) return `${(mw / 1e3).toFixed(digits)} GW`
-  return `${mw.toFixed(digits)} MW`
-}
+// The formatters live in utils/format.ts (one module for every surface);
+// re-exported here so existing results imports keep working.
+export { fmtCurrency, fmtEnergy, fmtMwhNumber, fmtPower } from '../../utils/format'
 
 export function shortStamp(s: string): string {
   // Post-fix backend emits clean ISO timesteps even on multi-period
@@ -929,18 +891,13 @@ export function ChartActions({ chartRef, onExportCSV, filename, className }: Cha
   )
 }
 
-// ── StatCard / KPI ───────────────────────────────────────────────────────────
-// The design system's StatCard (Portfolio Optimizer handoff): a 9 px uppercase
-// eyebrow, a large mono tnum value with an optional faint unit, an optional
-// state-coloured delta, and an optional short sub-line. `accent` adds a 3 px
-// red gradient left rail + tinted border for the headline metric of a strip.
-//
-// Back-compatible with the previous KPI signature ({label, value, hint}). The
-// old `hint` — frequently a full-sentence formula explanation — now renders as
-// the card's hover `title` so the strip stays visually calm; pass `sub` for a
-// short always-visible line.
+// ── KPI ──────────────────────────────────────────────────────────────────────
+// The results tabs' KPI signature, rendered by the one shared tile
+// (components/Kpi.tsx). `sub` is the tile's basis line, `accent` marks the
+// strip's headline tile, and `hint` (often a full-sentence formula) stays a
+// hover title so the strip reads calmly.
 export function KPI({
-  label, value, unit, hint, delta, deltaState, sub, accent,
+  label, value, unit, hint, delta, deltaState, sub, accent, state, reason, action,
 }: {
   label: string
   value: string
@@ -950,33 +907,24 @@ export function KPI({
   deltaState?: 'ok' | 'warn' | 'err'
   sub?: string
   accent?: boolean
+  state?: ResultStateKind
+  reason?: string
+  action?: ResultAction
 }) {
-  const deltaColor = deltaState === 'ok' ? 'text-success'
-    : deltaState === 'warn' ? 'text-warn'
-    : deltaState === 'err' ? 'text-danger'
-    : 'text-muted'
   return (
-    <div
-      title={hint}
-      className={`relative overflow-hidden rounded-[10px] border bg-bg-2 px-4 py-3
-        shadow-[0_1px_0_rgba(10,14,20,0.04)]
-        ${accent ? 'border-accent/30' : 'border-border'}`}
-    >
-      {accent && (
-        <span className="absolute left-0 inset-y-0 w-[3px] bg-gradient-to-b from-accent to-accent/70" />
-      )}
-      <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted">{label}</div>
-      <div className="mt-1.5 flex items-baseline gap-1">
-        <span className="font-mono text-[20px] font-semibold leading-none text-text tabular-nums">{value}</span>
-        {unit && <span className="text-[12px] font-normal text-muted">{unit}</span>}
-      </div>
-      {delta && (
-        <div className={`mt-1.5 inline-flex items-center gap-1 font-mono text-[10.5px] font-medium ${deltaColor}`}>
-          {delta}
-        </div>
-      )}
-      {sub && <div className="mt-1 text-[10px] text-muted">{sub}</div>}
-    </div>
+    <Kpi
+      label={label}
+      value={value}
+      unit={unit}
+      hint={hint}
+      delta={delta}
+      deltaTone={deltaState === 'ok' ? 'good' : deltaState === 'err' ? 'bad' : deltaState}
+      basis={sub}
+      headline={accent}
+      state={state}
+      reason={reason}
+      action={action}
+    />
   )
 }
 
