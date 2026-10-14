@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 241,
+  "tool_count": 244,
   "tools": [
     {
       "name": "list_components",
@@ -4964,6 +4964,72 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "4c371de156bae5ed913134eef2ce1138a2c2e8b7c4eb57ac6fd8a3d50063f2a6",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "advance_experiment",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "experiment_id"
+      ],
+      "required": [
+        "experiment_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "add7aa39807e1175fd337d20587108cc688fda582690e35ca067c2eb5b731000",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "refresh_experiment",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "experiment_id"
+      ],
+      "required": [
+        "experiment_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "add7aa39807e1175fd337d20587108cc688fda582690e35ca067c2eb5b731000",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "cancel_experiment",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "experiment_id"
+      ],
+      "required": [
+        "experiment_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "add7aa39807e1175fd337d20587108cc688fda582690e35ca067c2eb5b731000",
       "behavioral_fixture": "pending"
     },
     {

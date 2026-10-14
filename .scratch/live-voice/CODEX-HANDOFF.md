@@ -28,13 +28,18 @@ exact input preflight digests while retaining `execution_available=false`.
 See [its contract](experiment-prerequisites.md). Case advancement remains the next
 scope; this metadata tranche does not complete issue 10 or external release gates.
 
+The continuation adds [one network case](experiment-case-advancement.md) through
+ordinary confirmed sensitivity/queue calls and durable no-replay receipts.
+Next: two-case compatible comparisons, explicit uncertain-effect reconciliation,
+then other domain recipes. This remains partial issue 10 coverage.
+
 ---
 
 ## Inventory / env snapshot
 
 | Item | Value |
 | --- | --- |
-| Tools | **241** (inventory + GUI nav schemas match; behavioral/parameter coverage still pending) |
+| Tools | **244** (inventory + GUI nav schemas match; behavioral/parameter coverage still pending) |
 | Result tabs / panels | 14 tabs, 18 panels |
 | Full-coverage claim | **false** — see `capability-matrix.json` `full_coverage` and issue 08 |
 | Dev UI | API `:8000`, Vite `:5173`; login `admin@example.com` + password file `~/.local/share/PyPSA Studio/dev-admin-password` |
@@ -56,7 +61,7 @@ Branch naming for this repo’s Cursor agents: `cursor/<slug>-a604`. Prefer `pyp
 | 11 | Nonblocking monitoring | claimed | Foreground/detached progress, observer SSE, `fg:` / `ad:` / `rpt:` wait adapters, D-C1 multi-family fakes | GridSpine/solve-queue in same matrix; D-I2 cross-family recovery; real-worker multi-family |
 | 06 | Run evidence + context | ready-for-agent | Publish (fg/queue/study/report), list/get/compare, discuss + `open_run_result`, export, **three-run acceptance**, resume rehydration | Optional: more ACL/restart edge cases; keep “never restore historical inputs” |
 | 07 | Loadflow summary | claimed | `get_loadflow_summary` over current results; historical `run_id` typed unavailable until loadflow section | Typed UI: open loadflow tab, highlight/scroll, ACK; shared client/server metric source |
-| 10 | Cross-domain experiments | ready-for-agent | Persist only: `start_experiment` / `list_experiments` / `get_experiment` (`executed=false`) | **Case advancement** through ordinary tools/approvals/queues; partial failure; compare; cancel/resume; commercial/reliability/GridSpine adapters |
+| 10 | Cross-domain experiments | ready-for-agent | Typed planning/preflight and one network case via ordinary confirmation/queue; durable no-replay receipt, bounded waits, cancel and owned evidence/export path | Two/multiple-case compatible comparisons; explicit uncertain-effect retry reconciliation; commercial/reliability/GridSpine adapters |
 | 01 | Transport | ready-for-agent | F-U1 mocked STT/TTS contracts (`harness/providers/live_media.py`) | Real vendor adapters, WebRTC/LiveKit, token routes, budgeted live probe |
 | 03 | Conversation UI | ready-for-agent | Companion shell (via 12); typed closed Live path proven with Moonshot | Continuous media UX, mute/end, audio lifecycle, Chromium/device gates (needs 01) |
 | 04 | Budgets / resume | ready-for-agent | Parent budget primitives exist on durable thread | Separate LiveKit/STT/TTS/model units; measured latency; speech→typed fallback without replaying writes |
@@ -80,7 +85,7 @@ Do not paste API keys into logs, scratch, or PRs.
 
 ### A — No credentials (preferred next)
 
-1. **Issue 10 case advancement** — After `start_experiment`, advance cases via existing harness tools (`preview_project_changes` / solves / queue / studies) with normal confirmation, locks, budgets; keep `executed` honest; no hidden agent loop. Tests first (TDD). Highest product leverage of the no-cred set.
+1. **Issue 10 two-case continuation** — Extend the single network-case receipt path to compatible comparisons and explicit partial outcomes. Reconcile uncertain effects before any retry; retain ordinary confirmation, locks and budgets. Keep `executed` honest; no hidden agent loop. Tests first (TDD).
 2. **Issue 03 mocked scaffolding** — Presence/caption/confirmation/download cards without real mic; Chromium unit/integration only. Does not unblock media acceptance.
 3. **Issue 07 loadflow UI** — `results_tab='loadflow'` navigation + highlight/ACK wired to `get_loadflow_summary` window/source.
 4. **Issue 11 residual** — Put solve-queue/GridSpine into D-C1-style matrix; D-I2 cursor recovery across families.
