@@ -247,7 +247,7 @@ the recommended answer on every question except Q11.
 | Q5 | Guided mode is folded into the `hub-design` workflow, wording and write-tier confirmation kept. |
 | Q6 | All six workflows are active in the first menu; `investment-decision` stays planned. |
 | Q7 | History format and the new-chat-on-wire-switch rule stay. |
-| Q8 | MCP exposure later, own spec. |
+| Q8 | MCP exposure later, own spec. (Spec drafted 2026-10-14 in `mcp-spec.md`; Q8 reopened there as four scopes.) |
 | Q9 | Adapters move to `harness/providers/` in phase 1; `llm_config` stays in `services/`. |
 | Q10 | A start-menu chip sends its opening request immediately through the request queue, labelled with the chip title. |
 | Q11 | **`hub-design` is offered in Expert mode too** (owner's choice over the recommendation). |

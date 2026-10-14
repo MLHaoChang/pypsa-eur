@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): Draft the joint MCP spec for the chat harness: the harness as an MCP client on the owner's defaults (admin-only, zero servers, write tier unless read-only, capped descriptions, fenced results), and exposure to external agents laid out as owner choices.
