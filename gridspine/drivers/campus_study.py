@@ -560,7 +560,8 @@ def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 4
         cases.append(T.Case(f"{key[0]} h{key[1]} {key[2]} {key[3]}", built_[0], run))
     rec = T.recommend_gfm_settings(cases, limits, equipment_=eq, window_ms=window, margin=margin,
                                    allow_i_max=allow_i_max, max_sims=max_sims)
-    out = {"label": rec.label, "achievable": rec.achievable, "changed": rec.changed, "settings": rec.settings,
+    out = {"label": rec.label, "status": rec.status, "achievable": rec.achievable, "changed": rec.changed,
+           "settings": rec.settings,
            "cases": rec.cases, "capacity": rec.capacity, "comparison": rec.comparison,
            "simulations": rec.simulations, "max_simulations": max_sims, "margin": margin,
            "bounds": dataclasses.asdict(rec.bounds), "allow_i_max": allow_i_max, "notes": rec.notes,

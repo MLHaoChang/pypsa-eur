@@ -51,7 +51,7 @@ def test_shrunk_tightens_each_limit_by_the_margin():
 def test_a_passing_island_is_left_alone_and_the_count_is_exact():
     c = case(island(), 2.0)
     r = T.recommend_gfm_settings([c], lim())
-    assert r.achievable and not r.changed
+    assert r.achievable and not r.changed and r.status == "unchanged"
     assert r.settings["B"]["recommended"] == r.settings["B"]["current"]
     # 1 before + 1 after + the comparison: gfl_fw skipped (no FW block), droop and VSM one each
     assert r.simulations == 4
@@ -98,7 +98,7 @@ def test_an_impossible_island_is_not_achievable_and_names_the_capacity():
     units = [bess("gfm_vsm", h=1.0, p0=0.0)]
     c = case(units, 30.0)
     r = T.recommend_gfm_settings([c], lim(rocof=1.0, f_min=47.5))
-    assert not r.achievable
+    assert r.achievable is False and r.status == "not_achievable"
     assert r.capacity and {x["kind"] for x in r.capacity} <= set(F.CUT_KINDS)
     assert any("capacity is needed" in n for n in r.notes)
     rec = r.settings["B"]["recommended"]
@@ -117,11 +117,17 @@ def test_raising_i_max_is_only_tried_when_allowed():
         assert any("hardware" in n for n in allowed.notes)
 
 
-def test_the_budget_stops_the_search():
+def test_the_cap_stops_the_search_as_incomplete_never_as_a_capacity_verdict():
     c = case(island(), 4.0)
-    r = T.recommend_gfm_settings([c], lim(rocof=0.9), max_sims=3)
-    assert r.simulations <= 3 and not r.achievable
-    assert any("budget" in n for n in r.notes)
+    full = T.recommend_gfm_settings([c], lim(rocof=0.9))
+    r = T.recommend_gfm_settings([c], lim(rocof=0.9), max_sims=6)
+    assert r.simulations == 6 and r.status == "incomplete" and r.achievable is None
+    assert any(n.startswith("search incomplete (cap 6 reached)") for n in r.notes)
+    assert r.capacity == [] and not any("capacity" in n for n in r.notes)
+    # the best settings found so far: the corner passed at step 2, so they are bounded and pass
+    rec = r.settings["B"]["recommended"]
+    assert T.GFM_BOUNDS.h_s[0] <= rec["H_v_s"] <= T.GFM_BOUNDS.h_s[1]
+    assert full.status == "recommended" and full.simulations > 6
 
 
 def test_a_vsm_beats_a_frequency_watt_converter_on_rocof_at_0_plus():
@@ -134,7 +140,8 @@ def test_a_vsm_beats_a_frequency_watt_converter_on_rocof_at_0_plus():
     by = {x["model"]: x for x in r.comparison if x["unit"] == "B"}
     assert by["gfm_vsm"]["worst_rocof0_hz_per_s"] < by["gfl_fw"]["worst_rocof0_hz_per_s"]
     assert by["gfl_fw"]["worst_rocof_hz_per_s"] is not None
-    assert by["gfl_fw"]["note"] is None
+    assert "adds no inertia at 0+" in by["gfl_fw"]["note"]
+    assert by["gfm_vsm"]["note"] is None
 
 
 def test_without_a_gfm_nothing_is_tuned():

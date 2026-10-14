@@ -88,9 +88,16 @@ class Case:
     run: Callable
 
 
+#: ``Recommendation.status``: the current settings pass (``unchanged``); new
+#: ones pass (``recommended``); none within the bounds does (``not_achievable``,
+#: capacity is needed); or the simulation cap stopped the search
+#: (``incomplete``: the best settings found so far, never a capacity verdict).
+STATUSES = ("unchanged", "recommended", "not_achievable", "incomplete")
+
+
 @dataclasses.dataclass
 class Recommendation:
-    achievable: bool
+    achievable: bool | None     # None when the search was incomplete
     changed: bool
     settings: dict              # unit -> {"model", "current": {...}, "recommended": {...}}
     cases: list                 # {"key", "ok_before", "binding_before", "ok_after", "binding_after"}
@@ -102,6 +109,7 @@ class Recommendation:
     bounds: Bounds
     notes: list = dataclasses.field(default_factory=list)
     label: str = LABEL
+    status: str = "unchanged"
 
 
 class _Budget(Exception):
@@ -170,10 +178,16 @@ def recommend_gfm_settings(cases, limits, *, f0=F.F0, equipment_=(), window_ms=5
     def judged(case, units, horizon, lim):
         return measured(case, units, horizon, lim)[1]
 
+    best = {}            # the setting closest to the current one that passed so far
+
     def passes(d, h, horizon, i_max_pu=None):
         for c in cases:
             if not judged(c, apply(c.units, d, h, bounds, i_max_pu), horizon, tight).ok:
                 return False
+        # The latest passing setting is the closest to the current one (the
+        # search walks toward it); a verified one is not replaced by a search one.
+        if horizon == verify or not best.get("verified"):
+            best.update(d=d, h=h, i_max_pu=i_max_pu, verified=horizon == verify)
         return True
 
     gfm0 = next((u for c in cases for u in _gfms(c.units)), None)
@@ -199,8 +213,14 @@ def recommend_gfm_settings(cases, limits, *, f0=F.F0, equipment_=(), window_ms=5
                                       allow_i_max, notes)
             changed = True
     except _Budget:
-        notes.append(f"stopped at the budget of {max_sims} simulations")
-        rec, achievable, changed = {"d": d_lo, "h": h_hi, "i_max_pu": None}, False, True
+        # Never a capacity verdict: the search did not finish. The best setting
+        # it found (else the current one) is what is reported.
+        notes.append(f"search incomplete (cap {max_sims} reached)"
+                     + (": the best settings found so far are reported" if best else
+                        ": no passing setting found yet; the current settings are reported"))
+        rec = ({k: best[k] for k in ("d", "h", "i_max_pu")} if best
+               else {"d": d_cur, "h": h_cur, "i_max_pu": None})
+        achievable, changed = None, bool(best)
         before += [(False, "not run (budget)")] * (len(cases) - len(before))
 
     after, capacity = [], []
@@ -212,7 +232,7 @@ def recommend_gfm_settings(cases, limits, *, f0=F.F0, equipment_=(), window_ms=5
         except _Budget:
             ok1, b1 = False, "not run (budget)"
         after.append({"key": c.key, "ok_before": ok0, "binding_before": b0, "ok_after": ok1, "binding_after": b1})
-        if not ok1 and not achievable and b1 != "not run (budget)":
+        if not ok1 and achievable is False and b1 != "not run (budget)":
             dt, t_end = verify
             for kind, delta, binding, derivation, feasible, note in F.cuts_for_event(
                     units, lambda us, t, c=c, dt=dt: c.run(us, dt, t), limits, f0, equipment_, window_ms,
@@ -229,9 +249,11 @@ def recommend_gfm_settings(cases, limits, *, f0=F.F0, equipment_=(), window_ms=5
             comparison = _compare(cases, rec, bounds, measured, search, tight)
         except _Budget:
             notes.append(f"the GFM/GFL comparison stopped at the budget of {max_sims} simulations")
+    status = ("incomplete" if achievable is None else "not_achievable" if not achievable
+              else "recommended" if changed else "unchanged")
     return Recommendation(achievable=achievable, changed=changed, settings=settings, cases=after,
                           capacity=capacity, comparison=comparison, simulations=sims[0], margin=margin,
-                          bounds=bounds, notes=notes)
+                          bounds=bounds, notes=notes, status=status)
 
 
 def _search(passes, d_cur, h_cur, d_lo, d_hi, h_lo, h_hi, search, verify, bounds, allow_i_max, notes):
@@ -314,8 +336,13 @@ def _compare(cases, rec, bounds, measured, horizon, tight) -> list:
                 worst_r = max(worst_r, math.inf if m.collapse is not None else abs(m.rocof_window_hz_per_s))
                 worst_n = max(worst_n, math.inf if m.collapse is not None else abs(m.nadir_hz))
                 ok_all = ok_all and v.ok
+            if skipped is None and model == "gfl_fw":
+                skipped_note = ("grid-following: adds no inertia at 0+; its RoCoF over the window comes from "
+                                "its frequency-watt response, not inertia")
+            else:
+                skipped_note = skipped
             out.append({"unit": name, "model": model, "worst_rocof0_hz_per_s": None if skipped else worst_r0,
                         "worst_rocof_hz_per_s": None if skipped else worst_r,
                         "worst_nadir_hz": None if skipped else worst_n, "ok": None if skipped else ok_all,
-                        "note": skipped})
+                        "note": skipped_note})
     return out
