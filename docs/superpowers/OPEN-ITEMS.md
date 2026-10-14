@@ -20,7 +20,17 @@ on that date, so the entries below still date from 2026-09-12.
 while these branches were unmerged. Commits, findings and tests written
 before 2026-10-13 cite them as 12, 13 and 14.
 
-**2026-10-06:** items 12–14 added from the 3D site view branch's full-product
+**Renumbered 2026-10-13 (later):** the 3D site view's 12 and 13 become **19**
+and **20**. The P33b items 12 and 13 (closed by PR #170) keep their numbers
+because they were entered first. Text written before this date that names
+the scratch-slot network reset or the `login.html` credential as "item 12" or
+"item 13" means 19 or 20; text about the io-import pointer or the reload of
+the open project means the closed 12 or 13. Another item 13 (the hydrate that
+ignored `user_ts.json`, cited by `findings/2026-09-28-*` and
+`test_hydrate_restores_user_ts.py`) was closed and removed on 2026-09-29.
+`test/test_open_items_numbering.py` now fails on any reused number.
+
+**2026-10-06:** items 12–14 (now 19, 20 and the closed 14) added from the 3D site view branch's full-product
 browser E2E (`notes/2026-09-29-3d-site-view-phase2-qa.md` §7), re-verified in
 source on master that day. Its defect D (a second project from the same
 template → 409) is not listed: master's `_unique_project_name` already fixes it.
@@ -34,7 +44,8 @@ the detail) and item 14 (a three-port Link dropping `bus2` / `efficiency2`;
 increments A1 and A4 of `plans/2026-10-06-visual-layers-1-abstract-canvas.md`.
 
 **2026-10-13:** the P33b-era items 12 and 13 closed (see "Closed since the
-2026-09-12 pass"; the open 3D-site-view items 12 and 13 are different). Item 12
+2026-09-12 pass"; the 3D-site-view items that shared the numbers are now 19
+and 20). Item 12
 (an io import under a session pointer landing in a context the next request
 never reads) was already fixed on master by `e049c25e`: `routers/io.py::_unbind_session`
 clears the pointer on a successful import, as `/network/reset` does. The only
@@ -185,20 +196,30 @@ NOT reused or compacted — other findings and assessments cite these numbers.
   comparison is exactly the fix this item asked for, so `/confirm` no longer
   depends on the session id being unguessable.
 
-* **12 (P33b entry, 2026-10-06; not the open item 12 below)** — `/api/io/import/*`
-  under a session pointer imported into a context
+* **12** — `/api/io/import/*` under a session pointer imported into a context
   the next request never read. Already closed on master by `e049c25e`
   (`routers/io.py::_unbind_session` clears the pointer on a successful import).
   Tripwire widened by `9c99daa0` (PR #170):
   `test_every_http_import_is_what_the_next_request_sees` covers all four
   imports, and all four fail with the un-pointing removed.
-* **13 (P33b entry, 2026-10-06; not the open item 13 below)** — re-loading the
-  open project with unsaved edits left memory and disk
+* **13** — re-loading the open project with unsaved edits left memory and disk
   disagreeing. Closed by `9c99daa0` (PR #170): `load_project` registers with
   `write_back=False`, and a displaced copy belonging to a project the caller is
   not on is saved before the disk read. Tripwire:
   `tests/test_reload_same_project.py`, red on the old code in server and local
   mode.
+* **19** (the 3D site view's 12 until 2026-10-13) — a network reset while a
+  project is open landed in the session's scratch slot: undo, raw imports,
+  snapshot restore, and template create / bundle import. Every route was
+  already fixed on master when this was verified on 2026-10-13: `e049c25e`
+  for the imports, and P33b's `rekey_context` in undo, snapshot restore and
+  `_register_created_context` for the rest. Tripwire:
+  `tests/test_routes_with_a_project_active.py`, seven tests run with a session
+  pointer SET. They are the five kept in `notes/2026-09-30-full-e2e/` plus a
+  bundle-import test and a test that undo and restore are refused (409) while
+  the queue solves the active project. Each was mutation-checked: removing
+  the matching `rekey_context` call, or the solver-in-flight gate, turns it
+  red.
 
 ---
 
@@ -246,38 +267,13 @@ suite carries **124 pre-existing failures**, all from `No module named
 *the failing set is unchanged*. Source: gap 6 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
 
-### 12. A network reset while a project is open lands in the session's scratch slot
-
-**Undo reports success and changes nothing; a raw import is silently lost or
-ignored.** `PyPSAService.reset_network()` publishes the new, unbound network
-context into `scratch:<sid>`, but while `sessions.active_project_id` is set the
-next request re-resolves the *project's* registry slot
-(`services/active_project.resolve_for_session`) and never sees it. Affected: raw
-imports (`.nc`, CSV, Excel, MATPOWER in `routers/io.py`), undo
-(`services/network_undo.apply_undo`), snapshot restore (`routers/snapshots.py`),
-and template create / bundle import (`routers/projects.py`), which re-bind but
-leave a stale bound copy in scratch that is written back over the project's
-saved edits when evicted. Reproduces through the API alone. The backend tests
-miss it because `install_network` (`tests/conftest.py`) clears
-`active_project_id`, so every test runs with the pointer unset. **Data-loss
-class.** A proposed fix (clear the pointer after a raw import; `rekey_context`
-after re-binding; pass the acting session through the chat import wrappers) and
-five regression tests sit unapplied in `notes/2026-09-30-full-e2e/`; the diff
-targets the 2026-09-30 tree and needs porting to today's `routers/io.py`.
-Source: `notes/2026-09-29-3d-site-view-phase2-qa.md` §7, defects A–C.
-**2026-10-13:** the raw-import part is closed: `e049c25e` clears the pointer
-after a successful import, and PR #170's
-`test_every_http_import_is_what_the_next_request_sees` runs all four formats
-with the pointer SET (the `on_project_x` fixture activates a project). Undo,
-snapshot restore and template / bundle import were not re-verified for this
-note.
-
-### 13. `login.html` prefills and prints a review credential
+### 20. `login.html` prefills and prints a review credential
 
 `frontend/public/login.html:391-402` ships `admin@example.com` /
 `admin-pass-123` as the input values and in a visible "Review account" line, and
 auth mode serves that page (`static_gate.decide_route` passes `/login.html`
 through). Fine for a review build; a credential in a shipped page otherwise. One
 decision (strip before release, or gate the prefill on a build flag) and a test
-that the served page carries no password value. Source: the same E2E, "Other
-findings".
+that the served page carries no password value. Source:
+`notes/2026-09-29-3d-site-view-phase2-qa.md` §7, "Other findings". Numbered 13
+until 2026-10-13.

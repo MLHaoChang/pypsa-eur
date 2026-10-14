@@ -1,0 +1,1 @@
+* Test(pypsa-gui): Pin that undo, snapshot restore, raw imports, template create and bundle import take effect while a project is open, and that undo and restore are refused while the queue solves that project. Add a check that every `docs/superpowers/OPEN-ITEMS.md` entry has a unique number.
