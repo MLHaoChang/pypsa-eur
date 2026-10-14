@@ -40,6 +40,30 @@ the union of the k most extreme hours per criterion:
 - Boundary ties are spread exactly as in the case39 selection, by reusing
   its ``_top_k_spread``.
 
+**Island critical hours (plan I3b).** ``island_metrics(hourly, unit,
+island, campus)`` reads the I3a tables (``schema/island.py``) and adds, per
+``(period, hour)``:
+
+``island_dp_up_mw``, ``island_dp_down_mw``
+    The import and export steps at islanding, the worst over scenarios.
+``island_inertia_short_mws``
+    (max − M) within the period, M the lowest inertia over scenarios.
+``island_gfm_headroom_short_mw``
+    (max − x) of the upward headroom summed over the grid-forming bess.
+``island_load_mw``
+    The critical load.
+``island_gfl_share``
+    Grid-following PV and wind output over the campus consumption: the
+    renewable share, highest at low load (voltage rise, over-frequency).
+``island_energy_short_mwh``
+    (max − x) of the stored energy at loss, e(t−1) summed over the bess.
+
+Minimum criteria are transformed to (max − x) **within each period**, not
+negated: the values stay ≥ 0, so a flat series is 0 and selects nothing,
+just as a base column that never rises above zero. ``select_campus_hours``
+ranks these columns (``ISLAND_CRITERIA``) with the base ones when they are
+present; without them the selection is unchanged.
+
 Engine cage: pandas/numpy only, plus the campus schema and ``select``.
 """
 from collections import deque
@@ -58,6 +82,18 @@ BASE_CRITERIA = (
     ("max_renewable_mw", "renewable_mw"),
 )
 _RENEWABLE = frozenset({"pv", "wind"})
+
+#: (reason, column) of the island criteria (plan I3b), in report order.
+ISLAND_CRITERIA = (
+    ("max_island_dp_up", "island_dp_up_mw"),
+    ("max_island_dp_down", "island_dp_down_mw"),
+    ("min_island_inertia", "island_inertia_short_mws"),
+    ("min_gfm_headroom", "island_gfm_headroom_short_mw"),
+    ("max_island_load", "island_load_mw"),
+    ("max_gfl_share", "island_gfl_share"),
+    ("min_stored_energy", "island_energy_short_mwh"),
+)
+_GFM = frozenset({"gfm_droop", "gfm_vsm"})
 
 
 def _downstream(campus_spec):
@@ -118,6 +154,43 @@ def campus_metrics(hourly: pd.DataFrame, pcc: pd.DataFrame, campus_spec: dict) -
     return out.fillna(0.0).astype("float64").sort_index()
 
 
+def _short(series: pd.Series) -> pd.Series:
+    """(max − x) within each period: a minimum criterion as a maximum one."""
+    return series.groupby(level="period").transform("max") - series
+
+
+def island_metrics(hourly: pd.DataFrame, unit: pd.DataFrame, island: pd.DataFrame,
+                   campus_spec: dict) -> pd.DataFrame:
+    """The island columns (module docstring) per ``(period, hour)``, from the
+    campus hourly table and the two I3a island tables, already validated
+    (``schema/island.py``; the driver reads and checks them, which keeps
+    this module inside its cage)."""
+    hourly = validate_hourly(hourly)
+    units = campus_spec["campus"]["units"]
+    kind = {str(u): spec["kind"] for u, spec in units.items()}
+    control = {str(u): (spec.get("island") or {}).get("control") for u, spec in units.items()}
+    key = ["period", "hour"]
+    by = island.groupby(key)
+    out = pd.DataFrame({"island_dp_up_mw": by["dp_up_mw"].max(),
+                        "island_dp_down_mw": by["dp_down_mw"].max(),
+                        "island_load_mw": by["critical_load_mw"].max()})
+    out["island_inertia_short_mws"] = _short(by["inertia_mws"].min())
+    bess = unit[unit["unit_id"].map(kind) == "bess"]
+    gfm = bess[bess["unit_id"].map(control).isin(_GFM)]
+    if len(gfm):
+        out["island_gfm_headroom_short_mw"] = _short(gfm.groupby(key)["headroom_up_mw"].sum())
+    if len(bess):
+        out["island_energy_short_mwh"] = _short(bess.groupby(key)["soc_start_mwh"].sum())
+    h = hourly.assign(kind=hourly["unit_id"].map(kind), control=hourly["unit_id"].map(control))
+    gfl = h[h["kind"].isin(_RENEWABLE) & ~h["control"].isin(_GFM)]
+    consumption = (-h["p_mw"].clip(upper=0.0)).groupby([h["period"], h["hour"]]).sum()
+    renewable = gfl.groupby(key)["p_mw"].sum().reindex(consumption.index, fill_value=0.0)
+    share = (renewable / consumption.where(consumption > 0)).fillna(0.0)
+    share.index.names = key
+    out["island_gfl_share"] = share
+    return out.fillna(0.0).astype("float64").sort_index()
+
+
 def select_campus_hours(metrics: pd.DataFrame, k: int = 3) -> pd.DataFrame:
     """``period``, ``hour``, ``reasons`` (a list): within each period, the
     union of the k most extreme hours under each criterion that occurs."""
@@ -125,7 +198,7 @@ def select_campus_hours(metrics: pd.DataFrame, k: int = 3) -> pd.DataFrame:
         raise ContractError(f"k must be a positive integer, got {k!r}")
     criteria = list(BASE_CRITERIA) + [
         (f"max_{c}", c) for c in metrics.columns if c.startswith("trafo_")
-    ]
+    ] + [(r, c) for r, c in ISLAND_CRITERIA if c in metrics.columns]
     rows = []
     for period, block in metrics.groupby(level="period"):
         block = block.droplevel("period").sort_index(kind="mergesort")

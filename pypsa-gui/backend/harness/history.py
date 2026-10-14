@@ -625,20 +625,29 @@ def rewind_session(session: "ChatSession", turns: int = 1) -> int:
         if any(_is_turn_start(m) for m in session.messages):
             from harness.assurance_recovery import invalidate
             invalidate(session)
-        for _ in range(turns):
-            # Walk back to the most recent turn start and cut there.
-            cut: int | None = None
-            for i in range(len(session.messages) - 1, -1, -1):
-                if _is_turn_start(session.messages[i]):
-                    cut = i
-                    break
-            if cut is None:
-                break
-            while len(session.messages) > cut:
-                session.messages.pop()
+        cut_turns(session.messages, turns)
         if before != len(session.messages):
             session.assurance_context = None
+            # Issue 13: the event log replays the rewind exactly.
+            from harness import eventlog
+            eventlog.record(session, "history/rewind", turns=turns)
         return before - len(session.messages)
+
+
+def cut_turns(messages: collections.deque, turns: int) -> None:
+    """Drop the last `turns` complete turns from `messages` in place: walk back
+    to the most recent turn start and cut there, `turns` times. Shared by
+    `rewind_session` and the event log's `derive_messages` (issue 13)."""
+    for _ in range(turns):
+        cut: int | None = None
+        for i in range(len(messages) - 1, -1, -1):
+            if _is_turn_start(messages[i]):
+                cut = i
+                break
+        if cut is None:
+            break
+        while len(messages) > cut:
+            messages.pop()
 
 
 def _drop_oldest_turn_group(messages: collections.deque) -> bool:

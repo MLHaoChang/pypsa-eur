@@ -4,7 +4,8 @@
 // `startEdit` keys, save mapping, edit inputs). Derived rows (capital cost,
 // a battery's lifetime and fixed O&M) are shown read-only, never typed.
 import { Fragment, type ReactNode } from 'react'
-import type { AssetFieldSpec, AssetSchema } from '../../api/assetSchema'
+import type { AssetFieldSpec, AssetSchema, ProvenanceEntry } from '../../api/assetSchema'
+import { ProvenanceChip } from '../../components/ProvenanceChip'
 import type { Bus, Carrier } from '../../api/types'
 import { derivedStored, displayValue, isRevealed } from '../../utils/assetForm'
 import {
@@ -51,7 +52,21 @@ export function assetReadoutItems(schema: AssetSchema | undefined, asset: Record
   return out
 }
 
-function DerivedRow({ spec, value }: { spec: AssetFieldSpec; value: unknown }) {
+/** U3: the field's own provenance stamp (S1a); none renders nothing. */
+type Stamps = Record<string, ProvenanceEntry> | undefined
+
+function chipOf(stamps: Stamps, key: string) {
+  const entry = stamps?.[key]
+  return entry ? <ProvenanceChip entry={entry} testId={`asset-prov-${key}`} /> : null
+}
+
+/** A field's chip on its own full-width row, so it never takes a grid cell. */
+function chipRow(stamps: Stamps, key: string) {
+  const chip = chipOf(stamps, key)
+  return chip ? <div className="col-span-2 -mt-0.5">{chip}</div> : null
+}
+
+function DerivedRow({ spec, value, stamps }: { spec: AssetFieldSpec; value: unknown; stamps?: Stamps }) {
   const d = displayValue(spec, value)
   return (
     // Full width, label left and value right: derived labels are long
@@ -59,6 +74,8 @@ function DerivedRow({ spec, value }: { spec: AssetFieldSpec; value: unknown }) {
     <div className="col-span-2 flex items-baseline justify-between gap-2" data-testid={`asset-derived-${spec.key}`}>
       <span className="text-[9px] text-muted">
         <InfoTip text={spec.help}>{spec.label}{spec.unit_display ? ` (${unitLabel(spec.unit_display)})` : ''}</InfoTip>
+        {/* The derived key's own stamp only, never inferred from its parts. */}
+        {chipOf(stamps, spec.key)}
       </span>
       <span className="text-[10px] font-mono text-muted italic whitespace-nowrap" title="Derived: recomputed on save">
         {d === null ? '—' : fmt(d)} <span className="not-italic text-[9px]">derived</span>
@@ -92,7 +109,7 @@ const PART_COLUMNS: Array<{ suffix: string; head: string }> = [
  * never truncates "Power part: overnight cost". Each input keeps the field's
  * full label as its accessible name.
  */
-function PartsTable({ parts, fs, set }: { parts: AssetFieldSpec[]; fs: FS; set: SetFS }) {
+function PartsTable({ parts, fs, set, stamps }: { parts: AssetFieldSpec[]; fs: FS; set: SetFS; stamps?: Stamps }) {
   const names = [...new Set(parts.map(f => f.part as string))]
   return (
     <div className="col-span-2" data-testid="asset-parts">
@@ -125,6 +142,7 @@ function PartsTable({ parts, fs, set }: { parts: AssetFieldSpec[]; fs: FS; set: 
                           onChange={e => set(p => ({ ...p, [f.key]: e.target.value }))}
                           className="bg-bg border border-border rounded px-1 py-0.5 text-[10px] font-mono focus:outline-none focus:border-accent w-full" />
                       )}
+                      {f && chipOf(stamps, f.key)}
                     </td>
                   )
                 })}
@@ -142,7 +160,7 @@ function PartsTable({ parts, fs, set }: { parts: AssetFieldSpec[]; fs: FS; set: 
  * boolean's side effect (Extendable seeds the minimum); `after` places a card's
  * own control after a field (e.g. the per-period bounds link after the maximum).
  */
-export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onCheck, after, hidden }: {
+export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onCheck, after, hidden, provenance }: {
   schema: AssetSchema
   fs: FS
   set: SetFS
@@ -153,6 +171,12 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
   after?: Record<string, ReactNode>
   /** Fields this asset does not use (e.g. curtailment cost on a thermal unit). */
   hidden?: ReadonlySet<string>
+  /**
+   * U3: the asset's per-field provenance (`useAssetProvenance`). Optional: a
+   * card that passes none renders exactly as before; a field with no stamp
+   * shows no chip (unknown is not "default").
+   */
+  provenance?: Record<string, ProvenanceEntry>
 }) {
   // The typed parts of a composite asset render together, as one table where
   // the first of them would have been (the Investment group).
@@ -171,19 +195,20 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
               <Fragment key={f.key}>
                 {f.key === firstPart ? (
                   <>
-                    <PartsTable parts={parts} fs={fs} set={set} />
+                    <PartsTable parts={parts} fs={fs} set={set} stamps={provenance} />
                     {/* The parts draw as one table, so a control placed after any
                         part goes after the table. */}
                     {parts.map(p => <Fragment key={p.key}>{after?.[p.key]}</Fragment>)}
                   </>
                 )
-                  : f.derived ? <DerivedRow spec={f} value={derivedStored(f.key, current)} />
+                  : f.derived ? <DerivedRow spec={f} value={derivedStored(f.key, current)} stamps={provenance} />
                   : f.kind === 'bool' ? <ChkInput label={f.label} k={f.key} fs={fs} set={set} tip={f.help} onCheck={onCheck?.[f.key]} />
                   : f.kind === 'bus' ? <BusSelect k={f.key} fs={fs} set={set} buses={buses} tip={f.help} label={f.label} />
                   : f.kind === 'carrier' ? <CarrierGroupSelect k={f.key} fs={fs} set={set} carriers={carriers} tip={f.help} />
                   : f.kind === 'text' ? <TxtInput label={f.label} k={f.key} fs={fs} set={set} tip={f.help} />
                   : f.kind === 'enum' ? <EnumInput spec={f} fs={fs} set={set} />
                   : <NumInput label={f.label} k={f.key} fs={fs} set={set} unit={f.unit_display ? unitLabel(f.unit_display) : undefined} tip={f.help} />}
+                {!f.derived && f.key !== firstPart && chipRow(provenance, f.key)}
                 {f.key !== firstPart && after?.[f.key]}
               </Fragment>
             ))}
