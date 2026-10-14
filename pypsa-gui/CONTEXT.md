@@ -189,6 +189,16 @@ chat under the app-data directory. Today it runs beside `chat.jsonl`, which
 still serves `/history`.
 _Avoid_: transcript (that is chat.jsonl), audit log
 
+**Goal**:
+What the assistant keeps working toward over several turns without being
+asked each time (`harness/goals.py`): an objective and a round budget
+(default 5, at most 20). After a turn, the next round starts on its own until
+the assistant completes or pauses the goal, the rounds are used up, or a
+turn needs the user (a card, a question, an error, a usage limit). Every
+change still needs its card. Only the user resumes a paused or blocked goal,
+from the goal strip.
+_Avoid_: task (that is a durable assistant task), plan
+
 **Choice card**:
 The card the panel renders when the assistant calls `ask_user`: a title, a
 question, options with one marked recommended, and a free-text field. A pick

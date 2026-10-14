@@ -1966,6 +1966,41 @@ TOOLS: list[dict[str, Any]] = [
         "the last step is done). Safety: read.",
     ),
 
+    _t(
+        "set_goal",
+        "Set a goal for this chat when the user asks you to keep working "
+        "toward something over several steps without prompting each one. "
+        "After this turn, rounds run on their own (each starts with 'Continue "
+        "toward the goal (round n of N).') until you call complete_goal, you "
+        "call pause_goal, the rounds are used up, or something needs the user "
+        "(a card, a question, an error). Every change still needs its card. "
+        "One goal at a time; only the user resumes a paused goal. "
+        "Safety: read.",
+        {
+            "objective": {"type": "string",
+                          "description": "One sentence saying what done looks like."},
+            "max_rounds": {"type": "integer", "minimum": 1, "maximum": 20,
+                           "description": "Unattended rounds allowed; default 5."},
+        },
+        ["objective"],
+    ),
+
+    _t(
+        "pause_goal",
+        "Pause the goal: no more rounds run on their own until the user "
+        "resumes it. Use it when you need the user's input or cannot go on. "
+        "Safety: read.",
+        {"reason": {"type": "string", "description": "Why, in a few words."}},
+        [],
+    ),
+
+    _t(
+        "complete_goal",
+        "Mark the goal reached; no more rounds run. Safety: read.",
+        {"summary": {"type": "string", "description": "One line: what was achieved."}},
+        [],
+    ),
+
 # ── Conversation (2) ───────────────────────────────────────────────────
 
     _t(
@@ -3607,6 +3642,9 @@ TOOL_ROUTES: dict[str, list] = {
     "start_workflow": _SERVICE_CALL,
     "advance_workflow": _SERVICE_CALL,
     "end_workflow": _SERVICE_CALL,
+    "set_goal": _SERVICE_CALL,
+    "pause_goal": _SERVICE_CALL,
+    "complete_goal": _SERVICE_CALL,
     # conversation (2)
     "list_chat_history": _CHAT_JSONL,
     "clear_chat_history": _CHAT_JSONL,
