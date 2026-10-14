@@ -88,7 +88,7 @@ def test_frontier_stage_fills_points_with_shed_exclusion_and_period_basis():
     for p in pts:
         assert p["excludes_shed_cost"] is True
         if p["status"] == "ok":
-            assert p["period_basis"] in ("single_period", "multi_period")
+            assert p["period_basis"] in ("single_period", "npv_multi_period")
             assert p["point"]["total_system_cost_eur"] >= 0
     assert sec.payload["excludes_shed_cost"] is True
     assert sec.payload["period_basis"] == report.period_basis
