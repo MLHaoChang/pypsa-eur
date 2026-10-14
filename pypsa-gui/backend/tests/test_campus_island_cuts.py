@@ -334,3 +334,55 @@ def test_the_solve_goes_through_the_queue_with_the_projects_config(saved, monkey
     job.status, job.error = "failed", "infeasible"
     with pytest.raises(RuntimeError, match="infeasible"):
         cic._queue_solve(saved, 7, threading.Event())
+
+
+# ── the routes ──────────────────────────────────────────────────────────────
+
+
+from db.models import Project  # noqa: E402
+from tests.test_campus_island_service import hub  # noqa: E402,F401
+from tests.test_worksheet_foreign_lock import _is_lock_refusal, same_org_other_user  # noqa: E402,F401
+
+_BASE = "/api/campus-electrical/Router Hub/island/cuts"
+
+
+@pytest.mark.parametrize("method, path, function, status, expected_kw", [
+    ("get", "", "get_cuts", 200, {}),
+    ("post", "/apply", "start_apply_job", 202, {"user_id": "user"}),
+    ("get", "/apply", "apply_status", 200, {}),
+    ("post", "/apply/cancel", "cancel_apply_job", 200, {}),
+    ("delete", "/2030/3/inertia", "remove_cut", 200, {"period": 2030, "hour": 3, "kind": "inertia"}),
+    ("delete", "", "clear_cuts", 200, {}),
+])
+def test_each_cut_route_calls_its_service_function_with_the_row(client, hub, seeded_identity, monkeypatch,  # noqa: F811
+                                                               method, path, function, status, expected_kw):
+    calls = []
+    monkeypatch.setattr(cic, function, lambda *a, **kw: calls.append((a, kw)) or {"ok": function})
+    resp = getattr(client, method)(f"{_BASE}{path}")
+    assert resp.status_code == status, resp.text
+    assert resp.json() == {"ok": function}
+    (args, kw), = calls
+    assert isinstance(args[0], Project) and args[0].name == "Router Hub"
+    if expected_kw.get("user_id") == "user":
+        expected_kw = {"user_id": seeded_identity["user_id"]}
+    assert kw == expected_kw
+
+
+def test_a_cut_kind_off_the_contract_is_422_before_the_service(client, hub, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(cic, "remove_cut", lambda *a, **kw: pytest.fail("not reached"))
+    assert client.delete(f"{_BASE}/2030/3/damping").status_code == 422
+
+
+def test_the_cut_writes_are_refused_under_another_users_lock_and_the_reads_are_not(
+        client, hub, same_org_other_user, monkeypatch):  # noqa: F811
+    for function in ("get_cuts", "start_apply_job", "apply_status", "cancel_apply_job", "remove_cut",
+                     "clear_cuts"):
+        monkeypatch.setattr(cic, function, lambda *a, **kw: {"ok": True})
+    assert client.post("/api/projects/Router Hub/lock").status_code == 200
+    other = same_org_other_user
+    for method, path in (("post", "/apply"), ("post", "/apply/cancel"), ("delete", "/2030/3/inertia"),
+                         ("delete", "")):
+        resp = getattr(other, method)(f"{_BASE}{path}")
+        assert _is_lock_refusal(resp), (method, path, resp.status_code, resp.text)
+    for path in ("", "/apply"):
+        assert other.get(f"{_BASE}{path}").status_code == 200

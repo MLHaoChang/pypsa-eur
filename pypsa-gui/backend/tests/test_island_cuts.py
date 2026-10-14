@@ -188,3 +188,12 @@ def test_a_cuts_file_that_is_not_json_is_refused_with_its_name(tmp_path, monkeyp
     (tmp_path / "island_cuts.json").write_text("{not json")
     with pytest.raises(IslandRefusal, match="island_cuts.json"):
         island_mod.load_project_island()
+
+
+def test_the_bundle_carries_the_applied_cuts_and_a_template_ships_none():
+    """The cuts change what the project solves, so they travel with it as
+    the sidecar does; a template starts without any."""
+    from routers.projects import _BUNDLE_FILES, _TEMPLATE_SIDECARS
+    assert island_mod.CUTS_FILE == "island_cuts.json"
+    assert island_mod.CUTS_FILE in _BUNDLE_FILES
+    assert island_mod.CUTS_FILE not in _TEMPLATE_SIDECARS

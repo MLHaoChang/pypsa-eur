@@ -262,6 +262,78 @@ async def run_island_study(
     return await run_in_threadpool(ce.run_island_study, _row(proj, db), body.scenarios)
 
 
+# ── the frequency cuts (campus island plan, I7; owner Q6: manual) ──────────
+
+CutKind = Literal["inertia", "headroom_up", "headroom_down", "droop_gain"]
+
+
+@router.get("/{name}/island/cuts")
+def get_island_cuts(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """The cuts the last campus run proposes, each with its primal estimate;
+    the applied cuts and the trials; the limit (bridge energy gets no cut)."""
+    from services import campus_island_cuts as cic
+    return cic.get_cuts(_row(proj, db))
+
+
+@router.post("/{name}/island/cuts/apply", status_code=202)
+def apply_island_cuts(
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Apply the proposed cuts, re-solve the hub and rerun the campus study,
+    up to three trials (a background job); poll ``GET .../apply``."""
+    from services import campus_island_cuts as cic
+    _check_lock(proj, db, user)
+    return cic.start_apply_job(_row(proj, db), user_id=user.id if user else None)
+
+
+@router.get("/{name}/island/cuts/apply")
+def island_cuts_status(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """The apply job's record: state, trials so far, why it stopped."""
+    from services import campus_island_cuts as cic
+    return cic.apply_status(_row(proj, db))
+
+
+@router.post("/{name}/island/cuts/apply/cancel")
+def cancel_island_cuts(
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Stop the apply job after the trial in hand."""
+    from services import campus_island_cuts as cic
+    _check_lock(proj, db, user)
+    return cic.cancel_apply_job(_row(proj, db))
+
+
+@router.delete("/{name}/island/cuts/{period}/{hour}/{kind}")
+def remove_island_cut(
+    period: int,
+    hour: int,
+    kind: CutKind,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Take one applied cut back; the next solve no longer has it."""
+    from services import campus_island_cuts as cic
+    _check_lock(proj, db, user)
+    return cic.remove_cut(_row(proj, db), period=period, hour=hour, kind=kind)
+
+
+@router.delete("/{name}/island/cuts")
+def clear_island_cuts(
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Take every cut back, and the trials with them."""
+    from services import campus_island_cuts as cic
+    _check_lock(proj, db, user)
+    return cic.clear_cuts(_row(proj, db))
+
+
 # ── the asset library (plan C9) ────────────────────────────────────────────
 
 @router.get("/{name}/library")
