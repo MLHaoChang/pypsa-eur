@@ -26,6 +26,12 @@ OWNER = 'owner-lf'
 SNAPSHOTS = pd.date_range('2030-01-01', periods=4, freq='h', name='snapshot')
 
 
+def _record_fixture_inputs(n: pypsa.Network) -> None:
+    """Hand-set result fixtures declare their input source, as the solver does."""
+    from services import workflow_tools
+    workflow_tools._record_solve_inputs(n, PyPSAService.get_solver_state()['solver_config'])
+
+
 def _install(n: pypsa.Network) -> None:
     PyPSAService.set_network(n)
     with PyPSAService._registry_lock:
@@ -35,6 +41,7 @@ def _install(n: pypsa.Network) -> None:
     state.update(status='completed', condition='optimal', objective=1000.0,
                  ac_pf_results=None, ac_pf_convergence=None, ac_pf_convergence_list=None,
                  ac_pf_converged_count=None, ac_pf_total_snapshots=None)
+    _record_fixture_inputs(n)
 
 
 def _frame(**cols) -> pd.DataFrame:
@@ -152,6 +159,7 @@ def test_zero_or_missing_rating_and_no_data_are_reported_not_ranked(solved):
 
 def test_zero_effective_limit_from_s_max_pu_is_skipped(solved):
     solved['network'].lines.loc['L_hot', 's_max_pu'] = 0.0
+    _record_fixture_inputs(solved['network'])
     out = lf.get_loadflow_summary(limit=25)
     reasons = {s['name']: s['reason'] for s in out['skipped']}
     assert reasons['L_hot'] == 'zero_effective_limit'
@@ -172,6 +180,7 @@ def test_weighted_snapshots_drive_hours_and_mean(solved):
     n.snapshot_weightings.loc[:, 'generators'] = [3.0, 1.0, 1.0, 3.0]
     n.lines_t.p0.loc[SNAPSHOTS[3], 'L_hot'] = 100.0
     n.lines_t.p1.loc[SNAPSHOTS[3], 'L_hot'] = -99.0
+    _record_fixture_inputs(n)
     out = lf.get_loadflow_summary(limit=25)
     row = _by_name(out)['L_hot']
     # 95 % (w3), 10 % (w1), 20 % (w1), 100 % (w3): at limit only the last one.
@@ -275,6 +284,70 @@ def test_ac_pf_requested_without_a_result_is_typed_unavailable(solved):
     assert out['status'] == 'unavailable' and out['unavailable_kind'] == 'ac_pf_not_available'
 
 
+def test_unaligned_ac_convergence_cannot_certify_loading(solved):
+    _install_ac(solved['network'])
+    PyPSAService.get_solver_state()['ac_pf_convergence_list'] = []
+    out = lf.get_loadflow_summary(source='ac_pf')
+    assert out['status'] == 'unavailable'
+    assert out['unavailable_kind'] == 'ac_pf_convergence_unavailable'
+
+
+def test_string_false_is_not_a_converged_snapshot(solved):
+    _install_ac(solved['network'])
+    for entry in PyPSAService.get_solver_state()['ac_pf_convergence_list']:
+        entry['ok'] = 'false'
+    assert lf.get_loadflow_summary(source='ac_pf')['unavailable_kind'] == 'ac_pf_not_converged'
+
+
+def test_invalid_weights_refuse_instead_of_inventing_weighted_means(solved):
+    solved['network'].snapshot_weightings.loc[SNAPSHOTS[0], 'generators'] = -1
+    out = lf.get_loadflow_summary()
+    assert out['unavailable_kind'] == 'invalid_snapshot_weights'
+
+
+def test_shared_view_matches_chat_rows_and_preserves_both_terminal_series(solved):
+    view = lf.get_loadflow_view(window_from=1, window_to=2)
+    summary = lf.get_loadflow_summary(limit=25, window_from=1, window_to=2)
+    assert view['top'] == summary['top']
+    assert view['evidence_token'] == summary['evidence_token']
+    assert view['binding']['window_from'] == 1
+    assert view['binding']['window_to'] == 2
+    row = next(r for r in view['rows'] if r['name'] == 'L_p1')
+    series = next(s for s in view['series'] if s['name'] == 'L_p1')
+    assert row['util_pct'] == 60
+    assert series['util_pct'] == [60, 40]
+    assert len(view['binding']['data_sha256']) == 64
+
+
+def test_source_digest_changes_for_non_peak_result_and_weight_changes(solved):
+    before = lf.get_loadflow_view()['binding']
+    solved['network'].lines_t.p0.loc[SNAPSHOTS[1], 'L_hot'] += 0.00000001
+    after = lf.get_loadflow_view()['binding']
+    assert before['data_sha256'] != after['data_sha256']
+    solved['network'].snapshot_weightings.loc[SNAPSHOTS[1], 'generators'] = 7
+    _record_fixture_inputs(solved['network'])
+    assert lf.get_loadflow_view()['binding']['data_sha256'] != after['data_sha256']
+
+
+def test_chart_cap_does_not_cap_the_summary_window_or_fabricate_points(solved):
+    n = solved['network']
+    n.set_snapshots(pd.date_range('2030-01-01', periods=900, freq='h'))
+    flow = np.full(900, 40.0)
+    flow[-1] = 100.0
+    n.lines_t.p0 = pd.DataFrame({name: flow if name == 'L_p1' else np.full(900, np.nan)
+                               for name in n.lines.index}, index=n.snapshots)
+    n.lines_t.p1 = -n.lines_t.p0
+    _record_fixture_inputs(n)
+    view = lf.get_loadflow_view()
+    row = next(r for r in view['rows'] if r['name'] == 'L_p1')
+    trace = next(s for s in view['series'] if s['name'] == 'L_p1')
+    assert row['util_pct'] == 100
+    assert view['window']['snapshots'] == 900
+    assert len(trace['util_pct']) == 800 and max(trace['util_pct']) == 40
+    assert len(view['series_index']) == 800 and view['series_truncated']
+    json.dumps(view, allow_nan=False)
+
+
 # ── unsolved / stale / running / infeasible / failed ────────────────────
 
 def test_unsolved_network_is_unavailable(solved):
@@ -289,6 +362,19 @@ def test_stale_results_after_topology_change_are_unavailable(solved):
     out = lf.get_loadflow_summary()
     assert out['status'] == 'unavailable' and out['unavailable_kind'] == 'stale_results'
     assert out['freshness'] == 'stale' and 'top' not in out
+
+
+def test_parameter_edit_without_topology_change_cannot_relabel_old_results(solved):
+    solved['network'].lines.loc['L_hot', 's_nom'] = 1000
+    for out in (lf.get_loadflow_summary(), lf.get_loadflow_view()):
+        assert out['status'] == 'unavailable' and out['unavailable_kind'] == 'solve_inputs_changed'
+        assert 'top' not in out and 'binding' not in out
+
+
+def test_legacy_solve_without_exact_input_provenance_remains_unavailable(solved):
+    solved['network'].meta.pop('assistant_solve_exact_input_fingerprint')
+    assert lf.get_loadflow_summary()['unavailable_kind'] == 'solve_provenance_missing'
+    assert lf.get_loadflow_view()['unavailable_kind'] == 'solve_provenance_missing'
 
 
 @pytest.mark.parametrize('patch, kind', [

@@ -1,3 +1,4 @@
+import { resultsEvidenceApi } from '../../api/resultsEvidence'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { render, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -22,6 +23,8 @@ vi.mock('../../api/simulation', async (importOriginal) => {
   }
 })
 
+vi.mock('../../api/resultsEvidence', () => ({ resultsEvidenceApi: { loadflow: vi.fn() } }))
+
 vi.mock('../../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/network')>()
   return {
@@ -36,7 +39,8 @@ vi.mock('../../api/network', async (importOriginal) => {
 afterEach(() => cleanup())
 
 beforeEach(() => {
-  useUIStore.setState({ currentProject: 'Demo' })
+  useUIStore.setState({ currentProject: 'Demo', resultSource: 'lopf' })
+  vi.mocked(resultsEvidenceApi.loadflow).mockResolvedValue({ status: 'ok', binding: { version: 1, project_id: 'project-1', project_name: 'Demo', scope: 'current', data_sha256: 'a'.repeat(64) }, rows: [{ name: 'Line 1', class: 'Line', basis: 'active_power_proxy', util_pct: 42.424, rating_pct: 42.424, mean_util_pct: 42.424, peak_flow: 424.24, mean_flow: 424.24, peak_at: '2026-01-01', h_at_limit: 0, h_over_limit: 0, rating: { value: 1000, basis: 'configured' }, s_max_pu: { min: 1, max: 1 } }] })
   const emptyTs = { index: [], columns: [], data: [] }
   vi.mocked(resultsApi.getAcPfStatus).mockReset().mockResolvedValue({ available: false })
   // Single line, single snapshot: max(|p0|) over one point equals that

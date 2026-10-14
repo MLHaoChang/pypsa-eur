@@ -7,7 +7,7 @@ import ChatPanel from './ChatPanel'
 import { ConfirmationCard } from './ConfirmationCard'
 import CompanionLauncher, { type CompanionWorkState } from './CompanionLauncher'
 import CompanionOutcome from './CompanionOutcome'
-import { KEY_RESULT_TABS, keyResultsWalkRequested, openProjectList, openProjectRequested, startKeyResultsWalk } from './liveWalk'
+import { keyResultsWalkRequested, openProjectList, openProjectRequested, startKeyResultsWalk, type ResultsWalk } from './liveWalk'
 import { ErrorBoundary } from './ErrorBoundary'
 import { ensureLiveDurableThread } from '../api/durableConversations'
 
@@ -57,7 +57,8 @@ export default function AssistantDock() {
   const [liveCaption, setLiveCaption] = useState('')
   const [liveEcho, setLiveEcho] = useState('')
   const [walking, setWalking] = useState(false)
-  const walkCancel = useRef<(() => void) | null>(null)
+  const [walkNextReady, setWalkNextReady] = useState(false)
+  const walkCancel = useRef<ResultsWalk | null>(null)
   const echoTimer = useRef<number | null>(null)
   const liveGeneration = useRef(0)
   // Conversation/decision state is independent of in-page text and audio.
@@ -78,6 +79,7 @@ export default function AssistantDock() {
     walkCancel.current?.()
     walkCancel.current = null
     setWalking(false)
+    setWalkNextReady(false)
   }, [])
 
   const flashEcho = useCallback((text: string) => {
@@ -99,18 +101,20 @@ export default function AssistantDock() {
       stopWalk()
       setLiveEcho('')
       setWalking(true)
-      setLiveCaption('Opening each results tab.')
+      setLiveCaption('Waiting for matching result evidence.')
       walkCancel.current = startKeyResultsWalk({
-        onStep: (tab, index, last) => {
-          setLiveCaption(`Tab ${index + 1} of ${KEY_RESULT_TABS.length}. ${tab.label}. ${tab.blurb}`)
+        onStep: (tab, _index, last) => {
+          setLiveCaption(`${tab.label}. ${tab.blurb} Matching result data is displayed.`)
+          setWalkNextReady(!last)
           if (last) setWalking(false)
         },
-        onPaceMiss: () => {
-          setLiveCaption('Could not hold the tab. The pause did not come from the dev server.')
+        onWaiting: (tab) => { setWalkNextReady(false); setLiveCaption(`Waiting for matching ${tab.label} evidence…`) },
+        onStop: (reason) => {
+          setLiveCaption(reason)
+          setWalkNextReady(false)
           setWalking(false)
         },
       })
-      forwardToHarness(text)
       return
     }
     if (openProjectRequested(text)) {
@@ -118,7 +122,6 @@ export default function AssistantDock() {
       setLiveEcho('')
       openProjectList()
       setLiveCaption('Opening the project list.')
-      forwardToHarness(text)
       return
     }
     if (ready === true) {
@@ -316,7 +319,8 @@ export default function AssistantDock() {
         >
           <ErrorBoundary label="The assistant crashed">
             <ConfirmationCard />
-            <CompanionOutcome />
+            {walking && walkNextReady && <button type="button" data-no-panel-close className="fixed bottom-24 right-4 text-xs rounded border border-border bg-panel px-3 py-2" onClick={() => walkCancel.current?.next()}>Next evidence view</button>}
+      <CompanionOutcome />
           </ErrorBoundary>
         </CompanionLauncher>
       )}

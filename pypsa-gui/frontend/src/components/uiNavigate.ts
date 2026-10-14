@@ -1,3 +1,4 @@
+import { manualNavigation, navigationEpoch, withAssistantNavigation } from '../utils/navigationEpoch'
 import { useUIStore } from '../store/uiStore'
 
 /**
@@ -54,7 +55,7 @@ function _normalizePanelId(raw: string): string {
   return aliases[key] ?? key
 }
 
-export function applyUiNavigate(d: {
+type NavigationRequest = {
   kind?: string
   panel_id?: string
   results_tab?: string
@@ -77,7 +78,16 @@ export function applyUiNavigate(d: {
   status?: string
   fingerprint?: string
   evidence_available?: boolean
-}) {
+}
+
+export function applyUiNavigate(d: NavigationRequest, expectedEpoch?: number): boolean {
+  if (expectedEpoch !== undefined && expectedEpoch !== navigationEpoch()) return false
+  if (expectedEpoch === undefined) manualNavigation()
+  withAssistantNavigation(() => apply(d))
+  return true
+}
+
+function apply(d: NavigationRequest) {
   const ui = useUIStore.getState()
   if (d.kind === 'select_component' && d.component_class && d.name) {
     ui.setSelectedComponent({ type: d.component_class, name: d.name })
