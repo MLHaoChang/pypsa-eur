@@ -9,12 +9,14 @@
 // `value` may arrive pre-formatted with its unit ("136.64 €/MWh"); without an
 // explicit `unit` the tile splits it (utils/format.ts::splitValueUnit) so the
 // unit renders smaller and can never wrap under the number.
+// The figure is then rounded to the tile standard (utils/format.ts::kpiFigure:
+// 3 significant figures, one decimal for prices, % and h/yr).
 //
 // `state` (components/ResultState.tsx) replaces the figure with a pill, a
 // one-sentence `reason` and an optional `action` whenever there is no
 // computed value — the tile never shows 0 or "—" for a result that was not
 // run, not modelled or does not apply. `stale` keeps the old figure, dimmed.
-import { splitValueUnit } from '../utils/format'
+import { kpiFigure, splitValueUnit } from '../utils/format'
 import { StateAction, StatePill, type ResultAction, type ResultStateKind } from './ResultState'
 
 export type KpiTone = 'good' | 'warn' | 'bad'
@@ -45,7 +47,8 @@ export default function Kpi({
   reason?: string
   action?: ResultAction
 }) {
-  const parts = unit !== undefined ? { value, unit } : splitValueUnit(value)
+  const raw = unit !== undefined ? { value, unit } : splitValueUnit(value)
+  const parts = kpiFigure(raw.value, raw.unit)
   const showsFigure = state === 'ready' || state === 'zero' || state === 'stale'
   return (
     <div

@@ -153,7 +153,8 @@ function renderPage() {
 
 it('renders a distinctive peak-flow KPI sourced from a single mocked line/snapshot', async () => {
   renderPage()
-  const match = await findKpiValue(f => f.includes('424.24 MW'))
+  // KPI tiles round to the R1 standard (3 s.f.), so the tile shows 424 MW.
+  const match = await findKpiValue('424 MW')
   expect(match).toBeTruthy()
 })
 

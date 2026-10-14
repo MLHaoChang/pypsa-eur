@@ -75,7 +75,7 @@ _LOAD_OPTIONAL = ("f_trip_hz",)
 
 _REQ_REQUIRED = ("bridge_s", "sustained_h", "rocof_window_ms", "gfm_margin")
 _REQ_OPTIONAL = ("fuel_autonomy_h", "genset_redundancy_n", "pickup_blocks", "i_max_sensitivity_pu",
-                 "relay_sensitivity")
+                 "relay_sensitivity", "gfm_tuning_margin")
 _REQ_STRUCTURAL = ("scenarios", "frequency_limits", "ride_through_storage", "linearised_uc", "gfl_min_case")
 _LIMIT_FIELDS = ("rocof_hz_per_s", "f_min_hz", "f_max_hz", "qss_band_hz")
 REQ_DEFAULTS = {"genset_redundancy_n": 1, "i_max_sensitivity_pu": [1.2, 1.5, 2.0], "relay_sensitivity": 1.5}
@@ -138,6 +138,7 @@ _SCALAR = {
     "fuel_autonomy_h": (_pos, "positive"),
     "rocof_window_ms": (_pos, "positive"),
     "gfm_margin": (_nonneg, "non-negative"),
+    "gfm_tuning_margin": (lambda v: 0 <= v < 1, "in [0, 1)"),
     "genset_redundancy_n": (lambda v: v >= 0 and float(v).is_integer(), "a whole number of at least 0"),
     "rocof_hz_per_s": (_pos, "positive"),
     "f_min_hz": (lambda v: 40 <= v <= 70, "a frequency in [40, 70] Hz"),
@@ -215,6 +216,7 @@ FIELD_USERS = {
     "qss_band_hz": ("I2b", "I6"),
     "rocof_window_ms": ("I6",),
     "gfm_margin": ("I2b",),
+    "gfm_tuning_margin": ("GFM-a",),            # recommended GFM settings (gfm_tuning), not I2b's margin
     "gfl_min_case": ("I5",),
     "i_max_sensitivity_pu": ("I5", "I6"),
 }

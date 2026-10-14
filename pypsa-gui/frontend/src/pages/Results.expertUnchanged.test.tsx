@@ -9,7 +9,11 @@ import { useUIStore } from '../store/uiStore'
 // (§3.5) are the only allowed difference and are stripped before comparing.
 // Re-recorded once for a deliberate addition: the Expert-only Investment tab
 // (Edge Investment Case P3 WP3.5), between FMEA and Asset Detail.
-const NEW_TEST_IDS = /\s?data-testid="results-tab-[a-z]+"/g
+// Re-recorded again for UX overhaul S3 (owner decision D1a): the strip is now
+// a group row (Summary · Investment · Grid plan · Reliability · Operation,
+// Asset detail on the right) plus a row holding the active group's tabs. The
+// snapshot covers both rows; test ids are still stripped.
+const NEW_TEST_IDS = /\s?data-testid="results-(tab|group)-[a-z_]+"/g
 function normalise(html: string): string {
   return html.replace(NEW_TEST_IDS, '')
 }
@@ -58,8 +62,14 @@ async function renderStrip() {
     </QueryClientProvider>,
   )
   await act(async () => { await new Promise(r => setTimeout(r, 20)) })
-  // The strip is the parent of the tab buttons; anchor on a stable title.
-  return screen.getByTitle('Per-snapshot generation, storage, loads').parentElement as HTMLElement
+  // The group row is the parent of the group buttons; the sub-row (absent
+  // when Summary is a one-tab group) follows it.
+  const groups = screen.getByTestId('results-group-summary').parentElement as HTMLElement
+  const sub = document.querySelector('[data-testid="results-subtabs"]')
+  const wrap = document.createElement('div')
+  wrap.append(groups.cloneNode(true))
+  if (sub) wrap.append(sub.cloneNode(true))
+  return wrap
 }
 
 beforeEach(() => {

@@ -48,7 +48,7 @@ describe('Kpi with a result state', () => {
 
   it('dims a stale value and says it is out of date', () => {
     render(<Kpi label="Total system cost" value="€39.75 M" state="stale" reason="Inputs changed since this run." testId="k" />)
-    const figure = screen.getByTestId('k').querySelector('[data-kpi-value="€39.75 M"]')!
+    const figure = screen.getByTestId('k').querySelector('[data-kpi-value="€39.8 M"]')!
     expect(figure.className).toMatch(/opacity-60/)
     expect(screen.getByText('Out of date')).toBeTruthy()
   })
