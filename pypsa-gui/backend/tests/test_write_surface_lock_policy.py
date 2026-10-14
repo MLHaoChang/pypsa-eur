@@ -133,6 +133,12 @@ _R_SKILL_REGISTRY = (
     "Writes nothing to disk and touches no project. Not project data."
 )
 _R_LOCAL = "desktop-only (`reject_unless_local_mode` on the router); one identity, no holder."
+_R_MCP = (
+    "local MCP exposure (issue 11): acts on the caller's own `mcp-` chat "
+    "session, local mode and a per-launch token only. Every tool a call runs "
+    "goes through `harness.loop.dispatch_tool_call`, lock-checked at the chat "
+    "seam per tool, like a turn's."
+)
 _R_CHAT_OWNED = (
     "acts on a chat SESSION, authorized by its owner (`session_owner_allows`, "
     "OPEN-ITEMS item 3). Any tool a turn runs is lock-checked at the chat seam, "
@@ -235,6 +241,8 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     # chat session
     ("POST", "/api/chat/stream"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/confirm"): (CHAT_SESSION, _R_CHAT_OWNED),
+    ("POST", "/api/mcp"): (CHAT_SESSION, _R_MCP),
+    ("DELETE", "/api/mcp"): (CHAT_SESSION, _R_MCP),
     ("POST", "/api/chat/{session_id}/rewind"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/abort"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/goal"): (CHAT_SESSION, _R_CHAT_OWNED),
