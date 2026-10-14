@@ -34,7 +34,14 @@ demo-only hacks in shared code).
 | 7 | Expert → Campus electrical → Draft from project | **"the project is not solved; solve it and save, then draft the campus"**. The guided study solved a private copy, so the project itself is unsolved | **seam broken**: stage 2 → 3 has no handoff |
 | 8 | Run LOPF | Header **Optimal**, status bar `Completed` but **`Obj: —`**. Hub design Results now says **"These results are from an earlier study; the network was solved since. Run again to refresh."** | meeting stage 3's prerequisite makes stage 2 stale |
 | 9 | Draft from project | Draft made; "storage unit **bess_new: built at 0 MW**" left out. The LOPF builds no battery, though the EH study's plan may differ | works; the two solves disagree on the design |
-| 10 | Campus electrical → Run study | The button reads **Running…**, but the header still says **Idle** and there is no progress or wait message. The request is synchronous: at 100 % CPU in `gridspine/static/frequency.py` `e4_ups_bridged → simulate` (I6, eleven 5 MW pickup blocks, RK4 in pure Python) for **over 9 minutes** (still running when this plan was sent; the result is added on the next update) | stage 3 can run for many minutes with no "please wait" |
+| 10 | Campus electrical → Run study | The button reads **Running…**, but the header still says **Idle** and there is no progress or wait message. The request is synchronous: at 100 % CPU in `gridspine/static/frequency.py` `e4_ups_bridged → simulate` (I6, eleven 5 MW pickup blocks, RK4 in pure Python) for **11 minutes** in all (18:54 → 19:05). **Result:**
+    - Buys a 63 MVA grid transformer, 3 × 25 MVA site transformers and 19 switchgear bays: **capex €7.0 M**,
+      **€0.62 M/yr** annualised, **1.5 %** of the hub's €39.75 M.
+    - Reactive compensation is not needed.
+    - Every PCC check under EU RfG/DCC **passes with the assets**. As is, the grid transformer is UNDERSIZED
+      (43 MVA peak against 50 MVA, 52 MVA needed with the margin) and the switchgear is NOT RATED.
+    - Two to check: SITE_TRANSFO is rated ADEQUATE, yet 3 units are bought; the Island section still says
+      "Not yet available: island study", although the 11 minutes were spent in the island frequency checks | works, but runs 11 min with no "please wait"; good content, no highlighting |
 | 11 | Reports → Generate report… | Dialog with a **Template** picker (built-in default; user .docx upload exists), language, 13 sections, **all reliability** (target, MC, cost, frontier, sizing, redundancy, levers, DtC, FMEA, TEA, gates, multi-energy). The panel also says "Open a Project to list its reports" while one is open. Generating needs the LLM | partial: no investment case, electrical, grid-code or control section; needs a key |
 | — | Investment (stage 1) | `GET /api/results/investment_case` → 204 (none run). Running one on the template refuses with **`value_flows_not_configured`**: the template ships no commercial config (`services/results/finance_case.py:1489`). The Investment, Economics and Capacity tabs are **Expert-only** (`Results.tsx:66-86`) | **not wired** for this case |
 
