@@ -237,6 +237,17 @@ GET     /api/projects/{name}/statistics                                         
 GET     /api/projects/{name}/stress_profile_packs                                  -> get_stress_profile_packs_api_projects__name__stress_profile_packs_get
 GET     /api/projects/{name}/stress_scenarios                                      -> get_stress_scenarios_api_projects__name__stress_scenarios_get
 PUT     /api/projects/{name}/stress_scenarios                                      -> put_stress_scenarios_api_projects__name__stress_scenarios_put
+POST    /api/projects/{name}/studies/                                              -> create_study_api_projects__name__studies__post
+GET     /api/projects/{name}/studies/{study_id}/findings                           -> get_findings_api_projects__name__studies__study_id__findings_get
+GET     /api/projects/{name}/studies/{study_id}/findings/tornado                   -> get_findings_tornado_api_projects__name__studies__study_id__findings_tornado_get
+POST    /api/projects/{name}/studies/{study_id}/findings/tornado                   -> start_findings_tornado_api_projects__name__studies__study_id__findings_tornado_post
+PUT     /api/projects/{name}/studies/{study_id}/ledger                             -> put_ledger_api_projects__name__studies__study_id__ledger_put
+POST    /api/projects/{name}/studies/{study_id}/report                             -> assemble_report_api_projects__name__studies__study_id__report_post
+GET     /api/projects/{name}/studies/{study_id}/report.docx                        -> get_report_docx_api_projects__name__studies__study_id__report_docx_get
+GET     /api/projects/{name}/studies/{study_id}/report.html                        -> get_report_html_api_projects__name__studies__study_id__report_html_get
+GET     /api/projects/{name}/studies/{study_id}/report.xlsx                        -> get_report_xlsx_api_projects__name__studies__study_id__report_xlsx_get
+GET     /api/projects/{name}/studies/{study_id}/run                                -> get_study_run_api_projects__name__studies__study_id__run_get
+POST    /api/projects/{name}/studies/{study_id}/run                                -> run_study_api_projects__name__studies__study_id__run_post
 GET     /api/projects/{name}/uploads                                               -> get_uploads_api_projects__name__uploads_get
 POST    /api/projects/{name}/uploads                                               -> post_upload_api_projects__name__uploads_post
 DELETE  /api/projects/{name}/uploads/{file_id}                                     -> delete_upload_route_api_projects__name__uploads__file_id__delete

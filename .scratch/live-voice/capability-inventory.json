@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 231,
+  "tool_count": 237,
   "tools": [
     {
       "name": "list_components",
@@ -4723,6 +4723,184 @@
       "required": [],
       "safety_tier": "read",
       "schema_sha256": "0255989cd003852e2a25c3efca98367e6e231a2e69aa3456b05cde6c544499a9",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "start_decision_study",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/studies/"
+        ]
+      ],
+      "input_keys": [
+        "project",
+        "question_id",
+        "name",
+        "intake",
+        "base_project_name"
+      ],
+      "required": [
+        "project",
+        "question_id",
+        "name",
+        "intake"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "f5fb3e690ffc90f4805a24ba356d8b3c350153d5416655b132fbbfb91f869a56",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_study_parameter",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "PUT",
+          "/api/projects/{name}/studies/{study_id}/ledger"
+        ]
+      ],
+      "input_keys": [
+        "project",
+        "study_id",
+        "key",
+        "value",
+        "unit",
+        "source"
+      ],
+      "required": [
+        "project",
+        "study_id",
+        "key",
+        "value",
+        "unit"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "65c0d48902200e114aebc2ad07533699ccd0a1baad068d9c37420d6a0702372a",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "run_decision_study",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/studies/{study_id}/run"
+        ],
+        [
+          "POST",
+          "/api/projects/{name}/studies/{study_id}/findings/tornado"
+        ]
+      ],
+      "input_keys": [
+        "project",
+        "study_id",
+        "stage",
+        "fidelity"
+      ],
+      "required": [
+        "project",
+        "study_id"
+      ],
+      "safety_tier": "execution_long_running",
+      "schema_sha256": "5cd1577cb48b39b800a3c74f3da4aa21d68fde56aa56504fc135691c6160ca21",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_study_findings",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/studies/{study_id}/run"
+        ],
+        [
+          "GET",
+          "/api/projects/{name}/studies/{study_id}/findings/tornado"
+        ],
+        [
+          "GET",
+          "/api/projects/{name}/studies/{study_id}/findings"
+        ]
+      ],
+      "input_keys": [
+        "project",
+        "study_id"
+      ],
+      "required": [
+        "project",
+        "study_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "693fcb5125fb5bf97c9fc829772647e27ac2bad2af76cad37ba2d6997240e138",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "explain_verdict",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/studies/{study_id}/findings"
+        ]
+      ],
+      "input_keys": [
+        "project",
+        "study_id"
+      ],
+      "required": [
+        "project",
+        "study_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "693fcb5125fb5bf97c9fc829772647e27ac2bad2af76cad37ba2d6997240e138",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "generate_study_report",
+      "toolsets": [
+        "simulation",
+        "results"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/studies/{study_id}/report"
+        ],
+        [
+          "GET",
+          "/api/projects/{name}/studies/{study_id}/report.docx"
+        ],
+        [
+          "GET",
+          "/api/projects/{name}/studies/{study_id}/report.xlsx"
+        ],
+        [
+          "GET",
+          "/api/projects/{name}/studies/{study_id}/report.html"
+        ]
+      ],
+      "input_keys": [
+        "project",
+        "study_id",
+        "format"
+      ],
+      "required": [
+        "project",
+        "study_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "4c371de156bae5ed913134eef2ce1138a2c2e8b7c4eb57ac6fd8a3d50063f2a6",
       "behavioral_fixture": "pending"
     },
     {

@@ -479,13 +479,21 @@
       "surface": "inline",
       "why": "Decision study (S4): asking for the run status or aborting a study that has never been run. A client-side sequencing slip, not a condition the user must act on."
     },
+    "study_report_format_invalid": {
+      "surface": "inline",
+      "why": "Decision study chat tool (U3): generate_study_report was asked for a format other than docx, xlsx or html. The model's slip; it reads the message and asks again."
+    },
     "study_request_too_large": {
       "surface": "inline",
       "why": "Decision study (F1 B2): a /studies request body over the size limit (the 25 MB load-file cap plus headroom), refused 413 by services/study/body_limit.py before it is parsed. Route-only, no chat tool posts a study body; the message tells the user to use a smaller file."
     },
     "study_running": {
       "surface": "inline",
-      "why": "Decision study (S4): a second run, a delete, or another study refused while a study runs on the base project. Route-only today; the message names the study and the user waits or aborts it."
+      "why": "Decision study (S4): a second run, a delete, or another study refused while a study runs on the base project. Reaches chat through the study tools (U3); the message names the study and the user waits or aborts it."
+    },
+    "study_stage_invalid": {
+      "surface": "inline",
+      "why": "Decision study chat tool (U3): run_decision_study was asked for a stage other than options or tornado. The model's slip; it reads the message and asks again."
     },
     "time_column_parse_error": {
       "surface": "banner",

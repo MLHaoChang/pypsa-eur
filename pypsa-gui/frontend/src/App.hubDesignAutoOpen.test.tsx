@@ -358,3 +358,18 @@ describe('guided tour holds are released', () => {
   })
 })
 const qcRef: { qc: QueryClient | null } = { qc: null }
+
+// UX M7 (U3): the bottom grids are Expert chrome.
+describe('the bottom panel per mode', () => {
+  it('is not rendered in Guided', () => {
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'results' })
+    renderApp()
+    expect(screen.queryByTestId('bottom-panel-stub')).toBeNull()
+  })
+
+  it('is rendered in Expert', () => {
+    useUIStore.setState({ uiMode: 'expert', activeSlidePanel: null })
+    renderApp()
+    expect(screen.getByTestId('bottom-panel-stub')).toBeTruthy()
+  })
+})
