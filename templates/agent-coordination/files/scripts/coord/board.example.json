@@ -1,0 +1,7 @@
+{
+ "rows": [
+  {"board": "prs", "pr": 12, "title": "Short title of the change", "stream": "Package name", "state": "Testing", "eta": "16:40", "head": "1a2b3c4d", "unblocks": "What merging it unblocks", "note": "Gatekeeper OK; merges when CI is green"},
+  {"board": "sessions", "session": "Package name", "doing": "#12 in CI; next: the follow-up", "waiting_on": "CI", "needs_you": "no"},
+  {"board": "merged", "pr": 11, "title": "Short title of the change", "stream": "Package name", "merged": "15:31"}
+ ]
+}
