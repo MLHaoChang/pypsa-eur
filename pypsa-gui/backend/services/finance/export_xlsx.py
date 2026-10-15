@@ -99,8 +99,12 @@ def _flags(report: InvestmentCaseReport) -> list[str]:
 BASELINE_CAVEATS = (
     ("counterfactual_exceeds_connection",
      "The comparison site without the investment draws more than the connection can carry in "
-     "some hours: it could not run as modelled, so the NPV, IRR and payback compare against an "
-     "impossible baseline."),
+     "some hours, and no value of lost load is set to price the excess: it could not run as "
+     "modelled, so the NPV, IRR and payback compare against an impossible baseline."),
+    ("counterfactual_shed_at_voll",
+     "The comparison site without the investment cannot import all of its load: the load above "
+     "its connection is shed and valued at the value of lost load, so the NPV, IRR and payback "
+     "count that shed as a cost the investment avoids."),
     ("counterfactual_exceeds_supply",
      "The comparison site without the investment needs more than its grid supply can deliver in "
      "some hours: it could not run as modelled, so the NPV, IRR and payback compare against an "
@@ -179,7 +183,9 @@ def build_workbook(report: InvestmentCaseReport, *, project: str | None = None) 
         if k not in ("completeness", "sections", "cashflow_lines", "gates", "packs", "pipeline")
         and not isinstance(raw.get(k), (dict, list))])
     flags = set(_flags(report))
-    _rows(summary, [["Caveat", text] for f, text in BASELINE_CAVEATS if f in flags],
+    # A flag matches its key alone or with a `:<value>` suffix (counterfactual_shed_at_voll:<MWh>).
+    _rows(summary, [["Caveat", text] for f, text in BASELINE_CAVEATS
+                    if any(x == f or x.startswith(f + ":") for x in flags)],
           summary.max_row + 1)
 
     for name in IC_REPORT_SECTIONS:

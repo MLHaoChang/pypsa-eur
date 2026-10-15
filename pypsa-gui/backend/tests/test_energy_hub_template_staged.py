@@ -2,7 +2,7 @@
 
 The single-year campus planned from a projected load: three investment
 periods (2027, 2030, 2035), the IT load ramping 12 → 24 → 36 MW, the utility
-energizing the 40 MW connection in steps (20 MW until 2030), and one genset
+energizing its connection in steps (20 MW until 2030), and one genset
 and one battery candidate per period with that period as its build year. The
 single-year template is untouched (a golden digest of its build).
 """
@@ -140,7 +140,7 @@ def test_one_candidate_per_period_that_outlives_the_horizon(staged):
 def test_the_plan_solves_and_respects_the_20_mw_cap_in_2027(solved):
     flow = solved.links_t.p0["grid_import"]
     assert flow.loc[2027].max() <= 20.0 + 1e-6
-    assert flow.loc[2035].max() <= 40.0 + 1e-6
+    assert flow.loc[2035].max() <= T.DC_ENERGIZATION_MW[2035] + 1e-6
     # a candidate built in a later period produces nothing before it
     for g in ("genset_new_2030", "genset_new_2035"):
         y = int(g.rsplit("_", 1)[1])
@@ -151,7 +151,8 @@ def test_the_plan_solves_and_respects_the_20_mw_cap_in_2027(solved):
 def test_the_meta_and_solver_config_say_staged_and_multi_period():
     meta = T.TEMPLATE_META[TID]
     assert [r["year"] for r in meta["projected_load"]] == YEARS
-    assert [r["available_import_mw"] for r in meta["energization"]] == [20.0, 40.0, 40.0]
+    assert [r["available_import_mw"] for r in meta["energization"]] == \
+        [T.DC_ENERGIZATION_MW[y] for y in YEARS]
     assert all(r["source"] == "assumed" for r in meta["energization"])
     assert meta["ledger"] and meta["ledger"][0]["source"] == "assumed"
     cfg = T.solver_config(TID)
@@ -217,3 +218,13 @@ def test_with_the_island_rows_the_plan_stages():
     assert sum(1 for v in built.values() if v > 0.1) >= 2, built
     assert built[2035] > built[2027], built
     assert n.links_t.p0["grid_import"].loc[2027].max() == pytest.approx(20.0, abs=1e-4)
+
+
+def test_the_wizard_describes_the_staged_connection_as_the_template_builds_it():
+    """#294 review: the New-project wizard's text for the staged template is
+    hand-written; it names the template's own connection and first-period cap."""
+    tsx = (BACKEND.parent / "frontend" / "src" / "layout" / "NewProjectWizard.tsx").read_text()
+    line = next(ln for ln in tsx.splitlines() if "id: 'eh_datacenter_staged'" in ln)
+    assert f"{T._DC_POC_MW:g} MW connection" in line
+    assert f"{T.DC_ENERGIZATION_MW[2027]:g} MW until 2030" in line
+    assert "40 MW" not in line

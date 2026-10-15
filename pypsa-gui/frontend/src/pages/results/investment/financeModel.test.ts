@@ -252,3 +252,17 @@ describe('baselineCaveats (#283 review)', () => {
     expect(baselineCaveats({} as never)).toEqual([])
   })
 })
+
+describe('baselineCaveats: the shed priced at VoLL (owner decision 2026-10-15)', () => {
+  const rep = (flags: string[]) => ({ sections: { project: { status: 'ok', payload: {
+    counterfactual: { present: true, flags } } } } }) as never
+  it('a flag with its MWh suffix is matched, and says the shed is valued, not impossible', () => {
+    const out = baselineCaveats(rep(['counterfactual_shed_at_voll:1234.5']))
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatch(/valued at the value of lost load/)
+    expect(out[0]).not.toMatch(/impossible/)
+  })
+  it('a different flag sharing the prefix is not matched', () => {
+    expect(baselineCaveats(rep(['counterfactual_shed_at_voll_extra']))).toEqual([])
+  })
+})

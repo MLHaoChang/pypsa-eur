@@ -535,9 +535,17 @@ def test_shed_load_is_excluded_on_both_sides_and_disclosed(reset_backend):
         float((w * (dsr + voll)).sum()), abs=0.01)
     (cf,) = case.counterfactual
     f = 8760.0 / 168.0
-    want = B.rate_meter(n, cfg.commercial, served, np.zeros(len(served))).per_period[None]
+    # The site without the owner's assets imports at most the 1 MW connection:
+    # it is billed on that, and the served load above it is shed at the VoLL
+    # (owner decision 2026-10-15). The actual side's own shed stays excluded.
+    carried = np.minimum(served, 1.0)
+    want = B.rate_meter(n, cfg.commercial, carried, np.zeros(len(served))).per_period[None]
     assert _lines(cf)["bill:energy"].amount == pytest.approx(
         -want.per_item_sampled["energy"] * f, abs=1e-6)
+    above = float((w * np.clip(served - 1.0, 0.0, None)).sum())
+    assert _flag_num(case.flags, "counterfactual_shed_at_voll:") == pytest.approx(above, abs=0.01)
+    assert _lines(cf)["counterfactual:shed_at_voll"].amount == pytest.approx(
+        -1000.0 * above * f, rel=1e-6)
     (t,) = case.templates
     assert not any("dsr" in k or "voll" in k for k in _lines(t))      # disclosed, never cash
 

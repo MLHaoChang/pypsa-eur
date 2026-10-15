@@ -71,6 +71,16 @@ def test_without_scalers_the_entry_is_unchanged():
     assert C.fca_stress_entry(n, _fca(), poc_link="import", solver_cfg=off) == raw
 
 
+def test_the_entry_says_its_hours_are_one_budget_over_the_horizon():
+    """Owner decision 2026-10-15: the curtailment budget stays horizon-wide
+    (h/yr × the horizon's years, taken in its worst hours wherever they fall),
+    and the entry's text says so."""
+    n = _two_period()
+    entry = C.fca_stress_entry(n, _fca(), poc_link="import")
+    assert entry["label"] == ("FCA curtailment on import (876 h/yr, one budget over the "
+                              "whole horizon, taken in its highest-load hours)")
+
+
 # ── through the route ────────────────────────────────────────────────────────
 
 
