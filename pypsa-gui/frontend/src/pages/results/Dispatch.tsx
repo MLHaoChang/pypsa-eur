@@ -307,7 +307,7 @@ export default function Dispatch() {
   // VOLL slack dispatch — non-null only when last solve ran with voll > 0
   // and the LP actually shed load. Drives the Lost Load KPI + chart below.
   // `getLostLoad` now carries an optional range — windowed like the rest.
-  const { data: lostLoad } = useQuery({
+  const { data: lostLoad, isSuccess: lostLoadRead } = useQuery({
     queryKey: nk(currentProject, 'results', 'lost_load', win.from, win.to),
     queryFn: () => resultsApi.getLostLoad(fetchRange),
     enabled: winValid,
@@ -716,6 +716,12 @@ export default function Dispatch() {
       ? ((llMeta.total_cost_eur ?? 0) / llMeta.total_mwh) : 0
     return { mwh, cost: mwh * voll }
   }, [lostLoad, weightCtx, range.from, range.to])
+  // UX overhaul S2b: null lost load inside a solved results tab means the
+  // solve had no VOLL — not modelled, never "—"; a VOLL solve that shed
+  // nothing is a computed zero.
+  const lostLoadState = lostLoadRead && !lostLoad
+    ? { state: 'not_modelled' as const, reason: 'The solve had no VOLL, so lost load was not modelled.' }
+    : lostLoadTotals && lostLoadTotals.mwh === 0 ? { state: 'zero' as const } : {}
 
   // Per-carrier lost-load split. The backend's VOLL slack lives on every
   // bus, so `lost_load_t.columns` carries bus names across electrical, H2,
@@ -1351,10 +1357,12 @@ export default function Dispatch() {
               users can read the reliability gap at a glance. */}
           <KPI label="Lost load"
                value={lostLoadTotals ? fmtEnergy(lostLoadTotals.mwh) : '—'}
-               hint={"Demand the LP couldn't serve across ALL energy carriers (electrical + H2 + heat + …) — absorbed by VOLL slack generators on every bus. Set Solver Settings → VOLL > 0 to enable." + scaleHint} />
+               hint={"Demand the LP couldn't serve across ALL energy carriers (electrical + H2 + heat + …) — absorbed by VOLL slack generators on every bus. Set Solver Settings → VOLL > 0 to enable." + scaleHint} 
+               {...lostLoadState} />
           <KPI label="Lost-load cost"
                value={lostLoadTotals ? fmtCurrency(lostLoadTotals.cost) : '—'}
-               hint={'MWh of lost load × the VOLL set in Solver Settings (e.g. 3000–10000 €/MWh). Summed across all carriers.' + scaleHint} />
+               hint={'MWh of lost load × the VOLL set in Solver Settings (e.g. 3000–10000 €/MWh). Summed across all carriers.' + scaleHint} 
+               {...lostLoadState} />
           {/* Per-carrier lost-load split. Only renders when the backend
               returned bus_carriers AND at least one non-electrical
               carrier shed load — for purely electrical networks this is

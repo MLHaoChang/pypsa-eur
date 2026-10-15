@@ -203,3 +203,24 @@ it('still explains VoLL when no target was ever set', async () => {
   const copy = (await screen.findByTestId('lostload-empty-copy')).textContent ?? ''
   expect(copy).toMatch(/VOLL/i)
 })
+
+// ── UX overhaul S2b: VoLL in the solve vs not ───────────────────────────────
+it('says no load was shed — not "set a VoLL" — when VoLL was in the solve and nothing was shed', async () => {
+  vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+    index: [], columns: [], data: [],
+    total_mwh: 0, total_cost_eur: 0, voll_eur_per_mwh: 4000, voll_applied: true, bus_carriers: {},
+  } as never)
+  renderPage()
+  const copy = (await screen.findByTestId('lostload-empty-copy')).textContent ?? ''
+  expect(copy).toMatch(/No load was shed/)
+  expect(copy).toMatch(/4,000 €\/MWh/)
+  expect(screen.queryByText(/Set a VOLL/i)).toBeNull()
+})
+
+it('says lost load was not modelled when the solve had no VoLL, with a way to set one', async () => {
+  vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue(null as never)
+  renderPage()
+  expect(await screen.findByText('Not modelled')).toBeTruthy()
+  screen.getByRole('button', { name: 'Set VOLL in Solver settings' }).click()
+  expect(useUIStore.getState().activeSlidePanel).toBe('simparams')
+})
