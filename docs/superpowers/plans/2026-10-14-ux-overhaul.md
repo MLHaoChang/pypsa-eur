@@ -237,11 +237,23 @@ A dash or a 0 is never used to stand in for any state other than Ready or Comput
 | R1 | Tile rounding | (a) 3 significant figures for money, energy, power and emissions; one decimal for prices, % and h/yr; ISO 24 h dates everywhere. Tables keep full precision. |
 | G5 | Guided "certified" vs Expert "Not solved yet" | The E2E session's slice 10 owns the fix. ResultState gains `study_only` ("From the study"), agreed with E2E. |
 
-Still to ask, as the second batch: the dock rail default, and the Expert sidebar regrouping.
+| Q5 | Assistant dock over Results | (a) A rail that collapses over Results (or with no API key) unless pinned. Whether more panels should collapse it is with the owner. |
+| Q6 | Expert sidebar | (a) Regrouped by category: Model, Run, Results, Studies, Reports. |
+| Q7 | Next slices | (a) S4 (charts), then S5. |
+| S6 split | Guided alignment, agreed with E2E | UX builds the shared pieces (`displayName`, `AssetName`). E2E edits `hubDesign/**`: Results always reachable (a "Not run yet" card), display names, the Guided cards on Kpi / ResultState, and the Guided-density report entry. |
 
-**Progress so far:**
-- Merged: L1 #249, S1 #252.
-- Open: S2a #257, S1b #261 (R1 rounding), S2b #262.
+**Progress (2026-10-15):**
+- Merged:
+  - L1 #249, the plan #263.
+  - S1 #252, S1b #261, S2a #257, S2b #262.
+  - S3 #264, S3b #271, S4a #267, S4b #275, #279.
+  - Dock rail #272, sidebar #273, `<Explain>` #274.
+  - D3 rows: #277 (Economics, Storage cycling), #278 (Load Flow lines), #280 (Dispatch per carrier).
+- Open: S7 #281 (entry surfaces), S6 #282 (display names).
+- With E2E: S6 edits in `hubDesign/**` (see the S6 split above).
+- Not done:
+  - D3 rows 16–17 sit in Dispatch's hidden system strip, so changing them would change nothing visible.
+  - The import-cap reference line has no chart that plots grid import yet.
 
 ## 7. Signed-off result-state list (D3)
 
