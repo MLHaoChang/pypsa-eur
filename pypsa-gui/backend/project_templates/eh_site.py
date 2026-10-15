@@ -76,7 +76,13 @@ PACK_VERSION = _T.TEMPLATE_PACK_VERSION
 
 
 class SiteParamsError(ValueError):
-    """A parameter set the template refuses; the message names the field."""
+    """A parameter set the template refuses. ``field`` is the parameter's
+    path (``stages[1].peak_mw``), the message's text up to its first colon
+    unless given."""
+
+    def __init__(self, message: str, field: str | None = None):
+        super().__init__(message)
+        self.field = field if field is not None else message.split(":", 1)[0]
 
 
 # ── The presets (synthetic illustrative numbers) ────────────────────────────
@@ -259,8 +265,8 @@ def site_params(raw: dict | None = None) -> dict:
     if not isinstance(energ, list) or [e.get("year") if isinstance(e, dict) else None
                                        for e in energ] != years:
         raise SiteParamsError(f"energization: one {{year, mw}} per stage year {years}, got {energ!r}")
-    p["energization"] = [{"year": e["year"], "mw": _num(f"energization[{e['year']}].mw", e["mw"],
-                                                        hi=conn)} for e in energ]
+    p["energization"] = [{"year": e["year"], "mw": _num(f"energization[{i}].mw", e["mw"], hi=conn)}
+                         for i, e in enumerate(energ)]
 
     ex = p["existing"]
     g = ex["gensets"]
@@ -286,13 +292,13 @@ def site_params(raw: dict | None = None) -> dict:
         c["max_mw"] = _num(f"candidates.{k}.max_mw", c["max_mw"])
 
     # Q1: the grid-only comparison must run under its own connection.
-    for s, e in zip(out_stages, p["energization"]):
+    for i, (s, e) in enumerate(zip(out_stages, p["energization"])):
         if s["peak_mw"] > e["mw"] + 1e-9:
             raise SiteParamsError(
                 f"stage {s['year']}: the peak load {s['peak_mw']:g} MW is above the "
                 f"{e['mw']:g} MW of grid connection energized in {s['year']} "
                 f"(short by {s['peak_mw'] - e['mw']:g} MW). Raise the connection or its "
-                f"energization, or lower the peak.")
+                f"energization, or lower the peak.", field=f"stages[{i}].peak_mw")
 
     if 0.0 < ex["ups"]["mw"] < critical_peak - 1e-9:
         raise SiteParamsError(
@@ -637,7 +643,22 @@ def stress_scenarios(p: dict) -> list[dict]:
     return out
 
 
-def template_meta(p: dict) -> dict:
+def entered_fields(raw: dict | None) -> list[str]:
+    """The parameters the user set (dotted paths; a list is one value), so
+    the report can tell them from the preset's defaults."""
+    out: list[str] = []
+
+    def walk(d, prefix):
+        for k, v in d.items():
+            if isinstance(v, dict):
+                walk(v, f"{prefix}{k}.")
+            else:
+                out.append(f"{prefix}{k}")
+    walk(dict(raw or {}), "")
+    return sorted(out)
+
+
+def template_meta(p: dict, entered: list[str] | None = None) -> dict:
     years = [s["year"] for s in p["stages"]]
     weights = period_years(years, p["horizon_end"])
     label = _LABEL[p["site_type"]]
@@ -669,6 +690,7 @@ def template_meta(p: dict) -> dict:
         "name": f"{label} Energy Hub (generic site)",
         "site_type": p["site_type"],
         "params": copy.deepcopy(p),
+        "entered": list(entered or []),
         "description": (
             f"A generic {label.lower()} planned from a projected load: the peak grows "
             f"{stages_txt} MW behind a {conn:g} MW grid connection, with the existing on-site "
@@ -727,7 +749,7 @@ def template_meta(p: dict) -> dict:
 
 
 def write_sidecars(out_dir, p: dict, n: pypsa.Network | None = None,
-                   cfg: dict | None = None) -> None:
+                   cfg: dict | None = None, entered: list[str] | None = None) -> None:
     """The template metadata, stress registry, solver settings (``cfg``, else
     built on ``n``) and (with a UPS) the island sidecar, beside ``network.nc``."""
     out_dir = pathlib.Path(out_dir)
@@ -736,7 +758,7 @@ def write_sidecars(out_dir, p: dict, n: pypsa.Network | None = None,
     def dump(name, obj):
         (out_dir / name).write_text(json.dumps(obj, indent=2, sort_keys=True) + "\n")
 
-    dump(_T.META_FILE, template_meta(p))
+    dump(_T.META_FILE, template_meta(p, entered))
     dump(_T.STRESS_FILE, {"__schema__": _T.SCHEMA, "scenarios": stress_scenarios(p)})
     dump(_T.SOLVER_FILE, cfg if cfg is not None else solver_config(p, n))
     isl = island_config(p)

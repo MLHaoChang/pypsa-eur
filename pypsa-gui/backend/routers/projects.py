@@ -1583,7 +1583,9 @@ def create_from_template(
         try:
             site_p = site_mod.site_params(params)
         except site_mod.SiteParamsError as exc:
-            raise HTTPException(422, str(exc))
+            # The field, so the Guided form puts the message beside it.
+            raise HTTPException(422, {"code": "site_params_invalid", "field": exc.field,
+                                      "message": str(exc)})
         site_net = site_mod.build_eh_site(site_p)
         site = (site_mod, site_p, site_net, site_mod.solver_config(site_p, site_net))
     elif params is not None:
@@ -1622,7 +1624,8 @@ def create_from_template(
     else:
         atomic_copy(src_nc, dest / "network.nc")
     if site is not None:
-        site[0].write_sidecars(dest, site[1], site[2], site[3])
+        site[0].write_sidecars(dest, site[1], site[2], site[3],
+                               entered=site[0].entered_fields(params))
     else:
         for sidecar in _TEMPLATE_SIDECARS:
             src = _PROJECT_TEMPLATES_DIR / template_key / sidecar

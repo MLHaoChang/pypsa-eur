@@ -148,8 +148,9 @@ def test_a_peak_above_the_connection_is_refused():
     ({"load_profile": "brewery"}, "load_profile"),
 ])
 def test_bad_parameters_are_refused_naming_the_field(raw, field):
-    with pytest.raises(S.SiteParamsError, match=field.replace(".", r"\.")):
+    with pytest.raises(S.SiteParamsError, match=field.replace(".", r"\.")) as exc:
         S.site_params(raw)
+    assert exc.value.field == field
 
 
 def test_overrides_lay_over_the_preset():
@@ -224,6 +225,8 @@ def test_from_template_builds_the_site_from_the_body_and_binds_its_blocks(
     assert meta.status_code == 200, meta.text
     assert meta.json()["site_type"] == "hospital"
     assert meta.json()["pack_overrides"] == {"import_p_nom_mw": 10.0}
+    # the fields the user set, told from the preset's defaults
+    assert meta.json()["entered"] == ["connection_mw", "site_type"]
 
 
 def test_from_template_without_a_body_uses_the_default_preset(client, tmp_projects_dir):
@@ -237,7 +240,9 @@ def test_a_refused_site_creates_no_project(client, tmp_projects_dir):
     r = client.post(f"/api/projects/from_template/{TID}", params={"name": "too_big"},
                     json={"site_type": "commercial", "connection_mw": 3.0})
     assert r.status_code == 422
-    assert "stage 2035" in r.json()["detail"] and "short by 1 MW" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert detail["code"] == "site_params_invalid" and detail["field"] == "stages[2].peak_mw"
+    assert "stage 2035" in detail["message"] and "short by 1 MW" in detail["message"]
     assert {row["name"] for row in client.get("/api/projects/").json()} == before
 
 
