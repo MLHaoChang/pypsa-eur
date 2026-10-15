@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A running campus electrical study now shows its stage (island checks cover the frequency sweep and the cuts), its elapsed time and, when it fails, the failed stage and its error, in both the Expert campus panel and the Guided "Grid checks on the campus" tile (which no longer says "not run" while the study runs or after it failed).
