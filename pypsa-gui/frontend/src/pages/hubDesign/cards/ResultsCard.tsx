@@ -16,6 +16,7 @@ import { CardShell } from '../shared/CardShell'
 import { Term, TERM_FALLBACK } from '../shared/Term'
 import { useHubReport, useHubReview, useHubStudy } from '../useHubData'
 import { SECTION_LABEL } from '../sectionLabels'
+import { ChaptersSection } from '../ChaptersSection'
 
 
 export const STALE_TEXT =
@@ -48,6 +49,17 @@ export function ResultsCard() {
   const gaps = report ? notEstablishedNotes(report) : []
   const cost = report?.cost_at_target_eur
   const setStep = useHubDesignStore(s => s.setStep)
+  // The four category tiles (UX S6, G4/G6), shown whether or not the study ran.
+  const summary = review?.summary ?? {}
+  const verdict = summary.verdict
+  const chapters = (
+    <ChaptersSection reliability={{
+      hasResults: studyHasResults(study), running,
+      lole: summary.mc_lole_h_per_year ?? report?.mc_lole_h ?? null,
+      target: summary.target_lole_h ?? null,
+      verdict: verdict === 'pass' || verdict === 'fail' || verdict === 'inconclusive' ? verdict : null,
+    }} />
+  )
 
   if (!studyHasResults(study)) {
     // Never an empty or greyed card (UX S6, G2): say why, and how to get there.
@@ -59,6 +71,7 @@ export function ResultsCard() {
           <ResultState state="not_run" reason="The study writes its verdict, cost and risks here."
             action={{ label: 'Go to Goal and run the study', onClick: () => setStep('goal', { user: true }) }} />
         )}
+        {chapters}
       </CardShell>
     )
   }
@@ -159,6 +172,7 @@ export function ResultsCard() {
         className="self-start inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-[12px] text-text hover:border-accent hover:text-accent">
         <FileText size={13} /> Open full report
       </button>
+      {chapters}
     </CardShell>
   )
 }
