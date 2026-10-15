@@ -49,8 +49,12 @@ def test_owned_families_and_replacement_never_borrow_success(client, project):
         ctx.solver_state['fmea_sweep'] = {'status': 'done'}
         ctx.solver_state['report_job'] = {'status': 'done', 'report_id': 'r1'}
     rows = client.get('/api/chat/activity').json()['items']
-    assert all(r['status'] == 'unavailable' for r in rows)
+    # Durable origins remain visible for inspection, but the replacement's
+    # terminal status still cannot complete any of these original handles.
+    assert all(r['status'] == 'needs_review' for r in rows)
     assert all(r['native_status'] == 'unknown' for r in rows)
+    assert all(r['last_observed_status'] == 'running' for r in rows)
+    assert all(r['observation'] == 'retained' for r in rows)
     assert all(r['evidence_available'] is False for r in rows)
 
 
@@ -213,6 +217,11 @@ def test_live_native_worker_does_not_block_reads_and_closing_observer_does_not_c
             worker.join(5)
     row = next(r for r in client.get('/api/chat/activity').json()['items'] if r['source_id'] == job)
     assert row['native_status'] == 'failed'
+    ja._reset_for_tests()
+    retained = next(r for r in client.get('/api/chat/activity').json()['items'] if r['source_id'] == job)
+    assert retained['native_status'] == 'failed'
+    assert retained['observation'] == 'retained'
+    assert retained['evidence_available'] is False
 
 
 def register_existing(ctx, owner):
