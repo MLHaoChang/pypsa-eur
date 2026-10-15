@@ -1430,15 +1430,24 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
     electric = _lp._electric_bus_test(n, parsed)
     purchases = {r.load: r for r in getattr(parsed, "reference_purchases", None) or []}
     co2 = getattr(parsed, "co2_price", None)
-    unserved: dict[str, np.ndarray | None] = {}
+    # Per snapshot, the baseline's shed over the actual's (a snapshot-level
+    # netting: the electric shed nets per period, `_shed_mwh`), with a noise
+    # floor per snapshot as `_excess_above` (solver noise summed over a long
+    # horizon must not read as unmet load; gatekeeper review of #312).
+    unserved: dict[str, np.ndarray] = {}
+    unknown: list[str] = []
     for ld in n.loads.index:
         bus = str(n.loads.at[ld, "bus"])
         if bus not in sides.site or electric(bus) or ld not in baseline.network.loads.index:
             continue
         b_t, a_t = _shed_t(baseline.network, baseline.lost_load, str(ld), voll), \
             _shed_t(n, lost_load, str(ld), voll)
-        diff = None if b_t is None or a_t is None else np.clip(b_t - a_t, 0.0, None)
-        if diff is None or float(diff.sum()) > _EPS_MW:
+        if b_t is None or a_t is None:
+            unknown.append(str(ld))             # VoLL on, no shed capture handed in
+            continue
+        raw = b_t - a_t
+        diff = np.where(raw > _EPS_MW, raw, 0.0)
+        if float(diff.sum()) > 0.0:
             unserved[str(ld)] = diff
     bought = sorted(ld for ld in unserved if ld in purchases)
     missing = sorted(ld for ld in unserved if ld not in purchases)
@@ -1448,6 +1457,11 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
         flags.append("counterfactual_baseline_unserved:" + ",".join(missing))
         if purchases:
             flags.append("counterfactual_reference_purchase_missing:" + ",".join(missing))
+    if unknown:
+        # Whether the site today serves these loads is not known (no shed
+        # capture): neither "cannot serve" nor zero.
+        blockers.append("counterfactual_not_established:baseline_shed_unknown")
+        flags.append("counterfactual_baseline_shed_unknown:" + ",".join(sorted(unknown)))
     if bought:
         flags.append("counterfactual_buys:" + ",".join(bought))
     unused = sorted(set(purchases) - set(bought))
@@ -1459,12 +1473,14 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
     if co2 is not None and (bought or grid_co2):
         _co2_basis_flags(co2, fin, flags)
     flags += blockers
-    scratch: list[str] = []
-    imports = {"actual": (n, n.links_t.p0), "baseline": (baseline.network,
-                                                         baseline.network.links_t.p0)}
-    imp = {side_: np.sum([_billing._flow(p0, m, scratch) for m in _lp.import_links(parsed)],
-                         axis=0) * np.ones(len(net.snapshots))
-           for side_, (net, p0) in imports.items()}
+    imp: dict[str, np.ndarray] = {}
+    if grid_co2:
+        scratch: list[str] = []
+        imports = {"actual": (n, n.links_t.p0), "baseline": (baseline.network,
+                                                             baseline.network.links_t.p0)}
+        imp = {side_: np.sum([_billing._flow(p0, m, scratch) for m in _lp.import_links(parsed)],
+                             axis=0) * np.ones(len(net.snapshots))
+               for side_, (net, p0) in imports.items()}
     for p in _periods(n):
         k = _key(p)
         lines = list(side.actual.get(k, []))
@@ -1475,21 +1491,16 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
         wa = n.snapshot_weightings.objective.to_numpy(dtype=float)
         for ld in bought:
             r, diff = purchases[ld], unserved[ld]
-            mwh = None if diff is None else float((wb[mb] * diff[mb]).sum())
-            kg = None if mwh is None else mwh * 1000.0 / r.lhv_kwh_per_kg
-            if mwh is not None:
-                bought_by[f"{k}:{ld}"] = mwh
-            else:
-                flags.append(f"counterfactual_purchase_not_established:{ld}:voll_shed_unknown")
+            mwh = float((wb[mb] * diff[mb]).sum())
+            kg = mwh * 1000.0 / r.lhv_kwh_per_kg
+            bought_by[f"{k}:{ld}"] = mwh
             lines.append(TemplateLine(
                 key=f"counterfactual:purchase:{ld}", stream="fuel",
-                amount=None if kg is None else -kg * r.price_eur_per_kg,
-                esc_class="fuel", source="counterfactual", source_id=f"purchase:{ld}", period=k,
-                money_year=base_year))
+                amount=-kg * r.price_eur_per_kg, esc_class="fuel", source="counterfactual",
+                source_id=f"purchase:{ld}", period=k, money_year=base_year))
             if co2 is not None:
-                line = _co2_line(f"co2:purchase:{ld}", 0.0 if kg is None else kg * r.co2_t_per_kg,
-                                 co2, fin, k, "counterfactual", f"co2_avoided_cash:{ld}")
-                lines.append(line if kg is not None else dataclasses.replace(line, amount=None))
+                lines.append(_co2_line(f"co2:purchase:{ld}", kg * r.co2_t_per_kg, co2, fin, k,
+                                       "counterfactual", f"co2_avoided_cash:{ld}"))
         if grid_co2 and not blockers and actual is not None:
             # Both sides' metered imports, so only the difference counts.
             act_t = float((wa[ma] * imp["actual"][ma]).sum()) * co2.grid_t_per_mwh
@@ -1521,6 +1532,12 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
         # H2e: what the baseline buys (a case without purchases keeps its hash).
         blob["bought"] = {k: round(v, 6) for k, v in sorted(bought_by.items())}
         blob["blockers"] = blockers
+    # As the analytic basis (C13): the purchases' terms and the CO2 price,
+    # present only when they act, so earlier hashes hold.
+    if bought:
+        blob["purchases"] = {ld: purchases[ld].model_dump(mode="json") for ld in bought}
+    if co2 is not None and (bought or grid_co2):
+        blob["co2"] = co2.model_dump(mode="json")
     cf_hash = hashlib.sha256(json.dumps(blob, sort_keys=True).encode()).hexdigest()[:16]
     return out, avoided, cf_hash
 

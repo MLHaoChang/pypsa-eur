@@ -15,6 +15,9 @@ _PLAIN = {
     "counterfactual_baseline_unserved": "The site as it stands today cannot serve {a} "
                                         "without the new builds, and no reference purchase "
                                         "prices it: the comparison is not established.",
+    "counterfactual_baseline_shed_unknown": "Whether the site as it stands today serves {a} is "
+                                            "not known (no record of its shed), so the "
+                                            "comparison is not established.",
     "co2_price_not_applied": "The CO2 price cannot be applied to this comparison, so the "
                              "avoided CO2 cost is not established.",
 }

@@ -99,3 +99,37 @@ def test_the_co2_price_applies_to_the_purchase_and_both_sides_imports(reset_back
     assert block["co2_priced"] is True
     assert block["avoided_co2_cost"] is not None
     assert np.isfinite(sum(block["avoided_co2_cost"]))
+
+
+@pytest.mark.live_solve
+def test_solver_noise_in_the_shed_is_not_unmet_load(reset_backend):
+    """Gatekeeper review of #312: a per-snapshot noise floor, as
+    `_excess_above`; 1e-9 MW on every snapshot is no load to buy or block."""
+    import dataclasses
+
+    n, cfg, ll, base = _site_today()
+    noisy = dict(base.lost_load)
+    shed = noisy["lost_load_t"].copy()
+    shed["h2_load"] = 1e-9
+    noisy["lost_load_t"] = shed
+    case = _case(n, cfg, _fin_h2(), baseline=dataclasses.replace(base, lost_load=noisy),
+                 lost_load=ll)
+    assert not any(f.startswith(("counterfactual_not_established", "counterfactual_buys",
+                                 "counterfactual_baseline_unserved")) for f in case.flags)
+
+
+@pytest.mark.live_solve
+def test_a_missing_shed_capture_is_unknown_not_unserved(reset_backend):
+    """Gatekeeper review of #312: with VoLL on and no shed record, whether the
+    site today serves the H2 is not known; never "cannot serve", never zero."""
+    import dataclasses
+
+    n, cfg, ll, base = _site_today(reference_purchases=[PURCHASE])
+    case = _case(n, cfg, _fin_h2(), baseline=dataclasses.replace(base, lost_load=None),
+                 lost_load=ll)
+    assert "counterfactual_baseline_shed_unknown:h2_load" in case.flags
+    assert "counterfactual_not_established:baseline_shed_unknown" in case.flags
+    assert not any(f.startswith(("counterfactual_baseline_unserved", "counterfactual_buys"))
+                   for f in case.flags)
+    (cf,) = case.counterfactual
+    assert _lines(cf)["counterfactual:baseline_shed_unknown"].amount is None
