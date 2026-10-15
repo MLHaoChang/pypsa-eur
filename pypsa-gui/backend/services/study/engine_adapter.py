@@ -95,6 +95,8 @@ if not set(KIND_COMPONENT.values()) <= set(BILL_COMPONENT_KEYS):
 _ONE_YEAR_HOURS = (8760.0, 8784.0)
 _SUM_TOL = 1e-9
 _CODE_RE = re.compile(r"[a-z]+(_[a-z]+)*")
+
+
 def analytic_basis_note(n, cfg) -> str | None:
     """The Guided study keeps the analytic counterfactual (owner decision
     2026-10-15; the investment case re-solves a baseline instead): when its

@@ -11,9 +11,10 @@ capacity:
   (`p_nom_opt − p_nom`) goes, and a candidate of a later period (build_year
   after the first) is removed outright;
 - a non-extendable owned row stays only when the case charges it no capex (a
-  typed `overnight_cost` of 0); a priced row is a new investment and goes, and
-  an untyped one (its capex read from `capital_cost`) goes too, flagged
-  `baseline_typing_mismatch:<a>` so a forgotten 0 is never silent;
+  typed `overnight_cost` of 0, or untyped at no `capital_cost`); a priced row
+  is a new investment and goes, and an untyped one with a `capital_cost` (its
+  capex read from it) goes too, flagged `baseline_typing_mismatch:<a>` so a
+  forgotten 0 is never silent;
 - an extendable increment typed at 0 is flagged `baseline_free_capacity:<a>`;
 - the owner's uncosted PoC meter Links are the connection, never an
   investment: kept, never flagged.
@@ -95,7 +96,8 @@ def plan_baseline(n, owned: list[tuple[str, str]], *,
                 removed.append((comp, name, keep))
                 if typed == 0.0:
                     flags.append(f"baseline_free_capacity:{name}")
-        elif typed == 0.0:
+        elif typed == 0.0 or (typed is None and not (_num(df.at[name, "capital_cost"]) or 0.0) > 0.0):
+            # charged no capex (typed 0, or untyped at no capital cost): it stays
             kept.append((comp, name))
         else:
             removed.append((comp, name, 0.0))
@@ -153,7 +155,7 @@ _CACHE_LOCK = threading.Lock()
 _CACHE_MAX = 4
 
 
-def _key(n, cfg, plan: BaselinePlan) -> str:
+def _key(n, cfg, plan: BaselinePlan, island=None) -> str:
     from dataclasses import asdict
 
     from services.dispatch_status import dispatch_digest
@@ -164,8 +166,20 @@ def _key(n, cfg, plan: BaselinePlan) -> str:
         conf = dict(vars(cfg))
     conf.pop("finance", None)
     blob = {"dispatch": dispatch_digest(n), "config": conf,
-            "removed": plan.removed, "fixed": plan.fixed}
+            "removed": plan.removed, "fixed": plan.fixed, "island": island}
     return hashlib.sha256(json.dumps(blob, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def _island_sidecar(storage) -> str | None:
+    """The project's island sidecar as text (the solve reads it), for the key."""
+    if not storage:
+        return None
+    from pathlib import Path
+
+    from services.adequacy.island_config import SIDECAR_NAME
+
+    path = Path(storage) / SIDECAR_NAME
+    return path.read_text() if path.is_file() else None
 
 
 def solve_baseline(n, cfg, plan: BaselinePlan, *, solve=None) -> Baseline:
@@ -179,15 +193,15 @@ def solve_baseline(n, cfg, plan: BaselinePlan, *, solve=None) -> Baseline:
     when the baseline does not solve. `solve` replaces `run_simulation` in tests."""
     from services.pypsa_service import PyPSAService
 
-    key = _key(n, cfg, plan)
+    live = PyPSAService.solve_target_context()
+    storage = getattr(live, "storage_dir", None) if live is not None else None
+    key = _key(n, cfg, plan, _island_sidecar(storage))
     with _CACHE_LOCK:
         hit = _CACHE.get(key)
     if hit is not None:
         return hit
     if solve is None:
         from services.solver_service import run_simulation as solve
-    live = PyPSAService.solve_target_context()
-    storage = getattr(live, "storage_dir", None) if live is not None else None
 
     def attempt(conf):
         base = baseline_network(n, plan)

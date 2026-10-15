@@ -1750,14 +1750,18 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
             raise FinanceRefused(campus.refusal, campus.detail)
         # The counterfactual is the site as it stands today when the owner keeps
         # existing assets (owner decision 2026-10-15): a baseline re-solve
-        # without the plan's new builds, planned under the lock, solved on a copy
-        # outside it (the live project is never blocked or touched), cached.
+        # without the plan's new builds, planned and copied under the lock, solved
+        # on that copy outside it (the live project is never blocked or touched),
+        # cached.
+        from services.workflow_tools import _network_copy
+
         with PyPSAService.get_lock():
             plan = baseline_plan(n, cfg, owner)
+            snap = _network_copy(n) if plan is not None and plan.needed else None
         base = None
-        if plan is not None and plan.needed:
+        if snap is not None:
             try:
-                base = _B.solve_baseline(n, cfg, plan)
+                base = _B.solve_baseline(snap, cfg, plan)
             except _B.BaselineRefused as exc:
                 raise FinanceRefused(exc.code, exc.detail) from exc
         with PyPSAService.get_lock():

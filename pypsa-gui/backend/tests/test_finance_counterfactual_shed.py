@@ -126,6 +126,19 @@ def test_a_non_firm_contract_caps_the_counterfactual_import(reset_backend):
     assert _excess_mwh(n, 38.0) > _excess_mwh(n, POC_MW)
 
 
+@pytest.mark.live_solve
+def test_a_firm_agreement_at_the_link_rating_leaves_the_shed_unchanged(reset_backend):
+    """A firm agreement for what the link carries adds no cap (gatekeeper
+    review of #302): the shed is the one against the link alone."""
+    n, com = _site()
+    com["connection"] = _agreement(kind="firm", cap=POC_MW)
+    state: dict = {}
+    n, cfg = _solve(n, com, voll=VOLL, state=state)
+    case = _case(n, cfg, _fin(annualise=True), lost_load=state.get("last_lost_load"))
+    assert _flag_num(case.flags, "counterfactual_shed_at_voll:") == \
+        pytest.approx(_excess_mwh(n, POC_MW), rel=1e-6)
+
+
 def test_the_agreement_cap_series_matches_what_the_solve_imposes():
     """`connection.agreement_import_cap_mw`: the contract cap (a study's
     planning limit clamps it), 0 before `available_from`, constant for firm

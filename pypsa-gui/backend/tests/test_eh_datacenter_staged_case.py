@@ -149,9 +149,12 @@ def test_the_study_notes_say_the_poc_is_loss_free_and_the_connection_carries_the
     poc = float(n.links.at["grid_import", "p_nom"])
     assert f"{poc:g} MW connection carries the {year} peak" in notes
     assert float(n.loads_t.p_set.sum(axis=1).loc[year].max()) <= poc
-    # The excess is shed at the template's own VoLL (owner decision 2026-10-15).
-    assert f"{T.solver_config(TID)['voll']:,.0f} EUR/MWh VoLL" in notes
-    assert "counterfactual_shed_at_voll" in notes
+    # The case compares against the site as it stands today, which sheds
+    # nothing (gatekeeper review of #302, item 4): the notes say so and claim
+    # no shed at VoLL; the island capability is a break-even.
+    assert "site as it stands today" in notes and "still meets its load" in notes
+    assert "break-even" in notes
+    assert "VoLL" not in notes and "counterfactual_shed_at_voll" not in notes
 
 
 def test_from_template_binds_the_commercial_block_and_the_finance_inputs(
@@ -402,9 +405,27 @@ def test_a_multi_period_shed_is_priced_per_period(connection_45, staged_case_ana
     assert set(shed_lines) == {"2035"}
 
 
+@pytest.mark.live_solve
+def test_the_shipped_15_mw_2027_analytic_shed(staged_case_analytic):
+    """The analytic basis on the shipped template (gatekeeper review of #302):
+    2027's load above the energized 15 MW is shed at VoLL, 2030 and 2035 shed
+    nothing (the 55 MW connection carries their peaks)."""
+    n, case, _r = staged_case_analytic
+    assert T.DC_ENERGIZATION_MW[2027] == 15.0
+    voll = T.solver_config(TID)["voll"]
+    period = n.snapshots.get_level_values(0)
+    load = n.loads_t.p_set.sum(axis=1).to_numpy(float)
+    w = n.snapshot_weightings.objective.to_numpy(float)
+    m = period == 2027
+    want = voll * float((w[m] * np.clip(load[m] - 15.0, 0.0, None)).sum())
+    shed_lines = {ln.period: ln.amount for t in case.counterfactual for ln in t.lines
+                  if ln.key == "counterfactual:shed_at_voll"}
+    assert want > 0 and set(shed_lines) == {"2027"}
+    assert shed_lines["2027"] == pytest.approx(-want, rel=1e-9)
+
+
 # ── the island capability's break-even (owner decision 2026-10-15) ───────────
 
-@pytest.mark.live_solve
 def _with_inflow(case, x):
     import dataclasses
 
@@ -417,6 +438,7 @@ def _with_inflow(case, x):
     return dataclasses.replace(case, templates=add)
 
 
+@pytest.mark.live_solve
 def test_the_island_capability_break_even_beside_the_npv(staged_case):
     """The honest NPV stays (site as it stands); beside it, the yearly value
     the island capability must reach for the plan to break even, a threshold
@@ -446,6 +468,7 @@ def test_the_island_capability_break_even_beside_the_npv(staged_case):
     assert got == pytest.approx(0.0, abs=1.0)
 
 
+@pytest.mark.live_solve
 def test_the_break_even_per_outage_hour_comes_only_from_the_stated_hours(staged_case):
     """The user's expected outage hours and their source: per avoided outage
     hour = per year / hours; per MWh = per year / (hours × the mean critical
@@ -481,6 +504,7 @@ def test_the_break_even_per_outage_hour_comes_only_from_the_stated_hours(staged_
     assert finance_case_hash(stated) != finance_case_hash(case)
 
 
+@pytest.mark.live_solve
 def test_a_positive_case_needs_no_island_value(staged_case):
     from services.finance.breakeven import island_breakeven
     from services.finance.engine import run_case

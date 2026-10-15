@@ -229,9 +229,6 @@ _DC_IT_MW = 36.0                                   # the single-year template's 
 # investment case computes on a project made from the template. Synthetic
 # illustrative numbers; the ledger in TEMPLATE_META says what each one is.
 
-#: The VoLL the notes quote (SOLVER_CONFIG's, pinned equal by the tests).
-_DC_VOLL = 5000.0
-
 #: The existing campus, in service at the first period (overnight cost 0).
 DC_EXISTING = ("genset_1", "genset_2", "genset_3", "genset_4", "rooftop_pv", "ups_battery",
                "site_transformer")
@@ -610,10 +607,11 @@ TEMPLATE_META: dict[str, dict] = {
             "builds is a stage with its own COD, and an unbuilt later candidate is not an investment.",
             "PoC and transformer losses are not modelled in the staged plan (efficiency 1.0), so the "
             "investment case can compare against the grid-only site.",
-            f"The {_DC_POC_MW:g} MW connection carries the 2035 peak. In 2027 the grid-only "
-            "comparison of the investment case cannot import the load above the energized "
-            f"{DC_ENERGIZATION_MW[2027]:g} MW: it is shed there, valued at the "
-            f"{_DC_VOLL:,.0f} EUR/MWh VoLL (counterfactual_shed_at_voll).",
+            f"The {_DC_POC_MW:g} MW connection carries the 2035 peak. The investment case "
+            "compares against the site as it stands today: with the plan's new builds removed, "
+            f"the site still meets its load (the {DC_ENERGIZATION_MW[2027]:g} MW energized in 2027 "
+            "included), and the island capability the new builds buy is shown as a break-even "
+            "beside the NPV.",
         ],
         "provenance": PROVENANCE,
     },

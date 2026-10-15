@@ -43,13 +43,17 @@ def _fixture():
     n.generators.loc["proposal", "overnight_cost"] = 2.5e6
     # untyped, with a capital cost: treated as new, removed and flagged
     _row(n, "Generator", "untyped", p_nom=3.0, capital_cost=50.0)
+    # untyped at no capital cost: the case charges it no capex, so it stays
+    # (gatekeeper review of #302, item 2), unflagged
+    _row(n, "Generator", "untyped_free", p_nom=1.0, capital_cost=0.0)
     # an extendable increment typed overnight 0: capacity added for free, flagged
     _row(n, "StorageUnit", "free", p_nom=0.0, p_nom_extendable=True, capital_cost=5.0)
     n.storage_units.loc["free", ["p_nom_opt", "overnight_cost"]] = [1.5, 0.0]
     return n
 
 
-OWNED = [("Generator", g) for g in ("grown", "idle", "existing", "proposal", "untyped")] \
+OWNED = [("Generator", g) for g in ("grown", "idle", "existing", "proposal", "untyped",
+                                     "untyped_free")] \
     + [("StorageUnit", "free")]
 
 
@@ -60,11 +64,12 @@ def test_the_baseline_removes_exactly_the_charged_capex_and_the_lp_increments():
     # the invariant: removed == {capex > 0 rows} ∪ {LP increments}
     assert set(removed) == {"grown", "proposal", "untyped", "free"}
     assert removed == {"grown": 2.0, "proposal": 0.0, "untyped": 0.0, "free": 0.0}
-    assert plan.kept == (("Generator", "existing"),)
+    assert plan.kept == (("Generator", "existing"), ("Generator", "untyped_free"))
     assert plan.needed                                    # a kept existing asset
     assert "baseline_typing_mismatch:untyped" in plan.flags
     assert "baseline_free_capacity:free" in plan.flags
-    assert not [f for f in plan.flags if f.endswith((":existing", ":proposal", ":grown"))]
+    assert not [f for f in plan.flags
+                if f.endswith((":existing", ":proposal", ":grown", ":untyped_free"))]
 
 
 def test_every_owned_extendable_asset_is_fixed_in_the_baseline_network():
