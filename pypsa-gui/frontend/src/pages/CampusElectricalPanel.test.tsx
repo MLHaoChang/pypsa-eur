@@ -579,6 +579,21 @@ describe('the run is a solve-queue job (E2E demo plan 2026-10-14, D1)', () => {
     expect((screen.getByRole('button', { name: 'Run study' }) as HTMLButtonElement).disabled).toBe(false)
   })
 
+  // #303 review: a GFM-settings job is a campus job, but not a run: the campus
+  // results stay current whatever becomes of it.
+  it.each<['running' | 'failed' | 'aborted', RegExp]>([
+    ['running', /Recommending grid-forming settings.*campus results below are current/],
+    ['failed', /grid-forming settings search failed: ContractError: no units.*campus run's results are unchanged/],
+    ['aborted', /grid-forming settings search was stopped.*campus run's results are unchanged/],
+  ])('a %s GFM-settings job says the campus results are unchanged', async (status, want) => {
+    api.state.mockResolvedValue({ ...sized(), run_job: job({ status, stage: 'gfm_settings',
+                                                             error: status === 'failed' ? 'ContractError: no units' : null }) })
+    renderPanel()
+    const el = await screen.findByTestId('campus-run-status')
+    expect(el.textContent).toMatch(want)
+    expect(el.textContent).not.toMatch(/earlier run|previous run/)
+  })
+
   it('shows nothing for a finished run: its results are what shows', async () => {
     api.state.mockResolvedValue({ ...sized(), run_job: job({ status: 'completed', stage: 'done' }) })
     renderPanel()

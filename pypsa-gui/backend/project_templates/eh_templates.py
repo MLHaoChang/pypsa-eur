@@ -819,6 +819,27 @@ def _staged_island(cfg: dict) -> dict:
 
 ISLAND_CONFIG["eh_datacenter_staged"] = _staged_island(ISLAND_CONFIG["eh_datacenter"])
 
+
+def _register_staged_hubs() -> None:
+    """The staged H2 hub and microgrid (``eh_staged_hubs.py``, generic-site
+    E2E H1/M1) add themselves to the registries above. Loaded by file path
+    like this module; it gets a view of this module's names, never imports
+    it."""
+    import importlib.util
+    import pathlib
+    import types
+
+    path = pathlib.Path(__file__).resolve().with_name("eh_staged_hubs.py")
+    if not path.is_file():           # this module copied on its own (a test's tmp dir)
+        return
+    spec = importlib.util.spec_from_file_location("_eh_staged_hubs", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.register(types.SimpleNamespace(**globals()))
+
+
+_register_staged_hubs()
+
 # Sidecar file names copied by POST /api/projects/from_template/<id>.
 META_FILE = "eh_template.json"
 STRESS_FILE = "adequacy_stress_scenarios.json"
