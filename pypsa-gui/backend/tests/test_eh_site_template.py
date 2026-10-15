@@ -305,3 +305,22 @@ def test_every_preset_solves_to_an_investment_case_against_a_feasible_grid_only_
     # The import never exceeds the energized connection.
     cap = n.links_t["eh_energization_mw"]["grid_import"]
     assert (n.links_t.p0["grid_import"] <= cap + 1e-4).all()
+
+
+def test_the_assistant_creates_a_site_and_still_creates_the_other_templates(
+        client, tmp_projects_dir):
+    """The chat tool calls the route handler as a plain function: `params`
+    must reach it as a value (a raw `Body` default would refuse every
+    template), and the site's parameters must reach eh_site."""
+    from harness import catalogue
+    from services import chat_tools
+
+    tool = next(t for t in catalogue.TOOLS if t["name"] == "create_project_from_template")
+    assert "eh_site" in tool["input_schema"]["properties"]["template_id"]["enum"]
+    assert "params" in tool["input_schema"]["properties"]
+    create = chat_tools.DISPATCHERS["create_project_from_template"]
+    assert create(template_id="eh_microgrid", new_name="chat_island")["imported"] == "chat_island"
+    out = create(template_id=TID, new_name="chat_clinic", params={"site_type": "hospital"})
+    assert out["imported"] == "chat_clinic" and out.get("solver_config_issues", []) == []
+    meta = client.get("/api/projects/chat_clinic/eh_template").json()
+    assert meta["site_type"] == "hospital" and meta["entered"] == ["site_type"]
