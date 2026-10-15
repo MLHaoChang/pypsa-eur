@@ -99,7 +99,9 @@ describe('chapterTiles', () => {
     expect(t.operation.state).toBe('running')
     t = byId({ ...NONE, operation: { status: { running: false, dispatch: 'fresh', objective: 3.2e6,
       condition: 'optimal', solve_time: 1 } as never } })
-    expect(t.operation).toMatchObject({ state: 'ready', basis: 'The solve’s total system cost (objective)' })
+    // Not the cost again (UX audit M9): the Results cost tile already shows it.
+    expect(t.operation).toMatchObject({ state: 'ready', value: 'Solved',
+      basis: 'Every modelled hour dispatched; its cost is in the yearly cost above' })
     t = byId({ ...NONE, operation: { status: { running: false, dispatch: 'stale', objective: 3.2e6 } as never } })
     expect(t.operation.state).toBe('stale')
   })

@@ -2539,14 +2539,15 @@
       ],
       "input_keys": [
         "template_id",
-        "new_name"
+        "new_name",
+        "params"
       ],
       "required": [
         "template_id",
         "new_name"
       ],
       "safety_tier": "destructive",
-      "schema_sha256": "50a8bbb540a0596a668de574608cdccaa69a99833e3491ad04dcdd8df817e7be",
+      "schema_sha256": "1270429abb89934851771b2c66a13fe561dd66500a73566350d76935ef48619c",
       "behavioral_fixture": "pending"
     },
     {

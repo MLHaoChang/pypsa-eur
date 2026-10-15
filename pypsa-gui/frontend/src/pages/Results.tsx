@@ -609,6 +609,16 @@ export default function Results() {
     )
   }
 
+  // Guided names the group on screen, not always the reliability entry it was
+  // opened from (UX template audit M1).
+  const shownGroup = RESULT_GROUPS.find(g => g.id === activeGroup)
+  // Summary and Reliability keep the hub design's reliability header (P29).
+  const hubHeader = !shownGroup || shownGroup.id === 'reliability' || shownGroup.id === 'summary'
+  const guidedTitle = hubHeader ? 'Reliability results' : `${shownGroup.label} results`
+  const guidedSubtitle = hubHeader
+    ? 'Adequacy and failure-mode (FMEA) risk results for the hub design.'
+    : `${shownGroup.question}.`
+
   return (
     <div
       className="flex flex-col h-full text-sm"
@@ -618,9 +628,9 @@ export default function Results() {
     >
       <PageHeader
         eyebrow={discussedRun ? 'RESULTS · RETAINED EVIDENCE' : uiMode === 'guided' ? 'HUB DESIGN · RESULTS' : 'RESULTS · OPTIMIZATION'}
-        title={discussedRun ? 'Retained run results' : uiMode === 'guided' ? 'Reliability results' : 'Optimization results'}
+        title={discussedRun ? 'Retained run results' : uiMode === 'guided' ? guidedTitle : 'Optimization results'}
         subtitle={discussedRun ? `Recorded evidence for run ${discussedRun.runId}. Live inputs remain unchanged.` : uiMode === 'guided'
-          ? 'Adequacy and failure-mode (FMEA) risk results for the hub design.'
+          ? guidedSubtitle
           : 'Capacity expansion, dispatch, load flow, prices, and emissions from the last solve.'}
         actions={
           <>
@@ -650,10 +660,16 @@ export default function Results() {
           </>
         }
       />
-      <div className="mx-4 text-xs text-muted" data-testid="results-source-context">
-        Current project: {currentProject ?? 'unsaved'} · selected entity: {selectedEntity ? `${selectedEntity.type}: ${selectedEntity.name}` : 'none'}
-        {!discussedRun && <> · window {toDisplay(fromIso) || 'start'} → {toDisplay(toIso) || 'end'} · period {selectedPeriod}</>}
-      </div>
+      {/* What the views below read from. Expert only: in Guided the hub
+          design has already named the project and the window, and
+          "selected entity: none" read like an error (UX template audit M2). */}
+      {uiMode !== 'guided' && (
+        <div className="mx-4 text-xs text-muted" data-testid="results-source-context">
+          Current project: {currentProject ?? 'unsaved'}
+          {selectedEntity && <> · selected {selectedEntity.type}: {selectedEntity.name}</>}
+          {!discussedRun && <> · window {toDisplay(fromIso) || 'start'} → {toDisplay(toIso) || 'end'} · period {selectedPeriod}</>}
+        </div>
+      )}
       {discussedRun && (
         <div
           className="mx-4 mt-2 mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 pb-2 text-[11px]"

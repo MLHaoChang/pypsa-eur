@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): In Guided, the Results header now names the group on screen. Investment, grid-plan and operation results opened from the hub design no longer read "Reliability results". The project / entity / window line above the result tabs now shows only in Expert, and it no longer says "selected entity: none".

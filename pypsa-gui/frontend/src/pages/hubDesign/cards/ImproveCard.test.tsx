@@ -181,7 +181,7 @@ describe('ImproveCard', () => {
     expect(screen.getByTestId('hub-improve-not_established_frontier').textContent)
       .toContain('Cost versus reliability could not be worked out')
     expect(screen.getByTestId('hub-improve-fmea_dominant_mode').textContent)
-      .toContain('site_transformer accounts for 93% of the outage risk')
+      .toContain('Site transformer accounts for 93% of the outage risk')
     expect(screen.getByTestId('hub-improve-fmea_dominant_mode').textContent)
       // P26 gate friction 4: the button runs the study; the effect is its aim.
       .toContain('The assistant would run the reliability study again. Aim: compare the cost with and without a spare unit or extra storage (rough estimate).')

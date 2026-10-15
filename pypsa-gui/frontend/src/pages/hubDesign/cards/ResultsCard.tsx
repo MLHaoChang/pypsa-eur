@@ -16,6 +16,7 @@ import { CardShell } from '../shared/CardShell'
 import { Term, TERM_FALLBACK } from '../shared/Term'
 import { useHubReport, useHubReview, useHubStudy } from '../useHubData'
 import { SECTION_LABEL } from '../sectionLabels'
+import { kpiMoney } from '../plainWords'
 import { ChaptersSection } from '../ChaptersSection'
 
 
@@ -86,10 +87,8 @@ export function ResultsCard() {
         </p>
       )}
       {review?.stale === true && study?.edited_since_study !== true && (
-        <p data-testid="hub-results-stale"
-          className="rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
-          {STALE_TEXT}
-        </p>
+        // The shared stale state (UX audit L5), not a custom banner.
+        <div data-testid="hub-results-stale"><ResultState state="stale" reason={STALE_TEXT} /></div>
       )}
 
       {review ? (
@@ -136,7 +135,7 @@ export function ResultsCard() {
                 {r.criticality_eur_per_year != null && (
                   <span className="text-muted">
                     {' — '}{r.criticality_eur_per_year > 0
-                      ? `about ${fmtCurrency(r.criticality_eur_per_year)} per year`
+                      ? `about ${kpiMoney(r.criticality_eur_per_year)} per year`
                       // P29 (B3): the same reason text as the FMEA tab.
                       : (zeroReasonText(r.zero_reason) ?? 'no measurable cost')}
                   </span>

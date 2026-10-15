@@ -480,6 +480,11 @@ interface UIStore {
   bottomTabRequest: string | null
   // Chat / agent navigation: Results sub-tab id (capex, dispatch, …).
   resultsTabRequest: string | null
+  /** One-shot: bumped by a "Run the solve" outside the header (a result tab's
+   *  empty state, UX template audit H2). The header runs its own run path when
+   *  it changes, so there is one way to queue a solve. */
+  runSolveRequest: number
+  requestRunSolve: () => void
   // Deep-link into a Settings section (e.g. 'assistant-model'). The
   // settings SlidePanel subtree remounts on every panel switch, so this
   // anchor has to live outside it — a set(SlidePanel) parameter cannot
@@ -696,6 +701,7 @@ export const useUIStore = create<UIStore>((set) => ({
   compareRailWidth: storedCompareRailWidth(),
   bottomTabRequest: null,
   resultsTabRequest: null,
+  runSolveRequest: 0,
   settingsSectionRequest: null,
   reportGenerateRequest: false,
   propertiesEditRequest: null,
@@ -907,6 +913,7 @@ export const useUIStore = create<UIStore>((set) => ({
   clearBottomTabRequest: () => set({ bottomTabRequest: null }),
   requestResultsTab: (tab) => { navigationChanged(); set({ resultsTabRequest: tab }) },
   clearResultsTabRequest: () => set({ resultsTabRequest: null }),
+  requestRunSolve: () => set(s => ({ runSolveRequest: s.runSolveRequest + 1 })),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),
   requestReportGenerate: () => set({ reportGenerateRequest: true }),

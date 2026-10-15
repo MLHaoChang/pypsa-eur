@@ -68,6 +68,15 @@ describe('headline (§5.5)', () => {
       .toBe('Certified: about 0.4 h/yr of shortfall, under the 3 h/yr goal.')
   })
 
+  it('a computed zero says no shortfall, never "about 0.0 h/yr" (UX audit M7)', () => {
+    expect(headline(review({ verdict: 'pass', mc_lole_h_per_year: 0, target_lole_h: 3 }), report()))
+      .toBe('Certified: no shortfall expected, under the 3 h/yr goal.')
+    expect(headline(review({ verdict: 'pass', mc_lole_h_per_year: 0.04, target_lole_h: 3 }), report()))
+      .toBe('Certified: no shortfall expected, under the 3 h/yr goal.')
+    expect(headline(review({ verdict: null, mc_lole_h_per_year: 0, target_lole_h: null }), report()))
+      .toBe('No reliability goal was set — the study expects no shortfall. Set a goal to certify.')
+  })
+
   it('no target: the study reports the shortfall and asks for a goal', () => {
     expect(headline(review({ verdict: null, mc_lole_h_per_year: 1.25, target_lole_h: null }), report()))
       .toBe('No reliability goal was set — the study reports 1.3 h/yr of shortfall. Set a goal to certify.')

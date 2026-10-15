@@ -228,3 +228,30 @@ describe('Back to Results', () => {
     expect(screen.queryByRole('button', { name: /Back to Results/ })).toBeNull()
   })
 })
+
+// UX template audit (M1, M2): the Guided header names the group on screen,
+// not always "Reliability", and the source-context line is Expert's.
+describe('the Results header follows the group', () => {
+  const header = () => document.querySelector('header') as HTMLElement
+  it('Guided: names the group the user picked', async () => {
+    // As Guided's "Open the detail" does: request the Investment case tab.
+    useUIStore.setState({ uiMode: 'guided', resultsTabRequest: 'investment' })
+    await renderResults()
+    expect(header().querySelector('h1')!.textContent).toBe('Investment results')
+    expect(header().textContent).toContain('What to build, and what it costs and earns')
+    expect(header().textContent).not.toContain('Adequacy and failure-mode')
+  })
+
+  it('Guided: no source-context line', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    await renderResults()
+    expect(screen.queryByTestId('results-source-context')).toBeNull()
+  })
+
+  it('Expert: keeps the context line, without "selected entity: none"', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    await renderResults()
+    const line = screen.getByTestId('results-source-context')
+    expect(line.textContent).not.toMatch(/selected entity: none/)
+  })
+})
