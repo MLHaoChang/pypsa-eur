@@ -291,4 +291,15 @@ describe('InvestmentTab → Economics', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Tariff' }))
     expect(screen.getByTestId('ic-tariff-island').textContent).toMatch(/buys no grid power/)
   })
+
+  it('keeps the editors while the PoC state is unknown (a solve holds the network)', async () => {
+    vi.mocked(commercialApi.getBilling).mockResolvedValue(null)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(FLOWS as never)
+    vi.mocked(commercialApi.getPocState).mockResolvedValue(
+      { poc_link: 'subsea_tie', open: null, reason: 'network_busy' })
+    renderTab()
+    expect(await screen.findByTestId('ic-site-connection')).toBeTruthy()
+    expect(screen.queryByTestId('ic-island')).toBeNull()
+  })
 })
+

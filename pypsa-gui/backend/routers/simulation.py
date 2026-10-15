@@ -688,12 +688,25 @@ def poc_state(n, commercial) -> dict:
     return out
 
 
+#: How long the PoC read waits for the network lock (a solve holds it).
+_POC_LOCK_WAIT_S = 2.0
+
+
 @router.get("/commercial/poc")
 def get_poc_state():
-    """The PoC Link's state (`poc_state`)."""
-    with PyPSAService.get_lock():
-        return poc_state(PyPSAService.get_network(),
-                         getattr(_state["solver_config"], "commercial", None))
+    """The PoC Link's state (`poc_state`). Never blocks on a running solve: if
+    the network lock is not free within `_POC_LOCK_WAIT_S`, the state is
+    unknown (`open: None`, `reason: network_busy`) and the Investment detail
+    keeps its editors."""
+    commercial = getattr(_state["solver_config"], "commercial", None)
+    lock = PyPSAService.get_lock()
+    if not lock.acquire(timeout=_POC_LOCK_WAIT_S):
+        poc = commercial.get("poc_link") if isinstance(commercial, dict) else None
+        return {"poc_link": poc, "open": None, "reason": "network_busy"}
+    try:
+        return poc_state(PyPSAService.get_network(), commercial)
+    finally:
+        lock.release()
 
 
 @router.put("/commercial/value_flows")
