@@ -1,6 +1,7 @@
 {
   "auto_discount_periods": true,
   "commercial": {
+    "co2_price": null,
     "connection": null,
     "contracts": [],
     "demand_items": [],
@@ -18,6 +19,7 @@
     "meter_history_peaks_kw": {},
     "poc_link": "subsea_tie",
     "power_factor": null,
+    "reference_purchases": [],
     "site_party": "site",
     "timezone": "UTC",
     "value_flows": {
