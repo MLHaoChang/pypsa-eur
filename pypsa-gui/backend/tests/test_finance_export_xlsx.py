@@ -111,3 +111,19 @@ def test_the_summary_says_the_comparison_shed_is_valued_at_voll():
     caveats = [r[1] for r in _values(wb["Summary"]) if r[0] == "Caveat"]
     assert len(caveats) == 1 and "valued at the value of lost load" in caveats[0]
     assert "impossible" not in caveats[0]
+
+
+def test_the_summary_says_what_the_figures_are_compared_with():
+    """Owner decision 2026-10-15: the counterfactual basis and the baseline's
+    notes sit beside the Summary figures."""
+    rep = _report()
+    rep.sections["project"].payload["counterfactual"] = {
+        "present": True, "counterfactual_basis": "site_today",
+        "basis": "compared with the site as it stands today (existing assets kept, new builds "
+                 "removed, re-solved)",
+        "notes": ["pv has no typed cost; treated as a new investment. Type overnight 0 if it "
+                  "already exists."]}
+    wb = openpyxl.load_workbook(io.BytesIO(build_workbook(rep)))
+    rows = {r[0]: r[1] for r in _values(wb["Summary"]) if r[0] in ("Compared with", "Note")}
+    assert rows["Compared with"].startswith("compared with the site as it stands today")
+    assert rows["Note"].startswith("pv has no typed cost")

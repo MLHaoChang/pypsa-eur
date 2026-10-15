@@ -159,6 +159,23 @@ describe('InvestmentCaseView', () => {
     expect(screen.getByTestId('ic-headlines').nextElementSibling).toBe(caveat)
   })
 
+  it('says next to the headlines what the figures are compared with (owner decision 2026-10-15)', async () => {
+    api.getInvestmentCase.mockResolvedValue({ status: 'done', report: { present: true } })
+    const rep = structuredClone(REPORT)
+    const project = rep.sections!.project!.payload as Record<string, unknown>
+    project.counterfactual = { present: true, counterfactual_basis: 'site_today',
+      basis: 'compared with the site as it stands today (existing assets kept, new builds removed, re-solved)',
+      notes: ['pv has no typed cost; treated as a new investment. Type overnight 0 if it already exists.'] }
+    api.getReport.mockResolvedValue(rep)
+    renderView()
+    await screen.findByTestId('ic-report')
+    const basis = screen.getByTestId('ic-cf-basis')
+    expect(basis.textContent).toBe(
+      'Compared with the site as it stands today (existing assets kept, new builds removed, re-solved).')
+    expect(basis.getAttribute('data-basis')).toBe('site_today')
+    expect(screen.getByTestId('ic-cf-notes').textContent).toMatch(/pv has no typed cost/)
+  })
+
   it('no baseline flag: no caveat', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'done', report: { present: true } })
     api.getReport.mockResolvedValue(structuredClone(REPORT))

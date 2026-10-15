@@ -95,6 +95,17 @@ if not set(KIND_COMPONENT.values()) <= set(BILL_COMPONENT_KEYS):
 _ONE_YEAR_HOURS = (8760.0, 8784.0)
 _SUM_TOL = 1e-9
 _CODE_RE = re.compile(r"[a-z]+(_[a-z]+)*")
+def analytic_basis_note(n, cfg) -> str | None:
+    """The Guided study keeps the analytic counterfactual (owner decision
+    2026-10-15; the investment case re-solves a baseline instead): when its
+    owner keeps existing assets, it says so next to its figures."""
+    from services.results.finance_case import baseline_plan
+
+    plan = baseline_plan(n, cfg)
+    return "counterfactual_analytic_existing_not_redispatched" if plan is not None \
+        and plan.needed else None
+
+
 # IC note → the guided bill's digit-free code (§3.2 `honesty_notes`).
 _NOTE_MAP = {"capacity_prorated_by_represented_hours": "capacity_charge_prorated_by_hours"}
 
@@ -941,6 +952,9 @@ def option_case(n, cfg, ledger: AssumptionsLedger, *, compiled: C.CompiledCommer
                      else "battery_upfront_from_ledger_not_back_calculated")
     if any(f.startswith("meter_link_not_investment:") for f in case.flags):
         notes.append("meter_links_are_not_investments")
+    basis_note = analytic_basis_note(n, cfg_case)
+    if basis_note:
+        notes.append(basis_note)
     notes += list(finance.notes)
     tail = list(meta.get("honesty_notes") or [])
     tail += _pack_notes(n)

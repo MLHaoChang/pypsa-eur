@@ -461,6 +461,15 @@ def _operating_status(result) -> dict[str, str]:
     return status
 
 
+#: The counterfactual basis in words, shown next to the NPV.
+BASIS_TEXT = {
+    "site_today": "compared with the site as it stands today (existing assets kept, new "
+                  "builds removed, re-solved)",
+    "analytic": "compared with the same site's bill, commodity and connection lines without "
+                "the owner's assets (analytic basis: existing assets not re-dispatched)",
+}
+
+
 def _counterfactual_block(result, case) -> dict[str, Any]:
     """The counterfactual's provenance (plan C13; WP4.6b review B6): what it is,
     its lines' sources, and whether it was established. Its per-year cash is
@@ -470,10 +479,17 @@ def _counterfactual_block(result, case) -> dict[str, Any]:
                 "basis": "no counterfactual in the case (the adapter builds one only when "
                          "the owner is the site party): incremental = total"}
     lines = [ln for t in case.counterfactual for ln in t.lines]
+    site_today = "counterfactual_basis:site_today" in result.flags
+    from services.results.baseline import flag_text
+
     return {
         "present": True,
-        "basis": "the same site's bill, commodity and connection lines without the owner's "
-                 "investable assets",
+        # Which counterfactual the incremental figures are against (owner
+        # decision 2026-10-15): the site as it stands today (a baseline
+        # re-solve), or the analytic one (no re-dispatch).
+        "counterfactual_basis": "site_today" if site_today else "analytic",
+        "basis": BASIS_TEXT["site_today" if site_today else "analytic"],
+        "notes": [t for t in (flag_text(f) for f in result.flags) if t],
         "first_years": sorted({int(t.first_year) for t in case.counterfactual}),
         "n_lines": len(lines),
         "sources": sorted({f"{ln.source}:{ln.source_id}" if ln.source_id else ln.source

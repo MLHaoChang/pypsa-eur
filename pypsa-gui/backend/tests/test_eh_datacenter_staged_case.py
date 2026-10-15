@@ -230,17 +230,13 @@ def test_an_unexpected_bind_error_still_leaves_an_openable_project(
 # ── 5. the case computes (must-check 2) ─────────────────────────────────────
 
 @pytest.fixture
-def staged_case(reset_backend, monkeypatch):
+def staged_solved(reset_backend, monkeypatch):
     """The template solved multi-period through run_simulation with its own
-    solver settings (island rows from its sidecar), then the finance case."""
-    import routers.results as R
+    solver settings (island rows from its sidecar): (n, cfg, solve state)."""
     import routers.simulation as sim_router
-    from models.finance import FinanceInputs
     from routers.projects import _solver_config_from_dict
     from services.adequacy.island_config import SIDECAR_NAME, load_island_config
-    from services.finance.engine import run_case
     from services.pypsa_service import PyPSAService
-    from services.results.finance_case import build_finance_case
     from services.solver import island as I
     from services.solver_service import run_simulation
     from tests.conftest import install_network_into_backend
@@ -257,10 +253,39 @@ def staged_case(reset_backend, monkeypatch):
     status, cond = run_simulation(cfg, n, PyPSAService.get_lock(), threading.Event(),
                                   queue.SimpleQueue(), state_update=lambda **k: state.update(k))
     assert status in ("ok", "optimal"), (status, cond)
-    # As the investment-case route does: the solve's lost-load capture.
+    return n, cfg, state
+
+
+def _staged_finance(n, cfg, state, *, site_today: bool):
+    import routers.results as R
+    from models.finance import FinanceInputs
+    from services.finance.engine import run_case
+    from services.results import baseline as Bl
+    from services.results.finance_case import baseline_plan, build_finance_case
+
+    base = None
+    if site_today:
+        Bl.clear_cache()
+        plan = baseline_plan(n, cfg)
+        base = Bl.solve_baseline(n, cfg, plan) if plan is not None and plan.needed else None
     case = build_finance_case(n, cfg, FinanceInputs.model_validate(cfg.finance),
-                              result_df=R._result_df, lost_load=state.get("last_lost_load"))
+                              result_df=R._result_df, lost_load=state.get("last_lost_load"),
+                              baseline=base)
     return n, case, run_case(case)
+
+
+@pytest.fixture
+def staged_case(staged_solved):
+    """As the investment-case route does: the solve's lost-load capture, and the
+    baseline (the site as it stands today) when the owner keeps existing assets,
+    which the staged campus does (owner decision 2026-10-15)."""
+    return _staged_finance(*staged_solved, site_today=True)
+
+
+@pytest.fixture
+def staged_case_analytic(staged_solved):
+    """The same solve with the analytic counterfactual (no baseline)."""
+    return _staged_finance(*staged_solved, site_today=False)
 
 
 def _built(n, a):
@@ -307,10 +332,13 @@ def test_the_staged_template_produces_an_investment_case(staged_case):
     assert r.op.status == {"operating": "ok", "capex": "ok", "terminal": "ok"}, r.op.reasons
     for k in ("project_pre_tax_npv", "project_pre_tax_irr"):
         assert r.metrics[k] is not None, (k, r.reasons)
-    # The connection carries the 2035 peak (owner decision 2026-10-15): the
-    # grid-only comparison runs as modelled, nothing shed, nothing impossible
-    # (the shed-at-VoLL path is test_finance_counterfactual_shed's).
-    assert not [f for f in r.flags if f.startswith(("counterfactual_shed_at_voll",
+    # Compared with the site as it stands today (owner decision 2026-10-15):
+    # the existing 4 x 10 MW gensets and the PV stay, and they carry the 2027
+    # peak above the 15 MW energized import, so the comparison sheds nothing.
+    # The new stages are removed; the island rows they meet are relaxed.
+    assert "counterfactual_basis:site_today" in case.flags
+    assert "baseline_island_rows_relaxed" in case.flags
+    assert not [f for f in r.flags if f.startswith(("counterfactual_shed",
                                                     "counterfactual_exceeds"))], r.flags
 
 
@@ -351,11 +379,11 @@ def connection_45(monkeypatch):
 
 
 @pytest.mark.live_solve
-def test_a_multi_period_shed_is_priced_per_period(connection_45, staged_case):
+def test_a_multi_period_shed_is_priced_per_period(connection_45, staged_case_analytic):
     """#294 review (item 5): each period's shed line is
     −VoLL · Σ_period w · max(0, load − min(PoC, E)); a period that sheds
-    nothing has no line. (`connection_45` before `staged_case`.)"""
-    n, case, _r = staged_case
+    nothing has no line, on the analytic path. (`connection_45` before the case.)"""
+    n, case, _r = staged_case_analytic
     voll = T.solver_config(TID)["voll"]
     period = n.snapshots.get_level_values(0)
     load = n.loads_t.p_set.sum(axis=1).to_numpy(float)

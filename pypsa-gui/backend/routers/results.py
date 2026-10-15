@@ -1742,13 +1742,29 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
         from services.finance.case import FinanceRefused
         from services.results.finance_case import build_finance_case
 
+        from services.results import baseline as _B
+        from services.results.finance_case import baseline_plan
+
         fin = FinanceInputs.model_validate(cfg.finance)
         if campus is not None and campus.refusal:
             raise FinanceRefused(campus.refusal, campus.detail)
+        # The counterfactual is the site as it stands today when the owner keeps
+        # existing assets (owner decision 2026-10-15): a baseline re-solve
+        # without the plan's new builds, planned under the lock, solved on a copy
+        # outside it (the live project is never blocked or touched), cached.
+        with PyPSAService.get_lock():
+            plan = baseline_plan(n, cfg, owner)
+        base = None
+        if plan is not None and plan.needed:
+            try:
+                base = _B.solve_baseline(n, cfg, plan)
+            except _B.BaselineRefused as exc:
+                raise FinanceRefused(exc.code, exc.detail) from exc
         with PyPSAService.get_lock():
             case = build_finance_case(n, cfg, fin, result_df=_result_df, lost_load=lost_load,
                                       owner=owner,
-                                      extra_assets=campus.extras if campus is not None else ())
+                                      extra_assets=campus.extras if campus is not None else (),
+                                      baseline=base)
         flags = campus.run_flags if campus is not None else ()
         return dataclasses.replace(case, flags=case.flags + flags) if flags else case
     return build
