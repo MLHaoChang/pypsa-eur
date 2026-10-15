@@ -80,8 +80,11 @@ def test_c1_lost_load_voll() -> None:
 
 def test_c2_lines_table_s_nom_opt() -> None:
     print("\n[C2] LoadFlow Lines table shows s_nom_opt")
-    text = (REPO / "frontend" / "src" / "pages" / "results" / "LoadFlow.tsx").read_text(encoding="utf-8")
-    has_header = ">s_nom_opt<" in text
+    # LoadFlow embeds the source-bound BranchLoading table. Follow that
+    # component rather than inspecting the removed duplicate table.
+    parent = (REPO / "frontend/src/pages/results/LoadFlow.tsx").read_text(encoding="utf-8")
+    text = (REPO / "frontend/src/pages/results/BranchLoading.tsx").read_text(encoding="utf-8")
+    has_header = '<BranchLoading ' in parent and 'Optimized MVA (s_nom_opt)' in text
     has_expansion_class = "text-accent font-semibold" in text and "expanded" in text
     _step("s_nom_opt column header present", has_header)
     _step("expanded-line callout (class change)", has_expansion_class)

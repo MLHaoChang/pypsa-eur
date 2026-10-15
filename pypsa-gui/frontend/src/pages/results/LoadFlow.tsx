@@ -1,3 +1,4 @@
+import BranchLoading from './BranchLoading'
 import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -8,7 +9,7 @@ import { Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
-import type { Bus, Line as LineT, Transformer } from '../../api/types'
+import type { Bus } from '../../api/types'
 import { type TSPayload, fmtPower, shortStamp, downloadCSV, KPI, ChartActions, Seg,
   CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   useSeasonalViewMode, SeasonalLineCardGrid, WindowCapBanner,
@@ -19,14 +20,9 @@ import { useUIStore } from '../../store/uiStore'
 import ResultState from '../../components/ResultState'
 import { nk } from '../../utils/queryKeys'
 
-// ── Load Flow tab ─────────────────────────────────────────────────────────────
-// Three sections:
-//   1. KPI strip — peak network flow, mean loading %, mean marginal price
-//   2. Line table — peak/mean |p0|, loading %, s_nom (CSV-exportable)
-//   3. Top-loaded lines time-series chart (top 5 by mean loading)
-//   4. Bus table — mean marginal price, voltage angle (when available)
-
-const TOP_N_CHART = 5
+// Branch loading is the native, source-attested server projection used by
+// get_loadflow_summary. Bus/reactive/voltage/loss diagnostics retain their
+// separate native queries and do not inherit its data ACK or checking claim.
 
 // CO₂ emissions, the hourly price chart, and the price-drivers table were
 // moved to the dedicated Emissions / Prices tabs but their JSX is kept here
@@ -39,8 +35,6 @@ const SHOW_RETIRED_SECTIONS = false as boolean
 export default function LoadFlow() {
   // Refs for SVG export — one per chart section.
   const voltageChartRef = useRef<HTMLDivElement | null>(null)
-  const topLinesChartRef = useRef<HTMLDivElement | null>(null)
-  const topTrafoChartRef = useRef<HTMLDivElement | null>(null)
   // resultSource is in the queryKey so every result query re-fetches when the
   // user flips the AC PF toggle (P2). Backend honours the param via ?source=.
   const { resultSource, setResultSource } = useUIStore()
@@ -52,7 +46,7 @@ export default function LoadFlow() {
   const { data: acPfStatus } = useQuery({ queryKey: nk(currentProject, 'results', 'ac_pf', 'status'), queryFn: resultsApi.getAcPfStatus })
   const acPfAvailable = !!acPfStatus?.available
 
-  const { data: linesTS, isPending: linesTSPending } = useQuery({
+  const { data: linesTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'lines', resultSource, win.from, win.to),
     queryFn: () => resultsApi.getLineResults(resultSource, fetchRange),
     enabled: winValid,
@@ -151,9 +145,6 @@ export default function LoadFlow() {
     negative_hours?: number
   }
 
-  const { data: lines = [], isSuccess: linesLoaded } = useQuery({ queryKey: nk(currentProject, 'lines'), queryFn: networkApi.getLines })
-  const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'), queryFn: networkApi.getTransformers })
-  const noLines = linesLoaded && lines.length === 0
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
 
   const tsLines = linesTS as TSPayload | null
@@ -176,148 +167,6 @@ export default function LoadFlow() {
     setViewMode: setLoadFlowViewMode, effectiveMode: lfMode,
     weeklyAvailable: lfWeeklyOk, monthlyAvailable: lfMonthlyOk,
   } = useSeasonalViewMode('results:loadflow-viewmode', refIndex, range)
-
-  // Per-transformer stats: same shape as line stats so the table renders the
-  // same way. Helper computes peak/mean/loading from a (snapshot × asset)
-  // time series. Kept inline rather than abstracted into a util because the
-  // line and transformer flows have different field names (s_nom_opt vs the
-  // same on transformers) that are easy to mix up in a generic helper.
-  function computeStats<T extends { name: string; s_nom: number }>(
-    ts: TSPayload | null, assets: T[]
-  ) {
-    if (!ts) return null
-    const byName = new Map(assets.map(a => [a.name, a]))
-    const rFrom = Math.max(0, range.from)
-    const rTo = Math.min(ts.data.length - 1, range.to)
-    return ts.columns.map((name, ci) => {
-      let peak = 0, sumAbs = 0, n = 0
-      if (rFrom <= rTo) {
-        for (let row = rFrom; row <= rTo; row++) {
-          const v = ts.data[row][ci]
-          if (Number.isFinite(v)) {
-            const a = Math.abs(v)
-            if (a > peak) peak = a
-            sumAbs += a; n += 1
-          }
-        }
-      }
-      const mean = n ? sumAbs / n : 0
-      const a = byName.get(name)
-      const sNom = a?.s_nom ?? 0
-      const sNomOpt = (a as unknown as { s_nom_opt?: number } | undefined)?.s_nom_opt ?? sNom
-      const sCap = sNomOpt > 0 ? sNomOpt : sNom
-      const loadingPct = sCap > 0 ? (peak / sCap) * 100 : 0
-      return {
-        name,
-        bus0: (a as unknown as { bus0?: string } | undefined)?.bus0 ?? '',
-        bus1: (a as unknown as { bus1?: string } | undefined)?.bus1 ?? '',
-        s_nom: sNom,
-        s_nom_opt: sNomOpt,
-        peak, mean, loadingPct,
-      }
-    }).sort((a, b) => b.loadingPct - a.loadingPct)
-  }
-
-  // Per-line stats: peak |p0|, mean |p0|, s_nom, loading% — scoped to the
-  // active period via `range`.
-  const lineStats = useMemo(() => {
-    if (!tsLines) return null
-    const lineByName = new Map((lines as LineT[]).map(l => [l.name, l]))
-    const rFrom = Math.max(0, range.from)
-    const rTo = Math.min(tsLines.data.length - 1, range.to)
-    return tsLines.columns.map((name, ci) => {
-      let peak = 0, sumAbs = 0, n = 0
-      if (rFrom <= rTo) {
-        for (let row = rFrom; row <= rTo; row++) {
-          const v = tsLines.data[row][ci]
-          if (Number.isFinite(v)) {
-            const a = Math.abs(v)
-            if (a > peak) peak = a
-            sumAbs += a; n += 1
-          }
-        }
-      }
-      const mean = n ? sumAbs / n : 0
-      const ln = lineByName.get(name)
-      const sNom = ln?.s_nom ?? 0
-      const sNomOpt = (ln as unknown as { s_nom_opt?: number } | undefined)?.s_nom_opt ?? sNom
-      const sCap = sNomOpt > 0 ? sNomOpt : sNom
-      const loadingPct = sCap > 0 ? (peak / sCap) * 100 : 0
-      return {
-        name,
-        bus0: ln?.bus0 ?? '',
-        bus1: ln?.bus1 ?? '',
-        s_nom: sNom,
-        s_nom_opt: sNomOpt,
-        peak, mean, loadingPct,
-      }
-    }).sort((a, b) => b.loadingPct - a.loadingPct)
-  }, [tsLines, lines, range.from, range.to])
-
-  // D3 rows 6–7: with no lines, the section statement above already says so;
-  // with lines but no solved flows, say "not run" once for the table and the
-  // chart instead of "Lines (0)" and "No data.".
-  const linesSolved = !noLines && !!lineStats && lineStats.length > 0
-  const linesNotRun = linesLoaded && !noLines && !linesTSPending && !linesSolved
-
-  // Per-transformer stats (same shape as lineStats — see helper above).
-  const trafoStats = useMemo(
-    () => computeStats(tsTrafos, transformers as Transformer[]),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tsTrafos, transformers, range.from, range.to],
-  )
-
-  // Top-N most loaded lines as a per-snapshot multi-line chart. Recharts wants
-  // {snapshot, lineA, lineB, ...} rows; we slice to the top-N by mean loading.
-  // Rows are scoped to `range` so per-period view only shows that period's
-  // hours — single-period or "Aggregated" sees the full series.
-  const topChart = useMemo(() => {
-    if (!tsLines || !lineStats) return null
-    const top = lineStats.slice(0, TOP_N_CHART)
-    const colIdxByName = new Map(tsLines.columns.map((c, i) => [c, i]))
-    const cols = top.map(t => t.name)
-    const rFrom = Math.max(0, range.from)
-    const rTo = Math.min(tsLines.data.length - 1, range.to)
-    const rows: Array<Record<string, number | string | null>> = []
-    for (let row = rFrom; row <= rTo; row++) {
-      const stamp = tsLines.index[row]
-      // Missing values are passed as `null` so Recharts skips them and the
-      // line shows a gap. Coercing to 0 (the old behaviour) made AC-PF
-      // non-convergent snapshots look like a fault — see audit P1.
-      const obj: Record<string, number | string | null> = { snapshot: stamp }
-      for (const c of cols) {
-        const i = colIdxByName.get(c)
-        const v = i != null ? tsLines.data[row][i] : null
-        obj[c] = Number.isFinite(v as number) ? (v as number) : null
-      }
-      rows.push(obj)
-    }
-    return { rows, cols }
-  }, [tsLines, lineStats, range.from, range.to])
-
-  // Top-N most loaded transformers (analogous to topChart). Built lazily —
-  // returns null when no transformer time series, so the section can opt out.
-  const topTrafoChart = useMemo(() => {
-    if (!tsTrafos || !trafoStats) return null
-    const top = trafoStats.slice(0, TOP_N_CHART)
-    const colIdxByName = new Map(tsTrafos.columns.map((c, i) => [c, i]))
-    const cols = top.map(t => t.name)
-    // Period-scoped slice — mirrors lineChart above.
-    const rFrom = Math.max(0, range.from)
-    const rTo = Math.min(tsTrafos.data.length - 1, range.to)
-    const rows: Array<Record<string, number | string | null>> = []
-    for (let row = rFrom; row <= rTo; row++) {
-      const stamp = tsTrafos.index[row]
-      const obj: Record<string, number | string | null> = { snapshot: stamp }
-      for (const c of cols) {
-        const i = colIdxByName.get(c)
-        const v = i != null ? tsTrafos.data[row][i] : null
-        obj[c] = Number.isFinite(v as number) ? (v as number) : null
-      }
-      rows.push(obj)
-    }
-    return { rows, cols }
-  }, [tsTrafos, trafoStats, range.from, range.to])
 
   // Per-asset min/max/avg over a (snapshot × asset) time series.
   // Used by the AC-PF reactive-power tables and voltage tables.
@@ -349,11 +198,12 @@ export default function LoadFlow() {
       }
       return {
         name,
+        hasData: n > 0,
         min: n ? min : 0,
         max: n ? max : 0,
         mean: n ? s / n : 0,
       }
-    })
+    }).filter(row => row.hasData)
   }
 
   // AC-PF reactive-power stats per line / transformer.
@@ -524,34 +374,6 @@ export default function LoadFlow() {
              hasAdjusted: !!tsP.data_adjusted }
   }, [priceTS, busStats, priceSource, range.from, range.to])
 
-  // KPIs: peak flow across the network, mean loading, average price
-  const kpis = useMemo(() => {
-    const peakFlow = lineStats ? Math.max(0, ...lineStats.map(l => l.peak)) : null
-    const meanLoading = lineStats && lineStats.length > 0
-      ? lineStats.reduce((a, l) => a + l.loadingPct, 0) / lineStats.length : null
-    const meanPrice = busStats && busStats.length > 0
-      ? busStats.reduce((a, b) => a + b.meanPrice, 0) / busStats.length : null
-    return { peakFlow, meanLoading, meanPrice }
-  }, [lineStats, busStats])
-
-  const exportLineStatsCSV = () => {
-    if (!lineStats) return
-    downloadCSV('results_line_stats.csv',
-      ['name', 'bus0', 'bus1', 's_nom_MW', 's_nom_opt_MW', 'peak_abs_p0_MW', 'mean_abs_p0_MW', 'peak_loading_pct'],
-      lineStats.map(l => [l.name, l.bus0, l.bus1, l.s_nom, l.s_nom_opt, l.peak.toFixed(3), l.mean.toFixed(3), l.loadingPct.toFixed(2)]),
-    )
-    toast.success(`Exported ${lineStats.length} rows`)
-  }
-
-  const exportTrafoStatsCSV = () => {
-    if (!trafoStats) return
-    downloadCSV('results_transformer_stats.csv',
-      ['name', 'bus0', 'bus1', 's_nom_MVA', 's_nom_opt_MVA', 'peak_abs_p0_MW', 'mean_abs_p0_MW', 'peak_loading_pct'],
-      trafoStats.map(t => [t.name, t.bus0, t.bus1, t.s_nom, t.s_nom_opt, t.peak.toFixed(3), t.mean.toFixed(3), t.loadingPct.toFixed(2)]),
-    )
-    toast.success(`Exported ${trafoStats.length} rows`)
-  }
-
   const exportBusStatsCSV = () => {
     if (!busStats) return
     downloadCSV('results_bus_stats.csv',
@@ -561,13 +383,6 @@ export default function LoadFlow() {
     toast.success(`Exported ${busStats.length} rows`)
   }
 
-  if (!tsLines && !priceTS) {
-    return (
-      <div className="p-6 text-center text-xs text-muted">
-        No load-flow results yet. Run a simulation (any mode produces line flows; LOPF additionally produces marginal prices).
-      </div>
-    )
-  }
 
   return (
     <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
@@ -609,18 +424,7 @@ export default function LoadFlow() {
             </div>
           )}
         </div>
-        {noLines ? (
-          <ResultState state="not_applicable" reason="This network has no lines, so there is no line flow or loading." />
-        ) : (
-          <div className="grid grid-cols-2 gap-2">
-            <KPI label="Peak flow"
-                 value={fmtPower(kpis.peakFlow)}
-                 hint="Maximum |p0| observed across all lines and snapshots in the active range." />
-            <KPI label="Mean loading"
-                 value={kpis.meanLoading != null ? `${kpis.meanLoading.toFixed(1)} %` : '—'}
-                 hint="Average of per-line peak loading %. See the Prices tab for marginal-price KPIs." />
-          </div>
-        )}
+        <BranchLoading from={win.from} to={win.to} enabled={winValid} />
       </section>
 
       {/* ── Time-series view mode (weekly / monthly / full timeframe) ─────── */}
@@ -1275,72 +1079,7 @@ export default function LoadFlow() {
         </section>
       )}
 
-      {/* ── Lines table ───────────────────────────────────────── */}
-      {linesNotRun && (
-        <section>
-          <h3 className="mb-2 text-[12.5px] font-semibold text-text tracking-[-0.005em]">Lines</h3>
-          <ResultState state="not_run"
-            reason="Line flows and loading come from a solve. Run one to see them." />
-        </section>
-      )}
-      {linesSolved && (
-      <section>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Lines ({lineStats?.length ?? 0})</h3>
-          <button onClick={exportLineStatsCSV} disabled={!lineStats}
-            className="flex items-center gap-1 text-[11px] text-muted hover:text-accent disabled:opacity-40"
-          ><Download size={11} /> CSV</button>
-        </div>
-        {!lineStats ? (
-          <div className="border border-border rounded p-4 text-center text-xs text-muted">
-            No line flow time-series.
-          </div>
-        ) : (
-          <div className="border border-border rounded overflow-auto max-h-72">
-            <table className="w-full text-xs border-collapse" style={{ minWidth: 720 }}>
-              <thead className="sticky top-0 bg-bg-2 z-10">
-                <tr className="border-b border-border">
-                  <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Name</th>
-                  <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">From</th>
-                  <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">To</th>
-                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Original (pre-solve) thermal rating">s_nom</th>
-                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Optimized capacity from the LP. Loading% is computed against this — so 100% on a line whose s_nom_opt > s_nom means the LP expanded it.">s_nom_opt</th>
-                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Peak |p|</th>
-                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Mean |p|</th>
-                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Loading</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lineStats.map((l, i) => {
-                  const expanded = l.s_nom_opt > l.s_nom + 1e-6
-                  return (
-                    <tr key={l.name} className={i % 2 === 0 ? 'bg-bg' : 'bg-panel'}>
-                      <td className="px-2 py-1 font-mono text-[11px]">{l.name}</td>
-                      <td className="px-2 py-1 text-[11px]">{l.bus0}</td>
-                      <td className="px-2 py-1 text-[11px]">{l.bus1}</td>
-                      <td className="px-2 py-1 font-mono text-[11px] text-right">{fmtPower(l.s_nom, 1)}</td>
-                      <td className={`px-2 py-1 font-mono text-[11px] text-right ${expanded ? 'text-accent font-semibold' : ''}`}
-                          title={expanded ? `Expanded by ${fmtPower(l.s_nom_opt - l.s_nom, 1)}` : 'No expansion'}>
-                        {fmtPower(l.s_nom_opt, 1)}
-                      </td>
-                      <td className="px-2 py-1 font-mono text-[11px] text-right">{fmtPower(l.peak, 1)}</td>
-                      <td className="px-2 py-1 font-mono text-[11px] text-right">{fmtPower(l.mean, 1)}</td>
-                      <td className={`px-2 py-1 font-mono text-[11px] text-right font-semibold ${
-                        l.loadingPct >= 90 ? 'text-danger' :
-                        l.loadingPct >= 50 ? 'text-warn'   :
-                        'text-success'
-                      }`}>{l.loadingPct.toFixed(1)} %</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-      )}
 
-      {/* ── Line reactive power (AC PF only) ──────────────────── */}
       {acPfAvailable && lineReactiveStats && lineReactiveStats.length > 0 && (
         <section>
           <div className="flex items-center justify-between mb-2">
@@ -1381,110 +1120,7 @@ export default function LoadFlow() {
           </div>
         </section>
       )}
-
-      {/* ── Top-loaded lines time-series chart ────────────────── */}
-      {linesSolved && (
-      <section>
-        <div className="flex items-center mb-2">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Top-loaded lines (top {TOP_N_CHART})</h3>
-          {topChart && topChart.cols.length > 0 && (
-            <ChartActions
-              className="ml-auto"
-              chartRef={topLinesChartRef}
-              onExportCSV={() => {
-                const header = ['snapshot', ...topChart.cols]
-                downloadCSV('results_top_lines.csv', header,
-                  topChart.rows.map(r =>
-                    [r.snapshot, ...topChart.cols.map(c => r[c] ?? '')]))
-                toast.success('Exported')
-              }}
-              filename="results_top_lines" />
-          )}
-        </div>
-        {!topChart || topChart.cols.length === 0 ? (
-          <div className="border border-border rounded p-4 text-center text-xs text-muted">No data.</div>
-        ) : (
-          <div ref={topLinesChartRef}>
-            {lfMode !== 'timeframe' ? (
-              <SeasonalLineCardGrid
-                mode={lfMode}
-                rows={topChart.rows}
-                cols={topChart.cols}
-                colors={['#dc2626', '#0ea5e9', '#16a34a', '#d97706', '#7c3aed']}
-                unit="MW"
-                height={170}
-              />
-            ) : (
-              <ResponsiveContainer width="100%" height={180}>
-                <LineChart data={topChart.rows} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
-                  <CartesianGrid {...CHART_GRID} />
-                  <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
-                  <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
-                  <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(2)} MW`} />
-                  <Legend {...CHART_LEGEND} />
-                  {topChart.cols.map((c, i) => (
-                    <Line key={c} type="monotone" dataKey={c}
-                          stroke={['#dc2626', '#0ea5e9', '#16a34a', '#d97706', '#7c3aed'][i % 5]}
-                          strokeWidth={1.4} dot={false} />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        )}
-      </section>
-      )}
-
-      {/* ── Transformers loading ──────────────────────────────── */}
-      {/* Same table + chart structure as Lines, just over n.transformers_t.p0.
-          Renders only when the network has transformers AND the LP produced a
-          flow time series — keeps the page clean for pure single-voltage
-          networks. */}
-      {trafoStats && trafoStats.length > 0 && (
-        <>
-          <section>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Transformers ({trafoStats.length})</h3>
-              <button onClick={exportTrafoStatsCSV}
-                className="flex items-center gap-1 text-[11px] text-muted hover:text-accent"
-              ><Download size={11} /> CSV</button>
-            </div>
-            <div className="border border-border rounded overflow-auto max-h-72">
-              <table className="w-full text-xs border-collapse" style={{ minWidth: 720 }}>
-                <thead className="sticky top-0 bg-bg-2 z-10">
-                  <tr className="border-b border-border">
-                    <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Name</th>
-                    <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">HV bus</th>
-                    <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">LV bus</th>
-                    <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">s_nom</th>
-                    <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Peak |p|</th>
-                    <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Mean |p|</th>
-                    <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Loading</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {trafoStats.map((t, i) => (
-                    <tr key={t.name} className={i % 2 === 0 ? 'bg-bg' : 'bg-panel'}>
-                      <td className="px-2 py-1 font-mono text-[11px]">{t.name}</td>
-                      <td className="px-2 py-1 text-[11px]">{t.bus0}</td>
-                      <td className="px-2 py-1 text-[11px]">{t.bus1}</td>
-                      <td className="px-2 py-1 font-mono text-[11px] text-right">{fmtPower(t.s_nom, 1).replace('MW', 'MVA')}</td>
-                      <td className="px-2 py-1 font-mono text-[11px] text-right">{fmtPower(t.peak, 1)}</td>
-                      <td className="px-2 py-1 font-mono text-[11px] text-right">{fmtPower(t.mean, 1)}</td>
-                      <td className={`px-2 py-1 font-mono text-[11px] text-right font-semibold ${
-                        t.loadingPct >= 90 ? 'text-danger' :
-                        t.loadingPct >= 50 ? 'text-warn'   :
-                        'text-success'
-                      }`}>{t.loadingPct.toFixed(1)} %</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          {/* Transformer reactive power (AC PF only) */}
-          {acPfAvailable && trafoReactiveStats && trafoReactiveStats.length > 0 && (
+      {acPfAvailable && trafoReactiveStats && trafoReactiveStats.length > 0 && (
             <section>
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Transformers · reactive power · AC PF ({trafoReactiveStats.length})</h3>
@@ -1524,54 +1160,6 @@ export default function LoadFlow() {
               </div>
             </section>
           )}
-
-          {topTrafoChart && topTrafoChart.cols.length > 0 && (
-            <section>
-              <div className="flex items-center mb-2">
-                <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Top-loaded transformers (top {TOP_N_CHART})</h3>
-                <ChartActions
-                  className="ml-auto"
-                  chartRef={topTrafoChartRef}
-                  onExportCSV={() => {
-                    const header = ['snapshot', ...topTrafoChart.cols]
-                    downloadCSV('results_top_transformers.csv', header,
-                      topTrafoChart.rows.map(r =>
-                        [r.snapshot, ...topTrafoChart.cols.map(c => r[c] ?? '')]))
-                    toast.success('Exported')
-                  }}
-                  filename="results_top_transformers" />
-              </div>
-              <div ref={topTrafoChartRef}>
-                {lfMode !== 'timeframe' ? (
-                  <SeasonalLineCardGrid
-                    mode={lfMode}
-                    rows={topTrafoChart.rows}
-                    cols={topTrafoChart.cols}
-                    colors={['#d97706', '#7c3aed', '#0ea5e9', '#16a34a', '#dc2626']}
-                    unit="MW"
-                    height={170}
-                  />
-                ) : (
-                  <ResponsiveContainer width="100%" height={180}>
-                    <LineChart data={topTrafoChart.rows} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
-                      <CartesianGrid {...CHART_GRID} />
-                      <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
-                      <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
-                      <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(2)} MW`} />
-                      <Legend {...CHART_LEGEND} />
-                      {topTrafoChart.cols.map((c, i) => (
-                        <Line key={c} type="monotone" dataKey={c}
-                              stroke={['#d97706', '#7c3aed', '#0ea5e9', '#16a34a', '#dc2626'][i % 5]}
-                              strokeWidth={1.4} dot={false} />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </section>
-          )}
-        </>
-      )}
 
       {/* Bus marginal prices, per-bus tables, hourly price chart, price duration
           curve, and price drivers all live in the dedicated "Prices" tab now.

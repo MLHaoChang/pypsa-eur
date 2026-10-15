@@ -61,7 +61,7 @@ RANKING_CONVENTION = (
     "flow = larger terminal magnitude; ties by name. rating_pct ignores s_max_pu "
     "(the Load flow tab's number)."
 )
-LIMITS_CLAIM = "Not proof of AC thermal compliance: no N-1, no voltage limits, no dynamic limits."
+LIMITS_CLAIM = "Not proof of AC thermal compliance: no N-1, no voltage limits or temperature-dependent thermal ratings."
 UNITS = {"rating": "MVA", "flow": "MW (active_power_proxy) or MVA (ac_apparent_power)",
          "utilisation": "%", "hours": "weighted hours"}
 
@@ -161,6 +161,10 @@ def _gate(n: Any, solve: dict, source: str) -> dict | None:
             return _unavailable("ac_pf_not_available",
                                 "No AC power-flow result exists; run the AC PF stage or use source='lopf'.",
                                 solve=solve)
+    elif PyPSAService.get_solver_state().get("ac_pf_results") is not None:
+        if not isinstance(PyPSAService.get_solver_state().get("lopf_results"), dict):
+            return _unavailable("lopf_snapshot_unavailable",
+                                "The LOPF snapshot is missing after AC PF; live AC flows are not substituted.")
     return None
 
 
@@ -181,10 +185,11 @@ def _ac_convergence(n: Any, win_index: pd.Index, start: int, end: int) -> tuple[
     entries = state.get("ac_pf_convergence_list") or []
     info = {"converged_count": state.get("ac_pf_converged_count"),
             "total_snapshots": state.get("ac_pf_total_snapshots")}
-    if len(entries) != len(n.snapshots):
+    if (not isinstance(entries, list) or len(entries) != len(n.snapshots)
+            or any(not isinstance(e, dict) for e in entries)):
         info["per_snapshot"] = "unaligned"
         return None, info
-    ok = np.array([bool(e.get("ok")) for e in entries[start:end + 1]])
+    ok = np.array([e.get("ok") is True for e in entries[start:end + 1]])
     info["per_snapshot"] = "aligned"
     info["unconverged_in_window"] = int((~ok).sum())
     return ok, info
@@ -194,6 +199,11 @@ def _frame(n: Any, accessor: str, attr: str, source: str, names: pd.Index,
            win_index: pd.Index) -> pd.DataFrame | None:
     from routers.results import _result_df
 
+    state = PyPSAService.get_solver_state()
+    if source == "ac_pf" or state.get("ac_pf_results") is not None:
+        snapshot = state.get(f"{source}_results")
+        if not isinstance(snapshot, dict) or f"{accessor}.{attr}" not in snapshot:
+            return None
     df = _result_df(n, accessor, attr, source)
     if df is None or getattr(df, "empty", True):
         return None
@@ -207,7 +217,7 @@ def _frame(n: Any, accessor: str, attr: str, source: str, names: pd.Index,
 def _smax_matrix(n: Any, comp_df: pd.DataFrame, t_accessor: str, names: pd.Index,
                  win_index: pd.Index) -> pd.DataFrame:
     static = pd.to_numeric(comp_df.get("s_max_pu", pd.Series(1.0, index=comp_df.index)),
-                           errors="coerce").reindex(names).fillna(1.0)
+                           errors="coerce").reindex(names)
     smax = pd.DataFrame(np.tile(static.to_numpy(float), (len(win_index), 1)),
                         index=win_index, columns=names)
     t_df = getattr(getattr(n, t_accessor, None), "s_max_pu", None)
@@ -232,10 +242,14 @@ def _rating(row: pd.Series) -> tuple[float | None, str | None]:
 
 def _summarise_class(n: Any, cls: str, comp: str, t_accessor: str, source: str,
                      win_index: pd.Index, weights: pd.Series, valid_mask: np.ndarray | None,
-                     missing: list[str]) -> tuple[list[dict], list[dict]]:
+                     missing: list[str], series_names: set[str] | None = None) -> tuple[list[dict], list[dict]]:
     comp_df = getattr(n, comp)
     if comp_df is None or comp_df.empty:
         return [], []
+    if series_names is not None:
+        comp_df = comp_df.loc[[name for name in comp_df.index if str(name) in series_names]]
+        if comp_df.empty:
+            return [], []
     names = comp_df.index
     p0 = _frame(n, t_accessor, "p0", source, names, win_index)
     if p0 is None:
@@ -262,12 +276,12 @@ def _summarise_class(n: Any, cls: str, comp: str, t_accessor: str, source: str,
             skipped.append({"name": label, "class": cls, "reason": "rating_missing_or_zero",
                             "rating_field": rating_field})
             continue
-        a0 = p0[name].where(mask)
+        a0 = p0[name].where(mask & np.isfinite(p0[name]))
         two_terminals = p1 is not None and name in p1.columns
         flow = a0.abs()
         basis = "active_power_proxy"
         if two_terminals:
-            flow = pd.Series(np.fmax(a0.abs().to_numpy(), p1[name].where(mask).abs().to_numpy()),
+            flow = pd.Series(np.fmax(a0.abs().to_numpy(), p1[name].where(mask & np.isfinite(p1[name])).abs().to_numpy()),
                              index=win_index)
         if q0 is not None and name in q0.columns and q0[name].notna().any():
             s0 = np.hypot(a0.to_numpy(), q0[name].to_numpy())
@@ -275,12 +289,12 @@ def _summarise_class(n: Any, cls: str, comp: str, t_accessor: str, source: str,
                   if two_terminals and q1 is not None and name in q1.columns else np.full(len(a0), np.nan))
             flow = pd.Series(np.where(mask.to_numpy(), np.fmax(s0, s1), np.nan), index=win_index)
             basis = "ac_apparent_power"
-        present = flow.notna()
+        present = pd.Series(np.isfinite(flow), index=win_index)
         if not present.any():
             skipped.append({"name": label, "class": cls, "reason": "no_flow_data"})
             continue
         limit_t = rating * smax[name]
-        valid_limit = present & (limit_t > 1e-9)
+        valid_limit = present & np.isfinite(limit_t) & (limit_t > 1e-9)
         if not valid_limit.any():
             skipped.append({"name": label, "class": cls, "reason": "zero_effective_limit"})
             continue
@@ -309,7 +323,17 @@ def _summarise_class(n: Any, cls: str, comp: str, t_accessor: str, source: str,
             "rating": {"value": _r(rating, 2), "basis": "optimized" if rating_field == "s_nom_opt" else "configured"},
             "s_max_pu": {"min": _r(smin, 3), "max": _r(smax_v, 3)},
             "_rank": peak_util,
+            "_native_name": str(name),
+            "_capacity": {
+                "configured": _r(comp_df.loc[name].get("s_nom"), 2),
+                "optimized": _r(rating, 2) if rating_field == "s_nom_opt" else None,
+                "extendable": rating_field == "s_nom_opt",
+            },
+            "mean_flow": _r(float((flow.where(valid_limit, 0.0) * wp).sum() / wsum) if wsum > 0 else None, 2),
         }
+        if series_names is not None:
+            row["_series"] = {"flow": [_r(x, 8) for x in flow.where(valid_limit).iloc[:800]],
+                              "util_pct": [_r(x * 100, 8) for x in util.iloc[:800]]}
         if not two_terminals:
             row["terminals"] = "bus0_only"
         if coverage < len(win_index):
@@ -319,16 +343,49 @@ def _summarise_class(n: Any, cls: str, comp: str, t_accessor: str, source: str,
 
 
 def _evidence_token(project_id: str, source: str, start: int, end: int, solve: dict,
-                    rows: list[dict]) -> str:
-    material = json.dumps([project_id, source, start, end, solve, [
-        (r["name"], r["util_pct"], r["rating_pct"]) for r in rows]],
-        sort_keys=True, default=str)
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+                    n: Any, weights: pd.Series, input_sha256: str) -> str:
+    """Hash the exact evidence, including non-peak values; never rounded rows."""
+    digest = hashlib.sha256(json.dumps(
+        [project_id, source, start, end, solve, input_sha256],
+        sort_keys=True, default=str).encode())
+    for _, comp, accessor in _BRANCH_CLASSES:
+        frames = [getattr(n, comp)]
+        for attr in ("p0", "p1", "q0", "q1"):
+            from routers.results import _result_df
+            frames.append(_result_df(n, accessor, attr, source))
+        frames.append(getattr(getattr(n, accessor), "s_max_pu", None))
+        for frame in frames:
+            if frame is None:
+                digest.update(b"absent")
+            else:
+                digest.update(str(getattr(frame, "columns", [])).encode())
+                digest.update(pd.util.hash_pandas_object(frame, index=True).values.tobytes())
+    digest.update(pd.util.hash_pandas_object(weights, index=True).values.tobytes())
+    digest.update(json.dumps(PyPSAService.get_solver_state().get("ac_pf_convergence_list"),
+                             sort_keys=True, default=str).encode())
+    return digest.hexdigest()
 
 
 def get_loadflow_summary(source: str = "lopf", limit: int = DEFAULT_LIMIT,
                          window_from: int | None = None, window_to: int | None = None,
                          run_id: str | None = None) -> dict:
+    from harness.durable import network_guard
+
+    with network_guard():
+        return _loadflow(source, limit, window_from, window_to, run_id)
+
+
+def get_loadflow_view(source: str = "lopf", window_from: int | None = None,
+                      window_to: int | None = None) -> dict:
+    """Bounded native UI projection of the same oracle as the chat tool."""
+    from harness.durable import network_guard
+
+    with network_guard():
+        return _loadflow(source, MAX_LIMIT, window_from, window_to, None, view=True)
+
+
+def _loadflow(source: str, limit: int, window_from: int | None,
+              window_to: int | None, run_id: str | None, *, view: bool = False) -> dict:
     _check_args(source, limit, window_from, window_to, run_id)
     _root, project_id, _owner = run_evidence._authority()
     if run_id is not None:
@@ -343,7 +400,34 @@ def get_loadflow_summary(source: str = "lopf", limit: int = DEFAULT_LIMIT,
     win_index, start, end = _window(n, window_from, window_to)
     from services import period_utils
 
+    raw_weights = getattr(n, "snapshot_weightings", None)
+    if not isinstance(raw_weights, pd.DataFrame) or "generators" not in raw_weights:
+        return _unavailable("invalid_snapshot_weights",
+                            "Generator snapshot weights are missing; no weighting basis is assumed.")
+    if isinstance(win_index, pd.MultiIndex):
+        period_weights = getattr(n, "investment_period_weightings", None)
+        if not isinstance(period_weights, pd.DataFrame) or "years" not in period_weights:
+            return _unavailable("invalid_snapshot_weights", "Investment-period years are missing.")
+        years = pd.to_numeric(period_weights["years"], errors="coerce").reindex(
+            win_index.get_level_values(0).unique())
+        if not np.isfinite(years).all() or (years < 0).any():
+            return _unavailable("invalid_snapshot_weights", "Investment-period years are invalid.")
     weights = period_utils.snapshot_weights(n, "generators")
+    requested_weights = weights.reindex(win_index)
+    if (not np.isfinite(requested_weights).all() or (requested_weights < 0).any()
+            or requested_weights.sum() <= 0):
+        return _unavailable("invalid_snapshot_weights",
+                            "Weighted loading needs finite nonnegative weights and positive covered hours.")
+    from services import workflow_tools
+
+    recorded = n.meta.get("assistant_solve_exact_input_fingerprint")
+    if not isinstance(recorded, str) or len(recorded) != 64:
+        return _unavailable("solve_provenance_missing",
+                            "Exact solve-input provenance is missing. Re-solve before reading load flow.")
+    input_sha256 = workflow_tools._network_input_fingerprint(PyPSAService.get_active_context(), exact=True)
+    if recorded != input_sha256:
+        return _unavailable("solve_inputs_changed",
+                            "Inputs changed after the recorded solve. Re-solve before reading load flow.")
     missing: list[str] = []
     valid_mask = None
     ac_info = None
@@ -351,8 +435,9 @@ def get_loadflow_summary(source: str = "lopf", limit: int = DEFAULT_LIMIT,
     if source == "ac_pf":
         valid_mask, ac_info = _ac_convergence(n, win_index, start, end)
         if valid_mask is None:
-            missing.append("AC convergence is not aligned with the snapshots; unconverged "
-                           "snapshots could not be excluded.")
+            return _unavailable("ac_pf_convergence_unavailable",
+                                "AC convergence is not aligned; no loading can be certified.",
+                                solve=solve, ac_pf=ac_info)
         else:
             excluded = int((~valid_mask).sum())
             if not valid_mask.any():
@@ -376,9 +461,30 @@ def get_loadflow_summary(source: str = "lopf", limit: int = DEFAULT_LIMIT,
                             skipped=skipped[:MAX_LISTED_NAMES])
 
     rows.sort(key=lambda r: (-r["_rank"], r["name"]))
-    token = _evidence_token(project_id, source, start, end, solve, rows)
+    token = _evidence_token(project_id, source, start, end, solve, n, weights, input_sha256)
+    series = []
+    view_rows = []
+    if view:
+        view_rows = [{**{k: v for k, v in r.items() if not k.startswith("_")},
+                      "capacity": r["_capacity"],
+                      "name": r["_native_name"][:512],
+                      "name_truncated": len(r["_native_name"]) > 512,
+                      "asset_key": hashlib.sha256((r["class"] + "/" + r["_native_name"]).encode()).hexdigest()}
+                     for r in rows[:500]]
+        # Re-read only the ten ranked chart branches while holding the same
+        # network lock. Do not retain every branch's entire time series.
+        for cls, comp, t_accessor in _BRANCH_CLASSES:
+            selected = {r["_native_name"] for r in rows[:10] if r["class"] == cls}
+            chart_rows, _ = _summarise_class(n, cls, comp, t_accessor, source, win_index,
+                                            weights, valid_mask, [], selected)
+            series.extend({"name": r["_native_name"][:512], "class": r["class"],
+                           "asset_key": hashlib.sha256((r["class"] + "/" + r["_native_name"]).encode()).hexdigest(),
+                           "name_truncated": len(r["_native_name"]) > 512, **r["_series"]}
+                          for r in chart_rows)
     for r in rows:
         r.pop("_rank")
+        r.pop("_native_name")
+        r.pop("_capacity")
     ranked_total = len(rows)
     bases = sorted({r["basis"] for r in rows})
     window_weights = weights.reindex(win_index).fillna(0.0)
@@ -403,11 +509,13 @@ def get_loadflow_summary(source: str = "lopf", limit: int = DEFAULT_LIMIT,
                    "of": len(n.snapshots), "start": str(win_index[0]), "end": str(win_index[-1]),
                    "weighted_hours": _r(window_weights.sum(), 2)},
         "freshness": "fresh",
+        "source_provenance": "recorded_exact_inputs",
         "solve": solve,
         "claims": {"full_ac_thermal_compliance": False, "reason": LIMITS_CLAIM},
         "bases_present": bases,
         "ranking_convention": RANKING_CONVENTION,
         "units": UNITS,
+        "weighting_basis": "Generator snapshot weights multiplied by investment-period years.",
         "counts": {"ranked": ranked_total,
                    "over_limit": sum(1 for r in rows if r["h_over_limit"]),
                    "at_limit": sum(1 for r in rows if r["h_at_limit"]),
@@ -424,11 +532,29 @@ def get_loadflow_summary(source: str = "lopf", limit: int = DEFAULT_LIMIT,
         out["ac_pf"] = {**(ac_info or {}), "unconverged_snapshots_excluded": excluded}
     # Shed the weakest-ranked rows, then the skipped list, until the whole
     # payload (claims and missing evidence included) fits the per-result cap.
-    while len(json.dumps(out)) > MAX_PAYLOAD_CHARS and len(out["top"]) > 1:
+    # Reserve room for the final truncation flags before enforcing the wire cap.
+    while len(json.dumps(out)) > MAX_PAYLOAD_CHARS - 100 and len(out["top"]) > 1:
         out["top"].pop()
-    while len(json.dumps(out)) > MAX_PAYLOAD_CHARS and out["skipped"]:
+    while len(json.dumps(out)) > MAX_PAYLOAD_CHARS - 100 and out["skipped"]:
         out["skipped"].pop()
     out["top_shown"] = len(out["top"])
     out["top_truncated"] = ranked_total > len(out["top"])
     out["skipped_truncated"] = len(skipped) > len(out["skipped"])
+    if view:
+        out["rows"] = view_rows
+        out["rows_truncated"] = ranked_total > len(out["rows"])
+        out["skipped"] = skipped[:500]
+        out["skipped_truncated"] = len(skipped) > len(out["skipped"])
+        # Ten branches x at most 800 snapshots. No downsampling or invented gap values.
+        out["series"] = [{**r, "flow": r["flow"][:800],
+                          "util_pct": r["util_pct"][:800]} for r in series[:10]]
+        out["series_index"] = [str(x) for x in win_index[:800]]
+        out["series_truncated"] = len(win_index) > 800 or ranked_total > 10
+        out["binding"] = {
+            "version": 1, "project_id": project_id, "scope": "current",
+            "project_name": PyPSAService.get_active_context().loaded_project,
+            "input_sha256": input_sha256,
+            "source": source, "window_from": start, "window_to": end,
+            "data_sha256": token,
+        }
     return out

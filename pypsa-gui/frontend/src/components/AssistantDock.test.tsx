@@ -366,37 +366,26 @@ describe('assistant dock prominence', () => {
     )
   })
 
-  it('walks the results tabs from the live composer and leaves the console closed', async () => {
+  it('keeps Guided policy and does not forward a local walkthrough to a competing model controller', async () => {
     const user = userEvent.setup()
-    const seen: string[] = []
-    const request = useUIStore.getState().requestResultsTab
-    useUIStore.setState({
-      activeSlidePanel: null,
-      resultsTabRequest: null,
-      uiMode: 'guided',
-      requestResultsTab: (tab: string) => {
-        seen.push(tab)
-        request(tab)
-      },
-    })
-    // The dev pause must not reject during this assertion. A hanging request
-    // keeps the first caption on screen until unmount cancels the walk.
-    vi.stubGlobal('fetch', () => new Promise(() => {}))
+    const forwarded = vi.fn()
+    window.addEventListener('companion:live-utterance', forwarded)
+    useUIStore.setState({ currentProject: 'Demo', discussedRun: null,
+      activeSlidePanel: null, resultsTabRequest: null, uiMode: 'guided' })
     const view = render(<AssistantDock />)
-    await user.click(screen.getByTestId('companion-live'))
-    await user.type(
-      screen.getByTestId('companion-live-input'),
-      'Walk me through the key results in each tab',
-    )
-    await user.click(screen.getByTestId('companion-live-send'))
-    expect(useUIStore.getState().assistantDockOpen).toBe(false)
-    expect(useUIStore.getState().activeSlidePanel).toBe('results')
-    expect(useUIStore.getState().uiMode).toBe('expert')
-    expect(seen).toEqual(['overview'])
-    expect(screen.getByTestId('companion-live-caption').textContent).toContain('Tab 1 of')
-    expect(screen.getByTestId('companion-live-caption').textContent).toContain('Overview')
-    view.unmount()
-    vi.unstubAllGlobals()
+    try {
+      await user.click(screen.getByTestId('companion-live'))
+      await user.type(screen.getByTestId('companion-live-input'), 'Walk me through the key results in each tab')
+      await user.click(screen.getByTestId('companion-live-send'))
+      expect(useUIStore.getState().assistantDockOpen).toBe(false)
+      expect(useUIStore.getState().uiMode).toBe('guided')
+      expect(useUIStore.getState().resultsTabRequest).toBeNull()
+      expect(screen.getByTestId('companion-live-caption').textContent).toContain('Guided mode')
+      expect(forwarded).not.toHaveBeenCalled()
+    } finally {
+      view.unmount()
+      window.removeEventListener('companion:live-utterance', forwarded)
+    }
   })
 
   it('reserves no column width while collapsed', () => {

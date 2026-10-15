@@ -114,6 +114,67 @@ def test_list_empty_project(roots):
     assert out['items'] == [] and out['total_count'] == 0 and out['has_more'] is False
 
 
+@pytest.mark.parametrize('target', ['run', 'manifest', 'section', 'evidence_root'])
+def test_evidence_reads_refuse_symlinks_outside_the_owned_project(roots, tmp_path, target):
+    root = roots['root_for'](PROJECT)
+    _publish_completed(root)
+    run = root / 'run_evidence' / 'run-completed'
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    if target == 'section':
+        path = run / 'sections' / 'summary.json'
+        external = outside / 'summary.json'
+        external.write_bytes(path.read_bytes())
+        path.unlink()
+        path.symlink_to(external)
+        out = re_.get_run_evidence('run-completed')
+        assert out['evidence_available'] is False
+        with pytest.raises(HTTPException) as exc:
+            re_.get_run_evidence('run-completed', 'summary')
+        assert exc.value.detail['error_kind'] == 'evidence_unavailable'
+        return
+    if target == 'manifest':
+        path = run / 'manifest.json'
+        external = outside / 'manifest.json'
+    elif target == 'run':
+        path, external = run, outside / 'run-completed'
+    else:
+        path, external = root / 'run_evidence', outside / 'run_evidence'
+    path.rename(external)
+    path.symlink_to(external, target_is_directory=target != 'manifest')
+    with pytest.raises(HTTPException) as exc:
+        re_.get_run_evidence('run-completed')
+    assert exc.value.status_code == 404
+
+
+def test_corrupt_manifest_section_names_cannot_escape_sections_directory(roots):
+    root = roots['root_for'](PROJECT)
+    _publish_completed(root)
+    run = root / 'run_evidence' / 'run-completed'
+    manifest = run / 'manifest.json'
+    record = json.loads(manifest.read_text())
+    record['sections']['../private'] = record['sections'].pop('summary')
+    (run / 'sections' / 'summary.json').rename(run / 'private.json')
+    manifest.write_text(json.dumps(record))
+    out = re_.get_run_evidence('run-completed')
+    assert out['evidence_available'] is False
+    assert out['sections'] == [{'name': '../private', 'available': False}]
+
+
+def test_publication_does_not_follow_a_symlinked_sections_directory(roots, tmp_path):
+    root = roots['root_for'](PROJECT)
+    run = root / 'run_evidence' / 'run-completed'
+    run.mkdir(parents=True)
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (run / 'sections').symlink_to(outside, target_is_directory=True)
+    with pytest.raises(HTTPException) as exc:
+        _publish_completed(root)
+    assert exc.value.status_code == 422
+    assert list(outside.iterdir()) == []
+    assert not (run / 'manifest.json').exists()
+
+
 # ── get ─────────────────────────────────────────────────────────────────
 
 def test_get_completed_run_returns_values_units_and_section(roots):

@@ -100,3 +100,12 @@ describe('Results opens on Summary after a new solve (M3)', () => {
     expect(screen.getByTestId('summary-stub')).toBeTruthy()
   })
 })
+
+
+it('a request for the already active tab still wins over a newly observed solve', async () => {
+  localStorage.setItem('results:active-tab', 'loadflow')
+  useUIStore.setState({ resultsTabRequest: 'loadflow' })
+  await renderResults()
+  expect(screen.getByTestId('loadflow-stub')).toBeTruthy()
+  expect(screen.queryByTestId('summary-stub')).toBeNull()
+})

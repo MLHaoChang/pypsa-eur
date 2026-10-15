@@ -1,8 +1,9 @@
-/** A view ACK certifies a mounted target, never the scientific validity of its data. */
+/** V1 certifies a mount; V2 certifies an exact displayed source. Neither grants domain approval. */
+import { displayedResultsSource, sameResultsSource, type ResultsSourceBinding } from './resultsSource'
 import { client } from '../api/client'
 
 export interface NavigationAcknowledgement {
-  version: 1
+  version: 1 | 2
   action_id: string
   turn_id: string
   binding_generation: number
@@ -10,6 +11,7 @@ export interface NavigationAcknowledgement {
   project_id: string
   input_sha256: string
   target: { panel_id: string; results_tab?: string }
+  source_binding?: ResultsSourceBinding
 }
 
 export function acknowledgeMountedView(
@@ -27,6 +29,10 @@ export function acknowledgeMountedView(
         const style = getComputedStyle(parent)
         if (style.display === 'none' || style.visibility === 'hidden') return false
       }
+      if (expected.version === 2) {
+        const data = displayedResultsSource(expected.target.results_tab ?? '', element)
+        if (!data || !expected.source_binding || !sameResultsSource(data, expected.source_binding)) return false
+      }
       return !expected.target.results_tab || Array.from(element.querySelectorAll<HTMLElement>('[data-assurance-tab]'))
         .some(tab => tab.dataset.assuranceTab === expected.target.results_tab)
     })
@@ -37,7 +43,8 @@ export function acknowledgeMountedView(
     if (!mounted()) return
     stop()
     const { version, action_id, turn_id, binding_generation, target } = expected
-    void client.post('/chat/ui-ack', { version, action_id, turn_id, binding_generation, target },
+    void client.post('/chat/ui-ack', { version, action_id, turn_id, binding_generation, target,
+      ...(version === 2 ? { source_binding: expected.source_binding } : {}) },
       { skipErrorToast: true }).then(response => {
       if (isCurrent() && mounted() && response.data?.outcome === 'completed') onVerified?.()
     }).catch(() => { /* Failed/expired ACKs retain submitted status. */ })

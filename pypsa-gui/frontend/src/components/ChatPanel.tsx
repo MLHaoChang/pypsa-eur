@@ -1,3 +1,4 @@
+import { navigationEpoch, manualNavigation } from '../utils/navigationEpoch'
 import AssistantResultCard from './AssistantResultCard'
 import DictationControls from './DictationControls'
 /**
@@ -1291,6 +1292,7 @@ export default function ChatPanel() {
   // tool_result / tool_error. `tool_result` frames don't carry the tier, so
   // this map is how a completion knows whether it mutated (assetWrite fix).
   const toolTierRef = useRef(new Map<string, string>())
+  const streamNavigationEpoch = useRef(navigationEpoch())
   const streamGenerationRef = useRef(0)
   const streamProjectRef = useRef(useUIStore.getState().currentProject)
   // Issue 11 — detached solver progress observer (GET …/progress). Independent
@@ -2343,13 +2345,14 @@ export default function ChatPanel() {
           evidence_available?: boolean
         }>(frame)
         try {
-          applyUiNavigate(d)
+          if (!applyUiNavigate(d, streamNavigationEpoch.current)) break
           if (d.acknowledgement && assuranceRef.current.strict) {
             const expected = d.acknowledgement
             const state = assuranceRef.current
             acknowledgeMountedView(expected, () => assuranceRef.current === state
               && streamGenerationRef.current === expected.binding_generation
-              && useUIStore.getState().currentProject === expected.project_name, () => {
+              && useUIStore.getState().currentProject === expected.project_name
+              && streamNavigationEpoch.current === navigationEpoch(), () => {
               if (!d.tool_use_id) return
               state.navigationCompleted ??= new Set()
               state.navigationCompleted.add(d.tool_use_id)
@@ -2546,6 +2549,8 @@ export default function ChatPanel() {
       else setInput(text)
       return
     }
+    manualNavigation()
+    streamNavigationEpoch.current = navigationEpoch()
     const generation = ++streamGenerationRef.current
     streamProjectRef.current = useUIStore.getState().currentProject
     const chatSequence = useChatStore.getState().newChatSeq

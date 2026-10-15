@@ -199,6 +199,10 @@
       "surface": "inline",
       "why": "PUT /{name}/reports/{id}/template/plan (or set_report_mapping) received a body that is not a mapping plan, or a plan that needs sanitising under strict mode; the detail carries the sanitiser's notes naming the heading or section that does not exist. Per-call: the model (or the plan editor) corrects the plan within the turn, as with invalid_tool_args."
     },
+    "invalid_run_evidence": {
+      "surface": "inline",
+      "why": "Run-evidence validation or a path-containment guard refused this evidence operation. Its own error explains the refusal; the turn can continue without a conversation-wide banner."
+    },
     "invalid_report_id": {
       "surface": "inline",
       "why": "A report id that is not 16 lowercase hex characters, refused at the store boundary before any path is joined. Route-only in WP1; when WP6's report tools pass a model-typed id, the model sees the message and corrects within the turn, as with invalid_tool_args."
