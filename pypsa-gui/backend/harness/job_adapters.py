@@ -12,6 +12,7 @@ import math
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -98,6 +99,75 @@ _LOCK = threading.RLock()
 _FOREGROUND: dict[str, ForegroundJob] = {}
 _STUDIES: dict[str, StudyJob] = {}
 _REPORTS: dict[str, ReportJobHandle] = {}
+# Small identity-only bindings; never retain networks, results or provider data.
+_ACTIVITY_BINDINGS: OrderedDict[str, tuple] = OrderedDict()
+
+
+def _bind_activity(job_id, ctx, key=None):
+    if ctx is None:
+        from services.pypsa_service import PyPSAService
+        ctx = PyPSAService.get_active_context()
+    with ctx.solver_state_lock:
+        record = ctx.solver_state if key is None else ctx.solver_state.get(key)
+        if isinstance(record, dict):
+            _ACTIVITY_BINDINGS[job_id] = (
+                id(ctx), key, record.get('thread'), record.get('started_at'),
+            )
+            while len(_ACTIVITY_BINDINGS) > 512:
+                _ACTIVITY_BINDINGS.popitem(last=False)
+
+
+def _snapshot_bound_job(job_id, ctx):
+    """Read one exact native origin under its short lifecycle lock.
+
+    Check and read are atomic against replacement. Never acquire the network
+    mutation lock, and never use a latest-project result for an old handle.
+    """
+    with _LOCK:
+        binding = _ACTIVITY_BINDINGS.get(job_id)
+    if ctx is None or binding is None or binding[0] != id(ctx):
+        return {'status': 'unknown'}
+    _, key, worker, started = binding
+    with ctx.solver_state_lock:
+        record = ctx.solver_state if key is None else ctx.solver_state.get(key)
+        if not isinstance(record, dict) or not (
+            (worker is not None and record.get('thread') is worker)
+            or (worker is None and started is not None and record.get('started_at') == started)
+        ):
+            return {'status': 'unknown'}
+        snap = {k: record.get(k) for k in (
+            'status', 'kind', 'objective', 'condition', 'stage', 'error',
+            'report_id', 'mode', 'section', 'version',
+        )}
+        snap['section'] = snap['section'] or record.get('current_section')
+        snap['running'] = snap['status'] == 'running'
+        snap['progress'] = None
+        for field in ('iterations', 'points', 'rows'):
+            value = record.get(field)
+            if isinstance(value, list):
+                snap['progress'] = {field: len(value)}
+                break
+        return snap
+
+
+def activity_jobs(ctx, *, owner_id: str, project_id: str) -> list[dict]:
+    """Exact owned registered jobs, bounded to 512 recent identity bindings."""
+    with _LOCK:
+        handles = [(_FOREGROUND.get(j) or _STUDIES.get(j) or _REPORTS.get(j))
+                   for j in _ACTIVITY_BINDINGS]
+    rows = []
+    for handle in handles:
+        if handle is None or str(handle.owner_user_id) != owner_id or str(handle.project_uuid) != project_id:
+            continue
+        snap = _snapshot_bound_job(handle.job_id, ctx)
+        rows.append({
+            'source_id': handle.job_id, 'family': handle.family,
+            'title': handle.tool_name.replace('_', ' '),
+            'native_status': snap.get('status') or 'unknown',
+            'stage': str(snap['stage'])[:120] if snap.get('stage') else None,
+            'tool_use_id': handle.tool_use_id,
+        })
+    return rows
 
 
 def _refuse(kind: str, message: str, status: int = 404, **extra) -> None:
@@ -125,6 +195,7 @@ def register_foreground_solve(
     owner_user_id: str | None,
     project_uuid: str | None,
     kind: str | None,
+    ctx=None,
 ) -> str:
     """Mint a stable handle for a running foreground simulation/AC-PF."""
     job_id = FOREGROUND_PREFIX + uuid.uuid4().hex
@@ -139,6 +210,7 @@ def register_foreground_solve(
             kind=kind,
             created_at=time.monotonic(),
         )
+        _bind_activity(job_id, ctx)
     return job_id
 
 
@@ -149,6 +221,7 @@ def register_study_job(
     tool_use_id: str,
     owner_user_id: str | None,
     project_uuid: str | None,
+    ctx=None,
 ) -> str:
     """Mint a stable handle for a running adequacy/study mesh worker."""
     if study_key not in set(STUDY_TOOL_KEYS.values()):
@@ -169,6 +242,7 @@ def register_study_job(
             project_uuid=project_uuid,
             created_at=time.monotonic(),
         )
+        _bind_activity(job_id, ctx, study_key)
     return job_id
 
 
@@ -179,6 +253,7 @@ def register_report_job(
     report_id: str | None,
     owner_user_id: str | None,
     project_uuid: str | None,
+    ctx=None,
 ) -> str:
     """Mint a stable handle for a running report generation/mapping job."""
     job_id = REPORT_PREFIX + uuid.uuid4().hex
@@ -193,6 +268,7 @@ def register_report_job(
             project_uuid=project_uuid,
             created_at=time.monotonic(),
         )
+        _bind_activity(job_id, ctx, REPORT_STATE_KEY)
     return job_id
 
 
@@ -230,22 +306,6 @@ def _require_report(job_id: str, actor_id: str | None) -> ReportJobHandle:
     return job
 
 
-def _snapshot_solver() -> dict[str, Any]:
-    from services.pypsa_service import PyPSAService
-
-    ctx = PyPSAService.get_active_context()
-    with ctx.solver_state_lock:
-        status = ctx.solver_state.get('status')
-        kind = ctx.solver_state.get('kind')
-        objective = ctx.solver_state.get('objective')
-        condition = ctx.solver_state.get('condition')
-    return {
-        'status': status,
-        'kind': kind,
-        'objective': objective,
-        'condition': condition,
-        'running': status == 'running',
-    }
 
 
 def _job_view(handle: ForegroundJob, snap: dict[str, Any]) -> dict[str, Any]:
@@ -284,7 +344,6 @@ def wait_foreground_job(
     started = time.monotonic()
     deadline = started + timeout_seconds
     while True:
-        snap = _snapshot_solver()
         # Project rebind under the wait must not report another project's
         # solver as this handle's outcome — require matching project when known.
         from services.pypsa_service import PyPSAService
@@ -297,6 +356,7 @@ def wait_foreground_job(
                 'The active project no longer matches this foreground job.',
                 409,
             )
+        snap = _snapshot_bound_job(job_id, ctx)
         status = snap.get('status')
         terminal = status in _FG_TERMINAL
         cancelled = stop.is_set()
@@ -325,29 +385,6 @@ def wait_foreground_job(
         stop.wait(min(0.25, max(0, deadline - time.monotonic())))
 
 
-def _snapshot_study(study_key: str) -> dict[str, Any]:
-    from services.pypsa_service import PyPSAService
-
-    ctx = PyPSAService.get_active_context()
-    with ctx.solver_state_lock:
-        record = ctx.solver_state.get(study_key)
-        if not isinstance(record, dict):
-            return {'status': 'unknown', 'stage': None, 'progress': None}
-        status = record.get('status')
-        stage = record.get('stage')
-        # Cheap progress cursor when the runner exposes iterative collections.
-        progress = None
-        for field in ('iterations', 'points', 'rows'):
-            value = record.get(field)
-            if isinstance(value, list):
-                progress = {field: len(value)}
-                break
-        return {
-            'status': status,
-            'stage': stage,
-            'progress': progress,
-            'error': record.get('error'),
-        }
 
 
 def _study_job_view(handle: StudyJob, snap: dict[str, Any]) -> dict[str, Any]:
@@ -402,7 +439,7 @@ def wait_study_job(
                 'The active project no longer matches this study job.',
                 409,
             )
-        snap = _snapshot_study(handle.study_key)
+        snap = _snapshot_bound_job(job_id, ctx)
         status = snap.get('status')
         terminal = status in _STUDY_TERMINAL
         cancelled = stop.is_set()
@@ -439,28 +476,6 @@ def wait_study_job(
         stop.wait(min(0.25, max(0, deadline - time.monotonic())))
 
 
-def _snapshot_report() -> dict[str, Any]:
-    from services.pypsa_service import PyPSAService
-    from services.reports.report_job import public_record
-
-    ctx = PyPSAService.get_active_context()
-    with ctx.solver_state_lock:
-        record = public_record(ctx.solver_state.get(REPORT_STATE_KEY))
-    if not isinstance(record, dict):
-        return {
-            'status': 'unknown',
-            'report_id': None,
-            'mode': None,
-            'section': None,
-        }
-    return {
-        'status': record.get('status'),
-        'report_id': record.get('report_id'),
-        'mode': record.get('mode'),
-        'section': record.get('section') or record.get('current_section'),
-        'error': record.get('error'),
-        'version': record.get('version'),
-    }
 
 
 def _report_job_view(handle: ReportJobHandle, snap: dict[str, Any]) -> dict[str, Any]:
@@ -511,7 +526,7 @@ def wait_report_job(
                 'The active project no longer matches this report job.',
                 409,
             )
-        snap = _snapshot_report()
+        snap = _snapshot_bound_job(job_id, ctx)
         status = snap.get('status')
         terminal = status in _REPORT_TERMINAL
         cancelled = stop.is_set()
@@ -547,3 +562,4 @@ def _reset_for_tests() -> None:
         _FOREGROUND.clear()
         _STUDIES.clear()
         _REPORTS.clear()
+        _ACTIVITY_BINDINGS.clear()

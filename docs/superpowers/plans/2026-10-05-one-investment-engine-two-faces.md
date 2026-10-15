@@ -225,6 +225,12 @@ without value flows); the guided study reads it to say when its analytic basis k
 Addition: `FinanceInputs.island_outage` (`IslandOutage{hours_per_year, source}`, default None), the user's
 expected outage hours for the island break-even (owner decision 2026-10-15; no default). Left out of
 `finance_case_hash` when None, so a case without it keeps its hash; it never enters the cash flows.
+**Additions (2026-10-15, generic-site E2E H2e, `.scratch/generic-site/engine-slices.md`):**
+`CommercialConfig.reference_purchases` (default `[]`) and `CommercialConfig.co2_price` (default None), with the
+models `ReferencePurchase` and `Co2Price`. They are read only by the finance adapter's counterfactual. Unset, they
+add no line, flag or hash key, so an existing case keeps its `finance_case_hash` and its `run_case` output. No
+signature changes (`_counterfactual` is private). With a `baseline` (site today) they are not applied:
+flagged `reference_purchases_not_applied:site_today_basis` / `co2_price_not_applied:site_today_basis`.
 
 ## 7. Coordination protocol
 

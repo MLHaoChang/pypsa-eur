@@ -131,9 +131,19 @@ def test_the_island_chapter_shows_the_checks_and_the_gfm_settings():
 
 
 def test_an_applied_recommendation_asks_for_the_re_solve():
-    ev = _collect(island={"report": _island_report(), "gfm": _gfm(
-        status="recommended", state="stale",
-        applied={"at": 1, "changes": [{"unit": "BESS1"}], "hub_resolve_needed": True})})
+    gfm = _gfm(status="recommended", state="stale")
+    gfm["applied"] = {"at": 1, "changes": [{"unit": "BESS1"}], "hub_resolve_needed": True}
+    ev = _collect(island={"report": _island_report(), "gfm": gfm})
+    assert any("Re-solve the hub" in d for d in ev.required_disclosures)
+
+
+def test_the_re_solve_disclosure_outlives_the_recommendation():
+    """#310 review: a campus run removes the recommendation; the applied
+    record still asks for the re-solve, even with no island table."""
+    gfm = {"state": "not_run", "reason": "r", "recommendation": None,
+           "applied": {"at": 1, "changes": [], "hub_resolve_needed": True}}
+    ev = _collect(island={"report": None, "gfm": gfm})
+    assert ev.sections[chapters.ISLAND].status == "ok"
     assert any("Re-solve the hub" in d for d in ev.required_disclosures)
 
 
@@ -239,3 +249,19 @@ def test_an_incomplete_search_shows_its_best_settings_so_far_never_a_recommendat
     assert ev.tables["island_gfm_settings"].columns[-1] == "Best found so far"
     ev = _collect(island={"report": _island_report(), "gfm": _gfm(status="recommended")})
     assert ev.tables["island_gfm_settings"].columns[-1] == "Recommended"
+
+
+def test_an_island_chapter_without_an_apply_record_carries_no_applied_key():
+    """#310 review: the key is added only with a record, so a report of an
+    island with no recommendation keeps its evidence hash."""
+    ev = _collect(island={"report": _island_report(), "gfm": {"state": "not_run", "reason": "r",
+                                                               "recommendation": None}})
+    assert "applied" not in ev.sections[chapters.ISLAND].payload["gfm"]
+
+
+def test_island_constraints_off_says_the_hub_does_not_read_them():
+    gfm = {"state": "ready", "reason": "", "recommendation": None,
+           "applied": {"at": 1, "changes": [], "hub_resolve_needed": False}}
+    ev = _collect(island={"report": _island_report(), "gfm": gfm})
+    assert any("does not read them" in d for d in ev.required_disclosures)
+    assert not any("Re-solve the hub" in d for d in ev.required_disclosures)

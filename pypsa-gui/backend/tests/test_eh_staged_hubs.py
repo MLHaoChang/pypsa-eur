@@ -4,9 +4,10 @@ H1/M1: template data only).
 Each is its single-year template over 2027/2030/2035 with one candidate row
 per period, the existing hub sunk and finance inputs shipped. The H2 hub's
 investment case is refused today (its H2 offtake has no source without the
-investment: the grey-H2 counterfactual is a later engine slice) and the
-microgrid ships no commercial config (no grid comparison: the diesel-only
-baseline is a later engine slice); both say so in their notes and ledger.
+investment: the grey-H2 counterfactual is a later engine slice). The
+microgrid's case compares against the island as it stands today (owner,
+M2e (a)): the open tie is its PoC, with no tariff, and the investment-case
+route re-solves the island without the candidates (#302).
 """
 from __future__ import annotations
 
@@ -101,13 +102,20 @@ def test_the_blocks_validate_and_say_what_is_missing():
     fin = FinanceInputs.model_validate(h2["finance"])
     assert fin.cod_by_asset == {a: date(2027, 1, 1) for a in H.H2_EXISTING}
     mg = T.solver_config("eh_microgrid_staged")
-    assert "commercial" not in mg and mg["island_constraints"] is True
-    FinanceInputs.model_validate(mg["finance"])
+    com = CommercialConfig.model_validate(mg["commercial"])
+    assert com.poc_link == "subsea_tie" and com.import_tariff is None
+    assert com.export_link is None and mg["island_constraints"] is True
+    fin = FinanceInputs.model_validate(mg["finance"])
+    assert fin.cod_by_asset == {a: date(2027, 1, 1) for a in H.MG_EXISTING}
     for tid in IDS:
         items = {r["item"]: r for r in T.TEMPLATE_META[tid]["ledger"]}
         assert "investment case" in items
-        assert any("investment case is not available yet" in s
-                   for s in T.TEMPLATE_META[tid]["study_notes"])
+    assert any("investment case is not available yet" in s
+               for s in T.TEMPLATE_META["eh_h2_hub_staged"]["study_notes"])
+    mg_case = {r["item"]: r for r in T.TEMPLATE_META["eh_microgrid_staged"]["ledger"]}
+    assert mg_case["investment case"]["value"] == (
+        "compared with the island as it stands today: the existing diesels, PV, wind and "
+        "battery, without the planned candidates, and no grid")
 
 
 def test_the_microgrid_island_sidecar_is_valid():
@@ -211,3 +219,39 @@ def test_the_microgrid_plans_for_its_growing_load_with_the_island_rows(reset_bac
     assert built > 0.1
     # the tie stays open: the island serves itself
     assert float(n.links_t.p0["subsea_tie"].abs().max()) == pytest.approx(0.0, abs=1e-6)
+
+
+@pytest.mark.live_solve
+def test_the_microgrid_case_compares_with_the_island_as_it_stands_today(reset_backend,
+                                                                       monkeypatch, tmp_path):
+    """Owner, M2e (a): the baseline re-solve keeps the existing diesels, PV,
+    wind and battery and removes the candidates the plan builds; nothing is
+    shed, so no part of the NPV is the value of lost load; the avoided cost
+    is the existing diesels' running cost."""
+    import routers.results as R
+    from models.finance import FinanceInputs
+    from services.finance.engine import run_case
+    from services.results import baseline as Bl
+    from services.results.finance_case import baseline_plan, build_finance_case
+
+    n, cfg, state = _solve("eh_microgrid_staged", monkeypatch, tmp_path)
+    Bl.clear_cache()
+    plan = baseline_plan(n, cfg)
+    assert plan is not None and plan.needed
+    removed = {name for _c, name, _k in plan.removed}
+    built = {c for df in (n.generators, n.storage_units) for c in df.index
+             if "_new_" in c and float(df.at[c, "p_nom_opt"]) > 1e-6}
+    assert built and built <= removed and not removed & set(H.MG_EXISTING)
+    base = Bl.solve_baseline(n, cfg, plan)
+    case = build_finance_case(n, cfg, FinanceInputs.model_validate(cfg.finance),
+                              result_df=R._result_df, lost_load=state.get("last_lost_load"),
+                              baseline=base)
+    Bl.clear_cache()
+    assert "counterfactual_basis:site_today" in case.flags
+    assert not any(f.startswith("counterfactual_not_established") for f in case.flags)
+    keys = {ln.key for t in case.counterfactual for ln in t.lines}
+    assert "counterfactual:shed_at_voll" not in keys
+    assert {f"asset:opex:Generator:diesel_{i}" for i in (1, 2, 3)} <= keys
+    r = run_case(case)
+    assert r.metrics["project_pre_tax_npv"] is not None
+

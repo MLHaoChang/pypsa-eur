@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
 from models.finance import InvestmentCaseReport, export_investment_case
 from services.finance.debt import CFADS_DEFINITION
 
@@ -507,6 +509,9 @@ def _counterfactual_block(result, case) -> dict[str, Any]:
         "basis": BASIS_TEXT[("site_today_no_island" if "baseline_island_rows_relaxed"
                              in result.flags else "site_today") if site_today else "analytic"],
         "notes": [t for t in (flag_text(f) for f in result.flags) if t],
+        # The template starts: one per period, plus one at each listed CO2
+        # price year inside a period's span (H2e sub-templates); `n_lines`
+        # counts every template's lines.
         "first_years": sorted({int(t.first_year) for t in case.counterfactual}),
         "n_lines": len(lines),
         "sources": sorted({f"{ln.source}:{ln.source_id}" if ln.source_id else ln.source
@@ -517,7 +522,36 @@ def _counterfactual_block(result, case) -> dict[str, Any]:
         # What it was built from — tariff, served load, connection, commodity
         # (plan C13; WP4.6a review B9). None for a hand-built case.
         "hash": getattr(case, "counterfactual_hash", None),
+        # Of which avoided CO2 cost (H2e): the `co2:*` lines, actual minus
+        # counterfactual per year — cash the site would otherwise pay at the
+        # stated CO2 price. None when there is none or one is not established.
+        "avoided_co2_cost": None
+        if any(f.startswith("co2_price_not_applied:") for f in result.flags)
+        else _avoided_co2(result),
+        # Whether the case prices CO2 at all, so a None above reads "not
+        # established", never "none" (gatekeeper review of #305).
+        "co2_priced": any(ln.key.startswith("co2:")
+                          for t in (*case.templates, *case.counterfactual) for ln in t.lines)
+        or any(f.startswith("co2_price_not_applied:") for f in result.flags),
     }
+
+
+def _avoided_co2(result) -> list[float] | None:
+    act = getattr(getattr(result, "op", None), "lines", None) or {}
+    cf_op = getattr(result, "op_counterfactual", None)
+    cf = getattr(cf_op, "lines", None) or {}
+    keys = sorted(k for k in set(act) | set(cf) if k.startswith("co2:"))
+    if not keys:
+        return None
+    total = None
+    for key in keys:
+        a, c = act.get(key, 0.0), cf.get(key, 0.0)
+        if (key in act and a is None) or (key in cf and c is None):
+            return None
+        a = np.zeros_like(c) if key not in act else np.asarray(a, dtype=float)
+        c = np.zeros_like(a) if key not in cf else np.asarray(c, dtype=float)
+        total = (a - c) if total is None else total + (a - c)
+    return [float(x) for x in total]
 
 
 def _project_reasons(result) -> list[str]:

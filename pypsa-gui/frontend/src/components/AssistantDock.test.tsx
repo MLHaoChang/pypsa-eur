@@ -421,3 +421,19 @@ describe('assistant dock prominence', () => {
     expect(dock.style.width).toBe('560px')
   })
 })
+
+
+it('keeps chat mounted across Activity and reopens Compose as chat', async () => {
+  useUIStore.setState({ assistantDockOpen: true, currentProject: null })
+  const user = userEvent.setup()
+  chatPanelMounts.current = 0
+  render(<AssistantDock />)
+  await user.click(screen.getByRole('button', { name: 'Activity' }))
+  expect(screen.getByRole('region', { name: 'Assistant activity' })).toBeTruthy()
+  expect(chatPanelMounts.current).toBe(1)
+  await user.click(screen.getByTestId('assistant-dock-collapse'))
+  await user.click(screen.getByTestId('companion-compose'))
+  expect(screen.queryByRole('region', { name: 'Assistant activity' })).toBeNull()
+  expect(chatPanelMounts.current).toBe(1)
+  expect(screen.getByTestId('assistant-dock-body').className.split(/\s+/)).not.toContain('hidden')
+})

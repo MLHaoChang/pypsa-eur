@@ -600,6 +600,57 @@ class MarketPack(BaseModel):
     valid_year: int
 
 
+# ------------------------------------------------------------------ counterfactual purchases (H2e)
+
+
+class ReferencePurchase(BaseModel):
+    """What the site would buy, without the investment, for one non-electric
+    site Load the owner's conversion serves (generic-site E2E H2e; owner Q3):
+    grey H2 for an H2 offtake, say. The investment case's counterfactual buys
+    the load's energy at this price instead of leaving it without a source.
+    Every number is an input with its `source`; none is an engine constant."""
+
+    load: str = Field(min_length=1)
+    #: The purchase price per kg, in the case's base-year money (as tariffs are).
+    price_eur_per_kg: float = Field(ge=0)
+    #: Energy per kg (kWh/kg) converting the load's MWh to kg. 33.33 kWh/kg is
+    #: hydrogen's lower heating value (US DOE Hydrogen Program, H2 properties).
+    lhv_kwh_per_kg: float = Field(default=33.33, gt=0)
+    #: The purchase's CO2 intensity (t CO2 per kg); no default (grey H2 by SMR
+    #: is ~0.009-0.012 t/kg, but the case states its own).
+    co2_t_per_kg: float = Field(ge=0)
+    source: str = Field(min_length=1)
+
+
+class Co2Price(BaseModel):
+    """A CO2 certificate price by year (an ETS-like trajectory; owner Q3).
+    Each period of the case takes the price of the last listed year at or
+    before the period's year; a period before the first listed year is
+    refused (`co2_price_year_uncovered:<year>`), never extrapolated back.
+    Prices are REAL in `money_year` money: a nominal case escalates them at
+    the case's inflation, a real case keeps them. The cost it puts on a
+    purchase, or on grid imports, is cash the site would otherwise pay."""
+
+    eur_per_t_by_year: dict[int, float]
+    money_year: int
+    source: str = Field(min_length=1)
+    #: The grid import's CO2 intensity (t/MWh). Opt-in: with none there is no
+    #: grid CO2 line. It is ADDITIONAL to any carbon cost already in the
+    #: tariff or the wholesale price; 0 if they include it.
+    grid_t_per_mwh: float | None = Field(default=None, ge=0)
+    grid_source: str | None = None
+
+    @model_validator(mode="after")
+    def _check(self) -> "Co2Price":
+        if not self.eur_per_t_by_year:
+            raise ValueError("eur_per_t_by_year needs at least one year")
+        if any(not (v >= 0) for v in self.eur_per_t_by_year.values()):
+            raise ValueError("eur_per_t_by_year: prices must be non-negative numbers")
+        if self.grid_t_per_mwh is not None and not self.grid_source:
+            raise ValueError("grid_t_per_mwh needs grid_source")
+        return self
+
+
 # ------------------------------------------------------------------ solver-config boundary
 
 
@@ -663,6 +714,12 @@ class CommercialConfig(BaseModel):
     # `Any`, not `dict`: a hand-edited file holding a string or a list must not
     # make `_lp._parse` fail the solve either (WP3.0 review #3).
     value_flows: Any = None
+    # The investment case's counterfactual (generic-site E2E H2e): what the
+    # site buys without the investment for a non-electric load, and a CO2
+    # price on that purchase and (opt-in) on grid imports. Read only by the
+    # finance adapter, never by the LP.
+    reference_purchases: list[ReferencePurchase] = Field(default_factory=list)
+    co2_price: Co2Price | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -679,6 +736,9 @@ class CommercialConfig(BaseModel):
 
     @model_validator(mode="after")
     def _unique_contract_ids(self) -> "CommercialConfig":
+        loads = [r.load for r in self.reference_purchases]
+        if len(loads) != len(set(loads)):
+            raise ValueError("reference_purchases: one purchase per load")
         ids = [c.id for c in self.contracts]
         if len(ids) != len(set(ids)):
             # One `ic:contract:<id>` column per contract (WP2.2-0 review 0b #3).

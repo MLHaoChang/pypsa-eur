@@ -80,6 +80,11 @@ const GUIDED_CARD_SUMMARY: Record<string, (a: Record<string, unknown>) => string
   // campus island I7: the loop re-solves and saves the hub and rewrites the campus file's sizes.
   campus_apply_island_cuts: (a) => `Apply the frequency cuts to ${_str(a.project_id) ?? 'this project'}: `
     + 're-solve and save the hub, update the sizes in its campus file and rerun the island check, up to 3 times',
+  // GFM-b: the recommender is a campus job; the apply writes the sidecar and the campus file.
+  campus_recommend_gfm_settings: (a) => `Recommend grid-forming settings for ${_str(a.project_id) ?? 'this project'} `
+    + 'from its last campus run (heuristic screening)',
+  campus_apply_gfm_settings: (a) => 'Write the recommended grid-forming settings into the island data and the '
+    + `campus file of ${_str(a.project_id) ?? 'this project'}; the hub then needs a re-solve`,
   run_decision_study: (a) => a.stage === 'tornado'
     ? 'Test the study’s best option against each key assumption’s range'
     : 'Run the decision study: calculate every option',

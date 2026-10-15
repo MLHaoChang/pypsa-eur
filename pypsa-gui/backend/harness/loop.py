@@ -2809,6 +2809,7 @@ def _dispatch_real_tool_call(
                     tool_use_id=tool_use_id,
                     owner_user_id=str(owner) if owner else None,
                     project_uuid=getattr(active_ctx, "project_uuid", None),
+                    ctx=active_ctx,
                     kind=kind,
                 )
                 from services import run_evidence as _run_evidence
@@ -2861,6 +2862,7 @@ def _dispatch_real_tool_call(
                     tool_use_id=tool_use_id,
                     owner_user_id=str(owner) if owner else None,
                     project_uuid=getattr(active_ctx, "project_uuid", None),
+                    ctx=active_ctx,
                 )
                 monitor = (
                     "get_investment_case"
@@ -2894,6 +2896,7 @@ def _dispatch_real_tool_call(
                     report_id=result.get("report_id"),
                     owner_user_id=str(owner) if owner else None,
                     project_uuid=getattr(active_ctx, "project_uuid", None),
+                    ctx=active_ctx,
                 )
                 result = {
                     **result,
