@@ -125,7 +125,12 @@ function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 
 function control(gfm: GfmSettingsState | null | undefined): ChapterTile['control'] {
   if (!gfm) return undefined
   const rec = gfm.recommendation
-  if ((gfm.applied ?? rec?.applied)?.hub_resolve_needed) {
+  const applied = gfm.applied ?? rec?.applied
+  if (applied && !applied.hub_resolve_needed) {
+    return { state: 'ready',
+      text: 'Grid-forming settings applied; island constraints are off, so the hub solve does not read them.' }
+  }
+  if (applied?.hub_resolve_needed) {
     return { state: 'stale', resolve: true,
       text: 'Grid-forming settings applied. Re-solve the hub: these settings change its island rows; '
         + 'then run the campus study again.' }

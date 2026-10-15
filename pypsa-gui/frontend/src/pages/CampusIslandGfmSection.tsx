@@ -77,7 +77,8 @@ export default function CampusIslandGfmSection({ name }: { name: string }) {
   const data = gfm.data
   const rec = data?.recommendation ?? null
   const applied = data?.applied ?? rec?.applied
-  const canApply = data?.state === 'ready' && rec?.status === 'recommended' && !applied
+  // the backend refuses a second apply of the same recommendation (409)
+  const canApply = data?.state === 'ready' && rec?.status === 'recommended'
 
   return (
     <div className="mt-4" data-testid="gfm-section">
@@ -106,11 +107,13 @@ export default function CampusIslandGfmSection({ name }: { name: string }) {
           </Btn>
         </div>
       )}
-      {applied?.hub_resolve_needed && (
+      {applied && (
         <p className="text-[12px] mt-2" data-testid="gfm-resolve" role="status">
           Applied ({applied.changes.length} setting{applied.changes.length === 1 ? '' : 's'}).{' '}
-          Re-solve the hub: these settings change its island rows.{' '}
-          <Btn onClick={requestRunSolve}><Play size={12} /> Solve</Btn>
+          {applied.hub_resolve_needed
+            ? <>Re-solve the hub: these settings change its island rows.{' '}
+                <Btn onClick={requestRunSolve}><Play size={12} /> Solve</Btn></>
+            : 'Island constraints are off, so the hub solve does not read these settings.'}
         </p>
       )}
     </div>

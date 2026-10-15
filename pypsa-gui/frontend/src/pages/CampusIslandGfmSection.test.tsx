@@ -141,4 +141,14 @@ describe('CampusIslandGfmSection', () => {
     expect((await screen.findByTestId('gfm-resolve')).textContent)
       .toMatch(/Applied \(1 setting\).*Re-solve the hub: these settings change its island rows/)
   })
+
+  it('with island constraints off it says the hub solve does not read the settings, no Solve', async () => {
+    api.gfmSettings.mockResolvedValue({ state: 'stale', reason: 'x', recommendation: null,
+      applied: { at: 1, hub_resolve_needed: false, changes: [
+        { unit: 'BESS1', pypsa_name: 'bess', field: 'droop_pct', from: 4, to: 2.5 }] } })
+    renderSection()
+    const line = await screen.findByTestId('gfm-resolve')
+    expect(line.textContent).toMatch(/Island constraints are off, so the hub solve does not read these settings/)
+    expect(screen.queryByRole('button', { name: /Solve/ })).toBeNull()
+  })
 })

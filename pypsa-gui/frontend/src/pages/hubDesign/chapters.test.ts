@@ -137,6 +137,10 @@ describe('chapterTiles', () => {
                                 text: expect.stringMatching(/Re-solve the hub: these settings change its island rows/) })
       // a campus run removed the recommendation; the record still asks (#310 review)
       expect(ctl({ state: 'not_run', reason: '', recommendation: null, applied })).toMatchObject({ resolve: true })
+      // island constraints off: the hub solve does not read them, no Solve
+      expect(ctl({ state: 'stale', reason: '', recommendation: null,
+                   applied: { ...applied, hub_resolve_needed: false } }))
+        .toMatchObject({ state: 'ready', text: expect.stringMatching(/does not read them/) })
     })
   })
 })

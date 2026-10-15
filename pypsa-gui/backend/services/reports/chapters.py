@@ -159,7 +159,9 @@ def island_payload(source: dict | None) -> dict | None:
             "applied": applied,
         }
     elif gfm:
-        out["gfm"] = {"state": gfm.get("state"), "reason": gfm.get("reason"), "applied": applied}
+        out["gfm"] = {"state": gfm.get("state"), "reason": gfm.get("reason")}
+        if applied:                       # only with a record: other reports keep their evidence hash
+            out["gfm"]["applied"] = applied
     return out
 
 
@@ -227,4 +229,7 @@ def island_disclosures(payload: dict) -> list[str]:
     if isinstance(applied, dict) and applied.get("hub_resolve_needed"):
         out.append("Islanding and control — the recommended settings were applied to the island data; "
                    "Re-solve the hub: these settings change its island rows.")
+    elif isinstance(applied, dict):
+        out.append("Islanding and control — the recommended settings were applied to the island data; "
+                   "island constraints are off, so the hub solve does not read them.")
     return out

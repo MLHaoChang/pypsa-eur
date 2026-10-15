@@ -28,6 +28,7 @@ def drafted(user_and_db):  # noqa: F811
     d = project_registry.ensure_project_dir(row)
     _network().export_to_netcdf(str(d / "network.nc"))
     (d / "island_config.json").write_text(json.dumps(_sidecar()))
+    (d / "solver_config.json").write_text(json.dumps({"island_constraints": True}))
     ce.draft(row)
     return row
 
@@ -230,20 +231,92 @@ def test_applying_twice_is_refused(drafted):
     assert exc.value.status_code == 409 and "already applied" in exc.value.detail
 
 
-def test_the_re_solve_line_outlives_a_campus_run_and_goes_with_a_hub_solve(drafted):
-    """The applied record sits beside the campus file: a campus run (which
-    removes the run's recommendation) keeps it; a saved re-solve of the hub
-    (the network changes) clears it."""
+def _solve_job(project, started_at, status="completed", kind="solve"):
+    return {"project_key": project_registry.registry_key(project), "kind": kind, "status": status,
+            "started_at": started_at}
+
+
+def test_the_re_solve_line_outlives_a_campus_run_and_saves_and_goes_with_a_hub_solve(
+        drafted, monkeypatch):
+    """#310 review: the record sits beside the campus file, so a campus run
+    keeps it; a save (an edit, autosave, the pre-run save) keeps it; a hub
+    solve that started after the apply and completed clears it, even when it
+    left the network byte-identical."""
+    import time
+
+    from services import solve_queue as sq
+
     _recommend(drafted)
     cit.apply_settings(drafted)
+    at = cit.get_settings(drafted)["applied"]["at"]
     for name in ce._island_hours_files():                      # what a campus run removes
         (ce.campus_dir(drafted) / "run" / name).unlink(missing_ok=True)
     got = cit.get_settings(drafted)
     assert got["recommendation"] is None and got["applied"]["hub_resolve_needed"] is True
     nc = project_registry.project_dir(drafted) / ce.NETWORK_FILE
-    nc.write_bytes(nc.read_bytes() + b"\0")                   # the hub re-solved and saved
+    nc.write_bytes(nc.read_bytes() + b"\0")                   # an edit saved, no solve
+    assert cit.get_settings(drafted)["applied"] is not None
+    jobs = [_solve_job(drafted, at - 5),                        # before the apply
+            _solve_job(drafted, at + 1, status="failed"),       # failed or aborted
+            _solve_job(drafted, at + 1, kind="campus")]         # not a hub solve
+    monkeypatch.setattr(sq.solve_queue, "list_jobs", lambda: list(jobs))
+    assert cit.get_settings(drafted)["applied"] is not None
+    jobs.append(_solve_job(drafted, at + 1))                    # the hub re-solved (network unchanged)
     assert cit.get_settings(drafted)["applied"] is None
     assert not (ce.campus_dir(drafted) / cit.APPLIED_FILE).exists()
+    assert time.time() > at
+
+
+def test_a_persisted_solve_after_a_restart_clears_it(drafted, monkeypatch):
+    from services import solve_job_store
+    from datetime import datetime, timezone
+
+    _recommend(drafted)
+    cit.apply_settings(drafted)
+    at = cit.get_settings(drafted)["applied"]["at"]
+    row = {**_solve_job(drafted, None), "started_at": datetime.fromtimestamp(at + 2, tz=timezone.utc)}
+    monkeypatch.setattr(solve_job_store, "load_by_status", lambda statuses, **kw: [row])
+    assert cit.get_settings(drafted)["applied"] is None
+
+
+def test_with_island_constraints_off_no_re_solve_is_asked(drafted):
+    (project_registry.project_dir(drafted) / "solver_config.json").write_text(
+        json.dumps({"island_constraints": False}))
+    _recommend(drafted)
+    out = cit.apply_settings(drafted)
+    assert out["hub_resolve_needed"] is False
+    rec = cit.get_settings(drafted)["applied"]
+    assert rec["hub_resolve_needed"] is False and rec["island_rows"] is False
+
+
+def test_a_second_apply_before_the_re_solve_merges_its_changes(drafted):
+    _recommend(drafted)
+    cit.apply_settings(drafted)
+    _recommend(drafted, recommended={"droop_pct": 2.0, "tau_f_s": 0.6, "i_max_pu": 1.2,
+                                     "H_equivalent_s": 1.2})
+    cit.apply_settings(drafted)
+    changes = {(c["field"]): (c["from"], c["to"]) for c in cit.get_settings(drafted)["applied"]["changes"]}
+    assert changes == {"droop_pct": (4.0, 2.0), "tau_f_s": (0.1, 0.6)}
+
+
+def test_a_failed_restore_keeps_the_original_error(drafted, monkeypatch, caplog):
+    import services.atomic_io as aio
+
+    _recommend(drafted)
+    real = aio.atomic_write_text
+    calls = []
+
+    def failing(path, text, *a, **k):
+        calls.append(str(path))
+        if str(path).endswith(ce.CAMPUS_FILE):
+            raise OSError("disk full")
+        if len(calls) > 2:
+            raise PermissionError("restore failed")
+        return real(path, text, *a, **k)
+    monkeypatch.setattr(aio, "atomic_write_text", failing)
+    with pytest.raises(OSError, match="disk full"):
+        cit.apply_settings(drafted)
+    assert "may disagree" in caplog.text
 
 
 # ── the route ───────────────────────────────────────────────────────────────

@@ -35,9 +35,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import logging
+
 from fastapi import HTTPException
 
 from services import campus_electrical_service as ce
+
+logger = logging.getLogger(__name__)
 
 #: The job's one stage, as ``run_job_state`` names it.
 STAGE = "gfm_settings"
@@ -164,8 +168,8 @@ def _same(a, b) -> bool:
 
 #: The applied record (owner decision 2026-10-15: no hub marker, the record
 #: says it). Beside the campus file, not in the run directory, so a campus run
-#: (which removes the run's recommendation) keeps it; cleared when the saved
-#: network changes, i.e. the hub was re-solved and saved.
+#: (which removes the run's recommendation) keeps it; cleared when a hub solve
+#: of the project, started after the apply, completes (``_hub_solved_since``).
 APPLIED_FILE = "gfm_applied.json"
 
 
@@ -173,16 +177,41 @@ def _applied_path(project) -> Path:
     return ce.campus_dir(project) / APPLIED_FILE
 
 
-def _network_digest(project) -> str | None:
-    from services import project_registry
+def _epoch(value) -> float | None:
+    if value is None:
+        return None
+    return value.timestamp() if hasattr(value, "timestamp") else float(value)
 
-    nc = project_registry.project_dir(project) / ce.NETWORK_FILE
-    return ce._file_digest(nc) if nc.is_file() else None
+
+def _hub_solved_since(project, at: float) -> bool:
+    """A ``solve`` job of the project (the Solve button and the solve queue
+    are one path) that started after ``at`` and completed: the resident
+    queue's records, then the persisted ones, so a restart keeps the answer.
+    Neither a save (Ctrl+S, autosave, the pre-run save, a restore) nor an
+    identical network counts: only the solve does."""
+    from services import project_registry
+    from services import solve_queue as sq
+
+    key = project_registry.registry_key(project)
+    rows = list(sq.solve_queue.list_jobs())
+    try:
+        from services import solve_job_store
+
+        rows += solve_job_store.load_by_status(("completed",),
+                                               project_key_prefix=key.partition(":")[0] + ":")
+    except Exception:                       # noqa: BLE001 - no store (tests, a broken DB): resident only
+        pass
+    for job in rows:
+        started = _epoch(job.get("started_at"))
+        if (job.get("project_key") == key and (job.get("kind") or sq.KIND_SOLVE) == sq.KIND_SOLVE
+                and job.get("status") == "completed" and started is not None and started > at):
+            return True
+    return False
 
 
 def applied_record(project) -> dict | None:
-    """The last apply's record while the hub has not been re-solved since
-    (the saved network unchanged); None otherwise, and the record goes."""
+    """The last apply's record until a hub solve started after it completes
+    (``_hub_solved_since``); None then, and the record goes."""
     path = _applied_path(project)
     if not path.is_file():
         return None
@@ -190,10 +219,22 @@ def applied_record(project) -> dict | None:
         rec = json.loads(path.read_text())
     except (OSError, ValueError):
         return None
-    if rec.get("network_sha256") != _network_digest(project):
-        path.unlink(missing_ok=True)                 # the hub was re-solved and saved
+    if _hub_solved_since(project, float(rec.get("at") or 0.0)):
+        path.unlink(missing_ok=True)
         return None
     return rec
+
+
+def _island_rows_on(project) -> bool:
+    """Whether the hub solve reads the island sidecar (``island_constraints``
+    in the project's solver config)."""
+    from services import project_registry
+
+    cfg = project_registry.project_dir(project) / "solver_config.json"
+    try:
+        return bool(json.loads(cfg.read_text()).get("island_constraints")) if cfg.is_file() else False
+    except (OSError, ValueError):
+        return False
 
 
 def _project_busy(project) -> str | None:
@@ -233,7 +274,16 @@ def apply_settings(project) -> dict:
     written atomically, then the campus file (temp and rename), and the old
     sidecar is put back if that fails; the island study made with the old
     inputs goes only after both are written. The campus file is re-dumped as
-    YAML, so its comments go (as the cuts loop's refresh does)."""
+    YAML, so its comments go (as the cuts loop's refresh does).
+
+    The busy check shares no lock with ``enqueue_settings`` or the queue: a
+    job enqueued in the milliseconds between the check and the writes can
+    still start. Both writes are atomic renames, so such a job reads either
+    file whole, old or new; accepted.
+
+    The record (``APPLIED_FILE``) says the hub must be re-solved only when its
+    solve reads the island rows (``island_constraints``); an apply before an
+    earlier one was re-solved merges its changes in."""
     import time
 
     import yaml
@@ -307,12 +357,29 @@ def apply_settings(project) -> dict:
     try:
         atomic_write_text(campus_path, campus_text)
     except BaseException:
-        atomic_write_text(sidecar_path, old_sidecar)          # both or neither
+        try:
+            atomic_write_text(sidecar_path, old_sidecar)      # both or neither
+        except Exception:                                     # noqa: BLE001 - the original error wins
+            logger.exception("GFM apply: the campus file write failed and the island sidecar could "
+                             "not be restored; the two files may disagree")
         raise
     study_path.unlink(missing_ok=True)                        # made with the old inputs
-    record = {"at": time.time(), "changes": changes, "hub_resolve_needed": True,
+    island_rows = _island_rows_on(project)
+    prior = applied_record(project)                           # an earlier apply not yet re-solved
+    record = {"at": time.time(), "changes": _merge_changes((prior or {}).get("changes"), changes),
+              # with island constraints off the hub solve does not read these settings
+              "hub_resolve_needed": island_rows, "island_rows": island_rows,
               "from_basis": "the recommendation's current value",
-              "network_sha256": _network_digest(project),
               "recommendation_mtime": rec_path.stat().st_mtime}
     atomic_write_text(_applied_path(project), json.dumps(record, indent=2))
-    return {"changes": changes, "hub_resolve_needed": True}
+    return {"changes": changes, "hub_resolve_needed": island_rows}
+
+
+def _merge_changes(prior: list | None, new: list) -> list:
+    """One change per unit and field across applies not yet re-solved: the
+    first ``from``, the latest ``to``."""
+    by = {(c["unit"], c["field"]): dict(c) for c in prior or []}
+    for c in new:
+        k = (c["unit"], c["field"])
+        by[k] = {**c, "from": by[k]["from"]} if k in by else dict(c)
+    return [by[k] for k in sorted(by)]
