@@ -16,6 +16,7 @@ export interface BranchLoadingRow {
   h_at_limit: number | null
   h_over_limit: number | null
   rating: { value: number | null; basis: 'configured' | 'optimized' }
+  capacity?: { configured: number | null; optimized: number | null; extendable: boolean }
   s_max_pu: { min: number | null; max: number | null }
   terminals?: string
   snapshots_with_data?: number

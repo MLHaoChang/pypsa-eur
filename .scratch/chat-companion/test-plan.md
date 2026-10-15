@@ -4,10 +4,12 @@
 # Companion acceptance matrix
 
 Status: ready-for-agent
-Execution: all cases below are pending; this is a contract, not an executed suite
+Execution: this matrix defines the contract; per-slice evidence and remaining gates are recorded in the linked issues below. Unrecorded cases remain pending.
 Source baseline: `4ac218cc98a1437950dd20c3f46233efac6cc159`
 Specification: [CC-01–CC-16](spec.md)
 Sequence: [implementation plan](../../docs/superpowers/plans/2026-10-14-chat-companion-implementation.md)
+
+Execution records: [CP-01](issues/01-truthful-state.md), [CP-02](issues/02-canonical-outcomes.md), and [bounded CP-03](issues/03-source-navigation.md). CP-03 exercises CT-08–10 for retained native evidence and current Expert branch loading; it does not establish all-tab adapters, historical harness completion ACKs, live model verification, domain review or real-use calibration.
 
 Use authenticated public chat/API/SSE and browser interaction. External transport/inference, time and interrupted I/O may be mocked; real ownership, catalogue/admission, ordinary confirmation, stores, job services and exported bytes remain exercised. Do not infer completion from a model sentence, HTTP success, animation or permission grant.
 
@@ -70,4 +72,4 @@ Record exact source/head and applicable acceptance IDs; RED cause; GREEN/regress
 
 For media cases, verify no default audio recording and no credentials/raw audio/private transcript content in ordinary diagnostics. Any optional recording feature requires separately tested consent, access, retention and deletion contracts before admission. Correctness evidence reports supported answers and refusal classes against explicit independent expectations; finite zero-error runs never become a zero real-use error claim.
 
-All CT cases start pending. Add tests per implementation slice; future cases do not become permanent skipped placeholders. Preserve the existing 133-case offline gate and include new supported adapters before broadening checked admission. Report applicable ADR-0002 live verification, hosted/device proof, independent domain review and representative real-use calibration separately; no new paid run or reviewer contact is authorized by this matrix.
+All CT cases started pending. Add tests per implementation slice and record executed boundaries in its issue; future cases do not become permanent skipped placeholders. Preserve the existing 133-case offline gate and include new supported adapters before broadening checked admission. Report applicable ADR-0002 live verification, hosted/device proof, independent domain review and representative real-use calibration separately; no new paid run or reviewer contact is authorized by this matrix.

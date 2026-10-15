@@ -46,7 +46,7 @@ export default function LoadFlow() {
   const { data: acPfStatus } = useQuery({ queryKey: nk(currentProject, 'results', 'ac_pf', 'status'), queryFn: resultsApi.getAcPfStatus })
   const acPfAvailable = !!acPfStatus?.available
 
-  const { data: linesTS, isPending: linesTSPending } = useQuery({
+  const { data: linesTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'lines', resultSource, win.from, win.to),
     queryFn: () => resultsApi.getLineResults(resultSource, fetchRange),
     enabled: winValid,

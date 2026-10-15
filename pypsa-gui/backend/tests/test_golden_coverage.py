@@ -111,6 +111,9 @@ ROUTE_FILES: dict[str, str] = {
 # `test_every_route_is_declared_or_the_scan_below_catches_it`.
 ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     # ── routers/results.py ──────────────────────────────────────────────
+    ("routers/results.py", "get_loadflow_view"): frozenset(),  # loading, no economics
+    # Retained metrics/sections are verbatim evidence, not a new economics roll-up.
+    ("routers/results.py", "get_run_view"): frozenset(),
     ("routers/results.py", "get_cost_breakdown"):          frozenset({"cost_breakdown"}),
     ("routers/results.py", "get_objective_decomposition"):  frozenset(),
     ("routers/results.py", "get_economics_by_carrier"):     frozenset({"economics_by_carrier"}),

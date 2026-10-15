@@ -324,6 +324,11 @@ def _summarise_class(n: Any, cls: str, comp: str, t_accessor: str, source: str,
             "s_max_pu": {"min": _r(smin, 3), "max": _r(smax_v, 3)},
             "_rank": peak_util,
             "_native_name": str(name),
+            "_capacity": {
+                "configured": _r(comp_df.loc[name].get("s_nom"), 2),
+                "optimized": _r(rating, 2) if rating_field == "s_nom_opt" else None,
+                "extendable": rating_field == "s_nom_opt",
+            },
             "mean_flow": _r(float((flow.where(valid_limit, 0.0) * wp).sum() / wsum) if wsum > 0 else None, 2),
         }
         if series_names is not None:
@@ -461,6 +466,7 @@ def _loadflow(source: str, limit: int, window_from: int | None,
     view_rows = []
     if view:
         view_rows = [{**{k: v for k, v in r.items() if not k.startswith("_")},
+                      "capacity": r["_capacity"],
                       "name": r["_native_name"][:512],
                       "name_truncated": len(r["_native_name"]) > 512,
                       "asset_key": hashlib.sha256((r["class"] + "/" + r["_native_name"]).encode()).hexdigest()}
@@ -478,6 +484,7 @@ def _loadflow(source: str, limit: int, window_from: int | None,
     for r in rows:
         r.pop("_rank")
         r.pop("_native_name")
+        r.pop("_capacity")
     ranked_total = len(rows)
     bases = sorted({r["basis"] for r in rows})
     window_weights = weights.reindex(win_index).fillna(0.0)

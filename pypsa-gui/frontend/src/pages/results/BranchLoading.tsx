@@ -47,19 +47,24 @@ export default function BranchLoading({ from, to, enabled }: { from: number; to:
       <KPI label="Ranked branches" value={String(rows.length)} hint="Missing ratings or result evidence are listed separately, never counted as zero loading." />
     </div>
     <button type="button" className="text-xs underline mb-2" onClick={() => downloadCSV('loadflow_loading.csv',
-      ['project_id', 'source', 'window_from', 'window_to', 'evidence_sha256', 'asset_key', 'class', 'name', 'basis', 'rating_MVA', 'rating_basis', 'peak_flow', 'weighted_mean_flow', 'peak_limit_pct', 'peak_rating_pct', 'weighted_mean_limit_pct', 'hours_at_limit', 'hours_over_limit'],
+      ['project_id', 'source', 'window_from', 'window_to', 'evidence_sha256', 'asset_key', 'class', 'name', 'basis', 'rating_MVA', 'rating_basis', 'configured_MVA', 'optimized_MVA', 'peak_flow', 'weighted_mean_flow', 'peak_limit_pct', 'peak_rating_pct', 'weighted_mean_limit_pct', 'hours_at_limit', 'hours_over_limit'],
       rows.map(r => [data.binding!.project_id, source, from, to, data.binding!.data_sha256,
         r.asset_key ?? '', r.class, r.name, r.basis, r.rating.value ?? '', r.rating.basis,
+        r.capacity?.configured ?? '', r.capacity?.optimized ?? '',
         r.peak_flow ?? '', r.mean_flow ?? '', r.util_pct ?? '', r.rating_pct ?? '',
         r.mean_util_pct ?? '', r.h_at_limit ?? '', r.h_over_limit ?? '']))}>Export shown loading CSV</button>
     {data.rows_truncated && <p role="status">Showing the first 500 ranked branches.</p>}
     <div className="overflow-auto max-h-80 border border-border rounded">
-      <table className="w-full text-xs"><thead><tr>{['Branch', 'Basis', 'Rating MVA', 'Peak flow', 'Weighted mean flow', 'Peak limit %', 'Peak rating %', 'Weighted mean limit %', 'At limit h', 'Over limit h', 'Coverage'].map(t => <th key={t} className="p-2 text-left">{t}</th>)}</tr></thead>
+      <table className="w-full text-xs"><thead><tr>{['Branch', 'Basis', 'Rating MVA', 'Configured MVA', 'Optimized MVA (s_nom_opt)', 'Peak flow', 'Weighted mean flow', 'Peak limit %', 'Peak rating %', 'Weighted mean limit %', 'At limit h', 'Over limit h', 'Coverage'].map(t => <th key={t} className="p-2 text-left">{t}</th>)}</tr></thead>
         <tbody>{rows.map(r => (
           <tr key={r.asset_key ?? `${r.class}:${r.name}`}>
             <td className="p-2">{r.class}: {r.name}{r.name_truncated ? ' (name truncated)' : ''}</td>
             <td>{r.basis === 'active_power_proxy' ? 'Active power (MW)' : 'Apparent power (MVA)'}</td>
             <td>{number(r.rating.value)} ({r.rating.basis})</td>
+            <td>{number(r.capacity?.configured)}</td>
+            <td>{r.capacity?.extendable ? <span className={r.capacity.optimized != null && r.capacity.configured != null && r.capacity.optimized > r.capacity.configured + 1e-6 ? 'text-accent font-semibold' : undefined}>
+              {number(r.capacity.optimized)}{r.capacity.optimized != null && r.capacity.configured != null && r.capacity.optimized > r.capacity.configured + 1e-6 ? ' · expanded' : ''}
+            </span> : 'Not optimized'}</td>
             <td>{number(r.peak_flow)}</td><td>{number(r.mean_flow)}</td>
             <td>{number(r.util_pct)}</td><td>{number(r.rating_pct)}</td><td>{number(r.mean_util_pct)}</td>
             <td>{number(r.h_at_limit)}</td><td>{number(r.h_over_limit)}</td>

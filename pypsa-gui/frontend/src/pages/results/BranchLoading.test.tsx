@@ -32,6 +32,16 @@ it('does not attest data from a different project even if numbers are present', 
   expect(document.querySelector('[data-result-binding]')).toBeNull()
   expect(screen.queryByText('Line: L_p1')).toBeNull()
 })
+it('shows configured and optimized capacity and highlights expansion from the same bound evidence', async () => {
+  vi.mocked(resultsEvidenceApi.loadflow).mockResolvedValue({ ...view, rows: [
+    { ...view.rows![0], rating: { value: 200, basis: 'optimized' }, capacity: { configured: 10, optimized: 200, extendable: true } },
+  ] })
+  renderView()
+  const row = (await screen.findByText('Line: L_p1')).closest('tr')!
+  expect(row.textContent).toContain('10.00')
+  expect(screen.getByText('200.00 · expanded').className).toContain('text-accent font-semibold')
+  expect(screen.getByRole('columnheader', { name: 'Optimized MVA (s_nom_opt)' })).toBeTruthy()
+})
 it('removes the old data marker while a new source is fetching', async () => {
   let release: (data: LoadflowView) => void = () => {}
   renderView()

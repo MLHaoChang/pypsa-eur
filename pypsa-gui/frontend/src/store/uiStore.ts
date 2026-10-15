@@ -915,14 +915,14 @@ export const useUIStore = create<UIStore>((set) => ({
   clearPropertiesEditRequest: () => set({ propertiesEditRequest: null }),
   requestEhReport: () => set({ ehReportRequest: true }),
   clearEhReportRequest: () => set({ ehReportRequest: false }),
-  requestAssetDetail: (req) => set({
+  requestAssetDetail: (req) => { navigationChanged(); set({
     assetDetailRequest: req,
     selectedComponent: { type: req.componentClass, name: req.name },
     // P30 gate S-2: the selection moved, so a pending edit request goes.
     propertiesEditRequest: null,
     activeSlidePanel: 'results',
     resultsTabRequest: 'asset',
-  }),
+  }) },
   clearAssetDetailRequest: () => set({ assetDetailRequest: null }),
   requestRunResult: (req) => { navigationChanged(); set({
     discussedRun: req,
@@ -930,7 +930,7 @@ export const useUIStore = create<UIStore>((set) => ({
     ...(req.resultsTab ? { resultsTabRequest: req.resultsTab } : {}),
   }) },
   clearDiscussedRun: () => { navigationChanged(); set({ discussedRun: null }) },
-  requestCompareNav: (nav) => set({ compareNavRequest: nav }),
+  requestCompareNav: (nav) => { navigationChanged(); set({ compareNavRequest: nav }) },
   clearCompareNavRequest: () => set({ compareNavRequest: null }),
   requestIoModal: (tab) => set({ ioModalRequest: tab }),
   clearIoModalRequest: () => set({ ioModalRequest: null }),

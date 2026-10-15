@@ -196,6 +196,7 @@ it('says branch loading does not apply when the network has no lines or transfor
 
 // ── D3 rows 6–7: the lines table and top-loaded chart ───────────────────────
 it('does not repeat "Lines (0)" or "No data." under the no-lines statement', async () => {
+  vi.mocked(resultsEvidenceApi.loadflow).mockResolvedValue({ status: 'unavailable', unavailable_kind: 'no_ac_branches', message: 'No AC lines or transformers in this network.' })
   vi.mocked(networkApi.getLines).mockResolvedValue([])
   vi.mocked(resultsApi.getLineResults).mockResolvedValue({ index: [], columns: [], data: [] } as never)
   const { findAllByText, queryByText } = renderPage()
@@ -206,6 +207,7 @@ it('does not repeat "Lines (0)" or "No data." under the no-lines statement', asy
 })
 
 it('says line flows have not run when the network has lines but no solved flows', async () => {
+  vi.mocked(resultsEvidenceApi.loadflow).mockResolvedValue({ status: 'unavailable', unavailable_kind: 'not_solved', message: 'Line flows and loading come from a solve. Run one to see them.' })
   vi.mocked(resultsApi.getLineResults).mockResolvedValue(null as never)
   const { findByText, queryByText } = renderPage()
   expect(await findByText('Not run yet')).toBeTruthy()

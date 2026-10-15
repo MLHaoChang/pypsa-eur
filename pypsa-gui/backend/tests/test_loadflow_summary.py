@@ -148,6 +148,15 @@ def test_optimized_rating_used_for_extendable_branch(solved):
     assert _by_name(out)['L_hot']['rating'] == {'value': 100.0, 'basis': 'configured'}
 
 
+def test_native_capacity_expansion_uses_the_same_recorded_branch_as_its_rating(solved):
+    view = lf.get_loadflow_view()
+    rows = {row['name']: row for row in view['rows']}
+    assert rows['L_ext']['capacity'] == {'configured': 10.0, 'optimized': 200.0, 'extendable': True}
+    assert rows['L_ext']['rating']['value'] == rows['L_ext']['capacity']['optimized']
+    assert rows['L_hot']['capacity'] == {'configured': 100.0, 'optimized': None, 'extendable': False}
+    assert all('capacity' not in row for row in lf.get_loadflow_summary()['top'])
+
+
 def test_zero_or_missing_rating_and_no_data_are_reported_not_ranked(solved):
     out = lf.get_loadflow_summary(limit=25)
     assert 'L_zero' not in _by_name(out) and 'L_nan' not in _by_name(out)
