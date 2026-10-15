@@ -11,7 +11,8 @@
 # This is the whole merge gate: one command, nothing checked by hand. It exits
 # non-zero on a conflict, a code-file overlap with master, a failing semantic
 # test or catalogue inventory check on the trial merge, or any check run on the
-# head that is not success or skipped (or that it could not read). Docs-only
+# head that is not success or skipped (or that it could not read), or a live
+# coordination-file change with no matching template change. Docs-only
 # overlap and files identical on both sides are reported, not fatal.
 #
 # Environment:
@@ -19,6 +20,8 @@
 #   PREMERGE_BASE    base branch (default: master)
 #   PREMERGE_REPO    GitHub repo whose check runs are read
 #                    (default: MLHaoChang/pypsa-eur)
+#   PREMERGE_TEMPLATE_SYNC  "skip" to pass a live coordination-file change
+#                    that is project-specific and needs no template change
 #   PREMERGE_PYTHON  Python that runs the semantic tests (default: the repo's
 #                    pixi `test` env, then `default`, then ~/.venv-pypsa-gui
 #                    from .claude/hooks/session-start.sh, then python3)
@@ -52,6 +55,9 @@ semantic_tests=(
 )
 # A PR touching these must also keep the assistant inventory current.
 catalogue_re='(^|/)harness/catalogue'
+# A PR touching these live coordination files must also update
+# templates/agent-coordination/ (or run with PREMERGE_TEMPLATE_SYNC=skip).
+template_live_re='^(\.claude/skills/(steward|coordinator|retro)/|scripts/coord/|docs/agents/session-brief\.md$)'
 
 base_ref="refs/remotes/$remote/$base_branch"
 pr_ref="refs/premerge/pr-$pr"
@@ -154,6 +160,27 @@ else
       fail=1
     fi
   fi
+fi
+
+echo
+echo "== template sync"
+# The live coordination files and templates/agent-coordination/ change
+# together; see that folder's README.md, "Keeping it current".
+changed=${changed:-$(git diff --name-only "$mbase" "$head")}
+live=$(grep -E "$template_live_re" <<<"$changed" || true)
+if [[ -z $live ]]; then
+  echo "not needed (no live coordination file changed)"
+elif grep -q '^templates/agent-coordination/' <<<"$changed"; then
+  echo "template changed alongside:"
+  sed 's/^/  /' <<<"$live"
+elif [[ ${PREMERGE_TEMPLATE_SYNC:-} == skip ]]; then
+  echo "skipped (PREMERGE_TEMPLATE_SYNC=skip: project-specific change):"
+  sed 's/^/  /' <<<"$live"
+else
+  echo "TEMPLATE NOT UPDATED. Port these to templates/agent-coordination/, or rerun"
+  echo "with PREMERGE_TEMPLATE_SYNC=skip if the change is project-specific:"
+  sed 's/^/  /' <<<"$live"
+  fail=1
 fi
 
 echo

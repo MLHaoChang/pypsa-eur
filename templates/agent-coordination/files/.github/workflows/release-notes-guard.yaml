@@ -1,0 +1,47 @@
+name: Release notes guard
+
+# Fails a PR that edits {{RELEASE_NOTES_FILE}} directly. Changes add a
+# fragment under {{RELEASE_NOTES_DIR}}/ instead; only a collate run (which
+# deletes fragments) may touch the collated file. See
+# {{RELEASE_NOTES_DIR}}/README.md.
+
+on:
+  pull_request:
+    branches:
+    - {{BASE_BRANCH}}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Release notes guard
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Check the release notes are only changed by a collate run
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        NOTES: {{RELEASE_NOTES_FILE}}
+        FRAGMENTS: {{RELEASE_NOTES_DIR}}/
+      run: |
+        mb=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+        changes=$(git diff --name-status --no-renames "$mb" "$HEAD_SHA")
+        if ! awk -F'\t' -v f="$NOTES" '$2 == f { found = 1 } END { exit !found }' <<<"$changes"; then
+          echo "$NOTES unchanged."
+          exit 0
+        fi
+        if awk -F'\t' -v d="$FRAGMENTS" '$1 == "D" && index($2, d) == 1 { found = 1 } END { exit !found }' <<<"$changes"; then
+          echo "$NOTES changed by a collate run (fragments deleted)."
+          exit 0
+        fi
+        echo "::error file=$NOTES::Add a fragment file under $FRAGMENTS instead of editing $NOTES. See ${FRAGMENTS}README.md."
+        exit 1

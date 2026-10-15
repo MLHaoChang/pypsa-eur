@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# Pre-merge check for one pull request against the base branch. See
+# .claude/skills/steward/SKILL.md for when to run it.
+#
+#   scripts/coord/premerge.sh <pr-number>
+#
+# This is the whole merge gate: one command, nothing checked by hand. It exits
+# non-zero on a conflict, a code-file overlap with the base branch, a failing
+# semantic check on the trial merge, or any check run on the head that is not
+# success or skipped (or that it could not read). Docs-only overlap and files
+# identical on both sides are reported, not fatal. Reading check runs needs
+# the gh CLI.
+#
+# Environment:
+#   PREMERGE_REMOTE  remote to fetch from (default: origin)
+#   PREMERGE_BASE    base branch (default: {{BASE_BRANCH}})
+#   PREMERGE_REPO    GitHub repo whose check runs are read (default: {{REPO}})
+
+set -euo pipefail
+
+usage() { echo "usage: $0 <pr-number>" >&2; exit 2; }
+[[ $# -eq 1 && $1 =~ ^[0-9]+$ ]] || usage
+pr=$1
+remote=${PREMERGE_REMOTE:-origin}
+base_branch=${PREMERGE_BASE:-{{BASE_BRANCH}}}
+gh_repo=${PREMERGE_REPO:-{{REPO}}}
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+# --- Project settings ----------------------------------------------------
+# Overlap in these paths is harmless when the merge itself is clean.
+docs_only_re='^({{RELEASE_NOTES_DIR}}/.*|docs/.*\.md)$'
+# A PR touching a path matching semantic_re must pass semantic_cmd on a trial
+# merge with the base branch. Leave semantic_re empty to skip this check.
+# semantic_cmd runs from the trial-merge worktree root.
+semantic_re=''
+semantic_cmd=(python3 -m pytest -q -p no:cacheprovider)
+# -------------------------------------------------------------------------
+
+base_ref="refs/remotes/$remote/$base_branch"
+pr_ref="refs/premerge/pr-$pr"
+git fetch -q "$remote" \
+  "+refs/heads/$base_branch:$base_ref" \
+  "+refs/pull/$pr/head:$pr_ref"
+
+head=$(git rev-parse "$pr_ref")
+base_sha=$(git rev-parse "$base_ref")
+mbase=$(git merge-base "$base_sha" "$head")
+behind=$(git rev-list --count --first-parent "$mbase..$base_sha")
+
+echo "PR #$pr"
+echo "head:       $head"
+echo "$base_branch:     $base_sha"
+echo "merge-base: $mbase"
+echo "behind:     $behind merge(s) on $base_branch since merge-base"
+
+fail=0
+
+echo
+echo "== conflicts"
+if tree=$(git merge-tree --write-tree --name-only "$base_sha" "$head"); then
+  tree=${tree%%$'\n'*}
+  echo "clean"
+  conflict=0
+else
+  echo "CONFLICT:"
+  # First line is the tree OID; the conflicted paths follow up to a blank line.
+  sed -n '2,/^$/p' <<<"$tree" | sed '/^$/d; s/^/  /'
+  conflict=1
+  fail=1
+fi
+
+echo
+echo "== files changed on both sides since merge-base"
+overlap=$(comm -12 \
+  <(git diff --name-only "$mbase" "$base_sha" | sort) \
+  <(git diff --name-only "$mbase" "$head" | sort))
+if [[ -z $overlap ]]; then
+  echo "none"
+else
+  while IFS= read -r f; do
+    # Same blob on both sides (e.g. a cherry-pick the base already has), or
+    # deleted on both: nothing to reconcile.
+    if [[ $(git rev-parse -q --verify "$base_sha:$f" || true) == \
+      "$(git rev-parse -q --verify "$head:$f" || true)" ]]; then
+      echo "  identical  $f"
+    elif [[ $f =~ $docs_only_re ]]; then
+      echo "  docs-only  $f"
+    else
+      echo "  code       $f"
+      fail=1
+    fi
+  done <<<"$overlap"
+fi
+
+echo
+echo "== semantic tests"
+changed=$(git diff --name-only "$mbase" "$head")
+if [[ -z $semantic_re ]] || ! grep -Eq "$semantic_re" <<<"$changed"; then
+  echo "not needed (no path matches semantic_re)"
+elif ((conflict)); then
+  echo "skipped: no trial merge while the PR conflicts"
+else
+  trial=$(GIT_AUTHOR_NAME=premerge GIT_AUTHOR_EMAIL=premerge@localhost \
+    GIT_COMMITTER_NAME=premerge GIT_COMMITTER_EMAIL=premerge@localhost \
+    git commit-tree "$tree" -p "$base_sha" -p "$head" -m "premerge trial #$pr")
+  wt=$(mktemp -d "${TMPDIR:-/tmp}/premerge-$pr.XXXXXX")
+  trap 'git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt"' EXIT
+  git worktree add -q --detach "$wt" "$trial"
+
+  echo "trial merge $trial"
+  if (cd "$wt" && "${semantic_cmd[@]}"); then
+    echo "semantic tests: pass"
+  else
+    echo "semantic tests: FAIL"
+    fail=1
+  fi
+fi
+
+echo
+echo "== checks"
+# Every check run on the head must be success or skipped. Anything else,
+# including a run still in progress, blocks; so does failing to read them.
+if runs=$(command -v gh >/dev/null &&
+  gh api "repos/$gh_repo/commits/$head/check-runs" --paginate \
+    --jq '.check_runs[] | [.status, (.conclusion // "-"), .name] | @tsv'); then
+  total=$(grep -c . <<<"$runs" || true)
+  bad=$(awk -F'\t' 'NF && !($1 == "completed" && ($2 == "success" || $2 == "skipped"))' <<<"$runs")
+  echo "$total check run(s) on $head"
+  if ((total == 0)); then
+    echo "  none yet"
+    fail=1
+  elif [[ -n $bad ]]; then
+    awk -F'\t' '{ printf "  %-11s %-15s %s\n", $1, $2, $3 }' <<<"$bad"
+    fail=1
+  else
+    echo "all success or skipped"
+  fi
+else
+  echo "checks: not read"
+  fail=1
+fi
+
+echo
+if ((fail)); then
+  echo "RESULT: blocked"
+else
+  echo "RESULT: ok to merge $head"
+fi
+exit "$fail"

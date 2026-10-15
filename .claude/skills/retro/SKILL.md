@@ -24,6 +24,13 @@ The user has asked for a **retrospective**. You are suggesting improvements to t
 
 4. Present these candidates to the user, in order of severity.
 
+5. When a candidate the user picks changes the coordination setup, land it in the template too:
+   - the setup is the steward, coordinator and retro skills, `scripts/coord/`, and `docs/agents/session-brief.md`;
+   - make the same change in `templates/agent-coordination/`, in the same PR;
+   - add a dated entry to `templates/agent-coordination/LEARNINGS.md`.
+
+   `scripts/coord/premerge.sh` blocks a PR that changes the live files without the template.
+
 ## Reference
 
 ### Implementation vs Review
