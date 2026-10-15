@@ -52,7 +52,7 @@ export default function LoadFlow() {
   const { data: acPfStatus } = useQuery({ queryKey: nk(currentProject, 'results', 'ac_pf', 'status'), queryFn: resultsApi.getAcPfStatus })
   const acPfAvailable = !!acPfStatus?.available
 
-  const { data: linesTS } = useQuery({
+  const { data: linesTS, isPending: linesTSPending } = useQuery({
     queryKey: nk(currentProject, 'results', 'lines', resultSource, win.from, win.to),
     queryFn: () => resultsApi.getLineResults(resultSource, fetchRange),
     enabled: winValid,
@@ -253,6 +253,12 @@ export default function LoadFlow() {
       }
     }).sort((a, b) => b.loadingPct - a.loadingPct)
   }, [tsLines, lines, range.from, range.to])
+
+  // D3 rows 6–7: with no lines, the section statement above already says so;
+  // with lines but no solved flows, say "not run" once for the table and the
+  // chart instead of "Lines (0)" and "No data.".
+  const linesSolved = !noLines && !!lineStats && lineStats.length > 0
+  const linesNotRun = linesLoaded && !noLines && !linesTSPending && !linesSolved
 
   // Per-transformer stats (same shape as lineStats — see helper above).
   const trafoStats = useMemo(
@@ -1270,6 +1276,14 @@ export default function LoadFlow() {
       )}
 
       {/* ── Lines table ───────────────────────────────────────── */}
+      {linesNotRun && (
+        <section>
+          <h3 className="mb-2 text-[12.5px] font-semibold text-text tracking-[-0.005em]">Lines</h3>
+          <ResultState state="not_run"
+            reason="Line flows and loading come from a solve. Run one to see them." />
+        </section>
+      )}
+      {linesSolved && (
       <section>
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Lines ({lineStats?.length ?? 0})</h3>
@@ -1324,6 +1338,7 @@ export default function LoadFlow() {
           </div>
         )}
       </section>
+      )}
 
       {/* ── Line reactive power (AC PF only) ──────────────────── */}
       {acPfAvailable && lineReactiveStats && lineReactiveStats.length > 0 && (
@@ -1368,6 +1383,7 @@ export default function LoadFlow() {
       )}
 
       {/* ── Top-loaded lines time-series chart ────────────────── */}
+      {linesSolved && (
       <section>
         <div className="flex items-center mb-2">
           <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Top-loaded lines (top {TOP_N_CHART})</h3>
@@ -1417,6 +1433,7 @@ export default function LoadFlow() {
           </div>
         )}
       </section>
+      )}
 
       {/* ── Transformers loading ──────────────────────────────── */}
       {/* Same table + chart structure as Lines, just over n.transformers_t.p0.

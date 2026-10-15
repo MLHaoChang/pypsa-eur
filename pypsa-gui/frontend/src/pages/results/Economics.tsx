@@ -356,6 +356,10 @@ function ProfitChip({ value }: { value: number | null }) {
   )
 }
 
+// LCOE and capture price are per delivered MWh: with nothing delivered there
+// is no ratio, which is not the same as one that is unknown (UX D3 row 33).
+const NOTHING_DISPATCHED = { state: 'not_applicable' as const, reason: 'Nothing was dispatched in this window.' }
+
 export default function Economics() {
   const currentProject = useUIStore(s => s.currentProject)
   const filter = useResultsFilter()
@@ -431,6 +435,9 @@ export default function Economics() {
     availableCarriers,
     storageKey: 'results:economics:carrier',
   })
+  // Over the unfiltered rows: a carrier filter hides storage, it does not
+  // remove it from the network.
+  const hasStorage = everyRow.some(r => r.group === 'Storage')
   const allRows = useMemo<AggregatedAssetRow[]>(() => {
     if (!carrierFilter.isFiltered) return everyRow
     return everyRow.filter(r => carrierFilter.matchesSelected(canonicaliseCarrier(rowComponentClass(r), r.carrier)))
@@ -549,6 +556,8 @@ export default function Economics() {
       profitable, unprofitable, sysLcoe, avgCapture, profitMarginPct,
     }
   }, [projectedRows])
+
+  const nothingDispatched = kpis.energy <= 1e-6
 
   const groupTotals = useMemo(() => {
     return {
@@ -748,16 +757,21 @@ export default function Economics() {
           <KPI label="Charge cost (storage)"
                value={fmtCurrency(kpis.charge_cost)}
                sub="market price paid to fill"
+               {...(!hasStorage
+                 ? { state: 'not_applicable' as const, reason: 'This network has no storage.' }
+                 : Math.abs(kpis.charge_cost) > 1e-3 ? {} : { state: 'zero' as const })}
                hint="Σ charge_mwh × bus price across every storage asset. Zero on networks without storage. Subtracts directly from storage revenue in the net-profit roll-up." />
           <KPI label="System LCOE / LCOS"
                value={kpis.sysLcoe != null
                  ? `${kpis.sysLcoe.toFixed(2)} €/MWh`
                  : costsAvailable ? '—' : COST_UNAVAILABLE}
                sub="(Σ fixed + vom + charge) / Σ energy"
+               {...(nothingDispatched ? NOTHING_DISPATCHED : {})}
                hint="Portfolio-wide €/MWh — what every MWh delivered into the market costs the system to produce, on average. Useful as a yardstick: the avg capture price needs to exceed this for the portfolio to recover costs." />
           <KPI label="Avg capture price"
                value={kpis.avgCapture != null ? `${kpis.avgCapture.toFixed(2)} €/MWh` : '—'}
                sub="Σ revenue / Σ energy delivered"
+               {...(nothingDispatched ? NOTHING_DISPATCHED : {})}
                hint="Volume-weighted average price the portfolio earned on delivered MWh (discharge for storage). Compare to System LCOE / LCOS: capture above LCOE means market prices cover production cost on average." />
         </div>
         {/* The backend's own framing of a near-zero net profit: an extendable

@@ -176,7 +176,7 @@ from gridspine.ranking.campus import campus_metrics, island_metrics, select_camp
 from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
-from gridspine.static.campus_reactive import reactive_need, requirement_from, size_compensation
+from gridspine.static.campus_reactive import ibr_q_capability, reactive_need, requirement_from, size_compensation
 from gridspine.static.campus_compliance import campus_compliance
 from gridspine.static.campus_invest import ParallelRules, period_spans, select_assets
 from gridspine.static.campus_milp import select_assets_milp
@@ -190,6 +190,7 @@ from gridspine.templates.grid_codes import (  # noqa: F401  (re-exported: the ba
     confirm_limit,
     list_grid_codes,
     load_grid_code,
+    reported_requirements,
     uncovered_kv_ranges,
     unconfirmed,
     validate_profile,
@@ -209,6 +210,10 @@ SIZING_COMP_CSV = "campus_sizing_compensation.csv"
 REQUIREMENT_JSON = "campus_requirement.json"
 SHORT_CIRCUIT_CSV = "campus_short_circuit.csv"
 COMPLIANCE_CSV = "campus_compliance.csv"
+#: IEEE 2800's IBR reactive capability, when the profile states it.
+IBR_CAPABILITY_CSV = "campus_ibr_capability.csv"
+#: What the profile requires that a steady-state study cannot show.
+REPORTED_REQUIREMENTS_JSON = "campus_reported_requirements.json"
 INVESTMENT_CSV = "campus_investment.csv"
 COST_CSV = "campus_cost.csv"
 INVESTED_YAML = "campus_invested.yaml"
@@ -667,8 +672,18 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
         bus_kv=dict(zip(net.bus["name"].astype(str), net.bus["vn_kv"].astype(float))),
     )
     _write_text_atomic(run_dir / COMPLIANCE_CSV, compliance.to_csv(index=False))
+    # Beside the compliance table, never in it (the measure loop reads that):
+    # the IBR capability, and the requirements no steady-state check can show.
+    ibr = ibr_q_capability(campus, code)
+    if ibr is not None:
+        _write_text_atomic(run_dir / IBR_CAPABILITY_CSV, ibr.to_csv(index=False))
+    else:
+        (run_dir / IBR_CAPABILITY_CSV).unlink(missing_ok=True)       # an earlier profile's table
+    reported = reported_requirements(code)
+    _write_text_atomic(run_dir / REPORTED_REQUIREMENTS_JSON, json.dumps(reported, indent=2))
     return {"transformers": sizing, "compensation": comp, "requirement": requirement,
-            "short_circuit": short_circuit, "compliance": compliance}
+            "short_circuit": short_circuit, "compliance": compliance, "ibr_capability": ibr,
+            "reported_requirements": reported}
 
 
 def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,

@@ -2841,8 +2841,11 @@ TOOLS: list[dict[str, Any]] = [
         "compensation sizing with the design margin, IEC 60909 short circuit, "
         "and the PCC compliance report against the grid-code profile. pf is "
         "the connection agreement's power factor; omit it to use the code's "
-        "widest range (EU DCC 0.48 Q/Pmax). Seconds of CPU. Returns the "
-        "campus_get_study shape. invest (default true) also buys the "
+        "widest range (EU DCC 0.48 Q/Pmax). It runs for minutes as a solve-queue "
+        "job of kind campus: returns the queue job {id, kind, status, position}; "
+        "follow it with wait_for_job or campus_get_study (run_job, with its "
+        "stage) and tell the user to wait; abort it with the solve_queue_* "
+        "tools. One job per project at a time (409 otherwise). invest (default true) also buys the "
         "electrical assets from the project's asset library at least cost, "
         "re-checked by AC load flow at every critical hour: read the purchase "
         "with campus_get_investment. pcc_switchgear_by_operator (default "
@@ -2851,8 +2854,8 @@ TOOLS: list[dict[str, Any]] = [
         "pcc_tap_control (campus|grid_operator, default campus) says who moves "
         "the on-load taps of the transformers at the PCC; with grid_operator "
         "they stay at the campus file's position. "
-        "422 without a campus file or for a bad "
-        "setting. Safety: write.",
+        "422 without a campus file or a saved network, or for a bad "
+        "setting. Safety: execution_long_running.",
         {
             "project_id": {"type": "string"},
             "k": {"type": "integer"},
@@ -3948,7 +3951,9 @@ _SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
     "gridspine_assess_connection",
     # campus (master #84/#89/#91): the study reads the SAVED network.nc and
     # writes its own files under the project directory; never the live one.
-    "campus_draft_campus", "campus_run_study", "campus_set_library",
+    # (campus_run_study left the list with slice D1: it queues a job,
+    # execution_long_running tier, not a service-call write)
+    "campus_draft_campus", "campus_set_library",
     "campus_extract_grid_code",
     # campus island (I9a): the sidecar beside network.nc and the study JSON;
     # the study solves copies of the SAVED network.

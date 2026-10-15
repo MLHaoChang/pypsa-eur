@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { CampusState, InvestmentRow, MilpJobRecord } from '../api/campusElectrical'
+import type { CampusRunJob, CampusState, InvestmentRow, MilpJobRecord } from '../api/campusElectrical'
 import CampusElectricalPanel from './CampusElectricalPanel'
 
 const store = vi.hoisted(() => ({ currentProject: 'Hub A' as string | null }))
@@ -23,6 +23,12 @@ const api = vi.hoisted(() => ({
   startMilp: vi.fn(), milpStatus: vi.fn(), cancelMilp: vi.fn(),
   island: vi.fn(), islandReport: vi.fn(),
 }))
+const queue = vi.hoisted(() => ({ abort: vi.fn() }))
+vi.mock('../api/solveQueue', async () => {
+  const real = await vi.importActual<typeof import('../api/solveQueue')>('../api/solveQueue')
+  return { ...real, solveQueueApi: { ...real.solveQueueApi, abort: queue.abort } }
+})
+
 vi.mock('../api/campusElectrical', async () => {
   const real = await vi.importActual<typeof import('../api/campusElectrical')>('../api/campusElectrical')
   return { ...real, campusApi: api }
@@ -532,5 +538,51 @@ describe('CampusElectricalPanel', () => {
       await userEvent.click(screen.getByRole('button', { name: MILP }))
       expect(await screen.findByText(/already running/)).toBeTruthy()
     })
+  })
+})
+
+
+describe('the run is a solve-queue job (E2E demo plan 2026-10-14, D1)', () => {
+  const job = (over: Partial<CampusRunJob>): CampusRunJob => ({
+    id: 'j1', kind: 'campus', status: 'running', position: null, error: null, enqueued_at: 1, started_at: Date.now() / 1000 - 75,
+    finished_at: null, stage: 'island_checks', stage_done: 2, stage_total: 5, ...over,
+  })
+
+  it('says it is running, at which stage, asks the user to wait, and aborts through the queue', async () => {
+    api.state.mockResolvedValue({ ...sized(), run_job: job({}) })
+    queue.abort.mockResolvedValue({})
+    renderPanel()
+    const status = await screen.findByTestId('campus-run-status')
+    expect(status.textContent).toMatch(/island frequency checks/)
+    expect(status.textContent).toMatch(/step 3 of 5/)
+    expect(status.textContent).toMatch(/please wait/i)
+    expect(status.textContent).toMatch(/1:1[45]/)
+    const runBtn = screen.getByRole('button', { name: /Running…/ }) as HTMLButtonElement
+    expect(runBtn.disabled).toBe(true)
+    await userEvent.click(within(status).getByRole('button', { name: /Abort/ }))
+    await waitFor(() => expect(queue.abort).toHaveBeenCalledWith('j1'))
+  })
+
+  it('says a queued run is waiting, with its place', async () => {
+    api.state.mockResolvedValue({ ...sized(), run_job: job({ status: 'queued', position: 2, started_at: null, stage: null }) })
+    renderPanel()
+    const status = await screen.findByTestId('campus-run-status')
+    expect(status.textContent).toMatch(/waiting for the solve queue \(#2\)/)
+  })
+
+  it('says why the last run failed and that the results are older', async () => {
+    api.state.mockResolvedValue({ ...sized(), run_job: job({ status: 'failed', error: 'HTTPException: no PCC' }) })
+    renderPanel()
+    const status = await screen.findByTestId('campus-run-status')
+    expect(status.textContent).toMatch(/failed: HTTPException: no PCC/)
+    expect(status.textContent).toMatch(/earlier run/)
+    expect((screen.getByRole('button', { name: 'Run study' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('shows nothing for a finished run: its results are what shows', async () => {
+    api.state.mockResolvedValue({ ...sized(), run_job: job({ status: 'completed', stage: 'done' }) })
+    renderPanel()
+    await screen.findByTestId('trafo-GRID_IMPORT')
+    expect(screen.queryByTestId('campus-run-status')).toBeNull()
   })
 })

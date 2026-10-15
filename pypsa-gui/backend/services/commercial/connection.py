@@ -494,10 +494,16 @@ def capacity_fee_coefficient(n, link: str, fee_eur_per_mw_year: float) -> tuple[
 # ── FCA stress entry (WP1.4b) ──────────────────────────────────────────────
 
 
-def _site_load(n) -> np.ndarray:
-    """Total load per snapshot (MW): static p_set, overridden by any profile."""
+def _site_load(n, solver_cfg=None) -> np.ndarray:
+    """Total load per snapshot (MW) as the LP solves it: static p_set,
+    overridden by any profile, with the profiles scaled by the config's
+    ``load_scalers`` (``demand.lp_demand_frame``, the LP's own rule; a static
+    p_set is never scaled, by the LP or here). ``solver_cfg`` None: the raw
+    profiles."""
+    from services.adequacy.demand import lp_demand_frame
+
     total = np.zeros(len(n.snapshots))
-    p_set_t = n.loads_t.p_set
+    p_set_t = n.loads_t.p_set if solver_cfg is None else lp_demand_frame(n, solver_cfg)
     for name in n.loads.index:
         if name in p_set_t.columns:
             total += p_set_t[name].to_numpy(dtype=float)
@@ -508,7 +514,8 @@ def _site_load(n) -> np.ndarray:
 
 def fca_stress_entry(n, agreement: ConnectionAgreement, *, poc_link: str,
                      timezone: str | None = None,
-                     envelope_mw: np.ndarray | None = None) -> dict:
+                     envelope_mw: np.ndarray | None = None,
+                     solver_cfg=None) -> dict:
     """The FCA curtailment hours as a `profiles` stress entry on the PoC Link.
 
     Which hours are curtailed is not in the agreement, so the entry takes the
@@ -520,7 +527,8 @@ def fca_stress_entry(n, agreement: ConnectionAgreement, *, poc_link: str,
     other snapshot keeps the agreement's normal availability.
     `frequency_per_year = 1`: the curtailment is a yearly condition, not a
     rare event. `envelope_mw` lets the config route build the entry from an
-    envelope it has aligned but not yet written.
+    envelope it has aligned but not yet written. `solver_cfg` ranks the hours
+    on the load the LP solves (its `load_scalers`; E2E slice 1b).
     """
     if agreement.kind != "fca" or agreement.curtailment_hours_per_year is None:
         raise CommercialBindingError("fca_stress_entry needs an fca agreement with "
@@ -538,7 +546,7 @@ def fca_stress_entry(n, agreement: ConnectionAgreement, *, poc_link: str,
     target_h = float(agreement.curtailment_hours_per_year) * weights.sum() / _HOURS_PER_YEAR
     series = base.copy()
     achieved = 0.0
-    for i in np.argsort(-_site_load(n), kind="stable"):
+    for i in np.argsort(-_site_load(n, solver_cfg), kind="stable"):
         if base[i] <= 0.0:
             continue  # already closed: curtailing it changes nothing
         if achieved + weights[i] > target_h + 1e-9:

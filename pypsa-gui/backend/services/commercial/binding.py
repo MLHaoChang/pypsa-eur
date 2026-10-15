@@ -111,11 +111,13 @@ def resolve_tariff_ref(commercial, resolve_item: Callable[[object], dict] | None
 
 def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
                     resolve_ref: Callable[[object], pd.Series], lock=None,
-                    resolve_item: Callable[[object], dict] | None = None) -> dict | None:
+                    resolve_item: Callable[[object], dict] | None = None,
+                    solver_cfg=None) -> dict | None:
     """Returns the plain dict stored on `SolverConfig.commercial` (None when
     clearing). `commercial` is a parsed `CommercialConfig` or None. A Library
     tariff ref is resolved first (`resolve_item`), so everything after checks
-    the tariff the solve will use."""
+    the tariff the solve will use. `solver_cfg` (the config the solve will
+    use) ranks an FCA's curtailment hours on the LP's scaled load (E2E 1b)."""
 
     def plan_registry(entry):
         try:
@@ -194,7 +196,8 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
         try:
             entry = conn.fca_stress_entry(
                 n, agreement, poc_link=commercial.poc_link, timezone=commercial.timezone,
-                envelope_mw=None if envelope is None else envelope.to_numpy(dtype=float))
+                envelope_mw=None if envelope is None else envelope.to_numpy(dtype=float),
+                solver_cfg=solver_cfg)
         except lp_bindings.CommercialBindingError as exc:
             raise BindingRefusal(422, exc.code, str(exc)) from exc
         planned = plan_registry(entry)
@@ -283,8 +286,8 @@ def context_resolvers(ctx, user=None) -> tuple[Callable[[object], pd.Series],
 
 
 def bind_commercial_on_context(ctx, commercial, *, user=None,
-                               in_flight: Callable[[object], bool] | None = None
-                               ) -> dict | None:
+                               in_flight: Callable[[object], bool] | None = None,
+                               solver_cfg=None) -> dict | None:
     """`bind_commercial` on ANY project context: the active one (the
     solver-config route) or a context off the foreground (a study-owned fork,
     GS U2 `compile.bind_on_fork`). It supplies what the route used to:
@@ -300,7 +303,7 @@ def bind_commercial_on_context(ctx, commercial, *, user=None,
     Nothing here touches the active context, so a fork's bind never writes a
     column into the foreground network. Returns the plain dict to store on
     `SolverConfig.commercial` (None when `commercial` is None, clearing);
-    storing it is the caller's job."""
+    storing it is the caller's job. `solver_cfg`: see `bind_commercial`."""
     check = in_flight if in_flight is not None else _solve_running
     if check(ctx):
         raise BindingRefusal(409, "solver_in_flight", SOLVER_IN_FLIGHT_MESSAGE)
@@ -308,7 +311,7 @@ def bind_commercial_on_context(ctx, commercial, *, user=None,
     resolve, resolve_item = context_resolvers(ctx, user)
     return bind_commercial(ctx.network, commercial, project_dir=project_dir,
                            resolve_ref=resolve, lock=ctx.mutation_lock,
-                           resolve_item=resolve_item)
+                           resolve_item=resolve_item, solver_cfg=solver_cfg)
 
 
 # ── The commercial root: the site connection (IC U1 follow-up, item b) ─────

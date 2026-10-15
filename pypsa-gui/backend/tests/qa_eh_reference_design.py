@@ -240,7 +240,7 @@ def section_1_weak_flexible() -> None:
           len(ok_pts) >= MIN_FRONTIER_POINTS, f"{len(ok_pts)} of {len(pts)}")
     _step("every frontier cost excludes shed and states its period basis",
           bool(pts) and all(p.get("excludes_shed_cost") is True for p in pts)
-          and all(p.get("period_basis") in ("single_period", "multi_period")
+          and all(p.get("period_basis") in ("single_period", "npv_multi_period")
                   for p in ok_pts),
           str([(p.get("excludes_shed_cost"), p.get("period_basis")) for p in pts])[:200])
     _step("the frontier passes through the report's own target",

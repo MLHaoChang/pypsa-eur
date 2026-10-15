@@ -317,6 +317,14 @@ def _headline(eh_report: dict | None) -> dict[str, Any]:
     return {key: copy.deepcopy(eh_report.get(key)) for key in HEADLINE_KEYS}
 
 
+_PERIOD_BASIS = {"npv_multi_period": "NPV-discounted multi-period"}
+
+
+def _period_basis(value: Any) -> str:
+    """A cost basis in words: a multi-period total is discounted, say so."""
+    return _PERIOD_BASIS.get(value, F.fmt_text(value))
+
+
 # ── disclosures and the negative space ───────────────────────────────────
 
 
@@ -327,7 +335,7 @@ def _eh_disclosures(sections: dict[str, EvidenceSection],
     if headline.get("cost_at_target_eur") is not None:
         out.append(
             f"The cost at target ({F.fmt_number(headline['cost_at_target_eur'], unit='€')}) "
-            f"is on a {F.fmt_text(headline.get('period_basis'))} basis and "
+            f"is on a {_period_basis(headline.get('period_basis'))} basis and "
             f"excludes the cost of load shedding; do not add a VoLL term to it.")
     for section_id in REPORT_SECTIONS:
         section = sections.get(section_id)
@@ -395,7 +403,7 @@ def _t_headline(headline: dict[str, Any]) -> EvidenceTable:
     tea = headline.get("tea") or {}
     cost = F.fmt_number(headline.get("cost_at_target_eur"), unit="€")
     if cost != F.NOT_ESTABLISHED:
-        cost += (f" ({F.fmt_text(headline.get('period_basis'))}; "
+        cost += (f" ({_period_basis(headline.get('period_basis'))}; "
                  f"excludes load-shedding cost)")
     lcoh = F.fmt_number(tea.get("lcoh_eur_per_kg"), unit="€/kg", digits=2)
     if lcoh == F.NOT_ESTABLISHED and tea.get("lcoh_note"):
@@ -489,7 +497,7 @@ def _t_frontier(payload: dict) -> EvidenceTable:
                  "Shed hours (h/yr)"],
         rows=rows,
         caption=(f"Cost of reliability, one full expansion solve per target; "
-                 f"{F.fmt_text(payload.get('period_basis'))}; excludes "
+                 f"{_period_basis(payload.get('period_basis'))}; excludes "
                  f"load-shedding cost; VoLL "
                  f"{F.fmt_number(payload.get('voll_eur_per_mwh'), unit='€/MWh')}"),
         source_path="/sections/frontier/payload/points")

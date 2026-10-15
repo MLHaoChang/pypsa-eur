@@ -131,6 +131,87 @@ def requirement_from(profile: dict, p_ref_mw: float, pf: float | None = None) ->
     )
 
 
+#: The inverter-based resources IEEE 2800's reactive capability applies to.
+IBR_KINDS = ("bess", "pv", "wind")
+IBR_LABEL = ("screening at unit terminals: sqrt(S^2 - P_n^2) per inverter against the profile's q_range_ibr x P_n "
+             "at rated active power; the standard states it for the plant at its reference point, so collector "
+             "and transformer reactive losses are not counted")
+IBR_COLUMNS = ("unit", "kind", "p_n_mw", "s_mva", "required_mvar", "available_mvar", "shortfall_mvar", "status",
+               "detail", "clause", "source", "basis")
+
+
+def ibr_q_capability(campus, profile: dict):
+    """IEEE 2800's reactive capability of the on-site IBR (``IBR_LABEL``):
+    one row per BESS, PV or wind unit, then a plant ``TOTAL`` row whose
+    status and shortfall are max(0, sum required - sum available) over the
+    rated units (NaN when none is rated), or None when the profile states no
+    ``q_range_ibr``. A unit without a rating is ``reported``, never ``pass``;
+    a shortfall ``fail`` row says the inverter rating or the STATCOM that
+    would cover it. Every row carries ``IBR_LABEL`` in its ``basis`` column."""
+    if "q_range_ibr" not in profile:
+        return None
+    ibr = profile["q_range_ibr"]
+    frac = float(ibr["value"])
+    oversize = math.sqrt(1.0 + frac ** 2)
+    rows = []
+    for uid, u in campus.units.iterrows():
+        if u["kind"] not in IBR_KINDS:
+            continue
+        p_n, s = float(u["p_mw"]), float(u["s_mva"]) if u["s_mva"] == u["s_mva"] else math.nan
+        base = {"unit": str(uid), "kind": u["kind"], "p_n_mw": p_n, "s_mva": s, "clause": ibr["clause"],
+                "source": ibr["source"]}
+        if not (p_n > 0 and math.isfinite(s) and s > 0):
+            rows.append({**base, "required_mvar": frac * p_n if p_n > 0 else math.nan, "available_mvar": math.nan,
+                         "shortfall_mvar": math.nan, "status": "reported",
+                         "detail": f"{uid}: rating not given (P_n and the inverter S are needed)"})
+            continue
+        req = frac * p_n
+        avail = math.sqrt(max(s ** 2 - p_n ** 2, 0.0))
+        short = max(req - avail, 0.0)
+        if short <= 1e-9:
+            detail = f"{uid} supplies {avail:.2f} Mvar of the {req:.2f} Mvar required at rated P"
+        else:
+            detail = (f"{uid} can supply {avail:.2f} of the {req:.2f} Mvar required at rated P: oversize the "
+                      f"inverter to S >= {oversize:.3f} x P_n = {oversize * p_n:.2f} MVA, or add "
+                      f"{short:.2f} Mvar of STATCOM")
+        rows.append({**base, "required_mvar": req, "available_mvar": avail, "shortfall_mvar": short if short > 1e-9
+                     else 0.0, "status": "pass" if short <= 1e-9 else "fail", "detail": detail})
+    if not rows:
+        return None
+    # IEEE 2800 states the requirement for the plant at its reference point:
+    # the TOTAL compares the sums over the rated units, and names each unit
+    # that cannot carry its own share (its row keeps its own fail).
+    rated = [r for r in rows if r["status"] != "reported"]
+    unrated = len(rated) < len(rows)
+    if rated:
+        p_t = sum(r["p_n_mw"] for r in rated)
+        req_t = sum(r["required_mvar"] for r in rated)
+        avail_t = sum(r["available_mvar"] for r in rated)
+        short_t = max(req_t - avail_t, 0.0)
+        short_t = short_t if short_t > 1e-9 else 0.0
+    else:
+        p_t = req_t = avail_t = short_t = math.nan
+    status = "reported" if unrated else "fail" if short_t > 0 else "pass"
+    if rated:
+        detail = (f"plant {'meets' if short_t == 0 else 'falls short'}: {avail_t:.2f} Mvar available against "
+                  f"{req_t:.2f} Mvar required ({frac:g} x rating at rated P)"
+                  + (f", {short_t:.2f} Mvar short" if short_t > 0 else ""))
+        alone = [f"{r['unit']} alone falls {r['shortfall_mvar']:.2f} Mvar short" for r in rated
+                 if r["status"] == "fail"]
+        if alone:
+            detail += "; " + "; ".join(alone)
+    else:
+        detail = "no unit has a rating (P_n and the inverter S are needed)"
+    if unrated and rated:
+        detail += "; a unit without a rating is not counted"
+    rows.append({"unit": "TOTAL", "kind": "ibr", "p_n_mw": p_t, "s_mva": math.nan, "required_mvar": req_t,
+                 "available_mvar": avail_t, "shortfall_mvar": short_t, "status": status, "detail": detail,
+                 "clause": ibr["clause"], "source": ibr["source"]})
+    for r in rows:
+        r["basis"] = IBR_LABEL
+    return pd.DataFrame(rows, columns=list(IBR_COLUMNS))
+
+
 def compensation_bus(campus) -> str:
     """Where compensation goes: the low-voltage side of the transformers
     connected to the PCC, else the PCC bus itself."""
