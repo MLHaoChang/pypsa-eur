@@ -277,7 +277,9 @@ MODEL_FIELDS: dict[str, tuple[str, ...]] = {
         "grid_cfe_share_ref", "group_cap_mw", "group_contract", "group_members",
         "import_tariff", "import_tariff_id", "import_tariff_ref", "initial_peak_lower_bound",
         "meter_history_energy_kwh", "meter_history_peaks_kw", "poc_link", "power_factor",
-        "site_party", "timezone", "value_flows"),
+        "site_party", "timezone", "value_flows",
+        # H2e (2026-10-15): the counterfactual's reference purchases and CO2 price.
+        "co2_price", "reference_purchases"),
     "models.finance.FinanceInputs": (
         "acquisition_date", "analysis_years", "annualise", "capex_phasing", "cod_by_asset",
         "construction_months_by_asset", "construction_start", "contingency_share",

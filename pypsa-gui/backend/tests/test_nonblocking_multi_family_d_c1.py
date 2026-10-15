@@ -40,8 +40,8 @@ def families(tmp_projects_dir, install_network, tmp_path, monkeypatch):
     install_network(n, name=None)
     ctx = PyPSAService.get_active_context()
     with ctx.solver_state_lock:
-        ctx.solver_state.update(status='running', kind='lopf', objective=None, condition=None)
-        ctx.solver_state[STUDY_KEY] = {'status': 'running', 'stage': 'sweep', 'iterations': []}
+        ctx.solver_state.update(status='running', kind='lopf', objective=None, condition=None, thread=threading.Thread())
+        ctx.solver_state[STUDY_KEY] = {'status': 'running', 'stage': 'sweep', 'iterations': [], 'started_at': time.time()}
         ctx.solver_state['report_job'] = {
             'status': 'running', 'report_id': 'rep-1', 'mode': 'generate',
             'section': 'executive_summary', 'error': None, 'started_at': time.time(),

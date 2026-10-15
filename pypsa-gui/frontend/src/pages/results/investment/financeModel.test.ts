@@ -266,3 +266,34 @@ describe('baselineCaveats: the shed priced at VoLL (owner decision 2026-10-15)',
     expect(baselineCaveats(rep(['counterfactual_shed_at_voll_extra']))).toEqual([])
   })
 })
+
+describe('baselineCaveats: a bought load and a CO2 price (H2e)', () => {
+  const rep = (projectFlags: string[], cfFlags: string[]) => ({ sections: { project: {
+    status: 'ok', payload: { flags: projectFlags, counterfactual: { present: true, flags: cfFlags } },
+  } } }) as never
+  it('says the comparison buys the load, and that the CO2 cost is cash it would pay', () => {
+    const out = baselineCaveats(rep(['co2_price_period:2030:2030:80'],
+                                    ['counterfactual_buys:h2_offtake']))
+    expect(out).toHaveLength(2)
+    expect(out[0]).toMatch(/reference price/)
+    expect(out[1]).toMatch(/additional to any carbon cost already in the tariff/)
+  })
+})
+
+
+describe('headlines: of which avoided CO2 cost (H2e)', () => {
+  const rep = (cf: Record<string, unknown>) => ({ sections: { project: { status: 'ok', payload: {
+    project_post_tax_npv: 1e6, counterfactual: { present: true, ...cf } } } } }) as never
+  it('sits beside the NPV as its own figure when the case prices CO2', () => {
+    const rows = headlines(rep({ co2_priced: true, avoided_co2_cost: [100, 250.5] }))
+    const i = rows.findIndex(h => h.id === 'npv_at_wacc')
+    expect(rows[i + 1].id).toBe('avoided_co2')
+    expect(rows[i + 1].value).toBe(350.5)
+  })
+  it('a priced but unknown figure is not established; no CO2 price, no row', () => {
+    const unknown = headlines(rep({ co2_priced: true, avoided_co2_cost: null }))
+      .find(h => h.id === 'avoided_co2')!
+    expect(unknown.value).toBeNull()
+    expect(headlines(rep({ co2_priced: false })).some(h => h.id === 'avoided_co2')).toBe(false)
+  })
+})

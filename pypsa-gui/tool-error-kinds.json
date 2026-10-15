@@ -738,6 +738,14 @@
     "mcp_protocol_error": {
       "surface": "inline",
       "why": "An external MCP server answered with a JSON-RPC error or a malformed reply. A server-side fault the model can only report; no UI copy would help."
+    },
+    "activity_project_required": {
+      "surface": "inline",
+      "why": "The read-only Activity view needs an authorized saved project; its own empty/error state explains the missing scope."
+    },
+    "activity_resnapshot_required": {
+      "surface": "inline",
+      "why": "The Activity snapshot cursor expired or changed; its observer reloads authority without replaying work or approvals."
     }
   }
 }

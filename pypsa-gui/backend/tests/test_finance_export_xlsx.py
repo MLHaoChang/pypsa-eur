@@ -113,6 +113,23 @@ def test_the_summary_says_the_comparison_shed_is_valued_at_voll():
     assert "impossible" not in caveats[0]
 
 
+def test_the_about_sheet_says_the_avoided_co2_cost_and_never_reads_not_established_as_none():
+    """H2e (gatekeeper review of #305): "Of which avoided CO2 cost" is the
+    horizon's sum; a case that prices CO2 but cannot establish it is
+    not established, never "none"."""
+    def about(block):
+        rep = _report()
+        rep.sections["project"].payload["counterfactual"] = block
+        wb = openpyxl.load_workbook(io.BytesIO(build_workbook(rep)))
+        return dict((r[0], r[1]) for r in _values(wb["About"]) if r and r[0])
+    priced = {"present": True, "co2_priced": True, "avoided_co2_cost": [100.0, 250.5]}
+    assert about(priced)["Of which avoided CO2 cost"] == 350.5
+    unknown = {"present": True, "co2_priced": True, "avoided_co2_cost": None}
+    assert about(unknown)["Of which avoided CO2 cost"] == NOT_ESTABLISHED
+    unpriced = {"present": True, "co2_priced": False, "avoided_co2_cost": None}
+    assert about(unpriced)["Of which avoided CO2 cost"] == "none"
+
+
 def test_the_summary_says_what_the_figures_are_compared_with():
     """Owner decision 2026-10-15: the counterfactual basis and the baseline's
     notes sit beside the Summary figures."""
