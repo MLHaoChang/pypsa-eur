@@ -458,6 +458,28 @@ function RunJobStatus({ job, onAbort, aborting }: { job: CampusRunJob; onAbort: 
       </p>
     )
   }
+  // A GFM-settings job (GFM-b) is a campus job but not a run: the campus results stay current.
+  const gfm = job.stage === 'gfm_settings'
+  if (job.status === 'running' && gfm) {
+    return (
+      <p className="mt-2 text-[12px]" data-testid="campus-run-status" role="status">
+        <Tag tone="accent">running</Tag>{' '}
+        Recommending grid-forming settings from the island hours · {elapsed(job.started_at)}. The campus results
+        below are current.{' '}
+        <Btn onClick={onAbort} disabled={aborting}><Square size={12} /> Abort</Btn>
+      </p>
+    )
+  }
+  if (gfm && (job.status === 'failed' || job.status === 'interrupted' || job.status === 'aborted')) {
+    const how = job.status === 'aborted' ? 'was stopped'
+      : job.status === 'failed' ? `failed${job.error ? `: ${job.error}` : ''}` : 'was interrupted (the backend restarted)'
+    return (
+      <p className={`mt-2 text-[12px] ${job.status === 'aborted' ? 'text-muted' : 'text-danger'}`}
+         data-testid="campus-run-status" role={job.status === 'aborted' ? undefined : 'alert'}>
+        The grid-forming settings search {how}. The campus run's results are unchanged.
+      </p>
+    )
+  }
   if (job.status === 'running') {
     const stage = job.stage ?? 'prepare'
     const step = job.stage_total ? ` (step ${Math.min((job.stage_done ?? 0) + 1, job.stage_total)} of ${job.stage_total})` : ''

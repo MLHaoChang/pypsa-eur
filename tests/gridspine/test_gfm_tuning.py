@@ -240,3 +240,22 @@ def test_a_searched_mixed_fleet_starts_from_common_settings_and_says_so():
 def test_the_margin_note_says_equipment_limits_are_used_as_given():
     r = T.recommend_gfm_settings([case(island(), 2.0)], lim())
     assert any("grid-code limits only" in n and "used as given" in n for n in r.notes)
+
+
+def test_a_stop_ends_the_search_after_the_simulation_in_hand():
+    """GFM-b review (#303): a cooperative stop, asked before every simulation
+    beside the budget check, raises ``SearchStopped``; it never reads as a
+    result, and the cap and the margin are untouched when nobody stops."""
+    c = case(island(), 4.0)
+    full = T.recommend_gfm_settings([c], lim(rocof=0.9))
+    asked = []
+
+    def stop():
+        asked.append(1)
+        return len(asked) > 3                 # three simulations, then stop
+    with pytest.raises(T.SearchStopped):
+        T.recommend_gfm_settings([c], lim(rocof=0.9), should_stop=stop)
+    assert len(asked) == 4
+    same = T.recommend_gfm_settings([c], lim(rocof=0.9), should_stop=lambda: False)
+    assert (same.status, same.simulations, same.settings) == (full.status, full.simulations,
+                                                              full.settings)

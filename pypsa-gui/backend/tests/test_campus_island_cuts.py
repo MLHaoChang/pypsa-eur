@@ -342,6 +342,21 @@ def test_the_solve_goes_through_the_queue_with_the_projects_config(saved, monkey
         cic._queue_solve(saved, 7, threading.Event())
 
 
+
+def test_the_solve_never_waits_on_another_job_of_the_project(saved, monkeypatch):
+    """#303 review: a campus job (a GFM search) holding the queue is not the
+    hub solve; the trial fails with why, it never waits on that job."""
+    from services import solve_queue as sq
+    from services.study import runner
+
+    _ready(saved)
+    other = SimpleNamespace(kind="campus", status="running", objective=None, error=None)
+    monkeypatch.setattr(sq.solve_queue, "enqueue_unique", lambda name, **kw: (other, False))
+    monkeypatch.setattr(runner, "_wait", lambda j, stop: pytest.fail("never waits on another job"))
+    with pytest.raises(RuntimeError, match="already has a campus job"):
+        cic._queue_solve(saved, 7, threading.Event())
+
+
 # ── the routes ──────────────────────────────────────────────────────────────
 
 
