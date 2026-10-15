@@ -7,6 +7,7 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { KPI } from './shared'
 import { useResultsFilter } from './filterContext'
+import NotSolved from './NotSolved'
 
 // ── Emissions tab ───────────────────────────────────────────────────────────
 // Surfaces PyPSA's CO₂ totals from LP dispatch × per-carrier intensity /
@@ -83,9 +84,7 @@ export default function Emissions() {
 
   if (!emissions) {
     return (
-      <div className="p-6 text-center text-xs text-muted">
-        No emissions data yet. Run a LOPF / SCLOPF solve (header → <span className="font-medium text-text">Run LOPF</span>) — CO₂ is computed from per-carrier intensity × dispatched energy.
-      </div>
+      <NotSolved what="Emissions" why="CO₂ is each carrier’s intensity times its dispatched energy." />
     )
   }
   if (!view) return null
