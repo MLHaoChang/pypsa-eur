@@ -218,3 +218,13 @@ def test_with_the_island_rows_the_plan_stages():
     assert sum(1 for v in built.values() if v > 0.1) >= 2, built
     assert built[2035] > built[2027], built
     assert n.links_t.p0["grid_import"].loc[2027].max() == pytest.approx(20.0, abs=1e-4)
+
+
+def test_the_wizard_describes_the_staged_connection_as_the_template_builds_it():
+    """#294 review: the New-project wizard's text for the staged template is
+    hand-written; it names the template's own connection and first-period cap."""
+    tsx = (BACKEND.parent / "frontend" / "src" / "layout" / "NewProjectWizard.tsx").read_text()
+    line = next(ln for ln in tsx.splitlines() if "id: 'eh_datacenter_staged'" in ln)
+    assert f"{T._DC_POC_MW:g} MW connection" in line
+    assert f"{T.DC_ENERGIZATION_MW[2027]:g} MW until 2030" in line
+    assert "40 MW" not in line

@@ -24,6 +24,12 @@ YEARS = (2027, 2030, 2035)
 SCHEDULE = {y: T.DC_ENERGIZATION_MW[y] for y in YEARS}
 
 
+def test_the_schedule_values_themselves():
+    """The tests below read SCHEDULE from the template; pin its values once so a
+    drift is caught (#294 review): 20 MW until 2030, then the 55 MW connection."""
+    assert SCHEDULE == {2027: 20.0, 2030: 55.0, 2035: 55.0}
+
+
 def _staged():
     return T.BUILDERS["eh_datacenter_staged"]()
 

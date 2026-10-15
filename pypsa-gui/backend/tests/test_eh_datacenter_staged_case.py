@@ -136,7 +136,7 @@ def test_the_staged_poc_chain_is_loss_free_and_says_so():
 
 # ── the route binds what the template ships ────────────────────────────────
 
-def test_the_study_notes_say_the_poc_is_loss_free_and_the_comparison_exceeds_the_connection():
+def test_the_study_notes_say_the_poc_is_loss_free_and_the_connection_carries_the_peak():
     """Review of #283: the Guided user sees the loss-free PoC and the grid-only
     comparison's 2035 overload in the notes, not only in the ledger."""
     n = T.BUILDERS[TID]()

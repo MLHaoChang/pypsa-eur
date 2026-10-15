@@ -889,6 +889,14 @@ def _import_capacity(n, parsed) -> np.ndarray:
     return cap
 
 
+def _excess_above(served: np.ndarray, capacity: np.ndarray) -> np.ndarray:
+    """The load above what the connection carries (MW), per snapshot; an
+    overshoot within `_EPS_MW` is floating-point noise, not a shed (#294
+    review), so it never adds a shed line or changes the hash."""
+    excess = np.clip(served - capacity, 0.0, None)
+    return np.where(excess > _EPS_MW, excess, 0.0)
+
+
 def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, dict[str, _Acc]],
                     templates_actual: dict[str, list[TemplateLine]], owned, contracts,
                     lost_load, base_year: int, flags: list[str]
@@ -936,7 +944,7 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
     # at the case's VoLL, and the bill and the commodity are rated on the
     # rest. Without a VoLL the excess cannot be priced: the whole load stays
     # billed, flagged — a comparison against a site that could not run.
-    excess = np.clip(served - _import_capacity(n, parsed), 0.0, None)
+    excess = _excess_above(served, _import_capacity(n, parsed))
     excess_mwh = float((w_all * excess).sum())
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)
     shed_priced = excess_mwh > 0.0 and voll > 0.0
@@ -985,11 +993,14 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
             lines.append(_cf_none("counterfactual:hub_allocation",
                                   "counterfactual_not_established:hub_allocation", k, base_year))
         # The load the connection cannot carry, shed at the case's VoLL (a cost
-        # to the site without the investment; escalates as opex).
-        if shed_priced:
+        # to the site without the investment). It escalates as opex: VoLL is a
+        # real-terms reliability value, not a tariff (#294 review). A period
+        # that sheds nothing has no line.
+        shed_k = float((w_all[m] * excess[m]).sum())
+        if shed_priced and shed_k > 0.0:
             lines.append(TemplateLine(
                 key="counterfactual:shed_at_voll", stream="other",
-                amount=-voll * float((w_all[m] * excess[m]).sum()), esc_class="opex",
+                amount=-voll * shed_k, esc_class="opex",
                 source="counterfactual", source_id="shed_at_voll", period=k,
                 money_year=base_year))
         # bill

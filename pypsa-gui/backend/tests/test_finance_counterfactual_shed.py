@@ -89,3 +89,16 @@ def test_the_energization_schedule_caps_the_counterfactual_import(reset_backend)
     case = _case(n, cfg, _fin(annualise=True), lost_load=state.get("last_lost_load"))
     assert _flag_num(case.flags, "counterfactual_shed_at_voll:") == \
         pytest.approx(_excess_mwh(n, 40.0), rel=1e-6)
+
+
+def test_an_overshoot_within_the_tolerance_is_not_a_shed():
+    """#294 review: floating-point noise in the served load (cap + 1e-9) is
+    not a shed, so it adds no line and leaves the counterfactual's hash as it
+    was; a real overshoot is kept whole."""
+    from services.results.finance_case import _EPS_MW, _excess_above
+
+    cap = np.full(4, 40.0)
+    assert not _excess_above(cap + 1e-9, cap).any()
+    assert not _excess_above(cap + 0.5 * _EPS_MW, cap).any()
+    got = _excess_above(np.array([40.0, 41.5, 39.0, 40.0 + 2 * _EPS_MW]), cap)
+    assert got.tolist() == pytest.approx([0.0, 1.5, 0.0, 2 * _EPS_MW])
