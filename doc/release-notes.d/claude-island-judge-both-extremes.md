@@ -1,0 +1,1 @@
+* Fix(gridspine): The island frequency check now judges the lowest and the highest frequency of an event against their own limits. Before, it read only the largest deviation, so a dip that recovers into a smaller overshoot past the upper limit (or a peak that falls back into a dip past the lower one) passed. Such events now fail, binding on the side they break.
