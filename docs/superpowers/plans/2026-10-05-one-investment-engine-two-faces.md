@@ -217,6 +217,9 @@ signature changes.
 `bind_commercial_on_context` gain the optional keyword `solver_cfg=None` (the config the solve will use), so an FCA's
 curtailment hours are ranked on the LP's scaled load (`load_scalers`). Omitting it keeps the old ranking on the raw
 `p_set`; a study fork binds without a project directory, where an FCA is refused anyway.
+**Changes (2026-10-15, the site-today baseline, owner decision after #294):** `results.finance_case.build_finance_case`
+gains the optional keyword `baseline=None` (a solved `results.baseline.Baseline`): the counterfactual is then the site as
+it stands today, re-solved without the plan's new builds. Omitting it keeps the analytic counterfactual, byte for byte.
 
 ## 7. Coordination protocol
 

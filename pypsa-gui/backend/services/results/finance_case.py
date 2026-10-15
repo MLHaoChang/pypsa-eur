@@ -1194,8 +1194,8 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
     baseline's import value minus the actual's."""
     from services.adequacy.eh_report import _live_result_df
 
-    side = build_finance_case(baseline.network, cfg, fin, result_df=_live_result_df,
-                              lost_load=baseline.lost_load, owner=owner, _side_only=True)
+    side = _build_finance_case(baseline.network, cfg, fin, result_df=_live_result_df,
+                               lost_load=baseline.lost_load, owner=owner, side_only=True)
     flags += ["counterfactual_basis:site_today", *baseline.plan.flags]
     removed = sorted(name for _c, name, _k in baseline.plan.removed)
     if removed:
@@ -1796,7 +1796,16 @@ def _extra_fom_lines(extra_finance: tuple[AssetFinance, ...], k: str, base_year:
 def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                        owner: str | None = None,
                        extra_assets: Sequence[ExtraOwnerAsset] = (),
-                       baseline=None, _side_only: bool = False) -> FinanceCase:
+                       baseline=None) -> FinanceCase:
+    """The owner's `FinanceCase`: see `_build_finance_case`."""
+    return _build_finance_case(n, cfg, fin, result_df=result_df, lost_load=lost_load,
+                               owner=owner, extra_assets=extra_assets, baseline=baseline)
+
+
+def _build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
+                        owner: str | None = None,
+                        extra_assets: Sequence[ExtraOwnerAsset] = (),
+                        baseline=None, side_only: bool = False) -> FinanceCase | _Side:
     """The owner's `FinanceCase` from the solved network `n`, its solver
     config `cfg` and the stored `FinanceInputs` `fin` (see the module
     docstring); `FinanceRefused(code)` when it cannot be stated.
@@ -1805,7 +1814,7 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
     `baseline` (`services.results.baseline.Baseline`, owner decision
     2026-10-15): the counterfactual is that solved baseline's own actual side
     (the site as it stands today), see `_baseline_counterfactual`; None keeps
-    the analytic counterfactual. `_side_only` returns the actual side only
+    the analytic counterfactual. `side_only` returns the actual side only
     (`_Side`), for the baseline itself."""
     from services.results.value_flows import value_flow_ledger
 
@@ -1901,7 +1910,7 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                                     owner_gens=owner_gens, contracts=contracts, fin=fin,
                                     gen=gens[k], site_gens=site_gens, gen_links=gen_links,
                                     flags=flags)
-    if _side_only:
+    if side_only:
         return _Side(inputs=inputs, accs=accs, actual=actual)
 
     # C13: the counterfactual, when the owner is the site party that pays the bill.
