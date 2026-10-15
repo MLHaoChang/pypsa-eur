@@ -217,6 +217,11 @@ signature changes.
 `bind_commercial_on_context` gain the optional keyword `solver_cfg=None` (the config the solve will use), so an FCA's
 curtailment hours are ranked on the LP's scaled load (`load_scalers`). Omitting it keeps the old ranking on the raw
 `p_set`; a study fork binds without a project directory, where an FCA is refused anyway.
+**Additions (2026-10-15, generic-site E2E H2e, `.scratch/generic-site/engine-slices.md`):**
+`CommercialConfig.reference_purchases` (default `[]`) and `CommercialConfig.co2_price` (default None), with the
+models `ReferencePurchase` and `Co2Price`. They are read only by the finance adapter's counterfactual. Unset, they
+add no line, flag or hash key, so an existing case keeps its `finance_case_hash` and its `run_case` output. No
+signature changes (`_counterfactual` is private).
 
 ## 7. Coordination protocol
 
