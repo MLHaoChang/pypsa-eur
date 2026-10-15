@@ -184,7 +184,7 @@ describe('StartCard — your own site (G2)', () => {
     expect(await screen.findByTestId('site-form')).toBeTruthy()
     // the tile is not one of the example templates
     expect(screen.getByTestId('hub-start-templates')
-      .querySelectorAll('[data-testid^="hub-start-template-"]').length).toBe(4)
+      .querySelectorAll('[data-testid^="hub-start-template-"]').length).toBe(6)
     cleanup()
     useHubDesignStore.setState({ siteFormRequested: true })
     mount()
