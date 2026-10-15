@@ -191,6 +191,11 @@ def _expect_data(r, url):
     `_result_df`), SKIP for one that genuinely has nothing to serve here
     (the AC-PF endpoints, absent a `n.pf()` stage).
     """
+    if r.status_code == 200 and r.json().get("voll_applied") is False:
+        # UX overhaul S2b: lost load answers 200 `voll_applied: false` (not
+        # modelled — no series at all) where it used to answer 204; there is
+        # nothing to range, exactly as with the 204 it replaced.
+        pytest.skip(f"{url}: lost load not modelled on this fixture (no VoLL)")
     if r.status_code != 204:
         return
     if url in DATA_GUARANTEED_ENDPOINTS:

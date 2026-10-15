@@ -1225,6 +1225,19 @@ def run_simulation(
                 # identical guard the ENS cap carries below, for the identical
                 # reason: with no plan to measure, a margin block would report
                 # the previous solve's firm capacity as this one's.
+                # UX overhaul S2b: the settings this solve actually used, so
+                # /results/{lost_load,adequacy,reserve_margin} can tell "solved
+                # without this standard" from "not solved" — and answer from
+                # the solve, never from the Solver Settings draft (which the
+                # user may have edited since). None after a failed solve, for
+                # the same reason the stashes below are: no dispatch to judge.
+                _emit_state(last_solve_settings=({
+                    "voll_eur_per_mwh": float(getattr(config, "voll", 0.0) or 0.0),
+                    "ens_target_applied": bool(_ens_targets),
+                    "ens_cap_permyriad": getattr(config, "ens_cap_permyriad", None),
+                    "reserve_margin_applied": bool(_margin_targets),
+                    "reserve_margin": getattr(config, "reserve_margin", None),
+                } if status in ("ok", "optimal") else None))
                 _margin_payload = None
                 if not _margin_targets:
                     # 12c-0 shipped-code review, finding 3: the HTTP route

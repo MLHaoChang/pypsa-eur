@@ -83,16 +83,20 @@ def test_204_before_any_solve(client, install_network):
     assert r.content == b""
 
 
-def test_204_when_the_last_solve_set_no_margin(client, install_network,
-                                               session_state):
+def test_configured_false_when_the_last_solve_set_no_margin(client, install_network,
+                                                           session_state):
     """★ A margin left in state from a previous solve is a stale standard the
     next plan never met — the same republish-a-stale-report failure QA round 2
-    found on the ENS cap."""
+    found on the ENS cap. Since UX overhaul S2b a margin-less solve answers
+    200 `{"configured": false}` (204 is reserved for "not solved"), and the
+    stale payload must still never come back."""
     install_network(_network())
     session_state(client)["last_reserve_margin"] = copy.deepcopy(SENTINEL)
     session_state(client)["solver_config"] = SolverConfig()   # no margin
     _run_and_join(client, session_state)
-    assert client.get(URL).status_code == 204
+    r = client.get(URL)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"configured": False}
 
 
 # ── ★ the persisted stash, never a recomputation ──────────────────────────

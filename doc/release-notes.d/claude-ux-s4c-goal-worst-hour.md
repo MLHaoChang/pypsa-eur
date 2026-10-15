@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The cost-vs-availability frontier marks the unserved-energy goal the last solve applied, as a dashed line on its axis. The lost-load chart marks its worst hour with the unserved MW, rounded as the tiles round it.
