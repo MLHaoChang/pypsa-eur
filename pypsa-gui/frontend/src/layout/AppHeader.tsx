@@ -868,6 +868,21 @@ export default function AppHeader() {
   // navigates away). Without this, the EventSource keeps reconnecting.
   useEffect(() => () => { esCleanupRef.current?.() }, [])
 
+  // A "Run the solve" from elsewhere (a result tab's empty state, UX template
+  // audit H2) runs THIS path: same pre-save, enqueue and log attach. Only an
+  // idle request starts a run; it never aborts or cancels one. The mount value
+  // is remembered so opening the header does not replay an old request.
+  const runSolveRequest = useUIStore(s => s.runSolveRequest)
+  const seenRunRequest = useRef(runSolveRequest)
+  const runHandlerRef = useRef(handleRunButton)
+  runHandlerRef.current = handleRunButton
+  useEffect(() => {
+    if (runSolveRequest === seenRunRequest.current) return
+    seenRunRequest.current = runSolveRequest
+    if (jobRunning || isRunning || jobQueued) return
+    void runHandlerRef.current()
+  }, [runSolveRequest, jobRunning, isRunning, jobQueued])
+
   return (
     <header data-no-panel-close className="h-11 flex items-center gap-2 px-3 bg-bg border-b border-border shrink-0 z-10">
       {/* S8: when a watched decision-study run ends, open its verdict and toast

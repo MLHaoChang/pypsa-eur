@@ -17,6 +17,7 @@ import { type TSPayload, shortStamp, downloadCSV, KPI, ChartActions,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, refLine } from './shared'
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
+import NotSolved from './NotSolved'
 
 // ── Prices tab ───────────────────────────────────────────────────────────────
 // Extracted from LoadFlow. Three sections:
@@ -196,9 +197,7 @@ export default function Prices() {
 
   if (!tsP) {
     return (
-      <div className="p-6 text-center text-xs text-muted">
-        No marginal-price data yet. Run a LOPF / SCLOPF solve (header → <span className="font-medium text-text">Run LOPF</span>) — prices come from the LP dual variables.
-      </div>
+      <NotSolved what="Marginal prices" why="They are the dual values of that solve." />
     )
   }
 

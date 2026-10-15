@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Result tabs that need the hour-by-hour solve no longer tell you to use the header's Run LOPF button, which Guided hides. Dispatch, Capacity expansion, Prices, Economics, Emissions, Curtailment and the aggregated overview now say "Not run yet", what is missing, and offer "Run the solve" right there. The button uses the same run path as the header.

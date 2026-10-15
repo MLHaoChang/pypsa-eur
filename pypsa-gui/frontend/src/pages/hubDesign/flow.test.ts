@@ -66,6 +66,10 @@ describe('rail', () => {
     expect(HUB_STEPS.map(s => railState('done', s, 'improve', true)))
       .toEqual(['done', 'done', 'done', 'done', 'current'])
   })
+  it('out-of-date results are not ticked as done (UX audit L5)', () => {
+    expect(HUB_STEPS.map(s => railState('stale', s, 'improve', true)))
+      .toEqual(['done', 'done', 'done', 'todo', 'current'])
+  })
   it('own network before a study: Start is not ticked', () => {
     expect(HUB_STEPS.map(s => railState('no_study', s, 'site', false)))
       .toEqual(['todo', 'current', 'todo', 'todo', 'blocked'])

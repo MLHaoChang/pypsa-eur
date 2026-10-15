@@ -307,6 +307,37 @@ def test_acquire_lock_returns_none_on_insert_race(session_local, monkeypatch):
         assert current.holder_user_id == user_a.id
 
 
+def test_acquire_lock_returns_the_lock_when_the_same_user_won_the_insert_race(
+        session_local, monkeypatch):
+    """A tab's lock claim racing the same user's first write on a fresh project
+    (both insert; one hits IntegrityError) is not contention: the caller holds
+    the lock, so it gets it back, its TTL refreshed. A 409 here opened a new
+    project read-only, "locked" by its own creator (UX audit W6 / H1)."""
+    from services import project_locks
+
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+    soon = _now() + timedelta(seconds=5)
+
+    with session_local() as db:
+        db.add(ProjectLock(project_id=project.id, holder_user_id=user_a.id,
+                           acquired_at=_now(), expires_at=soon))
+        db.commit()
+
+    monkeypatch.setattr(project_locks, "_prune_expired", lambda db, project_id: None)
+
+    with session_local() as db:
+        result = project_locks.acquire_lock(db, project.id, user_a.id)
+        assert result is not None and result.holder_user_id == user_a.id
+        assert project_locks._as_utc(result.expires_at) > soon
+
+    with session_local() as db:
+        rows = db.scalars(select(ProjectLock).where(ProjectLock.project_id == project.id)).all()
+        assert [r.holder_user_id for r in rows] == [user_a.id]
+
+
 def test_logout_releases_all_project_locks(session_local):
     org = _create_org(session_local)
     user = _create_user(session_local, email="holder@example.com")

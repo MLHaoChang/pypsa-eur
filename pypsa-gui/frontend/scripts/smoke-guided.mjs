@@ -992,10 +992,12 @@ function expectedHeadline(review, report) {
     if (ci) return `Not decided: the shortfall estimate (${ci[0].toFixed(0)}–${ci[1].toFixed(0)} h/yr) straddles the ${g(target)} h/yr goal — more simulation runs would settle it.`
   }
   if (verdict === 'pass' && lole != null && target != null) {
-    return `Certified: about ${lole.toFixed(1)} h/yr of shortfall, under the ${g(target)} h/yr goal.`
+    return lole < 0.05 ? `Certified: no shortfall expected, under the ${g(target)} h/yr goal.`
+      : `Certified: about ${lole.toFixed(1)} h/yr of shortfall, under the ${g(target)} h/yr goal.`
   }
   if (lole != null && target == null) {
-    return `No reliability goal was set — the study reports ${lole.toFixed(1)} h/yr of shortfall. Set a goal to certify.`
+    return lole < 0.05 ? 'No reliability goal was set — the study expects no shortfall. Set a goal to certify.'
+      : `No reliability goal was set — the study reports ${lole.toFixed(1)} h/yr of shortfall. Set a goal to certify.`
   }
   if (lole == null && target == null) {
     return 'No reliability goal is set for this site, so the study did not certify it — set an allowed shortfall in step 3 (Goal) to get a verdict.'
@@ -1072,8 +1074,9 @@ async function phaseP24(browser) {
     await byId('hub-goal-run').click()
     await byId('hub-goal-running').waitFor({ state: 'visible', timeout: 30_000 })
     check(await byId('hub-rail-spinner').isVisible(), 'rail spinner on Goal while running')
-    check(await railState('results') === 'blocked' && await railState('improve') === 'blocked',
-      'Results / Improve blocked while running')
+    // Results is never locked (#285): it says "running" itself; Improve waits.
+    check(await railState('results') === 'todo' && await railState('improve') === 'blocked',
+      'Results open, Improve blocked while running')
     const runText = await textOf('hub-goal-running')
     check(runText.startsWith('Studying…') && !/poll|get_adequacy_results/.test(runText),
       `running text is the card's own: "${runText}" (N3)`)
@@ -1148,7 +1151,7 @@ async function phaseP24(browser) {
     await byId('hub-card-site').waitFor({ state: 'visible', timeout: 30_000 })
     check(await railState('site') === 'current' && await railState('start') === 'done',
       'rail: Start ✓, Site current')
-    check(await railState('results') === 'blocked', 'Results blocked before a study')
+    check(await railState('results') === 'todo', 'Results open (not run yet) before a study')
     check((await page.getByTitle(/queues the solve/).count()) === 0, 'Guided: no idle "Run LOPF" in the header')
     await shot(page, 'p24-dc-opened-at-site')
 
@@ -1271,7 +1274,7 @@ async function phaseP24(browser) {
       (document.querySelector('[data-testid="hub-start-provenance"]')?.textContent ?? '').includes(n)
       || document.querySelector('[data-testid="hub-card-site"]') !== null, TEMPLATE_NAMES.eh_h2_hub, { timeout: 60_000 })
     await waitRail('site', 'current', 60_000)
-    check(await railState('results') === 'blocked', 'new project: Results blocked again')
+    check(await railState('results') === 'todo', 'new project: Results back to not run yet')
     await checkSite('eh_h2_hub', 'strong_grid')
     await shot(page, 'p24-h2-site')
     await runStudy('h2', { expectLole: '' , tourWhileRunning: true })
