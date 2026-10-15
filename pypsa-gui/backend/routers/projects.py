@@ -1436,6 +1436,9 @@ _TEMPLATE_DEFAULT_NAMES = {
     # The generic site (generic-site E2E, G1): parametrized, built at create
     # from the request body (project_templates/eh_site.py).
     "eh_site": "Generic Site Energy Hub",
+    # The staged H2 hub and microgrid (generic-site E2E, H1/M1).
+    "eh_h2_hub_staged": "Industrial Hydrogen Hub (staged growth)",
+    "eh_microgrid_staged": "Island Microgrid (staged growth)",
 }
 
 # Sidecars a template directory may carry beside network.nc (P19): the EH

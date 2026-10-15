@@ -1,0 +1,71 @@
+{
+  "description": "The island microgrid planned from a growing load: residential demand grows 40 % and the hospital 20 % by 2035. Diesel, battery, PV and wind candidates per period; the island runs without its subsea tie. Multi-period; tagged for an off-grid study.",
+  "dtc_attribution": null,
+  "energization": [],
+  "id": "eh_microgrid_staged",
+  "ledger": [
+    {
+      "item": "discount rate",
+      "note": "the solve discounts each period's costs at it",
+      "source": "assumed",
+      "value": "7 % nominal"
+    },
+    {
+      "item": "finance inputs",
+      "note": "pre-tax; a later stage's capex is paid a year before its COD",
+      "source": "assumed",
+      "value": "nominal EUR (2020 money), escalation 2 %/yr, all equity at 7 %, close 2026-01-01, to 2045"
+    },
+    {
+      "item": "load growth",
+      "note": "replace with the island's load forecast",
+      "source": "synthetic",
+      "value": "residential \u00d71.2 / \u00d71.4, hospital \u00d71.1 / \u00d71.2 by 2030 / 2035"
+    },
+    {
+      "item": "hospital feeder losses",
+      "note": "not modelled in the staged plan",
+      "source": "assumed",
+      "value": "efficiency 1.0"
+    },
+    {
+      "item": "investment case",
+      "note": "the island has no grid-only site; a diesel-only baseline comes in a later slice",
+      "source": "assumed",
+      "value": "not configured (no grid comparison)"
+    }
+  ],
+  "name": "Island Microgrid (staged growth)",
+  "pack_overrides": {},
+  "period_years": {
+    "2027": 3,
+    "2030": 5,
+    "2035": 10
+  },
+  "projected_load": [
+    {
+      "note": "the residential and hospital peaks added (they do not coincide); synthetic",
+      "peak_mw": 9.2,
+      "year": 2027
+    },
+    {
+      "note": "the residential and hospital peaks added (they do not coincide); synthetic",
+      "peak_mw": 10.87,
+      "year": 2030
+    },
+    {
+      "note": "the residential and hospital peaks added (they do not coincide); synthetic",
+      "peak_mw": 12.54,
+      "year": 2035
+    }
+  ],
+  "provenance": "synthetic illustrative data (P19 template) \u2014 representative week, public-catalogue-range costs; replace with project data before any decision",
+  "recommended_archetype": "off_grid",
+  "stages": null,
+  "study_notes": [
+    "Each period is the same representative week, with the period's load.",
+    "Candidates are one row per period (build_year = the period).",
+    "The island rows hold the steady island: grid-forming battery and diesel droop.",
+    "The investment case is not available yet: an island has no grid-only comparison. A diesel-only baseline comes next."
+  ]
+}

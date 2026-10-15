@@ -1,0 +1,105 @@
+{
+  "description": "The hydrogen hub planned from a projected H2 demand: the offtake grows 10 \u2192 18 \u2192 25 MW over 2027, 2030 and 2035 beside a 40 MW process load on a 200 MW connection. Wind, solar, battery and electrolyser candidates per period. Multi-period; tagged for an Energy Hub study.",
+  "dtc_attribution": null,
+  "energization": [
+    {
+      "available_import_mw": 200.0,
+      "connection_mw": 200.0,
+      "note": "fully energized",
+      "source": "assumed",
+      "year": 2027
+    },
+    {
+      "available_import_mw": 200.0,
+      "connection_mw": 200.0,
+      "note": "fully energized",
+      "source": "assumed",
+      "year": 2030
+    },
+    {
+      "available_import_mw": 200.0,
+      "connection_mw": 200.0,
+      "note": "fully energized",
+      "source": "assumed",
+      "year": 2035
+    }
+  ],
+  "id": "eh_h2_hub_staged",
+  "ledger": [
+    {
+      "item": "discount rate",
+      "note": "the solve discounts each period's costs at it",
+      "source": "assumed",
+      "value": "7 % nominal"
+    },
+    {
+      "item": "finance inputs",
+      "note": "pre-tax; a later stage's capex is paid a year before its COD",
+      "source": "assumed",
+      "value": "nominal EUR (2020 money), escalation 2 %/yr, all equity at 7 %, close 2026-01-01, to 2045"
+    },
+    {
+      "item": "H2 offtake",
+      "note": "the customer's demand ramp; replace with the offtake contract",
+      "source": "synthetic",
+      "value": "10 \u2192 18 \u2192 25 MW (LHV)"
+    },
+    {
+      "item": "PoC losses",
+      "note": "not modelled, so the counterfactual bill is the served load at the meter",
+      "source": "assumed",
+      "value": "efficiency 1.0 on grid_import"
+    },
+    {
+      "item": "import tariff",
+      "note": "an illustrative network-use charge on top of the wholesale price",
+      "source": "synthetic",
+      "value": "h2_hub_network_tariff_synthetic: 25 EUR/MWh 08-20 h, 15 EUR/MWh otherwise"
+    },
+    {
+      "item": "fuel cell",
+      "note": "the pack's fuel cell lives 10 years: a staged one would retire before 2045",
+      "source": "assumed",
+      "value": "the existing 10 MW unit, no staged candidate"
+    },
+    {
+      "item": "investment case",
+      "note": "without the investment the H2 offtake has no source; the grey-H2 counterfactual with a CO2 price by period comes in a later slice",
+      "source": "assumed",
+      "value": "refused today (owner_conversion_load)"
+    }
+  ],
+  "name": "Industrial Hydrogen Hub (staged growth)",
+  "pack_overrides": {},
+  "period_years": {
+    "2027": 3,
+    "2030": 5,
+    "2035": 10
+  },
+  "projected_load": [
+    {
+      "note": "process load plus the electrolysis the offtake needs; synthetic",
+      "peak_mw": 54.71,
+      "year": 2027
+    },
+    {
+      "note": "process load plus the electrolysis the offtake needs; synthetic",
+      "peak_mw": 66.47,
+      "year": 2030
+    },
+    {
+      "note": "process load plus the electrolysis the offtake needs; synthetic",
+      "peak_mw": 76.76,
+      "year": 2035
+    }
+  ],
+  "provenance": "synthetic illustrative data (P19 template) \u2014 representative week, public-catalogue-range costs; replace with project data before any decision",
+  "recommended_archetype": "strong_grid",
+  "stages": null,
+  "study_notes": [
+    "Each period is the same representative week, with the period's H2 offtake.",
+    "Candidates are one row per period (build_year = the period): the plan says what to build when.",
+    "The investment case is not available yet: without the investment the H2 offtake has no stated source. A grey-H2 comparison at a reference price comes next.",
+    "The connection (200 MW) carries the grid-only site in every period."
+  ]
+}

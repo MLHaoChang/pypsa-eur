@@ -78,6 +78,9 @@ export const TEMPLATES = [
   { id: 'eh_microgrid', name: 'Island Microgrid', description: 'Island system that must run without its subsea tie: PV, wind, battery, diesel fleet, critical hospital feeder. Ready for an off-grid Energy Hub study.', buses: 3, lines: 0, badge: 'energy hub', available: true },
   // E2E demo plan 2026-10-14, slice 8: the same campus planned from a projected load over three periods.
   { id: 'eh_datacenter_staged', name: 'Data Center Energy Hub (staged growth)', description: 'The data center planned from a projected load: IT grows 12 → 24 → 36 MW over 2027, 2030 and 2035 while the utility energizes a 55 MW connection in steps (20 MW until 2030). Genset and battery candidates per period. Multi-period; ready for an Energy Hub study on a connection limited until it is fully energized.', buses: 3, lines: 0, badge: 'energy hub', available: true },
+  // Generic-site E2E H1/M1: the hydrogen hub and the island planned over three periods.
+  { id: 'eh_h2_hub_staged', name: 'Industrial Hydrogen Hub (staged growth)', description: 'The hydrogen hub planned from a growing H2 demand: the offtake grows 10 → 18 → 25 MW over 2027, 2030 and 2035 on a 200 MW connection. Wind, solar, battery and electrolyser candidates per period. Multi-period; ready for an Energy Hub study on a strong grid.', buses: 3, lines: 0, badge: 'energy hub', available: true },
+  { id: 'eh_microgrid_staged', name: 'Island Microgrid (staged growth)', description: 'The island microgrid planned from a growing load: residential demand up 40 % and the hospital up 20 % by 2035. Diesel, battery, PV and wind candidates per period. Multi-period; ready for an off-grid Energy Hub study.', buses: 3, lines: 0, badge: 'energy hub', available: true },
 ] as const
 
 export default function NewProjectWizard({
