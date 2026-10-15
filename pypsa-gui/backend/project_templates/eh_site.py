@@ -392,7 +392,22 @@ def stage_network(n: pypsa.Network, years: list[int], *, load_scale: dict[int, d
         df.loc[rows, ["overnight_cost", "discount_rate"]] = [0.0, DISCOUNT_RATE]
     for y in years:
         candidates(n, y)
+    cyclic_per_period(n)
     return n
+
+
+def cyclic_per_period(n: pypsa.Network) -> None:
+    """Storage cycles within each period: one representative week stands for
+    several years, so energy carried from one period into the next is not
+    physical (gatekeeper review of #304). PyPSA's per-period flags default to
+    False. Every staged template applies it (the staged data center through
+    ``eh_templates._staged_datacenter``)."""
+    if len(n.stores):
+        n.stores["e_cyclic"] = True
+        n.stores["e_cyclic_per_period"] = True
+    if len(n.storage_units):
+        n.storage_units["cyclic_state_of_charge"] = True
+        n.storage_units["cyclic_state_of_charge_per_period"] = True
 
 
 # ── The network ─────────────────────────────────────────────────────────────
@@ -525,12 +540,6 @@ def build_eh_site(params: dict | None = None) -> pypsa.Network:
                   energization={"grid_import": [e["mw"] for e in p["energization"]]},
                   weights=period_years(years, p["horizon_end"]),
                   existing=existing_assets(p), candidates=candidates)
-    # Storage cycles within each period: one week stands for several years,
-    # so no energy is carried from one period into the next (gatekeeper
-    # review of #304; set here, not in the shared stage_network).
-    if len(n.storage_units):
-        n.storage_units["cyclic_state_of_charge"] = True
-        n.storage_units["cyclic_state_of_charge_per_period"] = True
     n.name = p["name"] or f"{_LABEL[p['site_type']]} Energy Hub"
     return n
 
