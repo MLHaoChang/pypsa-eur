@@ -198,6 +198,7 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/simulation.py", "get_value_flows"):       frozenset(),
     ("routers/simulation.py", "get_value_flow_designer"): frozenset(),   # P3 WP3.6
     ("routers/simulation.py", "put_value_flows"):       frozenset(),
+    ("routers/simulation.py", "get_poc_state"):         frozenset(),   # H4: is the PoC open; no economics
     ("routers/simulation.py", "build_value_flow_template"): frozenset(),
     # IC P4 WP4.6b: the finance inputs; config, reports no figures.
     ("routers/simulation.py", "get_finance"):           frozenset(),

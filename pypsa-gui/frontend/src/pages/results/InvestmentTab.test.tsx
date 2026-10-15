@@ -13,7 +13,7 @@ import { expectAllButtonsNamed } from '../../test-utils/accessibleName'
 vi.mock('../../api/commercial', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/commercial')>()
   return { ...actual, commercialApi: { ...actual.commercialApi,
-    getBilling: vi.fn(), getValueFlowsResult: vi.fn(), getCommercial: vi.fn(),
+    getBilling: vi.fn(), getValueFlowsResult: vi.fn(), getCommercial: vi.fn(), getPocState: vi.fn(),
     saveSiteConnection: vi.fn() } }
 })
 // The Site connection form (IC U1 follow-up b) lists the network's Links.
@@ -52,6 +52,7 @@ const LINKS = [
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo' })
   vi.mocked(commercialApi.getCommercial).mockResolvedValue(ROOT as never)
+  vi.mocked(commercialApi.getPocState).mockResolvedValue({ poc_link: 'import', open: false })
   vi.mocked(networkApi.getLinks).mockResolvedValue(LINKS as never)
 })
 afterEach(() => { cleanup(); vi.mocked(commercialApi.getBilling).mockReset()
@@ -278,4 +279,27 @@ describe('InvestmentTab → Economics', () => {
     await screen.findByText(/import tariff/)
     expect(screen.queryByTestId('ic-edit-in-economics')).toBeNull()
   })
+
+  it('shows an island with an open PoC: no connection, tariff or export to set (H4)', async () => {
+    vi.mocked(commercialApi.getBilling).mockResolvedValue(null)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(FLOWS as never)
+    vi.mocked(commercialApi.getPocState).mockResolvedValue({ poc_link: 'subsea_tie', open: true })
+    renderTab()
+    expect((await screen.findByTestId('ic-island')).textContent).toMatch(
+      /^Island: no grid in operation; compared with the island as it stands today\. The tie subsea_tie is open/)
+    expect(screen.queryByTestId('ic-site-connection')).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: 'Tariff' }))
+    expect(screen.getByTestId('ic-tariff-island').textContent).toMatch(/buys no grid power/)
+  })
+
+  it('keeps the editors while the PoC state is unknown (a solve holds the network)', async () => {
+    vi.mocked(commercialApi.getBilling).mockResolvedValue(null)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(FLOWS as never)
+    vi.mocked(commercialApi.getPocState).mockResolvedValue(
+      { poc_link: 'subsea_tie', open: null, reason: 'network_busy' })
+    renderTab()
+    expect(await screen.findByTestId('ic-site-connection')).toBeTruthy()
+    expect(screen.queryByTestId('ic-island')).toBeNull()
+  })
 })
+
