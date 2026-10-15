@@ -50,6 +50,22 @@ Merge master into a PR only for one of these:
 - **Re-run** a failed job at most once, and only when it died before any test ran or the failure is a known flake. A second failure is real.
 - **Keep every test as strict as it is**: fix the code or the test's genuine bug, never skip, loosen or quarantine a test.
 
+## Helper agents
+
+Run read-only helper agents (log reading, file sweeps, summaries of saved tool output) with `model: haiku`. Give each one the exact question and the answer shape you expect back.
+
+## Finishing a package
+
+When the last PR of your work package has merged, `send_message` the coordinator a hand-off note, then stop. The note covers:
+- the decisions made;
+- the open items;
+- file pointers;
+- the last merged SHA.
+
+The coordinator opens the next package as a fresh session from that note.
+
+A package that turns out to need code beyond your brief, such as gridspine or investment-engine code in a frontend or template-data package, goes back to the coordinator before you change that code.
+
 ## Questions
 
 Send each question to the coordinator with `send_message`, as 2–4 options, the recommended one first with its reason. The owner reads times in CET/CEST, so give times in that zone.

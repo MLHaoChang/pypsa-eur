@@ -1,0 +1,1 @@
+* Chore(agents): The coordinator picks a model per work package, opens one session per package, and runs the hourly check as a fresh small session; PR sessions run read-only helper agents on Haiku and hand off when a package ends.
