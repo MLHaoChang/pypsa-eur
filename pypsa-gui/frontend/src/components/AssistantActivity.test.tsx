@@ -2,10 +2,11 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
-import { getAssistantActivity, type ActivitySnapshot } from '../api/assistantActivity'
+import { getAssistantActivity, getAssistantDecision, type ActivitySnapshot, type DecisionObservation } from '../api/assistantActivity'
 import AssistantActivity from './AssistantActivity'
-vi.mock('../api/assistantActivity', () => ({ getAssistantActivity: vi.fn() }))
+vi.mock('../api/assistantActivity', () => ({ getAssistantActivity: vi.fn(), getAssistantDecision: vi.fn() }))
 const get = vi.mocked(getAssistantActivity)
+const inspect = vi.mocked(getAssistantDecision)
 function snapshot(cursor = 'epoch:1', status = 'running'): ActivitySnapshot {
   return { version: 1, project_id: 'p1', filter: 'all', cursor, revision: 1,
     resnapshot_required: false, next_page: null, total: 1, warnings: [], scheduling_available: false,
@@ -15,6 +16,7 @@ function snapshot(cursor = 'epoch:1', status = 'running'): ActivitySnapshot {
 describe('AssistantActivity', () => {
   beforeEach(() => {
     get.mockReset()
+    inspect.mockReset()
     useUIStore.setState({ currentProject: 'Project A' })
     useChatStore.setState({ sessionId: 'session-a' })
   })
@@ -104,5 +106,56 @@ describe('AssistantActivity', () => {
     const { container } = render(<AssistantActivity onConversation={vi.fn()} />)
     expect(await screen.findByText('Retained observation')).toBeTruthy()
     expect(container.querySelector('time')).toBeNull()
+  })
+  function question() {
+    const data = snapshot()
+    data.items[0] = { ...data.items[0], family: 'question', status: 'waiting_for_input',
+      native_status: 'waiting_for_input', decision_id: 'decision1', decision_revision: 1,
+      decision_digest: 'digest1', session_id: 'old-session', needs_you: true }
+    return data
+  }
+  function detail(): DecisionObservation {
+    return { source_id: 'decision1', project_id: 'p1', session_id: 'old-session', tool_use_id: 'original-call',
+      tool_name: 'ask_user', native_status: 'waiting_for_input', revision: 1, decision_digest: 'digest1',
+      inspection_only: true, evidence_available: false, reason: 'Read the original question.',
+      question: { title: 'Basis', question: 'Which basis?', detail: '<script>untrusted text</script>',
+        allow_free_text: true, multi_select: false, intent: 'choice', options: [{ label: 'Battery', description: '', recommended: true }] } }
+  }
+  it('inspects an old question as text without restoring controls or rebinding the chat', async () => {
+    get.mockResolvedValue(question())
+    inspect.mockResolvedValue(detail())
+    const open = vi.fn()
+    const { container } = render(<AssistantActivity onConversation={open} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect decision' }))
+    expect(await screen.findByText('Which basis?')).toBeTruthy()
+    expect(screen.getByText('Battery (recommended)')).toBeTruthy()
+    expect(screen.getByText('<script>untrusted text</script>')).toBeTruthy()
+    expect(container.querySelector('script')).toBeNull()
+    expect(screen.getByText(/original-call/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /approve|answer|retry|resume|open originating/i })).toBeNull()
+    expect(useChatStore.getState().sessionId).toBe('session-a')
+    expect(open).not.toHaveBeenCalled()
+    expect(inspect.mock.calls[0][0]).toEqual(question().items[0])
+  })
+  it('refuses stale inspection and offers a visible refresh route', async () => {
+    get.mockResolvedValue(question())
+    inspect.mockRejectedValue(new Error('409 stale'))
+    render(<AssistantActivity onConversation={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect decision' }))
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Refresh Activity'))
+    expect(screen.queryByText('Which basis?')).toBeNull()
+  })
+  it('aborts inspection on project changes and ignores late private data', async () => {
+    get.mockResolvedValue(question())
+    let finish!: (value: DecisionObservation) => void
+    inspect.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    render(<AssistantActivity onConversation={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect decision' }))
+    await waitFor(() => expect(inspect).toHaveBeenCalledOnce())
+    const signal = inspect.mock.calls[0][1]
+    act(() => useUIStore.setState({ currentProject: 'Project B' }))
+    expect(signal.aborted).toBe(true)
+    await act(async () => finish(detail()))
+    expect(screen.queryByText('Which basis?')).toBeNull()
   })
 })

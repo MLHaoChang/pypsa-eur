@@ -1565,8 +1565,10 @@ TOOLS: list[dict[str, Any]] = [
         "stages [{year, peak_mw}], connection_mw, energization [{year, mw}], "
         "critical_share, load_profile, existing {gensets {count, unit_mw, fuel}, "
         "pv_mw, battery {mw, mwh}, ups {mw, minutes}}, candidates {genset|bess|pv: "
-        "{enabled, max_mw}}; a stage whose peak is above its energized "
-        "connection is refused). Grid templates: 3bus, ieee14, belgium, "
+        "{enabled, max_mw}}, ride_through (true: ride through grid outages "
+        "without a blackout, the seamless scenario; needs an existing battery "
+        "or new batteries; default false); a stage whose peak is above its "
+        "energized connection is refused). Grid templates: 3bus, ieee14, belgium, "
         "ieee39. Safety: destructive.",
         {
             "template_id": {"type": "string",

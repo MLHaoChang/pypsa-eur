@@ -185,6 +185,8 @@ def _confirm_destructive_tool(
                          f"approval for {tool_name!r} could not be recorded",
                          tool_results_collector)
         return False
+    from harness import attention
+    attention.confirmation(session, pc, tool_use_id)
     card = {
         "tool_use_id": tool_use_id,
         "tool_name": tool_name,
@@ -200,6 +202,7 @@ def _confirm_destructive_tool(
     outcome, by = _DECISION_OUTCOMES.get(decision, ("unavailable", "system"))
     recorded = approvals.decided(session, call_id=tool_use_id, tool=tool_name, tier=tier,
                                  outcome=outcome, by=by, link=link)
+    attention.confirmation(session, pc, tool_use_id, outcome if recorded else 'unavailable')
     if decision == "approve" and recorded:
         return True
     if decision == "approve":

@@ -98,6 +98,24 @@ def test_generator_named_network_cannot_become_a_network_cost_request(
     assert "Network network" not in public_text(frames)
 
 
+def test_software_clarification_is_retained_only_after_checked_publication(solved, conversation, monkeypatch, tmp_path):
+    monkeypatch.setenv('PYPSAGUI_APP_DATA_DIR', str(tmp_path / 'app'))
+    frames, provider = conversation('Show cost for generator G1.')
+    clarified(frames, provider, 'cost_quantity_required')
+    native = next(payload for event, payload in frames if event == 'choice_request')
+    from harness import session
+    from services.pypsa_service import PyPSAService
+    from harness import attention
+    owner = session.get_session(conversation.sid).owner_user_id
+    project = str(PyPSAService.get_active_context().project_uuid)
+    rows, warnings = attention.project_records(owner, project, [])
+    assert len(rows) == 1 and not warnings
+    assert rows[0]['tool_name'] == 'checked_clarification'
+    assert rows[0]['tool_use_id'] == native['tool_use_id']
+    assert rows[0]['question']['question'] == native['question']
+    assert rows[0]['evidence_available'] is False
+
+
 def test_previous_run_is_latest_distinct_checked_run_not_latest_answer(
     solved, conversation
 ):

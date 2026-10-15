@@ -368,3 +368,100 @@ def test_the_frontend_fixture_is_the_form_data():
     with `json.dumps(eh_site.form_schema(), indent=1)`."""
     fixture = BACKEND.parent / "frontend/src/pages/hubDesign/siteFormFixture.json"
     assert json.loads(fixture.read_text()) == json.loads(json.dumps(S.form_schema()))
+
+
+# ── grid-outage ride-through (owner decision: opt-in, default off) ──────────
+
+def test_ride_through_is_off_by_default_and_adds_the_seamless_scenario():
+    p = S.site_params({"site_type": "industrial"})
+    assert p["ride_through"] is False
+    assert S.island_config(p)["requirements"]["scenarios"] == ["ups_bridged"]
+    on = S.site_params({"site_type": "industrial", "ride_through": True})
+    assert S.island_config(on)["requirements"]["scenarios"] == ["ups_bridged", "seamless"]
+    row = {r["item"]: r for r in S.template_meta(on)["ledger"]}["grid-outage ride-through"]
+    assert row["value"].startswith("on") and "ride-through off" in row["note"]
+    assert "expected to cost more" in row["note"]
+    # Off is the default and leaves the metadata as before (byte-identical).
+    meta = S.template_meta(p)
+    assert "ride_through" not in meta["params"]
+    assert "grid-outage ride-through" not in {r["item"] for r in meta["ledger"]}
+
+
+def test_ride_through_without_a_ups_studies_seamless_alone():
+    p = S.site_params({"site_type": "industrial", "ride_through": True,
+                       "existing": {"ups": {"mw": 0.0}}})
+    isl = S.island_config(p)
+    assert isl["requirements"]["scenarios"] == ["seamless"]
+    assert "ups" not in json.dumps(isl).lower()          # no orphan UPS reference
+    assert S.solver_config(p)["island_constraints"] is True
+    from services.adequacy.island_config import validate
+
+    validate(isl)                                         # the island validator accepts it
+    row = {r["item"]: r for r in S.template_meta(p)["ledger"]}["grid-outage ride-through"]
+    assert "no UPS" in row["value"]
+
+
+@pytest.mark.parametrize("raw", [
+    {"ride_through": "yes"},
+    {"ride_through": True, "candidates": {"bess": {"enabled": False}}},
+])
+def test_ride_through_is_refused_without_a_battery_to_form_the_island(raw):
+    with pytest.raises(S.SiteParamsError) as exc:
+        S.site_params({"site_type": "industrial", **raw})
+    assert exc.value.field == "ride_through"
+
+
+def _solve_site(p, monkeypatch, tmp_path):
+    import routers.simulation as sim_router
+    from routers.projects import _solver_config_from_dict
+    from services.adequacy.island_config import SIDECAR_NAME, load_island_config
+    from services.pypsa_service import PyPSAService
+    from services.solver import island as I
+    from services.solver_service import run_simulation
+    from tests.conftest import install_network_into_backend
+
+    (tmp_path / SIDECAR_NAME).write_text(json.dumps(S.island_config(p)))
+    isl = load_island_config(tmp_path / SIDECAR_NAME)
+    isl["cuts"] = []
+    monkeypatch.setattr(I, "load_project_island", lambda: isl)
+    install_network_into_backend(S.build_eh_site(p))
+    cfg = _solver_config_from_dict(S.solver_config(p))
+    sim_router._state["solver_config"] = cfg
+    n = PyPSAService.get_network()
+    state: dict = {}
+    status, cond = run_simulation(cfg, n, PyPSAService.get_lock(), threading.Event(),
+                                  queue.SimpleQueue(), state_update=lambda **k: state.update(k))
+    assert status in ("ok", "optimal"), (status, cond)
+    return n, cfg, state
+
+
+@pytest.mark.live_solve
+def test_a_ride_through_site_solves_and_costs_at_least_the_ups_bridged_plan(
+        reset_backend, monkeypatch, tmp_path):
+    import routers.results as R
+    from models.finance import FinanceInputs
+    from services.finance.breakeven import island_breakeven
+    from services.finance.engine import run_case
+    from services.results import baseline as Bl
+    from services.results.finance_case import baseline_plan, build_finance_case
+
+    n_off, _cfg, _s = _solve_site(S.site_params({"site_type": "industrial"}), monkeypatch,
+                                  tmp_path)
+    off = float(n_off.objective)
+    n, cfg, state = _solve_site(S.site_params({"site_type": "industrial", "ride_through": True}),
+                                monkeypatch, tmp_path)
+    assert float(n.objective) >= off - 1e-6 * abs(off)
+    # The investment case on the site-today basis: the baseline either meets
+    # the seamless rows or is re-solved without them (#302), never infeasible,
+    # and then states the island capability's break-even.
+    Bl.clear_cache()
+    base = Bl.solve_baseline(n, cfg, baseline_plan(n, cfg))
+    case = build_finance_case(n, cfg, FinanceInputs.model_validate(cfg.finance),
+                              result_df=R._result_df, lost_load=state.get("last_lost_load"),
+                              baseline=base)
+    Bl.clear_cache()
+    assert "counterfactual_basis:site_today" in case.flags
+    r = run_case(case)
+    assert r.metrics["project_pre_tax_npv"] is not None
+    if "baseline_island_rows_relaxed" in case.flags:
+        assert island_breakeven(r, case) is not None

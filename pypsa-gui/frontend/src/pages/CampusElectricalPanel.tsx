@@ -31,7 +31,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, RefreshCw, Save, Square, Wand2, Workflow } from 'lucide-react'
 import {
   campusApi, errorText, isActiveRun, isNoAnswer, isOtherKind,
-  type CampusRunJob, type CampusRunStage, type CampusSettings, type CampusState, type CheckStatus, type ComplianceRow,
+  type CampusRunJob, type CampusSettings, type CampusState, type CheckStatus, type ComplianceRow,
   type InvestedComplianceRow, type InvestmentRow, type MilpJobRecord, type TransformerSizing,
 } from '../api/campusElectrical'
 import { solveQueueApi } from '../api/solveQueue'
@@ -42,6 +42,7 @@ import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from 
 import CampusIslandSection, { ISLAND_REPORT_KEY } from './CampusIslandSection'
 import CampusLibrarySection from './CampusLibrarySection'
 import { useCampusMilpJob } from './useCampusMilpJob'
+import { elapsed, failureLine, stageLabel, stepText, useTick } from './campusRunProgress'
 
 export const CAMPUS_KEY = (name: string) => ['campusElectrical', 'state', name] as const
 /** How often the state is re-read while a run goes on without an answer. */
@@ -430,25 +431,10 @@ function MilpProgress({ record, cancelling, onCancel, stale }: {
   )
 }
 
-const STAGE_LABEL: Record<CampusRunStage, string> = {
-  prepare: 'preparing the campus from the saved network',
-  rank: 'ranking the critical hours',
-  island_checks: 'island frequency checks (the slowest step)',
-  size: 'sizing the transformers, the compensation and the short circuit',
-  invest: 'buying the assets from the library, re-checked by AC load flow',
-  gfm_settings: 'recommending grid-forming settings from the island hours',
-  done: 'finishing',
-}
-
-function elapsed(fromS: number | null, toS?: number | null): string {
-  if (fromS == null) return ''
-  const s = Math.max(0, Math.round((toS ?? Date.now() / 1000) - fromS))
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-}
-
 /** The run's job, in words: queued or running (please wait, the stage, Abort),
  *  or how the last one ended. A finished run says nothing: its results show. */
 function RunJobStatus({ job, onAbort, aborting }: { job: CampusRunJob; onAbort: () => void; aborting: boolean }) {
+  useTick(isActiveRun(job))
   if (job.status === 'queued') {
     return (
       <p className="mt-2 text-[12px]" data-testid="campus-run-status" role="status">
@@ -482,11 +468,11 @@ function RunJobStatus({ job, onAbort, aborting }: { job: CampusRunJob; onAbort: 
   }
   if (job.status === 'running') {
     const stage = job.stage ?? 'prepare'
-    const step = job.stage_total ? ` (step ${Math.min((job.stage_done ?? 0) + 1, job.stage_total)} of ${job.stage_total})` : ''
+    const step = stepText(job) ? ` (${stepText(job)})` : ''
     return (
       <p className="mt-2 text-[12px]" data-testid="campus-run-status" role="status">
         <Tag tone="accent">running</Tag>{' '}
-        Running: {STAGE_LABEL[stage] ?? stage}{step} · {elapsed(job.started_at)}. The study takes several minutes; please wait.
+        Running: {stageLabel(stage)}{step} · {elapsed(job.started_at)}. The study takes several minutes; please wait.
         The results below are the previous run's until it finishes.{' '}
         <Btn onClick={onAbort} disabled={aborting}><Square size={12} /> Abort</Btn>
       </p>
@@ -495,15 +481,14 @@ function RunJobStatus({ job, onAbort, aborting }: { job: CampusRunJob; onAbort: 
   if (job.status === 'failed' || job.status === 'interrupted') {
     return (
       <p className="mt-2 text-[12px] text-danger" data-testid="campus-run-status" role="alert">
-        The last run {job.status === 'failed' ? 'failed' : 'was interrupted (the backend restarted)'}
-        {job.error ? `: ${job.error}` : '.'} The results below, if any, are from an earlier run.
+        {failureLine(job)} The results below, if any, are from an earlier run.
       </p>
     )
   }
   if (job.status === 'aborted') {
     return (
       <p className="mt-2 text-[12px] text-muted" data-testid="campus-run-status">
-        The last run was aborted{job.stage ? ` during ${STAGE_LABEL[job.stage] ?? job.stage}` : ''}. The results below, if any,
+        The last run was aborted{job.stage ? ` during ${stageLabel(job.stage)}` : ''}. The results below, if any,
         are from an earlier run.
       </p>
     )

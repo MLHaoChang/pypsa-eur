@@ -230,6 +230,27 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
         </div>
       </Group>
 
+      <Group title="Grid outages">
+        {/* Owner decision: opt-in, off by default; on adds the seamless scenario. */}
+        <label className="flex items-start gap-1.5 text-[12px] text-text">
+          <input type="checkbox" data-field="ride_through" data-testid="site-field-ride_through"
+            checked={v.ride_through}
+            aria-invalid={errors.ride_through ? true : undefined}
+            aria-describedby={errors.ride_through ? errId('ride_through') : undefined}
+            onChange={e => update(setField(draft, 'ride_through', e.target.checked))} />
+          <span className="flex flex-col gap-0.5">
+            <span className="flex items-baseline gap-1.5">
+              Ride through grid outages without a blackout <DefaultTag on={isDefault(draft, 'ride_through')} />
+            </span>
+            <Hint>
+              The plan keeps enough battery online to hold the site the instant the grid is lost.
+              It costs more than bridging the must-stay-on load on the UPS while the gensets start.
+            </Hint>
+          </span>
+        </label>
+        <FieldError id={errId('ride_through')} error={errors.ride_through} />
+      </Group>
+
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" data-testid="site-create" onClick={submit}
           disabled={create.isPending || disabledReason !== null || nErrors > 0}

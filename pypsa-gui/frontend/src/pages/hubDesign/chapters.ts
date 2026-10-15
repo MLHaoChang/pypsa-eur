@@ -8,6 +8,7 @@ import type { CampusState, GfmSettingsState } from '../../api/campusElectrical'
 import type { InvestmentCaseReportPayload, InvestmentCaseStudy, SimulationStatus } from '../../api/types'
 import { RESULT_GROUPS, type ResultsGroup, type ResultsTab } from '../results/groups'
 import { fmtCurrency } from '../../utils/format'
+import { failureLine, runningLine } from '../campusRunProgress'
 
 export type ChapterId = Exclude<ResultsGroup, 'summary'>
 
@@ -86,6 +87,11 @@ function gridPlan({ campus, notHub }: ChapterInputs['grid']): Omit<ChapterTile, 
     return { label, value: '', state: 'not_applicable', open,
       reason: 'This project has no campus electrical study.' }
   }
+  // A study run in progress, or the last one failed: say the stage, the time and the error.
+  const going = runningLine(campus?.run_job)
+  if (going) return { label, value: '', state: 'running', reason: going, open }
+  const failed = failureLine(campus?.run_job)
+  if (failed) return { label, value: '', state: 'unavailable', reason: failed, open }
   const rows = campus?.results?.compliance ?? null
   if (!rows || rows.length === 0) {
     return { label, value: '', state: 'not_run', open,
