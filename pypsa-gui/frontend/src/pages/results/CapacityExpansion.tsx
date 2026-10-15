@@ -18,6 +18,7 @@ import { useResultsFilter } from './filterContext'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 import { CarrierFilter, useCarrierFilter, bindCarrierFilter } from './CarrierFilter'
 import { canonicaliseCarrier, type ComponentClass } from './carrierAliases'
+import NotSolved from './NotSolved'
 
 // ── Capacity Expansion tab ────────────────────────────────────────────────────
 // Cost summary (KPIs + CAPEX-by-class chart) sits at the top. Below it, one
@@ -841,10 +842,7 @@ export default function CapacityExpansion() {
 
   if (isLoading) return <div className="p-6 text-muted text-xs">Loading…</div>
   if (!cost) return (
-    <div className="p-6 text-center text-xs text-muted">
-      No solved network. Run an LOPF (header → <span className="font-medium text-text">Run LOPF</span>)
-      to populate capacity-expansion results.
-    </div>
+    <NotSolved what="Capacity expansion" />
   )
 
   // Respect the shared period selector so the cost KPIs line up with the

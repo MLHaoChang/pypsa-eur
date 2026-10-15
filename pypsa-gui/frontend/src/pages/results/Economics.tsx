@@ -22,6 +22,7 @@ import { CarrierFilter, useCarrierFilter, bindCarrierFilter } from './CarrierFil
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { canonicaliseCarrier, type ComponentClass } from './carrierAliases'
+import NotSolved from './NotSolved'
 
 // ── Economics tab ──────────────────────────────────────────────────────────
 // Per-asset profitability view. Each row is one Generator / StorageUnit /
@@ -662,9 +663,7 @@ export default function Economics() {
   }
   if (!payload) {
     return (
-      <div className="p-6 text-center text-xs text-muted">
-        No solved results. Run a LOPF / SCLOPF (header → <span className="font-medium text-text">Run LOPF</span>) — asset economics need post-solve dispatch + bus marginal prices.
-      </div>
+      <NotSolved what="Asset economics" why="They need its dispatch and bus prices." />
     )
   }
   if (allRows.length === 0) {
