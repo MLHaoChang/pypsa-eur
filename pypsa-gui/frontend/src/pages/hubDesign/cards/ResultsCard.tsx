@@ -10,7 +10,7 @@ import { fmeaTopRows, notEstablishedNotes } from '../../results/EhReferenceDesig
 import { zeroReasonText } from '../../results/fmea'
 import { fmtCurrency } from '../../results/shared'
 import { studyHasResults } from '../flow'
-import { headline } from '../headline'
+import { headline, riskName } from '../headline'
 import { useHubDesignStore } from '../hubDesignStore'
 import { CardShell } from '../shared/CardShell'
 import { Term, TERM_FALLBACK } from '../shared/Term'
@@ -113,7 +113,7 @@ export function ResultsCard() {
           <ol data-testid="hub-results-risks" className="ml-4 list-decimal">
             {risks.map((r, i) => (
               <li key={r.mode_id} data-testid={`hub-results-risks-${i}`}>
-                {r.name || r.mode_id}
+                {riskName(r.name || r.mode_id)}
                 {r.criticality_eur_per_year != null && (
                   <span className="text-muted">
                     {' — '}{r.criticality_eur_per_year > 0

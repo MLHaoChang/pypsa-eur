@@ -13,6 +13,7 @@ import { CardShell, DelegateButton } from '../shared/CardShell'
 import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
 import { Term, type TermKey } from '../shared/Term'
 import { useHubReadiness, useHubStudy, useHubTemplate } from '../useHubData'
+import { displayName } from '../../../utils/displayName'
 
 export const SITE_TYPES: { id: EhArchetype; label: string }[] = [
   { id: 'strong_grid', label: 'Strong grid — import whenever needed' },
@@ -28,19 +29,21 @@ interface Row { value: string; gap: boolean; fix?: string }
 export function siteRows(r: EhReadiness, archetype: EhArchetype): Record<SiteFix, Row> {
   const island = archetype === 'off_grid'
   const links = r.import?.links ?? []
+  // Plain names in Guided, never the raw ids (UX S6, G1).
+  const names = (ids: string[]) => ids.map(displayName).join(', ')
   const grid: Row = island
     ? { value: links.length
-      ? `${links.join(', ')} — normally open; the study runs the site as an island`
+      ? `${names(links)} — normally open; the study runs the site as an island`
       : 'none — the study runs the site as an island', gap: false }
     : links.length
-      ? { value: `${links.join(', ')}${r.import_p_nom_mw != null ? ` (${mw(r.import_p_nom_mw)}${
+      ? { value: `${names(links)}${r.import_p_nom_mw != null ? ` (${mw(r.import_p_nom_mw)}${
           r.import_firm_mw != null && r.import_firm_mw < r.import_p_nom_mw
             ? `; ${mw(r.import_firm_mw)} until fully energized` : ''})` : ''}`, gap: false }
       : { value: 'none tagged', gap: true, fix: siteFixText('grid') }
 
   const crit = r.critical_buses ?? []
   const critical: Row = crit.length
-    ? { value: crit.join(', '), gap: false }
+    ? { value: names(crit), gap: false }
     : { value: 'none tagged', gap: true, fix: siteFixText('critical') }
 
   const scr = r.scr?.status

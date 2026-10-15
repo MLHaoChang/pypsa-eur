@@ -53,7 +53,7 @@ const verdictText = async () => (await screen.findByTestId('hub-results-verdict'
 describe('ResultsCard headline (§5.5)', () => {
   const cases: [string, ReturnType<typeof review>, EhReferenceDesignReport, string][] = [
     ['fail', review(), REPORT,
-      'Not certified: about 12 h/yr of shortfall vs a 3 h/yr goal — driven by grid_import'],
+      'Not certified: about 12 h/yr of shortfall vs a 3 h/yr goal — driven by Grid import'],
     ['inconclusive', review({ summary: { verdict: 'inconclusive', mc_lole_h_per_year: 3.2, target_lole_h: 3 } }),
       { ...REPORT, sections: { certification: { status: 'ok', payload: {
         verdict: 'inconclusive', lole_h_per_year: 3.2, lole_ci: [2.4, 4.1], horizon_years: 1, target_lole_h: 3 } } } },
@@ -117,9 +117,10 @@ describe('ResultsCard body', () => {
     await screen.findByTestId('hub-results-verdict')
     expect(screen.getByTestId('hub-results-cost').querySelector('[data-kpi-value]')
       ?.getAttribute('data-kpi-value')).toBe(KPI_COST)
-    expect(screen.getByTestId('hub-results-risks-0').textContent).toContain('grid_import')
+    expect(screen.getByTestId('hub-results-risks-0').textContent).toContain('Grid import')
+    expect(screen.getByTestId('hub-results-risks-0').textContent).not.toContain('grid_import')
     expect(screen.getByTestId('hub-results-risks-0').textContent).toContain(fmtCurrency(590_000))
-    expect(screen.getByTestId('hub-results-risks-2').textContent).toContain('genset_2')
+    expect(screen.getByTestId('hub-results-risks-2').textContent).toContain('Genset 2')
     expect(screen.queryByTestId('hub-results-risks-3')).toBeNull()
     const gaps = screen.getByTestId('hub-results-gaps').textContent ?? ''
     expect(gaps).toContain('VOLL must be above zero for the frontier.')
@@ -135,7 +136,7 @@ describe('ResultsCard body', () => {
       ] } } } }))
     mount()
     const r1 = await screen.findByTestId('hub-results-risks-1')
-    expect(r1.textContent).toContain('electrolyser')
+    expect(r1.textContent).toContain('Electrolyser')
     expect(r1.textContent).toContain('no measurable cost')
     expect(r1.textContent).not.toContain('€0')
   })

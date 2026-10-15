@@ -52,8 +52,11 @@ describe('SiteCard rows', () => {
   it('four rows from the readiness body, no fix buttons when nothing is missing', async () => {
     mount()
     await screen.findByTestId('hub-site-grid')
-    expect(text('hub-site-grid')).toContain('grid_import (40 MW)')
-    expect(text('hub-site-critical')).toContain('it_bus')
+    // Plain names, never the raw ids (UX S6, G1).
+    expect(text('hub-site-grid')).toContain('Grid import (40 MW)')
+    expect(text('hub-site-critical')).toContain('IT bus')
+    expect(text('hub-site-grid')).not.toContain('grid_import')
+    expect(text('hub-site-critical')).not.toContain('it_bus')
     expect(text('hub-site-strength')).toContain('data present')
     expect(text('hub-site-outage')).toContain('9 units')
     for (const k of ['grid', 'critical', 'strength', 'outage']) {

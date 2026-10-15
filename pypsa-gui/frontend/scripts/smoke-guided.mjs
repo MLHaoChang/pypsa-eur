@@ -948,6 +948,22 @@ async function phaseP23(browser) {
 }
 
 // ── the P24 path (spec §5, plan P24-FE gate item 5) ────────────────────────
+// Guided names components in plain words (UX S6, G1): a mirror of
+// src/utils/displayName.ts and hubDesign/headline.ts `riskName`, so the smoke
+// checks the rendered text (a Node script cannot import the TS modules).
+const DN_ACRONYMS = { ac: 'AC', dc: 'DC', it: 'IT', pv: 'PV', h2: 'H2', ups: 'UPS', ev: 'EV',
+  hv: 'HV', mv: 'MV', lv: 'LV', bess: 'BESS', chp: 'CHP', ccgt: 'CCGT', ocgt: 'OCGT',
+  poc: 'PoC', co2: 'CO₂', lng: 'LNG' }
+function displayName(id) {
+  if (!id || /\s|[A-Z]/.test(id)) return id
+  return id.split(/[_-]+/).filter(Boolean)
+    .map((w, i) => DN_ACRONYMS[w] ?? (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w)).join(' ')
+}
+function riskName(name) {
+  const cm = /^common_mode:(.+)$/.exec(name)
+  return cm ? `${cm[1].split(',').map(displayName).join(' and ')} failing together` : displayName(name)
+}
+
 // The §5.5 headline, recomputed from the review / report bodies the app
 // read, so the smoke checks the rendered sentence character for character.
 function expectedHeadline(review, report) {
@@ -960,7 +976,7 @@ function expectedHeadline(review, report) {
   const rows = report?.sections?.fmea_top?.payload?.rows ?? []
   const cert = report?.sections?.certification?.payload ?? {}
   if (verdict === 'fail' && lole != null && target != null) {
-    const top = rows[0] ? String(rows[0].name || rows[0].mode_id) : "the plan's energy limit"
+    const top = rows[0] ? riskName(String(rows[0].name || rows[0].mode_id)) : "the plan's energy limit"
     return `Not certified: about ${lole.toFixed(0)} h/yr of shortfall vs a ${g(target)} h/yr goal — driven by ${top}`
   }
   if (verdict === 'inconclusive' && target != null) {
@@ -1009,7 +1025,7 @@ async function checkSiteRows(page, templateId, archetype) {
   const strength = await textOf('hub-site-strength')
   const outage = await textOf('hub-site-outage')
   info(`Site: ${grid} | ${critical} | ${strength} | ${outage}`)
-  for (const l of r.import.links) check(grid.includes(l), `grid row names ${l}`)
+  for (const l of r.import.links) check(grid.includes(displayName(l)), `grid row names ${displayName(l)}`)
   if (archetype === 'off_grid') {
     check(/island/.test(grid) && !/\d MW/.test(grid), 'off-grid: the tie is "normally open", no MW rating shown (N4)')
     check(!/without/.test(outage), 'off-grid: the open tie is not reported as missing outage data (N4)')
@@ -1018,7 +1034,7 @@ async function checkSiteRows(page, templateId, archetype) {
   } else if (r.import_p_nom_mw != null) {
     check(grid.includes(`(${Number(r.import_p_nom_mw.toPrecision(6))} MW)`), `grid row shows ${r.import_p_nom_mw} MW`)
   }
-  for (const b of r.critical_buses) check(critical.includes(b), `critical row names ${b}`)
+  for (const b of r.critical_buses) check(critical.includes(displayName(b)), `critical row names ${displayName(b)}`)
   const wantStrength = r.scr.status === 'ok' ? 'data present'
     : r.scr.status === 'not_required' ? 'not needed' : 'data missing'
   check(strength.includes(wantStrength), `strength row: scr ${r.scr.status} → "${wantStrength}"`)
