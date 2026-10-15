@@ -8,7 +8,7 @@ const NONE: ChapterInputs = {
   investment: { study: null, report: null },
   grid: { campus: null, notHub: false },
   reliability: { hasResults: false, running: false, lole: null, target: null, verdict: null },
-  operation: { status: null },
+  operation: { status: null, gfm: null },
 }
 
 const byId = (inputs: ChapterInputs) => Object.fromEntries(chapterTiles(inputs).map(t => [t.id, t]))
@@ -105,4 +105,37 @@ describe('chapterTiles', () => {
     t = byId({ ...NONE, operation: { status: { running: false, dispatch: 'stale', objective: 3.2e6 } as never } })
     expect(t.operation.state).toBe('stale')
   })
+
+  // GFM-b (owner decision 2026-10-15): the operation tile carries the control
+  // line: the grid-forming settings' state, and the re-solve an apply needs.
+  describe('the control line', () => {
+    const rec = (over: Record<string, unknown> = {}) => ({
+      label: 'heuristic screening', ledger: [], status: 'recommended', achievable: true, changed: true,
+      settings: { BESS1: { model: 'gfm_droop', current: { droop_pct: 4, i_max_pu: 1.2, H_equivalent_s: 0.4 } },
+                  BESS2: { model: 'gfm_vsm', current: { droop_pct: 4, i_max_pu: 1.2, H_equivalent_s: 0.4 } } },
+      cases: [], capacity: [], comparison: [], simulations: 10, max_simulations: 400, margin: 0.1,
+      allow_i_max: false, notes: [], excluded: [], ...over }) as never
+    const ctl = (gfm: unknown) => byId({ ...NONE, operation: { status: null, gfm: gfm as never } }).operation.control
+
+    it('none without a GFM read (no campus, no island)', () => {
+      expect(ctl(null)).toBeUndefined()
+    })
+    it('not run, recommended, not achievable, stale', () => {
+      expect(ctl({ state: 'not_run', reason: '', recommendation: null })).toMatchObject(
+        { state: 'not_run', text: expect.stringMatching(/not recommended for this campus run/) })
+      expect(ctl({ state: 'ready', reason: '', recommendation: rec() })).toMatchObject(
+        { state: 'ready', text: expect.stringMatching(/recommended for 2 units, not applied yet/) })
+      expect(ctl({ state: 'ready', reason: '', recommendation: rec({ status: 'not_achievable' }) })).toMatchObject(
+        { state: 'ready', text: expect.stringMatching(/no setting passes: capacity is needed/) })
+      expect(ctl({ state: 'stale', reason: 'x', recommendation: rec() })).toMatchObject(
+        { state: 'stale', text: expect.stringMatching(/recommend them again/) })
+    })
+    it('applied: re-solve the hub, with the Solve action', () => {
+      const c = ctl({ state: 'stale', reason: 'x', recommendation: rec({ applied: { at: 1, changes: [],
+                                                                                   hub_resolve_needed: true } }) })
+      expect(c).toMatchObject({ state: 'stale', resolve: true,
+                                text: expect.stringMatching(/Re-solve the hub: these settings change its island rows/) })
+    })
+  })
 })
+

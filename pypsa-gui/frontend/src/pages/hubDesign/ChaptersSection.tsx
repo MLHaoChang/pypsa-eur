@@ -9,6 +9,7 @@ import { simulationApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { CAMPUS_KEY } from '../CampusElectricalPanel'
+import { GFM_KEY } from '../CampusIslandGfmSection'
 import { chapterTiles, type ChapterInputs, type ChapterOpen } from './chapters'
 import { useHubDesignStore } from './hubDesignStore'
 
@@ -38,12 +39,18 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
   const status = useQuery({
     queryKey: nk(project, 'simulationStatus'), queryFn: simulationApi.getStatus, enabled: !!project,
   })
+  // The campus GFM settings, for the operation tile's control line (GFM-b);
+  // only for a hub with a campus run (the island section's own key).
+  const gfm = useQuery({
+    queryKey: GFM_KEY(project ?? ''), queryFn: () => campusApi.gfmSettings(project ?? ''),
+    enabled: !!project && !!campus.data, retry: false,
+  })
 
   const tiles = chapterTiles({
     investment: { study: icStudy.data ?? null, report: icRunning ? null : icReport.data ?? null },
     grid: { campus: campus.data ?? null, notHub: is409(campus.error) },
     reliability,
-    operation: { status: status.data ?? null },
+    operation: { status: status.data ?? null, gfm: gfm.data ?? null },
   })
 
   const open = (o: ChapterOpen) => {
@@ -62,6 +69,16 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{t.group}</span>
             <Kpi label={t.label} value={t.value} unit={t.unit} basis={t.basis}
               state={t.state} reason={t.reason} testId={`hub-chapter-${t.id}-kpi`} />
+            {t.control && (
+              <p className="text-[11.5px] text-muted" data-testid={`hub-chapter-${t.id}-control`}>
+                {t.control.text}{' '}
+                {t.control.resolve && (
+                  <button type="button" data-testid={`hub-chapter-${t.id}-solve`}
+                    onClick={() => useUIStore.getState().requestRunSolve()}
+                    className="text-accent hover:underline">Solve</button>
+                )}
+              </p>
+            )}
             <button type="button" data-testid={`hub-chapter-${t.id}-open`} onClick={() => open(t.open)}
               className="self-start text-[11.5px] text-accent hover:underline">
               {OPEN_LABEL(t.open)}

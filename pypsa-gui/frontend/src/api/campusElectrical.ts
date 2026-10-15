@@ -552,6 +552,48 @@ export interface CutTrial {
   verdict: string
 }
 
+/** One GFM converter's settings (gridspine `gfm_tuning._settings_of`). */
+export interface GfmUnitSettings {
+  droop_pct: number
+  i_max_pu: number
+  H_equivalent_s: number
+  tau_f_s?: number
+  H_v_s?: number
+}
+
+export type GfmStatus = 'unchanged' | 'recommended' | 'not_achievable' | 'incomplete'
+
+/** gridspine's `campus_gfm_settings.json` (GFM-b), as written, plus `applied` once applied. */
+export interface GfmRecommendation {
+  label: string
+  ledger: string[]
+  status: GfmStatus
+  achievable: boolean | null
+  changed: boolean
+  settings: Record<string, { model: string; current: GfmUnitSettings; recommended?: GfmUnitSettings }>
+  cases: { key: string; ok_before: boolean; binding_before: string; ok_after: boolean | null; binding_after: string }[]
+  capacity: { case: string; kind: string; delta: number; unit: string; binding: string; derivation: string;
+              feasible: boolean; note: string }[]
+  comparison: { unit: string; model: string; worst_rocof0_hz_per_s: number | null; worst_rocof_hz_per_s: number | null;
+                worst_nadir_hz: number | null; ok: boolean; note: string }[]
+  simulations: number
+  max_simulations: number
+  margin: number
+  allow_i_max: boolean
+  notes: string[]
+  excluded: string[]
+  applied?: { at: number; changes: GfmChange[]; hub_resolve_needed: boolean }
+}
+
+export interface GfmChange { unit: string; pypsa_name: string; field: string; from: number | null; to: number }
+
+/** `GET …/island/gfm-settings`: the UX ResultState names. */
+export interface GfmSettingsState {
+  state: 'not_run' | 'ready' | 'stale'
+  reason: string
+  recommendation: GfmRecommendation | null
+}
+
 export interface IslandCuts {
   limit: string
   max_trials: number
@@ -664,6 +706,20 @@ export const campusApi = {
 
   clearIslandCuts: (project: string) =>
     client.delete<IslandCuts>(`${base(project)}/island/cuts`, quiet).then(r => r.data),
+
+  /** The recommended GFM settings and whether they are still the campus run's. */
+  gfmSettings: (project: string) =>
+    client.get<GfmSettingsState>(`${base(project)}/island/gfm-settings`, quiet).then(r => r.data),
+
+  /** Queue the recommender as a campus job (202 with the queue job); follow it on `state`'s run_job. */
+  recommendGfmSettings: (project: string, allowIMax = false) =>
+    client.post<CampusRunJob>(`${base(project)}/island/gfm-settings`, { allow_i_max: allowIMax }, quiet)
+      .then(r => r.data),
+
+  /** Write a recommended result into the island data and the campus file. */
+  applyGfmSettings: (project: string) =>
+    client.post<{ changes: GfmChange[]; hub_resolve_needed: boolean }>(
+      `${base(project)}/island/gfm-settings/apply`, {}, quiet).then(r => r.data),
 
   /** The island report: tables with their model, caveat and assumed rows. */
   islandReport: (project: string) =>
