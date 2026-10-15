@@ -145,3 +145,33 @@ describe('chapterTiles', () => {
   })
 })
 
+
+describe('chapterTiles: the campus run in progress', () => {
+  const job = (over: Record<string, unknown>) => ({
+    id: 'j1', kind: 'campus', status: 'running', position: null, error: null,
+    enqueued_at: 100, started_at: 100, finished_at: null, stage: 'island_checks', stage_done: 2, stage_total: 5, ...over,
+  })
+  const grid = (run_job: unknown) => byId({ ...NONE, grid: { campus: { run_job } as never, notHub: false } }).grid_plan
+
+  it('running: the stage, the step and the elapsed time', () => {
+    const t = grid(job({ started_at: Date.now() / 1000 - 125 }))
+    expect(t.state).toBe('running')
+    expect(t.reason).toMatch(/island checks.*frequency sweep.*cuts/)
+    expect(t.reason).toMatch(/step 3 of 5/)
+    expect(t.reason).toMatch(/2:0\d\./)
+  })
+
+  it('queued: waiting in the queue', () => {
+    expect(grid(job({ status: 'queued', position: 2, stage: null })).reason).toMatch(/solve queue \(#2\)/)
+  })
+
+  it('failed: the failed stage, the time it ran and the error, not "not run"', () => {
+    const t = grid(job({ status: 'failed', finished_at: 400, error: 'ValueError: no PCC' }))
+    expect(t.state).toBe('unavailable')
+    expect(t.reason).toMatch(/failed in the island checks.* after 5:00: ValueError: no PCC/)
+  })
+
+  it('a grid-forming settings job is not a study run', () => {
+    expect(grid(job({ stage: 'gfm_settings' })).state).toBe('not_run')
+  })
+})

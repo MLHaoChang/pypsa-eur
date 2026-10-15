@@ -3,12 +3,13 @@
 // Reads share the Expert views' query keys, so one cache serves both.
 import { useQuery } from '@tanstack/react-query'
 import Kpi from '../../components/Kpi'
-import { campusApi } from '../../api/campusElectrical'
+import { campusApi, isActiveRun } from '../../api/campusElectrical'
 import { financeApi } from '../../api/finance'
 import { simulationApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
-import { CAMPUS_KEY } from '../CampusElectricalPanel'
+import { CAMPUS_KEY, CAMPUS_RUN_POLL_MS } from '../CampusElectricalPanel'
+import { isRunJob, useTick } from '../campusRunProgress'
 import { GFM_KEY } from '../CampusIslandGfmSection'
 import { chapterTiles, type ChapterInputs, type ChapterOpen } from './chapters'
 import { useHubDesignStore } from './hubDesignStore'
@@ -35,7 +36,11 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
   const campus = useQuery({
     queryKey: CAMPUS_KEY(project ?? ''), queryFn: () => campusApi.state(project ?? ''),
     enabled: !!project, retry: false,
+    // A running study takes up to an hour: follow it, so the tile shows its stage and time.
+    refetchInterval: q => (isRunJob(q.state.data?.run_job) && isActiveRun(q.state.data?.run_job)
+      ? CAMPUS_RUN_POLL_MS : false),
   })
+  useTick(isRunJob(campus.data?.run_job) && isActiveRun(campus.data?.run_job))
   const status = useQuery({
     queryKey: nk(project, 'simulationStatus'), queryFn: simulationApi.getStatus, enabled: !!project,
   })
