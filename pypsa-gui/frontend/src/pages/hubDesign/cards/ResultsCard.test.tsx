@@ -245,3 +245,25 @@ describe('ResultsCard: edited since the study (P33b)', () => {
     expect(screen.queryByTestId('hub-results-stale')).toBeNull()
   })
 })
+
+describe('ResultsCard before the study (UX S6, G2)', () => {
+  it('says the study has not run and offers the way to Goal', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
+    const user = mount()
+    const card = await screen.findByTestId('hub-card-results')
+    await screen.findByText('Go to Goal and run the study')
+    expect(card.textContent).toContain('The study writes its verdict, cost and risks here.')
+    expect(screen.queryByTestId('hub-results-verdict')).toBeNull()
+    await user.click(screen.getByText('Go to Goal and run the study'))
+    expect(useHubDesignStore.getState().step).toBe('goal')
+  })
+
+  it('says the study is running, with no action', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(
+      { status: 'running', archetype: 'weak_flexible' as const } as never)
+    mount()
+    const card = await screen.findByTestId('hub-card-results')
+    await waitFor(() => expect(card.textContent).toContain('The study is running'))
+    expect(screen.queryByText('Go to Goal and run the study')).toBeNull()
+  })
+})

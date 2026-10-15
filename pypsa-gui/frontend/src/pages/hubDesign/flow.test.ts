@@ -55,10 +55,10 @@ describe('rail', () => {
     expect(HUB_STEPS.map(s => blockedReason('no_project', s))).toEqual(
       [null, BLOCKED_NO_PROJECT, BLOCKED_NO_PROJECT, BLOCKED_NO_PROJECT, BLOCKED_NO_PROJECT])
   })
-  it('no study / running: Results and Improve are blocked', () => {
+  it('no study / running: only Improve is blocked; Results says why itself', () => {
     for (const f of ['no_study', 'running'] as const) {
       expect(HUB_STEPS.map(s => blockedReason(f, s))).toEqual(
-        [null, null, null, BLOCKED_NO_STUDY, BLOCKED_NO_STUDY])
+        [null, null, null, null, BLOCKED_NO_STUDY])
     }
     expect(HUB_STEPS.map(s => blockedReason('done', s))).toEqual([null, null, null, null, null])
   })
@@ -68,10 +68,11 @@ describe('rail', () => {
   })
   it('own network before a study: Start is not ticked', () => {
     expect(HUB_STEPS.map(s => railState('no_study', s, 'site', false)))
-      .toEqual(['todo', 'current', 'todo', 'blocked', 'blocked'])
+      .toEqual(['todo', 'current', 'todo', 'todo', 'blocked'])
   })
   it('a blocked step is never shown: it falls back to the flow\'s own step', () => {
-    expect(effectiveStep('no_study', 'results', true)).toBe('site')
+    expect(effectiveStep('no_study', 'results', true)).toBe('results')
+    expect(effectiveStep('no_study', 'improve', true)).toBe('site')
     expect(effectiveStep('no_project', 'goal', false)).toBe('start')
     expect(effectiveStep('done', 'improve', false)).toBe('improve')
   })

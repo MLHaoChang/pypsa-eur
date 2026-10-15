@@ -43,7 +43,9 @@ export const BLOCKED_NO_STUDY = 'Run the study first'
 /** Why a step cannot be opened, or null when it can. */
 export function blockedReason(flow: FlowState, s: HubStep): string | null {
   if (flow === 'no_project') return s === 'start' ? null : BLOCKED_NO_PROJECT
-  if ((flow === 'no_study' || flow === 'running') && (s === 'results' || s === 'improve')) {
+  // Results is always reachable with a project: it says "not run yet" or
+  // "running" itself (UX S6, G2). Improve needs a study's findings.
+  if ((flow === 'no_study' || flow === 'running') && s === 'improve') {
     return BLOCKED_NO_STUDY
   }
   return null

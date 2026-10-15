@@ -3,6 +3,7 @@
 // establish — from GET /results/eh_review and the report the Expert panel
 // shows. "Open full report" goes to that panel.
 import { FileText } from 'lucide-react'
+import ResultState from '../../../components/ResultState'
 import { useUIStore } from '../../../store/uiStore'
 import { fmeaTopRows, notEstablishedNotes } from '../../results/EhReferenceDesignPanel'
 import { zeroReasonText } from '../../results/fmea'
@@ -40,6 +41,20 @@ export function ResultsCard() {
   const gaps = report ? notEstablishedNotes(report) : []
   const cost = report?.cost_at_target_eur
   const setStep = useHubDesignStore(s => s.setStep)
+
+  if (!studyHasResults(study)) {
+    // Never an empty or greyed card (UX S6, G2): say why, and how to get there.
+    return (
+      <CardShell step="results" next="improve" testId="hub-card-results" title="Results">
+        {running ? (
+          <ResultState state="running" reason="The study is running; its verdict, cost and risks appear here when it finishes." />
+        ) : (
+          <ResultState state="not_run" reason="The study writes its verdict, cost and risks here."
+            action={{ label: 'Go to Goal and run the study', onClick: () => setStep('goal', { user: true }) }} />
+        )}
+      </CardShell>
+    )
+  }
 
   return (
     <CardShell step="results" next="improve" testId="hub-card-results" title="Results">

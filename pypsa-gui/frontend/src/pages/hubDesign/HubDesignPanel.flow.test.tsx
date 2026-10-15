@@ -73,19 +73,20 @@ describe('flowState → rail and card (§5.4)', () => {
     expect(resultsApi.getEhStudy).not.toHaveBeenCalled()
   })
 
-  it('no_study on a template project: Start ✓, opens on Site; Results / Improve blocked', async () => {
+  it('no_study on a template project: Start ✓, opens on Site; Improve blocked, Results reachable', async () => {
     mount()
     await screen.findByTestId('hub-card-site')
     expect(railStates()).toEqual({ start: 'done', site: 'current', goal: 'todo',
-      results: 'blocked', improve: 'blocked' })
-    expect(rail('results').getAttribute('title')).toBe(BLOCKED_NO_STUDY)
+      results: 'todo', improve: 'blocked' })
+    expect(rail('improve').getAttribute('title')).toBe(BLOCKED_NO_STUDY)
+    expect((rail('results') as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('no_study on an own network: opens on Start (not ✓)', async () => {
     vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(null)
     mount()
     await screen.findByTestId('hub-card-start')
-    expect(railStates()).toMatchObject({ start: 'current', site: 'todo', results: 'blocked' })
+    expect(railStates()).toMatchObject({ start: 'current', site: 'todo', results: 'todo' })
   })
 
   it('failed without a report is no_study; Goal shows the error and Run again', async () => {
@@ -93,21 +94,23 @@ describe('flowState → rail and card (§5.4)', () => {
     // the route answers 204 for a failed study (N2): the review is not asked
     const user = mount()
     await screen.findByTestId('hub-card-site')
-    expect(railStates()).toMatchObject({ results: 'blocked', improve: 'blocked' })
+    expect(railStates()).toMatchObject({ results: 'todo', improve: 'blocked' })
     await user.click(rail('goal'))
     expect((await screen.findByTestId('hub-goal-error')).textContent).toContain('boom')
     expect(screen.getByTestId('hub-goal-run').textContent).toBe('Run again')
     expect(resultsApi.getEhReview).not.toHaveBeenCalled()
   })
 
-  it('running: opens on Goal with a spinner; Results / Improve blocked', async () => {
+  it('running: opens on Goal with a spinner; Improve blocked, Results says it is running', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue(RUNNING)
-    mount()
+    const user = mount()
     await screen.findByTestId('hub-card-goal')
     expect(railStates()).toEqual({ start: 'done', site: 'done', goal: 'current',
-      results: 'blocked', improve: 'blocked' })
+      results: 'todo', improve: 'blocked' })
     expect(screen.getByTestId('hub-rail-spinner')).toBeTruthy()
     expect(screen.getByTestId('hub-goal-running')).toBeTruthy()
+    await user.click(rail('results'))
+    expect((await screen.findByTestId('hub-card-results')).textContent).toContain('The study is running')
   })
 
   it('done: opens on Results; every step enabled', async () => {
