@@ -136,17 +136,21 @@ def test_the_staged_poc_chain_is_loss_free_and_says_so():
 
 # ── the route binds what the template ships ────────────────────────────────
 
-def test_the_study_notes_say_the_poc_is_loss_free_and_the_comparison_exceeds_the_connection():
+def test_the_study_notes_say_the_poc_is_loss_free_and_the_connection_carries_the_peak():
     """Review of #283: the Guided user sees the loss-free PoC and the grid-only
     comparison's 2035 overload in the notes, not only in the ledger."""
     n = T.BUILDERS[TID]()
     notes = " ".join(T.TEMPLATE_META[TID]["study_notes"])
     year, it_mw, pue = T.DC_PHASES[-1]
     assert "losses are not modelled" in notes
-    assert f"{it_mw * pue:g} MW in {year}" in notes
-    assert f"{n.links.at['grid_import', 'p_nom']:g} MW connection" in notes
-    assert it_mw * pue > n.links.at["grid_import", "p_nom"]     # the note's claim holds
-    assert "counterfactual_exceeds_connection" in notes
+    # The connection carries the 2035 peak (owner decision 2026-10-15), so the
+    # grid-only comparison can run: the note says so, and it holds.
+    poc = float(n.links.at["grid_import", "p_nom"])
+    assert f"{poc:g} MW connection carries the {year} peak" in notes
+    assert float(n.loads_t.p_set.sum(axis=1).loc[year].max()) <= poc
+    # The excess is shed at the template's own VoLL (owner decision 2026-10-15).
+    assert f"{T.solver_config(TID)['voll']:,.0f} EUR/MWh VoLL" in notes
+    assert "counterfactual_shed_at_voll" in notes
 
 
 def test_from_template_binds_the_commercial_block_and_the_finance_inputs(
@@ -302,6 +306,36 @@ def test_the_staged_template_produces_an_investment_case(staged_case):
     assert r.op.status == {"operating": "ok", "capex": "ok", "terminal": "ok"}, r.op.reasons
     for k in ("project_pre_tax_npv", "project_pre_tax_irr"):
         assert r.metrics[k] is not None, (k, r.reasons)
-    # The grid-only comparison overloads the connection in 2035, as the study
-    # notes say; the flag reaches the result the card and the export read.
-    assert "counterfactual_exceeds_connection" in r.flags
+    # The connection carries the 2035 peak (owner decision 2026-10-15): the
+    # grid-only comparison runs as modelled, nothing shed, nothing impossible
+    # (the shed-at-VoLL path is test_finance_counterfactual_shed's).
+    assert not [f for f in r.flags if f.startswith(("counterfactual_shed_at_voll",
+                                                    "counterfactual_exceeds"))], r.flags
+
+
+@pytest.fixture
+def battery_built(monkeypatch):
+    """The 2030 battery candidate forced to build 2 MW, the solve dispatching it."""
+    orig = T.BUILDERS[TID]
+
+    def forced():
+        n = orig()
+        n.storage_units.loc["bess_new_2030", "p_nom_min"] = 2.0
+        return n
+    monkeypatch.setitem(T.BUILDERS, TID, forced)
+
+
+@pytest.mark.live_solve
+def test_a_staged_plan_that_builds_a_battery_gets_an_npv(battery_built, staged_case):
+    """Review of #283 (minor 2): a staged case that builds storage is a case:
+    the battery is a stage with its COD and capex, and every line, the C5
+    degradation pair included, is established, so the NPV is computed.
+    (`battery_built` before `staged_case`: the builder is patched first.)"""
+    n, case, r = staged_case
+    assert float(n.storage_units.at["bess_new_2030", "p_nom_opt"]) == pytest.approx(2.0)
+    assets = {a.name: a for a in case.assets}
+    assert "bess_new_2030" in assets and assets["bess_new_2030"].overnight_cost > 0
+    assert case.asset_cod["bess_new_2030"] == date(2030, 1, 1)
+    assert not [ln.key for t in (*case.templates, *case.counterfactual) for ln in t.lines
+                if ln.amount is None]
+    assert r.metrics["project_pre_tax_npv"] is not None, r.reasons

@@ -872,6 +872,31 @@ def _asset_of(a: _Acc) -> tuple[str, str] | None:
     return (parts[1], parts[2]) if len(parts) == 3 else None
 
 
+def _import_capacity(n, parsed) -> np.ndarray:
+    """What the connection carries per snapshot (MW): each import Link's size
+    (`p_nom_opt`, else `p_nom`) × its `p_max_pu`, capped hour by hour by the
+    energization schedule (`energization.capped_mw`, the solve's own rule)."""
+    from services.adequacy import energization as _E
+
+    cap = np.zeros(len(n.snapshots))
+    for m in _lp.import_links(parsed):
+        if m not in n.links.index:
+            continue
+        pn = _fin(n.links.at[m, "p_nom_opt"]) if "p_nom_opt" in n.links.columns else None
+        pn = pn if pn is not None else float(n.links.at[m, "p_nom"])
+        cap += _E.capped_mw(n, m, pn * _series(n, "links_t", "p_max_pu", m,
+                                                 n.links.at[m, "p_max_pu"]))
+    return cap
+
+
+def _excess_above(served: np.ndarray, capacity: np.ndarray) -> np.ndarray:
+    """The load above what the connection carries (MW), per snapshot; an
+    overshoot within `_EPS_MW` is floating-point noise, not a shed (#294
+    review), so it never adds a shed line or changes the hash."""
+    excess = np.clip(served - capacity, 0.0, None)
+    return np.where(excess > _EPS_MW, excess, 0.0)
+
+
 def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, dict[str, _Acc]],
                     templates_actual: dict[str, list[TemplateLine]], owned, contracts,
                     lost_load, base_year: int, flags: list[str]
@@ -914,6 +939,21 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
         flags.append("counterfactual_owner_conversion_links:" + ",".join(owner_conv))
     flags += blockers
 
+    # The site without the owner's assets imports at most what its connection
+    # carries (owner decision 2026-10-15): the load above it is shed, priced
+    # at the case's VoLL, and the bill and the commodity are rated on the
+    # rest. Without a VoLL the excess cannot be priced: the whole load stays
+    # billed, flagged — a comparison against a site that could not run.
+    excess = _excess_above(served, _import_capacity(n, parsed))
+    excess_mwh = float((w_all * excess).sum())
+    voll = float(getattr(cfg, "voll", 0.0) or 0.0)
+    shed_priced = excess_mwh > 0.0 and voll > 0.0
+    if shed_priced:
+        served = served - excess
+        flags.append(f"counterfactual_shed_at_voll:{_num(excess_mwh)}")
+    elif excess_mwh > 0.0:
+        flags += ["counterfactual_exceeds_connection", "counterfactual_shed_unpriced:no_voll"]
+
     # The tariff bill on the served-load meter (C13; `rate_meter` = bill_site's rating).
     items = inputs.bill_items
     payees = P.resolve_tariff_payees(items, vf, inputs.retailer)
@@ -921,9 +961,6 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
     bill = None
     if parsed.import_tariff is not None:
         bill = _billing.rate_meter(n, parsed, served, np.zeros(len(n.snapshots)))
-        cap = float(bill.provenance["capacity_basis"]["p_nom_mw"])
-        if served.max(initial=0.0) > cap + _EPS_MW:
-            flags.append("counterfactual_exceeds_connection")
         flags += [f"counterfactual_bill:{f}" for f in bill.flags]
 
     # The commodity on the meter basis, cross-checked against the ledger.
@@ -955,6 +992,17 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
             flags.append("counterfactual_not_established:hub_allocation")
             lines.append(_cf_none("counterfactual:hub_allocation",
                                   "counterfactual_not_established:hub_allocation", k, base_year))
+        # The load the connection cannot carry, shed at the case's VoLL (a cost
+        # to the site without the investment). It escalates as opex: VoLL is a
+        # real-terms reliability value, not a tariff (#294 review). A period
+        # that sheds nothing has no line.
+        shed_k = float((w_all[m] * excess[m]).sum())
+        if shed_priced and shed_k > 0.0:
+            lines.append(TemplateLine(
+                key="counterfactual:shed_at_voll", stream="other",
+                amount=-voll * shed_k, esc_class="opex",
+                source="counterfactual", source_id="shed_at_voll", period=k,
+                money_year=base_year))
         # bill
         cf_import_bill: float | None = 0.0
         act_import_bill: float | None = 0.0
@@ -1049,6 +1097,11 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
         .hexdigest(),
         "connection": {"agreement": None if parsed.connection is None
                        else _H.digest(parsed.connection), "lines": hash_connection},
+        # The load shed above the connection and its price (owner decision
+        # 2026-10-15); absent when nothing is shed, so earlier hashes hold.
+        **({"shed": {"voll": voll, "excess": hashlib.sha256(
+            np.ascontiguousarray(np.round(excess, 9)).tobytes()).hexdigest()}}
+           if shed_priced else {}),
         "commodity": {"supply": supply, "why": why,
                       "mc": None if mc is None else hashlib.sha256(
                           np.ascontiguousarray(np.round(mc, 9)).tobytes()).hexdigest(),

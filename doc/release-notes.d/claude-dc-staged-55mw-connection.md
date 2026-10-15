@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The staged data center template's connection is 55 MW (energized at 20 MW until 2030), sized to its 2035 peak of about 52.5 MW, so its investment case compares against a grid-only site that can run; the single-year template keeps its weak 40 MW.
