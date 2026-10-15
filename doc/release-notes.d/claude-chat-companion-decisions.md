@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Retain bounded, owner/project-scoped chat questions and confirmation observations in Activity, with read-only origin inspection after session loss. Recorded decisions do not restore approval authority or certify completed work.

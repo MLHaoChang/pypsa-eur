@@ -6,6 +6,23 @@ export interface ActivityItem {
   session_id?: string; stage?: string | null; reason?: string | null
   observation?: 'live' | 'retained'; observed_at?: number | null
   last_observed_status?: string | null
+  tool_use_id?: string; decision_id?: string; decision_revision?: number; decision_digest?: string
+  live_approval_available?: boolean
+}
+export interface DecisionObservation {
+  source_id: string; project_id: string; session_id: string; tool_use_id: string
+  tool_name: string; native_status: string; revision: number; decision_digest: string
+  reason: string; inspection_only: true; evidence_available: false
+  question: null | { title: string; question: string; detail: string | null
+    options: { label: string; description: string; recommended: boolean }[]
+    allow_free_text: boolean; multi_select: boolean; intent: 'choice' | 'plan_review' }
+}
+export async function getAssistantDecision(item: ActivityItem, signal: AbortSignal): Promise<DecisionObservation> {
+  const response = await client.get<DecisionObservation>(`/chat/decisions/${encodeURIComponent(item.decision_id!)}`, {
+    params: { project_id: item.project_id, revision: item.decision_revision, digest: item.decision_digest },
+    signal, skipErrorToast: true,
+  })
+  return response.data
 }
 export interface ActivitySnapshot {
   version: 1; project_id: string; filter: ActivityFilter; cursor: string; revision: number

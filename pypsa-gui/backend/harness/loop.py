@@ -1230,6 +1230,8 @@ def run_turn(
             logger.exception("chat: could not resolve the turn's project")
         from harness import eventlog as _eventlog
         _eventlog.turn_start(session, message, _wal_ctx)
+        from harness import attention as _attention
+        _attention.followed_up(session, getattr(_wal_ctx, 'project_uuid', None))
         _checked = session.assurance_turn is not None
         body = _run_turn_body(
             session,
@@ -1246,6 +1248,9 @@ def run_turn(
                     payload = session.assurance_turn.project_frame(event, payload)
                     if payload is None:
                         continue
+                if event == "choice_request":
+                    _attention.question_presented(session, getattr(_wal_ctx, 'project_uuid', None),
+                                                  payload, checked=session.assurance_turn is not None)
                 trace.note(event, payload)
                 goal_watch.note(event, payload)
                 if event == "error" and _goals.on_error(session):
@@ -2912,7 +2917,7 @@ def _dispatch_real_tool_call(
 
     try:
         task_state = assistant_tasks.finish_step(task_ticket, result=result)
-    except Exception as exc:
+    except Exception:
         # The action may have completed. Keep its running checkpoint uncertain,
         # pair the real tool ID, and forbid a silent automatic repeat.
         yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,

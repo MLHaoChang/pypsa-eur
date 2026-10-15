@@ -45,10 +45,23 @@ createRoot(document.getElementById('root')!).render(<main style={{display:'flex'
     await context.route(url => url.protocol.startsWith('http') && url.hostname !== '127.0.0.1', route => route.abort())
     const page = await context.newPage()
     const errors = [], mutations = []
-    let reads = 0, fail = false
+    let reads = 0, inspections = 0, fail = false
     page.on('pageerror', error => errors.push(error.message))
     await page.route(url => url.pathname.startsWith('/api/'), async route => {
       const request = route.request(), url = new URL(request.url())
+      if (request.method() === 'GET' && url.pathname === '/api/chat/decisions/recorded-question') {
+        inspections++
+        assert.equal(url.searchParams.get('project_id'), 'p1')
+        assert.equal(url.searchParams.get('revision'), '1')
+        assert.equal(url.searchParams.get('digest'), 'a'.repeat(64))
+        return route.fulfill({json:{source_id:'recorded-question',project_id:'p1',session_id:'previous-chat',
+          tool_use_id:'exact-question-call',tool_name:'ask_user',native_status:'waiting_for_input',revision:1,
+          decision_digest:'a'.repeat(64),inspection_only:true,evidence_available:false,
+          reason:'Inspect the original question; no answer has been certified.',
+          question:{title:'Storage basis',question:'Which storage basis should the next draft use?',
+            detail:'<img src=x onerror=alert(1)>',allow_free_text:true,multi_select:false,intent:'choice',
+            options:[{label:'Battery',description:'Use the declared battery assumptions.',recommended:true}]}}})
+      }
       if (request.method() !== 'GET' || url.pathname !== '/api/chat/activity') {
         mutations.push(url.pathname); return route.abort()
       }
@@ -59,6 +72,9 @@ createRoot(document.getElementById('root')!).render(<main style={{display:'flex'
         {id:'solve:1',source_id:'job-1',project_id:'p1',family:'solve_queue',title:'Network solve',status:'running',native_status:'running',needs_you:false,evidence_available:false},
         {id:'confirmation:1',source_id:'opaque-decision',project_id:'p1',family:'confirmation',title:'Update generator capacity',status:'waiting_for_approval',native_status:'waiting_for_approval',needs_you:true,evidence_available:false,session_id:'s1'},
         {id:'foreground_simulation:old',source_id:'old-job',project_id:'p1',family:'foreground_simulation',title:'Previous network solve',status:'needs_review',native_status:'unknown',last_observed_status:'running',needs_you:true,evidence_available:false,observation:'retained',observed_at:1792000000,reason:'Last observed work has no matching live worker; it was not restarted.'},
+        {id:'question:old',source_id:'recorded-question',project_id:'p1',family:'question',title:'Storage basis',
+          status:'waiting_for_input',native_status:'waiting_for_input',needs_you:true,evidence_available:false,
+          session_id:'previous-chat',decision_id:'recorded-question',decision_revision:1,decision_digest:'a'.repeat(64)},
       ].filter(row => filter === 'needs_you' ? row.needs_you : filter === 'scheduled' ? false : true)
       return route.fulfill({json:{version:1,project_id:'p1',filter,cursor:'epoch:1',revision:1,resnapshot_required:false,items,next_page:null,total:items.length,warnings:['activity_history_is_bounded_observation'],scheduling_available:false}})
     })
@@ -73,6 +89,15 @@ createRoot(document.getElementById('root')!).render(<main style={{display:'flex'
       await page.getByText('Last recorded native status: running', {exact:true}).waitFor()
       assert.equal(await page.getByRole('button', {name:/approve|retry|resume|cancel/i}).count(),0)
       assert.equal(await page.getByText('Network solve',{exact:true}).count(),0)
+      await page.getByRole('button',{name:'Inspect decision',exact:true}).click()
+      await page.getByText('Which storage basis should the next draft use?',{exact:true}).waitFor()
+      await page.getByText('<img src=x onerror=alert(1)>',{exact:true}).waitFor()
+      await page.getByText(/exact-question-call/).waitFor()
+      assert.equal(await page.locator('[aria-label="Decision inspection"] img').count(),0)
+      assert.equal(await page.getByRole('button', {name:/approve|answer|retry|resume|cancel/i}).count(),0)
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth > window.innerWidth),false)
+      await page.screenshot({path:path.join(artifacts,`${name}-inspection.png`)})
+      await page.getByRole('button',{name:'Close inspection',exact:true}).click()
       await page.getByRole('button',{name:'Open originating chat'}).click()
       assert.equal(await page.evaluate(()=>window.__opened),1)
       assert.deepEqual(mutations,[])
@@ -88,7 +113,7 @@ createRoot(document.getElementById('root')!).render(<main style={{display:'flex'
       await page.getByText('Scheduled work is not available yet.').waitFor()
       assert.deepEqual(errors,[])
       assert.deepEqual(mutations,[])
-      results.push({name,pass:true,reads,mutations:0})
+      results.push({name,pass:true,reads,inspections,mutations:0})
     } finally { await context.close() }
   }
   console.log(JSON.stringify({artifacts,results},null,2))
