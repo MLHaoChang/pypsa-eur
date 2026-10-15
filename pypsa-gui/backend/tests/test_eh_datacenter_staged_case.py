@@ -271,3 +271,6 @@ def test_the_staged_template_produces_an_investment_case(staged_case):
     assert r.op.status == {"operating": "ok", "capex": "ok", "terminal": "ok"}, r.op.reasons
     for k in ("project_pre_tax_npv", "project_pre_tax_irr"):
         assert r.metrics[k] is not None, (k, r.reasons)
+    # The grid-only comparison overloads the connection in 2035, as the study
+    # notes say; the flag reaches the result the card and the export read.
+    assert "counterfactual_exceeds_connection" in r.flags

@@ -94,6 +94,20 @@ def _flags(report: InvestmentCaseReport) -> list[str]:
     return sorted(found)
 
 
+#: Counterfactual flags under which the incremental figures compare against a
+#: site that could not run (review of #283): said beside the Summary figures.
+BASELINE_CAVEATS = (
+    ("counterfactual_exceeds_connection",
+     "The comparison site without the investment draws more than the connection can carry in "
+     "some hours: it could not run as modelled, so the NPV, IRR and payback compare against an "
+     "impossible baseline."),
+    ("counterfactual_exceeds_supply",
+     "The comparison site without the investment needs more than its grid supply can deliver in "
+     "some hours: it could not run as modelled, so the NPV, IRR and payback compare against an "
+     "impossible baseline."),
+)
+
+
 def _counterfactual_summary(block: Any) -> str | None:
     """The About row: the counterfactual's provenance in one line (the full
     block is on the Project sheet). None → `not_established`."""
@@ -164,6 +178,9 @@ def build_workbook(report: InvestmentCaseReport, *, project: str | None = None) 
         [k, raw.get(k)] for k in IC_EXPORT_KEYS
         if k not in ("completeness", "sections", "cashflow_lines", "gates", "packs", "pipeline")
         and not isinstance(raw.get(k), (dict, list))])
+    flags = set(_flags(report))
+    _rows(summary, [["Caveat", text] for f, text in BASELINE_CAVEATS if f in flags],
+          summary.max_row + 1)
 
     for name in IC_REPORT_SECTIONS:
         ws = wb.create_sheet(name[:31])
