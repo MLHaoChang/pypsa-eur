@@ -220,20 +220,31 @@ def test_a_normally_open_tie_sizes_against_its_rating_and_says_the_tie_is_open(t
     n.links_t.p1["grid_import"] = 0.0
     n.export_to_netcdf(str(project))
     spec = draft_from_project(project).spec
-    assert spec["campus"]["pcc"]["p_connection_mw"] == {"value": 60.0, "source": "assumed"}
+    pcc = spec["campus"]["pcc"]
+    assert pcc["p_connection_mw"] == {"value": 60.0, "source": "assumed"} and pcc["tie_normally_open"] is True
+    tie = next(k for k, v in spec["campus"]["transformers"].items() if v["pypsa_name"] == "grid_import")
+    drafted = spec["campus"]["transformers"][tie]
     run = tmp_path / "run"
     prepare_campus(run, spec, project)
     rank_campus(run, k=1)
     out = size_campus(run)
     req = out["requirement"]
-    assert req["p_ref_mw"] == 60.0 and req["q_limit_mvar"] > 0
-    assert req["p_ref_from"].startswith("normally open tie: its rating") and "grid-connected checks" in req["p_ref_from"]
+    assert req["p_ref_mw"] == 60.0 and req["q_limit_mvar"] > 0 and req["tie_open"] is True
+    assert req["p_ref_from"] == "normally open tie: its rating, the campus file p_connection_mw (grid-connected checks)"
     label = "applies with the tie closed (grid-connected operation), not to islanded operation"
     assert label in req["clause"]
-    row = out["compliance"].set_index("check").loc["pcc_reactive"]
-    assert label in row["clause"]
-    invested = invest_campus(run)["compliance"].set_index("check")
-    assert label in invested.at["pcc_reactive", "clause"]
+    # the tie is not sized from islanded hours: no sizing row, and the checks say so
+    assert out["transformers"].empty
+    comp = out["compliance"].set_index("check")
+    for check in ("pcc_reactive", "pcc_voltage", "transformer_loading"):
+        assert label in comp.at[check, "clause"], check
+    assert "not sized from islanded hours" in comp.at["transformer_loading", "detail"]
+    inv = invest_campus(run)
+    assert not inv["investment"]["need"].str.startswith("transformer").any()      # nothing bought for the tie
+    assert inv["spec"]["campus"]["transformers"][tie] == drafted                  # the drafted rating survives
+    invested = inv["compliance"].set_index("check")
+    for check in ("pcc_reactive", "pcc_voltage", "transformer_loading"):
+        assert label in invested.at[check, "clause"], check
 
 
 def test_sizing_checks_short_circuit_per_period_with_that_periods_units(tmp_path, project):

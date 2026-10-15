@@ -16,12 +16,14 @@ Translation, in the order the draft is built:
   ``eh_sk_mva`` if the project has one, else ``TYPICAL_SK_MVA`` for its
   voltage class. ``sk_min`` is taken equal to ``sk_max``, because no
   separate minimum is known. Generators on the PCC bus with a grid carrier
-  (``GRID_CARRIERS``) *are* the grid and become no unit. When every Link
-  at the PCC is a normally open tie (``p_max_pu`` 0, so it never imports),
-  the draft writes their rating as the connection capacity
-  ``p_connection_mw``: the study's P_ref would otherwise be the peak
-  import, which is 0. Otherwise it writes none, and the study uses the
-  peak import.
+  (``GRID_CARRIERS``) *are* the grid and become no unit. When the PCC is
+  joined to the campus only by Links, and every one is a normally open
+  tie (``p_max_pu`` 0, so it never imports), the draft marks the PCC
+  ``tie_normally_open`` and writes the ties' summed rating (they may all
+  close together) as the connection capacity ``p_connection_mw``: the
+  study's P_ref would otherwise be the peak import, which is 0. A Line or
+  Transformer at the PCC conducts, so then the draft writes neither, and
+  the study uses the peak import.
 * **Buses.** Every AC bus keeps its ``v_nom``. Buses of other carriers (H2,
   heat) are not electrical and are left out.
 * **Links between AC buses.**
@@ -37,13 +39,18 @@ Translation, in the order the draft is built:
   pump) is power drawn from that bus, so it becomes a **load** at its
   optimised capacity.
 * **A Link from another carrier into an AC bus** is a source on that bus,
-  typed by its carrier (``LINK_SOURCE_KIND``, then ``CARRIER_KIND``): a
-  fuel cell becomes a ``fuel_cell``, an inverter-based source with the
-  drafted inverter's data, and an engine (a gas or hydrogen engine Link)
-  a ``genset``. Its rating is the AC side, its optimised capacity times
-  its efficiency, and its hourly power is what it delivers there
-  (``p1``). An unknown carrier is refused with its name, as for a
-  generator.
+  typed in this order: ``eh_role`` ``fuel_cell``; its carrier
+  (``LINK_SOURCE_KIND``, then ``CARRIER_KIND``); and a Link from an H2
+  bus (the GUI's fuel cell, carrier ``H2``). A fuel cell becomes a
+  ``fuel_cell``, an inverter-based source with the drafted inverter's
+  data, and an engine (a gas or hydrogen engine Link) a ``genset``. Its
+  rating is the AC side, its optimised capacity times its efficiency, and
+  its hourly power is what it delivers there (``p1``). An unknown carrier
+  is refused with its name, as for a generator. A grid-forming fuel cell
+  counts as GFM in gridspine's island checks, but the hub's island LP
+  (the backend's ``services/solver/island.py``) gives GFM credit to
+  batteries only; neither the fuel cell nor its H2 Store enters the island
+  energy or fuel-autonomy checks.
 * **Lines** become cables with their own r, x and b.
 * **Generators** are typed by carrier (``CARRIER_KIND``). An unknown carrier
   is refused with its name, so the user can add it rather than have it
@@ -288,8 +295,13 @@ def _never_conducts(n, lname):
 
 
 def _open_tie_rating(n, pcc):
-    """The summed rating of the Links at the PCC when every one is a normally
-    open tie, else None (module docstring)."""
+    """The summed rating of the Links at the PCC when they alone join it to
+    the campus and every one is a normally open tie, else None (module
+    docstring)."""
+    for tbl in ("lines", "transformers"):
+        df = getattr(n, tbl, pd.DataFrame())
+        if len(df) and ((df["bus0"] == pcc) | (df["bus1"] == pcc)).any():
+            return None                                  # a conducting branch at the PCC
     links = n.links
     at_pcc = [x for x in links.index if pcc in (links.at[x, "bus0"], links.at[x, "bus1"])]
     if not at_pcc or not all(_never_conducts(n, x) for x in at_pcc):
@@ -297,11 +309,15 @@ def _open_tie_rating(n, pcc):
     return sum(_rating(links, x) for x in at_pcc) or None
 
 
-def _source_unit(links, lname, bus, p):
+def _source_unit(links, lname, bus, p, carrier_in):
     """The unit a Link from another carrier into the AC ``bus`` becomes, at
-    its AC-side rating (module docstring)."""
+    its AC-side rating (module docstring). ``carrier_in`` is the carrier of
+    the bus it draws from."""
     car = str(links.at[lname, "carrier"]) if "carrier" in links.columns else ""
-    kind = LINK_SOURCE_KIND.get(car.lower()) or CARRIER_KIND.get(car.lower())
+    role = links.at[lname, "eh_role"] if "eh_role" in links.columns else None
+    kind = ("fuel_cell" if role == "fuel_cell" else
+            LINK_SOURCE_KIND.get(car.lower()) or CARRIER_KIND.get(car.lower()) or
+            ("fuel_cell" if str(carrier_in).lower() == "h2" else None))
     if kind not in ("fuel_cell", "genset"):
         raise ContractError(
             f"link {lname} feeds an AC bus from another carrier, and its carrier {car!r} is not a source "
@@ -390,7 +406,7 @@ def draft_campus(n, island=None) -> CampusDraft:
         elif in1:
             (eid,) = ids([lname])
             pypsa_ids[lname] = eid
-            spec["units"][eid] = _source_unit(links, lname, bus_ids[b1], p)
+            spec["units"][eid] = _source_unit(links, lname, bus_ids[b1], p, carrier.get(b0))
         else:
             skipped.append(f"link {lname}: between non-electrical buses")
 
@@ -476,6 +492,7 @@ def draft_campus(n, island=None) -> CampusDraft:
     p_conn = _open_tie_rating(n, pcc)
     if p_conn:
         spec["pcc"]["p_connection_mw"] = _t(p_conn)
+        spec["pcc"]["tie_normally_open"] = True
 
     if not spec["cables"]:
         del spec["cables"]

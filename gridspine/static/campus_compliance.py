@@ -50,6 +50,12 @@ import pandas as pd
 from gridspine.templates.grid_codes import band_for
 
 CHECKS = ("pcc_reactive", "pcc_voltage", "campus_voltage", "transformer_loading", "switchgear")
+#: Added to the clause of the PCC checks of a normally open tie
+#: (``requirement["tie_open"]``): they are made at the tie's rating, as
+#: grid-connected operation.
+OPEN_TIE_CLAUSE = " [applies with the tie closed (grid-connected operation), not to islanded operation]"
+#: The transformer row's note for a normally open tie's PCC transformers.
+OPEN_TIE_TRAFO = "normally open tie: rated at p_connection_mw, not sized from islanded hours"
 #: The note a campus without a transformer carries in its voltage row.
 NO_TRANSFORMER = "no transformer between the PCC and the site buses ({kv} kV): transformer loading not assessed"
 #: Mvar tolerance for "on the band edge" after correction (the solver's tol).
@@ -96,17 +102,19 @@ def _voltage(rows: pd.DataFrame, profile, bus_kv, fixed_band=None):
     return ("fail" if key > 1e-9 else "pass"), value, limit, where, band, bus, case
 
 
-def _transformer_row(trafo, sizing):
+def _transformer_row(trafo, sizing, tie_open=False):
     j = trafo["loading_pct"].idxmax()
     peak = float(trafo.at[j, "loading_pct"])
     as_is = "fail" if peak > 100.0 + 1e-9 else "pass"
     recs = [f"{r.group}: {r.units} x {r.recommended_unit_mva:g} MVA recommended (now {r.unit_rating_mva:g} MVA)"
             for r in sizing.itertuples(index=False) if not bool(r.adequate)]
     after = "pass" if all(pd.notna(r.recommended_unit_mva) for r in sizing.itertuples(index=False)) else "fail"
+    detail = "; ".join(recs) if recs else f"worst {trafo.at[j, 'trafo']} ({trafo.at[j, 'case']})"
+    clause = "equipment rating (not a grid-code clause)"
+    if tie_open:
+        detail, clause = f"{detail}; {OPEN_TIE_TRAFO}", clause + OPEN_TIE_CLAUSE
     return _row("transformer_loading", as_is, after, peak, 100.0, "%",
-                (int(trafo.at[j, "period"]), int(trafo.at[j, "hour"])),
-                "equipment rating (not a grid-code clause)", "assumed",
-                "; ".join(recs) if recs else f"worst {trafo.at[j, 'trafo']} ({trafo.at[j, 'case']})",
+                (int(trafo.at[j, "period"]), int(trafo.at[j, "hour"])), clause, "assumed", detail,
                 str(trafo.at[j, "case"]))
 
 
@@ -159,8 +167,13 @@ def campus_compliance(bus, trafo, reactive, sizing, compensation, short_circuit,
                          band))
 
     # transformers: none on a campus that runs at the grid's voltage
-    if len(trafo) and len(sizing):
-        rows.append(_transformer_row(trafo, sizing))
+    tie_open = bool(requirement.get("tie_open"))
+    if tie_open:
+        for r in rows:
+            if r["check"] == "pcc_voltage" and not r["clause"].endswith(OPEN_TIE_CLAUSE):
+                r["clause"] += OPEN_TIE_CLAUSE
+    if len(trafo):
+        rows.append(_transformer_row(trafo, sizing, tie_open))
     else:
         kvs = [bus_kv[pcc_bus]] + sorted({v for b, v in bus_kv.items() if b != pcc_bus}, reverse=True)
         note = NO_TRANSFORMER.format(kv="/".join(f"{v:g}" for v in kvs) if len(kvs) > 1 else f"{kvs[0]:g}")

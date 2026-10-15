@@ -290,9 +290,33 @@ def test_a_normally_open_tie_at_the_pcc_gives_its_rating_as_the_connection_capac
     n = hub()
     n.links.loc["grid_import", "p_max_pu"] = 0.0
     pcc = draft_campus(n).spec["campus"]["pcc"]
-    assert pcc["p_connection_mw"] == {"value": 40.0, "source": "assumed"}
-    build_campus(draft_campus(n).spec)
+    assert pcc["p_connection_mw"] == {"value": 40.0, "source": "assumed"} and pcc["tie_normally_open"] is True
+    assert build_campus(draft_campus(n).spec).tie_normally_open
 
 
 def test_a_tie_that_conducts_leaves_the_connection_capacity_to_the_peak_import():
-    assert "p_connection_mw" not in draft_campus(hub()).spec["campus"]["pcc"]
+    pcc = draft_campus(hub()).spec["campus"]["pcc"]
+    assert "p_connection_mw" not in pcc and "tie_normally_open" not in pcc
+    assert not build_campus(draft_campus(hub()).spec).tie_normally_open
+
+
+def test_an_open_backup_link_beside_a_conducting_line_at_the_pcc_is_no_open_tie():
+    n = hub()
+    n.links.loc["grid_import", "p_max_pu"] = 0.0                     # the backup link is open...
+    n.add("Line", "feeder", bus0="grid", bus1="dc_mv", s_nom=60.0, x=0.5, r=0.1, length=1.0)
+    pcc = draft_campus(n).spec["campus"]["pcc"]                       # ...but the line conducts
+    assert "p_connection_mw" not in pcc and "tie_normally_open" not in pcc
+
+
+@pytest.mark.parametrize("extra", [{"carrier": "H2"}, {"carrier": "", "eh_role": "fuel_cell"}])
+def test_a_gui_drawn_fuel_cell_is_typed_by_its_role_or_its_h2_input(extra):
+    # the GUI palette draws a fuel cell as a Link with carrier 'H2'
+    n = hub()
+    n.add("Bus", "h2", carrier="H2")
+    if "eh_role" in extra:
+        n.links["eh_role"] = None
+    n.add("Link", "fc", bus0="h2", bus1="dc_mv", p_nom=4.0, efficiency=0.5, carrier=extra["carrier"])
+    if "eh_role" in extra:
+        n.links.loc["fc", "eh_role"] = extra["eh_role"]
+    _, fc = _by_pypsa(draft_campus(n).spec["campus"]["units"])["fc"]
+    assert fc["kind"] == "fuel_cell" and fc["p_mw"]["value"] == pytest.approx(2.0)

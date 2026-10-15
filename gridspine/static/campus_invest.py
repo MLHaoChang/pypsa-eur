@@ -430,7 +430,8 @@ def _compliance(study, req, profile) -> pd.DataFrame:
     out = campus_compliance(
         bus=study.bus, trafo=study.trafo, reactive=study.q, sizing=study.sizing, compensation=study.compensation,
         short_circuit=study.short_circuit, requirement={"q_limit_mvar": req.q_limit_mvar, "clause": req.clause,
-                                                         "source": req.source},
+                                                         "source": req.source,
+                                                         "tie_open": study.campus.tie_normally_open},
         profile=profile, pcc_bus=str(net.bus.at[int(net.ext_grid["bus"].iloc[0]), "name"]),
         bus_kv=dict(zip(net.bus["name"].astype(str), net.bus["vn_kv"].astype(float))))
     note = compliance_note(study.tapper, study.bus, study.taps, study.hunted)
