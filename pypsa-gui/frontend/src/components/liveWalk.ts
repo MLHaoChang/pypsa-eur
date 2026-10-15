@@ -1,12 +1,16 @@
 import { applyUiNavigate } from './uiNavigate'
+import { resultsEvidenceApi } from '../api/resultsEvidence'
+import { displayedResultsSource, sameResultsSource } from '../utils/resultsSource'
+import { manualNavigation, navigationEpoch, onManualNavigation } from '../utils/navigationEpoch'
 import { useUIStore } from '../store/uiStore'
 
 /** Project-level Results tabs. Asset detail needs a selected component. */
 export const KEY_RESULT_TABS = [
+  { id: 'summary', label: 'Summary', blurb: 'Recorded solve outcomes and evidence availability.' },
   { id: 'overview', label: 'Overview', blurb: 'Horizon economics, generation mix, and storage.' },
   { id: 'capex', label: 'Capacity expansion', blurb: 'Capital cost, operating cost, and sized assets.' },
   { id: 'dispatch', label: 'Dispatch', blurb: 'Generation, storage, and load at each snapshot.' },
-  { id: 'loadflow', label: 'Load flow', blurb: 'Line flows, voltages, and losses.' },
+  { id: 'loadflow', label: 'Load flow', blurb: 'Branch-loading evidence and its conventions.' },
   { id: 'prices', label: 'Prices', blurb: 'Marginal prices and what drives them.' },
   { id: 'economics', label: 'Economics', blurb: 'Revenue, profit, and levelised cost by asset.' },
   { id: 'emissions', label: 'Emissions', blurb: 'CO₂ totals and the cap shadow price.' },
@@ -19,8 +23,6 @@ export const KEY_RESULT_TABS = [
 ] as const
 
 export type KeyResultTab = (typeof KEY_RESULT_TABS)[number]
-
-export const KEY_RESULT_STEP_MS = 1800
 
 export function keyResultsWalkRequested(text: string): boolean {
   const t = text.toLowerCase()
@@ -35,93 +37,99 @@ export function openProjectRequested(text: string): boolean {
   return /\bopen\b/.test(t) && /\bprojects?\b/.test(t) && !keyResultsWalkRequested(text)
 }
 
-/**
- * Open each key results tab through `applyUiNavigate` — the same function
- * ChatPanel runs when the harness tool `ui_open_panel` emits a ui_event.
- *
- * Steps are chained. Scheduling every timeout up front lets a long Results
- * render hold the thread until they are all due, so only the last tab paints.
- */
-export function startKeyResultsWalk(opts?: {
-  schedule?: (fn: () => void, ms: number) => number
-  stepMs?: number
-  onStep?: (tab: KeyResultTab, index: number, last: boolean) => void
-  onPaceMiss?: (detail: string) => void
-}): () => void {
-  // Each step waits out its own pause. Page timers queued during the first
-  // Results render all become due together and only the last tab paints.
-  const stops: Array<() => void> = []
-  const schedule = opts?.schedule ?? ((fn: () => void, ms: number) => {
-    stops.push(scheduleStep(fn, ms, opts?.onPaceMiss))
-    return 0
-  })
-  const stepMs = opts?.stepMs ?? KEY_RESULT_STEP_MS
-  // Session-only. setUiMode would persist a mode the user did not choose.
-  useUIStore.setState({ uiMode: 'expert' })
-  let cancelled = false
-  const handles: number[] = []
-  const apply = (index: number) => {
-    if (cancelled || index >= KEY_RESULT_TABS.length) return
-    const tab = KEY_RESULT_TABS[index]
-    applyUiNavigate({ kind: 'navigate', panel_id: 'results', results_tab: tab.id })
-    opts?.onStep?.(tab, index, index === KEY_RESULT_TABS.length - 1)
-    if (index + 1 < KEY_RESULT_TABS.length) {
-      handles.push(schedule(() => apply(index + 1), stepMs))
-    }
-  }
-  apply(0)
-  return () => {
-    cancelled = true
-    for (const stop of stops) stop()
-    for (const handle of handles) window.clearTimeout(handle)
-  }
-}
+export type ResultsWalk = (() => void) & { next: () => void }
 
-/**
- * Pause before the next tab.
- *
- * In dev, Vite's `/__pace` handler sleeps on the server and answers
- * `paced:<ms>`. Any other body — including a fast HTTP 200 of login HTML —
- * must not advance the walk, and must not fall back to the page timer. That
- * timer collapses in this environment and paints only the last tab.
- * A production build uses the page timer.
- */
-function scheduleStep(
-  fn: () => void,
-  ms: number,
-  onMiss?: (detail: string) => void,
-): () => void {
-  let timer = 0
-  let aborted = false
-  const ctrl = new AbortController()
-  const miss = (detail: string) => {
-    if (aborted) return
-    onMiss?.(detail)
+/** Only adapters that render and revalidate a matching native source may advance. */
+export function startKeyResultsWalk(opts?: {
+  onStep?: (tab: KeyResultTab, index: number, last: boolean) => void
+  onWaiting?: (tab: KeyResultTab, total: number) => void
+  onStop?: (reason: string) => void
+}): ResultsWalk {
+  manualNavigation() // Supersede navigation from any earlier model turn.
+  const epoch = navigationEpoch()
+  const initial = useUIStore.getState()
+  const project = initial.currentProject
+  const run = initial.discussedRun
+  let stopped = false, ready = false, checking = false, index = 0
+  let tabs: KeyResultTab[] = []
+  let observer: MutationObserver | null = null
+  let timeout: ReturnType<typeof setTimeout> | null = null
+  let detachManual = () => {}, detachContext = () => {}
+  const stop = (reason?: string) => {
+    if (stopped) return
+    stopped = true
+    observer?.disconnect()
+    if (timeout) clearTimeout(timeout)
+    detachManual(); detachContext()
+    if (reason) opts?.onStop?.(reason)
   }
-  if (import.meta.env.DEV && typeof fetch === 'function') {
-    fetch(`/__pace?ms=${ms}`, { cache: 'no-store', signal: ctrl.signal })
-      .then(async (res) => {
-        const body = (await res.text()).trim()
-        if (aborted) return
-        if (body === `paced:${ms}`) fn()
-        else miss('pause body was not a server sleep')
-      })
-      .catch((err: unknown) => {
-        if (aborted) return
-        const name = err && typeof err === 'object' && 'name' in err
-          ? String((err as { name: string }).name)
-          : ''
-        if (name === 'AbortError') return
-        miss('pause request failed')
-      })
-  } else {
-    timer = window.setTimeout(fn, ms)
+  const cancel = (() => stop()) as ResultsWalk
+  detachManual = onManualNavigation(() => stop('Walk stopped. Your newer navigation takes priority.'))
+  detachContext = useUIStore.subscribe(state => {
+    if (state.currentProject !== project || state.discussedRun?.runId !== run?.runId
+      || state.discussedRun?.baselineRunId !== run?.baselineRunId
+      || state.uiMode !== initial.uiMode || state.resultSource !== initial.resultSource) {
+      stop('Walk stopped because the project, source or mode changed.')
+    }
+  })
+  const current = () => !stopped && navigationEpoch() === epoch
+  const check = async () => {
+    if (!current() || checking || ready) return
+    const tab = tabs[index]
+    if (!tab) return
+    const shown = displayedResultsSource(tab.id)
+    if (!shown || shown.project_name !== project || (run ? shown.scope !== 'historical' || shown.run_id !== run.runId
+      || (shown.baseline_run_id ?? undefined) !== run.baselineRunId : shown.scope !== 'current'
+      || shown.source !== initial.resultSource)) return
+    checking = true
+    try {
+      const evidence = run
+        ? await resultsEvidenceApi.run(run.runId, shown.section ?? undefined, run.baselineRunId)
+        : await resultsEvidenceApi.loadflow(initial.resultSource, shown.window_from, shown.window_to)
+      const now = displayedResultsSource(tab.id)
+      if (!current() || !now || !evidence.binding || !sameResultsSource(now, shown)
+        || !sameResultsSource(shown, evidence.binding)) return
+      ready = true
+      if (timeout) clearTimeout(timeout)
+      opts?.onStep?.(tab, index, index === tabs.length - 1)
+      if (index === tabs.length - 1) stop()
+    } catch { stop('Matching evidence could not be verified. The walkthrough remains incomplete.') }
+    finally { checking = false }
   }
-  return () => {
-    aborted = true
-    ctrl.abort()
-    window.clearTimeout(timer)
+  const open = () => {
+    if (!current()) return
+    ready = false
+    const tab = tabs[index]
+    opts?.onWaiting?.(tab, tabs.length)
+    applyUiNavigate({ kind: 'navigate', panel_id: 'results', results_tab: tab.id }, epoch)
+    if (timeout) clearTimeout(timeout)
+    timeout = setTimeout(() => stop('Matching result data did not become available. Walkthrough incomplete.'), 10000)
+    void check()
   }
+  cancel.next = () => {
+    if (!current() || !ready || index + 1 >= tabs.length) return
+    index += 1; open()
+  }
+  observer = new MutationObserver(() => { void check() })
+  observer.observe(document.body, { subtree: true, childList: true, attributes: true })
+  if (!project) stop('Save and open a project before walking through source-bound results.')
+  else if (run) {
+    void resultsEvidenceApi.run(run.runId, undefined, run.baselineRunId).then(view => {
+      if (!current()) return
+      const available = new Set((view.data.sections ?? []).filter(s => s.available).map(s => s.name))
+      tabs = KEY_RESULT_TABS.filter(t => (t.id === 'summary' || available.has(t.id)
+        || t.id === run.resultsTab && !!run.section && available.has(run.section))
+        && (initial.uiMode === 'expert' || ['summary', 'adequacy', 'fmea'].includes(t.id)))
+      if (!tabs.length) stop('This retained run has no eligible results evidence.')
+      else open()
+    }).catch(() => stop('Retained run evidence unavailable. Current results were not substituted.'))
+  } else if (initial.uiMode === 'expert') {
+    // Current load flow has a shared, source-attested adapter. Other tabs
+    // remain manually available; a mount alone cannot certify their data.
+    tabs = KEY_RESULT_TABS.filter(t => t.id === 'loadflow')
+    open()
+  } else stop('No source-bound current-results walkthrough adapter is available in Guided mode. Open the results tabs individually.')
+  return cancel
 }
 
 export function openProjectList(): void {

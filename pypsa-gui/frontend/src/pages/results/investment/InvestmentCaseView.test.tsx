@@ -144,6 +144,29 @@ describe('InvestmentCaseView', () => {
       .toMatch(/Stale: the campus study, the owner assets' investment columns changed/)
   })
 
+  it('a comparison baseline that could not run is said beside the headlines (#283 review)', async () => {
+    api.getInvestmentCase.mockResolvedValue({ status: 'done', report: { present: true } })
+    const rep = structuredClone(REPORT)
+    const project = rep.sections!.project!.payload as Record<string, unknown>
+    project.counterfactual = { present: true, flags: ['counterfactual_exceeds_connection'] }
+    api.getReport.mockResolvedValue(rep)
+    renderView()
+    await screen.findByTestId('ic-report')
+    const caveat = screen.getByTestId('ic-baseline-caveat')
+    expect(caveat.textContent).toMatch(/more than the connection can carry/)
+    expect(caveat.textContent).toMatch(/NPV, IRR and payback/)
+    // Right after the headline figures, before the counterfactual detail.
+    expect(screen.getByTestId('ic-headlines').nextElementSibling).toBe(caveat)
+  })
+
+  it('no baseline flag: no caveat', async () => {
+    api.getInvestmentCase.mockResolvedValue({ status: 'done', report: { present: true } })
+    api.getReport.mockResolvedValue(structuredClone(REPORT))
+    renderView()
+    await screen.findByTestId('ic-report')
+    expect(screen.queryByTestId('ic-baseline-caveat')).toBeNull()
+  })
+
   it('renders a report with not-established headlines and the stale marker', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'done',
       report: { present: true, stale: true, changed: ['finance', 'value_flows'] } })

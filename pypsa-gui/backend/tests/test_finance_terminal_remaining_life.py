@@ -177,6 +177,21 @@ def test_an_infinite_lifetime_is_terminal_part_unknown():
     assert r.cash["project_pre_tax"] is None
 
 
+def test_a_sunk_asset_at_an_overnight_cost_of_zero_leaves_no_terminal_value():
+    """Slice D4: an existing asset in service at the first period, typed at an
+    overnight cost of 0 (sunk, no capex), has no remaining value to credit,
+    whatever its lifetime (infinite on an existing PyPSA row): the terminal
+    value is established without it, never `terminal_part_unknown`."""
+    sunk = AssetFinance("genset", "Generator", 0.0, None, "gas",
+                        (AssetPart("investment", 0.0, math.inf, None),))
+    alone = run_case(_case(), layers=NO_TAX)
+    r = run_case(_case(assets=(_battery(), sunk)), layers=NO_TAX)
+    assert r.op.reasons["terminal"] == []
+    assert {t.asset for t in r.op.terminal_terms} == {"bess"}
+    assert r.op.terminal[-1] == pytest.approx(alone.op.terminal[-1], rel=1e-12)
+    # an infinite lifetime with a cost stays unknown (the test below)
+
+
 @pytest.mark.parametrize("make,reason", [
     (lambda: _case(lp=False), "terminal_needs_lp_rate"),
     (lambda: _case(rate=None), "terminal_needs_lp_rate"),

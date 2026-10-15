@@ -1,3 +1,4 @@
+import { navigationChanged } from '../utils/navigationEpoch'
 import { create } from 'zustand'
 import { effectiveLockState, type LockState, type ReadOnlyReason } from '../utils/lockState'
 import { readActiveSite } from '../site3d/activeSite'
@@ -733,6 +734,7 @@ export const useUIStore = create<UIStore>((set) => ({
   uiMode: INITIAL_UI_MODE.mode,
   uiModeExplicit: INITIAL_UI_MODE.explicit,
   setUiMode: (mode, opts) => {
+    navigationChanged()
     const explicit = opts?.explicit === true
     try {
       localStorage.setItem(UI_MODE_KEY, mode)
@@ -803,14 +805,14 @@ export const useUIStore = create<UIStore>((set) => ({
   },
   toggleRightPanel: () => set(s => ({ rightPanelOpen: !s.rightPanelOpen })),
   openRightPanel: () => set({ rightPanelOpen: true }),
-  setSelectedComponent: (c) => set(s => ({
+  setSelectedComponent: (c) => { navigationChanged(); set(s => ({
     selectedComponent: c,
     // P30 (B10): an edit request belongs to one component; moving the
     // selection anywhere else drops it.
     propertiesEditRequest: s.propertiesEditRequest && c
       && c.type === s.propertiesEditRequest.type && c.name === s.propertiesEditRequest.name
       ? s.propertiesEditRequest : null,
-  })),
+  })) },
   setHighlightedComponent: (c) => set({ highlightedComponent: c }),
   setProjectName: (name) => {
     try { localStorage.setItem(PROJECT_NAME_KEY, name) } catch { /* noop */ }
@@ -822,7 +824,7 @@ export const useUIStore = create<UIStore>((set) => ({
     try { localStorage.setItem(RESULTS_OVERLAY_KEY, v ? 'true' : 'false') } catch { /* noop */ }
     set({ resultsOverlayEnabled: v })
   },
-  setResultSource: (s) => set(state => {
+  setResultSource: (s) => { navigationChanged(); set(state => {
     const v: 'lopf' | 'ac_pf' = s === 'ac_pf' ? 'ac_pf' : 'lopf'
     // Per-project (B8): write the active project's entry alongside the
     // top-level mirror so a later instant switch restores the right source.
@@ -830,13 +832,14 @@ export const useUIStore = create<UIStore>((set) => ({
       ? { ...state.resultSourceByProject, [state.currentProject]: v }
       : state.resultSourceByProject
     return { resultSource: v, resultSourceByProject: byProject }
-  }),
+  }) },
   setFlowOverlayKind: (k) => set({ flowOverlayKind: k === 'q' ? 'q' : 'p' }),
   setResultsSnapshotIdx: (i) => set({ resultsSnapshotIdx: Math.max(0, Math.floor(i)) }),
   setCreationItem: (item) => set({ creationItem: item }),
   setPendingNodePosition: (p) => set({ pendingNodePosition: p }),
   setCanvasMode: (mode) => set({ canvasMode: mode }),
   setCanvasView: (view) => {
+    navigationChanged()
     try { localStorage.setItem(CANVAS_VIEW_KEY, view) } catch { /* noop */ }
     set({ canvasView: view })
   },
@@ -844,7 +847,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setSiteDraft: (d) => set({ siteDraft: d }),
   setActiveSiteId: (id) => set({ activeSiteId: id }),
   setSiteSizing: (m) => set({ siteSizing: m }),
-  setSlidePanel: (p) => set({ activeSlidePanel: p }),
+  setSlidePanel: (p) => { navigationChanged(); set({ activeSlidePanel: p }) },
   setAssistantDockOpen: (open) => {
     persistAssistantDockOpen(open)
     set({ assistantDockOpen: open })
@@ -902,7 +905,7 @@ export const useUIStore = create<UIStore>((set) => ({
   },
   requestBottomTab: (tab) => set({ bottomTabRequest: tab }),
   clearBottomTabRequest: () => set({ bottomTabRequest: null }),
-  requestResultsTab: (tab) => set({ resultsTabRequest: tab }),
+  requestResultsTab: (tab) => { navigationChanged(); set({ resultsTabRequest: tab }) },
   clearResultsTabRequest: () => set({ resultsTabRequest: null }),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),
@@ -912,22 +915,22 @@ export const useUIStore = create<UIStore>((set) => ({
   clearPropertiesEditRequest: () => set({ propertiesEditRequest: null }),
   requestEhReport: () => set({ ehReportRequest: true }),
   clearEhReportRequest: () => set({ ehReportRequest: false }),
-  requestAssetDetail: (req) => set({
+  requestAssetDetail: (req) => { navigationChanged(); set({
     assetDetailRequest: req,
     selectedComponent: { type: req.componentClass, name: req.name },
     // P30 gate S-2: the selection moved, so a pending edit request goes.
     propertiesEditRequest: null,
     activeSlidePanel: 'results',
     resultsTabRequest: 'asset',
-  }),
+  }) },
   clearAssetDetailRequest: () => set({ assetDetailRequest: null }),
-  requestRunResult: (req) => set({
+  requestRunResult: (req) => { navigationChanged(); set({
     discussedRun: req,
     activeSlidePanel: 'results',
     ...(req.resultsTab ? { resultsTabRequest: req.resultsTab } : {}),
-  }),
-  clearDiscussedRun: () => set({ discussedRun: null }),
-  requestCompareNav: (nav) => set({ compareNavRequest: nav }),
+  }) },
+  clearDiscussedRun: () => { navigationChanged(); set({ discussedRun: null }) },
+  requestCompareNav: (nav) => { navigationChanged(); set({ compareNavRequest: nav }) },
   clearCompareNavRequest: () => set({ compareNavRequest: null }),
   requestIoModal: (tab) => set({ ioModalRequest: tab }),
   clearIoModalRequest: () => set({ ioModalRequest: null }),
@@ -945,6 +948,7 @@ export const useUIStore = create<UIStore>((set) => ({
     return { solvingReadOnly: solving, readOnly, readOnlyReason: reason }
   }),
   setCurrentProject: (name, preferredId) => {
+    navigationChanged()
     try {
       if (name) {
         localStorage.setItem(CURRENT_PROJECT_KEY, name)

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { APPLY_UI_NAVIGATE_FOR_TEST as applyUiNavigate } from './ChatPanel'
 import { useUIStore } from '../store/uiStore'
+import { navigationEpoch } from '../utils/navigationEpoch'
 
 const panels = [
   'timeseries', 'simparams', 'horizon', 'results', 'snapshots', 'issues',
@@ -70,4 +71,25 @@ it('selects a discussed run via open_run_result without opening the console', ()
     runId: 'fg-abc', status: 'completed', resultsTab: 'dispatch',
     section: 'summary', mode: 'lopf',
   })
+})
+
+it('rejects a late assistant action after newer manual navigation without changing Guided policy', () => {
+  useUIStore.setState({ uiMode: 'guided' })
+  const epoch = navigationEpoch()
+  useUIStore.getState().setSlidePanel('issues')
+  expect(applyUiNavigate({ kind: 'navigate', panel_id: 'results', results_tab: 'loadflow' }, epoch)).toBe(false)
+  expect(useUIStore.getState().activeSlidePanel).toBe('issues')
+  expect(useUIStore.getState().resultsTabRequest).toBeNull()
+  expect(useUIStore.getState().uiMode).toBe('guided')
+})
+
+it.each(['asset', 'compare'] as const)('preserves a newer manual %s request against a late assistant action', target => {
+  const epoch = navigationEpoch()
+  if (target === 'asset') {
+    useUIStore.getState().requestAssetDetail({ componentClass: 'Line', name: 'Chosen branch' })
+  } else {
+    useUIStore.getState().requestCompareNav({ a: 'Chosen scenario', tab: 'economics' })
+  }
+  expect(applyUiNavigate({ kind: 'navigate', panel_id: 'results', results_tab: 'loadflow' }, epoch)).toBe(false)
+  expect(useUIStore.getState().resultsTabRequest).toBe(target === 'asset' ? 'asset' : null)
 })

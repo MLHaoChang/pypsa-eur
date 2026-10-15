@@ -17,14 +17,17 @@ header.
 from __future__ import annotations
 
 import dataclasses
+from contextlib import contextmanager
 import logging
 import re
 from typing import Any, Literal
 
 import threading as _threading
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict
+from db.models import User
+from deps import require_user
 
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.pypsa_service import PyPSAService
@@ -115,6 +118,67 @@ from routers.simulation import _solver_in_flight, _state, _state_snapshot
 logger = logging.getLogger("pypsa_gui.results")
 
 results_router = APIRouter()
+
+
+@contextmanager
+def _result_actor(actor: User):
+    """Use the authenticated HTTP reader's authority, restoring the caller's context."""
+    from services import chat_tools
+
+    previous = chat_tools.acting_user_id()
+    chat_tools.set_acting_user(str(actor.id))
+    try:
+        yield
+    finally:
+        chat_tools.set_acting_user(previous)
+
+
+@results_router.get("/loadflow-view")
+def get_loadflow_view(
+    source: Literal["lopf", "ac_pf"] = "lopf",
+    window_from: int | None = Query(default=None, ge=0),
+    window_to: int | None = Query(default=None, ge=0),
+    actor: User = Depends(require_user),
+):
+    """Read the owned current solve through the chat's bounded loading oracle."""
+    from services.loadflow_summary import get_loadflow_view as read
+
+    with _result_actor(actor):
+        return read(source, window_from, window_to)
+
+
+@results_router.get("/run-view")
+def get_run_view(
+    run_id: str,
+    section: str | None = None,
+    baseline_run_id: str | None = None,
+    actor: User = Depends(require_user),
+):
+    """Read retained evidence only; never restore inputs or fall back to live data."""
+    import hashlib
+    import json
+
+    from services import run_evidence
+
+    from harness.durable import network_guard
+
+    with _result_actor(actor), network_guard():
+        _root, project_id, _owner = run_evidence._authority()
+        project_name = PyPSAService.get_active_context().loaded_project
+        data = run_evidence.get_run_evidence(run_id, section)
+        baseline = (run_evidence.get_run_evidence(baseline_run_id)
+                    if baseline_run_id is not None else None)
+    material = json.dumps([data, baseline], sort_keys=True, allow_nan=False)
+    return {
+        "status": "ok", "data": data, "baseline": baseline,
+        "binding": {
+            "version": 1, "project_id": project_id, "scope": "historical",
+            "project_name": project_name,
+            "run_id": run_id, "section": section,
+            "baseline_run_id": baseline_run_id,
+            "data_sha256": hashlib.sha256(material.encode()).hexdigest(),
+        },
+    }
 
 
 # ── Results endpoints ─────────────────────────────────────────────────────────

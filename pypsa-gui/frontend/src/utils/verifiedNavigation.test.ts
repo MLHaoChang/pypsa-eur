@@ -80,4 +80,29 @@ describe('mounted view acknowledgements', () => {
     await tick()
     expect(verified).not.toHaveBeenCalled()
   })
+
+  it('version 2 needs displayed data with an exact source, not merely a mount', async () => {
+    const binding = { version: 1 as const, project_id: 'project-1', project_name: 'Demo', scope: 'current' as const,
+      data_sha256: 'a'.repeat(64), source: 'lopf' as const, window_from: 1, window_to: 2 }
+    const action: NavigationAcknowledgement = { ...expected, version: 2,
+      target: { panel_id: 'results', results_tab: 'loadflow' }, source_binding: binding }
+    const verified = vi.fn()
+    const stop = acknowledgeMountedView(action, () => true, verified)
+    mount('Demo', 'loadflow')
+    await tick()
+    expect(client.post).not.toHaveBeenCalled()
+    const data = document.querySelector<HTMLElement>('[data-assurance-tab]')!
+    data.dataset.resultTab = 'loadflow'
+    data.dataset.resultBinding = JSON.stringify({ ...binding, data_sha256: 'b'.repeat(64) })
+    await tick()
+    expect(client.post).not.toHaveBeenCalled()
+    data.dataset.resultBinding = JSON.stringify(binding)
+    await tick()
+    expect(client.post).toHaveBeenCalledWith('/chat/ui-ack', {
+      version: 2, action_id: 'action-1', turn_id: 'turn-1', binding_generation: 7,
+      target: action.target, source_binding: binding,
+    }, { skipErrorToast: true })
+    expect(verified).toHaveBeenCalledOnce()
+    stop()
+  })
 })

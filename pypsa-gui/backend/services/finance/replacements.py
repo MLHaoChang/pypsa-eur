@@ -237,7 +237,9 @@ def remaining_life_terms(case: FinanceCase, tl: Timeline
     (under `fixed`, `replacement_capex` entries for an asset with more than one
     part: an entry names an asset, not a part), `escalation_missing:capex` (a
     replacement's base cannot be stated). `r_a` is the asset's own discount
-    rate, else the LP's; `r` the LP's (GS's; the LP basis, not the WACC)."""
+    rate, else the LP's; `r` the LP's (GS's; the LP basis, not the WACC). A part
+    typed at an overnight cost of 0 with no `fixed` entry (a sunk, existing
+    asset) has no term and no reason, whatever its lifetime (slice D4)."""
     lp = case.lp_basis
     if lp is None or lp.discount_rate is None:
         return (), ["terminal_needs_lp_rate"]
@@ -259,6 +261,10 @@ def remaining_life_terms(case: FinanceCase, tl: Timeline
         r_a = r if own is None else float(own)
         for p in parts:
             life = p.lifetime_years
+            if p.overnight_cost == 0.0 and not (fin.replacement_rule == FIXED and a.name in entries):
+                # A typed 0 (a sunk, existing asset, slice D4): nothing was bought,
+                # so nothing remains to credit, whatever the lifetime.
+                continue
             # No cost, no lifetime, an infinite one (GS's `salvage_not_computed`) or
             # one below a year (S5's floor; review r1 B1: a typed 0 crashed the annuity).
             if p.overnight_cost is None or not _finite(life) or life < 1.0:

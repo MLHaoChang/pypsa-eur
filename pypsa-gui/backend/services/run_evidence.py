@@ -106,7 +106,26 @@ def _valid_run_id(run_id: Any) -> bool:
 
 
 def _run_dir(root: Path, run_id: str) -> Path:
-    return root / 'run_evidence' / run_id
+    if not isinstance(run_id, str) or not _RUN_ID.fullmatch(run_id):
+        _refuse('invalid_run_evidence', 'Invalid run id.', 422)
+    return _evidence_path(root, run_id)
+
+
+def _evidence_path(root: Path, *parts: str) -> Path:
+    """Resolve every read/write below the owned project's evidence directory.
+
+    Grammar checks alone do not stop an on-disk symlink (including a symlinked
+    manifest or sections directory). Check the resolved path, not its spelling.
+    """
+    project = os.path.realpath(root)
+    base = os.path.realpath(os.path.join(project, 'run_evidence'))
+    path = os.path.realpath(os.path.join(base, *parts))
+    # Include the separator: /project-other is not a child of /project.
+    # Normalize first, then check the same value that reaches the file API.
+    if not base.startswith(project + os.sep) or not path.startswith(base + os.sep):
+        raise HTTPException(422, {'error_kind': 'invalid_run_evidence',
+                                 'message': 'Evidence path leaves the owned project.'})
+    return Path(path)
 
 
 def _atomic_write(path: Path, data: bytes) -> None:
@@ -170,11 +189,11 @@ def start_run(root: Path, project_id: str, *, run_id: str, kind: str,
                      unsaved_inputs=unsaved_inputs, warnings=warnings, actor_id=actor_id)
     marker['status'] = 'running'
     with _LOCK:
-        run_dir = _run_dir(root, run_id)
-        if (run_dir / 'manifest.json').exists():
+        _run_dir(root, run_id)
+        if _evidence_path(root, run_id, 'manifest.json').exists():
             _refuse('run_already_finalized', 'This run already has a terminal manifest.',
                     run_id=run_id)
-        _atomic_write(run_dir / 'running.json', _json_bytes(marker))
+        _atomic_write(_evidence_path(root, run_id, 'running.json'), _json_bytes(marker))
     return copy.deepcopy(marker)
 
 
@@ -216,21 +235,25 @@ def publish_run(root: Path, project_id: str, *, run_id: str, kind: str, status: 
     manifest['sections'] = refs
 
     with _LOCK:
-        run_dir = _run_dir(root, run_id)
-        existing = _read_manifest_file(run_dir / 'manifest.json')
+        _run_dir(root, run_id)
+        manifest_path = _evidence_path(root, run_id, 'manifest.json')
+        marker_path = _evidence_path(root, run_id, 'running.json')
+        section_paths = {name: _evidence_path(root, run_id, 'sections', name + '.json')
+                         for name in blobs}
+        existing = _read_manifest_file(manifest_path)
         if existing is not None:
             if _same_completion(existing, manifest, started_at, finished_at):
                 return existing
             _refuse('run_already_finalized',
                     'This run already has a different terminal manifest; manifests are immutable.',
                     run_id=run_id)
-        marker = _read_json(run_dir / 'running.json')
+        marker = _read_json(marker_path)
         if marker and not started_at:
             manifest['started_at'] = marker.get('started_at', manifest['started_at'])
         for name, blob in blobs.items():
-            _atomic_write(run_dir / 'sections' / (name + '.json'), blob)
-        _atomic_write(run_dir / 'manifest.json', _json_bytes(manifest))
-        (run_dir / 'running.json').unlink(missing_ok=True)
+            _atomic_write(section_paths[name], blob)
+        _atomic_write(manifest_path, _json_bytes(manifest))
+        marker_path.unlink(missing_ok=True)
         _enforce_retention(root)
     return copy.deepcopy(manifest)
 
@@ -262,8 +285,12 @@ def _load_run(root: Path, project_id: str, run_id: str) -> dict | None:
     """Manifest (terminal) or running marker for THIS project; None otherwise."""
     if not _valid_run_id(run_id):
         return None
-    run_dir = _run_dir(root, run_id)
-    record = _read_manifest_file(run_dir / 'manifest.json') or _read_json(run_dir / 'running.json')
+    try:
+        manifest = _evidence_path(root, run_id, 'manifest.json')
+        marker = _evidence_path(root, run_id, 'running.json')
+    except (HTTPException, OSError, RuntimeError):
+        return None
+    record = _read_manifest_file(manifest) or _read_json(marker)
     if record is None or record.get('project_id') != project_id or record.get('run_id') != run_id:
         return None
     return record
@@ -271,13 +298,20 @@ def _load_run(root: Path, project_id: str, run_id: str) -> dict | None:
 
 def _section_state(root: Path, record: dict, name: str) -> tuple[bytes | None, str | None]:
     """(bytes, None) when the artifact verifies, else (None, reason)."""
+    # A manifest can have been altered since publication. Do not trust its
+    # section keys or run id as filesystem components, even for a summary read.
+    if (not isinstance(name, str) or not _SECTION.fullmatch(name)
+            or not _valid_run_id(record.get('run_id'))):
+        return None, 'artifact_corrupt'
     ref = (record.get('sections') or {}).get(name)
     if ref is None:
         return None, 'section_not_recorded'
-    path = _run_dir(root, record['run_id']) / 'sections' / (name + '.json')
+    if not isinstance(ref, dict):
+        return None, 'artifact_corrupt'
     try:
+        path = _evidence_path(root, record['run_id'], 'sections', name + '.json')
         blob = path.read_bytes()
-    except OSError:
+    except (HTTPException, OSError, RuntimeError):
         return None, 'artifact_missing'
     if hashlib.sha256(blob).hexdigest() != ref.get('sha256') or len(blob) != ref.get('bytes'):
         return None, 'artifact_corrupt'

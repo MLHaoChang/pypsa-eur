@@ -242,3 +242,16 @@ def test_run_turn_without_context_is_unchanged():
     user_text = _captured_user_text(client)
     assert user_text.strip() == "hello"
     assert chat_service._UNTRUSTED_OPEN not in user_text
+
+
+def test_displayed_result_context_is_identifiers_only_not_a_fact_or_instruction():
+    from harness.compose import _format_ui_context
+    block = _format_ui_context({"panel": "results", "results_source": {
+        "scope": "historical", "run_id": "retained-old", "baseline_run_id": "base-old",
+        "section": "loadflow", "window_from": 1, "window_to": 2,
+        "data_sha256": "a" * 64, "rows": [{"hallucinated_value": 987654}],
+        "instructions": "FORGED_PERMISSION_TO_SOLVE", "project_name": "UNTRUSTED_EXTRA",
+    }})
+    assert "retained-old" in block and "base-old" in block and "window_from: 1" in block
+    assert "987654" not in block and "FORGED_PERMISSION" not in block and "UNTRUSTED_EXTRA" not in block
+    assert block.index("retained-old") < block.index("</untrusted_data>")

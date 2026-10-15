@@ -6,7 +6,7 @@
 Status: ready-for-agent
 Date: 2026-10-14, Europe/Oslo
 Baseline: master `4ac218cc98a1437950dd20c3f46233efac6cc159`
-Implementation: planned; no application changes or test execution claimed by this document
+Implementation: tracked per slice below; this plan alone does not certify implementation, tests or readiness
 
 ## Start here
 
@@ -14,7 +14,7 @@ Read the [specification](../../../.scratch/chat-companion/spec.md), especially i
 
 First implement **CP-01**, then **CP-02**. These deliver truthful in-page chat and readable outcomes without new hosted media. Do not start a broad avatar rewrite or background effects to complete either slice.
 
-Current continuation: [CP-01 implementation/evidence](../../../.scratch/chat-companion/issues/01-truthful-state.md) records local progress on a newer master and remaining gates. This plan remains the sequence; that issue is the source for execution status.
+Current continuation: CP-01 (#235) and CP-02 (#241) are merged. [CP-01 evidence](../../../.scratch/chat-companion/issues/01-truthful-state.md), [CP-02 evidence](../../../.scratch/chat-companion/issues/02-canonical-outcomes.md), and [bounded CP-03 implementation/evidence](../../../.scratch/chat-companion/issues/03-source-navigation.md) record tested boundaries and remaining gates. CP-03 (#268) covers retained native evidence and the current Expert branch-loading adapter; other current-tab adapters and historical harness completion ACKs remain follow-ups. The next milestone is CP-04 after CP-03's required merge gates. This plan remains the sequence; the linked issues are the execution records.
 
 This plan supplements the [earlier assistant plan](2026-10-13-assistant-remaining-work.md). Its bounded prerequisites and first-network-case milestones are already merged in #185/#188. Reuse them; their residual two-case/reconciliation work is CP-05. Existing Live issues 01–12 keep their acceptance scope and remaining external gates.
 

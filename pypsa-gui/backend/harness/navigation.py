@@ -94,6 +94,15 @@ def issue(turn, payload):
             "outcome": "submitted",
             "expires_at": time.time() + 30,
         }
+        # Only this results adapter can attest displayed data today. Other
+        # version-1 actions retain their explicit mounted-view meaning.
+        if target == {"panel_id": "results", "results_tab": "loadflow"}:
+            from services.loadflow_summary import get_loadflow_view
+
+            view = get_loadflow_view()
+            if view.get("status") != "ok":
+                return None
+            record.update(version=2, source_binding=view["binding"])
         records.save(record, oid)
         if not records._path(turn.owner, cursor).exists():
             records.save(
@@ -113,7 +122,7 @@ def issue(turn, payload):
         if current["turn_id"] != turn.turn_id:
             return None
         records.save({**current, "action_id": oid}, cursor)
-        return {
+        issued = {
             k: record[k]
             for k in (
                 "version",
@@ -126,15 +135,20 @@ def issue(turn, payload):
                 "input_sha256",
             )
         }
+        if record["version"] == 2:
+            issued["source_binding"] = record["source_binding"]
+        return issued
 
 
 def acknowledge(owner, body):
     required = {"version", "action_id", "turn_id", "binding_generation", "target"}
+    if isinstance(body, dict) and body.get("version") == 2:
+        required.add("source_binding")
     if (
         not isinstance(body, dict)
         or set(body) != required
         or type(body.get("version")) is not int
-        or body["version"] != 1
+        or body["version"] not in (1, 2)
         or type(body.get("binding_generation")) is not int
         or not isinstance(body.get("target"), dict)
         or not all(
@@ -143,6 +157,17 @@ def acknowledge(owner, body):
         )
     ):
         raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
+    if body["version"] == 2:
+        binding = body["source_binding"]
+        keys = {"version", "project_id", "project_name", "scope", "source",
+                "input_sha256", "data_sha256", "window_from", "window_to"}
+        if (not isinstance(binding, dict) or set(binding) != keys
+                or type(binding.get("version")) is not int or binding["version"] != 1
+                or any(type(binding.get(k)) is not int or binding[k] < 0
+                       for k in ("window_from", "window_to"))
+                or any(not isinstance(binding.get(k), str)
+                       for k in keys - {"version", "window_from", "window_to"})):
+            raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
     try:
         with (
             network_guard(),
@@ -163,15 +188,32 @@ def acknowledge(owner, body):
                 != record["input_sha256"]
             ):
                 raise ValueError("mismatch")
+            if record["version"] == 2:
+                from services.loadflow_summary import get_loadflow_view
+                from services import chat_tools
+
+                binding = record["source_binding"]
+                # This request is a browser read-back, often outside a model
+                # turn. Its authenticated actor is authoritative here.
+                previous = chat_tools.acting_user_id()
+                chat_tools.set_acting_user(owner)
+                try:
+                    fresh = get_loadflow_view(binding["source"], binding["window_from"],
+                                              binding["window_to"])
+                finally:
+                    chat_tools.set_acting_user(previous)
+                if fresh.get("status") != "ok" or fresh.get("binding") != binding:
+                    raise ValueError("result evidence changed")
             if record["outcome"] == "submitted":
                 record.update(
                     outcome="completed",
                     acknowledged_at=time.time(),
-                    verification="browser_mounted_view",
+                    verification=("browser_displayed_data" if record["version"] == 2
+                                  else "browser_mounted_view"),
                 )
                 records.save(record, body["action_id"])
             return {
-                "version": 1,
+                "version": record["version"],
                 "action_id": body["action_id"],
                 "outcome": record["outcome"],
                 "verification": record["verification"],

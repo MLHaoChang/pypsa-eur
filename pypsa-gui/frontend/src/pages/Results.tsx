@@ -1,3 +1,5 @@
+import { manualNavigation } from '../utils/navigationEpoch'
+import RunBoundView from './results/RunBoundView'
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase} from 'lucide-react'
@@ -136,6 +138,7 @@ export default function Results() {
   // §10 addendum, gate P23 B3). Cleared by any click on the strip.
   const [requestedTab, setRequestedTab] = useState<ResultsTab | null>(null)
   const pickTab = (t: ResultsTab) => {
+    manualNavigation()
     setRequestedTab(null)
     setTab(t)
   }
@@ -148,6 +151,7 @@ export default function Results() {
   // The A-vs-B CompareView coexists on the right; the live Results tabs stay
   // fully interactive on the left. State lives in the store so the rail
   // survives result-tab switches and page reloads until explicitly closed.
+  const selectedEntity = useUIStore(s => s.selectedComponent)
   const currentProject    = useUIStore(s => s.currentProject)
   const compareRailOpen   = useUIStore(s => s.compareRailOpen)
   const compareRailWidth  = useUIStore(s => s.compareRailWidth)
@@ -194,10 +198,9 @@ export default function Results() {
   if (
     resultsTabRequest
     && TABS.some((item) => item.id === resultsTabRequest)
-    && resultsTabRequest !== tab
   ) {
-    setTab(resultsTabRequest as ResultsTab)
-    setRequestedTab(resultsTabRequest as ResultsTab)
+    if (resultsTabRequest !== tab) setTab(resultsTabRequest as ResultsTab)
+    if (requestedTab !== resultsTabRequest) setRequestedTab(resultsTabRequest as ResultsTab)
   }
   useEffect(() => {
     if (!resultsTabRequest) return
@@ -533,6 +536,7 @@ export default function Results() {
   const isWindowed = isNarrowed || selectedPeriod !== 'all'
 
   const resetHorizon = () => {
+    manualNavigation()
     if (firstSnap16) setFromIso(firstSnap16)
     if (lastSnap16)  setToIso(lastSnap16)
     setSelectedPeriod('all')
@@ -549,13 +553,13 @@ export default function Results() {
     controls: {
       fromInput: toDisplay(fromIso),
       toInput: toDisplay(toIso),
-      setFromInput: (v: string) => setFromIso(toStore(v)),
-      setToInput: (v: string) => setToIso(toStore(v)),
+      setFromInput: (v: string) => { manualNavigation(); setFromIso(toStore(v)) },
+      setToInput: (v: string) => { manualNavigation(); setToIso(toStore(v)) },
       firstSnap: firstSnap16 ? toDisplay(firstSnap16) : '',
       lastSnap: lastSnap16 ? toDisplay(lastSnap16) : '',
       periods: uniquePeriods,
       selectedPeriod,
-      setSelectedPeriod,
+      setSelectedPeriod: (p: number | string) => { manualNavigation(); setSelectedPeriod(p) },
       isFiltered,
       reset: resetHorizon,
     },
@@ -611,13 +615,13 @@ export default function Results() {
       data-assurance-tab={effectiveTab}
     >
       <PageHeader
-        eyebrow={uiMode === 'guided' ? 'HUB DESIGN · RESULTS' : 'RESULTS · OPTIMIZATION'}
-        title={uiMode === 'guided' ? 'Reliability results' : 'Optimization results'}
-        subtitle={uiMode === 'guided'
+        eyebrow={discussedRun ? 'RESULTS · RETAINED EVIDENCE' : uiMode === 'guided' ? 'HUB DESIGN · RESULTS' : 'RESULTS · OPTIMIZATION'}
+        title={discussedRun ? 'Retained run results' : uiMode === 'guided' ? 'Reliability results' : 'Optimization results'}
+        subtitle={discussedRun ? `Recorded evidence for run ${discussedRun.runId}. Live inputs remain unchanged.` : uiMode === 'guided'
           ? 'Adequacy and failure-mode (FMEA) risk results for the hub design.'
           : 'Capacity expansion, dispatch, load flow, prices, and emissions from the last solve.'}
         actions={
-          status && (
+          status && !discussedRun && (
             <span className="font-mono text-[11px] text-muted">
               {status.condition ?? '—'}
               {status.solve_time != null ? ` · ${status.solve_time.toFixed(2)} s` : ''}
@@ -625,6 +629,10 @@ export default function Results() {
           )
         }
       />
+      <div className="mx-4 text-xs text-muted" data-testid="results-source-context">
+        Current project: {currentProject ?? 'unsaved'} · selected entity: {selectedEntity ? `${selectedEntity.type}: ${selectedEntity.name}` : 'none'}
+        {!discussedRun && <> · window {toDisplay(fromIso) || 'start'} → {toDisplay(toIso) || 'end'} · period {selectedPeriod}</>}
+      </div>
       {discussedRun && (
         <div
           className="mx-4 mt-2 mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 pb-2 text-[11px]"
@@ -643,12 +651,12 @@ export default function Results() {
             <span className="text-muted">baseline {discussedRun.baselineRunId}</span>
           )}
           <span className="text-muted">
-            Charts below remain the current project results; historical numbers come from run evidence tools.
+            Results below read only retained evidence for this run. Live inputs remain unchanged.
           </span>
           <button
             type="button"
             className="ml-auto text-muted underline-offset-2 hover:underline"
-            onClick={() => clearDiscussedRun()}
+            onClick={() => { manualNavigation(); clearDiscussedRun() }}
           >
             Clear
           </button>
@@ -701,7 +709,7 @@ export default function Results() {
       )}
 
       {/* ── Horizon filter (expandable) ──────────────────────────── */}
-      <div className={`shrink-0 border-b border-border bg-bg ${isFiltered ? 'bg-warn/5' : ''}`}>
+      {!discussedRun && <div className={`shrink-0 border-b border-border bg-bg ${isFiltered ? 'bg-warn/5' : ''}`}>
         <button
           onClick={() => setFilterOpen(o => !o)}
           className="w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-muted hover:text-text"
@@ -738,7 +746,7 @@ export default function Results() {
                 type="datetime-local" value={toDisplay(fromIso)}
                 min={firstSnap16 ? toDisplay(firstSnap16) : undefined}
                 max={lastSnap16 ? toDisplay(lastSnap16) : undefined}
-                onChange={e => setFromIso(toStore(e.target.value))}
+                onChange={e => { manualNavigation(); setFromIso(toStore(e.target.value)) }}
                 className="px-2 py-1 border border-border rounded font-mono text-[11px] bg-bg"
               />
             </label>
@@ -748,7 +756,7 @@ export default function Results() {
                 type="datetime-local" value={toDisplay(toIso)}
                 min={firstSnap16 ? toDisplay(firstSnap16) : undefined}
                 max={lastSnap16 ? toDisplay(lastSnap16) : undefined}
-                onChange={e => setToIso(toStore(e.target.value))}
+                onChange={e => { manualNavigation(); setToIso(toStore(e.target.value)) }}
                 className="px-2 py-1 border border-border rounded font-mono text-[11px] bg-bg"
               />
             </label>
@@ -766,19 +774,19 @@ export default function Results() {
             )}
           </div>
         )}
-      </div>
+      </div>}
 
       {/* ── Period sub-tab strip (multi-period only) ─────────────── */}
       {/* Aggregated horizon = "all" — KPIs sum × weighting across every period.
           Per-period entries narrow each tab to a single period for hourly
           deep-dive. Hidden on single-period (flat) snapshots: uniquePeriods
           is empty so no strip renders. */}
-      {uniquePeriods.length > 0 && (
+      {!discussedRun && uniquePeriods.length > 0 && (
         <div className="shrink-0 border-b border-border bg-bg flex items-center gap-1 px-2 py-1.5">
           <Layers size={11} className="text-muted" />
           <span className="text-[10px] uppercase tracking-wider text-muted mr-1">Period</span>
           <button
-            onClick={() => setSelectedPeriod('all')}
+            onClick={() => { manualNavigation(); setSelectedPeriod('all') }}
             title="Show aggregated KPIs and charts spanning every investment period (weight-scaled to annual totals)."
             className={`h-6 px-2 text-[11px] font-mono rounded transition-colors
               ${selectedPeriod === 'all'
@@ -790,7 +798,7 @@ export default function Results() {
           {uniquePeriods.map(p => (
             <button
               key={p}
-              onClick={() => setSelectedPeriod(p)}
+              onClick={() => { manualNavigation(); setSelectedPeriod(p) }}
               title={`Show only investment period ${p}. Charts switch to hourly resolution within this period.`}
               className={`h-6 px-2 text-[11px] font-mono rounded transition-colors
                 ${selectedPeriod === p
@@ -816,6 +824,7 @@ export default function Results() {
             {(() => {
               // Overview is multi-period-only; if it's somehow the active tab on
               // a single-period run, fall back to Dispatch.
+              if (discussedRun) return <RunBoundView run={discussedRun} tab={effectiveTab} />
               const t = (effectiveTab === 'overview' && uniquePeriods.length === 0) ? 'dispatch' : effectiveTab
               return (
                 <>

@@ -32,6 +32,24 @@ beforeEach(() => {
 })
 
 describe('buildUiContext', () => {
+  it('carries displayed source identifiers and window without numerical results', () => {
+    useUIStore.setState({ activeSlidePanel: 'results', currentProject: 'Demo' })
+    const panel = document.createElement('div')
+    panel.dataset.activeResultsTab = 'loadflow'
+    const data = document.createElement('section')
+    const source = { version: 1, project_id: 'project-id', project_name: 'Demo',
+      scope: 'current', source: 'lopf', window_from: 2, window_to: 3, data_sha256: 'a'.repeat(64) }
+    data.dataset.resultTab = 'loadflow'
+    data.dataset.resultBinding = JSON.stringify({ ...source, rows: [{ value: 999 }], objective: 999 })
+    panel.append(data); document.body.append(panel)
+    try {
+      expect(buildUiContext()?.results_tab).toBe('loadflow')
+      expect(buildUiContext()?.results_source).toEqual(source)
+      data.removeAttribute('data-result-binding')
+      expect(buildUiContext()?.results_source).toBeUndefined()
+    } finally { panel.remove() }
+  })
+
   it('reports the open panel', () => {
     useUIStore.setState({ activeSlidePanel: 'results' })
     expect(buildUiContext()?.panel).toBe('results')

@@ -311,6 +311,27 @@ export function reportFlags(report: InvestmentCaseReportPayload, section: string
   return [...new Set(flags)]
 }
 
+/** Counterfactual flags under which the incremental figures compare against a
+ *  site that could not run (review of #283), in display order, each with its
+ *  plain sentence. */
+const BASELINE_CAVEATS: [string, string][] = [
+  ['counterfactual_exceeds_connection',
+   'The comparison site without the investment draws more than the connection can carry in '
+   + 'some hours: it could not run as modelled, so the NPV, IRR and payback compare against an '
+   + 'impossible baseline. Read them with care.'],
+  ['counterfactual_exceeds_supply',
+   'The comparison site without the investment needs more than its grid supply can deliver in '
+   + 'some hours: it could not run as modelled, so the NPV, IRR and payback compare against an '
+   + 'impossible baseline. Read them with care.'],
+]
+
+/** The caveats to show beside the headline figures: one per baseline flag
+ *  the project section carries. */
+export function baselineCaveats(report: InvestmentCaseReportPayload): string[] {
+  const flags = new Set(reportFlags(report, 'project'))
+  return BASELINE_CAVEATS.filter(([f]) => flags.has(f)).map(([, text]) => text)
+}
+
 /** Plain chip labels for the report sections (UX assessment Q7). */
 const SECTION_LABELS: Record<string, string> = {
   design: 'Design', commercial: 'Commercial', dispatch_modes: 'Dispatch modes',

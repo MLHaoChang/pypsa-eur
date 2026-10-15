@@ -1657,6 +1657,11 @@ def create_from_template(
         "parent_project": None,
         "scenario_description": None,
     })
+    # A template's commercial config and finance inputs (slice D4) are bound
+    # and validated as their PUT routes do; one that does not is dropped and
+    # reported, never stored unbound. After the metadata, so the project is
+    # complete whatever the bind does (#283 review).
+    solver_config_issues = _bind_template_solver_config(user, dest / "solver_config.json")
 
     # Persist the pointer, mirroring activate_project. Written AFTER the swap
     # succeeds so a failed create does not leave the session pointing at a
@@ -1682,7 +1687,77 @@ def create_from_template(
             transformers=len(n.transformers),
             snapshots=len(n.snapshots),
         ),
+        "solver_config_issues": solver_config_issues,
     }
+
+
+def _bind_template_solver_config(user, cfg_path: pathlib.Path) -> list[dict]:
+    """Bind the template's `commercial` block on the new project the way
+    `PUT /api/simulation/solver_config` does (`binding.check_site_connection`,
+    `binding.bind_commercial_on_context`; its value flows checked as
+    `PUT /commercial/value_flows` does) and validate its `finance` block as
+    `PUT /api/simulation/finance` does (slice D4). A block that does not bind
+    is removed from the stored config and from the project's
+    `solver_config.json`, and returned as `{field, code, message}`."""
+
+    from pydantic import ValidationError
+
+    from models.commercial import CommercialConfig
+    from models.finance import FinanceInputs
+    from routers.simulation import _state
+    from services.commercial import binding
+    from services.commercial import participants as P
+    from services.solver_service import SolverConfig
+
+    cfg = _state["solver_config"]
+    merged = asdict(cfg)
+    issues: list[dict] = []
+    if cfg.commercial is not None:
+        try:
+            parsed = CommercialConfig.model_validate(cfg.commercial)
+            binding.check_site_connection(PyPSAService.get_network(), parsed.poc_link,
+                                          parsed.export_link, direction_only=True,
+                                          group_members=parsed.group_members)
+            if parsed.value_flows is not None:
+                vf = P.parse_value_flows(parsed.value_flows)
+                problems = P.value_flows_problems(vf, parsed, PyPSAService.get_network())
+                if problems:
+                    raise binding.BindingRefusal(422, "value_flows_invalid", "; ".join(problems))
+            merged["commercial"] = binding.bind_commercial_on_context(
+                PyPSAService.get_active_context(), parsed, user=user, solver_cfg=cfg)
+        except ValidationError as exc:
+            issues.append({"field": "commercial", "code": "commercial_config_invalid",
+                           "message": str(exc.errors()[0]["msg"])})
+        except P.ValueFlowsInvalid as exc:
+            issues.append({"field": "commercial", "code": exc.code, "message": str(exc)})
+        except binding.BindingRefusal as exc:
+            issues.append({"field": "commercial", "code": exc.code, "message": exc.message})
+        except Exception:   # noqa: BLE001 — the project exists; report, never a 500
+            logger.exception("template commercial block failed to bind")
+            issues.append({"field": "commercial", "code": "commercial_bind_failed",
+                           "message": "the template's commercial settings could not be applied"})
+    if cfg.finance is not None:
+        try:
+            merged["finance"] = FinanceInputs.model_validate(cfg.finance).model_dump(mode="json")
+        except ValidationError as exc:
+            issues.append({"field": "finance", "code": "finance_inputs_invalid",
+                           "message": str(exc.errors()[0]["msg"])})
+        except Exception:   # noqa: BLE001 — as above
+            logger.exception("template finance block failed to validate")
+            issues.append({"field": "finance", "code": "finance_bind_failed",
+                           "message": "the template's finance inputs could not be applied"})
+    for issue in issues:
+        merged[issue["field"]] = None
+    _state["solver_config"] = SolverConfig(**merged)
+    if issues and cfg_path.is_file():
+        try:
+            data = json.loads(cfg_path.read_text())
+            for issue in issues:
+                data.pop(issue["field"], None)
+            atomic_write_text(cfg_path, json.dumps(data, indent=2, sort_keys=True) + "\n")
+        except (OSError, ValueError):
+            pass   # the stored config already dropped it; a later save rewrites the file
+    return issues
 
 
 @router.post("/{name}")

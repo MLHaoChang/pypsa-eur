@@ -187,7 +187,10 @@ read-only review; quantitative prose is withheld before review. The separately
 opt-in effect adapter requires an exact confirmed static-input update contract,
 durable ID reservation and independent input read-back. Live/uncertain writes
 never silently retry. Supported navigation stays submitted until an issued,
-current browser mounted-view ACK arrives. Authenticated JSON/ZIP exports and the
+current browser ACK arrives. Legacy version-1 ACKs certify a mounted view only.
+Version-2 load-flow ACKs additionally require fetched/rendered matching source
+binding and a current raw-data/input read-back; neither grants domain approval.
+Authenticated JSON/ZIP exports and the
 evidence card consume the same answer/receipt; existing PNG integrity is separate.
 
 Profile rollback, effect rollback and bounded shadow observations live in the
@@ -615,6 +618,25 @@ uses the same source selection, dispatch-freshness gate, rating (`s_nom_opt`
 for an extendable branch, otherwise `s_nom`), and snapshot weights as the
 Load flow tab. The default list is 5 branches, the maximum is 25, and the
 payload is trimmed to stay under 3800 characters.
+
+The native `GET /api/results/loadflow-view` uses this same oracle for branch
+tables, loading chart points and CSV. It requires recorded exact solve-input
+provenance; input drift or missing provenance requires a new solve. Both ordinary
+chat summaries and native projections refuse that drift. The UI projection caps
+rows and unavailable entries at 500 and chart series at ten branches × the first
+800 selected snapshots, with visible truncation; full-window statistics are not
+downsampled. Unknown ratings and unaligned AC convergence are unavailable.
+
+`GET /api/results/run-view` reads owned retained evidence and an optional owned
+baseline reference. Missing/corrupt sections remain unavailable; no live fallback,
+input restore, arbitrary historical slicing or implicit comparison is performed.
+The Results chrome shows the source; per-turn UI context carries only source
+identifiers/window positions, fenced as untrusted hints. Tools re-read evidence.
+The source-bound current walkthrough adapter covers branch loading in Expert;
+historical walks use available sections and explicit Next. Other current tabs and
+historical harness completion ACKs need their own source adapters. Guided tours
+report that gap without switching modes. See the
+[CP-03 implementation boundary](../../../.scratch/chat-companion/issues/03-source-navigation.md).
 
 Peak utilisation is the larger terminal flow divided by `rating * s_max_pu`.
 `source=lopf` (the default) is an active-power proxy: the larger of `|p0|`

@@ -15,7 +15,7 @@ import { blockerMessage } from '../../../utils/blockerMessage'
 import { downloadCSV } from '../shared'
 import {
   AVOIDED_PREFIX, basisStatement, cashflowPivot, cashTotals, completenessRows, missingLines, counterfactualStatement, fmtCell, fmtHeadline, gateLegs,
-  HEADLINE_KEYS, headlines, label, NOT_ESTABLISHED, perYearLists, progressFraction, progressText,
+  baselineCaveats, HEADLINE_KEYS, headlines, label, NOT_ESTABLISHED, perYearLists, progressFraction, progressText,
   reportFlags, reportYears, sectionOf, stalePartLabel, studyFailure, studyProgress, studyStale, toTable,
   uncheckableReason, waccGate,
   type GateState, type Table,
@@ -146,7 +146,9 @@ export function WaccGateChip({ state, legs }: { state: GateState; legs: Array<[s
 
 function Headlines({ report }: { report: InvestmentCaseReportPayload }) {
   const rows = headlines(report)
+  const caveats = baselineCaveats(report)
   return (
+    <>
     <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5" data-testid="ic-headlines">
       {rows.map(h => (
         <div key={h.id} className="contents">
@@ -158,6 +160,12 @@ function Headlines({ report }: { report: InvestmentCaseReportPayload }) {
         </div>
       ))}
     </dl>
+    {caveats.length > 0 && (
+      <div role="note" className="text-warn space-y-0.5" data-testid="ic-baseline-caveat">
+        {caveats.map(c => <p key={c}>{c}</p>)}
+      </div>
+    )}
+    </>
   )
 }
 
