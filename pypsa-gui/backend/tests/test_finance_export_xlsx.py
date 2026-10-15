@@ -86,3 +86,17 @@ def test_the_summary_sheet_reads_the_gate_flags_from_the_export_view():
     summary = {r[0].value: r[1].value for r in wb["Summary"].iter_rows(min_row=2, max_col=2)}
     assert summary["wacc_vs_discount_rate_consistent"] is True
     assert summary["conservation_ok"] is False
+
+
+def test_the_summary_says_when_the_comparison_baseline_could_not_run():
+    """Review of #283: a counterfactual that exceeds the connection (or its
+    supply) is said beside the headline figures, not only as an About flag."""
+    rep = _report()
+    rep.sections["project"].payload["flags"] = ["counterfactual_exceeds_connection",
+                                                "load_shed_excluded:1.5"]
+    wb = openpyxl.load_workbook(io.BytesIO(build_workbook(rep)))
+    caveats = [r[1] for r in _values(wb["Summary"]) if r[0] == "Caveat"]
+    assert len(caveats) == 1 and "more than the connection can carry" in caveats[0]
+    assert "NPV, IRR and payback" in caveats[0]
+    clean = openpyxl.load_workbook(io.BytesIO(build_workbook(_report())))
+    assert not [r for r in _values(clean["Summary"]) if r[0] == "Caveat"]

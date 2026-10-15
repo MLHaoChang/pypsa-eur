@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The investment case says beside its NPV, IRR and payback when the comparison site without the investment could not run (it draws more than the connection or its supply can carry), on the card and in the xlsx Summary sheet.

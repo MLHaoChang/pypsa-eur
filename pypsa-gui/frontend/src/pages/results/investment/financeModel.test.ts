@@ -1,7 +1,7 @@
 // The finance form and report mappings (IC P4 WP4.7a/b), without a DOM.
 import { describe, expect, it } from 'vitest'
 import {
-  basisStatement, cashflowPivot, cashTotals, counterfactualStatement, errorKey, errorsFor, established, financeErrors, fmtCell,
+  baselineCaveats, basisStatement, cashflowPivot, cashTotals, counterfactualStatement, errorKey, errorsFor, established, financeErrors, fmtCell,
   fmtHeadline, headlines, numOrNull, parseRateOrList, perYearLists, progressFraction, progressText,
   rateOrListText, studyFailure, studyProgress, studyStale, toTable, waccGate, withKey,
 } from './financeModel'
@@ -234,5 +234,21 @@ describe('WP4.7 review B3/B4', () => {
     expect(st.reason).toBe('solve_in_flight')
     expect(m.uncheckableReason(st.reason)).toContain('a solve is running')
     expect(m.uncheckableReason(null)).toBeNull()
+  })
+})
+
+describe('baselineCaveats (#283 review)', () => {
+  const rep = (flags: string[]) => ({ sections: { project: { status: 'ok', payload: {
+    flags: ['load_shed_excluded:1.5'], counterfactual: { present: true, flags } } } } }) as never
+  it('names a comparison that could not run, once per flag, in a fixed order', () => {
+    const out = baselineCaveats(rep(['counterfactual_exceeds_supply',
+                                     'counterfactual_exceeds_connection']))
+    expect(out).toHaveLength(2)
+    expect(out[0]).toMatch(/connection/)
+    expect(out[1]).toMatch(/supply/)
+  })
+  it('no such flag, or no report section: nothing', () => {
+    expect(baselineCaveats(rep(['counterfactual_bill:x']))).toEqual([])
+    expect(baselineCaveats({} as never)).toEqual([])
   })
 })

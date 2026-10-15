@@ -40,9 +40,39 @@
     },
     {
       "item": "battery inverter replacement",
-      "note": "bess_new_2027's inverter ends in 2037 and bess_new_2030's in 2040, inside the 2045 horizon; the investment case flags it (part_not_replaced) until the template's finance inputs add the replacement (slice P5c)",
+      "note": "bess_new_2027's inverter ends in 2037 and bess_new_2030's in 2040, inside the 2045 horizon; the template's finance inputs re-buy it at the end of its lifetime (replacement_rule part_lifetimes)",
       "source": "assumed",
       "value": "after 10 years (inv_power_lifetime)"
+    },
+    {
+      "item": "PoC and transformer losses",
+      "note": "losses are not modelled in the staged plan (the single-year template keeps 0.995 and 0.99), so the investment case's counterfactual bill (the served load at the meter) is established; about 1.5 % of the import is left out",
+      "source": "assumed",
+      "value": "efficiency 1.0 on grid_import and site_transformer"
+    },
+    {
+      "item": "import tariff",
+      "note": "an illustrative network-use charge on the metered import, on top of the wholesale price the grid supply carries; no demand charge (the template models one July week, so a monthly item would be billed for one month); replace with the site's tariff",
+      "source": "synthetic",
+      "value": "dc_network_tariff_synthetic: network energy charge 35 EUR/MWh 08-20 h, 20 EUR/MWh otherwise"
+    },
+    {
+      "item": "tariff clock",
+      "note": "the representative week's hours are the site clock; stating them as UTC reads each tariff window on the snapshot hour as is",
+      "source": "assumed",
+      "value": "UTC"
+    },
+    {
+      "item": "existing campus",
+      "note": "in service at the first period and sunk: no capex in the case; only the candidates the plan builds are investments, each a stage at its period",
+      "source": "assumed",
+      "value": "gensets 1-4, rooftop_pv, ups_battery, site_transformer: COD 2027-01-01, overnight cost 0"
+    },
+    {
+      "item": "finance inputs",
+      "note": "a later stage's capex is paid one year before its COD; pre-tax (no tax pack); the terminal value is the remaining-life annuity of each part",
+      "source": "assumed",
+      "value": "nominal EUR (2020 money, the pack's), escalation 2 %/yr, inflation 2 %, all equity at 7 %, close 2026-01-01, 18 years to 2045"
     },
     {
       "item": "depreciation of the staged assets",
@@ -87,6 +117,9 @@
     "Each period is the same representative July week, with the period's load and import cap.",
     "Candidates are one row per period (build_year = the period): the plan says what to build when.",
     "The energization schedule caps the import at 20 MW in 2027.",
-    "Load is picked up in 2.5 MW blocks after an islanding (assumed): the island rows then follow the load, so the plan stages \u2014 a small genset in 2027 and 2030, the bulk in 2035."
+    "Load is picked up in 2.5 MW blocks after an islanding (assumed): the island rows then follow the load, so the plan stages \u2014 a small genset in 2027 and 2030, the bulk in 2035.",
+    "After a solve the investment case runs on the shipped commercial config and finance inputs: the existing campus is in service in 2027 at no capex, each candidate the plan builds is a stage with its own COD, and an unbuilt later candidate is not an investment.",
+    "PoC and transformer losses are not modelled in the staged plan (efficiency 1.0), so the investment case can compare against the grid-only site.",
+    "The grid-only comparison serves 46.8 MW in 2035 on the 40 MW connection, which it could not; the case flags it (counterfactual_exceeds_connection)."
   ]
 }

@@ -8,6 +8,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { useInRouterContext, useNavigate, type NavigateFunction } from 'react-router-dom'
 import { projectsApi } from '../api/projects'
+import type { BundleImportResult } from '../api/types'
 import { getPostLoginPath } from '../auth/resume'
 import { useUIStore } from '../store/uiStore'
 import { appLog } from '../store/simulationStore'
@@ -33,6 +34,15 @@ export function useOptionalNavigate(): NavigateFunction | null {
   const inRouter = useInRouterContext()
   // eslint-disable-next-line react-hooks/rules-of-hooks
   return inRouter ? useNavigate() : null
+}
+
+const ISSUE_FIELD = { commercial: 'commercial settings', finance: 'finance inputs' } as const
+
+/** A template block the backend dropped on create (slice D4): the project is
+ *  made, but the investment case needs the block set again. */
+function issueMessage(i: NonNullable<BundleImportResult['solver_config_issues']>[number]): string {
+  return `The template's ${ISSUE_FIELD[i.field] ?? i.field} were not applied: ${i.message} `
+    + `(${i.code}). Set them again before running the investment case.`
 }
 
 /** Add the new project's tab (parity with Sidebar.newProjectMut) and, when
@@ -75,6 +85,11 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
       setProjectName(res.imported)
       appLog('INFO', `Created '${res.imported}' from template (${res.summary.buses} buses)`)
       toast.success(`Created '${res.imported}' from template`)
+      for (const issue of res.solver_config_issues ?? []) {
+        const msg = issueMessage(issue)
+        appLog('WARN', msg)
+        toast(msg, { icon: '⚠️', duration: 10000 })
+      }
       onCreated?.(res.imported)
       openInWorkbench(res.imported)
     },
