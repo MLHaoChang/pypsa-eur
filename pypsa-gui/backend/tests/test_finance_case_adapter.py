@@ -408,7 +408,12 @@ def test_the_integration_fixture_end_to_end(reset_backend):
     assert (assets["pv"].carrier, assets["bess"].lifetime_years) == ("solar", 15.0)
     assert case.lp_basis.discount_rate == pytest.approx(0.07)
     assert case.lp_basis.asset_discount_rates == {"pv": 0.07, "bess": 0.07}
+    # A later COD on a single-period network has no period of its own to start
+    # in (P5c rule P5-a; was `cod_mismatch` before staged builds).
     assert _refused(n, cfg, _fin(cod_by_asset={"pv": COD, "bess": date(2031, 1, 1)})).code == \
+        "staged_cod_not_active_period:bess"
+    # Two CODs in one year are still one too many: the engine is annual.
+    assert _refused(n, cfg, _fin(cod_by_asset={"pv": COD, "bess": date(2030, 7, 1)})).code == \
         "cod_mismatch"
     h = finance_case_hash(case)
     assert len(h) == 16 and h == finance_case_hash(_case(n, cfg))
@@ -610,8 +615,13 @@ def test_multi_period_templates_and_a_staged_build(reset_backend):
     for t in case.templates:
         p = n.generators_t.p.loc[t.first_year, "pv"].to_numpy(float)
         assert t.energy_mwh["pv"] == pytest.approx(0.25 * p.sum() * f)      # one year, not ×10
+    # A built asset whose build_year is after the first period is a stage
+    # (P5c): typed at the case COD it is refused by rule P5-a (its first active
+    # period is 2040); it was `staged_build_not_supported` before staged builds.
     n.generators.loc["pv", "build_year"] = 2040
-    assert _refused(n, cfg, _fin(annualise=True)).code == "staged_build_not_supported"
+    got = _refused(n, cfg, _fin(annualise=True))
+    assert got.code == "staged_cod_not_active_period:pv"
+    assert "2030" in str(got) and "2040" in str(got)
 
 
 @pytest.mark.live_solve

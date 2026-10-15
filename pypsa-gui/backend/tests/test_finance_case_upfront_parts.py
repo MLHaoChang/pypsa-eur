@@ -256,17 +256,26 @@ def test_a_build_year_at_the_bounds_is_a_cod(by):
     assert cod == date(by, 1, 1)
 
 
-def test_different_build_years_are_cod_mismatch():
+def test_different_build_years_are_per_asset_cods():
+    """P5c: different COD years are stages (each asset keeps its own COD, the
+    case's is the earliest; `build_finance_case` applies the stage rules) —
+    no longer `cod_mismatch`. Two CODs in ONE year still are."""
+    from services.results.finance_case import _asset_cods
+
     n = _net()
     n.storage_units.loc["bess", "build_year"] = 2030
     n.generators.loc["pv", "build_year"] = 2031
+    owned = [("StorageUnit", "bess"), ("Generator", "pv")]
+    cod, _flags = _cod(n, _fin(), owned)
+    assert cod == date(2030, 1, 1)
+    dates, flags = _asset_cods(n, _fin(), owned)
+    assert dates == {"bess": date(2030, 1, 1), "pv": date(2031, 1, 1)}
+    assert flags == ["cod_from_build_year:bess", "cod_from_build_year:pv"]
+    # A typed entry beside a build_year on another asset: the same two dates.
+    dates, _flags = _asset_cods(n, _fin(cod_by_asset={"bess": date(2030, 1, 1)}), owned)
+    assert dates == {"bess": date(2030, 1, 1), "pv": date(2031, 1, 1)}
     with pytest.raises(FinanceRefused) as exc:
-        _cod(n, _fin(), [("StorageUnit", "bess"), ("Generator", "pv")])
-    assert exc.value.code == "cod_mismatch"
-    # A typed entry against a different build_year on another asset: also a mismatch.
-    with pytest.raises(FinanceRefused) as exc:
-        _cod(n, _fin(cod_by_asset={"bess": date(2030, 1, 1)}),
-             [("StorageUnit", "bess"), ("Generator", "pv")])
+        _cod(n, _fin(cod_by_asset={"bess": date(2031, 7, 1)}), owned)
     assert exc.value.code == "cod_mismatch"
 
 
