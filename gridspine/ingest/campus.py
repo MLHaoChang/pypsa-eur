@@ -15,7 +15,11 @@ The description is one YAML mapping under ``campus``:
     ``r0x0_max`` / ``r0x0_min`` (R0/X0) for the unbalanced faults (I5b).
     It becomes an ``ext_grid`` named ``GRID``. Optionally it carries
     ``p_connection_mw``, the contracted connection capacity, which is the
-    reactive requirement's P_ref.
+    reactive requirement's P_ref. ``tie_normally_open: true`` (an untagged
+    flag, and only with ``p_connection_mw``) says the connection is a
+    normally open tie: the study then checks it at ``p_connection_mw`` as
+    grid-connected operation and does not size the transformers at the PCC
+    from the hours it carries no power (``Campus.tie_normally_open``).
 
 ``buses``
     The other buses, ``{name: {vn_kv}}``. Nominal voltage is a definition,
@@ -67,8 +71,9 @@ replace it at the end of its life. It changes nothing in the net.
     ``{name: {kind, bus, ...}}``, with ``kind`` one of ``UNIT_KINDS``:
 
     * ``load``: ``p_mw`` (the rating) and ``pf`` (lagging).
-    * ``bess``, ``pv``, ``wind``: ``p_mw``, the inverter ``s_mva``, and
-      ``k_sc`` and ``rx_sc`` for IEC 60909. A ``bess`` also needs ``e_mwh``.
+    * ``bess``, ``pv``, ``wind``, ``fuel_cell``: ``p_mw``, the inverter
+      ``s_mva``, and ``k_sc`` and ``rx_sc`` for IEC 60909. A ``bess`` also
+      needs ``e_mwh``.
     * ``genset``: ``p_mw``, ``s_mva``, ``xd_pp`` and ``rx_sc``.
 
 **Every number is ``{value, source}``**, with ``source`` one of
@@ -159,7 +164,7 @@ from gridspine.schema.transformer import VECTOR_GROUP, check_tap
 from gridspine.static.shortcircuit import LINE_ENDTEMP_DEGREE
 
 SOURCES = frozenset({"measured", "datasheet", "assumed"})
-UNIT_KINDS = ("load", "bess", "pv", "wind", "genset", "ups")
+UNIT_KINDS = ("load", "bess", "pv", "wind", "fuel_cell", "genset", "ups")
 COMP_KINDS = ("capacitor_bank", "shunt_reactor", "statcom")
 #: A STATCOM's IEC 60909 screening: a current source of k times its rated
 #: current, the drafted inverter's figures (producers/campus.py), assumed.
@@ -171,7 +176,8 @@ NET_BASE_MVA = 1.0
 
 #: How each unit kind appears in the registry. ``load`` is absent: loads
 #: travel in loads.csv, by bus.
-REGISTRY_KIND = {"bess": "storage", "ups": "storage", "pv": "res", "wind": "res", "genset": "genset"}
+REGISTRY_KIND = {"bess": "storage", "ups": "storage", "pv": "res", "wind": "res", "fuel_cell": "res",
+                 "genset": "genset"}
 
 #: A transformer winding may differ from its bus's nominal voltage, because
 #: tap and design voltages are routinely a few percent off (110/21 kV on a
@@ -205,6 +211,7 @@ _UNIT_FIELDS = {
     "bess": ("p_mw", "e_mwh", "s_mva", "k_sc", "rx_sc"),
     "pv": ("p_mw", "s_mva", "k_sc", "rx_sc"),
     "wind": ("p_mw", "s_mva", "k_sc", "rx_sc"),
+    "fuel_cell": ("p_mw", "s_mva", "k_sc", "rx_sc"),
     "genset": ("p_mw", "s_mva", "xd_pp", "rx_sc"),
     "ups": ("p_mw", "e_mwh", "s_mva"),
 }
@@ -280,6 +287,8 @@ class Campus:
     #: The tap changers given (plan C13): ``{transformer: {changer, side,
     #: neutral, min, max, step_percent, pos}}``; empty when none is.
     taps: dict = dataclasses.field(default_factory=dict)
+    #: The PCC is a normally open tie (the ``pcc.tie_normally_open`` flag).
+    tie_normally_open: bool = False
 
 
 _COMP_COLUMNS = ["name", "kind", "bus", "q_mvar", "steps", "library_id", "pypsa_name"]
@@ -458,7 +467,13 @@ def build_campus(spec) -> Campus:
 
     # buses: the PCC first, then the rest in file order
     pcc = c["pcc"]
-    _fields("pcc", pcc, _PCC_FIELDS + _PCC_OPTIONAL, ("bus", "vn_kv", "pypsa_name"))
+    _fields("pcc", pcc, _PCC_FIELDS + _PCC_OPTIONAL, ("bus", "vn_kv", "pypsa_name", "tie_normally_open"))
+    tie_open = pcc.get("tie_normally_open", False)
+    if not isinstance(tie_open, bool):
+        raise ContractError(f"pcc.tie_normally_open must be true or false, got {tie_open!r}")
+    if tie_open and "p_connection_mw" not in pcc:
+        raise ContractError("pcc.tie_normally_open needs pcc.p_connection_mw, the tie's rating the "
+                            "grid-connected checks are made at")
     if "bus" not in pcc or "vn_kv" not in pcc:
         raise ContractError("pcc: needs 'bus' and 'vn_kv'")
     buses = {str(pcc["bus"]): float(pcc["vn_kv"])}
@@ -669,7 +684,8 @@ def build_campus(spec) -> Campus:
     params = pd.DataFrame(rows, columns=["element", "param", "value", "source"])
     return Campus(name=name, net=net, units=units_df, params=params, registry=registry, compensation=compensation,
                   island=island, earthing=earthing, relays=relays, windings=windings,
-                  earthing_transformers=earthing_transformers, assumptions=assumptions, taps=taps)
+                  earthing_transformers=earthing_transformers, assumptions=assumptions, taps=taps,
+                  tie_normally_open=tie_open)
 
 
 def _island_requirements(c, units_df, island_units, rows):

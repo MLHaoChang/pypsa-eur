@@ -180,7 +180,7 @@ def test_the_units_table_carries_kind_bus_ratings_and_every_value_keeps_its_tag(
     assert p.at[("PCC", "sk_max_mva"), "source"] == "measured"
     assert p.at[("TR1", "vk_percent"), "source"] == "datasheet"
     assert p.at[("BESS1", "k_sc"), "source"] == "assumed"
-    assert set(UNIT_KINDS) == {"load", "bess", "pv", "wind", "genset", "ups"}   # ups: island plan I1
+    assert set(UNIT_KINDS) == {"load", "bess", "pv", "wind", "fuel_cell", "genset", "ups"}   # ups: island plan I1
 
 
 def test_the_registry_names_the_grid_and_every_generating_unit_by_kind():
@@ -235,6 +235,8 @@ def _broken(mutate):
     (lambda c: c["units"].update(TR1={"kind": "load", "bus": "MV2", "p_mw": t(1.0), "pf": t(1.0)}), "duplicate"),
     (lambda c: c["units"].update(A_VERY_LONG_NAME={"kind": "load", "bus": "MV2", "p_mw": t(1.0), "pf": t(1.0)}), "12"),
     (lambda c: c["pcc"].update(p_connection_mw=50.0), "value.*source"),
+    (lambda c: c["pcc"].update(tie_normally_open=True), "needs pcc.p_connection_mw"),
+    (lambda c: c["pcc"].update(tie_normally_open="yes", p_connection_mw=t(20.0)), "true or false"),
     (lambda c: c["pcc"].update(p_connection_mw=t(0.0)), "positive"),
     (lambda c: c.update(pcc_extra=1), "unknown key"),
     (lambda c: c.pop("pcc"), "pcc"),

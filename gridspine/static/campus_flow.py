@@ -40,6 +40,12 @@ only to groups of two or more, and only when ``criteria.n_minus_1`` is set
 (the default). A single transformer has no N-1 redundancy to size for, and
 the report says so (``max_s_n1_mva`` = 0).
 
+A campus whose PCC is a normally open tie (``Campus.tie_normally_open``)
+has no group at the PCC in the table (``held_groups``): the selected hours
+are islanded, so the tie carries next to nothing in them, and sizing it
+from them would replace it with a unit too small to close onto the grid.
+It keeps its drafted rating, which is the connection capacity.
+
 **Whether the group is adequate is judged unit by unit** (plan C13), each
 against its own rating, because parallel units share a flow in proportion
 to ``S_r / uk``, not equally: the unit with the lower impedance carries
@@ -99,6 +105,19 @@ def trafo_groups(campus) -> dict:
         key = frozenset((int(net.trafo.at[i, "hv_bus"]), int(net.trafo.at[i, "lv_bus"])))
         groups.setdefault(key, []).append(str(net.trafo.at[i, "name"]))
     return {"+".join(sorted(names)): sorted(names) for names in groups.values()}
+
+
+def held_groups(campus) -> set:
+    """The transformer groups at the PCC of a normally open tie: rated at
+    the connection capacity, not sized from islanded hours (module
+    docstring). Empty for any other campus."""
+    if not getattr(campus, "tie_normally_open", False):
+        return set()
+    net = campus.net
+    pcc = int(net.ext_grid["bus"].iloc[0])
+    at_pcc = {str(net.trafo.at[i, "name"]) for i in net.trafo.index
+              if pcc in (int(net.trafo.at[i, "hv_bus"]), int(net.trafo.at[i, "lv_bus"]))}
+    return {g for g, members in trafo_groups(campus).items() if at_pcc & set(members)}
 
 
 def apply_hour(campus, rows: pd.DataFrame) -> None:
@@ -216,14 +235,26 @@ def _standard_up(s):
     return math.nan
 
 
+#: The columns of ``size_transformers``; a campus without a transformer gets
+#: them too, with no rows.
+SIZING_COLUMNS = ["group", "units", "unit_rating_mva", "max_s_intact_mva", "max_s_n1_mva", "required_unit_mva",
+                  "recommended_unit_mva", "adequate", "utilisation", "worst_unit", "worst_period", "worst_hour",
+                  "unconverged_hours", "margin", "n_minus_1"]
+
+
 def size_transformers(flows: dict, campus, criteria: SizingCriteria = SizingCriteria()) -> pd.DataFrame:
     """One row per transformer group, from ``flows`` = ``{(period, hour):
-    solve_cases(...)}``. See the module docstring for the rule."""
+    solve_cases(...)}``. See the module docstring for the rule. A campus
+    without a transformer gets the columns and no rows; a normally open
+    tie's groups (``held_groups``) are left out."""
     net = campus.net
     rating = dict(zip(net.trafo["name"].astype(str), net.trafo["sn_mva"].astype(float)))
     m = criteria.margin
     rows = []
+    held = held_groups(campus)
     for group, members in trafo_groups(campus).items():
+        if group in held:
+            continue
         n = len(members)
         best = {"need": -1.0, "period": None, "hour": None}
         max_intact = max_n1 = 0.0
@@ -270,4 +301,4 @@ def size_transformers(flows: dict, campus, criteria: SizingCriteria = SizingCrit
             "unconverged_hours": unconverged, "margin": m,
             "n_minus_1": bool(criteria.n_minus_1 and n >= 2),
         })
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=SIZING_COLUMNS)

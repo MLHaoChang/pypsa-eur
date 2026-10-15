@@ -71,7 +71,7 @@ import pandas as pd
 from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, apply_hour
 
-_SUPPLIERS = frozenset({"bess", "pv", "wind", "genset"})
+_SUPPLIERS = frozenset({"bess", "pv", "wind", "fuel_cell", "genset"})
 #: Units that offer reactive power at zero active power. A battery inverter
 #: stays connected and can run as a STATCOM. A genset that is not producing
 #: is not running. PV and wind at 0 MW are assumed to be disconnected:
@@ -132,7 +132,7 @@ def requirement_from(profile: dict, p_ref_mw: float, pf: float | None = None) ->
 
 
 #: The inverter-based resources IEEE 2800's reactive capability applies to.
-IBR_KINDS = ("bess", "pv", "wind")
+IBR_KINDS = ("bess", "pv", "wind", "fuel_cell")
 IBR_LABEL = ("screening at unit terminals: sqrt(S^2 - P_n^2) per inverter against the profile's q_range_ibr x P_n "
              "at rated active power; the standard states it for the plant at its reference point, so collector "
              "and transformer reactive losses are not counted")

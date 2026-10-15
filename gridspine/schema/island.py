@@ -37,7 +37,7 @@ SOURCES = frozenset({"measured", "datasheet", "assumed"})
 
 CONTROLS = ("gfl_pq", "gfl_qu", "gfl_pf", "gfl_fw", "gfm_droop", "gfm_vsm")
 GFM_CONTROLS = frozenset({"gfm_droop", "gfm_vsm"})
-CONVERTER_KINDS = ("bess", "pv", "wind")
+CONVERTER_KINDS = ("bess", "pv", "wind", "fuel_cell")
 UNIT_KINDS = (*CONVERTER_KINDS, "genset", "ups", "load")
 GOVERNORS = ("droop", "isochronous")
 EXCITATIONS = ("avr_pmg", "avr_shunt", "none")

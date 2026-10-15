@@ -971,14 +971,14 @@ def emt_inputs(campus, rows):
     weakest converter bus over the converter MVA). The online sources are
     those built in the hour's period (``status`` 1), running or not: a
     genset with island data starts on islanding."""
-    from gridspine.schema.island import GFM_CONTROLS
+    from gridspine.schema.island import CONVERTER_KINDS, GFM_CONTROLS
     from gridspine.static.island_sc import island_fault_levels
 
     status = rows.set_index("unit_id")["status"]
     s = {"gfl": 0.0, "gfm": 0.0, "gen": 0.0}
     sources, conv_buses = set(), set()
     for uid, u in campus.units.iterrows():
-        if u["kind"] not in ("bess", "pv", "wind", "genset"):
+        if u["kind"] not in (*CONVERTER_KINDS, "genset"):
             continue
         block = campus.island["units"].get(uid)
         if int(status.get(uid, 0)) != 1:              # not built in the period

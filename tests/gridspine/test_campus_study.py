@@ -176,6 +176,77 @@ def test_without_a_connection_capacity_the_peak_import_is_used_and_said_so(tmp_p
     assert req["p_ref_from"].startswith("peak |import|") and req["source"] == "code"
 
 
+def test_a_campus_at_the_grids_voltage_has_no_transformer_and_still_sizes(tmp_path):
+    # eh_site at 10-30 MW: a 20 kV grid feeds a 20 kV site, so no transformer
+    project = tmp_path / "network.nc"
+    n = solved_hub(periods=[2030, 2040])
+    n.buses.loc["grid", "v_nom"] = 20.0
+    n.export_to_netcdf(str(project))
+    spec = draft_from_project(project).spec
+    assert not spec["campus"]["transformers"]
+    run = tmp_path / "run"
+    prepare_campus(run, spec, project)
+    rank_campus(run, k=1)
+    out = size_campus(run)
+    assert out["transformers"].empty and "adequate" in out["transformers"].columns
+    comp = out["compliance"].set_index("check")
+    assert "transformer_loading" not in comp.index and {"pcc_reactive", "switchgear"} <= set(comp.index)
+    note = "no transformer between the PCC and the site buses (20/20 kV): transformer loading not assessed"
+    assert comp.at["campus_voltage", "detail"].endswith(note)
+    invested = invest_campus(run)["compliance"].set_index("check")
+    assert "transformer_loading" not in invested.index and note in invested.at["campus_voltage", "detail"]
+
+
+def test_a_pcc_that_never_imports_needs_a_connection_capacity_and_is_told_so(tmp_path):
+    project = tmp_path / "network.nc"
+    n = solved_hub(periods=[2030, 2040])
+    n.links_t.p0["grid_import"] = 0.0                    # an open tie: the site runs on its own
+    n.links_t.p1["grid_import"] = 0.0
+    n.export_to_netcdf(str(project))
+    spec = draft_from_project(project).spec
+    run = tmp_path / "run"
+    prepare_campus(run, spec, project)
+    rank_campus(run, k=1)
+    with pytest.raises(ContractError, match="p_connection_mw"):
+        size_campus(run)
+
+
+def test_a_normally_open_tie_sizes_against_its_rating_and_says_the_tie_is_open(tmp_path):
+    # the microgrid: its PCC tie is normally open, so it never imports
+    project = tmp_path / "network.nc"
+    n = solved_hub(periods=[2030, 2040])
+    n.links.loc["grid_import", "p_max_pu"] = 0.0
+    n.links_t.p0["grid_import"] = 0.0
+    n.links_t.p1["grid_import"] = 0.0
+    n.export_to_netcdf(str(project))
+    spec = draft_from_project(project).spec
+    pcc = spec["campus"]["pcc"]
+    assert pcc["p_connection_mw"] == {"value": 60.0, "source": "assumed"} and pcc["tie_normally_open"] is True
+    tie = next(k for k, v in spec["campus"]["transformers"].items() if v["pypsa_name"] == "grid_import")
+    drafted = spec["campus"]["transformers"][tie]
+    run = tmp_path / "run"
+    prepare_campus(run, spec, project)
+    rank_campus(run, k=1)
+    out = size_campus(run)
+    req = out["requirement"]
+    assert req["p_ref_mw"] == 60.0 and req["q_limit_mvar"] > 0 and req["tie_open"] is True
+    assert req["p_ref_from"] == "normally open tie: its rating, the campus file p_connection_mw (grid-connected checks)"
+    label = "applies with the tie closed (grid-connected operation), not to islanded operation"
+    assert label in req["clause"]
+    # the tie is not sized from islanded hours: no sizing row, and the checks say so
+    assert out["transformers"].empty
+    comp = out["compliance"].set_index("check")
+    for check in ("pcc_reactive", "pcc_voltage", "transformer_loading"):
+        assert label in comp.at[check, "clause"], check
+    assert "not sized from islanded hours" in comp.at["transformer_loading", "detail"]
+    inv = invest_campus(run)
+    assert not inv["investment"]["need"].str.startswith("transformer").any()      # nothing bought for the tie
+    assert inv["spec"]["campus"]["transformers"][tie] == drafted                  # the drafted rating survives
+    invested = inv["compliance"].set_index("check")
+    for check in ("pcc_reactive", "pcc_voltage", "transformer_loading"):
+        assert label in invested.at[check, "clause"], check
+
+
 def test_sizing_checks_short_circuit_per_period_with_that_periods_units(tmp_path, project):
     run = tmp_path / "run"
     spec = draft_from_project(project).spec

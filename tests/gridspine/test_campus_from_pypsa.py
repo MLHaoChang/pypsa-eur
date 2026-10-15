@@ -250,3 +250,73 @@ def test_non_electrical_parts_are_left_out_and_said_so():
     assert units["electrolyser"][1]["kind"] == "load"
     assert units["electrolyser"][1]["p_mw"]["value"] == 5.0
     assert "h2" not in {s.get("pypsa_name") for s in draft.spec["campus"]["buses"].values()}
+
+
+def test_a_fuel_cell_feeding_an_ac_bus_becomes_an_inverter_source_at_its_ac_rating():
+    # the H2 hub: a fuel cell Link from the H2 bus into the AC hub
+    n = hub()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Link", "fuel_cell", bus0="h2", bus1="dc_mv", carrier="fuel cell", p_nom=10.0,
+          p_nom_extendable=True, p_nom_opt=14.0, efficiency=0.5)
+    draft = draft_campus(n)
+    eid, fc = _by_pypsa(draft.spec["campus"]["units"])["fuel_cell"]
+    assert fc["kind"] == "fuel_cell"
+    assert fc["bus"] == _by_pypsa(draft.spec["campus"]["buses"])["dc_mv"][0]
+    assert fc["p_mw"]["value"] == pytest.approx(7.0)               # 14 MW of H2 in, 7 MW AC out
+    assert fc["s_mva"]["value"] >= fc["p_mw"]["value"]
+    assert {fc[f]["source"] for f in ("p_mw", "s_mva", "k_sc", "rx_sc")} == {"assumed"}
+    campus = build_campus(draft.spec)
+    assert campus.units.at[eid, "kind"] == "fuel_cell"
+
+
+def test_an_engine_link_feeding_an_ac_bus_becomes_a_genset():
+    n = hub()
+    n.add("Bus", "gas", carrier="gas")
+    n.add("Link", "gas_engine", bus0="gas", bus1="dc_mv", carrier="gas", p_nom=10.0, efficiency=0.4)
+    _, g = _by_pypsa(draft_campus(n).spec["campus"]["units"])["gas_engine"]
+    assert g["kind"] == "genset" and g["p_mw"]["value"] == pytest.approx(4.0)
+
+
+def test_a_link_source_of_an_unknown_carrier_is_refused_with_the_carrier_named():
+    n = hub()
+    n.add("Bus", "heat", carrier="heat")
+    n.add("Link", "orc", bus0="heat", bus1="dc_mv", carrier="organic rankine", p_nom=2.0)
+    with pytest.raises(ContractError, match="organic rankine"):
+        draft_campus(n)
+
+
+def test_a_normally_open_tie_at_the_pcc_gives_its_rating_as_the_connection_capacity():
+    # the microgrid: its subsea tie never imports, so the peak import is no P_ref
+    n = hub()
+    n.links.loc["grid_import", "p_max_pu"] = 0.0
+    pcc = draft_campus(n).spec["campus"]["pcc"]
+    assert pcc["p_connection_mw"] == {"value": 40.0, "source": "assumed"} and pcc["tie_normally_open"] is True
+    assert build_campus(draft_campus(n).spec).tie_normally_open
+
+
+def test_a_tie_that_conducts_leaves_the_connection_capacity_to_the_peak_import():
+    pcc = draft_campus(hub()).spec["campus"]["pcc"]
+    assert "p_connection_mw" not in pcc and "tie_normally_open" not in pcc
+    assert not build_campus(draft_campus(hub()).spec).tie_normally_open
+
+
+def test_an_open_backup_link_beside_a_conducting_line_at_the_pcc_is_no_open_tie():
+    n = hub()
+    n.links.loc["grid_import", "p_max_pu"] = 0.0                     # the backup link is open...
+    n.add("Line", "feeder", bus0="grid", bus1="dc_mv", s_nom=60.0, x=0.5, r=0.1, length=1.0)
+    pcc = draft_campus(n).spec["campus"]["pcc"]                       # ...but the line conducts
+    assert "p_connection_mw" not in pcc and "tie_normally_open" not in pcc
+
+
+@pytest.mark.parametrize("extra", [{"carrier": "H2"}, {"carrier": "", "eh_role": "fuel_cell"}])
+def test_a_gui_drawn_fuel_cell_is_typed_by_its_role_or_its_h2_input(extra):
+    # the GUI palette draws a fuel cell as a Link with carrier 'H2'
+    n = hub()
+    n.add("Bus", "h2", carrier="H2")
+    if "eh_role" in extra:
+        n.links["eh_role"] = None
+    n.add("Link", "fc", bus0="h2", bus1="dc_mv", p_nom=4.0, efficiency=0.5, carrier=extra["carrier"])
+    if "eh_role" in extra:
+        n.links.loc["fc", "eh_role"] = extra["eh_role"]
+    _, fc = _by_pypsa(draft_campus(n).spec["campus"]["units"])["fc"]
+    assert fc["kind"] == "fuel_cell" and fc["p_mw"]["value"] == pytest.approx(2.0)

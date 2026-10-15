@@ -177,7 +177,7 @@ from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, valida
 from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
 from gridspine.static.campus_reactive import ibr_q_capability, reactive_need, requirement_from, size_compensation
-from gridspine.static.campus_compliance import campus_compliance
+from gridspine.static.campus_compliance import OPEN_TIE_CLAUSE, campus_compliance
 from gridspine.static.campus_invest import ParallelRules, period_spans, select_assets
 from gridspine.static.campus_milp import select_assets_milp
 from gridspine.static.campus_sc import campus_fault_levels
@@ -610,12 +610,34 @@ def psse_campus(run_dir, hours=None) -> list:
     return bundles
 
 
+#: P_ref of a normally open tie (``pcc.tie_normally_open``): its rating
+#: stands for the connection the grid-connected checks are made at.
+OPEN_TIE_P_REF = "normally open tie: its rating, the campus file p_connection_mw (grid-connected checks)"
+
+
+def _requirement(code, campus, pcc, pf):
+    """``(requirement, p_ref, p_ref_from)`` at the PCC. For a normally open
+    tie the clause says it applies with the tie closed."""
+    p_ref, p_ref_from = _p_ref(campus, pcc)
+    req = requirement_from(code, p_ref, pf=pf)
+    if campus.tie_normally_open:
+        req = dataclasses.replace(req, clause=req.clause + OPEN_TIE_CLAUSE)
+    return req, p_ref, p_ref_from
+
+
 def _p_ref(campus, pcc: pd.DataFrame):
     p = campus.params
     hit = p[(p["param"] == "p_connection_mw")]
     if len(hit):
-        return float(hit["value"].iloc[0]), "campus file p_connection_mw"
-    return float(pcc["import_mw"].abs().max()), "peak |import| over every hour of the prepared periods"
+        return float(hit["value"].iloc[0]), OPEN_TIE_P_REF if campus.tie_normally_open else "campus file p_connection_mw"
+    peak = float(pcc["import_mw"].abs().max())
+    if not peak > 0:
+        raise ContractError(
+            "the PCC has no import or export in any hour of the prepared periods, so the peak import gives no "
+            "connection capacity; set the campus file's pcc p_connection_mw (and, for a normally open tie, "
+            "tie_normally_open: true)"
+        )
+    return peak, "peak |import| over every hour of the prepared periods"
 
 
 def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,
@@ -631,8 +653,7 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
     hourly, pcc = campus_tables(run_dir)
     selection = selected_hours(run_dir)
     campus = load_run_campus(run_dir)
-    p_ref, p_ref_from = _p_ref(campus, pcc)
-    req = requirement_from(code, p_ref, pf=pf)
+    req, p_ref, p_ref_from = _requirement(code, campus, pcc, pf)
     flows, reactive, trafo_rows, bus_rows, pcc_rows, q_rows = {}, {}, [], [], [], []
     for period, hour in selection[["period", "hour"]].itertuples(index=False):
         period, hour = int(period), int(hour)
@@ -659,6 +680,8 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
     short_circuit = pd.concat(sc_frames, ignore_index=True)
     requirement = {"q_limit_mvar": req.q_limit_mvar, "clause": req.clause, "source": req.source,
                    "profile": profile, "pf": pf, "p_ref_mw": p_ref, "p_ref_from": p_ref_from}
+    if campus.tie_normally_open:
+        requirement["tie_open"] = True
     _write_text_atomic(run_dir / LF_TRAFO_CSV, pd.DataFrame(trafo_rows).to_csv(index=False))
     _write_text_atomic(run_dir / LF_BUS_CSV, pd.DataFrame(bus_rows).to_csv(index=False))
     _write_text_atomic(run_dir / LF_PCC_CSV, pd.DataFrame(pcc_rows).to_csv(index=False))
@@ -730,12 +753,12 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     selection = selected_hours(run_dir)
     spec = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
     lib = load_asset_library(library)
-    p_ref, _ = _p_ref(build_campus(spec), pcc)
     grid_code = load_grid_code(profile, extra_dirs=profile_dirs)
+    req, _, _ = _requirement(grid_code, build_campus(spec), pcc, pf)
     choose = select_assets_milp if method == "milp" else select_assets
     hooks = {"progress": progress, "should_stop": should_stop} if method == "milp" else {}
     manifest = json.loads(_require(run_dir, CAMPUS_MANIFEST).read_text())
-    out = choose(spec, hourly, selection, lib, requirement_from(grid_code, p_ref, pf=pf), grid_code, criteria,
+    out = choose(spec, hourly, selection, lib, req, grid_code, criteria,
                  pcc_switchgear=pcc_switchgear, parallel=parallel, pcc_tap_control=pcc_tap_control,
                  period_years=manifest.get("period_weightings"), **hooks)
     build_campus(out["spec"])                                # the invested file must build before it is written
