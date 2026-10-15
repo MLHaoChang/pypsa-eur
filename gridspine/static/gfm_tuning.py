@@ -289,6 +289,8 @@ def recommend_gfm_settings(cases, limits, *, f0=F.F0, equipment_=(), window_ms=5
                 continue
 
             def run(us, t, c=c):
+                if should_stop is not None and should_stop():
+                    raise SearchStopped("the GFM settings search was stopped")
                 extra[0] += 1
                 return c.run(us, dt, t)
             for kind, delta, binding, derivation, feasible, note in F.cuts_for_event(
