@@ -33,6 +33,8 @@ harness/
   solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call
   job_adapters.py foreground (fg:…) and later domain job handles for wait_for_job without holding the turn
   activity_history.py bounded owned job-origin/status observations across worker loss; no execution, numerical or approval authority
+  attention.py    bounded owned question/confirmation observations and versioned read-only inspection; no restored approval or answer authority
+  owned_snapshots.py private atomic bounded snapshot storage shared by job and decision observations; schemas remain separate
   compose.py      the system prompt for a turn, the live network line, and the per-turn ui-context / Guided / workflow-step blocks
   budget.py       the per-turn / per-session / daily caps, the retry schedule, the per-tool timeout, the budget gate
   stub.py         the scripted stub loop behind StreamRequest.script
@@ -56,6 +58,17 @@ harness/
 Borrowed designs (phase 5): `docs/superpowers/assessments/2026-10-06-deepseek-harness-adoption-assessment.md`; issues 13–20 under `.scratch/harness/issues/` (20 and 15 done, the rest re-scoped against the modules above on 2026-10-12, plan §9). Spec: `.scratch/harness/spec.md`. Plan:
 `docs/superpowers/plans/2026-10-05-chat-harness.md`. Vocabulary:
 `pypsa-gui/CONTEXT.md` (Harness, Workflow, Skill, Choice card, Start menu).
+
+Activity's decision observations are read-only. `attention.py` captures admitted
+Choice frames and audited native confirmation outcomes in a separate private
+owner/project store (newest 256 origins, 1 MB, 30-day visibility, lazy expiry).
+`GET /api/chat/decisions/{id}` rechecks project access and the listed revision/view
+digest; a changed record needs a new Activity snapshot. The digest is not an
+approval credential. Inspection never restores sessions or approval tokens,
+answers questions, or certifies effects/results. A later native turn is only a
+recorded follow-up, not proof of resolution. See
+`.scratch/chat-companion/issues/04c-retained-decision-observations.md` for the
+recovery, unavailable-history and remaining-scope contract.
 
 ## The contract
 

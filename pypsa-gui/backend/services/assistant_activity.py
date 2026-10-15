@@ -23,7 +23,7 @@ _LOCK = threading.Lock()
 _SCOPES = OrderedDict()
 _MAX_ROWS = 500
 _MAX_FILES = 500
-_TERMINAL = {'completed', 'failed', 'cancelled', 'partial'}
+_TERMINAL = {'completed', 'failed', 'cancelled', 'partial', 'decision_recorded'}
 
 
 def _status(native):
@@ -38,6 +38,7 @@ def _status(native):
         'needs_review': 'needs_review', 'running': 'running', 'queued': 'queued',
         'ready': 'paused', 'paused': 'paused', 'partial': 'partial',
         'waiting_for_approval': 'waiting_for_approval',
+        'waiting_for_input': 'waiting_for_input', 'decision_recorded': 'decision_recorded',
     }.get(native, 'unavailable')
 
 
@@ -48,7 +49,7 @@ def _row(project, family, source_id, title, native, *, review_required=False, **
         id=f'{family}:{source_id}', source_id=source_id, family=family,
         project_id=project, title=str(title)[:120], native_status=native,
         status=state, evidence_available=False, evidence_status='not_checked',
-        needs_you=state in {'needs_review', 'unavailable', 'waiting_for_approval'},
+        needs_you=state in {'needs_review', 'unavailable', 'waiting_for_approval', 'waiting_for_input'},
         # Native completion alone never certifies results or grants an action.
         **extra,
     )
@@ -129,7 +130,23 @@ def collect(*, db, user, project):
         family = 'gridspine' if job.get('kind') == 'gridspine' else 'solve_queue'
         rows.append(_row(pid, family, str(job['id']), family.replace('_', ' '), job['status']))
     from harness.session import pending_confirmation_origins
-    for pending in pending_confirmation_origins(owner, pid):
+    from harness import attention
+    live = pending_confirmation_origins(owner, pid)
+    decisions, decision_warnings = attention.project_records(owner, pid, live)
+    warnings.extend(decision_warnings)
+    recorded_ids = {r['source_id'] for r in decisions}
+    for decision in decisions:
+        rows.append(_row(pid, decision['family'], decision['source_id'],
+                         decision['question']['title'] if decision['question'] else decision['tool_name'].replace('_', ' '),
+                         decision['status'], session_id=decision['session_id'], tool_use_id=decision['tool_use_id'],
+                         decision_id=decision['source_id'], decision_revision=decision['revision'],
+                         decision_digest=decision['decision_digest'], observed_at=decision['observed_at'],
+                         last_observed_status=decision['native_status'], observation='retained',
+                         live_approval_available=decision['live_approval_available'], reason=decision['reason']))
+        rows[-1]['native_status'] = decision['native_status']
+    for pending in live:
+        if pending['source_id'] in recorded_ids:
+            continue
         rows.append(_row(pid, 'confirmation', pending['source_id'], pending['tool_name'].replace('_', ' '),
                          'waiting_for_approval', session_id=pending['session_id'],
                          reason='Open the originating conversation to inspect and decide.'))
