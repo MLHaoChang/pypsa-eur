@@ -154,9 +154,40 @@ describe('ResultsCard body', () => {
     const r1 = await screen.findByTestId('hub-results-risks-1')
     expect(r1.textContent).toContain('not counted (outside the electricity metric)')
     expect(r1.textContent).not.toContain('no measurable cost')
-    expect(screen.getByTestId('hub-results-risks-2').textContent)
-      .toContain('no shortfall — the site copes without it')
     expect(screen.getByTestId('hub-results-risks-0').textContent).toContain(fmtCurrency(7_890_000))
+    // A unit whose loss causes no shortfall is not a risk (UX S6, G3): it is
+    // said once under the list, never ranked in it.
+    expect(screen.queryByTestId('hub-results-risks-2')).toBeNull()
+    expect(screen.getByTestId('hub-results-no-shortfall').textContent)
+      .toBe('Also checked: Genset 1 — no shortfall, the site copes without it.')
+  })
+
+  it('every unit copes: no ranked list, the units still named', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study({ ...REPORT, sections: { ...REPORT.sections,
+      fmea_top: { status: 'ok', payload: { rows: [
+        { mode_id: 'B:n1', name: 'pv', criticality_eur_per_year: 0, zero_reason: 'no_shortfall' },
+      ] } } } }))
+    mount()
+    expect((await screen.findByTestId('hub-results-no-shortfall')).textContent)
+      .toBe('Also checked: PV — no shortfall, the site copes without it.')
+    expect(screen.queryByTestId('hub-results-risks')).toBeNull()
+  })
+
+  it('the three risks are drawn from the rows that are risks', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study({ ...REPORT, sections: { ...REPORT.sections,
+      fmea_top: { status: 'ok', payload: { rows: [
+        { mode_id: 'B:a', name: 'grid_import', criticality_eur_per_year: 500 },
+        { mode_id: 'B:n1', name: 'pv', criticality_eur_per_year: 0, zero_reason: 'no_shortfall' },
+        { mode_id: 'B:n2', name: 'ups_battery', criticality_eur_per_year: 0, zero_reason: 'no_shortfall' },
+        { mode_id: 'B:b', name: 'genset_1', criticality_eur_per_year: 300 },
+        { mode_id: 'B:c', name: 'genset_2', criticality_eur_per_year: 200 },
+      ] } } } }))
+    mount()
+    await screen.findByTestId('hub-results-risks-2')
+    expect(screen.getAllByTestId(/^hub-results-risks-\d$/).map(e => e.textContent?.split(' —')[0]))
+      .toEqual(['Grid import', 'Genset 1', 'Genset 2'])
+    expect(screen.getByTestId('hub-results-no-shortfall').textContent)
+      .toBe('Also checked: PV, UPS battery — no shortfall, the site copes without them.')
   })
 
   it('stale banner from the boolean (not the source text)', async () => {

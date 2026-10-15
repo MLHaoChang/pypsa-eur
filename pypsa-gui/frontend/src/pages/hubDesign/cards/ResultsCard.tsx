@@ -38,7 +38,13 @@ export function ResultsCard() {
   const { study, running } = useHubStudy()
   const { review } = useHubReview(studyHasResults(study))
   const report = useHubReport(study, running)
-  const risks = report ? fmeaTopRows(report).slice(0, 3) : []
+  // A unit whose loss causes no shortfall is not a risk (UX S6, G3): it is
+  // named once under the list, never ranked in it.
+  const rows = report ? fmeaTopRows(report) : []
+  const isNoShortfall = (r: (typeof rows)[number]) =>
+    r.zero_reason === 'no_shortfall' && !r.criticality_eur_per_year
+  const risks = rows.filter(r => !isNoShortfall(r)).slice(0, 3)
+  const coped = rows.filter(isNoShortfall).map(r => riskName(r.name || r.mode_id))
   const gaps = report ? notEstablishedNotes(report) : []
   const cost = report?.cost_at_target_eur
   const setStep = useHubDesignStore(s => s.setStep)
@@ -107,10 +113,10 @@ export function ResultsCard() {
         </div>
       )}
 
-      {risks.length > 0 && (
+      {(risks.length > 0 || coped.length > 0) && (
         <div className="flex flex-col gap-1 text-[12px]">
           <span className="font-semibold text-text"><Term k="top_risks">Biggest risks</Term></span>
-          <ol data-testid="hub-results-risks" className="ml-4 list-decimal">
+          {risks.length > 0 && <ol data-testid="hub-results-risks" className="ml-4 list-decimal">
             {risks.map((r, i) => (
               <li key={r.mode_id} data-testid={`hub-results-risks-${i}`}>
                 {riskName(r.name || r.mode_id)}
@@ -124,7 +130,12 @@ export function ResultsCard() {
                 )}
               </li>
             ))}
-          </ol>
+          </ol>}
+          {coped.length > 0 && (
+            <span className="text-muted" data-testid="hub-results-no-shortfall">
+              Also checked: {coped.join(', ')} — no shortfall, the site copes without {coped.length > 1 ? 'them' : 'it'}.
+            </span>
+          )}
         </div>
       )}
 
