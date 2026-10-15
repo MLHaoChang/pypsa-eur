@@ -98,7 +98,7 @@ def test_history_is_owner_project_scoped_after_navigation(client, other_org_clie
     assert [r['source_id'] for r in original['items']] == [job]
 
 
-@pytest.mark.parametrize('damage', ['malformed', 'oversized', 'symlink', 'foreign_scope', 'extra_fields'])
+@pytest.mark.parametrize('damage', ['malformed', 'deeply_nested', 'oversized', 'symlink', 'foreign_scope', 'extra_fields'])
 def test_untrusted_history_refuses_without_rewriting_or_leaking(client, origin, damage, tmp_path):
     ctx, owner, app = origin
     start(ctx, owner, 'foreground')
@@ -106,6 +106,8 @@ def test_untrusted_history_refuses_without_rewriting_or_leaking(client, origin, 
     data = json.loads(path.read_text())
     if damage == 'malformed':
         path.write_text('{private malformed')
+    elif damage == 'deeply_nested':
+        path.write_text('[' * 20000 + ']' * 20000)
     elif damage == 'oversized':
         path.write_text(' ' * 1000001)
     elif damage == 'symlink':

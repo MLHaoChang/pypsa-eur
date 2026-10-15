@@ -88,7 +88,10 @@ def _read(directory, owner, project):
         info = os.fstat(stream.fileno())
         if path.is_symlink() or not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES:
             raise ValueError('activity store unavailable')
-        data = json.loads(stream.read(MAX_BYTES + 1))
+        try:
+            data = json.loads(stream.read(MAX_BYTES + 1))
+        except RecursionError:
+            raise ValueError('activity store nesting exceeded') from None
     if (not isinstance(data, dict) or set(data) != {'version', 'owner_id', 'project_id', 'records', 'truncated'}
             or type(data['version']) is not int or data['version'] != 1
             or type(data['truncated']) is not bool or data['owner_id'] != owner or data['project_id'] != project

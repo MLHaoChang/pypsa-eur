@@ -56,10 +56,12 @@ its observed failed outcome after registry loss; only its expensive solver is
 replaced. Frontend tests/build and mocked Chromium desktop/touch/reduced-motion
 journeys exercise retained labels and zero job/approval mutations.
 
-Local regression: **365 passed, 2 existing skips** (the deliberate frame recorder and empty known-gap parameter). Frontend focused tests: **32 passed**; production build passed. Inventory: **249 tools / 15 tabs / 19 panels**; matrix: **170 controls / 14 families**, full coverage not established. Counts overlap with the required evaluation and remote checks and must not be summed.
+Local regression: **366 passed, 2 existing skips** (the deliberate frame recorder and empty known-gap parameter). Frontend focused tests: **32 passed**; production build passed. Inventory: **249 tools / 15 tabs / 19 panels**; matrix: **170 controls / 14 families**, full coverage not established. Counts overlap with the required evaluation and remote checks and must not be summed.
 
 Exact-source evaluation and CI/premerge evidence belong in the PR and durable handoff;
 local passing tests are not a claim that remote checks or merge are complete.
+
+Review hardening: a deeply nested corrupt JSON record reproduced an authenticated API parser recursion exception. The reader now treats that decoder limit as unavailable history, preserves the invalid source and leaves live reads usable. The strict corruption regression remains enabled.
 
 ## Still pending
 
