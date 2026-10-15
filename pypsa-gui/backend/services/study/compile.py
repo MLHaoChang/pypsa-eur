@@ -906,7 +906,8 @@ def currency_year_of(ledger: AssumptionsLedger, tariff_meta: Mapping[str, Any],
 
 def finance_from_ledger(ledger: AssumptionsLedger, *, model_year: int,
                         owned_assets: Iterable[str], tariff_meta: Mapping[str, Any],
-                        study_currency_year: int | None = None) -> CompiledFinance:
+                        study_currency_year: int | None = None,
+                        later_assets: Iterable[str] = ()) -> CompiledFinance:
     """
     The finance inputs of one option (plan §1.1 rows 1, 4, 6, 20; §1.2 rows
     21-32; C1, C2, C4):
@@ -930,7 +931,11 @@ def finance_from_ledger(ledger: AssumptionsLedger, *, model_year: int,
       not used: the `no_degradation` basis).
 
     `owned_assets` are the value flows' owner assets (the COD covers them all;
-    the meter Links IC's D11 skips need none, and an extra entry is unread).
+    the meter Links IC's D11 skips need none, and an extra entry is unread),
+    except `later_assets` — owned assets built after the first investment
+    period of a staged plan (`later_built_assets`): their COD is left to the
+    finance adapter, which takes it from their `build_year` (P5c), so a
+    Guided staged case is not refused `staged_cod_not_active_period`.
     Refused, typed: a second currency year, a lifetime that is not whole
     years, a missing discount rate.
     """
@@ -955,6 +960,7 @@ def finance_from_ledger(ledger: AssumptionsLedger, *, model_year: int,
         if v is not None:
             escalation[c] = v
     owned = list(dict.fromkeys(owned_assets))
+    later = set(later_assets)
     degradation: dict[str, float] = {}
     if "pv" in owned:
         pv = _row_or_default(ledger, "pv_degradation_pct_per_year", notes)
@@ -965,7 +971,7 @@ def finance_from_ledger(ledger: AssumptionsLedger, *, model_year: int,
     inputs = FinanceInputs(
         currency=str(tariff_meta.get("currency") or "EUR"), currency_year=currency_year,
         price_basis="real", financial_close=date(close_year, 1, 1), capex_phasing=[1.0],
-        cod_by_asset={a: date(cod_year, 1, 1) for a in owned},
+        cod_by_asset={a: date(cod_year, 1, 1) for a in owned if a not in later},
         contingency_share=_row_or_default(ledger, "contingency_share", notes),
         escalation=escalation, degradation_by_asset=degradation, inflation=None,
         analysis_years=horizon, annualise=False,
@@ -991,9 +997,39 @@ def option_finance(ledger: AssumptionsLedger, compiled: CompiledCommercial, n, *
     if compiled.config.value_flows is None:
         compiled = with_value_flows(compiled, n)
     owned = [o["asset_id"] for o in compiled.commercial()["value_flows"]["asset_owners"]]
-    return finance_from_ledger(ledger, model_year=int(pd.DatetimeIndex(n.snapshots)[0].year),
-                               owned_assets=owned, tariff_meta=compiled.tariff_meta,
-                               study_currency_year=study_currency_year)
+    year = first_model_year(n)
+    return finance_from_ledger(ledger, model_year=year, owned_assets=owned,
+                               tariff_meta=compiled.tariff_meta,
+                               study_currency_year=study_currency_year,
+                               later_assets=later_built_assets(n, owned, year))
+
+
+def first_model_year(n) -> int:
+    """The year a case starts in: the first investment period of a
+    multi-period network (its snapshots are a MultiIndex), else the first
+    snapshot's year."""
+    if isinstance(n.snapshots, pd.MultiIndex):
+        return int(n.snapshots.get_level_values(0)[0])
+    return int(pd.DatetimeIndex(n.snapshots)[0].year)
+
+
+_BUILD_YEAR_FRAMES = ("generators", "storage_units", "stores", "links", "lines", "transformers")
+
+
+def later_built_assets(n, assets: Iterable[str], first_year: int) -> list[str]:
+    """The `assets` NOT in service at `first_year`: a `build_year` after it
+    (PyPSA's 0, or no build year, is in service). Looked up by name in each
+    component frame; an unknown name is in service (its COD stays typed)."""
+    out = []
+    for a in assets:
+        for frame in _BUILD_YEAR_FRAMES:
+            df = getattr(n, frame)
+            if a in df.index and "build_year" in df.columns:
+                by = df.at[a, "build_year"]
+                if by == by and int(by) > int(first_year):
+                    out.append(a)
+                break
+    return out
 
 
 # ── the two other engine reads the guided study makes (U2 WP10) ───────────
