@@ -329,6 +329,11 @@ def _staged_datacenter(n: pypsa.Network, phases) -> pypsa.Network:
               p_nom_max=30.0, max_hours=4.0, efficiency_store=0.95, efficiency_dispatch=0.95,
               cyclic_state_of_charge=True, build_year=y)
         _price(n, "storage_units", b, "battery")
+    # Storage cycles within each period: each period's week stands for 3-10
+    # years, so no state of charge is carried into the next period
+    # (gatekeeper review of #304; the same rule as eh_site.stage_network).
+    n.storage_units["cyclic_state_of_charge"] = True
+    n.storage_units["cyclic_state_of_charge_per_period"] = True
     n.name = "Data Center Energy Hub (staged growth)"
     return n
 

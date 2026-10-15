@@ -392,7 +392,22 @@ def stage_network(n: pypsa.Network, years: list[int], *, load_scale: dict[int, d
         df.loc[rows, ["overnight_cost", "discount_rate"]] = [0.0, DISCOUNT_RATE]
     for y in years:
         candidates(n, y)
+    cyclic_per_period(n)
     return n
+
+
+def cyclic_per_period(n: pypsa.Network) -> None:
+    """Storage cycles within each period: one representative week stands for
+    several years, so energy carried from one period into the next is not
+    physical (gatekeeper review of #304). PyPSA's per-period flags default to
+    False. Every staged template applies it (the staged data center through
+    ``eh_templates._staged_datacenter``)."""
+    if len(n.stores):
+        n.stores["e_cyclic"] = True
+        n.stores["e_cyclic_per_period"] = True
+    if len(n.storage_units):
+        n.storage_units["cyclic_state_of_charge"] = True
+        n.storage_units["cyclic_state_of_charge_per_period"] = True
 
 
 # ── The network ─────────────────────────────────────────────────────────────
