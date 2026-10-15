@@ -92,7 +92,7 @@ describe('GenericSiteForm', () => {
     expect(screen.getByTestId('site-create').getAttribute('title')).toBe('A study is still running')
   })
 
-  it('starts from an existing site's values, keeping what its user set', async () => {
+  it("starts from an existing site's values, keeping what its user set", async () => {
     const params = { ...FORM.presets.hospital, connection_mw: 10 }
     const user = await mount(null, { params, entered: ['site_type', 'connection_mw'] })
     expect(fieldOf('connection_mw').value).toBe('10')
