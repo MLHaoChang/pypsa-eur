@@ -7,6 +7,18 @@ import { networkApi } from '../../api/network'
 import LostLoadTab from './LostLoadTab'
 import { findKpiValue } from '../../test/kpi'
 
+// A fixed-size chart, so recharts draws in jsdom (its ResponsiveContainer
+// measures 0 × 0 there and renders nothing).
+vi.mock('recharts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('recharts')>()
+  const { cloneElement } = await import('react')
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: React.ReactElement<{ width?: number; height?: number }> }) =>
+      cloneElement(children, { width: 600, height: 240 }),
+  }
+})
+
 // `getCopt` / `getMc` / `startMc` / `getElccCandidates` are no longer reached
 // from this tab — the surfaces that fetched them moved to the Adequacy tab —
 // but they stay stubbed so a regression that re-mounts one of them fails as a
@@ -223,4 +235,11 @@ it('says lost load was not modelled when the solve had no VoLL, with a way to se
   expect(await screen.findByText('Not modelled')).toBeTruthy()
   screen.getByRole('button', { name: 'Set VOLL in Solver settings' }).click()
   expect(useUIStore.getState().activeSlidePanel).toBe('simparams')
+})
+
+it('marks the worst hour on the lost-load chart, rounded like the tiles (UX S4b)', async () => {
+  const { container } = renderPage()
+  await findKpiValue('424 MWh').catch(() => undefined)
+  await vi.waitFor(() => expect(container.querySelector('.recharts-reference-dot')).not.toBeNull())
+  expect(container.querySelector('.recharts-reference-dot text')?.textContent).toBe('worst hour 424 MW')
 })

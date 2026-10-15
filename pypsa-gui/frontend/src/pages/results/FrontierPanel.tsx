@@ -2,14 +2,14 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip as RTooltip, ReferenceDot,
+  Tooltip as RTooltip, ReferenceDot, ReferenceLine,
 } from 'recharts'
 import { AlertTriangle, Activity, Square } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { nk } from '../../utils/queryKeys'
-import { CHART_GRID, downloadCSV } from './shared'
+import { CHART_GRID, downloadCSV, refLine } from './shared'
 
 // The cost-vs-availability frontier (spec §5.6, Phase 5) — the trade-off the
 // feature is named for, as a CURVE. Phases 1–4 give one point on it.
@@ -131,7 +131,10 @@ export function kneeMessage(
     : `Economic knee at ${ok[knee].target_permyriad}‱: tightening beyond it costs ${rate}.`
 }
 
-export function FrontierPanel() {
+export function FrontierPanel({ goalMwh }: {
+  /** The unserved-energy cap the last solve applied, drawn as the goal. */
+  goalMwh?: number | null
+} = {}) {
   const currentProject = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -275,6 +278,9 @@ export function FrontierPanel() {
                     contentStyle={{ fontSize: 11 }} />
                   <Line type="monotone" dataKey="cost" stroke={CURVE}
                     dot={{ r: 3 }} isAnimationActive={false} />
+                  {goalMwh != null && Number.isFinite(goalMwh) && (
+                    <ReferenceLine {...refLine('target', 'goal', goalMwh, 'MWh', 'x')} />
+                  )}
                   {kneePt && (
                     <ReferenceDot x={kneePt.ens} y={kneePt.cost} r={5}
                       fill={KNEE} stroke="none" />

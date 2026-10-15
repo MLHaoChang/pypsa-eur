@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import Kpi from '../../components/Kpi'
 import ResultState from '../../components/ResultState'
 import {
-  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceDot,
 } from 'recharts'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
@@ -13,7 +13,7 @@ import { nk } from '../../utils/queryKeys'
 import {
   type TSPayload, type WeightCtx, weightedSumSplit, aggregateTS,
   shortStamp, useWeightCtx, WindowCapBanner,
-  CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel,
+  CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel, extremeDot, extremeOf,
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
@@ -151,6 +151,11 @@ export default function LostLoadTab() {
     if (!ts) return null
     return aggregateTS(ts, new Set(ts.columns), range)
   }, [lostLoad, range])
+  // The hour the most load went unserved, marked on the chart (UX S4b).
+  const worst = useMemo(() => {
+    const e = agg ? extremeOf(agg, 'value') : null
+    return e && agg ? { snapshot: agg[e.index].snapshot, value: e.value } : null
+  }, [agg])
 
   const totals = useMemo(() => {
     const ts = lostLoad as TSPayload | null
@@ -306,6 +311,9 @@ export default function LostLoadTab() {
                   formatter={(v: number) => [`${v.toFixed(1)} MW`, 'unserved']} />
                 <Area type="monotone" dataKey="value"
                   stroke={ACCENT} fill="url(#llGrad)" strokeWidth={1.6} dot={false} />
+                {worst && (
+                  <ReferenceDot {...extremeDot(worst.snapshot, worst.value, 'worst hour', 'MW')} />
+                )}
               </AreaChart>
             </ResponsiveContainer>
           ) : <p className="text-[11px] text-muted">No time series for the selected range.</p>}
