@@ -10,7 +10,8 @@ import type { ProjectInfo } from '../api/types'
 import { projectsApi } from '../api/projects'
 import { formatApiDetail } from '../api/client'
 import { useAuthMode } from '../auth/AuthModeProvider'
-import { useCreateFromTemplate, useOpenInWorkbench } from '../hooks/useCreateFromTemplate'
+import { useCreateFromTemplate, useOpenInWorkbench, useOptionalNavigate } from '../hooks/useCreateFromTemplate'
+import { useHubDesignStore } from '../pages/hubDesign/hubDesignStore'
 import FromFolderTab from './FromFolderTab'
 import { ioApi } from '../api/io'
 import { networkApi } from '../api/network'
@@ -294,6 +295,18 @@ function TemplateTab({ onClose }: { onClose: () => void }) {
   // Which card (if any) is mid-import — used to show a per-card spinner label.
   const pendingId = importMut.isPending ? importMut.variables : null
 
+  // The generic site is set up in a form, not created on click: open Guided
+  // Start with the form (G2; UX: a card in this tab, not a new tab).
+  const navigate = useOptionalNavigate()
+  const openSiteForm = useCallback(() => {
+    onClose()
+    const hub = useHubDesignStore.getState()
+    hub.setStep('start', { user: true })
+    hub.setSiteFormRequested(true)
+    useUIStore.getState().setSlidePanel('hubDesign')
+    if (navigate && window.location.pathname !== '/app') navigate('/app')
+  }, [onClose, navigate])
+
   return (
     <div className="p-5">
       <div className="flex items-start gap-2 mb-3 px-2.5 py-2 bg-bg/60 border border-border/60 rounded text-[11px] text-muted">
@@ -340,6 +353,21 @@ function TemplateTab({ onClose }: { onClose: () => void }) {
             </button>
           )
         })}
+        <button
+          type="button"
+          data-testid="wizard-template-own-site"
+          onClick={openSiteForm}
+          disabled={importMut.isPending}
+          title="Set up your own site in the Guided form"
+          className="text-left border rounded-lg p-3.5 flex flex-col gap-2 transition-all border-border hover:border-accent/60 hover:bg-accent/5 cursor-pointer"
+        >
+          <span className="text-sm font-semibold text-text">Your own site</span>
+          <div className="text-[11px] text-muted leading-relaxed flex-1">
+            A factory, hospital, office building or campus that is not a data center: choose its type,
+            set its load and grid connection, and plan what to build. Opens the Guided form.
+          </div>
+          <div className="text-[10px] text-muted font-mono">generic site · energy hub</div>
+        </button>
       </div>
     </div>
   )

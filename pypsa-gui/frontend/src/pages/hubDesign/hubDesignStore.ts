@@ -4,6 +4,7 @@
 // `step` (P25).
 import { create } from 'zustand'
 import type { EhArchetype } from '../../api/simulation'
+import type { SiteParams } from './genericSite'
 
 export type HubStep = 'start' | 'site' | 'goal' | 'results' | 'improve'
 export const HUB_STEPS: readonly HubStep[] = ['start', 'site', 'goal', 'results', 'improve']
@@ -33,6 +34,13 @@ interface HubDesignState {
   ensCap: string
   /** A manual rail click suppresses the next auto-advance (§5.6). */
   userMovedRail: boolean
+  /** A generic site's values to start a NEW project from (the Site card's
+   *  "Start a new project from these values"); the Start card's form opens
+   *  with them. */
+  siteSeed: { params: SiteParams; entered: string[] } | null
+  /** The New-project wizard's "Your own site" card asked the Start card to
+   *  open the generic site form (consumed once by the Start card). */
+  siteFormRequested: boolean
 
   resetFor: (project: string | null, d: HubDesignDefaults) => void
   setStep: (step: HubStep, opts?: { user?: boolean }) => void
@@ -41,6 +49,8 @@ interface HubDesignState {
   setLoleTarget: (v: string) => void
   seedLoleFromPack: (v: string) => void
   setEnsCap: (v: string) => void
+  setSiteSeed: (seed: { params: SiteParams; entered: string[] } | null) => void
+  setSiteFormRequested: (v: boolean) => void
 }
 
 export const HUB_DESIGN_INITIAL = {
@@ -52,6 +62,8 @@ export const HUB_DESIGN_INITIAL = {
   loleSource: null as LoleSource,
   ensCap: '',
   userMovedRail: false,
+  siteSeed: null as { params: SiteParams; entered: string[] } | null,
+  siteFormRequested: false,
 }
 
 export const useHubDesignStore = create<HubDesignState>()((set) => ({
@@ -59,7 +71,7 @@ export const useHubDesignStore = create<HubDesignState>()((set) => ({
   resetFor: (project, d) => set({
     project, ready: true, step: d.step, archetype: d.archetype,
     loleTarget: d.loleTarget, loleSource: d.loleTarget !== '' ? 'template' : null,
-    ensCap: d.ensCap, userMovedRail: false,
+    ensCap: d.ensCap, userMovedRail: false, siteSeed: null,
   }),
   setStep: (step, opts) => set(opts?.user ? { step, userMovedRail: true } : { step }),
   clearUserMoved: () => set({ userMovedRail: false }),
@@ -67,4 +79,6 @@ export const useHubDesignStore = create<HubDesignState>()((set) => ({
   setLoleTarget: (loleTarget) => set({ loleTarget, loleSource: 'user' }),
   seedLoleFromPack: (loleTarget) => set({ loleTarget, loleSource: 'pack' }),
   setEnsCap: (ensCap) => set({ ensCap }),
+  setSiteSeed: (siteSeed) => set({ siteSeed }),
+  setSiteFormRequested: (siteFormRequested) => set({ siteFormRequested }),
 }))
