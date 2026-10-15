@@ -3,7 +3,7 @@ name: coordinator
 description: The coordinator session's own procedure (the other side of steward). Use in the coordinator session when running a sweep, merging a PR, refreshing the dashboard, or relaying between sessions and the owner.
 ---
 
-The **coordinator** relays the owner's decisions to the work sessions, does every merge and keeps the owner's dashboard current. PR sessions follow `.claude/skills/steward/SKILL.md`. This skill is the coordinator's side of the same rules. Owner decisions that change a rule land here or in steward; the hourly routine's prompt only points at this file.
+The **coordinator** relays the owner's decisions to the work sessions, does every merge and keeps the owner's dashboard current. PR sessions follow `.claude/skills/steward/SKILL.md`. This skill is the coordinator's side of the same rules. Owner decisions that change a rule land here or in steward; the sweep routine's prompt only points at this file.
 
 Work from a checkout of current master. Before a sweep, run `git switch master && git pull --ff-only`. A stale checkout loads stale `AGENTS.md`, steward and `scripts/coord/`.
 
@@ -20,20 +20,11 @@ Work from a checkout of current master. Before a sweep, run `git switch master &
 5. **Owner.** Message the owner only with what landed or what needs a decision, times in CEST. Ask every question as `AskUserQuestion` options, per `AGENTS.md`.
 6. **Log.** Append each event to the state file with [Time](#time).
 
-## Hourly check
+## Sweep timing
 
-An hourly routine opens a fresh `claude-sonnet-5-5` session for this check, so the coordinator's long context isn't re-read every quiet hour. The check session starts with no coordinator context and runs on current master:
+The routine wakes this session for a [Sweep](#sweep) every 3 hours, as a safety net. Between sweeps, merges follow the sessions' green reports.
 
-1. **Open PRs.** Run `scripts/coord/premerge.sh <pr>` for every open PR (`gh api 'repos/mlhaochang/pypsa-eur/pulls?state=open'`).
-2. **Master.** Read the check runs on master's head (`gh api repos/mlhaochang/pypsa-eur/commits/<sha>/check-runs`).
-3. **Sessions.** Save the `list_sessions` output to a file and run `python3 scripts/coord/sessions.py <file>`.
-4. **Report.** `send_message` the coordinator (session_013NDrjK8eU7A4n1bPW9m6Xj) only when something needs it:
-   - a PR whose premerge ends in `RESULT: ok to merge`, with that output;
-   - a master check that failed;
-   - a session that is failed, blocked, or waiting on a question.
-   Otherwise end without a message.
-
-Done when every open PR, master and every live session has been checked. The check session reads and reports only. Merges, PR changes and owner messages stay with the coordinator.
+A routine created from a session (`create_trigger` with `create_new_session_on_fire`) starts without the repo and without the session tools. It can't read PRs or reach the coordinator, so the sweep stays in this session.
 
 ## Opening a session
 
