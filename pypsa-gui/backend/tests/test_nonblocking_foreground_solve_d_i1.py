@@ -48,6 +48,8 @@ def _hold_solver_running(install_network, monkeypatch, hold_seconds: float = 1.5
         with ctx.solver_state_lock:
             ctx.solver_state['status'] = 'running'
             ctx.solver_state['kind'] = 'lopf'
+            # Match production's atomic native worker identity publication.
+            ctx.solver_state['thread'] = worker
             ctx.solver_state['objective'] = None
             ctx.solver_state['log_queue'] = log_queue
         return {'status': 'started'}

@@ -14,6 +14,6 @@ For companion outcomes/state, Activity/Needs-you, continuous voice or bounded ba
 
 Start with CP-01 truthful in-page chat state, then CP-02 readable source-bound outcomes. Core prerequisites and one network case are already merged; this plan extends their residual recovery/comparison behavior and the existing Live design.
 
-Implementation continuation: [CP-01 progress/evidence](issues/01-truthful-state.md) records the first local slice, its newer source baseline and pending live/CI gates. CP-02 is next; the remaining spec/matrix cases are not implicitly implemented by CP-01.
+Implementation continuation: CP-01 (#235), CP-02 (#241) and bounded CP-03 (#268) are merged. [CP-04 progress/evidence](issues/04-activity-needs-you.md) records the bounded Activity observer and the remaining durable-history/decision work. Linked issue records distinguish implementation, mocked tests, current-head CI and pending live/external gates.
 
 The [Dots assessment](../live-voice/dots-design-assessment-2026-10-14.md) supplies the source-reviewed rationale. This folder contains an implementation specification, not an implemented feature or release certificate. Hosted setup, fresh paid-probe authorization, independent domain review and real-use calibration remain separate pending gates.

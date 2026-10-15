@@ -584,6 +584,7 @@ def _persisted_job_public(row: dict) -> dict:
     finished_at = row.get("finished_at")
     return {
         "id": str(row["id"]),
+        "kind": row.get("kind") or "solve",
         "project_id": row.get("project_id"),
         "project_key": row.get("project_key"),
         "status": row.get("status"),
