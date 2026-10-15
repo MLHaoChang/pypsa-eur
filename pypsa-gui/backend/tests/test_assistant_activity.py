@@ -154,11 +154,16 @@ def test_task_checkpoints_are_bounded_metadata_not_arguments_or_results(client, 
 
 
 def test_confirmation_expiry_is_observed_without_consuming_or_approving(client, project):
-    from harness.session import ChatSession
+    import uuid
+    from harness import session as sessions
+    from services.pypsa_service import PyPSAService
     ctx, owner = project
-    session = ChatSession(owner_user_id=owner)
-    ctx.chat_state.session = session
-    pc = session.issue_confirmation(tool_name='update_component', args={'value': 'private'}, safety_tier='write')
+    session = sessions.get_or_create_session('activity-expiry-' + uuid.uuid4().hex, owner_user_id=owner)
+    binding = PyPSAService._request_ctx.set(ctx)
+    try:
+        pc = session.issue_confirmation(tool_name='update_component', args={'value': 'private'}, safety_tier='write')
+    finally:
+        PyPSAService._request_ctx.reset(binding)
     response = client.get('/api/chat/activity', params={'filter': 'needs_you'})
     assert response.status_code == 200, response.text
     rows = response.json()['items']
@@ -168,6 +173,7 @@ def test_confirmation_expiry_is_observed_without_consuming_or_approving(client, 
     pc.expires_at = 0
     assert client.get('/api/chat/activity', params={'filter': 'needs_you'}).json()['items'] == []
     assert not session.confirmation_decisions
+    sessions.drop_session(session.session_id)
 
 
 def test_live_native_worker_does_not_block_reads_and_closing_observer_does_not_cancel(client, project, monkeypatch):
@@ -279,3 +285,78 @@ def test_legacy_wait_cannot_certify_a_replaced_native_worker(project, family):
         assert observed['timed_out'] is True
     finally:
         PyPSAService._request_ctx.reset(token)
+
+
+def test_native_http_pending_approval_is_visible_without_legacy_context_slot(client, project, monkeypatch):
+    import concurrent.futures
+    import uuid
+    from harness import session as sessions
+    ctx, _owner = project
+    assert ctx.chat_state.session is None  # This field is a dormant Phase-0 stub.
+    sid = 'activity-http-' + uuid.uuid4().hex
+    monkeypatch.setattr(sessions, 'CONFIRMATION_TTL_SECONDS', 10)
+    token = None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(client.post, '/api/chat/stream', json={
+            'session_id': sid,
+            'script': [{'type': 'tool_call', 'tool_use_id': 'pending-native',
+                        'name': 'delete_component', 'args': {'name': 'private-preview'},
+                        'safety_tier': 'destructive', 'result': {'deleted': True}}],
+        })
+        try:
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                live = sessions.get_session(sid)
+                if live:
+                    with live._lock:
+                        if live.pending_confirmations:
+                            token = next(iter(live.pending_confirmations))
+                            break
+                if future.done():
+                    pytest.fail('Stream ended before ordinary confirmation: ' + future.result().text)
+                time.sleep(0.01)
+            assert token, 'Native HTTP stream never issued its confirmation'
+            response = client.get('/api/chat/activity', params={'filter': 'needs_you'})
+            assert response.status_code == 200, response.text
+            rows = response.json()['items']
+            assert any(row.get('session_id') == sid and row['family'] == 'confirmation' for row in rows)
+            assert token not in response.text and 'private-preview' not in response.text
+            assert ctx.chat_state.session is None
+        finally:
+            if token:
+                denied = client.post(f'/api/chat/{sid}/confirm', json={'token': token, 'decision': 'deny'})
+                assert denied.status_code == 200, denied.text
+            elif sessions.get_session(sid):
+                sessions.get_session(sid).abort_event.set()
+            result = future.result(timeout=12)
+            sessions.drop_session(sid)
+        assert result.status_code == 200, result.text
+        assert 'tool_running' not in result.text
+        assert client.get('/api/chat/activity', params={'filter': 'needs_you'}).json()['items'] == []
+
+
+def test_confirmation_origin_stays_with_its_project_after_navigation(client, project):
+    import uuid
+    from harness import session as sessions
+    from services.pypsa_service import PyPSAService
+    ctx, owner = project
+    session = sessions.get_or_create_session('activity-origin-' + uuid.uuid4().hex, owner_user_id=owner)
+    binding = PyPSAService._request_ctx.set(ctx)
+    try:
+        pc = session.issue_confirmation(tool_name='delete_component', args={'private': True}, safety_tier='destructive')
+    finally:
+        PyPSAService._request_ctx.reset(binding)
+    try:
+        origin_project = str(ctx.project_uuid)
+        assert pc.project_id == origin_project
+        assert client.post('/api/projects/Elsewhere', params={'force': True, 'rebind': True}).status_code == 200
+        assert client.get('/api/chat/activity', params={'filter': 'needs_you'}).json()['items'] == []
+        original = client.get('/api/chat/activity', params={'filter': 'needs_you', 'project_id': origin_project})
+        assert original.status_code == 200, original.text
+        assert [row['session_id'] for row in original.json()['items']] == [session.session_id]
+        # A legacy/unattested origin is never guessed from the reader's project.
+        pc.project_id = None
+        assert client.get('/api/chat/activity', params={'project_id': origin_project}).json()['items'] == []
+        assert pc.token in session.pending_confirmations
+    finally:
+        sessions.drop_session(session.session_id)

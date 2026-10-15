@@ -120,15 +120,11 @@ def collect(*, db, user, project):
             continue
         family = 'gridspine' if job.get('kind') == 'gridspine' else 'solve_queue'
         rows.append(_row(pid, family, str(job['id']), family.replace('_', ' '), job['status']))
-    if ctx is not None:
-        session = ctx.chat_state.session
-        if session is not None and str(session.owner_user_id) == owner:
-            with session._lock:
-                for pc in session.pending_confirmations.values():
-                    if not pc.is_expired():
-                        rows.append(_row(pid, 'confirmation', hashlib.sha256(pc.token.encode()).hexdigest(), pc.tool_name.replace('_', ' '),
-                                         'waiting_for_approval', session_id=session.session_id,
-                                         reason='Open the originating conversation to inspect and decide.'))
+    from harness.session import pending_confirmation_origins
+    for pending in pending_confirmation_origins(owner, pid):
+        rows.append(_row(pid, 'confirmation', pending['source_id'], pending['tool_name'].replace('_', ' '),
+                         'waiting_for_approval', session_id=pending['session_id'],
+                         reason='Open the originating conversation to inspect and decide.'))
     warnings.append('transient_jobs_require_originating_worker')
     # Fixed ordering means duplicate/reordered fetches cannot create new rows.
     rows.sort(key=lambda r: (0 if r['status'] in {'running', 'queued'} else 1 if r['needs_you'] else 2, r['id']))
