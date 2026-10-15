@@ -1,0 +1,106 @@
+// The Guided report entry (UX S6, G4/G6): one tile per category, each a figure
+// or a state in words, never 0 or "—" for what did not run.
+import { describe, expect, it } from 'vitest'
+import { chapterTiles, type ChapterInputs } from './chapters'
+import type { InvestmentCaseReportPayload } from '../../api/types'
+
+const NONE: ChapterInputs = {
+  investment: { study: null, report: null },
+  grid: { campus: null, notHub: false },
+  reliability: { hasResults: false, running: false, lole: null, target: null, verdict: null },
+  operation: { status: null },
+}
+
+const byId = (inputs: ChapterInputs) => Object.fromEntries(chapterTiles(inputs).map(t => [t.id, t]))
+
+describe('chapterTiles', () => {
+  it('four tiles, in the category order, named by the result groups', () => {
+    expect(chapterTiles(NONE).map(t => [t.id, t.group])).toEqual([
+      ['investment', 'Investment'], ['grid_plan', 'Grid plan'],
+      ['reliability', 'Reliability'], ['operation', 'Operation']])
+  })
+
+  it('nothing run: each says not run and where to start, never a figure', () => {
+    const t = byId(NONE)
+    for (const tile of Object.values(t)) {
+      expect(tile.state).toBe('not_run')
+      expect(tile.value).toBe('')
+      expect(tile.reason).toBeTruthy()
+    }
+    expect(t.reliability.open).toEqual({ step: 'goal' })
+    expect(t.investment.open).toEqual({ panel: 'results', tab: 'investment' })
+    expect(t.grid_plan.open).toEqual({ panel: 'campusElectrical' })
+    expect(t.operation.open).toEqual({ panel: 'results', tab: 'dispatch' })
+  })
+
+  it('reliability: the shortfall against the goal', () => {
+    const t = byId({ ...NONE, reliability: { hasResults: true, running: false, lole: 12.38,
+                                             target: 3, verdict: 'fail' } })
+    expect(t.reliability).toMatchObject({ state: 'ready', value: '12.38', unit: 'h/yr',
+      basis: 'Not certified: the goal is 3 h/yr', open: { panel: 'results', tab: 'adequacy' } })
+  })
+
+  it('reliability: running, and a run with no shortfall figure', () => {
+    expect(byId({ ...NONE, reliability: { ...NONE.reliability, running: true } }).reliability.state)
+      .toBe('running')
+    const t = byId({ ...NONE, reliability: { hasResults: true, running: false, lole: null,
+                                             target: null, verdict: null } })
+    expect(t.reliability.state).toBe('unavailable')
+  })
+
+  it('investment: the post-tax NPV when established, else the pre-tax one, said so', () => {
+    const report = (npv: number | null, pre: number | null) => ({
+      npv_at_wacc: npv,
+      sections: { project: { status: 'ok', payload: { project_pre_tax_npv: pre } } },
+    }) as unknown as InvestmentCaseReportPayload
+    const done = { status: 'done' } as never
+    let t = byId({ ...NONE, investment: { study: done, report: report(-1.2e6, -1e6) } })
+    expect(t.investment).toMatchObject({ state: 'ready', basis: 'Net present value at the WACC, after tax' })
+    expect(t.investment.value).toMatch(/1\.20? M/)
+    t = byId({ ...NONE, investment: { study: done, report: report(null, -11.01e6) } })
+    expect(t.investment).toMatchObject({ state: 'ready',
+      basis: 'Net present value before tax (no tax pack, so the after-tax figure is not established)' })
+    t = byId({ ...NONE, investment: { study: done, report: report(null, null) } })
+    expect(t.investment.state).toBe('unavailable')
+  })
+
+  it('investment: running, stale, refused', () => {
+    expect(byId({ ...NONE, investment: { study: { status: 'running' } as never, report: null } })
+      .investment.state).toBe('running')
+    const stale = byId({ ...NONE, investment: { study: { status: 'done', stale: true } as never,
+      report: { npv_at_wacc: 5e6 } as never } })
+    expect(stale.investment.state).toBe('stale')
+    const refused = byId({ ...NONE, investment: { study: { status: 'refused',
+      message: 'no owner assets' } as never, report: null } })
+    expect(refused.investment).toMatchObject({ state: 'unavailable' })
+    expect(refused.investment.reason).toMatch(/no owner assets/)
+  })
+
+  it('grid plan: the campus checks that pass with the proposed measures', () => {
+    const row = (s: string) => ({ status_with_measures: s })
+    const campus = (rows: { status_with_measures: string }[], stale = false) =>
+      ({ results: { compliance: rows }, stale }) as never
+    let t = byId({ ...NONE, grid: { campus: campus([row('pass'), row('pass'), row('fail')]), notHub: false } })
+    expect(t.grid_plan).toMatchObject({ state: 'ready', value: '2 of 3', unit: 'checks pass',
+      basis: 'Campus grid checks, with the proposed measures' })
+    t = byId({ ...NONE, grid: { campus: campus([row('pass')], true), notHub: false } })
+    expect(t.grid_plan.state).toBe('stale')
+    t = byId({ ...NONE, grid: { campus: { results: null, stale: false } as never, notHub: false } })
+    expect(t.grid_plan.state).toBe('not_run')
+    t = byId({ ...NONE, grid: { campus: null, notHub: true } })
+    expect(t.grid_plan.state).toBe('not_applicable')
+  })
+
+  it('operation: the dispatch solve, separate from the reliability study (G5)', () => {
+    let t = byId({ ...NONE, operation: { status: { running: false, dispatch: 'none' } as never } })
+    expect(t.operation.state).toBe('not_run')
+    expect(t.operation.reason).toMatch(/reliability study does not solve it/)
+    t = byId({ ...NONE, operation: { status: { running: true } as never } })
+    expect(t.operation.state).toBe('running')
+    t = byId({ ...NONE, operation: { status: { running: false, dispatch: 'fresh', objective: 3.2e6,
+      condition: 'optimal', solve_time: 1 } as never } })
+    expect(t.operation).toMatchObject({ state: 'ready', basis: 'The solve’s total system cost (objective)' })
+    t = byId({ ...NONE, operation: { status: { running: false, dispatch: 'stale', objective: 3.2e6 } as never } })
+    expect(t.operation.state).toBe('stale')
+  })
+})

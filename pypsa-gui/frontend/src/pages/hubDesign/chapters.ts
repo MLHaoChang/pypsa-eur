@@ -1,0 +1,150 @@
+// The Guided report entry (UX overhaul S6, findings G4 and G6): one tile per
+// category — Investment, Grid plan, Reliability, Operation — so Guided shows
+// the whole picture at its own density, not only the reliability study. Each
+// tile is a figure when one was computed, else a state in words (ResultState),
+// and says where its detail lives. Pure: the hooks are in ChaptersSection.
+import type { ResultStateKind } from '../../components/ResultState'
+import type { CampusState } from '../../api/campusElectrical'
+import type { InvestmentCaseReportPayload, InvestmentCaseStudy, SimulationStatus } from '../../api/types'
+import { RESULT_GROUPS, type ResultsGroup, type ResultsTab } from '../results/groups'
+import { fmtCurrency } from '../../utils/format'
+
+export type ChapterId = Exclude<ResultsGroup, 'summary'>
+
+/** Where a tile's detail is: a Results tab, the campus panel, or a Guided step. */
+export type ChapterOpen =
+  | { panel: 'results'; tab: ResultsTab }
+  | { panel: 'campusElectrical' }
+  | { step: 'goal' }
+
+export interface ChapterTile {
+  id: ChapterId
+  /** The result group's own label (RESULT_GROUPS), so the names match Expert. */
+  group: string
+  label: string
+  /** '' unless the state shows a figure (ready / zero / stale). */
+  value: string
+  unit?: string
+  basis?: string
+  state: ResultStateKind
+  reason?: string
+  open: ChapterOpen
+}
+
+export interface ChapterInputs {
+  investment: { study: InvestmentCaseStudy | null; report: InvestmentCaseReportPayload | null }
+  /** `notHub`: the campus route answered that this project has no campus (409). */
+  grid: { campus: CampusState | null; notHub: boolean }
+  reliability: { hasResults: boolean; running: boolean; lole: number | null; target: number | null
+                 verdict: 'pass' | 'fail' | 'inconclusive' | null }
+  operation: { status: SimulationStatus | null }
+}
+
+const ORDER: ChapterId[] = ['investment', 'grid_plan', 'reliability', 'operation']
+const groupLabel = (id: ChapterId) => RESULT_GROUPS.find(g => g.id === id)?.label ?? id
+const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+
+function investment({ study, report }: ChapterInputs['investment']): Omit<ChapterTile, 'id' | 'group'> {
+  const open: ChapterOpen = { panel: 'results', tab: 'investment' }
+  const label = 'What the design is worth'
+  if (study?.status === 'running') {
+    return { label, value: '', state: 'running', reason: 'The investment case is running.', open }
+  }
+  if (study && ['refused', 'error', 'failed'].includes(String(study.status))) {
+    const why = study.message || study.error || study.error_code || 'see the investment case'
+    return { label, value: '', state: 'unavailable', reason: `The investment case did not complete: ${why}.`, open }
+  }
+  if (!report) {
+    return { label, value: '', state: 'not_run', open,
+      reason: 'The investment case has not run. It turns the design’s costs and savings into NPV and IRR.' }
+  }
+  const post = num(report.npv_at_wacc)
+  const payload = (report.sections?.project?.payload ?? {}) as Record<string, unknown>
+  const pre = num(payload.project_pre_tax_npv)
+  const figure = post ?? pre
+  if (figure == null) {
+    return { label, value: '', state: 'unavailable', open,
+      reason: 'The investment case ran, but its NPV is not established; it says why.' }
+  }
+  const stale = study?.stale === true || study?.report?.stale === true || report.stale === true
+  return {
+    label, value: fmtCurrency(figure), state: stale ? 'stale' : 'ready', open,
+    basis: post != null ? 'Net present value at the WACC, after tax'
+      : 'Net present value before tax (no tax pack, so the after-tax figure is not established)',
+    reason: stale ? 'The inputs changed since the case ran.' : undefined,
+  }
+}
+
+function gridPlan({ campus, notHub }: ChapterInputs['grid']): Omit<ChapterTile, 'id' | 'group'> {
+  const open: ChapterOpen = { panel: 'campusElectrical' }
+  const label = 'Grid checks on the campus'
+  if (notHub) {
+    return { label, value: '', state: 'not_applicable', open,
+      reason: 'This project has no campus electrical study.' }
+  }
+  const rows = campus?.results?.compliance ?? null
+  if (!rows || rows.length === 0) {
+    return { label, value: '', state: 'not_run', open,
+      reason: 'The campus grid checks (voltage, loading, reactive power) have not run.' }
+  }
+  const pass = rows.filter(r => r.status_with_measures === 'pass').length
+  return {
+    label, value: `${pass} of ${rows.length}`, unit: 'checks pass', open,
+    state: campus?.stale ? 'stale' : 'ready',
+    basis: 'Campus grid checks, with the proposed measures',
+    reason: campus?.stale ? 'The network changed since the checks ran.' : undefined,
+  }
+}
+
+function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 'group'> {
+  const label = 'Expected shortfall'
+  if (r.running) {
+    return { label, value: '', state: 'running', reason: 'The reliability study is running.',
+      open: { panel: 'results', tab: 'adequacy' } }
+  }
+  if (!r.hasResults) {
+    return { label, value: '', state: 'not_run', open: { step: 'goal' },
+      reason: 'The reliability study has not run. Set a goal and run it.' }
+  }
+  const open: ChapterOpen = { panel: 'results', tab: 'adequacy' }
+  if (r.lole == null) {
+    return { label, value: '', state: 'unavailable', open,
+      reason: 'The study ran, but its shortfall figure is not established.' }
+  }
+  const verdict = r.verdict === 'pass' ? 'Certified' : r.verdict === 'fail' ? 'Not certified'
+    : r.verdict === 'inconclusive' ? 'Not decided' : null
+  const basis = r.target == null ? 'No goal set'
+    : `${verdict ? `${verdict}: ` : ''}the goal is ${Number(r.target.toPrecision(6))} h/yr`
+  return { label, value: String(r.lole), unit: 'h/yr', state: 'ready', basis, open }
+}
+
+function operation({ status }: ChapterInputs['operation']): Omit<ChapterTile, 'id' | 'group'> {
+  const open: ChapterOpen = { panel: 'results', tab: 'dispatch' }
+  const label = 'Hour-by-hour operation'
+  if (status?.running) {
+    return { label, value: '', state: 'running', reason: 'The dispatch is being solved.', open }
+  }
+  const obj = num(status?.objective)
+  if (!status || status.dispatch === 'none' || status.dispatch == null || obj == null) {
+    return { label, value: '', state: 'not_run', open,
+      reason: 'The hour-by-hour dispatch has not been solved; the reliability study does not solve it.' }
+  }
+  const stale = status.dispatch === 'stale'
+  return {
+    label, value: fmtCurrency(obj), state: stale ? 'stale' : 'ready', open,
+    basis: 'The solve’s total system cost (objective)',
+    reason: stale ? 'The network changed since the dispatch was solved.' : undefined,
+  }
+}
+
+const BUILD: Record<ChapterId, (i: ChapterInputs) => Omit<ChapterTile, 'id' | 'group'>> = {
+  investment: i => investment(i.investment),
+  grid_plan: i => gridPlan(i.grid),
+  reliability: i => reliability(i.reliability),
+  operation: i => operation(i.operation),
+}
+
+/** The four tiles, in the category order. */
+export function chapterTiles(inputs: ChapterInputs): ChapterTile[] {
+  return ORDER.map(id => ({ id, group: groupLabel(id), ...BUILD[id](inputs) }))
+}
