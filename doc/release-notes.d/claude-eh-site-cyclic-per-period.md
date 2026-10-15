@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The generic site template's batteries and UPS now cycle within each investment period instead of carrying their state of charge from one period into the next, which is not physical when one representative week stands for several years.

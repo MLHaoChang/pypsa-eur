@@ -73,6 +73,14 @@ def test_one_candidate_per_period_that_outlives_the_horizon(site):
         assert y + float(df.at[name, "lifetime"]) >= p["horizon_end"], name
 
 
+def test_storage_cycles_within_each_period(site):
+    """One representative week stands for several years: no state of charge
+    is carried from one period into the next."""
+    _p, n = site
+    assert n.storage_units["cyclic_state_of_charge"].all()
+    assert n.storage_units["cyclic_state_of_charge_per_period"].all()
+
+
 def test_the_existing_site_is_sunk_and_the_poc_chain_is_loss_free(site):
     p, n = site
     for a in S.existing_assets(p):
@@ -303,6 +311,19 @@ def test_every_preset_solves_to_an_investment_case_against_a_feasible_grid_only_
     assert r.op.status == {"operating": "ok", "capex": "ok", "terminal": "ok"}, r.op.reasons
     for k in ("project_pre_tax_npv",):
         assert r.metrics[k] is not None, (k, r.reasons)
+    # Each storage unit ends every period where it started (cyclic per period).
+    for su in n.storage_units.index:
+        if float(n.storage_units.at[su, "p_nom_opt"]) <= 1e-6:
+            continue
+        for y in _years(p):
+            soc = n.storage_units_t.state_of_charge[su].loc[y]
+            disp = n.storage_units_t.p[su].loc[y]
+            eta = (float(n.storage_units.at[su, "efficiency_store"]),
+                   float(n.storage_units.at[su, "efficiency_dispatch"]))
+            # soc_0 = soc_end + η_s·charge_0 − dispatch_0/η_d  (one-hour steps)
+            p0 = float(disp.iloc[0])
+            step = -p0 / eta[1] if p0 > 0 else -p0 * eta[0]
+            assert float(soc.iloc[0]) == pytest.approx(float(soc.iloc[-1]) + step, abs=1e-3), (su, y)
     # The import never exceeds the energized connection.
     cap = n.links_t["eh_energization_mw"]["grid_import"]
     assert (n.links_t.p0["grid_import"] <= cap + 1e-4).all()

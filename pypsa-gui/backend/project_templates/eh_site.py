@@ -525,6 +525,12 @@ def build_eh_site(params: dict | None = None) -> pypsa.Network:
                   energization={"grid_import": [e["mw"] for e in p["energization"]]},
                   weights=period_years(years, p["horizon_end"]),
                   existing=existing_assets(p), candidates=candidates)
+    # Storage cycles within each period: one week stands for several years,
+    # so no energy is carried from one period into the next (gatekeeper
+    # review of #304; set here, not in the shared stage_network).
+    if len(n.storage_units):
+        n.storage_units["cyclic_state_of_charge"] = True
+        n.storage_units["cyclic_state_of_charge_per_period"] = True
     n.name = p["name"] or f"{_LABEL[p['site_type']]} Energy Hub"
     return n
 
