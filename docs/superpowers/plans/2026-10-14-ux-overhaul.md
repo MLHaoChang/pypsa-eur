@@ -237,7 +237,7 @@ A dash or a 0 is never used to stand in for any state other than Ready or Comput
 | R1 | Tile rounding | (a) 3 significant figures for money, energy, power and emissions; one decimal for prices, % and h/yr; ISO 24 h dates everywhere. Tables keep full precision. |
 | G5 | Guided "certified" vs Expert "Not solved yet" | The E2E session's slice 10 owns the fix. ResultState gains `study_only` ("From the study"), agreed with E2E. |
 
-| Q5 | Assistant dock over Results | (a) A rail that collapses over Results (or with no API key) unless pinned. Whether more panels should collapse it is with the owner. |
+| Q5 | Assistant dock over Results | (a) A rail that collapses over Results (or with no API key) unless pinned. Only Results collapses it (owner, 2026-10-15). |
 | Q6 | Expert sidebar | (a) Regrouped by category: Model, Run, Results, Studies, Reports. |
 | Q7 | Next slices | (a) S4 (charts), then S5. |
 | S6 split | Guided alignment, agreed with E2E | UX builds the shared pieces (`displayName`, `AssetName`). E2E edits `hubDesign/**`: Results always reachable (a "Not run yet" card), display names, the Guided cards on Kpi / ResultState, and the Guided-density report entry. |
