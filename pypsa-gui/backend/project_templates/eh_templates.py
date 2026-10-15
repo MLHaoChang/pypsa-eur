@@ -223,6 +223,11 @@ _DC_IT_MW = 36.0                                   # the single-year template's 
 # investment case computes on a project made from the template. Synthetic
 # illustrative numbers; the ledger in TEMPLATE_META says what each one is.
 
+#: The PoC rating and the last period's site load (IT × PUE), in MW: the
+#: grid-only comparison serves that load on that connection.
+_DC_POC_MW = 40.0
+_DC_LAST_LOAD_MW = round(DC_PHASES[-1][1] * DC_PHASES[-1][2], 1)
+
 #: The existing campus, in service at the first period (overnight cost 0).
 DC_EXISTING = ("genset_1", "genset_2", "genset_3", "genset_4", "rooftop_pv", "ups_battery",
                "site_transformer")
@@ -596,6 +601,11 @@ TEMPLATE_META: dict[str, dict] = {
             "After a solve the investment case runs on the shipped commercial config and finance "
             "inputs: the existing campus is in service in 2027 at no capex, each candidate the plan "
             "builds is a stage with its own COD, and an unbuilt later candidate is not an investment.",
+            "PoC and transformer losses are not modelled in the staged plan (efficiency 1.0), so the "
+            "investment case can compare against the grid-only site.",
+            f"The grid-only comparison serves {_DC_LAST_LOAD_MW:g} MW in {DC_PHASES[-1][0]} on the "
+            f"{_DC_POC_MW:g} MW connection, which it could not; the case flags it "
+            "(counterfactual_exceeds_connection).",
         ],
         "provenance": PROVENANCE,
     },

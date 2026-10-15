@@ -136,6 +136,19 @@ def test_the_staged_poc_chain_is_loss_free_and_says_so():
 
 # ── the route binds what the template ships ────────────────────────────────
 
+def test_the_study_notes_say_the_poc_is_loss_free_and_the_comparison_exceeds_the_connection():
+    """Review of #283: the Guided user sees the loss-free PoC and the grid-only
+    comparison's 2035 overload in the notes, not only in the ledger."""
+    n = T.BUILDERS[TID]()
+    notes = " ".join(T.TEMPLATE_META[TID]["study_notes"])
+    year, it_mw, pue = T.DC_PHASES[-1]
+    assert "losses are not modelled" in notes
+    assert f"{it_mw * pue:g} MW in {year}" in notes
+    assert f"{n.links.at['grid_import', 'p_nom']:g} MW connection" in notes
+    assert it_mw * pue > n.links.at["grid_import", "p_nom"]     # the note's claim holds
+    assert "counterfactual_exceeds_connection" in notes
+
+
 def test_from_template_binds_the_commercial_block_and_the_finance_inputs(
         client, tmp_path, monkeypatch, tmp_projects_dir):
     from routers import projects as projects_router

@@ -954,6 +954,9 @@ export interface SaveResult {
 }
 export interface BundleImportResult {
   imported: string; summary: ImportSummary
+  /** from_template only (slice D4): a shipped `commercial` or `finance` block
+   *  that did not bind on the new project, dropped from its settings. */
+  solver_config_issues?: { field: 'commercial' | 'finance'; code: string; message: string }[]
 }
 export interface TimeseriesData {
   index: string[]; columns: string[]; data: number[][]

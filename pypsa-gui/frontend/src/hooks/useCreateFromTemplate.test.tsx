@@ -133,6 +133,33 @@ describe('useCreateFromTemplate', () => {
     await waitFor(() => expect(hook.result.current.isPending).toBe(false))
   })
 
+  it('a template block the backend dropped is shown, and the project is still created', async () => {
+    const toast = (await import('react-hot-toast')).default
+    vi.mocked(projectsApi.createFromTemplate).mockResolvedValue({
+      imported: NAME, summary: { buses: 3 },
+      solver_config_issues: [{ field: 'commercial', code: 'value_flows_invalid',
+                               message: 'owner asset genset_9 is not in the network' }],
+    } as never)
+    const { hook } = render('/app')
+    act(() => hook.result.current.mutate('eh_datacenter_staged'))
+    await waitFor(() => expect(calls).toContain(`tab:${NAME}`))
+    expect(toast.success).toHaveBeenCalledWith(`Created '${NAME}' from template`)
+    expect(toast).toHaveBeenCalledWith(
+      "The template's commercial settings were not applied: owner asset genset_9 is not in "
+      + 'the network (value_flows_invalid). Set them again before running the investment case.',
+      expect.objectContaining({ icon: '⚠️' }))
+  })
+
+  it('no dropped block: no warning', async () => {
+    const toast = (await import('react-hot-toast')).default
+    vi.mocked(projectsApi.createFromTemplate).mockResolvedValue(
+      { imported: NAME, summary: { buses: 3 }, solver_config_issues: [] } as never)
+    const { hook } = render('/app')
+    act(() => hook.result.current.mutate('eh_datacenter_staged'))
+    await waitFor(() => expect(calls).toContain(`tab:${NAME}`))
+    expect(toast).not.toHaveBeenCalled()
+  })
+
   it('a 409 because a study is running: a plain message, not the status line', async () => {
     const toast = (await import('react-hot-toast')).default
     vi.mocked(projectsApi.createFromTemplate).mockRejectedValue(Object.assign(
