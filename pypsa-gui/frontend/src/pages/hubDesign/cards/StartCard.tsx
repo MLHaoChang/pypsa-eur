@@ -8,7 +8,8 @@
 // decision-study questions and starts one through the wizard's own entry hook
 // (`useDecisionEntry`): the intake opens in the decision panel, and the study
 // builds its own project, so the open one is not changed.
-import { FolderOpen, Hexagon, Scale } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { FolderOpen, Hexagon, Scale, SlidersHorizontal } from 'lucide-react'
 import { GUIDED_QUESTIONS, useDecisionEntry } from '../../decision/useDecisionEntry'
 import { TEMPLATES } from '../../../layout/NewProjectWizard'
 import { useCreateFromTemplate } from '../../../hooks/useCreateFromTemplate'
@@ -19,8 +20,10 @@ import { CardShell } from '../shared/CardShell'
 import { Term } from '../shared/Term'
 import { useHubStudy, useHubTemplate } from '../useHubData'
 import { STUDY_RUNNING_SWITCH } from '../../../hooks/useCreateFromTemplate'
+import { GenericSiteForm } from './GenericSiteForm'
 import { plainIds } from '../plainWords'
 
+// The generic site (`eh_site`) is not in the table: it has its own tile and form.
 const HUB_TEMPLATES = TEMPLATES.filter(t => t.id.startsWith('eh_'))
 
 /** One plain line of purpose per example site. The wizard's own blurbs
@@ -55,6 +58,18 @@ export function StartCard() {
   // A new project would replace the network under a running study (the
   // backend refuses with 409): say so on the buttons instead.
   const { running } = useHubStudy()
+  // The Site card's "Start a new project from these values" opens the form
+  // with that site's values.
+  const siteSeed = useHubDesignStore(s => s.siteSeed)
+  const setSiteSeed = useHubDesignStore(s => s.setSiteSeed)
+  const [formToggled, setSiteFormOpen] = useState(false)
+  const siteFormRequested = useHubDesignStore(s => s.siteFormRequested)
+  useEffect(() => {
+    if (!siteFormRequested) return
+    setSiteFormOpen(true)
+    useHubDesignStore.getState().setSiteFormRequested(false)
+  }, [siteFormRequested])
+  const siteFormOpen = formToggled || siteSeed !== null
 
   return (
     <CardShell step="start" testId="hub-card-start" title="Start">
@@ -95,7 +110,24 @@ export function StartCard() {
                 </button>
               )
             })}
+            <button type="button" data-testid="hub-start-own-site"
+              aria-expanded={siteFormOpen}
+              onClick={() => { if (siteFormOpen) setSiteSeed(null); setSiteFormOpen(!siteFormOpen) }}
+              className={`flex flex-col gap-1 rounded-lg border p-3 text-left hover:border-accent/60 hover:bg-accent/5
+                ${siteFormOpen ? 'border-accent bg-accent/5' : 'border-border'}`}>
+              <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-text">
+                <SlidersHorizontal size={12} className="text-accent" /> Your own site
+              </span>
+              <span className="text-[11px] leading-relaxed text-muted">
+                A factory, hospital, office or campus: set its load and grid connection, and plan what to build.
+              </span>
+            </button>
           </div>
+          {siteFormOpen && (
+            <GenericSiteForm key={siteSeed ? 'seed' : 'preset'} create={create} seed={siteSeed}
+              onCancel={() => { setSiteSeed(null); setSiteFormOpen(false) }}
+              disabledReason={running ? STUDY_RUNNING_SWITCH : null} />
+          )}
         </div>
 
         <button type="button" data-testid="hub-start-own-network"

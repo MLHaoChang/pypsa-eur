@@ -172,3 +172,23 @@ describe('StartCard', () => {
     expect(screen.getByTestId('hub-start-invest-reason').textContent).toMatch(/Create or open a project first/)
   })
 })
+
+describe('StartCard — your own site (G2)', () => {
+  it("the tile opens the generic site form; the wizard's request opens it too, once", async () => {
+    const { projectsApi } = await import('../../../api/projects')
+    const formJson = (await import('../siteFormFixture.json')).default
+    vi.spyOn(projectsApi, 'getSiteTemplateForm').mockResolvedValue(formJson as never)
+    const user = mount()
+    expect(screen.queryByTestId('site-form')).toBeNull()
+    await user.click(screen.getByTestId('hub-start-own-site'))
+    expect(await screen.findByTestId('site-form')).toBeTruthy()
+    // the tile is not one of the example templates
+    expect(screen.getByTestId('hub-start-templates')
+      .querySelectorAll('[data-testid^="hub-start-template-"]').length).toBe(4)
+    cleanup()
+    useHubDesignStore.setState({ siteFormRequested: true })
+    mount()
+    expect(await screen.findByTestId('site-form')).toBeTruthy()
+    expect(useHubDesignStore.getState().siteFormRequested).toBe(false)
+  })
+})

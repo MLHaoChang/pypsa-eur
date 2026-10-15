@@ -1535,6 +1535,17 @@ def _unique_project_name(base: str) -> str:
         suffix += 1
 
 
+@router.get("/from_template/eh_site/form")
+def get_site_template_form(user: User | None = Depends(optional_user)) -> dict:
+    """The generic site's form data (generic-site E2E, G2): each site type's
+    full preset, the load shapes and the bounds, so the Guided form shows
+    every default before a project exists. Global, read-only."""
+    from services import project_registry
+
+    project_registry.require_user(user)
+    return _eh_site_module().form_schema()
+
+
 @router.post("/from_template/{template_id}")
 def create_from_template(
     template_id: str,
