@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from fastapi import HTTPException
@@ -69,6 +69,7 @@ class ForegroundJob:
     project_uuid: str | None
     kind: str | None
     created_at: float
+    registered_at: float = field(default_factory=time.time)
 
 
 @dataclass
@@ -81,6 +82,7 @@ class StudyJob:
     owner_user_id: str | None
     project_uuid: str | None
     created_at: float
+    registered_at: float = field(default_factory=time.time)
 
 
 @dataclass
@@ -93,6 +95,7 @@ class ReportJobHandle:
     owner_user_id: str | None
     project_uuid: str | None
     created_at: float
+    registered_at: float = field(default_factory=time.time)
 
 
 _LOCK = threading.RLock()
@@ -115,6 +118,21 @@ def _bind_activity(job_id, ctx, key=None):
             )
             while len(_ACTIVITY_BINDINGS) > 512:
                 _ACTIVITY_BINDINGS.popitem(last=False)
+    return ctx
+
+
+def _remember_activity(handle, ctx, snap=None):
+    from harness import activity_history
+
+    if ctx is None or str(ctx.project_uuid) != str(handle.project_uuid):
+        return
+    if snap is None:
+        snap = _snapshot_bound_job(handle.job_id, ctx)
+    activity_history.remember(str(handle.owner_user_id), str(handle.project_uuid), {
+        'source_id': handle.job_id, 'family': handle.family,
+        'tool_name': handle.tool_name, 'native_status': snap['status'],
+        'registered_at': handle.registered_at,
+    })
 
 
 def _snapshot_bound_job(job_id, ctx):
@@ -163,6 +181,8 @@ def activity_jobs(ctx, *, owner_id: str, project_id: str) -> list[dict]:
         rows.append({
             'source_id': handle.job_id, 'family': handle.family,
             'title': handle.tool_name.replace('_', ' '),
+            'tool_name': handle.tool_name,
+            'registered_at': handle.registered_at,
             'native_status': snap.get('status') or 'unknown',
             'stage': str(snap['stage'])[:120] if snap.get('stage') else None,
             'tool_use_id': handle.tool_use_id,
@@ -210,7 +230,9 @@ def register_foreground_solve(
             kind=kind,
             created_at=time.monotonic(),
         )
-        _bind_activity(job_id, ctx)
+        origin = _bind_activity(job_id, ctx)
+        handle = _FOREGROUND[job_id]
+    _remember_activity(handle, origin)
     return job_id
 
 
@@ -242,7 +264,9 @@ def register_study_job(
             project_uuid=project_uuid,
             created_at=time.monotonic(),
         )
-        _bind_activity(job_id, ctx, study_key)
+        origin = _bind_activity(job_id, ctx, study_key)
+        handle = _STUDIES[job_id]
+    _remember_activity(handle, origin)
     return job_id
 
 
@@ -268,7 +292,9 @@ def register_report_job(
             project_uuid=project_uuid,
             created_at=time.monotonic(),
         )
-        _bind_activity(job_id, ctx, REPORT_STATE_KEY)
+        origin = _bind_activity(job_id, ctx, REPORT_STATE_KEY)
+        handle = _REPORTS[job_id]
+    _remember_activity(handle, origin)
     return job_id
 
 
@@ -369,6 +395,8 @@ def wait_foreground_job(
                 'family': FOREGROUND_FAMILY,
             })
         if terminal or cancelled or time.monotonic() >= deadline:
+            if terminal:
+                _remember_activity(handle, ctx, snap)
             view = _job_view(handle, snap)
             return {
                 'job': view,
@@ -455,6 +483,8 @@ def wait_study_job(
                 'progress': snap.get('progress'),
             })
         if terminal or cancelled or time.monotonic() >= deadline:
+            if terminal:
+                _remember_activity(handle, ctx, snap)
             view = _study_job_view(handle, snap)
             abort_hint = (
                 'abort the investment case HTTP route'
@@ -541,6 +571,8 @@ def wait_report_job(
                 'section': snap.get('section'),
             })
         if terminal or cancelled or time.monotonic() >= deadline:
+            if terminal:
+                _remember_activity(handle, ctx, snap)
             view = _report_job_view(handle, snap)
             return {
                 'job': view,

@@ -108,9 +108,15 @@ def collect(*, db, user, project):
         if str(active.project_uuid) == pid:
             ctx = active
     rows, warnings = _tasks(project_registry.project_dir(project), pid, owner)
-    for native in job_adapters.activity_jobs(ctx, owner_id=owner, project_id=pid):
+    from harness import activity_history
+    native_jobs = job_adapters.activity_jobs(ctx, owner_id=owner, project_id=pid)
+    observed_jobs, history_warnings = activity_history.project_rows(owner, pid, native_jobs)
+    warnings.extend(history_warnings)
+    for native in observed_jobs:
         rows.append(_row(pid, native['family'], native['source_id'], native['title'],
-                         native['native_status'], stage=native['stage']))
+                         native['native_status'], stage=native['stage'],
+                         observation=native['observation'], observed_at=native.get('observed_at'),
+                         reason=native.get('reason')))
     # Use native persisted/live precedence and project authorization. Unlike
     # the global queue UI, Activity excludes even redacted foreign queue rows.
     prefix = queue_router._org_prefix(db, user)
@@ -125,7 +131,7 @@ def collect(*, db, user, project):
         rows.append(_row(pid, 'confirmation', pending['source_id'], pending['tool_name'].replace('_', ' '),
                          'waiting_for_approval', session_id=pending['session_id'],
                          reason='Open the originating conversation to inspect and decide.'))
-    warnings.append('transient_jobs_require_originating_worker')
+    warnings.append('activity_history_is_bounded_observation')
     # Fixed ordering means duplicate/reordered fetches cannot create new rows.
     rows.sort(key=lambda r: (0 if r['status'] in {'running', 'queued'} else 1 if r['needs_you'] else 2, r['id']))
     return rows, sorted(set(warnings))

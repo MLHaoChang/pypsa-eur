@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Retain bounded owned assistant job observations across application restarts, distinguish retained history from live work, and mark unobserved outcomes for review without recreating jobs or approvals.

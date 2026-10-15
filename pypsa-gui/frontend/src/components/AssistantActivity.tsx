@@ -8,6 +8,12 @@ const FILTERS: [ActivityFilter, string][] = [
   ['scheduled', 'Scheduled'], ['completed', 'Completed'],
 ]
 
+function observationTime(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  const date = new Date(value * 1000)
+  return Number.isFinite(date.getTime()) ? date : null
+}
+
 /** A read-only observer: closing it changes no job, task or decision. */
 export default function AssistantActivity({ onConversation }: { onConversation: () => void }) {
   const project = useUIStore(s => s.currentProject)
@@ -111,22 +117,33 @@ export default function AssistantActivity({ onConversation }: { onConversation: 
       {data?.resnapshot_required && <p role="status">Activity recovered from a fresh snapshot.</p>}
       {filter === 'scheduled' && data && <p>Scheduled work is not available yet.</p>}
       {data && data.items.length === 0 && filter !== 'scheduled' && <p>No matching work in this snapshot.</p>}
-      {data?.items.map(item => <article key={item.id} className="border border-border rounded p-3 space-y-1">
+      {data?.items.map(item => {
+        const recorded = observationTime(item.observed_at)
+        return <article key={item.id} className="border border-border rounded p-3 space-y-1">
         <p className="font-medium break-words">{item.title}</p>
         <p>{item.status.replace(/_/g, ' ')} <span className="text-muted">· {item.family.replace(/_/g, ' ')}</span></p>
         <p className="text-xs text-muted">Native status: {item.native_status}{item.stage ? ` · ${item.stage}` : ''}</p>
+        {item.observation && <p className="text-xs text-muted">
+          {item.observation === 'retained' ? 'Retained observation' : 'Current native observation'}
+          {recorded && <> · Last recorded <time dateTime={recorded.toISOString()}>
+            {recorded.toLocaleString()}
+          </time></>}
+        </p>}
         <p className="text-xs text-muted break-all">Source: {item.source_id}</p>
         {item.reason && <p className="text-xs">{item.reason}</p>}
         {item.status === 'unavailable' && <p className="text-xs">The originating job state cannot be established. Inspect it before retrying.</p>}
         {item.family === 'confirmation' && (item.session_id === session
           ? <button type="button" className="text-accent" onClick={onConversation}>Open originating chat</button>
           : <p className="text-xs">This decision belongs to another conversation. Return there to inspect it; no approval is granted here.</p>)}
-      </article>)}
+      </article>})}
       {data?.next_page && <button type="button" className="text-accent" disabled={loadingMore} onClick={() => void more()}>
         {loadingMore ? 'Loading…' : 'Load more activity'}
       </button>}
-      {data && <p className="text-xs text-muted">Transient job history requires its originating application worker. Completion does not certify engineering results.</p>}
-      {data?.warnings.some(w => w !== 'transient_jobs_require_originating_worker') &&
+      {data && <p className="text-xs text-muted">History covers up to 30 days and the newest 512 job origins per owner/project. Unobserved outcomes remain unknown. Completion does not certify engineering results.</p>}
+      {data?.warnings.includes('activity_history_unavailable') && <p role="status" className="text-xs">
+        Retained job history could not be read or saved. Live observations may still be shown; missing history does not mean work never ran.
+      </p>}
+      {data?.warnings.some(w => !['activity_history_is_bounded_observation', 'activity_history_unavailable'].includes(w)) &&
         <p role="status" className="text-xs">Some activity sources are unavailable or bounded. Refresh or inspect their native records for more detail.</p>}
     </div>
   </section>
