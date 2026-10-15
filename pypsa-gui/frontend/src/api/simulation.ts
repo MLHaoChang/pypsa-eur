@@ -1,4 +1,5 @@
 import client from './client'
+import type { SiteParams } from '../pages/hubDesign/genericSite'
 import type { SolverConfig, SimulationStatus, PreflightResult } from './types'
 
 export const simulationApi = {
@@ -932,6 +933,16 @@ export interface EhTemplateMeta {
   dtc_attribution?: EhDtcAttribution | null
   study_notes?: string[]
   provenance?: string
+  // The generic site (`eh_site`, G1/G2): its type, the full parameters, the
+  // ones the user set, the load and connection schedule and the ledger.
+  site_type?: string
+  site_type_label?: string
+  params?: SiteParams
+  entered?: string[]
+  projected_load?: { year: number; peak_mw?: number; it_mw?: number; pue?: number; note?: string }[]
+  energization?: { year: number; available_import_mw: number; connection_mw: number;
+    source?: string; note?: string }[]
+  ledger?: { item: string; value: string; source: string; note?: string }[]
 }
 
 /** Read-only preflight from GET /results/eh_readiness (P14). */

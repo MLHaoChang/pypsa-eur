@@ -62,7 +62,24 @@ export interface CreateFromTemplateOptions {
   onCreated?: (name: string) => void
 }
 
-/** `{ mutate(templateId), isPending, variables }` — the wizard's mutation. */
+/** A template created with parameters: the generic site (G2). */
+export interface TemplateCreate {
+  templateId: string
+  params: Record<string, unknown>
+  name?: string
+}
+
+/** A refusal the generic site form shows beside its field (422
+ *  `site_params_invalid`), or null. */
+export function siteParamsRefusal(e: unknown): { field: string; message: string } | null {
+  const res = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response
+  const d = res?.data?.detail as { code?: string; field?: string; message?: string } | undefined
+  return res?.status === 422 && d?.code === 'site_params_invalid' && d.field && d.message
+    ? { field: d.field, message: d.message } : null
+}
+
+/** `{ mutate(templateId), isPending, variables }` — the wizard's mutation.
+ *  `mutate({templateId, params})` creates the generic site from its form. */
 export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
   const qc = useQueryClient()
   const setCurrentProject = useUIStore(s => s.setCurrentProject)
@@ -74,7 +91,9 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
   // endpoint, which copies the bundled network.nc into a fresh project dir and
   // loads it — same success path as FromFileTab's bundle import.
   return useMutation({
-    mutationFn: (templateId: string) => projectsApi.createFromTemplate(templateId),
+    mutationFn: (arg: string | TemplateCreate) => typeof arg === 'string'
+      ? projectsApi.createFromTemplate(arg)
+      : projectsApi.createFromTemplate(arg.templateId, arg.name, arg.params),
     onSuccess: (res) => {
       // G4 (guided-mode spec §3.4): a new project starts Guided unless the
       // user chose a mode explicitly. First, before any navigation.
@@ -93,6 +112,7 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
       onCreated?.(res.imported)
       openInWorkbench(res.imported)
     },
-    onError: (e: unknown) => toast.error(createErrorMessage(e)),
+    // A refused site parameter is shown beside its field by the form.
+    onError: (e: unknown) => { if (!siteParamsRefusal(e)) toast.error(createErrorMessage(e)) },
   })
 }

@@ -1,0 +1,400 @@
+{
+ "site_types": [
+  {
+   "id": "industrial",
+   "label": "Industrial plant",
+   "example": "a factory or process plant"
+  },
+  {
+   "id": "commercial",
+   "label": "Commercial building",
+   "example": "offices, retail or a hotel"
+  },
+  {
+   "id": "hospital",
+   "label": "Hospital",
+   "example": "a hospital or clinic that must keep its critical care on"
+  },
+  {
+   "id": "campus",
+   "label": "University or campus",
+   "example": "several buildings on one connection"
+  },
+  {
+   "id": "other",
+   "label": "Other site",
+   "example": "anything else: start from round numbers"
+  }
+ ],
+ "presets": {
+  "industrial": {
+   "site_type": "industrial",
+   "name": null,
+   "fault_level_mva": 400.0,
+   "energization": [
+    {
+     "year": 2027,
+     "mw": 20.0
+    },
+    {
+     "year": 2030,
+     "mw": 20.0
+    },
+    {
+     "year": 2035,
+     "mw": 20.0
+    }
+   ],
+   "horizon_end": 2045,
+   "stages": [
+    {
+     "year": 2027,
+     "peak_mw": 8.0
+    },
+    {
+     "year": 2030,
+     "peak_mw": 12.0
+    },
+    {
+     "year": 2035,
+     "peak_mw": 15.0
+    }
+   ],
+   "load_profile": "industrial",
+   "critical_share": 0.4,
+   "connection_mw": 20.0,
+   "existing": {
+    "gensets": {
+     "count": 2,
+     "unit_mw": 2.0,
+     "fuel": "gas"
+    },
+    "pv_mw": 1.0,
+    "battery": {
+     "mw": 0.0,
+     "mwh": 0.0
+    },
+    "ups": {
+     "mw": 6.6,
+     "minutes": 15.0
+    }
+   },
+   "candidates": {
+    "genset": {
+     "enabled": true,
+     "max_mw": 12.0
+    },
+    "bess": {
+     "enabled": true,
+     "max_mw": 8.0
+    },
+    "pv": {
+     "enabled": true,
+     "max_mw": 5.0
+    }
+   }
+  },
+  "commercial": {
+   "site_type": "commercial",
+   "name": null,
+   "fault_level_mva": 100.0,
+   "energization": [
+    {
+     "year": 2027,
+     "mw": 5.0
+    },
+    {
+     "year": 2030,
+     "mw": 5.0
+    },
+    {
+     "year": 2035,
+     "mw": 5.0
+    }
+   ],
+   "horizon_end": 2045,
+   "stages": [
+    {
+     "year": 2027,
+     "peak_mw": 2.0
+    },
+    {
+     "year": 2030,
+     "peak_mw": 3.0
+    },
+    {
+     "year": 2035,
+     "peak_mw": 4.0
+    }
+   ],
+   "load_profile": "commercial",
+   "critical_share": 0.15,
+   "connection_mw": 5.0,
+   "existing": {
+    "gensets": {
+     "count": 2,
+     "unit_mw": 0.5,
+     "fuel": "diesel"
+    },
+    "pv_mw": 0.5,
+    "battery": {
+     "mw": 0.0,
+     "mwh": 0.0
+    },
+    "ups": {
+     "mw": 0.66,
+     "minutes": 15.0
+    }
+   },
+   "candidates": {
+    "genset": {
+     "enabled": true,
+     "max_mw": 3.0
+    },
+    "bess": {
+     "enabled": true,
+     "max_mw": 3.0
+    },
+    "pv": {
+     "enabled": true,
+     "max_mw": 2.0
+    }
+   }
+  },
+  "hospital": {
+   "site_type": "hospital",
+   "name": null,
+   "fault_level_mva": 160.0,
+   "energization": [
+    {
+     "year": 2027,
+     "mw": 8.0
+    },
+    {
+     "year": 2030,
+     "mw": 8.0
+    },
+    {
+     "year": 2035,
+     "mw": 8.0
+    }
+   ],
+   "horizon_end": 2045,
+   "stages": [
+    {
+     "year": 2027,
+     "peak_mw": 4.0
+    },
+    {
+     "year": 2030,
+     "peak_mw": 5.0
+    },
+    {
+     "year": 2035,
+     "peak_mw": 6.0
+    }
+   ],
+   "load_profile": "hospital",
+   "critical_share": 0.5,
+   "connection_mw": 8.0,
+   "existing": {
+    "gensets": {
+     "count": 3,
+     "unit_mw": 2.0,
+     "fuel": "diesel"
+    },
+    "pv_mw": 0.3,
+    "battery": {
+     "mw": 0.0,
+     "mwh": 0.0
+    },
+    "ups": {
+     "mw": 3.3,
+     "minutes": 15.0
+    }
+   },
+   "candidates": {
+    "genset": {
+     "enabled": true,
+     "max_mw": 6.0
+    },
+    "bess": {
+     "enabled": true,
+     "max_mw": 4.0
+    },
+    "pv": {
+     "enabled": true,
+     "max_mw": 1.0
+    }
+   }
+  },
+  "campus": {
+   "site_type": "campus",
+   "name": null,
+   "fault_level_mva": 500.0,
+   "energization": [
+    {
+     "year": 2027,
+     "mw": 25.0
+    },
+    {
+     "year": 2030,
+     "mw": 25.0
+    },
+    {
+     "year": 2035,
+     "mw": 25.0
+    }
+   ],
+   "horizon_end": 2045,
+   "stages": [
+    {
+     "year": 2027,
+     "peak_mw": 10.0
+    },
+    {
+     "year": 2030,
+     "peak_mw": 14.0
+    },
+    {
+     "year": 2035,
+     "peak_mw": 18.0
+    }
+   ],
+   "load_profile": "campus",
+   "critical_share": 0.2,
+   "connection_mw": 25.0,
+   "existing": {
+    "gensets": {
+     "count": 2,
+     "unit_mw": 3.0,
+     "fuel": "gas"
+    },
+    "pv_mw": 2.0,
+    "battery": {
+     "mw": 2.0,
+     "mwh": 4.0
+    },
+    "ups": {
+     "mw": 3.96,
+     "minutes": 15.0
+    }
+   },
+   "candidates": {
+    "genset": {
+     "enabled": true,
+     "max_mw": 12.0
+    },
+    "bess": {
+     "enabled": true,
+     "max_mw": 10.0
+    },
+    "pv": {
+     "enabled": true,
+     "max_mw": 6.0
+    }
+   }
+  },
+  "other": {
+   "site_type": "other",
+   "name": null,
+   "fault_level_mva": 240.0,
+   "energization": [
+    {
+     "year": 2027,
+     "mw": 12.0
+    },
+    {
+     "year": 2030,
+     "mw": 12.0
+    },
+    {
+     "year": 2035,
+     "mw": 12.0
+    }
+   ],
+   "horizon_end": 2045,
+   "stages": [
+    {
+     "year": 2027,
+     "peak_mw": 5.0
+    },
+    {
+     "year": 2030,
+     "peak_mw": 7.0
+    },
+    {
+     "year": 2035,
+     "peak_mw": 9.0
+    }
+   ],
+   "load_profile": "flat",
+   "critical_share": 0.3,
+   "connection_mw": 12.0,
+   "existing": {
+    "gensets": {
+     "count": 2,
+     "unit_mw": 2.0,
+     "fuel": "diesel"
+    },
+    "pv_mw": 1.0,
+    "battery": {
+     "mw": 0.0,
+     "mwh": 0.0
+    },
+    "ups": {
+     "mw": 2.97,
+     "minutes": 15.0
+    }
+   },
+   "candidates": {
+    "genset": {
+     "enabled": true,
+     "max_mw": 8.0
+    },
+    "bess": {
+     "enabled": true,
+     "max_mw": 5.0
+    },
+    "pv": {
+     "enabled": true,
+     "max_mw": 3.0
+    }
+   }
+  }
+ },
+ "load_profiles": [
+  {
+   "id": "industrial",
+   "label": "Two shifts on weekdays"
+  },
+  {
+   "id": "commercial",
+   "label": "Office hours on weekdays"
+  },
+  {
+   "id": "hospital",
+   "label": "Around the clock, busier by day"
+  },
+  {
+   "id": "campus",
+   "label": "Teaching day with an evening shoulder"
+  },
+  {
+   "id": "flat",
+   "label": "Nearly flat"
+  }
+ ],
+ "bounds": {
+  "max_stages": 3,
+  "year_min": 2025,
+  "year_max": 2060,
+  "peak_mw_max": 500.0,
+  "connection_mw_max": 1000.0,
+  "max_gensets": 8,
+  "unit_mw_max": 50.0,
+  "ups_minutes_max": 240.0,
+  "ups_minutes_min": 10.0,
+  "horizon_end": 2045
+ }
+}

@@ -10,7 +10,8 @@ import type { ProjectInfo } from '../api/types'
 import { projectsApi } from '../api/projects'
 import { formatApiDetail } from '../api/client'
 import { useAuthMode } from '../auth/AuthModeProvider'
-import { useCreateFromTemplate, useOpenInWorkbench } from '../hooks/useCreateFromTemplate'
+import { useCreateFromTemplate, useOpenInWorkbench, useOptionalNavigate } from '../hooks/useCreateFromTemplate'
+import { useHubDesignStore } from '../pages/hubDesign/hubDesignStore'
 import FromFolderTab from './FromFolderTab'
 import { ioApi } from '../api/io'
 import { networkApi } from '../api/network'
@@ -77,7 +78,7 @@ export const TEMPLATES = [
   { id: 'eh_h2_hub', name: 'Industrial Hydrogen Hub', description: 'Grid-connected site with wind, PV, electrolyser, H2 storage and fuel cell, critical process load and H2 offtake. Ready for an Energy Hub study on a strong grid.', buses: 3, lines: 0, badge: 'energy hub', available: true },
   { id: 'eh_microgrid', name: 'Island Microgrid', description: 'Island system that must run without its subsea tie: PV, wind, battery, diesel fleet, critical hospital feeder. Ready for an off-grid Energy Hub study.', buses: 3, lines: 0, badge: 'energy hub', available: true },
   // E2E demo plan 2026-10-14, slice 8: the same campus planned from a projected load over three periods.
-  { id: 'eh_datacenter_staged', name: 'Data Center Energy Hub (staged growth)', description: 'The data center planned from a projected load: IT grows 12 → 24 → 36 MW over 2027, 2030 and 2035 while the utility energizes a 55 MW connection in steps (20 MW until 2030). Genset and battery candidates per period. Multi-period; ready for an Energy Hub study on a connection limited until it is fully energized.', buses: 3, lines: 0, badge: 'energy hub', available: true },
+  { id: 'eh_datacenter_staged', name: 'Data Center Energy Hub (staged growth)', description: 'The data center planned from a projected load: IT grows 12 → 24 → 36 MW over 2027, 2030 and 2035 while the utility energizes a 55 MW connection in steps (15 MW until 2030). Genset and battery candidates per period. Multi-period; ready for an Energy Hub study on a connection limited until it is fully energized.', buses: 3, lines: 0, badge: 'energy hub', available: true },
 ] as const
 
 export default function NewProjectWizard({
@@ -294,6 +295,18 @@ function TemplateTab({ onClose }: { onClose: () => void }) {
   // Which card (if any) is mid-import — used to show a per-card spinner label.
   const pendingId = importMut.isPending ? importMut.variables : null
 
+  // The generic site is set up in a form, not created on click: open Guided
+  // Start with the form (G2; UX: a card in this tab, not a new tab).
+  const navigate = useOptionalNavigate()
+  const openSiteForm = useCallback(() => {
+    onClose()
+    const hub = useHubDesignStore.getState()
+    hub.setStep('start', { user: true })
+    hub.setSiteFormRequested(true)
+    useUIStore.getState().setSlidePanel('hubDesign')
+    if (navigate && window.location.pathname !== '/app') navigate('/app')
+  }, [onClose, navigate])
+
   return (
     <div className="p-5">
       <div className="flex items-start gap-2 mb-3 px-2.5 py-2 bg-bg/60 border border-border/60 rounded text-[11px] text-muted">
@@ -340,6 +353,21 @@ function TemplateTab({ onClose }: { onClose: () => void }) {
             </button>
           )
         })}
+        <button
+          type="button"
+          data-testid="wizard-template-own-site"
+          onClick={openSiteForm}
+          disabled={importMut.isPending}
+          title="Set up your own site in the Guided form"
+          className="text-left border rounded-lg p-3.5 flex flex-col gap-2 transition-all border-border hover:border-accent/60 hover:bg-accent/5 cursor-pointer"
+        >
+          <span className="text-sm font-semibold text-text">Your own site</span>
+          <div className="text-[11px] text-muted leading-relaxed flex-1">
+            A factory, hospital, office building or campus that is not a data center: choose its type,
+            set its load and grid connection, and plan what to build. Opens the Guided form.
+          </div>
+          <div className="text-[10px] text-muted font-mono">generic site · energy hub</div>
+        </button>
       </div>
     </div>
   )

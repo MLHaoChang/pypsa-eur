@@ -6,7 +6,10 @@
 // Off-grid (P24-BE gate N4): the pack islands the import, so a tagged tie is
 // "normally open", not a grid connection with a rating, and its missing
 // outage data is not a gap — the island is studied without it.
-import type { EhArchetype, EhReadiness } from '../../../api/simulation'
+import type { EhArchetype, EhReadiness, EhTemplateMeta } from '../../../api/simulation'
+import Kpi from '../../../components/Kpi'
+import Explain from '../../../components/Explain'
+import { kpiFigure } from '../../../utils/format'
 import { useHubDesignStore } from '../hubDesignStore'
 import { siteFixText, type SiteFix } from '../delegate'
 import { CardShell, DelegateButton } from '../shared/CardShell'
@@ -88,6 +91,73 @@ function SiteRow({ k, term, label, row, liveStudy }: {
   )
 }
 
+/** "3.6 MW" at the tile rounding, without padding zeros. */
+const mwText = (x: number) => `${kpiFigure(String(x), 'MW').value.replace(/\.0+$|(\.\d*?)0+$/, '$1')} MW`
+
+/** The generic site's must-stay-on load as entered: "3.6 MW, 30 % of peak". */
+export function genericCritical(t: EhTemplateMeta): string | null {
+  const p = t.params
+  if (!t.site_type || !p) return null
+  const last = p.stages[p.stages.length - 1]
+  return `${mwText(p.critical_share * last.peak_mw)} in ${last.year}, `
+    + `${Math.round(p.critical_share * 100)} % of peak`
+}
+
+/** The generic site's load and connection schedule, read-only: everything
+ *  the form asked is shown here, never asked again (G2). */
+function SiteSchedule({ template }: { template: EhTemplateMeta }) {
+  const setSiteSeed = useHubDesignStore(s => s.setSiteSeed)
+  const setStep = useHubDesignStore(s => s.setStep)
+  const p = template.params
+  if (!p) return null
+  const avail = new Map((template.energization ?? []).map(e => [e.year, e.available_import_mw]))
+  return (
+    <section data-testid="hub-site-schedule" aria-label="Load and grid connection"
+      className="flex flex-col gap-2">
+      <p data-testid="hub-site-kind" className="text-[12px] text-text">
+        <span className="text-muted">Site type:</span> {template.site_type_label ?? template.site_type}
+      </p>
+      <div className="flex flex-wrap items-start gap-3">
+        <table className="text-[12px]">
+          <thead>
+            <tr className="text-left text-muted">
+              <th className="pr-4 font-normal">Year</th>
+              <th className="pr-4 font-normal">Peak load (MW)</th>
+              <th className="font-normal">Available from grid (MW)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {p.stages.map(s => (
+              <tr key={s.year} data-testid={`hub-site-stage-${s.year}`}>
+                <td className="pr-4">{s.year}</td>
+                <td className="pr-4">{mwText(s.peak_mw).replace(' MW', '')}</td>
+                <td>{mwText(avail.get(s.year) ?? p.connection_mw).replace(' MW', '')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="w-44">
+          <Kpi testId="hub-site-connection" label="Connection limit" value={String(p.connection_mw)}
+            unit="MW" basis="once fully energized" />
+        </div>
+      </div>
+      <Explain origin="computed" text={[
+        'Synthetic illustrative numbers unless you set them.',
+        (template.ledger ?? []).some(r => r.item === 'power factor and load damping')
+          ? 'The electrical studies assume power factor 0.98 and no load damping.' : '',
+      ].filter(Boolean).join(' ')} />
+      <button type="button" data-testid="hub-site-new-from-values"
+        onClick={() => {
+          setSiteSeed({ params: p, entered: template.entered ?? [] })
+          setStep('start', { user: true })
+        }}
+        className="self-start text-[12px] text-accent hover:underline">
+        Start a new project from these values
+      </button>
+    </section>
+  )
+}
+
 export function SiteCard() {
   const { running, isPending: studyPending } = useHubStudy()
   const { template, isPending: templatePending } = useHubTemplate()
@@ -96,6 +166,9 @@ export function SiteCard() {
   const { readiness, isError } = useHubReadiness(template, running,
     !studyPending && !templatePending)
   const rows = readiness ? siteRows(readiness, archetype) : null
+  // A generic site says what was entered, not a bus name (UX G2 note 7).
+  const critical = template ? genericCritical(template) : null
+  if (rows && critical) rows.critical = { value: critical, gap: false }
   const liveStudy = useLiveStudyRunning()
 
   return (
@@ -109,6 +182,8 @@ export function SiteCard() {
           {SITE_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
         </select>
       </label>
+
+      {template?.site_type && <SiteSchedule template={template} />}
 
       <div data-testid="hub-site-readiness" className="flex flex-col gap-2">
         {running ? (

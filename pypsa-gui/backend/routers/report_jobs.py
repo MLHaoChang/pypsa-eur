@@ -49,6 +49,7 @@ from routers.deps import AuthorizedProject, ProjectAccessDep
 from routers.reports import (
     _bound,
     _check_lock,
+    _current_chapter_sources,
     _current_eh_report,
     _current_study_report,
     _http,
@@ -149,7 +150,7 @@ def _evidence_for(project: AuthorizedProject):
     study_report = _current_study_report()
     worksheet = load_worksheet(project.directory)
     evidence = collect_evidence(study_report=study_report, eh_report=eh_report,
-                                worksheet=worksheet)
+                                worksheet=worksheet, **_current_chapter_sources(project))
     if not any(s.status == "ok" for s in evidence.sections.values()):
         raise HTTPException(400, {
             "error_kind": "no_evidence",

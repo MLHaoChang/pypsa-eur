@@ -427,6 +427,7 @@ export const HELP: Record<string, string> = {
   "basis_real_pre_tax_no_subsidy": "Money is in real terms, before tax and without subsidy, in the currency year stated beside each figure.",
   "currency_year_stated": "Every money figure states the currency year it is expressed in.",
   "single_year_extrapolated": "One representative year of operation is repeated over the whole horizon.",
+  "counterfactual_analytic_existing_not_redispatched": "The figures are compared with the site without the owner's assets (analytic basis): the existing assets the owner keeps are not re-dispatched, so their value counts as the investment's.",
   "perfect_foresight_dispatch": "The model dispatches the battery knowing the whole year's load and prices in advance; a real controller will capture less.",
   "demand_charge_perfect_foresight": "The demand-charge saving assumes the battery knows every month's peak in advance; a real controller misses some peaks, so this stream is an upper bound.",
   "duals_include_demand_charge": "The model's energy prices include the demand charge's shadow price, so they are not market prices.",

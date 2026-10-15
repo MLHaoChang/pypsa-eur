@@ -12,7 +12,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { financeApi, SolverInFlightError, StaleEditError, StudyBusyError } from '../../../api/finance'
 import { commercialApi } from '../../../api/commercial'
 import type {
-  DebtTranche, EscalationClass, FinanceInputs, Incentive, SolvePpa, TerminalValueRule,
+  DebtTranche, EscalationClass, FinanceInputs, Incentive, IslandOutage, SolvePpa, TerminalValueRule,
 } from '../../../api/types'
 import { useUIStore } from '../../../store/uiStore'
 import { NumInput } from './NumInput'
@@ -357,7 +357,7 @@ const PLACED = ['currency', 'currency_year', 'price_basis', 'financial_close', '
   'degradation_by_asset',
   'debt', 'tax_pack_id', 'hebesatz_pct', 'state_rate', 'tax_losses', 'financing_fee_tax', 'pwa_met',
   'small_business_163j', 'depreciation_class_by_asset', 'incentives', 'wacc_nominal', 'cost_of_equity',
-  'inflation', 'reserves_rate', 'terminal_value', 'solve_ppa']
+  'inflation', 'reserves_rate', 'terminal_value', 'solve_ppa', 'island_outage']
 
 function Form({ d, set, errors, report, assets }: {
   d: FinanceDraft; set: (key: string, v: unknown) => void; errors: Errs; report: Report; assets: string
@@ -367,6 +367,12 @@ function Form({ d, set, errors, report, assets }: {
   const incentives = (d.incentives ?? []) as Incentive[]
   const tv = (d.terminal_value ?? {}) as TerminalValueRule
   const sp = d.solve_ppa as SolvePpa | null | undefined
+  const io = (d.island_outage ?? null) as IslandOutage | null
+  // Both blank: not stated (no default); otherwise the pair, the server judges it.
+  const outage = (k: keyof IslandOutage, v: unknown) => {
+    const next = { hours_per_year: io?.hours_per_year ?? null, source: io?.source ?? null, [k]: v }
+    set('island_outage', next.hours_per_year == null && !next.source ? null : next)
+  }
   const esc = (d.escalation ?? {}) as Record<string, number>
   return (
     <div className="space-y-3">
@@ -529,6 +535,19 @@ function Form({ d, set, errors, report, assets }: {
         )}
         <FieldErrors id="sp-errors" list={errorsFor(errors, 'solve_ppa',
           ['solve_ppa.contract_id', 'solve_ppa.target_irr', 'solve_ppa.target_year'])} />
+      </fieldset>
+      <fieldset className="border border-border rounded p-2 space-y-1">
+        <legend className="font-semibold">Island capability</legend>
+        <p className="text-muted">The break-even per outage hour uses only the hours you state here,
+          with their source; blank: per year only.</p>
+        <NumField label="Expected outage hours a year" hint="(hours)" value={io?.hours_per_year}
+                  errors={e('island_outage.hours_per_year')}
+                  onChange={v => outage('hours_per_year', v)} />
+        <TextField label="Source of the outage hours" hint="(e.g. the utility's outage log)"
+                   value={io?.source} errors={e('island_outage.source')}
+                   onChange={v => outage('source', v)} />
+        <FieldErrors id="io-errors" list={errorsFor(errors, 'island_outage',
+          ['island_outage.hours_per_year', 'island_outage.source'])} />
       </fieldset>
     </div>
   )
