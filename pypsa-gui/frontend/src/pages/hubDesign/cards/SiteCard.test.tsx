@@ -251,3 +251,28 @@ describe('SiteCard for a generic site (G2)', () => {
     expect(screen.queryByTestId('hub-site-schedule')).toBeNull()
   })
 })
+
+// Owner decision D1 (UX template audit): "Site type" is the generic template's
+// category, so this control is "Grid connection"; the read-out row it would
+// collide with is the "Connection point". Labels only — ids unchanged.
+describe('SiteCard labels', () => {
+  it('names the control Grid connection, with strong / weak or limited / none', async () => {
+    mount()
+    await screen.findByTestId('hub-site-grid')
+    const select = screen.getByTestId('hub-site-type') as HTMLSelectElement
+    expect(screen.getByRole('combobox', { name: /Grid connection/ })).toBe(select)
+    expect(Array.from(select.options).map(o => [o.value, o.textContent])).toEqual([
+      ['strong_grid', 'Strong — import whenever needed'],
+      ['weak_flexible', 'Weak or limited'],
+      ['off_grid', 'None — the site runs as an island'],
+    ])
+    expect(screen.queryByText('Site type')).toBeNull()
+  })
+
+  it('calls the read-out row the connection point, so no two labels say Grid connection', async () => {
+    mount()
+    await screen.findByTestId('hub-site-grid')
+    expect(text('hub-site-grid')).toMatch(/Connection point:/)
+    expect(screen.getAllByText('Grid connection')).toHaveLength(1)
+  })
+})

@@ -1,0 +1,1 @@
+* Change(pypsa-gui): In the Guided Site step, the control that says how the site meets the grid is now "Grid connection", with the options Strong, Weak or limited, and None. "Site type" is now the generic template's category. The read-out row that names the import line is now "Connection point", so no two labels say "Grid connection".

@@ -19,9 +19,9 @@ import { useHubReadiness, useHubStudy, useHubTemplate } from '../useHubData'
 import { displayName } from '../../../utils/displayName'
 
 export const SITE_TYPES: { id: EhArchetype; label: string }[] = [
-  { id: 'strong_grid', label: 'Strong grid — import whenever needed' },
-  { id: 'weak_flexible', label: 'Weak or limited grid connection' },
-  { id: 'off_grid', label: 'No grid — the site runs as an island' },
+  { id: 'strong_grid', label: 'Strong — import whenever needed' },
+  { id: 'weak_flexible', label: 'Weak or limited' },
+  { id: 'off_grid', label: 'None — the site runs as an island' },
 ]
 
 const mw = (v: number) => `${Number(v.toPrecision(6))} MW`
@@ -68,7 +68,7 @@ export function siteRows(r: EhReadiness, archetype: EhArchetype): Record<SiteFix
 }
 
 const ROW_META: { k: SiteFix; term: TermKey; label: string }[] = [
-  { k: 'grid', term: 'grid_connection', label: 'Grid connection' },
+  { k: 'grid', term: 'grid_connection', label: 'Connection point' },
   { k: 'critical', term: 'critical_load', label: 'Must stay on' },
   { k: 'strength', term: 'grid_strength', label: 'Grid strength' },
   { k: 'outage', term: 'outage_data', label: 'Outage data' },
@@ -174,7 +174,7 @@ export function SiteCard() {
   return (
     <CardShell step="site" testId="hub-card-site" title="Site" next="goal">
       <label className="flex flex-col gap-1 text-[12px]">
-        <span className="font-semibold text-text"><Term k="site_type">Site type</Term></span>
+        <span className="font-semibold text-text"><Term k="site_type">Grid connection</Term></span>
         <select data-testid="hub-site-type" value={archetype}
           disabled={running}
           onChange={e => setArchetype(e.target.value as EhArchetype)}
