@@ -357,8 +357,13 @@ def site_params(raw: dict | None = None) -> dict:
 
 
 def has_gfm_storage(p: dict) -> bool:
-    """A battery the island can form on: existing, or a candidate."""
-    return p["existing"]["battery"]["mw"] > 0 or p["candidates"]["bess"]["enabled"]
+    """A grid-forming battery the island can form on, by the island
+    validator's own predicate (a ``bess`` unit whose control is one of
+    gridspine's ``GFM_CONTROLS``), over the units the sidecar would name."""
+    from services.adequacy.island_config import GFM_CONTROLS
+
+    return any(u["kind"] == "bess" and u.get("control") in GFM_CONTROLS
+               for u in _island_units(p).values())
 
 
 def island_scenarios(p: dict) -> list[str]:
@@ -633,14 +638,10 @@ def solver_config(p: dict, n: pypsa.Network | None = None) -> dict:
 # ── The island sidecar ──────────────────────────────────────────────────────
 
 
-def island_config(p: dict) -> dict | None:
-    """Control modes, unit dynamics and island requirements (gridspine's
-    schema), or None for a site with no island scenario: no UPS (the bridge
-    ``ups_bridged`` needs is missing) and no ride-through (``seamless``)."""
+def _island_units(p: dict) -> dict[str, dict]:
+    """The supply units the island sidecar names (gensets, PV, batteries and,
+    with a UPS, the UPS), with their control modes and dynamics."""
     ex, cand = p["existing"], p["candidates"]
-    scenarios = island_scenarios(p)
-    if not scenarios:
-        return None
     years = [s["year"] for s in p["stages"]]
     units: dict[str, dict] = {}
     for i in range(1, ex["gensets"]["count"] + 1):
@@ -664,6 +665,18 @@ def island_config(p: dict) -> dict | None:
     if ex["ups"]["mw"] > 0:
         units["ups_battery"] = {"kind": "ups", "it_load": ["critical_load"],
                                 "walk_in_s": _a(15.0), "f_window_hz": _a(2.0)}
+    return units
+
+
+def island_config(p: dict) -> dict | None:
+    """Control modes, unit dynamics and island requirements (gridspine's
+    schema), or None for a site with no island scenario: no UPS (the bridge
+    ``ups_bridged`` needs is missing) and no ride-through (``seamless``)."""
+    ex = p["existing"]
+    scenarios = island_scenarios(p)
+    if not scenarios:
+        return None
+    units = _island_units(p)
     units["critical_load"] = {"kind": "load", "critical": True}
     units["general_load"] = {"kind": "load", "critical": False}
     limits = copy.deepcopy(_T._LIMITS)
@@ -762,14 +775,17 @@ def template_meta(p: dict, entered: list[str] | None = None) -> dict:
     if p["ride_through"]:
         notes.append("Ride-through is on: the plan keeps enough grid-forming battery online to "
                       "hold the site through a grid outage without a blackout (the seamless "
-                      "scenario). Its cost is the plan's extra over the same site with "
-                      "ride-through off.")
+                      "scenario). It is expected to cost more; the extra is the plan's "
+                      "difference from the same site with ride-through off.")
     return {
         "id": TEMPLATE_ID,
         "name": f"{label} Energy Hub (generic site)",
         "site_type": p["site_type"],
         "site_type_label": SITE_TYPE_TEXT[p["site_type"]][0],
-        "params": copy.deepcopy(p),
+        # `ride_through` off is the default and stays out of the metadata,
+        # so a site without it is byte-identical to one built before it.
+        "params": {k: copy.deepcopy(v) for k, v in p.items()
+                   if not (k == "ride_through" and v is False)},
         "entered": list(entered or []),
         "description": (
             f"A generic {label.lower()} planned from a projected load: the peak grows "
@@ -814,17 +830,17 @@ def template_meta(p: dict, entered: list[str] | None = None) -> dict:
                                                 f"all equity at 7 %, to {p['horizon_end']}",
              "source": "assumed", "note": "pre-tax; a later stage's capex is paid a year "
                                           "before its COD"},
-            {"item": "grid-outage ride-through",
-             "value": ("on: seamless islanding, no blackout when the grid is lost"
-                       if p["ride_through"] else
-                       "off: the UPS bridges the critical load while the gensets start"
-                       if p["existing"]["ups"]["mw"] > 0 else "off: no island rows"),
-             "source": "user" if p["ride_through"] else "assumed",
-             "note": ("the plan pays for grid-forming battery headroom held at all times; "
-                      "its cost is the extra over the same site with ride-through off"
-                      if p["ride_through"] else
-                      "opt in to ride through grid outages without a blackout; it adds the "
-                      "seamless scenario and its cost")},
+            *([{"item": "grid-outage ride-through",
+                 "value": "on: seamless islanding, no blackout when the grid is lost"
+                          + ("" if p["existing"]["ups"]["mw"] > 0 else
+                             " (no UPS: studied under seamless alone; the island file "
+                             "names no UPS unit)"),
+                 "source": "user",
+                 "note": "the plan holds grid-forming battery headroom at all times, so it is "
+                         "expected to cost more than the UPS-bridged plan (the live test "
+                         "checks it does not cost less); the extra is the difference from "
+                         "the same site with ride-through off"}]
+               if p["ride_through"] else []),
             {"item": "fault level at the PoC", "value": f"{p['fault_level_mva']:g} MVA",
              "source": "assumed", "note": "20 × the connection unless set"},
             {"item": "power factor and load damping",
