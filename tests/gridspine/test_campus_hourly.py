@@ -123,6 +123,17 @@ def test_an_electrolyser_link_draws_its_input_power_as_a_load():
     assert (_unit(hourly, campus, "electrolyser")["p_mw"] == -4.0).all()
 
 
+def test_a_fuel_cell_link_injects_what_it_delivers_at_its_ac_bus():
+    n = solved_hub()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Link", "fuel_cell", bus0="h2", bus1="mv", carrier="fuel cell", p_nom=10.0, efficiency=0.5)
+    n.links_t.p0["fuel_cell"] = 6.0                              # H2 in
+    n.links_t.p1["fuel_cell"] = -3.0                             # AC out
+    campus = draft_campus(n).spec
+    hourly, _ = campus_hourly(n, campus)
+    assert (_unit(hourly, campus, "fuel_cell")["p_mw"] == 3.0).all()
+
+
 def test_an_unsolved_project_is_refused():
     n = solved_hub()
     campus = draft_campus(n).spec

@@ -615,7 +615,13 @@ def _p_ref(campus, pcc: pd.DataFrame):
     hit = p[(p["param"] == "p_connection_mw")]
     if len(hit):
         return float(hit["value"].iloc[0]), "campus file p_connection_mw"
-    return float(pcc["import_mw"].abs().max()), "peak |import| over every hour of the prepared periods"
+    peak = float(pcc["import_mw"].abs().max())
+    if not peak > 0:
+        raise ContractError(
+            "the PCC never imports or exports in the prepared periods (a normally open tie?), so the peak "
+            "import gives no connection capacity; set the campus file's pcc p_connection_mw to the tie's rating"
+        )
+    return peak, "peak |import| over every hour of the prepared periods"
 
 
 def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,

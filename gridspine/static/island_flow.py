@@ -52,7 +52,7 @@ import math
 import pandapower as pp
 import pandas as pd
 
-from gridspine.schema.island import GFM_CONTROLS
+from gridspine.schema.island import CONVERTER_KINDS, GFM_CONTROLS
 from gridspine.static.campus_flow import apply_hour
 
 LABEL = "steady-state screening"
@@ -262,7 +262,7 @@ def island_flow(campus, rows, online=None, settings=IslandSettings()) -> IslandF
                 changed = True
                 continue
             block = refs.at[uid, "block"]
-            if refs.at[uid, "kind"] in ("bess", "pv", "wind") and "i_max_pu" in block["values"]:
+            if refs.at[uid, "kind"] in CONVERTER_KINDS and "i_max_pu" in block["values"]:
                 # the converter's current is S / V at its TERMINAL, not behind x_v
                 term = int(net.sgen.at[sgen_idx[uid], "bus"])
                 vt = float(net.res_bus.at[term, "vm_pu"])

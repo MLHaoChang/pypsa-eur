@@ -216,9 +216,17 @@ def _standard_up(s):
     return math.nan
 
 
+#: The columns of ``size_transformers``; a campus without a transformer gets
+#: them too, with no rows.
+SIZING_COLUMNS = ["group", "units", "unit_rating_mva", "max_s_intact_mva", "max_s_n1_mva", "required_unit_mva",
+                  "recommended_unit_mva", "adequate", "utilisation", "worst_unit", "worst_period", "worst_hour",
+                  "unconverged_hours", "margin", "n_minus_1"]
+
+
 def size_transformers(flows: dict, campus, criteria: SizingCriteria = SizingCriteria()) -> pd.DataFrame:
     """One row per transformer group, from ``flows`` = ``{(period, hour):
-    solve_cases(...)}``. See the module docstring for the rule."""
+    solve_cases(...)}``. See the module docstring for the rule. A campus
+    without a transformer gets the columns and no rows."""
     net = campus.net
     rating = dict(zip(net.trafo["name"].astype(str), net.trafo["sn_mva"].astype(float)))
     m = criteria.margin
@@ -270,4 +278,4 @@ def size_transformers(flows: dict, campus, criteria: SizingCriteria = SizingCrit
             "unconverged_hours": unconverged, "margin": m,
             "n_minus_1": bool(criteria.n_minus_1 and n >= 2),
         })
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=SIZING_COLUMNS)

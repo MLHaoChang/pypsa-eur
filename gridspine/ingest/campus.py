@@ -67,8 +67,9 @@ replace it at the end of its life. It changes nothing in the net.
     ``{name: {kind, bus, ...}}``, with ``kind`` one of ``UNIT_KINDS``:
 
     * ``load``: ``p_mw`` (the rating) and ``pf`` (lagging).
-    * ``bess``, ``pv``, ``wind``: ``p_mw``, the inverter ``s_mva``, and
-      ``k_sc`` and ``rx_sc`` for IEC 60909. A ``bess`` also needs ``e_mwh``.
+    * ``bess``, ``pv``, ``wind``, ``fuel_cell``: ``p_mw``, the inverter
+      ``s_mva``, and ``k_sc`` and ``rx_sc`` for IEC 60909. A ``bess`` also
+      needs ``e_mwh``.
     * ``genset``: ``p_mw``, ``s_mva``, ``xd_pp`` and ``rx_sc``.
 
 **Every number is ``{value, source}``**, with ``source`` one of
@@ -159,7 +160,7 @@ from gridspine.schema.transformer import VECTOR_GROUP, check_tap
 from gridspine.static.shortcircuit import LINE_ENDTEMP_DEGREE
 
 SOURCES = frozenset({"measured", "datasheet", "assumed"})
-UNIT_KINDS = ("load", "bess", "pv", "wind", "genset", "ups")
+UNIT_KINDS = ("load", "bess", "pv", "wind", "fuel_cell", "genset", "ups")
 COMP_KINDS = ("capacitor_bank", "shunt_reactor", "statcom")
 #: A STATCOM's IEC 60909 screening: a current source of k times its rated
 #: current, the drafted inverter's figures (producers/campus.py), assumed.
@@ -171,7 +172,8 @@ NET_BASE_MVA = 1.0
 
 #: How each unit kind appears in the registry. ``load`` is absent: loads
 #: travel in loads.csv, by bus.
-REGISTRY_KIND = {"bess": "storage", "ups": "storage", "pv": "res", "wind": "res", "genset": "genset"}
+REGISTRY_KIND = {"bess": "storage", "ups": "storage", "pv": "res", "wind": "res", "fuel_cell": "res",
+                 "genset": "genset"}
 
 #: A transformer winding may differ from its bus's nominal voltage, because
 #: tap and design voltages are routinely a few percent off (110/21 kV on a
@@ -205,6 +207,7 @@ _UNIT_FIELDS = {
     "bess": ("p_mw", "e_mwh", "s_mva", "k_sc", "rx_sc"),
     "pv": ("p_mw", "s_mva", "k_sc", "rx_sc"),
     "wind": ("p_mw", "s_mva", "k_sc", "rx_sc"),
+    "fuel_cell": ("p_mw", "s_mva", "k_sc", "rx_sc"),
     "genset": ("p_mw", "s_mva", "xd_pp", "rx_sc"),
     "ups": ("p_mw", "e_mwh", "s_mva"),
 }

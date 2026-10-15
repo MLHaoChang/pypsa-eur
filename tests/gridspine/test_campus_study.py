@@ -176,6 +176,38 @@ def test_without_a_connection_capacity_the_peak_import_is_used_and_said_so(tmp_p
     assert req["p_ref_from"].startswith("peak |import|") and req["source"] == "code"
 
 
+def test_a_campus_at_the_grids_voltage_has_no_transformer_and_still_sizes(tmp_path):
+    # eh_site at 10-30 MW: a 20 kV grid feeds a 20 kV site, so no transformer
+    project = tmp_path / "network.nc"
+    n = solved_hub(periods=[2030, 2040])
+    n.buses.loc["grid", "v_nom"] = 20.0
+    n.export_to_netcdf(str(project))
+    spec = draft_from_project(project).spec
+    assert not spec["campus"]["transformers"]
+    run = tmp_path / "run"
+    prepare_campus(run, spec, project)
+    rank_campus(run, k=1)
+    out = size_campus(run)
+    assert out["transformers"].empty and "adequate" in out["transformers"].columns
+    checks = set(out["compliance"]["check"])
+    assert "transformer_loading" not in checks and {"pcc_reactive", "switchgear"} <= checks
+    invest_campus(run)
+
+
+def test_a_pcc_that_never_imports_needs_a_connection_capacity_and_is_told_so(tmp_path):
+    project = tmp_path / "network.nc"
+    n = solved_hub(periods=[2030, 2040])
+    n.links_t.p0["grid_import"] = 0.0                    # an open tie: the site runs on its own
+    n.links_t.p1["grid_import"] = 0.0
+    n.export_to_netcdf(str(project))
+    spec = draft_from_project(project).spec
+    run = tmp_path / "run"
+    prepare_campus(run, spec, project)
+    rank_campus(run, k=1)
+    with pytest.raises(ContractError, match="p_connection_mw"):
+        size_campus(run)
+
+
 def test_sizing_checks_short_circuit_per_period_with_that_periods_units(tmp_path, project):
     run = tmp_path / "run"
     spec = draft_from_project(project).spec

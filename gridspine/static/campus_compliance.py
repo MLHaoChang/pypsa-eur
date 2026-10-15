@@ -18,7 +18,7 @@ check (``CHECKS``):
     confirmed), which it then stays.
 ``transformer_loading``
     The highest loading of any transformer, intact or N-1, against 100 % of
-    its rating (equipment).
+    its rating (equipment). A campus without a transformer has no such row.
 ``switchgear``
     Ik'' and peak against each rated bus (C4c). Buses without a rating make
     the check ``not_rated``.
@@ -91,6 +91,20 @@ def _voltage(rows: pd.DataFrame, profile, bus_kv, fixed_band=None):
     return ("fail" if key > 1e-9 else "pass"), value, limit, where, band, bus, case
 
 
+def _transformer_row(trafo, sizing):
+    j = trafo["loading_pct"].idxmax()
+    peak = float(trafo.at[j, "loading_pct"])
+    as_is = "fail" if peak > 100.0 + 1e-9 else "pass"
+    recs = [f"{r.group}: {r.units} x {r.recommended_unit_mva:g} MVA recommended (now {r.unit_rating_mva:g} MVA)"
+            for r in sizing.itertuples(index=False) if not bool(r.adequate)]
+    after = "pass" if all(pd.notna(r.recommended_unit_mva) for r in sizing.itertuples(index=False)) else "fail"
+    return _row("transformer_loading", as_is, after, peak, 100.0, "%",
+                (int(trafo.at[j, "period"]), int(trafo.at[j, "hour"])),
+                "equipment rating (not a grid-code clause)", "assumed",
+                "; ".join(recs) if recs else f"worst {trafo.at[j, 'trafo']} ({trafo.at[j, 'case']})",
+                str(trafo.at[j, "case"]))
+
+
 def campus_compliance(bus, trafo, reactive, sizing, compensation, short_circuit, requirement, profile,
                       pcc_bus, bus_kv) -> pd.DataFrame:
     rows = []
@@ -139,18 +153,9 @@ def campus_compliance(bus, trafo, reactive, sizing, compensation, short_circuit,
         rows.append(_row(check, status, after, value, limit, "pu", where, band["clause"], source, detail, str(case),
                          band))
 
-    # transformers
-    j = trafo["loading_pct"].idxmax()
-    peak = float(trafo.at[j, "loading_pct"])
-    as_is = "fail" if peak > 100.0 + 1e-9 else "pass"
-    recs = [f"{r.group}: {r.units} x {r.recommended_unit_mva:g} MVA recommended (now {r.unit_rating_mva:g} MVA)"
-            for r in sizing.itertuples(index=False) if not bool(r.adequate)]
-    after = "pass" if all(pd.notna(r.recommended_unit_mva) for r in sizing.itertuples(index=False)) else "fail"
-    rows.append(_row("transformer_loading", as_is, after, peak, 100.0, "%",
-                     (int(trafo.at[j, "period"]), int(trafo.at[j, "hour"])),
-                     "equipment rating (not a grid-code clause)", "assumed",
-                     "; ".join(recs) if recs else f"worst {trafo.at[j, 'trafo']} ({trafo.at[j, 'case']})",
-                     str(trafo.at[j, "case"])))
+    # transformers: none on a campus that runs at the grid's voltage
+    if len(trafo) and len(sizing):
+        rows.append(_transformer_row(trafo, sizing))
 
     # switchgear
     rated = short_circuit[short_circuit["rated_ka"].notna()]
