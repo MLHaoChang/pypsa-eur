@@ -613,9 +613,10 @@ def psse_campus(run_dir, hours=None) -> list:
 def _p_ref(campus, pcc: pd.DataFrame):
     p = campus.params
     hit = p[(p["param"] == "p_connection_mw")]
-    if len(hit):
-        return float(hit["value"].iloc[0]), "campus file p_connection_mw"
     peak = float(pcc["import_mw"].abs().max())
+    if len(hit):
+        why = "" if peak > 0 else " (the tie is open: no import or export in any hour)"
+        return float(hit["value"].iloc[0]), "campus file p_connection_mw" + why
     if not peak > 0:
         raise ContractError(
             "the PCC never imports or exports in the prepared periods (a normally open tie?), so the peak "

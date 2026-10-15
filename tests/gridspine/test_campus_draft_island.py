@@ -164,3 +164,22 @@ def test_a_protected_load_the_sidecar_does_not_list_is_translated():
     s["units"]["ups_battery"]["it_load"] = ["it_load", "offices"]
     units = by_pypsa(drafted(s).spec["campus"]["units"])
     assert units["ups_battery"][1]["island"]["it_load"] == [units["it_load"][0], units["offices"][0]]
+
+
+def test_a_fuel_cell_is_a_converter_with_a_grid_following_block_and_its_island_data_builds():
+    n = built_hub()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Link", "fuel_cell", bus0="h2", bus1="dc_mv", carrier="fuel cell", p_nom=10.0, efficiency=0.5)
+    cfg = sidecar()
+    spec = draft_campus(n, island=validate_island_config(cfg)).spec
+    uid, fc = by_pypsa(spec["campus"]["units"])["fuel_cell"]
+    assert fc["kind"] == "fuel_cell" and "xd_pp" not in fc                  # a converter, not a machine
+    assert fc["island"]["control"] == "gfl_qu"
+    assert {v["source"] for k, v in fc["island"].items() if k != "control"} == {"assumed"}
+    campus = build_campus(spec)
+    assert campus.island["units"][uid]["control"] == "gfl_qu"
+    # a sidecar may name it, with a grid-forming block
+    cfg["units"]["fuel_cell"] = {"kind": "fuel_cell", **gfm_bess()}
+    spec = draft_campus(n, island=validate_island_config(cfg)).spec
+    assert by_pypsa(spec["campus"]["units"])["fuel_cell"][1]["island"]["control"] == "gfm_droop"
+    build_campus(spec)

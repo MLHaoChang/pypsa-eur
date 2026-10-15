@@ -208,6 +208,24 @@ def test_a_pcc_that_never_imports_needs_a_connection_capacity_and_is_told_so(tmp
         size_campus(run)
 
 
+def test_a_normally_open_tie_sizes_against_its_rating_and_says_the_tie_is_open(tmp_path):
+    # the microgrid: its PCC tie is normally open, so it never imports
+    project = tmp_path / "network.nc"
+    n = solved_hub(periods=[2030, 2040])
+    n.links.loc["grid_import", "p_max_pu"] = 0.0
+    n.links_t.p0["grid_import"] = 0.0
+    n.links_t.p1["grid_import"] = 0.0
+    n.export_to_netcdf(str(project))
+    spec = draft_from_project(project).spec
+    assert spec["campus"]["pcc"]["p_connection_mw"] == {"value": 60.0, "source": "assumed"}
+    run = tmp_path / "run"
+    prepare_campus(run, spec, project)
+    rank_campus(run, k=1)
+    req = size_campus(run)["requirement"]
+    assert req["p_ref_mw"] == 60.0 and req["q_limit_mvar"] > 0
+    assert req["p_ref_from"] == "campus file p_connection_mw (the tie is open: no import or export in any hour)"
+
+
 def test_sizing_checks_short_circuit_per_period_with_that_periods_units(tmp_path, project):
     run = tmp_path / "run"
     spec = draft_from_project(project).spec
