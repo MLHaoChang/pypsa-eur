@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { PanelRightClose } from 'lucide-react'
+import { PanelRightClose, Pin, PinOff } from 'lucide-react'
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { useChatProfiles, useChatReadiness } from '../hooks/useChatProfiles'
@@ -42,6 +42,8 @@ export default function AssistantDock() {
   // for updates it doesn't consume — now that it's always mounted, it does.
   const assistantDockOpen = useUIStore((s) => s.assistantDockOpen)
   const setAssistantDockOpen = useUIStore((s) => s.setAssistantDockOpen)
+  const assistantDockPinned = useUIStore((s) => s.assistantDockPinned)
+  const setAssistantDockPinned = useUIStore((s) => s.setAssistantDockPinned)
   const assistantDockWidth = useUIStore((s) => s.assistantDockWidth)
   const setAssistantDockWidth = useUIStore((s) => s.setAssistantDockWidth)
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
@@ -211,6 +213,18 @@ export default function AssistantDock() {
               ASSISTANT
             </span>
             <span className="flex-1" />
+            {/* UX overhaul S5 (Q5a): pinned, the dock never steps aside by
+                itself over Results or without a key (layout/dockAutoCollapse.ts). */}
+            <button
+              onClick={() => setAssistantDockPinned(!assistantDockPinned)}
+              title={assistantDockPinned ? 'Unpin: let the assistant step aside over Results' : 'Pin the assistant open'}
+              aria-label={assistantDockPinned ? 'Unpin the assistant' : 'Pin the assistant open'}
+              aria-pressed={assistantDockPinned}
+              data-testid="assistant-dock-pin"
+              className={`p-1 rounded hover:bg-panel transition-colors ${assistantDockPinned ? 'text-accent' : 'text-muted hover:text-text'}`}
+            >
+              {assistantDockPinned ? <Pin size={14} /> : <PinOff size={14} />}
+            </button>
             <button
               onClick={() => setAssistantDockOpen(false)}
               title="Collapse the assistant"

@@ -52,8 +52,11 @@ describe('SiteCard rows', () => {
   it('four rows from the readiness body, no fix buttons when nothing is missing', async () => {
     mount()
     await screen.findByTestId('hub-site-grid')
-    expect(text('hub-site-grid')).toContain('grid_import (40 MW)')
-    expect(text('hub-site-critical')).toContain('it_bus')
+    // Plain names, never the raw ids (UX S6, G1).
+    expect(text('hub-site-grid')).toContain('Grid import (40 MW)')
+    expect(text('hub-site-critical')).toContain('IT bus')
+    expect(text('hub-site-grid')).not.toContain('grid_import')
+    expect(text('hub-site-critical')).not.toContain('it_bus')
     expect(text('hub-site-strength')).toContain('data present')
     expect(text('hub-site-outage')).toContain('9 units')
     for (const k of ['grid', 'critical', 'strength', 'outage']) {
@@ -62,6 +65,16 @@ describe('SiteCard rows', () => {
     // the readiness call carries the template's recommended overrides
     expect(resultsApi.getEhReadiness).toHaveBeenCalledWith('weak_flexible', undefined, undefined,
       { stages: undefined, pack_overrides: { import_p_nom_mw: 40 } })
+  })
+
+  it('a connection energized in steps shows what is firm until it is', async () => {
+    vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness({
+      import: { rule: 'eh_role', links: ['grid_import'], applied: true },
+      import_p_nom_mw: 40, import_firm_mw: 20,
+    }))
+    mount()
+    await waitFor(() => expect(text('hub-site-grid')).toContain('20 MW until fully energized'))
+    expect(text('hub-site-grid')).toContain('40 MW')
   })
 
   it('each gap has a fix button with its §5.7 request', async () => {

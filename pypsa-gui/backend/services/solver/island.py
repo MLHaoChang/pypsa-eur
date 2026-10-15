@@ -474,11 +474,24 @@ def island_study(n, island, *, scenarios=None, solve=None, tol=1e-6) -> dict:
     returns (status, condition); HiGHS by default."""
     import copy
 
+    from services.adequacy.energization import apply_energization
+
+    if isinstance(n.snapshots, pd.MultiIndex):
+        # The variants are plain single-period LOPFs of copies (no
+        # multi_investment_periods; PyPSA's copy() also drops the MultiIndex
+        # name), so a multi-period network would crash mid-study.
+        raise IslandRefusal("island_study_multi_period_unsupported: the cost-of-islanding "
+                            "study runs single-period networks only; this network has "
+                            "investment periods")
     solve = solve or _default_solve
     scenarios = list(scenarios or island["requirements"]["scenarios"])
     variants = {}
 
+    # Every variant solves a disposable copy outside run_simulation, so each
+    # copy gets a connection's energization schedule the way run_simulation
+    # applies it (E2E slice 8); the copies are dropped, nothing to undo.
     base = n.copy()
+    apply_energization(base)
     status, cond = solve(base, None)
     variants["baseline"] = {"status": status, "condition": cond,
                             "objective": float(base.objective) if status == "ok" else None}
@@ -491,6 +504,7 @@ def island_study(n, island, *, scenarios=None, solve=None, tol=1e-6) -> dict:
                             "reason": "ups_bridged needs pickup_blocks in the sidecar"}
             continue
         c = n.copy()
+        apply_energization(c)
         try:
             with linearised_uc(c, one) as kw:
                 status, cond = solve(c, island_extra_functionality(one), **kw)

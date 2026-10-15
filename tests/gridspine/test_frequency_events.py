@@ -181,6 +181,99 @@ def test_e4_on_an_isochronous_ramp_limited_genset_has_a_bounded_nadir(monkeypatc
     assert wound.blocks[0].nadir_hz == pytest.approx(61.80, abs=0.01)
 
 
+# ── the trip floor ──────────────────────────────────────────────────────────
+
+LIMITS_47 = {"transition": {"rocof_hz_per_s": 1.0, "f_min_hz": 47.5, "f_max_hz": 51.5, "qss_band_hz": 1.0},
+             "steady_island": {"rocof_hz_per_s": 1.0, "f_min_hz": 49.0, "f_max_hz": 51.0, "qss_band_hz": 1.0}}
+
+
+def test_the_trip_floor_is_the_lowest_limit_and_names_it():
+    fl = F.trip_floor(LIMITS_47)
+    assert (fl.lo_hz, fl.lo_what, fl.hi_hz, fl.hi_what) == (47.5, "transition f_min", 51.5, "transition f_max")
+    # a UPS window below it sets it; a load's under-frequency trip has no high side (NaN), which is skipped
+    eq = [("UPS window U", 47.0, 53.0), ("CH trip", 48.0, math.nan), ("FAN trip", math.nan, 52.0)]
+    fl = F.trip_floor(LIMITS_47, eq)
+    assert (fl.lo_hz, fl.lo_what, fl.hi_hz, fl.hi_what) == (47.0, "UPS window U", 53.0, "UPS window U")
+    fl = F.trip_floor(LIMITS_47, eq[1:])
+    assert (fl.lo_hz, fl.hi_hz, fl.hi_what) == (47.5, 52.0, "FAN trip")
+
+
+def test_a_run_that_stays_inside_the_floor_is_the_run_without_it():
+    g = gen(p0=0.0, p_max=1e6)
+    free = F.simulate([g], F.step(4.0), t_end=10.0, dt=5e-3)
+    held = F.simulate([g], F.step(4.0), t_end=10.0, dt=5e-3, floor=F.trip_floor(LIMITS_47))
+    assert held.trip is None and np.array_equal(free.t, held.t) and np.array_equal(free.df, held.df)
+    assert F.metrics(free) == F.metrics(held)
+
+
+def test_a_run_that_crosses_the_floor_stops_there_as_a_trip():
+    # the #260 case: an isochronous, ramp-limited genset falls to -23.5 Hz unfloored; at 47.5 Hz it trips
+    g = gen(isochronous=True, p0=0.0, step_mw=0.5, ramp_mw_per_s=0.08)
+    floor = F.trip_floor(LIMITS_47)
+    free = F.simulate([g], F.step(2.0), t_end=60.0, dt=5e-3)
+    tr = F.simulate([g], F.step(2.0), t_end=60.0, dt=5e-3, floor=floor)
+    first = int(np.flatnonzero(50.0 + free.df < 47.5)[0])
+    assert tr.trip == (pytest.approx(free.t[first]), "Δf below the 47.5 Hz floor (transition f_min)")
+    assert tr.t[-1] == pytest.approx(free.t[first]) and np.array_equal(tr.df, free.df[:first + 1])
+    m = F.metrics(tr)
+    assert m.trip == tr.trip and m.collapse is None and math.isnan(m.nadir_hz) and math.isnan(m.df_qss_hz)
+    v = F.judge(m, LIMITS_47)
+    assert not v.ok and v.worst == math.inf
+    assert v.binding == f"trip: Δf below the 47.5 Hz floor (transition f_min) at t = {free.t[first]:.2f} s"
+    # and the ceiling: a 2 MW load lost from 8 MW
+    hot = F.simulate([gen(isochronous=True, p0=8.0, step_mw=0.5, ramp_mw_per_s=0.08)], F.step(-2.0),
+                     t_end=60.0, dt=5e-3, floor=floor)
+    assert hot.trip[1] == "Δf above the 51.5 Hz ceiling (transition f_max)"
+
+
+def test_e4_reads_a_tripped_block_as_not_completing():
+    gens, blocks = [cold_gen(isochronous=True, step_mw=0.5, ramp_mw_per_s=0.08)], [2.0, 2.0]
+    res = F.e4_ups_bridged(gens, blocks, [("U", 6.0, 100.0)], floor=F.trip_floor(LIMITS_47))
+    assert not res.complete and len(res.blocks) == 1 and res.blocks[0].trip is not None
+    assert F.judge(res.blocks[0], LIMITS_47).binding.startswith("trip: Δf below the 47.5 Hz floor")
+    assert res.bridge[0].needed_s == math.inf and not res.bridge[0].ok
+    # the floor is in the pickup's cache key: the unfloored run is not served the tripped one
+    cache = {}
+    F.e4_ups_bridged(gens, blocks, floor=F.trip_floor(LIMITS_47), cache=cache)
+    assert F.e4_ups_bridged(gens, blocks, cache=cache).complete
+
+
+def test_the_sweep_reports_a_trip_and_its_cuts_are_those_of_the_run_without_the_floor(monkeypatch):
+    camp = ups_campus(transfers=False, scenarios=("seamless",))
+    h = hourly()
+    h.loc[h["unit_id"] == "BESS1", "status"] = 0                 # the genset alone runs away
+    ih, iu = island_tables(online=(1.0, 1.0))
+    floored = F.e1_every_hour(camp, h, ih, iu)
+    assert floored["trip_s"].notna().any() and floored["binding"].str.startswith("trip:").any()
+    monkeypatch.setattr(F, "trip_floor", lambda *a, **k: F.TripFloor())    # NaN: no floor, no ceiling
+    free = F.e1_every_hour(camp, h, ih, iu)
+    assert free["trip_s"].isna().all()
+    monkeypatch.undo()
+    a = F.propose_cuts(camp, h, None, floored, island_hourly=ih, island_unit_hourly=iu)
+    b = F.propose_cuts(camp, h, None, free, island_hourly=ih, island_unit_hourly=iu)
+    pd.testing.assert_frame_equal(a, b)
+
+
+def test_the_study_runs_every_event_against_the_campus_floor():
+    from tests.gridspine.test_island_schema import t
+    # E1: without the BESS the genset alone runs away, past the UPS window's 52 Hz
+    camp = ups_campus(transfers=False, scenarios=("seamless",))
+    h = hourly()
+    h.loc[h["unit_id"] == "BESS1", "status"] = 0
+    e1 = F.campus_frequency_study(camp, h, [(2030, 0)], t_end=5.0).events.iloc[0]
+    assert e1["event"] == "E1" and e1["trip_s"] == pytest.approx(0.34)
+    assert e1["binding"] == "trip: Δf above the 52 Hz ceiling (UPS window UPS1) at t = 0.34 s"
+    # E4: a 30 MW block on the 10 MW genset falls through the 47.5 Hz floor; the pickup does not complete
+    s = ups_campus_spec(scenarios=("ups_bridged",))
+    s["campus"]["island"]["pickup_blocks"] = t([30.0])
+    ih, iu = island_tables(online=(1.0, 1.0))
+    st = F.campus_frequency_study(build_campus(s), hourly(), [(2030, 0)], island_unit_hourly=iu)
+    e4 = st.events.iloc[0]
+    assert e4["event"] == "E4" and e4["trip_s"] == pytest.approx(0.065)
+    assert e4["binding"].startswith("trip: Δf below the 47.5 Hz floor (transition f_min)")
+    assert not st.bridge.iloc[0]["pickup_complete"] and st.bridge.iloc[0]["needed_s"] == math.inf
+
+
 def test_a_pickup_beyond_the_gensets_does_not_complete_and_fails_the_bridge():
     res = F.e4_ups_bridged([cold_gen()], [6.0, 6.0], [("U", 6.0, 100.0)], bridge_s=60.0, dt=1e-3, t_end=30.0)
     assert not res.complete
@@ -552,8 +645,12 @@ def test_a_unit_not_built_in_the_period_is_not_in_the_island():
     rows0 = h[h["hour"] == 0][["unit_id", "p_mw", "status"]].reset_index(drop=True)
     units = F.units_from_campus(camp, rows0, online=F.built(rows0))          # the UPS stays on line: kept
     assert "BESS1" not in {u.name for u in units} and "UPS1" in {u.name for u in units}
-    by_hand = F.metrics(F.simulate(units, F.step(10.0), t_end=10.0, dt=5e-3))
-    assert sweep.iloc[0]["nadir_hz"] == pytest.approx(by_hand.nadir_hz, abs=1e-12)
+    limits, req = F._limits(camp)
+    floor = F.trip_floor(limits, F.equipment(camp))
+    by_hand = F.metrics(F.simulate(units, F.step(10.0), t_end=10.0, dt=5e-3, floor=floor))
+    # the genset alone runs away (+131 Hz unfloored): the sweep reads the same trip, not a number
+    assert by_hand.trip is not None and sweep.iloc[0]["trip_s"] == pytest.approx(by_hand.trip[0], abs=1e-12)
+    assert sweep.iloc[0]["binding"] == F.trip_label(by_hand.trip) and math.isnan(sweep.iloc[0]["nadir_hz"])
     # without the BESS the genset cannot form the island; counting the unbuilt BESS would make it viable
     st = F.campus_frequency_study(camp, h, [(2030, 0)], t_end=5.0)
     assert not st.losses.iloc[0]["i4_viable"] and IF.island_flow(camp, rows0).viable

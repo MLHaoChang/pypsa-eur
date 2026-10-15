@@ -20,7 +20,7 @@ import {
   CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   SEASONS, SEASON_OF_MONTH, SEASON_ACCENT,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, WEEKDAYS,
-  parseSeasonStamp, useSeasonalViewMode, colourForCarrier,
+  parseSeasonStamp, useSeasonalViewMode, colourForCarrier, isAllZero, ChartZero,
 } from './shared'
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
@@ -307,7 +307,7 @@ export default function Dispatch() {
   // VOLL slack dispatch — non-null only when last solve ran with voll > 0
   // and the LP actually shed load. Drives the Lost Load KPI + chart below.
   // `getLostLoad` now carries an optional range — windowed like the rest.
-  const { data: lostLoad } = useQuery({
+  const { data: lostLoad, isSuccess: lostLoadRead } = useQuery({
     queryKey: nk(currentProject, 'results', 'lost_load', win.from, win.to),
     queryFn: () => resultsApi.getLostLoad(fetchRange),
     enabled: winValid,
@@ -716,6 +716,13 @@ export default function Dispatch() {
       ? ((llMeta.total_cost_eur ?? 0) / llMeta.total_mwh) : 0
     return { mwh, cost: mwh * voll }
   }, [lostLoad, weightCtx, range.from, range.to])
+  // UX overhaul S2b: null lost load inside a solved results tab means the
+  // solve had no VOLL — not modelled, never "—"; a VOLL solve that shed
+  // nothing is a computed zero.
+  const lostLoadNotModelled = lostLoadRead && !lostLoad
+  const lostLoadState = lostLoadNotModelled
+    ? { state: 'not_modelled' as const, reason: 'The solve had no VOLL, so lost load was not modelled.' }
+    : lostLoadTotals && lostLoadTotals.mwh === 0 ? { state: 'zero' as const } : {}
 
   // Per-carrier lost-load split. The backend's VOLL slack lives on every
   // bus, so `lost_load_t.columns` carries bus names across electrical, H2,
@@ -1351,10 +1358,12 @@ export default function Dispatch() {
               users can read the reliability gap at a glance. */}
           <KPI label="Lost load"
                value={lostLoadTotals ? fmtEnergy(lostLoadTotals.mwh) : '—'}
-               hint={"Demand the LP couldn't serve across ALL energy carriers (electrical + H2 + heat + …) — absorbed by VOLL slack generators on every bus. Set Solver Settings → VOLL > 0 to enable." + scaleHint} />
+               hint={"Demand the LP couldn't serve across ALL energy carriers (electrical + H2 + heat + …) — absorbed by VOLL slack generators on every bus. Set Solver Settings → VOLL > 0 to enable." + scaleHint} 
+               {...lostLoadState} />
           <KPI label="Lost-load cost"
                value={lostLoadTotals ? fmtCurrency(lostLoadTotals.cost) : '—'}
-               hint={'MWh of lost load × the VOLL set in Solver Settings (e.g. 3000–10000 €/MWh). Summed across all carriers.' + scaleHint} />
+               hint={'MWh of lost load × the VOLL set in Solver Settings (e.g. 3000–10000 €/MWh). Summed across all carriers.' + scaleHint} 
+               {...lostLoadState} />
           {/* Per-carrier lost-load split. Only renders when the backend
               returned bus_carriers AND at least one non-electrical
               carrier shed load — for purely electrical networks this is
@@ -1577,7 +1586,7 @@ export default function Dispatch() {
           </p>
           <div ref={durationChartRef}>
             <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={durationCurves.rows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <AreaChart data={durationCurves.rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="ldc-load-grad" x1="0" x2="0" y1="0" y2="1">
                     <stop offset="0%" stopColor="#6b7280" stopOpacity={0.22} />
@@ -1591,7 +1600,7 @@ export default function Dispatch() {
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="pct" type="number" domain={[0, 100]}
                   tickFormatter={(v: number) => `${v.toFixed(0)} %`} {...CHART_AXIS} />
-                <YAxis {...CHART_AXIS} tickFormatter={(v: number) => fmtPower(v, 1)} label={yAxisLabel('MW')} />
+                <YAxis {...CHART_AXIS} width={64} tickFormatter={(v: number) => fmtPower(v, 1)} label={yAxisLabel('MW')} />
                 <RTooltip {...CHART_TOOLTIP}
                   labelFormatter={(v: number) => `${Number(v).toFixed(1)} % of hours`}
                   formatter={(v: number, n: string) => [fmtPower(v), n === 'residual' ? 'Residual load' : 'Load']} />
@@ -1662,6 +1671,7 @@ export default function Dispatch() {
                       range={range}
                       lostLoadByCarrier={lostLoadByCarrier}
                       econByCarrier={econByCarrier?.by_carrier ?? null}
+                      lostLoadNotModelled={lostLoadNotModelled}
                       scaled={scaled}
                       avgScale={avgScale}
                       isElectrical={c === 'electricity'}
@@ -1749,6 +1759,7 @@ export default function Dispatch() {
                   range={range}
                   lostLoadByCarrier={lostLoadByCarrier}
                   econByCarrier={econByCarrier?.by_carrier ?? null}
+                  lostLoadNotModelled={lostLoadNotModelled}
                   scaled={scaled}
                   avgScale={avgScale}
                   isElectrical={isElectrical}
@@ -2087,7 +2098,7 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
           ) : (
             <ResponsiveContainer width="100%" height={full ? 320 : 190}>
               <ComposedChart data={rows} stackOffset="sign"
-                margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="bucket" {...CHART_AXIS}
                   interval={23} tickFormatter={tickFmt} />
@@ -2231,14 +2242,14 @@ export function linkFlowTotals(
 // Sits ABOVE each per-carrier DispatchStack so users see "what happened
 // on this carrier" (demand met, gen split, storage, curtailment, lost-load,
 // OPEX breakdown) at a glance before drilling into the hourly chart.
-function CarrierKpiPanel({
+export function CarrierKpiPanel({
   carrier, group,
   gensTS, loadTS, storPowerTS, storeTS, curtailTS, linkTS,
   generators, loads, storageUnits, stores, links,
   weightCtx, range,
   lostLoadByCarrier, econByCarrier,
   scaled, avgScale, isElectrical,
-  selectedPeriod,
+  selectedPeriod, lostLoadNotModelled = false,
 }: {
   carrier: string
   group: { gens: Set<string>; loads: Set<string>; storage: Set<string>; stores: Set<string>; busNames: Set<string> }
@@ -2280,6 +2291,8 @@ function CarrierKpiPanel({
   // null, totals are used. Dispatch KPIs use `range` regardless, which
   // already collapses to the selected period via resolveRange().
   selectedPeriod?: number | string | null
+  /** The solve had no VOLL, so lost load was not modelled (UX D3 row 19). */
+  lostLoadNotModelled?: boolean
 }) {
   // Dispatch / demand KPIs — filtered to this carrier's gens / loads / storage.
   //
@@ -2400,7 +2413,20 @@ function CarrierKpiPanel({
 
     // Total generation = native + link gen (carrier-side production picture).
     const totalGen = renewable + conventional + linkGen
+    // What this carrier has at all, so a missing figure can say why (UX D3
+    // rows 20–24): a link port that supplies it, renewables, and renewables
+    // carrying a curtailment cost.
+    const hasLinkSupply = links.some(l => {
+      const x = l as { bus2?: string; efficiency2?: number }
+      return (!!l.bus1 && group.busNames.has(l.bus1) && (l.efficiency ?? 1) > 0)
+        || (!!x.bus2 && group.busNames.has(x.bus2) && (x.efficiency2 ?? 1) > 0)
+    })
+    const hasCurtailmentCost = generators.some(g =>
+      renewSet.has(g.name) && (g.curtailment_cost ?? 0) > 0)
     return {
+      hasRenewables: renewSet.size > 0,
+      hasLinkSupply,
+      hasCurtailmentCost,
       conventional,
       renewable,
       demand,
@@ -2501,6 +2527,16 @@ function CarrierKpiPanel({
   }, [econByCarrier, generators, storageUnits, links, group, selectedPeriod])
 
   const scaleHint = scaled ? ` × ${avgScale.toFixed(2)} weighted` : ''
+  // Result states (UX overhaul D3 rows 19–25): a figure this carrier cannot
+  // have says "not applicable", one the solve left out says "not modelled",
+  // and a computed zero is shown as zero — never "—".
+  const where = carrierDisplayLabel(carrier)
+  const notApplicable = (reason: string) => ({ state: 'not_applicable' as const, reason })
+  const zeroOr = (v: number) => (Math.abs(v) > 1e-6 ? {} : { state: 'zero' as const })
+  const hasStorage = group.storage.size + group.stores.size > 0
+  const noStorage = notApplicable(`No storage on ${where} buses.`)
+  const noRenewables = notApplicable(`No renewables on ${where} buses.`)
+  const lostLoadOff = { state: 'not_modelled' as const, reason: 'The solve had no VOLL, so lost load was not modelled.' }
   // Scope label: tells the user whether the numbers cover the full horizon,
   // a single period, or a user-narrowed slice. Reads off the same range +
   // selectedPeriod the KPI maths uses, so the label always matches the data.
@@ -2536,24 +2572,29 @@ function CarrierKpiPanel({
              hint={`Total energy consumed on ${carrierDisplayLabel(carrier)} buses: native loads (${fmtEnergy(dispatch.nativeLoad)}) + link outflows (${fmtEnergy(dispatch.linkOutflow)}, e.g. electrolyzer / heat-pump / datacenter draining this carrier) + sink-gen absorption (${fmtEnergy(dispatch.sinkAbsorption)}, e.g. heat-dump). Storage charging is shown separately below.${scaleHint}`} />
         <KPI label="Gen — conventional"  value={fmtEnergy(dispatch.conventional)}  hint={`Σ max(p,0) × weights over thermal gens on this carrier${scaleHint}`} />
         <KPI label="Gen — renewable"     value={fmtEnergy(dispatch.renewable)}     hint={`Σ max(p,0) × weights over renewable gens on this carrier${scaleHint}`} />
-        <KPI label="Gen — links" value={dispatch.linkGen > 1e-6 ? fmtEnergy(dispatch.linkGen) : '—'}
+        <KPI label="Gen — links" value={fmtEnergy(dispatch.linkGen)}
+             {...(dispatch.hasLinkSupply ? zeroOr(dispatch.linkGen) : notApplicable(`No link supplies ${where}.`))}
              hint={`Σ link contributions where the link's bus1/bus2 sits on ${carrierDisplayLabel(carrier)} buses (efficiency × p0 × weights). Captures electrolyzer H₂ output, heat-pump heat output, datacenter waste heat, etc.${scaleHint}`} />
         <KPI label="Storage discharge"
              value={fmtEnergy(dispatch.storageDischarge ?? 0)}
+             {...(hasStorage ? zeroOr(dispatch.storageDischarge ?? 0) : noStorage)}
              hint={group.storage.size + group.stores.size === 0
                ? `No StorageUnit or Store on ${carrierDisplayLabel(carrier)} buses — add one to model reservoir cycling on this carrier.`
                : `Σ max(p,0) × weights over ${group.storage.size} StorageUnit(s) + ${group.stores.size} Store(s) on this carrier.`} />
         <KPI label="Storage charge"
              value={fmtEnergy(dispatch.storageCharge ?? 0)}
+             {...(hasStorage ? zeroOr(dispatch.storageCharge ?? 0) : noStorage)}
              hint={group.storage.size + group.stores.size === 0
                ? `No StorageUnit or Store on ${carrierDisplayLabel(carrier)} buses.`
                : `Σ |min(p,0)| × weights over ${group.storage.size} StorageUnit(s) + ${group.stores.size} Store(s) on this carrier.`} />
         <KPI label="Curtailment"
-             value={dispatch.curtailment != null && dispatch.curtailment > 1e-6
-               ? `${fmtEnergy(dispatch.curtailment)}${dispatch.curtailmentPct != null ? ` · ${dispatch.curtailmentPct.toFixed(1)} %` : ''}`
-               : '—'}
+             value={`${fmtEnergy(dispatch.curtailment)}${dispatch.curtailmentPct != null ? ` · ${dispatch.curtailmentPct.toFixed(1)} %` : ''}`}
+             {...(!dispatch.hasRenewables ? noRenewables
+               : !curtailTS ? { state: 'unavailable' as const, reason: 'The solve returned no curtailment series.' }
+               : zeroOr(dispatch.curtailment))}
              hint={`Σ curtailed energy (server pre-computes max(p_max_pu × p_nom − p, 0)) × weights, over renewables on ${carrierDisplayLabel(carrier)} buses. % = curtailment ÷ (curtailment + renewable_dispatch).${scaleHint}`} />
-        <KPI label="Lost load"           value={lostLoadEnergy > 1e-6 ? fmtEnergy(lostLoadEnergy) : '—'}
+        <KPI label="Lost load"           value={fmtEnergy(lostLoadEnergy)}
+             {...(lostLoadNotModelled ? lostLoadOff : zeroOr(lostLoadEnergy))}
              hint={`VOLL slack dispatched on ${carrierDisplayLabel(carrier)} buses — non-zero only when the LP couldn't meet demand`} />
       </div>
 
@@ -2589,16 +2630,22 @@ function CarrierKpiPanel({
                      hint="Broader than Capacity Expansion's OPEX (horizon): Σ gen/link marginal cost + storage charge at bus price + curtailment + lost-load (economics_by_carrier). For this run, gen cost alone matches Capacity Expansion; the extra is mainly Storage charge cost." />
                 <KPI label="Gen cost" value={fmtCurrency(genCostEur)}
                      hint={`Σ marginal_cost × |dispatch| × weights over gens / links producing on this carrier — this is what Capacity Expansion labels OPEX (horizon). Link costs (e.g. electrolyzer / P2H marginal_cost × |p0|) are already included by the backend.${scaleHint}`} />
-                <KPI label="Storage charge cost" value={Math.abs(econ.charge) > 1e-6 ? fmtCurrency(econ.charge * 1e6) : '—'}
+                <KPI label="Storage charge cost" value={fmtCurrency(econ.charge * 1e6)}
+                     {...(hasStorage ? zeroOr(econ.charge) : noStorage)}
                      hint="What storage paid (or earned, if negative) to charge — bus_price × |charge| × weights. Included in OPEX (total) here, but NOT in Capacity Expansion OPEX (horizon)." />
-                <KPI label="Curtailment cost" value={econ.curt > 1e-6 ? fmtCurrency(econ.curt * 1e6) : '—'}
+                <KPI label="Curtailment cost" value={fmtCurrency(econ.curt * 1e6)}
+                     {...(!dispatch.hasRenewables ? noRenewables
+                       : !dispatch.hasCurtailmentCost
+                         ? { state: 'not_modelled' as const, reason: `No renewable on ${where} buses has a curtailment cost set.` }
+                         : zeroOr(econ.curt))}
                      hint="Σ curtailment_cost × curtailed-energy × weights" />
-                <KPI label="Lost-load cost" value={(econ.lost > 1e-6 || lostLoadCostFromCarrier > 1e-3)
-                                                    ? fmtCurrency(Math.max(econ.lost * 1e6, lostLoadCostFromCarrier)) : '—'}
+                <KPI label="Lost-load cost" value={fmtCurrency(Math.max(econ.lost * 1e6, lostLoadCostFromCarrier))}
+                     {...(lostLoadNotModelled ? lostLoadOff : zeroOr(Math.max(econ.lost, lostLoadCostFromCarrier / 1e6)))}
                      hint="VOLL × unserved demand on this carrier's buses" />
                 <KPI label="CAPEX (annuitised)" value={fmtCurrency(econ.capex * 1e6)}
                      hint="Σ ((overnight × annuity, or capital_cost) + fom_cost) × p_nom_opt × years_in_horizon — annuitised CAPEX plus fixed O&M, the fixed cost the LP objective paid; same gens/storage basis as Economics Fixed cost (excludes line CAPEX)." />
-                <KPI label="LCOE" value={lcoe > 1e-6 ? `${lcoe.toFixed(1)} €/MWh` : '—'}
+                <KPI label="LCOE" value={`${lcoe.toFixed(1)} €/MWh`}
+                     {...(dispatchTotal > 1e-6 ? {} : notApplicable(`Nothing was dispatched on ${where} buses.`))}
                      hint="(CAPEX + OPEX) ÷ (gen + link gen + storage discharge) — aggregated across this carrier's component-carriers" />
               </>
             )
@@ -3118,7 +3165,7 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
           <div ref={mainChartRef}>
             {perAsset && perAssetView ? (
               <ResponsiveContainer width="100%" height={180}>
-                <LineChart data={perAssetView.rows} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                <LineChart data={perAssetView.rows} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                   <YAxis {...CHART_AXIS}
@@ -3135,7 +3182,7 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
             ) : (
               <ResponsiveContainer width="100%" height={140}>
                 {isStorage ? (
-                  <LineChart data={aggView ?? agg} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                  <LineChart data={aggView ?? agg} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid {...CHART_GRID} />
                     <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                     <YAxis {...CHART_AXIS}
@@ -3145,7 +3192,7 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
                     <Line type="monotone" dataKey="value" stroke={style.color} strokeWidth={1.6} dot={false} />
                   </LineChart>
                 ) : (
-                  <AreaChart data={aggView ?? agg} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                  <AreaChart data={aggView ?? agg} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid {...CHART_GRID} />
                     <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                     <YAxis {...CHART_AXIS} label={yAxisLabel(yUnit)} />
@@ -3185,9 +3232,12 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
                   </button>
                 </span>
               </div>
+              {isAllZero(curtailmentSeries, ['value']) ? (
+                <ChartZero>No renewable energy was curtailed in this window.</ChartZero>
+              ) : (
               <div ref={curtailChartRef}>
                 <ResponsiveContainer width="100%" height={120}>
-                  <AreaChart data={curtailmentSeries} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                  <AreaChart data={curtailmentSeries} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid {...CHART_GRID} />
                     <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                     <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
@@ -3196,6 +3246,7 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
+              )}
             </div>
           )}
 
@@ -3230,7 +3281,7 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
               </div>
               <div ref={lostLoadChartRef}>
                 <ResponsiveContainer width="100%" height={120}>
-                  <AreaChart data={lostLoadSeries} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                  <AreaChart data={lostLoadSeries} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid {...CHART_GRID} />
                     <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                     <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
@@ -3612,7 +3663,7 @@ function FullLoadHoursSection(props: {
         </header>
         <div className="p-3">
           <ResponsiveContainer width="100%" height={220}>
-            <ComposedChart data={categoryStats} margin={{ top: 4, right: 12, left: 0, bottom: 4 }}>
+            <ComposedChart data={categoryStats} margin={{ top: 18, right: 12, left: 0, bottom: 4 }}>
               <CartesianGrid {...CHART_GRID} />
               <XAxis dataKey="category" {...CHART_AXIS} interval={0}
                 angle={categoryStats.length > 5 ? -15 : 0}

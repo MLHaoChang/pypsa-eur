@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Kpi from '../../components/Kpi'
+import ResultState from '../../components/ResultState'
 import {
-  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceDot,
 } from 'recharts'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
@@ -12,7 +13,7 @@ import { nk } from '../../utils/queryKeys'
 import {
   type TSPayload, type WeightCtx, weightedSumSplit, aggregateTS,
   shortStamp, useWeightCtx, WindowCapBanner,
-  CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel,
+  CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel, extremeDot, extremeOf,
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
@@ -69,7 +70,7 @@ export default function LostLoadTab() {
   // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
   // lost-load query below can be windowed before any payload exists.
   const { win, winValid, fetchRange } = useResultsWindow(currentProject)
-  const { data: lostLoad } = useQuery({
+  const { data: lostLoad, isSuccess: lostLoadRead } = useQuery({
     queryKey: nk(currentProject, 'results', 'lost_load', win.from, win.to),
     queryFn: () => resultsApi.getLostLoad(fetchRange),
     enabled: winValid,
@@ -150,6 +151,11 @@ export default function LostLoadTab() {
     if (!ts) return null
     return aggregateTS(ts, new Set(ts.columns), range)
   }, [lostLoad, range])
+  // The hour the most load went unserved, marked on the chart (UX S4b).
+  const worst = useMemo(() => {
+    const e = agg ? extremeOf(agg, 'value') : null
+    return e && agg ? { snapshot: agg[e.index].snapshot, value: e.value } : null
+  }, [agg])
 
   const totals = useMemo(() => {
     const ts = lostLoad as TSPayload | null
@@ -172,8 +178,15 @@ export default function LostLoadTab() {
   // The `targeted` branch's old copy said "the reliability target ABOVE
   // reports what actually bound" — there is no longer anything above, so it
   // points at the tab that now carries it.
+  // Nothing to say until the query answers: an unread payload is neither
+  // "not modelled" nor "nothing shed".
+  if (!lostLoadRead && !lostLoad) return null
   if (!lostLoad || !totals || totals.mwh <= 0) {
     const targeted = (adequacy as AdequacyReportPayload | null | undefined)?.target != null
+    // `voll_applied` comes from the solve-time settings (S2b); older payloads
+    // without it fall back to the VoLL the capture carries.
+    const vollApplied = lostLoad != null
+      && (lostLoad.voll_applied ?? (lostLoad.voll_eur_per_mwh ?? 0) > 0)
     return (
       <div className="flex flex-col h-full overflow-auto p-4 gap-4">
         <header>
@@ -190,15 +203,20 @@ export default function LostLoadTab() {
               and how the plan scores under the screening and sampling engines, is on the
               Adequacy tab.
             </p>
+          ) : vollApplied ? (
+            // UX overhaul S2b: VoLL WAS in the solve and nothing was shed — a
+            // computed zero, not a missing setting.
+            <p>
+              No load was shed in this solve: with a VOLL of{' '}
+              {Math.round(lostLoad?.voll_eur_per_mwh ?? 0).toLocaleString('en-US')} €/MWh the plan
+              served all demand, so there is no lost-load breakdown to chart.
+            </p>
           ) : (
-            <>
-              <p>No lost-load data available.</p>
-              <p>
-                The LP only writes lost-load when run with <code className="font-mono">VOLL &gt; 0</code> in
-                solver settings AND the optimisation can't meet demand at any price ≤ VOLL. Set a VOLL
-                (e.g. 3000–10000 €/MWh) and re-run to populate this tab.
-              </p>
-            </>
+            <ResultState
+              state="not_modelled"
+              reason="Lost load was not modelled in this run: the solve had no VOLL. The LP only writes lost load when VOLL > 0 and demand cannot be met at any price up to VOLL (e.g. 3000–10000 €/MWh)."
+              action={{ label: 'Set VOLL in Solver settings', onClick: () => useUIStore.getState().setSlidePanel('simparams') }}
+            />
           )}
         </div>
       </div>
@@ -278,7 +296,7 @@ export default function LostLoadTab() {
         <div className="p-3">
           {agg && agg.length > 0 ? (
             <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={agg} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <AreaChart data={agg} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="llGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={ACCENT} stopOpacity={0.4} />
@@ -293,6 +311,9 @@ export default function LostLoadTab() {
                   formatter={(v: number) => [`${v.toFixed(1)} MW`, 'unserved']} />
                 <Area type="monotone" dataKey="value"
                   stroke={ACCENT} fill="url(#llGrad)" strokeWidth={1.6} dot={false} />
+                {worst && (
+                  <ReferenceDot {...extremeDot(worst.snapshot, worst.value, 'worst hour', 'MW')} />
+                )}
               </AreaChart>
             </ResponsiveContainer>
           ) : <p className="text-[11px] text-muted">No time series for the selected range.</p>}

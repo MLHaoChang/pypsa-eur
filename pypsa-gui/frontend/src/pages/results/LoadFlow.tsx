@@ -46,7 +46,7 @@ export default function LoadFlow() {
   const { data: acPfStatus } = useQuery({ queryKey: nk(currentProject, 'results', 'ac_pf', 'status'), queryFn: resultsApi.getAcPfStatus })
   const acPfAvailable = !!acPfStatus?.available
 
-  const { data: linesTS } = useQuery({
+  const { data: linesTS, isPending: linesTSPending } = useQuery({
     queryKey: nk(currentProject, 'results', 'lines', resultSource, win.from, win.to),
     queryFn: () => resultsApi.getLineResults(resultSource, fetchRange),
     enabled: winValid,
@@ -1053,7 +1053,7 @@ export default function LoadFlow() {
                   />
                 ) : (
                   <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={voltageChart.rows} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                    <LineChart data={voltageChart.rows} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                       <CartesianGrid {...CHART_GRID} />
                       <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                       <YAxis {...CHART_AXIS} domain={['auto', 'auto']}
@@ -1220,7 +1220,7 @@ export default function LoadFlow() {
           <ResponsiveContainer width="100%" height={200}>
             <LineChart
               data={priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows}
-              margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
+              margin={{ top: 18, right: 4, left: 0, bottom: 0 }}
             >
               <CartesianGrid {...CHART_GRID} />
               <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />

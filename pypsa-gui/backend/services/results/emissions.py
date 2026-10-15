@@ -12,6 +12,8 @@ the router already used, so they are intentionally absent from this header.
 """
 from __future__ import annotations
 
+import math
+
 from services.economics import co2_intensity_map
 from services.period_utils import (
     period_years_map,
@@ -19,6 +21,22 @@ from services.period_utils import (
 )
 from typing import Any
 
+
+
+
+def _cap_binding(mu: float | None, slack: float | None, cap_value: float = 0.0) -> bool | None:
+    """Whether a CO2 cap bound the last LP, or None when it cannot be told.
+
+    UX overhaul S2b: a cap with no finite dual was not part of the last LP
+    (added after the solve, or the solve failed), so "not binding" would be a
+    claim nobody computed — the GUI shows it as unknown instead. Otherwise the
+    cap binds when it is used up (slack ≈ 0) or carries a non-zero dual.
+    """
+    if mu is None or not math.isfinite(mu):
+        return None
+    if slack is not None and abs(slack) < max(1.0, abs(cap_value) * 1e-6):
+        return True
+    return abs(mu) > 1e-6
 
 
 def compute_emissions(n, source, *, result_df):
@@ -296,7 +314,8 @@ def compute_emissions(n, source, *, result_df):
             )
             for cap_name in gc.index[mask]:
                 cap_value = float(gc.at[cap_name, "constant"])
-                mu = float(gc.at[cap_name, "mu"]) if "mu" in gc.columns else 0.0
+                mu_raw = float(gc.at[cap_name, "mu"]) if "mu" in gc.columns else None
+                mu = mu_raw if mu_raw is not None else 0.0
                 # Which period does this cap apply to (if any)?
                 ip_raw = gc.at[cap_name, "investment_period"] if "investment_period" in gc.columns else None
                 ip_norm: Any = None
@@ -327,7 +346,7 @@ def compute_emissions(n, source, *, result_df):
                     "used_tCO2": used,
                     "shadow_price_eur_per_tCO2": mu if _math.isfinite(mu) else 0.0,
                     "slack_tCO2": slack,
-                    "binding": (slack is not None and abs(slack) < max(1.0, abs(cap_value) * 1e-6)),
+                    "binding": _cap_binding(mu_raw, slack, cap_value),
                 }
                 caps.append(cap_entry)
                 if not cap_info.get("active"):
@@ -339,6 +358,7 @@ def compute_emissions(n, source, *, result_df):
                         "cap_tCO2": cap_value if _math.isfinite(cap_value) else None,
                         "shadow_price_eur_per_tCO2": mu if _math.isfinite(mu) else 0.0,
                         "slack_tCO2": slack,
+                        "binding": cap_entry["binding"],
                     }
     except Exception:
         pass

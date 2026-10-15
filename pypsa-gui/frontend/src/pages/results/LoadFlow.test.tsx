@@ -193,3 +193,23 @@ it('says branch loading does not apply when the network has no lines or transfor
   expect(document.querySelector('[data-state="not_applicable"]')?.textContent).toMatch(/no lines/i)
   expect(queryByText('Peak flow')).toBeNull()
 })
+
+// ── D3 rows 6–7: the lines table and top-loaded chart ───────────────────────
+it('does not repeat "Lines (0)" or "No data." under the no-lines statement', async () => {
+  vi.mocked(networkApi.getLines).mockResolvedValue([])
+  vi.mocked(resultsApi.getLineResults).mockResolvedValue({ index: [], columns: [], data: [] } as never)
+  const { findAllByText, queryByText } = renderPage()
+  expect((await findAllByText('Not applicable')).length).toBe(1)
+  expect(queryByText(/^Lines \(/)).toBeNull()
+  expect(queryByText('No data.')).toBeNull()
+  expect(queryByText('No line flow time-series.')).toBeNull()
+})
+
+it('says line flows have not run when the network has lines but no solved flows', async () => {
+  vi.mocked(resultsApi.getLineResults).mockResolvedValue(null as never)
+  const { findByText, queryByText } = renderPage()
+  expect(await findByText('Not run yet')).toBeTruthy()
+  expect(queryByText('No data.')).toBeNull()
+  expect(queryByText('No line flow time-series.')).toBeNull()
+  expect(queryByText(/^Lines \(0\)/)).toBeNull()
+})

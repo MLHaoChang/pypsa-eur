@@ -302,6 +302,15 @@ function storedAssistantDockOpen(): boolean {
   return true
 }
 
+const ASSISTANT_DOCK_PIN_KEY = 'network-diagram:assistant-dock-pinned'
+
+function storedAssistantDockPinned(): boolean {
+  try {
+    return localStorage.getItem(ASSISTANT_DOCK_PIN_KEY) === 'pinned'
+  } catch { /* noop */ }
+  return false
+}
+
 function storedAssistantDockWidth(): number {
   try {
     const v = Number(localStorage.getItem(ASSISTANT_DOCK_WIDTH_KEY))
@@ -440,6 +449,9 @@ interface UIStore {
   // regression test and the 2026-08-05 presence spec.
   assistantDockOpen: boolean
   assistantDockWidth: number
+  // UX overhaul S5 (Q5a): a pinned dock never collapses by itself
+  // (layout/dockAutoCollapse.ts). Persisted.
+  assistantDockPinned: boolean
   assistantEntry: 'compose' | 'speak' | 'profiles' | null
   // True while a project switch/load is mid-flight (between the moment the
   // backend starts swapping the in-memory network and the moment
@@ -585,6 +597,10 @@ interface UIStore {
   setSiteSizing: (m: SizingMode) => void
   setSlidePanel: (p: SlidePanel | null) => void
   setAssistantDockOpen: (open: boolean) => void
+  // Open/close WITHOUT persisting — the auto-collapse must not overwrite the
+  // user's stored choice (layout/dockAutoCollapse.ts).
+  setAssistantDockOpenTransient: (open: boolean) => void
+  setAssistantDockPinned: (pinned: boolean) => void
   setAssistantEntry: (entry: 'compose' | 'speak' | 'profiles' | null) => void
   toggleAssistantDock: () => void
   setAssistantDockWidth: (px: number) => void
@@ -669,6 +685,7 @@ export const useUIStore = create<UIStore>((set) => ({
   siteSizing: 'installed',
   activeSlidePanel: null,
   assistantDockOpen: storedAssistantDockOpen(),
+  assistantDockPinned: storedAssistantDockPinned(),
   assistantDockWidth: storedAssistantDockWidth(),
   assistantEntry: null,
   assistantSpeakEnabled: storedAssistantSpeak(),
@@ -834,6 +851,11 @@ export const useUIStore = create<UIStore>((set) => ({
   setAssistantDockOpen: (open) => {
     persistAssistantDockOpen(open)
     set({ assistantDockOpen: open })
+  },
+  setAssistantDockOpenTransient: (open) => set({ assistantDockOpen: open }),
+  setAssistantDockPinned: (pinned) => {
+    try { localStorage.setItem(ASSISTANT_DOCK_PIN_KEY, pinned ? 'pinned' : 'unpinned') } catch { /* noop */ }
+    set({ assistantDockPinned: pinned })
   },
   setAssistantEntry: (entry) => set({ assistantEntry: entry }),
   toggleAssistantDock: () => set(s => {

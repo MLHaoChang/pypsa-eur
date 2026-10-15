@@ -250,6 +250,9 @@ class FinanceInputs(BaseModel):
     cod_by_asset: dict[str, date] = Field(default_factory=dict)
     construction_months_by_asset: dict[str, int] = Field(default_factory=dict)
     capex_phasing: list[float] = Field(default_factory=lambda: [1.0])
+    # A later stage's capex is paid this many years before its COD (P5; E2E
+    # demo plan 2026-10-14 §7.1): one year by default, 0 = in the COD year.
+    stage_capex_lead_years: int = Field(default=1, ge=0)
     # None = not supplied (ADR-0001): the engine reports the figure as
     # not_established rather than fabricating a 0.
     contingency_share: float | None = Field(default=None, ge=0)

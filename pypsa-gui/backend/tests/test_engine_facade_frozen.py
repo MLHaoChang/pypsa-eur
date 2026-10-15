@@ -8,7 +8,9 @@ additions of `2026-10-06-ic-s0b-replacements-terminal.md` S7: the asset parts,
 the G2 additions of `2026-10-07-ic-g1-g2-campus-equipment.md` G-11:
 `ExtraOwnerAsset`, `FinanceCase.extra_assets` and the `extra_assets` keyword of
 `build_finance_case`; and the 2026-10-13 engine ask: `series_store.delete_series`,
-`pinned_by`, `list_series` and their result types).
+`pinned_by`, `list_series` and their result types; and P5b's staged builds of
+`2026-10-14-e2e-guided-demo.md` §7.1: `FinanceCase.asset_cod` and
+`FinanceInputs.stage_capex_lead_years`).
 
 Every facade name is imported and its call signature pinned with
 `inspect.signature` against the expectation below, so any change — a renamed
@@ -122,7 +124,8 @@ SIGNATURES: dict[str, str] = {
     "services.commercial.binding.bind_commercial":
         "(n, commercial, *, project_dir: 'pathlib.Path | None', "
         "resolve_ref: 'Callable[[object], pd.Series]', lock=None, "
-        "resolve_item: 'Callable[[object], dict] | None' = None) -> 'dict | None'",
+        "resolve_item: 'Callable[[object], dict] | None' = None, solver_cfg=None)"
+        " -> 'dict | None'",
     "services.library.series_store.resolve":
         "(db: 'DBSession', org_id: 'UUID', ref: 'PriceSeriesRef', *, root: 'Path | None' = None)"
         " -> 'pd.Series'",
@@ -137,8 +140,8 @@ SIGNATURES: dict[str, str] = {
         "(n, commercial) -> 'dict[str, float | None]'",
     # The context-level commercial binding (C, U1 follow-up b; GS Q15).
     "services.commercial.binding.bind_commercial_on_context":
-        "(ctx, commercial, *, user=None, in_flight: 'Callable[[object], bool] | None' = None)"
-        " -> 'dict | None'",
+        "(ctx, commercial, *, user=None, in_flight: 'Callable[[object], bool] | None' = None, "
+        "solver_cfg=None) -> 'dict | None'",
     # The generic defaults pack (A, U1 follow-up a) and the flat export series (e).
     "services.library.defaults_pack.loader.load_defaults_pack":
         "(version: 'str | None' = None) -> 'DefaultsPack'",
@@ -253,7 +256,7 @@ DATACLASS_FIELDS: dict[str, tuple[str, ...]] = {
     "services.library.series_store.SeriesDeleted": ("deleted_versions", "kept", "pinned_by"),
     "services.finance.case.FinanceCase": (
         "inputs", "owner", "base_year", "cod", "templates", "assets", "flags", "counterfactual",
-        "lp_basis", "counterfactual_hash", "conservation_ok", "extra_assets"),
+        "lp_basis", "counterfactual_hash", "conservation_ok", "extra_assets", "asset_cod"),
 }
 
 # The literal choices the guided study compiles to (IC S0b plan S7: C2 compiles
@@ -278,7 +281,7 @@ MODEL_FIELDS: dict[str, tuple[str, ...]] = {
         "depreciation_class_by_asset", "escalation", "financial_close", "financing_fee_tax",
         "hebesatz_pct", "incentives", "inflation", "participants", "price_basis", "pwa_met",
         "replacement_capex", "replacement_rule", "reserves_rate", "small_business_163j",
-        "solve_ppa", "state_rate",
+        "solve_ppa", "stage_capex_lead_years", "state_rate",
         "tax_equity", "tax_losses", "tax_pack_id", "terminal_value", "wacc_nominal"),
 }
 

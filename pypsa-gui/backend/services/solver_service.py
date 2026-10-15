@@ -795,9 +795,17 @@ def run_simulation(
                     phase("Commercial binding failed. Aborting.")
                     status, condition = "error", "commercial_binding_failed"
                     return status, condition
+                # A connection energized in steps (absolute MW, E2E slice 8):
+                # p_max_pu = min(own, E / p_nom) for this solve, after the
+                # agreement so its cap composes; undone before it.
+                from services.adequacy.energization import apply_energization
+
+                _energization_undo = lambda: None   # noqa: E731
                 try:
+                    _energization_undo = apply_energization(network)
                     _real_restore, captured = _apply_modelling_assumptions(network, config, phase)
                 except BaseException:
+                    _energization_undo()
                     _ic_conn.undo()
                     raise
                 _assumptions_restore = _real_restore
@@ -806,7 +814,10 @@ def run_simulation(
                     try:
                         _assumptions_restore()
                     finally:
-                        _ic_conn.undo()
+                        try:
+                            _energization_undo()
+                        finally:
+                            _ic_conn.undo()
                 # Once-guarded restore wrapper. The network now carries the LP
                 # transforms; restore MUST run exactly once before the network
                 # can be serialised. The solve try/finally below calls this on
@@ -1214,6 +1225,19 @@ def run_simulation(
                 # identical guard the ENS cap carries below, for the identical
                 # reason: with no plan to measure, a margin block would report
                 # the previous solve's firm capacity as this one's.
+                # UX overhaul S2b: the settings this solve actually used, so
+                # /results/{lost_load,adequacy,reserve_margin} can tell "solved
+                # without this standard" from "not solved" — and answer from
+                # the solve, never from the Solver Settings draft (which the
+                # user may have edited since). None after a failed solve, for
+                # the same reason the stashes below are: no dispatch to judge.
+                _emit_state(last_solve_settings=({
+                    "voll_eur_per_mwh": float(getattr(config, "voll", 0.0) or 0.0),
+                    "ens_target_applied": bool(_ens_targets),
+                    "ens_cap_permyriad": getattr(config, "ens_cap_permyriad", None),
+                    "reserve_margin_applied": bool(_margin_targets),
+                    "reserve_margin": getattr(config, "reserve_margin", None),
+                } if status in ("ok", "optimal") else None))
                 _margin_payload = None
                 if not _margin_targets:
                     # 12c-0 shipped-code review, finding 3: the HTTP route

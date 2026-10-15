@@ -651,9 +651,11 @@ def _payload_or_no_data(kind: str, result: Any, message: str) -> Any:
     return result
 
 
-# What a 204 means on /api/results. Both halves are load-bearing: `lost_load`
-# and `adequacy` answer 204 on a perfectly good solve that simply shed nothing
-# / carried no target, so "not solved" alone would be a lie.
+# What a 204 means on /api/results. Both halves are load-bearing: several
+# kinds answer 204 when a solve produced none of their result. (Since UX
+# overhaul S2b `lost_load`, `adequacy` and `reserve_margin` answer 200 with
+# `voll_applied` / `configured: false` on a solve without that standard and
+# 204 only when nothing is solved; the message stays true for the rest.)
 _RESULTS_NO_DATA_MESSAGE = (
     "no result of this kind: the network has not been solved, its dispatch is "
     "stale relative to the current topology, or this solve produced none of "
@@ -2464,8 +2466,8 @@ def solve_ppa_price(target_irr: float, target_year: int,
 
 # The engine's own sources in the report's cashflow lines (report.py
 # `_cashflow_lines`); every other source is an operating line.
-_IC_FINANCE_SOURCES = frozenset({"capex", "replacement_capex", "terminal_value", "itc", "ptc",
-                                 "grant", "debt", "debt_draws", "dsra", "reserve_interest"})
+_IC_FINANCE_SOURCES = frozenset({"capex", "replacement_capex", "stage_capex", "terminal_value", "itc",
+                                 "ptc", "grant", "debt", "debt_draws", "dsra", "reserve_interest"})
 _IC_AVOIDED = "avoided_supply_cost (counterfactual)"
 
 
@@ -2931,12 +2933,12 @@ _ADEQUACY_NO_DATA_HINTS: dict[str, str] = {
     "coupling_loop": "no coupling loop has run in this session",
     "margin_loop": "no margin loop has run in this session",
     "adequacy": (
-        "nothing has been solved, or the last solve ran without a "
-        "reliability target"
+        "nothing has been solved (a solve without a reliability target "
+        "answers configured: false instead)"
     ),
     "reserve_margin": (
-        "nothing has been solved, the last solve set no reserve margin, or "
-        "it produced no dispatch to judge one against"
+        "nothing has been solved, or it produced no dispatch to judge a margin "
+        "against (a solve without a margin answers configured: false instead)"
     ),
     "eh_study": "no Energy Hub reference-design study has run in this session",
     "eh_reference_design": (
@@ -3582,7 +3584,7 @@ def campus_run_study(project_id: str, k: int | None = None, pf: float | None = N
                      n_minus_1: bool | None = None, invest: bool | None = None,
                      pcc_switchgear_by_operator: bool | None = None,
                      pcc_tap_control: str | None = None) -> dict:
-    from services.campus_electrical_service import run as _h
+    from services.campus_electrical_service import enqueue_run as _h
     settings = {key: v for key, v in (("k", k), ("profile", profile), ("margin", margin),
                                        ("n_minus_1", n_minus_1), ("invest", invest),
                                        ("pcc_switchgear_by_operator", pcc_switchgear_by_operator),
@@ -3590,7 +3592,7 @@ def campus_run_study(project_id: str, k: int | None = None, pf: float | None = N
                 if v is not None}
     settings["pf"] = pf
     with _acting() as (db, user):
-        return _h(_gridspine_project_for_write(db, user, project_id), settings)
+        return _h(_gridspine_project_for_write(db, user, project_id), settings, user)
 
 
 def _campus_check_lock(db, user, project) -> None:

@@ -47,6 +47,7 @@ import ProjectMismatchBanner from './components/ProjectMismatchBanner'
 import { useProjectMismatchDetection } from './hooks/useProjectMismatchDetection'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import AssistantDock from './components/AssistantDock'
+import { useDockAutoCollapse } from './layout/dockAutoCollapse'
 import { useUIStore, type SlidePanel } from './store/uiStore'
 import { authEnabled } from './auth/config'
 import AuthMismatchGate from './auth/AuthMismatchGate'
@@ -212,6 +213,9 @@ export function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: ()
 }
 
 export default function App() {
+  // The assistant dock steps aside over Results and when no key is set,
+  // unless pinned (UX overhaul S5, owner decision Q5a).
+  useDockAutoCollapse()
   const {
     activeSlidePanel, setSlidePanel, currentProject, canvasView,
     lastProjectId, lastSavedByProject, markProjectSaved, pruneRecents, recents, setLastProjectId,

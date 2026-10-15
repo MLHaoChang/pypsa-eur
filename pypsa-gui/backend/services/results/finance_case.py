@@ -8,17 +8,21 @@ engine imports nothing from `services.results`; the router injects a
 `build_case` callable). It refuses with `FinanceRefused(code)` — stable codes:
 
   value_flows_not_configured, value_flows_invalid, owner_has_no_assets,
-  owner_ambiguous, staged_build_not_supported,
-  staged_build_vintage_bounds_not_supported, template_not_annual:<hours>,
-  cod_missing, cod_mismatch, counterfactual_not_established:lossy_poc,
-  owner_asset_missing, stream_unmapped:<stream>.
+  owner_ambiguous, staged_build_vintage_bounds_not_supported,
+  staged_cod_not_active_period:<asset>, asset_retires_in_horizon:<asset>,
+  template_not_annual:<hours>, cod_missing, cod_mismatch,
+  counterfactual_not_established:lossy_poc, owner_asset_missing,
+  stream_unmapped:<stream>.
 
 What it builds:
 
 * **The owner** — the given `owner`, else the single distinct owner of
   `vf.asset_owners`; the owner's assets are its `asset_owners` entries
   (`same_party`). A multi-period owner asset built after the first period is
-  a staged build (P5).
+  a staged build (P5c, below); one built after it with no built capacity
+  (`p_nom_opt` / `e_nom_opt` / `s_nom_opt` when extendable, else the static
+  capacity, ≤ 1e-6) is not an investment: no capex, no COD, flagged
+  `not_built:<a>`.
 * **The annual check (C3)** — Σ objective weights per period within 0.5 % of
   8,760 (8,784 in a leap weight-majority year), else refused
   `template_not_annual:<hours>`; `fin.annualise` scales every template line
@@ -114,18 +118,33 @@ What it builds:
   at the committed import price + the supply's price; the on-site-surplus
   share at the export revenue forgone), scaled by the annualise factor.
 * **Dates, LP basis, hash** — `base_year` the modelled / first period year;
-  COD from `fin.cod_by_asset`, else 1 January of the asset's `build_year`
-  (`cod_from_build_year:<a>`; PyPSA's 0 is absent — IC S0b S3), one date for
-  every owner asset; `LpBasis` from the
-  config and the assets' own `discount_rate`; `finance_case_hash`.
+  each invested asset's COD from `fin.cod_by_asset`, else 1 January of its
+  `build_year` (`cod_from_build_year:<a>`; PyPSA's 0 is absent — IC S0b S3);
+  two CODs in one year are `cod_mismatch`; `case.cod` the earliest;
+  `LpBasis` from the config and the assets' own `discount_rate`;
+  `finance_case_hash`.
+* **Staged builds (P5c; E2E plan §7.1, §7.4)** — when the invested assets'
+  CODs differ, `case.asset_cod` names every one (network and extra assets);
+  otherwise it is empty, so an unstaged case keeps its hash. A later stage's
+  COD year must be its FIRST ACTIVE investment period (PyPSA's
+  `get_active_assets`; an extra: the first period at or after its
+  `build_year`), else `staged_cod_not_active_period:<a>`; a network asset
+  built after the first period is held to the same rule whatever its COD; a
+  single-period network has no period for a stage. An invested asset active
+  in a modelled period and inactive in a later one is
+  `asset_retires_in_horizon:<a>` (only the modelled periods count). A staged
+  case whose first COD is before the first period (an asset in service
+  before it) stays `cod_mismatch`. Vintage-bound parents that build in a
+  later period stay `staged_build_vintage_bounds_not_supported`.
 * **Extra (campus) assets, IC G2** — `extra_assets` (`ExtraOwnerAsset`s, a
   campus study's chosen equipment): each is one `AssetFinance` after the
   network assets (`campus:<kind>`, no carrier, overnight = Σ upfront per unit ×
   quantity, in the case's money: the caller converts), with one
   `extra_asset_fom:<name>` template line per period (Σ fom_share × overnight,
-  `opex`, after the annualise scaling); never in the counterfactual; COD by
-  year against the case COD (`cod_from_build_year:<name>`, `cod_mismatch`,
-  `extra_asset_staged_build:<name>`); refused
+  `opex`, after the annualise scaling; a later stage's only from its own
+  period); never in the counterfactual; COD by year against the case COD
+  (`cod_from_build_year:<name>`, `cod_mismatch`; a later year is a stage
+  under the staged-build rules); refused
   `extra_asset_duplicates_network_asset:<name>`, `extra_asset_duplicate:<name>`,
   `extra_asset_derived_upfront:<name>`; flagged
   `extra_asset_may_double_count:<name>` beside an owned network Transformer or
@@ -666,8 +685,8 @@ def _served_load(n, cfg, loads: list[str], lost_load) -> tuple[np.ndarray, np.nd
     shed = np.zeros(len(n.snapshots))
     reasons: list[str] = []
     buses = {str(n.loads.at[ld, "bus"]) for ld in loads}
-    frame = n.buses_t.get(_SI.DSR_ATTR) if hasattr(n.buses_t, "get") else None
-    if frame is not None and not frame.empty:
+    dsr_frame = n.buses_t.get(_SI.DSR_ATTR) if hasattr(n.buses_t, "get") else None
+    if dsr_frame is not None and not dsr_frame.empty:
         dsr, _f = _SI.dsr_activation(n)
         if dsr is None:
             reasons.append("dsr_shed_unknown")
@@ -1164,10 +1183,18 @@ def _build_year(n, comp: str, name: str) -> int | None:
 
 
 def _cod(n, fin, owned_list) -> tuple[date, list[str]]:
-    """The case's COD and its flags (S3): each owner asset's `cod_by_asset`
+    """The case's COD and its flags (S3): the earliest of the owner assets'
+    CODs (`_asset_cods`)."""
+    dates, flags = _asset_cods(n, fin, owned_list)
+    return min(dates.values()), flags
+
+
+def _asset_cods(n, fin, owned_list) -> tuple[dict[str, date], list[str]]:
+    """Each owner asset's COD and the flags (S3, P5c): its `cod_by_asset`
     entry, else 1 January of its `build_year` (flagged
-    `cod_from_build_year:<a>`), else `cod_missing`; one COD for all assets
-    (`cod_mismatch` otherwise — staged builds are P5)."""
+    `cod_from_build_year:<a>`), else `cod_missing`. Different COD years are
+    stages (`build_finance_case` applies the stage rules); two different CODs
+    in ONE year are `cod_mismatch` (the engine's axis is annual)."""
     dates: dict[str, date] = {}
     flags: list[str] = []
     missing = []
@@ -1184,11 +1211,16 @@ def _cod(n, fin, owned_list) -> tuple[date, list[str]]:
     if missing:
         raise FinanceRefused("cod_missing", f"cod_by_asset names no date for {missing} and they "
                              "have no build_year")
-    distinct = set(dates.values())
-    if len(distinct) > 1:
-        raise FinanceRefused("cod_mismatch",
-                             f"the owner's assets have different CODs {sorted(distinct)} (P5)")
-    return next(iter(distinct)), flags
+    if not dates:
+        raise FinanceRefused("owner_has_no_assets", "the owner has no invested asset")
+    by_year: dict[int, set[date]] = {}
+    for d in dates.values():
+        by_year.setdefault(d.year, set()).add(d)
+    for year, same in sorted(by_year.items()):
+        if len(same) > 1:
+            raise FinanceRefused("cod_mismatch", f"the owner's assets have different CODs "
+                                 f"{sorted(same)} in one year {year} (the axis is annual)")
+    return dates, flags
 
 
 def _scale(lines, f: float, monthly: dict[str, float | None] | None = None
@@ -1464,28 +1496,114 @@ def _extra_assets(extras: tuple[ExtraOwnerAsset, ...], owned_list, invest_list
     return tuple(out), flags
 
 
-def _extra_cod_flags(fin, extras: tuple[ExtraOwnerAsset, ...], cod: date) -> list[str]:
-    """G-7: an extra asset is taken at the case COD (from the network owner assets,
-    `_cod`). A typed `cod_by_asset` entry must equal it (`cod_mismatch`); without one
-    its `build_year` is compared BY YEAR: the COD's year is accepted at the case COD
-    (`cod_from_build_year:<name>`), an earlier year is `cod_mismatch`, a later one
-    `extra_asset_staged_build:<name>` (P5) — never moved."""
+def _extra_cods(fin, extras: tuple[ExtraOwnerAsset, ...], cod: date
+                ) -> tuple[dict[str, date], list[str]]:
+    """G-7, P5c: each extra asset's COD and the flags, against the case COD (from
+    the network owner assets, `_asset_cods`). A typed `cod_by_asset` entry equal to
+    the case COD is taken; one in a later year is a stage at that date; any other
+    is `cod_mismatch`. Without one its `build_year` is compared BY YEAR: the COD's
+    year is taken at the case COD (`cod_from_build_year:<name>`), an earlier year
+    is `cod_mismatch`, a later one a stage at 1 January of it (also
+    `cod_from_build_year:<name>`; the stage rules are `_stage_rules`)."""
+    dates: dict[str, date] = {}
     flags = []
     for e in extras:
         if e.name in fin.cod_by_asset:
-            if fin.cod_by_asset[e.name] != cod:
+            typed = fin.cod_by_asset[e.name]
+            if typed != cod and typed.year <= cod.year:
                 raise FinanceRefused("cod_mismatch", f"cod_by_asset[{e.name!r}] "
-                                     f"{fin.cod_by_asset[e.name]} differs from the case COD {cod}")
+                                     f"{typed} differs from the case COD {cod}")
+            dates[e.name] = typed
             continue
         if e.build_year < cod.year:
             raise FinanceRefused("cod_mismatch", f"{e.name!r} is built in {e.build_year}, "
                                  f"before the case COD {cod}")
-        if e.build_year > cod.year:
-            raise FinanceRefused(f"extra_asset_staged_build:{e.name}",
-                                 f"{e.name!r} is built in {e.build_year}, after the case COD "
-                                 f"{cod} (staged builds are P5)")
+        dates[e.name] = cod if e.build_year == cod.year else date(e.build_year, 1, 1)
         flags.append(f"cod_from_build_year:{e.name}")
-    return flags
+    return dates, flags
+
+
+def _built_capacity(n, comp: str, name: str) -> float | None:
+    """The capacity an asset has after the solve: the optimised one when it is
+    extendable (`p_nom_opt`, `e_nom_opt` for a Store, `s_nom_opt` for a branch),
+    else the static one; None when not stated."""
+    df = getattr(n, _frame_of(comp) or "", None)
+    col = _CAPACITY_COLS.get(comp)
+    if df is None or col is None or name not in df.index:
+        return None
+    ext = bool(df.at[name, f"{col}_extendable"]) if f"{col}_extendable" in df.columns else False
+    if ext and f"{col}_opt" in df.columns:
+        return _fin(df.at[name, f"{col}_opt"])
+    return _fin(df.at[name, col]) if col in df.columns else None
+
+
+def _active_periods(n, comp: str, name: str, periods: list) -> list[bool]:
+    """Whether the asset is active in each investment period (PyPSA's own
+    `get_active_assets`: build_year ≤ period < build_year + lifetime, and the
+    static `active` flag) — the same mask the LP used."""
+    out = []
+    for p in periods:
+        act = n.components[comp].get_active_assets(int(p))
+        out.append(bool(act.get(name, False)))
+    return out
+
+
+def _stage_rules(n, periods: list, period_year: int, invest_list, dates: dict[str, date],
+                 extras: tuple[ExtraOwnerAsset, ...], extra_dates: dict[str, date],
+                 cod: date) -> None:
+    """The staged-build rules (P5c; plan §7.1 items 2, 3, 7 with §7.4):
+
+    - `asset_retires_in_horizon:<a>` — an invested network asset active in a
+      modelled period and inactive in a LATER one (a replacement would
+      contradict the dispatch; only the modelled periods count);
+    - rule P5-a, `staged_cod_not_active_period:<a>` — a later stage (a COD year
+      after the case's, or a network asset built after the first period) must
+      have its COD in its FIRST ACTIVE investment period (for an extra: the
+      first period at or after its `build_year`), where its dispatch starts;
+      a single-period network has no later period for a stage;
+    - `cod_mismatch` — a staged case whose first COD is before the first
+      period (an asset in service before it, combined with a later stage:
+      refused as before P5)."""
+    staged = len({d.year for d in [*dates.values(), *extra_dates.values()]}) > 1
+    if periods[0] is None:
+        for name, d in [*dates.items(), *extra_dates.items()]:
+            if d.year > cod.year:
+                raise FinanceRefused(f"staged_cod_not_active_period:{name}",
+                                     f"{name!r} has its COD in {d.year}, but the network has one "
+                                     f"period ({period_year}): a later stage needs an investment "
+                                     "period of its own")
+        return
+    first = periods[0]
+    for comp, name in invest_list:
+        active = _active_periods(n, comp, name, periods)
+        for i, on in enumerate(active):
+            if on and not all(active[i:]):
+                gone = periods[i + active[i:].index(False)]
+                raise FinanceRefused(f"asset_retires_in_horizon:{name}",
+                                     f"{comp} {name!r} is active in {periods[i]} and retired by "
+                                     f"{gone}: a retirement inside the modelled periods is not "
+                                     "supported")
+        by = _build_year(n, comp, name)
+        if dates[name].year > cod.year or (by is not None and by > first):
+            first_active = periods[active.index(True)] if any(active) else None
+            if first_active != dates[name].year:
+                raise FinanceRefused(f"staged_cod_not_active_period:{name}",
+                                     f"{comp} {name!r} has its COD in {dates[name].year}, but its "
+                                     f"first active investment period is "
+                                     f"{first_active if first_active is not None else 'none'}")
+    for e in extras:
+        d = extra_dates[e.name]
+        if d.year > cod.year:
+            first_active = next((p for p in periods if p >= e.build_year), None)
+            if first_active != d.year:
+                raise FinanceRefused(f"staged_cod_not_active_period:{e.name}",
+                                     f"{e.name!r} has its COD in {d.year}, but its first active "
+                                     f"investment period is "
+                                     f"{first_active if first_active is not None else 'none'}")
+    if staged and cod.year < first:
+        raise FinanceRefused("cod_mismatch",
+                             f"the case COD {cod} is before the first period {first}: an asset "
+                             "in service before the first period cannot open a staged case")
 
 
 def _extra_fom_lines(extra_finance: tuple[AssetFinance, ...], k: str, base_year: int
@@ -1531,25 +1649,38 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
     meter_skip = _uncosted_meter_links(n, parsed, owned_list)
     flags += [f"meter_link_not_investment:{m}" for m in meter_skip]
     invest_list = [(c, a) for c, a in owned_list if not (c == "Link" and a in meter_skip)]
-    extras = tuple(extra_assets)
-    extra_finance, extra_flags = _extra_assets(extras, owned_list, invest_list)
 
-    # Staged builds are P5 (plan C2).
+    # Staged builds (P5c): an owned asset built after the first period with no
+    # built capacity is not an investment (`not_built:<a>`); a built one is a
+    # stage (its COD and the stage rules below). Vintage-bound parents that
+    # build in a later period are still refused until they are split.
     if periods[0] is not None:
         first = periods[0]
+        kept, dropped = [], set()
         for comp, name in invest_list:
             df = getattr(n, _frame_of(comp) or "", None)
-            if df is not None and name in df.index and "build_year" in df.columns:
-                by = _fin(df.at[name, "build_year"])
-                if by is not None and by > first:
-                    raise FinanceRefused("staged_build_not_supported",
-                                         f"{comp} {name!r} is built in {int(by)}, after the "
-                                         f"first period {first} (P5)")
+            by = _fin(df.at[name, "build_year"]) if df is not None and name in df.index \
+                and "build_year" in df.columns else None
+            built = _built_capacity(n, comp, name)
+            if by is not None and by > first and built is not None and built <= _EPS_MW:
+                flags.append(f"not_built:{name}")
+                dropped.add(name)
+                continue
             later = _later_build_year(n, comp, name, first)
             if later is not None:
                 raise FinanceRefused("staged_build_vintage_bounds_not_supported",
                                      f"{comp} {name!r} builds {later[1]:g} in {later[0]}, after "
                                      f"the first period {first}, through vintage bounds (P5)")
+            kept.append((comp, name))
+        invest_list = kept
+        if dropped & set(fin.cod_by_asset):
+            # A typed COD on a candidate that built nothing names no asset of
+            # the case: passed on, the engine would check it against the
+            # resolved COD (`cod_mismatch`), a refusal `not_built` must not cause.
+            fin = fin.model_copy(update={"cod_by_asset": {
+                k: v for k, v in fin.cod_by_asset.items() if k not in dropped}})
+    extras = tuple(extra_assets)
+    extra_finance, extra_flags = _extra_assets(extras, owned_list, invest_list)
 
     # C3: the template must be a year.
     info: dict[str, tuple[int, float]] = {}
@@ -1676,8 +1807,30 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
 
     lp_rate = _fin(getattr(cfg, "discount_rate", None))
     assets, rates, asset_flags = _assets(n, invest_list, discount_rate=lp_rate)
-    cod, cod_flags = _cod(n, fin, invest_list)
-    flags += asset_flags + cod_flags + extra_flags + _extra_cod_flags(fin, extras, cod)
+    dates, cod_flags = _asset_cods(n, fin, invest_list)
+    cod = min(dates.values())
+    extra_dates, extra_cod_flags = _extra_cods(fin, extras, cod)
+    # One COD per year across network assets AND extras (the axis is annual).
+    by_year: dict[int, set[date]] = {}
+    for d in [*dates.values(), *extra_dates.values()]:
+        by_year.setdefault(d.year, set()).add(d)
+    for year, same in sorted(by_year.items()):
+        if len(same) > 1:
+            raise FinanceRefused("cod_mismatch", f"the owner's assets and extras have different "
+                                 f"CODs {sorted(same)} in one year {year} (the axis is annual)")
+    _stage_rules(n, periods, info[_key(periods[0])][0], invest_list, dates, extras,
+                 extra_dates, cod)
+    flags += asset_flags + cod_flags + extra_flags + extra_cod_flags
+    # P5c: `asset_cod` names every invested asset only when they differ, so an
+    # unstaged case keeps its hash. A later extra's fixed O&M starts in its period.
+    asset_cod = {**dates, **extra_dates} if len({*dates.values(), *extra_dates.values()}) > 1 \
+        else {}
+    late = {name: d.year for name, d in extra_dates.items() if d.year > cod.year}
+    if late:
+        templates = [dataclasses.replace(t, lines=tuple(
+            ln for ln in t.lines
+            if not (ln.source == "extra_asset_fom" and t.first_year < late.get(ln.source_id, 0))))
+            for t in templates]
     if extras and fin.currency_year is None:
         # The extras' costs are in the caller's money; with no case currency year
         # nothing says whether it matches (IC G2 gate r1 note 5).
@@ -1691,7 +1844,7 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                        flags=tuple(dict.fromkeys(flags)),
                        counterfactual=tuple(counterfactual), lp_basis=lp,
                        counterfactual_hash=cf_hash, conservation_ok=conservation.ok,
-                       extra_assets=extras)
+                       extra_assets=extras, asset_cod=asset_cod)
 
 
 # ── the hash ─────────────────────────────────────────────────────────────────
@@ -1703,6 +1856,13 @@ def _canon(o):
         # a case without extras keeps its S0b hash (no generic empty-tuple rule).
         if isinstance(o, FinanceCase) and o.extra_assets == ():
             del out["extra_assets"]
+        # P5 (staged builds) likewise: a case without stages, at the default
+        # lead, keeps its pre-P5 hash.
+        if isinstance(o, FinanceCase):
+            if not o.asset_cod:
+                del out["asset_cod"]
+            if o.inputs.stage_capex_lead_years == 1 and isinstance(out.get("inputs"), dict):
+                out["inputs"].pop("stage_capex_lead_years", None)
         return out
     if hasattr(o, "model_dump"):
         return _canon(o.model_dump(mode="json"))

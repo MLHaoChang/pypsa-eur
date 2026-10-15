@@ -486,3 +486,29 @@ def test_a_draft_without_the_sidecar_is_unchanged(project):
     assert yaml.safe_dump(plain.spec, sort_keys=False) == yaml.safe_dump(
         draft_campus(load_solved_network(project)).spec, sort_keys=False)
     assert "island" not in plain.spec["campus"]
+
+
+def test_sizing_writes_the_ibr_capability_and_the_reported_requirements_beside_compliance(tmp_path, project):
+    """E2E demo plan 2026-10-14 §7.3: the US profile adds IEEE 2800's IBR
+    capability table and the dynamic requirements, never a compliance row
+    (the measure loop reads that); the EU profile reports its dynamic
+    requirements and has no capability table."""
+    import pandas as pd
+
+    from gridspine.drivers.campus_study import IBR_CAPABILITY_CSV, REPORTED_REQUIREMENTS_JSON
+
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(project).spec, project)
+    rank_campus(run, k=1)
+    eu = size_campus(run)
+    eu_checks = list(eu["compliance"]["check"])
+    assert eu["ibr_capability"] is None and not (run / IBR_CAPABILITY_CSV).is_file()
+    assert all(r["status"] == "reported" for r in json.loads((run / REPORTED_REQUIREMENTS_JSON).read_text()))
+    us = size_campus(run, profile="us_ieee2800_nerc")
+    assert list(us["compliance"]["check"]) == eu_checks                 # no new compliance row
+    table = pd.read_csv(run / IBR_CAPABILITY_CSV)
+    assert list(table["unit"])[-1] == "TOTAL"
+    ids = {r["id"] for r in json.loads((run / REPORTED_REQUIREMENTS_JSON).read_text())}
+    assert {"frt", "vrt", "rocof", "large_load_ride_through"} <= ids
+    size_campus(run)                                                     # back to EU: the table goes
+    assert not (run / IBR_CAPABILITY_CSV).is_file()

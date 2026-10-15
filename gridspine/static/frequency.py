@@ -134,6 +134,7 @@ class Trace:
     rocof0: float                # dΔf/dt at 0⁺, Hz/s
     ups: dict = dataclasses.field(default_factory=dict)    # UPS -> UpsLog
     label: str = LABEL
+    trip: tuple | None = None    # (t, what): Δf crossed the trip floor or ceiling at t (``TripFloor``)
 
 
 @dataclasses.dataclass
@@ -293,14 +294,16 @@ def _ups_step(units, x, dt, log, t):
             rec["t_online"] = None
 
 
-def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0, islanding=False) -> Trace:
+def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0, islanding=False, floor=None) -> Trace:
     """Integrate the island frequency after ``dp_event(t)`` (MW, positive a
     deficit: load gained or generation lost) with ``units`` (``Unit``).
     Fixed-step RK4 on Δf and the governors; the frequency-watt ramps, the
     UPS states and the limits are applied after each step. ``islanding``:
     the event opens the PCC, so a UPS that ``transfers`` starts on its
     battery. A ``dp_event`` with an ``advance(t, Δf, RoCoF)`` method is told
-    the state after each step and may change itself (E4's pickup)."""
+    the state after each step and may change itself (E4's pickup).
+    ``floor`` (a ``TripFloor``): once Δf crosses it the run stops there, a
+    trip (``Trace.trip``), not a number; None runs to ``t_end``."""
     units = list(units)
     x = {"df": 0.0}
     ups_log = {}
@@ -317,7 +320,7 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0, islanding
     t = np.linspace(0.0, (n - 1) * dt, n)
     df = np.zeros(n)
     dp = {u.name: np.zeros(n) for u in units}
-    saturated, collapse = {}, None
+    saturated, collapse, trip = {}, None, None
     rocof0, _, _ = _balance(units, dict(x), 0.0, dp_event, f0, damping)
     if rocof0 is None:
         return Trace(t[:1], df[:1], {k: v[:1] for k, v in dp.items()}, {}, 0.0, math.nan,
@@ -356,6 +359,12 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0, islanding
                     saturated.setdefault(u.name, float(tt))
             elif u.model in ("genset", "gfl_fw", "ups"):
                 dp[u.name][i] = x[u.name] if (u.model != "genset" or tt >= u.join_s) else 0.0
+        crossed = _tripped(floor, x["df"], f0)
+        if crossed is not None:
+            trip = (float(tt), crossed)
+            t, df = t[:i + 1], df[:i + 1]
+            dp = {k: v[:i + 1] for k, v in dp.items()}
+            break
         if i == n - 1:
             break
         k1 = deriv(x, tt)
@@ -372,7 +381,7 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0, islanding
         _clamp(units, x, tt + dt)
         _fw_step(units, x, tt + dt, dt)
         _ups_step(units, x, dt, ups_log, tt + dt)
-    return Trace(t, df, dp, saturated, collapse, float(rocof0), _ups_logs(units, ups_log))
+    return Trace(t, df, dp, saturated, collapse, float(rocof0), _ups_logs(units, ups_log), trip=trip)
 
 
 def _ups_logs(units, log):
@@ -429,6 +438,52 @@ class Metrics:
     t_return_s: float            # the last time |Δf − Δf_qss| leaves the band; 0 if it never does
     saturated: dict
     collapse: float | None
+    trip: tuple | None = None    # (t, what), from the ``Trace``
+
+
+@dataclasses.dataclass(frozen=True)
+class TripFloor:
+    """Where the island's protection ends the run: Δf below ``lo_hz`` or
+    above ``hi_hz`` (absolute Hz; NaN: none on that side), each named by
+    what sets it (``trip_floor``)."""
+    lo_hz: float = math.nan
+    lo_what: str = ""
+    hi_hz: float = math.nan
+    hi_what: str = ""
+
+
+def trip_floor(limits, equipment_=(), f0=F0) -> TripFloor:
+    """The lowest frequency any limit allows, and the highest: the
+    transition and steady-island f_min / f_max and each piece of
+    equipment's low and high (``equipment``; an undefined side, NaN, is
+    skipped). Beyond it the linear model means nothing (owner,
+    2026-10-14), so the event ends as a trip. ``judge`` already fails a run
+    that reaches it, so the floor changes the label and the figures, never
+    the verdict. Where a UPS window sets it, the run stops before that
+    UPS's transfer is modelled; the verdict is the same, the window failed."""
+    tr, st = limits["transition"], limits["steady_island"]
+    lows = [(tr["f_min_hz"], "transition f_min"), (st["f_min_hz"], "steady-island f_min")]
+    highs = [(tr["f_max_hz"], "transition f_max"), (st["f_max_hz"], "steady-island f_max")]
+    for label, lo, hi in equipment_:
+        if lo == lo:
+            lows.append((lo, label))
+        if hi == hi:
+            highs.append((hi, label))
+    lo, lo_what = min(lows, key=lambda c: c[0])
+    hi, hi_what = max(highs, key=lambda c: c[0])
+    return TripFloor(float(lo), lo_what, float(hi), hi_what)
+
+
+def _tripped(floor, df, f0):
+    """What ``df`` crossed of ``floor``, or None."""
+    if floor is None:
+        return None
+    f = f0 + df
+    if f < floor.lo_hz:
+        return f"Δf below the {floor.lo_hz:g} Hz floor ({floor.lo_what})"
+    if f > floor.hi_hz:
+        return f"Δf above the {floor.hi_hz:g} Hz ceiling ({floor.hi_what})"
+    return None
 
 
 def metrics(trace, window_ms=500.0, band_hz=0.1) -> Metrics:
@@ -436,6 +491,9 @@ def metrics(trace, window_ms=500.0, band_hz=0.1) -> Metrics:
     if trace.collapse is not None:
         return Metrics(trace.rocof0, math.nan, window_ms, math.nan, math.nan, math.nan, math.nan,
                        dict(trace.saturated), trace.collapse)
+    if trace.trip is not None:
+        return Metrics(trace.rocof0, math.nan, window_ms, math.nan, math.nan, math.nan, math.nan,
+                       dict(trace.saturated), None, trace.trip)
     w = window_ms / 1000.0
     iw = min(int(round(w / (trace.t[1] - trace.t[0]))), len(trace.t) - 1)
     rocof_w = (trace.df[iw] - trace.df[0]) / trace.t[iw]
@@ -455,6 +513,12 @@ class Verdict:
     worst: float = 0.0           # the binding limit's relative exceedance (inf on collapse)
 
 
+def trip_label(trip):
+    """``"trip: Δf below the 47.5 Hz floor (transition f_min) at t = 3.21 s"``."""
+    t, what = trip
+    return f"trip: {what} at t = {t:.2f} s"
+
+
 def judge(m, limits, f0=F0, equipment=()) -> Verdict:
     """``m`` against the ``transition`` limits during the event and the
     ``steady_island`` ones after it (requirements ``frequency_limits``
@@ -465,6 +529,9 @@ def judge(m, limits, f0=F0, equipment=()) -> Verdict:
     of different kinds compare."""
     if m.collapse is not None:
         return Verdict(False, COLLAPSE, [COLLAPSE], math.inf)
+    if m.trip is not None:
+        label = trip_label(m.trip)
+        return Verdict(False, label, [label], math.inf)
     tr, st = limits["transition"], limits["steady_island"]
     f_ext, f_qss = f0 + m.nadir_hz, f0 + m.df_qss_hz
 
@@ -631,7 +698,7 @@ def _settle_time(trace, settled, band_hz, settle_hz_per_s):
     """The first time after 0 that Δf is within ``band_hz`` of ``settled``
     and |RoCoF| ≤ ``settle_hz_per_s``: the governors have recovered (inf if
     never within the trace)."""
-    if trace.collapse is not None or len(trace.t) < 2:
+    if trace.collapse is not None or trace.trip is not None or len(trace.t) < 2:
         return math.inf
     rocof = np.gradient(trace.df, trace.t)
     ok = (np.abs(trace.df - settled) <= band_hz) & (np.abs(rocof) <= settle_hz_per_s) & (trace.t > 0)
@@ -652,7 +719,7 @@ E4_FIRST_S = 20.0
 def _steady_tail(trace, hold_s=E4_STEADY_HOLD_S, tol=E4_STEADY_HZ_PER_S):
     """True when the last ``hold_s`` of ``trace`` hold |RoCoF| ≤ ``tol``,
     or the island has collapsed (nothing more to see)."""
-    if trace.collapse is not None:
+    if trace.collapse is not None or trace.trip is not None:
         return True
     if trace.t[-1] < hold_s:
         return False
@@ -660,21 +727,22 @@ def _steady_tail(trace, hold_s=E4_STEADY_HOLD_S, tol=E4_STEADY_HZ_PER_S):
     return float(np.max(np.abs(np.gradient(trace.df[sel], trace.t[sel])))) <= tol
 
 
-def _block_run(units, block, t_end, dt, f0, first_s=E4_FIRST_S):
+def _block_run(units, block, t_end, dt, f0, first_s=E4_FIRST_S, floor=None):
     """One E4 block, run until its tail is steady (``_steady_tail``): from
     ``first_s``, doubled each time the tail still moves, at most ``t_end``.
     A slow island (an isochronous genset, a ramp-limited one) is extended
     rather than read early."""
     t = min(first_s, t_end)
     while True:
-        tr = simulate(units, step(block), t_end=t, dt=dt, f0=f0)
+        tr = simulate(units, step(block), t_end=t, dt=dt, f0=f0, floor=floor)
         if t >= t_end or _steady_tail(tr):
             return tr
         t = min(2.0 * t, t_end)
 
 
 def e4_ups_bridged(gensets, blocks, ups=(), bridge_s=0.0, redundancy_n=0, band_hz=0.1, settle_hz_per_s=0.05,
-                   window_ms=500.0, t_end=600.0, dt=5e-3, f0=F0, steady_stop=True, cache=None) -> BridgedStart:
+                   window_ms=500.0, t_end=600.0, dt=5e-3, f0=F0, steady_stop=True, cache=None,
+                   floor=None) -> BridgedStart:
     """E4, the ``ups_bridged`` start (plan I6b): the bus is dead, the UPSs
     carry the IT load, the gensets start and, once every one is ready
     (start + sync, the join I2b uses), pick up ``blocks`` one at a time.
@@ -704,12 +772,12 @@ def e4_ups_bridged(gensets, blocks, ups=(), bridge_s=0.0, redundancy_n=0, band_h
     ready = max(g.ready_s for g in gens)
     units = [dataclasses.replace(g, p0=0.0, join_s=0.0) for g in gens]
     key = (repr(units), tuple(float(b) for b in blocks), band_hz, settle_hz_per_s, window_ms, t_end, dt, f0,
-           steady_stop)
+           steady_stop, floor)
     if cache is not None and key in cache:
         trace, times, per, complete = cache[key]
     else:
         trace, times, per, complete = _e4_pickup(units, blocks, band_hz, settle_hz_per_s, window_ms, t_end, dt, f0,
-                                                 steady_stop)
+                                                 steady_stop, floor)
         if cache is not None:
             cache[key] = (trace, times, per, complete)
     last_pickup = ready + times[-1] if complete else math.inf
@@ -721,15 +789,15 @@ def e4_ups_bridged(gensets, blocks, ups=(), bridge_s=0.0, redundancy_n=0, band_h
     return BridgedStart(trace, ready, times, per, complete, bridge, dropped)
 
 
-def _e4_pickup(units, blocks, band_hz, settle_hz_per_s, window_ms, t_end, dt, f0, steady_stop):
+def _e4_pickup(units, blocks, band_hz, settle_hz_per_s, window_ms, t_end, dt, f0, steady_stop, floor=None):
     """E4's blocks on the reset gensets: ``(trace, block times, metrics,
     complete)``."""
     iso = any(g.isochronous for g in units)
     k_droop = sum(g.k for g in units if not g.isochronous)
     times, per, parts, complete, clock = [], [], [], True, 0.0
     for i, block in enumerate(blocks):
-        tr = (_block_run(units, block, t_end, dt, f0) if steady_stop
-              else simulate(units, step(block), t_end=t_end, dt=dt, f0=f0))
+        tr = (_block_run(units, block, t_end, dt, f0, floor=floor) if steady_stop
+              else simulate(units, step(block), t_end=t_end, dt=dt, f0=f0, floor=floor))
         times.append(clock)
         per.append(metrics(tr, window_ms, band_hz))
         settled = 0.0 if iso else (-block / k_droop if k_droop else math.nan)
@@ -972,14 +1040,14 @@ def _event_row(key, event, dp_mw, trace, limits, window_ms, eq, f0, emt=None, **
     return {**key, "event": event, **extra, "dp_mw": dp_mw, "rocof0_hz_per_s": m.rocof0_hz_per_s,
             "rocof_window_hz_per_s": m.rocof_window_hz_per_s, "nadir_hz": m.nadir_hz, "t_nadir_s": m.t_nadir_s,
             "df_qss_hz": m.df_qss_hz, "t_return_s": m.t_return_s, "saturated": ", ".join(sorted(m.saturated)),
-            "collapse_s": m.collapse, "ok": v.ok, "binding": v.binding, "worst": v.worst,
-            "emt": "; ".join(flags)}
+            "collapse_s": m.collapse, "trip_s": m.trip[0] if m.trip else None, "ok": v.ok, "binding": v.binding,
+            "worst": v.worst, "emt": "; ".join(flags)}
 
 
 #: The fixed columns of the sweep and the study tables (plan I6c): a table
 #: carries every column whatever events ran, empty where one does not apply.
 _METRIC_COLUMNS = ("dp_mw", "rocof0_hz_per_s", "rocof_window_hz_per_s", "nadir_hz", "t_nadir_s", "df_qss_hz",
-                   "t_return_s", "saturated", "collapse_s", "ok", "binding", "worst", "emt")
+                   "t_return_s", "saturated", "collapse_s", "trip_s", "ok", "binding", "worst", "emt")
 E1_HOURLY_COLUMNS = ("period", "hour", "scenario", "event", "direction", "dp_source", "ups_drops", *_METRIC_COLUMNS)
 #: ``unit``: E3's tripped unit; ``i_max_pu``: a Q8 rerun; ``block``,
 #: ``t_block_s``: an E4 block.
@@ -1023,6 +1091,7 @@ def e1_every_hour(campus, hourly, island_hourly, island_unit_hourly=None, scenar
 
     limits, req = _limits(campus)
     window, eq = req["values"]["rocof_window_ms"], equipment(campus, f0)
+    floor = trip_floor(limits, eq, f0)
     ih = validate_island_hourly(island_hourly)
     ih = ih[ih["scenario"] == scenario]
     iu = validate_island_unit_hourly(island_unit_hourly) if island_unit_hourly is not None else None
@@ -1036,9 +1105,9 @@ def e1_every_hour(campus, hourly, island_hourly, island_unit_hourly=None, scenar
         for direction, dp in (("import", r["dp_up_mw"]), ("export", -r["dp_down_mw"])):
             if not abs(dp) > 1e-9 or (direction == "import") != (dp > 0):
                 continue
-            ck = (repr(units), round(dp, 9))
+            ck = (repr(units), round(dp, 9), floor)
             if ck not in cache:
-                cache[ck] = simulate(units, step(dp), t_end=t_end, dt=dt, f0=f0)
+                cache[ck] = simulate(units, step(dp), t_end=t_end, dt=dt, f0=f0, floor=floor)
             drops = sorted(n for n, rec in cache[ck].ups.items() if rec.drops)
             out.append(_event_row(key, "E1", dp, cache[ck], limits, window, eq, f0, direction=direction,
                                   dp_source="I3a lossless", ups_drops=", ".join(drops)))
@@ -1132,9 +1201,10 @@ def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_
     limits, req = _limits(campus)
     rv = req["values"]
     window, eq = rv["rocof_window_ms"], equipment(campus, f0)
+    floor = trip_floor(limits, eq, f0)               # beyond it every event is a trip, not a number
     iu = validate_island_unit_hourly(island_unit_hourly) if island_unit_hourly is not None else None
     ev, losses, bridge, planned, ups = [], [], [], [], []
-    kw = {"t_end": t_end, "dt": dt, "f0": f0}
+    kw = {"t_end": t_end, "dt": dt, "f0": f0, "floor": floor}
     e4_cache = {}                                  # hours with the same fleet share one E4 pickup
 
     def log_ups(key, event, trace):
@@ -1196,13 +1266,14 @@ def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_
                 gens = [u for u in units if u.model == "genset"]
                 feeds = [(u.name, u.ups["it_mw"], u.ups["e_mwh"]) for u in units if u.model == "ups"]
                 res = e4_ups_bridged(gens, rv["pickup_blocks"], feeds, rv["bridge_s"], rv["genset_redundancy_n"],
-                                     window_ms=window, f0=f0, cache=e4_cache)
+                                     window_ms=window, f0=f0, cache=e4_cache, floor=floor)
                 for i, m in enumerate(res.blocks):
                     v = judge(m, limits, f0, eq)
                     ev.append({**sk, "event": "E4", "block": i + 1, "dp_mw": rv["pickup_blocks"][i],
                                "t_block_s": res.ready_s + res.block_times_s[i],
                                "rocof_window_hz_per_s": m.rocof_window_hz_per_s, "nadir_hz": m.nadir_hz,
                                "t_nadir_s": m.t_nadir_s, "df_qss_hz": m.df_qss_hz, "t_return_s": m.t_return_s,
+                               "trip_s": m.trip[0] if m.trip else None,
                                "ok": v.ok, "binding": v.binding, "worst": v.worst,
                                "emt": "; ".join(emt_flags(m, limits, f0))})
                 for b in res.bridge:

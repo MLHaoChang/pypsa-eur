@@ -335,3 +335,42 @@ describe('StorageCycling: generators-basis + no-years + window-vs-whole-horizon'
     expect(match).toBeTruthy()
   })
 })
+
+// ── Result states (UX overhaul D3 row 34) ───────────────────────────────────
+describe('StorageCycling: says why there is nothing to cycle', () => {
+  it('names a network with no storage units as not applicable, not as missing data', async () => {
+    vi.mocked(networkApi.getStorageUnits).mockResolvedValue([])
+    renderPage()
+    const state = await screen.findByText('Not applicable')
+    expect(state).toBeTruthy()
+    expect(screen.getByText('This network has no storage units.')).toBeTruthy()
+  })
+
+  it('says the solve has not run when units exist but there is no dispatch yet', async () => {
+    vi.mocked(resultsApi.getStorageDispatchResults).mockResolvedValue(null as never)
+    renderPage()
+    expect(await screen.findByText('Not run yet')).toBeTruthy()
+    expect(screen.queryByText('Not applicable')).toBeNull()
+  })
+
+  it('shows an unbuilt unit as not built, never as 0.00 cycles', async () => {
+    vi.mocked(networkApi.getStorageUnits).mockResolvedValue([
+      {
+        name: 'Battery1', bus: 'Bus 0', carrier: 'battery', p_nom: 0,
+        p_nom_extendable: true, p_nom_min: 0, p_nom_max: null,
+        max_hours: 4, efficiency_store: 1, efficiency_dispatch: 1,
+        standing_loss: 0, cyclic_state_of_charge: false, state_of_charge_initial: 0,
+        inflow: 0,
+        capital_cost: 0, marginal_cost: 0, fom_cost: 0,
+        overnight_cost: null, discount_rate: null,
+        build_year: 0, lifetime: null,
+      },
+    ])
+    vi.mocked(resultsApi.getStorageDispatchResults).mockResolvedValue({
+      index: ['2026-01-01T00:00:00'], columns: ['Battery1'], data: [[0]],
+    })
+    renderPage()
+    expect(await screen.findByText('not built')).toBeTruthy()
+    expect(screen.queryByText('0.00')).toBeNull()
+  })
+})

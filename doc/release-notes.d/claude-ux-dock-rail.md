@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant dock steps aside while Results is open, and while no model key is set, so the work area keeps its width; it comes back when Results closes. A pin in the dock header keeps it open, and a dock reopened by hand stays open. The collapse never changes the stored open or closed preference.

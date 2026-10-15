@@ -187,6 +187,35 @@ def _not_solved():
     return Response(status_code=204)
 
 
+def _solved_settings() -> dict | None:
+    """
+    The settings the last successful solve used, or None when nothing is
+    solved (UX overhaul S2b). Lets lost_load / adequacy / reserve_margin say
+    "solved without this standard" (200, `configured: false`) instead of a 204
+    that also meant "not solved", and answer from the SOLVE — the Solver
+    Settings draft in `_state["solver_config"]` may have changed since.
+
+    Projects solved before the stash existed carry none; for those the
+    existing stashes decide, which is exact because each is published only by
+    a successful solve that enforced its standard.
+    """
+    settings = _state.get("last_solve_settings")
+    if settings:
+        return settings
+    if _state.get("status") == "failed" or not _dispatch_ready(PyPSAService.get_network()):
+        return None
+    capture = _state.get("last_lost_load") or {}
+    report = _state.get("adequacy_report") or {}
+    return {
+        "voll_eur_per_mwh": float(capture.get("voll_eur_per_mwh") or 0.0)
+        if capture.get("lost_load_t") is not None else 0.0,
+        "ens_target_applied": report.get("target") is not None,
+        "ens_cap_permyriad": None,
+        "reserve_margin_applied": bool(_state.get("last_reserve_margin")),
+        "reserve_margin": None,
+    }
+
+
 def _dispatch_ready(n) -> bool:
     """
     Tighter solve-gate than `is_solved` + non-empty `_t` tables.
@@ -1447,13 +1476,17 @@ def get_adequacy():
     (engine="lp_proxy" — a deterministic proxy, not comparable to a
     statutory standard, and the UI must say so at the point of display).
 
-    204 = no report: the solve ran without a target, or nothing has been
-    solved. Same convention as /results/lost_load.
+    204 = nothing solved. A solve that ran without a target answers 200
+    `{"configured": false}`; a report carries `configured: true` (UX overhaul
+    S2b — the GUI shows "Not modelled", not a missing result).
     """
     report = _state.get("adequacy_report")
     if not report:
-        return Response(status_code=204)
-    return report
+        # S2b: solved without a target is not "not solved".
+        if _solved_settings() is None:
+            return Response(status_code=204)
+        return {"configured": False, "engine": "lp_proxy"}
+    return {**report, "configured": True}
 
 
 @results_router.get("/eh_study")
@@ -2060,20 +2093,23 @@ def get_reserve_margin():
     justified by convention and by the derating factors, not by a sampler, and
     the panel says so at the point of display.
 
-    204 = no margin result: nothing solved yet, the last solve set no margin,
-    or it did not produce a dispatch to judge one against. Same convention as
-    /results/lost_load and /results/adequacy.
+    204 = nothing solved (or no dispatch to judge a margin against). A solve
+    that set no margin answers 200 `{"configured": false}`; a payload carries
+    `configured: true` (UX overhaul S2b).
     """
     from services.adequacy.report import sanitize_reserve_margin_payload
 
     payload = _state.get("last_reserve_margin")
     if not payload:
-        return Response(status_code=204)
+        # S2b: a solve that set no margin answers `configured: false`.
+        if _solved_settings() is None:
+            return Response(status_code=204)
+        return {"configured": False}
     # `max_achievable_mw` is `inf` whenever an active extendable has an
     # unbounded `p_nom_max` — the honest value, and not JSON: Starlette dumps
     # with `allow_nan=False`, so serving it untouched raises inside the
     # response and the panel gets a 500 instead of a report.
-    return sanitize_reserve_margin_payload(payload)
+    return {**sanitize_reserve_margin_payload(payload), "configured": True}
 
 
 @results_router.get("/lost_load")
@@ -2089,8 +2125,9 @@ def get_lost_load(
     got dispatched.
 
     Returns a TSPayload (index/columns/data) plus aggregate totals in MWh
-    and EUR. 204 No Content when no lost-load data is available (either the
-    run had voll=0, hasn't happened yet, or the LP didn't shed any load).
+    and EUR, and `voll_applied` / `voll_eur_per_mwh` from the solve-time
+    settings (UX overhaul S2b). 204 only when nothing is solved; a solve with
+    voll=0 answers `voll_applied: false` with null totals.
     """
     from services.results.lost_load import compute_lost_load
     payload = compute_lost_load(
@@ -2099,7 +2136,25 @@ def get_lost_load(
         from_,
         to_,
     )
-    return Response(status_code=204) if payload is None else payload
+    if payload is not None:
+        return {**payload, "voll_applied": True}
+    # S2b: 204 only when nothing is solved. Otherwise say whether VoLL was in
+    # the solve: with it and nothing captured, the totals are a computed zero;
+    # without it, lost load was not modelled and the totals are null — never 0.
+    settings = _solved_settings()
+    if settings is None:
+        return Response(status_code=204)
+    voll = float(settings.get("voll_eur_per_mwh") or 0.0)
+    applied = voll > 0
+    return {
+        "index": [], "columns": [], "data": [],
+        "voll_applied": applied,
+        "voll_eur_per_mwh": voll if applied else None,
+        "total_mwh": 0.0 if applied else None,
+        "total_cost_eur": 0.0 if applied else None,
+        "bus_carriers": {},
+        "shed_hours": {"total": 0.0, "by_period": {}} if applied else None,
+    }
 
 
 

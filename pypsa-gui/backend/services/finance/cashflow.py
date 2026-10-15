@@ -18,7 +18,8 @@ import numpy as np
 
 from models.finance import ESCALATION_CLASSES
 from services.finance.case import (
-    CONTRACT_CLASS, UPFRONT_FROM_CAPITAL_COST, FinanceCase, Template, TemplateLine,
+    CONTRACT_CLASS, UPFRONT_FROM_CAPITAL_COST, FinanceCase, Template, TemplateLine, cod_year_of,
+    staged_assets,
 )
 from services.finance.replacements import (
     Replacement, TerminalTerm, on_axis, remaining_life_terms, schedule,
@@ -69,6 +70,13 @@ class Operating:
     replacement_items: tuple[tuple[Replacement, float], ...] = ()
     # The `remaining_life_annuity` terms (IC S0b plan S6; empty otherwise).
     terminal_terms: tuple[TerminalTerm, ...] = ()
+    # Later stages' capex (P5): paid `stage_capex_lead_years` before each
+    # stage's COD, escalated by `capex` from the base year, with contingency;
+    # equity-funded, so it is NOT in `capex` (what debt and the stage-1 tax
+    # basis read). Zeros without a later stage.
+    stage_capex: np.ndarray | None = None
+    # (asset, COD year, capex year, amount) per later-stage asset.
+    stage_items: tuple[tuple[str, int, int, float], ...] = ()
 
     def established(self, section: str) -> bool:
         return self.status.get(section) == "ok"
@@ -131,7 +139,11 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
     def degr(asset: str | None) -> np.ndarray | None:
         if asset not in deg_cache:
             spec = fin.degradation_by_asset.get(asset)
-            deg_cache[asset] = None if spec is None else degradation_factor(spec, k)
+            # Operating year k from the asset's own COD (P5: a later stage is
+            # new in its COD year).
+            cod = cod_year_of(case, asset, tl.cod_year)
+            k_asset = np.where(years >= cod, years - cod + 1, 0)
+            deg_cache[asset] = None if spec is None else degradation_factor(spec, k_asset)
         return deg_cache[asset]
 
     def rate_of(line: TemplateLine) -> tuple[float | None, str]:
@@ -209,18 +221,24 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
         revenue = np.sum([np.clip(v, 0, None) for v in vals], axis=0) if vals else np.zeros(tl.n)
         costs = np.sum([np.clip(-v, 0, None) for v in vals], axis=0) if vals else np.zeros(tl.n)
 
-    # Capex (plan C6).
+    # Capex (plan C6). A later stage (P5) is paid on its own, below.
     capex: np.ndarray | None = np.zeros(tl.n)
+    stages = set(staged_assets(case, tl.cod_year))
     total = 0.0
     for a in case.assets:
         if a.overnight_cost is None:
             reasons["capex"].append(f"overnight_cost_missing:{a.name}")
             if f"{UPFRONT_FROM_CAPITAL_COST}:{a.name}" in case.flags:    # IC S0b S1
                 reasons["capex"].append(f"{UPFRONT_FROM_CAPITAL_COST}:{a.name}")
-        else:
+        elif a.name not in stages:
             total += a.overnight_cost
     if fin.contingency_share is None:
         reasons["capex"].append("contingency_share_missing")
+    r_capex = fin.escalation.get("capex")
+    if stages and r_capex is None:
+        reasons["capex"].append("escalation_missing:capex")
+    stage_capex = np.zeros(tl.n)
+    stage_items: list[tuple[str, int, int, float]] = []
     if reasons["capex"]:
         capex = None
     else:
@@ -228,11 +246,24 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
         idx = tl.construction_years or [tl.y0]
         for y, share in zip(idx, fin.capex_phasing):
             capex[tl.index(y)] += total * share
+        # Each later stage: its overnight cost with contingency, escalated by
+        # `capex` from the base year to its capex year, `stage_capex_lead_years`
+        # before its COD (the timeline refuses a year before financial close).
+        for a in case.assets:
+            if a.name not in stages:
+                continue
+            cod = cod_year_of(case, a.name, tl.cod_year)
+            year = cod - fin.stage_capex_lead_years
+            v = a.overnight_cost * (1.0 + fin.contingency_share) * \
+                (1.0 + r_capex) ** (year - tl.base_year)
+            stage_capex[tl.index(year)] += v
+            stage_items.append((a.name, cod, year, v))
+        if stage_items:
+            flags.append("staged_capex_equity_funded")
     # Replacements: the one schedule (IC S0b plan S4), escalated by `capex`
     # from the base year, no contingency, on the operating axis.
     replacement = np.zeros(tl.n)
     items: list[tuple[Replacement, float]] = []
-    r_capex = fin.escalation.get("capex")
     for x in schedule(case, tl):
         if not on_axis(tl, x.year):
             reasons["capex"].append(f"replacement_outside_axis:{x.asset}:{x.year}")
@@ -292,4 +323,5 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
     return Operating(tl=tl, lines=lines, line_meta=meta, revenue=revenue, costs=costs,
                      ebitda=ebitda, capex=capex, replacement=replacement, terminal=terminal,
                      energy_mwh=energy, status=status, reasons=reasons, flags=flags,
-                     replacement_items=tuple(items), terminal_terms=terminal_terms)
+                     replacement_items=tuple(items), terminal_terms=terminal_terms,
+                     stage_capex=stage_capex, stage_items=tuple(stage_items))

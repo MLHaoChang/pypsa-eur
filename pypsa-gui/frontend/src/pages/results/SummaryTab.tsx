@@ -12,6 +12,7 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { useResultsFilter } from './filterContext'
 import { fmtCurrency, fmtEnergy } from './shared'
+import { kpiFigure, splitValueUnit } from '../../utils/format'
 import {
   capacityRows, costView, emissionsView, reserveMarginVerdict,
   type EmissionsPayload, type LostLoadPayload, type ReserveMarginSummary,
@@ -43,7 +44,7 @@ function Card({ title, testId, link, linkLabel, onOpen, hint, children }: {
     <section data-testid={testId} title={hint}
       className="rounded-[10px] border border-border bg-bg-2 px-4 py-3 flex flex-col gap-2 min-w-0">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted">{title}</h3>
+        <h3 className="text-[12px] font-semibold text-muted">{title}</h3>
         <button type="button" onClick={() => onOpen(link)}
           className="text-[10.5px] text-accent hover:underline inline-flex items-center gap-1">
           {linkLabel} <ArrowRight size={10} />
@@ -54,11 +55,21 @@ function Card({ title, testId, link, linkLabel, onOpen, hint, children }: {
   )
 }
 
+// The card's headline follows the KPI tile standard (UX overhaul S3b,
+// components/Kpi.tsx): the figure rounded by kpiFigure (owner sign-off R1),
+// its unit smaller on the same unbreakable line. The detail lines below keep
+// full precision, as tables do.
 function Headline({ value, sub }: { value: string; sub?: ReactNode }) {
+  const raw = splitValueUnit(value)
+  const parts = kpiFigure(raw.value, raw.unit)
   return (
     <div>
-      <div className="font-mono text-[20px] font-semibold leading-none text-text tabular-nums">{value}</div>
-      {sub && <div className="mt-1 text-[10.5px] text-muted">{sub}</div>}
+      <div data-kpi-value={parts.unit ? `${parts.value} ${parts.unit}` : parts.value}
+        className="flex items-baseline gap-1 whitespace-nowrap">
+        <span className="text-[22px] font-semibold leading-none text-text tabular-nums">{parts.value}</span>
+        {parts.unit && <span className="text-[13px] text-muted">{parts.unit}</span>}
+      </div>
+      {sub && <div className="mt-1 text-[11px] text-muted">{sub}</div>}
     </div>
   )
 }
@@ -144,7 +155,7 @@ export default function SummaryTab({ onOpenTab }: { onOpenTab: (t: SummaryLink) 
           hint="From /results/emissions: dispatch × carrier CO₂ intensity ÷ efficiency. Caps are the primary-energy global constraints on co2_emissions; the price is their shadow price.">
           {e ? (
             <>
-              <Headline value={fmtTonnes(e.total_tCO2)} />
+              <Headline value={`${e.total_tCO2} tCO₂`} />
               {e.caps.length ? e.caps.map(cap => (
                 <Line key={cap.name} label={`Cap ${cap.name}${cap.cap_tCO2 != null ? ` (${fmtTonnes(cap.cap_tCO2)})` : ''}`}
                   tone={cap.binding ? 'warn' : 'ok'}

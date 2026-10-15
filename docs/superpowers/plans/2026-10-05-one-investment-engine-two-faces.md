@@ -208,6 +208,15 @@ keyword-only `asset=` / `part=` (ask 2; the whole-case form is unchanged).
 `TemplateLine`, `LpBasis`, `SiteBill`, `TemplateResult`, the commercial models and the defaults pack's models (a
 subset each, additions free); the `run_case` dict keys and the `commercial_cost_terms` / `export_revenue` keys it
 reads. The study's `ALLOWED_EXCEPTIONS` is empty, and its scan covers `models.commercial` / `models.finance`.
+**Additions (2026-10-14, P5b staged builds, `2026-10-14-e2e-guided-demo.md` §7.1):** `FinanceCase.asset_cod`
+(default `{}`: every asset at `cod`, the case before P5) and `FinanceInputs.stage_capex_lead_years` (default 1);
+`Operating.stage_capex` / `stage_items` (defaults); the helpers `finance.case.cod_year_of` / `staged_assets`. Both
+new fields are left out of `finance_case_hash` at their defaults, so a case without stages keeps its hash. No
+signature changes.
+**Changes (2026-10-14, E2E demo plan slice 1b):** `commercial.binding.bind_commercial` and
+`bind_commercial_on_context` gain the optional keyword `solver_cfg=None` (the config the solve will use), so an FCA's
+curtailment hours are ranked on the LP's scaled load (`load_scalers`). Omitting it keeps the old ranking on the raw
+`p_set`; a study fork binds without a project directory, where an FCA is refused anyway.
 
 ## 7. Coordination protocol
 

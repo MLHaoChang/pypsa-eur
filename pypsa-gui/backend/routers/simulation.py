@@ -8,6 +8,7 @@ import logging
 import queue
 import threading
 from dataclasses import asdict
+from types import SimpleNamespace
 from typing import Any
 
 # Module logger for /results endpoints. The catch-all `except Exception:
@@ -334,7 +335,7 @@ def get_solver_config():
     return asdict(_state["solver_config"])
 
 
-def _bind_commercial(commercial, user) -> dict | None:
+def _bind_commercial(commercial, user, solver_cfg=None) -> dict | None:
     """
     Bind a submitted commercial block to the ACTIVE network: a call of
     `services.commercial.binding.bind_commercial_on_context` on the active
@@ -352,9 +353,50 @@ def _bind_commercial(commercial, user) -> dict | None:
     try:
         return binding.bind_commercial_on_context(
             PyPSAService.get_active_context(), commercial, user=user,
-            in_flight=lambda ctx: _solver_in_flight_ctx(ctx))
+            in_flight=lambda ctx: _solver_in_flight_ctx(ctx), solver_cfg=solver_cfg)
     except binding.BindingRefusal as exc:
         raise HTTPException(exc.status, {"code": exc.code, "message": exc.message}) from exc
+
+
+def _rebind_fca_for_scalers(stored_commercial, user, solver_view) -> dict | None:
+    """Re-bind the stored FCA agreement because only the load scalers
+    changed (E2E 1b). A refusal names the scaler edit and the commercial
+    config it was refused for."""
+    from fastapi import HTTPException
+
+    from models.commercial import CommercialConfig
+
+    try:
+        commercial = CommercialConfig.model_validate(stored_commercial)
+    except ValidationError as exc:
+        raise HTTPException(409, {
+            "code": "commercial_config_invalid",
+            "message": "the load-scaler change re-ranks the FCA curtailment hours, but the "
+                       "stored commercial config does not validate; re-save it first "
+                       f"({exc.errors()[0]['msg']})"}) from exc
+    try:
+        return _bind_commercial(commercial, user, solver_view)
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+        message = ("the load-scaler change was refused: it re-ranks the FCA curtailment hours "
+                   "of the commercial config, and binding that config failed: "
+                   + str(detail.get("message", "")))
+        if detail.get("code") == "solver_in_flight":
+            message = ("the load-scaler change was refused: a solve is running, and the change "
+                       "re-ranks the FCA curtailment hours of the commercial config; change the "
+                       "solver config after the solve finishes")
+        raise HTTPException(exc.status_code, {**detail, "message": message}) from exc
+
+
+# The solver-config keys the LP's load scaling reads (`demand.load_scale_factors`).
+_LOAD_SCALER_KEYS = ("multi_investment_periods", "load_scalers", "load_scalers_by_carrier")
+
+
+def _is_fca(stored) -> bool:
+    """A stored commercial config whose connection is an FCA with curtailment hours."""
+    conn = stored.get("connection") if isinstance(stored, dict) else None
+    return isinstance(conn, dict) and conn.get("kind") == "fca" \
+        and conn.get("curtailment_hours_per_year") is not None
 
 
 def _check_site_connection(commercial, stored) -> None:
@@ -520,6 +562,13 @@ def update_solver_config(
         submitted.pop("finance")
     stored_commercial = getattr(_state["solver_config"], "commercial", None)
     rebound = False
+    # The FCA stress hours are ranked on the load the LP will solve (E2E 1b):
+    # the scalers as they stand after this PUT, and a change of them alone
+    # re-binds a stored FCA agreement so its hours follow.
+    stored_cfg = _state["solver_config"]
+    scaled = {k: submitted.get(k, getattr(stored_cfg, k, None)) for k in _LOAD_SCALER_KEYS}
+    solver_view = SimpleNamespace(**scaled)
+    scalers_changed = any(scaled[k] != getattr(stored_cfg, k, None) for k in _LOAD_SCALER_KEYS)
     if "commercial" in submitted and (cfg.commercial is not None
                                       or stored_commercial is not None):
         if cfg.commercial is not None and "value_flows" in cfg.commercial.model_fields_set:
@@ -543,8 +592,10 @@ def update_solver_config(
         # touches nothing (WP1.4 round 3 #6).
         if cfg.commercial is not None:
             _check_site_connection(cfg.commercial, stored_commercial)
-        submitted["commercial"] = _bind_commercial(cfg.commercial, user)
+        submitted["commercial"] = _bind_commercial(cfg.commercial, user, solver_view)
         rebound = submitted["commercial"] is not None
+    rebind_fca = "commercial" not in submitted and scalers_changed \
+        and _is_fca(stored_commercial)
     # Legacy mode 'lpf' was removed in v1.x — coerce to 'lopf' silently so
     # old saved configs and stale frontend caches don't 400 the user. Same
     # treatment applied in projects.py at load time.
@@ -555,6 +606,11 @@ def update_solver_config(
     # BEFORE the merge: a 403 that still stored the code would read as
     # protection while the next run executed it.
     _gate_user_code(submitted, db, user)
+    if rebind_fca:
+        # AFTER the gate: a refused PUT must leave the FCA ranking (written to
+        # the stress registry by the binding) in step with the stored config.
+        submitted["commercial"] = _rebind_fca_for_scalers(stored_commercial, user, solver_view)
+        rebound = submitted["commercial"] is not None
     with PyPSAService.get_solver_state_lock():
         merged = asdict(_state["solver_config"])
         if rebound:

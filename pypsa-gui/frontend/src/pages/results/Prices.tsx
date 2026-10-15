@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area,
-  XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend,
+  XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend, ReferenceLine,
 } from 'recharts'
 import { Download } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -14,7 +14,7 @@ import type { Bus } from '../../api/types'
 import { type TSPayload, shortStamp, downloadCSV, KPI, ChartActions,
   ChartCard, Seg, CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   useSeasonalViewMode, SeasonalLineCardGrid, durationCurvePoints, WindowCapBanner,
-  WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS } from './shared'
+  WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, refLine } from './shared'
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 
@@ -147,8 +147,12 @@ export default function Prices() {
       }
       perBusRows.push(obj)
     }
+    // The mean of the plotted system series, for its reference line. With LP
+    // prices and no gaps it equals the "System mean" tile.
+    const finite = avgRows.map(r => r.avg).filter(Number.isFinite)
+    const mean = finite.length ? finite.reduce((a, b) => a + b, 0) / finite.length : null
     return {
-      avgRows, perBusRows, cols,
+      avgRows, perBusRows, cols, mean,
       busTotal: tsP.columns.length,
       negativeHours: tsP.negative_hours ?? 0,
       hasAdjusted: !!tsP.data_adjusted,
@@ -377,7 +381,7 @@ export default function Prices() {
               <ResponsiveContainer width="100%" height={200}>
                 <LineChart
                   data={priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows}
-                  margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+                  margin={{ top: 18, right: 8, left: 0, bottom: 0 }}
                 >
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
@@ -385,6 +389,9 @@ export default function Prices() {
                   <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(2)} €/MWh`} />
                   {priceView === 'per_bus' && priceChart.cols.length <= 8 && (
                     <Legend {...CHART_LEGEND} />
+                  )}
+                  {priceChart.mean != null && (
+                    <ReferenceLine {...refLine('mean', 'mean', priceChart.mean, '€/MWh')} />
                   )}
                   {priceView === 'avg' ? (
                     <Line type="monotone" dataKey="avg" name="Average"
@@ -430,7 +437,7 @@ export default function Prices() {
         >
           <div ref={durationChartRef}>
             <ResponsiveContainer width="100%" height={180}>
-              <AreaChart data={durationCurve} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <AreaChart data={durationCurve} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="price-duration-grad" x1="0" x2="0" y1="0" y2="1">
                     <stop offset="0%" stopColor="#0369a1" stopOpacity={0.28} />
@@ -446,6 +453,9 @@ export default function Prices() {
                   formatter={(v: number) => `${v.toFixed(2)} €/MWh`} />
                 <Area type="monotone" dataKey="price" stroke="#0369a1" fill="url(#price-duration-grad)"
                       strokeWidth={1.6} />
+                {priceChart?.mean != null && (
+                  <ReferenceLine {...refLine('mean', 'mean', priceChart.mean, '€/MWh')} />
+                )}
               </AreaChart>
             </ResponsiveContainer>
           </div>

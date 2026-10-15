@@ -369,8 +369,10 @@ def test_an_extra_asset_cod_is_compared_by_year(solved):
     case = _build(n, cfg, fin, extras=(_ext(build_year=2027),))
     assert case.cod == cod and "cod_from_build_year:trf" in case.flags
     assert _refused(n, cfg, fin, extras=(_ext(build_year=2026),)).code == "cod_mismatch"
+    # A later build year is a stage (P5c), but this network has one period:
+    # no period for the stage to start in (was `extra_asset_staged_build:trf`).
     assert _refused(n, cfg, fin, extras=(_ext(build_year=2028),)).code == \
-        "extra_asset_staged_build:trf"
+        "staged_cod_not_active_period:trf"
     typed = _fin(financial_close=date(2027, 1, 1),
                  cod_by_asset={"pv": cod, "bess": cod, "trf": date(2027, 1, 1)})
     assert _refused(n, cfg, typed, extras=(_ext(build_year=2027),)).code == "cod_mismatch"

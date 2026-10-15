@@ -357,7 +357,31 @@ export interface CampusState {
    *  tab's, the copilot's, or the joint optimisation's least-cost run): the
    *  results are the previous run's until it ends. Absent from an older backend. */
   run_in_progress?: boolean
+  /** The project's latest campus run job (E2E demo plan 2026-10-14, D1): null
+   *  when none has run since the backend started. */
+  run_job?: CampusRunJob | null
 }
+
+/** The run's stages, as the backend names them (`RUN_STAGES`), then `done`. */
+export type CampusRunStage = 'prepare' | 'rank' | 'island_checks' | 'size' | 'invest' | 'done'
+
+/** The campus run's solve-queue job, with the stage it reached. */
+export interface CampusRunJob {
+  id: string
+  kind: 'campus'
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'aborted' | 'interrupted'
+  position: number | null
+  error: string | null
+  enqueued_at: number
+  started_at: number | null
+  finished_at: number | null
+  stage?: CampusRunStage | null
+  stage_done?: number | null
+  stage_total?: number | null
+}
+
+export const isActiveRun = (j: CampusRunJob | null | undefined): boolean =>
+  j != null && (j.status === 'queued' || j.status === 'running')
 
 /** The asset library: the project's copy, else the shipped default. */
 export interface AssetLibrary { yaml: string; is_default: boolean }
@@ -582,11 +606,12 @@ export const campusApi = {
   save: (project: string, yaml: string) =>
     client.put<{ campus_yaml: string }>(`${base(project)}/campus`, { yaml }, quiet).then(r => r.data),
 
-  /** Prepare, rank and size the campus; returns the new state. Seconds to
-   *  minutes of CPU: see `CAMPUS_RUN_TIMEOUT_MS`. */
+  /** Queue the study (prepare, rank, island checks, size, invest): a
+   *  solve-queue job of kind `campus` that runs for minutes. Answers the job
+   *  (202); its stage is read from the state's `run_job`. 409 while the
+   *  project has a queued or running job. */
   run: (project: string, settings: CampusSettings) =>
-    client.post<CampusState>(`${base(project)}/run`, settings, { ...quiet, timeout: CAMPUS_RUN_TIMEOUT_MS })
-      .then(r => r.data),
+    client.post<CampusRunJob>(`${base(project)}/run`, settings, quiet).then(r => r.data),
 
   /** Start the joint optimisation (MILP, minutes) in the background. The
    *  least-cost run is made first unless a fresh one with these settings exists.

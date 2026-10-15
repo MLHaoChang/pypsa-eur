@@ -191,3 +191,28 @@ describe('NewProjectWizard — where a blank project is saved (P30 B6)', () => {
     expect(screen.queryByText(/Saved to/)).toBeNull()
   })
 })
+
+// UX overhaul S7 (findings P2, P3): one vocabulary for creating a project, and
+// template cards in plain words.
+describe('NewProjectWizard — entry copy (UX S7)', () => {
+  it('names its tabs with the same words as the projects page cards', async () => {
+    const { CREATE_LABEL } = await import('./newProjectVocabulary')
+    renderWizard()
+    for (const kind of ['blank', 'template', 'file', 'clone', 'study', 'decision'] as const) {
+      expect(screen.getByRole('button', { name: new RegExp(`^${CREATE_LABEL[kind]}$`) })).toBeTruthy()
+    }
+  })
+
+  it('shows no developer path and no internal pack id on the template cards', () => {
+    renderWizard()
+    const body = document.body.textContent ?? ''
+    expect(body).not.toMatch(/project_templates/)
+    expect(body).not.toMatch(/weak_flexible|strong_grid/)
+  })
+
+  it('does not call the Belgian grid both 5 nodes and 10 buses', () => {
+    renderWizard()
+    const card = screen.getByRole('button', { name: /Belgium Grid/ })
+    expect(card.textContent).not.toMatch(/5 nodes/)
+  })
+})

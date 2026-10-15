@@ -16,12 +16,19 @@ is solved with HiGHS) so a shipped template can never be silently infeasible.
 from __future__ import annotations
 
 import pathlib
+import sys
 
 import numpy as np
 import pandas as pd
 import pypsa
 
 HERE = pathlib.Path(__file__).parent
+# The Energy Hub templates price their candidates through the backend's
+# defaults pack and solve through its energization helper, so the backend
+# package must be importable; build-macos.sh puts only the repo root on
+# PYTHONPATH, under which every EH template failed to build.
+if str(HERE.parent) not in sys.path:
+    sys.path.insert(0, str(HERE.parent))
 
 # 24-hour hourly horizon shared by both templates. A single representative day
 # keeps the LOPF tiny (<1 s) while still exercising a time-varying load.
@@ -37,10 +44,22 @@ LOAD_SHAPE = (
 )
 
 
-def _verify_feasible(n: pypsa.Network, label: str) -> None:
-    """Solve a copy with HiGHS and assert the LOPF is feasible."""
+def _verify_feasible(n: pypsa.Network, label: str, solver_config: dict | None = None) -> None:
+    """Solve a copy with HiGHS and assert the LOPF is feasible. A template
+    whose solver settings say ``multi_investment_periods`` is solved that way
+    (its MultiIndex snapshots need it)."""
     test = n.copy()
-    status, condition = test.optimize(solver_name="highs")
+    multi = bool((solver_config or {}).get("multi_investment_periods"))
+    if isinstance(test.snapshots, pd.MultiIndex):
+        # PyPSA's Network.copy() drops a multi-period snapshot index's name,
+        # which a storage unit's spillage variables then cannot select on.
+        test.snapshots.name = "snapshot"
+    # A connection energized in steps is applied the way run_simulation
+    # applies it (`services.adequacy.energization`).
+    from services.adequacy.energization import apply_energization
+
+    apply_energization(test)
+    status, condition = test.optimize(solver_name="highs", multi_investment_periods=multi)
     if status != "ok" or condition != "optimal":
         raise SystemExit(
             f"[{label}] template is NOT feasible: status={status} condition={condition}"
@@ -269,7 +288,9 @@ def main() -> None:
         n = builder()
         if n is None:
             continue
-        _verify_feasible(n, template_id)
+        _verify_feasible(n, template_id,
+                         eh_templates.solver_config(template_id)
+                         if template_id in eh_templates.TEMPLATE_META else None)
         _export(n, template_id)
         if template_id in eh_templates.TEMPLATE_META:
             # P19: metadata, stress registry and solver settings the

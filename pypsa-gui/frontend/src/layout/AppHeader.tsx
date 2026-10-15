@@ -635,7 +635,7 @@ export default function AppHeader() {
   // identical to the historical direct-/run done/err logic). `runLabel` is
   // read via the ref-captured closure value at attach time. On `done` we also
   // invalidate ['solveQueue'] so the queue UI reflects the finished job.
-  const openLogStream = useCallback((label: string, jobId?: string) => {
+  const openLogStream = useCallback((label: string, jobId?: string, kind?: string) => {
     esCleanupRef.current?.()
     esCleanupRef.current = createLogStream(
       (line) => {
@@ -654,6 +654,26 @@ export default function AppHeader() {
         const finalStatus = d.status === 'completed' ? 'completed'
           : d.status === 'aborted' ? 'aborted'
           : 'failed'
+        // A study job (campus electrical, planning → dynamics) is not a solve: it
+        // leaves the network's results alone, so it neither reports an optimum nor
+        // opens Results; it says which study finished and where its results are.
+        if (kind != null && kind !== 'solve') {
+          const what = kind === 'campus' ? 'Campus electrical study' : 'Planning → dynamics study'
+          setStatus(finalStatus === 'completed' ? 'idle' : finalStatus)
+          if (jobId != null) setFinishedJobId(jobId)
+          if (finalStatus === 'completed') {
+            appLog('INFO', `${what} finished`)
+            toast.success(kind === 'campus'
+              ? 'Campus electrical study finished — the results are in Campus electrical'
+              : `${what} finished`, { duration: 6000 })
+          } else {
+            appLog(finalStatus === 'aborted' ? 'WARN' : 'ERROR', `${what} ${finalStatus}`)
+          }
+          qcRef.invalidateQueries({ queryKey: ['campusElectrical'] })
+          qcRef.invalidateQueries({ queryKey: ['solveQueue'] })
+          esCleanupRef.current = null
+          return
+        }
         setStatus(finalStatus)
         if (jobId != null) setFinishedJobId(jobId)
         if (finalStatus === 'completed') {
@@ -752,7 +772,7 @@ export default function AppHeader() {
         setStatus('running')
       }
       requestBottomTab('Log')
-      openLogStream(runLabel, myJob.id)
+      openLogStream(runLabel, myJob.id, myJob.kind)
     }
   }, [myJob, status, runLabel, openLogStream, clearLog, setStatus, requestBottomTab])
 
