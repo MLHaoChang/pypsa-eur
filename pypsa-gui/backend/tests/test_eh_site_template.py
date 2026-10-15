@@ -368,3 +368,66 @@ def test_the_frontend_fixture_is_the_form_data():
     with `json.dumps(eh_site.form_schema(), indent=1)`."""
     fixture = BACKEND.parent / "frontend/src/pages/hubDesign/siteFormFixture.json"
     assert json.loads(fixture.read_text()) == json.loads(json.dumps(S.form_schema()))
+
+
+# ── grid-outage ride-through (owner decision: opt-in, default off) ──────────
+
+def test_ride_through_is_off_by_default_and_adds_the_seamless_scenario():
+    p = S.site_params({"site_type": "industrial"})
+    assert p["ride_through"] is False
+    assert S.island_config(p)["requirements"]["scenarios"] == ["ups_bridged"]
+    on = S.site_params({"site_type": "industrial", "ride_through": True})
+    assert S.island_config(on)["requirements"]["scenarios"] == ["ups_bridged", "seamless"]
+    row = {r["item"]: r for r in S.template_meta(on)["ledger"]}["grid-outage ride-through"]
+    assert row["value"].startswith("on") and "ride-through off" in row["note"]
+
+
+def test_ride_through_without_a_ups_studies_seamless_alone():
+    p = S.site_params({"site_type": "industrial", "ride_through": True,
+                       "existing": {"ups": {"mw": 0.0}}})
+    isl = S.island_config(p)
+    assert isl["requirements"]["scenarios"] == ["seamless"]
+    assert "ups_battery" not in isl["units"]
+    assert S.solver_config(p)["island_constraints"] is True
+
+
+@pytest.mark.parametrize("raw", [
+    {"ride_through": "yes"},
+    {"ride_through": True, "candidates": {"bess": {"enabled": False}}},
+])
+def test_ride_through_is_refused_without_a_battery_to_form_the_island(raw):
+    with pytest.raises(S.SiteParamsError) as exc:
+        S.site_params({"site_type": "industrial", **raw})
+    assert exc.value.field == "ride_through"
+
+
+def _solve_site(p, monkeypatch, tmp_path):
+    import routers.simulation as sim_router
+    from routers.projects import _solver_config_from_dict
+    from services.adequacy.island_config import SIDECAR_NAME, load_island_config
+    from services.pypsa_service import PyPSAService
+    from services.solver import island as I
+    from services.solver_service import run_simulation
+    from tests.conftest import install_network_into_backend
+
+    (tmp_path / SIDECAR_NAME).write_text(json.dumps(S.island_config(p)))
+    isl = load_island_config(tmp_path / SIDECAR_NAME)
+    isl["cuts"] = []
+    monkeypatch.setattr(I, "load_project_island", lambda: isl)
+    install_network_into_backend(S.build_eh_site(p))
+    cfg = _solver_config_from_dict(S.solver_config(p))
+    sim_router._state["solver_config"] = cfg
+    n = PyPSAService.get_network()
+    status, cond = run_simulation(cfg, n, PyPSAService.get_lock(), threading.Event(),
+                                  queue.SimpleQueue(), state_update=lambda **k: None)
+    assert status in ("ok", "optimal"), (status, cond)
+    return float(n.objective)
+
+
+@pytest.mark.live_solve
+def test_a_ride_through_site_solves_and_costs_at_least_the_ups_bridged_plan(
+        reset_backend, monkeypatch, tmp_path):
+    off = _solve_site(S.site_params({"site_type": "industrial"}), monkeypatch, tmp_path)
+    on = _solve_site(S.site_params({"site_type": "industrial", "ride_through": True}),
+                     monkeypatch, tmp_path)
+    assert on >= off - 1e-6 * abs(off)

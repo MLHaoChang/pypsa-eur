@@ -23,6 +23,8 @@ export interface SiteParams {
   energization: { year: number; mw: number }[]
   fault_level_mva: number
   horizon_end: number
+  /** Ride through a grid outage without a blackout (the seamless scenario). */
+  ride_through: boolean
   existing: {
     gensets: { count: number; unit_mw: number; fuel: 'gas' | 'diesel' }
     pv_mw: number
@@ -221,6 +223,11 @@ export function validate(draft: SiteDraft, bounds: SiteForm['bounds']): Record<s
   for (const k of ['genset', 'bess', 'pv'] as const) {
     num(`candidates.${k}.max_mw`, v.candidates[k].max_mw, 0, Infinity)
   }
+  // Seamless islanding forms on a battery at the instant the grid is lost.
+  if (v.ride_through && !(v.existing.battery.mw > 0) && !v.candidates.bess.enabled) {
+    err.ride_through = 'Riding through a grid outage needs a battery to hold the site at the '
+      + 'instant the grid is lost. Add an existing battery or allow new batteries.'
+  }
   return err
 }
 
@@ -251,6 +258,7 @@ export function presetSummary(p: SiteParams, figure: (x: number) => string): str
 export const FIELD_ORDER = [
   'stages', 'load_profile', 'critical_share', 'connection_mw', 'energization', 'fault_level_mva',
   'existing.gensets', 'existing.pv_mw', 'existing.battery', 'existing.ups', 'candidates',
+  'ride_through',
 ]
 export function firstErrorField(errors: Record<string, string>): string | null {
   const keys = Object.keys(errors)

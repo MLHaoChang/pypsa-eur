@@ -101,4 +101,25 @@ describe('GenericSiteForm', () => {
       { templateId: 'eh_site', params: { site_type: 'hospital', connection_mw: 10 } },
       expect.anything())
   })
+
+  it('offers grid-outage ride-through, off by default, and sends it only when set', async () => {
+    const user = await mount()
+    const box = fieldOf('ride_through')
+    expect(box.checked).toBe(false)
+    await user.click(box)
+    expect(fieldOf('ride_through').checked).toBe(true)
+    await user.click(screen.getByTestId('site-create'))
+    expect(create.mutate).toHaveBeenCalledWith(
+      { templateId: 'eh_site', params: { site_type: 'industrial', ride_through: true } },
+      expect.anything())
+  })
+
+  it('refuses ride-through with no battery to hold the site, beside the field', async () => {
+    const user = await mount()
+    await user.click(screen.getByTestId('site-candidate-bess'))
+    await user.click(fieldOf('ride_through'))
+    expect(fieldOf('ride_through').getAttribute('aria-invalid')).toBe('true')
+    expect(screen.getByRole('alert').textContent).toMatch(/needs a battery/)
+    expect((screen.getByTestId('site-create') as HTMLButtonElement).disabled).toBe(true)
+  })
 })
