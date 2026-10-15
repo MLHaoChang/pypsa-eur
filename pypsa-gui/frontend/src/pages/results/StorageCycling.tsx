@@ -14,6 +14,7 @@ import {
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
+import ResultState from '../../components/ResultState'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 
 // ── Storage cycling result tab ──────────────────────────────────────────────
@@ -96,7 +97,7 @@ export default function StorageCycling() {
     queryFn: () => resultsApi.getStorageDispatchResults(undefined, fetchRange),
     enabled: winValid,
   })
-  const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
+  const { data: storageUnits = [], isSuccess: unitsLoaded } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
   const { data: vintageResults } = useQuery({ queryKey: nk(currentProject, 'vintage_results'), queryFn: networkApi.listVintageResults })
 
   // Resolve the row range using the same snapshot timeline the dispatch
@@ -280,11 +281,22 @@ export default function StorageCycling() {
       .sort((a, b) => b.cycles - a.cycles)
   }, [units])
 
-  if (!storPowerTS || units.length === 0) {
+  // Say which empty case this is (UX overhaul D3 row 34): a network with no
+  // storage units has nothing to cycle; one with units but no dispatch has
+  // not been solved yet.
+  if (unitsLoaded && storageUnits.length === 0) {
     return (
-      <div className="p-6 text-[12px] text-muted">
-        No storage cycling data available. Run a LOPF with at least one extendable storage unit
-        to populate <code className="font-mono">storage_units_t.p</code>.
+      <div className="p-6">
+        <ResultState state="not_applicable" reason="This network has no storage units." />
+      </div>
+    )
+  }
+  if (!storPowerTS || units.length === 0) {
+    if (!unitsLoaded) return null
+    return (
+      <div className="p-6">
+        <ResultState state="not_run"
+          reason="Cycles come from the solved storage dispatch. Run a solve to count them." />
       </div>
     )
   }
@@ -375,7 +387,9 @@ function PerUnitCyclingSection({ units }: { units: UnitRow[] }) {
                 <td className="py-1 text-right font-mono text-text">{u.pNom.toFixed(1)}</td>
                 <td className="py-1 text-right font-mono text-text">{u.energyCap.toFixed(1)}</td>
                 <td className="py-1 text-right font-mono text-muted">{u.throughput.toFixed(0)}</td>
-                <td className="py-1 text-right font-mono text-text">{u.cycles.toFixed(2)}</td>
+                <td className="py-1 text-right font-mono text-text">
+                  {u.energyCap > 0 ? u.cycles.toFixed(2) : <span className="font-sans text-muted">not built</span>}
+                </td>
               </tr>
             ))}
           </tbody>
