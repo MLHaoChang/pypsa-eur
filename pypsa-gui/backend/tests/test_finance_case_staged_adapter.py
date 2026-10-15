@@ -159,3 +159,47 @@ def test_an_unstaged_case_keeps_its_hash(reset_backend):
     assert "asset_cod" not in json.dumps(_canon(case), default=str)
     assert finance_case_hash(case) == finance_case_hash(dataclasses.replace(case, asset_cod={}))
 
+
+
+@pytest.mark.live_solve
+def test_a_typed_cod_on_an_unbuilt_candidate_is_dropped_with_it(reset_backend):
+    """D4 types every owned asset; a typed COD on a candidate that built
+    nothing must not reach the engine's COD check (gatekeeper, #276)."""
+    n, cfg = _staged(gen2=True)
+    case = _case(n, cfg, _sfin(cod_by_asset={"pv": C2030, "bess": C2040, "gen2": C2040}))
+    assert "not_built:gen2" in case.flags
+    assert "gen2" not in case.inputs.cod_by_asset
+    from services.finance.engine import run_case
+
+    run_case(case)                                       # no cod_mismatch from the engine
+
+
+@pytest.mark.live_solve
+def test_an_asset_in_service_before_the_first_period_cannot_open_a_staged_case(reset_backend):
+    n, cfg = _staged()
+    n.generators.loc["pv", ["build_year", "lifetime"]] = [2020, 40.0]
+    got = _refused(n, cfg, _sfin(cod_by_asset={"pv": date(2025, 1, 1), "bess": C2040}))
+    assert got.code == "cod_mismatch"
+    assert "before the first period" in str(got)
+
+
+@pytest.mark.live_solve
+def test_a_first_period_candidate_that_built_zero_stays_an_asset(reset_backend):
+    """Only a LATER build year makes an unbuilt candidate `not_built`."""
+    n, cfg = _staged(gen2=True)
+    n.generators.loc["gen2", "build_year"] = 2030
+    n.generators.loc["gen2", "p_nom_opt"] = 0.0
+    case = _case(n, cfg, _sfin(cod_by_asset={"pv": C2030, "bess": C2040, "gen2": C2030}))
+    assert "not_built:gen2" not in case.flags
+    assert "gen2" in {a.name for a in case.assets}
+
+
+@pytest.mark.live_solve
+def test_an_extra_and_a_network_stage_in_one_year_need_one_cod(reset_backend):
+    from tests.test_finance_case_extra_assets import _ext
+
+    n, cfg = _staged()
+    got = _refused(n, cfg, _sfin(cod_by_asset={"pv": C2030, "bess": C2040,
+                                               "trf": date(2040, 7, 1)}),
+                   extra_assets=(_ext(build_year=2040),))
+    assert got.code == "cod_mismatch"

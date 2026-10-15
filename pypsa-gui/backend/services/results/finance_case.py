@@ -1543,7 +1543,7 @@ def _active_periods(n, comp: str, name: str, periods: list) -> list[bool]:
     static `active` flag) — the same mask the LP used."""
     out = []
     for p in periods:
-        act = n.get_active_assets(comp, p)
+        act = n.components[comp].get_active_assets(int(p))
         out.append(bool(act.get(name, False)))
     return out
 
@@ -1656,7 +1656,7 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
     # build in a later period are still refused until they are split.
     if periods[0] is not None:
         first = periods[0]
-        kept = []
+        kept, dropped = [], set()
         for comp, name in invest_list:
             df = getattr(n, _frame_of(comp) or "", None)
             by = _fin(df.at[name, "build_year"]) if df is not None and name in df.index \
@@ -1664,6 +1664,7 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
             built = _built_capacity(n, comp, name)
             if by is not None and by > first and built is not None and built <= _EPS_MW:
                 flags.append(f"not_built:{name}")
+                dropped.add(name)
                 continue
             later = _later_build_year(n, comp, name, first)
             if later is not None:
@@ -1672,6 +1673,12 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                                      f"the first period {first}, through vintage bounds (P5)")
             kept.append((comp, name))
         invest_list = kept
+        if dropped & set(fin.cod_by_asset):
+            # A typed COD on a candidate that built nothing names no asset of
+            # the case: passed on, the engine would check it against the
+            # resolved COD (`cod_mismatch`), a refusal `not_built` must not cause.
+            fin = fin.model_copy(update={"cod_by_asset": {
+                k: v for k, v in fin.cod_by_asset.items() if k not in dropped}})
     extras = tuple(extra_assets)
     extra_finance, extra_flags = _extra_assets(extras, owned_list, invest_list)
 
@@ -1803,6 +1810,14 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
     dates, cod_flags = _asset_cods(n, fin, invest_list)
     cod = min(dates.values())
     extra_dates, extra_cod_flags = _extra_cods(fin, extras, cod)
+    # One COD per year across network assets AND extras (the axis is annual).
+    by_year: dict[int, set[date]] = {}
+    for d in [*dates.values(), *extra_dates.values()]:
+        by_year.setdefault(d.year, set()).add(d)
+    for year, same in sorted(by_year.items()):
+        if len(same) > 1:
+            raise FinanceRefused("cod_mismatch", f"the owner's assets and extras have different "
+                                 f"CODs {sorted(same)} in one year {year} (the axis is annual)")
     _stage_rules(n, periods, info[_key(periods[0])][0], invest_list, dates, extras,
                  extra_dates, cod)
     flags += asset_flags + cod_flags + extra_flags + extra_cod_flags
