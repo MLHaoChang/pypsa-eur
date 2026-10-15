@@ -367,6 +367,20 @@ def recommend_gfm_settings(
                                 allow_i_max=bool(body.allow_i_max) if body else False)
 
 
+@router.post("/{name}/island/gfm-settings/apply")
+def apply_gfm_settings(
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Write the recommended settings into the island sidecar and the campus
+    file (tagged assumed); the island study goes, and the hub must be
+    re-solved: ``{changes, hub_resolve_needed}``."""
+    from services import campus_island_tuning as cit
+    _check_lock(proj, db, user)
+    return cit.apply_settings(_row(proj, db))
+
+
 # ── the asset library (plan C9) ────────────────────────────────────────────
 
 @router.get("/{name}/library")

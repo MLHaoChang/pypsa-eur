@@ -3661,6 +3661,32 @@ def campus_apply_island_cuts(project_id: str) -> dict:
         return _cic.start_apply_job(project, user_id=user.id)
 
 
+def campus_island_gfm_settings(project_id: str) -> dict:
+    from services import campus_electrical_service as _ce
+    from services import campus_island_tuning as _cit
+    with _acting() as (db, user):
+        project = _gridspine_project(db, user, project_id)
+        job = _ce.run_job_state(project)
+        return {**_cit.get_settings(project),
+                "job": job if job and job.get("stage") == _cit.STAGE else None}
+
+
+def campus_recommend_gfm_settings(project_id: str, allow_i_max: bool | None = None) -> dict:
+    from services import campus_island_tuning as _cit
+    with _acting() as (db, user):
+        project = _gridspine_project(db, user, project_id)
+        _campus_check_lock(db, user, project)
+        return _cit.enqueue_settings(project, user, allow_i_max=bool(allow_i_max))
+
+
+def campus_apply_gfm_settings(project_id: str) -> dict:
+    from services import campus_island_tuning as _cit
+    with _acting() as (db, user):
+        project = _gridspine_project(db, user, project_id)
+        _campus_check_lock(db, user, project)
+        return _cit.apply_settings(project)
+
+
 def campus_get_library(project_id: str) -> dict:
     from services.campus_electrical_service import get_library as _h
     with _acting() as (db, user):
@@ -7419,6 +7445,9 @@ DISPATCHERS: dict[str, Any] = {
     "campus_run_island_study": campus_run_island_study,
     "campus_island_cuts": campus_island_cuts,
     "campus_apply_island_cuts": campus_apply_island_cuts,
+    "campus_island_gfm_settings": campus_island_gfm_settings,
+    "campus_recommend_gfm_settings": campus_recommend_gfm_settings,
+    "campus_apply_gfm_settings": campus_apply_gfm_settings,
     # campus grid codes (2): no publish tool, by design (plan C10)
     "campus_list_grid_codes": campus_list_grid_codes,
     "campus_extract_grid_code": campus_extract_grid_code,

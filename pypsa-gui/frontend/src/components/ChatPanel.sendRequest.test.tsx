@@ -637,6 +637,8 @@ describe('P26 gate B2: Guided cards name what they touch', () => {
     'set_active_profile', 'gridspine_run_pipeline',
     // campus island I7: the frequency-cut loop (execution_long_running)
     'campus_apply_island_cuts',
+    // GFM-b: the recommender job and the apply
+    'campus_recommend_gfm_settings', 'campus_apply_gfm_settings',
   ]
   it.each(DESTRUCTIVE_AND_EXECUTION)('%s has its own summary (not the fallback)', (tool) => {
     expect(guidedCardSummary(tool, {})).not.toMatch(/^The assistant wants to use/)
@@ -648,6 +650,11 @@ describe('P26 gate B2: Guided cards name what they touch', () => {
     ['campus_apply_island_cuts', { project_id: 'Hub A' },
       'Apply the frequency cuts to Hub A: re-solve and save the hub, update the sizes in its campus file '
       + 'and rerun the island check, up to 3 times'],
+    ['campus_recommend_gfm_settings', { project_id: 'Hub A' },
+      'Recommend grid-forming settings for Hub A from its last campus run (heuristic screening)'],
+    ['campus_apply_gfm_settings', { project_id: 'Hub A' },
+      'Write the recommended grid-forming settings into the island data and the campus file of Hub A; '
+      + 'the hub then needs a re-solve'],
     ['cascade_delete_bus', { name: 'it_bus' }, 'Delete the bus it_bus and everything connected to it'],
     ['batch_delete_components', { component_class: 'Load', names: ['a', 'b', 'c', 'd', 'e', 'f'] },
       'Delete 6 components from the network: a, b, c, d, e and 1 more'],

@@ -4,7 +4,7 @@
 // tile is a figure when one was computed, else a state in words (ResultState),
 // and says where its detail lives. Pure: the hooks are in ChaptersSection.
 import type { ResultStateKind } from '../../components/ResultState'
-import type { CampusState } from '../../api/campusElectrical'
+import type { CampusState, GfmSettingsState } from '../../api/campusElectrical'
 import type { InvestmentCaseReportPayload, InvestmentCaseStudy, SimulationStatus } from '../../api/types'
 import { RESULT_GROUPS, type ResultsGroup, type ResultsTab } from '../results/groups'
 import { fmtCurrency } from '../../utils/format'
@@ -29,6 +29,9 @@ export interface ChapterTile {
   state: ResultStateKind
   reason?: string
   open: ChapterOpen
+  /** The operation tile's control line (GFM-b): the grid-forming settings, and
+   *  the re-solve an applied recommendation needs (owner decision 2026-10-15). */
+  control?: { text: string; state: ResultStateKind; resolve?: boolean }
 }
 
 export interface ChapterInputs {
@@ -37,7 +40,8 @@ export interface ChapterInputs {
   grid: { campus: CampusState | null; notHub: boolean }
   reliability: { hasResults: boolean; running: boolean; lole: number | null; target: number | null
                  verdict: 'pass' | 'fail' | 'inconclusive' | null }
-  operation: { status: SimulationStatus | null }
+  /** `gfm`: the campus GFM settings (null when the project has no campus or no island). */
+  operation: { status: SimulationStatus | null; gfm?: GfmSettingsState | null }
 }
 
 const ORDER: ChapterId[] = ['investment', 'grid_plan', 'reliability', 'operation']
@@ -118,7 +122,38 @@ function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 
   return { label, value: String(r.lole), unit: 'h/yr', state: 'ready', basis, open }
 }
 
-function operation({ status }: ChapterInputs['operation']): Omit<ChapterTile, 'id' | 'group'> {
+function control(gfm: GfmSettingsState | null | undefined): ChapterTile['control'] {
+  if (!gfm) return undefined
+  const rec = gfm.recommendation
+  const applied = gfm.applied ?? rec?.applied
+  if (applied && !applied.hub_resolve_needed) {
+    return { state: 'ready',
+      text: 'Grid-forming settings applied; island constraints are off, so the hub solve does not read them.' }
+  }
+  if (applied?.hub_resolve_needed) {
+    return { state: 'stale', resolve: true,
+      text: 'Grid-forming settings applied. Re-solve the hub: these settings change its island rows; '
+        + 'then run the campus study again.' }
+  }
+  if (gfm.state === 'not_run' || !rec) {
+    return { state: 'not_run', text: 'Grid-forming settings: not recommended for this campus run.' }
+  }
+  if (gfm.state === 'stale') {
+    return { state: 'stale', text: 'Grid-forming settings: the campus run changed; recommend them again.' }
+  }
+  const n = Object.keys(rec.settings).length
+  const text = rec.status === 'recommended' ? `recommended for ${n} unit${n === 1 ? '' : 's'}, not applied yet`
+    : rec.status === 'unchanged' ? 'the current settings pass with margin'
+      : rec.status === 'not_achievable' ? 'no setting passes: capacity is needed'
+        : 'the search stopped at its cap; recommend again'
+  return { state: 'ready', text: `Grid-forming settings (heuristic screening): ${text}.` }
+}
+
+function operation({ status, gfm }: ChapterInputs['operation']): Omit<ChapterTile, 'id' | 'group'> {
+  return { ...dispatch(status), control: control(gfm) }
+}
+
+function dispatch(status: SimulationStatus | null): Omit<ChapterTile, 'id' | 'group'> {
   const open: ChapterOpen = { panel: 'results', tab: 'dispatch' }
   const label = 'Hour-by-hour operation'
   if (status?.running) {
