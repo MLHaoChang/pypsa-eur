@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A new project no longer opens read-only, "locked" by its own creator. When a tab's lock claim raced the same user's first write on a fresh project, the losing insert was reported as contention (409) and the workbench fell to read-only. It now returns the user's own lock with its TTL refreshed.
