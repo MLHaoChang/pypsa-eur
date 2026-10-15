@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): On a multi-period project with load scalers, a flexible connection agreement's (FCA) curtailment hours are now chosen on the scaled load the solve uses, not the unscaled profile, and changing the load scalers alone re-ranks the stored FCA stress entry.

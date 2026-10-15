@@ -114,7 +114,11 @@ _TERMINAL = ("completed", "failed", "aborted", "interrupted")
 # existing caller creates, are network solves.
 KIND_SOLVE = "solve"
 KIND_GRIDSPINE = "gridspine"
-KINDS = (KIND_SOLVE, KIND_GRIDSPINE)
+# The campus electrical study of a hub project (E2E demo plan 2026-10-14, D1):
+# it reads the SAVED network and writes under the project directory, like a
+# GridSpine study. Its run settings ride as the job's `solver_config_json`.
+KIND_CAMPUS = "campus"
+KINDS = (KIND_SOLVE, KIND_GRIDSPINE, KIND_CAMPUS)
 
 
 @dataclass
@@ -949,6 +953,8 @@ class SolveQueue:
         whichever runner takes it."""
         if job.kind == KIND_GRIDSPINE:
             self._run_gridspine_job(job)
+        elif job.kind == KIND_CAMPUS:
+            self._run_campus_job(job)
         else:
             self._run_solve_job(job)
 
@@ -1074,6 +1080,48 @@ class SolveQueue:
                 logger.exception("solve_queue: gridspine job %s failed", job.id)
         finally:
             log_queue.put(None)          # close the SSE stream, as a solve does
+            self._finish(job, status, error=error)
+
+    def _run_campus_job(self, job: SolveJob) -> None:
+        """Run one campus electrical study (``campus_electrical_service.run``)
+        on the project the job's authorized ``storage_dir`` names: the same
+        claim, log, stop event and persisted status as a GridSpine study. The
+        stop event is read between the run's stages."""
+        from routers import simulation as sim
+        from services import campus_electrical_service as ce
+
+        stop_event = threading.Event()
+        log_queue = sim.BufferedLogQueue()
+        claim = self._claim(job, stop_event, log_queue)
+        if claim == "parked":
+            return
+        if claim == "cancelled":
+            self._finish(job, "aborted")
+            return
+
+        def progress(stage: str, done: int, total: int) -> None:
+            log_queue.put(f"campus {stage} {done}/{total}")
+
+        status, error = "failed", None
+        try:
+            if not job.storage_dir:
+                error = "campus job has no authorized storage directory"
+                return
+            log_queue.put(f"campus electrical study starting for {job.project_id!r}")
+            ce.run_queued(job, progress, stop_event)
+            status = "completed"
+            log_queue.put("campus electrical study completed")
+        except BaseException as exc:  # noqa: BLE001 - recorded, never re-raised
+            if isinstance(exc, ce.CampusRunAborted):
+                status = "aborted"
+                log_queue.put("campus electrical study aborted")
+            else:
+                detail = getattr(exc, "detail", None)
+                error = f"{type(exc).__name__}: {detail if detail is not None else exc}"
+                log_queue.put(f"campus electrical study failed: {error}")
+                logger.exception("solve_queue: campus job %s failed", job.id)
+        finally:
+            log_queue.put(None)
             self._finish(job, status, error=error)
 
     def _run_solve_job(self, job: SolveJob) -> None:

@@ -818,7 +818,8 @@ def test_c3_c6_q15_mint_in_local_org_and_bind_on_a_study_owned_fork(local_mode_d
 
         # (2) The route helper binds the ACTIVE network, not the fork.
         params = list(inspect.signature(sim_router._bind_commercial).parameters)
-        assert params == ["commercial", "user"]
+        # no project/context argument (`solver_cfg` is the solve's config, E2E 1b)
+        assert params == ["commercial", "user", "solver_cfg"]
         foreground = _site_network("none")
         install_network_into_backend(foreground)
         assert PyPSAService.get_network() is foreground

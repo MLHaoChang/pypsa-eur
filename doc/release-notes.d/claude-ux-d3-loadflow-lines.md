@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Load Flow no longer shows "Lines (0)" and "No data." Under a network with no lines, the section statement that there are no lines stands alone. On a network with lines but no solved flows, the lines table and top-loaded chart read "Not run yet" once, with how to get them.

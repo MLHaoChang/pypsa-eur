@@ -1,7 +1,9 @@
 """The connection-point assessment table (increment 10): one row per check.
 
 ``status`` is ``pass`` / ``fail`` against the grid-code profile's limit, or
-``reported`` for a figure the code does not gate (SCR). ``value`` is in
+``reported`` for a figure the code does not gate (SCR) or that this table
+cannot check (``q_ibr``: IEEE 2800's reactive capability of the on-site IBR,
+which needs the inverter ratings the campus study has). ``value`` is in
 ``unit``; ``limit`` is the threshold the value was held to (empty when the
 check is a rule, not a number). ``clause`` and ``source`` say which rule was
 applied and how sure it is: ``code`` for a number the regulation states,
@@ -15,7 +17,7 @@ from gridspine.schema.contracts import ContractError
 
 CHECKS = (
     "connection", "energisation", "load_trip", "facility_trip",
-    "q_lead", "q_lag", "scr_onsite", "scr_load",
+    "q_lead", "q_lag", "scr_onsite", "scr_load", "q_ibr",
 )
 STATUSES = ("pass", "fail", "reported")
 SOURCES = ("code", "assumed")

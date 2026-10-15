@@ -304,7 +304,7 @@ class ReferenceDesignReport(BaseModel):
     # None when no LOLE target is set or certification is not established.
     certified: bool | None = None
     cost_at_target_eur: float | None = None
-    period_basis: Literal["single_period", "multi_period"] | None = None
+    period_basis: Literal["single_period", "npv_multi_period"] | None = None
     excludes_shed_cost: Literal[True] = True
     sections: dict[str, SectionState] = Field(default_factory=dict)
     completeness: dict[str, SectionStatus] = Field(default_factory=dict)

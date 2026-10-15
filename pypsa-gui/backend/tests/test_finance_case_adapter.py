@@ -652,6 +652,14 @@ def test_a_vintage_bound_build_in_a_later_period_is_refused(reset_backend):
         {"build_year": 2030, "lifetime": 25, "p_nom_opt": total}]
     _case(n, cfg, _fin(annualise=True))
 
+    # A single entry whose only build year is later still has capacity built
+    # after the first: refused (the broader H1 rule, gatekeeper #250 nit).
+    n.meta["vintage_results"]["Generator"]["pv"]["periods"] = [
+        {"build_year": 2040, "lifetime": 25, "p_nom_opt": 5.0}]
+    refused = _refused(n, cfg, _fin(annualise=True))
+    assert refused.code == "staged_build_vintage_bounds_not_supported"
+    assert "2040" in str(refused)
+
 
 def test_the_counterfactual_load_follows_the_solves_load_scalers():
     """P5a, H2. `load_scalers` scale the demand for the solve only and the

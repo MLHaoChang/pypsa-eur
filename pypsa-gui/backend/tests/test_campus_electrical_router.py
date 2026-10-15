@@ -30,23 +30,6 @@ def hub(client, _auth_db, seeded_identity):
     ("get", "", "get_state", None, ()),
     ("post", "/draft", "draft", {"overwrite": True}, (True,)),
     ("put", "/campus", "save_campus", {"yaml": "campus: {}"}, ("campus: {}",)),
-    ("post", "/run", "run", {"k": 2, "pf": 0.95}, ({"k": 2, "pf": 0.95, "profile": "eu_rfg_dcc_ce",
-                                                    "margin": 0.2, "n_minus_1": True, "invest": True,
-                                                    "pcc_switchgear_by_operator": False,
-                                                    "pcc_tap_control": "campus"},)),
-    ("post", "/run", "run", {"invest": False}, ({"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce",
-                                                  "margin": 0.2, "n_minus_1": True, "invest": False,
-                                                  "pcc_switchgear_by_operator": False,
-                                                  "pcc_tap_control": "campus"},)),
-    ("post", "/run", "run", {"pcc_switchgear_by_operator": True}, ({"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce",
-                                                                   "margin": 0.2, "n_minus_1": True, "invest": True,
-                                                                   "pcc_switchgear_by_operator": True,
-                                                                   "pcc_tap_control": "campus"},)),
-    # plan C15: who moves the PCC transformer's taps
-    ("post", "/run", "run", {"pcc_tap_control": "grid_operator"}, ({"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce",
-                                                                     "margin": 0.2, "n_minus_1": True, "invest": True,
-                                                                     "pcc_switchgear_by_operator": False,
-                                                                     "pcc_tap_control": "grid_operator"},)),
     ("get", "/library", "get_library", None, ()),
     ("put", "/library", "save_library", {"yaml": "discount_rate: {}"}, ("discount_rate: {}",)),
     ("post", "/library/reset", "reset_library", None, ()),
@@ -71,10 +54,46 @@ def test_each_route_calls_its_service_function_with_the_row(client, hub, monkeyp
     assert tuple(rest) == expected_args
 
 
+@pytest.mark.parametrize("payload, expected", [
+    ({"k": 2, "pf": 0.95}, {"k": 2, "pf": 0.95, "profile": "eu_rfg_dcc_ce",
+                                                    "margin": 0.2, "n_minus_1": True, "invest": True,
+                                                    "pcc_switchgear_by_operator": False,
+                                                    "pcc_tap_control": "campus"}),
+    ({"invest": False}, {"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce",
+                                                  "margin": 0.2, "n_minus_1": True, "invest": False,
+                                                  "pcc_switchgear_by_operator": False,
+                                                  "pcc_tap_control": "campus"}),
+    ({"pcc_switchgear_by_operator": True}, {"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce",
+                                                                   "margin": 0.2, "n_minus_1": True, "invest": True,
+                                                                   "pcc_switchgear_by_operator": True,
+                                                                   "pcc_tap_control": "campus"}),
+    ({"pcc_tap_control": "grid_operator"}, {"k": 3, "pf": None, "profile": "eu_rfg_dcc_ce",
+                                                                     "margin": 0.2, "n_minus_1": True, "invest": True,
+                                                                     "pcc_switchgear_by_operator": False,
+                                                                     "pcc_tap_control": "grid_operator"}),
+])
+def test_run_queues_the_study_with_the_settings_and_answers_202(client, hub, monkeypatch, payload, expected):
+    """The run is a solve-queue job (E2E demo plan 2026-10-14, D1): the route
+    answers the job, 202, and hands the service the parsed settings."""
+    calls = []
+
+    def fake(project, settings, user):
+        calls.append((project, settings))
+        return {"id": "job", "kind": "campus", "status": "queued"}
+
+    monkeypatch.setattr(ce, "enqueue_run", fake)
+    resp = client.post("/api/campus-electrical/Router Hub/run", json=payload)
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["kind"] == "campus"
+    (project, settings), = calls
+    assert isinstance(project, Project) and project.name == "Router Hub"
+    assert settings == expected
+
+
 @pytest.mark.parametrize("body", [{"k": 0}, {"pf": 1.5}, {"margin": -1}, {"profile": ""},
                                   {"pcc_tap_control": "operator"}])
 def test_bad_run_settings_are_422_before_the_service(client, hub, monkeypatch, body):
-    monkeypatch.setattr(ce, "run", lambda *a: pytest.fail("the service must not be reached"))
+    monkeypatch.setattr(ce, "enqueue_run", lambda *a: pytest.fail("the service must not be reached"))
     resp = client.post("/api/campus-electrical/Router Hub/run", json=body)
     assert resp.status_code == 422, resp.text
 

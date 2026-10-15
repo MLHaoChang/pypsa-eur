@@ -947,6 +947,7 @@ const CHECK_LABEL: Record<ConnectionCheck, string> = {
   q_lag: 'Reactive range — absorbing',
   scr_onsite: 'SCR, on-site converter',
   scr_load: 'SCR, load',
+  q_ibr: 'On-site IBR reactive capability (IEEE 2800; checked in the campus study)',
 }
 const CHECK_ORDER = Object.keys(CHECK_LABEL) as ConnectionCheck[]
 

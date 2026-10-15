@@ -8,6 +8,7 @@ They follow the gridspine tools' rules:
   the panel's routes call.
 """
 import pytest
+from unittest.mock import ANY
 
 from db.models import Project, User
 from services import campus_electrical_service as ce
@@ -34,7 +35,8 @@ def test_every_campus_tool_is_registered_routed_and_tiered():
         assert callable(chat_tools.DISPATCHERS[name]), name
     assert safety_tier_for("campus_get_study") == "read"
     assert safety_tier_for("campus_draft_campus") == "write"
-    assert safety_tier_for("campus_run_study") == "write"
+    # the run is a solve-queue job (E2E demo plan 2026-10-14, D1)
+    assert safety_tier_for("campus_run_study") == "execution_long_running"
     for tool in TOOLS:
         if tool["name"] in CAMPUS_TOOLS:
             assert tool["input_schema"]["required"] == ["project_id"], tool["name"]
@@ -50,14 +52,14 @@ def test_the_descriptions_say_what_the_model_must_not_do():
     ("campus_get_study", {"project_id": "Chat Hub"}, "get_state", ()),
     ("campus_draft_campus", {"project_id": "Chat Hub"}, "draft", (False,)),
     ("campus_draft_campus", {"project_id": "Chat Hub", "overwrite": True}, "draft", (True,)),
-    ("campus_run_study", {"project_id": "Chat Hub", "k": 2, "pf": 0.95}, "run", ({"k": 2, "pf": 0.95},)),
-    ("campus_run_study", {"project_id": "Chat Hub"}, "run", ({"pf": None},)),
-    ("campus_run_study", {"project_id": "Chat Hub", "invest": False}, "run", ({"invest": False, "pf": None},)),
-    ("campus_run_study", {"project_id": "Chat Hub", "invest": True}, "run", ({"invest": True, "pf": None},)),
-    ("campus_run_study", {"project_id": "Chat Hub", "pcc_switchgear_by_operator": True}, "run",
-     ({"pcc_switchgear_by_operator": True, "pf": None},)),
-    ("campus_run_study", {"project_id": "Chat Hub", "pcc_tap_control": "grid_operator"}, "run",
-     ({"pcc_tap_control": "grid_operator", "pf": None},)),
+    ("campus_run_study", {"project_id": "Chat Hub", "k": 2, "pf": 0.95}, "enqueue_run", ({"k": 2, "pf": 0.95}, ANY)),
+    ("campus_run_study", {"project_id": "Chat Hub"}, "enqueue_run", ({"pf": None}, ANY)),
+    ("campus_run_study", {"project_id": "Chat Hub", "invest": False}, "enqueue_run", ({"invest": False, "pf": None}, ANY)),
+    ("campus_run_study", {"project_id": "Chat Hub", "invest": True}, "enqueue_run", ({"invest": True, "pf": None}, ANY)),
+    ("campus_run_study", {"project_id": "Chat Hub", "pcc_switchgear_by_operator": True}, "enqueue_run",
+     ({"pcc_switchgear_by_operator": True, "pf": None}, ANY)),
+    ("campus_run_study", {"project_id": "Chat Hub", "pcc_tap_control": "grid_operator"}, "enqueue_run",
+     ({"pcc_tap_control": "grid_operator", "pf": None}, ANY)),
 ])
 def test_each_dispatcher_resolves_the_project_and_calls_its_service_function(hub, monkeypatch, tool, args,
                                                                            function, expected):

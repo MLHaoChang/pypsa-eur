@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 import { isValidElement, type ReactElement } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { ChartCard, yAxisLabel } from './shared'
+import { ChartCard, ChartZero, extremeOf, isAllZero, refLine, shortStamp, yAxisLabel } from './shared'
 
 afterEach(cleanup)
 
@@ -68,5 +68,57 @@ describe('axis text contrast (A1)', () => {
     for (const surface of ['bg', 'bg-2', 'panel']) {
       expect(contrast(axis, token(block, surface))).toBeGreaterThanOrEqual(4.5)
     }
+  })
+})
+
+describe('reference lines (S4b)', () => {
+  it('draw a limit, a target or a mean dashed, in a semantic colour, never the accent', () => {
+    for (const tone of ['limit', 'target', 'mean'] as const) {
+      const p = refLine(tone, 'mean', 136.64, '€/MWh')
+      expect(p.strokeDasharray).toBeTruthy()
+      expect(p.stroke).not.toMatch(/accent/)
+      expect(p.stroke).toMatch(/^var\(--color-/)
+    }
+    expect(refLine('limit', 'import cap', 40, 'MW').stroke).toBe('var(--color-danger)')
+  })
+
+  it('label the line with its figure rounded like the KPI tile', () => {
+    const p = refLine('mean', 'mean', 136.64, '€/MWh')
+    expect(p.y).toBe(136.64)
+    expect(p.label.value).toBe('mean 136.6 €/MWh')
+  })
+})
+
+describe('the extreme point (S4b)', () => {
+  it('finds the highest finite value and where it sits', () => {
+    const rows = [{ s: 'a', v: 1 }, { s: 'b', v: Number.NaN }, { s: 'c', v: 7 }, { s: 'd', v: 7 }, { s: 'e', v: 2 }]
+    expect(extremeOf(rows, 'v')).toEqual({ index: 2, value: 7 })
+  })
+
+  it('is absent when nothing is above zero', () => {
+    expect(extremeOf([{ v: 0 }, { v: 0 }], 'v')).toBeNull()
+    expect(extremeOf([], 'v')).toBeNull()
+  })
+})
+
+describe('an all-zero series (S4b)', () => {
+  it('is detected across every plotted key, ignoring gaps', () => {
+    expect(isAllZero([{ a: 0, b: 0 }, { a: null, b: 0 }], ['a', 'b'])).toBe(true)
+    expect(isAllZero([{ a: 0, b: 0.01 }], ['a', 'b'])).toBe(false)
+    expect(isAllZero([], ['a'])).toBe(true)
+  })
+
+  it('reads as a sentence instead of empty axes', () => {
+    render(<ChartZero>No load was shed in this window.</ChartZero>)
+    const el = screen.getByTestId('chart-zero')
+    expect(el.textContent).toBe('No load was shed in this window.')
+    expect(el.querySelector('svg')).toBeNull()
+  })
+})
+
+describe('time ticks (S4b)', () => {
+  it('are ISO and 24 h', () => {
+    expect(shortStamp('2030-07-01T14:00:00')).toBe('07-01 14:00')
+    expect(shortStamp('2030-07-01 23:00:00')).toBe('07-01 23:00')
   })
 })

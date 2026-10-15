@@ -12,7 +12,7 @@ import { useSimulationStore } from '../store/simulationStore'
 import { WRITABLE } from '../utils/lockState'
 import { createLogStream } from '../api/simulation'
 
-let queueJobs: Array<{ id: string; project_id: string; status: string; position: number | null }> = []
+let queueJobs: Array<{ id: string; project_id: string; status: string; position: number | null; kind?: string }> = []
 vi.mock('../hooks/useSolveQueue', () => ({
   useSolveQueue: () => ({ data: { jobs: queueJobs, running: [], paused: false } }),
   useEnqueueSolve: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -93,5 +93,19 @@ describe('formatObjective', () => {
   it('says nothing for a missing objective rather than €0', () => {
     expect(formatObjective(null)).toBeNull()
     expect(formatObjective(Number.NaN)).toBeNull()
+  })
+})
+
+
+describe('a campus electrical job (E2E demo plan 2026-10-14, D1)', () => {
+  it('shows it running, and when it ends names the study instead of announcing a solve', async () => {
+    queueJobs = [{ id: 'job-c', project_id: 'Demo', status: 'running', position: null, kind: 'campus' }]
+    const success = vi.spyOn(toast, 'success')
+    renderHeader()
+    expect(await screen.findByText('Abort')).toBeTruthy()
+    act(() => doneCallback()({ status: 'completed' }))
+    expect(useUIStore.getState().activeSlidePanel).toBeNull()          // Results not opened
+    expect(screen.queryByText('Optimal')).toBeNull()
+    expect(String(success.mock.calls[success.mock.calls.length - 1][0])).toMatch(/Campus electrical study finished/)
   })
 })

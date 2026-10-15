@@ -29,7 +29,7 @@ from tests.test_chat_tools_dispatch import (
 # tool -> (service module, service function, tool kwargs)
 WRITE_TOOLS = {
     "campus_draft_campus": (ce, "draft", {"overwrite": True}),
-    "campus_run_study": (ce, "run", {}),
+    "campus_run_study": (ce, "enqueue_run", {}),
     "campus_extract_grid_code": (gc, "extract", {"document_id": "doc1"}),
     "campus_set_library": (ce, "save_library", {"yaml": "intruder: true\n"}),
 }

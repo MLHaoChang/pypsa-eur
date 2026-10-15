@@ -530,6 +530,8 @@ def get_state(project) -> dict:
         # backend is still at it (the run holds this lock throughout, the joint optimisation's
         # least-cost run too), so it never takes the previous run's results for the new one's.
         "run_in_progress": _lock(d / "run").locked(),
+        # The run is a solve-queue job: the latest one for this project, with its stage.
+        "run_job": run_job_state(project),
     }
 
 
@@ -1154,9 +1156,23 @@ def _run_island_hours(run_dir: Path) -> None:
         cs.cuts_campus(run_dir)                  # I7: the cuts what fails would need
 
 
-def run(project, settings: dict) -> dict:
+#: The run's stages, in order, as its progress names them (the queue log's
+#: ``campus <stage> <done>/<total>`` lines and ``get_state``'s ``run_job``).
+RUN_STAGES = ("prepare", "rank", "island_checks", "size", "invest")
+
+
+class CampusRunAborted(Exception):
+    """The run stopped between two stages because its job was aborted."""
+
+
+def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
     """Prepare, rank and size the campus, then buy the electrical assets from
-    the library (``invest``, default on); returns ``get_state``."""
+    the library (``invest``, default on); returns ``get_state``.
+
+    ``progress(stage, done, total)`` is told before each of ``RUN_STAGES``;
+    ``should_stop()`` is asked there too, and a True ends the run with
+    ``CampusRunAborted`` (the queue job's abort). The run is a solve-queue
+    job (``enqueue_run``); this is its body, and what tests call directly."""
     require_capacity_expansion(project)
     d = campus_dir(project)
     campus = d / CAMPUS_FILE
@@ -1168,16 +1184,29 @@ def run(project, settings: dict) -> dict:
     run_dir = d / "run"
     criteria = SizingCriteria(margin=float(s["margin"]), n_minus_1=s["n_minus_1"])
     profile_dirs = (grid_codes_dir(project),)
+    total = len(RUN_STAGES) if s["invest"] else len(RUN_STAGES) - 1
+
+    def stage(name):
+        if should_stop is not None and should_stop():
+            raise CampusRunAborted(f"aborted before {name}")
+        if progress is not None:
+            progress(name, RUN_STAGES.index(name), total)
+
     with _lock(run_dir):
         try:
+            stage("prepare")
             with _netcdf_lock():
                 cs.prepare_campus(run_dir, spec, nc)
                 _write_island_tables(project, run_dir, spec, nc)
+            stage("rank")
             cs.rank_campus(run_dir, k=s["k"])
+            stage("island_checks")
             _run_island_hours(run_dir)
+            stage("size")
             cs.size_campus(run_dir, criteria, profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs)
             _clear_investment(run_dir)               # the earlier run's purchases belong to its sizing, not this one's
             if s["invest"]:
+                stage("invest")
                 # The library is read once and kept: the engine buys from this
                 # copy, and a later change to the library is then a different
                 # file from the one the results were made with.
@@ -1196,7 +1225,83 @@ def run(project, settings: dict) -> dict:
         except ContractError as exc:
             raise _unprocessable(exc)
         (d / SETTINGS_FILE).write_text(json.dumps(s))
+    if progress is not None:
+        progress("done", total, total)
     return get_state(project)
+
+
+# ── the run as a solve-queue job (E2E demo plan 2026-10-14, slice D1) ────────
+#
+# One job system: the run is a job of kind ``campus`` in the solve queue, as a
+# GridSpine study is (`gridspine_service.run_pipeline`), so it is one at a
+# time per project, abortable, its log on the existing SSE stream, its status
+# on the header and in `wait_for_job`. The settings ride on the job as its
+# `solver_config_json` snapshot (a constructor argument, so the dispatcher
+# never sees the job without them); the stage it is at is kept here, by job id.
+
+_RUN_PROGRESS: dict = {}
+_RUN_PROGRESS_LOCK = threading.Lock()
+
+
+def enqueue_run(project, settings: dict, user=None) -> dict:
+    """Queue the run (``run``) for ``project`` and answer the queue job's
+    public view. Checked here, in the request, so a job that cannot start is
+    a 422 now rather than a failed job later: the campus file, the saved
+    network and the settings. A project with a queued or running job of any
+    kind is a 409 (the queue's one-active-job rule)."""
+    from services import solve_queue as sq
+
+    require_capacity_expansion(project)
+    d = campus_dir(project)
+    if not (d / CAMPUS_FILE).is_file():
+        raise HTTPException(status_code=422, detail="there is no campus file yet; draft one from the project or save your own")
+    _network(project)
+    s = _settings(settings, profiles(project))
+    job, created = sq.solve_queue.enqueue_unique(
+        project.name, project_key=project_registry.registry_key(project),
+        storage_dir=str(project_registry.ensure_project_dir(project)),
+        solver_config_json=json.dumps(s), enqueued_by_user_id=getattr(user, "id", None), kind=sq.KIND_CAMPUS)
+    if not created:
+        raise HTTPException(status_code=409, detail=f"project '{project.name}' already has a {job.kind} job "
+                                                    f"{job.status}; wait for it or abort it")
+    # `enqueue_unique` persisted the row before publishing the job.
+    return sq.solve_queue.get_job(job.id) or job.to_public(None)
+
+
+def run_queued(job, progress, stop_event) -> None:
+    """The queue's runner body for a ``campus`` job: ``run`` on the project
+    the job's authorized ``storage_dir`` names (resolved by the route that
+    checked the caller's ACL; the dispatcher never derives a path from a
+    name), with the settings the job carries."""
+    from types import SimpleNamespace
+
+    org, _, pid = (job.project_key or "").partition(":")
+    project = SimpleNamespace(name=job.project_id, storage_path=str(job.storage_dir), project_kind=None,
+                              org_id=org or None, id=pid or None)
+    settings = json.loads(job.solver_config_json or "{}")
+
+    def report(stage, done, total):
+        with _RUN_PROGRESS_LOCK:
+            _RUN_PROGRESS[str(job.id)] = {"stage": stage, "done": done, "total": total, "at": time.time()}
+        progress(stage, done, total)
+
+    run(project, settings, progress=report, should_stop=stop_event.is_set)
+
+
+def run_job_state(project):
+    """The project's latest campus job (queued, running or finished since the
+    backend started), with the stage it reached; None when there is none."""
+    from services import solve_queue as sq
+
+    key = project_registry.registry_key(project)
+    jobs = [j for j in sq.solve_queue.list_jobs()
+            if j.get("kind") == sq.KIND_CAMPUS and j.get("project_key") == key]
+    if not jobs:
+        return None
+    job = max(jobs, key=lambda j: j.get("enqueued_at") or 0.0)
+    with _RUN_PROGRESS_LOCK:
+        stage = dict(_RUN_PROGRESS.get(job["id"]) or {})
+    return {**job, "stage": stage.get("stage"), "stage_done": stage.get("done"), "stage_total": stage.get("total")}
 
 
 # ── the joint optimisation (MILP) as a background job (plan C12) ────────────
