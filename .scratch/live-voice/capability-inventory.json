@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 249,
+  "tool_count": 252,
   "tools": [
     {
       "name": "list_components",
@@ -4456,6 +4456,61 @@
         "project_id"
       ],
       "safety_tier": "execution_long_running",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_island_gfm_settings",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_recommend_gfm_settings",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "allow_i_max"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "execution_long_running",
+      "schema_sha256": "3460ec2d07f9d23551871ef75d2559e1e1f3bfc08cfc9644218a752d4672edfb",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_apply_gfm_settings",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "write",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
       "behavioral_fixture": "pending"
     },

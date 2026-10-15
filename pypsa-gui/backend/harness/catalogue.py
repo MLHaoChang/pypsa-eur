@@ -2967,6 +2967,63 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id"],
     ),
     _t(
+        "campus_island_gfm_settings",
+        "The recommended grid-forming (GFM) settings of a hub project's island "
+        "and the recommend job: {state, reason, recommendation, job}. state: "
+        "not_run (none for the last campus run), ready, or stale (the campus "
+        "run changed since: recommend again). recommendation (gridspine's "
+        "heuristic screening, never a certificate): status (recommended, "
+        "unchanged, not_achievable, incomplete), settings per GFM unit "
+        "(current -> recommended droop_pct, tau_f_s or H_v_s, i_max_pu, "
+        "H_equivalent_s), the cases before and after with their binding check, "
+        "capacity (when not_achievable: the inertia, headroom or droop gain the "
+        "I7 cuts would buy instead), the GFM-vs-GFL comparison, the search "
+        "ledger (every bound assumed), the simulations used, and applied once "
+        "applied (with hub_resolve_needed: the hub must be re-solved, since "
+        "droop and inertia change its island rows). job: the running or last "
+        "recommend job (null when none). Say it is heuristic screening and "
+        "which inputs are assumed; when not_achievable, say capacity is "
+        "needed, never that settings fix it. 409 for a project of another "
+        "kind. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "campus_recommend_gfm_settings",
+        "Recommend grid-forming settings for a hub project's island from its "
+        "last campus run: one droop and one inertia (tau_f or H_v) per GFM "
+        "converter that make the island-hour events E1, E2, E3 and E5 pass with "
+        "margin, or the capacity needed when none within the bounds does (E4, "
+        "the UPS-bridged genset start, has no GFM in it and is not a case). "
+        "i_max stays at its value (hardware) unless allow_i_max (default "
+        "false) lets it rise to 1.5 pu. It runs as a solve-queue job of kind "
+        "campus (seconds to a minute; the search caps its simulations): "
+        "returns the queue job {id, kind, status, position}; follow it with "
+        "wait_for_job, then read the result with campus_island_gfm_settings. "
+        "422 when the last campus run has no island frequency check (run the "
+        "campus study with island requirements first); 409 while the project "
+        "has a job. Safety: execution_long_running.",
+        {"project_id": {"type": "string"}, "allow_i_max": {"type": "boolean"}},
+        ["project_id"],
+    ),
+    _t(
+        "campus_apply_gfm_settings",
+        "Apply a hub project's recommended GFM settings: the recommended "
+        "droop_pct, tau_f_s or H_v_s (and i_max_pu only when the recommendation "
+        "was allowed to raise it) are written into the island sidecar and the "
+        "campus file, tagged assumed, both validated before either is written. "
+        "The island study made with the old settings goes, the campus results "
+        "go stale, and the hub must be re-solved (droop and inertia change its "
+        "island rows): returns {changes (unit, pypsa_name, field, from, to), "
+        "hub_resolve_needed}. Show the user the settings "
+        "(campus_island_gfm_settings) before you call it. 409 when there is no "
+        "recommendation for the last campus run (or it is stale); 422 when it "
+        "is not_achievable, unchanged or incomplete, or a value is refused. "
+        "Safety: write.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
         "campus_get_library",
         "The asset library the campus study of a capacity-expansion (hub) "
         "project buys from: {yaml (the library as text: transformers, cables, "
@@ -3866,6 +3923,9 @@ TOOL_ROUTES: dict[str, list] = {
     "campus_run_island_study": _SERVICE_CALL,
     "campus_island_cuts": _SERVICE_CALL,
     "campus_apply_island_cuts": _SERVICE_CALL,
+    "campus_island_gfm_settings": _SERVICE_CALL,
+    "campus_recommend_gfm_settings": _SERVICE_CALL,
+    "campus_apply_gfm_settings": _SERVICE_CALL,
     # campus grid codes (2) — service calls; no publish tool (plan C10)
     "campus_list_grid_codes": _SERVICE_CALL,
     "campus_extract_grid_code": _SERVICE_CALL,
@@ -3970,6 +4030,8 @@ _SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
     # campus island (I9a): the sidecar beside network.nc and the study JSON;
     # the study solves copies of the SAVED network.
     "campus_set_island_config", "campus_run_island_study",
+    # GFM-b: the recommended settings into the same sidecar and the campus file.
+    "campus_apply_gfm_settings",
     # master (assistant tasks, experiments, deliveries): task / experiment
     # records, a preview built on a side context (`build_context`), charts,
     # delivery and evidence files — none writes the live network.

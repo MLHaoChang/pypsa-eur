@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-14",
+  "generated_at": "2026-10-15",
   "status": "control/parameter matrix for Network/topology; behavioral journeys remain pending on issue 05",
   "sources": [
     "pypsa-gui/frontend/src/layout/CreationForm.tsx",
