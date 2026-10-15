@@ -63,3 +63,20 @@ def test_the_bounds_are_ledgered_as_assumed(tmp_path):
     for word in ("droop", "H", "tau_f", "i_max", "assumed"):
         assert word in text
     assert any("1–10 %" in x or "1-10 %" in x for x in out["ledger"])
+
+
+def test_a_stopped_search_writes_nothing(tmp_path):
+    """GFM-b review (#303): the driver passes the stop through; a stopped
+    search raises and leaves no recommendation behind."""
+    from gridspine.static import gfm_tuning as T
+
+    run = write_run(tmp_path / "run", campus_spec(scenarios=("seamless", "ups_bridged")))
+    D.island_frequency_campus(run, every_hour=False)
+    n = [0]
+
+    def stop():
+        n[0] += 1
+        return n[0] > 2
+    with pytest.raises(T.SearchStopped):
+        D.gfm_settings_campus(run, max_sims=200, should_stop=stop)
+    assert not (run / D.GFM_SETTINGS_JSON).exists()
