@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The report's investment chapter says "compared with nothing: incremental = total" for a case without a counterfactual (it read "the incremental figures are no counterfactual …"), and the islanding chapter heads an incomplete grid-forming search's column "Best found so far", never "Recommended".
