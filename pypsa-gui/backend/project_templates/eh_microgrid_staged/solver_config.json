@@ -1,5 +1,158 @@
 {
   "auto_discount_periods": true,
+  "commercial": {
+    "co2_price": null,
+    "connection": null,
+    "contracts": [],
+    "demand_items": [],
+    "export_link": null,
+    "export_price_ref": null,
+    "grid_cfe_share_ref": null,
+    "group_cap_mw": null,
+    "group_contract": null,
+    "group_members": [],
+    "import_tariff": null,
+    "import_tariff_id": null,
+    "import_tariff_ref": null,
+    "initial_peak_lower_bound": {},
+    "meter_history_energy_kwh": {},
+    "meter_history_peaks_kw": {},
+    "poc_link": "subsea_tie",
+    "power_factor": null,
+    "reference_purchases": [],
+    "site_party": "site",
+    "timezone": "UTC",
+    "value_flows": {
+      "allocation": null,
+      "asset_owners": [
+        {
+          "asset_id": "pv_plant",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "wind_turbines",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "diesel_1",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "diesel_2",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "diesel_3",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "diesel_new_2027",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "pv_new_2027",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "wind_new_2027",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "diesel_new_2030",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "pv_new_2030",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "wind_new_2030",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "diesel_new_2035",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "pv_new_2035",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "wind_new_2035",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "island_battery",
+          "component": "StorageUnit",
+          "owner": "site"
+        },
+        {
+          "asset_id": "bess_new_2027",
+          "component": "StorageUnit",
+          "owner": "site"
+        },
+        {
+          "asset_id": "bess_new_2030",
+          "component": "StorageUnit",
+          "owner": "site"
+        },
+        {
+          "asset_id": "bess_new_2035",
+          "component": "StorageUnit",
+          "owner": "site"
+        },
+        {
+          "asset_id": "subsea_tie",
+          "component": "Link",
+          "owner": "site"
+        },
+        {
+          "asset_id": "hospital_feeder",
+          "component": "Link",
+          "owner": "site"
+        }
+      ],
+      "built_digest": "f96d87add01e5f04",
+      "built_inputs_digest": "0f66c16cb4abe74a",
+      "connection_fee_payee": null,
+      "export_revenue_to": "site_party",
+      "externals": [
+        "retailer",
+        "dso",
+        "tso",
+        "market",
+        "tax_authority",
+        "capex_supplier",
+        "om_contractor"
+      ],
+      "hub_members": [],
+      "participants": [
+        {
+          "currency": "EUR",
+          "id": "site",
+          "name": "site",
+          "role": "site_owner"
+        }
+      ],
+      "tariff_payees": [],
+      "template": "single_owner",
+      "template_version": "single_owner@2"
+    }
+  },
   "discount_rate": 0.07,
   "finance": {
     "acquisition_date": null,

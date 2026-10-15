@@ -30,9 +30,27 @@
     },
     {
       "item": "investment case",
-      "note": "the island has no grid-only site; a diesel-only baseline comes in a later slice",
+      "note": "owner decision (M2e a); the investment-case route re-solves the island without the candidates. The analytic grid comparison does not apply",
       "source": "assumed",
-      "value": "not configured (no grid comparison)"
+      "value": "compared with the island as it stands today: the existing diesels, PV, wind and battery, without the planned candidates, and no grid"
+    },
+    {
+      "item": "point of connection",
+      "note": "it seeds the site/grid split and carries nothing; its 0.97 efficiency is kept (no flow, so the solve is unchanged)",
+      "source": "assumed",
+      "value": "subsea_tie, normally open (p_max_pu 0), no tariff"
+    },
+    {
+      "item": "diesel running cost",
+      "note": "the single-year template's marginal cost, in base-year (2027) money, escalating 2 %/yr as fuel; replace with the island's fuel contract",
+      "source": "synthetic",
+      "value": "260 EUR/MWh (fuel and variable O&M)"
+    },
+    {
+      "item": "existing island",
+      "note": "in service at the first period and sunk",
+      "source": "assumed",
+      "value": "pv_plant, wind_turbines, diesel_1, diesel_2, diesel_3, island_battery, hospital_feeder: COD 2027-01-01, overnight cost 0"
     }
   ],
   "name": "Island Microgrid (staged growth)",
@@ -66,6 +84,6 @@
     "Each period is the same representative week, with the period's load.",
     "Candidates are one row per period (build_year = the period).",
     "The island rows hold the steady island: grid-forming battery and diesel droop.",
-    "The investment case is not available yet: an island has no grid-only comparison. A diesel-only baseline comes next."
+    "After a solve the investment case compares the plan with the island as it stands today (the existing diesels, PV, wind and battery, no grid), re-solved without the candidates."
   ]
 }

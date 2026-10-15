@@ -19,10 +19,12 @@ What each one still lacks is said in its ledger and study notes:
   Q3) is the engine slice H2e. It ships no island sidecar: islanding a
   200 MW import is not the H2 hub's question (the control stage follows the
   data center's wiring when it lands).
-* **The microgrid** has no grid comparison (its tie is normally open), so it
-  ships its finance inputs but no commercial config; the diesel-only
-  baseline (owner, Q4) and the off-grid rule for the Investment detail (UX
-  audit H4) are the engine slice M2e. Its island sidecar runs ``seamless``:
+* **The microgrid** has no grid comparison (its tie is normally open). Its
+  investment case compares against the island as it stands today (owner,
+  M2e (a)): the existing diesels, PV, wind and battery, without the planned
+  candidates, and no grid; #302's baseline re-solve gives it with no engine
+  change. Its commercial config names the open tie as the PoC and has no
+  tariff. Its island sidecar runs ``seamless``:
   the island is already islanded, so the rows hold the steady island (GFM
   MVA, genset minimum load).
 
@@ -253,10 +255,20 @@ def _mg_finance() -> dict:
     }
 
 
-def _mg_finance_only(T) -> dict:
+def _mg_commercial_and_finance(T) -> dict:
+    """The island's commercial config: the open subsea tie is the PoC (the
+    site/grid split seeds from it; it carries nothing), no tariff, and the
+    single-owner value flows. The case compares against the island as it
+    stands today, which the investment-case route re-solves (#302)."""
+    from models.commercial import CommercialConfig
     from models.finance import FinanceInputs
+    from services.commercial import value_flow_templates as VFT
 
-    return {"finance": FinanceInputs.model_validate(_mg_finance()).model_dump(mode="json")}
+    base = CommercialConfig.model_validate({"poc_link": "subsea_tie", "timezone": "UTC"})
+    vf = VFT.build("single_owner", build_eh_microgrid_staged(T), base).config
+    commercial = base.model_copy(update={"value_flows": vf.model_dump(mode="json")})
+    return {"commercial": commercial.model_dump(mode="json"),
+            "finance": FinanceInputs.model_validate(_mg_finance()).model_dump(mode="json")}
 
 
 def _mg_island(T) -> dict:
@@ -318,7 +330,7 @@ def register(T) -> None:
     T.SOLVER_CONFIG_EXTRA["eh_h2_hub_staged"] = dict(staged)
     T.SOLVER_CONFIG_EXTRA["eh_microgrid_staged"] = {**staged, "island_constraints": True}
     T._SOLVER_CONFIG_BUILT["eh_h2_hub_staged"] = lambda: _h2_commercial_and_finance(T)
-    T._SOLVER_CONFIG_BUILT["eh_microgrid_staged"] = lambda: _mg_finance_only(T)
+    T._SOLVER_CONFIG_BUILT["eh_microgrid_staged"] = lambda: _mg_commercial_and_finance(T)
     T.ISLAND_CONFIG["eh_microgrid_staged"] = _mg_island(T)
 
     py = _period_years_static()
@@ -398,17 +410,32 @@ def register(T) -> None:
              "note": "replace with the island's load forecast"},
             {"item": "hospital feeder losses", "value": "efficiency 1.0", "source": "assumed",
              "note": "not modelled in the staged plan"},
-            {"item": "investment case", "value": "not configured (no grid comparison)",
+            {"item": "investment case",
+             "value": "compared with the island as it stands today: the existing diesels, PV, "
+                      "wind and battery, without the planned candidates, and no grid",
              "source": "assumed",
-             "note": "the island has no grid-only site; a diesel-only baseline comes in a later "
-                     "slice"},
+             "note": "owner decision (M2e a); the investment-case route re-solves the island "
+                     "without the candidates. The analytic grid comparison does not apply"},
+            {"item": "point of connection", "value": "subsea_tie, normally open (p_max_pu 0), "
+                                                     "no tariff",
+             "source": "assumed",
+             "note": "it seeds the site/grid split and carries nothing; its 0.97 efficiency is "
+                     "kept (no flow, so the solve is unchanged)"},
+            {"item": "diesel running cost", "value": "260 EUR/MWh (fuel and variable O&M)",
+             "source": "synthetic",
+             "note": "the single-year template's marginal cost, in base-year (2027) money, "
+                     "escalating 2 %/yr as fuel; replace with the island's fuel contract"},
+            {"item": "existing island", "value": ", ".join(a for a in MG_EXISTING)
+                                                 + f": COD {YEARS[0]}-01-01, overnight cost 0",
+             "source": "assumed", "note": "in service at the first period and sunk"},
         ],
         "study_notes": [
             "Each period is the same representative week, with the period's load.",
             "Candidates are one row per period (build_year = the period).",
             "The island rows hold the steady island: grid-forming battery and diesel droop.",
-            "The investment case is not available yet: an island has no grid-only comparison. A "
-            "diesel-only baseline comes next.",
+            "After a solve the investment case compares the plan with the island as it stands "
+            "today (the existing diesels, PV, wind and battery, no grid), re-solved without the "
+            "candidates.",
         ],
         "provenance": T.PROVENANCE,
     }

@@ -19,6 +19,7 @@ class-A COPT screening block of ``fmea_top``, and the pack's
 from __future__ import annotations
 
 import copy
+import dataclasses
 import hashlib
 import json
 import logging
@@ -783,9 +784,17 @@ def _stage_fmea_top(st: _Study) -> None:
         return _not_established(
             f"not run: the sweep needs {cost} solves and budget_solves leaves "
             f"{st.remaining()} — a partial ranking would mislead")
+    cfg = st.cfg
+    commercial = getattr(cfg, "commercial", None)
+    if closed and isinstance(commercial, dict) and commercial.get("poc_link") in closed:
+        # The copy no longer has the closed PoC Link the commercial config
+        # binds to (an island whose normally open tie is its PoC, #313): the
+        # sweep ranks reliability on the islanded copy, where the PoC carries
+        # nothing, so it solves without the commercial binding.
+        cfg = dataclasses.replace(cfg, commercial=None)
     try:
         rows, restore = sw.run_class_b_sweep(
-            fcopy, st.lock, st.cfg, log_queue=st.log_queue,
+            fcopy, st.lock, cfg, log_queue=st.log_queue,
             stop_event=st.stop_event, restore_base=False)
     except Exception as exc:  # noqa: BLE001 — degrade like every other stage
         logger.exception("fmea_top sweep failed")
