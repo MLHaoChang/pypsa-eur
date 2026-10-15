@@ -111,7 +111,10 @@ def enqueue_settings(project, user=None, *, allow_i_max: bool = False) -> dict:
 
 def run_queued(project, settings: dict, *, progress, should_stop) -> None:
     """The ``campus`` job's body for ``ACTION``: the recommender on the run."""
-    from gridspine.static.gfm_tuning import SearchStopped
+    try:
+        from gridspine.static.gfm_tuning import SearchStopped
+    except ImportError:            # without gridspine the recommender refuses first (503)
+        SearchStopped = ()
 
     if should_stop():
         raise ce.CampusRunAborted(f"aborted before {STAGE}")
