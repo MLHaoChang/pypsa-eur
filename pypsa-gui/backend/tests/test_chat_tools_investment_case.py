@@ -181,9 +181,10 @@ def test_the_summary_says_what_the_case_is_compared_with(solved, store):
     """Owner decision 2026-10-15: the assistant states the counterfactual's
     basis and its notes, and the island capability's break-even beside the
     NPV, as the card does."""
-    be = {"eur_per_year": 693523.0, "outage_hours_per_year": 17.52,
-          "eur_per_outage_hour": 39585.0, "islanded_mwh_per_year": 420.8,
-          "eur_per_mwh_islanded": 1648.0, "text": "t" * 2000}
+    be = {"eur_per_year": 693523.0, "outage_hours_per_year": 4.0,
+          "outage_source": "utility outage log", "eur_per_outage_hour": 173380.75,
+          "islanded_mwh_per_year": 96.0, "eur_per_mwh_islanded": 7224.2,
+          "needs_outage_duration": False, "text": "t" * 2000}
 
     def site_today(rep):
         p = rep["sections"]["project"]["payload"]
@@ -199,8 +200,9 @@ def test_the_summary_says_what_the_case_is_compared_with(solved, store):
     assert cf["text"] == "the site as it stands today"
     assert len(cf["notes"]) <= 4 and all(len(n) <= 300 for n in cf["notes"])
     ib = out["island_breakeven"]
-    assert ib["eur_per_year"] == 693523.0 and ib["eur_per_outage_hour"] == 39585.0
-    assert ib["eur_per_mwh_islanded"] == 1648.0 and len(ib["text"]) <= 300
+    assert ib["eur_per_year"] == 693523.0 and ib["eur_per_outage_hour"] == 173380.75
+    assert ib["eur_per_mwh_islanded"] == 7224.2 and len(ib["text"]) <= 300
+    assert ib["outage_source"] == "utility outage log" and ib["needs_outage_duration"] is False
     assert _size(out) < _CAP
 
     store(_report())                         # no break-even: the key is absent, not a 0

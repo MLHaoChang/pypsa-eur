@@ -181,11 +181,11 @@ describe('InvestmentCaseView', () => {
     const rep = structuredClone(REPORT)
     const project = rep.sections!.project!.payload as Record<string, unknown>
     project.island_breakeven = { eur_per_year: 693523, text:
-      'For the investment to break even, the island capability would have to be worth about EUR 693,523 a year. No value of lost load is assumed.' }
+      'The island capability must be worth at least EUR 693,523 a year (2027 money, escalating with opex) for the plan to break even. Per outage hour: needs an outage duration (enter the expected outage hours a year and their source). No value of lost load is assumed.' }
     api.getReport.mockResolvedValue(rep)
     renderView()
     await screen.findByTestId('ic-report')
-    expect(screen.getByTestId('ic-island-breakeven').textContent).toMatch(/break even.*EUR 693,523 a year/)
+    expect(screen.getByTestId('ic-island-breakeven').textContent).toMatch(/at least EUR 693,523 a year.*break even.*needs an outage duration/)
   })
 
   it('no baseline flag: no caveat', async () => {

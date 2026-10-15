@@ -1151,32 +1151,23 @@ class _Side:
     actual: dict
 
 
-def _island_exposure(n, parsed) -> list[str]:
-    """`island_exposure_hours_per_year:<h>`: the expected hours a year the
-    grid connection is out (each import Link's forced-outage rate × 8760 h, the
-    FOR basis of `outage_rate_value`), and `island_exposure_mwh_per_year:<mwh>`:
-    the critical load (`eh_critical` buses) carried through them at its mean.
-    Nothing when an import Link has no outage data."""
-    hours = 0.0
-    for m in _lp.import_links(parsed):
-        rate = _fin(n.links.at[m, "outage_rate_value"]) \
-            if m in n.links.index and "outage_rate_value" in n.links.columns else None
-        if rate is None:
-            return []
-        hours += rate * 8760.0
-    out = [f"island_exposure_hours_per_year:{hours:g}"]
+def _island_critical_load(n) -> list[str]:
+    """`island_critical_load_mw:<mw>`: the mean critical load (`eh_critical`
+    buses) the island capability carries, for the break-even per MWh (the
+    outage hours are the user's, `FinanceInputs.island_outage`). Nothing when
+    the network marks no critical bus."""
     crit = set(n.buses.index[n.buses["eh_critical"].astype(bool)]) \
         if "eh_critical" in n.buses.columns else set()
     loads = [ld for ld in n.loads.index if str(n.loads.at[ld, "bus"]) in crit]
-    if loads:
-        mw = 0.0
-        for ld in loads:
-            if ld in n.loads_t.p_set.columns:
-                mw += float(n.loads_t.p_set[ld].mean())
-            else:
-                mw += float(n.loads.at[ld, "p_set"])
-        out.append(f"island_exposure_mwh_per_year:{hours * mw:g}")
-    return out
+    if not loads:
+        return []
+    mw = 0.0
+    for ld in loads:
+        if ld in n.loads_t.p_set.columns:
+            mw += float(n.loads_t.p_set[ld].mean())
+        else:
+            mw += float(n.loads.at[ld, "p_set"])
+    return [f"island_critical_load_mw:{mw:g}"]
 
 
 def _shed_mwh(n, lost_load, loads: list[str], mask) -> float:
@@ -1226,10 +1217,9 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
                                lost_load=baseline.lost_load, owner=owner, side_only=True)
     flags += ["counterfactual_basis:site_today", *baseline.plan.flags]
     if "baseline_island_rows_relaxed" in baseline.plan.flags:
-        # What the island capability the new builds buy is exposed to, from
-        # the network's own outage data (owner decision 2026-10-15): the
-        # break-even beside the NPV is stated per outage hour and per MWh.
-        flags += _island_exposure(n, parsed)
+        # The critical load the island capability carries (owner decision
+        # 2026-10-15): with the user's outage hours, the break-even per MWh.
+        flags += _island_critical_load(n)
     removed = sorted(name for _c, name, _k in baseline.plan.removed)
     if removed:
         flags.append("baseline_removed:" + ",".join(removed))
@@ -2091,6 +2081,10 @@ def _canon(o):
                 del out["asset_cod"]
             if o.inputs.stage_capex_lead_years == 1 and isinstance(out.get("inputs"), dict):
                 out["inputs"].pop("stage_capex_lead_years", None)
+            # The island break-even's outage hours (2026-10-15): not stated, the
+            # case keeps its hash; stated, the report re-runs to state its figures.
+            if o.inputs.island_outage is None and isinstance(out.get("inputs"), dict):
+                out["inputs"].pop("island_outage", None)
         return out
     if hasattr(o, "model_dump"):
         return _canon(o.model_dump(mode="json"))

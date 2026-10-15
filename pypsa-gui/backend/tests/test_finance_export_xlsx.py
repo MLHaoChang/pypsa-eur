@@ -132,9 +132,11 @@ def test_the_summary_says_what_the_figures_are_compared_with():
 def test_the_summary_states_the_island_capability_break_even():
     rep = _report()
     rep.sections["project"].payload["island_breakeven"] = {
-        "eur_per_year": 693523.0, "text": "For the investment to break even, the island "
-        "capability would have to be worth about EUR 693,523 a year. No value of lost load "
-        "is assumed."}
+        "eur_per_year": 693523.0, "text": "The island capability must be worth at least "
+        "EUR 693,523 a year (2027 money, escalating with opex) for the plan to break even. Per "
+        "outage hour: needs an outage duration (enter the expected outage hours a year and "
+        "their source). No value of lost load is assumed."}
     wb = openpyxl.load_workbook(io.BytesIO(build_workbook(rep)))
     rows = {r[0]: r[1] for r in _values(wb["Summary"])}
-    assert rows["Island capability break-even"].startswith("For the investment to break even")
+    assert rows["Island capability break-even"].startswith(
+        "The island capability must be worth at least EUR 693,523 a year")

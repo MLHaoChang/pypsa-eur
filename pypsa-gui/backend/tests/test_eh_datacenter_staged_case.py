@@ -405,34 +405,90 @@ def test_a_multi_period_shed_is_priced_per_period(connection_45, staged_case_ana
 # ── the island capability's break-even (owner decision 2026-10-15) ───────────
 
 @pytest.mark.live_solve
-def test_the_island_capability_break_even_beside_the_npv(staged_case):
-    """The honest NPV stays (site as it stands); beside it, what the island
-    capability would have to be worth for the investment to break even, per
-    year and per hour of grid outage it rides through (and per MWh of
-    critical load carried), from the network's own outage data. No VoLL."""
+def _with_inflow(case, x):
     import dataclasses
 
-    from services.finance.breakeven import island_breakeven
     from services.finance.case import TemplateLine
-    from services.finance.engine import run_case
 
-    n, case, r = staged_case
-    # the exposure: the import link's forced-outage rate × 8760 h
-    rate = float(n.links.at["grid_import", "outage_rate_value"])
-    assert f"island_exposure_hours_per_year:{rate * 8760:g}" in case.flags
-    be = island_breakeven(r, case)
-    npv = r.metrics["project_pre_tax_npv"]
-    assert npv < 0 and be is not None
-    assert be["outage_hours_per_year"] == pytest.approx(rate * 8760)
-    assert be["eur_per_outage_hour"] == pytest.approx(be["eur_per_year"] / (rate * 8760))
-    assert be["eur_per_mwh_islanded"] == pytest.approx(
-        be["eur_per_year"] / be["islanded_mwh_per_year"])
-    # the figure is the break-even: that much a year more nets the NPV to 0
-    x = be["eur_per_year"]
     add = tuple(dataclasses.replace(t, lines=t.lines + (TemplateLine(
         key="check:island", stream="other", amount=x, esc_class="opex",
         period=t.lines[0].period if t.lines else None, money_year=case.base_year),))
         for t in case.templates)
-    assert run_case(dataclasses.replace(case, templates=add)).metrics[
-        "project_pre_tax_npv"] == pytest.approx(0.0, abs=1.0)
+    return dataclasses.replace(case, templates=add)
+
+
+def test_the_island_capability_break_even_beside_the_npv(staged_case):
+    """The honest NPV stays (site as it stands); beside it, the yearly value
+    the island capability must reach for the plan to break even, a threshold
+    (owner decision 2026-10-15). With no outage hours stated, the per-hour and
+    per-MWh figures read "needs an outage duration": no default, the import
+    link's forced-outage rate included. No VoLL."""
+    from services.finance.breakeven import island_breakeven
+    from services.finance.engine import run_case
+
+    n, case, r = staged_case
+    assert case.inputs.island_outage is None
+    assert not [f for f in case.flags if f.startswith("island_exposure")]
+    be = island_breakeven(r, case)
+    npv = r.metrics["project_pre_tax_npv"]
+    assert npv < 0 and be is not None and be["eur_per_year"] > 0
+    assert be["needs_outage_duration"] is True
+    assert be["outage_hours_per_year"] is None and be["eur_per_outage_hour"] is None
+    assert be["islanded_mwh_per_year"] is None and be["eur_per_mwh_islanded"] is None
+    assert be["text"].startswith("The island capability must be worth at least EUR ")
+    assert "Per outage hour: needs an outage duration" in be["text"]
     assert "No value of lost load is assumed" in be["text"]
+    # the baseline was solved without the island rows: labelled so (gatekeeper item 1)
+    from services.finance.report import _counterfactual_block
+    assert "without island capability" in _counterfactual_block(r, case)["basis"]
+    # the figure is the break-even: that much a year more nets the NPV to 0
+    got = run_case(_with_inflow(case, be["eur_per_year"])).metrics["project_pre_tax_npv"]
+    assert got == pytest.approx(0.0, abs=1.0)
+
+
+def test_the_break_even_per_outage_hour_comes_only_from_the_stated_hours(staged_case):
+    """The user's expected outage hours and their source: per avoided outage
+    hour = per year / hours; per MWh = per year / (hours × the mean critical
+    load). The per-year figure does not move, nor do the cash flows."""
+    import dataclasses
+
+    from models.finance import IslandOutage
+    from services.finance.breakeven import island_breakeven
+    from services.finance.engine import run_case
+
+    n, case, r = staged_case
+    base = island_breakeven(r, case)
+    stated = dataclasses.replace(case, inputs=case.inputs.model_copy(update={
+        "island_outage": IslandOutage(hours_per_year=4.0, source="utility outage log 2020-25")}))
+    r2 = run_case(stated)
+    assert r2.metrics["project_pre_tax_npv"] == pytest.approx(r.metrics["project_pre_tax_npv"])
+    be = island_breakeven(r2, stated)
+    assert be["eur_per_year"] == pytest.approx(base["eur_per_year"])
+    assert be["needs_outage_duration"] is False
+    assert be["outage_hours_per_year"] == 4.0
+    assert be["outage_source"] == "utility outage log 2020-25"
+    assert be["eur_per_outage_hour"] == pytest.approx(be["eur_per_year"] / 4.0)
+    mw = next(float(f.split(":", 1)[1]) for f in case.flags
+              if f.startswith("island_critical_load_mw:"))
+    assert be["islanded_mwh_per_year"] == pytest.approx(4.0 * mw)
+    assert be["eur_per_mwh_islanded"] == pytest.approx(be["eur_per_year"] / (4.0 * mw))
+    assert "per avoided outage hour at 4 h a year, source: utility outage log 2020-25" \
+        in be["text"]
+    assert "needs an outage duration" not in be["text"]
+    # not stated, the case keeps its hash; stated, the report re-runs to state it
+    from services.results.finance_case import _canon, finance_case_hash
+    assert "island_outage" not in _canon(case)["inputs"]
+    assert finance_case_hash(stated) != finance_case_hash(case)
+
+
+def test_a_positive_case_needs_no_island_value(staged_case):
+    from services.finance.breakeven import island_breakeven
+    from services.finance.engine import run_case
+
+    n, case, r = staged_case
+    rich = _with_inflow(case, 5.0e6)
+    r2 = run_case(rich)
+    assert r2.metrics["project_pre_tax_npv"] > 0
+    be = island_breakeven(r2, rich)
+    assert be["eur_per_year"] == 0.0
+    assert be["text"].startswith("Already positive without valuing the island capability")

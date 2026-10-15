@@ -222,6 +222,9 @@ gains the optional keyword `baseline=None` (a solved `results.baseline.Baseline`
 it stands today, re-solved without the plan's new builds. Omitting it keeps the analytic counterfactual, byte for byte.
 Addition: `results.finance_case.baseline_plan(n, cfg, owner=None)`, the rows a baseline removes or keeps (`None`
 without value flows); the guided study reads it to say when its analytic basis keeps existing assets.
+Addition: `FinanceInputs.island_outage` (`IslandOutage{hours_per_year, source}`, default None), the user's
+expected outage hours for the island break-even (owner decision 2026-10-15; no default). Left out of
+`finance_case_hash` when None, so a case without it keeps its hash; it never enters the cash flows.
 
 ## 7. Coordination protocol
 

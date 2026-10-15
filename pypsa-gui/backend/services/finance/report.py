@@ -477,6 +477,10 @@ def _operating_status(result) -> dict[str, str]:
 BASIS_TEXT = {
     "site_today": "compared with the site as it stands today (existing assets kept, new "
                   "builds removed, re-solved)",
+    # The baseline re-solved without the island rows (it cannot meet them).
+    "site_today_no_island": "compared with the site as it stands today without island "
+                            "capability (existing assets kept, new builds removed, re-solved "
+                            "without the island requirements)",
     "analytic": "compared with the same site's bill, commodity and connection lines without "
                 "the owner's assets (analytic basis: existing assets not re-dispatched)",
 }
@@ -500,7 +504,8 @@ def _counterfactual_block(result, case) -> dict[str, Any]:
         # decision 2026-10-15): the site as it stands today (a baseline
         # re-solve), or the analytic one (no re-dispatch).
         "counterfactual_basis": "site_today" if site_today else "analytic",
-        "basis": BASIS_TEXT["site_today" if site_today else "analytic"],
+        "basis": BASIS_TEXT[("site_today_no_island" if "baseline_island_rows_relaxed"
+                             in result.flags else "site_today") if site_today else "analytic"],
         "notes": [t for t in (flag_text(f) for f in result.flags) if t],
         "first_years": sorted({int(t.first_year) for t in case.counterfactual}),
         "n_lines": len(lines),

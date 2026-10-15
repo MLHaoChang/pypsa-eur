@@ -2202,7 +2202,10 @@ def _ic_summary(status: dict | None, report: dict | None) -> dict:
         out["island_breakeven"] = {k: _ne(be.get(k), 2) for k in (
             "eur_per_year", "outage_hours_per_year", "eur_per_outage_hour",
             "islanded_mwh_per_year", "eur_per_mwh_islanded")}
-        out["island_breakeven"]["text"] = _cut(be.get("text"), 300)
+        out["island_breakeven"].update(
+            outage_source=_cut(be.get("outage_source"), 120),
+            needs_outage_duration=bool(be.get("needs_outage_duration")),
+            text=_cut(be.get("text"), 300))
     gate = _section(report, "gates").get("payload") or {}
     consistent = gate.get("wacc_vs_discount_rate_consistent",
                           (report.get("gates") or {}).get("wacc_vs_discount_rate_consistent"))

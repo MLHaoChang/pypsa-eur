@@ -11,7 +11,8 @@ the G2 additions of `2026-10-07-ic-g1-g2-campus-equipment.md` G-11:
 `pinned_by`, `list_series` and their result types; and P5b's staged builds of
 `2026-10-14-e2e-guided-demo.md` §7.1: `FinanceCase.asset_cod` and
 `FinanceInputs.stage_capex_lead_years`; and the site-today baseline of
-2026-10-15: the `baseline` keyword of `build_finance_case` and `baseline_plan`).
+2026-10-15: the `baseline` keyword of `build_finance_case`, `baseline_plan` and
+`FinanceInputs.island_outage`).
 
 Every facade name is imported and its call signature pinned with
 `inspect.signature` against the expectation below, so any change — a renamed
@@ -282,7 +283,8 @@ MODEL_FIELDS: dict[str, tuple[str, ...]] = {
         "construction_months_by_asset", "construction_start", "contingency_share",
         "cost_of_equity", "currency", "currency_year", "debt", "degradation_by_asset",
         "depreciation_class_by_asset", "escalation", "financial_close", "financing_fee_tax",
-        "hebesatz_pct", "incentives", "inflation", "participants", "price_basis", "pwa_met",
+        "hebesatz_pct", "incentives", "inflation", "island_outage", "participants", "price_basis",
+        "pwa_met",
         "replacement_capex", "replacement_rule", "reserves_rate", "small_business_163j",
         "solve_ppa", "stage_capex_lead_years", "state_rate",
         "tax_equity", "tax_losses", "tax_pack_id", "terminal_value", "wacc_nominal"),
