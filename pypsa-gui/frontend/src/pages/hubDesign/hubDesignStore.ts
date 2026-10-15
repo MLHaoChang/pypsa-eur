@@ -38,6 +38,9 @@ interface HubDesignState {
    *  "Start a new project from these values"); the Start card's form opens
    *  with them. */
   siteSeed: { params: SiteParams; entered: string[] } | null
+  /** The New-project wizard's "Your own site" card asked the Start card to
+   *  open the generic site form (consumed once by the Start card). */
+  siteFormRequested: boolean
 
   resetFor: (project: string | null, d: HubDesignDefaults) => void
   setStep: (step: HubStep, opts?: { user?: boolean }) => void
@@ -47,6 +50,7 @@ interface HubDesignState {
   seedLoleFromPack: (v: string) => void
   setEnsCap: (v: string) => void
   setSiteSeed: (seed: { params: SiteParams; entered: string[] } | null) => void
+  setSiteFormRequested: (v: boolean) => void
 }
 
 export const HUB_DESIGN_INITIAL = {
@@ -59,6 +63,7 @@ export const HUB_DESIGN_INITIAL = {
   ensCap: '',
   userMovedRail: false,
   siteSeed: null as { params: SiteParams; entered: string[] } | null,
+  siteFormRequested: false,
 }
 
 export const useHubDesignStore = create<HubDesignState>()((set) => ({
@@ -75,4 +80,5 @@ export const useHubDesignStore = create<HubDesignState>()((set) => ({
   seedLoleFromPack: (loleTarget) => set({ loleTarget, loleSource: 'pack' }),
   setEnsCap: (ensCap) => set({ ensCap }),
   setSiteSeed: (siteSeed) => set({ siteSeed }),
+  setSiteFormRequested: (siteFormRequested) => set({ siteFormRequested }),
 }))

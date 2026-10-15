@@ -8,7 +8,7 @@
 // decision-study questions and starts one through the wizard's own entry hook
 // (`useDecisionEntry`): the intake opens in the decision panel, and the study
 // builds its own project, so the open one is not changed.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { FolderOpen, Hexagon, Scale, SlidersHorizontal } from 'lucide-react'
 import { GUIDED_QUESTIONS, useDecisionEntry } from '../../decision/useDecisionEntry'
 import { TEMPLATES } from '../../../layout/NewProjectWizard'
@@ -60,6 +60,12 @@ export function StartCard() {
   const siteSeed = useHubDesignStore(s => s.siteSeed)
   const setSiteSeed = useHubDesignStore(s => s.setSiteSeed)
   const [formToggled, setSiteFormOpen] = useState(false)
+  const siteFormRequested = useHubDesignStore(s => s.siteFormRequested)
+  useEffect(() => {
+    if (!siteFormRequested) return
+    setSiteFormOpen(true)
+    useHubDesignStore.getState().setSiteFormRequested(false)
+  }, [siteFormRequested])
   const siteFormOpen = formToggled || siteSeed !== null
 
   return (
