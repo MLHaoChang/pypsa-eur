@@ -176,3 +176,25 @@ and generates the sidecars at create, because there is no prebuilt directory.
    diesel-baseline counterfactual.
 6. **C1, control and report:** follow E2E's wiring for the data center; each template adds
    only sidecar or meta data.
+
+## G2 notes from the UX review (2026-10-15)
+
+Required by the UX standards:
+- Every field carries its own "default" tag. The defaults line above the form is only a
+  preview. Its figures go through `kpiFigure` / `format.ts`.
+- Stage years ascend, and the check shows next to the field ("2030 must come after 2027").
+- Site card, "Must stay on": show the critical load as entered ("3.6 MW, 30 % of peak").
+- An action that makes a new project says so ("Start a new project from these values").
+  Better: edit in place and mark the study `stale`.
+
+Suggestions to take:
+- Kind of site: a radio group of 5 small cards (2–3 per row), each with a one-line example.
+- "Grid strength — fault level (MVA)".
+- "What the study may add".
+- Site card: a table (Year | Peak load | Available from grid) plus one Kpi for the
+  connection limit.
+- Beside the disabled Create button: "N fields need attention", which scrolls to the first.
+- New Project wizard: a "Generic site" card inside the From template tab that opens Guided
+  Start. No new tab.
+- The field name stays provisional until the owner decides on "Site type" against "Grid
+  connection".
