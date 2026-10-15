@@ -102,3 +102,63 @@ def test_an_overshoot_within_the_tolerance_is_not_a_shed():
     assert not _excess_above(cap + 0.5 * _EPS_MW, cap).any()
     got = _excess_above(np.array([40.0, 41.5, 39.0, 40.0 + 2 * _EPS_MW]), cap)
     assert got.tolist() == pytest.approx([0.0, 1.5, 0.0, 2 * _EPS_MW])
+
+
+# ── the connection agreement's cap (#294 review, item 4) ────────────────────
+# `apply_connection_agreement` imposes a non-firm cap (and a closed connection
+# before `available_from`) for the solve only and undoes it after; the
+# counterfactual composes the same cap into what the connection carries.
+
+def _agreement(kind="non_firm_static", cap=38.0, available_from="2020-01-01"):
+    return {"kind": kind, "import_cap_mw": cap, "available_from": available_from}
+
+
+@pytest.mark.live_solve
+def test_a_non_firm_contract_caps_the_counterfactual_import(reset_backend):
+    n, com = _site()
+    com["connection"] = _agreement(cap=38.0)
+    state: dict = {}
+    n, cfg = _solve(n, com, voll=VOLL, state=state)
+    case = _case(n, cfg, _fin(annualise=True), lost_load=state.get("last_lost_load"))
+    # Shed against the contract's 38 MW, not the 42 MW link.
+    assert _flag_num(case.flags, "counterfactual_shed_at_voll:") == \
+        pytest.approx(_excess_mwh(n, 38.0), rel=1e-6)
+    assert _excess_mwh(n, 38.0) > _excess_mwh(n, POC_MW)
+
+
+@pytest.mark.live_solve
+def test_a_firm_agreement_at_the_link_rating_leaves_the_shed_unchanged(reset_backend):
+    """A firm agreement for what the link carries adds no cap (gatekeeper
+    review of #302): the shed is the one against the link alone."""
+    n, com = _site()
+    com["connection"] = _agreement(kind="firm", cap=POC_MW)
+    state: dict = {}
+    n, cfg = _solve(n, com, voll=VOLL, state=state)
+    case = _case(n, cfg, _fin(annualise=True), lost_load=state.get("last_lost_load"))
+    assert _flag_num(case.flags, "counterfactual_shed_at_voll:") == \
+        pytest.approx(_excess_mwh(n, POC_MW), rel=1e-6)
+
+
+def test_the_agreement_cap_series_matches_what_the_solve_imposes():
+    """`connection.agreement_import_cap_mw`: the contract cap (a study's
+    planning limit clamps it), 0 before `available_from`, constant for firm
+    and static non-firm agreements."""
+    from datetime import date
+
+    from models.commercial import ConnectionAgreement
+    from services.commercial import connection as C
+
+    n, _com = _site()
+    t0 = pd.DatetimeIndex(n.snapshots)[0]
+    a = ConnectionAgreement(kind="non_firm_static", import_cap_mw=38.0, available_from=date(2020, 1, 1))
+    assert np.allclose(C.agreement_import_cap_mw(n, a, poc_link="import"), 38.0)
+    firm = ConnectionAgreement(kind="firm", import_cap_mw=40.0, available_from=date(2020, 1, 1))
+    assert np.allclose(C.agreement_import_cap_mw(n, firm, poc_link="import"), 40.0)
+    setattr(n, C.LINK_LIMITS_ATTR, {"import": 30.0})          # a lever below the contract
+    assert np.allclose(C.agreement_import_cap_mw(n, a, poc_link="import"), 30.0)
+    delattr(n, C.LINK_LIMITS_ATTR)
+    later = ConnectionAgreement(kind="non_firm_static", import_cap_mw=38.0,
+                                available_from=(t0 + pd.Timedelta(days=2)).date())
+    got = C.agreement_import_cap_mw(n, later, poc_link="import")
+    closed = np.asarray(pd.DatetimeIndex(n.snapshots) < pd.Timestamp(later.available_from))
+    assert closed.any() and np.all(got[closed] == 0.0) and np.allclose(got[~closed], 38.0)

@@ -66,7 +66,7 @@ def adequacy_section_id(study_id: str) -> str:
 ADEQUACY_SECTION_IDS: tuple[str, ...] = tuple(
     adequacy_section_id(s) for s in SECTION_ORDER)
 
-SectionKind = Literal["eh", "adequacy", "worksheet"]
+SectionKind = Literal["eh", "adequacy", "worksheet", "investment", "island"]
 SectionStatus = Literal["ok", "not_established", "skipped"]
 
 SECTION_TITLES: dict[str, str] = {
@@ -94,6 +94,9 @@ SECTION_TITLES: dict[str, str] = {
     "fmea_sweep": "Contingency sweep (FMEA classes B/C)",
     # Worksheet.
     WORKSHEET_SECTION: "Expert-entered failure modes (class D)",
+    # The investment case and the island (control) chapters (D8).
+    "investment_case": "Investment case",
+    "island": "Islanding and control",
 }
 
 # Why a surface can be empty — the sentences ``get_adequacy_results`` gives
@@ -694,8 +697,58 @@ def _tables(sections: dict[str, EvidenceSection], headline: dict[str, Any],
 # ── entry points ─────────────────────────────────────────────────────────
 
 
+def _chapter_sections(ic_report, ic_stale, island) -> dict[str, EvidenceSection]:
+    """The investment-case and island chapters (``services/reports/chapters``),
+    each only when its source was passed."""
+    from services.reports import chapters as C
+
+    out: dict[str, EvidenceSection] = {}
+    if ic_report is not None:
+        payload = C.investment_payload(ic_report, stale=ic_stale)
+        source = "investment_case_report"
+        out[C.INVESTMENT] = _missing(C.INVESTMENT, "investment", C.NO_INVESTMENT, source=source) \
+            if payload is None else EvidenceSection(
+                section_id=C.INVESTMENT, title=SECTION_TITLES[C.INVESTMENT], kind="investment",
+                status="ok", source=source, engine="finance_engine", payload=payload,
+                note=("the inputs changed since the case ran" if ic_stale else None))
+    if island is not None:
+        payload = C.island_payload(island)
+        source = "campus island report and GFM settings"
+        out[C.ISLAND] = _missing(C.ISLAND, "island", C.NO_ISLAND, source=source) \
+            if payload is None else EvidenceSection(
+                section_id=C.ISLAND, title=SECTION_TITLES[C.ISLAND], kind="island",
+                status="ok", source=source, engine="gridspine", payload=payload)
+    return out
+
+
+def _chapter_tables(sections: dict[str, EvidenceSection]) -> dict[str, EvidenceTable]:
+    from services.reports import chapters as C
+
+    out: dict[str, EvidenceTable] = {}
+    inv = sections.get(C.INVESTMENT)
+    if inv is not None and inv.status == "ok" and inv.payload:
+        out[C.INVESTMENT] = C.investment_table(inv.payload, f"/sections/{C.INVESTMENT}/payload")
+    isl = sections.get(C.ISLAND)
+    if isl is not None and isl.status == "ok" and isl.payload:
+        out.update(C.island_tables(isl.payload, f"/sections/{C.ISLAND}/payload"))
+    return out
+
+
+def _chapter_disclosures(sections: dict[str, EvidenceSection]) -> list[str]:
+    from services.reports import chapters as C
+
+    out: list[str] = []
+    inv, isl = sections.get(C.INVESTMENT), sections.get(C.ISLAND)
+    if inv is not None and inv.status == "ok" and inv.payload:
+        out += C.investment_disclosures(inv.payload)
+    if isl is not None and isl.status == "ok" and isl.payload:
+        out += C.island_disclosures(isl.payload)
+    return out
+
+
 def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
-                     worksheet: dict | None) -> Evidence:
+                     worksheet: dict | None, ic_report: dict | None = None,
+                     ic_stale: bool | None = None, island: dict | None = None) -> Evidence:
     """
     Union the adequacy write-up, the EH reference design and the worksheet.
 
@@ -703,6 +756,9 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
     ``export_reference_design(report)`` or a ``ReferenceDesignReport``
     dump, ``load_worksheet(project_dir)``) and gets back one ``Evidence``
     with every known section present, established or stated as not.
+    ``ic_report`` (the stored investment case report, ``ic_stale`` its
+    staleness) and ``island`` (``{report, gfm}``) add the investment and
+    island chapters when passed (``chapters``); None leaves them out.
     """
     has_study = isinstance(study_report, dict)
     has_eh = isinstance(eh_report, dict)
@@ -711,6 +767,7 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
     sections.update(_eh_sections(eh_report))
     sections.update(_adequacy_sections(study_report))
     sections[WORKSHEET_SECTION] = _worksheet_section(worksheet)
+    sections.update(_chapter_sections(ic_report, ic_stale, island))
 
     headline = _headline(eh_report)
     pipeline = copy.deepcopy(eh_report.get("pipeline")) if has_eh else None
@@ -719,6 +776,7 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
     if has_study:
         disclosures += [str(d) for d in study_report.get("required_disclosures") or []]
     disclosures += _eh_disclosures(sections, headline)
+    disclosures += _chapter_disclosures(sections)
     if not any(s.status == "ok" for s in sections.values()
                if s.kind != "worksheet"):
         disclosures.insert(0, NOTHING_MEASURED_DISCLOSURE)
@@ -742,8 +800,8 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
         required_disclosures=disclosures,
         not_established=not_established,
         evidence_gaps=[g for g in gaps if isinstance(g, dict)],
-        tables=_tables(sections, headline, pipeline, has_eh=has_eh,
-                       has_study=has_study),
+        tables={**_tables(sections, headline, pipeline, has_eh=has_eh,
+                          has_study=has_study), **_chapter_tables(sections)},
     )
 
 
@@ -781,6 +839,7 @@ _COUNT_KEYS = {"rank", "top_n"}
 _COUNT_PREFIXES = ("n_", "draws_")
 _COUNT_SUFFIXES = ("_count",)
 _UNIT_SUFFIXES: tuple[tuple[str, str], ...] = (
+    ("_pct", "%"),
     ("_eur_per_mwh", "€/MWh"),
     ("_eur_per_kg", "€/kg"),
     ("_eur_per_year", "€/yr"),

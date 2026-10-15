@@ -331,6 +331,53 @@ def _render_figures(eh_report: dict | None,
     return out
 
 
+def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
+    """
+    The investment-case and island chapters' sources (`services/reports/
+    chapters`, D8), as `collect_evidence` keywords: the stored investment
+    case report and its staleness when one is stored; the campus island
+    report and the GFM settings when the project has island data on disk (an
+    island sidecar or a campus frequency check). Neither → no chapter, so the
+    report of any other project keeps its evidence.
+    """
+    from types import SimpleNamespace
+
+    from routers import results as results_router
+
+    out: dict[str, Any] = {}
+    try:
+        body = results_router.get_investment_case_report(detail="full")
+        if getattr(body, "status_code", None) != 204 and isinstance(body, dict):
+            out["ic_report"] = body
+            status = results_router.get_investment_case()
+            out["ic_stale"] = bool(((status or {}).get("report") or {}).get("stale")) \
+                if isinstance(status, dict) else None
+    except HTTPException as exc:
+        logger.info("reports: no investment case for this project: %s", exc.detail)
+    d = pathlib.Path(project.directory)
+    if (d / "island_config.json").is_file() \
+            or (d / "campus_electrical" / "run" / "campus_freq_events.csv").is_file():
+        import importlib
+
+        from services import campus_island_report
+
+        row = SimpleNamespace(name=project.name, storage_path=str(d), project_kind=None,
+                              org_id=project.org_id, id=project.uuid)
+        island: dict[str, Any] = {"report": None, "gfm": None}
+        readers = [("report", campus_island_report.island_report)]
+        try:                                    # the GFM settings service (GFM-b, #303)
+            readers.append(("gfm", importlib.import_module("services.campus_island_tuning").get_settings))
+        except ModuleNotFoundError:
+            pass
+        for key, read in readers:
+            try:
+                island[key] = read(row)
+            except Exception as exc:                        # noqa: BLE001 - stated as not established
+                logger.info("reports: island %s not read: %s", key, exc)
+        out["island"] = island
+    return out
+
+
 def _current_evidence(project: AuthorizedProject) -> tuple[Evidence, dict | None]:
     """
     The session's current evidence — the EH reference design (204 → None),
@@ -346,7 +393,7 @@ def _current_evidence(project: AuthorizedProject) -> tuple[Evidence, dict | None
     study_report = _current_study_report()
     worksheet = load_worksheet(project.directory)
     evidence = collect_evidence(study_report=study_report, eh_report=eh_report,
-                                worksheet=worksheet)
+                                worksheet=worksheet, **_current_chapter_sources(project))
     return evidence, eh_report
 
 

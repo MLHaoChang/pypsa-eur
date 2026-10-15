@@ -58,6 +58,7 @@
     "hebesatz_pct": null,
     "incentives": [],
     "inflation": 0.02,
+    "island_outage": null,
     "participants": [],
     "price_basis": "nominal",
     "pwa_met": null,
