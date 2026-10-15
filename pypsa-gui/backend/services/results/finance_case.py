@@ -964,8 +964,13 @@ def _price_co2(templates: list, counterfactual: list, co2, cod_year: int, flags:
         ts = sorted(ts, key=lambda t: t.first_year)
         out = []
         for i, t in enumerate(ts):
-            start = max(t.first_year, first_op) if i == 0 else t.first_year
             end = ts[i + 1].first_year if i + 1 < len(ts) else math.inf
+            if end <= first_op:
+                # In force only before the first operating year: it never
+                # operates, so it is neither priced nor flagged (#305 review).
+                out.append(t)
+                continue
+            start = max(t.first_year, first_op)
             for j, y in enumerate([start] + [x for x in listed if start < x < end]):
                 pr, at = price(y)
                 flags.append(f"co2_price_period:{y}:{at}:{_num(pr)}")
@@ -1045,6 +1050,10 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
         flags.append("counterfactual_reference_purchase_unused:" + ",".join(unused))
     co2 = getattr(parsed, "co2_price", None)
     grid_co2 = co2 is not None and co2.grid_t_per_mwh is not None
+    if co2 is not None and blockers:
+        # A CO2 price the blocked counterfactual cannot apply: its avoided
+        # cost is not established, not absent (#305 review).
+        flags.append("co2_price_not_applied:counterfactual_not_established")
     if co2 is not None and (bought or grid_co2):
         if getattr(fin, "price_basis", "nominal") == "real":
             cy = getattr(fin, "currency_year", None)

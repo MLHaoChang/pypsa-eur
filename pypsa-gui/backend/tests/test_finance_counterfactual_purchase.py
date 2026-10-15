@@ -312,3 +312,46 @@ def test_a_blocked_counterfactual_adds_no_grid_co2_on_either_side(reset_backend)
     assert "counterfactual_not_established:owner_conversion_load" in case.flags
     for t in [*case.templates, *case.counterfactual]:
         assert "co2:grid_import" not in _lines(t)
+
+
+
+@pytest.mark.live_solve
+def test_a_template_in_force_only_before_the_first_operating_year_is_never_priced(reset_backend):
+    """#305 review: periods 2030/2040, COD 2041, a CO2 price from 2041. The
+    2030 and 2040 templates' own years precede operation: no IndexError, no
+    flag for a year with no operation, and 2041 on priced at 90."""
+    from datetime import date
+
+    from services.finance.engine import run_case
+
+    co2 = {"eur_per_t_by_year": {"2041": 90.0}, "money_year": 2029, "source": "test"}
+    n, cfg = _solved(reference_purchases=[PURCHASE], co2_price=co2)
+    cod = date(2041, 1, 1)
+    fin = _real_fin(financial_close=date(2040, 1, 1),
+                    cod_by_asset={"pv": cod, "bess": cod, "electrolyser": cod})
+    case = _case(n, cfg, fin)
+    periods = [f for f in case.flags if f.startswith("co2_price_period:")]
+    assert periods == ["co2_price_period:2041:2041:90"], periods
+    by_year = _cf_line_by_year(run_case(case), "co2:purchase:h2_load")
+    unit = -_kg(n, 2040) * CO2_KG * _annual(n, 2040)
+    for y in (2041, 2045, 2050):
+        assert by_year[y] == pytest.approx(unit * 90.0, rel=1e-9), y
+    # with an earlier listed year too, no flag for 2040 (it never operates)
+    cfg.commercial = {**cfg.commercial, "co2_price": {
+        "eur_per_t_by_year": {"2035": 50.0, "2041": 90.0}, "money_year": 2029, "source": "t"}}
+    case = _case(n, cfg, fin)
+    assert [f for f in case.flags if f.startswith("co2_price_period:")] == \
+        ["co2_price_period:2041:2041:90"]
+
+
+@pytest.mark.live_solve
+def test_a_blocked_counterfactual_with_a_co2_price_reads_not_established(reset_backend):
+    from services.finance.engine import run_case
+    from services.finance.report import _counterfactual_block
+
+    co2 = {"eur_per_t_by_year": {"2030": 50.0}, "money_year": 2029, "source": "test"}
+    n, cfg = _solved(co2_price=co2)                          # no purchase: blocked
+    case = _case(n, cfg, _fin_h2())
+    assert "co2_price_not_applied:counterfactual_not_established" in case.flags
+    block = _counterfactual_block(run_case(case), case)
+    assert block["co2_priced"] is True and block["avoided_co2_cost"] is None
