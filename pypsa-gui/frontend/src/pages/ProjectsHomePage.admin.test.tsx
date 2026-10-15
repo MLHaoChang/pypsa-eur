@@ -60,7 +60,7 @@ describe('the import-a-folder entry point', () => {
 
     renderPage()
 
-    expect(await screen.findByText('Import a folder')).toBeTruthy()
+    expect(await screen.findByText('Import folder')).toBeTruthy()
   })
 
   it('is absent on the web deployment, where the route 404s', async () => {
@@ -71,7 +71,7 @@ describe('the import-a-folder entry point', () => {
     renderPage()
 
     await screen.findByRole('navigation', { name: 'Account' })
-    expect(screen.queryByText('Import a folder')).toBeNull()
+    expect(screen.queryByText('Import folder')).toBeNull()
   })
 })
 

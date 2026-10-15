@@ -22,6 +22,7 @@ import { Dialog } from '../components/Dialog'
 import { gridspineApi } from '../api/gridspine'
 import { GUIDED_QUESTIONS, useDecisionEntry, type GuidedQuestion } from '../pages/decision/useDecisionEntry'
 import { useLocalSettings } from '../hooks/useLocalSettings'
+import { CREATE_LABEL } from './newProjectVocabulary'
 
 // NewProjectWizard — replaces the single-input NewProjectModal with a 4-tab
 // flow per the design spec. Tabs:
@@ -64,7 +65,7 @@ type Tab = NewProjectTab
 export const TEMPLATES = [
   { id: '3bus',    name: '3-Bus Tutorial', description: 'Minimal AC network — 3 buses, 3 lines, 1 generator. Best starting point for learning PyPSA.', buses: 3,  lines: 3,  badge: 'simple',    available: true },
   { id: 'ieee14',  name: 'IEEE 14-Bus',    description: 'Classic test case. 14 buses, 20 lines, 5 generators. Stable baseline for benchmarking.',     buses: 14, lines: 20, badge: 'reference', available: true },
-  { id: 'belgium', name: 'Belgium Grid',   description: "PyPSA-Eur's Belgian network — OSM-derived HV grid clustered to 5 nodes, with wind, solar, nuclear, gas, batteries and H2. Solves out of the box.", buses: 10, lines: 6, badge: 'PyPSA-Eur', available: true },
+  { id: 'belgium', name: 'Belgium Grid',   description: "PyPSA-Eur's Belgian network — OSM-derived HV grid clustered to 5 regions, with wind, solar, nuclear, gas, batteries and H2. Solves out of the box.", buses: 10, lines: 6, badge: 'PyPSA-Eur', available: true },
   // Built by gridspine's own producer (project_templates/_build.py::build_ieee39),
   // so a project made from it, solved and saved, is a valid dispatch source for
   // a planning → dynamics study — its generators are the detailed grid's units.
@@ -72,11 +73,11 @@ export const TEMPLATES = [
   // P19 Energy Hub templates (project_templates/eh_templates.py): tagged,
   // with outage data, a stress-scenario registry, VOLL and a recommended
   // archetype pack — open the Energy Hub panel and press Run.
-  { id: 'eh_datacenter', name: 'Data Center Energy Hub', description: '50 MW hyperscale campus behind a weak 40 MW grid connection: critical IT with UPS, gas gensets, rooftop PV, expansion candidates. Ready for an Energy Hub study (weak_flexible).', buses: 3, lines: 0, badge: 'energy hub', available: true },
-  { id: 'eh_h2_hub', name: 'Industrial Hydrogen Hub', description: 'Grid-connected site with wind, PV, electrolyser, H2 storage and fuel cell, critical process load and H2 offtake. Ready for an Energy Hub study (strong_grid).', buses: 3, lines: 0, badge: 'energy hub', available: true },
+  { id: 'eh_datacenter', name: 'Data Center Energy Hub', description: '50 MW hyperscale campus behind a weak 40 MW grid connection: critical IT with UPS, gas gensets, rooftop PV, expansion candidates. Ready for an Energy Hub study on a weak grid connection.', buses: 3, lines: 0, badge: 'energy hub', available: true },
+  { id: 'eh_h2_hub', name: 'Industrial Hydrogen Hub', description: 'Grid-connected site with wind, PV, electrolyser, H2 storage and fuel cell, critical process load and H2 offtake. Ready for an Energy Hub study on a strong grid.', buses: 3, lines: 0, badge: 'energy hub', available: true },
   { id: 'eh_microgrid', name: 'Island Microgrid', description: 'Island system that must run without its subsea tie: PV, wind, battery, diesel fleet, critical hospital feeder. Ready for an off-grid Energy Hub study.', buses: 3, lines: 0, badge: 'energy hub', available: true },
   // E2E demo plan 2026-10-14, slice 8: the same campus planned from a projected load over three periods.
-  { id: 'eh_datacenter_staged', name: 'Data Center Energy Hub (staged growth)', description: 'The data center planned from a projected load: IT grows 12 → 24 → 36 MW over 2027, 2030 and 2035 while the utility energizes the 40 MW connection in steps. Genset and battery candidates per period. Multi-period; ready for an Energy Hub study (weak_flexible).', buses: 3, lines: 0, badge: 'energy hub', available: true },
+  { id: 'eh_datacenter_staged', name: 'Data Center Energy Hub (staged growth)', description: 'The data center planned from a projected load: IT grows 12 → 24 → 36 MW over 2027, 2030 and 2035 while the utility energizes the 40 MW connection in steps. Genset and battery candidates per period. Multi-period; ready for an Energy Hub study on a weak grid connection.', buses: 3, lines: 0, badge: 'energy hub', available: true },
 ] as const
 
 export default function NewProjectWizard({
@@ -111,17 +112,17 @@ export default function NewProjectWizard({
 
       {/* Tab strip */}
       <div className="flex items-center border-b border-border shrink-0 px-2">
-        <TabBtn id="blank"    active={tab === 'blank'}    onClick={() => setTab('blank')}    icon={<FilePlus size={12} />}   label="Blank" />
-        <TabBtn id="template" active={tab === 'template'} onClick={() => setTab('template')} icon={<BookOpen size={12} />}    label="From template" />
-        <TabBtn id="file"     active={tab === 'file'}     onClick={() => setTab('file')}     icon={<Upload size={12} />}     label="From file" />
-        <TabBtn id="clone"    active={tab === 'clone'}    onClick={() => setTab('clone')}    icon={<CopyIcon size={12} />}   label="Clone" />
-        <TabBtn id="study"    active={tab === 'study'}    onClick={() => setTab('study')}    icon={<FlaskConical size={12} />} label="Study" />
-        <TabBtn id="decision" active={tab === 'decision'} onClick={() => setTab('decision')} icon={<Scale size={12} />}        label="Decision study" />
+        <TabBtn id="blank"    active={tab === 'blank'}    onClick={() => setTab('blank')}    icon={<FilePlus size={12} />}   label={CREATE_LABEL.blank} />
+        <TabBtn id="template" active={tab === 'template'} onClick={() => setTab('template')} icon={<BookOpen size={12} />}    label={CREATE_LABEL.template} />
+        <TabBtn id="file"     active={tab === 'file'}     onClick={() => setTab('file')}     icon={<Upload size={12} />}     label={CREATE_LABEL.file} />
+        <TabBtn id="clone"    active={tab === 'clone'}    onClick={() => setTab('clone')}    icon={<CopyIcon size={12} />}   label={CREATE_LABEL.clone} />
+        <TabBtn id="study"    active={tab === 'study'}    onClick={() => setTab('study')}    icon={<FlaskConical size={12} />} label={CREATE_LABEL.study} />
+        <TabBtn id="decision" active={tab === 'decision'} onClick={() => setTab('decision')} icon={<Scale size={12} />}        label={CREATE_LABEL.decision} />
         {/* DESKTOP ONLY. The route it calls takes a server-side path, so it
             404s when auth is on — offering the tab there would be a dead end
             of exactly the kind the "Open admin" button turned out to be. */}
         {!authEnabled && (
-          <TabBtn id="folder" active={tab === 'folder'} onClick={() => setTab('folder')} icon={<FolderInput size={12} />} label="From folder" />
+          <TabBtn id="folder" active={tab === 'folder'} onClick={() => setTab('folder')} icon={<FolderInput size={12} />} label={CREATE_LABEL.folder} />
         )}
       </div>
 
@@ -339,9 +340,6 @@ function TemplateTab({ onClose }: { onClose: () => void }) {
             </button>
           )
         })}
-      </div>
-      <div className="mt-4 text-[10px] text-muted/70 text-center">
-        Template networks are bundled in <span className="font-mono">backend/project_templates/</span>.
       </div>
     </div>
   )
