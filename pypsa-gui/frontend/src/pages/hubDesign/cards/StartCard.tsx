@@ -28,6 +28,7 @@ const PURPOSE: Record<string, string> = {
   eh_datacenter: 'A data center that must keep running through grid outages.',
   eh_h2_hub: 'An industrial site that makes hydrogen from wind and solar power, with a grid connection.',
   eh_microgrid: 'An island that must keep its hospital running without its link to the mainland.',
+  eh_datacenter_staged: 'A data center that grows over the years: plan what to build, and when, as its load and grid connection grow.',
 }
 
 /** The Start card's purpose line; a template without one falls back to the

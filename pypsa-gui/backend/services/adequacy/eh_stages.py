@@ -29,6 +29,8 @@ from typing import Any
 
 import numpy as np
 
+from services.adequacy.energization import capped_mw
+
 from models.energy_hub import (
     DEFAULT_EH_FMEA_TOP_N,
     DEFAULT_EH_FRONTIER_LADDER,
@@ -462,7 +464,10 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True,
         cap = solved_capacity(ldf.loc[lk])
         if h == str(ldf.at[lk, "bus1"]):
             eff = _series(n, lk, "efficiency", 1.0)
-            sending = cap * np.clip(_series(n, lk, "p_max_pu", 1.0), 0.0, None)
+            # A connection energized in steps caps the sending MW hour by hour
+            # (`energization.capped_mw`, the solve's own composition).
+            sending = capped_mw(n, str(lk),
+                                cap * np.clip(_series(n, lk, "p_max_pu", 1.0), 0.0, None))
             delivered = sending * eff
         else:
             # Reverse flow bus1 → bus0: PyPSA withdraws eff × |p0| at bus1.

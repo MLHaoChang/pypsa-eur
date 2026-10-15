@@ -307,4 +307,21 @@ def eh_readiness(network, pack: ArchetypePack, *, budget_solves: int,
         "outage_units": _outage_units(net, links),
         "import_p_nom_mw": _finite_or_none(
             net.links.loc[list(links), "p_nom"].sum()) if links else None,
+        # A connection energized in steps (E2E slice 8): the MW available in
+        # every period, so the Site card never reads the full rating as firm.
+        "import_firm_mw": _import_firm_mw(net, links),
     }
+
+
+def _import_firm_mw(net, links) -> float | None:
+    """Σ over the import Links of min(p_nom, the energization's horizon
+    minimum), or None when no Link carries an energization schedule."""
+    from services.adequacy.energization import firm_energized_mw
+
+    if not links:
+        return None
+    firm = {l: firm_energized_mw(net, l) for l in links}
+    if all(v is None for v in firm.values()):
+        return None
+    return _finite_or_none(sum(min(float(net.links.at[l, "p_nom"]), v) if v is not None
+                               else float(net.links.at[l, "p_nom"]) for l, v in firm.items()))
