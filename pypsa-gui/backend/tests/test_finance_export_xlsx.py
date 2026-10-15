@@ -127,3 +127,14 @@ def test_the_summary_says_what_the_figures_are_compared_with():
     rows = {r[0]: r[1] for r in _values(wb["Summary"]) if r[0] in ("Compared with", "Note")}
     assert rows["Compared with"].startswith("compared with the site as it stands today")
     assert rows["Note"].startswith("pv has no typed cost")
+
+
+def test_the_summary_states_the_island_capability_break_even():
+    rep = _report()
+    rep.sections["project"].payload["island_breakeven"] = {
+        "eur_per_year": 693523.0, "text": "For the investment to break even, the island "
+        "capability would have to be worth about EUR 693,523 a year. No value of lost load "
+        "is assumed."}
+    wb = openpyxl.load_workbook(io.BytesIO(build_workbook(rep)))
+    rows = {r[0]: r[1] for r in _values(wb["Summary"])}
+    assert rows["Island capability break-even"].startswith("For the investment to break even")

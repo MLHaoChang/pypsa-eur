@@ -1151,6 +1151,34 @@ class _Side:
     actual: dict
 
 
+def _island_exposure(n, parsed) -> list[str]:
+    """`island_exposure_hours_per_year:<h>`: the expected hours a year the
+    grid connection is out (each import Link's forced-outage rate × 8760 h, the
+    FOR basis of `outage_rate_value`), and `island_exposure_mwh_per_year:<mwh>`:
+    the critical load (`eh_critical` buses) carried through them at its mean.
+    Nothing when an import Link has no outage data."""
+    hours = 0.0
+    for m in _lp.import_links(parsed):
+        rate = _fin(n.links.at[m, "outage_rate_value"]) \
+            if m in n.links.index and "outage_rate_value" in n.links.columns else None
+        if rate is None:
+            return []
+        hours += rate * 8760.0
+    out = [f"island_exposure_hours_per_year:{hours:g}"]
+    crit = set(n.buses.index[n.buses["eh_critical"].astype(bool)]) \
+        if "eh_critical" in n.buses.columns else set()
+    loads = [ld for ld in n.loads.index if str(n.loads.at[ld, "bus"]) in crit]
+    if loads:
+        mw = 0.0
+        for ld in loads:
+            if ld in n.loads_t.p_set.columns:
+                mw += float(n.loads_t.p_set[ld].mean())
+            else:
+                mw += float(n.loads.at[ld, "p_set"])
+        out.append(f"island_exposure_mwh_per_year:{hours * mw:g}")
+    return out
+
+
 def _shed_mwh(n, lost_load, loads: list[str], mask) -> float:
     """The VoLL shed of `loads` in a period (MWh, objective-weighted)."""
     ll = (lost_load or {}).get("lost_load_t") if isinstance(lost_load, dict) else None
@@ -1197,6 +1225,11 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
     side = _build_finance_case(baseline.network, cfg, fin, result_df=_live_result_df,
                                lost_load=baseline.lost_load, owner=owner, side_only=True)
     flags += ["counterfactual_basis:site_today", *baseline.plan.flags]
+    if "baseline_island_rows_relaxed" in baseline.plan.flags:
+        # What the island capability the new builds buy is exposed to, from
+        # the network's own outage data (owner decision 2026-10-15): the
+        # break-even beside the NPV is stated per outage hour and per MWh.
+        flags += _island_exposure(n, parsed)
     removed = sorted(name for _c, name, _k in baseline.plan.removed)
     if removed:
         flags.append("baseline_removed:" + ",".join(removed))

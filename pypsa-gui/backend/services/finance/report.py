@@ -271,6 +271,14 @@ def _cashflow_lines(result, case, packs: dict[str, str]) -> list:
     return out
 
 
+def _island_breakeven(result, case) -> dict[str, Any] | None:
+    from services.finance.breakeven import island_breakeven
+
+    got = island_breakeven(result, case)
+    return None if got is None else {k: _num(v) if isinstance(v, float) else v
+                                     for k, v in got.items()}
+
+
 def _project_payload(result, case) -> dict[str, Any]:
     m, fin = result.metrics, case.inputs
     cash = result.cash
@@ -333,6 +341,10 @@ def _project_payload(result, case) -> dict[str, Any]:
         # G-10); readers use `.get` (older payloads lack the key).
         "extra_assets": _extra_assets_block(case),
         "flags": list(result.flags),
+        # What the island capability would have to be worth for the case to
+        # break even, beside the NPV (owner decision 2026-10-15); None when
+        # the baseline met the island rows or the NPV is not established.
+        "island_breakeven": _island_breakeven(result, case),
     }
 
 

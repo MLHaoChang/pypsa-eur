@@ -176,6 +176,18 @@ describe('InvestmentCaseView', () => {
     expect(screen.getByTestId('ic-cf-notes').textContent).toMatch(/pv has no typed cost/)
   })
 
+  it('states the island capability break-even beside the NPV (owner decision 2026-10-15)', async () => {
+    api.getInvestmentCase.mockResolvedValue({ status: 'done', report: { present: true } })
+    const rep = structuredClone(REPORT)
+    const project = rep.sections!.project!.payload as Record<string, unknown>
+    project.island_breakeven = { eur_per_year: 693523, text:
+      'For the investment to break even, the island capability would have to be worth about EUR 693,523 a year. No value of lost load is assumed.' }
+    api.getReport.mockResolvedValue(rep)
+    renderView()
+    await screen.findByTestId('ic-report')
+    expect(screen.getByTestId('ic-island-breakeven').textContent).toMatch(/break even.*EUR 693,523 a year/)
+  })
+
   it('no baseline flag: no caveat', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'done', report: { present: true } })
     api.getReport.mockResolvedValue(structuredClone(REPORT))

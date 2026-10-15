@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The investment case states, beside its NPV, what the island capability would have to be worth for the plan to break even: per year, per hour of grid outage and per MWh of islanded critical load, with no value of lost load assumed.
