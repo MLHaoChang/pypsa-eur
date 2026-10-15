@@ -46,7 +46,7 @@ def _frequency_checked(project):
 
 
 def fake_recommend(seen, *, fail=None):
-    def recommend(run_dir, *, allow_i_max=False, max_sims=400):
+    def recommend(run_dir, *, allow_i_max=False, max_sims=400, should_stop=None):
         seen.append({"run_dir": run_dir, "allow_i_max": allow_i_max})
         if fail:
             raise ce.ContractError(fail)
@@ -99,6 +99,71 @@ def test_a_newer_frequency_check_makes_it_stale(hub, monkeypatch):  # noqa: F811
     out = cit.get_settings(project)
     assert out["state"] == "stale" and out["recommendation"] == REC
     assert "campus run" in out["reason"]
+
+
+def test_a_campus_run_stale_against_its_inputs_makes_it_stale(hub, monkeypatch):  # noqa: F811
+    """#303 review: a campus file, network or library changed since the run
+    (``ce._stale``) makes the recommendation stale too, without a rerun."""
+    _db, _user, project = hub
+    _frequency_checked(project)
+    (_run_dir(project) / ce.cs.GFM_SETTINGS_JSON).write_text(json.dumps(REC))
+    later = time.time() + 5
+    os.utime(_run_dir(project) / ce.cs.GFM_SETTINGS_JSON, (later, later))
+    assert cit.get_settings(project)["state"] == "ready"
+    monkeypatch.setattr(ce, "_stale", lambda p, d: True)
+    out = cit.get_settings(project)
+    assert out["state"] == "stale" and "campus file" in out["reason"]
+
+
+def test_an_unreadable_recommendation_is_stale_not_a_500(hub):  # noqa: F811
+    _db, _user, project = hub
+    _frequency_checked(project)
+    (_run_dir(project) / ce.cs.GFM_SETTINGS_JSON).write_text('{"label": "heuri')
+    out = cit.get_settings(project)
+    assert out["state"] == "stale" and out["recommendation"] is None
+    assert "could not be read" in out["reason"]
+
+
+def test_no_job_while_the_cuts_are_being_applied(hub, monkeypatch):  # noqa: F811
+    """#303 review: the cuts' trials rerun the campus study outside the queue,
+    replacing the frequency check the search would read."""
+    from services import campus_island_cuts as cic
+
+    _db, user, project = hub
+    _frequency_checked(project)
+    monkeypatch.setattr(cic, "_running", lambda record: True)
+    with pytest.raises(HTTPException) as exc:
+        cit.enqueue_settings(project, user)
+    assert exc.value.status_code == 409 and "frequency cuts" in exc.value.detail
+    assert sq.solve_queue.list_jobs() == []
+
+
+def test_an_abort_mid_search_stops_it_and_writes_nothing(hub, monkeypatch):  # noqa: F811
+    """#303 review: the abort reaches the search (asked before every
+    simulation); the job reads aborted and there is no recommendation."""
+    import threading
+
+    from gridspine.static.gfm_tuning import SearchStopped
+
+    _db, user, project = hub
+    _frequency_checked(project)
+    started, sims = threading.Event(), []
+
+    def searching(run_dir, *, allow_i_max=False, max_sims=400, should_stop=None):
+        started.set()
+        for _ in range(max_sims):
+            if should_stop():
+                raise SearchStopped("stopped")
+            sims.append(1)
+            time.sleep(0.01)
+        (run_dir / ce.cs.GFM_SETTINGS_JSON).write_text(json.dumps(REC))
+    monkeypatch.setattr(cit, "recommend", searching)
+    job = cit.enqueue_settings(project, user)
+    assert started.wait(10)
+    sq.solve_queue.abort(uuid.UUID(job["id"]))
+    assert _wait(lambda: _job(job["id"])["status"] == "aborted"), _job(job["id"])
+    assert len(sims) < cit.MAX_SIMS
+    assert cit.get_settings(project)["state"] == "not_run"
 
 
 def test_a_campus_rerun_drops_an_old_recommendation():
