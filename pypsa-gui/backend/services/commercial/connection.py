@@ -555,7 +555,10 @@ def fca_stress_entry(n, agreement: ConnectionAgreement, *, poc_link: str,
         achieved += weights[i]
     slug = re.sub(r"[^a-z0-9_-]+", "_", poc_link.lower()).strip("_")[:55] or "poc"
     return {"id": f"fca_{slug}", "kind": "profiles", "frequency_per_year": 1.0,
-            "label": f"FCA curtailment on {poc_link} ({agreement.curtailment_hours_per_year:g} h/yr)",
+            # One budget over the whole horizon, not per period (owner decision
+            # 2026-10-15): the text says so.
+            "label": f"FCA curtailment on {poc_link} ({agreement.curtailment_hours_per_year:g} "
+                     "h/yr, one budget over the whole horizon, taken in its highest-load hours)",
             "disclosure": FCA_DISCLOSURE, "target_hours": float(target_h),
             "achieved_hours": float(achieved),
             "links_p_max_pu": {poc_link: [float(v) for v in series]}}
