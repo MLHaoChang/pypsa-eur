@@ -12,7 +12,7 @@ import { useChatStore } from '../../../store/chatStore'
 import { useUIStore } from '../../../store/uiStore'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { siteFixText } from '../delegate'
-import { DC_TEMPLATE, MG_TEMPLATE, readiness } from '../testFixtures'
+import { DC_TEMPLATE, MG_TEMPLATE, SITE_TEMPLATE, readiness } from '../testFixtures'
 import { SiteCard } from './SiteCard'
 import { nk } from '../../../utils/queryKeys'
 
@@ -209,5 +209,44 @@ describe('SiteCard while a risk check runs (A1-FE)', () => {
     await waitFor(() => expect(resultsApi.getFmeaModes).toHaveBeenCalled())
     expect(fix.disabled).toBe(false)
     expect(screen.queryByTestId('hub-live-study-note')).toBeNull()
+  })
+})
+
+describe('SiteCard for a generic site (G2)', () => {
+  beforeEach(() => { vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(SITE_TEMPLATE) })
+
+  it('shows the load and connection schedule read-only, never asking for them again', async () => {
+    mount()
+    await screen.findByTestId('hub-site-schedule')
+    expect(text('hub-site-stage-2030')).toBe('203058')         // year | peak | available
+    expect(text('hub-site-stage-2035')).toBe('2035610')
+    expect(text('hub-site-connection')).toContain('Connection limit')
+    expect(text('hub-site-connection')).toContain('10')
+    expect(screen.getByTestId('hub-site-schedule').querySelectorAll('input')).toHaveLength(0)
+    expect(text('hub-site-schedule')).toContain('power factor 0.98')
+  })
+
+  it('says the must-stay-on load as entered, not a bus name', async () => {
+    mount()
+    await screen.findByTestId('hub-site-critical')
+    expect(text('hub-site-critical')).toContain('3 MW in 2035, 50 % of peak')
+  })
+
+  it('"Start a new project from these values" says so, and seeds the Start form', async () => {
+    const user = mount()
+    const btn = await screen.findByTestId('hub-site-new-from-values')
+    expect(btn.textContent).toBe('Start a new project from these values')
+    await (await user).click(btn)
+    const st = useHubDesignStore.getState()
+    expect(st.step).toBe('start')
+    expect(st.siteSeed?.params.connection_mw).toBe(10)
+    expect(st.siteSeed?.entered).toEqual(SITE_TEMPLATE.entered)
+  })
+
+  it('an example template shows no schedule', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(DC_TEMPLATE)
+    mount()
+    await screen.findByTestId('hub-site-grid')
+    expect(screen.queryByTestId('hub-site-schedule')).toBeNull()
   })
 })

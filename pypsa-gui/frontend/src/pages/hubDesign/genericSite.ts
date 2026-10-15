@@ -112,6 +112,12 @@ export function initialDraft(form: SiteForm, type: SiteTypeId = 'industrial'): S
   return derive({ values: clone(form.presets[type]), touched: [] })
 }
 
+/** A draft from a site's stored parameters and the fields its user set (the
+ *  template metadata's `params` and `entered`), to start a new project from. */
+export function draftFromSite(params: SiteParams, entered: string[]): SiteDraft {
+  return derive({ values: clone(params), touched: entered.map(touchPath) })
+}
+
 /** Switch the site type: every field the user has not set takes the new
  *  preset's value; the ones they set stay. */
 export function withSiteType(form: SiteForm, draft: SiteDraft, type: SiteTypeId): SiteDraft {

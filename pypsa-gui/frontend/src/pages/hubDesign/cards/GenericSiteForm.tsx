@@ -12,9 +12,9 @@ import { projectsApi } from '../../../api/projects'
 import { kpiFigure } from '../../../utils/format'
 import { siteParamsRefusal, type TemplateCreate } from '../../../hooks/useCreateFromTemplate'
 import {
-  addStage, firstErrorField, initialDraft, isDefault, presetSummary, removeStage, requestBody,
+  addStage, draftFromSite, firstErrorField, initialDraft, isDefault, presetSummary, removeStage, requestBody,
   setEnergization, setField, setStage, validate, withSiteType,
-  type SiteDraft, type SiteForm, type SiteTypeId,
+  type SiteDraft, type SiteForm, type SiteParams, type SiteTypeId,
 } from '../genericSite'
 
 // The tile rounding (3 significant figures) without its padding zeros: an
@@ -26,11 +26,13 @@ interface CreateMutation {
   isPending: boolean
 }
 
-export function GenericSiteForm({ create, disabledReason, onCancel }: {
+export function GenericSiteForm({ create, disabledReason, onCancel, seed }: {
   create: CreateMutation
   /** Why creating is not possible now (a study runs), or null. */
   disabledReason: string | null
   onCancel: () => void
+  /** Start from an existing site's values instead of a preset. */
+  seed?: { params: SiteParams; entered: string[] } | null
 }) {
   const form = useQuery({ queryKey: ['eh_site_form'], queryFn: projectsApi.getSiteTemplateForm,
     staleTime: Infinity })
@@ -42,16 +44,19 @@ export function GenericSiteForm({ create, disabledReason, onCancel }: {
     )
   }
   if (!form.data) return <p className="text-[12px] text-muted">Loading the site form…</p>
-  return <SiteFormBody form={form.data} create={create} disabledReason={disabledReason} onCancel={onCancel} />
+  return <SiteFormBody form={form.data} create={create} disabledReason={disabledReason}
+    onCancel={onCancel} seed={seed ?? null} />
 }
 
-function SiteFormBody({ form, create, disabledReason, onCancel }: {
+function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
   form: SiteForm
   create: CreateMutation
   disabledReason: string | null
   onCancel: () => void
+  seed: { params: SiteParams; entered: string[] } | null
 }) {
-  const [draft, setDraft] = useState<SiteDraft>(() => initialDraft(form))
+  const [draft, setDraft] = useState<SiteDraft>(
+    () => (seed ? draftFromSite(seed.params, seed.entered) : initialDraft(form)))
   const [server, setServer] = useState<{ field: string; message: string } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const errors = useMemo(() => {

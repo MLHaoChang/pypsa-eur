@@ -55,7 +55,12 @@ export function StartCard() {
   // A new project would replace the network under a running study (the
   // backend refuses with 409): say so on the buttons instead.
   const { running } = useHubStudy()
-  const [siteFormOpen, setSiteFormOpen] = useState(false)
+  // The Site card's "Start a new project from these values" opens the form
+  // with that site's values.
+  const siteSeed = useHubDesignStore(s => s.siteSeed)
+  const setSiteSeed = useHubDesignStore(s => s.setSiteSeed)
+  const [formToggled, setSiteFormOpen] = useState(false)
+  const siteFormOpen = formToggled || siteSeed !== null
 
   return (
     <CardShell step="start" testId="hub-card-start" title="Start">
@@ -98,7 +103,7 @@ export function StartCard() {
             })}
             <button type="button" data-testid="hub-start-own-site"
               aria-expanded={siteFormOpen}
-              onClick={() => setSiteFormOpen(o => !o)}
+              onClick={() => { if (siteFormOpen) setSiteSeed(null); setSiteFormOpen(!siteFormOpen) }}
               className={`flex flex-col gap-1 rounded-lg border p-3 text-left hover:border-accent/60 hover:bg-accent/5
                 ${siteFormOpen ? 'border-accent bg-accent/5' : 'border-border'}`}>
               <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-text">
@@ -110,7 +115,8 @@ export function StartCard() {
             </button>
           </div>
           {siteFormOpen && (
-            <GenericSiteForm create={create} onCancel={() => setSiteFormOpen(false)}
+            <GenericSiteForm key={siteSeed ? 'seed' : 'preset'} create={create} seed={siteSeed}
+              onCancel={() => { setSiteSeed(null); setSiteFormOpen(false) }}
               disabledReason={running ? STUDY_RUNNING_SWITCH : null} />
           )}
         </div>

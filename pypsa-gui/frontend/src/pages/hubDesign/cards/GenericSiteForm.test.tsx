@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { projectsApi } from '../../../api/projects'
 import formJson from '../siteFormFixture.json'
-import type { SiteForm } from '../genericSite'
+import type { SiteForm, SiteParams } from '../genericSite'
 import { GenericSiteForm } from './GenericSiteForm'
 
 const FORM = formJson as unknown as SiteForm
@@ -20,10 +20,11 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
-async function mount(disabledReason: string | null = null) {
+async function mount(disabledReason: string | null = null,
+  seed: { params: SiteParams; entered: string[] } | null = null) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(<QueryClientProvider client={client}>
-    <GenericSiteForm create={create} disabledReason={disabledReason} onCancel={() => {}} />
+    <GenericSiteForm create={create} disabledReason={disabledReason} onCancel={() => {}} seed={seed} />
   </QueryClientProvider>)
   await screen.findByTestId('site-form')
   return userEvent.setup()
@@ -89,5 +90,15 @@ describe('GenericSiteForm', () => {
     await mount('A study is still running')
     expect((screen.getByTestId('site-create') as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByTestId('site-create').getAttribute('title')).toBe('A study is still running')
+  })
+
+  it('starts from an existing site's values, keeping what its user set', async () => {
+    const params = { ...FORM.presets.hospital, connection_mw: 10 }
+    const user = await mount(null, { params, entered: ['site_type', 'connection_mw'] })
+    expect(fieldOf('connection_mw').value).toBe('10')
+    await user.click(screen.getByTestId('site-create'))
+    expect(create.mutate).toHaveBeenCalledWith(
+      { templateId: 'eh_site', params: { site_type: 'hospital', connection_mw: 10 } },
+      expect.anything())
   })
 })
