@@ -91,7 +91,8 @@ LINK_LIMITS_ATTR = "_ic_link_limits"
 FCA_DISCLOSURE = "fca_synthetic_hours"
 
 __all__ = ["Applied", "CommercialBindingError", "ENVELOPE_ATTR", "apply_commercial_for_solve",
-           "apply_connection_agreement", "apply_for_config", "fca_stress_entry",
+           "agreement_import_cap_mw", "apply_connection_agreement", "apply_for_config",
+           "fca_stress_entry",
            "register_fca_entry", "write_envelope"]
 
 
@@ -238,6 +239,27 @@ def _validate(n, agreement: ConnectionAgreement, poc_link: str, export_link: str
                 f"{agreement.kind} cap {agreement.import_cap_mw} MW exceeds the PoC Link's "
                 f"p_nom {p_nom} MW")
     return fee
+
+
+def agreement_import_cap_mw(n, agreement: ConnectionAgreement, *, poc_link: str,
+                            timezone: str | None = None) -> np.ndarray:
+    """The import the agreement allows on `poc_link` per snapshot (MW), as
+    `apply_connection_agreement` imposes it for a solve, without touching the
+    network (the counterfactual's "what the connection carries", #294 review):
+    the contract cap, clamped by a study's planning limit; under the envelope
+    for a dynamic agreement or an enveloped FCA; 0 before `available_from`.
+    An FCA's curtailment hours are a stress entry, not the solve's cap."""
+    cap = float(agreement.import_cap_mw)
+    limit = (getattr(n, LINK_LIMITS_ATTR, None) or {}).get(poc_link)
+    if limit is not None:
+        cap = min(cap, float(limit))
+    if agreement.kind != "firm" and (agreement.kind == "non_firm_dynamic"
+                                     or agreement.envelope is not None):
+        series = np.minimum(_envelope_mw(n, poc_link), cap)
+    else:
+        series = np.full(len(n.snapshots), cap)
+    closed, _ = _available_mask(n, agreement, timezone)
+    return np.where(closed, 0.0, series)
 
 
 def _available_mask(n, agreement: ConnectionAgreement, timezone: str | None):

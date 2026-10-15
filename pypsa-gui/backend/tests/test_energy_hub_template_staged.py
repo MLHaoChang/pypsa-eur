@@ -2,7 +2,7 @@
 
 The single-year campus planned from a projected load: three investment
 periods (2027, 2030, 2035), the IT load ramping 12 → 24 → 36 MW, the utility
-energizing its connection in steps (20 MW until 2030), and one genset
+energizing its connection in steps (15 MW until 2030), and one genset
 and one battery candidate per period with that period as its build year. The
 single-year template is untouched (a golden digest of its build).
 """
@@ -137,9 +137,9 @@ def test_one_candidate_per_period_that_outlives_the_horizon(staged):
     assert T.solver_config(TID)["finance"]["replacement_rule"] == "part_lifetimes"
 
 
-def test_the_plan_solves_and_respects_the_20_mw_cap_in_2027(solved):
+def test_the_plan_solves_and_respects_the_energized_cap_in_2027(solved):
     flow = solved.links_t.p0["grid_import"]
-    assert flow.loc[2027].max() <= 20.0 + 1e-6
+    assert flow.loc[2027].max() <= T.DC_ENERGIZATION_MW[2027] + 1e-6
     assert flow.loc[2035].max() <= T.DC_ENERGIZATION_MW[2035] + 1e-6
     # a candidate built in a later period produces nothing before it
     for g in ("genset_new_2030", "genset_new_2035"):
@@ -194,7 +194,7 @@ def test_the_build_scripts_verify_step_solves_every_template(tid):
 
 def test_with_the_island_rows_the_plan_stages():
     """The island rows (on in the template's solver settings) drive the build:
-    a genset in more than one period, and the 2027 import at its 20 MW cap."""
+    a genset in more than one period, and the 2027 import at its energized cap."""
     import json
     import tempfile
 
@@ -217,7 +217,8 @@ def test_with_the_island_rows_the_plan_stages():
              + float(n.storage_units.at[f"bess_new_{y}", "p_nom_opt"]) for y in YEARS}
     assert sum(1 for v in built.values() if v > 0.1) >= 2, built
     assert built[2035] > built[2027], built
-    assert n.links_t.p0["grid_import"].loc[2027].max() == pytest.approx(20.0, abs=1e-4)
+    assert n.links_t.p0["grid_import"].loc[2027].max() == pytest.approx(
+        T.DC_ENERGIZATION_MW[2027], abs=1e-4)
 
 
 def test_the_wizard_describes_the_staged_connection_as_the_template_builds_it():

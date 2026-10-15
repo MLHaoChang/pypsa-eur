@@ -18,6 +18,7 @@ import sys
 import threading
 from datetime import date
 
+import numpy as np
 import pytest
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
@@ -148,9 +149,12 @@ def test_the_study_notes_say_the_poc_is_loss_free_and_the_connection_carries_the
     poc = float(n.links.at["grid_import", "p_nom"])
     assert f"{poc:g} MW connection carries the {year} peak" in notes
     assert float(n.loads_t.p_set.sum(axis=1).loc[year].max()) <= poc
-    # The excess is shed at the template's own VoLL (owner decision 2026-10-15).
-    assert f"{T.solver_config(TID)['voll']:,.0f} EUR/MWh VoLL" in notes
-    assert "counterfactual_shed_at_voll" in notes
+    # The case compares against the site as it stands today, which sheds
+    # nothing (gatekeeper review of #302, item 4): the notes say so and claim
+    # no shed at VoLL; the island capability is a break-even.
+    assert "site as it stands today" in notes and "still meets its load" in notes
+    assert "break-even" in notes
+    assert "VoLL" not in notes and "counterfactual_shed_at_voll" not in notes
 
 
 def test_from_template_binds_the_commercial_block_and_the_finance_inputs(
@@ -229,17 +233,13 @@ def test_an_unexpected_bind_error_still_leaves_an_openable_project(
 # ── 5. the case computes (must-check 2) ─────────────────────────────────────
 
 @pytest.fixture
-def staged_case(reset_backend, monkeypatch):
+def staged_solved(reset_backend, monkeypatch):
     """The template solved multi-period through run_simulation with its own
-    solver settings (island rows from its sidecar), then the finance case."""
-    import routers.results as R
+    solver settings (island rows from its sidecar): (n, cfg, solve state)."""
     import routers.simulation as sim_router
-    from models.finance import FinanceInputs
     from routers.projects import _solver_config_from_dict
     from services.adequacy.island_config import SIDECAR_NAME, load_island_config
-    from services.finance.engine import run_case
     from services.pypsa_service import PyPSAService
-    from services.results.finance_case import build_finance_case
     from services.solver import island as I
     from services.solver_service import run_simulation
     from tests.conftest import install_network_into_backend
@@ -256,10 +256,39 @@ def staged_case(reset_backend, monkeypatch):
     status, cond = run_simulation(cfg, n, PyPSAService.get_lock(), threading.Event(),
                                   queue.SimpleQueue(), state_update=lambda **k: state.update(k))
     assert status in ("ok", "optimal"), (status, cond)
-    # As the investment-case route does: the solve's lost-load capture.
+    return n, cfg, state
+
+
+def _staged_finance(n, cfg, state, *, site_today: bool):
+    import routers.results as R
+    from models.finance import FinanceInputs
+    from services.finance.engine import run_case
+    from services.results import baseline as Bl
+    from services.results.finance_case import baseline_plan, build_finance_case
+
+    base = None
+    if site_today:
+        Bl.clear_cache()
+        plan = baseline_plan(n, cfg)
+        base = Bl.solve_baseline(n, cfg, plan) if plan is not None and plan.needed else None
     case = build_finance_case(n, cfg, FinanceInputs.model_validate(cfg.finance),
-                              result_df=R._result_df, lost_load=state.get("last_lost_load"))
+                              result_df=R._result_df, lost_load=state.get("last_lost_load"),
+                              baseline=base)
     return n, case, run_case(case)
+
+
+@pytest.fixture
+def staged_case(staged_solved):
+    """As the investment-case route does: the solve's lost-load capture, and the
+    baseline (the site as it stands today) when the owner keeps existing assets,
+    which the staged campus does (owner decision 2026-10-15)."""
+    return _staged_finance(*staged_solved, site_today=True)
+
+
+@pytest.fixture
+def staged_case_analytic(staged_solved):
+    """The same solve with the analytic counterfactual (no baseline)."""
+    return _staged_finance(*staged_solved, site_today=False)
 
 
 def _built(n, a):
@@ -306,10 +335,13 @@ def test_the_staged_template_produces_an_investment_case(staged_case):
     assert r.op.status == {"operating": "ok", "capex": "ok", "terminal": "ok"}, r.op.reasons
     for k in ("project_pre_tax_npv", "project_pre_tax_irr"):
         assert r.metrics[k] is not None, (k, r.reasons)
-    # The connection carries the 2035 peak (owner decision 2026-10-15): the
-    # grid-only comparison runs as modelled, nothing shed, nothing impossible
-    # (the shed-at-VoLL path is test_finance_counterfactual_shed's).
-    assert not [f for f in r.flags if f.startswith(("counterfactual_shed_at_voll",
+    # Compared with the site as it stands today (owner decision 2026-10-15):
+    # the existing 4 x 10 MW gensets and the PV stay, and they carry the 2027
+    # peak above the 15 MW energized import, so the comparison sheds nothing.
+    # The new stages are removed; the island rows they meet are relaxed.
+    assert "counterfactual_basis:site_today" in case.flags
+    assert "baseline_island_rows_relaxed" in case.flags
+    assert not [f for f in r.flags if f.startswith(("counterfactual_shed",
                                                     "counterfactual_exceeds"))], r.flags
 
 
@@ -339,3 +371,148 @@ def test_a_staged_plan_that_builds_a_battery_gets_an_npv(battery_built, staged_c
     assert not [ln.key for t in (*case.templates, *case.counterfactual) for ln in t.lines
                 if ln.amount is None]
     assert r.metrics["project_pre_tax_npv"] is not None, r.reasons
+
+
+@pytest.fixture
+def connection_45(monkeypatch):
+    """The staged template with a 45 MW connection: the 2035 peak (52.5 MW)
+    no longer fits, so the grid-only comparison sheds in 2035 only."""
+    monkeypatch.setattr(T, "_DC_POC_MW", 45.0)
+    monkeypatch.setattr(T, "DC_ENERGIZATION_MW", {2027: 20.0, 2030: 45.0, 2035: 45.0})
+
+
+@pytest.mark.live_solve
+def test_a_multi_period_shed_is_priced_per_period(connection_45, staged_case_analytic):
+    """#294 review (item 5): each period's shed line is
+    −VoLL · Σ_period w · max(0, load − min(PoC, E)); a period that sheds
+    nothing has no line, on the analytic path. (`connection_45` before the case.)"""
+    n, case, _r = staged_case_analytic
+    voll = T.solver_config(TID)["voll"]
+    period = n.snapshots.get_level_values(0)
+    load = n.loads_t.p_set.sum(axis=1).to_numpy(float)
+    e = n.links_t["eh_energization_mw"]["grid_import"].to_numpy(float)
+    cap = np.minimum(float(n.links.at["grid_import", "p_nom"]), e)
+    w = n.snapshot_weightings.objective.to_numpy(float)
+    shed_lines = {ln.period: ln.amount for t in case.counterfactual for ln in t.lines
+                  if ln.key == "counterfactual:shed_at_voll"}
+    for y in T.DC_PHASES:
+        m = period == y[0]
+        want = voll * float((w[m] * np.clip(load[m] - cap[m], 0.0, None)).sum())
+        if want > 0:
+            assert shed_lines[str(y[0])] == pytest.approx(-want, rel=1e-9), y[0]
+        else:
+            assert str(y[0]) not in shed_lines, y[0]
+    assert set(shed_lines) == {"2035"}
+
+
+@pytest.mark.live_solve
+def test_the_shipped_15_mw_2027_analytic_shed(staged_case_analytic):
+    """The analytic basis on the shipped template (gatekeeper review of #302):
+    2027's load above the energized 15 MW is shed at VoLL, 2030 and 2035 shed
+    nothing (the 55 MW connection carries their peaks)."""
+    n, case, _r = staged_case_analytic
+    assert T.DC_ENERGIZATION_MW[2027] == 15.0
+    voll = T.solver_config(TID)["voll"]
+    period = n.snapshots.get_level_values(0)
+    load = n.loads_t.p_set.sum(axis=1).to_numpy(float)
+    w = n.snapshot_weightings.objective.to_numpy(float)
+    m = period == 2027
+    want = voll * float((w[m] * np.clip(load[m] - 15.0, 0.0, None)).sum())
+    shed_lines = {ln.period: ln.amount for t in case.counterfactual for ln in t.lines
+                  if ln.key == "counterfactual:shed_at_voll"}
+    assert want > 0 and set(shed_lines) == {"2027"}
+    assert shed_lines["2027"] == pytest.approx(-want, rel=1e-9)
+
+
+# ── the island capability's break-even (owner decision 2026-10-15) ───────────
+
+def _with_inflow(case, x):
+    import dataclasses
+
+    from services.finance.case import TemplateLine
+
+    add = tuple(dataclasses.replace(t, lines=t.lines + (TemplateLine(
+        key="check:island", stream="other", amount=x, esc_class="opex",
+        period=t.lines[0].period if t.lines else None, money_year=case.base_year),))
+        for t in case.templates)
+    return dataclasses.replace(case, templates=add)
+
+
+@pytest.mark.live_solve
+def test_the_island_capability_break_even_beside_the_npv(staged_case):
+    """The honest NPV stays (site as it stands); beside it, the yearly value
+    the island capability must reach for the plan to break even, a threshold
+    (owner decision 2026-10-15). With no outage hours stated, the per-hour and
+    per-MWh figures read "needs an outage duration": no default, the import
+    link's forced-outage rate included. No VoLL."""
+    from services.finance.breakeven import island_breakeven
+    from services.finance.engine import run_case
+
+    n, case, r = staged_case
+    assert case.inputs.island_outage is None
+    assert not [f for f in case.flags if f.startswith("island_exposure")]
+    be = island_breakeven(r, case)
+    npv = r.metrics["project_pre_tax_npv"]
+    assert npv < 0 and be is not None and be["eur_per_year"] > 0
+    assert be["needs_outage_duration"] is True
+    assert be["outage_hours_per_year"] is None and be["eur_per_outage_hour"] is None
+    assert be["islanded_mwh_per_year"] is None and be["eur_per_mwh_islanded"] is None
+    assert be["text"].startswith("The island capability must be worth at least EUR ")
+    assert "Per outage hour: needs an outage duration" in be["text"]
+    assert "No value of lost load is assumed" in be["text"]
+    # the baseline was solved without the island rows: labelled so (gatekeeper item 1)
+    from services.finance.report import _counterfactual_block
+    assert "without island capability" in _counterfactual_block(r, case)["basis"]
+    # the figure is the break-even: that much a year more nets the NPV to 0
+    got = run_case(_with_inflow(case, be["eur_per_year"])).metrics["project_pre_tax_npv"]
+    assert got == pytest.approx(0.0, abs=1.0)
+
+
+@pytest.mark.live_solve
+def test_the_break_even_per_outage_hour_comes_only_from_the_stated_hours(staged_case):
+    """The user's expected outage hours and their source: per avoided outage
+    hour = per year / hours; per MWh = per year / (hours × the mean critical
+    load). The per-year figure does not move, nor do the cash flows."""
+    import dataclasses
+
+    from models.finance import IslandOutage
+    from services.finance.breakeven import island_breakeven
+    from services.finance.engine import run_case
+
+    n, case, r = staged_case
+    base = island_breakeven(r, case)
+    stated = dataclasses.replace(case, inputs=case.inputs.model_copy(update={
+        "island_outage": IslandOutage(hours_per_year=4.0, source="utility outage log 2020-25")}))
+    r2 = run_case(stated)
+    assert r2.metrics["project_pre_tax_npv"] == pytest.approx(r.metrics["project_pre_tax_npv"])
+    be = island_breakeven(r2, stated)
+    assert be["eur_per_year"] == pytest.approx(base["eur_per_year"])
+    assert be["needs_outage_duration"] is False
+    assert be["outage_hours_per_year"] == 4.0
+    assert be["outage_source"] == "utility outage log 2020-25"
+    assert be["eur_per_outage_hour"] == pytest.approx(be["eur_per_year"] / 4.0)
+    mw = next(float(f.split(":", 1)[1]) for f in case.flags
+              if f.startswith("island_critical_load_mw:"))
+    assert be["islanded_mwh_per_year"] == pytest.approx(4.0 * mw)
+    assert be["eur_per_mwh_islanded"] == pytest.approx(be["eur_per_year"] / (4.0 * mw))
+    assert "per avoided outage hour at 4 h a year, source: utility outage log 2020-25" \
+        in be["text"]
+    assert "needs an outage duration" not in be["text"]
+    # not stated, the case keeps its hash; stated, the report re-runs to state it
+    from services.results.finance_case import _canon, finance_case_hash
+    assert "island_outage" not in _canon(case)["inputs"]
+    assert finance_case_hash(stated) != finance_case_hash(case)
+
+
+@pytest.mark.live_solve
+def test_a_positive_case_needs_no_island_value(staged_case):
+    from services.finance.breakeven import island_breakeven
+    from services.finance.engine import run_case
+
+    n, case, r = staged_case
+    rich = _with_inflow(case, 5.0e6)
+    r2 = run_case(rich)
+    assert r2.metrics["project_pre_tax_npv"] > 0
+    be = island_breakeven(r2, rich)
+    assert be["eur_per_year"] == 0.0
+    assert be["text"].startswith("Already positive without valuing the island capability")
