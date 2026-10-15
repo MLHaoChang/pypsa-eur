@@ -13,6 +13,8 @@ Installed: exactly the promoted set the upstream Claude Code plugin ships
 - `code-review` is installed as **`mp-code-review`**, because the Claude Code harness
   already has a built-in `code-review` skill. References in `ask-matt`, `implement`,
   `implement-spec` and `tdd` point at the new name.
+- `retro` has a step 5: a picked fix that changes the coordination setup also lands in
+  `templates/agent-coordination/` and its `LEARNINGS.md`.
 
 ## Where to start
 
