@@ -337,6 +337,36 @@ def clear_island_cuts(
     return cic.clear_cuts(_row(proj, db))
 
 
+# ── recommended GFM settings (E2E demo plan §7.2, GFM-b) ───────────────────
+
+
+class GfmSettingsBody(BaseModel):
+    allow_i_max: bool = False
+
+
+@router.get("/{name}/island/gfm-settings")
+def get_gfm_settings(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """The last recommendation (heuristic screening) and whether it is still
+    the campus run's: ``{state: not_run|ready|stale, reason, recommendation}``."""
+    from services import campus_island_tuning as cit
+    return cit.get_settings(_row(proj, db))
+
+
+@router.post("/{name}/island/gfm-settings", status_code=202)
+def recommend_gfm_settings(
+    body: GfmSettingsBody | None = None,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Recommend GFM settings from the last campus run's island hours, as a
+    campus job of the solve queue; follow it on the campus state's run job."""
+    from services import campus_island_tuning as cit
+    _check_lock(proj, db, user)
+    return cit.enqueue_settings(_row(proj, db), user,
+                                allow_i_max=bool(body.allow_i_max) if body else False)
+
+
 # ── the asset library (plan C9) ────────────────────────────────────────────
 
 @router.get("/{name}/library")

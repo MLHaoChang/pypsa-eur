@@ -436,6 +436,7 @@ const STAGE_LABEL: Record<CampusRunStage, string> = {
   island_checks: 'island frequency checks (the slowest step)',
   size: 'sizing the transformers, the compensation and the short circuit',
   invest: 'buying the assets from the library, re-checked by AC load flow',
+  gfm_settings: 'recommending grid-forming settings from the island hours',
   done: 'finishing',
 }
 
