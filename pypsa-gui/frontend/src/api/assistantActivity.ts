@@ -5,6 +5,7 @@ export interface ActivityItem {
   native_status: string; status: string; evidence_available: boolean; needs_you: boolean
   session_id?: string; stage?: string | null; reason?: string | null
   observation?: 'live' | 'retained'; observed_at?: number | null
+  last_observed_status?: string | null
 }
 export interface ActivitySnapshot {
   version: 1; project_id: string; filter: ActivityFilter; cursor: string; revision: number

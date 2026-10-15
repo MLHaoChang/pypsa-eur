@@ -146,8 +146,10 @@ def _update(owner, project, live):
             if previous:
                 if (previous['family'], previous['tool_name']) != (candidate['family'], candidate['tool_name']):
                     raise ValueError('changed activity origin')
-                # Unknown/stale collectors cannot erase an exact terminal read.
-                if previous['native_status'] in _TERMINAL[previous['family']] or candidate['native_status'] == previous['native_status']:
+                # Losing a source is not a new native outcome. Preserve the
+                # last factual state, and never regress an exact terminal read.
+                if (previous['native_status'] in _TERMINAL[previous['family']]
+                        or candidate['native_status'] in {'unknown', previous['native_status']}):
                     continue
             records[row['source_id']] = candidate
         # Keep the newest *origins*, so old live handles cannot churn the cap
@@ -188,7 +190,8 @@ def project_rows(owner, project, live):
         rows.append(dict(
             source_id=record['source_id'], family=record['family'],
             title=record['tool_name'].replace('_', ' '), stage=None,
-            native_status=record['native_status'] if terminal else 'interrupted',
+            native_status=record['native_status'] if terminal else 'unknown',
+            last_observed_status=record['native_status'], review_required=not terminal,
             observation='retained', observed_at=record['observed_at'],
             reason=('Retained terminal observation; current worker and engineering evidence are not checked.'
                     if terminal else 'Last observed work has no matching live worker. Inspect its native records before retrying; it was not restarted.'),

@@ -123,6 +123,8 @@ export default function AssistantActivity({ onConversation }: { onConversation: 
         <p className="font-medium break-words">{item.title}</p>
         <p>{item.status.replace(/_/g, ' ')} <span className="text-muted">· {item.family.replace(/_/g, ' ')}</span></p>
         <p className="text-xs text-muted">Native status: {item.native_status}{item.stage ? ` · ${item.stage}` : ''}</p>
+        {item.observation === 'retained' && item.last_observed_status &&
+          <p className="text-xs text-muted">Last recorded native status: {item.last_observed_status}</p>}
         {item.observation && <p className="text-xs text-muted">
           {item.observation === 'retained' ? 'Retained observation' : 'Current native observation'}
           {recorded && <> · Last recorded <time dateTime={recorded.toISOString()}>

@@ -23,8 +23,8 @@ runner, numerical evidence store or approval authority.
   metadata without recreating native jobs, waits, contexts or sessions.
 - Exact live sources take precedence. A retained terminal observation remains
   visible after its native slot/registry is replaced. Previously running or
-  unknown work without a matching source is Needs review (`interrupted` in the
-  projection), never successful, never proof of cancellation/quiescence and
+  unknown work without a matching source is Needs review with current native
+  status `unknown` and a separate last-recorded status, never successful, never proof of cancellation/quiescence and
   never proof no effect occurred. Late running collectors cannot erase a saved
   terminal observation. Retained metadata cannot restore `wait_for_job` or
   return numerical results.

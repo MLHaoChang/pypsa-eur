@@ -58,7 +58,7 @@ createRoot(document.getElementById('root')!).render(<main style={{display:'flex'
       const items = [
         {id:'solve:1',source_id:'job-1',project_id:'p1',family:'solve_queue',title:'Network solve',status:'running',native_status:'running',needs_you:false,evidence_available:false},
         {id:'confirmation:1',source_id:'opaque-decision',project_id:'p1',family:'confirmation',title:'Update generator capacity',status:'waiting_for_approval',native_status:'waiting_for_approval',needs_you:true,evidence_available:false,session_id:'s1'},
-        {id:'foreground_simulation:old',source_id:'old-job',project_id:'p1',family:'foreground_simulation',title:'Previous network solve',status:'needs_review',native_status:'interrupted',needs_you:true,evidence_available:false,observation:'retained',observed_at:1792000000,reason:'Last observed work has no matching live worker; it was not restarted.'},
+        {id:'foreground_simulation:old',source_id:'old-job',project_id:'p1',family:'foreground_simulation',title:'Previous network solve',status:'needs_review',native_status:'unknown',last_observed_status:'running',needs_you:true,evidence_available:false,observation:'retained',observed_at:1792000000,reason:'Last observed work has no matching live worker; it was not restarted.'},
       ].filter(row => filter === 'needs_you' ? row.needs_you : filter === 'scheduled' ? false : true)
       return route.fulfill({json:{version:1,project_id:'p1',filter,cursor:'epoch:1',revision:1,resnapshot_required:false,items,next_page:null,total:items.length,warnings:['activity_history_is_bounded_observation'],scheduling_available:false}})
     })
@@ -69,6 +69,8 @@ createRoot(document.getElementById('root')!).render(<main style={{display:'flex'
       await page.getByRole('button',{name:'Open originating chat'}).waitFor()
       await page.getByText('Previous network solve', {exact:true}).waitFor()
       await page.getByText(/Retained observation/).waitFor()
+      await page.getByText('Native status: unknown', {exact:true}).waitFor()
+      await page.getByText('Last recorded native status: running', {exact:true}).waitFor()
       assert.equal(await page.getByRole('button', {name:/approve|retry|resume|cancel/i}).count(),0)
       assert.equal(await page.getByText('Network solve',{exact:true}).count(),0)
       await page.getByRole('button',{name:'Open originating chat'}).click()

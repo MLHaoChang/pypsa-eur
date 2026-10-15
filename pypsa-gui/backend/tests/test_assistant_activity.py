@@ -52,7 +52,8 @@ def test_owned_families_and_replacement_never_borrow_success(client, project):
     # Durable origins remain visible for inspection, but the replacement's
     # terminal status still cannot complete any of these original handles.
     assert all(r['status'] == 'needs_review' for r in rows)
-    assert all(r['native_status'] == 'interrupted' for r in rows)
+    assert all(r['native_status'] == 'unknown' for r in rows)
+    assert all(r['last_observed_status'] == 'running' for r in rows)
     assert all(r['observation'] == 'retained' for r in rows)
     assert all(r['evidence_available'] is False for r in rows)
 

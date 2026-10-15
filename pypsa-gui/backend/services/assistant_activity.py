@@ -41,9 +41,9 @@ def _status(native):
     }.get(native, 'unavailable')
 
 
-def _row(project, family, source_id, title, native, **extra):
+def _row(project, family, source_id, title, native, *, review_required=False, **extra):
     native = native[:80] if isinstance(native, str) else 'unknown'
-    state = _status(native)
+    state = 'needs_review' if review_required else _status(native)
     return dict(
         id=f'{family}:{source_id}', source_id=source_id, family=family,
         project_id=project, title=str(title)[:120], native_status=native,
@@ -116,6 +116,8 @@ def collect(*, db, user, project):
         rows.append(_row(pid, native['family'], native['source_id'], native['title'],
                          native['native_status'], stage=native['stage'],
                          observation=native['observation'], observed_at=native.get('observed_at'),
+                         last_observed_status=native.get('last_observed_status'),
+                         review_required=native.get('review_required', False),
                          reason=native.get('reason')))
     # Use native persisted/live precedence and project authorization. Unlike
     # the global queue UI, Activity excludes even redacted foreign queue rows.

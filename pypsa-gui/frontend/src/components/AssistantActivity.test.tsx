@@ -74,7 +74,7 @@ describe('AssistantActivity', () => {
   })
   it('distinguishes retained observations from live work and grants no recovered control', async () => {
     const data = snapshot('recovered:1', 'needs_review')
-    data.items[0] = { ...data.items[0], native_status: 'interrupted', needs_you: true,
+    data.items[0] = { ...data.items[0], native_status: 'unknown', last_observed_status: 'running', needs_you: true,
       observation: 'retained', observed_at: 1792000000,
       reason: 'Last observed work has no matching live worker. It was not restarted.' }
     get.mockResolvedValue(data)
@@ -82,6 +82,8 @@ describe('AssistantActivity', () => {
     const { container } = render(<AssistantActivity onConversation={open} />)
     expect(await screen.findByText(/Retained observation/)).toBeTruthy()
     expect(screen.getByText(/It was not restarted/)).toBeTruthy()
+    expect(screen.getByText('Native status: unknown')).toBeTruthy()
+    expect(screen.getByText('Last recorded native status: running')).toBeTruthy()
     expect(container.querySelector('time')?.dateTime).toBe(new Date(1792000000000).toISOString())
     expect(screen.getByText(/Unobserved outcomes remain unknown/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /approve|retry|resume|cancel|open originating/i })).toBeNull()

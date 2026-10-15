@@ -50,7 +50,8 @@ def test_registration_survives_loss_without_inventing_completion(client, origin,
     assert response.status_code == 200, response.text
     row = next(r for r in response.json()['items'] if r['source_id'] == job)
     assert row['status'] == 'needs_review'
-    assert row['native_status'] == 'interrupted'
+    assert row['native_status'] == 'unknown'
+    assert row['last_observed_status'] == 'running'
     assert row['observation'] == 'retained'
     assert row['evidence_available'] is False
     assert 'last observed' in row['reason'].lower()
@@ -147,7 +148,8 @@ def test_clean_process_can_read_retained_origin_without_native_registries(client
     rows, warnings = json.loads(result.stdout)
     assert warnings == []
     assert rows[0]['source_id'] == job
-    assert rows[0]['native_status'] == 'interrupted'
+    assert rows[0]['native_status'] == 'unknown'
+    assert rows[0]['last_observed_status'] == 'running'
     assert rows[0]['observation'] == 'retained'
     assert rows[0]['observed_at'] > 0
 
