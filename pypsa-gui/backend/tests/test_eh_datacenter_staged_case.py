@@ -191,6 +191,37 @@ def test_from_template_refuses_a_commercial_block_that_does_not_bind(
     assert client.get("/api/simulation/solver_config").json()["commercial"] is None
 
 
+def test_an_unexpected_bind_error_still_leaves_an_openable_project(
+        client, tmp_path, monkeypatch, tmp_projects_dir):
+    """Review of #283 (minor 1): an error the bind does not expect is reported
+    as an issue, never a 500 after the project exists; the project has its
+    metadata and opens."""
+    from routers import projects as projects_router
+    from services.commercial import binding
+
+    src = tmp_path / TID
+    src.mkdir()
+    T.BUILDERS[TID]().export_to_netcdf(str(src / "network.nc"))
+    T.write_sidecars(src, TID)
+    monkeypatch.setattr(projects_router, "_PROJECT_TEMPLATES_DIR", tmp_path)
+
+    def boom(*a, **k):
+        raise RuntimeError("unexpected")
+    monkeypatch.setattr(binding, "bind_commercial_on_context", boom)
+    r = client.post(f"/api/projects/from_template/{TID}", params={"name": "dcs_err"})
+    assert r.status_code == 200, r.text
+    issues = r.json()["solver_config_issues"]
+    assert [(i["field"], i["code"]) for i in issues] == [("commercial", "commercial_bind_failed")]
+    assert "unexpected" not in issues[0]["message"]          # no internals leak
+    # The list reads metadata.json (bus_count 0 when it is missing).
+    rows = {row["name"]: row for row in client.get("/api/projects/").json()}
+    assert rows["dcs_err"]["bus_count"] > 0
+    assert client.get("/api/simulation/solver_config").json()["commercial"] is None
+    # The finance block is independent of the commercial one and still binds.
+    assert client.get("/api/simulation/finance").json()["status"] == "ok"
+    assert client.get("/api/projects/dcs_err").status_code == 200
+
+
 # ── 5. the case computes (must-check 2) ─────────────────────────────────────
 
 @pytest.fixture

@@ -1635,10 +1635,6 @@ def create_from_template(
     else:
         _state["solver_config"] = SolverConfig()
     _sim_state_update(status="idle", condition=None, objective=None, solve_time=None)
-    # A template's commercial config and finance inputs (slice D4) are bound
-    # and validated as their PUT routes do; one that does not is dropped and
-    # reported, never stored unbound.
-    solver_config_issues = _bind_template_solver_config(user, dest / "solver_config.json")
 
     n = PyPSAService.get_network()
     n.name = target_name
@@ -1661,6 +1657,11 @@ def create_from_template(
         "parent_project": None,
         "scenario_description": None,
     })
+    # A template's commercial config and finance inputs (slice D4) are bound
+    # and validated as their PUT routes do; one that does not is dropped and
+    # reported, never stored unbound. After the metadata, so the project is
+    # complete whatever the bind does (#283 review).
+    solver_config_issues = _bind_template_solver_config(user, dest / "solver_config.json")
 
     # Persist the pointer, mirroring activate_project. Written AFTER the swap
     # succeeds so a failed create does not leave the session pointing at a
@@ -1731,12 +1732,20 @@ def _bind_template_solver_config(user, cfg_path: pathlib.Path) -> list[dict]:
             issues.append({"field": "commercial", "code": exc.code, "message": str(exc)})
         except binding.BindingRefusal as exc:
             issues.append({"field": "commercial", "code": exc.code, "message": exc.message})
+        except Exception:   # noqa: BLE001 — the project exists; report, never a 500
+            logger.exception("template commercial block failed to bind")
+            issues.append({"field": "commercial", "code": "commercial_bind_failed",
+                           "message": "the template's commercial settings could not be applied"})
     if cfg.finance is not None:
         try:
             merged["finance"] = FinanceInputs.model_validate(cfg.finance).model_dump(mode="json")
         except ValidationError as exc:
             issues.append({"field": "finance", "code": "finance_inputs_invalid",
                            "message": str(exc.errors()[0]["msg"])})
+        except Exception:   # noqa: BLE001 — as above
+            logger.exception("template finance block failed to validate")
+            issues.append({"field": "finance", "code": "finance_bind_failed",
+                           "message": "the template's finance inputs could not be applied"})
     for issue in issues:
         merged[issue["field"]] = None
     _state["solver_config"] = SolverConfig(**merged)
