@@ -120,6 +120,11 @@ export default function InvestmentTab() {
                            queryFn: () => commercialApi.getValueFlowsResult() })
   const commercial = useQuery({ queryKey: nk(project, 'commercial', 'config'),
                                 queryFn: () => commercialApi.getCommercial() })
+  // An open PoC (the island's normally open tie, H4): no grid in operation, so
+  // no connection, tariff or export to set.
+  const poc = useQuery({ queryKey: nk(project, 'commercial', 'poc'),
+                         queryFn: () => commercialApi.getPocState() })
+  const island = poc.data?.open === true
   const [section, setSection] = useState<SectionId>('participants')
   const [designing, setDesigning] = useState(false)
   const expert = useUIStore(s => s.uiMode === 'expert')
@@ -154,7 +159,12 @@ export default function InvestmentTab() {
 
   return (
     <div className="space-y-3" data-testid="investment-tab">
-      {(commercial.isSuccess || rootMissing) && (
+      {island ? (
+        <p className="text-[11px] text-muted" data-testid="ic-island">
+          Island: no grid in operation; compared with the island as it stands today. The tie
+          {' '}{poc.data?.poc_link} is open, so there is no connection, tariff or export to set.
+        </p>
+      ) : (commercial.isSuccess || rootMissing) && (
         <SiteConnectionSection config={commercial.data} needed={rootMissing} />
       )}
       <CompletenessChips rows={completeness(billing.data, flows.data,
@@ -199,7 +209,10 @@ export default function InvestmentTab() {
             {designing && <ParticipantsDesigner />}
           </div>
         )}
-        {section === 'tariff' && <TariffSection />}
+        {section === 'tariff' && (island
+          ? <p className="text-[11px] text-muted py-2" data-testid="ic-tariff-island">
+              No tariff: the island buys no grid power.</p>
+          : <TariffSection />)}
         {section === 'library' && <LibraryBrowser />}
         {section === 'contracts' && <ContractsEditor />}
         {section === 'finance' && <FinanceInputsEditor />}
