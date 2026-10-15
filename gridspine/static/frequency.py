@@ -439,6 +439,8 @@ class Metrics:
     saturated: dict
     collapse: float | None
     trip: tuple | None = None    # (t, what), from the ``Trace``
+    df_min_hz: float = math.nan  # the lowest and the highest Δf over the event; NaN: read
+    df_max_hz: float = math.nan  # ``nadir_hz`` for both (a ``Metrics`` built by hand)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -457,10 +459,11 @@ def trip_floor(limits, equipment_=(), f0=F0) -> TripFloor:
     transition and steady-island f_min / f_max and each piece of
     equipment's low and high (``equipment``; an undefined side, NaN, is
     skipped). Beyond it the linear model means nothing (owner,
-    2026-10-14), so the event ends as a trip. ``judge`` already fails a run
-    that reaches it, so the floor changes the label and the figures, never
-    the verdict. Where a UPS window sets it, the run stops before that
-    UPS's transfer is modelled; the verdict is the same, the window failed."""
+    2026-10-14), so the event ends as a trip. ``judge`` fails a run that
+    reaches either side, since it checks the lowest and the highest Δf, so
+    the floor changes the label and the figures, never the verdict. Where
+    a UPS window sets it, the run stops before that UPS's transfer is
+    modelled; the verdict is the same, the window failed."""
     tr, st = limits["transition"], limits["steady_island"]
     lows = [(tr["f_min_hz"], "transition f_min"), (st["f_min_hz"], "steady-island f_min")]
     highs = [(tr["f_max_hz"], "transition f_max"), (st["f_max_hz"], "steady-island f_max")]
@@ -502,7 +505,7 @@ def metrics(trace, window_ms=500.0, band_hz=0.1) -> Metrics:
     outside = np.flatnonzero(np.abs(trace.df - qss) > band_hz)
     t_ret = float(trace.t[outside[-1]]) if outside.size else 0.0
     return Metrics(trace.rocof0, float(rocof_w), window_ms, float(trace.df[i_ext]), float(trace.t[i_ext]), qss,
-                   t_ret, dict(trace.saturated), None)
+                   t_ret, dict(trace.saturated), None, None, float(trace.df.min()), float(trace.df.max()))
 
 
 @dataclasses.dataclass
@@ -526,14 +529,18 @@ def judge(m, limits, f0=F0, equipment=()) -> Verdict:
     f_high_hz)``, e.g. a UPS input window or a chiller's ``f_trip_hz``.
     The binding limit is the broken one exceeded most **relative to what it
     allows** (f0 − f_min, f_max − f0, the RoCoF limit, the band), so limits
-    of different kinds compare."""
+    of different kinds compare. The low limits are read on the lowest Δf
+    and the high ones on the highest, so a dip that recovers into an
+    overshoot is judged on both."""
     if m.collapse is not None:
         return Verdict(False, COLLAPSE, [COLLAPSE], math.inf)
     if m.trip is not None:
         label = trip_label(m.trip)
         return Verdict(False, label, [label], math.inf)
     tr, st = limits["transition"], limits["steady_island"]
-    f_ext, f_qss = f0 + m.nadir_hz, f0 + m.df_qss_hz
+    f_qss = f0 + m.df_qss_hz
+    f_lo = f0 + (m.nadir_hz if math.isnan(m.df_min_hz) else m.df_min_hz)
+    f_hi = f0 + (m.nadir_hz if math.isnan(m.df_max_hz) else m.df_max_hz)
 
     def low(label, limit, f):
         return label, (limit - f) / (f0 - limit)
@@ -544,17 +551,17 @@ def judge(m, limits, f0=F0, equipment=()) -> Verdict:
     checks = [
         (f"transition RoCoF {abs(m.rocof_window_hz_per_s):.2f} Hz/s over {m.window_ms:g} ms against "
          f"{tr['rocof_hz_per_s']:g} Hz/s", (abs(m.rocof_window_hz_per_s) - tr["rocof_hz_per_s"]) / tr["rocof_hz_per_s"]),
-        low(f"transition nadir {f_ext:.2f} Hz against {tr['f_min_hz']:g} Hz", tr["f_min_hz"], f_ext),
-        high(f"transition peak {f_ext:.2f} Hz against {tr['f_max_hz']:g} Hz", tr["f_max_hz"], f_ext),
+        low(f"transition nadir {f_lo:.2f} Hz against {tr['f_min_hz']:g} Hz", tr["f_min_hz"], f_lo),
+        high(f"transition peak {f_hi:.2f} Hz against {tr['f_max_hz']:g} Hz", tr["f_max_hz"], f_hi),
     ]
     band = f"steady island {f_qss:.2f} Hz against {st['f_min_hz']:g}-{st['f_max_hz']:g} Hz"
     checks.append(max(low(band, st["f_min_hz"], f_qss), high(band, st["f_max_hz"], f_qss), key=lambda c: c[1]))
     checks.append((f"steady island deviation {abs(m.df_qss_hz):.2f} Hz against {st['qss_band_hz']:g} Hz",
                    (abs(m.df_qss_hz) - st["qss_band_hz"]) / st["qss_band_hz"]))
     for label, lo, hi in equipment:
-        checks.append(low(f"{label}, nadir {f_ext:.2f} Hz against {lo:g} Hz", lo, f_ext))
+        checks.append(low(f"{label}, nadir {f_lo:.2f} Hz against {lo:g} Hz", lo, f_lo))
         if hi == hi:
-            checks.append(high(f"{label}, peak {f_ext:.2f} Hz against {hi:g} Hz", hi, f_ext))
+            checks.append(high(f"{label}, peak {f_hi:.2f} Hz against {hi:g} Hz", hi, f_hi))
     broken = sorted(((over, label) for label, over in checks if over > 1e-12), reverse=True)
     return Verdict(not broken, broken[0][1] if broken else None, [label for _, label in broken],
                    broken[0][0] if broken else 0.0)

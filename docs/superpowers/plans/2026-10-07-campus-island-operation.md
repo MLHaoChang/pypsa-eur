@@ -2508,17 +2508,22 @@ no physical meaning. `judge` already failed such runs.
   collapse. The trip is checked before the steady-tail stop.
 - **I7** re-runs without the floor, so a tripped event gets the cuts of the
   same event without it. That is sound because the floor is at or below
-  every limit `judge` checks: a run that passes never reaches it, and the
-  floor changes the label and the figures, never the verdict.
+  every limit `judge` checks: a run that passes never reaches it. As
+  merged in #269, the floor changed the verdict only where `judge`'s
+  largest-|Δf| reading had missed a failure (a dip that recovers into an
+  overshoot past the other side's limit, gatekeeper). Since `judge` reads
+  the lowest and the highest Δf (below), it changes the label and the
+  figures, never the verdict.
 - **Where a UPS window sets the floor,** the run stops before that UPS's
   transfer is modelled. The verdict is the same, because the window has
   failed.
 
 **Contract.** `trip_s` is a new column, and nothing in pypsa-gui reads
 `collapse_s`. The island report checks each CSV's header against the
-column tuples, so a run written before this change shows its frequency
-tables as "columns differ" until it is re-run. The I2c and E2E sessions
-have been told.
+column tuples. A header that is the contract without `trip_s` is still
+read (`_LATER_COLUMNS`, I2c agreed): `trip_s` shows empty, with "written
+before the trip floor: re-run for trip times", so an empty column never
+reads as "no trip". The I2c and E2E sessions have been told.
 
 **Tests:**
 - the floor is the lowest limit, named; a UPS window can set it; NaN sides
@@ -2535,16 +2540,54 @@ have been told.
 - the study runs every event against the campus floor: E1 trips at the UPS
   window's 52 Hz ceiling, and an E4 block at the 47.5 Hz floor, whose
   pickup then does not complete.
-- **Mutations:** 16 edits, 13 killed. The three left are equivalent, and
-  their guards stay as the gatekeeper asked:
-  - skipping a NaN high: `max` never picks a NaN after the first, defined
-    limit;
-  - `_settle_time` on a trip: a runaway trace never settles;
-  - the floor in the sweep's cache key: that cache lives within one call
-    and one floor.
+- **Mutations:** 16 edits, 13 killed. Two of the three left are
+  equivalent; the third is not strictly. Their guards stay as the
+  gatekeeper asked:
+  - skipping a NaN high (equivalent): `max` never picks a NaN after the
+    first, defined limit;
+  - the floor in the sweep's cache key (equivalent): that cache lives
+    within one call and one floor;
+  - `_settle_time` on a trip (not equivalent, untested): a runaway trace
+    never settles, but a slow drift past the floor could sit within the
+    band at low RoCoF before it trips and read as settled early. The
+    trip guard in `_settle_time` is what rules that out.
 - **eh_datacenter** with the gatekeeper's scripts: every CSV is unchanged
   against master to 1e-6, and `trip_s` is empty in every row (no hour comes
   near the floor). It takes 6.1 s.
+
+### `judge` reads both extremes (2026-10-15)
+
+**Gatekeeper, on #269:** `judge` read the low and the high limits on one
+figure, `nadir_hz`, the Δf of largest magnitude. With asymmetric limits
+(47.5 / 51.5 Hz) a dip to 48.2 Hz that recovers into an overshoot to
+51.68 Hz passed on master: the peak check saw 48.2 Hz. The owner chose to
+fix it in a small follow-up (coordinator, option 1).
+
+- `Metrics` gains `df_min_hz` and `df_max_hz`, the lowest and the highest
+  Δf over the event (NaN at a collapse or a trip, as the other figures).
+- `judge` reads every low limit (transition f_min, each equipment low) on
+  the lowest Δf and every high limit on the highest. A `Metrics` built by
+  hand without them (NaN) is read on `nadir_hz` as before.
+- `nadir_hz` and the event tables are unchanged: no column is added, and
+  the binding text names the frequency it read.
+- A trace on one side of f0 is judged exactly as before (its extreme is
+  its lowest or its highest Δf). Only an event that crosses f0 can gain a
+  failure, on the side its largest |Δf| is not on.
+- The trip floor now never changes a verdict (see the trip-floor note).
+
+**Tests:** the plan's genset alone, 4 MW deficit, then a 1.5 MW surplus at
+4 s: Δf dips to -1.83 Hz and overshoots to +1.73 Hz. Against 47.5 / 51.5 Hz
+it fails on "transition peak 51.73 Hz against 51.5 Hz", and read on the
+largest |Δf| alone it passes. A UPS window's high side fails on the peak
+the same way. The mirrored event fails "transition nadir 48.27 Hz against
+48.5 Hz" and a chiller's f_trip on the dip.
+
+**Mutations:** 10 edits (each side read on `nadir_hz` or on the other
+side's extreme, the NaN fallback inverted, the extremes swapped or not
+recorded, each equipment side swapped), all killed.
+
+**eh_datacenter:** every `campus_freq*.csv` is identical to #269's run (no
+hour crosses f0 that far).
 
 ### I7 as built: the gridspine cut derivation (2026-10-14)
 

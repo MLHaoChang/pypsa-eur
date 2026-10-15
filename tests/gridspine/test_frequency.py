@@ -15,6 +15,7 @@ Oracles:
 * I4: E1 at an island hour settles at I4's Δf within 1 mHz, with and
   without a unit at its limit.
 """
+import dataclasses
 import math
 
 import numpy as np
@@ -409,6 +410,36 @@ def test_equipment_with_an_upper_bound_is_judged_on_the_peak():
     v = F.judge(m, {"transition": _lim(f_max=53.0), "steady_island": _lim()},
                 equipment=[("UPS window", 47.5, 52.5)])
     assert v.failures == ["UPS window, peak 52.80 Hz against 52.5 Hz"]
+
+
+def _dip_then_overshoot(sign=1.0):
+    """The plan's genset alone: a 4 MW deficit, then at 4 s a 1.5 MW surplus
+    (``sign`` -1 mirrors it). Δf dips to -1.83 Hz and overshoots to +1.73 Hz,
+    so the largest |Δf| is the dip."""
+    return F.metrics(F.simulate([gen()], lambda t: sign * (4.0 if t < 4.0 else -1.5), t_end=20.0))
+
+
+def test_a_dip_that_recovers_into_an_overshoot_is_judged_on_both():
+    """48.17 Hz clears 47.5 Hz, but 51.73 Hz breaks 51.5 Hz. Read on the
+    largest |Δf| alone (``df_min_hz``/``df_max_hz`` NaN), the peak check
+    saw 48.17 Hz and the run passed."""
+    m = _dip_then_overshoot()
+    assert m.nadir_hz == m.df_min_hz == pytest.approx(-1.832, abs=1e-3)
+    assert m.df_max_hz == pytest.approx(1.726, abs=1e-3) and abs(m.df_qss_hz) < 1.0
+    limits = {"transition": _lim(rocof=5.0), "steady_island": _lim()}
+    v = F.judge(m, limits)
+    assert not v.ok and v.failures == ["transition peak 51.73 Hz against 51.5 Hz"]
+    assert F.judge(dataclasses.replace(m, df_min_hz=math.nan, df_max_hz=math.nan), limits).ok
+    ups = F.judge(m, {"transition": _lim(rocof=5.0, f_max=53.0), "steady_island": _lim()},
+                  equipment=[("UPS window", 47.5, 51.6)])
+    assert ups.failures == ["UPS window, peak 51.73 Hz against 51.6 Hz"]
+    # mirrored: the largest |Δf| is the peak, and the dip breaks a 48.5 Hz f_min
+    w = _dip_then_overshoot(-1.0)
+    assert w.nadir_hz == w.df_max_hz == pytest.approx(1.832, abs=1e-3)
+    low = F.judge(w, {"transition": _lim(rocof=5.0, f_min=48.5, f_max=52.0), "steady_island": _lim()},
+                  equipment=[("chiller CH1 f_trip", 48.4, math.nan)])
+    assert low.failures == ["transition nadir 48.27 Hz against 48.5 Hz",
+                            "chiller CH1 f_trip, nadir 48.27 Hz against 48.4 Hz"]
 
 
 def test_a_frequency_watt_pv_on_the_campus_has_no_headroom_above_its_dispatch():
