@@ -722,6 +722,7 @@ def template_meta(p: dict, entered: list[str] | None = None) -> dict:
         "id": TEMPLATE_ID,
         "name": f"{label} Energy Hub (generic site)",
         "site_type": p["site_type"],
+        "site_type_label": SITE_TYPE_TEXT[p["site_type"]][0],
         "params": copy.deepcopy(p),
         "entered": list(entered or []),
         "description": (

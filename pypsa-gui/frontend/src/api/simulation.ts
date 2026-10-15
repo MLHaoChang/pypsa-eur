@@ -936,6 +936,7 @@ export interface EhTemplateMeta {
   // The generic site (`eh_site`, G1/G2): its type, the full parameters, the
   // ones the user set, the load and connection schedule and the ledger.
   site_type?: string
+  site_type_label?: string
   params?: SiteParams
   entered?: string[]
   projected_load?: { year: number; peak_mw?: number; it_mw?: number; pue?: number; note?: string }[]

@@ -218,6 +218,7 @@ describe('SiteCard for a generic site (G2)', () => {
   it('shows the load and connection schedule read-only, never asking for them again', async () => {
     mount()
     await screen.findByTestId('hub-site-schedule')
+    expect(text('hub-site-kind')).toBe('Site type: Hospital')
     expect(text('hub-site-stage-2030')).toBe('203058')         // year | peak | available
     expect(text('hub-site-stage-2035')).toBe('2035610')
     expect(text('hub-site-connection')).toContain('Connection limit')

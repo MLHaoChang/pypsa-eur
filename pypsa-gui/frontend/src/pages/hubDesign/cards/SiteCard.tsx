@@ -114,6 +114,9 @@ function SiteSchedule({ template }: { template: EhTemplateMeta }) {
   return (
     <section data-testid="hub-site-schedule" aria-label="Load and grid connection"
       className="flex flex-col gap-2">
+      <p data-testid="hub-site-kind" className="text-[12px] text-text">
+        <span className="text-muted">Site type:</span> {template.site_type_label ?? template.site_type}
+      </p>
       <div className="flex flex-wrap items-start gap-3">
         <table className="text-[12px]">
           <thead>

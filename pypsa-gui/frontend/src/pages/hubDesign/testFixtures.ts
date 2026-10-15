@@ -28,6 +28,7 @@ export const SITE_TEMPLATE: EhTemplateMeta = {
   study_notes: ['The hospital\'s peak grows 4 → 5 → 6 MW over 2027, 2030, 2035.'],
   provenance: 'Synthetic example data — not a real site.',
   site_type: 'hospital',
+  site_type_label: 'Hospital',
   params: { ...SITE_FORM.presets.hospital, connection_mw: 10, fault_level_mva: 200,
     energization: [{ year: 2027, mw: 10 }, { year: 2030, mw: 8 }, { year: 2035, mw: 10 }] },
   entered: ['connection_mw', 'energization', 'site_type'],

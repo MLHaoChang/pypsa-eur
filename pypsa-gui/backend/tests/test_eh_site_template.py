@@ -204,6 +204,7 @@ def test_the_ledger_states_the_assumptions():
     assert "not modelled" in items["PoC and feeder losses"]["note"]
     assert items["import tariff"]["source"] == "synthetic"
     assert meta["site_type"] == "industrial" and meta["recommended_archetype"] == "weak_flexible"
+    assert meta["site_type_label"] == "Industrial plant"
     assert [r["peak_mw"] for r in meta["projected_load"]] == [8.0, 12.0, 15.0]
 
 

@@ -6,7 +6,7 @@
 // beside each field, in the backend's words and on its field keys, so a
 // server refusal lands on the same field. Nothing asked here is asked again
 // later in Guided: the Site card shows it read-only.
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { projectsApi } from '../../../api/projects'
 import { kpiFigure } from '../../../utils/format'
@@ -108,11 +108,20 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
       </Group>
 
       <Group title="Load">
-        <table data-testid="site-stages" className="w-full max-w-md text-[12px]">
+        {/* One row per stage: the year, its peak and what the grid makes
+            available that year, side by side as the Site card's schedule. */}
+        <table data-testid="site-stages" className="text-[12px]">
           <thead>
             <tr className="text-left text-muted">
-              <th className="font-normal">Year</th>
-              <th className="font-normal">Peak load (MW)</th>
+              <th className="pr-2 font-normal">Year</th>
+              <th className="pr-2 font-normal">
+                <span className="flex items-baseline gap-1.5">Peak load (MW) <DefaultTag on={isDefault(draft, 'stages')} /></span>
+              </th>
+              <th className="pr-2 font-normal">
+                <span className="flex items-baseline gap-1.5">
+                  Available from grid (MW) <DefaultTag on={isDefault(draft, 'energization')} />
+                </span>
+              </th>
               <th><span className="sr-only">Remove</span></th>
             </tr>
           </thead>
@@ -127,7 +136,12 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
                   <NumInput {...field(`stages[${i}].peak_mw`)} label={`Peak load in stage ${i + 1} (MW)`}
                     value={s.peak_mw} onChange={x => update(setStage(draft, i, 'peak_mw', x))} />
                 </td>
-                <td>
+                <td className="pr-2">
+                  <NumInput {...field(`energization[${i}].mw`)}
+                    label={`Available from the grid in ${s.year} (MW)`}
+                    value={v.energization[i]?.mw ?? NaN} onChange={x => update(setEnergization(draft, i, x))} />
+                </td>
+                <td className="pt-1">
                   {v.stages.length > 1 && (
                     <button type="button" data-testid={`site-stage-remove-${i}`}
                       onClick={() => update(removeStage(draft, i))}
@@ -138,12 +152,11 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
             ))}
           </tbody>
         </table>
-        <DefaultTag on={isDefault(draft, 'stages')} />
         {v.stages.length < bounds.max_stages && (
           <button type="button" data-testid="site-stage-add" onClick={() => update(addStage(draft, bounds))}
             className="self-start text-[11.5px] text-accent hover:underline">Add a growth stage</button>
         )}
-        <Hint>Each stage is the year the load grows to its new peak. Up to {bounds.max_stages} stages, studied until {v.horizon_end}.</Hint>
+        <Hint>Each stage is the year the load grows to its new peak, up to {bounds.max_stages} stages, studied until {v.horizon_end}. Available from grid is what the utility has energized that year: the connection limit unless you set it.</Hint>
         <SelectField {...field('load_profile')} label="Load shape" value={v.load_profile}
           options={form.load_profiles.map(p => ({ id: p.id, label: p.label }))}
           onChange={x => update(setField(draft, 'load_profile', x))} />
@@ -156,12 +169,6 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
         <NumField {...field('connection_mw')} label="Connection limit (MW)"
           hint="What the grid connection can carry once fully energized."
           value={v.connection_mw} onChange={x => update(setField(draft, 'connection_mw', x))} />
-        {v.energization.map((e, i) => (
-          <NumField key={e.year} {...field(`energization[${i}].mw`)} isDefault={isDefault(draft, 'energization')}
-            label={`Available from the grid in ${e.year} (MW)`}
-            hint={i === 0 ? 'Until the utility energizes the full connection.' : undefined}
-            value={e.mw} onChange={x => update(setEnergization(draft, i, x))} />
-        ))}
         <details className="text-[12px]">
           <summary className="cursor-pointer text-muted">More</summary>
           <div className="mt-2">
@@ -200,19 +207,27 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
       </Group>
 
       <Group title="What the study may add">
-        {(['genset', 'bess', 'pv'] as const).map(k => (
-          <div key={k} className="flex flex-wrap items-start gap-3">
-            <label className="flex items-center gap-1.5 pt-5 text-[12px] text-text">
-              <input type="checkbox" data-testid={`site-candidate-${k}`} checked={v.candidates[k].enabled}
-                onChange={e => update(setField(draft, `candidates.${k}.enabled`, e.target.checked))} />
-              {CANDIDATE_LABEL[k]}
-            </label>
-            {v.candidates[k].enabled && (
-              <NumField {...field(`candidates.${k}.max_mw`)} label="Up to (MW) per stage" value={v.candidates[k].max_mw}
-                onChange={x => update(setField(draft, `candidates.${k}.max_mw`, x))} />
-            )}
-          </div>
-        ))}
+        {/* Two columns (what | up to), so the inputs line up whatever the label. */}
+        <div className="grid grid-cols-[7rem_auto] items-start gap-x-3 gap-y-2 text-[12px]">
+          <span className="text-muted">Add</span>
+          <span className="flex items-baseline gap-1.5 text-muted">
+            Up to (MW) per stage <DefaultTag on={!draft.touched.some(p => p.startsWith('candidates.'))} />
+          </span>
+          {(['genset', 'bess', 'pv'] as const).map(k => (
+            <Fragment key={k}>
+              <label className="flex items-center gap-1.5 pt-1 text-text">
+                <input type="checkbox" data-testid={`site-candidate-${k}`} checked={v.candidates[k].enabled}
+                  onChange={e => update(setField(draft, `candidates.${k}.enabled`, e.target.checked))} />
+                {CANDIDATE_LABEL[k]}
+              </label>
+              {v.candidates[k].enabled ? (
+                <NumInput {...field(`candidates.${k}.max_mw`)} label={`${CANDIDATE_LABEL[k]}: up to (MW) per stage`}
+                  value={v.candidates[k].max_mw}
+                  onChange={x => update(setField(draft, `candidates.${k}.max_mw`, x))} />
+              ) : <span className="pt-1 text-muted">not added</span>}
+            </Fragment>
+          ))}
+        </div>
       </Group>
 
       <div className="flex flex-wrap items-center gap-3">
