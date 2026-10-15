@@ -340,3 +340,18 @@ def test_a_conversion_role_the_user_set_is_respected():
     n.links.at["tie", "eh_role"] = "conversion"
     out = suggest_eh_setup(n)
     assert "tie" not in _proposed(out)["import_link"]
+
+
+
+def test_empty_candidate_rows_are_not_supply():
+    """#304: a staged template's empty (p_nom 0) zero-cost candidates moved the
+    cheaper-half median and dropped the real grid supply out of it."""
+    from services.adequacy.eh_setup import _supply
+
+    n = TPL.BUILDERS["eh_microgrid"]()
+    before = dict(_supply(n))
+    for i in range(6):
+        n.add("Generator", f"pv_cand_{i}", bus="island", carrier="solar", p_nom=0.0,
+              p_nom_extendable=True, marginal_cost=0.0)
+    assert dict(_supply(n)) == before
+    assert before.get("mainland", 0.0) > 0

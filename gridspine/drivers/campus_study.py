@@ -518,7 +518,8 @@ def cuts_campus(run_dir) -> pd.DataFrame:
     return cuts
 
 
-def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 400, margin=None) -> dict:
+def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 400, margin=None,
+                        should_stop=None) -> dict:
     """Recommended grid-forming settings for a run whose frequency check has
     run (``island_frequency_campus``): one droop and one equivalent inertia
     for every GFM converter that make the island-hour events pass with margin
@@ -530,7 +531,9 @@ def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 4
     to the cuts. ``margin`` defaults to the requirements'
     ``gfm_tuning_margin`` (0.1 when absent; never ``gfm_margin``, which is
     I2b's capacity margin). The search ranges are ledgered as assumed
-    (``ledger``). Writes ``campus_gfm_settings.json`` and returns it."""
+    (``ledger``). ``should_stop`` is the search's cooperative stop
+    (``gfm_tuning.SearchStopped``, nothing written). Writes
+    ``campus_gfm_settings.json`` and returns it."""
     from gridspine.static import frequency as F
     from gridspine.static import gfm_tuning as T
 
@@ -566,7 +569,7 @@ def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 4
             return F._event_run(campus, hourly, iu, r, ctx, (dt, t_end), (dt, t_end))[1](us, t_end)
         cases.append(T.Case(f"{key[0]} h{key[1]} {key[2]} {key[3]}", built_[0], run))
     rec = T.recommend_gfm_settings(cases, limits, equipment_=eq, window_ms=window, margin=margin,
-                                   allow_i_max=allow_i_max, max_sims=max_sims)
+                                   allow_i_max=allow_i_max, max_sims=max_sims, should_stop=should_stop)
     out = {"label": rec.label, "ledger": T.ledger(rec.bounds), "status": rec.status, "achievable": rec.achievable, "changed": rec.changed,
            "settings": rec.settings,
            "cases": rec.cases, "capacity": rec.capacity, "comparison": rec.comparison,

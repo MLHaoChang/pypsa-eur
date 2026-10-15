@@ -312,9 +312,14 @@ def _queue_solve(project, user_id, stop_event) -> float | None:
 
     d = project_registry.project_dir(project)
     cfg = d / "solver_config.json"
-    job, _ = solve_queue.enqueue_unique(
+    job, created = solve_queue.enqueue_unique(
         project.name, project_key=project_registry.registry_key(project), storage_dir=str(d),
         solver_config_json=cfg.read_text() if cfg.is_file() else None, enqueued_by_user_id=user_id)
+    if not created:
+        # another job of the project (a campus run, a GFM search) holds the
+        # queue: never wait on it as if it were this solve
+        raise RuntimeError(f"the project already has a {job.kind} job {job.status}; the hub solve "
+                           "was not queued")
     _wait(job, stop_event)
     if job.status != "completed":
         raise RuntimeError(f"the hub solve ended {job.status}" + (f": {job.error}" if job.error else ""))
