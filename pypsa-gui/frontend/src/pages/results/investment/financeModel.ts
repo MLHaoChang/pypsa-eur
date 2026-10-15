@@ -224,6 +224,18 @@ export function headlines(report: InvestmentCaseReportPayload): Headline[] {
     }
     out.push({ id: h.id, label: h.label, kind: h.kind, value, note })
   }
+  // H2e: "of which avoided CO2 cost" beside the NPV, when the case prices CO2
+  // (gatekeeper Q1: lenders ask). Undiscounted over the horizon; a priced but
+  // unknown figure is not established, never a 0.
+  const cf = payloadOf(report, 'project').counterfactual
+  if (isObj(cf) && cf.co2_priced === true) {
+    const v = Array.isArray(cf.avoided_co2_cost) && cf.avoided_co2_cost.every(x => typeof x === 'number')
+      ? (cf.avoided_co2_cost as number[]).reduce((a, x) => a + x, 0) : null
+    const at = out.findIndex(h => h.id === 'npv_at_wacc')
+    out.splice(at < 0 ? out.length : at + 1, 0, {
+      id: 'avoided_co2', label: 'Of which avoided CO2 cost (undiscounted, whole horizon)',
+      kind: 'money', value: v, note: v === null ? 'a CO2 line is not established' : null })
+  }
   return out
 }
 

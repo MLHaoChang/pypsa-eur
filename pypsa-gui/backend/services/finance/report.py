@@ -490,6 +490,10 @@ def _counterfactual_block(result, case) -> dict[str, Any]:
         # counterfactual per year — cash the site would otherwise pay at the
         # stated CO2 price. None when there is none or one is not established.
         "avoided_co2_cost": _avoided_co2(result),
+        # Whether the case prices CO2 at all, so a None above reads "not
+        # established", never "none" (gatekeeper review of #305).
+        "co2_priced": any(ln.key.startswith("co2:")
+                          for t in (*case.templates, *case.counterfactual) for ln in t.lines),
     }
 
 

@@ -140,8 +140,7 @@ def _avoided_co2_total(block: Any) -> Any:
         return "none"
     v = block.get("avoided_co2_cost")
     if v is None:
-        return "none" if not any(str(f).startswith("co2_price_period")
-                                 for f in block.get("flags") or []) else None
+        return None if block.get("co2_priced") else "none"
     return round(float(sum(v)), 2)
 
 
