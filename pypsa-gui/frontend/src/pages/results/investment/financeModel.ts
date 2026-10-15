@@ -354,6 +354,13 @@ export function counterfactualBasis(report: InvestmentCaseReportPayload):
   }
 }
 
+/** What the island capability would have to be worth for the case to break
+ *  even, in a sentence (owner decision 2026-10-15); null when not stated. */
+export function islandBreakeven(report: InvestmentCaseReportPayload): string | null {
+  const be = payloadOf(report, 'project').island_breakeven
+  return isObj(be) && typeof be.text === 'string' && be.text ? be.text : null
+}
+
 /** Plain chip labels for the report sections (UX assessment Q7). */
 const SECTION_LABELS: Record<string, string> = {
   design: 'Design', commercial: 'Commercial', dispatch_modes: 'Dispatch modes',

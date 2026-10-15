@@ -189,6 +189,9 @@ def build_workbook(report: InvestmentCaseReport, *, project: str | None = None) 
           summary.max_row + 1)
     # What the incremental figures are compared with, and the baseline's notes
     # (owner decision 2026-10-15), next to the figures.
+    be = project_payload.get("island_breakeven")
+    if isinstance(be, dict) and be.get("text"):
+        _rows(summary, [["Island capability break-even", be["text"]]], summary.max_row + 1)
     cf = project_payload.get("counterfactual")
     if isinstance(cf, dict) and cf.get("basis"):
         _rows(summary, [["Compared with", cf["basis"]]]

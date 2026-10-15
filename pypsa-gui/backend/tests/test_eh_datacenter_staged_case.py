@@ -400,3 +400,39 @@ def test_a_multi_period_shed_is_priced_per_period(connection_45, staged_case_ana
         else:
             assert str(y[0]) not in shed_lines, y[0]
     assert set(shed_lines) == {"2035"}
+
+
+# ── the island capability's break-even (owner decision 2026-10-15) ───────────
+
+@pytest.mark.live_solve
+def test_the_island_capability_break_even_beside_the_npv(staged_case):
+    """The honest NPV stays (site as it stands); beside it, what the island
+    capability would have to be worth for the investment to break even, per
+    year and per hour of grid outage it rides through (and per MWh of
+    critical load carried), from the network's own outage data. No VoLL."""
+    import dataclasses
+
+    from services.finance.breakeven import island_breakeven
+    from services.finance.case import TemplateLine
+    from services.finance.engine import run_case
+
+    n, case, r = staged_case
+    # the exposure: the import link's forced-outage rate × 8760 h
+    rate = float(n.links.at["grid_import", "outage_rate_value"])
+    assert f"island_exposure_hours_per_year:{rate * 8760:g}" in case.flags
+    be = island_breakeven(r, case)
+    npv = r.metrics["project_pre_tax_npv"]
+    assert npv < 0 and be is not None
+    assert be["outage_hours_per_year"] == pytest.approx(rate * 8760)
+    assert be["eur_per_outage_hour"] == pytest.approx(be["eur_per_year"] / (rate * 8760))
+    assert be["eur_per_mwh_islanded"] == pytest.approx(
+        be["eur_per_year"] / be["islanded_mwh_per_year"])
+    # the figure is the break-even: that much a year more nets the NPV to 0
+    x = be["eur_per_year"]
+    add = tuple(dataclasses.replace(t, lines=t.lines + (TemplateLine(
+        key="check:island", stream="other", amount=x, esc_class="opex",
+        period=t.lines[0].period if t.lines else None, money_year=case.base_year),))
+        for t in case.templates)
+    assert run_case(dataclasses.replace(case, templates=add)).metrics[
+        "project_pre_tax_npv"] == pytest.approx(0.0, abs=1.0)
+    assert "No value of lost load is assumed" in be["text"]
