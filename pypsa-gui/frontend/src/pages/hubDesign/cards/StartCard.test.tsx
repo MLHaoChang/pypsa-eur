@@ -1,4 +1,4 @@
-// Guided-mode spec §5.3 (Start): the three energy-hub templates from the
+// Guided-mode spec §5.3 (Start): the energy-hub templates from the
 // wizard's own table, created through the lifted wizard mutation; the open
 // template project's provenance; "Use my network" goes to the Site card.
 // U3 (owner decision 5): beside them, "Is this investment worth it?" — the
@@ -55,12 +55,12 @@ function mount() {
 }
 
 describe('StartCard', () => {
-  it('offers exactly the three energy-hub templates of the wizard table', () => {
+  it('offers exactly the energy-hub templates of the wizard table', () => {
     mount()
     const ids = TEMPLATES.filter(t => t.id.startsWith('eh_')).map(t => t.id)
-    expect(ids).toEqual(['eh_datacenter', 'eh_h2_hub', 'eh_microgrid'])
+    expect(ids).toEqual(['eh_datacenter', 'eh_h2_hub', 'eh_microgrid', 'eh_datacenter_staged'])
     const list = screen.getByTestId('hub-start-templates')
-    expect(list.querySelectorAll('[data-testid^="hub-start-template-"]').length).toBe(3)
+    expect(list.querySelectorAll('[data-testid^="hub-start-template-"]').length).toBe(4)
     for (const t of TEMPLATES.filter(t => t.id.startsWith('eh_'))) {
       const el = screen.getByTestId(`hub-start-template-${t.id}`)
       expect(el.textContent).toContain(t.name)

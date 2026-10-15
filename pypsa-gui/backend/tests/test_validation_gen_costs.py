@@ -125,6 +125,7 @@ def test_only_the_exempt_units_are_dropped_from_the_count():
 # every template generator with all three static costs at 0.
 _EXEMPT = {
     "eh_datacenter": {"grid_supply", "rooftop_pv"},
+    "eh_datacenter_staged": {"grid_supply", "rooftop_pv"},
     "eh_h2_hub": {"grid_supply", "wind_farm", "solar_park"},
     "eh_microgrid": {"pv_plant", "wind_turbines"},
 }

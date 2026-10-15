@@ -1,0 +1,92 @@
+{
+  "description": "The data center campus planned from a projected load: IT grows 12 \u2192 24 \u2192 36 MW over 2027, 2030 and 2035 while the utility energizes the 40 MW connection in steps (20 MW until 2030). Genset and battery candidates per period, so the plan says what to build when. Multi-period; tagged for an Energy Hub study.",
+  "dtc_attribution": "per_load",
+  "energization": [
+    {
+      "available_import_mw": 20.0,
+      "connection_mw": 40.0,
+      "note": "utility energization schedule (assumed)",
+      "source": "assumed",
+      "year": 2027
+    },
+    {
+      "available_import_mw": 40.0,
+      "connection_mw": 40.0,
+      "note": "utility energization schedule (assumed)",
+      "source": "assumed",
+      "year": 2030
+    },
+    {
+      "available_import_mw": 40.0,
+      "connection_mw": 40.0,
+      "note": "utility energization schedule (assumed)",
+      "source": "assumed",
+      "year": 2035
+    }
+  ],
+  "id": "eh_datacenter_staged",
+  "ledger": [
+    {
+      "item": "discount rate",
+      "note": "the solve discounts each period's costs at it (auto_discount_periods)",
+      "source": "assumed",
+      "value": "7 % nominal (the solver settings' discount_rate)"
+    },
+    {
+      "item": "PUE",
+      "note": "metadata: cooling is the single-year template's profile scaled with the IT load, so the modelled peak-to-IT ratio is about 1.46 in 2035",
+      "source": "assumed",
+      "value": "1.3 design figure"
+    },
+    {
+      "item": "battery inverter replacement",
+      "note": "bess_new_2027's inverter ends in 2037 and bess_new_2030's in 2040, inside the 2045 horizon; the investment case flags it (part_not_replaced) until the template's finance inputs add the replacement (slice P5c)",
+      "source": "assumed",
+      "value": "after 10 years (inv_power_lifetime)"
+    },
+    {
+      "item": "depreciation of the staged assets",
+      "note": "a deliberate deviation: a dated degressive election on a later stage is refused by the investment case (P5), so the staged assets are planned on straight-line AfA",
+      "source": "assumed",
+      "value": "straight-line AfA (not degressive)"
+    }
+  ],
+  "name": "Data Center Energy Hub (staged growth)",
+  "pack_overrides": {
+    "import_p_nom_mw": 40.0
+  },
+  "period_years": {
+    "2027": 3,
+    "2030": 5,
+    "2035": 10
+  },
+  "projected_load": [
+    {
+      "it_mw": 12.0,
+      "note": "synthetic illustrative fit-out ramp; replace with the client's load projection",
+      "pue": 1.3,
+      "year": 2027
+    },
+    {
+      "it_mw": 24.0,
+      "note": "synthetic illustrative fit-out ramp; replace with the client's load projection",
+      "pue": 1.3,
+      "year": 2030
+    },
+    {
+      "it_mw": 36.0,
+      "note": "synthetic illustrative fit-out ramp; replace with the client's load projection",
+      "pue": 1.3,
+      "year": 2035
+    }
+  ],
+  "provenance": "synthetic illustrative data (P19 template) \u2014 representative week, public-catalogue-range costs; replace with project data before any decision",
+  "recommended_archetype": "weak_flexible",
+  "stages": null,
+  "study_notes": [
+    "Each period is the same representative July week, with the period's load and import cap.",
+    "Candidates are one row per period (build_year = the period): the plan says what to build when.",
+    "The energization schedule caps the import at 20 MW in 2027.",
+    "Load is picked up in 2.5 MW blocks after an islanding (assumed): the island rows then follow the load, so the plan stages \u2014 a small genset in 2027 and 2030, the bulk in 2035."
+  ]
+}
