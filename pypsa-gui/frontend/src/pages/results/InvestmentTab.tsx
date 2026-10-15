@@ -161,9 +161,8 @@ export default function InvestmentTab() {
     <div className="space-y-3" data-testid="investment-tab">
       {island ? (
         <p className="text-[11px] text-muted" data-testid="ic-island">
-          Island: no grid in operation (the tie {poc.data?.poc_link} is open), so there is no
-          connection, tariff or export to set. The case compares the plan with the island as it
-          stands today.
+          Island: no grid in operation; compared with the island as it stands today. The tie
+          {' '}{poc.data?.poc_link} is open, so there is no connection, tariff or export to set.
         </p>
       ) : (commercial.isSuccess || rootMissing) && (
         <SiteConnectionSection config={commercial.data} needed={rootMissing} />

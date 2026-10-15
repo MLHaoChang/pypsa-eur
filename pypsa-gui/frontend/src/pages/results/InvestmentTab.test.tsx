@@ -286,7 +286,7 @@ describe('InvestmentTab → Economics', () => {
     vi.mocked(commercialApi.getPocState).mockResolvedValue({ poc_link: 'subsea_tie', open: true })
     renderTab()
     expect((await screen.findByTestId('ic-island')).textContent).toMatch(
-      /Island: no grid in operation \(the tie subsea_tie is open\)/)
+      /^Island: no grid in operation; compared with the island as it stands today\. The tie subsea_tie is open/)
     expect(screen.queryByTestId('ic-site-connection')).toBeNull()
     fireEvent.click(screen.getByRole('tab', { name: 'Tariff' }))
     expect(screen.getByTestId('ic-tariff-island').textContent).toMatch(/buys no grid power/)
