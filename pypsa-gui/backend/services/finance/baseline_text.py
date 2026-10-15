@@ -12,12 +12,14 @@ _PLAIN = {
     "baseline_island_rows_relaxed": "The site as it stands cannot meet the island requirements "
                                     "without the new builds, so it is compared without them: "
                                     "the island capability is part of what the investment buys.",
-    # H2e's inputs act on the analytic comparison only (merge of #302 into #305).
-    "reference_purchases_not_applied": "The reference purchases (grey hydrogen, say) are not "
-                                       "applied: the site as it stands today is re-solved, not "
-                                       "assumed to buy them.",
-    "co2_price_not_applied": "The CO2 price is not applied to this comparison, so the avoided "
-                             "CO2 cost is not established.",
+    "counterfactual_baseline_unserved": "The site as it stands today cannot serve {a} "
+                                        "without the new builds, and no reference purchase "
+                                        "prices it: the comparison is not established.",
+    "counterfactual_baseline_shed_unknown": "Whether the site as it stands today serves {a} is "
+                                            "not known (no record of its shed), so the "
+                                            "comparison is not established.",
+    "co2_price_not_applied": "The CO2 price cannot be applied to this comparison, so the "
+                             "avoided CO2 cost is not established.",
 }
 
 

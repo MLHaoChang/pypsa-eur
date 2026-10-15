@@ -291,27 +291,3 @@ def test_an_island_infeasible_baseline_is_solved_without_the_island_rows():
     with pytest.raises(B.BaselineRefused):
         B.solve_baseline(n, Cfg(), plan, solve=lambda *a, **kw: ("warning", "infeasible"))
 
-
-@pytest.mark.live_solve
-def test_the_h2e_inputs_read_not_applied_on_the_site_today_basis(reset_backend):
-    """Merge of #302 into #305: a reference purchase and a CO2 price act on the
-    analytic counterfactual only. On the site-today basis they are flagged not
-    applied, and the avoided CO2 cost reads not established, never "none"."""
-    from services.finance.engine import run_case
-    from services.finance.report import _counterfactual_block
-
-    n, com = _site(pv_cost=500_000.0)
-    com["reference_purchases"] = [{"load": "h2_offtake", "price_eur_per_kg": 2.0,
-                                   "co2_t_per_kg": 0.01, "source": "test"}]
-    com["co2_price"] = {"eur_per_t_by_year": {2030: 80.0}, "money_year": 2030,
-                        "source": "test", "grid_t_per_mwh": 0.3, "grid_source": "test"}
-    n, cfg = _solve(n, com)
-    case, _base = _baseline_case(n, cfg)
-    assert "counterfactual_basis:site_today" in case.flags
-    assert {"reference_purchases_not_applied:site_today_basis",
-            "co2_price_not_applied:site_today_basis"} <= set(case.flags)
-    assert not any(ln.key.startswith("co2:") for t in (*case.templates, *case.counterfactual)
-                   for ln in t.lines)
-    block = _counterfactual_block(run_case(case), case)
-    assert block["co2_priced"] is True and block["avoided_co2_cost"] is None
-    assert any("CO2 price is not applied" in t for t in block["notes"])
