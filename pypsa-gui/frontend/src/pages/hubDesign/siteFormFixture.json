@@ -31,6 +31,7 @@
    "site_type": "industrial",
    "name": null,
    "fault_level_mva": 400.0,
+   "ride_through": false,
    "energization": [
     {
      "year": 2027,
@@ -98,6 +99,7 @@
    "site_type": "commercial",
    "name": null,
    "fault_level_mva": 100.0,
+   "ride_through": false,
    "energization": [
     {
      "year": 2027,
@@ -165,6 +167,7 @@
    "site_type": "hospital",
    "name": null,
    "fault_level_mva": 160.0,
+   "ride_through": false,
    "energization": [
     {
      "year": 2027,
@@ -232,6 +235,7 @@
    "site_type": "campus",
    "name": null,
    "fault_level_mva": 500.0,
+   "ride_through": false,
    "energization": [
     {
      "year": 2027,
@@ -299,6 +303,7 @@
    "site_type": "other",
    "name": null,
    "fault_level_mva": 240.0,
+   "ride_through": false,
    "energization": [
     {
      "year": 2027,
