@@ -22,6 +22,7 @@ import {
 } from '../api/campusElectrical'
 import { Btn, PageSection, Tag } from '../components/PageKit'
 import CampusIslandCutsSection from './CampusIslandCutsSection'
+import CampusIslandGfmSection from './CampusIslandGfmSection'
 
 export const ISLAND_KEY = (name: string) => ['campusElectrical', 'island', name] as const
 export const ISLAND_REPORT_KEY = (name: string) => ['campusElectrical', 'islandReport', name] as const
@@ -222,6 +223,7 @@ export default function CampusIslandSection({ name }: { name: string }) {
 
         <IslandReportView report={report.data} />
         {saved && <CampusIslandCutsSection name={name} />}
+        {saved && <CampusIslandGfmSection name={name} />}
       </PageSection>
     </div>
   )
