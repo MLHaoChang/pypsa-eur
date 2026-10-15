@@ -310,6 +310,10 @@ export const commercialApi = {
   previewBilling: (tariff: Tariff) =>
     client.post<BillingPayload>('/results/billing/preview', { tariff }, QUIET)
       .then(orNull, resultError),
+  /** Whether the PoC Link is open (H4): an island with no grid in operation. */
+  getPocState: () =>
+    client.get<{ poc_link: string | null; open: boolean }>('/simulation/commercial/poc', QUIET)
+      .then(r => r.data),
   /** The stored commercial config (the editors' starting point), or null. */
   getCommercial: () =>
     client.get<SolverConfig>('/simulation/solver_config')
