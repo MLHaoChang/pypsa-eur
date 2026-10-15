@@ -72,6 +72,7 @@ from services import shutdown as shutdown_service
 from routers import (
     admin,
     asset_results,
+    assistant_activity,
     auth,
     changelog,
     chat,
@@ -1348,6 +1349,7 @@ app.include_router(uploads.router, prefix="/api/projects", tags=["uploads"])
 # Chatbot integration v6 (Phase 2 stub — no Anthropic SDK yet). SSE stream +
 # confirmation card lifecycle + abort endpoint. The router is mounted under
 # /api/chat; Phase 3 wires the real LLM call without changing route shapes.
+app.include_router(assistant_activity.router, prefix="/api/chat", tags=["chat"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 # Local MCP exposure (chat harness issue 11): 404 unless local mode is on.
 app.include_router(mcp.router, prefix="/api", tags=["mcp"])

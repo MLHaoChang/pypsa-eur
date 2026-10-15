@@ -4,6 +4,7 @@ import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { useChatProfiles, useChatReadiness } from '../hooks/useChatProfiles'
 import ChatPanel from './ChatPanel'
+import AssistantActivity from './AssistantActivity'
 import { ConfirmationCard } from './ConfirmationCard'
 import CompanionLauncher, { type CompanionWorkState } from './CompanionLauncher'
 import CompanionOutcome from './CompanionOutcome'
@@ -48,6 +49,8 @@ export default function AssistantDock() {
   const setAssistantDockWidth = useUIStore((s) => s.setAssistantDockWidth)
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
 
+  const [surface, setSurface] = useState<'chat' | 'activity'>('chat')
+  useEffect(() => { if (!assistantDockOpen) setSurface('chat') }, [assistantDockOpen])
   const profilesQuery = useChatProfiles()
   const { effectiveProfileId, ready } = useChatReadiness()
   const streaming = useChatStore((s) => s.streaming)
@@ -212,6 +215,10 @@ export default function AssistantDock() {
             <span className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-accent">
               ASSISTANT
             </span>
+            <button type="button" aria-pressed={surface === 'chat'} onClick={() => setSurface('chat')}
+              className={`text-xs ${surface === 'chat' ? 'text-accent' : 'text-muted'}`}>Chat</button>
+            <button type="button" aria-pressed={surface === 'activity'} onClick={() => setSurface('activity')}
+              className={`text-xs ${surface === 'activity' ? 'text-accent' : 'text-muted'}`}>Activity</button>
             <span className="flex-1" />
             {/* UX overhaul S5 (Q5a): pinned, the dock never steps aside by
                 itself over Results or without a key (layout/dockAutoCollapse.ts). */}
@@ -251,7 +258,7 @@ export default function AssistantDock() {
 
         {/* Never unmounted — see the module docstring. */}
         <div
-          className={`flex-1 min-h-0 overflow-hidden ${assistantDockOpen ? '' : 'hidden'}`}
+          className={`flex-1 min-h-0 overflow-hidden ${assistantDockOpen && surface === 'chat' ? '' : 'hidden'}`}
           data-testid="assistant-dock-body"
         >
           {/*
@@ -280,6 +287,9 @@ export default function AssistantDock() {
             <ChatPanel />
           </ErrorBoundary>
         </div>
+        {assistantDockOpen && surface === 'activity' && <ErrorBoundary label="Activity could not be displayed">
+          <AssistantActivity onConversation={() => setSurface('chat')} />
+        </ErrorBoundary>}
       </div>
       {!assistantDockOpen && (
         <CompanionLauncher
