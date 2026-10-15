@@ -893,8 +893,12 @@ def _asset_of(a: _Acc) -> tuple[str, str] | None:
 def _import_capacity(n, parsed) -> np.ndarray:
     """What the connection carries per snapshot (MW): each import Link's size
     (`p_nom_opt`, else `p_nom`) × its `p_max_pu`, capped hour by hour by the
-    energization schedule (`energization.capped_mw`, the solve's own rule)."""
+    energization schedule (`energization.capped_mw`, the solve's own rule) and,
+    on the PoC, by the connection agreement's cap (`agreement_import_cap_mw`:
+    a non-firm cap, a closed connection before `available_from`; both are
+    undone after the solve, so the network alone does not show them)."""
     from services.adequacy import energization as _E
+    from services.commercial import connection as _C
 
     cap = np.zeros(len(n.snapshots))
     for m in _lp.import_links(parsed):
@@ -902,8 +906,12 @@ def _import_capacity(n, parsed) -> np.ndarray:
             continue
         pn = _fin(n.links.at[m, "p_nom_opt"]) if "p_nom_opt" in n.links.columns else None
         pn = pn if pn is not None else float(n.links.at[m, "p_nom"])
-        cap += _E.capped_mw(n, m, pn * _series(n, "links_t", "p_max_pu", m,
-                                                 n.links.at[m, "p_max_pu"]))
+        carried = _E.capped_mw(n, m, pn * _series(n, "links_t", "p_max_pu", m,
+                                                   n.links.at[m, "p_max_pu"]))
+        if m == parsed.poc_link and parsed.connection is not None:
+            carried = np.minimum(carried, _C.agreement_import_cap_mw(
+                n, parsed.connection, poc_link=m, timezone=parsed.timezone))
+        cap += carried
     return cap
 
 
@@ -1272,6 +1280,141 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
     }
     cf_hash = hashlib.sha256(json.dumps(blob, sort_keys=True, default=str).encode()) \
         .hexdigest()[:16]
+    return out, avoided, cf_hash
+
+
+# ── the baseline counterfactual (owner decision 2026-10-15) ──────────────────
+
+def baseline_plan(n, cfg, owner: str | None = None):
+    """The case's `BaselinePlan` (`services.results.baseline`): the owner's
+    assets from the value flows, the owner's uncosted PoC meter Links kept as
+    the connection. None when the case has no value flows to name an owner (it
+    is refused later, as before)."""
+    from services.results import baseline as _B
+
+    if not getattr(cfg, "commercial", None):
+        return None
+    try:
+        parsed = _lp._parse(cfg.commercial)
+        vf = P.parse_value_flows(parsed.value_flows)
+        if vf is None:
+            return None
+        _owner, owned = _resolve_owner(vf, owner)
+    except (P.ValueFlowsInvalid, FinanceRefused, ValueError, TypeError):
+        return None
+    return _B.plan_baseline(n, owned, meter_links=tuple(_uncosted_meter_links(n, parsed, owned)))
+
+
+@dataclasses.dataclass(frozen=True)
+class _Side:
+    """A network's actual side, per period key: the ledger inputs, the
+    owner's accumulated lines and the template lines built from them."""
+    inputs: object
+    accs: dict
+    actual: dict
+
+
+def _island_critical_load(n) -> list[str]:
+    """`island_critical_load_mw:<mw>`: the mean critical load (`eh_critical`
+    buses) the island capability carries, for the break-even per MWh (the
+    outage hours are the user's, `FinanceInputs.island_outage`). Nothing when
+    the network marks no critical bus."""
+    crit = set(n.buses.index[n.buses["eh_critical"].astype(bool)]) \
+        if "eh_critical" in n.buses.columns else set()
+    loads = [ld for ld in n.loads.index if str(n.loads.at[ld, "bus"]) in crit]
+    if not loads:
+        return []
+    mw = 0.0
+    for ld in loads:
+        if ld in n.loads_t.p_set.columns:
+            mw += float(n.loads_t.p_set[ld].mean())
+        else:
+            mw += float(n.loads.at[ld, "p_set"])
+    return [f"island_critical_load_mw:{mw:g}"]
+
+
+def _shed_mwh(n, lost_load, loads: list[str], mask) -> float:
+    """The VoLL shed of `loads` in a period (MWh, objective-weighted)."""
+    ll = (lost_load or {}).get("lost_load_t") if isinstance(lost_load, dict) else None
+    if ll is None or getattr(ll, "empty", True):
+        return 0.0
+    w = n.snapshot_weightings.objective.to_numpy(dtype=float)
+    total = 0.0
+    for ld in loads:
+        if ld in ll.columns:
+            s = np.clip(ll[ld].reindex(n.snapshots).fillna(0.0).to_numpy(dtype=float), 0.0, None)
+            total += float((w[mask] * s[mask]).sum())
+    return total
+
+
+def _import_value(side: _Side, k: str, s_items: set) -> float | None:
+    """The per-kWh import bill items plus the commodity the site pays in
+    period `k` (C5's S terms), None when either is not established."""
+    bill = side.inputs.bill.get(k) or {}
+    total = 0.0
+    for item in s_items:
+        v = bill.get(item)
+        if v is None:
+            return None
+        total += v
+    commodity = [a for a in side.accs[k].values() if _is_commodity(a)]
+    if any(a.amount is None for a in commodity):
+        return None
+    return total - sum(a.amount for a in commodity)
+
+
+def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs, owner,
+                             lost_load, base_year: int, flags: list[str]
+                             ) -> tuple[dict[str, list[TemplateLine]], dict[str, float | None],
+                                        str]:
+    """The counterfactual as the site stands today: the solved baseline's own
+    actual side (its bill, commodity, contracts, connection and the existing
+    assets' costs; the same adapter builds both sides, so a case with no new
+    builds nets to 0 line by line), plus the shed it adds over the actual
+    solve, priced at the case's VoLL (`counterfactual:shed_at_voll`, escalating
+    as opex: VoLL is a real-terms reliability value). S for C5 is the
+    baseline's import value minus the actual's."""
+    from services.adequacy.eh_report import _live_result_df
+
+    side = _build_finance_case(baseline.network, cfg, fin, result_df=_live_result_df,
+                               lost_load=baseline.lost_load, owner=owner, side_only=True)
+    flags += ["counterfactual_basis:site_today", *baseline.plan.flags]
+    if "baseline_island_rows_relaxed" in baseline.plan.flags:
+        # The critical load the island capability carries (owner decision
+        # 2026-10-15): with the user's outage hours, the break-even per MWh.
+        flags += _island_critical_load(n)
+    removed = sorted(name for _c, name, _k in baseline.plan.removed)
+    if removed:
+        flags.append("baseline_removed:" + ",".join(removed))
+    voll = float(getattr(cfg, "voll", 0.0) or 0.0)
+    loads = _site_loads(n, parsed, sides)
+    s_items = _s_items(parsed.import_tariff)
+    out: dict[str, list[TemplateLine]] = {}
+    avoided: dict[str, float | None] = {}
+    shed_by: dict[str, float] = {}
+    for p in _periods(n):
+        k = _key(p)
+        lines = list(side.actual.get(k, []))
+        extra = _shed_mwh(baseline.network, baseline.lost_load, loads,
+                          _mask(baseline.network, p)) - _shed_mwh(n, lost_load, loads,
+                                                                  _mask(n, p))
+        if abs(extra) > _EPS_MW and voll > 0.0:
+            shed_by[k] = extra
+            lines.append(TemplateLine(
+                key="counterfactual:shed_at_voll", stream="other", amount=-voll * extra,
+                esc_class="opex", source="counterfactual", source_id="shed_at_voll",
+                period=k, money_year=base_year))
+        elif abs(extra) > _EPS_MW:
+            flags.append(f"counterfactual_shed_unpriced:no_voll:{k}")
+        out[k] = lines
+        cf_v, act_v = _import_value(side, k, s_items), _import_value(
+            _Side(inputs=inputs, accs=accs, actual={}), k, s_items)
+        avoided[k] = None if cf_v is None or act_v is None else cf_v - act_v
+    if shed_by:
+        flags.append("counterfactual_shed_at_voll:" + _num(sum(shed_by.values())))
+    blob = {"basis": "site_today", "baseline": baseline.digest, "voll": voll,
+            "shed": {k: round(v, 6) for k, v in sorted(shed_by.items())}}
+    cf_hash = hashlib.sha256(json.dumps(blob, sort_keys=True).encode()).hexdigest()[:16]
     return out, avoided, cf_hash
 
 
@@ -1838,12 +1981,27 @@ def _extra_fom_lines(extra_finance: tuple[AssetFinance, ...], k: str, base_year:
 
 def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                        owner: str | None = None,
-                       extra_assets: Sequence[ExtraOwnerAsset] = ()) -> FinanceCase:
+                       extra_assets: Sequence[ExtraOwnerAsset] = (),
+                       baseline=None) -> FinanceCase:
+    """The owner's `FinanceCase`: see `_build_finance_case`."""
+    return _build_finance_case(n, cfg, fin, result_df=result_df, lost_load=lost_load,
+                               owner=owner, extra_assets=extra_assets, baseline=baseline)
+
+
+def _build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
+                        owner: str | None = None,
+                        extra_assets: Sequence[ExtraOwnerAsset] = (),
+                        baseline=None, side_only: bool = False) -> FinanceCase | _Side:
     """The owner's `FinanceCase` from the solved network `n`, its solver
     config `cfg` and the stored `FinanceInputs` `fin` (see the module
     docstring); `FinanceRefused(code)` when it cannot be stated.
     `extra_assets` (IC G2): equipment the owner buys outside the network
-    (a campus study's choice), added as owner capex — see `_extra_assets`."""
+    (a campus study's choice), added as owner capex — see `_extra_assets`.
+    `baseline` (`services.results.baseline.Baseline`, owner decision
+    2026-10-15): the counterfactual is that solved baseline's own actual side
+    (the site as it stands today), see `_baseline_counterfactual`; None keeps
+    the analytic counterfactual. `side_only` returns the actual side only
+    (`_Side`), for the baseline itself."""
     from services.results.value_flows import value_flow_ledger
 
     try:
@@ -1938,6 +2096,8 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                                     owner_gens=owner_gens, contracts=contracts, fin=fin,
                                     gen=gens[k], site_gens=site_gens, gen_links=gen_links,
                                     flags=flags)
+    if side_only:
+        return _Side(inputs=inputs, accs=accs, actual=actual)
 
     # C13: the counterfactual, when the owner is the site party that pays the bill.
     cf_lines: dict[str, list[TemplateLine]] = {}
@@ -1945,9 +2105,21 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
     cf_hash = None
     if same_party(owner, inputs.site_party):
         sides = P.classify_buses(n, parsed)
-        cf_lines, avoided, cf_hash = _counterfactual(
-            n, cfg, parsed, sides, inputs, vf, accs, actual, owned, contracts, lost_load,
-            base_year, flags, fin=fin)
+        if baseline is not None:
+            cf_lines, avoided, cf_hash = _baseline_counterfactual(
+                baseline, n, cfg, fin, parsed, sides, inputs, accs, owner, lost_load,
+                base_year, flags)
+            # H2e's inputs act on the analytic counterfactual only: the
+            # baseline re-solve neither buys a reference purchase nor prices
+            # CO2, so either one stated reads not applied, never absent.
+            if getattr(parsed, "reference_purchases", None):
+                flags.append("reference_purchases_not_applied:site_today_basis")
+            if getattr(parsed, "co2_price", None) is not None:
+                flags.append("co2_price_not_applied:site_today_basis")
+        else:
+            cf_lines, avoided, cf_hash = _counterfactual(n, cfg, parsed, sides, inputs, vf,
+                                                         accs, actual, owned, contracts,
+                                                         lost_load, base_year, flags, fin=fin)
 
     # The storage LCOS's throughput and charging cost (owner decision 6).
     storage_years = _storage_years(n, parsed, P.classify_buses(n, parsed), owned_list,
@@ -2082,6 +2254,10 @@ def _canon(o):
                 del out["asset_cod"]
             if o.inputs.stage_capex_lead_years == 1 and isinstance(out.get("inputs"), dict):
                 out["inputs"].pop("stage_capex_lead_years", None)
+            # The island break-even's outage hours (2026-10-15): not stated, the
+            # case keeps its hash; stated, the report re-runs to state its figures.
+            if o.inputs.island_outage is None and isinstance(out.get("inputs"), dict):
+                out["inputs"].pop("island_outage", None)
         return out
     if hasattr(o, "model_dump"):
         return _canon(o.model_dump(mode="json"))

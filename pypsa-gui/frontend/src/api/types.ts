@@ -1108,6 +1108,12 @@ export interface SolvePpa {
   target_year: number
 }
 
+/** The island break-even's outage hours, as the user states them with their source. */
+export interface IslandOutage {
+  hours_per_year: number | null
+  source: string | null
+}
+
 export interface TerminalValueRule {
   /** `remaining_life_annuity`: each part's remaining life on the LP's annuity (IC S0b S6); no value. */
   method?: 'none' | 'book_value' | 'multiple_of_ebitda' | 'fixed' | 'remaining_life_annuity'
@@ -1139,6 +1145,7 @@ export interface FinanceInputs {
   small_business_163j?: boolean | null
   reserves_rate?: number | null
   solve_ppa?: SolvePpa | null
+  island_outage?: IslandOutage | null
   depreciation_class_by_asset?: Record<string, string>
   replacement_capex?: Array<[number, string, number]>
   /** `part_lifetimes`: each part re-bought at the end of its lifetime at its upfront cost (IC S0b S5). */

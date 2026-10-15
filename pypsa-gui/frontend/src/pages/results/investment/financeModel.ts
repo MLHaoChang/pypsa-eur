@@ -360,6 +360,28 @@ export function baselineCaveats(report: InvestmentCaseReportPayload): string[] {
   return BASELINE_CAVEATS.filter(([f]) => has(f)).map(([, text]) => text)
 }
 
+/** What the incremental figures are compared with, in a sentence, and the
+ *  baseline's notes (owner decision 2026-10-15); null when the report says
+ *  nothing about it. */
+export function counterfactualBasis(report: InvestmentCaseReportPayload):
+  { basis: string; text: string; notes: string[] } | null {
+  const cf = payloadOf(report, 'project').counterfactual
+  if (!isObj(cf) || typeof cf.basis !== 'string' || !cf.basis) return null
+  const sentence = cf.basis.charAt(0).toUpperCase() + cf.basis.slice(1)
+  return {
+    basis: typeof cf.counterfactual_basis === 'string' ? cf.counterfactual_basis : 'analytic',
+    text: sentence.endsWith('.') ? sentence : `${sentence}.`,
+    notes: Array.isArray(cf.notes) ? cf.notes.filter((x): x is string => typeof x === 'string') : [],
+  }
+}
+
+/** What the island capability would have to be worth for the case to break
+ *  even, in a sentence (owner decision 2026-10-15); null when not stated. */
+export function islandBreakeven(report: InvestmentCaseReportPayload): string | null {
+  const be = payloadOf(report, 'project').island_breakeven
+  return isObj(be) && typeof be.text === 'string' && be.text ? be.text : null
+}
+
 /** Plain chip labels for the report sections (UX assessment Q7). */
 const SECTION_LABELS: Record<string, string> = {
   design: 'Design', commercial: 'Commercial', dispatch_modes: 'Dispatch modes',

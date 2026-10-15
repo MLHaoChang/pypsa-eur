@@ -1,5 +1,6 @@
 import axios from 'axios'
 import client, { formatApiDetail } from './client'
+import type { SiteForm } from '../pages/hubDesign/genericSite'
 import type {
   ProjectInfo, ProjectSettings, ImportSummary, SaveResult, BundleImportResult,
   CompareState, ResultsSummary,
@@ -349,12 +350,18 @@ export const projectsApi = {
   // fresh project dir, loads it, and returns the same shape as importBundle.
   // `name` is optional — the backend defaults to the template's friendly name
   // and uniquifies on collision.
-  createFromTemplate: (templateId: string, name?: string) =>
+  createFromTemplate: (templateId: string, name?: string, params?: Record<string, unknown>) =>
     client.post<BundleImportResult>(
       `/projects/from_template/${encodeURIComponent(templateId)}`,
-      null,
-      { params: name ? { name } : undefined },
+      // Only the generic site (`eh_site`) takes parameters; any other
+      // template refuses a body.
+      params ?? null,
+      // A refused site (422 site_params_invalid) is shown beside its field.
+      { params: name ? { name } : undefined, skipErrorToast: params !== undefined },
     ).then(r => r.data),
+  /** The generic site form's presets, load shapes and bounds (G2). */
+  getSiteTemplateForm: () =>
+    client.get<SiteForm>('/projects/from_template/eh_site/form').then(r => r.data),
   importBundle: (file: File, targetName?: string) => {
     const fd = new FormData()
     fd.append('file', file)

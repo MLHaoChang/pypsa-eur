@@ -2,6 +2,9 @@
 import type {
   EhReadiness, EhReferenceDesignReport, EhReview, EhTemplateMeta,
 } from '../../api/simulation'
+import siteFormJson from './siteFormFixture.json'
+import type { SiteForm } from './genericSite'
+const SITE_FORM = siteFormJson as unknown as SiteForm
 
 export const DC_TEMPLATE: EhTemplateMeta = {
   id: 'eh_datacenter',
@@ -11,6 +14,27 @@ export const DC_TEMPLATE: EhTemplateMeta = {
   stages: null,
   study_notes: ['The grid connection is capped at 40 MW.', 'Second note.'],
   provenance: 'Synthetic example data — not a real site.',
+}
+
+/** A generic site (eh_site) as the backend writes it: a hospital whose
+ *  user set the connection to 10 MW. */
+export const SITE_TEMPLATE: EhTemplateMeta = {
+  id: 'eh_site',
+  name: 'Hospital Energy Hub (generic site)',
+  recommended_archetype: 'weak_flexible',
+  pack_overrides: { import_p_nom_mw: 10 },
+  stages: null,
+  dtc_attribution: 'per_load',
+  study_notes: ['The hospital\'s peak grows 4 → 5 → 6 MW over 2027, 2030, 2035.'],
+  provenance: 'Synthetic example data — not a real site.',
+  site_type: 'hospital',
+  site_type_label: 'Hospital',
+  params: { ...SITE_FORM.presets.hospital, connection_mw: 10, fault_level_mva: 200,
+    energization: [{ year: 2027, mw: 10 }, { year: 2030, mw: 8 }, { year: 2035, mw: 10 }] },
+  entered: ['connection_mw', 'energization', 'site_type'],
+  energization: [2027, 2030, 2035].map((year, i) => ({
+    year, available_import_mw: [10, 8, 10][i], connection_mw: 10 })),
+  ledger: [{ item: 'power factor and load damping', value: 'PF 0.98', source: 'assumed' }],
 }
 
 export const MG_TEMPLATE: EhTemplateMeta = {

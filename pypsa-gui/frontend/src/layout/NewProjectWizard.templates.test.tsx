@@ -46,6 +46,29 @@ describe('NewProjectWizard — templates', () => {
   })
 })
 
+// G2 (UX review note 10): the generic site is a card in this tab, not a new
+// tab; it opens Guided Start with the form instead of creating on click.
+describe('NewProjectWizard — your own site', () => {
+  it('opens Guided Start with the generic site form, creating nothing', async () => {
+    const { useHubDesignStore, HUB_DESIGN_INITIAL } = await import('../pages/hubDesign/hubDesignStore')
+    useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL })
+    useUIStore.setState({ activeSlidePanel: null })
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const onClose = vi.fn()
+    render(
+      <QueryClientProvider client={qc}>
+        <NewProjectWizard existingProjects={[]} onConfirm={() => {}} onClose={onClose} isPending={false} initialTab="template" />
+      </QueryClientProvider>,
+    )
+    await userEvent.click(screen.getByTestId('wizard-template-own-site'))
+    expect(onClose).toHaveBeenCalled()
+    expect(projectsApi.createFromTemplate).not.toHaveBeenCalled()
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
+    expect(useHubDesignStore.getState().step).toBe('start')
+    expect(useHubDesignStore.getState().siteFormRequested).toBe(true)
+  })
+})
+
 // Obstacle 2 (guided-mode spec §2.6): creating a project from /projects left
 // the user on /projects — the success handlers set the current project but
 // neither added a tab nor opened the workbench. Template, From-file and Clone

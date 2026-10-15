@@ -273,6 +273,14 @@ def _cashflow_lines(result, case, packs: dict[str, str]) -> list:
     return out
 
 
+def _island_breakeven(result, case) -> dict[str, Any] | None:
+    from services.finance.breakeven import island_breakeven
+
+    got = island_breakeven(result, case)
+    return None if got is None else {k: _num(v) if isinstance(v, float) else v
+                                     for k, v in got.items()}
+
+
 def _project_payload(result, case) -> dict[str, Any]:
     m, fin = result.metrics, case.inputs
     cash = result.cash
@@ -335,6 +343,10 @@ def _project_payload(result, case) -> dict[str, Any]:
         # G-10); readers use `.get` (older payloads lack the key).
         "extra_assets": _extra_assets_block(case),
         "flags": list(result.flags),
+        # What the island capability would have to be worth for the case to
+        # break even, beside the NPV (owner decision 2026-10-15); None when
+        # the baseline met the island rows or the NPV is not established.
+        "island_breakeven": _island_breakeven(result, case),
     }
 
 
@@ -463,6 +475,19 @@ def _operating_status(result) -> dict[str, str]:
     return status
 
 
+#: The counterfactual basis in words, shown next to the NPV.
+BASIS_TEXT = {
+    "site_today": "compared with the site as it stands today (existing assets kept, new "
+                  "builds removed, re-solved)",
+    # The baseline re-solved without the island rows (it cannot meet them).
+    "site_today_no_island": "compared with the site as it stands today without island "
+                            "capability (existing assets kept, new builds removed, re-solved "
+                            "without the island requirements)",
+    "analytic": "compared with the same site's bill, commodity and connection lines without "
+                "the owner's assets (analytic basis: existing assets not re-dispatched)",
+}
+
+
 def _counterfactual_block(result, case) -> dict[str, Any]:
     """The counterfactual's provenance (plan C13; WP4.6b review B6): what it is,
     its lines' sources, and whether it was established. Its per-year cash is
@@ -472,10 +497,18 @@ def _counterfactual_block(result, case) -> dict[str, Any]:
                 "basis": "no counterfactual in the case (the adapter builds one only when "
                          "the owner is the site party): incremental = total"}
     lines = [ln for t in case.counterfactual for ln in t.lines]
+    site_today = "counterfactual_basis:site_today" in result.flags
+    from services.finance.baseline_text import flag_text
+
     return {
         "present": True,
-        "basis": "the same site's bill, commodity and connection lines without the owner's "
-                 "investable assets",
+        # Which counterfactual the incremental figures are against (owner
+        # decision 2026-10-15): the site as it stands today (a baseline
+        # re-solve), or the analytic one (no re-dispatch).
+        "counterfactual_basis": "site_today" if site_today else "analytic",
+        "basis": BASIS_TEXT[("site_today_no_island" if "baseline_island_rows_relaxed"
+                             in result.flags else "site_today") if site_today else "analytic"],
+        "notes": [t for t in (flag_text(f) for f in result.flags) if t],
         # The template starts: one per period, plus one at each listed CO2
         # price year inside a period's span (H2e sub-templates); `n_lines`
         # counts every template's lines.
@@ -493,13 +526,13 @@ def _counterfactual_block(result, case) -> dict[str, Any]:
         # counterfactual per year — cash the site would otherwise pay at the
         # stated CO2 price. None when there is none or one is not established.
         "avoided_co2_cost": None
-        if "co2_price_not_applied:counterfactual_not_established" in result.flags
+        if any(f.startswith("co2_price_not_applied:") for f in result.flags)
         else _avoided_co2(result),
         # Whether the case prices CO2 at all, so a None above reads "not
         # established", never "none" (gatekeeper review of #305).
         "co2_priced": any(ln.key.startswith("co2:")
                           for t in (*case.templates, *case.counterfactual) for ln in t.lines)
-        or "co2_price_not_applied:counterfactual_not_established" in result.flags,
+        or any(f.startswith("co2_price_not_applied:") for f in result.flags),
     }
 
 

@@ -10,7 +10,9 @@ the G2 additions of `2026-10-07-ic-g1-g2-campus-equipment.md` G-11:
 `build_finance_case`; and the 2026-10-13 engine ask: `series_store.delete_series`,
 `pinned_by`, `list_series` and their result types; and P5b's staged builds of
 `2026-10-14-e2e-guided-demo.md` §7.1: `FinanceCase.asset_cod` and
-`FinanceInputs.stage_capex_lead_years`).
+`FinanceInputs.stage_capex_lead_years`; and the site-today baseline of
+2026-10-15: the `baseline` keyword of `build_finance_case`, `baseline_plan` and
+`FinanceInputs.island_outage`).
 
 Every facade name is imported and its call signature pinned with
 `inspect.signature` against the expectation below, so any change — a renamed
@@ -53,7 +55,9 @@ SIGNATURES: dict[str, str] = {
         "(name: 'str', n, commercial: 'CommercialConfig', *, dsr_buses=()) -> 'TemplateResult'",
     "services.results.finance_case.build_finance_case":
         "(n, cfg, fin, *, result_df, lost_load=None, owner: 'str | None' = None, "
-        "extra_assets: 'Sequence[ExtraOwnerAsset]' = ()) -> 'FinanceCase'",
+        "extra_assets: 'Sequence[ExtraOwnerAsset]' = (), baseline=None) -> 'FinanceCase'",
+    # The site-today baseline (2026-10-15): which owned rows a baseline removes or keeps.
+    "services.results.finance_case.baseline_plan": "(n, cfg, owner: 'str | None' = None)",
     # IC G2 (plan G-11): campus equipment as owner capex.
     "services.finance.case.ExtraOwnerAsset":
         "(name: 'str', kind: 'str', basis: 'str', quantity: 'float', "
@@ -281,7 +285,8 @@ MODEL_FIELDS: dict[str, tuple[str, ...]] = {
         "construction_months_by_asset", "construction_start", "contingency_share",
         "cost_of_equity", "currency", "currency_year", "debt", "degradation_by_asset",
         "depreciation_class_by_asset", "escalation", "financial_close", "financing_fee_tax",
-        "hebesatz_pct", "incentives", "inflation", "participants", "price_basis", "pwa_met",
+        "hebesatz_pct", "incentives", "inflation", "island_outage", "participants", "price_basis",
+        "pwa_met",
         "replacement_capex", "replacement_rule", "reserves_rate", "small_business_163j",
         "solve_ppa", "stage_capex_lead_years", "state_rate",
         "tax_equity", "tax_losses", "tax_pack_id", "terminal_value", "wacc_nominal"),

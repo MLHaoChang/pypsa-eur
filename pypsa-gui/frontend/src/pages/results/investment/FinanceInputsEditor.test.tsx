@@ -313,6 +313,22 @@ describe('FinanceInputsEditor', () => {
     expect(api.putFinance.mock.calls[0][1]).toBe('digest-0')
   })
 
+  it('states the expected outage hours and their source for the island break-even', async () => {
+    api.getFinance.mockResolvedValue({ finance: null, digest: 'digest-0', status: 'not_set' })
+    renderEditor()
+    fireEvent.click(await screen.findByRole('button', { name: 'State the finance inputs' }))
+    fireEvent.change(screen.getByLabelText('Financial close'), { target: { value: '2030-01-01' } })
+    fireEvent.change(screen.getByLabelText('Expected outage hours a year'), { target: { value: '4' } })
+    fireEvent.change(screen.getByLabelText('Source of the outage hours'),
+                     { target: { value: 'utility outage log 2020-25' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save the finance inputs' }))
+    await waitFor(() => expect(api.putFinance).toHaveBeenCalled())
+    expect(putBody()).toEqual({
+      financial_close: '2030-01-01',
+      island_outage: { hours_per_year: 4, source: 'utility outage log 2020-25' },
+    })
+  })
+
   it('a list that is not numbers blocks the save', async () => {
     renderEditor()
     await screen.findByTestId('fi-tranche-0')

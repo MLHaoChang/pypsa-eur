@@ -217,11 +217,20 @@ signature changes.
 `bind_commercial_on_context` gain the optional keyword `solver_cfg=None` (the config the solve will use), so an FCA's
 curtailment hours are ranked on the LP's scaled load (`load_scalers`). Omitting it keeps the old ranking on the raw
 `p_set`; a study fork binds without a project directory, where an FCA is refused anyway.
+**Changes (2026-10-15, the site-today baseline, owner decision after #294):** `results.finance_case.build_finance_case`
+gains the optional keyword `baseline=None` (a solved `results.baseline.Baseline`): the counterfactual is then the site as
+it stands today, re-solved without the plan's new builds. Omitting it keeps the analytic counterfactual, byte for byte.
+Addition: `results.finance_case.baseline_plan(n, cfg, owner=None)`, the rows a baseline removes or keeps (`None`
+without value flows); the guided study reads it to say when its analytic basis keeps existing assets.
+Addition: `FinanceInputs.island_outage` (`IslandOutage{hours_per_year, source}`, default None), the user's
+expected outage hours for the island break-even (owner decision 2026-10-15; no default). Left out of
+`finance_case_hash` when None, so a case without it keeps its hash; it never enters the cash flows.
 **Additions (2026-10-15, generic-site E2E H2e, `.scratch/generic-site/engine-slices.md`):**
 `CommercialConfig.reference_purchases` (default `[]`) and `CommercialConfig.co2_price` (default None), with the
 models `ReferencePurchase` and `Co2Price`. They are read only by the finance adapter's counterfactual. Unset, they
 add no line, flag or hash key, so an existing case keeps its `finance_case_hash` and its `run_case` output. No
-signature changes (`_counterfactual` is private).
+signature changes (`_counterfactual` is private). With a `baseline` (site today) they are not applied:
+flagged `reference_purchases_not_applied:site_today_basis` / `co2_price_not_applied:site_today_basis`.
 
 ## 7. Coordination protocol
 
