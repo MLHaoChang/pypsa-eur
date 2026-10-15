@@ -1,7 +1,16 @@
 {
   "auto_discount_periods": true,
   "commercial": {
-    "co2_price": null,
+    "co2_price": {
+      "eur_per_t_by_year": {
+        "2027": 80.0,
+        "2030": 120.0
+      },
+      "grid_source": null,
+      "grid_t_per_mwh": null,
+      "money_year": 2020,
+      "source": "synthetic demo path"
+    },
     "connection": null,
     "contracts": [],
     "demand_items": [],
@@ -60,7 +69,15 @@
     "meter_history_peaks_kw": {},
     "poc_link": "grid_import",
     "power_factor": null,
-    "reference_purchases": [],
+    "reference_purchases": [
+      {
+        "co2_t_per_kg": 0.01,
+        "lhv_kwh_per_kg": 33.33,
+        "load": "h2_offtake",
+        "price_eur_per_kg": 2.0,
+        "source": "synthetic demo value (grey H2 by SMR)"
+      }
+    ],
     "site_party": "site",
     "timezone": "UTC",
     "value_flows": {

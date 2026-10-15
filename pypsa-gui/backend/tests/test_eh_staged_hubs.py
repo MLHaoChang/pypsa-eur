@@ -2,9 +2,10 @@
 H1/M1: template data only).
 
 Each is its single-year template over 2027/2030/2035 with one candidate row
-per period, the existing hub sunk and finance inputs shipped. The H2 hub's
-investment case is refused today (its H2 offtake has no source without the
-investment: the grey-H2 counterfactual is a later engine slice). The
+per period, the existing hub sunk and finance inputs shipped. The H2 hub
+ships a grey-H2 reference purchase and a CO2 price (synthetic demo values):
+its case compares against the hub as it stands today, which buys grey H2
+whenever that is cheaper than running its electrolyser (#312). The
 microgrid's case compares against the island as it stands today (owner,
 M2e (a)): the open tie is its PoC, with no tariff, and the investment-case
 route re-solves the island without the candidates (#302).
@@ -98,7 +99,12 @@ def test_the_blocks_validate_and_say_what_is_missing():
     from models.finance import FinanceInputs
 
     h2 = T.solver_config("eh_h2_hub_staged")
-    assert CommercialConfig.model_validate(h2["commercial"]).poc_link == "grid_import"
+    h2c = CommercialConfig.model_validate(h2["commercial"])
+    assert h2c.poc_link == "grid_import"
+    (grey,) = h2c.reference_purchases
+    assert (grey.load, grey.price_eur_per_kg, grey.co2_t_per_kg) == ("h2_offtake", 2.0, 0.010)
+    assert h2c.co2_price.eur_per_t_by_year == {2027: 80.0, 2030: 120.0}
+    assert h2c.co2_price.money_year == 2020 and h2c.co2_price.grid_t_per_mwh is None
     fin = FinanceInputs.model_validate(h2["finance"])
     assert fin.cod_by_asset == {a: date(2027, 1, 1) for a in H.H2_EXISTING}
     mg = T.solver_config("eh_microgrid_staged")
@@ -110,8 +116,13 @@ def test_the_blocks_validate_and_say_what_is_missing():
     for tid in IDS:
         items = {r["item"]: r for r in T.TEMPLATE_META[tid]["ledger"]}
         assert "investment case" in items
-    assert any("investment case is not available yet" in s
-               for s in T.TEMPLATE_META["eh_h2_hub_staged"]["study_notes"])
+    h2_ledger = {r["item"]: r for r in T.TEMPLATE_META["eh_h2_hub_staged"]["ledger"]}
+    for item in ("grey H2 reference price", "CO2 price"):
+        assert h2_ledger[item]["source"] == "synthetic"
+        assert "synthetic demo" in h2_ledger[item]["note"]
+    assert "2027" in h2_ledger["grey H2 reference price"]["note"]
+    assert "converted at the case's 2 % inflation" in h2_ledger["CO2 price"]["note"]
+    assert h2_ledger["grid CO2 intensity"]["value"] == "not set"
     mg_case = {r["item"]: r for r in T.TEMPLATE_META["eh_microgrid_staged"]["ledger"]}
     assert mg_case["investment case"]["value"] == (
         "compared with the island as it stands today: the existing diesels, PV, wind and "
@@ -179,7 +190,9 @@ def test_the_h2_hub_plans_electrolysis_for_the_growing_offtake(reset_backend, mo
                                                               tmp_path):
     import routers.results as R
     from models.finance import FinanceInputs
-    from services.results.finance_case import FinanceRefused, build_finance_case
+    from services.finance.engine import run_case
+    from services.results import baseline as Bl
+    from services.results.finance_case import baseline_plan, build_finance_case
 
     n, cfg, state = _solve("eh_h2_hub_staged", monkeypatch, tmp_path)
     added = sum(float(n.links.at[f"electrolyser_new_{y}", "p_nom_opt"]) for y in H.YEARS)
@@ -199,15 +212,28 @@ def test_the_h2_hub_plans_electrolysis_for_the_growing_offtake(reset_backend, mo
         assert float(e.iloc[-1]) == pytest.approx(float(e.iloc[0] + p_store.iloc[0]), abs=1e-3)
     # The existing fuel cell can run (it is in service).
     assert n.links.at["fuel_cell", "p_nom"] == 10.0
-    # The investment case is refused as the notes say, until the grey-H2
-    # counterfactual lands (the engine slice).
-    try:
-        case = build_finance_case(n, cfg, FinanceInputs.model_validate(cfg.finance),
-                                  result_df=R._result_df, lost_load=state.get("last_lost_load"))
-    except FinanceRefused as exc:
-        assert "counterfactual_not_established" in str(exc.code)
-    else:
-        assert "counterfactual_not_established:owner_conversion_load" in case.flags
+    # The investment case from the template's own shipped config, on the
+    # site-today basis (as the IC route): the hub as it stands today buys grey
+    # H2 whenever that is cheaper (#312). The demo's figures, pinned (the
+    # gatekeeper's plan review): re-derive them if the baseline or the solver
+    # changes, never loosen the tolerance.
+    Bl.clear_cache()
+    base = Bl.solve_baseline(n, cfg, baseline_plan(n, cfg))
+    case = build_finance_case(n, cfg, FinanceInputs.model_validate(cfg.finance),
+                              result_df=R._result_df, lost_load=state.get("last_lost_load"),
+                              baseline=base)
+    Bl.clear_cache()
+    assert "counterfactual_basis:site_today" in case.flags
+    assert "counterfactual_buys:h2_offtake" in case.flags
+    assert not any(f.startswith("counterfactual_not_established") for f in case.flags)
+    bn = base.network
+    w = bn.snapshot_weightings.objective
+    bought = {p: float((w.loc[p] * bn.generators_t.p["reference_supply:h2_offtake"].loc[p]).sum())
+              for p in (2030, 2035)}
+    assert bought[2030] == pytest.approx(51_041.0, rel=0.05)
+    assert bought[2035] == pytest.approx(112_361.0, rel=0.05)
+    r = run_case(case)
+    assert r.metrics["project_pre_tax_npv"] == pytest.approx(14.6e6, rel=0.01)
 
 
 @pytest.mark.live_solve

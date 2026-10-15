@@ -12,11 +12,11 @@ period) and the finance inputs shipped beside it. Staging itself is
 
 What each one still lacks is said in its ledger and study notes:
 
-* **The H2 hub** ships its commercial config, but its investment case is
-  refused today (``counterfactual_not_established:owner_conversion_load``):
-  without the investment the H2 offtake has no stated source. The grey-H2
-  counterfactual at a reference price with a CO2 price by period (owner,
-  Q3) is the engine slice H2e. It ships no island sidecar: islanding a
+* **The H2 hub** ships its commercial config with a grey-H2 reference
+  purchase for the offtake and a CO2 price by year (synthetic demo values;
+  owner, Q3 and #312): its investment case compares against the hub as it
+  stands today, which buys grey H2 whenever that is cheaper than running
+  its electrolyser. It ships no island sidecar: islanding a
   200 MW import is not the H2 hub's question (the control stage follows the
   data center's wiring when it lands).
 * **The microgrid** has no grid comparison (its tie is normally open). Its
@@ -182,13 +182,22 @@ def _h2_finance() -> dict:
     }
 
 
+#: The H2 hub's grey-H2 reference purchase and CO2 price (synthetic demo
+#: values, ledgered): what the site buys without its electrolysers.
+GREY_H2 = {"load": "h2_offtake", "price_eur_per_kg": 2.0, "lhv_kwh_per_kg": 33.33,
+           "co2_t_per_kg": 0.010, "source": "synthetic demo value (grey H2 by SMR)"}
+CO2_PRICE = {"eur_per_t_by_year": {2027: 80.0, 2030: 120.0}, "money_year": 2020,
+             "source": "synthetic demo path"}
+
+
 def _h2_commercial_and_finance(T) -> dict:
     from models.commercial import CommercialConfig
     from models.finance import FinanceInputs
     from services.commercial import value_flow_templates as VFT
 
     base = CommercialConfig.model_validate(
-        {"poc_link": "grid_import", "import_tariff": SYNTHETIC_TARIFF, "timezone": "UTC"})
+        {"poc_link": "grid_import", "import_tariff": SYNTHETIC_TARIFF, "timezone": "UTC",
+         "reference_purchases": [GREY_H2], "co2_price": CO2_PRICE})
     vf = VFT.build("single_owner", build_eh_h2_hub_staged(T), base).config
     commercial = base.model_copy(update={"value_flows": vf.model_dump(mode="json")})
     return {"commercial": commercial.model_dump(mode="json"),
@@ -372,17 +381,36 @@ def register(T) -> None:
             {"item": "fuel cell", "value": "the existing 10 MW unit, no staged candidate",
              "source": "assumed",
              "note": "the pack's fuel cell lives 10 years: a staged one would retire before 2045"},
-            {"item": "investment case", "value": "refused today (owner_conversion_load)",
+            {"item": "investment case",
+             "value": "compared with the hub as it stands today, buying grey H2 whenever "
+                      "that is cheaper than running its electrolyser",
              "source": "assumed",
-             "note": "without the investment the H2 offtake has no source; the grey-H2 "
-                     "counterfactual with a CO2 price by period comes in a later slice"},
+             "note": "the investment-case route re-solves the hub without the candidates, "
+                     "with a grey-H2 supply at the reference price plus that period's CO2"},
+            {"item": "grey H2 reference price",
+             "value": "2 EUR/kg (LHV 33.33 kWh/kg), 0.010 t CO2/kg",
+             "source": "synthetic",
+             "note": "synthetic demo value, in the case's base-year (2027) money, escalating "
+                     "2 %/yr as fuel; a real study uses the site's SMR supply contract and "
+                     "its certified carbon intensity"},
+            {"item": "CO2 price", "value": "80 EUR/t from 2027, 120 EUR/t from 2030",
+             "source": "synthetic",
+             "note": "synthetic demo path, real prices in 2020 money, converted at the "
+                     "case's 2 % inflation (the case is nominal); applied to the grey-H2 "
+                     "purchase only; a real study uses the ETS forward curve or a stated "
+                     "policy path"},
+            {"item": "grid CO2 intensity", "value": "not set",
+             "source": "assumed",
+             "note": "grid imports carry no CO2 cost, so the avoided CO2 is the grey-H2 "
+                     "purchase's alone"},
         ],
         "study_notes": [
             "Each period is the same representative week, with the period's H2 offtake.",
             "Candidates are one row per period (build_year = the period): the plan says what "
             "to build when.",
-            "The investment case is not available yet: without the investment the H2 offtake "
-            "has no stated source. A grey-H2 comparison at a reference price comes next.",
+            "After a solve the investment case compares the plan with the hub as it stands "
+            "today, which buys grey H2 (synthetic demo price and CO2 path) whenever that is "
+            "cheaper than running its electrolyser.",
             "The connection (200 MW) carries the grid-only site in every period.",
         ],
         "provenance": T.PROVENANCE,
