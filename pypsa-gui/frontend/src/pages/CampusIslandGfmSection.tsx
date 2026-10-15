@@ -76,7 +76,7 @@ export default function CampusIslandGfmSection({ name }: { name: string }) {
 
   const data = gfm.data
   const rec = data?.recommendation ?? null
-  const applied = rec?.applied
+  const applied = data?.applied ?? rec?.applied
   const canApply = data?.state === 'ready' && rec?.status === 'recommended' && !applied
 
   return (

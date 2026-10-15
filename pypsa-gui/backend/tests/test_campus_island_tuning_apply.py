@@ -78,7 +78,7 @@ def test_apply_writes_the_sidecar_and_the_campus_file_tagged_assumed(drafted):
     assert out["hub_resolve_needed"] is True
     # the recommendation records it; the island study went with the old inputs
     got = cit.get_settings(drafted)
-    assert got["recommendation"]["applied"]["changes"] == out["changes"]
+    assert got["applied"]["changes"] == out["changes"] and got["applied"]["hub_resolve_needed"]
     assert not study.is_file() and ce.get_island(drafted)["study"] is None
 
 
@@ -138,6 +138,114 @@ def test_a_unit_the_campus_file_does_not_have_is_refused(drafted):
     assert exc.value.status_code == 422 and "ghost" in exc.value.detail
 
 
+# ── #310 review: both or neither, busy projects, the re-solve record ────────
+
+
+def test_a_failed_campus_write_puts_the_sidecar_back_and_keeps_the_study(drafted, monkeypatch):
+    """Both files or neither: the campus write fails after the sidecar's, the
+    old sidecar comes back, the island study stays, nothing is recorded."""
+    import services.atomic_io as aio
+
+    _recommend(drafted)
+    study = ce._island_paths(drafted)[1]
+    study.write_text("{}")
+    side_before, campus_before = _sidecar_of(drafted), _campus(drafted)
+    real = aio.atomic_write_text
+
+    def failing(path, text, *a, **k):
+        if str(path).endswith(ce.CAMPUS_FILE):
+            raise OSError("disk full")
+        return real(path, text, *a, **k)
+    monkeypatch.setattr(aio, "atomic_write_text", failing)
+    with pytest.raises(OSError):
+        cit.apply_settings(drafted)
+    assert _sidecar_of(drafted) == side_before and _campus(drafted) == campus_before
+    assert study.is_file()
+    assert cit.get_settings(drafted)["applied"] is None
+
+
+def test_an_oversized_file_is_refused_before_anything_is_written(drafted, monkeypatch):
+    _recommend(drafted)
+    side_before = _sidecar_of(drafted)
+    monkeypatch.setattr(ce, "MAX_CAMPUS_BYTES", 10)
+    with pytest.raises(HTTPException) as exc:
+        cit.apply_settings(drafted)
+    assert exc.value.status_code == 422 and "campus file" in exc.value.detail
+    assert _sidecar_of(drafted) == side_before
+
+
+@pytest.mark.parametrize("busy", ["cuts", "job"])
+def test_no_apply_while_the_project_is_busy(drafted, monkeypatch, busy):
+    from services import campus_island_cuts as cic
+    from services import solve_queue as sq
+
+    _recommend(drafted)
+    if busy == "cuts":
+        monkeypatch.setattr(cic, "_running", lambda record: True)
+    else:
+        key = project_registry.registry_key(drafted)
+        monkeypatch.setattr(sq.solve_queue, "list_jobs", lambda: [
+            {"project_key": key, "kind": "campus", "status": "running"}])
+    before = _sidecar_of(drafted)
+    with pytest.raises(HTTPException) as exc:
+        cit.apply_settings(drafted)
+    assert exc.value.status_code == 409
+    assert _sidecar_of(drafted) == before
+
+
+def test_a_unit_whose_control_changed_is_refused(drafted):
+    """The droop and inertia were verified for one model; a unit since
+    switched to another is refused, neither field written."""
+    _recommend(drafted)
+    path = project_registry.project_dir(drafted) / "island_config.json"
+    cfg = json.loads(path.read_text())
+    cfg["units"]["bess"]["control"] = "gfm_vsm"
+    cfg["units"]["bess"].pop("tau_f_s")
+    cfg["units"]["bess"]["H_v_s"] = {"value": 1.0, "source": "assumed"}
+    path.write_text(json.dumps(cfg))
+    with pytest.raises(HTTPException) as exc:
+        cit.apply_settings(drafted)
+    assert exc.value.status_code == 422 and "gfm_droop" in exc.value.detail
+    assert _campus(drafted)["units"][_uid(drafted)]["island"]["droop_pct"]["value"] == 4.0
+
+
+def test_a_recommended_field_either_file_lacks_is_refused(drafted):
+    _recommend(drafted)
+    spec_path = ce.campus_dir(drafted) / ce.CAMPUS_FILE
+    spec = yaml.safe_load(spec_path.read_text())
+    spec["campus"]["units"][_uid(drafted)]["island"].pop("tau_f_s")
+    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+    before = _sidecar_of(drafted)
+    with pytest.raises(HTTPException) as exc:
+        cit.apply_settings(drafted)
+    assert exc.value.status_code == 422 and "tau_f_s" in exc.value.detail
+    assert _sidecar_of(drafted) == before
+
+
+def test_applying_twice_is_refused(drafted):
+    _recommend(drafted)
+    cit.apply_settings(drafted)
+    with pytest.raises(HTTPException) as exc:
+        cit.apply_settings(drafted)
+    assert exc.value.status_code == 409 and "already applied" in exc.value.detail
+
+
+def test_the_re_solve_line_outlives_a_campus_run_and_goes_with_a_hub_solve(drafted):
+    """The applied record sits beside the campus file: a campus run (which
+    removes the run's recommendation) keeps it; a saved re-solve of the hub
+    (the network changes) clears it."""
+    _recommend(drafted)
+    cit.apply_settings(drafted)
+    for name in ce._island_hours_files():                      # what a campus run removes
+        (ce.campus_dir(drafted) / "run" / name).unlink(missing_ok=True)
+    got = cit.get_settings(drafted)
+    assert got["recommendation"] is None and got["applied"]["hub_resolve_needed"] is True
+    nc = project_registry.project_dir(drafted) / ce.NETWORK_FILE
+    nc.write_bytes(nc.read_bytes() + b"\0")                   # the hub re-solved and saved
+    assert cit.get_settings(drafted)["applied"] is None
+    assert not (ce.campus_dir(drafted) / cit.APPLIED_FILE).exists()
+
+
 # ── the route ───────────────────────────────────────────────────────────────
 
 
@@ -168,11 +276,12 @@ def test_apply_is_refused_under_another_users_lock(client, router_hub, same_org_
 
 
 @pytest.mark.slow
-def test_the_real_recommender_on_a_failing_island_reads_back_and_applies_or_says_why(
-        user_and_db):  # noqa: F811
+def test_the_real_recommender_on_the_i7_hand_hub_says_capacity_is_needed(user_and_db):  # noqa: F811
     """The I7 hand hub fails at both hours (a 10 MW GFM BESS against a 20 MW
-    step): the recommender reads it, writes its result, and the result either
-    applies (status recommended) or is refused with its reason, never both."""
+    step, and the trip of that BESS, E3, which no setting covers): the real
+    recommender says not achievable, names the capacity, and apply refuses
+    with that reason, writing nothing. (A floor of 25 or 40 MW changes
+    nothing: E3 needs N-1 cover. The applied path is held to hand cases above.)"""
     from tests.test_campus_island_cuts_e2e import SETTINGS
 
     db, user = user_and_db
@@ -184,13 +293,13 @@ def test_the_real_recommender_on_a_failing_island_reads_back_and_applies_or_says
     ce.run(row, SETTINGS)
     cit.recommend(ce.campus_dir(row) / "run", max_sims=cit.MAX_SIMS)
     got = cit.get_settings(row)
-    assert got["state"] == "ready"
+    assert got["state"] == "ready" and got["applied"] is None
     rec = got["recommendation"]
     assert rec["label"].startswith("heuristic screening") and rec["simulations"] <= cit.MAX_SIMS
-    if rec["status"] == "recommended":
-        out = cit.apply_settings(row)
-        assert out["changes"] and out["hub_resolve_needed"] is True
-    else:
-        with pytest.raises(HTTPException) as exc:
-            cit.apply_settings(row)
-        assert exc.value.status_code == 422
+    assert rec["status"] == "not_achievable" and rec["achievable"] is False and rec["capacity"]
+    before = (d / "island_config.json").read_text()
+    with pytest.raises(HTTPException) as exc:
+        cit.apply_settings(row)
+    assert exc.value.status_code == 422 and "capacity is needed" in exc.value.detail
+    assert (d / "island_config.json").read_text() == before
+    assert cit.get_settings(row)["applied"] is None

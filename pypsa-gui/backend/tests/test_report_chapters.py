@@ -131,9 +131,19 @@ def test_the_island_chapter_shows_the_checks_and_the_gfm_settings():
 
 
 def test_an_applied_recommendation_asks_for_the_re_solve():
-    ev = _collect(island={"report": _island_report(), "gfm": _gfm(
-        status="recommended", state="stale",
-        applied={"at": 1, "changes": [{"unit": "BESS1"}], "hub_resolve_needed": True})})
+    gfm = _gfm(status="recommended", state="stale")
+    gfm["applied"] = {"at": 1, "changes": [{"unit": "BESS1"}], "hub_resolve_needed": True}
+    ev = _collect(island={"report": _island_report(), "gfm": gfm})
+    assert any("Re-solve the hub" in d for d in ev.required_disclosures)
+
+
+def test_the_re_solve_disclosure_outlives_the_recommendation():
+    """#310 review: a campus run removes the recommendation; the applied
+    record still asks for the re-solve, even with no island table."""
+    gfm = {"state": "not_run", "reason": "r", "recommendation": None,
+           "applied": {"at": 1, "changes": [], "hub_resolve_needed": True}}
+    ev = _collect(island={"report": None, "gfm": gfm})
+    assert ev.sections[chapters.ISLAND].status == "ok"
     assert any("Re-solve the hub" in d for d in ev.required_disclosures)
 
 

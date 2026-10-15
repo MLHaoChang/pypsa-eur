@@ -131,10 +131,12 @@ describe('chapterTiles', () => {
         { state: 'stale', text: expect.stringMatching(/recommend them again/) })
     })
     it('applied: re-solve the hub, with the Solve action', () => {
-      const c = ctl({ state: 'stale', reason: 'x', recommendation: rec({ applied: { at: 1, changes: [],
-                                                                                   hub_resolve_needed: true } }) })
+      const applied = { at: 1, changes: [], hub_resolve_needed: true }
+      const c = ctl({ state: 'stale', reason: 'x', recommendation: rec(), applied })
       expect(c).toMatchObject({ state: 'stale', resolve: true,
                                 text: expect.stringMatching(/Re-solve the hub: these settings change its island rows/) })
+      // a campus run removed the recommendation; the record still asks (#310 review)
+      expect(ctl({ state: 'not_run', reason: '', recommendation: null, applied })).toMatchObject({ resolve: true })
     })
   })
 })

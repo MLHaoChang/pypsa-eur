@@ -139,7 +139,9 @@ def island_payload(source: dict | None) -> dict | None:
                         "rows": [list(r) for r in t.get("rows") or []]}
               for t in (report or {}).get("tables") or [] if t.get("id") in ISLAND_TABLES}
     rec = (gfm or {}).get("recommendation") if gfm else None
-    if not tables and not rec:
+    # the last apply's record outlives the run's recommendation (#310 review)
+    applied = (gfm or {}).get("applied") or (rec or {}).get("applied")
+    if not tables and not rec and not applied:
         return None
     out: dict[str, Any] = {"caveat": (report or {}).get("caveat"),
                            "missing": list((report or {}).get("missing") or []), "tables": tables}
@@ -149,10 +151,10 @@ def island_payload(source: dict | None) -> dict | None:
             "simulations": rec.get("simulations"), "max_simulations": rec.get("max_simulations"),
             "margin_pct": _pct(rec.get("margin")),
             "settings": rec.get("settings") or {}, "capacity": list(rec.get("capacity") or []),
-            "applied": rec.get("applied"),
+            "applied": applied,
         }
     elif gfm:
-        out["gfm"] = {"state": gfm.get("state"), "reason": gfm.get("reason")}
+        out["gfm"] = {"state": gfm.get("state"), "reason": gfm.get("reason"), "applied": applied}
     return out
 
 

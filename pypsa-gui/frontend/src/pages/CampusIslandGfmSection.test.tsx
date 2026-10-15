@@ -119,9 +119,9 @@ describe('CampusIslandGfmSection', () => {
     const requestRunSolve = vi.fn()
     useUIStore.setState({ requestRunSolve })
     api.gfmSettings.mockResolvedValueOnce(ready())
-    api.gfmSettings.mockResolvedValue(ready(rec({ applied: { at: 1, hub_resolve_needed: true, changes: [
+    api.gfmSettings.mockResolvedValue({ ...ready(), state: 'stale', applied: { at: 1, hub_resolve_needed: true, changes: [
       { unit: 'BESS1', pypsa_name: 'bess', field: 'droop_pct', from: 4, to: 2.5 },
-      { unit: 'BESS1', pypsa_name: 'bess', field: 'tau_f_s', from: 0.1, to: 0.6 }] } })))
+      { unit: 'BESS1', pypsa_name: 'bess', field: 'tau_f_s', from: 0.1, to: 0.6 }] } })
     api.applyGfmSettings.mockResolvedValue({ changes: [], hub_resolve_needed: true })
     renderSection()
     await userEvent.click(await screen.findByRole('button', { name: /Apply to the island data/ }))
@@ -131,5 +131,14 @@ describe('CampusIslandGfmSection', () => {
     expect(screen.queryByRole('button', { name: /Apply to the island data/ })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: /Solve/ }))
     expect(requestRunSolve).toHaveBeenCalled()
+  })
+
+  it('the re-solve line stays after a campus run removed the recommendation (#310 review)', async () => {
+    api.gfmSettings.mockResolvedValue({ state: 'not_run', reason: 'Recommend GFM settings: …', recommendation: null,
+      applied: { at: 1, hub_resolve_needed: true, changes: [
+        { unit: 'BESS1', pypsa_name: 'bess', field: 'droop_pct', from: 4, to: 2.5 }] } })
+    renderSection()
+    expect((await screen.findByTestId('gfm-resolve')).textContent)
+      .toMatch(/Applied \(1 setting\).*Re-solve the hub: these settings change its island rows/)
   })
 })

@@ -125,7 +125,7 @@ function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 
 function control(gfm: GfmSettingsState | null | undefined): ChapterTile['control'] {
   if (!gfm) return undefined
   const rec = gfm.recommendation
-  if (rec?.applied?.hub_resolve_needed) {
+  if ((gfm.applied ?? rec?.applied)?.hub_resolve_needed) {
     return { state: 'stale', resolve: true,
       text: 'Grid-forming settings applied. Re-solve the hub: these settings change its island rows; '
         + 'then run the campus study again.' }

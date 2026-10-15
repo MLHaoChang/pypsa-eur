@@ -582,8 +582,12 @@ export interface GfmRecommendation {
   allow_i_max: boolean
   notes: string[]
   excluded: string[]
-  applied?: { at: number; changes: GfmChange[]; hub_resolve_needed: boolean }
+  /** Before #310's review the record sat here; it is now `GfmSettingsState.applied`. */
+  applied?: GfmApplied
 }
+
+/** The last apply's record while the hub has not been re-solved since. */
+export interface GfmApplied { at: number; changes: GfmChange[]; hub_resolve_needed: boolean }
 
 export interface GfmChange { unit: string; pypsa_name: string; field: string; from: number | null; to: number }
 
@@ -592,6 +596,8 @@ export interface GfmSettingsState {
   state: 'not_run' | 'ready' | 'stale'
   reason: string
   recommendation: GfmRecommendation | null
+  /** Outlives the recommendation (a campus run removes it); null once the hub is re-solved and saved. */
+  applied?: GfmApplied | null
 }
 
 export interface IslandCuts {

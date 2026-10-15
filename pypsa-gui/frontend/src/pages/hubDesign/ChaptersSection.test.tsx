@@ -80,8 +80,8 @@ describe('ChaptersSection', () => {
     const requestRunSolve = vi.fn()
     useUIStore.setState({ requestRunSolve })
     vi.mocked(campusApi.state).mockResolvedValue({ results: null, stale: false } as never)
-    vi.mocked(campusApi.gfmSettings).mockResolvedValue({ state: 'stale', reason: 'x', recommendation: {
-      status: 'recommended', settings: {}, applied: { at: 1, changes: [], hub_resolve_needed: true } } } as never)
+    vi.mocked(campusApi.gfmSettings).mockResolvedValue({ state: 'not_run', reason: 'x', recommendation: null,
+      applied: { at: 1, changes: [], hub_resolve_needed: true } } as never)
     const user = mount()
     const line = await screen.findByTestId('hub-chapter-operation-control')
     expect(line.textContent).toMatch(/Re-solve the hub: these settings change its island rows/)
