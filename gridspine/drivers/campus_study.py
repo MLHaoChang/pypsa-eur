@@ -610,13 +610,32 @@ def psse_campus(run_dir, hours=None) -> list:
     return bundles
 
 
+#: P_ref of a PCC that never imports or exports: a normally open tie, whose
+#: rating stands for the connection the grid-connected checks are made at.
+OPEN_TIE_P_REF = ("normally open tie: its rating, the campus file p_connection_mw (grid-connected checks; "
+                  "no import or export in any hour)")
+#: Added to the reactive requirement's clause for such a PCC.
+OPEN_TIE_CLAUSE = " [applies with the tie closed (grid-connected operation), not to islanded operation]"
+
+
+def _requirement(code, campus, pcc, pf):
+    """``(requirement, p_ref, p_ref_from)`` at the PCC. For a normally open
+    tie the clause says it applies with the tie closed."""
+    p_ref, p_ref_from = _p_ref(campus, pcc)
+    req = requirement_from(code, p_ref, pf=pf)
+    if p_ref_from == OPEN_TIE_P_REF:
+        req = dataclasses.replace(req, clause=req.clause + OPEN_TIE_CLAUSE)
+    return req, p_ref, p_ref_from
+
+
 def _p_ref(campus, pcc: pd.DataFrame):
     p = campus.params
     hit = p[(p["param"] == "p_connection_mw")]
     peak = float(pcc["import_mw"].abs().max())
     if len(hit):
-        why = "" if peak > 0 else " (the tie is open: no import or export in any hour)"
-        return float(hit["value"].iloc[0]), "campus file p_connection_mw" + why
+        if not peak > 0:
+            return float(hit["value"].iloc[0]), OPEN_TIE_P_REF
+        return float(hit["value"].iloc[0]), "campus file p_connection_mw"
     if not peak > 0:
         raise ContractError(
             "the PCC never imports or exports in the prepared periods (a normally open tie?), so the peak "
@@ -638,8 +657,7 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
     hourly, pcc = campus_tables(run_dir)
     selection = selected_hours(run_dir)
     campus = load_run_campus(run_dir)
-    p_ref, p_ref_from = _p_ref(campus, pcc)
-    req = requirement_from(code, p_ref, pf=pf)
+    req, p_ref, p_ref_from = _requirement(code, campus, pcc, pf)
     flows, reactive, trafo_rows, bus_rows, pcc_rows, q_rows = {}, {}, [], [], [], []
     for period, hour in selection[["period", "hour"]].itertuples(index=False):
         period, hour = int(period), int(hour)
@@ -737,12 +755,12 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     selection = selected_hours(run_dir)
     spec = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
     lib = load_asset_library(library)
-    p_ref, _ = _p_ref(build_campus(spec), pcc)
     grid_code = load_grid_code(profile, extra_dirs=profile_dirs)
+    req, _, _ = _requirement(grid_code, build_campus(spec), pcc, pf)
     choose = select_assets_milp if method == "milp" else select_assets
     hooks = {"progress": progress, "should_stop": should_stop} if method == "milp" else {}
     manifest = json.loads(_require(run_dir, CAMPUS_MANIFEST).read_text())
-    out = choose(spec, hourly, selection, lib, requirement_from(grid_code, p_ref, pf=pf), grid_code, criteria,
+    out = choose(spec, hourly, selection, lib, req, grid_code, criteria,
                  pcc_switchgear=pcc_switchgear, parallel=parallel, pcc_tap_control=pcc_tap_control,
                  period_years=manifest.get("period_weightings"), **hooks)
     build_campus(out["spec"])                                # the invested file must build before it is written

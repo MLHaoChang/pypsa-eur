@@ -189,9 +189,12 @@ def test_a_campus_at_the_grids_voltage_has_no_transformer_and_still_sizes(tmp_pa
     rank_campus(run, k=1)
     out = size_campus(run)
     assert out["transformers"].empty and "adequate" in out["transformers"].columns
-    checks = set(out["compliance"]["check"])
-    assert "transformer_loading" not in checks and {"pcc_reactive", "switchgear"} <= checks
-    invest_campus(run)
+    comp = out["compliance"].set_index("check")
+    assert "transformer_loading" not in comp.index and {"pcc_reactive", "switchgear"} <= set(comp.index)
+    note = "no transformer between the PCC and the site buses (20/20 kV): transformer loading not assessed"
+    assert comp.at["campus_voltage", "detail"].endswith(note)
+    invested = invest_campus(run)["compliance"].set_index("check")
+    assert "transformer_loading" not in invested.index and note in invested.at["campus_voltage", "detail"]
 
 
 def test_a_pcc_that_never_imports_needs_a_connection_capacity_and_is_told_so(tmp_path):
@@ -221,9 +224,16 @@ def test_a_normally_open_tie_sizes_against_its_rating_and_says_the_tie_is_open(t
     run = tmp_path / "run"
     prepare_campus(run, spec, project)
     rank_campus(run, k=1)
-    req = size_campus(run)["requirement"]
+    out = size_campus(run)
+    req = out["requirement"]
     assert req["p_ref_mw"] == 60.0 and req["q_limit_mvar"] > 0
-    assert req["p_ref_from"] == "campus file p_connection_mw (the tie is open: no import or export in any hour)"
+    assert req["p_ref_from"].startswith("normally open tie: its rating") and "grid-connected checks" in req["p_ref_from"]
+    label = "applies with the tie closed (grid-connected operation), not to islanded operation"
+    assert label in req["clause"]
+    row = out["compliance"].set_index("check").loc["pcc_reactive"]
+    assert label in row["clause"]
+    invested = invest_campus(run)["compliance"].set_index("check")
+    assert label in invested.at["pcc_reactive", "clause"]
 
 
 def test_sizing_checks_short_circuit_per_period_with_that_periods_units(tmp_path, project):

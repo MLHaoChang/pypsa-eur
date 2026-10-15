@@ -18,7 +18,10 @@ check (``CHECKS``):
     confirmed), which it then stays.
 ``transformer_loading``
     The highest loading of any transformer, intact or N-1, against 100 % of
-    its rating (equipment). A campus without a transformer has no such row.
+    its rating (equipment). A campus without a transformer has no such row;
+    the campus voltage row (or, without other buses, the PCC voltage row)
+    then says so (``NO_TRANSFORMER``), so a reader can tell "not
+    applicable" from "forgotten".
 ``switchgear``
     Ik'' and peak against each rated bus (C4c). Buses without a rating make
     the check ``not_rated``.
@@ -47,6 +50,8 @@ import pandas as pd
 from gridspine.templates.grid_codes import band_for
 
 CHECKS = ("pcc_reactive", "pcc_voltage", "campus_voltage", "transformer_loading", "switchgear")
+#: The note a campus without a transformer carries in its voltage row.
+NO_TRANSFORMER = "no transformer between the PCC and the site buses ({kv} kV): transformer loading not assessed"
 #: Mvar tolerance for "on the band edge" after correction (the solver's tol).
 Q_TOL = 0.011
 
@@ -156,6 +161,12 @@ def campus_compliance(bus, trafo, reactive, sizing, compensation, short_circuit,
     # transformers: none on a campus that runs at the grid's voltage
     if len(trafo) and len(sizing):
         rows.append(_transformer_row(trafo, sizing))
+    else:
+        kvs = [bus_kv[pcc_bus]] + sorted({v for b, v in bus_kv.items() if b != pcc_bus}, reverse=True)
+        note = NO_TRANSFORMER.format(kv="/".join(f"{v:g}" for v in kvs) if len(kvs) > 1 else f"{kvs[0]:g}")
+        at = next((r for r in rows if r["check"] == "campus_voltage"), None) or \
+            next(r for r in rows if r["check"] == "pcc_voltage")
+        at["detail"] = f"{at['detail']}; {note}"
 
     # switchgear
     rated = short_circuit[short_circuit["rated_ka"].notna()]
