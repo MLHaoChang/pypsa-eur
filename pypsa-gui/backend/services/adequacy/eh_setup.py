@@ -86,6 +86,10 @@ def _supply(n) -> dict[str, float]:
     if "carrier" in gens.columns:
         gens = gens[[not any(k in str(c).lower() for k in _NOT_EQUIPMENT_KW)
                      for c in gens["carrier"]]]
+    # An empty candidate row (p_nom 0, built only if the plan expands it) is
+    # not supply: counted, a staged template's zero-cost candidates moved the
+    # median and dropped the real grid supply out of the cheaper half.
+    gens = gens[gens["p_nom"].map(_f) > 0] if "p_nom" in gens.columns else gens
     if gens.empty:
         return out
     mc = gens["marginal_cost"].map(_f) if "marginal_cost" in gens.columns else None

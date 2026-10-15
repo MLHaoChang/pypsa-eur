@@ -81,7 +81,8 @@ def investment_payload(report: dict | None, *, stale: bool | None = None) -> dic
         "lcoe_eur_per_mwh": _num(report.get("lcoe_finance_consistent_eur_per_mwh")),
         "min_dscr": _num(report.get("min_dscr")),
         "basis_statement": p.get("basis_statement"),
-        "compared_with": cf.get("basis"),
+        "compared_with": cf.get("basis") if cf.get("present", True) else None,
+        "no_counterfactual": cf.get("basis") if cf and not cf.get("present", True) else None,
         "counterfactual_notes": [str(n) for n in cf.get("notes") or []],
         "island_breakeven_eur_per_year": _num(be.get("eur_per_year")),
         "island_breakeven_text": be.get("text"),
@@ -102,7 +103,9 @@ def investment_table(payload: dict, source_path: str):
         ("Payback (years)", F.fmt_number(payload.get("payback_years"), digits=1)),
         ("LCOE", F.fmt_number(payload.get("lcoe_eur_per_mwh"), unit="€/MWh", digits=1)),
         ("Minimum DSCR", F.fmt_number(payload.get("min_dscr"), digits=2)),
-        ("Compared with", F.fmt_text(payload.get("compared_with"))),
+        ("Compared with", F.fmt_text(payload.get("compared_with")) if payload.get("compared_with")
+         else "nothing: incremental = total" if payload.get("no_counterfactual")
+         else F.fmt_text(None)),
         ("Price basis", F.fmt_text(payload.get("basis_statement"))),
     ]
     if payload.get("island_breakeven_text"):
@@ -118,6 +121,8 @@ def investment_disclosures(payload: dict) -> list[str]:
                    "last run's.")
     if payload.get("compared_with"):
         out.append(f"Investment case — the incremental figures are {payload['compared_with']}.")
+    elif payload.get("no_counterfactual"):
+        out.append(f"Investment case — {payload['no_counterfactual']}.")
     out += [f"Investment case — {n}" for n in payload.get("counterfactual_notes") or []]
     if payload.get("island_breakeven_text"):
         out.append("Investment case — the island break-even is a threshold the island capability "
@@ -180,7 +185,10 @@ def island_tables(payload: dict, source_path: str) -> dict:
                 rows.append([unit, s.get("model", ""), field, _g(cur[field]), _g(rec.get(field, cur[field]))])
     if rows:
         out["island_gfm_settings"] = EvidenceTable(
-            table_id="island_gfm_settings", columns=["Unit", "Control", "Setting", "Current", "Recommended"],
+            table_id="island_gfm_settings",
+            # an incomplete search is never a verdict (#303): its settings are the best so far
+            columns=["Unit", "Control", "Setting", "Current",
+                     "Best found so far" if gfm.get("status") == "incomplete" else "Recommended"],
             rows=rows, caption="Grid-forming settings (heuristic screening)",
             source_path=f"{source_path}/gfm/settings")
     cap = [[c.get("case", ""), c.get("kind", ""), f"+{_g(c.get('delta'))} {c.get('unit', '')}".strip(),

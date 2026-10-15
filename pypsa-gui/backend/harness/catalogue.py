@@ -1558,7 +1558,8 @@ TOOLS: list[dict[str, Any]] = [
         "eh_datacenter (weak_flexible), eh_datacenter_staged (the same "
         "campus built in three phases 2027/2030/2035, multi-period), "
         "eh_h2_hub (strong_grid), "
-        "eh_microgrid (off_grid), eh_site (a generic site that is not a data "
+        "eh_microgrid (off_grid), eh_h2_hub_staged and eh_microgrid_staged "
+        "(those two planned over 2027/2030/2035, multi-period), eh_site (a generic site that is not a data "
         "center, parametrized by `params`: site_type industrial | commercial | "
         "hospital | campus | other fills every value from a preset; override "
         "stages [{year, peak_mw}], connection_mw, energization [{year, mw}], "
@@ -1571,7 +1572,8 @@ TOOLS: list[dict[str, Any]] = [
             "template_id": {"type": "string",
                             "enum": ["3bus", "ieee14", "belgium", "ieee39",
                                      "eh_datacenter", "eh_datacenter_staged",
-                                     "eh_h2_hub", "eh_microgrid", "eh_site"]},
+                                     "eh_h2_hub", "eh_microgrid", "eh_site",
+                                     "eh_h2_hub_staged", "eh_microgrid_staged"]},
             "new_name": {"type": "string"},
             "params": {"type": "object",
                        "description": "eh_site only: the site's parameters "
