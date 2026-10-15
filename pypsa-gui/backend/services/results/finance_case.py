@@ -105,6 +105,10 @@ What it builds:
   load already. CO2 lines escalate at the case's inflation
   in a nominal case and not at all in a real one; their cost is avoided cash
   (`source_id` `co2_avoided_cash:*`; the report's `avoided_co2_cost`).
+  On the site-today basis (`baseline`, owner decision 2026-10-15 (a)) the
+  baseline buys what it sheds of a non-electric site load over the actual
+  solve, priced and CO2-costed the same way; without a reference purchase
+  such a load blocks (`counterfactual_baseline_unserved:<loads>`).
   `counterfactual_hash` = sha256[:16] of the tariff, the served load, the
   connection and the commodity, and the purchases and CO2 price when set.
 * **The first-order bill effect of degradation (C5)** — per owner generator
@@ -938,6 +942,29 @@ def _co2_line(key: str, tonnes: float, co2, fin, k: str, source: str, source_id:
                         source_id=source_id, period=k, money_year=int(co2.money_year))
 
 
+def _co2_basis_flags(co2, fin, flags: list[str]) -> None:
+    """The CO2 price against the case's money basis (H2e): a real case whose
+    currency year differs is flagged; a nominal case without an inflation
+    cannot convert it (its lines read not established, `_co2_line`)."""
+    if getattr(fin, "price_basis", "nominal") == "real":
+        cy = getattr(fin, "currency_year", None)
+        if cy is not None and int(co2.money_year) != int(cy):
+            flags.append(f"co2_price_money_year_differs:{int(co2.money_year)}:{int(cy)}")
+    elif getattr(fin, "inflation", None) is None:
+        flags.append("co2_price_not_established:no_inflation")
+
+
+def _shed_t(n, lost_load, ld: str, voll: float) -> np.ndarray | None:
+    """The VoLL shed of load `ld` per snapshot (MW): 0 without VoLL slacks,
+    None when VoLL is on but no capture was handed in (`_served_load`)."""
+    ll = (lost_load or {}).get("lost_load_t") if isinstance(lost_load, dict) else None
+    if ll is None:
+        return np.zeros(len(n.snapshots)) if voll <= 0.0 else None
+    if getattr(ll, "empty", True) or ld not in ll.columns:
+        return np.zeros(len(n.snapshots))
+    return np.clip(ll[ld].reindex(n.snapshots).fillna(0.0).to_numpy(dtype=float), 0.0, None)
+
+
 def _is_co2(ln: TemplateLine) -> bool:
     return ln.key.startswith("co2:")
 
@@ -1063,12 +1090,7 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
         # cost is not established, not absent (#305 review).
         flags.append("co2_price_not_applied:counterfactual_not_established")
     if co2 is not None and (bought or grid_co2):
-        if getattr(fin, "price_basis", "nominal") == "real":
-            cy = getattr(fin, "currency_year", None)
-            if cy is not None and int(co2.money_year) != int(cy):
-                flags.append(f"co2_price_money_year_differs:{int(co2.money_year)}:{int(cy)}")
-        elif getattr(fin, "inflation", None) is None:
-            flags.append("co2_price_not_established:no_inflation")
+        _co2_basis_flags(co2, fin, flags)
     # The bought load as the LP saw it (`load_scalers`), less its shed.
     bought_mw: dict[str, np.ndarray | None] = {}
     for ld in bought:
@@ -1364,7 +1386,8 @@ def _import_value(side: _Side, k: str, s_items: set) -> float | None:
 
 
 def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs, owner,
-                             lost_load, base_year: int, flags: list[str]
+                             lost_load, base_year: int, flags: list[str],
+                             actual: dict[str, list[TemplateLine]] | None = None
                              ) -> tuple[dict[str, list[TemplateLine]], dict[str, float | None],
                                         str]:
     """The counterfactual as the site stands today: the solved baseline's own
@@ -1373,7 +1396,16 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
     builds nets to 0 line by line), plus the shed it adds over the actual
     solve, priced at the case's VoLL (`counterfactual:shed_at_voll`, escalating
     as opex: VoLL is a real-terms reliability value). S for C5 is the
-    baseline's import value minus the actual's."""
+    baseline's import value minus the actual's.
+
+    H2e on this basis (owner decision 2026-10-15, (a)): a site non-electric
+    load the baseline cannot serve (an H2 offtake without the new
+    electrolyser) is bought at its `reference_purchases` price, the
+    baseline's shed of it over the actual's, flagged `counterfactual_buys`;
+    a `co2_price` prices that purchase and, with a grid intensity, both
+    sides' imports. Without a reference purchase such a load leaves the
+    counterfactual not established (`owner_conversion_load`), as on the
+    analytic basis: the site today could not serve it and nothing prices it."""
     from services.adequacy.eh_report import _live_result_df
 
     side = _build_finance_case(baseline.network, cfg, fin, result_df=_live_result_df,
@@ -1392,9 +1424,80 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
     out: dict[str, list[TemplateLine]] = {}
     avoided: dict[str, float | None] = {}
     shed_by: dict[str, float] = {}
+    bought_by: dict[str, float] = {}
+    # H2e: the site's non-electric loads the baseline sheds over the actual
+    # solve, per snapshot (MW); None when either side's shed is not captured.
+    electric = _lp._electric_bus_test(n, parsed)
+    purchases = {r.load: r for r in getattr(parsed, "reference_purchases", None) or []}
+    co2 = getattr(parsed, "co2_price", None)
+    unserved: dict[str, np.ndarray | None] = {}
+    for ld in n.loads.index:
+        bus = str(n.loads.at[ld, "bus"])
+        if bus not in sides.site or electric(bus) or ld not in baseline.network.loads.index:
+            continue
+        b_t, a_t = _shed_t(baseline.network, baseline.lost_load, str(ld), voll), \
+            _shed_t(n, lost_load, str(ld), voll)
+        diff = None if b_t is None or a_t is None else np.clip(b_t - a_t, 0.0, None)
+        if diff is None or float(diff.sum()) > _EPS_MW:
+            unserved[str(ld)] = diff
+    bought = sorted(ld for ld in unserved if ld in purchases)
+    missing = sorted(ld for ld in unserved if ld not in purchases)
+    blockers = []
+    if missing:
+        blockers.append("counterfactual_not_established:owner_conversion_load")
+        flags.append("counterfactual_baseline_unserved:" + ",".join(missing))
+        if purchases:
+            flags.append("counterfactual_reference_purchase_missing:" + ",".join(missing))
+    if bought:
+        flags.append("counterfactual_buys:" + ",".join(bought))
+    unused = sorted(set(purchases) - set(bought))
+    if unused:
+        flags.append("counterfactual_reference_purchase_unused:" + ",".join(unused))
+    grid_co2 = co2 is not None and co2.grid_t_per_mwh is not None
+    if co2 is not None and blockers:
+        flags.append("co2_price_not_applied:counterfactual_not_established")
+    if co2 is not None and (bought or grid_co2):
+        _co2_basis_flags(co2, fin, flags)
+    flags += blockers
+    scratch: list[str] = []
+    imports = {"actual": (n, n.links_t.p0), "baseline": (baseline.network,
+                                                         baseline.network.links_t.p0)}
+    imp = {side_: np.sum([_billing._flow(p0, m, scratch) for m in _lp.import_links(parsed)],
+                         axis=0) * np.ones(len(net.snapshots))
+           for side_, (net, p0) in imports.items()}
     for p in _periods(n):
         k = _key(p)
         lines = list(side.actual.get(k, []))
+        for b in blockers:
+            lines.append(_cf_none(f"counterfactual:{b.split(':', 1)[1]}", b, k, base_year))
+        mb, ma = _mask(baseline.network, p), _mask(n, p)
+        wb = baseline.network.snapshot_weightings.objective.to_numpy(dtype=float)
+        wa = n.snapshot_weightings.objective.to_numpy(dtype=float)
+        for ld in bought:
+            r, diff = purchases[ld], unserved[ld]
+            mwh = None if diff is None else float((wb[mb] * diff[mb]).sum())
+            kg = None if mwh is None else mwh * 1000.0 / r.lhv_kwh_per_kg
+            if mwh is not None:
+                bought_by[f"{k}:{ld}"] = mwh
+            else:
+                flags.append(f"counterfactual_purchase_not_established:{ld}:voll_shed_unknown")
+            lines.append(TemplateLine(
+                key=f"counterfactual:purchase:{ld}", stream="fuel",
+                amount=None if kg is None else -kg * r.price_eur_per_kg,
+                esc_class="fuel", source="counterfactual", source_id=f"purchase:{ld}", period=k,
+                money_year=base_year))
+            if co2 is not None:
+                line = _co2_line(f"co2:purchase:{ld}", 0.0 if kg is None else kg * r.co2_t_per_kg,
+                                 co2, fin, k, "counterfactual", f"co2_avoided_cash:{ld}")
+                lines.append(line if kg is not None else dataclasses.replace(line, amount=None))
+        if grid_co2 and not blockers and actual is not None:
+            # Both sides' metered imports, so only the difference counts.
+            act_t = float((wa[ma] * imp["actual"][ma]).sum()) * co2.grid_t_per_mwh
+            cf_t = float((wb[mb] * imp["baseline"][mb]).sum()) * co2.grid_t_per_mwh
+            actual[k].append(_co2_line("co2:grid_import", act_t, co2, fin, k, "co2",
+                                       "grid_import"))
+            lines.append(_co2_line("co2:grid_import", cf_t, co2, fin, k, "counterfactual",
+                                   "co2_avoided_cash:grid_import"))
         extra = _shed_mwh(baseline.network, baseline.lost_load, loads,
                           _mask(baseline.network, p)) - _shed_mwh(n, lost_load, loads,
                                                                   _mask(n, p))
@@ -1414,6 +1517,10 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
         flags.append("counterfactual_shed_at_voll:" + _num(sum(shed_by.values())))
     blob = {"basis": "site_today", "baseline": baseline.digest, "voll": voll,
             "shed": {k: round(v, 6) for k, v in sorted(shed_by.items())}}
+    if bought_by or blockers:
+        # H2e: what the baseline buys (a case without purchases keeps its hash).
+        blob["bought"] = {k: round(v, 6) for k, v in sorted(bought_by.items())}
+        blob["blockers"] = blockers
     cf_hash = hashlib.sha256(json.dumps(blob, sort_keys=True).encode()).hexdigest()[:16]
     return out, avoided, cf_hash
 
@@ -2108,14 +2215,7 @@ def _build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
         if baseline is not None:
             cf_lines, avoided, cf_hash = _baseline_counterfactual(
                 baseline, n, cfg, fin, parsed, sides, inputs, accs, owner, lost_load,
-                base_year, flags)
-            # H2e's inputs act on the analytic counterfactual only: the
-            # baseline re-solve neither buys a reference purchase nor prices
-            # CO2, so either one stated reads not applied, never absent.
-            if getattr(parsed, "reference_purchases", None):
-                flags.append("reference_purchases_not_applied:site_today_basis")
-            if getattr(parsed, "co2_price", None) is not None:
-                flags.append("co2_price_not_applied:site_today_basis")
+                base_year, flags, actual=actual)
         else:
             cf_lines, avoided, cf_hash = _counterfactual(n, cfg, parsed, sides, inputs, vf,
                                                          accs, actual, owned, contracts,

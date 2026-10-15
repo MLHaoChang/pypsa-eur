@@ -229,8 +229,10 @@ expected outage hours for the island break-even (owner decision 2026-10-15; no d
 `CommercialConfig.reference_purchases` (default `[]`) and `CommercialConfig.co2_price` (default None), with the
 models `ReferencePurchase` and `Co2Price`. They are read only by the finance adapter's counterfactual. Unset, they
 add no line, flag or hash key, so an existing case keeps its `finance_case_hash` and its `run_case` output. No
-signature changes (`_counterfactual` is private). With a `baseline` (site today) they are not applied:
-flagged `reference_purchases_not_applied:site_today_basis` / `co2_price_not_applied:site_today_basis`.
+signature changes (`_counterfactual` is private). With a `baseline` (site today, owner decision 2026-10-15 (a)) the
+baseline buys the non-electric load it sheds over the actual solve at its reference price and prices the CO2 the same
+way; such a load without a reference purchase leaves the counterfactual not established (`owner_conversion_load`).
+`_baseline_counterfactual` (private) gains `actual=` for the actual side's grid CO2 line.
 
 ## 7. Coordination protocol
 
