@@ -1,0 +1,1 @@
+* Chore(agents): The coordination template stores its `.claude/` and `.github/` folders as `dot-claude/` and `dot-github/`, so its skills no longer load as this repo's own; `apply.sh` restores the dot names when it copies them.

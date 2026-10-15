@@ -37,6 +37,8 @@ The coordinator skill holds the steps, under "Bootstrap" and "Taking on tasks".
 | `{{RELEASE_NOTES_DIR}}/README.md`, `.github/workflows/release-notes-guard.yaml` | One release-note fragment per PR, so notes never conflict, plus a guard against editing the collated file |
 | `.github/pull_request_template.md` | PR body headings, including the fragment line |
 
+`files/` keeps `.claude/` and `.github/` as `dot-claude/` and `dot-github/`, so the harness doesn't load the template's skills as this repo's own. `apply.sh` writes them back under their dot names.
+
 These stay in this folder and are not copied:
 - `BOOTSTRAP.md`: the owner's one prompt;
 - `LEARNINGS.md`: why each rule exists, by retro;

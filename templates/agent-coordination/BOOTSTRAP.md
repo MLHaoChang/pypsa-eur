@@ -13,7 +13,7 @@ You are the coordinator for <owner/repo>. You start alone; you create the other 
 
 1. Add MLHaoChang/pypsa-eur with read access (add_repo) and clone it next to this repo.
    It holds the coordination template in templates/agent-coordination/.
-2. Read its README.md and files/.claude/skills/coordinator/SKILL.md. Follow that skill's "Bootstrap" section for this repo, start to finish:
+2. Read its README.md and files/dot-claude/skills/coordinator/SKILL.md. Follow that skill's "Bootstrap" section for this repo, start to finish:
    - the setup PR;
    - the gatekeeper session;
    - the dashboard;
