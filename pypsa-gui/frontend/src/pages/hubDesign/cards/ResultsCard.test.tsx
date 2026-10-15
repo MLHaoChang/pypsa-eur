@@ -3,6 +3,8 @@
 // stale banner from the review's `stale` boolean (never `source` — gate N8),
 // and "Open full report" into Results → Adequacy.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { kpiFigure, splitValueUnit } from '../../../utils/format'
+import { TERM_FALLBACK } from '../shared/Term'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -81,6 +83,13 @@ describe('ResultsCard headline (§5.5)', () => {
 // P24-FE gate B1: `cost_at_target_eur` is the cost of the planned design at
 // the pack's energy target, without shortfall costs — never the cost of
 // meeting the user's reliability goal.
+// The shared tile rounds to the KPI standard (utils/format.ts::kpiFigure).
+const KPI_COST = (() => {
+  const raw = splitValueUnit(fmtCurrency(12_345_678))
+  const p = kpiFigure(raw.value, raw.unit)
+  return p.unit ? `${p.value} ${p.unit}` : p.value
+})()
+
 describe('ResultsCard cost label (gate B1)', () => {
   const LABEL = 'Yearly cost of this design (before any shortfall costs)'
   const cases: [string, ReturnType<typeof review>][] = [
@@ -93,10 +102,11 @@ describe('ResultsCard cost label (gate B1)', () => {
       mount()
       const cost = await screen.findByTestId('hub-results-cost')
       expect(cost.textContent).toContain(LABEL)
-      expect(cost.textContent).toContain(fmtCurrency(12_345_678))
+      expect(cost.querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value')).toBe(KPI_COST)
       expect(cost.textContent).not.toMatch(/goal/i)
-      expect(cost.querySelector('[data-testid="term-cost_at_target"]')?.getAttribute('data-tip'))
-        .not.toMatch(/goal/i)
+      // the glossary text rides on the tile's hover, still never "goal"
+      expect(cost.getAttribute('title')).toBe(TERM_FALLBACK.cost_at_target)
+      expect(cost.getAttribute('title')).not.toMatch(/goal/i)
     })
   }
 })
@@ -105,7 +115,8 @@ describe('ResultsCard body', () => {
   it('cost via fmtCurrency, three risks, the gaps', async () => {
     mount()
     await screen.findByTestId('hub-results-verdict')
-    expect(screen.getByTestId('hub-results-cost').textContent).toContain(fmtCurrency(12_345_678))
+    expect(screen.getByTestId('hub-results-cost').querySelector('[data-kpi-value]')
+      ?.getAttribute('data-kpi-value')).toBe(KPI_COST)
     expect(screen.getByTestId('hub-results-risks-0').textContent).toContain('grid_import')
     expect(screen.getByTestId('hub-results-risks-0').textContent).toContain(fmtCurrency(590_000))
     expect(screen.getByTestId('hub-results-risks-2').textContent).toContain('genset_2')
