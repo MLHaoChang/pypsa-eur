@@ -57,6 +57,18 @@
       "value": "h2_hub_network_tariff_synthetic: 25 EUR/MWh 08-20 h, 15 EUR/MWh otherwise"
     },
     {
+      "item": "existing electrolyser",
+      "note": "the 2027 offtake (10 MW of H2) needs about 15 MW; the plan adds the rest by period as the offtake grows",
+      "source": "assumed",
+      "value": "30 MW (the single-year template has 60)"
+    },
+    {
+      "item": "storage across periods",
+      "note": "each period is one representative week standing for several years, so no energy is carried from one period into the next",
+      "source": "assumed",
+      "value": "cyclic within each period"
+    },
+    {
       "item": "fuel cell",
       "note": "the pack's fuel cell lives 10 years: a staged one would retire before 2045",
       "source": "assumed",

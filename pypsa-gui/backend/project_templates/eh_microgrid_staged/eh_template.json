@@ -44,17 +44,17 @@
   },
   "projected_load": [
     {
-      "note": "the residential and hospital peaks added (they do not coincide); synthetic",
+      "note": "sum of peaks (upper bound): the residential and hospital peaks do not coincide; synthetic",
       "peak_mw": 9.2,
       "year": 2027
     },
     {
-      "note": "the residential and hospital peaks added (they do not coincide); synthetic",
+      "note": "sum of peaks (upper bound): the residential and hospital peaks do not coincide; synthetic",
       "peak_mw": 10.87,
       "year": 2030
     },
     {
-      "note": "the residential and hospital peaks added (they do not coincide); synthetic",
+      "note": "sum of peaks (upper bound): the residential and hospital peaks do not coincide; synthetic",
       "peak_mw": 12.54,
       "year": 2035
     }

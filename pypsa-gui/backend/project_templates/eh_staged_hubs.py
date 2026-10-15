@@ -27,7 +27,9 @@ What each one still lacks is said in its ledger and study notes:
   MVA, genset minimum load).
 
 ``register(T)`` adds both to ``eh_templates``' registries; it is called from
-there, so this module never imports ``eh_templates`` itself.
+there, so this module never imports ``eh_templates`` itself. ``T`` is a
+snapshot of that module's names taken at import: a test that later
+monkeypatches ``eh_templates`` does not reach the staged builders.
 """
 from __future__ import annotations
 
@@ -90,6 +92,29 @@ def _sink_stores(n, existing) -> None:
     n.stores.loc[rows, ["overnight_cost", "discount_rate"]] = [0.0, DISCOUNT_RATE]
 
 
+def _in_service(n, existing) -> None:
+    """The existing hub is in service in every period: an infinite lifetime
+    (a pack-priced row carries the pack's, from build year 0, and would be
+    inactive from 2027 on; gatekeeper review of #304)."""
+    for frame in ("generators", "storage_units", "links", "stores"):
+        df = getattr(n, frame)
+        rows = [a for a in existing if a in df.index]
+        df.loc[rows, "lifetime"] = float("inf")
+
+
+def _cyclic_per_period(n) -> None:
+    """Storage cycles within each period: one representative week stands for
+    3, 5 or 10 years, so energy carried from one period into the next is not
+    physical (gatekeeper review of #304). Set here, not in the shared
+    ``stage_network``, so the staged data center is untouched."""
+    if len(n.stores):
+        n.stores["e_cyclic"] = True
+        n.stores["e_cyclic_per_period"] = True
+    if len(n.storage_units):
+        n.storage_units["cyclic_state_of_charge"] = True
+        n.storage_units["cyclic_state_of_charge_per_period"] = True
+
+
 # ── Industrial Hydrogen Hub, staged ─────────────────────────────────────────
 
 
@@ -143,6 +168,8 @@ def build_eh_h2_hub_staged(T) -> "pypsa.Network":  # noqa: F821
         load_scale={y: {"h2_offtake": H2_OFFTAKE_MW[y] / last} for y in YEARS},
         energization={}, weights=_period_years(), existing=H2_EXISTING, candidates=candidates)
     _sink_stores(n, H2_EXISTING)
+    _in_service(n, H2_EXISTING)
+    _cyclic_per_period(n)
     n.name = "Industrial Hydrogen Hub (staged growth)"
     return n
 
@@ -214,6 +241,8 @@ def build_eh_microgrid_staged(T) -> "pypsa.Network":  # noqa: F821
     _site().stage_network(
         n, list(YEARS), load_scale=MG_LOAD_SCALE, energization={}, weights=_period_years(),
         existing=MG_EXISTING, candidates=candidates)
+    _in_service(n, MG_EXISTING)
+    _cyclic_per_period(n)
     n.name = "Island Microgrid (staged growth)"
     return n
 
@@ -335,6 +364,14 @@ def register(T) -> None:
             {"item": "import tariff", "value": f"{SYNTHETIC_TARIFF['id']}: 25 EUR/MWh 08-20 h, "
                                                "15 EUR/MWh otherwise", "source": "synthetic",
              "note": "an illustrative network-use charge on top of the wholesale price"},
+            {"item": "existing electrolyser", "value": "30 MW (the single-year template has 60)",
+             "source": "assumed",
+             "note": "the 2027 offtake (10 MW of H2) needs about 15 MW; the plan adds the rest by "
+                     "period as the offtake grows"},
+            {"item": "storage across periods", "value": "cyclic within each period",
+             "source": "assumed",
+             "note": "each period is one representative week standing for several years, so no "
+                     "energy is carried from one period into the next"},
             {"item": "fuel cell", "value": "the existing 10 MW unit, no staged candidate",
              "source": "assumed",
              "note": "the pack's fuel cell lives 10 years: a staged one would retire before 2045"},
@@ -366,7 +403,7 @@ def register(T) -> None:
         "dtc_attribution": None,
         "projected_load": _stages_meta(
             {y: 7.5 * MG_LOAD_SCALE[y]["residential"] + 1.7 * MG_LOAD_SCALE[y]["hospital_load"]
-             for y in YEARS}, "the residential and hospital peaks added (they do not coincide); synthetic"),
+             for y in YEARS}, "sum of peaks (upper bound): the residential and hospital peaks do not coincide; synthetic"),
         "energization": [],
         "period_years": {str(y): py[y] for y in YEARS},
         "ledger": [

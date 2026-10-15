@@ -60,12 +60,23 @@ def test_one_candidate_per_period_that_outlives_the_horizon(staged):
         assert float(df.at[c, "overnight_cost"]) > 0 or c.startswith("bess"), c
 
 
-def test_the_existing_hub_is_sunk(staged):
+def test_the_existing_hub_is_sunk_and_in_service_in_every_period(staged):
     tid, n = staged
+    cls = {"generators": "Generator", "storage_units": "StorageUnit", "links": "Link",
+           "stores": "Store"}
     for a in EXISTING[tid]:
         frame = next(f for f in ("generators", "storage_units", "links", "stores")
                      if a in getattr(n, f).index)
         assert getattr(n, frame).at[a, "overnight_cost"] == 0.0, a
+        for p in H.YEARS:
+            assert bool(n.components[cls[frame]].get_active_assets(p).loc[a]), (a, p)
+
+
+def test_storage_cycles_within_each_period(staged):
+    _tid, n = staged
+    if len(n.stores):
+        assert n.stores["e_cyclic_per_period"].all() and n.stores["e_cyclic"].all()
+    assert n.storage_units["cyclic_state_of_charge_per_period"].all()
 
 
 def test_the_load_grows_by_period(staged):
@@ -165,6 +176,21 @@ def test_the_h2_hub_plans_electrolysis_for_the_growing_offtake(reset_backend, mo
     n, cfg, state = _solve("eh_h2_hub_staged", monkeypatch, tmp_path)
     added = sum(float(n.links.at[f"electrolyser_new_{y}", "p_nom_opt"]) for y in H.YEARS)
     assert added > 0.1                                # 30 MW cannot make 25 MW of H2
+    # The H2 balance closes within each period: no energy is carried between
+    # periods, so the period's electrolysis makes its own offtake (and what
+    # the fuel cell burns). Hours, not weights: the store's step is one hour.
+    eff = n.links.efficiency
+    els = [c for c in n.links.index if c.startswith("electrolyser")]
+    for p in H.YEARS:
+        made = sum(float((n.links_t.p0[c].loc[p] * eff[c]).sum()) for c in els)
+        used = float(n.loads_t.p_set["h2_offtake"].loc[p].sum()) \
+            + float(n.links_t.p0["fuel_cell"].loc[p].sum())
+        assert made == pytest.approx(used, rel=1e-6, abs=1e-3), p
+        e = n.stores_t.e["h2_storage"].loc[p]
+        p_store = n.stores_t.p["h2_storage"].loc[p]
+        assert float(e.iloc[-1]) == pytest.approx(float(e.iloc[0] + p_store.iloc[0]), abs=1e-3)
+    # The existing fuel cell can run (it is in service).
+    assert n.links.at["fuel_cell", "p_nom"] == 10.0
     # The investment case is refused as the notes say, until the grey-H2
     # counterfactual lands (the engine slice).
     try:
