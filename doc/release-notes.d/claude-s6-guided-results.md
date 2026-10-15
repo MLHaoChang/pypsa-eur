@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Guided mode's Results step is never locked (it says "not run yet" or "running" itself), its yearly cost is the shared KPI tile, and the Site and Results cards name components in plain words ("Grid import", "IT bus") instead of their raw ids.

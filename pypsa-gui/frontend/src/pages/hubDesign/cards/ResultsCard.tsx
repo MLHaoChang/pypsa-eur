@@ -3,15 +3,17 @@
 // establish — from GET /results/eh_review and the report the Expert panel
 // shows. "Open full report" goes to that panel.
 import { FileText } from 'lucide-react'
+import Kpi from '../../../components/Kpi'
+import ResultState from '../../../components/ResultState'
 import { useUIStore } from '../../../store/uiStore'
 import { fmeaTopRows, notEstablishedNotes } from '../../results/EhReferenceDesignPanel'
 import { zeroReasonText } from '../../results/fmea'
 import { fmtCurrency } from '../../results/shared'
 import { studyHasResults } from '../flow'
-import { headline } from '../headline'
+import { headline, riskName } from '../headline'
 import { useHubDesignStore } from '../hubDesignStore'
 import { CardShell } from '../shared/CardShell'
-import { Term } from '../shared/Term'
+import { Term, TERM_FALLBACK } from '../shared/Term'
 import { useHubReport, useHubReview, useHubStudy } from '../useHubData'
 import { SECTION_LABEL } from '../sectionLabels'
 
@@ -40,6 +42,20 @@ export function ResultsCard() {
   const gaps = report ? notEstablishedNotes(report) : []
   const cost = report?.cost_at_target_eur
   const setStep = useHubDesignStore(s => s.setStep)
+
+  if (!studyHasResults(study)) {
+    // Never an empty or greyed card (UX S6, G2): say why, and how to get there.
+    return (
+      <CardShell step="results" next="improve" testId="hub-card-results" title="Results">
+        {running ? (
+          <ResultState state="running" reason="The study is running; its verdict, cost and risks appear here when it finishes." />
+        ) : (
+          <ResultState state="not_run" reason="The study writes its verdict, cost and risks here."
+            action={{ label: 'Go to Goal and run the study', onClick: () => setStep('goal', { user: true }) }} />
+        )}
+      </CardShell>
+    )
+  }
 
   return (
     <CardShell step="results" next="improve" testId="hub-card-results" title="Results">
@@ -83,10 +99,12 @@ export function ResultsCard() {
       {cost != null && (
         // The cost of the planned design at the pack's energy target, without
         // shortfall costs — never "the cost of your goal" (P24-FE gate B1).
-        <p data-testid="hub-results-cost" className="text-[12px]">
-          <Term k="cost_at_target">Yearly cost of this design (before any shortfall costs)</Term>:{' '}
-          <span className="font-mono text-text">{fmtCurrency(cost)}</span>
-        </p>
+        // The shared KPI tile (UX S6, G-item 2), the glossary text on hover.
+        <div className="max-w-[260px]">
+          <Kpi testId="hub-results-cost" headline
+            label="Yearly cost of this design (before any shortfall costs)"
+            value={fmtCurrency(cost)} hint={TERM_FALLBACK.cost_at_target} />
+        </div>
       )}
 
       {risks.length > 0 && (
@@ -95,7 +113,7 @@ export function ResultsCard() {
           <ol data-testid="hub-results-risks" className="ml-4 list-decimal">
             {risks.map((r, i) => (
               <li key={r.mode_id} data-testid={`hub-results-risks-${i}`}>
-                {r.name || r.mode_id}
+                {riskName(r.name || r.mode_id)}
                 {r.criticality_eur_per_year != null && (
                   <span className="text-muted">
                     {' — '}{r.criticality_eur_per_year > 0

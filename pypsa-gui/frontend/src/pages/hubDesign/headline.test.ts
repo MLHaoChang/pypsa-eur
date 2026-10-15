@@ -3,7 +3,7 @@
 // report's, never computed anew.
 import { describe, expect, it } from 'vitest'
 import type { EhReferenceDesignReport, EhReview } from '../../api/simulation'
-import { headline } from './headline'
+import { headline, riskName } from './headline'
 
 type OkReview = Extract<EhReview, { status: 'ok' }>
 
@@ -26,12 +26,12 @@ describe('headline (§5.5)', () => {
       sections: {
         certification: { status: 'ok', payload: { verdict: 'fail', lole_h_per_year: 12.38, target_lole_h: 3 } },
         fmea_top: { status: 'ok', payload: { rows: [
-          { mode_id: 'B:grid_import', name: 'grid_import outage' },
+          { mode_id: 'B:grid_import', name: 'grid_import' },
           { mode_id: 'B:x', name: 'second' }] } },
       },
     })
     expect(headline(review({ verdict: 'fail', mc_lole_h_per_year: 12.38, target_lole_h: 3 }), r))
-      .toBe('Not certified: about 12 h/yr of shortfall vs a 3 h/yr goal — driven by grid_import outage')
+      .toBe('Not certified: about 12 h/yr of shortfall vs a 3 h/yr goal — driven by Grid import')
   })
 
   it('fail without ranked risks: driven by the plan\'s energy limit', () => {
@@ -95,5 +95,19 @@ describe('headline (§5.5)', () => {
   it('reads the report when the review summary lacks the shortfall (mc_lole_h)', () => {
     expect(headline(review({ verdict: 'pass', target_lole_h: 3 }), report({ mc_lole_h: 1.04 })))
       .toBe('Certified: about 1.0 h/yr of shortfall, under the 3 h/yr goal.')
+  })
+})
+
+describe('riskName (UX S6, G1)', () => {
+  it('a component id in plain words', () => {
+    expect(riskName('grid_import')).toBe('Grid import')
+    expect(riskName('genset_1')).toBe('Genset 1')
+  })
+  it('a common-mode outage names its links', () => {
+    expect(riskName('common_mode:grid_import,site_transformer'))
+      .toBe('Grid import and Site transformer failing together')
+  })
+  it('a name a person typed is kept', () => {
+    expect(riskName('Main feeder')).toBe('Main feeder')
   })
 })

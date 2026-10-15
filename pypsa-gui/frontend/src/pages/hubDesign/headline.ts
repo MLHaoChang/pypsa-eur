@@ -4,6 +4,7 @@
 // is re-computed here, only rounded for reading.
 import type { EhReferenceDesignReport, EhReview } from '../../api/simulation'
 import { certificationHeadline, fmeaTopRows } from '../results/EhReferenceDesignPanel'
+import { displayName } from '../../utils/displayName'
 
 type OkReview = Extract<EhReview, { status: 'ok' }>
 
@@ -28,9 +29,18 @@ function interval(review: OkReview, report: EhReferenceDesignReport | null): [nu
   return null
 }
 
+/** A ranked risk's name in plain words (UX S6, G1): a component id through
+ *  displayName; a common-mode row (`common_mode:a,b`) as its links failing
+ *  together. */
+export function riskName(name: string): string {
+  const cm = /^common_mode:(.+)$/.exec(name)
+  if (cm) return `${cm[1].split(',').map(displayName).join(' and ')} failing together`
+  return displayName(name)
+}
+
 function topRisk(report: EhReferenceDesignReport | null): string {
   const row = report ? fmeaTopRows(report)[0] : undefined
-  return row ? String(row.name || row.mode_id) : "the plan's energy limit"
+  return row ? riskName(String(row.name || row.mode_id)) : "the plan's energy limit"
 }
 
 export function headline(review: OkReview, report: EhReferenceDesignReport | null): string {

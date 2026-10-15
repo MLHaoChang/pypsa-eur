@@ -3,6 +3,8 @@
 // stale banner from the review's `stale` boolean (never `source` — gate N8),
 // and "Open full report" into Results → Adequacy.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { kpiFigure, splitValueUnit } from '../../../utils/format'
+import { TERM_FALLBACK } from '../shared/Term'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -51,7 +53,7 @@ const verdictText = async () => (await screen.findByTestId('hub-results-verdict'
 describe('ResultsCard headline (§5.5)', () => {
   const cases: [string, ReturnType<typeof review>, EhReferenceDesignReport, string][] = [
     ['fail', review(), REPORT,
-      'Not certified: about 12 h/yr of shortfall vs a 3 h/yr goal — driven by grid_import'],
+      'Not certified: about 12 h/yr of shortfall vs a 3 h/yr goal — driven by Grid import'],
     ['inconclusive', review({ summary: { verdict: 'inconclusive', mc_lole_h_per_year: 3.2, target_lole_h: 3 } }),
       { ...REPORT, sections: { certification: { status: 'ok', payload: {
         verdict: 'inconclusive', lole_h_per_year: 3.2, lole_ci: [2.4, 4.1], horizon_years: 1, target_lole_h: 3 } } } },
@@ -81,6 +83,13 @@ describe('ResultsCard headline (§5.5)', () => {
 // P24-FE gate B1: `cost_at_target_eur` is the cost of the planned design at
 // the pack's energy target, without shortfall costs — never the cost of
 // meeting the user's reliability goal.
+// The shared tile rounds to the KPI standard (utils/format.ts::kpiFigure).
+const KPI_COST = (() => {
+  const raw = splitValueUnit(fmtCurrency(12_345_678))
+  const p = kpiFigure(raw.value, raw.unit)
+  return p.unit ? `${p.value} ${p.unit}` : p.value
+})()
+
 describe('ResultsCard cost label (gate B1)', () => {
   const LABEL = 'Yearly cost of this design (before any shortfall costs)'
   const cases: [string, ReturnType<typeof review>][] = [
@@ -93,10 +102,11 @@ describe('ResultsCard cost label (gate B1)', () => {
       mount()
       const cost = await screen.findByTestId('hub-results-cost')
       expect(cost.textContent).toContain(LABEL)
-      expect(cost.textContent).toContain(fmtCurrency(12_345_678))
+      expect(cost.querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value')).toBe(KPI_COST)
       expect(cost.textContent).not.toMatch(/goal/i)
-      expect(cost.querySelector('[data-testid="term-cost_at_target"]')?.getAttribute('data-tip'))
-        .not.toMatch(/goal/i)
+      // the glossary text rides on the tile's hover, still never "goal"
+      expect(cost.getAttribute('title')).toBe(TERM_FALLBACK.cost_at_target)
+      expect(cost.getAttribute('title')).not.toMatch(/goal/i)
     })
   }
 })
@@ -105,10 +115,12 @@ describe('ResultsCard body', () => {
   it('cost via fmtCurrency, three risks, the gaps', async () => {
     mount()
     await screen.findByTestId('hub-results-verdict')
-    expect(screen.getByTestId('hub-results-cost').textContent).toContain(fmtCurrency(12_345_678))
-    expect(screen.getByTestId('hub-results-risks-0').textContent).toContain('grid_import')
+    expect(screen.getByTestId('hub-results-cost').querySelector('[data-kpi-value]')
+      ?.getAttribute('data-kpi-value')).toBe(KPI_COST)
+    expect(screen.getByTestId('hub-results-risks-0').textContent).toContain('Grid import')
+    expect(screen.getByTestId('hub-results-risks-0').textContent).not.toContain('grid_import')
     expect(screen.getByTestId('hub-results-risks-0').textContent).toContain(fmtCurrency(590_000))
-    expect(screen.getByTestId('hub-results-risks-2').textContent).toContain('genset_2')
+    expect(screen.getByTestId('hub-results-risks-2').textContent).toContain('Genset 2')
     expect(screen.queryByTestId('hub-results-risks-3')).toBeNull()
     const gaps = screen.getByTestId('hub-results-gaps').textContent ?? ''
     expect(gaps).toContain('VOLL must be above zero for the frontier.')
@@ -124,7 +136,7 @@ describe('ResultsCard body', () => {
       ] } } } }))
     mount()
     const r1 = await screen.findByTestId('hub-results-risks-1')
-    expect(r1.textContent).toContain('electrolyser')
+    expect(r1.textContent).toContain('Electrolyser')
     expect(r1.textContent).toContain('no measurable cost')
     expect(r1.textContent).not.toContain('€0')
   })
@@ -243,5 +255,27 @@ describe('ResultsCard: edited since the study (P33b)', () => {
     await screen.findByTestId('hub-results-verdict')
     expect(screen.queryByTestId('hub-results-edited')).toBeNull()
     expect(screen.queryByTestId('hub-results-stale')).toBeNull()
+  })
+})
+
+describe('ResultsCard before the study (UX S6, G2)', () => {
+  it('says the study has not run and offers the way to Goal', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
+    const user = mount()
+    const card = await screen.findByTestId('hub-card-results')
+    await screen.findByText('Go to Goal and run the study')
+    expect(card.textContent).toContain('The study writes its verdict, cost and risks here.')
+    expect(screen.queryByTestId('hub-results-verdict')).toBeNull()
+    await user.click(screen.getByText('Go to Goal and run the study'))
+    expect(useHubDesignStore.getState().step).toBe('goal')
+  })
+
+  it('says the study is running, with no action', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(
+      { status: 'running', archetype: 'weak_flexible' as const } as never)
+    mount()
+    const card = await screen.findByTestId('hub-card-results')
+    await waitFor(() => expect(card.textContent).toContain('The study is running'))
+    expect(screen.queryByText('Go to Goal and run the study')).toBeNull()
   })
 })
