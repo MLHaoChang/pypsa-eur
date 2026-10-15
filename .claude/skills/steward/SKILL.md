@@ -50,6 +50,15 @@ Merge master into a PR only for one of these:
 - **Re-run** a failed job at most once, and only when it died before any test ran or the failure is a known flake. A second failure is real.
 - **Keep every test as strict as it is**: fix the code or the test's genuine bug, never skip, loosen or quarantine a test.
 
+## Gatekeeper checkpoints
+
+The gatekeeper (session_01Fz66v1SpJnjGHky1RbUuqC) advises at two points before review, as well as at review:
+
+- **Before a plan.** Before you build a change that touches gridspine, investment/finance, adequacy or IC engine code, send the gatekeeper your plan in a few lines: what changes, which files, and how you will test it. Start building once it answers, or once it says the plan needs no input.
+- **Same failure twice.** When the same test or CI check fails twice for the same reason, send the gatekeeper the failure and your two attempts before a third try.
+
+The gatekeeper advises; it does not write the code.
+
 ## Helper agents
 
 Run read-only helper agents (log reading, file sweeps, summaries of saved tool output) with `model: haiku`. Give each one the exact question and the answer shape you expect back.

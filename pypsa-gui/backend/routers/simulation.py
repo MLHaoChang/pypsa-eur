@@ -664,6 +664,51 @@ def get_value_flows():
     return _value_flows_state(getattr(_state["solver_config"], "commercial", None))
 
 
+def poc_state(n, commercial) -> dict:
+    """Whether the commercial config's PoC Link is open (H4): it exists and can
+    carry nothing in either direction (static and time-varying ``p_max_pu`` and
+    ``p_min_pu`` all 0), as the island's normally open subsea tie. An open PoC
+    has no grid in operation: the Investment detail shows no connection,
+    tariff or export fields, and the case compares with the site as it stands
+    today (#302). Read-only; nothing is stored."""
+    import numpy as np
+
+    poc = commercial.get("poc_link") if isinstance(commercial, dict) else None
+    out = {"poc_link": poc, "open": False}
+    if not poc or n is None or poc not in n.links.index:
+        return out
+    for attr in ("p_max_pu", "p_min_pu"):
+        if abs(float(n.links.at[poc, attr])) > 1e-12:
+            return out
+        series = getattr(n.links_t, attr, None)
+        if series is not None and poc in series.columns and \
+                np.any(np.abs(series[poc].to_numpy(dtype=float)) > 1e-12):
+            return out
+    out["open"] = True
+    return out
+
+
+#: How long the PoC read waits for the network lock (a solve holds it).
+_POC_LOCK_WAIT_S = 2.0
+
+
+@router.get("/commercial/poc")
+def get_poc_state():
+    """The PoC Link's state (`poc_state`). Never blocks on a running solve: if
+    the network lock is not free within `_POC_LOCK_WAIT_S`, the state is
+    unknown (`open: None`, `reason: network_busy`) and the Investment detail
+    keeps its editors."""
+    commercial = getattr(_state["solver_config"], "commercial", None)
+    lock = PyPSAService.get_lock()
+    if not lock.acquire(timeout=_POC_LOCK_WAIT_S):
+        poc = commercial.get("poc_link") if isinstance(commercial, dict) else None
+        return {"poc_link": poc, "open": None, "reason": "network_busy"}
+    try:
+        return poc_state(PyPSAService.get_network(), commercial)
+    finally:
+        lock.release()
+
+
 @router.put("/commercial/value_flows")
 def put_value_flows(body: ValueFlowsIn, if_match: str | None = Header(default=None)):
     """Set (or clear, with null) the participants and value-flow assignment
