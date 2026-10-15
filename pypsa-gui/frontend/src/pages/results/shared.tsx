@@ -1075,11 +1075,11 @@ const REF_STROKE: Record<RefTone, string> = {
   mean: 'var(--color-axis)',
 }
 
-export function refLine(tone: RefTone, name: string, y: number, unit: string) {
-  const f = kpiFigure(String(y), unit)
+export function refLine(tone: RefTone, name: string, value: number, unit: string, axis: 'x' | 'y' = 'y') {
+  const f = kpiFigure(String(value), unit)
   const stroke = REF_STROKE[tone]
   return {
-    y,
+    ...(axis === 'x' ? { x: value } : { y: value }),
     stroke,
     strokeDasharray: '4 3',
     strokeWidth: 1,
@@ -1102,6 +1102,24 @@ export function extremeOf<T extends Record<string, unknown>>(rows: readonly T[],
     if (typeof v === 'number' && Number.isFinite(v) && v > 0 && (!best || v > best.value)) best = { index, value: v }
   })
   return best as { index: number; value: number } | null
+}
+
+/** Props for a recharts <ReferenceDot> on the point a KPI refers to: drawn in
+ *  the danger colour (an extreme is the bad end), labelled like refLine. */
+export function extremeDot(x: string | number, y: number, name: string, unit: string) {
+  const f = kpiFigure(String(y), unit)
+  return {
+    x, y, r: 3.5,
+    fill: 'var(--color-danger)',
+    stroke: 'var(--color-bg)',
+    ifOverflow: 'extendDomain' as const,
+    label: {
+      value: `${name} ${f.value}${f.unit ? ` ${f.unit}` : ''}`,
+      position: 'top' as const,
+      fontSize: 10.5,
+      fill: 'var(--color-danger)',
+    },
+  }
 }
 
 /** True when every plotted value is zero or missing: draw <ChartZero>, not

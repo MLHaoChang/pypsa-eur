@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 import { isValidElement, type ReactElement } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { ChartCard, ChartZero, extremeOf, isAllZero, refLine, shortStamp, yAxisLabel } from './shared'
+import { ChartCard, ChartZero, extremeDot, extremeOf, isAllZero, refLine, shortStamp, yAxisLabel } from './shared'
 
 afterEach(cleanup)
 
@@ -82,9 +82,16 @@ describe('reference lines (S4b)', () => {
     expect(refLine('limit', 'import cap', 40, 'MW').stroke).toBe('var(--color-danger)')
   })
 
+  it('can stand on the x axis, for a goal measured along it', () => {
+    const p = refLine('target', 'goal', 20, 'MWh', 'x')
+    expect(p).toMatchObject({ x: 20, stroke: 'var(--color-success)' })
+    expect(p).not.toHaveProperty('y')
+    expect(p.label.value).toBe('goal 20.0 MWh')
+  })
+
   it('label the line with its figure rounded like the KPI tile', () => {
     const p = refLine('mean', 'mean', 136.64, '€/MWh')
-    expect(p.y).toBe(136.64)
+    expect(p).toMatchObject({ y: 136.64 })
     expect(p.label.value).toBe('mean 136.6 €/MWh')
   })
 })
@@ -93,6 +100,13 @@ describe('the extreme point (S4b)', () => {
   it('finds the highest finite value and where it sits', () => {
     const rows = [{ s: 'a', v: 1 }, { s: 'b', v: Number.NaN }, { s: 'c', v: 7 }, { s: 'd', v: 7 }, { s: 'e', v: 2 }]
     expect(extremeOf(rows, 'v')).toEqual({ index: 2, value: 7 })
+  })
+
+  it('is marked with its figure, rounded like the KPI tile', () => {
+    const d = extremeDot('2030-07-01T14:00:00', 424.24, 'worst hour', 'MW')
+    expect(d).toMatchObject({ x: '2030-07-01T14:00:00', y: 424.24 })
+    expect(d.label.value).toBe('worst hour 424 MW')
+    expect(d.fill).not.toMatch(/accent/)
   })
 
   it('is absent when nothing is above zero', () => {

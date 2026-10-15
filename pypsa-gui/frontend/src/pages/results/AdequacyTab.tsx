@@ -114,7 +114,7 @@ export default function AdequacyTab() {
       />
 
       <ReserveMarginPanel />
-      <FrontierPanel />
+      <FrontierPanel goalMwh={report?.target?.system.cap_mwh ?? null} />
       <McPanel />
       <LoopPanel />
       {/* The SAME coupled search on the other lever (Phase 9). It sits after

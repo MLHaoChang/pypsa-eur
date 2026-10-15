@@ -19,6 +19,18 @@ vi.mock('../../api/simulation', async (importOriginal) => {
   }
 })
 
+// A fixed-size chart, so recharts draws in jsdom (its ResponsiveContainer
+// measures 0 × 0 there and renders nothing).
+vi.mock('recharts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('recharts')>()
+  const { cloneElement } = await import('react')
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: React.ReactElement<{ width?: number; height?: number }> }) =>
+      cloneElement(children, { width: 600, height: 240 }),
+  }
+})
+
 const row = (target: number, ens: number, cost: number): FrontierRow => ({
   target_permyriad: target, status: 'ok',
   point: {
@@ -181,5 +193,28 @@ describe('FrontierPanel — aborting a sweep', () => {
       .textContent ?? ''
     expect(note).toMatch(/time_limit/)
     expect(note).toMatch(/did not restore your plan/i)
+  })
+})
+
+describe('FrontierPanel — the applied goal (UX S4b)', () => {
+  afterEach(() => { cleanup(); vi.clearAllMocks() })
+
+  it('marks the goal the last solve applied on the unserved-energy axis', async () => {
+    vi.mocked(resultsApi.getFrontier).mockResolvedValue(DONE as never)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { container } = render(
+      <QueryClientProvider client={client}><FrontierPanel goalMwh={20} /></QueryClientProvider>)
+    await userEvent.setup().click(screen.getByRole('button', { name: /cost vs availability/i }))
+    await waitFor(() => expect(container.querySelector('.recharts-reference-line')).not.toBeNull())
+    expect(Array.from(container.querySelectorAll('.recharts-reference-line text')).map(t => t.textContent))
+      .toEqual(['goal 20.0 MWh'])
+  })
+
+  it('draws no goal when the last solve applied none', async () => {
+    vi.mocked(resultsApi.getFrontier).mockResolvedValue(DONE as never)
+    const { container } = renderPanel()
+    await userEvent.setup().click(screen.getByRole('button', { name: /cost vs availability/i }))
+    await waitFor(() => expect(container.querySelector('.recharts-line')).not.toBeNull())
+    expect(container.querySelector('.recharts-reference-line')).toBeNull()
   })
 })
