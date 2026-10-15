@@ -11,11 +11,13 @@ empty). Expected green today; this is the guard that keeps it so.
 from __future__ import annotations
 
 import io
+import pathlib
 import zipfile
 
 import pytest
 
 import project_templates._build as classic
+import project_templates.eh_site as site
 import project_templates.eh_templates as eh
 from routers import projects as projects_router
 from routers.projects import _PROJECT_TEMPLATES_DIR, _TEMPLATE_DEFAULT_NAMES
@@ -38,7 +40,8 @@ def _assert_no_site(pdir) -> None:
 
 def test_every_template_id_has_a_builder_under_test():
     """A template added to the registry must be covered here too."""
-    assert set(_TEMPLATE_DEFAULT_NAMES) == set(_CLASSIC_BUILDERS) | set(eh.BUILDERS)
+    assert set(_TEMPLATE_DEFAULT_NAMES) == (set(_CLASSIC_BUILDERS) | set(eh.BUILDERS)
+                                            | {site.TEMPLATE_ID})
 
 
 def test_shipped_template_dirs_carry_no_sites_sidecar():
@@ -60,15 +63,24 @@ def test_eh_sidecar_writer_writes_no_sites(tmp_path):
 
 @pytest.mark.parametrize("tid", sorted(_TEMPLATE_DEFAULT_NAMES))
 def test_create_from_template_creates_no_site(client, project_storage_dir, tmp_path, monkeypatch, tid):
-    builder = _CLASSIC_BUILDERS.get(tid) or eh.BUILDERS[tid]
-    n = builder()
-    if n is None:
-        pytest.skip(f"template {tid} needs source data that is not checked in")
-    src = tmp_path / tid
-    src.mkdir()
-    n.export_to_netcdf(str(src / "network.nc"))
-    if tid in eh.BUILDERS:
-        eh.write_sidecars(src, tid)
+    if tid == site.TEMPLATE_ID:
+        # The generic site is built at create from its parameters: the route
+        # needs only the two modules, no prebuilt network.
+        import shutil
+
+        tpl = pathlib.Path(site.__file__).parent
+        for f in ("eh_templates.py", "eh_site.py"):
+            shutil.copy(tpl / f, tmp_path / f)
+    else:
+        builder = _CLASSIC_BUILDERS.get(tid) or eh.BUILDERS[tid]
+        n = builder()
+        if n is None:
+            pytest.skip(f"template {tid} needs source data that is not checked in")
+        src = tmp_path / tid
+        src.mkdir()
+        n.export_to_netcdf(str(src / "network.nc"))
+        if tid in eh.BUILDERS:
+            eh.write_sidecars(src, tid)
     monkeypatch.setattr(projects_router, "_PROJECT_TEMPLATES_DIR", tmp_path)
 
     r = client.post(f"/api/projects/from_template/{tid}", params={"name": f"t_{tid}"})
