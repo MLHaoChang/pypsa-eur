@@ -12,6 +12,7 @@ import { resultsApi, type EhReferenceDesignReport } from '../../../api/simulatio
 import { useUIStore } from '../../../store/uiStore'
 import { fmtCurrency } from '../../results/shared'
 import { headline } from '../headline'
+import { kpiMoney } from '../plainWords'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { REPORT, review } from '../testFixtures'
 import { EDITED_TEXT, ResultsCard } from './ResultsCard'
@@ -119,7 +120,9 @@ describe('ResultsCard body', () => {
       ?.getAttribute('data-kpi-value')).toBe(KPI_COST)
     expect(screen.getByTestId('hub-results-risks-0').textContent).toContain('Grid import')
     expect(screen.getByTestId('hub-results-risks-0').textContent).not.toContain('grid_import')
-    expect(screen.getByTestId('hub-results-risks-0').textContent).toContain(fmtCurrency(590_000))
+    // The tile rounding (UX audit M8): "€590 k", never "€590.00 k".
+    expect(screen.getByTestId('hub-results-risks-0').textContent).toContain(kpiMoney(590_000))
+    expect(screen.getByTestId('hub-results-risks-0').textContent).not.toMatch(/\.00/)
     expect(screen.getByTestId('hub-results-risks-2').textContent).toContain('Genset 2')
     expect(screen.queryByTestId('hub-results-risks-3')).toBeNull()
     const gaps = screen.getByTestId('hub-results-gaps').textContent ?? ''
@@ -154,7 +157,7 @@ describe('ResultsCard body', () => {
     const r1 = await screen.findByTestId('hub-results-risks-1')
     expect(r1.textContent).toContain('not counted (outside the electricity metric)')
     expect(r1.textContent).not.toContain('no measurable cost')
-    expect(screen.getByTestId('hub-results-risks-0').textContent).toContain(fmtCurrency(7_890_000))
+    expect(screen.getByTestId('hub-results-risks-0').textContent).toContain(kpiMoney(7_890_000))
     // A unit whose loss causes no shortfall is not a risk (UX S6, G3): it is
     // said once under the list, never ranked in it.
     expect(screen.queryByTestId('hub-results-risks-2')).toBeNull()
@@ -193,7 +196,10 @@ describe('ResultsCard body', () => {
   it('stale banner from the boolean (not the source text)', async () => {
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ stale: true, source: 'stored report' }))
     mount()
-    expect((await screen.findByTestId('hub-results-stale')).textContent).toBe(
+    // The shared stale state (UX audit L5), not a custom banner.
+    const stale = await screen.findByTestId('hub-results-stale')
+    expect(stale.textContent).toContain('Out of date')
+    expect(stale.textContent).toContain(
       'These results are from an earlier study; the network was solved since. Run again to refresh.')
   })
 
