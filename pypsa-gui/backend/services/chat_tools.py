@@ -4048,12 +4048,16 @@ def import_project_bundle(bundle_bytes_b64: str, filename: str = "bundle.zip") -
         return _sync(_h(upload, db=db, user=user, session=_acting_session(db)))
 
 
-def create_project_from_template(template_id: str, new_name: str) -> dict:
+def create_project_from_template(template_id: str, new_name: str,
+                                 params: dict | None = None) -> dict:
     """C9: scaffold from a built-in template."""
     # Handler is create_from_template(template_id, name: str | None) — pass the
     # NAME STRING, not a dict (it does (name or "").strip() on the 2nd arg).
+    # `params` (eh_site's parameters) is passed ALWAYS: called as a plain
+    # function the handler's `Body(default=None)` would otherwise arrive as
+    # the raw FieldInfo, not None, and refuse every template.
     from routers.projects import create_from_template as _h
-    return _route(_h, template_id, new_name)
+    return _route(_h, template_id, new_name, params=params)
 
 
 def get_project_compare_state(name: str) -> dict:

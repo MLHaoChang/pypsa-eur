@@ -207,3 +207,51 @@ describe('P29: the Results header', () => {
     expect(header().textContent).toContain('RESULTS · OPTIMIZATION')
   })
 })
+
+// UX template audit M10 / owner decision D2 (a): result tabs opened from the
+// Guided hub design offer the way back to the step the user came from.
+describe('Back to Results', () => {
+  it('Guided: returns to the hub design Results step, as the user’s move', async () => {
+    const { useHubDesignStore } = await import('./hubDesign/hubDesignStore')
+    useHubDesignStore.setState({ step: 'site', userMovedRail: false })
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'results' })
+    await renderResults()
+    fireEvent.click(screen.getByRole('button', { name: /Back to Results/ }))
+    expect(useHubDesignStore.getState().step).toBe('results')
+    expect(useHubDesignStore.getState().userMovedRail).toBe(true)
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
+  })
+
+  it('Expert: no hub-design way back', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    await renderResults()
+    expect(screen.queryByRole('button', { name: /Back to Results/ })).toBeNull()
+  })
+})
+
+// UX template audit (M1, M2): the Guided header names the group on screen,
+// not always "Reliability", and the source-context line is Expert's.
+describe('the Results header follows the group', () => {
+  const header = () => document.querySelector('header') as HTMLElement
+  it('Guided: names the group the user picked', async () => {
+    // As Guided's "Open the detail" does: request the Investment case tab.
+    useUIStore.setState({ uiMode: 'guided', resultsTabRequest: 'investment' })
+    await renderResults()
+    expect(header().querySelector('h1')!.textContent).toBe('Investment results')
+    expect(header().textContent).toContain('What to build, and what it costs and earns')
+    expect(header().textContent).not.toContain('Adequacy and failure-mode')
+  })
+
+  it('Guided: no source-context line', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    await renderResults()
+    expect(screen.queryByTestId('results-source-context')).toBeNull()
+  })
+
+  it('Expert: keeps the context line, without "selected entity: none"', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    await renderResults()
+    const line = screen.getByTestId('results-source-context')
+    expect(line.textContent).not.toMatch(/selected entity: none/)
+  })
+})

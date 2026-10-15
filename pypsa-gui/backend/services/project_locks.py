@@ -58,10 +58,20 @@ def acquire_lock(
         try:
             db.commit()
         except IntegrityError:
-            # A concurrent acquire inserted the lock first: treat as contention
-            # (caller maps None to HTTP 409) rather than surfacing a 500.
+            # A concurrent acquire inserted the lock first. When that was the
+            # SAME user (a tab's lock claim racing its own first write's
+            # `_enforce_project_lock` on a fresh project), the caller holds the
+            # lock: refresh and return it, as a re-acquire would. Only a
+            # different holder is contention (the caller maps None to HTTP
+            # 409), never a 500.
             db.rollback()
-            return None
+            lock = db.get(ProjectLock, project_id)
+            if lock is None or lock.holder_user_id != user_id:
+                return None
+            lock.expires_at = expires_at
+            db.commit()
+            db.refresh(lock)
+            return lock
         db.refresh(lock)
         return lock
     if lock.holder_user_id != user_id:

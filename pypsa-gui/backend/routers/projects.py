@@ -15,7 +15,7 @@ import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 import local_mode
@@ -1433,6 +1433,9 @@ _TEMPLATE_DEFAULT_NAMES = {
     "eh_microgrid": "Island Microgrid",
     # E2E demo plan 2026-10-14, slice 8.
     "eh_datacenter_staged": "Data Center Energy Hub (staged growth)",
+    # The generic site (generic-site E2E, G1): parametrized, built at create
+    # from the request body (project_templates/eh_site.py).
+    "eh_site": "Generic Site Energy Hub",
 }
 
 # Sidecars a template directory may carry beside network.nc (P19): the EH
@@ -1462,6 +1465,19 @@ def _eh_template_builder(template_key: str):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return getattr(mod, "BUILDERS", {}).get(template_key)
+
+
+def _eh_site_module():
+    """``project_templates/eh_site.py``, loaded by FILE PATH like the EH templates."""
+    import importlib.util
+
+    path = _PROJECT_TEMPLATES_DIR / "eh_site.py"
+    spec = importlib.util.spec_from_file_location("_eh_site", path)
+    if not path.is_file() or spec is None or spec.loader is None:
+        raise HTTPException(404, "Template 'eh_site' is registered but eh_site.py is missing.")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _solver_config_from_dict(data: dict):
@@ -1520,6 +1536,7 @@ def _unique_project_name(base: str) -> str:
 def create_from_template(
     template_id: str,
     name: str | None = None,
+    params: dict | None = Body(default=None),
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
     session: SessionRow | None = Depends(current_session),
@@ -1556,9 +1573,28 @@ def create_from_template(
             f"Unknown template '{template_id}'. Available: "
             f"{', '.join(sorted(_TEMPLATE_DEFAULT_NAMES))}.",
         )
+    # The generic site is parametrized (G1): its parameters are checked and
+    # its network and sidecars built BEFORE the project row exists, so a
+    # refused parameter set (a stage whose peak is above the energized
+    # connection, say) leaves nothing behind. Other templates take none.
+    site = None
+    if template_key == "eh_site":
+        site_mod = _eh_site_module()
+        try:
+            site_p = site_mod.site_params(params)
+        except site_mod.SiteParamsError as exc:
+            # The field, so the Guided form puts the message beside it.
+            raise HTTPException(422, {"code": "site_params_invalid", "field": exc.field,
+                                      "message": str(exc)})
+        site_net = site_mod.build_eh_site(site_p)
+        site = (site_mod, site_p, site_net, site_mod.solver_config(site_p, site_net))
+    elif params is not None:
+        raise HTTPException(422, f"Template '{template_key}' takes no parameters.")
     src_nc = _PROJECT_TEMPLATES_DIR / template_key / "network.nc"
     eh_builder = None
-    if not src_nc.exists():
+    if site is not None:
+        eh_builder = lambda: site[2]  # noqa: E731 — built above
+    elif not src_nc.exists():
         # P19: network.nc is a gitignored build artifact (build-macos.sh);
         # the EH templates are pure builders (no solve), so a fresh checkout
         # or dev start builds them here instead of refusing.
@@ -1572,7 +1608,9 @@ def create_from_template(
 
     # `name` is optional — default to the template's friendly name, then
     # uniquify so clicking the same template twice doesn't clobber the first.
-    requested = (name or "").strip() or _TEMPLATE_DEFAULT_NAMES[template_key]
+    requested = (name or "").strip() or (
+        (site[1]["name"] or site[0].template_meta(site[1])["name"]) if site is not None
+        else _TEMPLATE_DEFAULT_NAMES[template_key])
     from services import project_registry
 
     project_registry.require_user(user)
@@ -1585,10 +1623,14 @@ def create_from_template(
         eh_builder().export_to_netcdf(str(dest / "network.nc"))
     else:
         atomic_copy(src_nc, dest / "network.nc")
-    for sidecar in _TEMPLATE_SIDECARS:
-        src = _PROJECT_TEMPLATES_DIR / template_key / sidecar
-        if src.is_file():
-            atomic_copy(src, dest / sidecar)
+    if site is not None:
+        site[0].write_sidecars(dest, site[1], site[2], site[3],
+                               entered=site[0].entered_fields(params))
+    else:
+        for sidecar in _TEMPLATE_SIDECARS:
+            src = _PROJECT_TEMPLATES_DIR / template_key / sidecar
+            if src.is_file():
+                atomic_copy(src, dest / sidecar)
 
     # Reset + load, mirroring import_bundle / load_project.
     from services import dirty_state, undo_service

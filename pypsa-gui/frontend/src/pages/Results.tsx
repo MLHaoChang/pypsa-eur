@@ -2,7 +2,7 @@ import { manualNavigation } from '../utils/navigationEpoch'
 import RunBoundView from './results/RunBoundView'
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase} from 'lucide-react'
+import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase, ArrowLeft } from 'lucide-react'
 import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
@@ -43,6 +43,7 @@ import {
 // at the top so the user always sees solve metadata regardless of tab.
 
 import { RESULT_GROUPS, groupOf, type ResultsGroup, type ResultsTab } from './results/groups'
+import { useHubDesignStore } from './hubDesign/hubDesignStore'
 const RESULTS_TAB_KEY = 'results:active-tab'
 
 const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
@@ -167,6 +168,7 @@ export default function Results() {
   const discussedRun = useUIStore(s => s.discussedRun)
   const clearDiscussedRun = useUIStore(s => s.clearDiscussedRun)
   const uiMode = useUIStore(s => s.uiMode)
+  const setSlidePanel = useUIStore(s => s.setSlidePanel)
   // Guided (spec §3.7): a STORED tab Guided does not show is displayed as
   // adequacy. Display only — `tab` and `results:active-tab` keep the user's
   // choice, so switching back to Expert restores it. An explicitly requested
@@ -607,6 +609,16 @@ export default function Results() {
     )
   }
 
+  // Guided names the group on screen, not always the reliability entry it was
+  // opened from (UX template audit M1).
+  const shownGroup = RESULT_GROUPS.find(g => g.id === activeGroup)
+  // Summary and Reliability keep the hub design's reliability header (P29).
+  const hubHeader = !shownGroup || shownGroup.id === 'reliability' || shownGroup.id === 'summary'
+  const guidedTitle = hubHeader ? 'Reliability results' : `${shownGroup.label} results`
+  const guidedSubtitle = hubHeader
+    ? 'Adequacy and failure-mode (FMEA) risk results for the hub design.'
+    : `${shownGroup.question}.`
+
   return (
     <div
       className="flex flex-col h-full text-sm"
@@ -616,23 +628,48 @@ export default function Results() {
     >
       <PageHeader
         eyebrow={discussedRun ? 'RESULTS · RETAINED EVIDENCE' : uiMode === 'guided' ? 'HUB DESIGN · RESULTS' : 'RESULTS · OPTIMIZATION'}
-        title={discussedRun ? 'Retained run results' : uiMode === 'guided' ? 'Reliability results' : 'Optimization results'}
+        title={discussedRun ? 'Retained run results' : uiMode === 'guided' ? guidedTitle : 'Optimization results'}
         subtitle={discussedRun ? `Recorded evidence for run ${discussedRun.runId}. Live inputs remain unchanged.` : uiMode === 'guided'
-          ? 'Adequacy and failure-mode (FMEA) risk results for the hub design.'
+          ? guidedSubtitle
           : 'Capacity expansion, dispatch, load flow, prices, and emissions from the last solve.'}
         actions={
-          status && !discussedRun && (
-            <span className="font-mono text-[11px] text-muted">
-              {status.condition ?? '—'}
-              {status.solve_time != null ? ` · ${status.solve_time.toFixed(2)} s` : ''}
-            </span>
-          )
+          <>
+            {/* Guided reaches these tabs from the hub design's "Open the
+                detail"; this is the way back to the step it came from (UX
+                template audit M10, owner decision D2). */}
+            {uiMode === 'guided' && (
+              <button
+                type="button"
+                data-testid="results-back-to-hub"
+                onClick={() => {
+                  useHubDesignStore.getState().setStep('results', { user: true })
+                  setSlidePanel('hubDesign')
+                }}
+                className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] text-text hover:border-accent hover:text-accent"
+              >
+                <ArrowLeft size={12} aria-hidden="true" />
+                Back to Results
+              </button>
+            )}
+            {status && !discussedRun && (
+              <span className="font-mono text-[11px] text-muted">
+                {status.condition ?? '—'}
+                {status.solve_time != null ? ` · ${status.solve_time.toFixed(2)} s` : ''}
+              </span>
+            )}
+          </>
         }
       />
-      <div className="mx-4 text-xs text-muted" data-testid="results-source-context">
-        Current project: {currentProject ?? 'unsaved'} · selected entity: {selectedEntity ? `${selectedEntity.type}: ${selectedEntity.name}` : 'none'}
-        {!discussedRun && <> · window {toDisplay(fromIso) || 'start'} → {toDisplay(toIso) || 'end'} · period {selectedPeriod}</>}
-      </div>
+      {/* What the views below read from. Expert only: in Guided the hub
+          design has already named the project and the window, and
+          "selected entity: none" read like an error (UX template audit M2). */}
+      {uiMode !== 'guided' && (
+        <div className="mx-4 text-xs text-muted" data-testid="results-source-context">
+          Current project: {currentProject ?? 'unsaved'}
+          {selectedEntity && <> · selected {selectedEntity.type}: {selectedEntity.name}</>}
+          {!discussedRun && <> · window {toDisplay(fromIso) || 'start'} → {toDisplay(toIso) || 'end'} · period {selectedPeriod}</>}
+        </div>
+      )}
       {discussedRun && (
         <div
           className="mx-4 mt-2 mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 pb-2 text-[11px]"

@@ -28,6 +28,7 @@ import DispatchStack from './DispatchStack'
 import StorageHeatmap from './StorageHeatmap'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 import { storageCarrierKey, storageCarrierLabel } from './carrierAliases'
+import NotSolved from './NotSolved'
 
 // Module-level constant so we don't allocate a fresh Set on every parent
 // render. Passed to <DispatchStack> for non-electrical stacks where the
@@ -1234,9 +1235,7 @@ export default function Dispatch() {
 
   if (!hasResults) {
     return (
-      <div className="p-6 text-center text-xs text-muted">
-        No solved network. Run a simulation (header → <span className="font-medium text-text">Run LOPF</span>) to populate dispatch results.
-      </div>
+      <NotSolved what="Dispatch" />
     )
   }
 

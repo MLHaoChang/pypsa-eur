@@ -19,6 +19,7 @@ import {
   ChartCard, colourForCarrier, CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP,
 } from './shared'
 import { storageCarrierKey, loadCarrierKey } from './carrierAliases'
+import NotSolved from './NotSolved'
 
 // ── Aggregated overview ────────────────────────────────────────────────────
 // Shown when the user picks the "Aggregated" period sub-tab. Replaces the
@@ -465,9 +466,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
 
   if (!gensTS && !loadTS && !cost) {
     return (
-      <div className="p-6 text-center text-xs text-muted">
-        No solved network. Run a simulation (header → <span className="font-medium text-text">Run LOPF</span>) to populate aggregated results.
-      </div>
+      <NotSolved what="The aggregated overview" />
     )
   }
 

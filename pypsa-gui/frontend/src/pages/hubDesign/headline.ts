@@ -59,10 +59,13 @@ export function headline(review: OkReview, report: EhReferenceDesignReport | nul
     }
   }
   if (verdict === 'pass' && lole != null && target != null) {
-    return `Certified: about ${lole.toFixed(1)} h/yr of shortfall, under the ${g(target)} h/yr goal.`
+    // A computed zero (below the one-decimal rounding) says so (UX audit M7).
+    return lole < 0.05 ? `Certified: no shortfall expected, under the ${g(target)} h/yr goal.`
+      : `Certified: about ${lole.toFixed(1)} h/yr of shortfall, under the ${g(target)} h/yr goal.`
   }
   if (lole != null && target == null) {
-    return `No reliability goal was set — the study reports ${lole.toFixed(1)} h/yr of shortfall. Set a goal to certify.`
+    return lole < 0.05 ? 'No reliability goal was set — the study expects no shortfall. Set a goal to certify.'
+      : `No reliability goal was set — the study reports ${lole.toFixed(1)} h/yr of shortfall. Set a goal to certify.`
   }
   // No goal and no shortfall number (decided at P24-FE, spec §5.5): the
   // engine's note ("no LOLE target …") would be jargon; ask for a goal.

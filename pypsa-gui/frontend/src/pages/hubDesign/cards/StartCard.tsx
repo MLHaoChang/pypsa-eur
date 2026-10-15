@@ -19,6 +19,7 @@ import { CardShell } from '../shared/CardShell'
 import { Term } from '../shared/Term'
 import { useHubStudy, useHubTemplate } from '../useHubData'
 import { STUDY_RUNNING_SWITCH } from '../../../hooks/useCreateFromTemplate'
+import { plainIds } from '../plainWords'
 
 const HUB_TEMPLATES = TEMPLATES.filter(t => t.id.startsWith('eh_'))
 
@@ -66,7 +67,7 @@ export function StartCard() {
             </span>
           )}
           {template.study_notes?.[0] && (
-            <span className="text-muted">{template.study_notes[0]}</span>
+            <span className="text-muted">{plainIds(template.study_notes[0])}</span>
           )}
         </div>
       )}

@@ -67,6 +67,7 @@ export function railState(
   if (s === 'start' && (isTemplate || studied)) return 'done'
   if (s === 'site' && studied) return 'done'
   if (s === 'goal' && finished) return 'done'
-  if (s === 'results' && finished && current === 'improve') return 'done'
+  // Out-of-date results are never ticked (UX audit L5): the card says so.
+  if (s === 'results' && flow === 'done' && current === 'improve') return 'done'
   return 'todo'
 }

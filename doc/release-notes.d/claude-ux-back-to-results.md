@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Result tabs opened from the Guided hub design have a "Back to Results" button. It returns to the hub design's Results step, so following "Open the detail" no longer strands you in the result tabs.

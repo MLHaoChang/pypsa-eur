@@ -17,6 +17,7 @@ import {
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
+import NotSolved from './NotSolved'
 
 // ── Curtailment result tab ──────────────────────────────────────────────────
 // Standalone view of renewable-curtailment data the LP rejected (cost-
@@ -97,11 +98,7 @@ export default function Curtailment() {
 
   if (!curtailTS) {
     return (
-      <div className="p-6 text-[12px] text-muted">
-        No curtailment data available yet. Run a LOPF with renewable generators that have a
-        time-varying <code className="font-mono">p_max_pu</code> profile to populate
-        <code className="font-mono"> /api/results/curtailment</code>.
-      </div>
+      <NotSolved what="Curtailment" />
     )
   }
 
