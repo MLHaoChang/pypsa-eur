@@ -128,6 +128,9 @@ _EXEMPT = {
     "eh_datacenter_staged": {"grid_supply", "rooftop_pv"},
     "eh_h2_hub": {"grid_supply", "wind_farm", "solar_park"},
     "eh_microgrid": {"pv_plant", "wind_turbines"},
+    # The staged H2 hub and microgrid (#304): their single-year originals' sets.
+    "eh_h2_hub_staged": {"grid_supply", "wind_farm", "solar_park"},
+    "eh_microgrid_staged": {"pv_plant", "wind_turbines"},
 }
 
 
