@@ -234,3 +234,28 @@ it('renders real capital-cost figures untouched when the flag is true', async ()
   expect(within(row).queryByText('unavailable')).toBeNull()
   expect(screen.queryByText(/capital costs are unavailable/i)).toBeNull()
 })
+
+// ── Result states (UX overhaul D3 rows 32–33) ───────────────────────────────
+it('says charge cost does not apply when the network has no storage, rather than €0.00', async () => {
+  renderPage()
+  await screen.findByText('Thermal')
+  const tile = kpiCard('Charge cost (storage)')
+  expect(tile.getAttribute('data-state')).toBe('not_applicable')
+  expect(within(tile).getByText('This network has no storage.')).toBeTruthy()
+  expect(within(tile).queryByText(/€0/)).toBeNull()
+})
+
+it('says LCOE and capture price do not apply when nothing was dispatched, rather than a dash', async () => {
+  const p = unavailablePayload()
+  p.capital_costs_available = true
+  Object.assign(p.generators[0], { energy_mwh: 0, revenue_eur: 0, vom_cost_eur: 0, fixed_cost_eur: 200, net_profit_eur: -200 })
+  vi.mocked(resultsApi.getAssetEconomics).mockResolvedValue(p as never)
+  renderPage()
+  await screen.findByText('Thermal')
+  for (const label of ['System LCOE / LCOS', 'Avg capture price']) {
+    const tile = kpiCard(label)
+    expect(tile.getAttribute('data-state')).toBe('not_applicable')
+    expect(within(tile).getByText('Nothing was dispatched in this window.')).toBeTruthy()
+    expect(within(tile).queryByText('—')).toBeNull()
+  }
+})
