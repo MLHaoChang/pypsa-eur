@@ -208,6 +208,27 @@ describe('P29: the Results header', () => {
   })
 })
 
+// UX template audit M10 / owner decision D2 (a): result tabs opened from the
+// Guided hub design offer the way back to the step the user came from.
+describe('Back to Results', () => {
+  it('Guided: returns to the hub design Results step, as the user’s move', async () => {
+    const { useHubDesignStore } = await import('./hubDesign/hubDesignStore')
+    useHubDesignStore.setState({ step: 'site', userMovedRail: false })
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'results' })
+    await renderResults()
+    fireEvent.click(screen.getByRole('button', { name: /Back to Results/ }))
+    expect(useHubDesignStore.getState().step).toBe('results')
+    expect(useHubDesignStore.getState().userMovedRail).toBe(true)
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
+  })
+
+  it('Expert: no hub-design way back', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    await renderResults()
+    expect(screen.queryByRole('button', { name: /Back to Results/ })).toBeNull()
+  })
+})
+
 // UX template audit (M1, M2): the Guided header names the group on screen,
 // not always "Reliability", and the source-context line is Expert's.
 describe('the Results header follows the group', () => {
