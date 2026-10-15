@@ -162,59 +162,106 @@ def _gfm_m(u, f0):
 def _balance(units, x, t, dp_event, f0, damping):
     """``(dΔf/dt, ΔP of each GFM, saturated GFMs)`` at state ``x``; the
     saturated set is found by iteration (a GFM beyond a limit holds it)."""
-    df = x["df"]
-    gfm = [u for u in units if u.model in ("gfm_droop", "gfm_vsm")]
-    sat = set()
-    for _ in range(len(gfm) + 1):
-        m, p = 0.0, -dp_event(t) - damping * df / f0
+    return _Island(units, f0).balance(x, t, dp_event, damping)
+
+
+class _Island:
+    """``units``' constants, worked out once per run so the integrator's
+    steps do not recompute them (``simulate``). Each sum is taken in the
+    units' order and each constant is the same expression as in the model,
+    so a run gives the same numbers, to the bit, as one that recomputes
+    them every step."""
+
+    def __init__(self, units, f0):
+        self.f0 = f0
+        self.plain = []                  # (model, name, M term, join_s) in unit order
+        self.gfm = []                    # (name, M term, K, -K, P0, hi, lo)
+        self.gensets = []                # (unit, name, integral key, K, T_g, join_s, bounds)
         for u in units:
-            if u.model == "genset" and t >= u.join_s:
-                m += 2.0 * u.h * u.s_n / f0
-                p += x[u.name]
-            elif u.model == "inertia":                    # I7: inertia alone, no response, no limit
-                m += 2.0 * u.h * u.s_n / f0
+            if u.model == "genset":
+                self.plain.append(("genset", u.name, 2.0 * u.h * u.s_n / f0, u.join_s))
+                k = u.p_n / ((u.r if u.r == u.r and u.r else ISO_DROOP) * f0)
+                self.gensets.append((u, u.name, f"{u.name}~i" if u.isochronous else None, k, u.t_g, u.join_s,
+                                     (u.step_mw, u.ramp_mw_per_s, 0.0 - u.p0, u.p_n - u.p0)))
+            elif u.model == "inertia":
+                self.plain.append(("inertia", u.name, 2.0 * u.h * u.s_n / f0, 0.0))
             elif u.model in ("gfl_fw", "ups"):
-                p += x[u.name]
-        for u in gfm:
-            if u.name in sat:
-                p += x[f"{u.name}~lim"]
-            else:
-                m += _gfm_m(u, f0)
-                p -= u.p_n / (u.r * f0) * df
-        if m <= 0.0:
-            return None, {}, sat
-        rocof = p / m
-        new, dps = set(), {}
-        for u in gfm:
-            dpu = -u.p_n / (u.r * f0) * df - _gfm_m(u, f0) * rocof
-            if u.name in sat:
-                dps[u.name] = x[f"{u.name}~lim"]
-                new.add(u.name)
-            elif u.p0 + dpu > u.hi + 1e-9 or u.p0 + dpu < u.lo - 1e-9:
-                x[f"{u.name}~lim"] = (u.hi if u.p0 + dpu > u.hi else u.lo) - u.p0
-                new.add(u.name)
-            else:
-                dps[u.name] = dpu
-        if new == sat:
-            return rocof, dps, sat
-        sat = new
-    raise RuntimeError("the GFM saturation set did not settle")
+                self.plain.append(("p", u.name, 0.0, 0.0))
+            elif u.model in ("gfm_droop", "gfm_vsm"):
+                self.gfm.append((u.name, _gfm_m(u, f0), u.p_n / (u.r * f0), -u.p_n / (u.r * f0), u.p0, u.hi, u.lo))
 
+    def balance(self, x, t, dp_event, damping):
+        """``_balance`` at state ``x``; a GFM's held ΔP at a limit is kept
+        in ``lim``, never in ``x``."""
+        f0, df = self.f0, x["df"]
+        sat, lim = set(), {}
+        for _ in range(len(self.gfm) + 1):
+            m, p = 0.0, -dp_event(t) - damping * df / f0
+            for model, name, mt, join in self.plain:
+                if model == "genset":
+                    if t >= join:
+                        m += mt
+                        p += x[name]
+                elif model == "inertia":
+                    m += mt
+                else:
+                    p += x[name]
+            for name, gm, k, _, _, _, _ in self.gfm:
+                if name in sat:
+                    p += lim[name]
+                else:
+                    m += gm
+                    p -= k * df
+            if m <= 0.0:
+                return None, {}, sat
+            rocof = p / m
+            new, dps = set(), {}
+            for name, gm, _, nk, p0, hi, lo in self.gfm:
+                dpu = nk * df - gm * rocof
+                if name in sat:
+                    dps[name] = lim[name]
+                    new.add(name)
+                elif p0 + dpu > hi + 1e-9 or p0 + dpu < lo - 1e-9:
+                    lim[name] = (hi if p0 + dpu > hi else lo) - p0
+                    new.add(name)
+                else:
+                    dps[name] = dpu
+            if new == sat:
+                return rocof, dps, sat
+            sat = new
+        raise RuntimeError("the GFM saturation set did not settle")
 
-def _targets(units, x, t, f0):
-    """The time derivatives of the governor states, and the fw targets."""
-    dx = {}
-    for u in units:
-        if u.model == "genset":
-            if t < u.join_s:
-                dx[u.name] = 0.0
+    def targets(self, x, t):
+        """The time derivatives of the governor states."""
+        dx = {}
+        for u, name, ikey, k, t_g, join, (step_mw, ramp, z_lo, z_hi) in self.gensets:
+            if t < join:
+                dx[name] = 0.0
                 continue
-            k = u.p_n / ((u.r if u.r == u.r and u.r else ISO_DROOP) * f0)
-            ref = -k * (x["df"] + (x[f"{u.name}~i"] / ISO_TI_S if u.isochronous else 0.0))
-            dx[u.name] = _hold(u, x[u.name], (ref - x[u.name]) / u.t_g, t)
-            if u.isochronous:
-                dx[f"{u.name}~i"] = _hold_integral(u, x[u.name], x["df"], t)
-    return dx
+            p = x[name]
+            ref = -k * (x["df"] + (x[ikey] / ISO_TI_S if ikey else 0.0))
+            dp_dt = (ref - p) / t_g
+            # anti-windup (``_genset_bounds``): a genset at a bound moves no
+            # faster outward than the bound does, so the RK4 stages inside a
+            # step never count power beyond it (``clamp`` holds it only after)
+            elapsed = t - join
+            room = step_mw + (ramp * elapsed if elapsed > 0.0 else 0.0)
+            if p >= min(room, z_hi) - 1e-12:
+                dp_dt = min(dp_dt, ramp if room < z_hi else 0.0)
+            if p <= max(-room, z_lo) + 1e-12:
+                dp_dt = max(dp_dt, -ramp if -room > z_lo else 0.0)
+            dx[name] = dp_dt
+            if ikey:
+                dx[ikey] = _hold_integral(u, p, x["df"], t)
+        return dx
+
+    def clamp(self, x, t):
+        """Hold the genset states to their limits after a step."""
+        for _, name, _, _, _, join, (step_mw, ramp, z_lo, z_hi) in self.gensets:
+            if t >= join:
+                elapsed = t - join
+                room = step_mw + (ramp * elapsed if elapsed > 0.0 else 0.0)
+                x[name] = min(max(x[name], max(-room, z_lo)), min(room, z_hi))
 
 
 def _hold_integral(u, p, df, t):
@@ -237,26 +284,6 @@ def _genset_bounds(u, t):
     lo, hi = max(-room, 0.0 - u.p0), min(room, u.p_n - u.p0)
     ramp = u.ramp_mw_per_s
     return lo, hi, -ramp if -room > 0.0 - u.p0 else 0.0, ramp if room < u.p_n - u.p0 else 0.0
-
-
-def _hold(u, p, dp_dt, t):
-    """Anti-windup: a genset at a bound moves no faster outward than the
-    bound does, so the RK4 stages inside a step never count power beyond
-    it (``_clamp`` alone holds it only after the step)."""
-    lo, hi, rate_lo, rate_hi = _genset_bounds(u, t)
-    if p >= hi - 1e-12:
-        dp_dt = min(dp_dt, rate_hi)
-    if p <= lo + 1e-12:
-        dp_dt = max(dp_dt, rate_lo)
-    return dp_dt
-
-
-def _clamp(units, x, t):
-    """Hold the genset and fw states to their limits after a step."""
-    for u in units:
-        if u.model == "genset" and t >= u.join_s:
-            lo, hi, _, _ = _genset_bounds(u, t)
-            x[u.name] = min(max(x[u.name], lo), hi)
 
 
 def _fw_step(units, x, t, dt):
@@ -321,18 +348,19 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0, islanding
     df = np.zeros(n)
     dp = {u.name: np.zeros(n) for u in units}
     saturated, collapse, trip = {}, None, None
-    rocof0, _, _ = _balance(units, dict(x), 0.0, dp_event, f0, damping)
+    island = _Island(units, f0)
+    rocof0, _, _ = island.balance(x, 0.0, dp_event, damping)
     if rocof0 is None:
         return Trace(t[:1], df[:1], {k: v[:1] for k, v in dp.items()}, {}, 0.0, math.nan,
                      _ups_logs(units, ups_log))
 
-    def deriv(state, tt):
-        s = dict(state)
-        rocof, _, _ = _balance(units, s, tt, dp_event, f0, damping)
+    def deriv(state, tt, rocof=None):
         if rocof is None:
-            return None
+            rocof, _, _ = island.balance(state, tt, dp_event, damping)
+            if rocof is None:
+                return None
         d = {"df": rocof}
-        d.update(_targets(units, s, tt, f0))
+        d.update(island.targets(state, tt))
         return d
 
     def add(state, d, h):
@@ -343,9 +371,9 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0, islanding
 
     for i in range(n):
         tt = t[i]
-        rocof, dps, sat = _balance(units, dict(x), tt, dp_event, f0, damping)
+        rocof, dps, sat = island.balance(x, tt, dp_event, damping)
         if rocof is not None and advance and advance(float(tt), x["df"], rocof):
-            rocof, dps, sat = _balance(units, dict(x), tt, dp_event, f0, damping)
+            rocof, dps, sat = island.balance(x, tt, dp_event, damping)
         if rocof is None:
             collapse = float(tt)
             t, df = t[:i], df[:i]
@@ -367,7 +395,9 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0, islanding
             break
         if i == n - 1:
             break
-        k1 = deriv(x, tt)
+        # k1 is the balance just taken at (x, tt), unless an E4 pickup may
+        # have changed the event since (``advance``)
+        k1 = deriv(x, tt, None if advance else rocof)
         k2 = deriv(add(x, k1, dt / 2), tt + dt / 2) if k1 else None
         k3 = deriv(add(x, k2, dt / 2), tt + dt / 2) if k2 else None
         k4 = deriv(add(x, k3, dt), tt + dt) if k3 else None
@@ -378,7 +408,7 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0, islanding
             break
         for k in k1:
             x[k] = x[k] + dt / 6.0 * (k1[k] + 2 * k2[k] + 2 * k3[k] + k4[k])
-        _clamp(units, x, tt + dt)
+        island.clamp(x, tt + dt)
         _fw_step(units, x, tt + dt, dt)
         _ups_step(units, x, dt, ups_log, tt + dt)
     return Trace(t, df, dp, saturated, collapse, float(rocof0), _ups_logs(units, ups_log), trip=trip)
@@ -1105,13 +1135,15 @@ def e1_every_hour(campus, hourly, island_hourly, island_unit_hourly=None, scenar
     out, cache = [], {}
     for _, r in ih.sort_values(["period", "hour"]).iterrows():
         period, hour = int(r["period"]), int(r["hour"])
+        steps = [(direction, dp) for direction, dp in (("import", r["dp_up_mw"]), ("export", -r["dp_down_mw"]))
+                 if abs(dp) > 1e-9 and (direction == "import") == (dp > 0)]
+        if not steps:
+            continue                     # nothing crosses the PCC: no event, and no units to build
         rows = _hour_rows(hourly, period, hour)
         urows = iu[(iu["period"] == period) & (iu["hour"] == hour)] if iu is not None else None
         units = _sweep_units(campus, rows, urows)
         key = {"period": period, "hour": hour, "scenario": scenario}
-        for direction, dp in (("import", r["dp_up_mw"]), ("export", -r["dp_down_mw"])):
-            if not abs(dp) > 1e-9 or (direction == "import") != (dp > 0):
-                continue
+        for direction, dp in steps:
             ck = (repr(units), round(dp, 9), floor)
             if ck not in cache:
                 cache[ck] = simulate(units, step(dp), t_end=t_end, dt=dt, f0=f0, floor=floor)
