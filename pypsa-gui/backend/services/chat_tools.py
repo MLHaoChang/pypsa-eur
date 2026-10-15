@@ -2188,6 +2188,21 @@ def _ic_summary(status: dict | None, report: dict | None) -> dict:
         out["solve_ppa"] = {"status": _cut(p.get("solve_ppa_status"), 120),
                             "price_per_mwh": _ne(p.get("solved_ppa_price"), 4),
                             "money_year": p.get("solved_ppa_price_money_year")}
+    # What the incremental figures are compared with (owner decision
+    # 2026-10-15), and the island capability's break-even beside the NPV.
+    cf = p.get("counterfactual")
+    if isinstance(cf, dict):
+        out["counterfactual"] = {
+            "basis": (cf.get("counterfactual_basis") or "none") if cf.get("present", True)
+            else "none",
+            "text": _cut(cf.get("basis"), 300),
+            "notes": [_cut(x, 300) for x in (cf.get("notes") or [])[:4]]}
+    be = p.get("island_breakeven")
+    if isinstance(be, dict):
+        out["island_breakeven"] = {k: _ne(be.get(k), 2) for k in (
+            "eur_per_year", "outage_hours_per_year", "eur_per_outage_hour",
+            "islanded_mwh_per_year", "eur_per_mwh_islanded")}
+        out["island_breakeven"]["text"] = _cut(be.get("text"), 300)
     gate = _section(report, "gates").get("payload") or {}
     consistent = gate.get("wacc_vs_discount_rate_consistent",
                           (report.get("gates") or {}).get("wacc_vs_discount_rate_consistent"))

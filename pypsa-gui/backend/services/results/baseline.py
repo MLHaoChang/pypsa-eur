@@ -31,6 +31,8 @@ import queue
 import threading
 from dataclasses import dataclass, field
 
+from services.finance.baseline_text import flag_text  # noqa: F401  (the flags' wording)
+
 _EPS_MW = 1e-6
 #: A removed row's upper bound in the baseline (MW): see `baseline_network`.
 _REMOVED_MAX = 1e-9
@@ -126,25 +128,6 @@ def baseline_network(n, plan: BaselinePlan):
             df.loc[name, [f"{col}_extendable", col, f"{col}_min", f"{col}_max"]] = \
                 [True, 0.0, 0.0, _REMOVED_MAX]
     return base
-
-
-_PLAIN = {
-    "baseline_typing_mismatch": "{a} has no typed cost; treated as a new investment. "
-                                "Type overnight 0 if it already exists.",
-    "baseline_free_capacity": "{a} adds capacity typed at no cost (overnight 0); the baseline "
-                              "removes the addition, so the case gets its value for free. "
-                              "Type its cost.",
-    "baseline_island_rows_relaxed": "The site as it stands cannot meet the island requirements "
-                                    "without the new builds, so it is compared without them: "
-                                    "the island capability is part of what the investment buys.",
-}
-
-
-def flag_text(flag: str) -> str | None:
-    """A baseline flag in plain words for the IC view; None for any other flag."""
-    code, _sep, asset = flag.partition(":")
-    tpl = _PLAIN.get(code)
-    return tpl.format(a=asset) if tpl else None
 
 
 # ── the solve ────────────────────────────────────────────────────────────────

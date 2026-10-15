@@ -1129,7 +1129,7 @@ def baseline_plan(n, cfg, owner: str | None = None):
     is refused later, as before)."""
     from services.results import baseline as _B
 
-    if not cfg.commercial:
+    if not getattr(cfg, "commercial", None):
         return None
     try:
         parsed = _lp._parse(cfg.commercial)

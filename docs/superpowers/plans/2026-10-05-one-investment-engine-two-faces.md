@@ -220,6 +220,8 @@ curtailment hours are ranked on the LP's scaled load (`load_scalers`). Omitting 
 **Changes (2026-10-15, the site-today baseline, owner decision after #294):** `results.finance_case.build_finance_case`
 gains the optional keyword `baseline=None` (a solved `results.baseline.Baseline`): the counterfactual is then the site as
 it stands today, re-solved without the plan's new builds. Omitting it keeps the analytic counterfactual, byte for byte.
+Addition: `results.finance_case.baseline_plan(n, cfg, owner=None)`, the rows a baseline removes or keeps (`None`
+without value flows); the guided study reads it to say when its analytic basis keeps existing assets.
 
 ## 7. Coordination protocol
 

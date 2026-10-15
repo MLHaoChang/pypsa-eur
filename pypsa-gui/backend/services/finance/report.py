@@ -492,7 +492,7 @@ def _counterfactual_block(result, case) -> dict[str, Any]:
                          "the owner is the site party): incremental = total"}
     lines = [ln for t in case.counterfactual for ln in t.lines]
     site_today = "counterfactual_basis:site_today" in result.flags
-    from services.results.baseline import flag_text
+    from services.finance.baseline_text import flag_text
 
     return {
         "present": True,
