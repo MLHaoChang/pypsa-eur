@@ -4360,7 +4360,7 @@
       "required": [
         "project_id"
       ],
-      "safety_tier": "write",
+      "safety_tier": "execution_long_running",
       "schema_sha256": "c2516f103a5d78e5c75ff13fb31a31febf7e33a4fb0cde85287b1b77e0e16f7d",
       "behavioral_fixture": "pending"
     },

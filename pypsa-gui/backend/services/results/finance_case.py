@@ -666,8 +666,8 @@ def _served_load(n, cfg, loads: list[str], lost_load) -> tuple[np.ndarray, np.nd
     shed = np.zeros(len(n.snapshots))
     reasons: list[str] = []
     buses = {str(n.loads.at[ld, "bus"]) for ld in loads}
-    frame = n.buses_t.get(_SI.DSR_ATTR) if hasattr(n.buses_t, "get") else None
-    if frame is not None and not frame.empty:
+    dsr_frame = n.buses_t.get(_SI.DSR_ATTR) if hasattr(n.buses_t, "get") else None
+    if dsr_frame is not None and not dsr_frame.empty:
         dsr, _f = _SI.dsr_activation(n)
         if dsr is None:
             reasons.append("dsr_shed_unknown")

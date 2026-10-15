@@ -9,7 +9,7 @@ import client from './client'
 export type SolveJobStatus =
   'queued' | 'running' | 'completed' | 'failed' | 'aborted' | 'interrupted'
 
-export type SolveJobKind = 'solve' | 'gridspine'
+export type SolveJobKind = 'solve' | 'gridspine' | 'campus'
 
 export interface SolveJob {
   // UUID string. Was a per-process integer that collided across replicas.
@@ -22,8 +22,8 @@ export interface SolveJob {
   // `org:uuid`. Always emitted by the backend, nulled by the same redaction.
   // Was missing from this interface entirely.
   project_key: string | null
-  // What the job RUNS: a network solve, or a planning → dynamics study
-  // (increment 4). Optional because rows written before the backend grew the
+  // What the job RUNS: a network solve, a planning → dynamics study
+  // (increment 4) or a campus electrical study (E2E demo plan 2026-10-14, D1). Optional because rows written before the backend grew the
   // field carry none; absent means `solve`, exactly as the backend resolves it.
   kind?: SolveJobKind
   status: SolveJobStatus

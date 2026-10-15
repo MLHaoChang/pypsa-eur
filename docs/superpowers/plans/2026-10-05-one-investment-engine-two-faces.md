@@ -213,6 +213,10 @@ reads. The study's `ALLOWED_EXCEPTIONS` is empty, and its scan covers `models.co
 `Operating.stage_capex` / `stage_items` (defaults); the helpers `finance.case.cod_year_of` / `staged_assets`. Both
 new fields are left out of `finance_case_hash` at their defaults, so a case without stages keeps its hash. No
 signature changes.
+**Changes (2026-10-14, E2E demo plan slice 1b):** `commercial.binding.bind_commercial` and
+`bind_commercial_on_context` gain the optional keyword `solver_cfg=None` (the config the solve will use), so an FCA's
+curtailment hours are ranked on the LP's scaled load (`load_scalers`). Omitting it keeps the old ranking on the raw
+`p_set`; a study fork binds without a project directory, where an FCA is refused anyway.
 
 ## 7. Coordination protocol
 

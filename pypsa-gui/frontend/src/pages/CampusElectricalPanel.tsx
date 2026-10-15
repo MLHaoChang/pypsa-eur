@@ -16,20 +16,25 @@
 // inline: another project kind (409), not saved or solved (422), a campus
 // file that does not build (422, naming the field).
 //
-// A run is one synchronous request (seconds to minutes; `CAMPUS_RUN_TIMEOUT_MS`).
-// When it gets no answer (a timeout, a dropped connection) the backend may still
-// be running it and will save its results, so the panel never treats the results
-// it shows as the new run's: it re-reads the state, warns while the backend says
-// a run is going on (`run_in_progress`), and says once it ends whether the
-// results it saved are the run asked for.
+// A run is a solve-queue job of kind `campus` (E2E demo plan 2026-10-14, D1): the
+// request queues it and answers at once; the job runs for minutes. The panel reads
+// the job and the stage it reached from the state's `run_job`, polls while it is
+// queued or running, says plainly that the user should wait, and offers Abort
+// (the queue's). The header's status pill shows the same job.
+// When the queueing request gets no answer (a timeout, a dropped connection) the
+// backend may still have queued it, so the panel never treats the results it
+// shows as the new run's: it re-reads the state, warns while the backend says a
+// run is going on, and says once it ends whether the results it saved are the
+// run asked for.
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, RefreshCw, Save, Square, Wand2, Workflow } from 'lucide-react'
 import {
-  campusApi, errorText, isNoAnswer, isOtherKind,
-  type CampusSettings, type CampusState, type CheckStatus, type ComplianceRow, type InvestedComplianceRow,
-  type InvestmentRow, type MilpJobRecord, type TransformerSizing,
+  campusApi, errorText, isActiveRun, isNoAnswer, isOtherKind,
+  type CampusRunJob, type CampusRunStage, type CampusSettings, type CampusState, type CheckStatus, type ComplianceRow,
+  type InvestedComplianceRow, type InvestmentRow, type MilpJobRecord, type TransformerSizing,
 } from '../api/campusElectrical'
+import { solveQueueApi } from '../api/solveQueue'
 import { useUIStore } from '../store/uiStore'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
@@ -102,8 +107,19 @@ function CampusView({ name }: { name: string }) {
   const [outcome, setOutcome] = useState<string | null>(null)
   const state = useQuery({
     queryKey: CAMPUS_KEY(name), queryFn: () => campusApi.state(name), retry: false,
-    refetchInterval: q => (lost != null || q.state.data?.run_in_progress ? CAMPUS_RUN_POLL_MS : false),
+    refetchInterval: q => (lost != null || q.state.data?.run_in_progress || isActiveRun(q.state.data?.run_job)
+      ? CAMPUS_RUN_POLL_MS : false),
   })
+  // When the run's job ends, its results are new: the island report reads them too.
+  const jobRef = useRef<CampusRunJob | null | undefined>(undefined)
+  useEffect(() => {
+    const job = state.data?.run_job
+    const was = jobRef.current
+    jobRef.current = job
+    if (was != null && isActiveRun(was) && job != null && job.id === was.id && !isActiveRun(job)) {
+      void qc.invalidateQueries({ queryKey: ISLAND_REPORT_KEY(name) })
+    }
+  }, [state.data?.run_job, qc, name])
   // Once a read made after the lost request (the effect runs on new data only) finds no run
   // going on, the backend has ended: say whether what it saved is the run asked for.
   const lostRef = useRef(lost)
@@ -148,7 +164,7 @@ function CampusView({ name }: { name: string }) {
     setLost({ settings, why })
     void qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })
   }
-  const pending = lost != null || state.data.run_in_progress === true
+  const pending = lost != null || state.data.run_in_progress === true || isActiveRun(state.data.run_job)
 
   return (
     <PageBody>
@@ -274,9 +290,16 @@ function RunSection({ name, state, onChange, lost, outcome, pending, onRunStart,
   const run = useMutation({
     mutationFn: (s: CampusSettings) => campusApi.run(name, s),
     onMutate: () => { setRefusal(null); onRunStart() },
-    onSuccess: data => onChange(data),
+    // The answer is the queued job: re-read the state, whose `run_job` the panel follows.
+    onSuccess: () => onChange(),
     onError: (e, s) => (isNoAnswer(e) ? onRunLost(s, errorText(e)) : setRefusal(errorText(e))),
   })
+  const abortRun = useMutation({
+    mutationFn: (jobId: string) => solveQueueApi.abort(jobId),
+    onSuccess: () => onChange(),
+    onError: e => setRefusal(errorText(e)),
+  })
+  const job = state.run_job ?? null
   // The joint optimisation: a background job, polled while it runs; when it
   // ends the state is re-read so its results appear beside the least-cost ones.
   const milp = useCampusMilpJob(name, { onStarted: () => onChange(), onFinished: () => onChange() })
@@ -328,7 +351,7 @@ function RunSection({ name, state, onChange, lost, outcome, pending, onRunStart,
                  checked={tapsByOperator} disabled={!invest} onChange={e => setTapsByOperator(e.target.checked)} />
         </Field>
         <Btn variant="primary" onClick={() => run.mutate(settings())} disabled={busy}>
-          <Play size={13} /> {run.isPending ? 'Running…' : 'Run study'}
+          <Play size={13} /> {run.isPending ? 'Queueing…' : isActiveRun(job) ? 'Running…' : 'Run study'}
         </Btn>
         <Btn
           onClick={startMilp}
@@ -338,6 +361,7 @@ function RunSection({ name, state, onChange, lost, outcome, pending, onRunStart,
           <Workflow size={13} /> {milp.isStarting ? 'Starting…' : 'Joint optimisation (MILP, slow — minutes)'}
         </Btn>
       </div>
+      {job != null && <RunJobStatus job={job} onAbort={() => abortRun.mutate(job.id)} aborting={abortRun.isPending} />}
       <p className="text-[11.5px] text-muted mt-2">
         The joint optimisation chooses every asset together instead of one need at a time, starting from the
         least-cost choice and re-checking each step by AC load flow. It takes minutes on a real site and runs in the
@@ -404,6 +428,64 @@ function MilpProgress({ record, cancelling, onCancel, stale }: {
           : `${ended}; its choice is shown under Joint optimisation.`}
     </p>
   )
+}
+
+const STAGE_LABEL: Record<CampusRunStage, string> = {
+  prepare: 'preparing the campus from the saved network',
+  rank: 'ranking the critical hours',
+  island_checks: 'island frequency checks (the slowest step)',
+  size: 'sizing the transformers, the compensation and the short circuit',
+  invest: 'buying the assets from the library, re-checked by AC load flow',
+  done: 'finishing',
+}
+
+function elapsed(fromS: number | null, toS?: number | null): string {
+  if (fromS == null) return ''
+  const s = Math.max(0, Math.round((toS ?? Date.now() / 1000) - fromS))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
+/** The run's job, in words: queued or running (please wait, the stage, Abort),
+ *  or how the last one ended. A finished run says nothing: its results show. */
+function RunJobStatus({ job, onAbort, aborting }: { job: CampusRunJob; onAbort: () => void; aborting: boolean }) {
+  if (job.status === 'queued') {
+    return (
+      <p className="mt-2 text-[12px]" data-testid="campus-run-status" role="status">
+        <Tag tone="accent">queued</Tag>{' '}
+        The study is waiting for the solve queue{job.position != null ? ` (#${job.position})` : ''}. Please wait; it starts on its own.{' '}
+        <Btn onClick={onAbort} disabled={aborting}><Square size={12} /> Abort</Btn>
+      </p>
+    )
+  }
+  if (job.status === 'running') {
+    const stage = job.stage ?? 'prepare'
+    const step = job.stage_total ? ` (step ${Math.min((job.stage_done ?? 0) + 1, job.stage_total)} of ${job.stage_total})` : ''
+    return (
+      <p className="mt-2 text-[12px]" data-testid="campus-run-status" role="status">
+        <Tag tone="accent">running</Tag>{' '}
+        Running: {STAGE_LABEL[stage] ?? stage}{step} · {elapsed(job.started_at)}. The study takes several minutes; please wait.
+        The results below are the previous run's until it finishes.{' '}
+        <Btn onClick={onAbort} disabled={aborting}><Square size={12} /> Abort</Btn>
+      </p>
+    )
+  }
+  if (job.status === 'failed' || job.status === 'interrupted') {
+    return (
+      <p className="mt-2 text-[12px] text-danger" data-testid="campus-run-status" role="alert">
+        The last run {job.status === 'failed' ? 'failed' : 'was interrupted (the backend restarted)'}
+        {job.error ? `: ${job.error}` : '.'} The results below, if any, are from an earlier run.
+      </p>
+    )
+  }
+  if (job.status === 'aborted') {
+    return (
+      <p className="mt-2 text-[12px] text-muted" data-testid="campus-run-status">
+        The last run was aborted{job.stage ? ` during ${STAGE_LABEL[job.stage] ?? job.stage}` : ''}. The results below, if any,
+        are from an earlier run.
+      </p>
+    )
+  }
+  return null
 }
 
 /** The first purchase the investment step chose for a transformer group (its
