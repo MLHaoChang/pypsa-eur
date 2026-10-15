@@ -18,6 +18,7 @@ import sys
 import threading
 from datetime import date
 
+import numpy as np
 import pytest
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
@@ -339,3 +340,35 @@ def test_a_staged_plan_that_builds_a_battery_gets_an_npv(battery_built, staged_c
     assert not [ln.key for t in (*case.templates, *case.counterfactual) for ln in t.lines
                 if ln.amount is None]
     assert r.metrics["project_pre_tax_npv"] is not None, r.reasons
+
+
+@pytest.fixture
+def connection_45(monkeypatch):
+    """The staged template with a 45 MW connection: the 2035 peak (52.5 MW)
+    no longer fits, so the grid-only comparison sheds in 2035 only."""
+    monkeypatch.setattr(T, "_DC_POC_MW", 45.0)
+    monkeypatch.setattr(T, "DC_ENERGIZATION_MW", {2027: 20.0, 2030: 45.0, 2035: 45.0})
+
+
+@pytest.mark.live_solve
+def test_a_multi_period_shed_is_priced_per_period(connection_45, staged_case):
+    """#294 review (item 5): each period's shed line is
+    −VoLL · Σ_period w · max(0, load − min(PoC, E)); a period that sheds
+    nothing has no line. (`connection_45` before `staged_case`.)"""
+    n, case, _r = staged_case
+    voll = T.solver_config(TID)["voll"]
+    period = n.snapshots.get_level_values(0)
+    load = n.loads_t.p_set.sum(axis=1).to_numpy(float)
+    e = n.links_t["eh_energization_mw"]["grid_import"].to_numpy(float)
+    cap = np.minimum(float(n.links.at["grid_import", "p_nom"]), e)
+    w = n.snapshot_weightings.objective.to_numpy(float)
+    shed_lines = {ln.period: ln.amount for t in case.counterfactual for ln in t.lines
+                  if ln.key == "counterfactual:shed_at_voll"}
+    for y in T.DC_PHASES:
+        m = period == y[0]
+        want = voll * float((w[m] * np.clip(load[m] - cap[m], 0.0, None)).sum())
+        if want > 0:
+            assert shed_lines[str(y[0])] == pytest.approx(-want, rel=1e-9), y[0]
+        else:
+            assert str(y[0]) not in shed_lines, y[0]
+    assert set(shed_lines) == {"2035"}

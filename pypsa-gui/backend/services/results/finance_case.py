@@ -875,8 +875,12 @@ def _asset_of(a: _Acc) -> tuple[str, str] | None:
 def _import_capacity(n, parsed) -> np.ndarray:
     """What the connection carries per snapshot (MW): each import Link's size
     (`p_nom_opt`, else `p_nom`) × its `p_max_pu`, capped hour by hour by the
-    energization schedule (`energization.capped_mw`, the solve's own rule)."""
+    energization schedule (`energization.capped_mw`, the solve's own rule) and,
+    on the PoC, by the connection agreement's cap (`agreement_import_cap_mw`:
+    a non-firm cap, a closed connection before `available_from`; both are
+    undone after the solve, so the network alone does not show them)."""
     from services.adequacy import energization as _E
+    from services.commercial import connection as _C
 
     cap = np.zeros(len(n.snapshots))
     for m in _lp.import_links(parsed):
@@ -884,8 +888,12 @@ def _import_capacity(n, parsed) -> np.ndarray:
             continue
         pn = _fin(n.links.at[m, "p_nom_opt"]) if "p_nom_opt" in n.links.columns else None
         pn = pn if pn is not None else float(n.links.at[m, "p_nom"])
-        cap += _E.capped_mw(n, m, pn * _series(n, "links_t", "p_max_pu", m,
-                                                 n.links.at[m, "p_max_pu"]))
+        carried = _E.capped_mw(n, m, pn * _series(n, "links_t", "p_max_pu", m,
+                                                   n.links.at[m, "p_max_pu"]))
+        if m == parsed.poc_link and parsed.connection is not None:
+            carried = np.minimum(carried, _C.agreement_import_cap_mw(
+                n, parsed.connection, poc_link=m, timezone=parsed.timezone))
+        cap += carried
     return cap
 
 
