@@ -131,8 +131,9 @@ function operation({ status }: ChapterInputs['operation']): Omit<ChapterTile, 'i
   }
   const stale = status.dispatch === 'stale'
   return {
-    label, value: fmtCurrency(obj), state: stale ? 'stale' : 'ready', open,
-    basis: 'The solve’s total system cost (objective)',
+    // Not the cost again (UX audit M9): the Results card's cost tile shows it.
+    label, value: 'Solved', state: stale ? 'stale' : 'ready', open,
+    basis: 'Every modelled hour dispatched; its cost is in the yearly cost above',
     reason: stale ? 'The network changed since the dispatch was solved.' : undefined,
   }
 }

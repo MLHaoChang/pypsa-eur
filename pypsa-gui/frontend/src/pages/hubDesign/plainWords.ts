@@ -2,6 +2,9 @@
 // carry (P24-FE gate B3, spec §5.8). The raw prose stays available, verbatim,
 // in the finding's "Why" evidence list; the card itself shows this version.
 import { SECTION_LABEL } from './sectionLabels'
+import { displayName } from '../../utils/displayName'
+import { fmtCurrency } from '../results/shared'
+import { kpiFigure, splitValueUnit } from '../../utils/format'
 
 const RULES: [RegExp, string][] = [
   // Whole review phrasings first (eh_review.py: fmea_dominant_mode).
@@ -42,9 +45,25 @@ export function plainWords(text: string): string {
   // "frontier: not established" → "Cost versus reliability could not be worked out"
   const ne = /^(\w+): not established$/.exec(text.trim())
   if (ne) return `${SECTION_LABEL[ne[1]] ?? 'A part of the study'} could not be worked out`
-  let out = text
+  // The dominant-risk line names its unit in plain words (UX audit M5).
+  let out = text.replace(/\b([a-z0-9]+(?:_[a-z0-9]+)+) carries (\d+(?:\.\d+)?%) of ranked Link risk\b/g,
+    (_m, id: string, pct: string) => `${displayName(id)} accounts for ${pct} of the outage risk`)
   for (const [re, plain] of RULES) out = out.replace(re, plain)
   return out
+}
+
+/** A template note with its raw component ids (`it_bus`) in plain words
+ *  (UX audit M5): any snake_case word; other words are left as written. */
+export function plainIds(text: string): string {
+  return text.replace(/\b[a-z0-9]+(?:_[a-z0-9]+)+\b/g, id => displayName(id))
+}
+
+/** Money in a sentence at the KPI tile's rounding (UX audit M8):
+ *  "€657 k", never "€657.00 k". */
+export function kpiMoney(eur: number): string {
+  const raw = splitValueUnit(fmtCurrency(eur))
+  const p = kpiFigure(raw.value, raw.unit)
+  return p.unit ? `${p.value} ${p.unit}` : p.value
 }
 
 /** Evidence values for reading: long decimals rounded to four significant

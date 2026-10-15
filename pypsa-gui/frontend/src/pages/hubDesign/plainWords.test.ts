@@ -1,7 +1,7 @@
 // P24-FE re-gate R8 and notes: every rule of the Improve card's glossary has a
 // case, including the review effects the three templates do not reach.
 import { describe, expect, it } from 'vitest'
-import { evidenceValue, plainWords } from './plainWords'
+import { evidenceValue, kpiMoney, plainIds, plainWords } from './plainWords'
 
 describe('plainWords', () => {
   it('a bare dtc_planning (dtc_critical_unserved effect)', () => {
@@ -65,5 +65,30 @@ describe('plainWords', () => {
     expect(evidenceValue([7.68316774385459, 17.084689399002553])).toBe('[7.683, 17.08]')
     expect(evidenceValue(500)).toBe('500')
     expect(evidenceValue('fail')).toBe('fail')
+  })
+})
+
+describe('plainWords: the dominant-risk line names the unit in plain words (UX audit M5)', () => {
+  it('a raw id before "carries … of ranked Link risk" becomes its display name', () => {
+    expect(plainWords('site_transformer carries 100% of ranked Link risk'))
+      .toBe('Site transformer accounts for 100% of the outage risk')
+    expect(plainWords('grid_import carries 62.5% of ranked Link risk'))
+      .toBe('Grid import accounts for 62.5% of the outage risk')
+  })
+})
+
+describe('kpiMoney (UX audit M8): money in a sentence at the KPI tile rounding', () => {
+  it('three significant figures, no trailing ".00"', () => {
+    expect(kpiMoney(657_000)).toBe('€657 k')
+    expect(kpiMoney(7_890_000)).toBe('€7.89 M')
+  })
+})
+
+describe('plainIds (UX audit M5): raw ids inside a template note', () => {
+  it('a snake_case id becomes its display name; other words stay', () => {
+    expect(plainIds('IT load is critical (it_bus); cooling and offices are not.'))
+      .toBe('IT load is critical (IT bus); cooling and offices are not.')
+    expect(plainIds('The grid connection is capped at 40 MW.'))
+      .toBe('The grid connection is capped at 40 MW.')
   })
 })

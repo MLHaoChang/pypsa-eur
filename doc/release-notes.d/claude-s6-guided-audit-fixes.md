@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Guided mode's cards no longer show raw ids (Improve, Start), say "no shortfall expected" instead of "about 0.0 h/yr", round risk money like the KPI tiles, show the Operation tile as solved instead of repeating the yearly cost, and mark out-of-date results with the shared "Out of date" state instead of a custom banner and a done tick.
