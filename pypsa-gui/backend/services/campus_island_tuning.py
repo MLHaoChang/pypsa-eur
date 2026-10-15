@@ -16,7 +16,14 @@ buy. Here it is:
   run after it makes it ``stale`` (and a rerun of the island checks removes
   it, ``campus_electrical_service._island_hours_files``).
 
-The result is heuristic screening, labelled so; nothing here applies it.
+- applied (``apply_settings``): the recommended droop, τ_f or H_v (and
+  i_max when the search could raise it) written into the island sidecar and
+  the campus file, tagged ``assumed``. The island study goes with the old
+  inputs; the campus results go stale by their hash of the campus file; the
+  hub must be re-solved, since droop, τ_f and H_v change its island rows
+  (I2b), and the recommendation says so (``applied.hub_resolve_needed``).
+
+The result is heuristic screening, labelled so.
 """
 from __future__ import annotations
 
@@ -94,3 +101,81 @@ def run_queued(project, settings: dict, *, progress, should_stop) -> None:
     progress(STAGE, 0, 1)
     recommend(_run_dir(project), allow_i_max=bool(settings.get("allow_i_max")), max_sims=MAX_SIMS)
     progress(STAGE, 1, 1)
+
+
+#: The fields a recommendation writes; ``H_equivalent_s`` is derived, never written.
+WRITTEN = ("droop_pct", "tau_f_s", "H_v_s", "i_max_pu")
+_REFUSE = {
+    "not_achievable": "no setting within the bounds passes: capacity is needed (I7), so there is "
+                      "nothing to apply",
+    "unchanged": "the current settings already pass with margin: nothing to apply",
+    "incomplete": "the recommendation is incomplete (the search hit its simulation cap); recommend "
+                  "again",
+}
+
+
+def _same(a, b) -> bool:
+    import math
+
+    return a is not None and b is not None and math.isclose(float(a), float(b), rel_tol=1e-9,
+                                                             abs_tol=1e-12)
+
+
+def apply_settings(project) -> dict:
+    """Write a ``recommended`` result that is still the run's into the island
+    sidecar and the campus file (see the module docstring). Both are validated
+    before either is written. Returns ``{changes, hub_resolve_needed}``, each
+    change ``{unit, pypsa_name, field, from, to}``. A 409 when there is no
+    recommendation for this run; a 422 for any other result, a unit the
+    campus file does not have, or a value the schema refuses."""
+    import time
+
+    import yaml
+
+    from services.adequacy.island_config import validate
+    from services.atomic_io import atomic_write_text
+
+    state = get_settings(project)
+    if state["state"] != "ready":
+        raise HTTPException(status_code=409, detail="no recommendation for the last campus run; "
+                                                    "recommend GFM settings again")
+    rec = state["recommendation"]
+    status = rec.get("status")
+    if status != "recommended":
+        raise HTTPException(status_code=422, detail=_REFUSE.get(status, f"status {status!r}: nothing to apply"))
+    campus_path = ce.campus_dir(project) / ce.CAMPUS_FILE
+    spec = yaml.safe_load(campus_path.read_text())
+    units = spec["campus"]["units"]
+    config = ce.get_island(project)["config"]
+    if config is None:
+        raise HTTPException(status_code=422, detail="the project has no island sidecar to write into")
+    changes = []
+    for uid, s in sorted((rec.get("settings") or {}).items()):
+        unit = units.get(uid)
+        name = (unit or {}).get("pypsa_name")
+        block, side = (unit or {}).get("island"), config["units"].get(name)
+        if block is None or side is None:
+            raise HTTPException(status_code=422, detail=f"unit {uid!r} has no island block in the campus "
+                                                        "file and the sidecar; draft the campus again")
+        for field in WRITTEN:
+            if field == "i_max_pu" and not rec.get("allow_i_max"):
+                continue                     # i_max is hardware: written only when the search could raise it
+            new, old = s["recommended"].get(field), s["current"].get(field)
+            if new is None or field not in side or _same(new, old):
+                continue
+            tagged = {"value": float(new), "source": "assumed"}
+            block[field], side[field] = dict(tagged), dict(tagged)
+            changes.append({"unit": uid, "pypsa_name": name, "field": field, "from": old, "to": float(new)})
+    if not changes:
+        raise HTTPException(status_code=422, detail="the recommendation changes no setting the files carry")
+    text = yaml.safe_dump(spec, sort_keys=False)
+    try:
+        validate(config)
+        ce.cs.check_campus(spec)
+    except ce.ContractError as exc:
+        raise ce._unprocessable(exc)
+    ce.save_island(project, config)          # drops the island study made with the old inputs
+    ce.save_campus(project, text)
+    rec["applied"] = {"at": time.time(), "changes": changes, "hub_resolve_needed": True}
+    atomic_write_text(_run_dir(project) / ce.cs.GFM_SETTINGS_JSON, json.dumps(rec, indent=2))
+    return {"changes": changes, "hub_resolve_needed": True}
