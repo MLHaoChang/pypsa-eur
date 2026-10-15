@@ -102,19 +102,6 @@ def _in_service(n, existing) -> None:
         df.loc[rows, "lifetime"] = float("inf")
 
 
-def _cyclic_per_period(n) -> None:
-    """Storage cycles within each period: one representative week stands for
-    3, 5 or 10 years, so energy carried from one period into the next is not
-    physical (gatekeeper review of #304). Set here, not in the shared
-    ``stage_network``, so the staged data center is untouched."""
-    if len(n.stores):
-        n.stores["e_cyclic"] = True
-        n.stores["e_cyclic_per_period"] = True
-    if len(n.storage_units):
-        n.storage_units["cyclic_state_of_charge"] = True
-        n.storage_units["cyclic_state_of_charge_per_period"] = True
-
-
 # ── Industrial Hydrogen Hub, staged ─────────────────────────────────────────
 
 
@@ -169,7 +156,6 @@ def build_eh_h2_hub_staged(T) -> "pypsa.Network":  # noqa: F821
         energization={}, weights=_period_years(), existing=H2_EXISTING, candidates=candidates)
     _sink_stores(n, H2_EXISTING)
     _in_service(n, H2_EXISTING)
-    _cyclic_per_period(n)
     n.name = "Industrial Hydrogen Hub (staged growth)"
     return n
 
@@ -242,7 +228,6 @@ def build_eh_microgrid_staged(T) -> "pypsa.Network":  # noqa: F821
         n, list(YEARS), load_scale=MG_LOAD_SCALE, energization={}, weights=_period_years(),
         existing=MG_EXISTING, candidates=candidates)
     _in_service(n, MG_EXISTING)
-    _cyclic_per_period(n)
     n.name = "Island Microgrid (staged growth)"
     return n
 

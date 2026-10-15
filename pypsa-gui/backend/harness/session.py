@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from services.llm_config import DEFAULT_MODEL
 from typing import Any
 import collections
+import hashlib
 import os
 import threading
 import time
@@ -70,6 +71,10 @@ class PendingConfirmation:
     safety_tier: str  # one of DESTRUCTIVE_TIERS (+ "write" in Guided mode)
     created_at: float
     expires_at: float
+    # Captured by the server at issuance; this is origin metadata, not a
+    # permission grant or a client-selected project binding. Legacy None is
+    # deliberately absent from project-scoped Activity.
+    project_id: str | None = None
 
     def is_expired(self, now: float | None = None) -> bool:
         return (now if now is not None else time.monotonic()) >= self.expires_at
@@ -297,6 +302,8 @@ class ChatSession:
             ttl_seconds = CONFIRMATION_TTL_SECONDS
         token = uuid.uuid4().hex
         now = time.monotonic()
+        from services.pypsa_service import PyPSAService
+        project_id = PyPSAService.get_active_context().project_uuid
         pc = PendingConfirmation(
             token=token,
             tool_name=tool_name,
@@ -304,6 +311,7 @@ class ChatSession:
             safety_tier=safety_tier,
             created_at=now,
             expires_at=now + ttl_seconds,
+            project_id=str(project_id) if project_id else None,
         )
         with self._lock:
             self.pending_confirmations[token] = pc
@@ -549,6 +557,30 @@ _SESSIONS_LOCK = threading.Lock()
 def get_session(session_id: str) -> ChatSession | None:
     with _SESSIONS_LOCK:
         return _SESSIONS.get(session_id)
+
+
+def pending_confirmation_origins(owner_id: str, project_id: str) -> list[dict]:
+    """Read live native confirmations by their server-captured origin.
+
+    No token, arguments or authorization is projected. The existing owner TTL,
+    replica and single-use decision gates remain authoritative. Context's
+    Phase-0 ``chat_state.session`` slot is not populated by production chat.
+    """
+    with _SESSIONS_LOCK:
+        sessions = [s for s in _SESSIONS.values() if s.owner_user_id == owner_id]
+    now = time.monotonic()
+    rows = []
+    for session in sessions:
+        if not session_replica_allows(session):
+            continue
+        with session._lock:
+            for pc in session.pending_confirmations.values():
+                if pc.project_id == project_id and not pc.is_expired(now):
+                    rows.append({
+                        'source_id': hashlib.sha256(pc.token.encode()).hexdigest(),
+                        'session_id': session.session_id, 'tool_name': pc.tool_name,
+                    })
+    return rows
 
 
 # CH-6 — the transcript key naming the user who ran a turn (the session owner).
