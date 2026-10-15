@@ -324,3 +324,25 @@ def test_the_assistant_creates_a_site_and_still_creates_the_other_templates(
     assert out["imported"] == "chat_clinic" and out.get("solver_config_issues", []) == []
     meta = client.get("/api/projects/chat_clinic/eh_template").json()
     assert meta["site_type"] == "hospital" and meta["entered"] == ["site_type"]
+
+
+def test_the_form_data_carries_every_preset_resolved(client, tmp_projects_dir):
+    r = client.get("/api/projects/from_template/eh_site/form")
+    assert r.status_code == 200, r.text
+    form = r.json()
+    assert [t["id"] for t in form["site_types"]] == list(S.SITE_TYPES)
+    for t in S.SITE_TYPES:
+        p = form["presets"][t]
+        assert p == json.loads(json.dumps(S.site_params({"site_type": t})))
+        assert p["existing"]["ups"]["mw"] > 0              # resolved, never None
+        assert len(p["energization"]) == len(p["stages"])
+    assert {lp["id"] for lp in form["load_profiles"]} == set(S.LOAD_PROFILES)
+    assert form["bounds"]["max_stages"] == S.MAX_STAGES
+
+
+def test_the_frontend_fixture_is_the_form_data():
+    """The Guided form's tests run on `siteFormFixture.json`; it must be what
+    the backend serves, or they test a form the user never sees. Regenerate
+    with `json.dumps(eh_site.form_schema(), indent=1)`."""
+    fixture = BACKEND.parent / "frontend/src/pages/hubDesign/siteFormFixture.json"
+    assert json.loads(fixture.read_text()) == json.loads(json.dumps(S.form_schema()))

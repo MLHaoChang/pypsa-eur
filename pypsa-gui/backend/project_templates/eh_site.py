@@ -188,6 +188,39 @@ def _shape(profile: str) -> np.ndarray:
     return raw / raw.max()
 
 
+#: What the Guided form shows for each site type (label, a typical example).
+SITE_TYPE_TEXT = {
+    "industrial": ("Industrial plant", "a factory or process plant"),
+    "commercial": ("Commercial building", "offices, retail or a hotel"),
+    "hospital": ("Hospital", "a hospital or clinic that must keep its critical care on"),
+    "campus": ("University or campus", "several buildings on one connection"),
+    "other": ("Other site", "anything else: start from round numbers"),
+}
+LOAD_PROFILE_TEXT = {
+    "industrial": "Two shifts on weekdays",
+    "commercial": "Office hours on weekdays",
+    "hospital": "Around the clock, busier by day",
+    "campus": "Teaching day with an evening shoulder",
+    "flat": "Nearly flat",
+}
+
+
+def form_schema() -> dict:
+    """What the Guided form needs to show the defaults before anything is
+    created: each site type's full preset (as ``site_params`` resolves it),
+    the load shapes and the bounds the checks apply."""
+    return {
+        "site_types": [{"id": t, "label": SITE_TYPE_TEXT[t][0], "example": SITE_TYPE_TEXT[t][1]}
+                       for t in SITE_TYPES],
+        "presets": {t: site_params({"site_type": t}) for t in SITE_TYPES},
+        "load_profiles": [{"id": k, "label": LOAD_PROFILE_TEXT[k]} for k in LOAD_PROFILES],
+        "bounds": {"max_stages": MAX_STAGES, "year_min": 2025, "year_max": 2060,
+                   "peak_mw_max": 500.0, "connection_mw_max": 1000.0,
+                   "max_gensets": MAX_GENSETS, "unit_mw_max": 50.0, "ups_minutes_max": 240.0,
+                   "ups_minutes_min": BRIDGE_S / 60.0, "horizon_end": HORIZON_END},
+    }
+
+
 # ── Parameters ──────────────────────────────────────────────────────────────
 
 
