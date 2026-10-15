@@ -132,7 +132,9 @@ def test_one_candidate_per_period_that_outlives_the_horizon(staged):
     ledger = " ".join(f"{r['item']} {r['note']}" for r in T.TEMPLATE_META[TID]["ledger"])
     for name, _c in short:
         if name.endswith(("2027", "2030")):
-            assert name in ledger and "part_not_replaced" in ledger, name
+            assert name in ledger and "part_lifetimes" in ledger, name
+    # ... and the finance inputs re-buy it (slice D4)
+    assert T.solver_config(TID)["finance"]["replacement_rule"] == "part_lifetimes"
 
 
 def test_the_plan_solves_and_respects_the_20_mw_cap_in_2027(solved):

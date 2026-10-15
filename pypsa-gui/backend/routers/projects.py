@@ -1635,6 +1635,10 @@ def create_from_template(
     else:
         _state["solver_config"] = SolverConfig()
     _sim_state_update(status="idle", condition=None, objective=None, solve_time=None)
+    # A template's commercial config and finance inputs (slice D4) are bound
+    # and validated as their PUT routes do; one that does not is dropped and
+    # reported, never stored unbound.
+    solver_config_issues = _bind_template_solver_config(user, dest / "solver_config.json")
 
     n = PyPSAService.get_network()
     n.name = target_name
@@ -1682,7 +1686,69 @@ def create_from_template(
             transformers=len(n.transformers),
             snapshots=len(n.snapshots),
         ),
+        "solver_config_issues": solver_config_issues,
     }
+
+
+def _bind_template_solver_config(user, cfg_path: pathlib.Path) -> list[dict]:
+    """Bind the template's `commercial` block on the new project the way
+    `PUT /api/simulation/solver_config` does (`binding.check_site_connection`,
+    `binding.bind_commercial_on_context`; its value flows checked as
+    `PUT /commercial/value_flows` does) and validate its `finance` block as
+    `PUT /api/simulation/finance` does (slice D4). A block that does not bind
+    is removed from the stored config and from the project's
+    `solver_config.json`, and returned as `{field, code, message}`."""
+
+    from pydantic import ValidationError
+
+    from models.commercial import CommercialConfig
+    from models.finance import FinanceInputs
+    from routers.simulation import _state
+    from services.commercial import binding
+    from services.commercial import participants as P
+    from services.solver_service import SolverConfig
+
+    cfg = _state["solver_config"]
+    merged = asdict(cfg)
+    issues: list[dict] = []
+    if cfg.commercial is not None:
+        try:
+            parsed = CommercialConfig.model_validate(cfg.commercial)
+            binding.check_site_connection(PyPSAService.get_network(), parsed.poc_link,
+                                          parsed.export_link, direction_only=True,
+                                          group_members=parsed.group_members)
+            if parsed.value_flows is not None:
+                vf = P.parse_value_flows(parsed.value_flows)
+                problems = P.value_flows_problems(vf, parsed, PyPSAService.get_network())
+                if problems:
+                    raise binding.BindingRefusal(422, "value_flows_invalid", "; ".join(problems))
+            merged["commercial"] = binding.bind_commercial_on_context(
+                PyPSAService.get_active_context(), parsed, user=user, solver_cfg=cfg)
+        except ValidationError as exc:
+            issues.append({"field": "commercial", "code": "commercial_config_invalid",
+                           "message": str(exc.errors()[0]["msg"])})
+        except P.ValueFlowsInvalid as exc:
+            issues.append({"field": "commercial", "code": exc.code, "message": str(exc)})
+        except binding.BindingRefusal as exc:
+            issues.append({"field": "commercial", "code": exc.code, "message": exc.message})
+    if cfg.finance is not None:
+        try:
+            merged["finance"] = FinanceInputs.model_validate(cfg.finance).model_dump(mode="json")
+        except ValidationError as exc:
+            issues.append({"field": "finance", "code": "finance_inputs_invalid",
+                           "message": str(exc.errors()[0]["msg"])})
+    for issue in issues:
+        merged[issue["field"]] = None
+    _state["solver_config"] = SolverConfig(**merged)
+    if issues and cfg_path.is_file():
+        try:
+            data = json.loads(cfg_path.read_text())
+            for issue in issues:
+                data.pop(issue["field"], None)
+            atomic_write_text(cfg_path, json.dumps(data, indent=2, sort_keys=True) + "\n")
+        except (OSError, ValueError):
+            pass   # the stored config already dropped it; a later save rewrites the file
+    return issues
 
 
 @router.post("/{name}")

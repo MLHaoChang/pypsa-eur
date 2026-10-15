@@ -218,6 +218,46 @@ DC_ENERGIZATION_MW = {2027: 20.0, 2030: 40.0, 2035: 40.0}
 DC_PERIOD_YEARS = {2027: 3, 2030: 5, 2035: 10}
 _DC_IT_MW = 36.0                                   # the single-year template's IT load
 
+# ── The staged campus's commercial and finance inputs (slice D4) ────────────
+# Inline only (no Library refs a fresh project would not have), so the
+# investment case computes on a project made from the template. Synthetic
+# illustrative numbers; the ledger in TEMPLATE_META says what each one is.
+
+#: The existing campus, in service at the first period (overnight cost 0).
+DC_EXISTING = ("genset_1", "genset_2", "genset_3", "genset_4", "rooftop_pv", "ups_battery",
+               "site_transformer")
+#: A synthetic network-use charge on the metered import (EUR/kWh), on top of
+#: the wholesale price the grid supply carries.
+DC_TARIFF: dict = {
+    "id": "dc_network_tariff_synthetic",
+    "name": "Synthetic network tariff (illustrative)",
+    "jurisdiction": "DE",
+    "valid_from": "2027-01-01",
+    "items": [{"id": "network_energy", "kind": "energy", "unit": "per_kwh",
+               "periods": [{"name": "day", "rate": 0.035, "start_hour": 8, "end_hour": 20},
+                           {"name": "night", "rate": 0.020}]}],
+}
+DC_FINANCE: dict = {
+    "currency": "EUR", "currency_year": 2020, "price_basis": "nominal",
+    "financial_close": "2026-01-01",
+    "cod_by_asset": {a: "2027-01-01" for a in DC_EXISTING},
+    "capex_phasing": [1.0], "stage_capex_lead_years": 1, "contingency_share": 0.0,
+    "escalation": {c: 0.02 for c in ("opex", "fuel", "tariff", "ppa", "export", "capex")},
+    # Every owned generator and battery needs an entry (the engine never reads
+    # a missing one as 0): PV 0.5 %/yr, the gensets and batteries none (the
+    # batteries on the no-degradation basis, as the guided case).
+    "degradation_by_asset": {
+        **{a: 0.0 for a in DC_EXISTING if a not in ("rooftop_pv", "site_transformer")},
+        "rooftop_pv": 0.005,
+        **{f"{k}_new_{y}": 0.0 for y, _it, _pue in DC_PHASES for k in ("genset", "bess")}},
+    "analysis_years": sum(DC_PERIOD_YEARS.values()),            # 2027-2044
+    "annualise": False,                                         # each period weighs 8,760 h
+    "tax_losses": "offset_other_income", "financing_fee_tax": "not_deducted",
+    "replacement_rule": "part_lifetimes",
+    "terminal_value": {"method": "remaining_life_annuity"},
+    "wacc_nominal": 0.07, "cost_of_equity": 0.07, "inflation": 0.02,
+}
+
 
 def _staged_datacenter(n: pypsa.Network, phases) -> pypsa.Network:
     """The single-year campus as a three-period plan: the week repeated in each
@@ -257,6 +297,21 @@ def _staged_datacenter(n: pypsa.Network, phases) -> pypsa.Network:
         index=snaps)
     n.remove("Generator", "genset_new")
     n.remove("StorageUnit", "bess_new")
+    # The investment case's counterfactual bill is the served load at the
+    # meter (`finance_case._lossy_poc`): with a lossy PoC chain it is not the
+    # metered import, and the case is refused. Losses are not modelled in the
+    # staged plan (the ledger says so); the single-year template keeps them.
+    n.links.loc[["grid_import", "site_transformer"], "efficiency"] = 1.0
+    # The existing campus is in service at the first period: a typed
+    # overnight cost of 0 is an established 0 (no capex, never a cost
+    # back-calculated from capital_cost). The PoC meter link stays untyped:
+    # it is not an investment.
+    for frame in ("generators", "storage_units", "links"):
+        df = getattr(n, frame)
+        rows = [a for a in DC_EXISTING if a in df.index]
+        # PyPSA annuitises a typed overnight cost and needs the rate to (the
+        # template's 7 %; 0 × anything is 0, so the LP is unchanged).
+        df.loc[rows, ["overnight_cost", "discount_rate"]] = [0.0, 0.07]
     for y in years:
         g, b = f"genset_new_{y}", f"bess_new_{y}"
         n.add("Generator", g, bus="dc_mv", carrier="gas", p_nom=0.0, p_nom_extendable=True,
@@ -496,8 +551,36 @@ TEMPLATE_META: dict[str, dict] = {
             {"item": "battery inverter replacement", "value": "after 10 years (inv_power_lifetime)",
              "source": "assumed",
              "note": "bess_new_2027's inverter ends in 2037 and bess_new_2030's in 2040, inside the "
-                     "2045 horizon; the investment case flags it (part_not_replaced) until the "
-                     "template's finance inputs add the replacement (slice P5c)"},
+                     "2045 horizon; the template's finance inputs re-buy it at the end of its "
+                     "lifetime (replacement_rule part_lifetimes)"},
+            {"item": "PoC and transformer losses", "value": "efficiency 1.0 on grid_import and "
+                                                            "site_transformer",
+             "source": "assumed",
+             "note": "losses are not modelled in the staged plan (the single-year template keeps "
+                     "0.995 and 0.99), so the investment case's counterfactual bill (the served "
+                     "load at the meter) is established; about 1.5 % of the import is left out"},
+            {"item": "import tariff", "value": f"{DC_TARIFF['id']}: network energy charge "
+                                               "35 EUR/MWh 08-20 h, 20 EUR/MWh otherwise",
+             "source": "synthetic",
+             "note": "an illustrative network-use charge on the metered import, on top of the "
+                     "wholesale price the grid supply carries; no demand charge (the template "
+                     "models one July week, so a monthly item would be billed for one month); "
+                     "replace with the site's tariff"},
+            {"item": "tariff clock", "value": "UTC",
+             "source": "assumed",
+             "note": "the representative week's hours are the site clock; stating them as UTC "
+                     "reads each tariff window on the snapshot hour as is"},
+            {"item": "existing campus", "value": "gensets 1-4, rooftop_pv, ups_battery, "
+                                                 "site_transformer: COD 2027-01-01, overnight cost 0",
+             "source": "assumed",
+             "note": "in service at the first period and sunk: no capex in the case; only the "
+                     "candidates the plan builds are investments, each a stage at its period"},
+            {"item": "finance inputs", "value": "nominal EUR (2020 money, the pack's), escalation "
+                                                "2 %/yr, inflation 2 %, all equity at 7 %, "
+                                                "close 2026-01-01, 18 years to 2045",
+             "source": "assumed",
+             "note": "a later stage's capex is paid one year before its COD; pre-tax (no tax "
+                     "pack); the terminal value is the remaining-life annuity of each part"},
             {"item": "depreciation of the staged assets",
              "value": "straight-line AfA (not degressive)",
              "source": "assumed",
@@ -510,6 +593,9 @@ TEMPLATE_META: dict[str, dict] = {
             "The energization schedule caps the import at 20 MW in 2027.",
             "Load is picked up in 2.5 MW blocks after an islanding (assumed): the island rows then "
             "follow the load, so the plan stages — a small genset in 2027 and 2030, the bulk in 2035.",
+            "After a solve the investment case runs on the shipped commercial config and finance "
+            "inputs: the existing campus is in service in 2027 at no capex, each candidate the plan "
+            "builds is a stage with its own COD, and an unbuilt later candidate is not an investment.",
         ],
         "provenance": PROVENANCE,
     },
@@ -611,9 +697,37 @@ SOLVER_CONFIG_EXTRA: dict[str, dict] = {
 }
 
 
+def _staged_commercial_and_finance() -> dict:
+    """The staged template's `commercial` and `finance` blocks, stored as the
+    routes store them (validated, dumped): the value flows are the
+    `single_owner` template built on the template's network."""
+    from models.commercial import CommercialConfig
+    from models.finance import FinanceInputs
+    from services.commercial import value_flow_templates as VFT
+
+    base = CommercialConfig.model_validate(
+        {"poc_link": "grid_import", "import_tariff": DC_TARIFF, "timezone": "UTC"})
+    vf = VFT.build("single_owner", build_eh_datacenter_staged(), base).config
+    commercial = base.model_copy(update={"value_flows": vf.model_dump(mode="json")})
+    return {"commercial": commercial.model_dump(mode="json"),
+            "finance": FinanceInputs.model_validate(DC_FINANCE).model_dump(mode="json")}
+
+
+#: Template blocks that need the backend's models (built on first use).
+_SOLVER_CONFIG_BUILT = {"eh_datacenter_staged": _staged_commercial_and_finance}
+_BUILT_CACHE: dict[str, dict] = {}
+
+
 def solver_config(template_id: str) -> dict:
     """The solver settings written beside one template."""
-    return {**SOLVER_CONFIG, **SOLVER_CONFIG_EXTRA.get(template_id, {})}
+    import copy
+
+    built = {}
+    if template_id in _SOLVER_CONFIG_BUILT:
+        if template_id not in _BUILT_CACHE:
+            _BUILT_CACHE[template_id] = _SOLVER_CONFIG_BUILT[template_id]()
+        built = copy.deepcopy(_BUILT_CACHE[template_id])
+    return {**SOLVER_CONFIG, **SOLVER_CONFIG_EXTRA.get(template_id, {}), **built}
 
 # The island sidecar (plan 2026-10-07 campus island, I1): control modes, unit
 # dynamics and island requirements, keyed by PyPSA name. Its schema is
