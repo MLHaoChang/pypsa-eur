@@ -178,9 +178,19 @@ def _applied_path(project) -> Path:
 
 
 def _epoch(value) -> float | None:
+    """An epoch float from a queue record (already one) or a persisted row's
+    datetime. SQLite reads ``DateTime(timezone=True)`` back NAIVE and a naive
+    ``.timestamp()`` assumes local time, so a naive value is UTC (as
+    ``solve_queue._row_epoch``; None stays None: not started)."""
     if value is None:
         return None
-    return value.timestamp() if hasattr(value, "timestamp") else float(value)
+    if not hasattr(value, "timestamp"):
+        return float(value)
+    if value.tzinfo is None:
+        from datetime import timezone
+
+        value = value.replace(tzinfo=timezone.utc)
+    return value.timestamp()
 
 
 def _hub_solved_since(project, at: float) -> bool:

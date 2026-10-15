@@ -279,6 +279,31 @@ def test_a_persisted_solve_after_a_restart_clears_it(drafted, monkeypatch):
     assert cit.get_settings(drafted)["applied"] is None
 
 
+@pytest.mark.parametrize("offset_s, cleared", [(60, True), (-60, False)])
+def test_a_naive_persisted_start_is_utc_on_a_machine_that_is_not(drafted, monkeypatch, offset_s, cleared):
+    """#310 review: SQLite reads the start back naive; in Berlin (+1/+2 h) a
+    local reading would shift it by hours. A solve one minute after the apply
+    clears the record, one minute before does not."""
+    import time
+    from datetime import datetime, timezone
+
+    from services import solve_job_store
+
+    _recommend(drafted)
+    cit.apply_settings(drafted)
+    at = cit.get_settings(drafted)["applied"]["at"]
+    naive = datetime.fromtimestamp(at + offset_s, tz=timezone.utc).replace(tzinfo=None)
+    row = {**_solve_job(drafted, None), "started_at": naive}
+    monkeypatch.setattr(solve_job_store, "load_by_status", lambda statuses, **kw: [row])
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    time.tzset()
+    try:
+        assert (cit.get_settings(drafted)["applied"] is None) is cleared
+    finally:
+        monkeypatch.delenv("TZ")
+        time.tzset()
+
+
 def test_with_island_constraints_off_no_re_solve_is_asked(drafted):
     (project_registry.project_dir(drafted) / "solver_config.json").write_text(
         json.dumps({"island_constraints": False}))
