@@ -12,6 +12,7 @@ import { redirectAfterLogout } from '../auth/logoutRedirect'
 import { getPostLoginPath } from '../auth/resume'
 import AssistantDock from '../components/AssistantDock'
 import NewProjectWizard, { type NewProjectTab } from '../layout/NewProjectWizard'
+import { CREATE_LABEL, DECISION_DESKTOP_ONLY } from '../layout/newProjectVocabulary'
 import DecisionStudiesEntry from './decision/DecisionStudiesEntry'
 import { useUIStore } from '../store/uiStore'
 import { appLog } from '../store/simulationStore'
@@ -76,13 +77,13 @@ const START_ACTIONS: ReadonlyArray<{
   hint: string
   Icon: typeof FilePlus
 }> = [
-  { tab: 'blank', label: 'New project', hint: 'Start from an empty network', Icon: FilePlus },
-  { tab: 'template', label: 'From template', hint: 'Bundled starter networks', Icon: BookOpen },
-  { tab: 'file', label: 'Import from disk', hint: '.pypsaproj.zip or .nc', Icon: Upload },
-  { tab: 'clone', label: 'Duplicate a project', hint: 'Fork one you can access', Icon: CopyIcon },
+  { tab: 'blank', label: CREATE_LABEL.blank, hint: 'Start from an empty network', Icon: FilePlus },
+  { tab: 'template', label: CREATE_LABEL.template, hint: 'Bundled starter networks', Icon: BookOpen },
+  { tab: 'file', label: CREATE_LABEL.file, hint: '.pypsaproj.zip or .nc', Icon: Upload },
+  { tab: 'clone', label: CREATE_LABEL.clone, hint: 'Fork one you can access', Icon: CopyIcon },
   // S8: a question-first decision study (its own project; the intake opens in
   // the workbench's decision panel).
-  { tab: 'decision', label: 'Decision study', hint: 'Do I need a battery? Get a yes/no and a report', Icon: Scale },
+  { tab: 'decision', label: CREATE_LABEL.decision, hint: 'Do I need a battery? Get a yes/no and a report', Icon: Scale },
 ]
 
 // DESKTOP ONLY, appended to the grid in local mode. The route behind it
@@ -90,7 +91,7 @@ const START_ACTIONS: ReadonlyArray<{
 // cannot work is the defect the "Open admin" button already was.
 const FOLDER_STARTER = {
   tab: 'folder' as const,
-  label: 'Import a folder',
+  label: CREATE_LABEL.folder,
   hint: 'Bring in pre-desktop projects',
   Icon: FolderInput,
 }
@@ -501,50 +502,12 @@ export default function ProjectsHomePage() {
           </section>
         )}
 
-        {/* Plan F1-F, F2: the studies of the last open decision study's own
-            project (a study is not in the project the workbench reopens). */}
-        <DecisionStudiesEntry className={`p-5 sm:p-7 ${GLASS_PANEL}`} />
-
-        <section aria-labelledby="start-heading" className="space-y-4">
-          <div className="space-y-2">
-            <Eyebrow>Workspace</Eyebrow>
-            <h2 className="text-xl font-semibold tracking-[-0.02em] sm:text-2xl" id="start-heading">
-              Start a project
-            </h2>
-            <p className="max-w-[60ch] text-sm leading-6 text-[var(--brand-ink-dim)]">
-              Creating, importing and duplicating all live here rather than in the workbench — a
-              project belongs to your workspace, not to whichever network happens to be open.
-            </p>
-          </div>
-          <ul className="grid list-none gap-3 p-0 sm:grid-cols-2 xl:grid-cols-4">
-            {(authEnabled ? START_ACTIONS : [...START_ACTIONS, FOLDER_STARTER])
-              .map(({ tab, label, hint, Icon }) => (
-              <li key={tab}>
-                <button
-                  className={`group flex h-full w-full flex-col items-start gap-2 rounded-[18px] border border-white/12 bg-[rgba(33,27,28,0.7)] p-4 text-left backdrop-blur-[18px] transition duration-200 hover:border-[rgba(255,82,82,0.4)] hover:bg-[rgba(40,33,34,0.85)] motion-safe:hover:-translate-y-0.5 ${FOCUS_RING}`}
-                  onClick={() => setWizardTab(tab)}
-                  type="button"
-                >
-                  <Icon aria-hidden="true" className="text-[var(--brand-red)]" size={18} />
-                  <span className="text-sm font-semibold tracking-[-0.01em]">{label}</span>
-                  <span className="text-xs leading-5 text-[var(--brand-ink-dim)]">{hint}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-
         <section aria-labelledby="projects-heading" className="space-y-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div className="space-y-2">
-              <Eyebrow>Accessible roots</Eyebrow>
               <h2 className="text-xl font-semibold tracking-[-0.02em] sm:text-2xl" id="projects-heading">
                 Projects you can open
               </h2>
-              <p className="max-w-[60ch] text-sm leading-6 text-[var(--brand-ink-dim)]">
-                Root projects are listed here; their scenario branches stay reachable inside the
-                workbench.
-              </p>
             </div>
             {rootProjects.length > 0 && (
               <span className="text-xs uppercase tracking-[0.14em] text-[var(--brand-ink-dim)]">
@@ -645,6 +608,42 @@ export default function ProjectsHomePage() {
               </ul>
             )}
           </div>
+        </section>
+
+        {/* Plan F1-F, F2: the studies of the last open decision study's own
+            project (a study is not in the project the workbench reopens). */}
+        <DecisionStudiesEntry className={`p-5 sm:p-7 ${GLASS_PANEL}`} />
+
+        <section aria-labelledby="start-heading" className="space-y-4">
+          <div className="space-y-2">
+            <h2 className="text-xl font-semibold tracking-[-0.02em] sm:text-2xl" id="start-heading">
+              Start a project
+            </h2>
+          </div>
+          <ul className="grid list-none gap-3 p-0 sm:grid-cols-2 xl:grid-cols-4">
+            {(authEnabled ? START_ACTIONS : [...START_ACTIONS, FOLDER_STARTER])
+              .map(({ tab, label, hint, Icon }) => {
+              // A decision study runs only in the desktop app for now (P4):
+              // say so on the card instead of failing after the click.
+              const desktopOnly = tab === 'decision' && authEnabled
+              return (
+              <li key={tab}>
+                <button
+                  disabled={desktopOnly}
+                  className={`group flex h-full w-full flex-col items-start gap-2 rounded-[18px] border border-white/12 bg-[rgba(33,27,28,0.7)] p-4 text-left backdrop-blur-[18px] transition duration-200 hover:border-[rgba(255,82,82,0.4)] hover:bg-[rgba(40,33,34,0.85)] motion-safe:hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 ${FOCUS_RING}`}
+                  onClick={() => setWizardTab(tab)}
+                  type="button"
+                >
+                  <Icon aria-hidden="true" className="text-[var(--brand-red)]" size={18} />
+                  <span className="text-sm font-semibold tracking-[-0.01em]">{label}</span>
+                  <span className="text-xs leading-5 text-[var(--brand-ink-dim)]">
+                    {desktopOnly ? DECISION_DESKTOP_ONLY : hint}
+                  </span>
+                </button>
+              </li>
+              )
+            })}
+          </ul>
         </section>
 
         {shouldShowImportSection(unclaimed, imported.length > 0) && (
