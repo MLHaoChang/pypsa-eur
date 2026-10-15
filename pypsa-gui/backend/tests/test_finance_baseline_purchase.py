@@ -162,3 +162,22 @@ def test_the_supply_is_priced_unescalated_plus_the_periods_co2_in_base_year_mone
     assert sp["mc"][2027] == pytest.approx(PRICE_KG * per_mwh + CO2_KG * per_mwh * 80.0 * conv)
     assert sp["mc"][2030] == pytest.approx(PRICE_KG * per_mwh + CO2_KG * per_mwh * 120.0 * conv)
     assert sp["bus"] == "h2" and sp["p_nom"] > 3.0
+
+
+@pytest.mark.live_solve
+def test_h2_the_plan_sheds_is_never_avoided_cost(reset_backend):
+    """Gatekeeper review of #312: the avoided purchase nets what the ACTUAL
+    solve sheds of the load, per snapshot; 1 MW shed by the plan in every hour
+    lowers the purchase by exactly that energy."""
+    n, cfg, ll, base = _site_today(reference_purchases=[PURCHASE])
+    shed = dict(ll or {})
+    t = shed["lost_load_t"].copy()
+    t["h2_load"] = 1.0
+    shed["lost_load_t"] = t
+    full = _lines(_case(n, cfg, _fin_h2(), baseline=base, lost_load=ll).counterfactual[0])
+    net = _lines(_case(n, cfg, _fin_h2(), baseline=base, lost_load=shed).counterfactual[0])
+    w = n.snapshot_weightings.objective.to_numpy(float)
+    one_mw = float(w.sum()) * 1000.0 / LHV * 8760.0 / float(w.sum()) * PRICE_KG
+    got = net["counterfactual:purchase:h2_load"].amount - full[
+        "counterfactual:purchase:h2_load"].amount
+    assert got == pytest.approx(one_mw, rel=1e-6)

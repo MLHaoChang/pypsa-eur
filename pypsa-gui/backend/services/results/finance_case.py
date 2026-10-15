@@ -1455,14 +1455,12 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
     # load's energy), plus any shed the baseline still leaves (none while the
     # supply is sized above the load's peak).
     bp = baseline.network.generators_t.p
+    supplied: dict[str, np.ndarray] = {}
     for ld in purchases:
         g = SUPPLY_PREFIX + ld
         if g in bp.columns:
-            raw = np.clip(bp[g].reindex(baseline.network.snapshots).fillna(0.0)
-                          .to_numpy(dtype=float), 0.0, None)
-            disp = np.where(raw > _EPS_MW, raw, 0.0)
-            if float(disp.sum()) > 0.0:
-                unserved[ld] = disp
+            supplied[ld] = np.clip(bp[g].reindex(baseline.network.snapshots).fillna(0.0)
+                                   .to_numpy(dtype=float), 0.0, None)
     for ld in n.loads.index:
         bus = str(n.loads.at[ld, "bus"])
         if bus not in sides.site or electric(bus) or ld not in baseline.network.loads.index:
@@ -1472,10 +1470,17 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
         if b_t is None or a_t is None:
             unknown.append(str(ld))             # VoLL on, no shed capture handed in
             continue
-        raw = b_t - a_t
+        if str(ld) in purchases:
+            # The avoided purchase is what the baseline buys or sheds of the
+            # load less what the ACTUAL solve sheds of it (gatekeeper review
+            # of #312): H2 the plan does not deliver is never avoided cost.
+            # Per snapshot: supply + baseline shed − actual shed, floored.
+            raw = supplied.get(str(ld), 0.0) + b_t - a_t
+        else:
+            raw = b_t - a_t
         diff = np.where(raw > _EPS_MW, raw, 0.0)
         if float(diff.sum()) > 0.0:
-            unserved[str(ld)] = unserved.get(str(ld), 0.0) + diff
+            unserved[str(ld)] = diff
     bought = sorted(ld for ld in unserved if ld in purchases)
     missing = sorted(ld for ld in unserved if ld not in purchases)
     blockers = []

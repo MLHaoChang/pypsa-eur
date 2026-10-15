@@ -141,9 +141,15 @@ def reference_supplies(n, cfg) -> tuple[dict, ...]:
     if not isinstance(com, dict) or not com.get("reference_purchases"):
         return ()
     parsed = CommercialConfig.model_validate(com)
+    # The same finance inputs the case prices the cash with (the IC route
+    # validates `cfg.finance`, as here): a model or its dict.
     fin_raw = getattr(cfg, "finance", None)
-    fin = FinanceInputs.model_validate(fin_raw) if isinstance(fin_raw, dict) else None
+    fin = fin_raw if isinstance(fin_raw, FinanceInputs) else \
+        FinanceInputs.model_validate(fin_raw) if isinstance(fin_raw, dict) else None
     real = fin is not None and fin.price_basis == "real"
+    # A nominal case without an inflation cannot convert the CO2 price; its
+    # CO2 cash lines read not established (`finance_case._co2_line`), and the
+    # dispatch takes the CO2 price unconverted.
     infl = 0.0 if real or fin is None or fin.inflation is None else float(fin.inflation)
     snaps = n.snapshots
     periods = (list(snaps.get_level_values(0).unique()) if hasattr(snaps, "levels")
@@ -165,9 +171,17 @@ def reference_supplies(n, cfg) -> tuple[dict, ...]:
                     (1.0 + infl) ** (base_year - int(co2.money_year))
                 cost += r.co2_t_per_kg * per_mwh * price
             mc[int(p)] = cost
-        ps = n.loads_t.p_set[r.load] if r.load in n.loads_t.p_set.columns \
-            else None
-        peak = float(ps.max()) if ps is not None else float(n.loads.at[r.load, "p_set"])
+        # Sized above the load as the LP sees it (`load_scalers` scale the
+        # demand for the solve only), so the supply never runs short.
+        from services.adequacy.demand import lp_demand_frame
+
+        frame = lp_demand_frame(n, cfg)
+        if frame is not None and r.load in frame.columns:
+            peak = float(frame[r.load].max())
+        elif r.load in n.loads_t.p_set.columns:
+            peak = float(n.loads_t.p_set[r.load].max())
+        else:
+            peak = float(n.loads.at[r.load, "p_set"])
         out.append({"load": r.load, "bus": str(n.loads.at[r.load, "bus"]),
                     "p_nom": round(2.0 * max(peak, 0.0) + 1.0, 6), "mc": mc})
     return tuple(out)
