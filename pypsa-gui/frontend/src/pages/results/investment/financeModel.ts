@@ -317,8 +317,13 @@ export function reportFlags(report: InvestmentCaseReportPayload, section: string
 const BASELINE_CAVEATS: [string, string][] = [
   ['counterfactual_exceeds_connection',
    'The comparison site without the investment draws more than the connection can carry in '
-   + 'some hours: it could not run as modelled, so the NPV, IRR and payback compare against an '
-   + 'impossible baseline. Read them with care.'],
+   + 'some hours, and no value of lost load is set to price the excess: it could not run as '
+   + 'modelled, so the NPV, IRR and payback compare against an impossible baseline. Read them '
+   + 'with care.'],
+  ['counterfactual_shed_at_voll',
+   'The comparison site without the investment cannot import all of its load: the load above '
+   + 'its connection is shed and valued at the value of lost load, so the NPV, IRR and payback '
+   + 'count that shed as a cost the investment avoids.'],
   ['counterfactual_exceeds_supply',
    'The comparison site without the investment needs more than its grid supply can deliver in '
    + 'some hours: it could not run as modelled, so the NPV, IRR and payback compare against an '
@@ -329,7 +334,9 @@ const BASELINE_CAVEATS: [string, string][] = [
  *  the project section carries. */
 export function baselineCaveats(report: InvestmentCaseReportPayload): string[] {
   const flags = new Set(reportFlags(report, 'project'))
-  return BASELINE_CAVEATS.filter(([f]) => flags.has(f)).map(([, text]) => text)
+  // A flag matches its key alone or with a `:<value>` suffix (counterfactual_shed_at_voll:<MWh>).
+  const has = (key: string) => [...flags].some(f => f === key || f.startsWith(`${key}:`))
+  return BASELINE_CAVEATS.filter(([f]) => has(f)).map(([, text]) => text)
 }
 
 /** Plain chip labels for the report sections (UX assessment Q7). */

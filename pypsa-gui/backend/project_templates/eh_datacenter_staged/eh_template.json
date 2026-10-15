@@ -120,6 +120,6 @@
     "Load is picked up in 2.5 MW blocks after an islanding (assumed): the island rows then follow the load, so the plan stages \u2014 a small genset in 2027 and 2030, the bulk in 2035.",
     "After a solve the investment case runs on the shipped commercial config and finance inputs: the existing campus is in service in 2027 at no capex, each candidate the plan builds is a stage with its own COD, and an unbuilt later candidate is not an investment.",
     "PoC and transformer losses are not modelled in the staged plan (efficiency 1.0), so the investment case can compare against the grid-only site.",
-    "The grid-only comparison serves 46.8 MW in 2035 on the 40 MW connection, which it could not; the case flags it (counterfactual_exceeds_connection)."
+    "The grid-only comparison would need 46.8 MW in 2035 on the 40 MW connection: the investment case sheds the load above it, valued at the 5,000 EUR/MWh VoLL (counterfactual_shed_at_voll)."
   ]
 }

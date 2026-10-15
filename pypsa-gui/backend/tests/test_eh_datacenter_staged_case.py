@@ -146,7 +146,9 @@ def test_the_study_notes_say_the_poc_is_loss_free_and_the_comparison_exceeds_the
     assert f"{it_mw * pue:g} MW in {year}" in notes
     assert f"{n.links.at['grid_import', 'p_nom']:g} MW connection" in notes
     assert it_mw * pue > n.links.at["grid_import", "p_nom"]     # the note's claim holds
-    assert "counterfactual_exceeds_connection" in notes
+    # The excess is shed at the template's own VoLL (owner decision 2026-10-15).
+    assert f"{T.solver_config(TID)['voll']:,.0f} EUR/MWh VoLL" in notes
+    assert "counterfactual_shed_at_voll" in notes
 
 
 def test_from_template_binds_the_commercial_block_and_the_finance_inputs(
@@ -303,5 +305,35 @@ def test_the_staged_template_produces_an_investment_case(staged_case):
     for k in ("project_pre_tax_npv", "project_pre_tax_irr"):
         assert r.metrics[k] is not None, (k, r.reasons)
     # The grid-only comparison overloads the connection in 2035, as the study
-    # notes say; the flag reaches the result the card and the export read.
-    assert "counterfactual_exceeds_connection" in r.flags
+    # notes say: the load above it is shed at the VoLL, priced in the case
+    # (owner decision 2026-10-15), never billed as an impossible import.
+    assert any(f.startswith("counterfactual_shed_at_voll:") for f in r.flags), r.flags
+    assert "counterfactual_exceeds_connection" not in r.flags
+
+
+@pytest.fixture
+def battery_built(monkeypatch):
+    """The 2030 battery candidate forced to build 2 MW, the solve dispatching it."""
+    orig = T.BUILDERS[TID]
+
+    def forced():
+        n = orig()
+        n.storage_units.loc["bess_new_2030", "p_nom_min"] = 2.0
+        return n
+    monkeypatch.setitem(T.BUILDERS, TID, forced)
+
+
+@pytest.mark.live_solve
+def test_a_staged_plan_that_builds_a_battery_gets_an_npv(battery_built, staged_case):
+    """Review of #283 (minor 2): a staged case that builds storage is a case:
+    the battery is a stage with its COD and capex, and every line, the C5
+    degradation pair included, is established, so the NPV is computed.
+    (`battery_built` before `staged_case`: the builder is patched first.)"""
+    n, case, r = staged_case
+    assert float(n.storage_units.at["bess_new_2030", "p_nom_opt"]) == pytest.approx(2.0)
+    assets = {a.name: a for a in case.assets}
+    assert "bess_new_2030" in assets and assets["bess_new_2030"].overnight_cost > 0
+    assert case.asset_cod["bess_new_2030"] == date(2030, 1, 1)
+    assert not [ln.key for t in (*case.templates, *case.counterfactual) for ln in t.lines
+                if ln.amount is None]
+    assert r.metrics["project_pre_tax_npv"] is not None, r.reasons

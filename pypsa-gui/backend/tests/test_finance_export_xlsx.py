@@ -100,3 +100,14 @@ def test_the_summary_says_when_the_comparison_baseline_could_not_run():
     assert "NPV, IRR and payback" in caveats[0]
     clean = openpyxl.load_workbook(io.BytesIO(build_workbook(_report())))
     assert not [r for r in _values(clean["Summary"]) if r[0] == "Caveat"]
+
+
+def test_the_summary_says_the_comparison_shed_is_valued_at_voll():
+    """Owner decision 2026-10-15: the load above the comparison's connection is
+    shed at the VoLL; the Summary says so (the flag carries its MWh)."""
+    rep = _report()
+    rep.sections["project"].payload["flags"] = ["counterfactual_shed_at_voll:812.5"]
+    wb = openpyxl.load_workbook(io.BytesIO(build_workbook(rep)))
+    caveats = [r[1] for r in _values(wb["Summary"]) if r[0] == "Caveat"]
+    assert len(caveats) == 1 and "valued at the value of lost load" in caveats[0]
+    assert "impossible" not in caveats[0]
