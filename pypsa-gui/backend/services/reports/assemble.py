@@ -291,6 +291,25 @@ def _worksheet_section(evidence: Evidence) -> Section | None:
                    source="code", status="ok", note=section.note, blocks=blocks)
 
 
+def _chapter_section(evidence: Evidence, section_id: str) -> Section | None:
+    """The investment-case or island chapter (``chapters``): its tables and
+    its disclosures, or not established; None when its source was not passed."""
+    from services.reports import chapters as C
+
+    section = evidence.sections.get(section_id)
+    if section is None:
+        return None
+    heading = C.TITLES[section_id]
+    if section.status != "ok" or not section.payload:
+        return _not_established_section(section_id, heading, section)
+    blocks: list[Block] = [TableRef(table_id=t) for t in _tables_for(evidence, section_id)]
+    notes = C.investment_disclosures(section.payload) if section_id == C.INVESTMENT \
+        else C.island_disclosures(section.payload)
+    blocks.extend(Callout(kind="disclosure", text=n) for n in notes)
+    return Section(section_id=section_id, heading=heading, source="code", status="ok",
+                   note=section.note, blocks=blocks)
+
+
 def _pipeline_section(evidence: Evidence) -> Section:
     if PIPELINE_ID in evidence.tables:
         return Section(section_id=PIPELINE_ID, heading="Study pipeline",
@@ -317,13 +336,21 @@ def evidence_only_document(evidence: Evidence, *, title: str, report_id: str,
     referenced, and the caller writes them under ``figures/<id>.png``.
     """
     figures: dict[str, Figure] = {}
+    from services.reports import chapters as C
+
+    # D8's order: the summary, the investment case, the reliability case, then
+    # the island and its control, and the pipeline last.
     sections: list[Section] = [_executive_summary(evidence, figure_pngs, figures)]
+    if (inv := _chapter_section(evidence, C.INVESTMENT)) is not None:
+        sections.append(inv)
     for name in REPORT_SECTIONS:
         sections.append(_eh_section(evidence, name, figure_pngs, figures))
     sections.extend(_adequacy_sections(evidence))
     worksheet = _worksheet_section(evidence)
     if worksheet is not None:
         sections.append(worksheet)
+    if (isl := _chapter_section(evidence, C.ISLAND)) is not None:
+        sections.append(isl)
     sections.append(_pipeline_section(evidence))
 
     tables = {

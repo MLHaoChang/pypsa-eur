@@ -84,6 +84,9 @@ SECTION_TITLES: dict[str, str] = {
     "tea": "Techno-economic summary (LCOE / LCOH)",
     "gates": "Dynamics gates",
     "multi_energy": "Multi-energy adequacy",
+    # The investment-case and island chapters (D8; ``chapters``).
+    "investment_case": "Investment case",
+    "island": "Islanding and control",
 }
 
 # WP0's ``figures=`` argument is keyed by EH section; the document's figure
