@@ -795,9 +795,17 @@ def run_simulation(
                     phase("Commercial binding failed. Aborting.")
                     status, condition = "error", "commercial_binding_failed"
                     return status, condition
+                # A connection energized in steps (absolute MW, E2E slice 8):
+                # p_max_pu = min(own, E / p_nom) for this solve, after the
+                # agreement so its cap composes; undone before it.
+                from services.adequacy.energization import apply_energization
+
+                _energization_undo = lambda: None   # noqa: E731
                 try:
+                    _energization_undo = apply_energization(network)
                     _real_restore, captured = _apply_modelling_assumptions(network, config, phase)
                 except BaseException:
+                    _energization_undo()
                     _ic_conn.undo()
                     raise
                 _assumptions_restore = _real_restore
@@ -806,7 +814,10 @@ def run_simulation(
                     try:
                         _assumptions_restore()
                     finally:
-                        _ic_conn.undo()
+                        try:
+                            _energization_undo()
+                        finally:
+                            _ic_conn.undo()
                 # Once-guarded restore wrapper. The network now carries the LP
                 # transforms; restore MUST run exactly once before the network
                 # can be serialised. The solve try/finally below calls this on

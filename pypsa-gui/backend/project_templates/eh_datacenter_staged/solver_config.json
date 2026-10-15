@@ -1,0 +1,7 @@
+{
+  "auto_discount_periods": true,
+  "discount_rate": 0.07,
+  "island_constraints": true,
+  "multi_investment_periods": true,
+  "voll": 5000.0
+}

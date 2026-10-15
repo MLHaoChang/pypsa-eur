@@ -962,6 +962,8 @@ export interface EhReadiness {
     missing: { class: string; name: string }[]
   }
   import_p_nom_mw?: number | null
+  /** The import available in every period when the connection is energized in steps. */
+  import_firm_mw?: number | null
 }
 
 export type EhReviewSeverity = 'high' | 'medium' | 'low' | 'info'

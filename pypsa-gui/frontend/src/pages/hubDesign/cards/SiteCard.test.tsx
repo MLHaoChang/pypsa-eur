@@ -64,6 +64,16 @@ describe('SiteCard rows', () => {
       { stages: undefined, pack_overrides: { import_p_nom_mw: 40 } })
   })
 
+  it('a connection energized in steps shows what is firm until it is', async () => {
+    vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness({
+      import: { rule: 'eh_role', links: ['grid_import'], applied: true },
+      import_p_nom_mw: 40, import_firm_mw: 20,
+    }))
+    mount()
+    await waitFor(() => expect(text('hub-site-grid')).toContain('20 MW until fully energized'))
+    expect(text('hub-site-grid')).toContain('40 MW')
+  })
+
   it('each gap has a fix button with its §5.7 request', async () => {
     vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness({
       import: { rule: 'eh_role', links: [], applied: false },

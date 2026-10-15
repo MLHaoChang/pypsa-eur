@@ -110,13 +110,16 @@ def _price(n, component: str, name: str, technology: str) -> None:
 # ── Data Center Energy Hub (weak_flexible) ─────────────────────────────────
 
 
-def build_eh_datacenter() -> pypsa.Network:
+def build_eh_datacenter(phases=None) -> pypsa.Network:
     """A 50 MW hyperscale campus behind a weak, capped grid connection.
 
     Critical IT sits on its own bus behind the site transformer (a near
     loss-free Link, so the P16 per-Load priority is exact); cooling and
     offices share the MV bus and are the non-critical demand. A UPS battery
     rides on the IT bus, a four-unit gas genset fleet on the MV bus.
+
+    ``phases`` (``DC_PHASES``) makes it the staged-growth campus
+    (``_staged_datacenter``); None is the single-year template, unchanged.
     """
     n = _base("Data Center Energy Hub")
     for c, co2 in (("AC", 0.0), ("gas", 0.20), ("solar", 0.0),
@@ -194,7 +197,82 @@ def build_eh_datacenter() -> pypsa.Network:
     # Site transformer failure islands the IT bus onto its UPS: a Class-B
     # mode fmea_top should rank.
     _outage(n, "links", "site_transformer", 0.005, 72.0)
+    return n if phases is None else _staged_datacenter(n, phases)
+
+
+# ── Data Center Energy Hub, staged growth (E2E demo plan 2026-10-14, slice 8) ─
+#
+# The same campus planned from a projected load: three investment periods, the
+# IT load ramping as the data halls are fitted out, and the utility energizing
+# the 40 MW connection in steps. Everything else is the single-year template.
+# Synthetic illustrative numbers, like the rest of this file.
+
+#: The projected load: (period year, IT MW, PUE). Cooling scales with the IT
+#: load (the single-year template's 8-14 MW profile is for 36 MW of IT).
+DC_PHASES = ((2027, 12.0, 1.3), (2030, 24.0, 1.3), (2035, 36.0, 1.3))
+#: The utility's energization schedule of the 40 MW connection (assumed): the
+#: import available in each period, in MW.
+DC_ENERGIZATION_MW = {2027: 20.0, 2030: 40.0, 2035: 40.0}
+#: Years each period stands for (2027-29, 2030-34, 2035-44): the horizon ends in
+#: 2045, before any candidate's pack lifetime (25 years) runs out.
+DC_PERIOD_YEARS = {2027: 3, 2030: 5, 2035: 10}
+_DC_IT_MW = 36.0                                   # the single-year template's IT load
+
+
+def _staged_datacenter(n: pypsa.Network, phases) -> pypsa.Network:
+    """The single-year campus as a three-period plan: the week repeated in each
+    period, the load scaled to ``phases``, the import capped per period by
+    ``DC_ENERGIZATION_MW`` (an absolute MW schedule on the 40 MW link), and the two expansion
+    candidates replaced by one candidate per period with that period as its
+    ``build_year`` (explicit rows, not vintage bounds, so the finance adapter
+    sees each stage)."""
+    years = [int(y) for y, _it, _pue in phases]
+    flat = {
+        ("generators_t", "p_max_pu"): n.generators_t.p_max_pu.copy(),
+        ("generators_t", "marginal_cost"): n.generators_t.marginal_cost.copy(),
+        ("loads_t", "p_set"): n.loads_t.p_set.copy(),
+    }
+    snaps = pd.MultiIndex.from_product([years, SNAPSHOTS], names=["period", "timestep"])
+    n.set_snapshots(snaps)
+    n.investment_periods = years
+    n.snapshot_weightings.loc[:, ["objective", "generators"]] = WEIGHT
+    n.snapshot_weightings.loc[:, "stores"] = 1.0                    # hours per snapshot (S0)
+    n.investment_period_weightings["years"] = [float(DC_PERIOD_YEARS[y]) for y in years]
+    n.investment_period_weightings["objective"] = [float(DC_PERIOD_YEARS[y]) for y in years]
+    snaps = n.snapshots                                 # PyPSA's own index (names and all)
+    for (frame, attr), df in flat.items():
+        tiled = pd.DataFrame(np.tile(df.to_numpy(), (len(years), 1)), index=snaps, columns=df.columns)
+        getattr(n, frame)[attr] = tiled
+    p_set = n.loads_t.p_set
+    for y, it_mw, _pue in phases:
+        scale = it_mw / _DC_IT_MW
+        for load in ("it_load", "cooling"):
+            p_set.loc[y, load] = (p_set.loc[y, load] * scale).to_numpy()
+    # The energization schedule in MW (`services.adequacy.energization`): a
+    # solve turns it into p_max_pu = min(own, E / p_nom), so a lever or an
+    # overlay that rewrites p_nom composes as min(E, cap) instead of
+    # rescaling a stored fraction (gatekeeper review of #266).
+    n.links_t["eh_energization_mw"] = pd.DataFrame(
+        {"grid_import": np.repeat([DC_ENERGIZATION_MW[y] for y in years], len(SNAPSHOTS))},
+        index=snaps)
+    n.remove("Generator", "genset_new")
+    n.remove("StorageUnit", "bess_new")
+    for y in years:
+        g, b = f"genset_new_{y}", f"bess_new_{y}"
+        n.add("Generator", g, bus="dc_mv", carrier="gas", p_nom=0.0, p_nom_extendable=True,
+              p_nom_max=40.0, marginal_cost=165.0, build_year=y)
+        _price(n, "generators", g, "gas-genset")
+        _outage(n, "generators", g, 0.03, 24.0)
+        n.add("StorageUnit", b, bus="it_bus", carrier="battery", p_nom=0.0, p_nom_extendable=True,
+              p_nom_max=30.0, max_hours=4.0, efficiency_store=0.95, efficiency_dispatch=0.95,
+              cyclic_state_of_charge=True, build_year=y)
+        _price(n, "storage_units", b, "battery")
+    n.name = "Data Center Energy Hub (staged growth)"
     return n
+
+
+def build_eh_datacenter_staged() -> pypsa.Network:
+    return build_eh_datacenter(phases=DC_PHASES)
 
 
 # ── Industrial Hydrogen Hub (strong_grid) ──────────────────────────────────
@@ -355,6 +433,7 @@ def build_eh_microgrid() -> pypsa.Network:
 
 BUILDERS = {
     "eh_datacenter": build_eh_datacenter,
+    "eh_datacenter_staged": build_eh_datacenter_staged,
     "eh_h2_hub": build_eh_h2_hub,
     "eh_microgrid": build_eh_microgrid,
 }
@@ -381,6 +460,56 @@ TEMPLATE_META: dict[str, dict] = {
             "credit it as a firm unit (decision 6).",
             "Try the energy import budget (Pack settings → Import energy) "
             "to see a capped-import plan.",
+        ],
+        "provenance": PROVENANCE,
+    },
+    "eh_datacenter_staged": {
+        "id": "eh_datacenter_staged",
+        "name": "Data Center Energy Hub (staged growth)",
+        "description": (
+            "The data center campus planned from a projected load: IT grows "
+            "12 → 24 → 36 MW over 2027, 2030 and 2035 while the utility "
+            "energizes the 40 MW connection in steps (20 MW until 2030). "
+            "Genset and battery candidates per period, so the plan says what "
+            "to build when. Multi-period; tagged for an Energy Hub study."),
+        "recommended_archetype": "weak_flexible",
+        "pack_overrides": {"import_p_nom_mw": 40.0},
+        "stages": None,
+        "dtc_attribution": "per_load",
+        "projected_load": [
+            {"year": y, "it_mw": it, "pue": pue,
+             "note": "synthetic illustrative fit-out ramp; replace with the client's load projection"}
+            for y, it, pue in DC_PHASES],
+        "energization": [
+            {"year": y, "available_import_mw": DC_ENERGIZATION_MW[y], "connection_mw": 40.0,
+             "source": "assumed", "note": "utility energization schedule (assumed)"}
+            for y, _it, _pue in DC_PHASES],
+        "period_years": {str(y): DC_PERIOD_YEARS[y] for y, _it, _pue in DC_PHASES},
+        "ledger": [
+            {"item": "discount rate", "value": "7 % nominal (the solver settings' discount_rate)",
+             "source": "assumed",
+             "note": "the solve discounts each period's costs at it (auto_discount_periods)"},
+            {"item": "PUE", "value": "1.3 design figure",
+             "source": "assumed",
+             "note": "metadata: cooling is the single-year template's profile scaled with the IT "
+                     "load, so the modelled peak-to-IT ratio is about 1.46 in 2035"},
+            {"item": "battery inverter replacement", "value": "after 10 years (inv_power_lifetime)",
+             "source": "assumed",
+             "note": "bess_new_2027's inverter ends in 2037 and bess_new_2030's in 2040, inside the "
+                     "2045 horizon; the investment case flags it (part_not_replaced) until the "
+                     "template's finance inputs add the replacement (slice P5c)"},
+            {"item": "depreciation of the staged assets",
+             "value": "straight-line AfA (not degressive)",
+             "source": "assumed",
+             "note": "a deliberate deviation: a dated degressive election on a later stage is refused by "
+                     "the investment case (P5), so the staged assets are planned on straight-line AfA"},
+        ],
+        "study_notes": [
+            "Each period is the same representative July week, with the period's load and import cap.",
+            "Candidates are one row per period (build_year = the period): the plan says what to build when.",
+            "The energization schedule caps the import at 20 MW in 2027.",
+            "Load is picked up in 2.5 MW blocks after an islanding (assumed): the island rows then "
+            "follow the load, so the plan stages — a small genset in 2027 and 2030, the bulk in 2035.",
         ],
         "provenance": PROVENANCE,
     },
@@ -429,6 +558,16 @@ TEMPLATE_META: dict[str, dict] = {
 
 # Preloaded Class-C registry per template (the stress.py schema).
 STRESS_SCENARIOS: dict[str, list[dict]] = {
+    "eh_datacenter_staged": [
+        {"id": "heatwave", "name": "Heatwave (cooling + PV derate)",
+         "kind": "parametric", "frequency_per_year": 0.3,
+         "electrical_load_multiplier": 1.12,
+         "renewable_availability_multiplier": 0.85},
+        {"id": "dunkelflaute", "name": "Dark, still week",
+         "kind": "parametric", "frequency_per_year": 0.5,
+         "electrical_load_multiplier": 1.0,
+         "renewable_availability_multiplier": 0.1},
+    ],
     "eh_datacenter": [
         {"id": "heatwave", "name": "Heatwave (cooling + PV derate)",
          "kind": "parametric", "frequency_per_year": 0.3,
@@ -463,7 +602,13 @@ SOLVER_CONFIG: dict = {"voll": 5000.0}
 # Per-template additions. The island rows (campus island I2a) are opt-in per
 # project and ship enabled on the templates that carry an island sidecar
 # (owner Q5).
-SOLVER_CONFIG_EXTRA: dict[str, dict] = {"eh_datacenter": {"island_constraints": True}}
+SOLVER_CONFIG_EXTRA: dict[str, dict] = {
+    "eh_datacenter": {"island_constraints": True},
+    # The staged campus is multi-period; the solve discounts the periods
+    # (auto_discount_periods) at the config's discount rate.
+    "eh_datacenter_staged": {"island_constraints": True, "multi_investment_periods": True,
+                             "auto_discount_periods": True, "discount_rate": 0.07},
+}
 
 
 def solver_config(template_id: str) -> dict:
@@ -472,8 +617,8 @@ def solver_config(template_id: str) -> dict:
 
 # The island sidecar (plan 2026-10-07 campus island, I1): control modes, unit
 # dynamics and island requirements, keyed by PyPSA name. Its schema is
-# gridspine's (gridspine/schema/island.py), which cannot be imported here
-# (_build.py runs with only this directory on sys.path), so the content is a
+# gridspine's (gridspine/schema/island.py), which this module does not
+# import (it loads without gridspine on the path), so the content is a
 # plain mapping and tests/test_island_config.py validates it through
 # gridspine. Every number is {value, source}; all are "assumed" until the
 # client's datasheets arrive. Only templates listed here ship the file.
@@ -523,6 +668,27 @@ ISLAND_CONFIG: dict[str, dict] = {
     },
 }
 
+def _staged_island(cfg: dict) -> dict:
+    """The single-year island sidecar with the expansion candidates renamed
+    per period (``genset_new_<y>``, ``bess_new_<y>``)."""
+    import copy
+
+    out = copy.deepcopy(cfg)
+    units = out["units"]
+    gen, bess = units.pop("genset_new"), units.pop("bess_new")
+    for y, _it, _pue in DC_PHASES:
+        units[f"genset_new_{y}"] = copy.deepcopy(gen)
+        units[f"bess_new_{y}"] = copy.deepcopy(bess)
+    out["requirements"]["ride_through_storage"] = [f"bess_new_{y}" for y, _it, _pue in DC_PHASES]
+    # The halls are fitted out in smaller steps: 2.5 MW pickup blocks (the
+    # single-year campus's 5 MW blocks need 36.7 MW more genset inertia in
+    # every period, whatever its load, so the plan could not stage).
+    out["requirements"]["pickup_blocks"] = {"value": [2.5] * 22, "source": "assumed"}
+    return out
+
+
+ISLAND_CONFIG["eh_datacenter_staged"] = _staged_island(ISLAND_CONFIG["eh_datacenter"])
+
 # Sidecar file names copied by POST /api/projects/from_template/<id>.
 META_FILE = "eh_template.json"
 STRESS_FILE = "adequacy_stress_scenarios.json"
@@ -530,8 +696,8 @@ SOLVER_FILE = "solver_config.json"
 SIDECAR_FILES = (META_FILE, STRESS_FILE, SOLVER_FILE)
 # Written only for the templates in ISLAND_CONFIG.
 ISLAND_FILE = "island_config.json"
-# services.adequacy.stress.SCHEMA — not imported: _build.py runs with only
-# this directory on sys.path. A test pins the two equal.
+# services.adequacy.stress.SCHEMA — not imported, so this module loads
+# without the backend's packages at import time. A test pins the two equal.
 SCHEMA = 1
 
 

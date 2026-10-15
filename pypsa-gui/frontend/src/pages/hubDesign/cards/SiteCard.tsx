@@ -33,7 +33,9 @@ export function siteRows(r: EhReadiness, archetype: EhArchetype): Record<SiteFix
       ? `${links.join(', ')} — normally open; the study runs the site as an island`
       : 'none — the study runs the site as an island', gap: false }
     : links.length
-      ? { value: `${links.join(', ')}${r.import_p_nom_mw != null ? ` (${mw(r.import_p_nom_mw)})` : ''}`, gap: false }
+      ? { value: `${links.join(', ')}${r.import_p_nom_mw != null ? ` (${mw(r.import_p_nom_mw)}${
+          r.import_firm_mw != null && r.import_firm_mw < r.import_p_nom_mw
+            ? `; ${mw(r.import_firm_mw)} until fully energized` : ''})` : ''}`, gap: false }
       : { value: 'none tagged', gap: true, fix: siteFixText('grid') }
 
   const crit = r.critical_buses ?? []

@@ -1,0 +1,21 @@
+{
+  "__schema__": 1,
+  "scenarios": [
+    {
+      "electrical_load_multiplier": 1.12,
+      "frequency_per_year": 0.3,
+      "id": "heatwave",
+      "kind": "parametric",
+      "name": "Heatwave (cooling + PV derate)",
+      "renewable_availability_multiplier": 0.85
+    },
+    {
+      "electrical_load_multiplier": 1.0,
+      "frequency_per_year": 0.5,
+      "id": "dunkelflaute",
+      "kind": "parametric",
+      "name": "Dark, still week",
+      "renewable_availability_multiplier": 0.1
+    }
+  ]
+}
