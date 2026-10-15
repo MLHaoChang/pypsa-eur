@@ -21,6 +21,12 @@ capacity:
 
 A case with no kept existing asset needs no baseline: removing every owned
 asset is the analytic counterfactual's own definition, which then stays.
+
+A load with a `reference_purchases` entry (grey H2, say) can be bought in the
+baseline: a supply Generator on its bus (`reference_supply:<load>`), priced
+at the reference price plus that period's CO2 (owner decision on #312, option
+1), so the site as it stands buys whenever that is cheaper than running its
+own conversion. The purchase is what it dispatches (`finance_case`).
 """
 from __future__ import annotations
 
@@ -37,6 +43,10 @@ from services.finance.baseline_text import flag_text  # noqa: F401  (the flags' 
 _EPS_MW = 1e-6
 #: A removed row's upper bound in the baseline (MW): see `baseline_network`.
 _REMOVED_MAX = 1e-9
+
+#: The baseline's reference-purchase supply Generators: `<prefix><load>`.
+SUPPLY_PREFIX = "reference_supply:"
+SUPPLY_CARRIER = "reference_purchase"
 
 _FRAMES = {"Generator": ("generators", "p_nom"), "StorageUnit": ("storage_units", "p_nom"),
            "Store": ("stores", "e_nom"), "Link": ("links", "p_nom")}
@@ -107,13 +117,90 @@ def plan_baseline(n, owned: list[tuple[str, str]], *,
                         fixed=tuple(fixed))
 
 
-def baseline_network(n, plan: BaselinePlan):
+def reference_supplies(n, cfg) -> tuple[dict, ...]:
+    """The baseline's reference-purchase supplies (owner decision on #312,
+    option 1): one per `reference_purchases` load in `n`, with its bus, a
+    capacity above the load's peak and its LP marginal cost per period
+    (EUR/MWh of the load's energy).
+
+    The LP cost is on the footing of the LP's other costs, which are NOT
+    escalated across periods (grid supply, tariff energy charge, diesel):
+    the reference price ×1000/LHV in the case's base-year money, unescalated,
+    plus that period's CO2 (the listed year in force at the period's start,
+    as `finance_case._price_co2` looks it up) × co2_t_per_kg ×1000/LHV,
+    converted from the CO2 price's money year to the base year at the case's
+    inflation (0 for a real case). Do not escalate it here: the cash is priced
+    per operating year from the dispatched MWh in `finance_case` (fuel
+    escalation, CO2 by year); this cost only steers the dispatch. The CO2
+    path's real change between periods stays: it is a real price signal.
+    Empty without reference purchases."""
+    from models.commercial import CommercialConfig
+    from models.finance import FinanceInputs
+
+    com = getattr(cfg, "commercial", None)
+    if not isinstance(com, dict) or not com.get("reference_purchases"):
+        return ()
+    parsed = CommercialConfig.model_validate(com)
+    fin_raw = getattr(cfg, "finance", None)
+    fin = FinanceInputs.model_validate(fin_raw) if isinstance(fin_raw, dict) else None
+    real = fin is not None and fin.price_basis == "real"
+    infl = 0.0 if real or fin is None or fin.inflation is None else float(fin.inflation)
+    snaps = n.snapshots
+    periods = (list(snaps.get_level_values(0).unique()) if hasattr(snaps, "levels")
+               else [int(snaps[0].year)])
+    base_year = int(periods[0])
+    co2 = parsed.co2_price
+    listed = sorted(int(y) for y in co2.eur_per_t_by_year) if co2 is not None else []
+    out = []
+    for r in parsed.reference_purchases:
+        if r.load not in n.loads.index:
+            continue
+        per_mwh = 1000.0 / r.lhv_kwh_per_kg
+        mc = {}
+        for p in periods:
+            cost = r.price_eur_per_kg * per_mwh
+            at = [y for y in listed if y <= int(p)]
+            if co2 is not None and at:
+                price = float(co2.eur_per_t_by_year[at[-1]]) * \
+                    (1.0 + infl) ** (base_year - int(co2.money_year))
+                cost += r.co2_t_per_kg * per_mwh * price
+            mc[int(p)] = cost
+        ps = n.loads_t.p_set[r.load] if r.load in n.loads_t.p_set.columns \
+            else None
+        peak = float(ps.max()) if ps is not None else float(n.loads.at[r.load, "p_set"])
+        out.append({"load": r.load, "bus": str(n.loads.at[r.load, "bus"]),
+                    "p_nom": round(2.0 * max(peak, 0.0) + 1.0, 6), "mc": mc})
+    return tuple(out)
+
+
+def _add_supplies(base, supplies) -> None:
+    """The supply Generators, in the baseline copy only (never the project)."""
+    import pandas as pd
+
+    if not supplies:
+        return
+    if SUPPLY_CARRIER not in base.carriers.index:
+        base.add("Carrier", SUPPLY_CARRIER)
+    multi = hasattr(base.snapshots, "levels")
+    for sp in supplies:
+        name = SUPPLY_PREFIX + sp["load"]
+        base.add("Generator", name, bus=sp["bus"], carrier=SUPPLY_CARRIER, p_nom=sp["p_nom"],
+                 marginal_cost=0.0)
+        per = base.snapshots.get_level_values(0) if multi else \
+            pd.Index([next(iter(sp["mc"]))] * len(base.snapshots))
+        base.generators_t.marginal_cost[name] = pd.Series(
+            [sp["mc"][int(p)] for p in per], index=base.snapshots, dtype=float)
+
+
+def baseline_network(n, plan: BaselinePlan, supplies=()):
     """A copy of `n` with every owned extendable row fixed at its kept size and
     every removed row at 0 (rows stay, so value flows still name them; a size
-    of 0 is an extendable row bounded to 0). The original is never touched."""
+    of 0 is an extendable row bounded to 0), plus the reference-purchase
+    supplies (`reference_supplies`). The original is never touched."""
     from services.workflow_tools import _network_copy
 
     base = _network_copy(n)
+    _add_supplies(base, supplies)
     sizes = {(c, a): k for c, a, k in plan.fixed}
     sizes.update({(c, a): k for c, a, k in plan.removed})
     for (comp, name), keep in sizes.items():
@@ -155,7 +242,7 @@ _CACHE_LOCK = threading.Lock()
 _CACHE_MAX = 4
 
 
-def _key(n, cfg, plan: BaselinePlan, island=None) -> str:
+def _key(n, cfg, plan: BaselinePlan, island=None, supplies=()) -> str:
     from dataclasses import asdict
 
     from services.dispatch_status import dispatch_digest
@@ -167,6 +254,10 @@ def _key(n, cfg, plan: BaselinePlan, island=None) -> str:
     conf.pop("finance", None)
     blob = {"dispatch": dispatch_digest(n), "config": conf,
             "removed": plan.removed, "fixed": plan.fixed, "island": island}
+    if supplies:
+        # Their LP costs read the finance inputs (popped above): a price
+        # change re-solves, a case without purchases keeps its key.
+        blob["supplies"] = supplies
     return hashlib.sha256(json.dumps(blob, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
@@ -195,7 +286,8 @@ def solve_baseline(n, cfg, plan: BaselinePlan, *, solve=None) -> Baseline:
 
     live = PyPSAService.solve_target_context()
     storage = getattr(live, "storage_dir", None) if live is not None else None
-    key = _key(n, cfg, plan, _island_sidecar(storage))
+    supplies = reference_supplies(n, cfg)
+    key = _key(n, cfg, plan, _island_sidecar(storage), supplies)
     with _CACHE_LOCK:
         hit = _CACHE.get(key)
     if hit is not None:
@@ -204,7 +296,7 @@ def solve_baseline(n, cfg, plan: BaselinePlan, *, solve=None) -> Baseline:
         from services.solver_service import run_simulation as solve
 
     def attempt(conf):
-        base = baseline_network(n, plan)
+        base = baseline_network(n, plan, supplies)
         ctx = PyPSAService.build_context()
         ctx.network = base
         ctx.storage_dir = storage

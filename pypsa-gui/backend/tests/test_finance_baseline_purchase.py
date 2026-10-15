@@ -129,7 +129,36 @@ def test_a_missing_shed_capture_is_unknown_not_unserved(reset_backend):
                  lost_load=ll)
     assert "counterfactual_baseline_shed_unknown:h2_load" in case.flags
     assert "counterfactual_not_established:baseline_shed_unknown" in case.flags
-    assert not any(f.startswith(("counterfactual_baseline_unserved", "counterfactual_buys"))
-                   for f in case.flags)
+    assert not any(f.startswith("counterfactual_baseline_unserved") for f in case.flags)
     (cf,) = case.counterfactual
     assert _lines(cf)["counterfactual:baseline_shed_unknown"].amount is None
+
+
+def test_the_supply_is_priced_unescalated_plus_the_periods_co2_in_base_year_money():
+    """Gatekeeper review of #312 (option 1): the LP cost sits on the footing
+    of the LP's other costs, never escalated across periods; the CO2 price in
+    force at the period's start, converted from its money year to the base
+    year at the inflation."""
+    import pandas as pd
+    import pypsa
+    from types import SimpleNamespace
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.MultiIndex.from_product([[2027, 2030], range(2)]))
+    n.set_investment_periods([2027, 2030])
+    n.add("Bus", "h2")
+    n.add("Load", "h2_load", bus="h2", p_set=3.0)
+    cfg = SimpleNamespace(
+        commercial={"poc_link": "x", "reference_purchases": [PURCHASE],
+                    "co2_price": {"eur_per_t_by_year": {"2027": 80.0, "2030": 120.0},
+                                  "money_year": 2020, "source": "s"}},
+        finance={"currency": "EUR", "price_basis": "nominal", "inflation": 0.02,
+                 "financial_close": "2026-01-01"})
+    from services.results.baseline import reference_supplies
+
+    (sp,) = reference_supplies(n, cfg)
+    per_mwh = 1000.0 / LHV
+    conv = 1.02 ** (2027 - 2020)
+    assert sp["mc"][2027] == pytest.approx(PRICE_KG * per_mwh + CO2_KG * per_mwh * 80.0 * conv)
+    assert sp["mc"][2030] == pytest.approx(PRICE_KG * per_mwh + CO2_KG * per_mwh * 120.0 * conv)
+    assert sp["bus"] == "h2" and sp["p_nom"] > 3.0

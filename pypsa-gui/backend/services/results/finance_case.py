@@ -1408,8 +1408,19 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
     analytic basis: the site today could not serve it and nothing prices it."""
     from services.adequacy.eh_report import _live_result_df
 
+    from services.results.baseline import SUPPLY_PREFIX
+
     side = _build_finance_case(baseline.network, cfg, fin, result_df=_live_result_df,
                                lost_load=baseline.lost_load, owner=owner, side_only=True)
+    # The reference supplies only steer the baseline's dispatch (#312, option
+    # 1): their LP cost is not cash. The purchase is priced below, per
+    # operating year, from what they dispatch; never also as an asset line.
+    side = _Side(inputs=side.inputs,
+                 accs={k: {key: a for key, a in v.items() if SUPPLY_PREFIX not in key}
+                       for k, v in side.accs.items()},
+                 actual={k: [ln for ln in v if SUPPLY_PREFIX not in ln.key
+                             and SUPPLY_PREFIX not in str(ln.source_id)]
+                         for k, v in side.actual.items()})
     flags += ["counterfactual_basis:site_today", *baseline.plan.flags]
     if "baseline_island_rows_relaxed" in baseline.plan.flags:
         # The critical load the island capability carries (owner decision
@@ -1434,8 +1445,24 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
     # netting: the electric shed nets per period, `_shed_mwh`), with a noise
     # floor per snapshot as `_excess_above` (solver noise summed over a long
     # horizon must not read as unmet load; gatekeeper review of #312).
+    from services.results.baseline import SUPPLY_PREFIX
+
     unserved: dict[str, np.ndarray] = {}
     unknown: list[str] = []
+    # Owner decision on #312 (option 1): a reference-purchased load is bought
+    # by the baseline's own supply Generator whenever that is cheaper than
+    # running the site's conversion; the purchase is its dispatch (MW of the
+    # load's energy), plus any shed the baseline still leaves (none while the
+    # supply is sized above the load's peak).
+    bp = baseline.network.generators_t.p
+    for ld in purchases:
+        g = SUPPLY_PREFIX + ld
+        if g in bp.columns:
+            raw = np.clip(bp[g].reindex(baseline.network.snapshots).fillna(0.0)
+                          .to_numpy(dtype=float), 0.0, None)
+            disp = np.where(raw > _EPS_MW, raw, 0.0)
+            if float(disp.sum()) > 0.0:
+                unserved[ld] = disp
     for ld in n.loads.index:
         bus = str(n.loads.at[ld, "bus"])
         if bus not in sides.site or electric(bus) or ld not in baseline.network.loads.index:
@@ -1448,7 +1475,7 @@ def _baseline_counterfactual(baseline, n, cfg, fin, parsed, sides, inputs, accs,
         raw = b_t - a_t
         diff = np.where(raw > _EPS_MW, raw, 0.0)
         if float(diff.sum()) > 0.0:
-            unserved[str(ld)] = diff
+            unserved[str(ld)] = unserved.get(str(ld), 0.0) + diff
     bought = sorted(ld for ld in unserved if ld in purchases)
     missing = sorted(ld for ld in unserved if ld not in purchases)
     blockers = []

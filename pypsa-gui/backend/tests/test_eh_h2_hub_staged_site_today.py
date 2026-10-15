@@ -66,18 +66,12 @@ def h2_site_today(reset_backend, monkeypatch):
     Bl.clear_cache()
 
 
-def _period_kg(n, base, state, period) -> float:
-    """By hand: the baseline's H2 shed over the actual's in `period`, in kg."""
-    def shed(net, ll):
-        s = (ll or {}).get("lost_load_t")
-        if s is None or "h2_offtake" not in s.columns:
-            return np.zeros(len(net.snapshots))
-        return np.clip(s["h2_offtake"].reindex(net.snapshots).fillna(0.0).to_numpy(float), 0, None)
-    m = n.snapshots.get_level_values(0) == period
-    w = n.snapshot_weightings.objective.to_numpy(float)
-    diff = np.clip(shed(base.network, base.lost_load) - shed(n, state.get("last_lost_load")),
-                   0.0, None)
-    return float((w[m] * diff[m]).sum()) * 1000.0 / LHV
+def _period_kg(base, period) -> float:
+    """By hand: the baseline supply's dispatch in `period`, in kg of H2."""
+    bn = base.network
+    d = bn.generators_t.p["reference_supply:h2_offtake"].loc[period].to_numpy(float)
+    w = bn.snapshot_weightings.objective.loc[period].to_numpy(float)
+    return float((w * np.clip(d, 0.0, None)).sum()) * 1000.0 / LHV
 
 
 @pytest.mark.live_solve
@@ -91,9 +85,17 @@ def test_the_staged_h2_hub_buys_its_unmet_h2_and_prices_its_co2(h2_site_today):
     assert "counterfactual_buys:h2_offtake" in case.flags
     assert not any(f.startswith(("counterfactual_not_established", "co2_price_not_applied",
                                  "reference_purchases_not_applied")) for f in case.flags)
-    kg = {p: _period_kg(n, base, state, p) for p in (2027, 2030, 2035)}
-    assert kg[2027] == pytest.approx(0.0, abs=1.0) and kg[2030] == pytest.approx(0.0, abs=1.0)
-    assert kg[2035] > 1e5                                 # 2035's 25 MW exceeds the ~20 MW
+    # The supply is in the baseline copy only, never the project network.
+    assert "reference_supply:h2_offtake" not in n.generators.index
+    kg = {p: _period_kg(base, p) for p in (2027, 2030, 2035)}
+    mwh = {p: kg[p] * LHV / 1000.0 for p in kg}
+    # Grey at 2 EUR/kg (60 EUR/MWh) plus CO2 is cheaper than electrolysis on
+    # grid power, so the baseline buys in 2030 too, and in 2035 more than the
+    # capacity shortfall alone (about 40 GWh; the gatekeeper's re-solve:
+    # about 51 and 112 GWh).
+    assert kg[2027] == pytest.approx(0.0, abs=1.0)
+    assert mwh[2030] == pytest.approx(51_000.0, rel=0.05)
+    assert mwh[2035] == pytest.approx(112_000.0, rel=0.05)
     # Never priced at VoLL as well: the H2 offtake is not an electric site load.
     years = list(r.op.tl.years)
     cf = r.op_counterfactual.lines
@@ -102,18 +104,19 @@ def test_the_staged_h2_hub_buys_its_unmet_h2_and_prices_its_co2(h2_site_today):
     # (2) The purchase: base-year (2027) money, escalating as fuel at 2 %.
     base_year = case.base_year
     esc = fin.escalation["fuel"]
-    for y in (2035, 2036):
-        want = -kg[2035] * PRICE_KG * (1 + esc) ** (y - base_year)
+    for p, y in ((2030, 2030), (2030, 2031), (2035, 2035), (2035, 2036)):
+        want = -kg[p] * PRICE_KG * (1 + esc) ** (y - base_year)
         assert cf["counterfactual:purchase:h2_offtake"][years.index(y)] == pytest.approx(
             want, rel=1e-6), y
-    for y in (2027, 2031):
-        assert cf["counterfactual:purchase:h2_offtake"][years.index(y)] == pytest.approx(
-            0.0, abs=1.0)
-    # The CO2: real prices in 2020 money, escalated at the case's inflation; 2035
-    # and 2036 take the 2030 price (the last listed year at or before them).
-    for y in (2035, 2036):
-        want = -kg[2035] * CO2_KG * 120.0 * (1 + fin.inflation) ** (y - 2020)
+    assert cf["counterfactual:purchase:h2_offtake"][years.index(2027)] == pytest.approx(
+        0.0, abs=1.0)
+    # The CO2: real prices in 2020 money, escalated at the case's inflation;
+    # 2030 to 2036 take the 2030 price (the last listed year at or before).
+    for p, y in ((2030, 2030), (2035, 2036)):
+        want = -kg[p] * CO2_KG * 120.0 * (1 + fin.inflation) ** (y - 2020)
         assert cf["co2:purchase:h2_offtake"][years.index(y)] == pytest.approx(want, rel=1e-6), y
+    # The supply's LP cost is never a cash line of the baseline's own side.
+    assert not any("reference_supply" in k for k in cf)
     # Purchase CO2 sits on the counterfactual side only.
     assert not any(ln.key.startswith("co2:purchase") for t in case.templates for ln in t.lines)
 
