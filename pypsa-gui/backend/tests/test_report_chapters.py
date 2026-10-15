@@ -211,3 +211,31 @@ def test_a_project_without_either_keeps_its_report(client, api_project):
     name = api_project("rep-none")
     ids = [s["section_id"] for s in _post(client, name)["document"]["sections"]]
     assert chapters.INVESTMENT not in ids and chapters.ISLAND not in ids
+
+
+# ── #307 review nits ─────────────────────────────────────────────────────────
+
+
+def test_without_a_counterfactual_the_chapter_says_so_in_its_own_words():
+    """#307 review: a case with no counterfactual reads "compared with nothing:
+    incremental = total", never "the incremental figures are no counterfactual …"."""
+    rep = _ic_report()
+    rep["sections"]["project"]["payload"]["counterfactual"] = {
+        "present": False, "basis": "no counterfactual in the case (the adapter builds one only "
+                                   "when the owner is the site party): incremental = total"}
+    ev = _collect(ic_report=rep)
+    assert ev.sections[chapters.INVESTMENT].payload["compared_with"] is None
+    assert dict(ev.tables["investment_case"].rows)["Compared with"].startswith("nothing")
+    assert not any("the incremental figures are no counterfactual" in d
+                   for d in ev.required_disclosures)
+    assert any("no counterfactual" in d and "incremental = total" in d
+               for d in ev.required_disclosures)
+
+
+def test_an_incomplete_search_shows_its_best_settings_so_far_never_a_recommendation():
+    """#307 review, #303's never-a-verdict rule: an incomplete search's column
+    reads "Best found so far"."""
+    ev = _collect(island={"report": _island_report(), "gfm": _gfm(status="incomplete")})
+    assert ev.tables["island_gfm_settings"].columns[-1] == "Best found so far"
+    ev = _collect(island={"report": _island_report(), "gfm": _gfm(status="recommended")})
+    assert ev.tables["island_gfm_settings"].columns[-1] == "Recommended"
