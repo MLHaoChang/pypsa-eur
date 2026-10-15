@@ -102,24 +102,34 @@ def _voltage(rows: pd.DataFrame, profile, bus_kv, fixed_band=None):
     return ("fail" if key > 1e-9 else "pass"), value, limit, where, band, bus, case
 
 
-def _transformer_row(trafo, sizing, tie_open=False):
+def _transformer_row(trafo, sizing, held=frozenset()):
+    """The ``transformer_loading`` row. ``held`` are a normally open tie's
+    transformers (``campus_flow.held_transformers``): unsized, so no measure
+    clears their overload, and the tie-closed clause is the row's only when
+    the worst unit is one of them."""
     j = trafo["loading_pct"].idxmax()
     peak = float(trafo.at[j, "loading_pct"])
     as_is = "fail" if peak > 100.0 + 1e-9 else "pass"
     recs = [f"{r.group}: {r.units} x {r.recommended_unit_mva:g} MVA recommended (now {r.unit_rating_mva:g} MVA)"
             for r in sizing.itertuples(index=False) if not bool(r.adequate)]
-    after = "pass" if all(pd.notna(r.recommended_unit_mva) for r in sizing.itertuples(index=False)) else "fail"
+    tie = trafo[trafo["trafo"].astype(str).isin(held)]
+    tie_over = bool(len(tie)) and float(tie["loading_pct"].astype(float).max()) > 100.0 + 1e-9
+    after = "pass" if all(pd.notna(r.recommended_unit_mva) for r in sizing.itertuples(index=False)) \
+        and not tie_over else "fail"
     detail = "; ".join(recs) if recs else f"worst {trafo.at[j, 'trafo']} ({trafo.at[j, 'case']})"
     clause = "equipment rating (not a grid-code clause)"
-    if tie_open:
-        detail, clause = f"{detail}; {OPEN_TIE_TRAFO}", clause + OPEN_TIE_CLAUSE
+    if len(tie):
+        detail = f"{detail}; {OPEN_TIE_TRAFO}" + ("; the tie is overloaded, and no measure resizes it"
+                                                  if tie_over else "")
+        if str(trafo.at[j, "trafo"]) in held:
+            clause += OPEN_TIE_CLAUSE
     return _row("transformer_loading", as_is, after, peak, 100.0, "%",
                 (int(trafo.at[j, "period"]), int(trafo.at[j, "hour"])), clause, "assumed", detail,
                 str(trafo.at[j, "case"]))
 
 
 def campus_compliance(bus, trafo, reactive, sizing, compensation, short_circuit, requirement, profile,
-                      pcc_bus, bus_kv) -> pd.DataFrame:
+                      pcc_bus, bus_kv, held=frozenset()) -> pd.DataFrame:
     rows = []
     comp = compensation.set_index("direction")
     measures = bool((compensation["recommended_mvar"] > 0).any() or (~sizing["adequate"].astype(bool)).any())
@@ -173,7 +183,7 @@ def campus_compliance(bus, trafo, reactive, sizing, compensation, short_circuit,
             if r["check"] == "pcc_voltage" and not r["clause"].endswith(OPEN_TIE_CLAUSE):
                 r["clause"] += OPEN_TIE_CLAUSE
     if len(trafo):
-        rows.append(_transformer_row(trafo, sizing, tie_open))
+        rows.append(_transformer_row(trafo, sizing, held))
     else:
         kvs = [bus_kv[pcc_bus]] + sorted({v for b, v in bus_kv.items() if b != pcc_bus}, reverse=True)
         note = NO_TRANSFORMER.format(kv="/".join(f"{v:g}" for v in kvs) if len(kvs) > 1 else f"{kvs[0]:g}")

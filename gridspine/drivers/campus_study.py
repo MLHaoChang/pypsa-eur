@@ -175,7 +175,7 @@ from gridspine.producers.pypsa_nodal import load_solved_network
 from gridspine.ranking.campus import campus_metrics, island_metrics, select_campus_hours
 from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
-from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases
+from gridspine.static.campus_flow import SizingCriteria, held_transformers, size_transformers, solve_cases
 from gridspine.static.campus_reactive import ibr_q_capability, reactive_need, requirement_from, size_compensation
 from gridspine.static.campus_compliance import OPEN_TIE_CLAUSE, campus_compliance
 from gridspine.static.campus_invest import ParallelRules, period_spans, select_assets
@@ -612,6 +612,9 @@ def psse_campus(run_dir, hours=None) -> list:
 
 #: P_ref of a normally open tie (``pcc.tie_normally_open``): its rating
 #: stands for the connection the grid-connected checks are made at.
+#: The PCC exchange (MW) a normally open tie may show in any hour: the
+#: solver's noise, not power through the tie.
+TIE_OPEN_TOL_MW = 0.01
 OPEN_TIE_P_REF = "normally open tie: its rating, the campus file p_connection_mw (grid-connected checks)"
 
 
@@ -628,9 +631,16 @@ def _requirement(code, campus, pcc, pf):
 def _p_ref(campus, pcc: pd.DataFrame):
     p = campus.params
     hit = p[(p["param"] == "p_connection_mw")]
+    peak = float(pcc["import_mw"].abs().max())
+    if campus.tie_normally_open and peak > TIE_OPEN_TOL_MW:
+        i = pcc["import_mw"].abs().idxmax()
+        raise ContractError(
+            f"pcc.tie_normally_open is set, but the PCC imports or exports {peak:.3g} MW (period "
+            f"{int(pcc.at[i, 'period'])}, hour {int(pcc.at[i, 'hour'])}): the tie conducts, so its transformers "
+            "must be sized; remove the flag"
+        )
     if len(hit):
         return float(hit["value"].iloc[0]), OPEN_TIE_P_REF if campus.tie_normally_open else "campus file p_connection_mw"
-    peak = float(pcc["import_mw"].abs().max())
     if not peak > 0:
         raise ContractError(
             "the PCC has no import or export in any hour of the prepared periods, so the peak import gives no "
@@ -696,6 +706,7 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
         sizing=sizing, compensation=comp, short_circuit=short_circuit, requirement=requirement,
         profile=code, pcc_bus=str(net.bus.at[int(net.ext_grid["bus"].iloc[0]), "name"]),
         bus_kv=dict(zip(net.bus["name"].astype(str), net.bus["vn_kv"].astype(float))),
+        held=held_transformers(campus),
     )
     _write_text_atomic(run_dir / COMPLIANCE_CSV, compliance.to_csv(index=False))
     # Beside the compliance table, never in it (the measure loop reads that):

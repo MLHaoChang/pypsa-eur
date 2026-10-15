@@ -241,3 +241,31 @@ def test_the_tolerance_is_said_for_whichever_pass_relies_on_it(q0, ok_as_is, q_f
     row = report(reactive=reactive, requirement=req).loc["pcc_reactive"]
     assert row["status_with_measures"] == "pass" and row["status_as_is"] == ("pass" if ok_as_is else "fail")
     assert row["detail"].endswith(f"tolerance of 0.011 Mvar: {q_said} Mvar against the 13.147 Mvar band")
+
+
+TIE_LABEL = "applies with the tie closed (grid-connected operation), not to islanded operation"
+
+
+def _tie_inputs(tie_pct, inner_pct, inner_adequate=True):
+    trafo = pd.DataFrame([
+        {"period": 2030, "hour": 1, "case": "intact", "trafo": "TIE", "s_mva": 1.3, "loading_pct": tie_pct},
+        {"period": 2030, "hour": 1, "case": "intact", "trafo": "INNER", "s_mva": 4.3, "loading_pct": inner_pct},
+    ])
+    sizing = pd.DataFrame([{"group": "INNER", "units": 1, "unit_rating_mva": 2.5, "required_unit_mva": 5.2,
+                            "recommended_unit_mva": 6.3, "adequate": inner_adequate, "worst_period": 2030,
+                            "worst_hour": 1, "n_minus_1": False}])
+    req = {**inputs()["requirement"], "tie_open": True}
+    return dict(trafo=trafo, sizing=sizing, requirement=req, held={"TIE"})
+
+
+def test_an_internal_overload_behind_an_open_tie_is_not_labelled_as_a_tie_closed_check():
+    row = report(**_tie_inputs(tie_pct=5.0, inner_pct=173.0, inner_adequate=False)).loc["transformer_loading"]
+    assert row["status_as_is"] == "fail" and row["status_with_measures"] == "pass"   # INNER is resized
+    assert TIE_LABEL not in row["clause"]
+    assert "INNER: 1 x 6.3 MVA recommended" in row["detail"] and "not sized from islanded hours" in row["detail"]
+
+
+def test_an_overloaded_open_tie_fails_with_measures_too():
+    row = report(**_tie_inputs(tie_pct=120.0, inner_pct=50.0)).loc["transformer_loading"]
+    assert row["status_as_is"] == "fail" and row["status_with_measures"] == "fail"   # nothing resizes the tie
+    assert TIE_LABEL in row["clause"] and "no measure resizes it" in row["detail"]

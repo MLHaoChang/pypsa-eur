@@ -120,6 +120,12 @@ def held_groups(campus) -> set:
     return {g for g, members in trafo_groups(campus).items() if at_pcc & set(members)}
 
 
+def held_transformers(campus) -> set:
+    """The transformers of ``held_groups``."""
+    groups = trafo_groups(campus)
+    return {m for g in held_groups(campus) for m in groups[g]}
+
+
 def apply_hour(campus, rows: pd.DataFrame) -> None:
     """Put one hour on ``campus.net`` (mutates it). ``rows`` is that hour's
     slice of the hourly table: ``unit_id``, ``p_mw``, ``status``."""

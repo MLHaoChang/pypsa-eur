@@ -247,6 +247,17 @@ def test_a_normally_open_tie_sizes_against_its_rating_and_says_the_tie_is_open(t
         assert label in invested.at[check, "clause"], check
 
 
+def test_a_tie_flagged_normally_open_that_conducts_is_refused_in_size_and_invest(tmp_path, project):
+    spec = draft_from_project(project).spec
+    spec["campus"]["pcc"].update(p_connection_mw={"value": 60.0, "source": "assumed"}, tie_normally_open=True)
+    run = tmp_path / "run"
+    prepare_campus(run, spec, project)
+    rank_campus(run, k=1)
+    for stage in (size_campus, invest_campus):
+        with pytest.raises(ContractError, match="tie_normally_open is set, but the PCC imports"):
+            stage(run)
+
+
 def test_sizing_checks_short_circuit_per_period_with_that_periods_units(tmp_path, project):
     run = tmp_path / "run"
     spec = draft_from_project(project).spec

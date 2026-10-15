@@ -1,0 +1,1 @@
+* Fix(gridspine): Behind a normally open tie, the campus transformer-loading check now carries the tie-closed label only when the tie itself is the worst unit, and an overloaded tie fails with measures too; a tie flagged ``tie_normally_open`` that carries power is refused instead of silently left unsized.
