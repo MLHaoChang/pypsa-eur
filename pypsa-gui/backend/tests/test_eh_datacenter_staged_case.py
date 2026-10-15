@@ -143,9 +143,11 @@ def test_the_study_notes_say_the_poc_is_loss_free_and_the_comparison_exceeds_the
     notes = " ".join(T.TEMPLATE_META[TID]["study_notes"])
     year, it_mw, pue = T.DC_PHASES[-1]
     assert "losses are not modelled" in notes
-    assert f"{it_mw * pue:g} MW in {year}" in notes
-    assert f"{n.links.at['grid_import', 'p_nom']:g} MW connection" in notes
-    assert it_mw * pue > n.links.at["grid_import", "p_nom"]     # the note's claim holds
+    # The connection carries the 2035 peak (owner decision 2026-10-15), so the
+    # grid-only comparison can run: the note says so, and it holds.
+    poc = float(n.links.at["grid_import", "p_nom"])
+    assert f"{poc:g} MW connection carries the {year} peak" in notes
+    assert float(n.loads_t.p_set.sum(axis=1).loc[year].max()) <= poc
     # The excess is shed at the template's own VoLL (owner decision 2026-10-15).
     assert f"{T.solver_config(TID)['voll']:,.0f} EUR/MWh VoLL" in notes
     assert "counterfactual_shed_at_voll" in notes
@@ -304,11 +306,11 @@ def test_the_staged_template_produces_an_investment_case(staged_case):
     assert r.op.status == {"operating": "ok", "capex": "ok", "terminal": "ok"}, r.op.reasons
     for k in ("project_pre_tax_npv", "project_pre_tax_irr"):
         assert r.metrics[k] is not None, (k, r.reasons)
-    # The grid-only comparison overloads the connection in 2035, as the study
-    # notes say: the load above it is shed at the VoLL, priced in the case
-    # (owner decision 2026-10-15), never billed as an impossible import.
-    assert any(f.startswith("counterfactual_shed_at_voll:") for f in r.flags), r.flags
-    assert "counterfactual_exceeds_connection" not in r.flags
+    # The connection carries the 2035 peak (owner decision 2026-10-15): the
+    # grid-only comparison runs as modelled, nothing shed, nothing impossible
+    # (the shed-at-VoLL path is test_finance_counterfactual_shed's).
+    assert not [f for f in r.flags if f.startswith(("counterfactual_shed_at_voll",
+                                                    "counterfactual_exceeds"))], r.flags
 
 
 @pytest.fixture

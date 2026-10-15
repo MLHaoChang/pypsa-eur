@@ -2,7 +2,7 @@
 
 The schedule E(t) composes with whatever p_nom a consumer writes: the
 import_cap lever's rungs at 20, 30 and 60 MW read 20/20/20 in the 20 MW year
-and 20/30/40 later, never a rescaled fraction. The MC import credit takes the
+and min(E, rung) later, never a rescaled fraction. The MC import credit takes the
 horizon minimum.
 """
 from __future__ import annotations
@@ -20,6 +20,8 @@ sys.path.insert(0, str(BACKEND / "project_templates"))
 import eh_templates as T  # noqa: E402
 
 YEARS = (2027, 2030, 2035)
+#: The template's schedule (20 MW, then the full connection), read from it.
+SCHEDULE = {y: T.DC_ENERGIZATION_MW[y] for y in YEARS}
 
 
 def _staged():
@@ -37,28 +39,25 @@ def test_the_template_stores_the_schedule_in_mw_not_as_a_fraction():
     assert "grid_import" not in n.links_t.p_max_pu.columns
     e = E.energization_mw(n, "grid_import")
     by = {y: set(np.round(e[n.snapshots.get_level_values(0) == y], 6)) for y in YEARS}
-    assert by == {2027: {20.0}, 2030: {40.0}, 2035: {40.0}}
+    assert by == {y: {v} for y, v in SCHEDULE.items()}
 
 
 def test_applied_for_a_solve_and_undone_after():
     n = _staged()
     undo = E.apply_energization(n)
-    assert _cap_by_period(n) == {2027: 20.0, 2030: 40.0, 2035: 40.0}
+    assert _cap_by_period(n) == SCHEDULE
     undo()
     undo()                                         # idempotent
     assert "grid_import" not in n.links_t.p_max_pu.columns
 
 
-@pytest.mark.parametrize("rung, want", [
-    (20.0, {2027: 20.0, 2030: 20.0, 2035: 20.0}),
-    (30.0, {2027: 20.0, 2030: 30.0, 2035: 30.0}),
-    (60.0, {2027: 20.0, 2030: 40.0, 2035: 40.0}),
-])
-def test_a_rewritten_p_nom_composes_as_min_of_schedule_and_cap(rung, want):
+@pytest.mark.parametrize("rung", [20.0, 30.0, 60.0])
+def test_a_rewritten_p_nom_composes_as_min_of_schedule_and_cap(rung):
     """The import_cap lever writes p_nom = rung; the solve hook then caps at
     min(E, rung)."""
     from services.adequacy.levers import apply_lever_scenario
 
+    want = {y: min(v, rung) for y, v in SCHEDULE.items()}
     n = _staged()
     undo_lever, _mutation = apply_lever_scenario(n, "import_cap", value=rung)
     undo = E.apply_energization(n)
@@ -69,9 +68,10 @@ def test_a_rewritten_p_nom_composes_as_min_of_schedule_and_cap(rung, want):
 
 def test_an_existing_tighter_profile_still_wins():
     n = _staged()
-    n.links_t.p_max_pu["grid_import"] = 0.25           # 10 MW of 40, everywhere
+    n.links_t.p_max_pu["grid_import"] = 0.25           # a quarter of the rating, everywhere
+    quarter = 0.25 * float(n.links.at["grid_import", "p_nom"])
     undo = E.apply_energization(n)
-    assert _cap_by_period(n) == {2027: 10.0, 2030: 10.0, 2035: 10.0}
+    assert _cap_by_period(n) == {y: min(quarter, v) for y, v in SCHEDULE.items()}
     undo()
     assert np.allclose(n.links_t.p_max_pu["grid_import"], 0.25)
 
@@ -130,7 +130,7 @@ def test_run_simulation_applies_the_schedule_and_undoes_it():
     assert status in ("ok", "optimal")
     flow = n.links_t.p0["grid_import"]
     assert flow.loc[2027].max() <= 20.0 + 1e-6
-    assert flow.loc[2035].max() > 20.0 + 1e-6        # the full 40 MW once energized
+    assert flow.loc[2035].max() > 20.0 + 1e-6        # the full connection once energized
     assert "grid_import" not in n.links_t.p_max_pu.columns   # undone after the solve
 
 
@@ -177,7 +177,7 @@ def test_an_hour_without_a_schedule_value_is_uncapped_in_that_hour_only():
     period = n.snapshots.get_level_values(0)
     n.links_t[E.ATTR].loc[period == 2035, "grid_import"] = np.nan
     undo = E.apply_energization(n)
-    assert _cap_by_period(n) == {2027: 20.0, 2030: 40.0, 2035: 40.0}
+    assert _cap_by_period(n) == SCHEDULE
     undo()
     assert E.firm_energized_mw(n, "grid_import") == pytest.approx(20.0)
 
@@ -203,11 +203,11 @@ def test_the_mc_samples_the_import_hour_by_hour_at_the_schedule():
     period = n.snapshots.get_level_values(0)
     eff = float(n.links.at["grid_import", "efficiency"])
     assert {y: round(float(series[period == y].max()), 6) for y in YEARS} == \
-        {2027: round(20.0 * eff, 6), 2030: round(40.0 * eff, 6), 2035: round(40.0 * eff, 6)}
+        {y: round(v * eff, 6) for y, v in SCHEDULE.items()}
 
 
 def test_the_boundary_credit_discloses_the_schedule_by_period():
     from services.adequacy.energization import energized_mw_by_period
 
     assert energized_mw_by_period(_staged(), "grid_import") == {
-        "2027": 20.0, "2030": 40.0, "2035": 40.0}
+        str(y): v for y, v in SCHEDULE.items()}

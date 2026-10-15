@@ -204,15 +204,19 @@ def build_eh_datacenter(phases=None) -> pypsa.Network:
 #
 # The same campus planned from a projected load: three investment periods, the
 # IT load ramping as the data halls are fitted out, and the utility energizing
-# the 40 MW connection in steps. Everything else is the single-year template.
+# a 55 MW connection in steps. Everything else is the single-year template.
 # Synthetic illustrative numbers, like the rest of this file.
 
 #: The projected load: (period year, IT MW, PUE). Cooling scales with the IT
 #: load (the single-year template's 8-14 MW profile is for 36 MW of IT).
 DC_PHASES = ((2027, 12.0, 1.3), (2030, 24.0, 1.3), (2035, 36.0, 1.3))
-#: The utility's energization schedule of the 40 MW connection (assumed): the
-#: import available in each period, in MW.
-DC_ENERGIZATION_MW = {2027: 20.0, 2030: 40.0, 2035: 40.0}
+#: The staged campus's PoC rating (MW): sized to its 2035 peak (about 52.5 MW
+#: modelled), so the grid-only comparison of the investment case can run (owner
+#: decision 2026-10-15). The single-year template keeps its weak 40 MW.
+_DC_POC_MW = 55.0
+#: The utility's energization schedule of the connection (assumed): the import
+#: available in each period, in MW.
+DC_ENERGIZATION_MW = {2027: 20.0, 2030: _DC_POC_MW, 2035: _DC_POC_MW}
 #: Years each period stands for (2027-29, 2030-34, 2035-44): the horizon ends in
 #: 2045, before any candidate's pack lifetime (25 years) runs out.
 DC_PERIOD_YEARS = {2027: 3, 2030: 5, 2035: 10}
@@ -223,10 +227,6 @@ _DC_IT_MW = 36.0                                   # the single-year template's 
 # investment case computes on a project made from the template. Synthetic
 # illustrative numbers; the ledger in TEMPLATE_META says what each one is.
 
-#: The PoC rating and the last period's site load (IT × PUE), in MW: the
-#: grid-only comparison serves that load on that connection.
-_DC_POC_MW = 40.0
-_DC_LAST_LOAD_MW = round(DC_PHASES[-1][1] * DC_PHASES[-1][2], 1)
 #: The VoLL the notes quote (SOLVER_CONFIG's, pinned equal by the tests).
 _DC_VOLL = 5000.0
 
@@ -269,7 +269,7 @@ DC_FINANCE: dict = {
 def _staged_datacenter(n: pypsa.Network, phases) -> pypsa.Network:
     """The single-year campus as a three-period plan: the week repeated in each
     period, the load scaled to ``phases``, the import capped per period by
-    ``DC_ENERGIZATION_MW`` (an absolute MW schedule on the 40 MW link), and the two expansion
+    ``DC_ENERGIZATION_MW`` (an absolute MW schedule on the ``_DC_POC_MW`` link), and the two expansion
     candidates replaced by one candidate per period with that period as its
     ``build_year`` (explicit rows, not vintage bounds, so the finance adapter
     sees each stage)."""
@@ -304,6 +304,7 @@ def _staged_datacenter(n: pypsa.Network, phases) -> pypsa.Network:
         index=snaps)
     n.remove("Generator", "genset_new")
     n.remove("StorageUnit", "bess_new")
+    n.links.at["grid_import", "p_nom"] = _DC_POC_MW
     # The investment case's counterfactual bill is the served load at the
     # meter (`finance_case._lossy_poc`): with a lossy PoC chain it is not the
     # metered import, and the case is refused. Losses are not modelled in the
@@ -531,11 +532,11 @@ TEMPLATE_META: dict[str, dict] = {
         "description": (
             "The data center campus planned from a projected load: IT grows "
             "12 → 24 → 36 MW over 2027, 2030 and 2035 while the utility "
-            "energizes the 40 MW connection in steps (20 MW until 2030). "
+            f"energizes a {_DC_POC_MW:g} MW connection in steps (20 MW until 2030). "
             "Genset and battery candidates per period, so the plan says what "
             "to build when. Multi-period; tagged for an Energy Hub study."),
         "recommended_archetype": "weak_flexible",
-        "pack_overrides": {"import_p_nom_mw": 40.0},
+        "pack_overrides": {"import_p_nom_mw": _DC_POC_MW},
         "stages": None,
         "dtc_attribution": "per_load",
         "projected_load": [
@@ -543,7 +544,7 @@ TEMPLATE_META: dict[str, dict] = {
              "note": "synthetic illustrative fit-out ramp; replace with the client's load projection"}
             for y, it, pue in DC_PHASES],
         "energization": [
-            {"year": y, "available_import_mw": DC_ENERGIZATION_MW[y], "connection_mw": 40.0,
+            {"year": y, "available_import_mw": DC_ENERGIZATION_MW[y], "connection_mw": _DC_POC_MW,
              "source": "assumed", "note": "utility energization schedule (assumed)"}
             for y, _it, _pue in DC_PHASES],
         "period_years": {str(y): DC_PERIOD_YEARS[y] for y, _it, _pue in DC_PHASES},
@@ -605,8 +606,8 @@ TEMPLATE_META: dict[str, dict] = {
             "builds is a stage with its own COD, and an unbuilt later candidate is not an investment.",
             "PoC and transformer losses are not modelled in the staged plan (efficiency 1.0), so the "
             "investment case can compare against the grid-only site.",
-            f"The grid-only comparison would need {_DC_LAST_LOAD_MW:g} MW in {DC_PHASES[-1][0]} on "
-            f"the {_DC_POC_MW:g} MW connection: the investment case sheds the load above it, valued "
+            f"The {_DC_POC_MW:g} MW connection carries the 2035 peak, so the investment case's "
+            "grid-only comparison can run; load above a connection would be shed in it, valued "
             f"at the {_DC_VOLL:,.0f} EUR/MWh VoLL (counterfactual_shed_at_voll).",
         ],
         "provenance": PROVENANCE,

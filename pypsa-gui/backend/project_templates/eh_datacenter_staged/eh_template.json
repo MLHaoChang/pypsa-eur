@@ -1,24 +1,24 @@
 {
-  "description": "The data center campus planned from a projected load: IT grows 12 \u2192 24 \u2192 36 MW over 2027, 2030 and 2035 while the utility energizes the 40 MW connection in steps (20 MW until 2030). Genset and battery candidates per period, so the plan says what to build when. Multi-period; tagged for an Energy Hub study.",
+  "description": "The data center campus planned from a projected load: IT grows 12 \u2192 24 \u2192 36 MW over 2027, 2030 and 2035 while the utility energizes a 55 MW connection in steps (20 MW until 2030). Genset and battery candidates per period, so the plan says what to build when. Multi-period; tagged for an Energy Hub study.",
   "dtc_attribution": "per_load",
   "energization": [
     {
       "available_import_mw": 20.0,
-      "connection_mw": 40.0,
+      "connection_mw": 55.0,
       "note": "utility energization schedule (assumed)",
       "source": "assumed",
       "year": 2027
     },
     {
-      "available_import_mw": 40.0,
-      "connection_mw": 40.0,
+      "available_import_mw": 55.0,
+      "connection_mw": 55.0,
       "note": "utility energization schedule (assumed)",
       "source": "assumed",
       "year": 2030
     },
     {
-      "available_import_mw": 40.0,
-      "connection_mw": 40.0,
+      "available_import_mw": 55.0,
+      "connection_mw": 55.0,
       "note": "utility energization schedule (assumed)",
       "source": "assumed",
       "year": 2035
@@ -83,7 +83,7 @@
   ],
   "name": "Data Center Energy Hub (staged growth)",
   "pack_overrides": {
-    "import_p_nom_mw": 40.0
+    "import_p_nom_mw": 55.0
   },
   "period_years": {
     "2027": 3,
@@ -120,6 +120,6 @@
     "Load is picked up in 2.5 MW blocks after an islanding (assumed): the island rows then follow the load, so the plan stages \u2014 a small genset in 2027 and 2030, the bulk in 2035.",
     "After a solve the investment case runs on the shipped commercial config and finance inputs: the existing campus is in service in 2027 at no capex, each candidate the plan builds is a stage with its own COD, and an unbuilt later candidate is not an investment.",
     "PoC and transformer losses are not modelled in the staged plan (efficiency 1.0), so the investment case can compare against the grid-only site.",
-    "The grid-only comparison would need 46.8 MW in 2035 on the 40 MW connection: the investment case sheds the load above it, valued at the 5,000 EUR/MWh VoLL (counterfactual_shed_at_voll)."
+    "The 55 MW connection carries the 2035 peak, so the investment case's grid-only comparison can run; load above a connection would be shed in it, valued at the 5,000 EUR/MWh VoLL (counterfactual_shed_at_voll)."
   ]
 }
