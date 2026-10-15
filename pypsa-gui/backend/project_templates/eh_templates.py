@@ -215,8 +215,10 @@ DC_PHASES = ((2027, 12.0, 1.3), (2030, 24.0, 1.3), (2035, 36.0, 1.3))
 #: decision 2026-10-15). The single-year template keeps its weak 40 MW.
 _DC_POC_MW = 55.0
 #: The utility's energization schedule of the connection (assumed): the import
-#: available in each period, in MW.
-DC_ENERGIZATION_MW = {2027: 20.0, 2030: _DC_POC_MW, 2035: _DC_POC_MW}
+#: available in each period, in MW. 2027 is energized below that period's peak
+#: (about 18.4 MW), so the early grid limit drives the first build and the
+#: grid-only comparison sheds then (owner decision 2026-10-15).
+DC_ENERGIZATION_MW = {2027: 15.0, 2030: _DC_POC_MW, 2035: _DC_POC_MW}
 #: Years each period stands for (2027-29, 2030-34, 2035-44): the horizon ends in
 #: 2045, before any candidate's pack lifetime (25 years) runs out.
 DC_PERIOD_YEARS = {2027: 3, 2030: 5, 2035: 10}
@@ -226,9 +228,6 @@ _DC_IT_MW = 36.0                                   # the single-year template's 
 # Inline only (no Library refs a fresh project would not have), so the
 # investment case computes on a project made from the template. Synthetic
 # illustrative numbers; the ledger in TEMPLATE_META says what each one is.
-
-#: The VoLL the notes quote (SOLVER_CONFIG's, pinned equal by the tests).
-_DC_VOLL = 5000.0
 
 #: The existing campus, in service at the first period (overnight cost 0).
 DC_EXISTING = ("genset_1", "genset_2", "genset_3", "genset_4", "rooftop_pv", "ups_battery",
@@ -537,7 +536,8 @@ TEMPLATE_META: dict[str, dict] = {
         "description": (
             "The data center campus planned from a projected load: IT grows "
             "12 → 24 → 36 MW over 2027, 2030 and 2035 while the utility "
-            f"energizes a {_DC_POC_MW:g} MW connection in steps (20 MW until 2030). "
+            f"energizes a {_DC_POC_MW:g} MW connection in steps "
+            f"({DC_ENERGIZATION_MW[2027]:g} MW until 2030). "
             "Genset and battery candidates per period, so the plan says what "
             "to build when. Multi-period; tagged for an Energy Hub study."),
         "recommended_archetype": "weak_flexible",
@@ -603,7 +603,8 @@ TEMPLATE_META: dict[str, dict] = {
         "study_notes": [
             "Each period is the same representative July week, with the period's load and import cap.",
             "Candidates are one row per period (build_year = the period): the plan says what to build when.",
-            "The energization schedule caps the import at 20 MW in 2027.",
+            f"The energization schedule caps the import at {DC_ENERGIZATION_MW[2027]:g} MW in "
+            "2027, below that period's peak: the plan builds on site for it.",
             "Load is picked up in 2.5 MW blocks after an islanding (assumed): the island rows then "
             "follow the load, so the plan stages — a small genset in 2027 and 2030, the bulk in 2035.",
             "After a solve the investment case runs on the shipped commercial config and finance "
@@ -611,9 +612,11 @@ TEMPLATE_META: dict[str, dict] = {
             "builds is a stage with its own COD, and an unbuilt later candidate is not an investment.",
             "PoC and transformer losses are not modelled in the staged plan (efficiency 1.0), so the "
             "investment case can compare against the grid-only site.",
-            f"The {_DC_POC_MW:g} MW connection carries the 2035 peak, so the investment case's "
-            "grid-only comparison can run; load above a connection would be shed in it, valued "
-            f"at the {_DC_VOLL:,.0f} EUR/MWh VoLL (counterfactual_shed_at_voll).",
+            f"The {_DC_POC_MW:g} MW connection carries the 2035 peak. The investment case "
+            "compares against the site as it stands today: with the plan's new builds removed, "
+            f"the site still meets its load (the {DC_ENERGIZATION_MW[2027]:g} MW energized in 2027 "
+            "included), and the island capability the new builds buy is shown as a break-even "
+            "beside the NPV.",
         ],
         "provenance": PROVENANCE,
     },
@@ -820,6 +823,27 @@ def _staged_island(cfg: dict) -> dict:
 
 
 ISLAND_CONFIG["eh_datacenter_staged"] = _staged_island(ISLAND_CONFIG["eh_datacenter"])
+
+
+def _register_staged_hubs() -> None:
+    """The staged H2 hub and microgrid (``eh_staged_hubs.py``, generic-site
+    E2E H1/M1) add themselves to the registries above. Loaded by file path
+    like this module; it gets a view of this module's names, never imports
+    it."""
+    import importlib.util
+    import pathlib
+    import types
+
+    path = pathlib.Path(__file__).resolve().with_name("eh_staged_hubs.py")
+    if not path.is_file():           # this module copied on its own (a test's tmp dir)
+        return
+    spec = importlib.util.spec_from_file_location("_eh_staged_hubs", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.register(types.SimpleNamespace(**globals()))
+
+
+_register_staged_hubs()
 
 # Sidecar file names copied by POST /api/projects/from_template/<id>.
 META_FILE = "eh_template.json"

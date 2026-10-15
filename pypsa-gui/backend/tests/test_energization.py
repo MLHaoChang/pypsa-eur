@@ -20,14 +20,15 @@ sys.path.insert(0, str(BACKEND / "project_templates"))
 import eh_templates as T  # noqa: E402
 
 YEARS = (2027, 2030, 2035)
-#: The template's schedule (20 MW, then the full connection), read from it.
+#: The template's schedule (15 MW in 2027, then the full connection), read from it.
 SCHEDULE = {y: T.DC_ENERGIZATION_MW[y] for y in YEARS}
 
 
 def test_the_schedule_values_themselves():
     """The tests below read SCHEDULE from the template; pin its values once so a
-    drift is caught (#294 review): 20 MW until 2030, then the 55 MW connection."""
-    assert SCHEDULE == {2027: 20.0, 2030: 55.0, 2035: 55.0}
+    drift is caught (#294 review): 15 MW until 2030 (below the 2027 peak, owner
+    decision 2026-10-15), then the 55 MW connection."""
+    assert SCHEDULE == {2027: 15.0, 2030: 55.0, 2035: 55.0}
 
 
 def _staged():
@@ -84,7 +85,7 @@ def test_an_existing_tighter_profile_still_wins():
 
 def test_the_firm_credit_is_the_horizon_minimum():
     n = _staged()
-    assert E.firm_energized_mw(n, "grid_import") == pytest.approx(20.0)
+    assert E.firm_energized_mw(n, "grid_import") == pytest.approx(SCHEDULE[2027])
     assert E.firm_energized_mw(n, "site_transformer") is None
 
 
@@ -113,7 +114,7 @@ def test_the_mc_import_credit_is_the_horizon_minimum_with_a_label():
     n = _staged()
     far = {str(n.links.at["grid_import", "bus0"])}
     assert _import_capacity_to_hub(n, "grid_import", far) == pytest.approx(
-        20.0 * float(n.links.at["grid_import", "efficiency"]))
+        SCHEDULE[2027] * float(n.links.at["grid_import", "efficiency"]))
     flat = T.BUILDERS["eh_datacenter"]()
     assert _import_capacity_to_hub(flat, "grid_import", far) == pytest.approx(
         float(flat.links.at["grid_import", "p_nom"]) * float(flat.links.at["grid_import", "efficiency"]))
@@ -135,8 +136,8 @@ def test_run_simulation_applies_the_schedule_and_undoes_it():
                                queue.SimpleQueue(), state_update=lambda **kw: None)
     assert status in ("ok", "optimal")
     flow = n.links_t.p0["grid_import"]
-    assert flow.loc[2027].max() <= 20.0 + 1e-6
-    assert flow.loc[2035].max() > 20.0 + 1e-6        # the full connection once energized
+    assert flow.loc[2027].max() <= SCHEDULE[2027] + 1e-6
+    assert flow.loc[2035].max() > SCHEDULE[2027] + 1e-6        # the full connection once energized
     assert "grid_import" not in n.links_t.p_max_pu.columns   # undone after the solve
 
 
@@ -144,7 +145,7 @@ def test_readiness_reports_the_firm_import_beside_the_rating():
     from services.adequacy.eh_readiness import _import_firm_mw
 
     n = _staged()
-    assert _import_firm_mw(n, ["grid_import"]) == pytest.approx(20.0)
+    assert _import_firm_mw(n, ["grid_import"]) == pytest.approx(SCHEDULE[2027])
     assert _import_firm_mw(T.BUILDERS["eh_datacenter"](), ["grid_import"]) is None
 
 
@@ -178,14 +179,14 @@ def test_the_island_study_refuses_a_multi_period_network():
 
 def test_an_hour_without_a_schedule_value_is_uncapped_in_that_hour_only():
     """A period added after the schedule was written has NaN rows: they get
-    no cap, and 2027 keeps its 20 MW."""
+    no cap, and 2027 keeps its cap."""
     n = _staged()
     period = n.snapshots.get_level_values(0)
     n.links_t[E.ATTR].loc[period == 2035, "grid_import"] = np.nan
     undo = E.apply_energization(n)
     assert _cap_by_period(n) == SCHEDULE
     undo()
-    assert E.firm_energized_mw(n, "grid_import") == pytest.approx(20.0)
+    assert E.firm_energized_mw(n, "grid_import") == pytest.approx(SCHEDULE[2027])
 
 
 def test_the_mc_samples_the_import_hour_by_hour_at_the_schedule():

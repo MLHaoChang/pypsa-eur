@@ -436,6 +436,7 @@ const STAGE_LABEL: Record<CampusRunStage, string> = {
   island_checks: 'island frequency checks (the slowest step)',
   size: 'sizing the transformers, the compensation and the short circuit',
   invest: 'buying the assets from the library, re-checked by AC load flow',
+  gfm_settings: 'recommending grid-forming settings from the island hours',
   done: 'finishing',
 }
 
@@ -454,6 +455,28 @@ function RunJobStatus({ job, onAbort, aborting }: { job: CampusRunJob; onAbort: 
         <Tag tone="accent">queued</Tag>{' '}
         The study is waiting for the solve queue{job.position != null ? ` (#${job.position})` : ''}. Please wait; it starts on its own.{' '}
         <Btn onClick={onAbort} disabled={aborting}><Square size={12} /> Abort</Btn>
+      </p>
+    )
+  }
+  // A GFM-settings job (GFM-b) is a campus job but not a run: the campus results stay current.
+  const gfm = job.stage === 'gfm_settings'
+  if (job.status === 'running' && gfm) {
+    return (
+      <p className="mt-2 text-[12px]" data-testid="campus-run-status" role="status">
+        <Tag tone="accent">running</Tag>{' '}
+        Recommending grid-forming settings from the island hours · {elapsed(job.started_at)}. The campus results
+        below are current.{' '}
+        <Btn onClick={onAbort} disabled={aborting}><Square size={12} /> Abort</Btn>
+      </p>
+    )
+  }
+  if (gfm && (job.status === 'failed' || job.status === 'interrupted' || job.status === 'aborted')) {
+    const how = job.status === 'aborted' ? 'was stopped'
+      : job.status === 'failed' ? `failed${job.error ? `: ${job.error}` : ''}` : 'was interrupted (the backend restarted)'
+    return (
+      <p className={`mt-2 text-[12px] ${job.status === 'aborted' ? 'text-muted' : 'text-danger'}`}
+         data-testid="campus-run-status" role={job.status === 'aborted' ? undefined : 'alert'}>
+        The grid-forming settings search {how}. The campus run's results are unchanged.
       </p>
     )
   }

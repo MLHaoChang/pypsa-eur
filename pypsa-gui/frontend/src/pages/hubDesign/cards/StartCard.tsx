@@ -33,6 +33,8 @@ const PURPOSE: Record<string, string> = {
   eh_h2_hub: 'An industrial site that makes hydrogen from wind and solar power, with a grid connection.',
   eh_microgrid: 'An island that must keep its hospital running without its link to the mainland.',
   eh_datacenter_staged: 'A data center that grows over the years: plan what to build, and when, as its load and grid connection grow.',
+  eh_h2_hub_staged: 'A hydrogen-making industrial site whose customers buy more each year: plan what to build, and when.',
+  eh_microgrid_staged: 'An island whose demand grows over the years: plan what to build, and when, without the mainland link.',
 }
 
 /** The Start card's purpose line; a template without one falls back to the

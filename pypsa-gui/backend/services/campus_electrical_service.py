@@ -1129,10 +1129,12 @@ def _write_island_tables(project, run_dir: Path, spec: dict, nc: Path) -> None:
 
 
 def _island_hours_files() -> tuple:
-    """The island-hours drivers' files in a run directory (I4–I6)."""
+    """The island-hours drivers' files in a run directory (I4–I7), and the
+    GFM settings recommended from them (GFM-b), so a rerun reads none stale."""
     return (*cs.ISLAND_STATIC_CSV.values(), cs.ISLAND_STATIC_SUMMARY_JSON,
             cs.FREQ_E1_HOURLY_CSV, cs.FREQ_EVENTS_CSV, cs.FREQ_LOSSES_CSV, cs.FREQ_BRIDGE_CSV,
-            cs.FREQ_PLANNED_CSV, cs.FREQ_UPS_CSV, cs.FREQ_SUMMARY_JSON, cs.FREQ_CUTS_CSV)
+            cs.FREQ_PLANNED_CSV, cs.FREQ_UPS_CSV, cs.FREQ_SUMMARY_JSON, cs.FREQ_CUTS_CSV,
+            cs.GFM_SETTINGS_JSON)
 
 
 def _run_island_hours(run_dir: Path) -> None:
@@ -1285,6 +1287,11 @@ def run_queued(job, progress, stop_event) -> None:
             _RUN_PROGRESS[str(job.id)] = {"stage": stage, "done": done, "total": total, "at": time.time()}
         progress(stage, done, total)
 
+    if settings.get("action") == "gfm_settings":       # recommended GFM settings (GFM-b)
+        from services import campus_island_tuning as cit
+
+        cit.run_queued(project, settings, progress=report, should_stop=stop_event.is_set)
+        return
     run(project, settings, progress=report, should_stop=stop_event.is_set)
 
 

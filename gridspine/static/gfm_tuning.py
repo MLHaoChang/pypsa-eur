@@ -139,6 +139,10 @@ class _Budget(Exception):
     pass
 
 
+class SearchStopped(Exception):
+    """The search was stopped by its caller (``should_stop``): no result."""
+
+
 def shrunk(limits: dict, margin: float, f0: float = F.F0) -> dict:
     """``limits`` with each one tightened by ``margin`` (0 ≤ m < 1) of what it allows."""
     if not (isinstance(margin, (int, float)) and 0.0 <= margin < 1.0):
@@ -185,8 +189,11 @@ def apply(units, d_pct: float, h: float, bounds: Bounds = GFM_BOUNDS, i_max_pu: 
 
 def recommend_gfm_settings(cases, limits, *, f0=F.F0, equipment_=(), window_ms=500.0, bounds=GFM_BOUNDS,
                            margin=0.1, search=(5e-3, 10.0), verify=(1e-3, 20.0), allow_i_max=False,
-                           max_sims=400) -> Recommendation:
-    """The recommended settings over ``cases`` (see the module docstring)."""
+                           max_sims=400, should_stop=None) -> Recommendation:
+    """The recommended settings over ``cases`` (see the module docstring).
+    ``should_stop()``, when given, is asked before every simulation; a True
+    raises ``SearchStopped`` (a cooperative stop: the cap, its verification
+    reservation and the margin are unchanged)."""
     cases = list(cases)
     tight = shrunk(limits, margin, f0)
     sims = [0]
@@ -194,6 +201,8 @@ def recommend_gfm_settings(cases, limits, *, f0=F.F0, equipment_=(), window_ms=5
     notes: list[str] = []
 
     def measured(case, units, horizon, lim):
+        if should_stop is not None and should_stop():
+            raise SearchStopped("the GFM settings search was stopped")
         if sims[0] >= cap[0]:
             raise _Budget()
         sims[0] += 1
@@ -280,6 +289,8 @@ def recommend_gfm_settings(cases, limits, *, f0=F.F0, equipment_=(), window_ms=5
                 continue
 
             def run(us, t, c=c):
+                if should_stop is not None and should_stop():
+                    raise SearchStopped("the GFM settings search was stopped")
                 extra[0] += 1
                 return c.run(us, dt, t)
             for kind, delta, binding, derivation, feasible, note in F.cuts_for_event(

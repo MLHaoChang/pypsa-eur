@@ -98,7 +98,8 @@ def _fake_adapter(monkeypatch):
 
     calls: list[dict] = []
 
-    def fake(n, cfg, fin, *, result_df, lost_load=None, owner=None, extra_assets=()):
+    def fake(n, cfg, fin, *, result_df, lost_load=None, owner=None, extra_assets=(),
+             baseline=None):
         calls.append({"extra_assets": tuple(extra_assets), "owner": owner})
         return S.to_finance_case("s2")
 
@@ -548,7 +549,8 @@ def test_the_factory_without_campus_behaves_as_before(monkeypatch):
 
     seen = {}
 
-    def fake(n, cfg, fin, *, result_df, lost_load=None, owner=None, extra_assets=()):
+    def fake(n, cfg, fin, *, result_df, lost_load=None, owner=None, extra_assets=(),
+             baseline=None):
         seen["extra_assets"] = extra_assets
         return S.to_finance_case("s2")
     monkeypatch.setattr(FC, "build_finance_case", fake)
@@ -565,7 +567,8 @@ def test_the_factory_applies_a_source_extras_flags_and_refusal(monkeypatch):
 
     seen = {}
 
-    def fake(n, cfg, fin, *, result_df, lost_load=None, owner=None, extra_assets=()):
+    def fake(n, cfg, fin, *, result_df, lost_load=None, owner=None, extra_assets=(),
+             baseline=None):
         seen["extra_assets"] = extra_assets
         return S.to_finance_case("s2")
     monkeypatch.setattr(FC, "build_finance_case", fake)
@@ -611,7 +614,7 @@ def test_the_route_and_solve_ppa_price_hand_the_seam_the_same_source(install_net
     monkeypatch.setattr(R, "_ic_case_hash", lambda case: "case-hash-for-test")
     monkeypatch.setattr(FC, "build_finance_case",
                         lambda n, cfg, fin, *, result_df, lost_load=None, owner=None,
-                        extra_assets=(): dataclasses.replace(S.to_finance_case("s1b", solve=True),
+                        extra_assets=(), baseline=None: dataclasses.replace(S.to_finance_case("s1b", solve=True),
                                                              extra_assets=tuple(extra_assets)))
 
     install_network(build_network(solve=True))
@@ -657,7 +660,7 @@ def test_solve_ppa_price_carries_the_cases_campus_flags(install_network, monkeyp
     monkeypatch.setattr(R, "_ic_campus_source", lambda finance: source)
     monkeypatch.setattr(FC, "build_finance_case",
                         lambda n, cfg, fin, *, result_df, lost_load=None, owner=None,
-                        extra_assets=(): S.to_finance_case("s1b", solve=True))
+                        extra_assets=(), baseline=None: S.to_finance_case("s1b", solve=True))
     monkeypatch.setattr(E, "solve_ppa", lambda case, pack=None, layers=None: {
         "solved_ppa_price": 55.0, "solve_ppa_status": "ok", "solved_ppa_price_money_year": 2026,
         "solve_ppa_flags": ["solve_ppa_flag_for_test"]})

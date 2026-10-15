@@ -111,3 +111,32 @@ def test_the_summary_says_the_comparison_shed_is_valued_at_voll():
     caveats = [r[1] for r in _values(wb["Summary"]) if r[0] == "Caveat"]
     assert len(caveats) == 1 and "valued at the value of lost load" in caveats[0]
     assert "impossible" not in caveats[0]
+
+
+def test_the_summary_says_what_the_figures_are_compared_with():
+    """Owner decision 2026-10-15: the counterfactual basis and the baseline's
+    notes sit beside the Summary figures."""
+    rep = _report()
+    rep.sections["project"].payload["counterfactual"] = {
+        "present": True, "counterfactual_basis": "site_today",
+        "basis": "compared with the site as it stands today (existing assets kept, new builds "
+                 "removed, re-solved)",
+        "notes": ["pv has no typed cost; treated as a new investment. Type overnight 0 if it "
+                  "already exists."]}
+    wb = openpyxl.load_workbook(io.BytesIO(build_workbook(rep)))
+    rows = {r[0]: r[1] for r in _values(wb["Summary"]) if r[0] in ("Compared with", "Note")}
+    assert rows["Compared with"].startswith("compared with the site as it stands today")
+    assert rows["Note"].startswith("pv has no typed cost")
+
+
+def test_the_summary_states_the_island_capability_break_even():
+    rep = _report()
+    rep.sections["project"].payload["island_breakeven"] = {
+        "eur_per_year": 693523.0, "text": "The island capability must be worth at least "
+        "EUR 693,523 a year (2027 money, escalating with opex) for the plan to break even. Per "
+        "outage hour: needs an outage duration (enter the expected outage hours a year and "
+        "their source). No value of lost load is assumed."}
+    wb = openpyxl.load_workbook(io.BytesIO(build_workbook(rep)))
+    rows = {r[0]: r[1] for r in _values(wb["Summary"])}
+    assert rows["Island capability break-even"].startswith(
+        "The island capability must be worth at least EUR 693,523 a year")

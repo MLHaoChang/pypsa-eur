@@ -205,6 +205,18 @@ class SolvePpa(BaseModel):
     target_year: int = Field(ge=1)
 
 
+class IslandOutage(BaseModel):
+    """The expected grid-outage hours a year the island capability rides
+    through, as the user states them with their source (owner decision
+    2026-10-15): the island break-even per outage hour and per MWh is computed
+    only from this. No default: None leaves those figures "needs an outage
+    duration". It never enters the cash flows."""
+    model_config = ConfigDict(extra="forbid")
+
+    hours_per_year: float = Field(gt=0, le=8784)
+    source: str = Field(min_length=1, max_length=200)
+
+
 class TerminalValueRule(BaseModel):
     """The terminal value at the last operating year (inside EBITDA, taxed):
     `fixed` an amount (SAM's salvage), `multiple_of_ebitda` a multiple,
@@ -279,6 +291,8 @@ class FinanceInputs(BaseModel):
     small_business_163j: bool | None = None
     reserves_rate: float | None = Field(default=None, ge=0)
     solve_ppa: SolvePpa | None = None
+    # The island break-even's outage hours (`IslandOutage`); None = not stated.
+    island_outage: IslandOutage | None = None
     # A depreciation class per owner asset where the pack assigns none (plan
     # WP4.3a, C11): "macrs_<n>", "sl_<n>" (US half-year), "afa_<n>" (DE
     # straight-line pro rata), "db_<rate>_<n>" (declining balance, rate as a

@@ -240,3 +240,52 @@ def test_a_searched_mixed_fleet_starts_from_common_settings_and_says_so():
 def test_the_margin_note_says_equipment_limits_are_used_as_given():
     r = T.recommend_gfm_settings([case(island(), 2.0)], lim())
     assert any("grid-code limits only" in n and "used as given" in n for n in r.notes)
+
+
+def test_a_stop_ends_the_search_after_the_simulation_in_hand():
+    """GFM-b review (#303): a cooperative stop, asked before every simulation
+    beside the budget check, raises ``SearchStopped``; it never reads as a
+    result, and the cap and the margin are untouched when nobody stops."""
+    c = case(island(), 4.0)
+    full = T.recommend_gfm_settings([c], lim(rocof=0.9))
+    asked = []
+
+    def stop():
+        asked.append(1)
+        return len(asked) > 3                 # three simulations, then stop
+    with pytest.raises(T.SearchStopped):
+        T.recommend_gfm_settings([c], lim(rocof=0.9), should_stop=stop)
+    assert len(asked) == 4
+    same = T.recommend_gfm_settings([c], lim(rocof=0.9), should_stop=lambda: False)
+    assert (same.status, same.simulations, same.settings) == (full.status, full.simulations,
+                                                              full.settings)
+
+
+def test_a_stop_during_the_capacity_fallback_ends_it(monkeypatch):
+    """#303 review: the fallback's bounded tries (cuts_for_event) ask the stop
+    too. A stop that answers True only when asked from inside the fallback
+    raises SearchStopped there, and no fallback simulation runs."""
+    import inspect
+
+    calls = [0]
+    real = F.simulate
+
+    def counted(*a, **k):
+        calls[0] += 1
+        return real(*a, **k)
+    monkeypatch.setattr(F, "simulate", counted)
+    c = case([bess("gfm_vsm", h=1.0, p0=0.0)], 30.0)
+    full = T.recommend_gfm_settings([c], lim(rocof=1.0, f_min=47.5))
+    assert full.status == "not_achievable"
+    assert any(n.startswith("capacity fallback: ") for n in full.notes)
+    seen = {}
+
+    def in_fallback():
+        if any(f.function == "cuts_for_event" for f in inspect.stack()):
+            seen.setdefault("calls", calls[0])
+            return True
+        return False
+    calls[0] = 0
+    with pytest.raises(T.SearchStopped):
+        T.recommend_gfm_settings([c], lim(rocof=1.0, f_min=47.5), should_stop=in_fallback)
+    assert calls[0] == seen["calls"]               # stopped before its first try
