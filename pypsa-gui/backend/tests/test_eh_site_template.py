@@ -153,6 +153,58 @@ def test_bad_parameters_are_refused_naming_the_field(raw, field):
     assert exc.value.field == field
 
 
+@pytest.mark.parametrize("raw, field", [
+    ({"stages": [{"year": 2027, "peak_mw": float("nan")}]}, "stages[0].peak_mw"),
+    ({"critical_share": True}, "critical_share"),
+    ({"fault_level_mva": float("inf")}, "fault_level_mva"),
+])
+def test_a_non_number_is_refused_rather_than_coerced(raw, field):
+    # NaN fails every bound check, True is an int, and fault level has no
+    # ceiling: without the finite-number guard each of these would be stored.
+    with pytest.raises(S.SiteParamsError, match="expected a number") as exc:
+        S.site_params(raw)
+    assert exc.value.field == field
+
+
+@pytest.mark.parametrize("battery", [
+    {"mw": 2.0, "mwh": 0.0},
+    {"mw": 0.0, "mwh": 4.0},
+])
+def test_a_battery_needs_both_power_and_energy_or_neither(battery):
+    with pytest.raises(S.SiteParamsError, match="give both mw and mwh") as exc:
+        S.site_params({"existing": {"battery": battery}})
+    assert exc.value.field == "existing.battery"
+
+
+def test_the_horizon_must_outlast_the_last_stage():
+    with pytest.raises(S.SiteParamsError, match=r"after the last stage \(2035\)") as exc:
+        S.site_params({"horizon_end": 2035})
+    assert exc.value.field == "horizon_end"
+
+
+def test_a_horizon_one_year_past_the_last_stage_weighs_that_period_as_one_year():
+    p = S.site_params({"horizon_end": 2036})
+    n = S.build_eh_site(p)
+    # 2027–2030 is 3 years, 2030–2035 is 5, 2035–2036 is 1.
+    assert list(n.investment_periods) == [2027, 2030, 2035]
+    assert n.investment_period_weightings["years"].tolist() == [3.0, 5.0, 1.0]
+    assert n.investment_period_weightings["objective"].tolist() == [3.0, 5.0, 1.0]
+
+
+def test_a_site_without_a_ups_ships_no_island_rows(tmp_path):
+    p = S.site_params({"site_type": "hospital", "existing": {"ups": {"mw": 0.0}}})
+    assert p["existing"]["ups"]["mw"] == 0.0
+    assert S.island_config(p) is None
+    n = S.build_eh_site(p)
+    assert "ups_battery" not in n.storage_units.index
+    assert "ups_battery" not in S.existing_assets(p)
+    assert "island_constraints" not in S.solver_config(p, n)
+    S.write_sidecars(tmp_path, p, n)
+    assert not (tmp_path / "island_config.json").exists()
+    meta = json.loads((tmp_path / "eh_template.json").read_text())
+    assert any("No UPS" in note for note in meta["study_notes"])
+
+
 def test_overrides_lay_over_the_preset():
     p = S.site_params({"site_type": "hospital", "connection_mw": 10.0,
                        "stages": [{"year": 2028, "peak_mw": 7.0}],

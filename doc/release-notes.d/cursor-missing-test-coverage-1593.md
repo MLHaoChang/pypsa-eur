@@ -1,0 +1,1 @@
+* Test(pypsa-gui): The generic site template refuses a peak, critical share or fault level that is not a finite number, a battery given only power or only energy, and a horizon that does not outlast the last growth stage. A site with no UPS ships no island sidecar and does not turn island constraints on.
