@@ -105,6 +105,14 @@ BASELINE_CAVEATS = (
      "The comparison site without the investment cannot import all of its load: the load above "
      "its connection is shed and valued at the value of lost load, so the NPV, IRR and payback "
      "count that shed as a cost the investment avoids."),
+    ("counterfactual_buys",
+     "The comparison site without the investment buys the energy of its non-electric load (grey "
+     "hydrogen, say) at the stated reference price: the NPV, IRR and payback count that purchase as "
+     "a cost the investment avoids."),
+    ("co2_price_period",
+     "A CO2 price is applied: the comparison counts the certificate cost of what it buys (and of "
+     "grid imports, on both sides, when a grid intensity is set) as cash the site would otherwise "
+     "pay. It is additional to any carbon cost already in the tariff or the wholesale price."),
     ("counterfactual_exceeds_supply",
      "The comparison site without the investment needs more than its grid supply can deliver in "
      "some hours: it could not run as modelled, so the NPV, IRR and payback compare against an "
@@ -123,6 +131,18 @@ def _counterfactual_summary(block: Any) -> str | None:
     reasons = block.get("reasons") or []
     state = "not established: " + ", ".join(reasons) if reasons else "established"
     return (f"{block.get('basis')}; {block.get('n_lines')} lines from {sources}; {state}")
+
+
+def _avoided_co2_total(block: Any) -> Any:
+    """The counterfactual's avoided CO2 cost over the horizon (undiscounted);
+    "none" without a CO2 price; None (`not_established`) when not established."""
+    if not isinstance(block, dict) or not block.get("present"):
+        return "none"
+    v = block.get("avoided_co2_cost")
+    if v is None:
+        return "none" if not any(str(f).startswith("co2_price_period")
+                                 for f in block.get("flags") or []) else None
+    return round(float(sum(v)), 2)
 
 
 def _currency_year(payload: dict) -> Any:
@@ -154,6 +174,8 @@ def build_workbook(report: InvestmentCaseReport, *, project: str | None = None) 
         ["WACC vs discount rate consistent", report.gates.wacc_vs_discount_rate_consistent],
         ["Value-flow conservation", report.gates.conservation_ok],
         ["Counterfactual", _counterfactual_summary(project_payload.get("counterfactual"))],
+        # Of which avoided CO2 cost (H2e): the horizon's sum, undiscounted; lenders ask.
+        ["Of which avoided CO2 cost", _avoided_co2_total(project_payload.get("counterfactual"))],
         # The price basis (GS Q6): a currency year not stated says so, never a guess.
         ["Price basis", project_payload.get("price_basis")],
         ["Currency year", _currency_year(project_payload)],

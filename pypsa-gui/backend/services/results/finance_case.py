@@ -87,8 +87,21 @@ What it builds:
   flagged `counterfactual_keeps_contract:<id>`). Contracts on the owner's
   assets are absent. An owner conversion Link beside a non-electric site
   load (the owner's heat pump) → `counterfactual_not_established:
-  owner_conversion_load`. `counterfactual_hash` = sha256[:16] of the tariff,
-  the served load, the connection and the commodity.
+  owner_conversion_load` — unless every such load has a
+  `CommercialConfig.reference_purchases` entry (H2e): the counterfactual then
+  buys it, `counterfactual:purchase:<load>` = −Σ w·L/lhv × price per kg
+  (base-year money, stream `fuel`), flagged `counterfactual_buys:<loads>`. A
+  `CommercialConfig.co2_price` (REAL prices by year; each period takes the
+  last listed year at or before it, `co2_price_period:<period>:<listed
+  year>:<price>`; a period before the first listed year is refused
+  `co2_price_year_uncovered:<year>`) adds `co2:purchase:<load>` = −kg ×
+  co2_t_per_kg × price, and with a `grid_t_per_mwh` a `co2:grid_import` line
+  on BOTH sides (the actual import and the served load × intensity × price),
+  so only the difference counts. CO2 lines escalate at the case's inflation
+  in a nominal case and not at all in a real one; their cost is avoided cash
+  (`source_id` `co2_avoided_cash:*`; the report's `avoided_co2_cost`).
+  `counterfactual_hash` = sha256[:16] of the tariff, the served load, the
+  connection and the commodity, and the purchases and CO2 price when set.
 * **The first-order bill effect of degradation (C5)** — per owner generator
   with a degradation entry: S = (counterfactual − actual) items billed per
   kWh on the import volume (energy, levies, certificates — by volume basis,
@@ -897,9 +910,37 @@ def _excess_above(served: np.ndarray, capacity: np.ndarray) -> np.ndarray:
     return np.where(excess > _EPS_MW, excess, 0.0)
 
 
+def _co2_for(co2, year: int) -> tuple[float, int]:
+    """(price, the listed year it comes from) for a period starting in
+    `year`: the last listed year at or before it. A period before the first
+    listed year is refused, never extrapolated backwards (H2e)."""
+    listed = sorted(int(y) for y in co2.eur_per_t_by_year)
+    at = [y for y in listed if y <= year]
+    if not at:
+        raise FinanceRefused(f"co2_price_year_uncovered:{year}",
+                             f"the CO2 price starts in {listed[0]}; the case has a period "
+                             f"from {year}")
+    return float(co2.eur_per_t_by_year[at[-1]]), at[-1]
+
+
+def _co2_line(key: str, amount: float, co2, fin, k: str, source: str, source_id: str
+              ) -> TemplateLine:
+    """A CO2 cost line (H2e): REAL prices in the CO2 price's money year, so a
+    nominal case escalates them at its inflation and a real case keeps them
+    (the contract-indexation path carries the rate; no escalation class is
+    the CO2 price's own). Without an inflation a nominal case cannot convert
+    them: the line is not established."""
+    real = getattr(fin, "price_basis", "nominal") == "real"
+    rate = 0.0 if real else getattr(fin, "inflation", None)
+    return TemplateLine(key=key, stream="other", amount=None if rate is None else amount,
+                        esc_class=CONTRACT_CLASS, indexation=rate, source=source,
+                        source_id=source_id, period=k, money_year=int(co2.money_year))
+
+
 def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, dict[str, _Acc]],
                     templates_actual: dict[str, list[TemplateLine]], owned, contracts,
-                    lost_load, base_year: int, flags: list[str]
+                    lost_load, base_year: int, flags: list[str], *, fin=None,
+                    period_years: dict[str, int] | None = None
                     ) -> tuple[dict[str, list[TemplateLine]], dict[str, float | None], str]:
     """Per period the counterfactual lines and S (avoided import value:
     counterfactual − actual per-kWh import items + commodity), for C5; and the
@@ -931,12 +972,29 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
     if draw_unknown:
         blockers.append("counterfactual_not_established:conversion_load_unknown")
     electric = _lp._electric_bus_test(n, parsed)
-    if owner_conv and any(str(n.loads.at[ld, "bus"]) in sides.site
-                          and not electric(str(n.loads.at[ld, "bus"])) for ld in n.loads.index):
-        # The owner's heat pump (say) serves a non-electric load: the site
-        # without it has no stated source for that load.
-        blockers.append("counterfactual_not_established:owner_conversion_load")
-        flags.append("counterfactual_owner_conversion_links:" + ",".join(owner_conv))
+    non_electric = [str(ld) for ld in n.loads.index if str(n.loads.at[ld, "bus"]) in sides.site
+                    and not electric(str(n.loads.at[ld, "bus"]))]
+    purchases = {r.load: r for r in getattr(parsed, "reference_purchases", None) or []}
+    bought: list[str] = []
+    if owner_conv and non_electric:
+        missing = [ld for ld in non_electric if ld not in purchases]
+        if missing:
+            # The owner's heat pump (say) serves a non-electric load: the site
+            # without it has no stated source for that load.
+            blockers.append("counterfactual_not_established:owner_conversion_load")
+            flags.append("counterfactual_owner_conversion_links:" + ",".join(owner_conv))
+            if purchases:
+                flags.append("counterfactual_reference_purchase_missing:" + ",".join(missing))
+        else:
+            # H2e: the site without the investment buys each such load's
+            # energy at its stated reference price (grey H2, say).
+            bought = non_electric
+            flags.append("counterfactual_buys:" + ",".join(bought))
+    unused = sorted(set(purchases) - set(bought))
+    if unused:
+        flags.append("counterfactual_reference_purchase_unused:" + ",".join(unused))
+    co2 = getattr(parsed, "co2_price", None)
+    grid_co2 = co2 is not None and co2.grid_t_per_mwh is not None
     flags += blockers
 
     # The site without the owner's assets imports at most what its connection
@@ -1003,6 +1061,35 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
                 amount=-voll * shed_k, esc_class="opex",
                 source="counterfactual", source_id="shed_at_voll", period=k,
                 money_year=base_year))
+        # H2e: the reference purchases and the CO2 price. The purchase is in
+        # base-year money like the tariff; the CO2 lines are real prices
+        # (`_co2_line`). The CO2 cost is avoided cash the site would otherwise
+        # pay; its keys start `co2:` so the report shows it apart.
+        price_k = listed_k = None
+        if co2 is not None and (bought or grid_co2):
+            year_k = (period_years or {}).get(k, base_year)
+            price_k, listed_k = _co2_for(co2, year_k)
+            flags.append(f"co2_price_period:{k}:{listed_k}:{_num(price_k)}")
+        for ld in bought:
+            r = purchases[ld]
+            load_mw = _series(n, "loads_t", "p_set", ld, n.loads.at[ld, "p_set"])
+            kg = float((w_all[m] * load_mw[m]).sum()) * 1000.0 / r.lhv_kwh_per_kg
+            lines.append(TemplateLine(
+                key=f"counterfactual:purchase:{ld}", stream="fuel", amount=-kg * r.price_eur_per_kg,
+                esc_class="fuel", source="counterfactual", source_id=f"purchase:{ld}", period=k,
+                money_year=base_year))
+            if price_k is not None:
+                lines.append(_co2_line(f"co2:purchase:{ld}", -kg * r.co2_t_per_kg * price_k,
+                                       co2, fin, k, "counterfactual", f"co2_avoided_cash:{ld}"))
+        if grid_co2 and price_k is not None:
+            # Both sides, so only the difference counts (gatekeeper Q2).
+            t_mwh = co2.grid_t_per_mwh * price_k
+            act = float((w_all[m] * imp_actual[m]).sum()) * t_mwh
+            cf = float((w_all[m] * served[m]).sum()) * t_mwh
+            templates_actual[k].append(_co2_line("co2:grid_import", -act, co2, fin, k, "co2",
+                                                 "grid_import"))
+            lines.append(_co2_line("co2:grid_import", -cf, co2, fin, k, "counterfactual",
+                                   "co2_avoided_cash:grid_import"))
         # bill
         cf_import_bill: float | None = 0.0
         act_import_bill: float | None = 0.0
@@ -1102,6 +1189,11 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
         **({"shed": {"voll": voll, "excess": hashlib.sha256(
             np.ascontiguousarray(np.round(excess, 9)).tobytes()).hexdigest()}}
            if shed_priced else {}),
+        # H2e: present only when set, so earlier hashes hold.
+        **({"purchases": {ld: purchases[ld].model_dump(mode="json") for ld in bought}}
+           if bought else {}),
+        **({"co2": co2.model_dump(mode="json")} if co2 is not None and (bought or grid_co2)
+           else {}),
         "commodity": {"supply": supply, "why": why,
                       "mc": None if mc is None else hashlib.sha256(
                           np.ascontiguousarray(np.round(mc, 9)).tobytes()).hexdigest(),
@@ -1782,9 +1874,9 @@ def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
     cf_hash = None
     if same_party(owner, inputs.site_party):
         sides = P.classify_buses(n, parsed)
-        cf_lines, avoided, cf_hash = _counterfactual(n, cfg, parsed, sides, inputs, vf, accs,
-                                                     actual, owned, contracts, lost_load,
-                                                     base_year, flags)
+        cf_lines, avoided, cf_hash = _counterfactual(
+            n, cfg, parsed, sides, inputs, vf, accs, actual, owned, contracts, lost_load,
+            base_year, flags, fin=fin, period_years={k: v[0] for k, v in info.items()})
 
     # The storage LCOS's throughput and charging cost (owner decision 6).
     storage_years = _storage_years(n, parsed, P.classify_buses(n, parsed), owned_list,

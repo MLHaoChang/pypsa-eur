@@ -324,6 +324,15 @@ const BASELINE_CAVEATS: [string, string][] = [
    'The comparison site without the investment cannot import all of its load: the load above '
    + 'its connection is shed and valued at the value of lost load, so the NPV, IRR and payback '
    + 'count that shed as a cost the investment avoids.'],
+  // H2e: the comparison buys a non-electric load, and a CO2 price applies.
+  ['counterfactual_buys',
+   'The comparison site without the investment buys the energy of its non-electric load (grey '
+   + 'hydrogen, say) at the stated reference price: the NPV, IRR and payback count that purchase '
+   + 'as a cost the investment avoids.'],
+  ['co2_price_period',
+   'A CO2 price is applied: the comparison counts the certificate cost of what it buys (and of '
+   + 'grid imports, on both sides, when a grid intensity is set) as cash the site would otherwise '
+   + 'pay. It is additional to any carbon cost already in the tariff or the wholesale price.'],
   ['counterfactual_exceeds_supply',
    'The comparison site without the investment needs more than its grid supply can deliver in '
    + 'some hours: it could not run as modelled, so the NPV, IRR and payback compare against an '

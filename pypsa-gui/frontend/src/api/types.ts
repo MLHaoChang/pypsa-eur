@@ -577,6 +577,28 @@ export interface CommercialConfig {
    * longer validates makes the ledger answer `value_flows_invalid`.
    */
   value_flows?: ValueFlowConfig | null
+  /** What the site buys without the investment for a non-electric load (H2e: grey H2). */
+  reference_purchases?: ReferencePurchase[]
+  /** A CO2 price by year on that purchase and, opt-in, on grid imports (H2e). */
+  co2_price?: Co2Price | null
+}
+
+/** models/commercial.py::ReferencePurchase (H2e). */
+export interface ReferencePurchase {
+  load: string
+  price_eur_per_kg: number
+  lhv_kwh_per_kg?: number
+  co2_t_per_kg: number
+  source: string
+}
+
+/** models/commercial.py::Co2Price (H2e): real prices in money_year money. */
+export interface Co2Price {
+  eur_per_t_by_year: Record<string, number>
+  money_year: number
+  source: string
+  grid_t_per_mwh?: number | null
+  grid_source?: string | null
 }
 /**
  * Actionable failure card for a finished solve. Produced by the backend's

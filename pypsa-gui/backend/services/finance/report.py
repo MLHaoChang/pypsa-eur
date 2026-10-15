@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
 from models.finance import InvestmentCaseReport, export_investment_case
 from services.finance.debt import CFADS_DEFINITION
 
@@ -484,7 +486,29 @@ def _counterfactual_block(result, case) -> dict[str, Any]:
         # What it was built from — tariff, served load, connection, commodity
         # (plan C13; WP4.6a review B9). None for a hand-built case.
         "hash": getattr(case, "counterfactual_hash", None),
+        # Of which avoided CO2 cost (H2e): the `co2:*` lines, actual minus
+        # counterfactual per year — cash the site would otherwise pay at the
+        # stated CO2 price. None when there is none or one is not established.
+        "avoided_co2_cost": _avoided_co2(result),
     }
+
+
+def _avoided_co2(result) -> list[float] | None:
+    act = getattr(getattr(result, "op", None), "lines", None) or {}
+    cf_op = getattr(result, "op_counterfactual", None)
+    cf = getattr(cf_op, "lines", None) or {}
+    keys = sorted(k for k in set(act) | set(cf) if k.startswith("co2:"))
+    if not keys:
+        return None
+    total = None
+    for key in keys:
+        a, c = act.get(key, 0.0), cf.get(key, 0.0)
+        if (key in act and a is None) or (key in cf and c is None):
+            return None
+        a = np.zeros_like(c) if key not in act else np.asarray(a, dtype=float)
+        c = np.zeros_like(a) if key not in cf else np.asarray(c, dtype=float)
+        total = (a - c) if total is None else total + (a - c)
+    return [float(x) for x in total]
 
 
 def _project_reasons(result) -> list[str]:

@@ -266,3 +266,16 @@ describe('baselineCaveats: the shed priced at VoLL (owner decision 2026-10-15)',
     expect(baselineCaveats(rep(['counterfactual_shed_at_voll_extra']))).toEqual([])
   })
 })
+
+describe('baselineCaveats: a bought load and a CO2 price (H2e)', () => {
+  const rep = (projectFlags: string[], cfFlags: string[]) => ({ sections: { project: {
+    status: 'ok', payload: { flags: projectFlags, counterfactual: { present: true, flags: cfFlags } },
+  } } }) as never
+  it('says the comparison buys the load, and that the CO2 cost is cash it would pay', () => {
+    const out = baselineCaveats(rep(['co2_price_period:2030:2030:80'],
+                                    ['counterfactual_buys:h2_offtake']))
+    expect(out).toHaveLength(2)
+    expect(out[0]).toMatch(/reference price/)
+    expect(out[1]).toMatch(/additional to any carbon cost already in the tariff/)
+  })
+})
