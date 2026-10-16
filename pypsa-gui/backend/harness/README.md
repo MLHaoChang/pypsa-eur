@@ -33,6 +33,7 @@ harness/
   solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call
   job_adapters.py foreground (fg:…) and later domain job handles for wait_for_job without holding the turn
   activity_history.py bounded owned job-origin/status observations across worker loss; no execution, numerical or approval authority
+  completion_observer.py bounded weak native-worker status observation while Activity is closed; no advancement or retry
   attention.py    bounded owned question/confirmation observations and versioned read-only inspection; no restored approval or answer authority
   owned_snapshots.py private atomic bounded snapshot storage shared by job and decision observations; schemas remain separate
   compose.py      the system prompt for a turn, the live network line, and the per-turn ui-context / Guided / workflow-step blocks
@@ -90,6 +91,17 @@ turn, not current evidence or resolution; the gap remains historical Needs
 review. Preparation never queues a send, alters the ordinary draft, restores an
 old session or changes global opt-in. See the CP-04e contract in
 `.scratch/chat-companion/issues/04e-explicit-gap-followups.md`.
+
+Registered jobs with an established native Thread can also be observed while
+Activity and native waits are closed. `completion_observer.py` uses one daemon,
+at most 512 weak context bindings and a 24-hour watch limit. It reads only exact
+native status without waiting for lifecycle locks, then journals outside those
+locks to the registration's owned destination. Missing/replaced/rebound sources,
+exited workers without terminal status and missed capture remain unknown/Needs
+review; a completion observation is not engineering evidence or quiescence.
+This best-effort observer cannot recover a terminal slot already replaced or a
+process that died before persistence. It never advances or retries work. See
+`.scratch/chat-companion/issues/04f-native-completion-observation.md`.
 
 ## The contract
 

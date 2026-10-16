@@ -1,8 +1,8 @@
 """Bounded durable *observations*, never job/result/approval authority.
 
-Registration records an owned origin even with no Activity observer. Only an
-identity-bound read can retain a later terminal observation. No background
-runner, numerical values, worker objects, arguments or approval tokens live here.
+Registration records an owned origin even with no Activity panel. Identity-bound
+reads, including the bounded completion observer, retain terminal observations.
+No execution runner, numerical values, worker objects or approvals live here.
 """
 from __future__ import annotations
 
@@ -69,8 +69,8 @@ def _write(directory, owner, project, records, truncated):
     return owned_snapshots.write(directory, owner, project, records, truncated)
 
 
-def _update(owner, project, live):
-    directory = _directory(owner, project)
+def _update(owner, project, live, *, directory=None):
+    directory = directory if directory is not None else _directory(owner, project)
     # An empty Activity read must not create an owner store.
     if not live and not directory.exists() and not directory.is_symlink():
         return [], []
@@ -105,13 +105,14 @@ def _update(owner, project, live):
         return retained, warnings
 
 
-def remember(owner, project, row):
-    """Best-effort origin recording must not alter native work admission."""
+def remember(owner, project, row, *, directory=None):
+    """Best effort; a native observer may freeze the owned destination at admission."""
     try:
-        _update(owner, project, [row])
+        _update(owner, project, [row], directory=directory)
+        return True
     except (OSError, ValueError, TypeError, KeyError, TimeoutError):
         # The subsequent read exposes store failure; never store exception bytes.
-        pass
+        return False
 
 
 def project_rows(owner, project, live):
