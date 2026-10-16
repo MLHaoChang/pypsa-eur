@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): An investment case refused because the campus assets are priced in another money year now names both years (the campus asset library's `price_year` and the finance inputs' `currency_year`) and says what to change. The refusal itself stays: no price index converts between them.

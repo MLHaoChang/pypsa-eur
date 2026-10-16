@@ -410,6 +410,26 @@ def test_a_money_year_problem_is_refused(assets, fin_over, client, install_netwo
     assert body["error_code"] == "campus_assets_money_year_mismatch" and calls == []
 
 
+def test_a_money_year_refusal_names_both_years_and_what_to_change(
+        client, install_network, session_ctx, _auth_db, monkeypatch):
+    """Guided smoke 2026-10-16, issue 03 (owner: keep the refusal, say what to do):
+    the library's 2026 money against the case's 2020 money, both named, and the way out."""
+    from services import campus_electrical_service as ce
+
+    calls = _fake_adapter(monkeypatch)
+    _save(client, install_network, "campus_ic_money_text")
+    with _row(_auth_db, session_ctx, client) as (_db, row):
+        fake_investment(row, _purchase())
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p: _response([_asset(price_year=2026)]))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2020))
+    body = _run(client)
+    assert body["error_code"] == "campus_assets_money_year_mismatch" and calls == []
+    text = body["error"]
+    assert "2026 money (the campus asset library's price_year)" in text
+    assert "the case in 2020 money (the finance inputs' currency_year)" in text
+    assert "no price index converts" in text and "reprice the campus asset library in 2020" in text
+
+
 def test_an_unstated_currency_year_takes_any_agreeing_price_year(
         client, install_network, session_ctx, _auth_db, monkeypatch):
     from services import campus_electrical_service as ce

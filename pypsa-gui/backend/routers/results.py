@@ -1630,12 +1630,26 @@ def _ic_money_year_problem(assets: list, fin) -> str | None:
     if currency != fin.currency.upper():
         logger.warning("investment_case: campus assets priced in %r, the case in %s",
                        currency, fin.currency)
-        return f"the campus assets are not priced in the case currency {fin.currency}"
+        return (f"the campus assets are not priced in the case currency {fin.currency}; "
+                + _IC_ONE_MONEY.format(what="currency", case=fin.currency))
     if fin.currency_year is not None and year != fin.currency_year:
         logger.warning("investment_case: campus assets priced in %r money, the case in %s",
                        year, fin.currency_year)
-        return f"the campus assets are not priced in the case's {fin.currency_year} money"
+        # the library's year is named only when it is a plain year (a detail
+        # carries no free-form asset value)
+        theirs = (f"{year} money (the campus asset library's price_year)"
+                  if isinstance(year, int) and not isinstance(year, bool) else "another money year")
+        return (f"the campus assets are priced in {theirs}, the case in {fin.currency_year} money "
+                "(the finance inputs' currency_year); "
+                + _IC_ONE_MONEY.format(what="money year", case=fin.currency_year))
     return None
+
+
+#: What a money-year refusal asks for (owner, 2026-10-16: keep the refusal, say
+#: what to change). Nothing converts one money into the other.
+_IC_ONE_MONEY = ("no price index converts between them, so a case with the campus assets needs the "
+                 "asset library and the finance inputs in one {what}: reprice the campus asset library "
+                 "in {case}, or state the finance inputs in the library's {what}")
 
 
 def _ic_campus_from_response(resp: dict, fin, *, unsaved: bool) -> CampusSource:
