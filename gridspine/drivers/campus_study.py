@@ -603,16 +603,26 @@ def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 4
            "bounds": dataclasses.asdict(rec.bounds), "allow_i_max": allow_i_max, "notes": rec.notes,
            "excluded": ["E4 (no grid-forming converter in a UPS-bridged genset start)",
                         "E6 (planned islanding is not rebuilt)", "the every-hour E1 sweep (see the cuts)"]}
-    _write_text_atomic(run_dir / GFM_SETTINGS_JSON, json.dumps(out, indent=2, default=_json_default))
+    out = _json_ready(out)
+    _write_text_atomic(run_dir / GFM_SETTINGS_JSON, json.dumps(out, indent=2, allow_nan=False))
     return out
 
 
-def _json_default(x):
+def _json_ready(x):
+    """``x`` with each non-finite float as None and each numpy scalar as its
+    Python value: strict JSON (a collapse's ``inf`` RoCoF, nadir or capacity
+    delta would otherwise be written as ``Infinity``, which a JSON response
+    refuses). ``json.dumps``' ``default`` never sees a float, so this walks
+    the value first."""
+    if isinstance(x, dict):
+        return {k: _json_ready(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_json_ready(v) for v in x]
+    if hasattr(x, "item") and not isinstance(x, (bool, int, float, str)):
+        x = x.item()
     if isinstance(x, float) and not math.isfinite(x):
         return None
-    if hasattr(x, "item"):
-        return x.item()
-    raise TypeError(f"not JSON serialisable: {type(x).__name__}")
+    return x
 
 
 def psse_campus(run_dir, hours=None) -> list:

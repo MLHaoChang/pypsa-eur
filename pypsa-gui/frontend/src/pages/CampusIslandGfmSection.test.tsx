@@ -15,6 +15,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { GfmRecommendation, GfmSettingsState } from '../api/campusElectrical'
 import { useUIStore } from '../store/uiStore'
 import CampusIslandGfmSection from './CampusIslandGfmSection'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const api = vi.hoisted(() => ({
   gfmSettings: vi.fn(), recommendGfmSettings: vi.fn(), applyGfmSettings: vi.fn(), state: vi.fn(),
@@ -79,6 +81,40 @@ describe('CampusIslandGfmSection', () => {
     expect((await screen.findByTestId('gfm-status')).textContent).toMatch(/capacity is needed/)
     expect(screen.getByTestId('gfm-capacity').textContent).toMatch(/inertia \+40 MW·s/)
     expect(screen.queryByRole('button', { name: /Apply/ })).toBeNull()
+  })
+
+  it('a collapse case names the collapse without a number', async () => {
+    api.gfmSettings.mockResolvedValue(ready(rec({
+      status: 'not_achievable', achievable: false,
+      capacity: [{ case: '2027 h0 seamless E2', kind: 'inertia', delta: null, unit: 'MW·s',
+                   binding: 'frequency collapse: no grid-forming headroom', derivation: 'collapse', feasible: false,
+                   note: 'no machine joined and every GFM at a limit: the island needs a former, not a cut' }] })))
+    renderSection()
+    const text = (await screen.findByTestId('gfm-capacity')).textContent
+    expect(text).toMatch(/2027 h0 seamless E2: frequency collapse: no grid-forming headroom/)
+    expect(text).toMatch(/needs a former/)
+    expect(text).not.toMatch(/\+/)
+  })
+
+  it('the live H2 hub collapse renders, as the backend serves it (Infinity read as null)', async () => {
+    // The backend's own fixture: the run's file as gridspine wrote it before the fix.
+    const text = readFileSync(resolve(__dirname, '../../../backend/tests/fixtures/gfm_settings_h2_collapse_pre_fix.json'), 'utf8')
+    const live = JSON.parse(text.replace(/-?Infinity/g, 'null')) as GfmRecommendation
+    api.gfmSettings.mockResolvedValue(ready(live))
+    renderSection()
+    expect((await screen.findByTestId('gfm-status')).textContent).toMatch(/not achievable.*capacity is needed/)
+    const cap = screen.getByTestId('gfm-capacity').textContent ?? ''
+    expect(cap).toMatch(/frequency collapse: no grid-forming headroom: no machine joined/)
+    expect(cap).not.toMatch(/\+|NaN|undefined|null/)
+    expect(screen.getByTestId('gfm-settings').textContent).toMatch(/SITE_BATTERY/)
+    expect(screen.queryByRole('button', { name: /Apply/ })).toBeNull()
+  })
+
+  it('a null setting reads "not stated"', async () => {
+    api.gfmSettings.mockResolvedValue(ready(rec({ settings: { BESS1: { model: 'gfm_droop',
+      current: { droop_pct: 4, tau_f_s: 0.1, i_max_pu: null, H_equivalent_s: 0.4 } } } })))
+    renderSection()
+    expect((await screen.findByTestId('gfm-settings')).textContent).toMatch(/not stated/)
   })
 
   it('stale says so and offers Recommend again, never Apply', async () => {

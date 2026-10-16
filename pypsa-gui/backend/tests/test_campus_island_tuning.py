@@ -11,6 +11,7 @@ import json
 import os
 import time
 import uuid
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -122,6 +123,58 @@ def test_an_unreadable_recommendation_is_stale_not_a_500(hub):  # noqa: F811
     out = cit.get_settings(project)
     assert out["state"] == "stale" and out["recommendation"] is None
     assert "could not be read" in out["reason"]
+
+
+def test_a_collapse_on_disk_reads_back_as_null_not_a_500(hub):  # noqa: F811
+    """Guided smoke 2026-10-16 (H2 hub): a recommendation written before
+    gridspine wrote strict JSON holds ``Infinity`` (a collapse); it reads back
+    with null there, so the route can answer it."""
+    _db, _user, project = hub
+    _frequency_checked(project)
+    rec = {**REC, "capacity": [{**REC["capacity"][0], "delta": float("inf"), "feasible": False}],
+           "comparison": [{"unit": "bess_new_2030", "model": "gfm_droop", "worst_rocof_hz_per_s": float("inf"),
+                           "worst_nadir_hz": float("-inf"), "worst_rocof0_hz_per_s": 0.4, "ok": False,
+                           "note": None}]}
+    text = json.dumps(rec)
+    assert "Infinity" in text
+    (_run_dir(project) / ce.cs.GFM_SETTINGS_JSON).write_text(text)
+    got = cit.get_settings(project)["recommendation"]
+    json.dumps(got, allow_nan=False)
+    assert got["capacity"][0]["delta"] is None
+    assert got["comparison"][0]["worst_rocof_hz_per_s"] is None and got["comparison"][0]["worst_nadir_hz"] is None
+
+
+#: The live H2 hub run's recommendation as gridspine wrote it before the fix
+#: (Guided smoke 2026-10-16; master 622149df, k=3), trimmed to three
+#: collapsing cases, two passing ones and their capacity rows: ``Infinity``
+#: in capacity[].delta and comparison[].worst_rocof_hz_per_s / worst_nadir_hz.
+H2_PRE_FIX = Path(__file__).parent / "fixtures" / "gfm_settings_h2_collapse_pre_fix.json"
+
+
+def test_the_live_h2_collapse_reads_back_renders_and_answers_200(hub):  # noqa: F811
+    from starlette.responses import JSONResponse
+
+    from services.reports import chapters
+
+    _db, _user, project = hub
+    _frequency_checked(project)
+    text = H2_PRE_FIX.read_text()
+    assert "Infinity" in text
+    (_run_dir(project) / ce.cs.GFM_SETTINGS_JSON).write_text(text)
+    later = time.time() + 5
+    os.utime(_run_dir(project) / ce.cs.GFM_SETTINGS_JSON, (later, later))
+    got = cit.get_settings(project)
+    rec = got["recommendation"]
+    assert rec["status"] == "not_achievable"
+    # what routers/campus_electrical.get_gfm_settings answers: it rendered a 500 before
+    body = json.loads(JSONResponse(content=got).body, parse_constant=lambda c: pytest.fail(c))
+    assert body["recommendation"]["capacity"][0]["delta"] is None
+    assert {c["worst_nadir_hz"] for c in body["recommendation"]["comparison"]} == {None}
+    # the report reads the same get_settings (routers/reports.py) and names the collapse
+    tables = chapters.island_tables(chapters.island_payload({"gfm": got}), "island")
+    rows = tables["island_gfm_capacity"].rows
+    assert rows and all("needs a former" in r[2] and "+" not in r[2] for r in rows)
+    assert all("frequency collapse" in r[3] for r in rows)
 
 
 def test_no_job_while_the_cuts_are_being_applied(hub, monkeypatch):  # noqa: F811

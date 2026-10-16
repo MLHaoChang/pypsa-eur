@@ -130,6 +130,19 @@ def test_the_island_chapter_shows_the_checks_and_the_gfm_settings():
     assert "screening, not a dynamic study" in disc
 
 
+def test_a_collapse_row_names_what_it_needs_without_a_number():
+    """Guided smoke 2026-10-16 (H2 hub): a collapse has no finite delta (null
+    in the file); the row says what the island needs instead of a number."""
+    gfm = _gfm()
+    gfm["recommendation"]["capacity"] = [{
+        "case": "2027 h0 seamless E2", "kind": "inertia", "delta": None, "unit": "MW·s",
+        "binding": "frequency collapse: no grid-forming headroom", "derivation": "collapse", "feasible": False,
+        "note": "no machine joined and every GFM at a limit: the island needs a former, not a cut"}]
+    ev = _collect(island={"report": _island_report(), "gfm": gfm})
+    (row,) = ev.tables["island_gfm_capacity"].rows
+    assert "needs a former" in row[2] and "+" not in row[2]
+
+
 def test_an_applied_recommendation_asks_for_the_re_solve():
     gfm = _gfm(status="recommended", state="stale")
     gfm["applied"] = {"at": 1, "changes": [{"unit": "BESS1"}], "hub_resolve_needed": True}

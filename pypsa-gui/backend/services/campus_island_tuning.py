@@ -33,6 +33,7 @@ The result is heuristic screening, labelled so.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import logging
@@ -88,7 +89,7 @@ def _state(project) -> dict:
                   "Run the campus study with island requirements first, then Recommend GFM settings")
         return {"state": "not_run", "reason": reason, "recommendation": None}
     try:
-        rec = json.loads(path.read_text())
+        rec = _finite(json.loads(path.read_text()))
     except (OSError, ValueError):
         return {"state": "stale", "recommendation": None,
                 "reason": "The last recommendation could not be read; recommend GFM settings again"}
@@ -103,6 +104,19 @@ def _state(project) -> dict:
                 "reason": "The campus file, the network or the library changed since the campus run "
                           f"these settings come from; run the campus study, then {again}"}
     return {"state": "ready", "reason": "", "recommendation": rec}
+
+
+def _finite(value):
+    """``value`` with each non-finite float as None: a recommendation written
+    before gridspine wrote strict JSON can hold ``Infinity`` (a collapse),
+    which the route's JSON response refuses."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {k: _finite(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_finite(v) for v in value]
+    return value
 
 
 _LIMIT_WORDS = {"rocof_hz_per_s": ("RoCoF", "Hz/s"), "f_min_hz": ("f min", "Hz"),
@@ -273,7 +287,7 @@ def applied_record(project) -> dict | None:
     if not path.is_file():
         return None
     try:
-        rec = json.loads(path.read_text())
+        rec = _finite(json.loads(path.read_text()))
     except (OSError, ValueError):
         return None
     if _hub_solved_since(project, float(rec.get("at") or 0.0)):
