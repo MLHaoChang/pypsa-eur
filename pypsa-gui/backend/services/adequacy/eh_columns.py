@@ -16,15 +16,22 @@ import math
 import numpy as np
 import pandas as pd
 
-from models.energy_hub import CRITICALITY_TIERS, EH_CUSTOM_COLUMNS, EH_INTERNAL_ROLES, EH_LINK_ROLES
+from models.energy_hub import EH_CUSTOM_COLUMNS, EH_INTERNAL_ROLES, EH_LINK_ROLES
+from models.process_unit import CRITICALITY_TIERS, PROCESS_CUSTOM_COLUMNS
 
 _ATTR_OF = {"Bus": "buses", "Link": "links"}
 _TRUE = ("true", "1", "yes", "y", "t")
 _FALSE = ("false", "0", "no", "n", "f", "")
 
 
+def _all_columns() -> dict[str, dict[str, str]]:
+    """The Energy Hub tags and the grid-to-process columns, per class."""
+    return {c: {**EH_CUSTOM_COLUMNS.get(c, {}), **PROCESS_CUSTOM_COLUMNS.get(c, {})}
+            for c in {*EH_CUSTOM_COLUMNS, *PROCESS_CUSTOM_COLUMNS}}
+
+
 def eh_columns_for(component_class: str) -> dict[str, str]:
-    return EH_CUSTOM_COLUMNS.get(component_class, {})
+    return _all_columns().get(component_class, {})
 
 
 def _as_bool(value) -> bool:
@@ -107,7 +114,7 @@ def normalise_eh_columns(n) -> None:
     Idempotent; unparseable cells fall back to the column default rather than
     raising — a save must not fail on a stale value.
     """
-    for component_class, cols in EH_CUSTOM_COLUMNS.items():
+    for component_class, cols in _all_columns().items():
         df = getattr(n, _ATTR_OF[component_class], None)
         if df is None:
             continue
