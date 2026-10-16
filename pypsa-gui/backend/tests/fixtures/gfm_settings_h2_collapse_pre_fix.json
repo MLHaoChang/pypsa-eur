@@ -1,0 +1,158 @@
+{
+  "label": "heuristic screening: one droop and one equivalent inertia for every grid-forming converter, on the single-bus aggregate frequency model; not a converter tuning study",
+  "ledger": [
+    "gfm settings: droop searched over 1\u201310 % on P_n (assumed)",
+    "gfm settings: equivalent inertia H searched over 0.5\u201310 s on S_n (assumed)",
+    "gfm settings: a droop GFM's tau_f held within 0.01\u20131 s (assumed)",
+    "gfm settings: i_max raised to at most 1.5 pu of S_n, only with allow_i_max, never lowered (assumed)",
+    "gfm settings: the margin covers the grid-code limits only (frequency_limits); equipment, UPS and protection limits are used as given (assumed)"
+  ],
+  "status": "not_achievable",
+  "achievable": false,
+  "changed": true,
+  "settings": {
+    "SITE_BATTERY": {
+      "model": "gfm_droop",
+      "current": {
+        "droop_pct": 4.0,
+        "i_max_pu": 1.2,
+        "tau_f_s": 0.1,
+        "H_equivalent_s": 1.1875
+      },
+      "recommended": {
+        "droop_pct": 1.0,
+        "i_max_pu": 1.2,
+        "tau_f_s": 0.21052631578947373,
+        "H_equivalent_s": 10.0
+      }
+    }
+  },
+  "cases": [
+    {
+      "key": "2027 h0 seamless E2",
+      "ok_before": false,
+      "binding_before": "frequency collapse: no grid-forming headroom",
+      "ok_after": false,
+      "binding_after": "frequency collapse: no grid-forming headroom"
+    },
+    {
+      "key": "2027 h0 seamless E3",
+      "ok_before": false,
+      "binding_before": "frequency collapse: no grid-forming headroom",
+      "ok_after": false,
+      "binding_after": "frequency collapse: no grid-forming headroom"
+    },
+    {
+      "key": "2027 h27 seamless E2",
+      "ok_before": false,
+      "binding_before": "frequency collapse: no grid-forming headroom",
+      "ok_after": false,
+      "binding_after": "frequency collapse: no grid-forming headroom"
+    },
+    {
+      "key": "2027 h0 seamless E1",
+      "ok_before": true,
+      "binding_before": null,
+      "ok_after": true,
+      "binding_after": null
+    },
+    {
+      "key": "2027 h27 seamless E1",
+      "ok_before": true,
+      "binding_before": null,
+      "ok_after": true,
+      "binding_after": null
+    }
+  ],
+  "capacity": [
+    {
+      "case": "2027 h0 seamless E2",
+      "kind": "inertia",
+      "delta": Infinity,
+      "unit": "MW\u00b7s",
+      "binding": "frequency collapse: no grid-forming headroom",
+      "derivation": "collapse",
+      "feasible": false,
+      "note": "no machine joined and every GFM at a limit: the island needs a former, not a cut"
+    },
+    {
+      "case": "2027 h0 seamless E3",
+      "kind": "inertia",
+      "delta": Infinity,
+      "unit": "MW\u00b7s",
+      "binding": "frequency collapse: no grid-forming headroom",
+      "derivation": "collapse",
+      "feasible": false,
+      "note": "no machine joined and every GFM at a limit: the island needs a former, not a cut"
+    },
+    {
+      "case": "2027 h27 seamless E2",
+      "kind": "inertia",
+      "delta": Infinity,
+      "unit": "MW\u00b7s",
+      "binding": "frequency collapse: no grid-forming headroom",
+      "derivation": "collapse",
+      "feasible": false,
+      "note": "no machine joined and every GFM at a limit: the island needs a former, not a cut"
+    }
+  ],
+  "comparison": [
+    {
+      "unit": "SITE_BATTERY",
+      "model": "gfm_droop",
+      "worst_rocof0_hz_per_s": 1.2140948712145843,
+      "worst_rocof_hz_per_s": Infinity,
+      "worst_nadir_hz": Infinity,
+      "ok": false,
+      "note": null
+    },
+    {
+      "unit": "SITE_BATTERY",
+      "model": "gfm_vsm",
+      "worst_rocof0_hz_per_s": 1.2140948712145843,
+      "worst_rocof_hz_per_s": Infinity,
+      "worst_nadir_hz": Infinity,
+      "ok": false,
+      "note": null
+    },
+    {
+      "unit": "SITE_BATTERY",
+      "model": "gfl_fw",
+      "worst_rocof0_hz_per_s": null,
+      "worst_rocof_hz_per_s": null,
+      "worst_nadir_hz": null,
+      "ok": null,
+      "note": "no frequency-watt block for this unit"
+    }
+  ],
+  "simulations": 372,
+  "max_simulations": 1500,
+  "margin": 0.1,
+  "bounds": {
+    "droop_pct": [
+      1.0,
+      10.0
+    ],
+    "h_s": [
+      0.5,
+      10.0
+    ],
+    "tau_f_s": [
+      0.01,
+      1.0
+    ],
+    "i_max_pu_max": 1.5
+  },
+  "allow_i_max": false,
+  "notes": [
+    "the margin covers the grid-code limits only (frequency_limits); equipment, UPS and protection limits are used as given",
+    "the search starts from common settings: every grid-forming converter at one droop and one H, from SITE_BATTERY's current 4 % and 1.1875 s",
+    "no setting within the bounds passes every case: capacity is needed (I7)",
+    "capacity fallback: 50 extra simulations via cuts_for_event (I7's own bounded tries, outside the cap)"
+  ],
+  "excluded": [
+    "E4 (no grid-forming converter in a UPS-bridged genset start)",
+    "E6 (planned islanding is not rebuilt)",
+    "the every-hour E1 sweep (see the cuts)"
+  ]
+}

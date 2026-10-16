@@ -553,12 +553,13 @@ export interface CutTrial {
 }
 
 /** One GFM converter's settings (gridspine `gfm_tuning._settings_of`). */
+/** A null value: the engine's was not finite (an unrated unit's i_max pu, say). */
 export interface GfmUnitSettings {
-  droop_pct: number
-  i_max_pu: number
-  H_equivalent_s: number
-  tau_f_s?: number
-  H_v_s?: number
+  droop_pct: number | null
+  i_max_pu: number | null
+  H_equivalent_s: number | null
+  tau_f_s?: number | null
+  H_v_s?: number | null
 }
 
 export type GfmStatus = 'unchanged' | 'recommended' | 'not_achievable' | 'incomplete'
@@ -575,8 +576,9 @@ export interface GfmRecommendation {
   /** `delta` null: no finite amount helps (a collapse: the island needs a former). */
   capacity: { case: string; kind: string; delta: number | null; unit: string; binding: string; derivation: string;
               feasible: boolean; note: string }[]
+  /** Not rendered. A null worst with `ok` false is a collapse; with `ok` null, the model was skipped (`note`). */
   comparison: { unit: string; model: string; worst_rocof0_hz_per_s: number | null; worst_rocof_hz_per_s: number | null;
-                worst_nadir_hz: number | null; ok: boolean; note: string }[]
+                worst_nadir_hz: number | null; ok: boolean | null; note: string | null }[]
   simulations: number
   max_simulations: number
   margin: number

@@ -142,8 +142,10 @@ function RecommendationView({ rec }: { rec: GfmRecommendation }) {
                 <td className={TD}>{unit}</td><td className={TD}>{s.model}</td>
                 {FIELDS.map(([f, label]) => {
                   const a = s.current[f], b = s.recommended?.[f]
+                  // null: the engine wrote a non-finite value (an unrated unit, say)
+                  const cell = (v: number | null | undefined) => (v === null ? 'not stated' : num(v))
                   return <td key={label} className={TD}>
-                    {a === undefined ? '' : b === undefined || b === a ? num(a) : `${num(a)} → ${num(b)}`}
+                    {a === undefined ? '' : b === undefined || b === a ? cell(a) : `${cell(a)} → ${cell(b)}`}
                   </td>
                 })}
               </tr>

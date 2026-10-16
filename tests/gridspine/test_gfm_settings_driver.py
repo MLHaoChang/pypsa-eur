@@ -115,3 +115,17 @@ def test_a_collapse_is_written_as_strict_json(tmp_path, monkeypatch):
     cmp = out["comparison"][0]
     assert cmp["worst_rocof_hz_per_s"] is None and cmp["worst_nadir_hz"] is None
     assert cmp["worst_rocof0_hz_per_s"] == 0.5 and cmp["ok"] is False and out["simulations"] == 3
+
+
+def test_the_live_h2_collapse_file_is_strict_json_once_ready():
+    """The live H2 hub run's pre-fix file (the GUI tests' fixture): every
+    non-finite value it holds becomes null under the writer's ``_json_ready``."""
+    from pathlib import Path
+
+    path = (Path(__file__).resolve().parents[2] / "pypsa-gui" / "backend" / "tests" / "fixtures"
+            / "gfm_settings_h2_collapse_pre_fix.json")
+    raw = json.loads(path.read_text())
+    text = json.dumps(D._json_ready(raw), allow_nan=False)
+    out = json.loads(text, parse_constant=lambda c: pytest.fail(c))
+    assert [c["delta"] for c in out["capacity"]] == [None] * len(out["capacity"])
+    assert all(c["worst_rocof_hz_per_s"] is None for c in out["comparison"])
