@@ -77,3 +77,12 @@ export function evidenceValue(v: unknown): string {
   if (typeof v === 'string') return v
   return JSON.stringify(v)
 }
+
+/** The cost tile's label. A multi-period study's cost is the discounted total over every investment
+ *  period, not a year's cost (UX review N3, owner decision B): say so, with the plan's years when
+ *  known. The engine reports the basis (`period_basis`); no yearly figure is derived from it. */
+export function costTileLabel(periodBasis: string | null | undefined, periods: number[] | null | undefined): string {
+  if (periodBasis !== 'npv_multi_period') return 'Yearly cost of this design (before any shortfall costs)'
+  const years = periods && periods.length > 1 ? `, ${Math.min(...periods)}–${Math.max(...periods)}` : ''
+  return `Cost over the plan${years} (discounted, before any shortfall costs)`
+}
