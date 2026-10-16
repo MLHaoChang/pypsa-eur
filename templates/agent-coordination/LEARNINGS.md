@@ -80,3 +80,13 @@ retro or an owner decision changes the setup (see "Keeping it current" in
   - Lives in: coordinator "Deciding or asking".
 - **A new project starts from one coordinator session,** which creates the gatekeeper, the dashboard and the routine, then opens sessions from the task list.
   - Lives in: coordinator "Bootstrap" and "Taking on tasks", `BOOTSTRAP.md`.
+
+## 16 Oct 2026: owner decisions (Matt Pocock skills)
+
+- **Skills that fit the workflow were not wired in.** The owner chose five changes:
+  - after the same failure twice, run `diagnosing-bugs`, then send the gatekeeper the diagnosis and both attempts;
+  - a gated bug-fix plan names the failing test, which the session writes first and watches fail (`tdd`);
+  - on gated PRs, run `mp-code-review` against the issue or spec before asking for an OK;
+  - a PreToolUse hook blocks force-push and history rewrites (adapted from upstream `git-guardrails-claude-code`, which blocks every push; ours allows a normal one);
+  - the vendored skills move to upstream commit `49dd158`.
+  - Lives in: steward "Gatekeeper checkpoints", gatekeeper skill, `files/dot-claude/hooks/block-dangerous-git.sh`.

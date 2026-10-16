@@ -28,6 +28,7 @@ The coordinator skill holds the steps, under "Bootstrap" and "Taking on tasks".
 | `.claude/skills/steward/SKILL.md` | How a work session drives its PR to green and reports it |
 | `.claude/skills/gatekeeper/SKILL.md` | Plan checks, repeated-failure help and head-exact reviews |
 | `.claude/settings.json`, `.claude/hooks/session-start.sh` | SessionStart hook skeleton for cloud sessions |
+| `.claude/hooks/block-dangerous-git.sh`, `test-block-dangerous-git.sh` | PreToolUse hook on Bash: allows a normal `git push`, blocks force-push, `reset --hard`, `rebase`, `commit --amend`, `filter-branch`/`filter-repo`, `clean -f`, `branch -D`; with its matcher tests |
 | `docs/agents/roles.md` | The one place for session ids, the dashboard link, the routine id and the template home |
 | `docs/agents/session-brief.md` | The first message the coordinator sends each new session |
 | `docs/agents/issue-tracker.md`, `triage-labels.md`, `domain.md` | Local markdown issues under `.scratch/`, triage roles, glossary layout |
