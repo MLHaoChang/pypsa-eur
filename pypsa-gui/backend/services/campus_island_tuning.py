@@ -109,28 +109,41 @@ _LIMIT_WORDS = {"rocof_hz_per_s": ("RoCoF", "Hz/s"), "f_min_hz": ("f min", "Hz")
                 "f_max_hz": ("f max", "Hz"), "qss_band_hz": ("quasi-steady band", "Hz")}
 
 
+def _number(v):
+    """``v`` when it is a real number (not a bool), else None."""
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
 def _limit_lines(run: Path) -> list[str]:
     """The frequency limits the search judged against, from the run's campus
     file, as ledger lines (a relaxed demo limit is then shown beside the
-    recommendation it allowed); none when the file cannot be read."""
+    recommendation it allowed); none when the file cannot be read, and a
+    field that is not a number is left out (the panel never fails on it)."""
     import yaml
 
     try:
         island = (yaml.safe_load((run / ce.cs.CAMPUS_YAML).read_text()) or {})["campus"]["island"]
-        limits, window = island["frequency_limits"], island.get("rocof_window_ms", {})
+        limits, window = island["frequency_limits"], island.get("rocof_window_ms")
     except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError):
         return []
+    if not isinstance(limits, dict):
+        return []
+    ms = _number(window.get("value")) if isinstance(window, dict) else None
     out = []
-    for name in sorted(limits):
+    for name in sorted(limits, key=str):
+        lim = limits[name]
+        if not isinstance(lim, dict):
+            continue
         parts = []
         for field, (word, unit) in _LIMIT_WORDS.items():
-            v = (limits[name] or {}).get(field)
-            if isinstance(v, dict) and "value" in v:
-                parts.append(f"{word} {v['value']:g} {unit}" + (f" over {window['value']:g} ms" if
-                             field == "rocof_hz_per_s" and isinstance(window, dict) and "value" in window
-                             else "") + f" ({v.get('source', 'assumed')})")
+            v = lim.get(field)
+            x = _number(v.get("value")) if isinstance(v, dict) else None
+            if x is None:
+                continue
+            over = f" over {ms:g} ms" if field == "rocof_hz_per_s" and ms is not None else ""
+            parts.append(f"{word} {x:g} {unit}{over} ({v.get('source', 'assumed')})")
         if parts:
-            out.append(f"judged against the {name.replace('_', ' ')} limits: " + ", ".join(parts))
+            out.append(f"judged against the {str(name).replace('_', ' ')} limits: " + ", ".join(parts))
     return out
 
 

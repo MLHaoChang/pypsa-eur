@@ -138,3 +138,20 @@ def test_the_ledger_line_reads_each_templates_own_limits(tid, transition, tmp_pa
     lines = cit._limit_lines(tmp_path)
     assert lines[0].startswith("judged against the steady island limits: RoCoF 1 Hz/s over 500 ms")
     assert lines[1].startswith(f"judged against the transition limits: RoCoF {transition:g} Hz/s over 500 ms")
+
+
+@pytest.mark.parametrize("limits,window,expected", [
+    ({"t": {"rocof_hz_per_s": {"value": "2"}}}, {"value": 500.0}, []),            # a string value
+    ({"t": {"rocof_hz_per_s": {"value": None}, "f_min_hz": {"value": 47.5}}},       # a null value: the
+     {"value": 500.0}, ["judged against the t limits: f min 47.5 Hz (assumed)"]),   # field is left out
+    (["x"], {"value": 500.0}, []),                                                  # not a mapping
+    ({"t": {"rocof_hz_per_s": {"value": 2.0}}}, {"value": "500"},                  # a bad window: no "over"
+     ["judged against the t limits: RoCoF 2 Hz/s (assumed)"]),
+    ({"t": ["x"], "u": {"rocof_hz_per_s": {"value": True}}}, None, []),            # a bool is not a number
+])
+def test_a_malformed_limit_never_fails_the_panel(limits, window, expected, tmp_path):
+    island = {"frequency_limits": limits}
+    if window is not None:
+        island["rocof_window_ms"] = window
+    (tmp_path / ce.cs.CAMPUS_YAML).write_text(yaml.safe_dump({"campus": {"island": island}}))
+    assert cit._limit_lines(tmp_path) == expected
