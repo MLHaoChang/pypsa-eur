@@ -156,7 +156,7 @@ describe('chapterTiles: the campus run in progress', () => {
   it('running: the stage, the step and the elapsed time', () => {
     const t = grid(job({ started_at: Date.now() / 1000 - 125 }))
     expect(t.state).toBe('running')
-    expect(t.reason).toMatch(/island checks.*frequency sweep.*cuts/)
+    expect(t.reason).toMatch(/island checks.*frequency sweep at the island hours/)
     expect(t.reason).toMatch(/step 3 of 5/)
     expect(t.reason).toMatch(/2:0\d\./)
   })
