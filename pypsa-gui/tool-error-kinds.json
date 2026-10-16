@@ -739,6 +739,22 @@
       "surface": "inline",
       "why": "An external MCP server answered with a JSON-RPC error or a malformed reply. A server-side fault the model can only report; no UI copy would help."
     },
+    "invalid_source_gap_followup": {
+      "surface": "inline",
+      "why": "Source-gap admission refuses a malformed or unchecked follow-up before provider work. It reaches the chat through a REST refusal or terminal error frame, rendered directly with KIND_COPY, never through a tool_error frame."
+    },
+    "source_gap_changed": {
+      "surface": "inline",
+      "why": "The native source-gap admission helper refuses a stale revision or view digest. The turn loop catches this private refusal and emits source_gap_followup_unavailable; this helper kind never reaches tool_error."
+    },
+    "source_gap_followup_unavailable": {
+      "surface": "inline",
+      "why": "The native follow-up stops before provider work when its owned origin or exact scope is unavailable. Its terminal error frame already renders the prepare-again banner through KIND_COPY; no tool completion failed."
+    },
+    "source_gap_unavailable": {
+      "surface": "inline",
+      "why": "The native source-gap admission helper cannot find the owned historical origin. The turn loop normalizes this private refusal to source_gap_followup_unavailable, so it is not a tool_error surface."
+    },
     "activity_project_required": {
       "surface": "inline",
       "why": "The read-only Activity view needs an authorized saved project; its own empty/error state explains the missing scope."
