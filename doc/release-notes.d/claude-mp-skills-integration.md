@@ -1,0 +1,1 @@
+* Chore(agents): Wire Matt Pocock's `diagnosing-bugs`, `tdd` and `mp-code-review` skills into the steward and gatekeeper rules, add a PreToolUse hook that blocks force-push and history rewrites, and refresh the vendored skills to upstream `49dd158`.

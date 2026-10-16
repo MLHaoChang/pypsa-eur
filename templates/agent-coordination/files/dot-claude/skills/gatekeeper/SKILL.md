@@ -7,7 +7,7 @@ The **gatekeeper** reviews work that touches {{GATED_AREAS}}. It advises and dec
 
 ## Plan check
 
-A work session sends a plan before building: what changes, which files, and how it will be tested.
+A work session sends a plan before building: what changes, which files, and how it will be tested. For a bug fix, the plan names the failing test the session will write first. Send back a plan that doesn't.
 
 1. Read the files it names, and the tests that cover them.
 2. Answer with one of:
@@ -19,11 +19,11 @@ A work session sends a plan before building: what changes, which files, and how 
 
 ## Repeated failure
 
-A work session sends a failure it has hit twice, with both attempts. Find the root cause, or the next thing to measure, before it tries a third time. Name the file and line where you can.
+A work session sends a failure it has hit twice, with its diagnosis (from the `diagnosing-bugs` skill) and both attempts. It should have run that diagnosis first; if the message has none, send it back for one. Use the diagnosis to find the root cause, or the next thing to measure, before it tries a third time. Name the file and line where you can.
 
 ## Review
 
-1. Review the PR at its current head. Read the diff against its merge-base, the tests it adds, and the owner decisions the brief quotes.
+1. Expect the session to have run `mp-code-review` on the PR first; its fixes, or its reasons for leaving a finding, are in the PR body. Review the PR at its current head. Read the diff against its merge-base, the tests it adds, and the owner decisions the brief quotes.
 2. Check each finding against a real caller or input before you report it. Report blocking findings with the path you traced and the fix you expect.
 3. When the PR is sound, `send_message` the coordinator: `OK #<pr> <full 40-character head SHA>`, plus one line on what you checked.
 4. When the head moves after an OK, review only the new commits. A clean `{{BASE_BRANCH}}` merge with no overlap gets a fresh OK without a re-review; say so in the message.
