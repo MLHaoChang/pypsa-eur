@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from models.commercial import CommercialConfig
 
@@ -240,6 +240,24 @@ class LinkCreate(BaseModel):
     p_max_pu: Finite = Field(default=1.0, allow_inf_nan=False)
     build_year: int = 0
     lifetime: _NoneToPosInf = Field(default=float("inf"))
+
+    @model_validator(mode="after")
+    def _process_unit_ports_state_their_efficiency(self):
+        """A process unit's extra port needs its efficiency stated (grid-to-process ticket 02).
+
+        `efficiency2..` default to 1.0, so a `bus2` sent alone would silently become a +1.0 OUTPUT, while a
+        process unit's feed is a negative efficiency. On an `eh_process` Link, a set port must therefore carry
+        its efficiency explicitly; the Asset write spreads the full row, so an edit always does.
+        """
+        extra = self.model_extra or {}
+        if extra.get("eh_process") not in (True, "true", "True", 1, "1"):
+            return self
+        for i in (2, 3, 4):
+            if getattr(self, f"bus{i}") and f"efficiency{i}" not in self.model_fields_set:
+                raise ValueError(
+                    f"efficiency{i} is required on a process unit with bus{i} set: give the flow per unit of "
+                    f"bus0 (negative for a feed the unit draws, positive for an output)")
+        return self
 
 
 class GeneratorCreate(BaseModel):

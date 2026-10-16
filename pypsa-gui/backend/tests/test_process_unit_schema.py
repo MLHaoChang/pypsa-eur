@@ -197,3 +197,60 @@ def test_generator_rows_are_unchanged_by_the_shared_helper():
     assert gen["start_up_cost"].help == "Cost of one start-up." and not gen["start_up_cost"].derived
     assert gen["shut_down_cost"].reveal_when == {"committable": True}
     assert "stand_by_cost" not in gen
+
+
+# ── efficiency2 is required on a process unit's set port ─────────────────────
+
+
+def test_a_process_unit_port_must_state_its_efficiency(client, install_network):
+    install_network(_net())
+    body = {k: v for k, v in PROCESS_UNIT.items() if k != "efficiency2"}
+    r = client.post("/api/network/links", json=body)
+    assert r.status_code == 422
+    assert "efficiency2" in r.text
+    # An unset port needs nothing; a zero is a stated value, not a default.
+    ok = {k: v for k, v in body.items() if k != "bus2"}
+    assert client.post("/api/network/links", json=ok).status_code in (200, 201)
+    zero = {**PROCESS_UNIT, "name": "z", "efficiency2": 0.0}
+    assert client.post("/api/network/links", json=zero).status_code in (200, 201)
+
+
+def test_a_non_process_link_still_defaults_its_efficiency(client, install_network):
+    n = _net()
+    install_network(n)
+    body = {"name": "x", "bus0": "hub", "bus1": "nh3", "bus2": "h2"}
+    assert client.post("/api/network/links", json=body).status_code in (200, 201)
+    assert float(n.links.at["x", "efficiency2"]) == 1.0
+
+
+# ── regression: the multi-port call sites other code already assumes ─────────
+
+HEAT_PUMP = {
+    "name": "hp", "bus0": "elec", "bus1": "heat", "bus2": "env", "carrier": "heat-pump-air",
+    "p_nom": 10.0, "efficiency": 3.0, "efficiency2": -2.0, "p_nom_extendable": True,
+    "p_nom_max": 50.0, "overnight_cost": 700000.0, "lifetime": 20.0, "marginal_cost": 0.0,
+}
+
+
+def test_a_heat_pump_with_bus2_round_trips_unchanged(client, install_network):
+    n = pypsa.Network()
+    for b, c in (("elec", "AC"), ("heat", "heat"), ("env", "env")):
+        n.add("Bus", b, carrier=c)
+    install_network(n)
+    assert client.post("/api/network/links", json=HEAT_PUMP).status_code in (200, 201)
+    first = _row(client, "hp")
+    assert client.put("/api/network/links/hp", json=first).status_code == 200
+    second = _row(client, "hp")
+    for k in ("bus2", "efficiency", "efficiency2", "p_nom_extendable", "p_nom_max", "overnight_cost", "lifetime",
+              "committable", "min_up_time", "min_down_time", "carrier"):
+        assert second[k] == first[k], k
+    assert second["efficiency2"] == -2.0 and not second["committable"]
+    for col in ("eh_process", "criticality_tier", "throughput_unit", "specific_energy_kwh_per_t"):
+        assert col not in n.links.columns
+
+
+def test_asset_summary_still_names_bus2():
+    from services.asset_results.compute import Ctx, summary_identity
+    ctx = Ctx(n=None, component_class="Link", name="CHP 1", source="x", sns=None, weights=None, is_multi=False,
+              params={"carrier": "gas", "bus0": "gas", "bus1": "elec", "bus2": "heat"})
+    assert summary_identity(ctx)["bus2"] == "heat"
