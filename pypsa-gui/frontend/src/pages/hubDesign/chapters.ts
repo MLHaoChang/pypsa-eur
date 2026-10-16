@@ -82,10 +82,10 @@ function investment({ study, report }: ChapterInputs['investment']): Omit<Chapte
 
 function gridPlan({ campus, notHub }: ChapterInputs['grid']): Omit<ChapterTile, 'id' | 'group'> {
   const open: ChapterOpen = { panel: 'campusElectrical' }
-  const label = 'Grid checks on the campus'
+  const label = 'Grid checks'
   if (notHub) {
     return { label, value: '', state: 'not_applicable', open,
-      reason: 'This project has no campus electrical study.' }
+      reason: 'This project has no grid-check study.' }
   }
   // A study run in progress, or the last one failed: say the stage, the time and the error.
   const going = runningLine(campus?.run_job)
@@ -95,13 +95,13 @@ function gridPlan({ campus, notHub }: ChapterInputs['grid']): Omit<ChapterTile, 
   const rows = campus?.results?.compliance ?? null
   if (!rows || rows.length === 0) {
     return { label, value: '', state: 'not_run', open,
-      reason: 'The campus grid checks (voltage, loading, reactive power) have not run.' }
+      reason: 'The grid checks (voltage, loading, reactive power) have not run.' }
   }
   const pass = rows.filter(r => r.status_with_measures === 'pass').length
   return {
     label, value: `${pass} of ${rows.length}`, unit: 'checks pass', open,
     state: campus?.stale ? 'stale' : 'ready',
-    basis: 'Campus grid checks, with the proposed measures',
+    basis: 'Grid checks, with the proposed measures',
     reason: campus?.stale ? 'The network changed since the checks ran.' : undefined,
   }
 }
@@ -139,13 +139,13 @@ function control(gfm: GfmSettingsState | null | undefined): ChapterTile['control
   if (applied?.hub_resolve_needed) {
     return { state: 'stale', resolve: true,
       text: 'Grid-forming settings applied. Re-solve the hub: these settings change its island rows; '
-        + 'then run the campus study again.' }
+        + 'then run the grid checks again.' }
   }
   if (gfm.state === 'not_run' || !rec) {
-    return { state: 'not_run', text: 'Grid-forming settings: not recommended for this campus run.' }
+    return { state: 'not_run', text: 'Grid-forming settings: no recommendation yet.' }
   }
   if (gfm.state === 'stale') {
-    return { state: 'stale', text: 'Grid-forming settings: the campus run changed; recommend them again.' }
+    return { state: 'stale', text: 'Grid-forming settings: the grid checks changed; recommend them again.' }
   }
   const n = Object.keys(rec.settings).length
   const text = rec.status === 'recommended' ? `recommended for ${n} unit${n === 1 ? '' : 's'}, not applied yet`
