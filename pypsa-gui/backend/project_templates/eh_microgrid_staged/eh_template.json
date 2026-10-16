@@ -47,6 +47,12 @@
       "value": "260 EUR/MWh (fuel and variable O&M)"
     },
     {
+      "item": "transition RoCoF limit",
+      "note": "demo value, relaxed from the data center's 1 Hz/s so a tuned grid-forming battery can meet it; the order of RoCoF withstand settings used in several RfG implementations, not taken from a grid code",
+      "source": "assumed",
+      "value": "2 Hz/s over 500 ms (the steady island keeps 1 Hz/s)"
+    },
+    {
       "item": "existing island",
       "note": "in service at the first period and sunk",
       "source": "assumed",
@@ -84,6 +90,7 @@
     "Each period is the same representative week, with the period's load.",
     "Candidates are one row per period (build_year = the period).",
     "The island rows hold the steady island: grid-forming battery and diesel droop.",
+    "The transition RoCoF limit is 2 Hz/s over 500 ms, a demo value relaxed from the data center's 1 Hz/s: the GFM settings recommender can then tune the batteries to meet it.",
     "After a solve the investment case compares the plan with the island as it stands today (the existing diesels, PV, wind and battery, no grid), re-solved without the candidates."
   ]
 }

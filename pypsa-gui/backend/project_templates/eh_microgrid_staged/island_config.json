@@ -38,7 +38,7 @@
         },
         "rocof_hz_per_s": {
           "source": "assumed",
-          "value": 1.0
+          "value": 2.0
         }
       }
     },
