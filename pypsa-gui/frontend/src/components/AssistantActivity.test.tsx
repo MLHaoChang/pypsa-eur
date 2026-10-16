@@ -145,6 +145,31 @@ describe('AssistantActivity', () => {
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Refresh Activity'))
     expect(screen.queryByText('Which basis?')).toBeNull()
   })
+  it('inspects historical missing slots and exact request scope without executing work', async () => {
+    const data = question()
+    data.items[0] = { ...data.items[0], family: 'source_gap', title: 'Checked answer source gap',
+      status: 'needs_review', native_status: 'source_gap_recorded' }
+    get.mockResolvedValue(data)
+    inspect.mockResolvedValue({ ...detail(), question: null, tool_name: 'checked_answer',
+      native_status: 'source_gap_recorded', reason: 'A later turn does not resolve this historical gap.',
+      source_gap: { answer_id: 'answer-original', turn_id: 'turn-original',
+        request_scope: { profile: 'generator-cost/1', project_id: 'requested-project',
+          entity_id: '<img src=x onerror=alert(1)>', start: '2026-01-01', end: '2026-01-02',
+          cost_basis: { currency: 'EUR', price_year: 2026, annual_fixed_cost_fraction: 1 },
+          evidence_id: 'retained-original', comparison_evidence_id: 'baseline-original' },
+        slots: [{ metric: 'total_cost', disposition: 'unavailable', reason: 'invalid_or_missing_raw_data' }] } })
+    const { container } = render(<AssistantActivity onConversation={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect source gap' }))
+    expect(await screen.findByText(/Answer: answer-original/)).toBeTruthy()
+    expect(screen.getByText(/2026-01-01 to 2026-01-02/)).toBeTruthy()
+    expect(screen.getByText(/Entity: <img src=x onerror=alert\(1\)>/)).toBeTruthy()
+    expect(screen.getByText(/Requested baseline evidence: baseline-original/)).toBeTruthy()
+    expect(screen.getByText(/total_cost: unavailable \(invalid_or_missing_raw_data\)/)).toBeTruthy()
+    expect(screen.getByText(/A later turn does not resolve/)).toBeTruthy()
+    expect(container.querySelector('img')).toBeNull()
+    expect(screen.queryByRole('button', { name: /approve|answer|retry|resume|open originating/i })).toBeNull()
+    expect(useChatStore.getState().sessionId).toBe('session-a')
+  })
   it('aborts inspection on project changes and ignores late private data', async () => {
     get.mockResolvedValue(question())
     let finish!: (value: DecisionObservation) => void

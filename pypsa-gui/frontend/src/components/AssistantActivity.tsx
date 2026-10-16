@@ -26,7 +26,7 @@ function DecisionInspector({ item, close }: { item: ActivityItem; close: () => v
     return () => controller.abort()
   }, [item.decision_id, item.decision_revision, item.decision_digest, item.project_id])
   return <section aria-label="Decision inspection" className="border border-border rounded p-2 space-y-2">
-    <p className="font-medium">Recorded decision</p>
+    <p className="font-medium">{item.family === 'source_gap' ? 'Recorded source gap' : 'Recorded decision'}</p>
     <p className="text-xs">Read-only inspection. This cannot answer a question, revive an approval or start work.</p>
     {failed ? <p role="alert">This record changed or is unavailable. Refresh Activity and inspect it again.</p>
       : !detail ? <p role="status">Loading decision…</p> : <>
@@ -41,8 +41,23 @@ function DecisionInspector({ item, close }: { item: ActivityItem; close: () => v
             {option.label}{option.recommended ? ' (recommended)' : ''}{option.description ? ` — ${option.description}` : ''}
           </li>)}</ul>
         </>}
+        {detail.source_gap && <>
+          <p className="text-xs break-all">Answer: {detail.source_gap.answer_id} · Turn: {detail.source_gap.turn_id}</p>
+          <p className="text-xs break-words">Requested profile: {detail.source_gap.request_scope.profile} · Entity: {detail.source_gap.request_scope.entity_id ?? 'not selected'}</p>
+          <p className="text-xs break-all">Requested project: {detail.source_gap.request_scope.project_id}</p>
+          {detail.source_gap.request_scope.metrics && <p className="text-xs break-words">Requested metrics: {detail.source_gap.request_scope.metrics.join(', ')}</p>}
+          <p className="text-xs break-words">Window: {detail.source_gap.request_scope.start
+            ? `${detail.source_gap.request_scope.start} to ${detail.source_gap.request_scope.end}` : 'All current snapshots at that turn'}</p>
+          {detail.source_gap.request_scope.cost_basis && <p className="text-xs">Requested cost basis: {detail.source_gap.request_scope.cost_basis.currency}, price year {detail.source_gap.request_scope.cost_basis.price_year}, annual fixed cost fraction {detail.source_gap.request_scope.cost_basis.annual_fixed_cost_fraction}</p>}
+          {detail.source_gap.request_scope.evidence_id && <p className="text-xs break-all">Requested retained evidence: {detail.source_gap.request_scope.evidence_id}</p>}
+          {detail.source_gap.request_scope.comparison_evidence_id && <p className="text-xs break-all">Requested baseline evidence: {detail.source_gap.request_scope.comparison_evidence_id}</p>}
+          {detail.source_gap.request_scope.retain !== undefined && <p className="text-xs">Retention requested: {detail.source_gap.request_scope.retain ? 'Yes' : 'No'}. This observation does not establish that evidence was retained.</p>}
+          <ul className="list-disc pl-4">{detail.source_gap.slots.map(slot => <li key={slot.metric} className="break-words">
+            {slot.metric}: {slot.disposition.replace(/_/g, ' ')} ({slot.reason})
+          </li>)}</ul>
+        </>}
         <p className="text-xs">{detail.reason}</p>
-        <p className="text-xs break-all">Project: {detail.project_id} · Chat: {detail.session_id} · Tool call: {detail.tool_use_id}</p>
+        <p className="text-xs break-all">Project: {detail.project_id} · Chat: {detail.session_id} · {detail.source_gap ? 'Turn' : 'Tool call'}: {detail.tool_use_id}</p>
         <p className="text-xs">This observation does not certify results.</p>
       </>}
     <button type="button" className="text-accent" onClick={close}>Close inspection</button>
@@ -171,7 +186,7 @@ export default function AssistantActivity({ onConversation }: { onConversation: 
         <p className="text-xs text-muted break-all">Source: {item.source_id}</p>
         {item.reason && <p className="text-xs">{item.reason}</p>}
         {item.status === 'unavailable' && <p className="text-xs">The originating job state cannot be established. Inspect it before retrying.</p>}
-        {item.decision_id && <button type="button" className="text-accent" onClick={() => setInspecting(item.id)}>Inspect decision</button>}
+        {item.decision_id && <button type="button" className="text-accent" onClick={() => setInspecting(item.id)}>{item.family === 'source_gap' ? 'Inspect source gap' : 'Inspect decision'}</button>}
         {item.decision_id && inspecting === item.id && <DecisionInspector
           key={JSON.stringify([key, item.decision_id, item.decision_revision, item.decision_digest])}
           item={item} close={() => setInspecting(null)} />}
@@ -183,9 +198,9 @@ export default function AssistantActivity({ onConversation }: { onConversation: 
         {loadingMore ? 'Loading…' : 'Load more activity'}
       </button>}
       {data && <p className="text-xs text-muted">History covers up to 30 days and the newest 512 job origins per owner/project. Unobserved outcomes remain unknown. Completion does not certify engineering results.</p>}
-      {data && <p className="text-xs text-muted">Decision history covers up to 30 days and the newest 256 questions and confirmations per owner/project, within a bounded store. Recorded decisions do not certify completed work.</p>}
+      {data && <p className="text-xs text-muted">Decision history covers up to 30 days and the newest 256 questions, confirmations and source gaps per owner/project, within a bounded store. Recorded observations do not certify completed work.</p>}
       {data?.warnings.includes('decision_history_unavailable') && <p role="status" className="text-xs">
-        Decision history could not be read or saved. Missing history does not establish that no question or confirmation occurred.
+        Decision history could not be read or saved. Missing history does not establish that no question, confirmation or source gap occurred.
       </p>}
       {data?.warnings.includes('activity_history_unavailable') && <p role="status" className="text-xs">
         Retained job history could not be read or saved. Live observations may still be shown; missing history does not mean work never ran.

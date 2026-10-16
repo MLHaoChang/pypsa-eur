@@ -109,11 +109,15 @@ def test_software_clarification_is_retained_only_after_checked_publication(solve
     owner = session.get_session(conversation.sid).owner_user_id
     project = str(PyPSAService.get_active_context().project_uuid)
     rows, warnings = attention.project_records(owner, project, [])
-    assert len(rows) == 1 and not warnings
-    assert rows[0]['tool_name'] == 'checked_clarification'
-    assert rows[0]['tool_use_id'] == native['tool_use_id']
-    assert rows[0]['question']['question'] == native['question']
-    assert rows[0]['evidence_available'] is False
+    assert len(rows) == 2 and not warnings
+    question = next(r for r in rows if r['family'] == 'question')
+    gap = next(r for r in rows if r['family'] == 'source_gap')
+    assert question['tool_name'] == 'checked_clarification'
+    assert question['tool_use_id'] == native['tool_use_id']
+    assert question['question']['question'] == native['question']
+    assert question['evidence_available'] is False
+    assert gap['source_gap']['answer_id'] == approval(frames)['answer_id']
+    assert all(s['reason'] == 'cost_quantity_required' for s in gap['source_gap']['slots'])
 
 
 def test_previous_run_is_latest_distinct_checked_run_not_latest_answer(

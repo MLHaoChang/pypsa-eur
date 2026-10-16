@@ -1251,6 +1251,8 @@ def run_turn(
                 if event == "choice_request":
                     _attention.question_presented(session, getattr(_wal_ctx, 'project_uuid', None),
                                                   payload, checked=session.assurance_turn is not None)
+                if event == "answer_approved" and session.assurance_turn is not None:
+                    _attention.checked_answer(session, getattr(_wal_ctx, 'project_uuid', None))
                 trace.note(event, payload)
                 goal_watch.note(event, payload)
                 if event == "error" and _goals.on_error(session):

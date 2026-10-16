@@ -2,6 +2,7 @@
 
 Questions are display data captured only after the publication projector. A
 confirmation records its native gate, without token, arguments or effect claims.
+Checked source gaps retain published missing-slot reasons, never result values.
 The original session and approval audit remain the only decision authority.
 """
 from __future__ import annotations
@@ -9,10 +10,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import threading
 import time
 import uuid
 from collections import OrderedDict
+from typing import get_args
 
 from harness import owned_snapshots
 
@@ -67,7 +70,8 @@ def _question(payload):
 
 
 def _validate(record):
-    if not isinstance(record, dict) or set(record) != _FIELDS:
+    fields = _FIELDS | {'source_gap'} if isinstance(record, dict) and record.get('family') == 'source_gap' else _FIELDS
+    if not isinstance(record, dict) or set(record) != fields:
         raise ValueError('invalid decision record')
     source = _text(record['source_id'], 64)
     if len(source) != 64 or any(c not in '0123456789abcdef' for c in source):
@@ -75,9 +79,11 @@ def _validate(record):
     for field, size in (('session_id', 200), ('tool_use_id', 200), ('tool_name', 120)):
         _text(record[field], size)
     family = record['family']
-    if family not in {'question', 'confirmation'}:
+    if family not in {'question', 'confirmation', 'source_gap'}:
         raise ValueError('invalid decision family')
-    if record['native_status'] not in (_QUESTION_STATES if family == 'question' else _CONFIRM_STATES):
+    states = (_QUESTION_STATES if family == 'question' else
+              {'source_gap_recorded'} if family == 'source_gap' else _CONFIRM_STATES)
+    if record['native_status'] not in states:
         raise ValueError('invalid decision status')
     if type(record['revision']) is not int or not 1 <= record['revision'] <= 1000000:
         raise ValueError('invalid decision revision')
@@ -91,9 +97,112 @@ def _validate(record):
     if family == 'question':
         if record['tool_name'] not in {'ask_user', 'checked_clarification'} or _question(record['question']) != record['question']:
             raise ValueError('invalid question')
+    elif family == 'source_gap':
+        if record['question'] is not None or record['tool_name'] != 'checked_answer':
+            raise ValueError('invalid source gap origin')
+        _gap(record['source_gap'])
+        if (record['tool_use_id'] != record['source_gap']['turn_id']
+                or record['source_id'] != _gap_id(record['source_gap']['answer_id'])):
+            raise ValueError('invalid source gap identity')
     elif record['question'] is not None:
         raise ValueError('confirmation arguments prohibited')
     return record
+
+
+def _uuid(value):
+    if not isinstance(value, str) or str(uuid.UUID(value)) != value:
+        raise ValueError('invalid checked origin')
+    return value
+
+
+def _scope_display(scope):
+    """Closed request descriptors, never results, prose, paths or tool arguments."""
+    from harness.assurance_scope import CostBasis, RequestScope
+
+    allowed = {'version', 'profile', 'project_id', 'entity_id', 'metrics', 'start', 'end',
+               'cost_basis', 'retain', 'evidence_id', 'comparison_evidence_id', 'window'}
+    if (not isinstance(scope, dict) or set(scope) - allowed
+            or not {'profile', 'project_id', 'entity_id'} <= set(scope)
+            or ('start' in scope) != ('end' in scope)):
+        raise ValueError('invalid gap scope')
+    if scope.get('profile') not in get_args(RequestScope.model_fields['profile'].annotation):
+        raise ValueError('invalid gap profile')
+    # This is the requested descriptor, not the authoritative store binding;
+    # a refused wrong-project request may itself contain a non-UUID identifier.
+    _text(scope['project_id'], 128)
+    for field, size in (('entity_id', 128), ('start', 64), ('end', 64)):
+        if field in scope and (scope[field] is not None or field != 'entity_id'):
+            _text(scope[field], size)
+    if 'version' in scope and (type(scope['version']) is not int or scope['version'] != 1):
+        raise ValueError('invalid gap scope version')
+    if 'retain' in scope and type(scope['retain']) is not bool:
+        raise ValueError('invalid gap retain flag')
+    if 'window' in scope and scope['window'] != 'all_current_snapshots':
+        raise ValueError('invalid gap window')
+    for field in ('evidence_id', 'comparison_evidence_id'):
+        if field in scope:
+            _uuid(scope[field])
+    if 'cost_basis' in scope:
+        CostBasis.model_validate(scope['cost_basis'])
+    if 'metrics' in scope:
+        metrics = scope['metrics']
+        if (not isinstance(metrics, list) or not 1 <= len(metrics) <= 20
+                or any(not isinstance(m, str) or not 1 <= len(m) <= 64 for m in metrics)
+                or len(set(metrics)) != len(metrics)):
+            raise ValueError('invalid gap metrics')
+    return scope
+
+
+def _gap(gap):
+    if not isinstance(gap, dict) or set(gap) != {'answer_id', 'turn_id', 'request_scope', 'slots'}:
+        raise ValueError('invalid source gap')
+    _uuid(gap['answer_id'])
+    _uuid(gap['turn_id'])
+    _scope_display(gap['request_scope'])
+    slots = gap['slots']
+    if not isinstance(slots, list) or not 1 <= len(slots) <= 20:
+        raise ValueError('invalid source gap slots')
+    for slot in slots:
+        if (not isinstance(slot, dict) or set(slot) != {'metric', 'disposition', 'reason'}
+                or slot['disposition'] not in {'unavailable', 'needs_clarification'}
+                or not isinstance(slot['metric'], str) or not 1 <= len(slot['metric']) <= 64
+                or not isinstance(slot['reason'], str) or not re.fullmatch(r'[a-z][a-z0-9_]{0,119}', slot['reason'])):
+            raise ValueError('invalid source gap slot')
+    if len({s['metric'] for s in slots}) != len(slots):
+        raise ValueError('duplicate source gap metric')
+    return gap
+
+
+def _gap_id(answer_id):
+    return hashlib.sha256(('checked-gap:' + answer_id).encode()).hexdigest()
+
+
+def checked_answer(session, project):
+    """Observe only the native committed answer at its admitted publication seam."""
+    def change(records):
+        turn = session.assurance_turn
+        answer = turn.approved
+        owner, pid = _scope(session, project)
+        if answer['owner_id'] != owner or answer['project_id'] != pid:
+            raise ValueError('unbound checked answer')
+        receipt = answer['receipt']
+        slots = [{k: slot[k] for k in ('metric', 'disposition', 'reason')}
+                 for slot in receipt.get('result_slots', []) if slot['disposition'] != 'answered']
+        if not slots:
+            return
+        # reason is a server annotation outside the request schema, already in
+        # the slots. Do not retain any answer text, values or evidence payloads.
+        scope = {k: v for k, v in receipt['request_scope'].items() if k != 'reason'}
+        gap = _gap(dict(answer_id=answer['answer_id'], turn_id=answer['turn_id'],
+                        request_scope=scope, slots=slots))
+        source = _gap_id(gap['answer_id'])
+        if any(r['source_id'] == source for r in records):
+            return
+        now = time.time()
+        records.append(_validate(dict(source_id=source, family='source_gap', session_id=session.session_id,
+            tool_use_id=gap['turn_id'], tool_name='checked_answer', native_status='source_gap_recorded',
+            revision=1, created_at=now, observed_at=now, question=None, source_gap=gap)))
+    _observe(session, project, change)
 
 
 def _failed(owner, project, failed):
@@ -214,6 +323,11 @@ def project_records(owner, project, live):
             reason = ('Inspect the recorded question. Continue through an ordinary chat turn; this view cannot answer it.'
                 if state == 'waiting_for_input' else
                 'A later native turn or question was recorded. This does not establish that the question was answered correctly or resolved.')
+        elif record['family'] == 'source_gap':
+            status = 'needs_review'
+            reason = ('The published checked answer had unavailable metrics or needed clarification. '
+                      'This is a historical gap, not a current evidence check. A later turn does not resolve it; '
+                      'use an ordinary checked request to obtain a new answer.')
         else:
             if state == 'waiting_for_approval':
                 status = 'waiting_for_approval' if active else 'needs_review'

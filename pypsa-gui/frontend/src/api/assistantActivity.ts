@@ -13,6 +13,12 @@ export interface DecisionObservation {
   source_id: string; project_id: string; session_id: string; tool_use_id: string
   tool_name: string; native_status: string; revision: number; decision_digest: string
   reason: string; inspection_only: true; evidence_available: false
+  source_gap?: { answer_id: string; turn_id: string
+    request_scope: { profile: string; project_id: string; entity_id?: string | null
+      metrics?: string[]; start?: string; end?: string; window?: string
+      retain?: boolean; evidence_id?: string; comparison_evidence_id?: string
+      cost_basis?: { currency: string; price_year: number; annual_fixed_cost_fraction: number } }
+    slots: { metric: string; disposition: 'unavailable' | 'needs_clarification'; reason: string }[] }
   question: null | { title: string; question: string; detail: string | null
     options: { label: string; description: string; recommended: boolean }[]
     allow_free_text: boolean; multi_select: boolean; intent: 'choice' | 'plan_review' }

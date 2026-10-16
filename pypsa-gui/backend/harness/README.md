@@ -70,6 +70,15 @@ recorded follow-up, not proof of resolution. See
 `.scratch/chat-companion/issues/04c-retained-decision-observations.md` for the
 recovery, unavailable-history and remaining-scope contract.
 
+Published checked-answer receipts with unavailable or clarification-required
+result slots also retain a bounded `source_gap` observation in the same store.
+Inspection shows the exact answer/turn origin and request descriptors with
+missing metric reasons, never result values or evidence authority. These are
+historical gaps: later turns do not silently resolve them, and the inspector
+does not recheck evidence or execute work. Fully answered requests and non-scoped
+refusals are not captured by this adapter. See
+`.scratch/chat-companion/issues/04d-retained-source-gaps.md`.
+
 ## The contract
 
 1. **Layering.** `services/* <- harness <- harness/providers`. Nothing in

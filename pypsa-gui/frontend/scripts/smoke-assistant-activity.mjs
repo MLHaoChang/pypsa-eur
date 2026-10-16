@@ -49,6 +49,20 @@ createRoot(document.getElementById('root')!).render(<main style={{display:'flex'
     page.on('pageerror', error => errors.push(error.message))
     await page.route(url => url.pathname.startsWith('/api/'), async route => {
       const request = route.request(), url = new URL(request.url())
+      if (request.method() === 'GET' && url.pathname === '/api/chat/decisions/recorded-gap') {
+        inspections++
+        assert.equal(url.searchParams.get('project_id'), 'p1')
+        assert.equal(url.searchParams.get('revision'), '1')
+        assert.equal(url.searchParams.get('digest'), 'b'.repeat(64))
+        return route.fulfill({json:{source_id:'recorded-gap',project_id:'p1',session_id:'previous-chat',
+          tool_use_id:'exact-gap-turn',tool_name:'checked_answer',native_status:'source_gap_recorded',revision:1,
+          decision_digest:'b'.repeat(64),inspection_only:true,evidence_available:false,question:null,
+          reason:'This is a historical gap. A later turn does not resolve it.',
+          source_gap:{answer_id:'exact-answer',turn_id:'exact-gap-turn',
+            request_scope:{profile:'generator-cost/1',project_id:'p1',entity_id:'<img src=x onerror=alert(1)>',
+              start:'2026-01-01',end:'2026-01-02',evidence_id:'exact-retained-source'},
+            slots:[{metric:'total_cost',disposition:'unavailable',reason:'invalid_or_missing_raw_data'}]}}})
+      }
       if (request.method() === 'GET' && url.pathname === '/api/chat/decisions/recorded-question') {
         inspections++
         assert.equal(url.searchParams.get('project_id'), 'p1')
@@ -75,6 +89,9 @@ createRoot(document.getElementById('root')!).render(<main style={{display:'flex'
         {id:'question:old',source_id:'recorded-question',project_id:'p1',family:'question',title:'Storage basis',
           status:'waiting_for_input',native_status:'waiting_for_input',needs_you:true,evidence_available:false,
           session_id:'previous-chat',decision_id:'recorded-question',decision_revision:1,decision_digest:'a'.repeat(64)},
+        {id:'source_gap:old',source_id:'recorded-gap',project_id:'p1',family:'source_gap',title:'Checked answer source gap',
+          status:'needs_review',native_status:'source_gap_recorded',needs_you:true,evidence_available:false,
+          session_id:'previous-chat',decision_id:'recorded-gap',decision_revision:1,decision_digest:'b'.repeat(64)},
       ].filter(row => filter === 'needs_you' ? row.needs_you : filter === 'scheduled' ? false : true)
       return route.fulfill({json:{version:1,project_id:'p1',filter,cursor:'epoch:1',revision:1,resnapshot_required:false,items,next_page:null,total:items.length,warnings:['activity_history_is_bounded_observation'],scheduling_available:false}})
     })
@@ -97,6 +114,17 @@ createRoot(document.getElementById('root')!).render(<main style={{display:'flex'
       assert.equal(await page.getByRole('button', {name:/approve|answer|retry|resume|cancel/i}).count(),0)
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth > window.innerWidth),false)
       await page.screenshot({path:path.join(artifacts,`${name}-inspection.png`)})
+      await page.getByRole('button',{name:'Close inspection',exact:true}).click()
+      await page.getByRole('button',{name:'Inspect source gap',exact:true}).click()
+      await page.getByText('Recorded source gap',{exact:true}).waitFor()
+      await page.getByText(/Answer: exact-answer/).waitFor()
+      await page.getByText('total_cost: unavailable (invalid_or_missing_raw_data)',{exact:true}).waitFor()
+      await page.getByText(/2026-01-01 to 2026-01-02/).waitFor()
+      await page.getByText(/Entity: <img src=x onerror=alert\(1\)>/).waitFor()
+      assert.equal(await page.locator('[aria-label="Decision inspection"] img').count(),0)
+      assert.equal(await page.getByRole('button', {name:/approve|answer|retry|resume|cancel/i}).count(),0)
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth > window.innerWidth),false)
+      await page.screenshot({path:path.join(artifacts,`${name}-source-gap.png`)})
       await page.getByRole('button',{name:'Close inspection',exact:true}).click()
       await page.getByRole('button',{name:'Open originating chat'}).click()
       assert.equal(await page.evaluate(()=>window.__opened),1)
