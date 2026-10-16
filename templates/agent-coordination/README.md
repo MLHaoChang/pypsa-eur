@@ -57,6 +57,7 @@ These stay in this folder and are not copied:
   - `scripts/coord/premerge.sh`: `docs_only_re`, `semantic_re` and `semantic_cmd`. Point `semantic_cmd` at the interpreter the hook builds.
   - `.claude/skills/coordinator/SKILL.md`: the model table and the known environment failures.
   - `AGENTS.md`: "Project notes".
+  - `.gitignore`: if it ignores `.claude/hooks/*`, add exceptions for `block-dangerous-git.sh` and `test-block-dangerous-git.sh`, or the guardrail files are never committed.
 
 | Placeholder | Example | Used in |
 |---|---|---|
