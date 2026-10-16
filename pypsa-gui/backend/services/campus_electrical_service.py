@@ -101,6 +101,7 @@ try:
     from gridspine.drivers import campus_study as cs
     from gridspine.drivers.campus_study import SizingCriteria
     from gridspine.schema.contracts import ContractError
+    from gridspine.static.parallel import Stopped
 
     CAMPUS_AVAILABLE = True
     CAMPUS_IMPORT_ERROR = None
@@ -111,6 +112,9 @@ except ImportError as exc:                      # pragma: no cover - build-shape
 
     class ContractError(Exception):
         """Stand-in so the `except ContractError` clauses below still parse."""
+
+    class Stopped(Exception):
+        """Stand-in, as ``ContractError``: gridspine's ``parallel.Stopped``."""
 
 SUBDIR = "campus_electrical"
 CAMPUS_FILE = "campus_input.yaml"
@@ -1174,8 +1178,6 @@ def _run_cuts(run_dir: Path, should_stop=None) -> None:
 def _aborted_on_stop(stage):
     """gridspine's ``parallel.Stopped`` (an abort inside a stage, its
     workers already ended) as the run's ``CampusRunAborted``."""
-    from gridspine.static.parallel import Stopped
-
     try:
         yield
     except Stopped as exc:
