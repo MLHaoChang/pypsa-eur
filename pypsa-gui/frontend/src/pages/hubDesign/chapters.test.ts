@@ -74,6 +74,14 @@ describe('chapterTiles', () => {
       message: 'no owner assets' } as never, report: null } })
     expect(refused.investment).toMatchObject({ state: 'unavailable' })
     expect(refused.investment.reason).toMatch(/no owner assets/)
+    // a money-year refusal (smoke 2026-10-16, issue 03) reaches the tile whole: both years and the way out
+    const money = byId({ ...NONE, investment: { study: { status: 'refused', error_code: 'campus_assets_money_year_mismatch',
+      error: "campus_assets_money_year_mismatch: the campus assets are priced in 2026 money (the campus asset library's "
+        + "price_year), the case in 2020 money (the finance inputs' currency_year); no price index converts between "
+        + 'them, so a case with the campus assets needs the asset library and the finance inputs in one money year: '
+        + "reprice the campus asset library in 2020, or state the finance inputs in the library's money year" } as never,
+      report: null } })
+    expect(money.investment.reason).toMatch(/2026 money .* 2020 money .* reprice the campus asset library in 2020/)
   })
 
   it('grid plan: the campus checks that pass with the proposed measures', () => {
