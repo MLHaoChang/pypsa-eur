@@ -2,6 +2,26 @@
   "description": "Grid-connected industrial site: 120 MW wind, 80 MW PV, 60 MW electrolyser, H\u2082 storage, an extendable fuel cell and a site battery, 40 MW critical process load and 25 MW H\u2082 offtake. Tagged for an Energy Hub study.",
   "dtc_attribution": null,
   "id": "eh_h2_hub",
+  "ledger": [
+    {
+      "item": "island sidecar",
+      "note": "the campus run's island checks and the report's islanding chapter read it",
+      "source": "assumed",
+      "value": "seamless: the batteries form the island and carry the 40 MW process load; no genset, no UPS"
+    },
+    {
+      "item": "island unit data",
+      "note": "demo values copied from the data center and gridspine, not from a datasheet or a grid code",
+      "source": "assumed",
+      "value": "batteries: the data center's bess_new block (droop 4 %, tau_f 0.1 s, i_max 1.2 pu, k_gfm_min 1.0, pf 0.95); fuel cell, wind and PV: gridspine's drafted grid-following default (Q(U), pf 0.95); the data center's frequency limits; sustained 1 h, bridge 600 s"
+    },
+    {
+      "item": "island rows",
+      "note": "the plan is not sized to island; turn them on to plan for islanding. Measured on this template (live solves, 2026-10-15): the solve's objective goes from 7.0 M to 8.8 M EUR at 1 h sustained (26 MW of new battery), 11.4 M at 4 h (42 MW) and 28.9 M at 24 h (170 MW), and the grid import falls from about 93 MW to 2-10 MW (owner: island data on, rows off, the user opts in)",
+      "source": "assumed",
+      "value": "off (island_constraints false)"
+    }
+  ],
   "name": "Industrial Hydrogen Hub",
   "pack_overrides": {},
   "provenance": "synthetic illustrative data (P19 template) \u2014 representative week, public-catalogue-range costs; replace with project data before any decision",

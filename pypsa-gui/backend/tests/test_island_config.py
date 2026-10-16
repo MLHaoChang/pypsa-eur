@@ -136,6 +136,11 @@ def test_the_h2_hub_drafts_with_its_sidecar_and_ships_the_island_rows_off(tid):
     # owner (a): the plan is not sized to island, and the template says so
     assert not T.solver_config(tid).get("island_constraints")
     assert any("Island rows are off" in s for s in T.TEMPLATE_META[tid]["study_notes"])
+    # both hubs ledger the sidecar, its unit data and what turning the rows on costs
+    items = [r["item"] for r in T.TEMPLATE_META[tid]["ledger"]]
+    assert {"island sidecar", "island unit data", "island rows"} <= set(items)
+    rows = next(r for r in T.TEMPLATE_META[tid]["ledger"] if r["item"] == "island rows")
+    assert rows["value"] == "off (island_constraints false)" and "24 h" in rows["note"]
 
 
 def test_only_templates_with_island_data_ship_the_file(tmp_path):

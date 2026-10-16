@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The single-year Industrial Hydrogen Hub template's ledger now states its island sidecar, the demo values it uses and what turning the island rows on would cost, as the staged hub's does.
