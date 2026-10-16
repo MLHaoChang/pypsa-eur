@@ -3,7 +3,7 @@
 
 # H2 hub: GET island/gfm-settings answers 500 (inf in the recommendation)
 
-Status: needs-triage
+Status: ready-for-human
 Type: bug
 Found by: Guided smoke re-run, 2026-10-16, master dc4e4b37
 
@@ -52,3 +52,6 @@ so the Guided "Control" tile cannot show a state for this template at all
 (GFM tile = 500).
 
 ## Comments
+
+- 2026-10-16 (session_01TP6mmWWALLE8q4y73ypwoq): fixed on `claude/guided-control-gfm-json`. gridspine writes the recommendation as strict JSON (non-finite → null, `allow_nan=False`); `_state` cleans an older file on read; the panel and the report name a collapse row by its note. The H2 verdict stays `not_achievable`, which is honest: the island rows are off (owner, 2026-10-16) and SITE_BATTERY, the only grid-forming unit, has no headroom in 50 of 80 cases (E2 38.8 MW, and E3 trips SITE_BATTERY itself). Whether the H2 hub should reach a recommendation is an owner question (the island rows' cost: NPV +14.6 M → −2.1 M EUR, the ledger's measure).
+
