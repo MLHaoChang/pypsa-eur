@@ -50,6 +50,7 @@ beforeEach(() => {
     selectedComponent: { type: 'StorageUnit', name: 'Battery' }, projectMismatch: null })
   useChatStore.setState({ sessionId: 'pilot-session', messages: [], error: null, pending: null, choice: null,
     streaming: false, streamCleanup: null, profileId: null, boundProfileId: null, requestQueue: [],
+    sourceGapDraft: null,
     activeRequest: null, lastRequest: null, newChatSeq: 0, suppressHydrationOnce: false, attachedFileIds: [], uploads: [] })
 })
 afterEach(() => { cleanup(); queryClient?.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -76,6 +77,68 @@ function init() {
   emit('session_init', { session_id: 'pilot-session', turn_id: 'turn-1', model: 'test',
     assurance: { version: 1, mode: 'strict', state: 'checking' } })
 }
+
+const preparedGap = () => ({ projectName: 'Demo', chatSequence: useChatStore.getState().newChatSeq,
+  message: 'Recheck the exact request shown in the checked follow-up card.',
+  checked_scope: { version: 1, profile: 'storage-unit-cost/1', project_id: 'owned-project',
+    entity_id: 'Battery', metrics: ['total_cost'], cost_basis: { currency: 'EUR', price_year: 2026, annual_fixed_cost_fraction: 1 } },
+  source_gap_ref: { source_id: 'a'.repeat(64), revision: 1, digest: 'b'.repeat(64) } })
+
+it('prepares a separate request and sends it only on explicit per-message checked consent', async () => {
+  mount()
+  const toggle = await screen.findByRole('checkbox', { name: 'Check answers' }) as HTMLInputElement
+  await waitFor(() => expect(toggle.disabled).toBe(false))
+  fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'Keep my unsent message.' } })
+  act(() => {
+    useChatStore.setState({ attachedFileIds: ['keep-attachment'] })
+    useChatStore.getState().setSourceGapDraft(preparedGap())
+  })
+  expect(await screen.findByRole('region', { name: 'Prepared checked follow-up' })).toBeTruthy()
+  expect(createChatStream).not.toHaveBeenCalled()
+  const liveSession = useChatStore.getState().sessionId
+  const draft = useChatStore.getState().sourceGapDraft!
+  fireEvent.click(screen.getByRole('button', { name: 'Send checked follow-up' }))
+  expect(createChatStream).toHaveBeenCalledOnce()
+  const request = vi.mocked(createChatStream).mock.calls[0][0]
+  expect(request.assurance).toEqual({ version: 1, mode: 'strict' })
+  expect(request.checked_scope).toEqual(draft.checked_scope)
+  expect(request.source_gap_ref).toEqual(draft.source_gap_ref)
+  expect(request.session_id).toBe(liveSession ?? undefined)
+  expect(request.attachment_file_ids).toBeUndefined()
+  expect(request.message).toBe(draft.message)
+  expect((screen.getByTestId('chat-input') as HTMLTextAreaElement).value).toBe('Keep my unsent message.')
+  expect(useChatStore.getState().attachedFileIds).toEqual(['keep-attachment'])
+  expect(useChatStore.getState().sourceGapDraft).toBeNull()
+  expect(useChatStore.getState().requestQueue).toEqual([])
+  expect(toggle.checked).toBe(false)
+})
+
+it.each(['disabled', 'shadow'])('never falls back to an unchecked gap send in %s mode', async mode => {
+  capabilities.mode = mode
+  mount()
+  await screen.findByRole('checkbox', { name: 'Check answers' })
+  act(() => useChatStore.getState().setSourceGapDraft(preparedGap()))
+  const button = await screen.findByRole('button', { name: 'Send checked follow-up' })
+  expect((button as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(button)
+  expect(createChatStream).not.toHaveBeenCalled()
+  expect(useChatStore.getState().sourceGapDraft).not.toBeNull()
+})
+
+it.each(['project', 'new chat', 'dismiss'])('clears the prepared request on %s without sending', async change => {
+  mount()
+  await screen.findByRole('checkbox', { name: 'Check answers' })
+  act(() => useChatStore.getState().setSourceGapDraft(preparedGap()))
+  await screen.findByRole('region', { name: 'Prepared checked follow-up' })
+  if (change === 'dismiss') fireEvent.click(screen.getByRole('button', { name: 'Dismiss follow-up' }))
+  else act(() => {
+    if (change === 'project') useUIStore.setState({ currentProject: 'Elsewhere' })
+    else useChatStore.getState().startNewChat()
+  })
+  await waitFor(() => expect(useChatStore.getState().sourceGapDraft).toBeNull())
+  expect(screen.queryByRole('region', { name: 'Prepared checked follow-up' })).toBeNull()
+  expect(createChatStream).not.toHaveBeenCalled()
+})
 function finish(text = 'StorageUnit Battery: total direct cost 51 EUR.') {
   emit('answer_approved', { version: 1, answer_id: 'answer-1', turn_id: 'turn-1', verdict: 'passed',
     receipt: { policy_version: '1', content_sha256: createHash('sha256').update(text).digest('hex'),

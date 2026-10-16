@@ -14,6 +14,9 @@
 import { create } from 'zustand'
 import { useUIStore } from './uiStore'
 import type { AnswerReceipt } from '../utils/answerAssurance'
+import type { PreparedGapFollowup } from '../api/assistantActivity'
+
+export interface SourceGapDraft extends PreparedGapFollowup { projectName: string; chatSequence: number }
 
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system'
 
@@ -247,6 +250,8 @@ interface ChatState {
   /** Text another panel asks to place in the composer (P22) — shown, never
    * auto-sent: the user stays the one who sends. Consumed by ChatPanel. */
   composerSeed: string | null
+  sourceGapDraft: SourceGapDraft | null
+  setSourceGapDraft: (draft: SourceGapDraft | null) => void
   seedComposer: (text: string | null) => void
   /** Guided-mode spec §6.1 — FIFO of requests a card SENDS ("Let the
    * assistant do this": the user's own click). ChatPanel's effect takes one
@@ -405,6 +410,7 @@ function newMessageId() {
 export const useChatStore = create<ChatState>((set, get) => ({
   sessionId: null,
   composerSeed: null,
+  sourceGapDraft: null,
   requestQueue: [],
   lastRequest: null,
   activeRequest: null,
@@ -439,6 +445,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setSessionId: (id) => set({ sessionId: id }),
   seedComposer: (text) => set({ composerSeed: text }),
+  setSourceGapDraft: (draft) => set({ sourceGapDraft: draft }),
   sendRequest: (raw, opts) => {
     const text = raw.trim()
     if (!text) return null
@@ -645,6 +652,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       attachedFileIds: [],
       unseenExportCount: 0,
       uploadBatches: {},
+      sourceGapDraft: null,
       requestQueue: [],
       activeRequest: null,
     })
@@ -656,6 +664,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // disabled while streaming, so there is no live turn to interrupt here.
     set((s) => ({
       sessionId: null,
+      sourceGapDraft: null,
       boundProfileId: null,
       messages: [],
       pending: null,

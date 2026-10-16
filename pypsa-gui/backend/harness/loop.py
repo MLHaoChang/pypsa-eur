@@ -1011,6 +1011,7 @@ def run_turn(
     generation: int | None = None,
     checked_scope: dict | None = None,
     checked_operation: dict | None = None,
+    source_gap_ref: dict | None = None,
     binding_generation: int = 0,
     _held_lease: str | None = None,
     _held_generation: int | None = None,
@@ -1199,6 +1200,19 @@ def run_turn(
             session.assurance_turn = assurance.Turn(session, PyPSAService.get_active_context())
             from harness.navigation import begin_turn
             begin_turn(session.assurance_turn, binding_generation)
+            if source_gap_ref is not None:
+                from harness import attention
+                try:
+                    if checked_operation is not None or attachment_file_ids or utterance_id is not None or generation is not None:
+                        raise ValueError('follow-up must be an explicit scoped text request')
+                    session.assurance_turn.source_gap_binding = attention.admit_followup(
+                        session, PyPSAService.get_active_context().project_uuid,
+                        source_gap_ref, message, checked_scope)
+                except (HTTPException, ValueError, TypeError, KeyError, OSError):
+                    yield 'error', {'error_kind': 'source_gap_followup_unavailable',
+                                    'message': 'The source gap changed, is unavailable, or the request no longer matches. Refresh Activity and prepare it again.'}
+                    yield 'session_done', {'reason': 'source_gap_followup_unavailable'}
+                    return
             try:
                 session.assurance_turn.suspend_scope()
             except (HTTPException, OSError, ValueError):
@@ -1209,6 +1223,10 @@ def run_turn(
             session.assurance_turn.prepare_operation(checked_operation)
             if not attachment_file_ids and checked_operation is None:
                 session.assurance_turn.prepare_request(message, ui_context, PyPSAService.get_active_context(), checked_scope)
+        elif source_gap_ref is not None:
+            yield 'error', {'error_kind': 'invalid_source_gap_followup', 'message': 'This follow-up requires a checked request.'}
+            yield 'session_done', {'reason': 'invalid_source_gap_followup'}
+            return
         elif assurance.shadow_configured():
             try:
                 session.shadow_turn = assurance.Turn(session, PyPSAService.get_active_context())

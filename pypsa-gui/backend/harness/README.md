@@ -79,6 +79,18 @@ does not recheck evidence or execute work. Fully answered requests and non-scope
 refusals are not captured by this adapter. See
 `.scratch/chat-companion/issues/04d-retained-source-gaps.md`.
 
+An inspectable, fully specified source gap can prepare a separate checked
+follow-up card in the current chat. Sending requires an explicit user click,
+strict checking and an exact version/digest-bound source_gap_ref plus scope.
+The native worker rechecks current owner/project access and the unchanged
+request before provider work. Clarification-required scopes are not guessed.
+Only an admitted answer_approved publication appends a bounded link (at most
+eight) to the original gap. A receipt's request_complete flag describes that
+turn, not current evidence or resolution; the gap remains historical Needs
+review. Preparation never queues a send, alters the ordinary draft, restores an
+old session or changes global opt-in. See the CP-04e contract in
+`.scratch/chat-companion/issues/04e-explicit-gap-followups.md`.
+
 ## The contract
 
 1. **Layering.** `services/* <- harness <- harness/providers`. Nothing in

@@ -93,6 +93,7 @@ class StreamRequest(BaseModel):
     assurance: Any = None
     checked_scope: Any = None
     checked_operation: Any = None
+    source_gap_ref: Any = None
     binding_generation: StrictInt = Field(default=0, ge=0, le=2**31 - 1)
 
 
@@ -1462,6 +1463,17 @@ async def chat_stream(
     # still sync and still runs off-loop in the threadpool.
     from harness import assurance
     strict_assurance = assurance.admission(body.assurance)
+    if body.source_gap_ref is not None:
+        from harness.attention import FOLLOWUP_MESSAGE, validate_reference
+        try:
+            validate_reference(body.source_gap_ref)
+        except (ValueError, TypeError):
+            raise HTTPException(422, {'error_kind': 'invalid_source_gap_followup'}) from None
+        if (not strict_assurance or body.checked_scope is None or body.checked_operation is not None
+                or body.attachment_file_ids or body.script is not None or body.utterance_id is not None
+                or body.generation is not None or body.input_mode not in (None, 'text')
+                or body.message != FOLLOWUP_MESSAGE):
+            raise HTTPException(422, {'error_kind': 'invalid_source_gap_followup'})
     if body.checked_scope is not None:
         from harness.assurance_scope import validate
         try:
@@ -1721,6 +1733,7 @@ async def chat_stream(
                     generation=body.generation,
                     checked_scope=body.checked_scope,
                     checked_operation=body.checked_operation,
+                    source_gap_ref=body.source_gap_ref,
                     binding_generation=body.binding_generation,
                 )
             for event_name, payload in events:
