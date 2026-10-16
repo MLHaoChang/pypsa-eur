@@ -82,6 +82,8 @@ class BusCreate(BaseModel):
     unit: str = "MW"
     control: str = "PQ"
     sub_network: str = ""
+    # Tonne factor of an energy product bus counted in MWh (CONTEXT.md, Product); written only when sent.
+    mwh_per_t: float | None = None
 
 
 class CarrierCreate(BaseModel):
@@ -177,6 +179,11 @@ class LengthsFromGeometryRequest(BaseModel):
     keys: list[str] | None = None
 
 
+# Columns a Create model declares but a create writes only when the caller sent them.
+LINK_LAZY_COLUMNS = frozenset({"eh_process", "criticality_tier", "throughput_unit", "specific_energy_kwh_per_t"})
+BUS_LAZY_COLUMNS = frozenset({"mwh_per_t"})
+
+
 class LinkCreate(BaseModel):
     # extra='allow' lets an attribute the model does not declare survive
     # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
@@ -240,6 +247,13 @@ class LinkCreate(BaseModel):
     p_max_pu: Finite = Field(default=1.0, allow_inf_nan=False)
     build_year: int = 0
     lifetime: _NoneToPosInf = Field(default=float("inf"))
+    # Process-unit columns (grid-to-process ticket 02; models/energy_hub.py EH_CUSTOM_COLUMNS). Declared so the
+    # chat tools and the API accept them, but only written when sent: `create_link` leaves an unset one out, so a
+    # Link that never sets them never gets the column (`LINK_LAZY_COLUMNS`).
+    eh_process: bool | None = None
+    criticality_tier: str | None = None
+    throughput_unit: str | None = None
+    specific_energy_kwh_per_t: float | None = None
 
     @model_validator(mode="after")
     def _process_unit_ports_state_their_efficiency(self):
@@ -249,8 +263,7 @@ class LinkCreate(BaseModel):
         process unit's feed is a negative efficiency. On an `eh_process` Link, a set port must therefore carry
         its efficiency explicitly; the Asset write spreads the full row, so an edit always does.
         """
-        extra = self.model_extra or {}
-        if extra.get("eh_process") not in (True, "true", "True", 1, "1"):
+        if not self.eh_process:
             return self
         for i in (2, 3, 4):
             if getattr(self, f"bus{i}") and f"efficiency{i}" not in self.model_fields_set:
