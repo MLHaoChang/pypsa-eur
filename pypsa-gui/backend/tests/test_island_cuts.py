@@ -214,14 +214,18 @@ def _spinning_genset_hub():
     return n, island
 
 
-@pytest.mark.parametrize("kind, p_nom", [(None, 5.0), ("headroom_up", 8.5), ("headroom_down", 12.0)])
-def test_upward_and_downward_headroom_are_told_apart(kind, p_nom):
+@pytest.mark.parametrize("kind, p_nom, with_events", [
+    (None, 5.0, 7.5), ("headroom_up", 8.5, 8.5), ("headroom_down", 12.0, 12.0)])
+def test_upward_and_downward_headroom_are_told_apart(kind, p_nom, with_events):
     """A 12 MW cut: upward, the genset's 3.5 MW counts, so the BESS needs
-    8.5; downward only the BESS absorbs, so it needs 12."""
-    n, island = _spinning_genset_hub()
-    island["cuts"] = [] if kind is None else [_cut(kind, 12.0, hour=1)]
-    _solve(n, island)
-    assert _p_nom(n) == pytest.approx(p_nom, abs=TOL)
+    8.5; downward only the BESS absorbs, so it needs 12. With no cut and the
+    event rows, the 10 MW load is E2's step against the genset's 50 % step
+    credit, 2.5 MW: the BESS needs 7.5 (the cuts still bind above it)."""
+    for event_rows, want in ((False, p_nom), (True, with_events)):
+        n, island = _spinning_genset_hub()
+        island["cuts"] = [] if kind is None else [_cut(kind, 12.0, hour=1)]
+        _solve(n, island, event_rows=event_rows)
+        assert _p_nom(n) == pytest.approx(want, abs=TOL)
 
 
 def test_a_cut_with_dispatch_terms_is_taken_at_its_own_snapshot_only():

@@ -298,7 +298,9 @@ def test_the_tables_from_a_solve_survive_a_netcdf_round_trip(tmp_path):
     n = _hub(load=10.0, gensets=[("g", 6.0)])
     n.storage_units.at["bess", "p_nom_max"] = 7.0
     island = _uc(hub_units(gensets={"g": _genset(p_min_pu=_a(0.3))}))
-    n = _solve_uc(n, island)
+    # the islanding step's rows alone: u = 1/2 (with the event rows, 1; see
+    # test_island_study's first linearised-UC toy)
+    n = _solve_uc(n, island, event_rows=False)
     before = island_hourly(n, island)
     path = tmp_path / "net.nc"
     n.export_to_netcdf(path)

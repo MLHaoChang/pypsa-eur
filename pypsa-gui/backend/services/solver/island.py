@@ -1258,7 +1258,8 @@ def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gf
         _event_rows(n, m, sns_p, coord, tag, units=units, gfm=gfm, gensets=gensets,
                     active=active, period=period, p_out=p_out, p_store=p_store,
                     headroom_up=lambda without=None: headroom_up(without, credit),
-                    headroom_down=headroom_down, blocks=blocks, facts=facts)
+                    headroom_down=headroom_down, blocks=blocks, facts=facts,
+                    genset_credit_max=sum(_genset_credit_max(n, g, spec(g)) for g in online + spinning))
 
     # (b↓) SoC room until frequency-watt has curtailed the surplus.
     t_curt = max((spec(f)["fw_delay_s"] + spec(f)["fw_p_limit_mw"] / spec(f)["fw_ramp_mw_per_s"]
@@ -1331,8 +1332,27 @@ def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gf
     return bridge
 
 
+def _rating_max(n, comp, name) -> float:
+    """The most an asset can be built to: its p_nom, or its p_nom_max when extendable."""
+    static = getattr(n, _LIST_NAMES[comp])
+    if bool(static.at[name, "p_nom_extendable"]):
+        return float(static.at[name, "p_nom_max"])
+    return float(static.at[name, "p_nom"])
+
+
+def _genset_credit_max(n, g, values) -> float:
+    """The most a genset's event credit can be (the infeasibility hint's
+    bound): min(its room at full commitment and its minimum load, its load
+    step), at its largest rating and availability."""
+    comp, eta = _genset_out(n, g)
+    p_nom = _rating_max(n, comp, g) * eta
+    avail = float(_dense(n, comp, "p_max_pu", n.snapshots, [g])[g].max())
+    room = p_nom * (avail - float(values.get("p_min_pu", 0.0) or 0.0))
+    return max(0.0, min(room, p_nom * values["load_step_max_pct"] / 100.0))
+
+
 def _event_rows(n, m, sns_p, coord, tag, *, units, gfm, gensets, active, period, p_out, p_store,
-                headroom_up, headroom_down, blocks, facts):
+                headroom_up, headroom_down, blocks, facts, genset_credit_max=0.0):
     """The seamless island's own events at 0⁺, as I6 judges them (gridspine
     ``frequency.campus_frequency_study``), on the same headroom as (b↑)/(b↓),
     a genset credited at min(its share, its load step):
@@ -1370,6 +1390,12 @@ def _event_rows(n, m, sns_p, coord, tag, *, units, gfm, gensets, active, period,
         step = None
     if step is not None:
         _row(m, headroom_up(), _Lin(sns_p).plus(step), f"Island-e2-up{tag}", coord, facts=facts)
+        # what the row can reach at most, for the infeasibility hint: the GFM
+        # storage at its rating (idle) and the gensets' step credit
+        facts.setdefault("events", []).append({
+            "row": f"Island-e2-up{tag}", "step_mw": float(step.max()),
+            "gfm_mw": float(sum(_rating_max(n, "StorageUnit", s) for s in gfm)),
+            "genset_mw": float(genset_credit_max)})
     if not blocks:
         # I6's "largest load" is the most negative p_mw of any campus unit in
         # the hour (frequency.py:1277 over ``_hour_rows``): a charging battery's
