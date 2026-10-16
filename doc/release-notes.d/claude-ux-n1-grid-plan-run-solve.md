@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The grid checks panel no longer dead-ends in Guided when the project is not solved: the refusal ("the project is not solved; solve it and save, then draft") becomes a "Not run yet" state with a "Run the solve" button (UX review N1).
