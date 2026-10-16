@@ -194,7 +194,13 @@ from gridspine.schema.contracts import ContractError
 from gridspine.schema.network import MAX_NAME_LEN
 from gridspine.schema.transformer import check_tap, check_vector_group, ratio as tap_ratio
 from gridspine.static.campus_compliance import ADDED, CHECKS, Q_TOL, campus_compliance
-from gridspine.static.campus_flow import SizingCriteria, size_transformers, solve_cases, trafo_groups
+from gridspine.static.campus_flow import (
+    SizingCriteria,
+    held_transformers,
+    size_transformers,
+    solve_cases,
+    trafo_groups,
+)
 from gridspine.static.campus_reactive import compensation_bus, reactive_need, size_compensation
 from gridspine.static.campus_sc import campus_fault_levels, judge
 from gridspine.static.campus_taps import PCC_TAP_CONTROL, Taps, compliance_note, tap_table
@@ -433,7 +439,8 @@ def _compliance(study, req, profile) -> pd.DataFrame:
                                                          "source": req.source,
                                                          "tie_open": study.campus.tie_normally_open},
         profile=profile, pcc_bus=str(net.bus.at[int(net.ext_grid["bus"].iloc[0]), "name"]),
-        bus_kv=dict(zip(net.bus["name"].astype(str), net.bus["vn_kv"].astype(float))))
+        bus_kv=dict(zip(net.bus["name"].astype(str), net.bus["vn_kv"].astype(float))),
+        held=held_transformers(study.campus))
     note = compliance_note(study.tapper, study.bus, study.taps, study.hunted)
     if note:
         at = out.index[out["check"] == "campus_voltage"]
