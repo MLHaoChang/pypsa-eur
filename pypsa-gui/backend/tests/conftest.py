@@ -67,6 +67,10 @@ _TEST_APP_DATA_DIR = _tempfile.mkdtemp(prefix="pypsa-gui-test-appdata-")
 os.environ["PYPSAGUI_APP_DATA_DIR"] = _TEST_APP_DATA_DIR
 os.environ["LEGACY_ROOT"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-legacy-")
 os.environ["FLAT_PROJECTS_ROOT"] = _tempfile.mkdtemp(prefix="pypsa-gui-test-flat-")
+# The campus island checks run in the test's own process (gridspine's
+# parallel.ordered_map at one worker), so a monkeypatch reaches them; a test
+# of the worker processes sets its own count.
+os.environ["GRIDSPINE_WORKERS"] = "1"
 # Same reasoning, one step further: this one is UNSET rather than redirected.
 # A developer who exported it — exactly what the importer's rehearsal
 # instructions teach — would otherwise have every local-mode test walk their

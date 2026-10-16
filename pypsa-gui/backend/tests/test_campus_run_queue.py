@@ -108,11 +108,12 @@ def test_an_abort_stops_the_run_between_stages(hub, monkeypatch):
     gate = threading.Event()
     monkeypatch.setattr(ce, "run", fake_run([], gate=gate))
     job = ce.enqueue_run(project, {}, user)
-    assert _wait(lambda: (ce.run_job_state(project) or {}).get("stage") == "island_checks")
+    held = ce.RUN_STAGES[ce.RUN_STAGES.index("size") - 1]             # the stage the gate holds the run at
+    assert _wait(lambda: (ce.run_job_state(project) or {}).get("stage") == held)
     sq.solve_queue.abort(uuid.UUID(job["id"]))
     gate.set()
     assert _wait(lambda: _job(job["id"])["status"] == "aborted"), _job(job["id"])
-    assert ce.run_job_state(project)["stage"] == "island_checks"      # never reached "size"
+    assert ce.run_job_state(project)["stage"] == held                 # never reached "size"
 
 
 def test_a_failing_run_is_a_failed_job_with_its_reason(hub, monkeypatch):

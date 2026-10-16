@@ -4,12 +4,13 @@
 import { useEffect, useState } from 'react'
 import { isActiveRun, type CampusRunJob, type CampusRunStage } from '../api/campusElectrical'
 
-/** Stage names are the backend's `RUN_STAGES`. The island checks hold the
- *  microgrid's frequency sweep and then the I7 cuts: ~55 min on a campus. */
+/** Stage names are the backend's `RUN_STAGES`. The island checks (the
+ *  frequency sweep) and the I7 cuts after them are the slow steps. */
 export const STAGE_LABEL: Record<CampusRunStage, string> = {
   prepare: 'preparing the campus from the saved network',
   rank: 'ranking the critical hours',
-  island_checks: 'island checks: the frequency sweep, then the cuts (the slowest step, up to about an hour)',
+  island_checks: 'island checks: the frequency sweep at the island hours',
+  cuts: 'the frequency cuts: what the failing island events would need (the slowest step)',
   size: 'sizing the transformers, the compensation and the short circuit',
   invest: 'buying the assets from the library, re-checked by AC load flow',
   gfm_settings: 'recommending grid-forming settings from the island hours',
@@ -19,7 +20,7 @@ export const STAGE_LABEL: Record<CampusRunStage, string> = {
 /** The stage as a noun, for a sentence that says where a run failed. */
 const STAGE_NAME: Record<CampusRunStage, string> = {
   prepare: 'preparing the campus', rank: 'ranking the critical hours',
-  island_checks: 'the island checks (frequency sweep and cuts)', size: 'sizing',
+  island_checks: 'the island checks (frequency sweep)', cuts: 'the frequency cuts', size: 'sizing',
   invest: 'the investment step', gfm_settings: 'the grid-forming settings', done: 'finishing',
 }
 
