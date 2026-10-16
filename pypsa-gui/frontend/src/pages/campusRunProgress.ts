@@ -7,7 +7,7 @@ import { isActiveRun, type CampusRunJob, type CampusRunStage } from '../api/camp
 /** Stage names are the backend's `RUN_STAGES`. The island checks (the
  *  frequency sweep) and the I7 cuts after them are the slow steps. */
 export const STAGE_LABEL: Record<CampusRunStage, string> = {
-  prepare: 'preparing the campus from the saved network',
+  prepare: 'preparing the site from the saved network',
   rank: 'ranking the critical hours',
   island_checks: 'island checks: the frequency sweep at the island hours',
   cuts: 'the frequency cuts: what the failing island events would need (the slowest step)',
@@ -19,7 +19,7 @@ export const STAGE_LABEL: Record<CampusRunStage, string> = {
 
 /** The stage as a noun, for a sentence that says where a run failed. */
 const STAGE_NAME: Record<CampusRunStage, string> = {
-  prepare: 'preparing the campus', rank: 'ranking the critical hours',
+  prepare: 'preparing the site', rank: 'ranking the critical hours',
   island_checks: 'the island checks (frequency sweep)', cuts: 'the frequency cuts', size: 'sizing',
   invest: 'the investment step', gfm_settings: 'the grid-forming settings', done: 'finishing',
 }
