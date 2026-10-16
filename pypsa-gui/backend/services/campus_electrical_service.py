@@ -101,6 +101,7 @@ try:
     from gridspine.drivers import campus_study as cs
     from gridspine.drivers.campus_study import SizingCriteria
     from gridspine.schema.contracts import ContractError
+    from gridspine.static import parallel
     from gridspine.static.parallel import Stopped
 
     CAMPUS_AVAILABLE = True
@@ -108,7 +109,7 @@ try:
 except ImportError as exc:                      # pragma: no cover - build-shape branch
     CAMPUS_AVAILABLE = False
     CAMPUS_IMPORT_ERROR = str(exc)
-    cs = SizingCriteria = None
+    cs = SizingCriteria = parallel = None
 
     class ContractError(Exception):
         """Stand-in so the `except ContractError` clauses below still parse."""
@@ -1139,7 +1140,7 @@ def _island_hours_files() -> tuple:
     return (*cs.ISLAND_STATIC_CSV.values(), cs.ISLAND_STATIC_SUMMARY_JSON,
             cs.FREQ_E1_HOURLY_CSV, cs.FREQ_EVENTS_CSV, cs.FREQ_LOSSES_CSV, cs.FREQ_BRIDGE_CSV,
             cs.FREQ_PLANNED_CSV, cs.FREQ_UPS_CSV, cs.FREQ_SUMMARY_JSON, cs.FREQ_CUTS_CSV,
-            cs.GFM_SETTINGS_JSON)
+            cs.WORKERS_JSON, cs.GFM_SETTINGS_JSON)
 
 
 def _run_island_hours(run_dir: Path, should_stop=None) -> bool:
@@ -1150,8 +1151,9 @@ def _run_island_hours(run_dir: Path, should_stop=None) -> bool:
     requirements and the run has the I3a island tables it reads. An earlier
     run's files are removed first, so nothing stale is read as this run's.
     True when the frequency check ran, so its cuts are due (``_run_cuts``).
-    ``should_stop`` is asked between the frequency check's hours; a True ends
-    the run there (``CampusRunAborted``)."""
+    The hours run over ``parallel.workers()`` processes; ``should_stop`` is
+    asked between them, and a True ends the run there
+    (``CampusRunAborted``)."""
     from services.adequacy.island_config import ISLAND_UNIT_HOURLY_CSV
 
     for name in _island_hours_files():
@@ -1163,7 +1165,7 @@ def _run_island_hours(run_dir: Path, should_stop=None) -> bool:
     if island["requirements"] is None or not (run_dir / ISLAND_UNIT_HOURLY_CSV).is_file():
         return False
     with _aborted_on_stop("island_checks"):
-        cs.island_frequency_campus(run_dir, should_stop=should_stop)
+        cs.island_frequency_campus(run_dir, workers=parallel.workers(), should_stop=should_stop)
     return True
 
 
@@ -1171,7 +1173,7 @@ def _run_cuts(run_dir: Path, should_stop=None) -> None:
     """I7: the cuts what fails in the frequency check would need,
     ``should_stop`` asked between the failing events."""
     with _aborted_on_stop("cuts"):
-        cs.cuts_campus(run_dir, should_stop=should_stop)
+        cs.cuts_campus(run_dir, workers=parallel.workers(), should_stop=should_stop)
 
 
 @contextlib.contextmanager

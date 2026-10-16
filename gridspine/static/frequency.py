@@ -397,8 +397,8 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0, islanding
             break
         if i == n - 1:
             break
-        # k1 is the balance just taken at (x, tt), unless an E4 pickup may
-        # have changed the event since (``advance``)
+        # k1 is the balance just taken at (x, tt); an event with
+        # ``advance`` may have changed itself since, so its k1 is taken again
         k1 = deriv(x, tt, None if advance else rocof)
         k2 = deriv(add(x, k1, dt / 2), tt + dt / 2) if k1 else None
         k3 = deriv(add(x, k2, dt / 2), tt + dt / 2) if k2 else None
@@ -1324,7 +1324,7 @@ def _study_hour(c, hour_key):
 
 
 def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_step_mw=None,
-                           dt=1e-3, t_end=20.0, f0=F0, workers=None, should_stop=None) -> FrequencyStudy:
+                           dt=1e-3, t_end=20.0, f0=F0, workers=1, should_stop=None) -> FrequencyStudy:
     """E1–E6 at the island critical ``hours``, ``[(period, hour)]`` (plan
     I6b; I3b chooses them), in each of the campus's island ``scenarios``:
 
@@ -1340,8 +1340,8 @@ def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_
 
     Each event is judged against the limits and the equipment, and flagged
     for EMT/RMS where ``emt_flags`` says so. The hours run over ``workers``
-    processes (``parallel.ordered_map``; default ``parallel.workers()``),
-    the tables in the hours' order whatever the count; ``should_stop()`` is
+    processes (``parallel.ordered_map``; default 1, in this process), the
+    tables in the hours' order whatever the count; ``should_stop()`` is
     asked between hours (``parallel.Stopped``)."""
     import pandas as pd
 
@@ -1701,8 +1701,23 @@ def _event_cuts(c, r):
     return out
 
 
+def cut_events(events, sweep=None) -> list:
+    """The event rows ``propose_cuts`` inverts, in its order: the failing
+    E1, E2, E3 and E5 of ``events`` (Q8 reruns aside), then the failing
+    rows of ``sweep``."""
+    failing = []
+    if events is not None and len(events):
+        e = events[events["event"].isin(["E1", "E2", "E3", "E5"])]
+        if "i_max_pu" in e:
+            e = e[e["i_max_pu"].isna()]
+        failing += [r for _, r in e[~e["ok"].astype(bool)].iterrows()]
+    if sweep is not None and len(sweep):
+        failing += [r for _, r in sweep[~sweep["ok"].astype(bool)].iterrows()]
+    return failing
+
+
 def propose_cuts(campus, hourly, events, sweep=None, island_hourly=None, island_unit_hourly=None, f0=F0,
-                 study=(1e-3, 20.0), sweep_run=(5e-3, 10.0), workers=None, should_stop=None):
+                 study=(1e-3, 20.0), sweep_run=(5e-3, 10.0), workers=1, should_stop=None):
     """I7's cuts (``CUT_COLUMNS``) for the failing events of a frequency
     study: E1, E2, E3 and E5 in ``events`` (``FrequencyStudy.events``, Q8
     reruns aside) and E1 in ``sweep`` (``e1_every_hour``). Each event is
@@ -1720,14 +1735,7 @@ def propose_cuts(campus, hourly, events, sweep=None, island_hourly=None, island_
     _limits(campus)                                  # no requirements: refused here, not in a worker
     ih = validate_island_hourly(island_hourly) if island_hourly is not None else None
     iu = validate_island_unit_hourly(island_unit_hourly) if island_unit_hourly is not None else None
-    failing = []
-    if events is not None and len(events):
-        e = events[events["event"].isin(["E1", "E2", "E3", "E5"])]
-        if "i_max_pu" in e:
-            e = e[e["i_max_pu"].isna()]
-        failing += [r for _, r in e[~e["ok"].astype(bool)].iterrows()]
-    if sweep is not None and len(sweep):
-        failing += [r for _, r in sweep[~sweep["ok"].astype(bool)].iterrows()]
+    failing = cut_events(events, sweep)
     parts = parallel.ordered_map(_event_cuts, failing, _cuts_context,
                                  (campus, hourly, ih, iu, f0, study, sweep_run),
                                  n_workers=workers, should_stop=should_stop)

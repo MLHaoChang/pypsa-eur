@@ -1,10 +1,11 @@
 """Compare two directories written by ``test_campus_island_equivalence.py``
 (two commits, or two worker counts): every file of every site's run
-directory byte for byte. The manifest is compared without the keys that
-name how and where the run was made rather than what it found: the saved
-network's path (a fresh temporary project each run), its SHA-256 (the
-netCDF export's bytes vary with the process's ``PYTHONHASHSEED``, the same
-network giving the same bytes only under the same seed) and ``workers``.
+directory byte for byte. Left out: ``campus_workers.json`` (how many
+processes ran, not what they found), and in the manifest the keys that name
+where the run was made: the saved network's path (a fresh temporary
+project each run) and its SHA-256 (the netCDF export's bytes vary with the
+process's ``PYTHONHASHSEED``, the same network giving the same bytes only
+under the same seed).
 
     python tests/campus_island_equivalence.py A B
 
@@ -15,8 +16,10 @@ import sys
 from pathlib import Path
 
 MANIFEST = "campus_manifest.json"
-#: Manifest keys about the run's making, not its results.
-MANIFEST_IGNORED = ("network_path", "network_sha256", "workers")
+#: Manifest keys about where the run was made, not its results.
+MANIFEST_IGNORED = ("network_path", "network_sha256")
+#: Files about how the run was made, not its results.
+FILES_IGNORED = ("campus_workers.json",)
 
 
 def _manifest(path):
@@ -30,8 +33,9 @@ def compare(a: Path, b: Path) -> list:
     if sites != sorted(p.name for p in b.iterdir() if p.is_dir()):
         diffs.append(f"sites differ: {sites} vs {sorted(p.name for p in b.iterdir() if p.is_dir())}")
     for site in sites:
-        fa = {p.relative_to(a / site) for p in (a / site).rglob("*") if p.is_file()}
-        fb = {p.relative_to(b / site) for p in (b / site).rglob("*") if p.is_file()} if (b / site).is_dir() else set()
+        fa = {p.relative_to(a / site) for p in (a / site).rglob("*") if p.is_file() and p.name not in FILES_IGNORED}
+        fb = ({p.relative_to(b / site) for p in (b / site).rglob("*") if p.is_file() and p.name not in FILES_IGNORED}
+              if (b / site).is_dir() else set())
         for rel in sorted(fa ^ fb):
             diffs.append(f"{site}/{rel}: only in {'A' if rel in fa else 'B'}")
         for rel in sorted(fa & fb):

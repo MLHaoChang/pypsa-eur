@@ -231,6 +231,10 @@ FREQ_UPS_CSV = "campus_freq_ups.csv"
 FREQ_SUMMARY_JSON = "campus_freq_summary.json"
 FREQ_CUTS_CSV = "campus_freq_cuts.csv"
 GFM_SETTINGS_JSON = "campus_gfm_settings.json"
+#: How many processes the island checks ran on, by stage (``_record_workers``).
+#: Kept out of ``CAMPUS_MANIFEST``, which is hashed as an input elsewhere:
+#: the results do not depend on it.
+WORKERS_JSON = "campus_workers.json"
 PSSE_DIR = "psse"
 #: ``island_static_campus``'s files, by ``IslandStatic`` table.
 ISLAND_STATIC_CSV = {
@@ -416,24 +420,24 @@ def island_hours(run_dir) -> list:
 
 
 
-def _record_workers(run_dir, stage, n):
-    """Note in the run's manifest how many worker processes ``stage`` ran
-    on (``parallel.workers``); the results do not depend on it."""
-    path = run_dir / CAMPUS_MANIFEST
-    if not path.is_file():
-        return
-    manifest = json.loads(path.read_text())
-    manifest.setdefault("workers", {})[stage] = n
-    _write_text_atomic(path, json.dumps(manifest, indent=2))
+def _record_workers(run_dir, stage, n, fresh=False):
+    """Note in ``WORKERS_JSON`` how many processes ``stage`` ran on
+    (``parallel.used``); ``fresh`` starts the file over (the frequency
+    check, which the cuts follow)."""
+    path = run_dir / WORKERS_JSON
+    record = {} if fresh or not path.is_file() else json.loads(path.read_text())
+    record[stage] = n
+    _write_text_atomic(path, json.dumps(record, indent=2))
 
 
-def island_frequency_campus(run_dir, every_hour: bool = True, workers=None, should_stop=None) -> dict:
+def island_frequency_campus(run_dir, every_hour: bool = True, workers=1, should_stop=None) -> dict:
     """The island frequency check of a ranked run (plan I6, see the module
     docstring). Needs the campus island requirements and the island tables
     (plan I3a). ``every_hour=False`` skips the every-hour E1. The island
-    hours run over ``workers`` processes (default ``parallel.workers()``,
-    noted in the manifest); ``should_stop()`` is asked between them
-    (``parallel.Stopped``, nothing written). Returns the summary it writes."""
+    hours run over ``workers`` processes (default 1, this one; the count
+    used is noted in ``WORKERS_JSON``); ``should_stop()`` is asked between
+    them (``parallel.Stopped``, nothing written). Returns the summary it
+    writes."""
     from gridspine.static import frequency as F
     from gridspine.static import parallel
 
@@ -451,10 +455,9 @@ def island_frequency_campus(run_dir, every_hour: bool = True, workers=None, shou
     scenarios = campus.island["requirements"]["scenarios"]
     sweep = (F.e1_every_hour(campus, hourly, hourly_island, unit)
              if every_hour and "seamless" in scenarios else pd.DataFrame(columns=list(F.E1_HOURLY_COLUMNS)))
-    n = parallel.workers() if workers is None else max(1, int(workers))
-    study = F.campus_frequency_study(campus, hourly, hours, island_unit_hourly=unit, workers=n,
+    study = F.campus_frequency_study(campus, hourly, hours, island_unit_hourly=unit, workers=workers,
                                      should_stop=should_stop)
-    _record_workers(run_dir, "island_frequency", n)
+    _record_workers(run_dir, "island_frequency", parallel.used(workers, len(hours)), fresh=True)
     for name, df in ((FREQ_E1_HOURLY_CSV, sweep), (FREQ_EVENTS_CSV, study.events), (FREQ_LOSSES_CSV, study.losses),
                      (FREQ_BRIDGE_CSV, study.bridge), (FREQ_PLANNED_CSV, study.planned), (FREQ_UPS_CSV, study.ups)):
         _write_text_atomic(run_dir / name, df.to_csv(index=False))
@@ -513,7 +516,7 @@ def island_static_campus(run_dir) -> dict:
     return summary
 
 
-def cuts_campus(run_dir, workers=None, should_stop=None) -> pd.DataFrame:
+def cuts_campus(run_dir, workers=1, should_stop=None) -> pd.DataFrame:
     """I7's frequency cuts for a run whose frequency check has run
     (``island_frequency_campus``): the failing E1, E2, E3 and E5 events at
     the island hours and E1 at every hour, each re-run and inverted
@@ -531,12 +534,12 @@ def cuts_campus(run_dir, workers=None, should_stop=None) -> pd.DataFrame:
     campus = load_run_campus(run_dir)
     tables = _island_tables(run_dir)
     hourly, _ = campus_tables(run_dir)
-    n = parallel.workers() if workers is None else max(1, int(workers))
-    cuts = F.propose_cuts(campus, hourly, pd.read_csv(events_path), pd.read_csv(sweep_path),
+    events, sweep = pd.read_csv(events_path), pd.read_csv(sweep_path)
+    cuts = F.propose_cuts(campus, hourly, events, sweep,
                           island_hourly=tables[1] if tables is not None else None,
                           island_unit_hourly=tables[0] if tables is not None else None,
-                          workers=n, should_stop=should_stop)
-    _record_workers(run_dir, "cuts", n)
+                          workers=workers, should_stop=should_stop)
+    _record_workers(run_dir, "cuts", parallel.used(workers, len(F.cut_events(events, sweep))))
     _write_text_atomic(run_dir / FREQ_CUTS_CSV, cuts.to_csv(index=False))
     return cuts
 

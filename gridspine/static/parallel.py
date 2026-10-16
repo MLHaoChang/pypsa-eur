@@ -7,15 +7,24 @@ worker. The workers are spawned (never forked: the backend calls this from
 a thread), build the shared context once each with ``init(*initargs)`` and
 return ``fn(context, item)`` per item; serially the context is built once in
 the caller, so nothing is kept between maps. A worker's exception is raised
-here with its traceback (the pool attaches it as the cause); a worker that
-dies ends the map (``BrokenProcessPool``). ``should_stop()`` is asked between items
-and, once True, the pending items are cancelled, the running workers are
-terminated and ``Stopped`` is raised, with no worker left behind.
+here with its traceback (the pool attaches it as the cause), the first
+failing item in input order, as the serial loop would; a worker that dies
+ends the map (``BrokenProcessPool``). ``should_stop()`` is asked between
+items and, once True, the pending items are cancelled, the running workers
+are terminated and ``Stopped`` is raised, with no worker left behind.
+
+A caller that spawns re-imports its ``__main__`` in every worker, so a
+script that calls this without an ``if __name__ == "__main__"`` guard fails;
+gridspine's own callers therefore default to one worker, and the campus
+service asks for ``workers()`` explicitly.
 """
+import logging
 import multiprocessing
 import os
 import sys
 from concurrent.futures import FIRST_EXCEPTION, ProcessPoolExecutor, wait
+
+logger = logging.getLogger(__name__)
 
 #: The environment variable that sets the worker count (1: serial).
 WORKERS_ENV = "GRIDSPINE_WORKERS"
@@ -43,24 +52,38 @@ class Stopped(Exception):
 
 
 def workers() -> int:
-    """The worker count: ``GRIDSPINE_WORKERS`` when set, else 1 in a frozen
-    (packaged) app, else one less than the CPUs, at most
+    """The worker count for the campus service: 1 in a frozen (packaged)
+    app, whatever ``GRIDSPINE_WORKERS`` says (spawning from the frozen
+    binary is untested); else ``GRIDSPINE_WORKERS`` when it is a whole
+    number (any other value is warned about and runs serially); else one
+    less than the CPUs this process may use, at most
     ``MAX_DEFAULT_WORKERS``."""
-    env = os.environ.get(WORKERS_ENV, "").strip()
-    if env:
-        return max(1, int(env))
     if getattr(sys, "frozen", False):
         return 1
-    return max(1, min((os.cpu_count() or 1) - 1, MAX_DEFAULT_WORKERS))
+    env = os.environ.get(WORKERS_ENV, "").strip()
+    if env:
+        try:
+            return max(1, int(env))
+        except ValueError:
+            logger.warning("%s=%r is not a whole number; the island checks run serially", WORKERS_ENV, env)
+            return 1
+    cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+    return max(1, min(cpus - 1, MAX_DEFAULT_WORKERS))
 
 
-def ordered_map(fn, items, init, initargs=(), *, n_workers=None, should_stop=None) -> list:
+def used(n_workers, n_items) -> int:
+    """The processes ``ordered_map`` runs ``n_items`` on at ``n_workers``:
+    never more than the items, and 1 (the caller's own) when serial."""
+    return max(1, min(max(1, int(n_workers)), n_items))
+
+
+def ordered_map(fn, items, init, initargs=(), *, n_workers=1, should_stop=None) -> list:
     """``[fn(init(*initargs), item) for item in items]``, the context built
-    once per process, over ``n_workers`` processes (default ``workers()``).
+    once per process, over ``used(n_workers, len(items))`` processes.
     ``fn`` and ``init`` must be module-level functions, and the arguments
     and results picklable."""
     items = list(items)
-    n = min(workers() if n_workers is None else max(1, int(n_workers)), len(items))
+    n = used(n_workers, len(items))
     if n <= 1:
         context, out = init(*initargs), []
         for item in items:
@@ -78,15 +101,21 @@ def ordered_map(fn, items, init, initargs=(), *, n_workers=None, should_stop=Non
             if should_stop is not None and should_stop():
                 raise Stopped
             finished, pending = wait(pending, timeout=POLL_S, return_when=FIRST_EXCEPTION)
-            for f in finished:
-                if f.exception() is not None:
-                    raise f.exception()
+            failed = [i for i, f in enumerate(futures) if f in finished and f.exception() is not None]
+            if failed:
+                # the serial loop would raise the first failing item: let the
+                # items before this one finish, then raise the first failure
+                for f in futures[failed[0] + 1:]:
+                    f.cancel()
+                wait(futures[:failed[0]])
+                raise next(f.exception() for f in futures[:failed[0] + 1] if f.exception() is not None)
         out = [f.result() for f in futures]
         done_ok = True
         return out
     finally:
         if not done_ok:
             # cancel what has not started, end what has, then reap them all
+            # (Python 3.14 has ProcessPoolExecutor.terminate_workers for this)
             for p in list((getattr(pool, "_processes", None) or {}).values()):
                 p.terminate()
         pool.shutdown(wait=True, cancel_futures=True)
