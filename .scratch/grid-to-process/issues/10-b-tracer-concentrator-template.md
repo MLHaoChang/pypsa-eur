@@ -11,7 +11,7 @@ Read [the design](../design.md) §3.B first.
 
 ## What to build
 
-The template on the `year_3h` time base, with every number from design §3.B and its label in
+The template on the hourly `year` time base (D4), with every number from design §3.B and its label in
 the ledger:
 
 - the flowsheet, with the mine as a fixed ore Generator;

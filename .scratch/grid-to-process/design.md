@@ -34,8 +34,8 @@ has a recommendation. Nothing in this design is built until the owner approves i
 - **Example A** reuses the staged H2 hub and upstream PyPSA-Eur's Haber-Bosch data. It fits the
   representative week if delivery is continuous. It is the tracer bullet for P1 and P2.
 - **Example B** needs P3. A concentrate stockpile shipped every few weeks cannot be valued
-  inside one cyclic week. The recommendation is a chronological year at 3-hour resolution for
-  planning, plus an hourly rolling week to check operation (D4).
+  inside one cyclic week. Owner decision D4: a full hourly chronological year per period for
+  planning, with the solve time and memory measured before B is built.
 
 ## 1. Concept and glossary
 
@@ -225,7 +225,7 @@ Changes:
    - Ticket 03 widens the check to Links.
 
 **Why linearised UC in planning, and its condition** (gatekeeper: yes, with conditions):
-- The plan is multi-period with extendable grid assets. Binary UC on 504 (A) or 8,760 (B)
+- The plan is multi-period with extendable grid assets. Binary UC on 504 (A) or 26,280 (B)
   snapshots, times several units, turns a seconds-scale LP into a MILP of unknown time.
 - **The relaxation is weak.** A fractional u lets a unit sit "half on" below its real minimum
   load and spread min up/down. So it *understates* restart losses (the shortfall) and the
@@ -439,10 +439,9 @@ anchors that are sourced are methods, not site numbers.
 firm + non-firm. The template's test pins that the 2027 plan without PV and BESS loses
 production, so the example has something to decide.
 
-**Context.** The coordinator relays a Hitachi Energy and Rockwell Automation grid-to-process
-announcement of 15 Oct 2026 aimed at mining and metals. A web search on 2026-10-16 did not find
-it (it found Hitachi Energy's June 2026 FRIEM MoU on electrified metals). B's motivation does not
-depend on that announcement. The design cites it only as the coordinator's context.
+**Context.** On 15 Oct 2026 (Zurich), Hitachi Energy and Rockwell Automation announced a
+collaboration on an "integrated grid-to-process architecture", aimed at mining and metals first:
+[press release](https://www.hitachienergy.com/news-and-events/press-releases/2026/10/hitachi-energy-and-rockwell-automation-unite-power-and-automation-to-help-industries-accelerate-electrification).
 
 #### Gaps it exercises
 
@@ -482,9 +481,8 @@ depend on that announcement. The design cites it only as the coordinator's conte
 
 #### Acceptance checks (B)
 
-- The template builds and solves on the chronological time base (D4) within the time budget
-  measured in ticket 09. The budget is proposed at ≤ 10 min on the CI runner; ticket 09 measures
-  it.
+- The template builds and solves on the hourly chronological year (D4) within the budget ticket
+  09 sets: proposed ≤ 30 min on the CI runner, with memory measured and reported.
 - **Mass balance.** Ore in = Σ crusher; crusher = Σ mills + Δ stockpile; concentrate =
   mass-pull × mill throughput; shipments = production + lost − Δ shed. Each holds to 1e-6 per
   period.
@@ -521,54 +519,53 @@ Three options, compared on what B needs:
 
 | Option | Snapshots (3 periods) | LP size vs today's 504 | Chronology | Engine change |
 |---|---|---|---|---|
-| (a) Full hourly year per period | 26,280 | ≈ 52× | exact | none (`stage_network` takes a year) |
-| **(b) Chronological year at 3 h** | 8,760 | ≈ 17× | exact at 3 h | none. Stores weight 3 h; `min_up/down` converted to snapshots (4 h → 2) |
+| **(b) Full hourly year per period (decided, D4)** | 26,280 | ≈ 52× | exact | none (`stage_network` takes a year) |
+| (a) Chronological year at 3 h | 8,760 | ≈ 17× | exact at 3 h | none, but every place that assumes 1 h snapshots needs an audit (below) |
 | (c) Chained representative days (Kotzur et al. 2018, *Applied Energy* 213: inter-period storage linking) | ≈ 3 × 24 × 12 typical days + 365 linking variables | ≈ 2× | approximate | yes: custom `extra_functionality` rows for intra and inter storage (gated, solver) |
 
-**Recommendation: (b) for planning, D4.**
+**Decided: (b), a full hourly year for planning** (owner, 2026-10-16, D4).
 
-- It needs no engine change. `stage_network` already tiles any series. The template supplies a
-  year of 3-hour data instead of a week, with weights `objective` 3 and `stores` 3.
-- It keeps the shipment schedule exact.
-- **The solve-time cost:**
-  - A's week solves in seconds today. LP time grows a little faster than linearly with size, so
-    (b) is estimated at minutes on HiGHS.
-  - Ticket 09 measures it before the template is built, and the owner sees the number (D4b).
-  - Option (a) is the fallback if 3 h blurs restarts too much: a 4 h mill restart is 1–2
-    snapshots at 3 h.
-- **Option (c)** is the long-term answer for large clients (a year at hourly resolution for many
-  sites). It is gated engine work, so it goes on the later list.
-- **PV and wind profiles:** a year of renewables.ninja-style or `p_max_pu` series per site. The
-  demo uses the same synthetic shape repeated, with seasonal scaling (demo, ledgered).
+- **No engine change.**
+  - `stage_network` already tiles any series. The template supplies 8,760 hourly snapshots per
+    period instead of a week.
+  - The weightings are `objective` = `generators` = `stores` = 1.
+  - The investment-period weighting stays the period's years.
+- **The shipment schedule is exact.** Every snapshot is one hour, as everywhere in the app
+  today, so tariffs, 15-min billing assumptions, adequacy metrics and finance annualisation see
+  the time step they already handle.
+- **Min up and down times stay in hours** (1 snapshot = 1 h). There is no conversion and no
+  rounding.
 - **Stores** are cyclic per period over the year (`e_cyclic_per_period`), which is physical over
   a year.
-- **Min up and down times.** PyPSA counts them in snapshots, so the rule is
-  ⌈hours / Δt⌉ (4 h → 2 at 3 h). The ledger says it rounds up.
-- **Not usable until ticket 09 covers the code that assumes 1 h or 168 h** (gatekeeper). Each
-  place gets a test that runs the same dispatch at 1 h and aggregated to 3 h and compares, or a
-  stated refusal:
-  - **`services/commercial/tariff_engine.py`:**
-    - energy items use the interval length;
-    - a demand or capacity charge on 3 h averages understates a 15-min peak. It needs either a
-      ledgered peak factor or a refusal; 09 decides which;
-    - `_HOURS_PER_YEAR` is used for capacity items.
-  - **`services/commercial/lp_bindings.py`:** kWh = MW × the interval's hours, not × 1.
-  - **`services/commercial/connection.py`:** nyears = Σw/8760, and the FCA curtailment-hours
-    target.
-  - **`services/results/finance_case.py`:** the annualisation 8760/hours (`:2220-2226`) and the
-    per-interval import price (`:1819-1888`).
-  - **`services/adequacy/metrics.py`:** `HOURS_PER_YEAR` and its ±2 % tolerance. LOLE and EENS
-    are weighted by 3 h.
-  - **`services/solver_service.py`:**
-    - `rolling_horizon` and `lf_period_length_h`: snapshots or hours? State which.
-    - the MIP gating at `:873`.
-  - **168 and 8760 literals:** `routers/network_time_axis.py`, `time_aggregation_service.py`,
-    `validation_service.py`, `profile_shapes.py` and `study/packs.py`. Grep and classify each.
-  - **Island and campus:**
-    - the island rows' bridge-energy and window terms (`solver/island.py`);
-    - gridspine's per-hour campus tables and ranking.
+- **PV and wind profiles:** a year of `p_max_pu` series per site. The demo uses the synthetic
+  daily shape with seasonal scaling (demo, ledgered).
+- **The solve-time and memory cost.** It is about 52× today's LP, estimated at minutes to tens
+  of minutes on HiGHS.
+  - Ticket 09 measures the solve time and peak memory of a B-sized network (about 30
+    components, 3 periods) on the CI runner, and reports both to the owner before template 10 is
+    built.
+  - **Proposed budget: ≤ 30 min and within the runner's memory.**
+  - **If it is exceeded:** B waits, and option (c), chained representative days, comes back as
+    a later gated solver item with its own plan check. Option (a) is not the fallback, because
+    of the audit below.
+- **Still to check in 09** (where code assumes one week per period, not one hour per snapshot):
+  - the 168 literals in `rolling_horizon` and `lf_period_length_h` (`solver_service.py`);
+  - `time_aggregation_service.py`, `routers/network_time_axis.py`, `validation_service.py`,
+    `profile_shapes.py` and `study/packs.py`;
+  - the size of the campus study's per-hour tables (26,280 rows) and its ranking.
 
-    These need a test, or a stated refusal of island and campus studies on a 3 h axis.
+  Each is tested on the hourly year, or refused there with a reason.
+- **The binary UC check (§2.3)** still re-solves one week per period.
+
+**If 3 h is wanted later** (option a, not planned): the gatekeeper's list (2026-10-16) is what it
+would need. Each place gets a test comparing 1 h with 3 h, or a refusal:
+- `tariff_engine.py`: demand charges on 3 h averages need a peak factor or a refusal;
+- `lp_bindings.py`: kWh = MW × the interval's hours;
+- `connection.py`: nyears and the FCA hours;
+- `finance_case.py`: annualisation `:2220-2226` and import price `:1819-1888`;
+- `adequacy/metrics.py`: `HOURS_PER_YEAR` and the weights;
+- the island rows and the campus tables;
+- min up/down as ⌈hours / Δt⌉.
 
 ### 4.3 The minutes-scale layer (restart, motor start, dip)
 
@@ -646,7 +643,7 @@ work, roughly.
 | 06 | A investment case: grey NH3 counterfactual via `ReferencePurchase`, product flows in the engine | 05 | **yes** (IC) | opus | S–M |
 | 07 | Process-unit form ("Process unit" type) and Guided display of the process view | 02, 04 | no | sonnet | M |
 | 08 | P2: criticality tiers and lost-production value per product (adequacy and DtC read the tiers) | 05 | **yes** (adequacy) | opus | L |
-| 09 | P3: chronological 3 h year as a staged-template time base, with a measured solve-time budget, the 1 h / 168 h audit, and the inventory-delivery validator rule | 03 | **yes** (solver, as it changes weightings) | opus | L |
+| 09 | P3: hourly chronological year as a staged-template time base, with measured solve time and memory (reported to the owner before 10), the one-week-per-period audit, and the inventory-delivery validator rule | 03 | **yes** (solver: it changes the staged templates' time base and adds a validator rule) | opus | M |
 | 10 | **B tracer:** `eh_concentrator_staged` template | 08, 09 | no | sonnet | M |
 | 11 | B investment case: re-solve counterfactual for a product Load (`owner_conversion_load`) | 10 | **yes** (IC) | opus | M |
 | 12 | Minutes-scale: motor-start ΔU check and process restart sequence (gridspine static + results) | 10 | **yes** (gridspine) | opus | L |
@@ -685,44 +682,57 @@ Critical paths:
 
 Each decision lists its options, with the recommended option first.
 
-- **D1, the product for A.**
+**All decided by the owner on 2026-10-16 (about 13:50 CEST):**
+- D1, D2, D3, D5, D6 and D7 as recommended.
+- D4 changed to (b), a full hourly year.
+
+The options are kept below for the record.
+
+- **D1, the product for A. Decided (a), green ammonia (owner, 2026-10-16).**
   - (a) Green ammonia — *recommended*: the coordinator's pick. Upstream PyPSA-Eur already has
     the link, the data and the conventions, and the investment case's `ReferencePurchase` fits
     it unchanged.
   - (b) Green steel (H2-DRI). Upstream has DRI data too, but it brings iron ore and scrap
     materials and a heat carrier, so more of P1 is needed before the first result.
-- **D2, product units.**
+- **D2, product units. Decided (a), MWh for energy products and t for materials (owner,
+  2026-10-16).**
   - (a) Energy products in MWh (LHV), material products in t; the UI converts NH3 to t —
     *recommended*: it matches upstream, and `ReferencePurchase` and the existing results work
     for A unchanged.
   - (b) Everything in t. That is uniform for the client but breaks the reuse and needs a unit
     layer in the commercial engine.
-- **D3, Haber-Bosch electricity and ASU.**
+- **D3, Haber-Bosch electricity and ASU. Decided (a), ASU folded into the HB unit (owner,
+  2026-10-16).**
   - (a) One HB unit whose electricity input includes the ASU, with the value pinned against
     technology-data — *recommended*: as upstream does. The 0.2473 unit question is settled in
     ticket 05 before any result ships.
   - (b) A separate ASU unit with an N2 buffer. This is more flexibility to show, but every ASU
     number is demo.
-- **D4, the time base for B.**
-  - (a) A chronological year at 3 h per period — *recommended*: exact chronology for a 21-day
-    shipment cycle, no engine change, and an estimated solve of minutes.
-  - (b) A full hourly year: exact, but about 3× (a) in size.
+- **D4, the time base for B. Decided (b), a full hourly chronological year (owner, 2026-10-16;
+  the design had recommended (a)).**
+  - (a) A chronological year at 3 h per period: exact chronology for a 21-day shipment cycle,
+    smaller, but it needs the 1 h audit.
+  - (b) A full hourly year: exact, about 3× (a) in size, no audit. **Chosen.**
   - (c) Chained representative days: fast, but gated engine work, and approximate.
-  - **D4b:** accept (a) only if ticket 09's measured solve is ≤ 10 min on the CI runner; else
-    come back with the number.
-- **D5, feedback loops.**
+  - **D4b:** ticket 09 measures the solve time and memory and reports them before B is built.
+    The proposed budget is ≤ 30 min on the CI runner. If it is exceeded, option (c) becomes a
+    later gated item (§4.2).
+- **D5, feedback loops. Decided (a), none new in this package (owner, 2026-10-16).**
   - (a) None new in this package. Grid results are fed forward into lost tonnes and EUR (§5),
     and P4 comes later — *recommended*: #332 is in the island code, and feed-forward already
     answers the client's questions.
   - (b) Add the internal-limits loop now (P4).
-- **D6, process sizing.**
+- **D6, process sizing. Decided (a), process units are fixed client inputs (owner,
+  2026-10-16).**
   - (a) Process units are fixed client inputs. The plan sizes grid, energy and inventory —
     *recommended*: this avoids committable-and-extendable big-M (owner decision 2026-10-13), and
     the client's flowsheet is a given.
   - (b) Make the process size a decision (MILP or a sweep over discrete sizes).
-- **D7, slurry or surge capacity between grinding and flotation in B.**
+- **D7, slurry or surge capacity between grinding and flotation in B. Decided (a), none (owner,
+  2026-10-16).**
   - (a) None: grinding and flotation run as one line — *recommended*: this is the usual plant
-    practice at plan scale, and a small surge tank adds nothing at 3-hour steps.
+    practice at plan scale, and a small surge tank (minutes of hold-up) adds little at hourly
+    steps.
   - (b) A surge tank Store.
 
 ## Comments
@@ -734,9 +744,12 @@ Each decision lists its options, with the recommended option first.
     period, and a flag threshold applies (§2.3).
   - **(b)** Refuse `start_up_cost` in templates, warn on user networks, with "weighted" defined
     (§2.3).
-  - **(c)** 3 h snapshots are not usable until ticket 09 covers the listed places (§4.2).
+  - **(c)** 3 h snapshots are not usable until the listed places are covered. That is moot now
+    that D4 chose an hourly year; the list is kept in §4.2 for a later 3 h option.
   - **(d)** Gating:
     - the validator is gated;
     - the lost-production value is gated, and is never VoLL;
     - buy-in is kept separate from shortfall, with lost value > buy-in (§2.1, §3.A, §6).
   - The design PR itself needs no gatekeeper OK.
+- **2026-10-16, owner decisions** (relayed by the coordinator): D1–D3 and D5–D7 as
+  recommended; D4 changed to a full hourly year. Then: "Merge, start ammonia path".
