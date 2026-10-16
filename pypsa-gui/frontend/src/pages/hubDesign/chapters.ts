@@ -40,10 +40,15 @@ export interface ChapterInputs {
   /** `notHub`: the campus route answered that this project has no campus (409). */
   grid: { campus: CampusState | null; notHub: boolean }
   reliability: { hasResults: boolean; running: boolean; lole: number | null; target: number | null
-                 verdict: 'pass' | 'fail' | 'inconclusive' | null }
+                 verdict: 'pass' | 'fail' | 'inconclusive' | null
+                 /** The review says the study is out of date (N4). */
+                 stale?: boolean }
   /** `gfm`: the campus GFM settings (null when the project has no campus or no island). */
   operation: { status: SimulationStatus | null; gfm?: GfmSettingsState | null }
 }
+
+/** Why a study figure is dimmed (UX review N4): the network was solved or edited after the study. */
+export const STALE_TILE_REASON = 'The network changed since the study ran. Run the study again to refresh.'
 
 const ORDER: ChapterId[] = ['investment', 'grid_plan', 'reliability', 'operation']
 const groupLabel = (id: ChapterId) => RESULT_GROUPS.find(g => g.id === id)?.label ?? id
@@ -125,7 +130,8 @@ function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 
     : r.verdict === 'inconclusive' ? 'Not decided' : null
   const basis = r.target == null ? 'No goal set'
     : `${verdict ? `${verdict}: ` : ''}the goal is ${Number(r.target.toPrecision(6))} h/yr`
-  return { label, value: String(r.lole), unit: 'h/yr', state: 'ready', basis, open }
+  return { label, value: String(r.lole), unit: 'h/yr', state: r.stale ? 'stale' : 'ready', basis, open,
+    reason: r.stale ? STALE_TILE_REASON : undefined }
 }
 
 function control(gfm: GfmSettingsState | null | undefined): ChapterTile['control'] {

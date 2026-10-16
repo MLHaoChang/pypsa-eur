@@ -201,6 +201,9 @@ describe('ResultsCard body', () => {
     expect(stale.textContent).toContain('Out of date')
     expect(stale.textContent).toContain(
       'These results are from an earlier study; the network was solved since. Run again to refresh.')
+    // The tiles carry the state too, and the banner offers the way to refresh (UX review N4).
+    expect(screen.getByTestId('hub-results-cost').getAttribute('data-state')).toBe('stale')
+    expect(stale.querySelector('button')?.textContent).toBe('Go to Goal and run the study')
   })
 
   it('a "study record" source without stale:true shows no banner', async () => {
