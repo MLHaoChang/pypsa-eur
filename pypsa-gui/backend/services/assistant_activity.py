@@ -137,6 +137,7 @@ def collect(*, db, user, project):
     recorded_ids = {r['source_id'] for r in decisions}
     for decision in decisions:
         rows.append(_row(pid, decision['family'], decision['source_id'],
+                         'Checked answer source gap' if decision['family'] == 'source_gap' else
                          decision['question']['title'] if decision['question'] else decision['tool_name'].replace('_', ' '),
                          decision['status'], session_id=decision['session_id'], tool_use_id=decision['tool_use_id'],
                          decision_id=decision['source_id'], decision_revision=decision['revision'],
