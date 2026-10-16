@@ -93,7 +93,14 @@ check_command() {
 }
 
 INPUT=$(cat)
-COMMAND=$(jq -r '.tool_input.command // empty' <<<"$INPUT")
+if command -v jq >/dev/null; then
+  COMMAND=$(jq -r '.tool_input.command // empty' <<<"$INPUT")
+elif command -v python3 >/dev/null; then
+  COMMAND=$(python3 -c 'import json,sys; print((json.load(sys.stdin).get("tool_input") or {}).get("command") or "")' <<<"$INPUT")
+else
+  echo "block-dangerous-git.sh: neither jq nor python3 found; git guardrail is NOT active." >&2
+  exit 0
+fi
 [[ -n $COMMAND ]] || exit 0
 
 check_command "$COMMAND"
