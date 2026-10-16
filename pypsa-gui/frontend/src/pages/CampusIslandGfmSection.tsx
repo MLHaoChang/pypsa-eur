@@ -171,7 +171,8 @@ function RecommendationView({ rec }: { rec: GfmRecommendation }) {
           <h4 className="text-[12.5px] font-semibold">Capacity needed instead</h4>
           <ul className="text-[12px] list-disc ml-5">
             {rec.capacity.map((c, i) => (
-              <li key={i}>{c.case}: {c.kind} +{num(c.delta)} {c.unit} ({c.binding}){c.feasible ? '' : `: ${c.note}`}</li>
+              <li key={i}>{c.case}: {c.delta == null ? c.binding : `${c.kind} +${num(c.delta)} ${c.unit} (${c.binding})`}
+                {c.feasible ? '' : `: ${c.note}`}</li>
             ))}
           </ul>
         </div>

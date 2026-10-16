@@ -193,7 +193,10 @@ def island_tables(payload: dict, source_path: str) -> dict:
                      "Best found so far" if gfm.get("status") == "incomplete" else "Recommended"],
             rows=rows, caption="Grid-forming settings (heuristic screening)",
             source_path=f"{source_path}/gfm/settings")
-    cap = [[c.get("case", ""), c.get("kind", ""), f"+{_g(c.get('delta'))} {c.get('unit', '')}".strip(),
+    # delta None: no finite amount passes (a collapse); the row's note says what it needs instead
+    cap = [[c.get("case", ""), c.get("kind", ""),
+            f"+{_g(c.get('delta'))} {c.get('unit', '')}".strip() if _num(c.get("delta")) is not None
+            else F.fmt_text(c.get("note") or "no finite amount"),
             F.fmt_text(c.get("binding"))] for c in gfm.get("capacity") or []]
     if cap:
         out["island_gfm_capacity"] = EvidenceTable(

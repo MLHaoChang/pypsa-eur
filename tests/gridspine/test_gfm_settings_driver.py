@@ -80,3 +80,38 @@ def test_a_stopped_search_writes_nothing(tmp_path):
     with pytest.raises(T.SearchStopped):
         D.gfm_settings_campus(run, max_sims=200, should_stop=stop)
     assert not (run / D.GFM_SETTINGS_JSON).exists()
+
+
+def test_a_collapse_is_written_as_strict_json(tmp_path, monkeypatch):
+    """Guided smoke 2026-10-16 (H2 hub): a collapse's inf RoCoF, nadir and
+    capacity delta were written as ``Infinity``, which the route's JSON
+    response refused (500). Non-finite floats are written as null, numpy
+    scalars as their values."""
+    import math
+
+    import numpy as np
+
+    from gridspine.static import gfm_tuning as T
+
+    run = write_run(tmp_path / "run", campus_spec())
+    D.island_frequency_campus(run, every_hour=False)
+
+    def collapsed(cases, limits, **kw):
+        return T.Recommendation(
+            achievable=False, changed=True, settings={}, cases=[],
+            capacity=[{"case": "c", "kind": "inertia", "delta": math.inf, "feasible": False}],
+            comparison=[{"unit": "BESS1", "worst_rocof_hz_per_s": np.float64(math.inf),
+                         "worst_nadir_hz": -math.inf, "worst_rocof0_hz_per_s": np.float32(0.5),
+                         "ok": np.bool_(False)}],
+            simulations=np.int64(3), margin=0.1, bounds=T.GFM_BOUNDS, notes=[math.nan], status="not_achievable")
+    monkeypatch.setattr(T, "recommend_gfm_settings", collapsed)
+    out = D.gfm_settings_campus(run, max_sims=60)
+
+    def refuse(c):
+        raise AssertionError(f"non-strict JSON constant {c}")
+    on_disk = json.loads((run / D.GFM_SETTINGS_JSON).read_text(), parse_constant=refuse)
+    assert on_disk == out
+    assert out["capacity"][0]["delta"] is None and out["notes"] == [None]
+    cmp = out["comparison"][0]
+    assert cmp["worst_rocof_hz_per_s"] is None and cmp["worst_nadir_hz"] is None
+    assert cmp["worst_rocof0_hz_per_s"] == 0.5 and cmp["ok"] is False and out["simulations"] == 3

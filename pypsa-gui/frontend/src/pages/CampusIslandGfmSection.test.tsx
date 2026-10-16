@@ -81,6 +81,19 @@ describe('CampusIslandGfmSection', () => {
     expect(screen.queryByRole('button', { name: /Apply/ })).toBeNull()
   })
 
+  it('a collapse case names the collapse without a number', async () => {
+    api.gfmSettings.mockResolvedValue(ready(rec({
+      status: 'not_achievable', achievable: false,
+      capacity: [{ case: '2027 h0 seamless E2', kind: 'inertia', delta: null, unit: 'MW·s',
+                   binding: 'frequency collapse: no grid-forming headroom', derivation: 'collapse', feasible: false,
+                   note: 'no machine joined and every GFM at a limit: the island needs a former, not a cut' }] })))
+    renderSection()
+    const text = (await screen.findByTestId('gfm-capacity')).textContent
+    expect(text).toMatch(/2027 h0 seamless E2: frequency collapse: no grid-forming headroom/)
+    expect(text).toMatch(/needs a former/)
+    expect(text).not.toMatch(/\+/)
+  })
+
   it('stale says so and offers Recommend again, never Apply', async () => {
     api.gfmSettings.mockResolvedValue({ state: 'stale', recommendation: rec(),
                                         reason: 'The campus run changed since these settings were recommended; recommend them again' })

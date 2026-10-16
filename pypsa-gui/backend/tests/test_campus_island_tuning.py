@@ -124,6 +124,25 @@ def test_an_unreadable_recommendation_is_stale_not_a_500(hub):  # noqa: F811
     assert "could not be read" in out["reason"]
 
 
+def test_a_collapse_on_disk_reads_back_as_null_not_a_500(hub):  # noqa: F811
+    """Guided smoke 2026-10-16 (H2 hub): a recommendation written before
+    gridspine wrote strict JSON holds ``Infinity`` (a collapse); it reads back
+    with null there, so the route can answer it."""
+    _db, _user, project = hub
+    _frequency_checked(project)
+    rec = {**REC, "capacity": [{**REC["capacity"][0], "delta": float("inf"), "feasible": False}],
+           "comparison": [{"unit": "bess_new_2030", "model": "gfm_droop", "worst_rocof_hz_per_s": float("inf"),
+                           "worst_nadir_hz": float("-inf"), "worst_rocof0_hz_per_s": 0.4, "ok": False,
+                           "note": None}]}
+    text = json.dumps(rec)
+    assert "Infinity" in text
+    (_run_dir(project) / ce.cs.GFM_SETTINGS_JSON).write_text(text)
+    got = cit.get_settings(project)["recommendation"]
+    json.dumps(got, allow_nan=False)
+    assert got["capacity"][0]["delta"] is None
+    assert got["comparison"][0]["worst_rocof_hz_per_s"] is None and got["comparison"][0]["worst_nadir_hz"] is None
+
+
 def test_no_job_while_the_cuts_are_being_applied(hub, monkeypatch):  # noqa: F811
     """#303 review: the cuts' trials rerun the campus study outside the queue,
     replacing the frequency check the search would read."""

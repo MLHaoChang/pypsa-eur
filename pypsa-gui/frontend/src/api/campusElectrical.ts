@@ -572,7 +572,8 @@ export interface GfmRecommendation {
   changed: boolean
   settings: Record<string, { model: string; current: GfmUnitSettings; recommended?: GfmUnitSettings }>
   cases: { key: string; ok_before: boolean; binding_before: string; ok_after: boolean | null; binding_after: string }[]
-  capacity: { case: string; kind: string; delta: number; unit: string; binding: string; derivation: string;
+  /** `delta` null: no finite amount helps (a collapse: the island needs a former). */
+  capacity: { case: string; kind: string; delta: number | null; unit: string; binding: string; derivation: string;
               feasible: boolean; note: string }[]
   comparison: { unit: string; model: string; worst_rocof0_hz_per_s: number | null; worst_rocof_hz_per_s: number | null;
                 worst_nadir_hz: number | null; ok: boolean; note: string }[]
