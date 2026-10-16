@@ -209,6 +209,7 @@ class LinkCreate(BaseModel):
     # configured (heat-pump case).
     efficiency2: _NoneToOne = 1.0
     efficiency3: _NoneToOne = 1.0
+    efficiency4: _NoneToOne = 1.0
     p_nom: Finite = 0.0
     p_nom_extendable: bool = False
     p_nom_min: Finite = 0.0
@@ -216,6 +217,15 @@ class LinkCreate(BaseModel):
     marginal_cost: Finite = 0.0
     capital_cost: Finite = 0.0
     fom_cost: Finite = 0.0   # fixed O&M, €/MW/yr (PyPSA-native)
+    # Unit commitment, as on the Generator (grid-to-process ticket 02). PyPSA's own Link defaults, so a Link that
+    # sets none of them is unchanged. The solve path does not read them for Links yet (ticket 03).
+    committable: bool = False
+    ramp_limit_up: float | None = None
+    ramp_limit_down: float | None = None
+    stand_by_cost: Finite = 0.0
+    start_up_cost: Finite = 0.0
+    min_up_time: int = 0
+    min_down_time: int = 0
     overnight_cost: float | None = None  # €/MW; NaN = unset
     # Per-asset discount rate used by PyPSA's native annuity when
     # overnight_cost is set. NaN ⇒ fall back to solver config's global

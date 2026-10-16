@@ -31,13 +31,22 @@ EH_INTERNAL_ROLES: tuple[str, ...] = ("eh_n1_conversion",)
 EH_LINK_ROLES: tuple[str, ...] = (
     ("",) + EH_IMPORT_ROLES + EH_CONVERSION_ROLES + EH_INTERNAL_ROLES)
 
+# Grid-to-process: how a process unit's electrical supply is ranked when it must be cut (CONTEXT.md, Criticality
+# tier). The empty string is "not set".
+CRITICALITY_TIERS: tuple[str, ...] = ("safety", "process_critical", "process_flexible", "deferrable")
+
 # Custom (non-PyPSA) columns the GUI may write. Each maps to a kind:
-# "bool" (flag, default False), "float_nonneg" (MVA, default NaN) or
-# "role" (one of EH_LINK_ROLES, default "").
+# "bool" (flag, default False), "float_nonneg" (default NaN), "role" (one of
+# EH_LINK_ROLES, default ""), "tier" (one of CRITICALITY_TIERS or "", default
+# "") or "text" (free text, default ""). The process-unit and tonne-factor
+# columns are not Energy Hub tags but ride the same lazy-column machinery, so
+# a project that never writes one never gets the column.
 EH_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
     "Bus": {"eh_poc": "bool", "eh_critical": "bool",
-            "eh_sk_mva": "float_nonneg", "eh_ibr_mva": "float_nonneg"},
-    "Link": {"eh_role": "role"},
+            "eh_sk_mva": "float_nonneg", "eh_ibr_mva": "float_nonneg",
+            "mwh_per_t": "float_nonneg"},
+    "Link": {"eh_role": "role", "eh_process": "bool", "criticality_tier": "tier",
+             "throughput_unit": "text", "specific_energy_kwh_per_t": "float_nonneg"},
 }
 
 # Spec decision 18 — ordered default pipeline.

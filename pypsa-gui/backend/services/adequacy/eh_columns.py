@@ -16,7 +16,7 @@ import math
 import numpy as np
 import pandas as pd
 
-from models.energy_hub import EH_CUSTOM_COLUMNS, EH_INTERNAL_ROLES, EH_LINK_ROLES
+from models.energy_hub import CRITICALITY_TIERS, EH_CUSTOM_COLUMNS, EH_INTERNAL_ROLES, EH_LINK_ROLES
 
 _ATTR_OF = {"Bus": "buses", "Link": "links"}
 _TRUE = ("true", "1", "yes", "y", "t")
@@ -74,11 +74,19 @@ def coerce_eh_value(component_class: str, col: str, value):
                 f"{[r for r in EH_LINK_ROLES if r and r not in EH_INTERNAL_ROLES]}"
                 " (or empty)")
         return v
+    if kind == "tier":
+        v = "" if value is None else str(value).strip()
+        if v and v not in CRITICALITY_TIERS:
+            raise ValueError(
+                f"{col}: {v!r} is not a criticality tier; expected one of {list(CRITICALITY_TIERS)} (or empty)")
+        return v
+    if kind == "text":
+        return "" if value is None else str(value).strip()
     raise ValueError(f"{col}: unknown kind {kind!r}")  # pragma: no cover
 
 
 def _default(kind: str):
-    return {"bool": False, "float_nonneg": float("nan"), "role": ""}[kind]
+    return {"bool": False, "float_nonneg": float("nan"), "role": "", "tier": "", "text": ""}[kind]
 
 
 def ensure_eh_column(n, component_class: str, col: str) -> None:
