@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-15",
+  "generated_at": "2026-10-16",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 252,
+  "tool_count": 253,
   "tools": [
     {
       "name": "list_components",
@@ -5180,6 +5180,30 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "add7aa39807e1175fd337d20587108cc688fda582690e35ca067c2eb5b731000",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "reconcile_experiment",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "experiment_id",
+        "receipt_sha256"
+      ],
+      "required": [
+        "experiment_id",
+        "receipt_sha256"
+      ],
+      "safety_tier": "destructive",
+      "schema_sha256": "e149dd99ba89ecb95755a219220419361394233dde88e3aed0b45257f3a85d37",
       "behavioral_fixture": "pending"
     },
     {

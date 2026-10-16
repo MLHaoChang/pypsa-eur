@@ -14,7 +14,16 @@ Read the [specification](../../../.scratch/chat-companion/spec.md), especially i
 
 First implement **CP-01**, then **CP-02**. These deliver truthful in-page chat and readable outcomes without new hosted media. Do not start a broad avatar rewrite or background effects to complete either slice.
 
-Current continuation: CP-01 (#235) and CP-02 (#241) are merged. [CP-01 evidence](../../../.scratch/chat-companion/issues/01-truthful-state.md), [CP-02 evidence](../../../.scratch/chat-companion/issues/02-canonical-outcomes.md), and [bounded CP-03 implementation/evidence](../../../.scratch/chat-companion/issues/03-source-navigation.md) record tested boundaries and remaining gates. CP-03 (#268) covers retained native evidence and the current Expert branch-loading adapter; other current-tab adapters and historical harness completion ACKs remain follow-ups. CP-03 is merged at `5711a6fa0116731ab61cfa2f757ef2d2a5540703`. [CP-04a Activity observer](../../../.scratch/chat-companion/issues/04-activity-needs-you.md) is merged in #309 at `07f90f2316ebdc1f9e42e1fffc17ea22d3b30e6a`: read-only owned snapshots and a reconnecting panel. [CP-04b retained job observations](../../../.scratch/chat-companion/issues/04b-retained-job-observations.md) is merged in #311 at `76835bb3fcf3a66a949a8cca66099a83f545b8ae`. The current bounded slice is [CP-04c retained decision observations](../../../.scratch/chat-companion/issues/04c-retained-decision-observations.md): persistent question/confirmation inspection without restored authority. Wider source-gap/effect decision adapters, unobserved completion capture and wider native worker journeys remain pending. This plan remains the sequence; the linked issues are the execution records.
+Current continuation: CP-01 (#235), CP-02 (#241), bounded CP-03 (#268), Activity
+(#309), retained jobs (#311), retained decisions (#319), source gaps (#327),
+explicit source-gap follow-ups (#333) and bounded native completion observation
+(#351, `319985014d7cd5b74fbc07bb1ad4975aaffcd6f7`) are merged. Their linked issue
+records describe verified boundaries and remaining live/domain gates. The next
+bounded slice is [CP-05a explicit uncertain-case reconciliation](../../../.scratch/chat-companion/issues/05a-uncertain-case-reconciliation.md):
+fenced native submission proof, independently matching child/job/input receipts,
+no automatic retry and no reset of the original reservation. Two-case comparison,
+wider current-tab navigation and broader family journeys remain separate scopes.
+This plan remains the sequence; the linked issues are the execution records.
 
 This plan supplements the [earlier assistant plan](2026-10-13-assistant-remaining-work.md). Its bounded prerequisites and first-network-case milestones are already merged in #185/#188. Reuse them; their residual two-case/reconciliation work is CP-05. Existing Live issues 01–12 keep their acceptance scope and remaining external gates.
 

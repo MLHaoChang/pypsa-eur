@@ -762,6 +762,18 @@
     "activity_resnapshot_required": {
       "surface": "inline",
       "why": "The Activity snapshot cursor expired or changed; its observer reloads authority without replaying work or approvals."
+    },
+    "experiment_reconciliation_stale": {
+      "surface": "inline",
+      "why": "The confirmation referenced an older owned receipt. Its failed tool line tells the user to inspect and confirm current proof; no project action is replayed."
+    },
+    "experiment_reconciliation_unavailable": {
+      "surface": "inline",
+      "why": "The historical submission lacks the new fenced proof. The failed tool line keeps its reservation unresolved; no fabricated no-effect verdict or retry is offered."
+    },
+    "experiment_worker_running": {
+      "surface": "inline",
+      "why": "The owned submission still holds its native fence. The failed tool line explains waiting; no result, reconciliation or retry has occurred."
     }
   }
 }

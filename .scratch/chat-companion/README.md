@@ -17,9 +17,11 @@ Start with CP-01 truthful in-page chat state, then CP-02 readable source-bound o
 Implementation continuation: CP-01 (#235), CP-02 (#241) and bounded CP-03 (#268) are merged. [CP-04 progress/evidence](issues/04-activity-needs-you.md) records the bounded Activity observer and the remaining durable-history/decision work. Linked issue records distinguish implementation, mocked tests, current-head CI and pending live/external gates.
 
 Retained jobs (#311), decisions (#319), source gaps (#327) and explicit checked
-source-gap follow-ups (#333) are merged. The next bounded continuation is
-[CP-04f native completion observation](issues/04f-native-completion-observation.md):
-capture exact native terminal status with Activity closed, while retaining
-unknown outcomes and the existing approval/evidence boundaries.
+source-gap follow-ups (#333) are merged. Bounded
+[CP-04f native completion observation](issues/04f-native-completion-observation.md)
+is merged in #351. The current continuation is
+[CP-05a uncertain-case reconciliation](issues/05a-uncertain-case-reconciliation.md):
+explicit native proof/read-back without replaying or resetting the original
+submission. Two-case comparison remains a later slice.
 
 The [Dots assessment](../live-voice/dots-design-assessment-2026-10-14.md) supplies the source-reviewed rationale. This folder contains an implementation specification, not an implemented feature or release certificate. Hosted setup, fresh paid-probe authorization, independent domain review and real-use calibration remain separate pending gates.
