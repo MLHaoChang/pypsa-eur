@@ -636,6 +636,8 @@ TEMPLATE_META: dict[str, dict] = {
             "Electrolyser and fuel cell carry conversion roles and outage "
             "data: fmea_top ranks them, redundancy can add a spare.",
             "The frontier runs by default for strong_grid.",
+            "Island rows are off: the plan is not sized to island; the island checks "
+            "report what islanding would need.",
         ],
         "provenance": PROVENANCE,
     },
@@ -802,6 +804,39 @@ ISLAND_CONFIG: dict[str, dict] = {
         },
     },
 }
+
+def _h2_hub_island(bess_new, wind_new, solar_new) -> dict:
+    """The H2 hub's island sidecar: no genset and no UPS, so its batteries
+    form the island (``seamless``) and carry the critical process load. The
+    battery block is the data center's ``bess_new`` block and the fuel cell
+    gets gridspine's drafted default (``producers/campus.py``
+    ``DEFAULT_ISLAND``), so draft and sidecar agree; all demo values. The
+    island rows ship off (owner, 2026-10-16): the plan is not sized to
+    island, and the island checks report what islanding would need."""
+    import copy
+
+    bess = copy.deepcopy(ISLAND_CONFIG["eh_datacenter"]["units"]["bess_new"])
+    qu = _a([[0.9, 0.33], [0.97, 0.0], [1.03, 0.0], [1.1, -0.33]])
+
+    def gfl(kind):
+        return {"kind": kind, "control": "gfl_qu", "pf_rated": _a(0.95), "qu_points": copy.deepcopy(qu)}
+
+    units = {"site_battery": copy.deepcopy(bess), "fuel_cell": gfl("fuel_cell"),
+             "process_load": {"kind": "load", "critical": True}}
+    for name, kind in (("wind_farm", "wind"), *((w, "wind") for w in wind_new),
+                       ("solar_park", "pv"), *((s, "pv") for s in solar_new)):
+        units[name] = gfl(kind)
+    for b in bess_new:
+        units[b] = copy.deepcopy(bess)
+    return {"units": units, "requirements": {
+        "bridge_s": _a(600.0), "sustained_h": _a(1.0), "scenarios": ["seamless"],
+        "frequency_limits": {"transition": dict(_LIMITS), "steady_island": dict(_LIMITS)},
+        "rocof_window_ms": _a(500.0), "gfm_margin": _a(0.1),
+        "ride_through_storage": ["site_battery", *bess_new]}}
+
+
+ISLAND_CONFIG["eh_h2_hub"] = _h2_hub_island(["bess_new"], ["wind_new"], ["solar_new"])
+
 
 def _staged_island(cfg: dict) -> dict:
     """The single-year island sidecar with the expansion candidates renamed

@@ -56,6 +56,8 @@ import math
 
 import numpy as np
 
+from gridspine.static import parallel
+
 LABEL = "frequency screening (single-bus aggregate; no voltage dynamics)"
 COLLAPSE = "frequency collapse: no grid-forming headroom"
 F0 = 50.0
@@ -162,59 +164,106 @@ def _gfm_m(u, f0):
 def _balance(units, x, t, dp_event, f0, damping):
     """``(dΔf/dt, ΔP of each GFM, saturated GFMs)`` at state ``x``; the
     saturated set is found by iteration (a GFM beyond a limit holds it)."""
-    df = x["df"]
-    gfm = [u for u in units if u.model in ("gfm_droop", "gfm_vsm")]
-    sat = set()
-    for _ in range(len(gfm) + 1):
-        m, p = 0.0, -dp_event(t) - damping * df / f0
+    return _Island(units, f0).balance(x, t, dp_event, damping)
+
+
+class _Island:
+    """``units``' constants, worked out once per run so the integrator's
+    steps do not recompute them (``simulate``). Each sum is taken in the
+    units' order and each constant is the same expression as in the model,
+    so a run gives the same numbers, to the bit, as one that recomputes
+    them every step."""
+
+    def __init__(self, units, f0):
+        self.f0 = f0
+        self.plain = []                  # (model, name, M term, join_s) in unit order
+        self.gfm = []                    # (name, M term, K, -K, P0, hi, lo)
+        self.gensets = []                # (unit, name, integral key, K, T_g, join_s, bounds)
         for u in units:
-            if u.model == "genset" and t >= u.join_s:
-                m += 2.0 * u.h * u.s_n / f0
-                p += x[u.name]
-            elif u.model == "inertia":                    # I7: inertia alone, no response, no limit
-                m += 2.0 * u.h * u.s_n / f0
+            if u.model == "genset":
+                self.plain.append(("genset", u.name, 2.0 * u.h * u.s_n / f0, u.join_s))
+                k = u.p_n / ((u.r if u.r == u.r and u.r else ISO_DROOP) * f0)
+                self.gensets.append((u, u.name, f"{u.name}~i" if u.isochronous else None, k, u.t_g, u.join_s,
+                                     (u.step_mw, u.ramp_mw_per_s, 0.0 - u.p0, u.p_n - u.p0)))
+            elif u.model == "inertia":
+                self.plain.append(("inertia", u.name, 2.0 * u.h * u.s_n / f0, 0.0))
             elif u.model in ("gfl_fw", "ups"):
-                p += x[u.name]
-        for u in gfm:
-            if u.name in sat:
-                p += x[f"{u.name}~lim"]
-            else:
-                m += _gfm_m(u, f0)
-                p -= u.p_n / (u.r * f0) * df
-        if m <= 0.0:
-            return None, {}, sat
-        rocof = p / m
-        new, dps = set(), {}
-        for u in gfm:
-            dpu = -u.p_n / (u.r * f0) * df - _gfm_m(u, f0) * rocof
-            if u.name in sat:
-                dps[u.name] = x[f"{u.name}~lim"]
-                new.add(u.name)
-            elif u.p0 + dpu > u.hi + 1e-9 or u.p0 + dpu < u.lo - 1e-9:
-                x[f"{u.name}~lim"] = (u.hi if u.p0 + dpu > u.hi else u.lo) - u.p0
-                new.add(u.name)
-            else:
-                dps[u.name] = dpu
-        if new == sat:
-            return rocof, dps, sat
-        sat = new
-    raise RuntimeError("the GFM saturation set did not settle")
+                self.plain.append(("p", u.name, 0.0, 0.0))
+            elif u.model in ("gfm_droop", "gfm_vsm"):
+                self.gfm.append((u.name, _gfm_m(u, f0), u.p_n / (u.r * f0), -u.p_n / (u.r * f0), u.p0, u.hi, u.lo))
 
+    def balance(self, x, t, dp_event, damping):
+        """``_balance`` at state ``x``; a GFM's held ΔP at a limit is kept
+        in ``lim``, never in ``x``."""
+        f0, df = self.f0, x["df"]
+        sat, lim = set(), {}
+        for _ in range(len(self.gfm) + 1):
+            m, p = 0.0, -dp_event(t) - damping * df / f0
+            for model, name, mt, join in self.plain:
+                if model == "genset":
+                    if t >= join:
+                        m += mt
+                        p += x[name]
+                elif model == "inertia":
+                    m += mt
+                else:
+                    p += x[name]
+            for name, gm, k, _, _, _, _ in self.gfm:
+                if name in sat:
+                    p += lim[name]
+                else:
+                    m += gm
+                    p -= k * df
+            if m <= 0.0:
+                return None, {}, sat
+            rocof = p / m
+            new, dps = set(), {}
+            for name, gm, _, nk, p0, hi, lo in self.gfm:
+                dpu = nk * df - gm * rocof
+                if name in sat:
+                    dps[name] = lim[name]
+                    new.add(name)
+                elif p0 + dpu > hi + 1e-9 or p0 + dpu < lo - 1e-9:
+                    lim[name] = (hi if p0 + dpu > hi else lo) - p0
+                    new.add(name)
+                else:
+                    dps[name] = dpu
+            if new == sat:
+                return rocof, dps, sat
+            sat = new
+        raise RuntimeError("the GFM saturation set did not settle")
 
-def _targets(units, x, t, f0):
-    """The time derivatives of the governor states, and the fw targets."""
-    dx = {}
-    for u in units:
-        if u.model == "genset":
-            if t < u.join_s:
-                dx[u.name] = 0.0
+    def targets(self, x, t):
+        """The time derivatives of the governor states."""
+        dx = {}
+        for u, name, ikey, k, t_g, join, (step_mw, ramp, z_lo, z_hi) in self.gensets:
+            if t < join:
+                dx[name] = 0.0
                 continue
-            k = u.p_n / ((u.r if u.r == u.r and u.r else ISO_DROOP) * f0)
-            ref = -k * (x["df"] + (x[f"{u.name}~i"] / ISO_TI_S if u.isochronous else 0.0))
-            dx[u.name] = _hold(u, x[u.name], (ref - x[u.name]) / u.t_g, t)
-            if u.isochronous:
-                dx[f"{u.name}~i"] = _hold_integral(u, x[u.name], x["df"], t)
-    return dx
+            p = x[name]
+            ref = -k * (x["df"] + (x[ikey] / ISO_TI_S if ikey else 0.0))
+            dp_dt = (ref - p) / t_g
+            # anti-windup (``_genset_bounds``): a genset at a bound moves no
+            # faster outward than the bound does, so the RK4 stages inside a
+            # step never count power beyond it (``clamp`` holds it only after)
+            elapsed = t - join
+            room = step_mw + (ramp * elapsed if elapsed > 0.0 else 0.0)
+            if p >= min(room, z_hi) - 1e-12:
+                dp_dt = min(dp_dt, ramp if room < z_hi else 0.0)
+            if p <= max(-room, z_lo) + 1e-12:
+                dp_dt = max(dp_dt, -ramp if -room > z_lo else 0.0)
+            dx[name] = dp_dt
+            if ikey:
+                dx[ikey] = _hold_integral(u, p, x["df"], t)
+        return dx
+
+    def clamp(self, x, t):
+        """Hold the genset states to their limits after a step."""
+        for _, name, _, _, _, join, (step_mw, ramp, z_lo, z_hi) in self.gensets:
+            if t >= join:
+                elapsed = t - join
+                room = step_mw + (ramp * elapsed if elapsed > 0.0 else 0.0)
+                x[name] = min(max(x[name], max(-room, z_lo)), min(room, z_hi))
 
 
 def _hold_integral(u, p, df, t):
@@ -237,26 +286,6 @@ def _genset_bounds(u, t):
     lo, hi = max(-room, 0.0 - u.p0), min(room, u.p_n - u.p0)
     ramp = u.ramp_mw_per_s
     return lo, hi, -ramp if -room > 0.0 - u.p0 else 0.0, ramp if room < u.p_n - u.p0 else 0.0
-
-
-def _hold(u, p, dp_dt, t):
-    """Anti-windup: a genset at a bound moves no faster outward than the
-    bound does, so the RK4 stages inside a step never count power beyond
-    it (``_clamp`` alone holds it only after the step)."""
-    lo, hi, rate_lo, rate_hi = _genset_bounds(u, t)
-    if p >= hi - 1e-12:
-        dp_dt = min(dp_dt, rate_hi)
-    if p <= lo + 1e-12:
-        dp_dt = max(dp_dt, rate_lo)
-    return dp_dt
-
-
-def _clamp(units, x, t):
-    """Hold the genset and fw states to their limits after a step."""
-    for u in units:
-        if u.model == "genset" and t >= u.join_s:
-            lo, hi, _, _ = _genset_bounds(u, t)
-            x[u.name] = min(max(x[u.name], lo), hi)
 
 
 def _fw_step(units, x, t, dt):
@@ -321,18 +350,19 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0, islanding
     df = np.zeros(n)
     dp = {u.name: np.zeros(n) for u in units}
     saturated, collapse, trip = {}, None, None
-    rocof0, _, _ = _balance(units, dict(x), 0.0, dp_event, f0, damping)
+    island = _Island(units, f0)
+    rocof0, _, _ = island.balance(x, 0.0, dp_event, damping)
     if rocof0 is None:
         return Trace(t[:1], df[:1], {k: v[:1] for k, v in dp.items()}, {}, 0.0, math.nan,
                      _ups_logs(units, ups_log))
 
-    def deriv(state, tt):
-        s = dict(state)
-        rocof, _, _ = _balance(units, s, tt, dp_event, f0, damping)
+    def deriv(state, tt, rocof=None):
         if rocof is None:
-            return None
+            rocof, _, _ = island.balance(state, tt, dp_event, damping)
+            if rocof is None:
+                return None
         d = {"df": rocof}
-        d.update(_targets(units, s, tt, f0))
+        d.update(island.targets(state, tt))
         return d
 
     def add(state, d, h):
@@ -343,9 +373,9 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0, islanding
 
     for i in range(n):
         tt = t[i]
-        rocof, dps, sat = _balance(units, dict(x), tt, dp_event, f0, damping)
+        rocof, dps, sat = island.balance(x, tt, dp_event, damping)
         if rocof is not None and advance and advance(float(tt), x["df"], rocof):
-            rocof, dps, sat = _balance(units, dict(x), tt, dp_event, f0, damping)
+            rocof, dps, sat = island.balance(x, tt, dp_event, damping)
         if rocof is None:
             collapse = float(tt)
             t, df = t[:i], df[:i]
@@ -367,7 +397,9 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0, islanding
             break
         if i == n - 1:
             break
-        k1 = deriv(x, tt)
+        # k1 is the balance just taken at (x, tt); an event with
+        # ``advance`` may have changed itself since, so its k1 is taken again
+        k1 = deriv(x, tt, None if advance else rocof)
         k2 = deriv(add(x, k1, dt / 2), tt + dt / 2) if k1 else None
         k3 = deriv(add(x, k2, dt / 2), tt + dt / 2) if k2 else None
         k4 = deriv(add(x, k3, dt), tt + dt) if k3 else None
@@ -378,7 +410,7 @@ def simulate(units, dp_event, t_end=20.0, dt=1e-3, f0=F0, damping=0.0, islanding
             break
         for k in k1:
             x[k] = x[k] + dt / 6.0 * (k1[k] + 2 * k2[k] + 2 * k3[k] + k4[k])
-        _clamp(units, x, tt + dt)
+        island.clamp(x, tt + dt)
         _fw_step(units, x, tt + dt, dt)
         _ups_step(units, x, dt, ups_log, tt + dt)
     return Trace(t, df, dp, saturated, collapse, float(rocof0), _ups_logs(units, ups_log), trip=trip)
@@ -1105,13 +1137,15 @@ def e1_every_hour(campus, hourly, island_hourly, island_unit_hourly=None, scenar
     out, cache = [], {}
     for _, r in ih.sort_values(["period", "hour"]).iterrows():
         period, hour = int(r["period"]), int(r["hour"])
+        steps = [(direction, dp) for direction, dp in (("import", r["dp_up_mw"]), ("export", -r["dp_down_mw"]))
+                 if abs(dp) > 1e-9 and (direction == "import") == (dp > 0)]
+        if not steps:
+            continue                     # nothing crosses the PCC: no event, and no units to build
         rows = _hour_rows(hourly, period, hour)
         urows = iu[(iu["period"] == period) & (iu["hour"] == hour)] if iu is not None else None
         units = _sweep_units(campus, rows, urows)
         key = {"period": period, "hour": hour, "scenario": scenario}
-        for direction, dp in (("import", r["dp_up_mw"]), ("export", -r["dp_down_mw"])):
-            if not abs(dp) > 1e-9 or (direction == "import") != (dp > 0):
-                continue
+        for direction, dp in steps:
             ck = (repr(units), round(dp, 9), floor)
             if ck not in cache:
                 cache[ck] = simulate(units, step(dp), t_end=t_end, dt=dt, f0=f0, floor=floor)
@@ -1183,8 +1217,114 @@ def _island_units(units, i4):
     return [dataclasses.replace(u, p0=float(p_isl[u.name]), join_s=0.0) if u.model != "ups" else u for u in units]
 
 
+def _study_context(campus, hourly, iu, load_step_mw, dt, t_end, f0):
+    """What every island hour of ``campus_frequency_study`` shares; built
+    once per worker (``parallel.ordered_map``)."""
+    limits, req = _limits(campus)
+    eq = equipment(campus, f0)
+    floor = trip_floor(limits, eq, f0)               # beyond it every event is a trip, not a number
+    return {"campus": campus, "hourly": hourly, "iu": iu, "load_step_mw": load_step_mw, "f0": f0,
+            "limits": limits, "req": req, "eq": eq,
+            "kw": {"t_end": t_end, "dt": dt, "f0": f0, "floor": floor},
+            "e4_cache": {}}                       # hours with the same fleet share one E4 pickup
+
+
+def _study_hour(c, hour_key):
+    """One island hour of ``campus_frequency_study``: its rows of the
+    events, losses, bridge, planned and UPS tables."""
+    from gridspine.static.island_flow import island_flow
+
+    period, hour = hour_key
+    campus, hourly, iu, load_step_mw, f0 = c["campus"], c["hourly"], c["iu"], c["load_step_mw"], c["f0"]
+    limits, req, eq, kw, e4_cache = c["limits"], c["req"], c["eq"], c["kw"], c["e4_cache"]
+    rv = req["values"]
+    window, floor = rv["rocof_window_ms"], kw["floor"]
+    ev, losses, bridge, planned, ups = [], [], [], [], []
+
+    def log_ups(key, event, trace):
+        for name, rec in trace.ups.items():
+            ups.append({**key, "event": event, "ups": name, "drops": len(rec.drops),
+                        "first_drop_s": rec.drops[0] if rec.drops else math.nan, "energy_mwh": rec.energy_mwh,
+                        "e_mwh": rec.e_mwh, "t_online_s": rec.t_online_s, "autonomy_ok": rec.autonomy_ok})
+
+    key = {"period": int(period), "hour": int(hour)}
+    rows, urows, units, soc = _hour_units(campus, hourly, iu, period, hour)
+    lossless = -float((rows["p_mw"] * (rows["status"] == 1)).sum())
+    i4 = island_flow(campus, rows, online=built(rows))
+    dp_ac = i4.delta_p_ac_mw if i4.viable else math.nan
+    losses.append({**key, "i4_viable": i4.viable, "i4_reason": i4.reason, "dp_ac_mw": dp_ac,
+                   "import_lossless_mw": lossless, "losses_mw": dp_ac - lossless})
+    emt = emt_inputs(campus, rows)
+    dp_e1 = dp_ac if i4.viable else lossless
+
+    for scenario in req["scenarios"]:
+        sk = {**key, "scenario": scenario}
+        if scenario == "seamless":
+            def e1(us):
+                return e1_islanding(us, dp_e1, **kw)
+            tr = e1(units)
+            ev.append(_event_row(sk, "E1", dp_e1, tr, limits, window, eq, f0, emt,
+                                 dp_source="I4 ΔP_AC" if i4.viable else "lossless import"))
+            log_ups(sk, "E1", tr)
+            bridge += _gfm_bridge(sk, units, tr, soc)
+            if not i4.viable:
+                continue
+            isl = _island_units(units, i4)
+            p_isl = i4.units.set_index("unit_id")["p_mw"]
+            step_mw = load_step_mw
+            if step_mw is None:
+                blocks = rv.get("pickup_blocks")
+                step_mw = max(blocks) if blocks else float((-rows["p_mw"].clip(upper=0.0)).max())
+
+            def e2(us):
+                return e2_load_step(us, step_mw, **kw)
+            tr = e2(isl)
+            ev.append(_event_row(sk, "E2", step_mw, tr, limits, window, eq, f0, emt))
+            log_ups(sk, "E2", tr)
+            sources = [u for u in isl if u.model not in ("ups", "none")]
+            if sources:
+                lost = max(sources, key=lambda u: (abs(u.p0), u.p_n))
+                tr = e3_unit_trip(isl, lost.name, **kw)
+                ev.append(_event_row(sk, "E3", lost.p0, tr, limits, window, eq, f0, emt, unit=lost.name))
+                log_ups(sk, "E3", tr)
+            pv = float(sum(p_isl[uid] for uid in p_isl.index if campus.units.at[uid, "kind"] == "pv"))
+            if pv > 1e-9:
+                tr = e5_pv_loss(isl, pv, **kw)
+                ev.append(_event_row(sk, "E5", pv, tr, limits, window, eq, f0, emt))
+                log_ups(sk, "E5", tr)
+            for name, run, base, dp in (("E1", e1, units, dp_e1), ("E2", e2, isl, step_mw)):
+                for v, tr in i_max_sensitivity(base, run, rv["i_max_sensitivity_pu"]):
+                    ev.append(_event_row(sk, name, dp, tr, limits, window, eq, f0, emt, i_max_pu=v))
+        elif scenario == "ups_bridged":
+            gens = [u for u in units if u.model == "genset"]
+            feeds = [(u.name, u.ups["it_mw"], u.ups["e_mwh"]) for u in units if u.model == "ups"]
+            res = e4_ups_bridged(gens, rv["pickup_blocks"], feeds, rv["bridge_s"], rv["genset_redundancy_n"],
+                                 window_ms=window, f0=f0, cache=e4_cache, floor=floor)
+            for i, m in enumerate(res.blocks):
+                v = judge(m, limits, f0, eq)
+                ev.append({**sk, "event": "E4", "block": i + 1, "dp_mw": rv["pickup_blocks"][i],
+                           "t_block_s": res.ready_s + res.block_times_s[i],
+                           "rocof_window_hz_per_s": m.rocof_window_hz_per_s, "nadir_hz": m.nadir_hz,
+                           "t_nadir_s": m.t_nadir_s, "df_qss_hz": m.df_qss_hz, "t_return_s": m.t_return_s,
+                           "trip_s": m.trip[0] if m.trip else None,
+                           "ok": v.ok, "binding": v.binding, "worst": v.worst,
+                           "emt": "; ".join(emt_flags(m, limits, f0))})
+            for b in res.bridge:
+                bridge.append({**sk, "unit": b.ups, "kind": "ups", "it_mw": b.it_mw, "e_mwh": b.e_mwh,
+                               "autonomy_s": b.autonomy_s,
+                               "needed_s": b.needed_s, "ok": b.ok, "pickup_complete": res.complete,
+                               "ready_s": res.ready_s, "dropped": ", ".join(res.dropped)})
+        elif scenario == "planned":
+            res = e6_planned([u for u in units if u.model != "ups"], dp_e1, **kw)
+            planned.append({**sk, "import_mw": dp_e1, "feasible": res.feasible, "ramp_s": res.ramp_s,
+                            "shortfall_mw": res.shortfall_mw})
+            if res.trace is not None:
+                ev.append(_event_row(sk, "E6", 0.0, res.trace, limits, window, eq, f0, emt))
+    return ev, losses, bridge, planned, ups
+
+
 def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_step_mw=None,
-                           dt=1e-3, t_end=20.0, f0=F0) -> FrequencyStudy:
+                           dt=1e-3, t_end=20.0, f0=F0, workers=1, should_stop=None) -> FrequencyStudy:
     """E1–E6 at the island critical ``hours``, ``[(period, hour)]`` (plan
     I6b; I3b chooses them), in each of the campus's island ``scenarios``:
 
@@ -1199,101 +1339,19 @@ def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_
     * ``planned``: E6 on the same ΔP_AC, its ramp time.
 
     Each event is judged against the limits and the equipment, and flagged
-    for EMT/RMS where ``emt_flags`` says so."""
+    for EMT/RMS where ``emt_flags`` says so. The hours run over ``workers``
+    processes (``parallel.ordered_map``; default 1, in this process), the
+    tables in the hours' order whatever the count; ``should_stop()`` is
+    asked between hours (``parallel.Stopped``)."""
     import pandas as pd
 
     from gridspine.schema.island import validate_island_unit_hourly
-    from gridspine.static.island_flow import island_flow
 
-    limits, req = _limits(campus)
-    rv = req["values"]
-    window, eq = rv["rocof_window_ms"], equipment(campus, f0)
-    floor = trip_floor(limits, eq, f0)               # beyond it every event is a trip, not a number
     iu = validate_island_unit_hourly(island_unit_hourly) if island_unit_hourly is not None else None
-    ev, losses, bridge, planned, ups = [], [], [], [], []
-    kw = {"t_end": t_end, "dt": dt, "f0": f0, "floor": floor}
-    e4_cache = {}                                  # hours with the same fleet share one E4 pickup
-
-    def log_ups(key, event, trace):
-        for name, rec in trace.ups.items():
-            ups.append({**key, "event": event, "ups": name, "drops": len(rec.drops),
-                        "first_drop_s": rec.drops[0] if rec.drops else math.nan, "energy_mwh": rec.energy_mwh,
-                        "e_mwh": rec.e_mwh, "t_online_s": rec.t_online_s, "autonomy_ok": rec.autonomy_ok})
-
-    for period, hour in hours:
-        key = {"period": int(period), "hour": int(hour)}
-        rows, urows, units, soc = _hour_units(campus, hourly, iu, period, hour)
-        lossless = -float((rows["p_mw"] * (rows["status"] == 1)).sum())
-        i4 = island_flow(campus, rows, online=built(rows))
-        dp_ac = i4.delta_p_ac_mw if i4.viable else math.nan
-        losses.append({**key, "i4_viable": i4.viable, "i4_reason": i4.reason, "dp_ac_mw": dp_ac,
-                       "import_lossless_mw": lossless, "losses_mw": dp_ac - lossless})
-        emt = emt_inputs(campus, rows)
-        dp_e1 = dp_ac if i4.viable else lossless
-
-        for scenario in req["scenarios"]:
-            sk = {**key, "scenario": scenario}
-            if scenario == "seamless":
-                def e1(us):
-                    return e1_islanding(us, dp_e1, **kw)
-                tr = e1(units)
-                ev.append(_event_row(sk, "E1", dp_e1, tr, limits, window, eq, f0, emt,
-                                     dp_source="I4 ΔP_AC" if i4.viable else "lossless import"))
-                log_ups(sk, "E1", tr)
-                bridge += _gfm_bridge(sk, units, tr, soc)
-                if not i4.viable:
-                    continue
-                isl = _island_units(units, i4)
-                p_isl = i4.units.set_index("unit_id")["p_mw"]
-                step_mw = load_step_mw
-                if step_mw is None:
-                    blocks = rv.get("pickup_blocks")
-                    step_mw = max(blocks) if blocks else float((-rows["p_mw"].clip(upper=0.0)).max())
-
-                def e2(us):
-                    return e2_load_step(us, step_mw, **kw)
-                tr = e2(isl)
-                ev.append(_event_row(sk, "E2", step_mw, tr, limits, window, eq, f0, emt))
-                log_ups(sk, "E2", tr)
-                sources = [u for u in isl if u.model not in ("ups", "none")]
-                if sources:
-                    lost = max(sources, key=lambda u: (abs(u.p0), u.p_n))
-                    tr = e3_unit_trip(isl, lost.name, **kw)
-                    ev.append(_event_row(sk, "E3", lost.p0, tr, limits, window, eq, f0, emt, unit=lost.name))
-                    log_ups(sk, "E3", tr)
-                pv = float(sum(p_isl[uid] for uid in p_isl.index if campus.units.at[uid, "kind"] == "pv"))
-                if pv > 1e-9:
-                    tr = e5_pv_loss(isl, pv, **kw)
-                    ev.append(_event_row(sk, "E5", pv, tr, limits, window, eq, f0, emt))
-                    log_ups(sk, "E5", tr)
-                for name, run, base, dp in (("E1", e1, units, dp_e1), ("E2", e2, isl, step_mw)):
-                    for v, tr in i_max_sensitivity(base, run, rv["i_max_sensitivity_pu"]):
-                        ev.append(_event_row(sk, name, dp, tr, limits, window, eq, f0, emt, i_max_pu=v))
-            elif scenario == "ups_bridged":
-                gens = [u for u in units if u.model == "genset"]
-                feeds = [(u.name, u.ups["it_mw"], u.ups["e_mwh"]) for u in units if u.model == "ups"]
-                res = e4_ups_bridged(gens, rv["pickup_blocks"], feeds, rv["bridge_s"], rv["genset_redundancy_n"],
-                                     window_ms=window, f0=f0, cache=e4_cache, floor=floor)
-                for i, m in enumerate(res.blocks):
-                    v = judge(m, limits, f0, eq)
-                    ev.append({**sk, "event": "E4", "block": i + 1, "dp_mw": rv["pickup_blocks"][i],
-                               "t_block_s": res.ready_s + res.block_times_s[i],
-                               "rocof_window_hz_per_s": m.rocof_window_hz_per_s, "nadir_hz": m.nadir_hz,
-                               "t_nadir_s": m.t_nadir_s, "df_qss_hz": m.df_qss_hz, "t_return_s": m.t_return_s,
-                               "trip_s": m.trip[0] if m.trip else None,
-                               "ok": v.ok, "binding": v.binding, "worst": v.worst,
-                               "emt": "; ".join(emt_flags(m, limits, f0))})
-                for b in res.bridge:
-                    bridge.append({**sk, "unit": b.ups, "kind": "ups", "it_mw": b.it_mw, "e_mwh": b.e_mwh,
-                                   "autonomy_s": b.autonomy_s,
-                                   "needed_s": b.needed_s, "ok": b.ok, "pickup_complete": res.complete,
-                                   "ready_s": res.ready_s, "dropped": ", ".join(res.dropped)})
-            elif scenario == "planned":
-                res = e6_planned([u for u in units if u.model != "ups"], dp_e1, **kw)
-                planned.append({**sk, "import_mw": dp_e1, "feasible": res.feasible, "ramp_s": res.ramp_s,
-                                "shortfall_mw": res.shortfall_mw})
-                if res.trace is not None:
-                    ev.append(_event_row(sk, "E6", 0.0, res.trace, limits, window, eq, f0, emt))
+    parts = parallel.ordered_map(_study_hour, [(int(p), int(h)) for p, h in hours], _study_context,
+                                 (campus, hourly, iu, load_step_mw, dt, t_end, f0),
+                                 n_workers=workers, should_stop=should_stop)
+    ev, losses, bridge, planned, ups = ([row for part in parts for row in part[i]] for i in range(5))
     return FrequencyStudy(*(pd.DataFrame(t, columns=list(c)) for t, c in (
         (ev, EVENT_COLUMNS), (losses, LOSSES_COLUMNS), (bridge, BRIDGE_COLUMNS), (planned, PLANNED_COLUMNS),
         (ups, UPS_COLUMNS))))
@@ -1595,25 +1653,58 @@ def _event_run(campus, hourly, iu, r, ctx, study, sweep, f0=F0):
     return units, run, study
 
 
-def propose_cuts(campus, hourly, events, sweep=None, island_hourly=None, island_unit_hourly=None, f0=F0,
-                 study=(1e-3, 20.0), sweep_run=(5e-3, 10.0)):
-    """I7's cuts (``CUT_COLUMNS``) for the failing events of a frequency
-    study: E1, E2, E3 and E5 in ``events`` (``FrequencyStudy.events``, Q8
-    reruns aside) and E1 in ``sweep`` (``e1_every_hour``). Each event is
-    rebuilt as its table ran it, at that table's ``(dt, t_end)`` (``study``,
-    ``sweep_run``: the two functions' defaults, which the driver uses), and
-    inverted by ``cuts_for_event``; ``current`` is I3a's (``island_hourly``,
-    ``island_unit_hourly``). No cut for E4 or E6. Per (period, hour,
-    scenario, kind): the tightest feasible row, and an infeasible one where
-    an event has no cut."""
-    import pandas as pd
-
-    from gridspine.schema.island import validate_island_hourly, validate_island_unit_hourly
-
+def _cuts_context(campus, hourly, ih, iu, f0, study, sweep_run):
+    """What every failing event of ``propose_cuts`` shares; built once per
+    worker (``parallel.ordered_map``)."""
     limits, req = _limits(campus)
-    window, eq = req["values"]["rocof_window_ms"], equipment(campus, f0)
-    ih = validate_island_hourly(island_hourly) if island_hourly is not None else None
-    iu = validate_island_unit_hourly(island_unit_hourly) if island_unit_hourly is not None else None
+    return {"campus": campus, "hourly": hourly, "ih": ih, "iu": iu, "f0": f0, "study": study,
+            "sweep_run": sweep_run, "limits": limits, "window": req["values"]["rocof_window_ms"],
+            "eq": equipment(campus, f0), "ctx": {}}     # ctx: the hours' units, built once (``_event_run``)
+
+
+def _event_cuts(c, r):
+    """``propose_cuts``' rows for one failing event row ``r``."""
+    campus, hourly, ih, iu, f0, ctx = c["campus"], c["hourly"], c["ih"], c["iu"], c["f0"], c["ctx"]
+    limits, window, eq, study, sweep_run = c["limits"], c["window"], c["eq"], c["study"], c["sweep_run"]
+    period, hour, scenario, event = int(r["period"]), int(r["hour"]), str(r["scenario"]), str(r["event"])
+    built_ = _event_run(campus, hourly, iu, r, ctx, study, sweep_run, f0)
+    if built_ is None:
+        return []
+    units, run, (dt, t_end) = built_
+    urows = iu[(iu["period"] == period) & (iu["hour"] == hour)] if iu is not None else None
+    ih_row = None
+    if ih is not None:
+        hit = ih[(ih["period"] == period) & (ih["hour"] == hour) & (ih["scenario"] == scenario)]
+        ih_row = hit.iloc[0] if len(hit) else None
+    fw, out = any(u.model == "gfl_fw" for u in units), []
+    binding_ = r.get("binding")
+    failed = str(binding_) if binding_ == binding_ and binding_ is not None else "failing in the study"
+    for kind, delta, binding, derivation, feasible, note in cuts_for_event(
+            units, run, limits, f0, eq, window, t_end=t_end, failing=failed,
+            where=f"dt {dt:g} s, t_end {t_end:g} s"):
+        current, cnote = _i3a_current(kind, scenario, units, ih_row, urows, f0)
+        heuristic = kind != "droop_gain" or fw or note.startswith("at a limit")
+        if scenario not in CUT_SCENARIOS:
+            feasible, note = False, f"{scenario}: no 0+ row in the hub for this scenario"
+        elif event == "E3" and feasible:
+            feasible, note = False, (f"a unit trip needs N-1 cover from the other units, not a cut on the "
+                                     f"total: the units left need {delta:+.4g} {CUT_KINDS[kind]}")
+        elif feasible and delta > CUT_CAP * (ref := max(abs(current), abs(_engine_value(kind, units, f0)), 1.0)):
+            feasible, note = False, (f"{delta:.4g} {CUT_KINDS[kind]} is beyond {CUT_CAP:g} x the current "
+                                     f"{ref:.4g}: not offered as a cut")
+        notes = "; ".join(n for n in (note, cnote) if n)
+        out.append({"period": period, "hour": hour, "scenario": scenario, "event": event, "kind": kind,
+                    "required": current + delta if feasible else math.inf, "current": current,
+                    "delta": delta if feasible else math.inf, "unit": CUT_KINDS[kind], "binding": binding,
+                    "derivation": derivation,
+                    "heuristic": heuristic, "feasible": bool(feasible), "note": notes})
+    return out
+
+
+def cut_events(events, sweep=None) -> list:
+    """The event rows ``propose_cuts`` inverts, in its order: the failing
+    E1, E2, E3 and E5 of ``events`` (Q8 reruns aside), then the failing
+    rows of ``sweep``."""
     failing = []
     if events is not None and len(events):
         e = events[events["event"].isin(["E1", "E2", "E3", "E5"])]
@@ -1622,40 +1713,33 @@ def propose_cuts(campus, hourly, events, sweep=None, island_hourly=None, island_
         failing += [r for _, r in e[~e["ok"].astype(bool)].iterrows()]
     if sweep is not None and len(sweep):
         failing += [r for _, r in sweep[~sweep["ok"].astype(bool)].iterrows()]
-    ctx, rows_out = {}, []
-    for r in failing:
-        period, hour, scenario, event = int(r["period"]), int(r["hour"]), str(r["scenario"]), str(r["event"])
-        built_ = _event_run(campus, hourly, iu, r, ctx, study, sweep_run, f0)
-        if built_ is None:
-            continue
-        units, run, (dt, t_end) = built_
-        urows = iu[(iu["period"] == period) & (iu["hour"] == hour)] if iu is not None else None
-        ih_row = None
-        if ih is not None:
-            hit = ih[(ih["period"] == period) & (ih["hour"] == hour) & (ih["scenario"] == scenario)]
-            ih_row = hit.iloc[0] if len(hit) else None
-        fw = any(u.model == "gfl_fw" for u in units)
-        binding_ = r.get("binding")
-        failed = str(binding_) if binding_ == binding_ and binding_ is not None else "failing in the study"
-        for kind, delta, binding, derivation, feasible, note in cuts_for_event(
-                units, run, limits, f0, eq, window, t_end=t_end, failing=failed,
-                where=f"dt {dt:g} s, t_end {t_end:g} s"):
-            current, cnote = _i3a_current(kind, scenario, units, ih_row, urows, f0)
-            heuristic = kind != "droop_gain" or fw or note.startswith("at a limit")
-            if scenario not in CUT_SCENARIOS:
-                feasible, note = False, f"{scenario}: no 0+ row in the hub for this scenario"
-            elif event == "E3" and feasible:
-                feasible, note = False, (f"a unit trip needs N-1 cover from the other units, not a cut on the "
-                                         f"total: the units left need {delta:+.4g} {CUT_KINDS[kind]}")
-            elif feasible and delta > CUT_CAP * (ref := max(abs(current), abs(_engine_value(kind, units, f0)), 1.0)):
-                feasible, note = False, (f"{delta:.4g} {CUT_KINDS[kind]} is beyond {CUT_CAP:g} x the current "
-                                         f"{ref:.4g}: not offered as a cut")
-            notes = "; ".join(n for n in (note, cnote) if n)
-            rows_out.append({"period": period, "hour": hour, "scenario": scenario, "event": event, "kind": kind,
-                             "required": current + delta if feasible else math.inf, "current": current,
-                             "delta": delta if feasible else math.inf, "unit": CUT_KINDS[kind], "binding": binding,
-                             "derivation": derivation,
-                             "heuristic": heuristic, "feasible": bool(feasible), "note": notes})
+    return failing
+
+
+def propose_cuts(campus, hourly, events, sweep=None, island_hourly=None, island_unit_hourly=None, f0=F0,
+                 study=(1e-3, 20.0), sweep_run=(5e-3, 10.0), workers=1, should_stop=None):
+    """I7's cuts (``CUT_COLUMNS``) for the failing events of a frequency
+    study: E1, E2, E3 and E5 in ``events`` (``FrequencyStudy.events``, Q8
+    reruns aside) and E1 in ``sweep`` (``e1_every_hour``). Each event is
+    rebuilt as its table ran it, at that table's ``(dt, t_end)`` (``study``,
+    ``sweep_run``: the two functions' defaults, which the driver uses), and
+    inverted by ``cuts_for_event``; ``current`` is I3a's (``island_hourly``,
+    ``island_unit_hourly``). No cut for E4 or E6. Per (period, hour,
+    scenario, kind): the tightest feasible row, and an infeasible one where
+    an event has no cut. The events run over ``workers`` processes and
+    ``should_stop`` is asked between them, as in ``campus_frequency_study``."""
+    import pandas as pd
+
+    from gridspine.schema.island import validate_island_hourly, validate_island_unit_hourly
+
+    _limits(campus)                                  # no requirements: refused here, not in a worker
+    ih = validate_island_hourly(island_hourly) if island_hourly is not None else None
+    iu = validate_island_unit_hourly(island_unit_hourly) if island_unit_hourly is not None else None
+    failing = cut_events(events, sweep)
+    parts = parallel.ordered_map(_event_cuts, failing, _cuts_context,
+                                 (campus, hourly, ih, iu, f0, study, sweep_run),
+                                 n_workers=workers, should_stop=should_stop)
+    rows_out = [row for part in parts for row in part]
     df = pd.DataFrame(rows_out, columns=list(CUT_COLUMNS))
     if not len(df):
         return df

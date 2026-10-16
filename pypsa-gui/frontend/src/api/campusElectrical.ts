@@ -363,7 +363,7 @@ export interface CampusState {
 }
 
 /** The run's stages, as the backend names them (`RUN_STAGES`), then `done`. */
-export type CampusRunStage = 'prepare' | 'rank' | 'island_checks' | 'size' | 'invest' | 'gfm_settings' | 'done'
+export type CampusRunStage = 'prepare' | 'rank' | 'island_checks' | 'cuts' | 'size' | 'invest' | 'gfm_settings' | 'done'
 
 /** The campus run's solve-queue job, with the stage it reached. */
 export interface CampusRunJob {

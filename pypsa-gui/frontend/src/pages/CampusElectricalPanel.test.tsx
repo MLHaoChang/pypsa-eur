@@ -553,7 +553,7 @@ describe('the run is a solve-queue job (E2E demo plan 2026-10-14, D1)', () => {
     queue.abort.mockResolvedValue({})
     renderPanel()
     const status = await screen.findByTestId('campus-run-status')
-    expect(status.textContent).toMatch(/island checks: the frequency sweep, then the cuts/)
+    expect(status.textContent).toMatch(/island checks: the frequency sweep at the island hours/)
     expect(status.textContent).toMatch(/step 3 of 5/)
     expect(status.textContent).toMatch(/please wait/i)
     expect(status.textContent).toMatch(/1:1[45]/)
@@ -561,6 +561,14 @@ describe('the run is a solve-queue job (E2E demo plan 2026-10-14, D1)', () => {
     expect(runBtn.disabled).toBe(true)
     await userEvent.click(within(status).getByRole('button', { name: /Abort/ }))
     await waitFor(() => expect(queue.abort).toHaveBeenCalledWith('j1'))
+  })
+
+  it('names the cuts as their own step', async () => {
+    api.state.mockResolvedValue({ ...sized(), run_job: job({ stage: 'cuts', stage_done: 3, stage_total: 6 }) })
+    renderPanel()
+    const status = await screen.findByTestId('campus-run-status')
+    expect(status.textContent).toMatch(/the frequency cuts/)
+    expect(status.textContent).toMatch(/step 4 of 6/)
   })
 
   it('says a queued run is waiting, with its place', async () => {

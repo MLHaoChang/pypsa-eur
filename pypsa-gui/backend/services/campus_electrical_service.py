@@ -72,6 +72,7 @@ unsolved network, a description that does not build, and bad settings are
 422s, each naming what to fix. A pypsa NetCDF read happens under
 ``PyPSAService.get_netcdf_io_lock()``, and the run under a per-project lock.
 """
+import contextlib
 import contextvars
 import hashlib
 import json
@@ -100,16 +101,21 @@ try:
     from gridspine.drivers import campus_study as cs
     from gridspine.drivers.campus_study import SizingCriteria
     from gridspine.schema.contracts import ContractError
+    from gridspine.static import parallel
+    from gridspine.static.parallel import Stopped
 
     CAMPUS_AVAILABLE = True
     CAMPUS_IMPORT_ERROR = None
 except ImportError as exc:                      # pragma: no cover - build-shape branch
     CAMPUS_AVAILABLE = False
     CAMPUS_IMPORT_ERROR = str(exc)
-    cs = SizingCriteria = None
+    cs = SizingCriteria = parallel = None
 
     class ContractError(Exception):
         """Stand-in so the `except ContractError` clauses below still parse."""
+
+    class Stopped(Exception):
+        """Stand-in, as ``ContractError``: gridspine's ``parallel.Stopped``."""
 
 SUBDIR = "campus_electrical"
 CAMPUS_FILE = "campus_input.yaml"
@@ -1134,33 +1140,55 @@ def _island_hours_files() -> tuple:
     return (*cs.ISLAND_STATIC_CSV.values(), cs.ISLAND_STATIC_SUMMARY_JSON,
             cs.FREQ_E1_HOURLY_CSV, cs.FREQ_EVENTS_CSV, cs.FREQ_LOSSES_CSV, cs.FREQ_BRIDGE_CSV,
             cs.FREQ_PLANNED_CSV, cs.FREQ_UPS_CSV, cs.FREQ_SUMMARY_JSON, cs.FREQ_CUTS_CSV,
-            cs.GFM_SETTINGS_JSON)
+            cs.WORKERS_JSON, cs.GFM_SETTINGS_JSON)
 
 
-def _run_island_hours(run_dir: Path) -> None:
+def _run_island_hours(run_dir: Path, should_stop=None) -> bool:
     """The island-hours checks of a ranked run (campus island plan I9b;
     owner, 2026-10-14: inside the Run, whenever the campus has island data).
     The steady state and short circuit (I4, I5, I5b) run when a unit has an
     island block; the frequency check (I6) when the campus also has island
-    requirements and the run has the I3a island tables it reads, and with it
-    the cuts its failures would need (I7). An earlier run's files are removed
-    first, so nothing stale is read as this run's."""
+    requirements and the run has the I3a island tables it reads. An earlier
+    run's files are removed first, so nothing stale is read as this run's.
+    True when the frequency check ran, so its cuts are due (``_run_cuts``).
+    The hours run over ``parallel.workers()`` processes; ``should_stop`` is
+    asked between them, and a True ends the run there
+    (``CampusRunAborted``)."""
     from services.adequacy.island_config import ISLAND_UNIT_HOURLY_CSV
 
     for name in _island_hours_files():
         (run_dir / name).unlink(missing_ok=True)
     island = cs.load_run_campus(run_dir).island
     if not island["units"]:
-        return
+        return False
     cs.island_static_campus(run_dir)
-    if island["requirements"] is not None and (run_dir / ISLAND_UNIT_HOURLY_CSV).is_file():
-        cs.island_frequency_campus(run_dir)
-        cs.cuts_campus(run_dir)                  # I7: the cuts what fails would need
+    if island["requirements"] is None or not (run_dir / ISLAND_UNIT_HOURLY_CSV).is_file():
+        return False
+    with _aborted_on_stop("island_checks"):
+        cs.island_frequency_campus(run_dir, workers=parallel.workers(), should_stop=should_stop)
+    return True
+
+
+def _run_cuts(run_dir: Path, should_stop=None) -> None:
+    """I7: the cuts what fails in the frequency check would need,
+    ``should_stop`` asked between the failing events."""
+    with _aborted_on_stop("cuts"):
+        cs.cuts_campus(run_dir, workers=parallel.workers(), should_stop=should_stop)
+
+
+@contextlib.contextmanager
+def _aborted_on_stop(stage):
+    """gridspine's ``parallel.Stopped`` (an abort inside a stage, its
+    workers already ended) as the run's ``CampusRunAborted``."""
+    try:
+        yield
+    except Stopped as exc:
+        raise CampusRunAborted(f"aborted during {stage}") from exc
 
 
 #: The run's stages, in order, as its progress names them (the queue log's
 #: ``campus <stage> <done>/<total>`` lines and ``get_state``'s ``run_job``).
-RUN_STAGES = ("prepare", "rank", "island_checks", "size", "invest")
+RUN_STAGES = ("prepare", "rank", "island_checks", "cuts", "size", "invest")
 
 
 class CampusRunAborted(Exception):
@@ -1203,7 +1231,10 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
             stage("rank")
             cs.rank_campus(run_dir, k=s["k"])
             stage("island_checks")
-            _run_island_hours(run_dir)
+            frequency = _run_island_hours(run_dir, should_stop)
+            stage("cuts")
+            if frequency:
+                _run_cuts(run_dir, should_stop)
             stage("size")
             cs.size_campus(run_dir, criteria, profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs)
             _clear_investment(run_dir)               # the earlier run's purchases belong to its sizing, not this one's

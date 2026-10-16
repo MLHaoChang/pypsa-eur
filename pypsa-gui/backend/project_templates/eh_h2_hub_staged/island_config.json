@@ -1,0 +1,446 @@
+{
+  "requirements": {
+    "bridge_s": {
+      "source": "assumed",
+      "value": 600.0
+    },
+    "frequency_limits": {
+      "steady_island": {
+        "f_max_hz": {
+          "source": "assumed",
+          "value": 51.5
+        },
+        "f_min_hz": {
+          "source": "assumed",
+          "value": 47.5
+        },
+        "qss_band_hz": {
+          "source": "assumed",
+          "value": 1.0
+        },
+        "rocof_hz_per_s": {
+          "source": "assumed",
+          "value": 1.0
+        }
+      },
+      "transition": {
+        "f_max_hz": {
+          "source": "assumed",
+          "value": 51.5
+        },
+        "f_min_hz": {
+          "source": "assumed",
+          "value": 47.5
+        },
+        "qss_band_hz": {
+          "source": "assumed",
+          "value": 1.0
+        },
+        "rocof_hz_per_s": {
+          "source": "assumed",
+          "value": 1.0
+        }
+      }
+    },
+    "gfm_margin": {
+      "source": "assumed",
+      "value": 0.1
+    },
+    "ride_through_storage": [
+      "site_battery",
+      "bess_new_2027",
+      "bess_new_2030",
+      "bess_new_2035"
+    ],
+    "rocof_window_ms": {
+      "source": "assumed",
+      "value": 500.0
+    },
+    "scenarios": [
+      "seamless"
+    ],
+    "sustained_h": {
+      "source": "assumed",
+      "value": 1.0
+    }
+  },
+  "units": {
+    "bess_new_2027": {
+      "control": "gfm_droop",
+      "droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "i_max_pu": {
+        "source": "assumed",
+        "value": 1.2
+      },
+      "k_gfm_min": {
+        "source": "assumed",
+        "value": 1.0
+      },
+      "kind": "bess",
+      "pf_rated": {
+        "source": "assumed",
+        "value": 0.95
+      },
+      "q_droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "tau_f_s": {
+        "source": "assumed",
+        "value": 0.1
+      }
+    },
+    "bess_new_2030": {
+      "control": "gfm_droop",
+      "droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "i_max_pu": {
+        "source": "assumed",
+        "value": 1.2
+      },
+      "k_gfm_min": {
+        "source": "assumed",
+        "value": 1.0
+      },
+      "kind": "bess",
+      "pf_rated": {
+        "source": "assumed",
+        "value": 0.95
+      },
+      "q_droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "tau_f_s": {
+        "source": "assumed",
+        "value": 0.1
+      }
+    },
+    "bess_new_2035": {
+      "control": "gfm_droop",
+      "droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "i_max_pu": {
+        "source": "assumed",
+        "value": 1.2
+      },
+      "k_gfm_min": {
+        "source": "assumed",
+        "value": 1.0
+      },
+      "kind": "bess",
+      "pf_rated": {
+        "source": "assumed",
+        "value": 0.95
+      },
+      "q_droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "tau_f_s": {
+        "source": "assumed",
+        "value": 0.1
+      }
+    },
+    "fuel_cell": {
+      "control": "gfl_qu",
+      "kind": "fuel_cell",
+      "pf_rated": {
+        "source": "assumed",
+        "value": 0.95
+      },
+      "qu_points": {
+        "source": "assumed",
+        "value": [
+          [
+            0.9,
+            0.33
+          ],
+          [
+            0.97,
+            0.0
+          ],
+          [
+            1.03,
+            0.0
+          ],
+          [
+            1.1,
+            -0.33
+          ]
+        ]
+      }
+    },
+    "process_load": {
+      "critical": true,
+      "kind": "load"
+    },
+    "site_battery": {
+      "control": "gfm_droop",
+      "droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "i_max_pu": {
+        "source": "assumed",
+        "value": 1.2
+      },
+      "k_gfm_min": {
+        "source": "assumed",
+        "value": 1.0
+      },
+      "kind": "bess",
+      "pf_rated": {
+        "source": "assumed",
+        "value": 0.95
+      },
+      "q_droop_pct": {
+        "source": "assumed",
+        "value": 4.0
+      },
+      "tau_f_s": {
+        "source": "assumed",
+        "value": 0.1
+      }
+    },
+    "solar_new_2027": {
+      "control": "gfl_qu",
+      "kind": "pv",
+      "pf_rated": {
+        "source": "assumed",
+        "value": 0.95
+      },
+      "qu_points": {
+        "source": "assumed",
+        "value": [
+          [
+            0.9,
+            0.33
+          ],
+          [
+            0.97,
+            0.0
+          ],
+          [
+            1.03,
+            0.0
+          ],
+          [
+            1.1,
+            -0.33
+          ]
+        ]
+      }
+    },
+    "solar_new_2030": {
+      "control": "gfl_qu",
+      "kind": "pv",
+      "pf_rated": {
+        "source": "assumed",
+        "value": 0.95
+      },
+      "qu_points": {
+        "source": "assumed",
+        "value": [
+          [
+            0.9,
+            0.33
+          ],
+          [
+            0.97,
+            0.0
+          ],
+          [
+            1.03,
+            0.0
+          ],
+          [
+            1.1,
+            -0.33
+          ]
+        ]
+      }
+    },
+    "solar_new_2035": {
+      "control": "gfl_qu",
+      "kind": "pv",
+      "pf_rated": {
+        "source": "assumed",
+        "value": 0.95
+      },
+      "qu_points": {
+        "source": "assumed",
+        "value": [
+          [
+            0.9,
+            0.33
+          ],
+          [
+            0.97,
+            0.0
+          ],
+          [
+            1.03,
+            0.0
+          ],
+          [
+            1.1,
+            -0.33
+          ]
+        ]
+      }
+    },
+    "solar_park": {
+      "control": "gfl_qu",
+      "kind": "pv",
+      "pf_rated": {
+        "source": "assumed",
+        "value": 0.95
+      },
+      "qu_points": {
+        "source": "assumed",
+        "value": [
+          [
+            0.9,
+            0.33
+          ],
+          [
+            0.97,
+            0.0
+          ],
+          [
+            1.03,
+            0.0
+          ],
+          [
+            1.1,
+            -0.33
+          ]
+        ]
+      }
+    },
+    "wind_farm": {
+      "control": "gfl_qu",
+      "kind": "wind",
+      "pf_rated": {
+        "source": "assumed",
+        "value": 0.95
+      },
+      "qu_points": {
+        "source": "assumed",
+        "value": [
+          [
+            0.9,
+            0.33
+          ],
+          [
+            0.97,
+            0.0
+          ],
+          [
+            1.03,
+            0.0
+          ],
+          [
+            1.1,
+            -0.33
+          ]
+        ]
+      }
+    },
+    "wind_new_2027": {
+      "control": "gfl_qu",
+      "kind": "wind",
+      "pf_rated": {
+        "source": "assumed",
+        "value": 0.95
+      },
+      "qu_points": {
+        "source": "assumed",
+        "value": [
+          [
+            0.9,
+            0.33
+          ],
+          [
+            0.97,
+            0.0
+          ],
+          [
+            1.03,
+            0.0
+          ],
+          [
+            1.1,
+            -0.33
+          ]
+        ]
+      }
+    },
+    "wind_new_2030": {
+      "control": "gfl_qu",
+      "kind": "wind",
+      "pf_rated": {
+        "source": "assumed",
+        "value": 0.95
+      },
+      "qu_points": {
+        "source": "assumed",
+        "value": [
+          [
+            0.9,
+            0.33
+          ],
+          [
+            0.97,
+            0.0
+          ],
+          [
+            1.03,
+            0.0
+          ],
+          [
+            1.1,
+            -0.33
+          ]
+        ]
+      }
+    },
+    "wind_new_2035": {
+      "control": "gfl_qu",
+      "kind": "wind",
+      "pf_rated": {
+        "source": "assumed",
+        "value": 0.95
+      },
+      "qu_points": {
+        "source": "assumed",
+        "value": [
+          [
+            0.9,
+            0.33
+          ],
+          [
+            0.97,
+            0.0
+          ],
+          [
+            1.03,
+            0.0
+          ],
+          [
+            1.1,
+            -0.33
+          ]
+        ]
+      }
+    }
+  }
+}

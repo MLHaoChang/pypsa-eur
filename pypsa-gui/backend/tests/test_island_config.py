@@ -80,9 +80,62 @@ def test_the_datacenter_pickup_blocks_cover_its_peak_critical_load():
     check_island(cfg, critical_peak_mw=peak)
 
 
-def test_the_committed_island_sidecar_matches_the_builder(tmp_path):
-    T.write_sidecars(tmp_path, "eh_datacenter")
-    assert (TPL_DIR / "eh_datacenter" / T.ISLAND_FILE).read_text() == (tmp_path / T.ISLAND_FILE).read_text()
+@pytest.mark.parametrize("tid", sorted(T.ISLAND_CONFIG))
+def test_the_committed_island_sidecar_matches_the_builder(tid, tmp_path):
+    T.write_sidecars(tmp_path, tid)
+    assert (TPL_DIR / tid / T.ISLAND_FILE).read_text() == (tmp_path / T.ISLAND_FILE).read_text()
+
+
+# ── the H2 hub (no genset, no UPS: its batteries form the island) ────────────
+
+H2_IDS = ("eh_h2_hub", "eh_h2_hub_staged")
+
+
+@pytest.mark.parametrize("tid", H2_IDS)
+def test_the_h2_hub_sidecar_names_its_units_and_its_batteries_form_the_island(tid):
+    from gridspine.producers.campus import DEFAULT_ISLAND
+    from gridspine.schema.island import GFM_CONTROLS
+    from services.adequacy import island_config as IC
+
+    n = T.BUILDERS[tid]()
+    cfg = IC.validate(T.ISLAND_CONFIG[tid])
+    tables = {"bess": "storage_units", "pv": "generators", "wind": "generators",
+              "fuel_cell": "links", "load": "loads"}
+    for name, block in cfg["units"].items():
+        assert name in getattr(n, tables[block["kind"]]).index, (name, block["kind"])
+    # every battery (existing and candidate) forms the island and rides it through
+    bess = sorted(n.storage_units.index)
+    assert sorted(u for u, b in cfg["units"].items() if b["kind"] == "bess") == bess
+    assert all(cfg["units"][b]["control"] in GFM_CONTROLS for b in bess)
+    assert sorted(cfg["requirements"]["ride_through_storage"]) == bess
+    assert cfg["requirements"]["scenarios"] == ["seamless"]
+    # the critical load is the process load; the electrolyser and the H2 offtake are not islanded
+    assert [u for u, b in cfg["units"].items() if b["kind"] == "load"] == ["process_load"]
+    # the fuel cell's block is gridspine's drafted default, so draft and sidecar agree
+    raw = T.ISLAND_CONFIG[tid]["units"]["fuel_cell"]
+    assert {k: (v["value"] if isinstance(v, dict) else v) for k, v in raw.items() if k != "kind"} \
+        == DEFAULT_ISLAND["fuel_cell"]
+    assert {v["source"] for v in raw.values() if isinstance(v, dict)} == {"assumed"}
+
+
+@pytest.mark.parametrize("tid", H2_IDS)
+def test_the_h2_hub_drafts_with_its_sidecar_and_ships_the_island_rows_off(tid):
+    from gridspine.ingest.campus import build_campus
+    from services.adequacy import island_config as IC
+
+    n = T.BUILDERS[tid]()
+    for frame in ("generators", "storage_units", "links"):
+        df = getattr(n, frame)
+        df["p_nom_opt"] = df["p_nom"].where(df["p_nom"] > 0, 10.0)
+    spec = draft_campus(n, island=IC.validate(T.ISLAND_CONFIG[tid])).spec
+    units = {u["pypsa_name"]: u for u in spec["campus"]["units"].values() if "pypsa_name" in u}
+    assert units["fuel_cell"]["kind"] == "fuel_cell" and units["fuel_cell"]["island"]["control"] == "gfl_qu"
+    assert units["site_battery"]["island"]["control"] == "gfm_droop"
+    assert spec["campus"]["island"]["scenarios"] == ["seamless"]
+    build_campus(spec)
+    # owner (a): the plan is not sized to island, and the template says so
+    assert not T.solver_config(tid).get("island_constraints")
+    assert any("Island rows are off" in s for s in T.TEMPLATE_META[tid]["study_notes"])
 
 
 def test_only_templates_with_island_data_ship_the_file(tmp_path):
