@@ -47,7 +47,10 @@ logger = logging.getLogger(__name__)
 STAGE = "gfm_settings"
 #: The campus job's action (in the job's settings); without it the job is the run.
 ACTION = "gfm_settings"
-MAX_SIMS = 400
+#: The search's simulation cap. 1500 (was 400): the staged microgrid's search
+#: needs about 1,200 to finish (45 cases, each passing step re-checks all of
+#: them); at about 0.23 s a simulation the cap is about 6 minutes of the job.
+MAX_SIMS = 1500
 
 
 def recommend(run_dir: Path, *, allow_i_max: bool = False, max_sims: int = MAX_SIMS,
@@ -89,6 +92,8 @@ def _state(project) -> dict:
     except (OSError, ValueError):
         return {"state": "stale", "recommendation": None,
                 "reason": "The last recommendation could not be read; recommend GFM settings again"}
+    if isinstance(rec, dict) and isinstance(rec.get("ledger"), list):
+        rec = {**rec, "ledger": [*rec["ledger"], *_limit_lines(run)]}
     again = "recommend them again"
     if not events.is_file() or events.stat().st_mtime > path.stat().st_mtime:
         return {"state": "stale", "recommendation": rec,
@@ -98,6 +103,48 @@ def _state(project) -> dict:
                 "reason": "The campus file, the network or the library changed since the campus run "
                           f"these settings come from; run the campus study, then {again}"}
     return {"state": "ready", "reason": "", "recommendation": rec}
+
+
+_LIMIT_WORDS = {"rocof_hz_per_s": ("RoCoF", "Hz/s"), "f_min_hz": ("f min", "Hz"),
+                "f_max_hz": ("f max", "Hz"), "qss_band_hz": ("quasi-steady band", "Hz")}
+
+
+def _number(v):
+    """``v`` when it is a real number (not a bool), else None."""
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _limit_lines(run: Path) -> list[str]:
+    """The frequency limits the search judged against, from the run's campus
+    file, as ledger lines (a relaxed demo limit is then shown beside the
+    recommendation it allowed); none when the file cannot be read, and a
+    field that is not a number is left out (the panel never fails on it)."""
+    import yaml
+
+    try:
+        island = (yaml.safe_load((run / ce.cs.CAMPUS_YAML).read_text()) or {})["campus"]["island"]
+        limits, window = island["frequency_limits"], island.get("rocof_window_ms")
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError):
+        return []
+    if not isinstance(limits, dict):
+        return []
+    ms = _number(window.get("value")) if isinstance(window, dict) else None
+    out = []
+    for name in sorted(limits, key=str):
+        lim = limits[name]
+        if not isinstance(lim, dict):
+            continue
+        parts = []
+        for field, (word, unit) in _LIMIT_WORDS.items():
+            v = lim.get(field)
+            x = _number(v.get("value")) if isinstance(v, dict) else None
+            if x is None:
+                continue
+            over = f" over {ms:g} ms" if field == "rocof_hz_per_s" and ms is not None else ""
+            parts.append(f"{word} {x:g} {unit}{over} ({v.get('source', 'assumed')})")
+        if parts:
+            out.append(f"judged against the {str(name).replace('_', ' ')} limits: " + ", ".join(parts))
+    return out
 
 
 def enqueue_settings(project, user=None, *, allow_i_max: bool = False) -> dict:

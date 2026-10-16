@@ -309,6 +309,12 @@ def _mg_commercial_and_finance(T) -> dict:
             "finance": FinanceInputs.model_validate(_mg_finance()).model_dump(mode="json")}
 
 
+#: The island's transition RoCoF limit (Hz/s over the 500 ms window): a demo
+#: value, relaxed from the data center's 1 Hz/s so a tuned grid-forming
+#: battery can meet it (owner, GFM demo tuning). The steady island keeps 1 Hz/s.
+MG_TRANSITION_ROCOF = 2.0
+
+
 def _mg_island(T) -> dict:
     """The island's own sidecar: diesel droop and a grid-forming battery
     holding the steady island (``seamless``; the tie is open, so there is no
@@ -334,7 +340,8 @@ def _mg_island(T) -> dict:
     return {"units": units, "requirements": {
         "bridge_s": a(600.0), "sustained_h": a(24.0), "fuel_autonomy_h": a(24.0),
         "genset_redundancy_n": a(1), "scenarios": ["seamless"],
-        "frequency_limits": {"transition": dict(T._LIMITS), "steady_island": dict(T._LIMITS)},
+        "frequency_limits": {"transition": {**T._LIMITS, "rocof_hz_per_s": a(MG_TRANSITION_ROCOF)},
+                             "steady_island": dict(T._LIMITS)},
         "rocof_window_ms": a(500.0), "gfm_margin": a(0.1),
         "ride_through_storage": ["island_battery", *[f"bess_new_{y}" for y in YEARS]],
     }}
@@ -487,6 +494,12 @@ def register(T) -> None:
              "source": "synthetic",
              "note": "the single-year template's marginal cost, in base-year (2027) money, "
                      "escalating 2 %/yr as fuel; replace with the island's fuel contract"},
+            {"item": "transition RoCoF limit",
+             "value": f"{MG_TRANSITION_ROCOF:g} Hz/s over 500 ms (the steady island keeps 1 Hz/s)",
+             "source": "assumed",
+             "note": "demo value, relaxed from the data center's 1 Hz/s so a tuned grid-forming "
+                     "battery can meet it; the order of RoCoF withstand settings used in several "
+                     "RfG implementations, not taken from a grid code"},
             {"item": "existing island", "value": ", ".join(a for a in MG_EXISTING)
                                                  + f": COD {YEARS[0]}-01-01, overnight cost 0",
              "source": "assumed", "note": "in service at the first period and sunk"},
@@ -495,6 +508,9 @@ def register(T) -> None:
             "Each period is the same representative week, with the period's load.",
             "Candidates are one row per period (build_year = the period).",
             "The island rows hold the steady island: grid-forming battery and diesel droop.",
+            f"The transition RoCoF limit is {MG_TRANSITION_ROCOF:g} Hz/s over 500 ms, a demo value "
+            "relaxed from the data center's 1 Hz/s: the GFM settings recommender can then tune "
+            "the batteries to meet it.",
             "After a solve the investment case compares the plan with the island as it stands "
             "today (the existing diesels, PV, wind and battery, no grid), re-solved without the "
             "candidates.",
