@@ -1195,6 +1195,51 @@ class CampusRunAborted(Exception):
     """The run stopped between two stages because its job was aborted."""
 
 
+#: The new study is built here and replaces ``run`` only once sizing has
+#: finished, so an abort during prepare, rank or the island checks leaves the
+#: previous study as it was.
+_RUN_PARTIAL = "run.partial"
+_RUN_BACKUP = "run.bak"
+
+
+def _remove_tree(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif path.is_symlink() or path.exists():
+        path.unlink()
+
+
+def _recover_run(published: Path) -> None:
+    """A publish that died between the two renames leaves the previous study
+    as ``run.bak`` and no ``run``. Put it back. A backup beside a published
+    run is the previous study after a publish that finished; drop it."""
+    backup = published.with_name(_RUN_BACKUP)
+    if not backup.exists():
+        return
+    if not published.exists():
+        backup.rename(published)
+    else:
+        _remove_tree(backup)
+
+
+def _publish_run(work: Path, published: Path) -> None:
+    """Replace ``published`` with ``work``. Both are in one directory, so each
+    rename is atomic. The previous study stays in place until this returns."""
+    backup = published.with_name(_RUN_BACKUP)
+    _remove_tree(backup)
+    moved = False
+    if published.exists():
+        published.rename(backup)
+        moved = True
+    try:
+        work.rename(published)
+    except BaseException:
+        if moved and not published.exists() and backup.exists():
+            backup.rename(published)
+        raise
+    _remove_tree(backup)
+
+
 def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
     """Prepare, rank and size the campus, then buy the electrical assets from
     the library (``invest``, default on); returns ``get_state``.
@@ -1202,7 +1247,13 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
     ``progress(stage, done, total)`` is told before each of ``RUN_STAGES``;
     ``should_stop()`` is asked there too, and a True ends the run with
     ``CampusRunAborted`` (the queue job's abort). The run is a solve-queue
-    job (``enqueue_run``); this is its body, and what tests call directly."""
+    job (``enqueue_run``); this is its body, and what tests call directly.
+
+    The new study is written under ``run.partial`` and replaces ``run`` only
+    after sizing. An abort or a refusal before that leaves the previous study
+    byte for byte, so its critical hours are never shown with another run's
+    sizing or purchases. A refusal while investing still publishes the new
+    sizing and clears the purchases (``_clear_investment``)."""
     require_capacity_expansion(project)
     d = campus_dir(project)
     campus = d / CAMPUS_FILE
@@ -1211,7 +1262,8 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
     s = _settings(settings, profiles(project))
     nc = _network(project)
     spec = yaml.safe_load(campus.read_text())
-    run_dir = d / "run"
+    published = d / "run"
+    work = d / _RUN_PARTIAL
     criteria = SizingCriteria(margin=float(s["margin"]), n_minus_1=s["n_minus_1"])
     profile_dirs = (grid_codes_dir(project),)
     total = len(RUN_STAGES) if s["invest"] else len(RUN_STAGES) - 1
@@ -1222,42 +1274,58 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
         if progress is not None:
             progress(name, RUN_STAGES.index(name), total)
 
-    with _lock(run_dir):
+    with _lock(published):
+        _recover_run(published)
+        if work.exists() or work.is_symlink():
+            _remove_tree(work)
         try:
-            stage("prepare")
-            with _netcdf_lock():
-                cs.prepare_campus(run_dir, spec, nc)
-                _write_island_tables(project, run_dir, spec, nc)
-            stage("rank")
-            cs.rank_campus(run_dir, k=s["k"])
-            stage("island_checks")
-            frequency = _run_island_hours(run_dir, should_stop)
-            stage("cuts")
-            if frequency:
-                _run_cuts(run_dir, should_stop)
-            stage("size")
-            cs.size_campus(run_dir, criteria, profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs)
-            _clear_investment(run_dir)               # the earlier run's purchases belong to its sizing, not this one's
+            try:
+                stage("prepare")
+                with _netcdf_lock():
+                    cs.prepare_campus(work, spec, nc)
+                    _write_island_tables(project, work, spec, nc)
+                stage("rank")
+                cs.rank_campus(work, k=s["k"])
+                stage("island_checks")
+                frequency = _run_island_hours(work, should_stop)
+                stage("cuts")
+                if frequency:
+                    _run_cuts(work, should_stop)
+                stage("size")
+                cs.size_campus(work, criteria, profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs)
+            except ContractError as exc:
+                raise _unprocessable(exc)
+            _publish_run(work, published)
+            # The earlier run's purchases belong to its sizing, not this one's.
+            _clear_investment(published)
             if s["invest"]:
                 stage("invest")
                 # The library is read once and kept: the engine buys from this
                 # copy, and a later change to the library is then a different
                 # file from the one the results were made with.
-                used = run_dir / USED_LIBRARY_FILE
+                used = published / USED_LIBRARY_FILE
                 try:
                     text, overridden, basis = _engine_library(project, d)
                     used.write_bytes(text.encode())
-                    cs.invest_campus(run_dir, used if overridden or (d / LIBRARY_FILE).is_file() else None,
+                    cs.invest_campus(published, used if overridden or (d / LIBRARY_FILE).is_file() else None,
                                      criteria=criteria, profile=s["profile"], pf=s["pf"],
                                      profile_dirs=profile_dirs, pcc_switchgear=not s["pcc_switchgear_by_operator"],
                                      pcc_tap_control=s["pcc_tap_control"])
-                    (run_dir / COST_BASIS_FILE).write_text(json.dumps(basis))
+                    (published / COST_BASIS_FILE).write_text(json.dumps(basis))
+                except ContractError as exc:
+                    _clear_investment(published)       # never half a purchase beside the new sizing
+                    raise _unprocessable(exc)
                 except BaseException:
-                    _clear_investment(run_dir)       # never half a purchase beside the new sizing
+                    _clear_investment(published)
                     raise
-        except ContractError as exc:
-            raise _unprocessable(exc)
-        (d / SETTINGS_FILE).write_text(json.dumps(s))
+            (d / SETTINGS_FILE).write_text(json.dumps(s))
+        finally:
+            # A failure here must not hide the abort or the refusal.
+            if work.exists() or work.is_symlink():
+                try:
+                    _remove_tree(work)
+                except OSError:
+                    logger.exception("campus run: could not remove %s", work)
     if progress is not None:
         progress("done", total, total)
     return get_state(project)
