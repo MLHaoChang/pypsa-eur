@@ -84,8 +84,9 @@ supplied by a priced slack (lost production). It is not a hard constraint.
 _Avoid_: quota, demand (unqualified, that means the electrical demand).
 
 **Lost-production value**:
-The cost of one unit of product not delivered: the client's margin per tonne, or the price of
-buying the product in. It is entered per product with its source. When it is missing, it is
+The cost of one unit of product not delivered: the client's margin per tonne, or a contract's
+shortfall penalty. It is not a purchase. When the product can be bought in, the buy-in is its
+own priced source, and the lost-production value must be above that price. It is entered per product with its source. When it is missing, it is
 Unavailable ([ADR-0001](../../pypsa-gui/docs/adr/0001-unresolvable-figures-ship-as-null.md)),
 never 0.
 _Avoid_: VoLL (that is per MWh of electricity, and stays the price of unserved electrical load).
@@ -115,7 +116,8 @@ _Avoid_: start-up cost (PyPSA's `start_up_cost` is unweighted; §2.3).
 | Ramp | `ramp_limit_up/down` | per snapshot, unweighted |
 | Inventory | Store on the product bus, `e_nom` or `e_nom_extendable` | the cycling rule is in §2.4 |
 | Production target | Load on the product bus (`p_set`, per period) | the delivery schedule |
-| Lost production | Generator `__lost_<product>` on the product bus, `marginal_cost` = lost-production value | weighted like any marginal cost |
+| Buy-in (when the product can be bought) | Generator `__buy_<product>` on the product bus, `marginal_cost` = purchase price (+ CO2) | a real purchase, booked as an expense |
+| Lost production | Generator `__lost_<product>` on the product bus, `marginal_cost` = lost-production value | weighted like any marginal cost. It must be above the buy-in price, or the LP "buys" by shedding (the validator checks it) |
 | Feed from outside the site (ore from the mine, N2 from air) | Generator on the feed bus, `p_max_pu` = schedule, cost 0 | the mine is out of scope |
 
 **Why a slack and not a hard target:**
@@ -181,7 +183,8 @@ Changes:
 | Multi-input balance | Link port rows: `p1 = −eff·p0` (product), `p2 = −eff2·p0` (feed drawn) | — |
 | Inventory | Store energy balance with `snapshot_weightings.stores` = hours per snapshot; e ≤ `e_nom` | capex on `e_nom` if extendable |
 | Production target | Load `p_set` on the product bus | — |
-| Lost production | slack Generator `p ≤ p_set` of the target, `marginal_cost` = lost-production value | objective × period weight |
+| Buy-in | Generator at the purchase price, `p_nom` = the target (A only) | objective × period weight |
+| Lost production | slack Generator `p ≤ p_set` of the target, `marginal_cost` = lost-production value (> buy-in) | objective × period weight |
 | Restart | `min_down_time` = restart time in snapshots. Lost tonnes are the slack's dispatch. `start_up_cost` = 0 | — |
 
 **Three constraints the PyPSA source imposes** (PyPSA 1.1.2, `pypsa/optimization/optimize.py`):
@@ -192,12 +195,21 @@ Changes:
    - Marginal and stand-by costs *are* weighted (`:211-216`, `:257-275`).
    - With one 168 h week standing for 52.14 weeks × 3–10 years, a start-up cost would be
      undercounted by a factor of about 150–520.
-   - **Design.**
+   - **Design** (gatekeeper agrees: refuse, don't pre-scale. Pre-scaling breaks as soon as
+     weights differ by snapshot or period, and a user would see a number that isn't the real
+     cost).
      - The restart is `min_down_time`, and its cost is the lost tonnes the slack prices (which
        are weighted).
      - Any non-process cost of a start (for example a purge) goes into `stand_by_cost`.
-     - The template validator refuses `start_up_cost > 0` on a weighted network, with that
-       reason.
+     - "Weighted" means any `snapshot_weightings.objective` ≠ 1 or any
+       `investment_period_weightings.objective` ≠ 1.
+     - **Templates:** the template validator *refuses* `start_up_cost` or `shut_down_cost`
+       above 0 on a weighted network. The refusal names the unit and points to `stand_by_cost`
+       or the shortfall slack.
+     - **User networks:** the solver *warns* (does not refuse) in the same case, because
+       PyPSA's behaviour there is existing behaviour (ticket 03).
+     - This is an upstream PyPSA gap, worth reporting upstream. The design does not depend on a
+       fix.
 2. **Committable and extendable together is big-M bilinear.** The owner already decided this for
    gensets (2026-10-13, option A: an extendable unit is never committed, see
    `solver/island.py:368-385`). The same rule applies to process units:
@@ -212,12 +224,19 @@ Changes:
    - Planning uses linearised UC (an LP), so this matters only in the operational check (§4.3).
    - Ticket 03 widens the check to Links.
 
-**Why linearised UC in planning:**
+**Why linearised UC in planning, and its condition** (gatekeeper: yes, with conditions):
 - The plan is multi-period with extendable grid assets. Binary UC on 504 (A) or 8,760 (B)
   snapshots, times several units, turns a seconds-scale LP into a MILP of unknown time.
-- Linearised UC (u continuous, with the tightened start-up formulation PyPSA ships) keeps the
-  minimum load and the min up/down roughly right. Its error is reported, not hidden: the
-  operational check (§4.3) re-runs one week per period with binaries and reports the gap.
+- **The relaxation is weak.** A fractional u lets a unit sit "half on" below its real minimum
+  load and spread min up/down. So it *understates* restart losses (the shortfall) and the
+  min-load cost.
+- **So the binary operational check is mandatory** whenever a process Link is committable:
+  - It re-solves one representative week per period with binary UC on the planned design (fixed
+    capacities).
+  - It reports per period, in the results and the ledger: binary minus linearised cost, and the
+    extra shortfall tonnes.
+  - Above the flag threshold (> 2 % cost, or any extra shortfall), the plan says "linearised UC
+    understates restarts". It never shows a silent number. Ticket 03 fixes the threshold.
 
 ### 2.4 Inventories with representative weeks
 
@@ -281,7 +300,8 @@ wind, PV, BESS ───┤ hub (AC, 110 kV)
                   └────────────── haber_bosch (bus0 = hub el., bus2 = h2 in, bus1 = nh3)
                                             │
                                      nh3 (MWh_NH3) ── nh3_tank ── nh3_delivery (Load)
-                                                              └── __lost_nh3 (slack, grey NH3 buy-in)
+                                                              ├── __buy_nh3 (grey NH3 purchase)
+                                                              └── __lost_nh3 (shortfall penalty)
 ```
 
 - The air separation unit is folded into the Haber-Bosch electricity input, as upstream does
@@ -305,7 +325,8 @@ wind, PV, BESS ───┤ hub (AC, 110 kV)
 | HB minimum load `p_min_pu` | 0.4 | demo | flexible-HB literature ranges from about 0.2 to 0.7; D-A1 sweeps it |
 | HB min up / min down (restart time) | 24 h / 8 h | demo | warm restart of the synthesis loop |
 | HB ramp | 0.2 p.u./h | demo | |
-| Lost-production value | grey NH3 buy-in: 97 EUR/MWh_NH3 (≈ 501 EUR/t) + CO2 | sourced, as an upstream default | `config.default.yaml:982` (`imports.price.NH3`). It is an upstream model default, not a market quote; the ledger says so |
+| Grey NH3 buy-in price (`__buy_nh3`, and the IC's `ReferencePurchase`) | 97 EUR/MWh_NH3 (≈ 501 EUR/t) + CO2 | sourced, as an upstream default | `config.default.yaml:982` (`imports.price.NH3`). It is an upstream model default, not a market quote; the ledger says so |
+| Lost-production value (`__lost_nh3`: the offtake contract's shortfall penalty) | 800 EUR/t | demo | must be above the buy-in price (validator). Ledgered input, never a VoLL default (#312) |
 | Grey NH3 CO2 intensity | demo | demo | stated by the case (as `GREY_H2.co2_t_per_kg` is) |
 | CO2 price, tariff, finance | as `eh_h2_hub_staged` | demo | `eh_staged_hubs.py` (`CO2_PRICE`, `SYNTHETIC_TARIFF`, `_h2_finance`) |
 | Wind, PV, prices, process load | as `eh_h2_hub` | demo | `eh_templates.build_eh_h2_hub` |
@@ -320,7 +341,7 @@ conversion factor (D2).
 - P1: all of it — a multi-input committable Link, a product Store and Load, results per port,
   and economics on bus2.
 - P2:
-  - lost production priced as a buy-in;
+  - grey buy-in kept separate from shortfall, priced at its own value;
   - restart time;
   - the HB's criticality tier `process_critical`, with the electrolysers `process_flexible`.
 - **IC:** the counterfactual is "buy grey NH3". It uses the existing `ReferencePurchase` path
@@ -338,9 +359,9 @@ conversion factor (D2).
    difference in MW is the inventory's grid value.
 4. **Green or grey?** NPV against buying grey NH3, per period, and the CO2 price at which green
    breaks even. These are the investment case's own outputs.
-5. **What does a trip cost?** A grid loss that trips the HB costs 8 h × 6.67 t/h ≈ 53 t (demo).
-   That is about 27 kEUR at the buy-in price, per event. §5 shows how the ride-through result
-   turns into that figure.
+5. **What does a trip cost?** A grid loss that trips the HB stops it for 8 h × 6.67 t/h ≈ 53 t
+   (demo). What the NH3 tank cannot cover is bought in at about 501 EUR/t, so up to about 27 kEUR
+   per event. §5 shows how the ride-through result turns into that figure.
 
 #### Acceptance checks (A)
 
@@ -354,8 +375,10 @@ conversion factor (D2).
   The binary operational check reports its objective gap against the linearised plan.
 - With the HB set to `p_min_pu` 1.0 and `min_down_time` 0 (inflexible, never stops), the solve
   needs at least as much H2 storage or grid import as the flexible case. A test pins the sign.
-- With an infinite connection and free storage, lost production is 0. With the electrolysers
-  removed, lost production = delivery, and the case shows the grey buy-in cost.
+- With an infinite connection and free storage, lost production and buy-in are 0. With the
+  electrolysers removed, buy-in = delivery and lost production = 0, because the lost-production
+  value is above the buy-in price.
+- **Binary check.** The binary operational check runs and reports its per-period gap (§2.3).
 - The investment case computes. Its counterfactual is the grey NH3 purchase. It has no
   `counterfactual_not_established` blocker.
 - The ledger lists every row of the table above with its label. No ammonia number lives only in
@@ -519,6 +542,33 @@ Three options, compared on what B needs:
   demo uses the same synthetic shape repeated, with seasonal scaling (demo, ledgered).
 - **Stores** are cyclic per period over the year (`e_cyclic_per_period`), which is physical over
   a year.
+- **Min up and down times.** PyPSA counts them in snapshots, so the rule is
+  ⌈hours / Δt⌉ (4 h → 2 at 3 h). The ledger says it rounds up.
+- **Not usable until ticket 09 covers the code that assumes 1 h or 168 h** (gatekeeper). Each
+  place gets a test that runs the same dispatch at 1 h and aggregated to 3 h and compares, or a
+  stated refusal:
+  - **`services/commercial/tariff_engine.py`:**
+    - energy items use the interval length;
+    - a demand or capacity charge on 3 h averages understates a 15-min peak. It needs either a
+      ledgered peak factor or a refusal; 09 decides which;
+    - `_HOURS_PER_YEAR` is used for capacity items.
+  - **`services/commercial/lp_bindings.py`:** kWh = MW × the interval's hours, not × 1.
+  - **`services/commercial/connection.py`:** nyears = Σw/8760, and the FCA curtailment-hours
+    target.
+  - **`services/results/finance_case.py`:** the annualisation 8760/hours (`:2220-2226`) and the
+    per-interval import price (`:1819-1888`).
+  - **`services/adequacy/metrics.py`:** `HOURS_PER_YEAR` and its ±2 % tolerance. LOLE and EENS
+    are weighted by 3 h.
+  - **`services/solver_service.py`:**
+    - `rolling_horizon` and `lf_period_length_h`: snapshots or hours? State which.
+    - the MIP gating at `:873`.
+  - **168 and 8760 literals:** `routers/network_time_axis.py`, `time_aggregation_service.py`,
+    `validation_service.py`, `profile_shapes.py` and `study/packs.py`. Grep and classify each.
+  - **Island and campus:**
+    - the island rows' bridge-energy and window terms (`solver/island.py`);
+    - gridspine's per-hour campus tables and ranking.
+
+    These need a test, or a stated refusal of island and campus studies on a 3 h axis.
 
 ### 4.3 The minutes-scale layer (restart, motor start, dip)
 
@@ -590,18 +640,31 @@ work, roughly.
 |---|---|---|---|---|---|
 | 01 | Glossary: process terms in CONTEXT.md | — | no | sonnet | S |
 | 02 | Process unit in the asset schema, carriers and API (multi-port and UC fields on Link) | 01 | no | sonnet | M |
-| 03 | Solve path: committable Links (MIP settings, linearised UC for process units, `start_up_cost` guard) | 02 | **yes** (solver) | opus | M |
+| 03 | Solve path: committable Links (MIP settings, linearised UC, mandatory binary check, `start_up_cost` refusal and warning, the template validator's process rules) | 02 | **yes** (solver) | opus | M–L |
 | 04 | Results and compare economics read every Link port; process results view | 02 | **yes** (economics) | opus | M |
-| 05 | **A tracer:** `eh_ammonia_staged` template, pack rows for Haber-Bosch and the NH3 tank, ledger | 03, 04 | no (template, pack data) | sonnet | M |
+| 05 | **A tracer:** `eh_ammonia_staged` template, pack rows for Haber-Bosch and the NH3 tank, ledger | 03, 04 | no (template, pack data; the validator rules live in 03 and 09) | sonnet | M |
 | 06 | A investment case: grey NH3 counterfactual via `ReferencePurchase`, product flows in the engine | 05 | **yes** (IC) | opus | S–M |
 | 07 | Process-unit form ("Process unit" type) and Guided display of the process view | 02, 04 | no | sonnet | M |
 | 08 | P2: criticality tiers and lost-production value per product (adequacy and DtC read the tiers) | 05 | **yes** (adequacy) | opus | L |
-| 09 | P3: chronological 3 h year as a staged-template time base, with a measured solve-time budget | 03 | **yes** (solver, as it changes weightings) | opus | M |
+| 09 | P3: chronological 3 h year as a staged-template time base, with a measured solve-time budget, the 1 h / 168 h audit, and the inventory-delivery validator rule | 03 | **yes** (solver, as it changes weightings) | opus | L |
 | 10 | **B tracer:** `eh_concentrator_staged` template | 08, 09 | no | sonnet | M |
 | 11 | B investment case: re-solve counterfactual for a product Load (`owner_conversion_load`) | 10 | **yes** (IC) | opus | M |
 | 12 | Minutes-scale: motor-start ΔU check and process restart sequence (gridspine static + results) | 10 | **yes** (gridspine) | opus | L |
 | 13 | Coupling report: ride-through, island and N-1 → lost tonnes and EUR | 08, 12 | **yes** (reads gridspine and adequacy results, report) | opus | M |
 | 14 | Assistant: process-unit fields in the chat tools and the template parameters | 07 | no (harness: read its README) | sonnet | S |
+
+Gatekeeper additions (2026-10-16):
+- **The template validator is gated.** Its rules (the `start_up_cost` refusal, inventory
+  delivery, lost value > buy-in) are solver semantics, so they live in 03 and 09, not in the
+  template tickets.
+- **The lost-production value is gated** wherever it reaches economics or the IC (04, 06, 11).
+  It is a ledgered input, never a VoLL default (#312, where the baseline valued H2 at VoLL and
+  the NPV was wrong). The case books slack tonnes as lost revenue in both the project and the
+  counterfactual, never as an expense twice.
+- **Gated tickets follow the PR rules:**
+  - each one sends its own plan to the gatekeeper;
+  - a bug-fix ticket names its first failing test;
+  - a gated PR carries its `mp-code-review` result in the body (steward, #334).
 
 Critical paths:
 - A runs 01 → 02 → 03/04 → 05 → 06, 08.
@@ -664,4 +727,16 @@ Each decision lists its options, with the recommended option first.
 
 ## Comments
 
-- 2026-10-16, gatekeeper plan check on §2 and §4: see below once answered.
+- **2026-10-16, gatekeeper plan check on §2 and §4: go, with changes. All are folded in above.**
+  - The gatekeeper confirmed on the installed PyPSA 1.1.2 that start-up and shut-down costs are
+    unweighted.
+  - **(a)** Linearised UC is OK, provided the binary check is mandatory, its gap is reported per
+    period, and a flag threshold applies (§2.3).
+  - **(b)** Refuse `start_up_cost` in templates, warn on user networks, with "weighted" defined
+    (§2.3).
+  - **(c)** 3 h snapshots are not usable until ticket 09 covers the listed places (§4.2).
+  - **(d)** Gating:
+    - the validator is gated;
+    - the lost-production value is gated, and is never VoLL;
+    - buy-in is kept separate from shortfall, with lost value > buy-in (§2.1, §3.A, §6).
+  - The design PR itself needs no gatekeeper OK.

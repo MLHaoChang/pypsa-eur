@@ -23,6 +23,8 @@ the ledger:
 
 The commercial and finance blocks follow the generic site's industrial preset.
 
+The concentrate has no buy-in, so only `__lost_concentrate` applies.
+
 ## Acceptance
 
 Design §3.B, "Acceptance checks (B)", except:

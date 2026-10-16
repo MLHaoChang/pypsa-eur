@@ -29,11 +29,12 @@ Read [the design](../design.md) §3.A first.
        0.2;
      - `nh3_tank`: extendable;
      - `nh3_delivery` at 50 / 100 / 150 t/d via `load_scale`;
-     - `__lost_nh3` at the grey buy-in price;
+     - `__buy_nh3` at the grey buy-in price (501 EUR/t);
+     - `__lost_nh3` at the shortfall penalty (800 EUR/t, demo; above the buy-in);
      - extendable `h2_storage`.
    - Every number goes in the ledger with the label from design §3.A.
-4. **The validator rule** from design §2.4: a representative-week template refuses an inventory
-   whose delivery is not continuous or at most weekly.
+4. **Validator rules.** The validator rules (design §2.3 and §2.4) are gated and live in
+   tickets 03 and 09. This template only has to pass them.
 
 ## Acceptance
 

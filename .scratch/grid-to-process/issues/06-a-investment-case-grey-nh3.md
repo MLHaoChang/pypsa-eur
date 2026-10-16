@@ -18,8 +18,12 @@ Read [the design](../design.md) §3.A (the IC row and decision question 4) first
   - The CO2 price follows the staged H2 hub.
 - **Check the counterfactual.** Confirm that `finance_case.py:1074` raises no
   `counterfactual_not_established:owner_conversion_load`.
-- **Lost production in the case.** It enters as a cost line separate from the energy bill,
-  through the engine (ADR-0004). Nothing is computed in the study layer.
+- **Buy-in and lost production in the case** (gatekeeper, #312):
+  - The project's own grey buy-in (`__buy_nh3`) is an expense.
+  - Shortfall (`__lost_nh3`) is lost revenue. It is counted the same way in the project and in
+    the counterfactual, and never booked as an expense twice.
+  - The lost-production value is a ledgered input, never VoLL.
+  - All of it goes through the engine (ADR-0004). Nothing is computed in the study layer.
 - **Engine change.** If the case needs one (for example, a product slack Generator mistaken for
   an owner asset), describe it to the gatekeeper first.
 

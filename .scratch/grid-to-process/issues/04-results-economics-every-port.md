@@ -18,6 +18,9 @@ Read [the design](../design.md) §2.2 (items 4 and 5) first.
    - Read every port.
    - Price each input port at its bus's price, as bus0 is today.
    - Price each output port at the product's value when one is set, else Unavailable.
+   - Lost-production value: a ledgered input only, never a VoLL default (#312).
+   - Book buy-in (`__buy_<p>`) as an expense.
+   - Book shortfall (`__lost_<p>`) as lost revenue, never as an expense as well.
 3. **Process view.** A results payload per product:
    - production (t and MWh);
    - delivery;

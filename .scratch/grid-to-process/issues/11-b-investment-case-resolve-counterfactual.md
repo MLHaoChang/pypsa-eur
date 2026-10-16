@@ -19,6 +19,8 @@ Read [the design](../design.md) §3.B (the IC paragraph) first.
   - Use the mechanism #302 gave the microgrid.
   - The lost-production slack carries the difference in tonnes.
 - **Report** the delta in lost tonnes and EUR as its own line.
+- **Shortfall** is lost revenue in both the project and the baseline, never an expense twice.
+  The lost-production value is a ledgered input, never VoLL (#312).
 
 ## Acceptance
 
