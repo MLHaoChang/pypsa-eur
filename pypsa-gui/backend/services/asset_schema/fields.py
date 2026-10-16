@@ -137,6 +137,45 @@ def _outages(with_cf_flag: bool) -> tuple[FieldSpec, ...]:
     return rows
 
 
+# ── unit commitment (Generator and Link share these rows) ────────────────────
+
+def _uc_cost_rows(*, shut_down: bool, stand_by: bool, start_up_readonly: bool = False) -> tuple[FieldSpec, ...]:
+    """The "variable" rows of the unit-commitment block, shown behind the `committable` gate."""
+    if start_up_readonly:
+        start_up = FieldSpec(
+            "start_up_cost", "variable", "Start-up cost", "Read-only. PyPSA does not weight a start-up cost by the "
+            "snapshot or period weighting, so a process unit prices a restart as lost production instead (see "
+            "grid-to-process ticket 03).", "EUR", "EUR", reveal_when=_UC, derived=True)
+    else:
+        start_up = FieldSpec("start_up_cost", "variable", "Start-up cost", "Cost of one start-up.", "EUR", "EUR",
+                             reveal_when=_UC)
+    rows = (start_up,)
+    if shut_down:
+        rows += (FieldSpec("shut_down_cost", "variable", "Shut-down cost", "Cost of one shut-down.", "EUR", "EUR",
+                           reveal_when=_UC),)
+    if stand_by:
+        rows += (FieldSpec("stand_by_cost", "variable", "Stand-by cost", "Cost per hour while the unit is on, at "
+                           "any output, including zero.", "EUR/h", "EUR/h", reveal_when=_UC),)
+    return rows
+
+
+def _uc_rows() -> tuple[FieldSpec, ...]:
+    """The "performance" rows of the unit-commitment block: the `committable` switch and what it reveals."""
+    return (
+        FieldSpec("committable", "performance", "Unit commitment", "Model on/off decisions with start-ups and "
+                  "minimum up and down times. Adds integer variables: slower, more realistic for thermal plants.",
+                  kind="bool"),
+        _share("ramp_limit_up", "performance", "Ramp-up limit", "Largest hour-on-hour increase, as a share of "
+               "capacity per hour.", reveal_when=_UC),
+        _share("ramp_limit_down", "performance", "Ramp-down limit", "Largest hour-on-hour decrease, as a share of "
+               "capacity per hour.", reveal_when=_UC),
+        FieldSpec("min_up_time", "performance", "Minimum up time", "Hours the unit stays on after a start-up.", "h",
+                  "h", kind="int", reveal_when=_UC),
+        FieldSpec("min_down_time", "performance", "Minimum down time", "Hours the unit stays off after a "
+                  "shut-down.", "h", "h", kind="int", reveal_when=_UC),
+    )
+
+
 # ── Generator (single part) ──────────────────────────────────────────────────
 
 GENERATOR: tuple[FieldSpec, ...] = (
@@ -162,24 +201,13 @@ GENERATOR: tuple[FieldSpec, ...] = (
               "O&M.", "EUR/MWh", "EUR/MWh"),
     FieldSpec("curtailment_cost", "variable", "Curtailment cost", "Penalty per MWh of available but unused energy. "
               "Set above zero to discourage spilling wind or solar.", "EUR/MWh", "EUR/MWh"),
-    FieldSpec("start_up_cost", "variable", "Start-up cost", "Cost of one start-up.", "EUR", "EUR", reveal_when=_UC),
-    FieldSpec("shut_down_cost", "variable", "Shut-down cost", "Cost of one shut-down.", "EUR", "EUR",
-              reveal_when=_UC),
+    *_uc_cost_rows(shut_down=True, stand_by=False),
     _share("efficiency", "performance", "Efficiency", "Conversion efficiency from primary energy to electricity. "
            "Used for CO₂ accounting (carrier emissions ÷ efficiency)."),
     _share("p_min_pu", "performance", "Minimum output", "Minimum dispatch as a share of capacity: a must-run floor."),
     _share("p_max_pu", "performance", "Availability", "Maximum dispatch as a share of capacity. For wind and solar, "
            "the time-varying capacity factor uploaded as a profile."),
-    FieldSpec("committable", "performance", "Unit commitment", "Model on/off decisions with start-ups and minimum "
-              "up and down times. Adds integer variables: slower, more realistic for thermal plants.", kind="bool"),
-    _share("ramp_limit_up", "performance", "Ramp-up limit", "Largest hour-on-hour increase, as a share of capacity "
-           "per hour.", reveal_when=_UC),
-    _share("ramp_limit_down", "performance", "Ramp-down limit", "Largest hour-on-hour decrease, as a share of "
-           "capacity per hour.", reveal_when=_UC),
-    FieldSpec("min_up_time", "performance", "Minimum up time", "Hours the unit stays on after a start-up.", "h",
-              "h", kind="int", reveal_when=_UC),
-    FieldSpec("min_down_time", "performance", "Minimum down time", "Hours the unit stays off after a shut-down.",
-              "h", "h", kind="int", reveal_when=_UC),
+    *_uc_rows(),
     FieldSpec("e_sum_min", "performance", "Minimum energy", "Least energy the generator must produce over the "
               "modelled horizon (Σ dispatch × weight). Empty for no lower bound.", "MWh", "MWh"),
     FieldSpec("e_sum_max", "performance", "Maximum energy", "Most energy the generator may produce over the "
@@ -314,6 +342,17 @@ LINK: tuple[FieldSpec, ...] = (
               "per MW of this input.", kind="bus", required=True),
     FieldSpec("bus1", "identity", "To bus", "Output side: the bus that receives the input × efficiency.",
               kind="bus", required=True),
+    *(FieldSpec(f"bus{i}", "identity", f"Port {i} bus", f"Optional extra port {i}: with a positive efficiency{i} "
+                f"the bus receives energy (CHP heat); with a negative one the link draws from it (a process "
+                f"feed). Leave empty for no port {i}.", kind="bus") for i in (2, 3, 4)),
+    FieldSpec("eh_process", "identity", "Process unit", "Tick when this link is a production step: bus0 is the "
+              "main input, bus1 the product, the other ports further inputs. A process unit is a fixed client "
+              "input, not a decision of the plan.", kind="bool"),
+    FieldSpec("criticality_tier", "identity", "Criticality tier", "How this unit's electrical supply is ranked when "
+              "it must be cut: safety (priced at VoLL), process_critical (a stop costs a restart), "
+              "process_flexible (it can stop and catch up from inventory) or deferrable (it shifts within the "
+              "day).", kind="enum", options=("safety", "process_critical", "process_flexible", "deferrable"),
+              reveal_when={"eh_process": True}),
     FieldSpec("p_nom", "size", "Capacity", "Rating on the input side (bus0). With extendable ticked, the existing "
               "capacity the optimiser starts from.", "MW", "MW", key_param=True),
     *_size_bounds(),
@@ -328,12 +367,24 @@ LINK: tuple[FieldSpec, ...] = (
     _money_per_mw_yr("fom_cost", "fom", "Fixed O&M", "Fixed operation and maintenance per kW of input per year."),
     FieldSpec("marginal_cost", "variable", "Marginal cost", "Cost per MWh drawn from the input bus.", "EUR/MWh",
               "EUR/MWh"),
+    *_uc_cost_rows(shut_down=False, stand_by=True, start_up_readonly=True),
     _share("efficiency", "performance", "Efficiency", "Output per unit of input: MWh delivered to bus1 per MWh drawn "
            "from bus0 (the COP for a heat pump, above 100 %)."),
+    *(FieldSpec(f"efficiency{i}", "performance", f"Port {i} efficiency", f"Flow on port {i} per unit drawn from "
+                f"bus0. Positive: the port bus receives it (CHP heat, 0.4 = 0.4 MWh per MWh of fuel). Negative: "
+                f"the link draws it from the port bus (a feed, −4.6 = 4.6 per unit of bus0). Read only when bus{i} "
+                f"is set.", "", "") for i in (2, 3, 4)),
     _share("p_min_pu", "performance", "Minimum flow", "Lowest flow as a share of capacity. Negative lets the link "
            "run backwards (−100 % for a bidirectional DC line)."),
     _share("p_max_pu", "performance", "Maximum flow", "Highest flow as a share of capacity. A profile uploaded on "
            "the Time Series page replaces this value hour by hour."),
+    *_uc_rows(),
+    FieldSpec("throughput_unit", "performance", "Throughput unit", "Display only: the unit of the product the unit "
+              "makes per hour, for example t/h. The solve reads the efficiency, not this.", kind="text",
+              derived=True, reveal_when={"eh_process": True}),
+    FieldSpec("specific_energy_kwh_per_t", "performance", "Specific energy", "Display only, derived: electricity "
+              "per tonne of product, from the efficiency. The solve reads the efficiency, not this.",
+              "kWh/t", "kWh/t", derived=True, reveal_when={"eh_process": True}),
     *_outages(with_cf_flag=False),
 )
 
@@ -433,6 +484,12 @@ BUS: tuple[FieldSpec, ...] = (
               kind="enum", options=("PQ", "PV", "Slack")),
     FieldSpec("country", "identity", "Country", "ISO country code, for grouping, country-level statistics and "
               "policy constraints.", kind="text"),
+    FieldSpec("unit", "identity", "Unit", "What the bus carries, for a product bus: MWh for an energy product (H2, "
+              "NH3) or t for a material (ore, concentrate). Empty for an electrical bus, which reads as MW.",
+              kind="text"),
+    FieldSpec("mwh_per_t", "identity", "Energy per tonne", "For an energy product in MWh: its lower heating value, "
+              "which results use to show tonnes (NH3: 5.166 MWh/t). Empty: tonnes are Unavailable.", "MWh/t",
+              "MWh/t", reveal_when={"unit": "MWh"}),
     FieldSpec("sub_network", "identity", "Sub-network", "Manual region label for the 'region' clustering mode: buses "
               "sharing it collapse to one node. Empty: determined from the electrical topology.", kind="text"),
     FieldSpec("x", "identity", "Longitude", "Geographic longitude, east positive. Places the bus on the map and "
@@ -489,7 +546,7 @@ SHUNT_IMPEDANCE: tuple[FieldSpec, ...] = (
 # What an emptied input saves (S1b). `clear` sends null: an Optional column, or a bound the write model turns
 # into +inf ("no limit", "never retires"). Costs save 0, a deliberate "free". Everything else keeps its value:
 # a blank capacity or efficiency is a slip, not a decision.
-_ZERO = {"marginal_cost", "fom_cost", "curtailment_cost", "start_up_cost", "shut_down_cost"}
+_ZERO = {"marginal_cost", "fom_cost", "curtailment_cost", "start_up_cost", "shut_down_cost", "stand_by_cost"}
 _CLEAR = {"p_nom_max", "e_nom_max", "s_nom_max", "v_nom_0", "v_nom_1", "lifetime", "overnight_cost", "discount_rate", "ramp_limit_up",
           "ramp_limit_down", "e_sum_min", "e_sum_max",
           "outage_rate_value", "outage_rate_basis", "mttr_hours", "p_max_pu_includes_outages"}
@@ -497,8 +554,10 @@ _CLEAR = {"p_nom_max", "e_nom_max", "s_nom_max", "v_nom_0", "v_nom_1", "lifetime
 
 # M5: per class. `empty` sends "" (a text column the write model types `str = ""`: an emptied country or display
 # name is a decision, and null would be refused); GlobalConstraint's optional columns clear to null.
-_EMPTY_BY_CLASS = {"Bus": {"country", "sub_network"}, "Carrier": {"nice_name", "color", "unit"}}
-_CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"}}
+_EMPTY_BY_CLASS = {"Bus": {"country", "sub_network", "unit"}, "Carrier": {"nice_name", "color", "unit"},
+                   "Link": {"bus2", "bus3", "bus4", "criticality_tier"}}
+_CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"},
+                   "Bus": {"mwh_per_t"}}
 
 
 def _with_blank(component: str, specs: tuple[FieldSpec, ...]) -> tuple[FieldSpec, ...]:
