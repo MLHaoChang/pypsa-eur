@@ -642,6 +642,51 @@ def test_a_failed_investment_leaves_no_half_purchase_and_is_a_422(hub, monkeypat
     assert not ce.get_state(hub)["stale"]
 
 
+def test_a_publish_that_dies_mid_rename_is_put_back(tmp_path):
+    published = tmp_path / "run"
+    published.mkdir()
+    (published / "kept.txt").write_text("previous")
+    backup = tmp_path / ce._RUN_BACKUP
+    published.rename(backup)                                 # died after the first rename
+    ce._recover_run(published)
+    assert (published / "kept.txt").read_text() == "previous" and not backup.exists()
+    work = tmp_path / ce._RUN_PARTIAL
+    work.mkdir()
+    (work / "new.txt").write_text("next")
+    ce._publish_run(work, published)
+    assert (published / "new.txt").read_text() == "next"
+    assert not (published / "kept.txt").exists()
+    assert not work.exists() and not backup.exists()
+
+
+def test_an_abort_before_sizing_keeps_the_previous_study(hub, monkeypatch):
+    """Aborting during the island checks used to leave the new critical hours
+    beside the previous sizing and purchases, and the study still read as
+    fresh. The previous study stays until the new sizing replaces it."""
+    ce.draft(hub)
+    ce.run(hub, {"k": 1, "invest": False})
+    run_dir = ce.campus_dir(hub) / "run"
+    (run_dir / ce.cs.INVESTMENT_CSV).write_text(
+        "need,status,reason,asset\ntransformer,kept,,old purchase\n")
+    before = {p.relative_to(run_dir).as_posix(): p.read_bytes()
+              for p in run_dir.rglob("*") if p.is_file()}
+
+    def abort(*_a, **_k):
+        raise ce.CampusRunAborted("aborted during island_checks")
+
+    monkeypatch.setattr(ce, "_run_island_hours", abort)
+    with pytest.raises(ce.CampusRunAborted):
+        ce.run(hub, {"k": 3, "invest": True})
+    after = {p.relative_to(run_dir).as_posix(): p.read_bytes()
+             for p in run_dir.rglob("*") if p.is_file()}
+    assert after == before
+    assert not (run_dir.parent / ce._RUN_PARTIAL).exists()
+    assert not (run_dir.parent / ce._RUN_BACKUP).exists()
+    state = ce.get_state(hub)
+    assert state["results"]["investment"][0]["asset"] == "old purchase"
+    assert state["stale"] is False
+
+
 def test_the_unresolved_needs_are_the_unresolved_rows_with_their_reasons():
     rows = [
         {"need": "transformer T", "status": "chosen", "reason": None},
