@@ -49,8 +49,11 @@ STAGE = "gfm_settings"
 #: The campus job's action (in the job's settings); without it the job is the run.
 ACTION = "gfm_settings"
 #: The search's simulation cap. 1500 (was 400): the staged microgrid's search
-#: needs about 1,200 to finish (45 cases, each passing step re-checks all of
-#: them); at about 0.23 s a simulation the cap is about 6 minutes of the job.
+#: needs about 1,200 to finish at k=1 (45 cases, each passing step re-checks
+#: all of them); at the Guided default k=3 (136 cases) the search and its
+#: verification finish inside it and the GFM/GFL comparison stops at it, said
+#: in a note (2026-10-16). At about 0.23 s a simulation the cap is about 6
+#: minutes of the job.
 MAX_SIMS = 1500
 
 

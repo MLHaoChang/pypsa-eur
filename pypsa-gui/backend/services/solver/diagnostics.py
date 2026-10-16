@@ -177,6 +177,25 @@ def _diagnose_infeasibility(network, config, log_queue,
     except Exception:
         pass
 
+    # 3b) The island rows (services.solver.island, I2b), when they were built:
+    #     a plan that cannot hold the islanding step, or the seamless island's
+    #     own events (E2 the largest load step, E3 a unit trip, E5 the PV
+    #     lost), is infeasible, not short. Their families are named.
+    try:
+        rows = ((getattr(n, "_island_facts", None) or {}).get("instant") or {}).get("rows") or []
+        if rows:
+            import re as _re
+            families = sorted({_re.sub(r"-\d{4}$", "", r) for r in rows})
+            emit("[INFEASIBLE]   • The island rows are on (island_constraints): "
+                 + ", ".join(families) + ". The plan may not be able to hold the islanding "
+                 "step or the seamless island's own events (Island-e2-up: the largest load "
+                 "step; Island-n1-up/-down-<unit>: that unit tripping; Island-e5-up: the PV "
+                 "lost) with what it can build; solve with island_constraints off to check, "
+                 "or raise the candidates' p_nom_max.")
+            hints += 1
+    except Exception:
+        pass
+
     # 4) Gurobi-only: native infeasibility report (IIS).
     try:
         if str(getattr(config, "solver_name", "")).lower() == "gurobi":

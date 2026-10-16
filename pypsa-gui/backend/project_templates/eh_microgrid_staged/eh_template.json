@@ -53,6 +53,12 @@
       "value": "2 Hz/s over 500 ms (the steady island keeps 1 Hz/s)"
     },
     {
+      "item": "island rows",
+      "note": "measured 2026-10-16 on this plan: battery 6 (existing) + 6.08 / 6.08 / 3.27 MW built in 2027 / 2030 / 2035, demo pre-tax NPV +43.2 M EUR (+43.9 M EUR when the rows held the islanding step alone); the GFM settings recommender then finds settings at the Guided defaults",
+      "source": "assumed",
+      "value": "on, seamless: the islanding step and the island's own events (the largest load step, any one unit's trip, the PV lost)"
+    },
+    {
       "item": "existing island",
       "note": "in service at the first period and sunk",
       "source": "assumed",
@@ -89,7 +95,7 @@
   "study_notes": [
     "Each period is the same representative week, with the period's load.",
     "Candidates are one row per period (build_year = the period).",
-    "The island rows hold the steady island: grid-forming battery and diesel droop.",
+    "The island rows hold the steady island: grid-forming battery and diesel droop. They also keep the headroom the frequency check asks for: the largest load step, any one unit's trip and the PV lost.",
     "The transition RoCoF limit is 2 Hz/s over 500 ms, a demo value relaxed from the data center's 1 Hz/s: the GFM settings recommender can then tune the batteries to meet it.",
     "After a solve the investment case compares the plan with the island as it stands today (the existing diesels, PV, wind and battery, no grid), re-solved without the candidates."
   ]

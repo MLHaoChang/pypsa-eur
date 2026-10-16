@@ -486,6 +486,14 @@ def register(T) -> None:
              "note": "demo value, relaxed from the data center's 1 Hz/s so a tuned grid-forming "
                      "battery can meet it; the order of RoCoF withstand settings used in several "
                      "RfG implementations, not taken from a grid code"},
+            {"item": "island rows",
+             "value": "on, seamless: the islanding step and the island's own events (the largest "
+                      "load step, any one unit's trip, the PV lost)",
+             "source": "assumed",
+             "note": "measured 2026-10-16 on this plan: battery 6 (existing) + 6.08 / 6.08 / 3.27 MW "
+                     "built in 2027 / 2030 / 2035, demo pre-tax NPV +43.2 M EUR (+43.9 M EUR when "
+                     "the rows held the islanding step alone); the GFM settings recommender then "
+                     "finds settings at the Guided defaults"},
             {"item": "existing island", "value": ", ".join(a for a in MG_EXISTING)
                                                  + f": COD {YEARS[0]}-01-01, overnight cost 0",
              "source": "assumed", "note": "in service at the first period and sunk"},
@@ -493,7 +501,9 @@ def register(T) -> None:
         "study_notes": [
             "Each period is the same representative week, with the period's load.",
             "Candidates are one row per period (build_year = the period).",
-            "The island rows hold the steady island: grid-forming battery and diesel droop.",
+            "The island rows hold the steady island: grid-forming battery and diesel droop. They "
+            "also keep the headroom the frequency check asks for: the largest load step, any one "
+            "unit's trip and the PV lost.",
             f"The transition RoCoF limit is {MG_TRANSITION_ROCOF:g} Hz/s over 500 ms, a demo value "
             "relaxed from the data center's 1 Hz/s: the GFM settings recommender can then tune "
             "the batteries to meet it.",

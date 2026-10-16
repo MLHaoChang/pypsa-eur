@@ -1,10 +1,11 @@
 """The staged microgrid's GFM demo: a recommendation that can be applied
 (owner, GFM demo tuning; gatekeeper's plan review).
 
-The microgrid's island fails I6 on transition RoCoF. With its demo limit
-(2 Hz/s over 500 ms, relaxed from the data center's 1 Hz/s and ledgered) and
-the search's cap of 1500 simulations, the real recommender finishes with
-``recommended``. Applying it writes the settings into the sidecar and the
+The microgrid's island fails I6 at its current settings. With its demo limit
+(2 Hz/s over 500 ms, relaxed from the data center's 1 Hz/s and ledgered), the
+hub sized for the island's own events (the seamless event rows, I2b) and the
+search's cap of 1500 simulations, the real recommender finishes with
+``recommended`` at the Guided default ranking (k=3, 136 cases). Applying it writes the settings into the sidecar and the
 campus file; the recommendation then reads stale, the hub must be re-solved
 (the microgrid ships its island rows on), and a second apply is refused.
 
@@ -31,15 +32,21 @@ TID = "eh_microgrid_staged"
 
 def _frequency_check(row):
     """The campus run's steps up to I6 (``ce.run``'s prepare, rank and
-    island checks without I7)."""
+    island checks without I7), at the Guided and Expert default ranking
+    (``ce.DEFAULTS["k"]``, 3 critical hours per criterion; Guided smoke
+    2026-10-16: at k=1 the ranking left out the hours that failed)."""
     spec = yaml.safe_load((ce.campus_dir(row) / ce.CAMPUS_FILE).read_text())
     run = ce.campus_dir(row) / "run"
     ce.cs.prepare_campus(run, spec, ce._network(row))
     ce._write_island_tables(row, run, spec, ce._network(row))
-    ce.cs.rank_campus(run, k=1)
+    ce.cs.rank_campus(run, k=ce.DEFAULTS["k"])
     ce.cs.island_static_campus(run)
     ce.cs.island_frequency_campus(run)
     return run
+
+
+def test_the_demo_runs_at_the_guided_default_ranking():
+    assert ce.DEFAULTS["k"] == 3
 
 
 def test_the_demo_limit_is_ledgered_and_only_the_transition_is_relaxed():
