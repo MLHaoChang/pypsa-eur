@@ -9,6 +9,7 @@
   "stages": null,
   "study_notes": [
     "Electrolyser and fuel cell carry conversion roles and outage data: fmea_top ranks them, redundancy can add a spare.",
-    "The frontier runs by default for strong_grid."
+    "The frontier runs by default for strong_grid.",
+    "Island rows are off: the plan is not sized to island; the island checks report what islanding would need."
   ]
 }

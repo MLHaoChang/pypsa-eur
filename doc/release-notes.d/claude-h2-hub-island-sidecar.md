@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Industrial Hydrogen Hub templates (single-year and staged) ship an island sidecar: their batteries form the island and carry the critical process load, and the fuel cell, wind and PV are grid-following (demo values). The island rows stay off, so the plan and its investment case are unchanged; the campus run's island checks report what islanding would need.
