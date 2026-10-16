@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Guided's "set up the assistant" banner can be dismissed and stays away for the rest of the session instead of returning above every step; the set price of undelivered energy moves under "More settings" on Goal (a missing price still shows, as it blocks the run), and "per MWh" loses its double space (UX review L1, L3).
