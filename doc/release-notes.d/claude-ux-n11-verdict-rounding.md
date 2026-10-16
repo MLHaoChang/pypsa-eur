@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Guided's verdict sentence rounds hours per year to one decimal like its tile ("about 4.6 h/yr", not "about 5 h/yr" above a 4.6 h/yr tile), including the not-decided interval (UX review N11).
