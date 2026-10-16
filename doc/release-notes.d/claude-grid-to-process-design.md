@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): Design for integrated grid-to-process planning for industrial clients (`.scratch/grid-to-process/`): the process-chain model, a green-ammonia hub and a mining concentrator as examples, the time-scale and grid-coupling design, and tickets. No code change.
