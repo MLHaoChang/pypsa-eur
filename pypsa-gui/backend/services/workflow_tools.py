@@ -467,6 +467,7 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
     if not isinstance(cases, list) or not 1 <= len(cases) <= 4:
         _refuse("invalid_sensitivity_cases", "Provide between 1 and 4 cases per sweep.")
     from harness.experiment_execution import assert_sweep_admission
+    from harness.experiment_reconciliation import checkpoint
     assert_sweep_admission(baseline_project_id, cases)
     try:
         parsed = [SensitivityCase.model_validate(case) for case in cases]
@@ -538,9 +539,11 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
                     if [_file_stamp(path) for path in base_files] != base_stamps:
                         _refuse("baseline_changed", "The saved baseline changed during preparation; inspect saved cases before retrying.", 409)
                     if existing is None:
+                        checkpoint('effect_started')
                         info = projects.create_scenario(str(base.id), request, db=db, user=user)
                         result["project_id"] = str(info.id)
                         existing = project_registry.resolve_project(db, user, str(info.id))
+                        checkpoint('child_created', case_project_id=str(existing.id))
                         ctx.loaded_project = existing.name
                         ctx.org_id, ctx.project_uuid = str(existing.org_id), str(existing.id)
                         ctx.storage_dir = str(project_registry.project_dir(existing))
@@ -556,6 +559,7 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
                         projects._save_context(ctx, existing.name, storage_dir=Path(ctx.storage_dir), db=db, user=user, project_row=existing)
                         from services.atomic_io import atomic_write_bytes
                         atomic_write_bytes(Path(ctx.storage_dir) / "sensitivity_case.json", json.dumps(spec, sort_keys=True).encode())
+                        checkpoint('child_saved')
                     result["project_id"] = str(existing.id)
                     saved_ctx = _load_context(existing)
                     from services.dispatch_status import dispatch_status
@@ -565,7 +569,10 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
                         # cap. Read comparisons separately with evidence tools.
                         result.update(reused=True, status="completed", objective=saved_ctx.network.objective)
                     else:
-                        result.update(status="queued", job=chat_tools.solve_queue_enqueue(str(existing.id)))
+                        checkpoint('queue_started')
+                        job = chat_tools.solve_queue_enqueue(str(existing.id))
+                        checkpoint('job_recorded', job_id=job.get('id'))
+                        result.update(status="queued", job=job)
                     outcomes.append(result)
                 except Exception as exc:
                     result.update(status="failed", error_kind=(exc.detail.get("error_kind", "sensitivity_failed") if isinstance(exc, HTTPException) and isinstance(exc.detail, dict) else "sensitivity_failed"))

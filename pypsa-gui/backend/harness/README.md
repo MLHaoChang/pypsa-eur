@@ -34,6 +34,8 @@ harness/
   job_adapters.py foreground (fg:…) and later domain job handles for wait_for_job without holding the turn
   activity_history.py bounded owned job-origin/status observations across worker loss; no execution, numerical or approval authority
   completion_observer.py bounded weak native-worker status observation while Activity is closed; no advancement or retry
+  experiment_execution.py ordinary single-network-case admission and permanent no-replay receipts
+  experiment_reconciliation.py explicitly confirmed fenced native submission read-back; no execution or retry
   attention.py    bounded owned question/confirmation observations and versioned read-only inspection; no restored approval or answer authority
   owned_snapshots.py private atomic bounded snapshot storage shared by job and decision observations; schemas remain separate
   compose.py      the system prompt for a turn, the live network line, and the per-turn ui-context / Guided / workflow-step blocks
@@ -743,3 +745,17 @@ preflight upgrades compatible records. Old ambiguous caps must be replanned.
 
 `start_experiment` and `prepare_experiment` are write-tier, with the same Guided confirmation rule as
 `discuss_project_run`. `list_experiments` and `get_experiment` are read-tier.
+
+New single-case submissions also carry a native fence and bounded submission
+checkpoints. `reconcile_experiment` is a destructive-tier, exact-receipt-bound
+metadata control: current owner/project access precedes edit-lock checks and
+ordinary confirmation is mandatory. Software derives the outcome by reading
+the matching native child/job/input/evidence records. A native child receipt
+binds the original job/attempt; a later same-input job cannot substitute.
+No-effect settlement requires a positive handler-close checkpoint before the
+first effect; a free lease alone cannot prove it. Legacy/missing/corrupt proof,
+lost queue receipts and source drift stay unresolved. The original reservation
+and caps remain; no retry, solve, abort, activation or deletion is executed.
+This does not add a checked-answer profile or a two-case adapter. See
+`.scratch/chat-companion/issues/05a-uncertain-case-reconciliation.md` and the
+single-case contract for the native proof and remaining-scope boundaries.

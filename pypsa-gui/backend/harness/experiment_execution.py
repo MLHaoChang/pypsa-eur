@@ -196,7 +196,7 @@ def _observe(record, ledger):
     return data
 
 
-def _view(record, data):
+def _view(record, data, *, root=None, ledger=None):
     job_status = data["job_status"]
     executed = (True if job_status in ("running", "completed", "failed") else
                 None if job_status in ("interrupted", "aborted")
@@ -219,6 +219,9 @@ def _view(record, data):
         elif data["status"] in ("submitted", "running"):
             remaining = record["limits"]["max_elapsed_seconds"] - (_clock() - data["started_at"])
             out["next_call"] = {"tool": "wait_for_job", "args": {"job_id": data["job_id"], "timeout_seconds": min(20, max(0, remaining))}}
+    if root is not None and ledger is not None:
+        from harness.experiment_reconciliation import decorate
+        return decorate(root, record, ledger, out)
     return out
 
 
@@ -227,7 +230,7 @@ def describe(record):
     if project != record["project_id"] or owner != record["owner_id"]:
         ex._refuse("experiment_not_found", "Experiment not found.", 404)
     ledger = _read(root, record)
-    return None if ledger is None else _view(record, _observe(record, ledger))
+    return None if ledger is None else _view(record, _observe(record, ledger), root=root, ledger=ledger)
 
 
 def advance_experiment(experiment_id: str) -> dict:
@@ -258,7 +261,7 @@ def advance_experiment(experiment_id: str) -> dict:
                 _save(root, record, ledger)
             session.experiment_id = experiment_id
             session.experiment_project_id = record["project_id"]
-            return _view(record, _observe(record, ledger))
+            return _view(record, _observe(record, ledger), root=root, ledger=ledger)
 
 
 def refresh_experiment(experiment_id: str) -> dict:
@@ -270,7 +273,7 @@ def refresh_experiment(experiment_id: str) -> dict:
                 ex._refuse("experiment_not_armed", "Use advance_experiment before observing case execution.")
             ledger = _observe(record, ledger)
             _save(root, record, ledger)
-            return _view(record, ledger)
+            return _view(record, ledger, root=root, ledger=ledger)
 
 
 def cancel_experiment(experiment_id: str) -> dict:
@@ -282,7 +285,7 @@ def cancel_experiment(experiment_id: str) -> dict:
                 ex._refuse("experiment_not_armed", "This experiment has no advancement to cancel.")
             ledger["cancelled"] = True
             _save(root, record, ledger)
-            return _view(record, _observe(record, ledger))
+            return _view(record, _observe(record, ledger), root=root, ledger=ledger)
 
 
 def assert_sweep_admission(baseline_project_id, cases):
@@ -306,9 +309,11 @@ def invoke(session, tool, args, handler):
                 tracked = ledger is not None and args.get("job_id") == ledger["job_id"]
         if not tracked:
             return _ordinary(session, args, handler)
-    # Freeze the baseline across preparation/submission. Job waits release it.
-    with network_guard() if tool == "run_sensitivity_sweep" else nullcontext():
-        return _invoke(session, eid, tool, args, handler)
+    # A shared native fence precedes the baseline lock and survives session loss.
+    from harness.experiment_reconciliation import submission_guard
+    with submission_guard(eid) if tool == "run_sensitivity_sweep" else nullcontext():
+        with network_guard() if tool == "run_sensitivity_sweep" else nullcontext():
+            return _invoke(session, eid, tool, args, handler)
 
 
 def _ordinary(session, args, handler):
@@ -362,6 +367,9 @@ def _invoke(session, eid, tool, args, handler):
             if tool == "run_sensitivity_sweep":
                 ledger["status"] = "submitting"
             _save(root, record, ledger)
+            if tool == "run_sensitivity_sweep":
+                from harness.experiment_reconciliation import prepare
+                prepare(root, record, attempt)
         # No network lock is held across a job wait; its worker must be able to finish.
     token = _ADMISSION.set(ex._digest(args)) if tool == "run_sensitivity_sweep" else None
     try:

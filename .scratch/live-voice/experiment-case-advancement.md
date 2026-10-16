@@ -58,6 +58,41 @@ handler may record its actual receipt, but never causes automatic advancement.
 Unknown/corrupt/missing checkpoints refuse rather than resetting or creating a
 replacement. Re-preparing an armed plan cannot replace its frozen inputs.
 
+## Explicit reconciliation of new submissions
+
+`reconcile_experiment(experiment_id, receipt_sha256)` is a destructive-tier
+metadata control. Ordinary offered-tool, current ACL/edit-lock, confirmation and
+strict-checked policy apply. It accepts no caller verdict, child ID or job ID.
+Inspect the current execution view for its exact digest-bound call. A changed
+receipt needs another inspection and ordinary confirmation.
+
+The main ledger remains version 1 and permanently retains its one submission
+reservation. New submissions additionally record a bounded version-1 checkpoint
+under `experiment_execution/submission_receipts/`, protected by a per-experiment
+cross-process lease. A native job origin in the child project's
+`experiment_submission.json` independently binds the original attempt/job.
+Checkpoints precede scenario creation and queue admission; returned child,
+prepared candidate and job IDs are recorded at those boundaries. The native
+handler holds the lease through receipt recording. Busy leases refuse promptly;
+session disappearance, PID reuse and Activity observations are not proof.
+
+A positive handler-finished checkpoint before the first effect can establish
+`not_started`. A crash/missing close record cannot. Matching native child/job
+receipts can recover observation after a lost return, but current ACL,
+parent/name, sensitivity descriptor and exact saved inputs must match. A later
+same-input job cannot stand in for the original. Completed values still require
+the existing independent saved/job/run-evidence checks. Partial child work stays
+partial; a queue boundary without an exact receipt stays unresolved. No job is
+guessed from a name or listing. Legacy/missing/corrupt proof never creates
+permission to repeat an operation.
+
+Resolution is historical metadata, not current numerical or quiescence
+certification. A free lease proves this cooperating submission handler stopped;
+an admitted queue job may still run. Source drift or loss withholds values.
+Reconciliation never executes, requeues, aborts, deletes, activates, renews caps
+or resets the old reservation. Any new attempt needs a new prepared plan and
+ordinary approvals. See the CP-05a specification for tests and limits.
+
 ## Truthful outcomes
 
 The view distinguishes `case_effects_reserved`, `job_status`, `executed` and

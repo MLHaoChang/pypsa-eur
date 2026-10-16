@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Add explicitly confirmed reconciliation of fenced single-case submissions, with native receipt and input verification, unresolved-gap handling and permanent protection against replay.
