@@ -190,3 +190,15 @@ def test_all_supported_request_profiles_keep_exact_bounded_descriptors(client, o
     assert gap['request_scope'] == scope
     assert gap['answer_id'] == published['answer_id']
     assert len(gap['slots']) == 1 and gap['slots'][0]['metric'] == 'unsupported_metric'
+
+
+def test_unavailable_requested_identifiers_remain_descriptors_not_authority(client, origin, monkeypatch):
+    ctx, _owner, sid, _app = origin
+    scope = dict(version=1, profile='generator-cost/1', project_id=str(ctx.project_uuid),
+        entity_id='G1', retain=True, evidence_id='x' * 36, comparison_evidence_id='y' * 36,
+        metrics=['total_cost'])
+    result = publish(client, sid, monkeypatch, checked_scope=scope)
+    gap = inspect(client, gap_row(client)).json()['source_gap']
+    assert gap['request_scope'] == scope
+    assert gap['slots'][0]['reason'] == result['receipt']['result_slots'][0]['reason']
+    assert 'decision_history_unavailable' not in client.get('/api/chat/activity').json()['warnings']

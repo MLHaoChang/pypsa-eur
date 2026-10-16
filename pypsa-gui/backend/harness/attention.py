@@ -141,7 +141,10 @@ def _scope_display(scope):
         raise ValueError('invalid gap window')
     for field in ('evidence_id', 'comparison_evidence_id'):
         if field in scope:
-            _uuid(scope[field])
+            # Retain even an unavailable requested identifier. RequestScope
+            # admits bounded strings; inspection never resolves them as evidence.
+            if len(_text(scope[field], 36)) != 36:
+                raise ValueError('invalid requested evidence descriptor')
     if 'cost_basis' in scope:
         CostBasis.model_validate(scope['cost_basis'])
     if 'metrics' in scope:
