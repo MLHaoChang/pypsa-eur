@@ -279,5 +279,8 @@ def test_the_microgrid_case_compares_with_the_island_as_it_stands_today(reset_ba
     assert "counterfactual:shed_at_voll" not in keys
     assert {f"asset:opex:Generator:diesel_{i}" for i in (1, 2, 3)} <= keys
     r = run_case(case)
-    assert r.metrics["project_pre_tax_npv"] is not None
+    # The demo's figure, pinned (measured 2026-10-16 with the seamless event
+    # rows; 43,857,725 before them): re-derive it if the plan or the solver
+    # changes, never loosen the tolerance.
+    assert r.metrics["project_pre_tax_npv"] == pytest.approx(43_231_055.0, rel=0.01)
 

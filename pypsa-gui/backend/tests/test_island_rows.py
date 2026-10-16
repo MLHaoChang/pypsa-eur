@@ -668,16 +668,22 @@ def test_headroom_covers_the_import_step_with_the_ups_on_line():
 
 def test_a_late_walk_in_transfer_relieves_the_step():
     """A 6 MW UPS that transfers and walks in after the gensets join
-    (20 s ≥ 10 + 5 s): ΔP⁺ = 10 − 6 = 4 MW."""
-    n = _hub(load=4.0, it=6.0, ups_mw=10.0, gensets=[("g", 0.0)])
-    n = _solve(n, _seamless(_units(ups=_ups(walk_in_s=20.0), gensets={"g": _genset()})))
+    (20 s ≥ 10 + 5 s): ΔP⁺ = 10 − 6 = 4 MW. With the event rows the 6 MW IT
+    load, the largest load, is E2's step: 6 MW."""
+    island = _seamless(_units(ups=_ups(walk_in_s=20.0), gensets={"g": _genset()}))
+    n = _solve(_hub(load=4.0, it=6.0, ups_mw=10.0, gensets=[("g", 0.0)]), island, event_rows=False)
     assert _p_nom(n) == pytest.approx(4.0, abs=TOL)
+    n = _solve(_hub(load=4.0, it=6.0, ups_mw=10.0, gensets=[("g", 0.0)]), island)
+    assert _p_nom(n) == pytest.approx(6.0, abs=TOL)
 
 
 def test_a_walk_in_exactly_at_the_join_counts_as_late():
-    n = _hub(load=4.0, it=6.0, ups_mw=10.0, gensets=[("g", 0.0)])
-    n = _solve(n, _seamless(_units(ups=_ups(walk_in_s=15.0), gensets={"g": _genset()})))
+    """ΔP⁺ = 4 MW as above; the event rows' E2 (the 6 MW IT load) makes it 6."""
+    island = _seamless(_units(ups=_ups(walk_in_s=15.0), gensets={"g": _genset()}))
+    n = _solve(_hub(load=4.0, it=6.0, ups_mw=10.0, gensets=[("g", 0.0)]), island, event_rows=False)
     assert _p_nom(n) == pytest.approx(4.0, abs=TOL)
+    n = _solve(_hub(load=4.0, it=6.0, ups_mw=10.0, gensets=[("g", 0.0)]), island)
+    assert _p_nom(n) == pytest.approx(6.0, abs=TOL)
 
 
 def test_an_early_walk_in_gives_no_relief():
@@ -691,20 +697,31 @@ def test_an_early_walk_in_gives_no_relief():
 @pytest.mark.parametrize("ups_mw,headroom", [(4.0, 6.0), (8.0, 4.0)])
 def test_extendable_ups_relief_is_the_smaller_of_its_load_and_its_rating(ups_mw, headroom):
     """L_it 6 MW. An extendable UPS of 4 MW relieves X = 4 (headroom 6);
-    one of 8 MW relieves X = L_it = 6 (headroom 4)."""
-    n = _hub(load=4.0, it=6.0, ups_mw=ups_mw, ups_extendable=True, gensets=[("g", 0.0)])
-    n = _solve(n, _seamless(_units(ups=_ups(walk_in_s=20.0), gensets={"g": _genset()})))
-    assert _p_nom(n) == pytest.approx(headroom, abs=TOL)
-    assert _p_nom(n, "ups") == pytest.approx(ups_mw, abs=TOL)
+    one of 8 MW relieves X = L_it = 6 (headroom 4). With the event rows E2's
+    step, the 6 MW IT load, holds the BESS at 6 MW in both."""
+    island = _seamless(_units(ups=_ups(walk_in_s=20.0), gensets={"g": _genset()}))
+    for event_rows, want in ((False, headroom), (True, 6.0)):
+        n = _hub(load=4.0, it=6.0, ups_mw=ups_mw, ups_extendable=True, gensets=[("g", 0.0)])
+        n = _solve(n, island, event_rows=event_rows)
+        assert _p_nom(n) == pytest.approx(want, abs=TOL)
+        assert _p_nom(n, "ups") == pytest.approx(ups_mw, abs=TOL)
 
 
 def test_a_spinning_genset_adds_headroom_and_burns_its_minimum_load():
     """A spinning 6 MW genset at p_min_pu 0.3 carries 6 − p_g of the 10 MW
     step: the BESS needs 4 MW. It runs at ≥ 1.8 MW every hour, which is the
-    fuel it costs. Cold, the BESS needs 10 MW and the genset never runs."""
+    fuel it costs. Cold, the BESS needs 10 MW and the genset never runs.
+
+    With the event rows the 10 MW load is also E2's step, where the genset is
+    credited at its 50 % load step, 3 MW (frequency.py:632), not its full
+    headroom: the BESS needs 10 − 3 = 7 MW. E1 still credits the full
+    headroom (the known gap the I2b docs name)."""
     units = _units(gensets={"g": _genset(spinning=True, p_min_pu=_a(0.3))})
-    n = _solve(_hub(load=10.0, gensets=[("g", 6.0)]), _seamless(units))
+    n = _solve(_hub(load=10.0, gensets=[("g", 6.0)]), _seamless(units), event_rows=False)
     assert _p_nom(n) == pytest.approx(4.0, abs=TOL)
+    assert (n.generators_t.p["g"] >= 1.8 - TOL).all()
+    n = _solve(_hub(load=10.0, gensets=[("g", 6.0)]), _seamless(units))
+    assert _p_nom(n) == pytest.approx(7.0, abs=TOL)
     assert (n.generators_t.p["g"] >= 1.8 - TOL).all()
     cold = _solve(_hub(load=10.0, gensets=[("g", 6.0)]),
                   _seamless(_units(gensets={"g": _genset()})))
@@ -1015,3 +1032,96 @@ def test_template_islands_ups_bridged_in_5_mw_blocks():
     assert float(n.generators.at["genset_new", "p_nom_opt"]) == pytest.approx(
         250.0 / 3.75 - 30.0, abs=1e-3)
     assert "Island-rocof-block" in n.model.constraints
+
+
+# ── the seamless island's own events: E2, E3 (N-1), E5 (Guided smoke 2026-10-16) ──
+#
+# I6 judges E2 (the largest load step), E3 (a unit trip) and E5 (the PV lost)
+# as well as the islanding step; the event rows size the same headroom for
+# them. The toys pin each one: a second, fixed GFM battery ``b2`` beside the
+# extendable ``bess``, PV that must run, and no export.
+
+_EVENTS = {"blocks": [0.1]}      # a 0.1 MW pickup block keeps E2 out of the way
+
+
+def _two_gfm_hub(*, pv, load, b2_mw):
+    n = _hub(pv=pv, hours=4, extra_storage=[("b2", b2_mw, 4.0)])
+    n.loads_t.p_set["load"] = pd.Series(load, index=n.snapshots, dtype=float)
+    return n
+
+
+def _two_gfm_units():
+    return _units(pv={"kind": "pv", "control": "gfl_qu", "pf_rated": _a(0.95),
+                      "qu_points": _a([[0.9, 0.33], [1.1, -0.33]])},
+                  extra={"b2": dict(_BESS)})
+
+
+def test_a_charging_batterys_trip_needs_the_other_former_to_absorb_it():
+    """6 MW of PV that must run and no load for two hours: the batteries
+    charge 6 MW. Whichever charges, a trip of the charging one leaves its
+    charge as surplus for the other: bess_nom − c_bess ≥ c_b2 with c_bess +
+    c_b2 = 6, so bess ≥ 6 MW. Without the event rows the fixed 6 MW b2 takes
+    it all and no BESS is bought."""
+    island = _seamless(_two_gfm_units(), **_EVENTS)
+    n = _solve(_two_gfm_hub(pv=6.0, load=[0.0, 0.0, 12.0, 12.0], b2_mw=6.0), island, event_rows=False)
+    assert _p_nom(n) == pytest.approx(0.0, abs=TOL)
+    n = _solve(_two_gfm_hub(pv=6.0, load=[0.0, 0.0, 12.0, 12.0], b2_mw=6.0), island)
+    assert _p_nom(n) == pytest.approx(6.0, abs=TOL)
+    rows = n._island_facts["instant"]["rows"]
+    assert {"Island-n1-down-b2", "Island-n1-down-bess", "Island-n1-up-b2", "Island-e2-up",
+            "Island-e5-up"} <= set(rows)
+    assert n._island_facts["n1_no_former"] == []
+
+
+def test_the_pv_lost_or_tripped_needs_up_headroom():
+    """6 MW of PV carries a 6 MW load, the batteries idle: E5 (the PV lost)
+    and E3 (the PV tripping) both need 6 MW up. The fixed b2 gives 4, so the
+    BESS gives 2. Without the event rows there is no import to lose: none."""
+    island = _seamless(_two_gfm_units(), **_EVENTS)
+    n = _solve(_two_gfm_hub(pv=6.0, load=[6.0] * 4, b2_mw=4.0), island, event_rows=False)
+    assert _p_nom(n) == pytest.approx(0.0, abs=TOL)
+    n = _solve(_two_gfm_hub(pv=6.0, load=[6.0] * 4, b2_mw=4.0), island)
+    assert _p_nom(n) == pytest.approx(2.0, abs=TOL)
+
+
+def test_the_trip_of_the_only_former_gets_no_row_and_says_so():
+    """One GFM battery: its trip leaves no grid former, and no dispatch
+    survives that, so it gets no N-1 row (the check judges it); the facts say
+    so. The PV lost (E5, which covers the PV's own trip) still needs the
+    BESS's up headroom."""
+    units = _units(pv={"kind": "pv", "control": "gfl_qu", "pf_rated": _a(0.95),
+                       "qu_points": _a([[0.9, 0.33], [1.1, -0.33]])})
+    n = _hub(pv=6.0, hours=4)
+    n.loads_t.p_set["load"] = pd.Series(6.0, index=n.snapshots)
+    n = _solve(n, _seamless(units, **_EVENTS))
+    rows = set(n._island_facts["instant"]["rows"])
+    assert not any(r.startswith("Island-n1-") and r.endswith("-bess") for r in rows)
+    assert "Island-e5-up" in rows and "Island-n1-up-pv" not in rows    # E5 implies the PV's own trip
+    assert n._island_facts["n1_no_former"] == ["E3 of bess leaves no grid former: not sized"]
+    assert _p_nom(n) == pytest.approx(6.0, abs=TOL)
+
+
+def test_an_event_the_site_cannot_hold_is_infeasible_and_the_diagnosis_names_the_rows():
+    """3 MW of PV that must run and no load for two hours: the batteries
+    charge 3 MW. b2 is fixed at 2 MW and the BESS can be built to 2 MW at
+    most, so whichever trips, the other cannot absorb its charge
+    (2 − c_bess ≥ c_b2 with c_bess + c_b2 = 3 has no solution). The LP is
+    infeasible with the event rows and solves without them; the solver's
+    infeasibility hints name the island rows."""
+    import queue
+
+    from services.solver.diagnostics import _diagnose_infeasibility
+
+    def net():
+        n = _two_gfm_hub(pv=3.0, load=[0.0, 0.0, 6.0, 6.0], b2_mw=2.0)
+        n.storage_units.at["bess", "p_nom_max"] = 2.0
+        return n
+    island = _seamless(_two_gfm_units(), **_EVENTS)
+    assert _solve(net(), island, event_rows=False) is not None
+    n = net()
+    status, cond = n.optimize(solver_name="highs", extra_functionality=island_extra_functionality(island))
+    assert status != "ok" and "infeasible" in str(cond).lower()
+    log = queue.SimpleQueue()
+    _diagnose_infeasibility(n, None, log)
+    text = " ".join(log.get() for _ in range(log.qsize()))
+    assert "island rows are on" in text and "Island-n1-down-b2" in text and "Island-e2-up" in text

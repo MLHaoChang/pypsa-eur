@@ -74,6 +74,30 @@ RoCoF reads the ``transition`` limits and the qss band the
 ``steady_island`` ones; f0 is 50 Hz. A row with no variable that fails is a
 refusal naming it, not an infeasible LP.
 
+**The seamless island's own events (Guided smoke 2026-10-16).** I6 judges
+more than the islanding step (E1): E2, the largest load step; E3, a unit
+trip; E5, the PV lost (gridspine ``frequency.campus_frequency_study``). A
+plan sized for E1 alone then fails the check whenever one of them is larger
+(the staged microgrid: a charging battery's trip with the other one already
+at its charge limit). ``seamless`` therefore adds, on (b↑)/(b↓)'s own
+headroom (``_event_rows``):
+
+    up ≥ max(pickup_blocks), else the hour's largest draw      Island-e2-up(-<s>)
+         (a load, or a GFM battery charging)
+    up without u ≥ p_u, for each source u                       Island-n1-up-<u>
+    down without s ≥ −p_s, for each GFM storage s               Island-n1-down-<s>
+    up ≥ Σ p_pv                                                 Island-e5-up
+
+A trip that leaves no grid-forming unit gets no row (no dispatch survives
+it; facts ``n1_no_former``); a PV unit's own trip is implied by E5's row, and
+a unit that cannot run (p_nom 0, not extendable) cannot trip. In these rows a
+genset is credited at min(its (b↑) share, its load step,
+load_step_max_pct·P_n: gridspine frequency.py:632, ``step_mw``), what it
+gives inside I6's window; its ramp after the step is not credited
+(conservative). **Known gap:** E1's own rows still credit a genset's full
+headroom, so a spinning genset counts for more at the islanding step than in
+the event rows (``.scratch/guided-smoke-2026-10-16/issues/04-e1-genset-credit.md``).
+
 **Ledgered:** PV is left out (conservative); the site is a copperplate (the
 hub's one-way site transformer is not seen here; I4 catches it at the island
 hours); U_max over-subtracts when an extendable genset is not built
@@ -229,16 +253,20 @@ def _wrap_with_island(network, user_fn, cfg, island=_UNSET, log_queue=None,
         emit=lambda msg: _safe_log(log_queue, f"[ISLAND] {msg}"))
 
 
-def island_extra_functionality(island, *, user_fn=None, delta_p_plus=None, emit=None):
+def island_extra_functionality(island, *, user_fn=None, delta_p_plus=None, emit=None,
+                               event_rows=True):
     """The ``extra_functionality`` callback that adds the island rows.
 
     ``delta_p_plus`` overrides the ``seamless`` step ΔP⁺ in MW (a number, a
     Series on the snapshots, or ``callable(n, sns)`` returning either); None,
-    the default, builds it from the PCC Links and the late UPSs (I2b)."""
+    the default, builds it from the PCC Links and the late UPSs (I2b).
+    ``event_rows`` is a test seam: False keeps the islanding step (E1) rows
+    alone; production never passes it."""
     def fn(n, snapshots):
         if user_fn is not None:
             user_fn(n, snapshots)
-        add_island_rows(n, snapshots, island, delta_p_plus=delta_p_plus, emit=emit)
+        add_island_rows(n, snapshots, island, delta_p_plus=delta_p_plus, emit=emit,
+                        event_rows=event_rows)
     return fn
 
 
@@ -534,9 +562,11 @@ def island_study(n, island, *, scenarios=None, solve=None, tol=1e-6) -> dict:
 # ── the rows ───────────────────────────────────────────────────────────────
 
 
-def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> dict:
+def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None,
+                    event_rows=True) -> dict:
     """Add (a), (b) and (c) to ``n.model`` and record what was built on
-    ``n._island_facts``."""
+    ``n._island_facts``. ``event_rows`` is a test seam: False keeps the
+    islanding step (E1) rows alone; production never passes it."""
     # gridspine through the guarded seam (a build without it then says so).
     from services.adequacy.activity import active_mask
     from services.adequacy.island_config import GFM_CONTROLS
@@ -696,7 +726,7 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None) -> di
             n, m, sns, sns_p, coord, tag, period, island=island, gensets=g_p, gfm=gfm_p,
             upss=ups_p, l_c=l_c, unit_rating=unit_rating, joins_s=joins_p, k=k,
             links=pcc, fw_units=fw, delta_p_plus=delta_p_plus, facts=facts, active=active,
-            committed=committed, cuts=cuts_p)
+            committed=committed, cuts=cuts_p, event_rows=event_rows)
 
         # (a) energy: Σ η·e(t−1) − Σ_window d·Δ ≥ B(t) for storage in RT ∩ GFM.
         cyclic_all = all(bool(n.storage_units.at[s, "cyclic_state_of_charge"]) for s in rt_p) \
@@ -999,7 +1029,7 @@ def _add_nominal(lin: _Lin, n, comp, name, coef):
 
 def _instant_rows(n, m, sns, sns_p, coord, tag, period, *, island, gensets, gfm, upss, l_c,
                   unit_rating, joins_s, k, links, fw_units, delta_p_plus, facts, active,
-                  committed=(), cuts=()):
+                  committed=(), cuts=(), event_rows=True):
     """The rows of the islanding instant for one period (I2b), by the
     scenario matrix; returns B(t), the seamless GFM bridge energy in MWh."""
     units, req = island["units"], island["requirements"]
@@ -1083,7 +1113,8 @@ def _instant_rows(n, m, sns, sns_p, coord, tag, period, *, island, gensets, gfm,
             delta_p_plus=delta_p_plus, facts=facts, active=active, period=period,
             p_out=p_out, nom_out=nom_out, on_out=on_out, online=online, p_store=p_store,
             k_sum=k_sum, margin=margin,
-            rocof_max=rocof_max, df_qss=df_qss, cut_lhs=cut_lhs)
+            rocof_max=rocof_max, df_qss=df_qss, cut_lhs=cut_lhs, blocks=vals.get("pickup_blocks"),
+            event_rows=event_rows)
         cut_lhs["droop_gain"] = k_sum
         for cut in cuts:
             _cut_row(m, cut_lhs[cut["kind"]], cut, coord, facts)
@@ -1118,7 +1149,7 @@ def _instant_rows(n, m, sns, sns_p, coord, tag, period, *, island, gensets, gfm,
 def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gfm, upss, l_c,
                    joins_s, links, fw_units, delta_p_plus, facts, active, period, p_out,
                    nom_out, on_out, online, p_store, k_sum, margin, rocof_max, df_qss,
-                   cut_lhs=None):
+                   cut_lhs=None, blocks=None, event_rows=True):
     """The ``seamless`` rows: the steps ΔP⁺ and ΔP⁻, headroom both ways, the
     MVA and inertia online at 0⁺, the droop gain, and B(t). ``cut_lhs``
     receives the 0⁺ quantities the I7 cuts bound (M, headroom both ways)."""
@@ -1164,35 +1195,71 @@ def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gf
         dp_down_joined.plus(_it_load(n, units, u, sns_p))
 
     # (b↑) upward headroom at 0⁺: the GFM storage, and the gensets online
-    # (spinning, or committed: u·p_max_pu·η·p_nom − η·p).
-    up = _Lin(sns_p)
-    for s in gfm:
-        _add_nominal(up, n, "StorageUnit", s, 1.0)
-        p_store(up, s, -1.0)
-    for g in online:
+    # (spinning, or committed: u·p_max_pu·η·p_nom − η·p). ``without``: the
+    # same less one unit's own share (the N-1 rows below).
+    def genset_room(g):
+        """One online genset's share of (b↑)."""
+        room = _Lin(sns_p)
         comp, eta = _genset_out(n, g)
         avail = _dense(n, comp, "p_max_pu", sns_p, [g])[g]
-        _, p_nom = _nominal(n, comp, g)
-        up.var(m.variables[f"{comp}-status"].sel(snapshot=sns_p, name=g),
-               avail * p_nom * eta, coord)
-        p_out(up, g, -1.0)
-    for g in spinning:
-        comp, _ = _genset_out(n, g)
-        avail = _dense(n, comp, "p_max_pu", sns_p, [g])[g]
-        var, fixed = _nominal(n, comp, g)
-        eta = _genset_out(n, g)[1]
-        if var is not None:
-            up.var(var, avail * eta, coord)
-        up.plus(avail * fixed * eta)
-        p_out(up, g, -1.0)
-    _row(m, up, dp_up, f"Island-headroom-up{tag}", coord, facts=facts)
+        if g in online:
+            _, p_nom = _nominal(n, comp, g)
+            room.var(m.variables[f"{comp}-status"].sel(snapshot=sns_p, name=g),
+                     avail * p_nom * eta, coord)
+        else:
+            var, fixed = _nominal(n, comp, g)
+            if var is not None:
+                room.var(var, avail * eta, coord)
+            room.plus(avail * fixed * eta)
+        return p_out(room, g, -1.0)
+
+    def headroom_up(without=None, credit=None):
+        """(b↑) less ``without``'s own share; ``credit``: a genset's share
+        replaced (the event rows' step credit)."""
+        up = _Lin(sns_p)
+        for s in gfm:
+            if s == without:
+                continue
+            _add_nominal(up, n, "StorageUnit", s, 1.0)
+            p_store(up, s, -1.0)
+        for g in online + spinning:
+            if g == without:
+                continue
+            up.add(credit[g] if credit is not None else genset_room(g))
+        return up
+
+    # The event rows credit a genset at min(its (b↑) share, its load step):
+    # inside I6's window a joined genset gives at most its step,
+    # load_step_max_pct·P_n (gridspine frequency.py:632, ``step_mw``), before
+    # its ramp (not credited). x_g ≤ both and enters only rows a larger x_g
+    # loosens, so it settles at the min (as Island-ups-relief does).
+    credit = {}
+    for g in (online + spinning) if event_rows else ():
+        x = m.add_variables(lower=0.0, coords=[coord], name=f"Island-event-genset-credit-{g}{tag}")
+        _row(m, genset_room(g), _Lin(sns_p).var(x), f"Island-event-genset-room-{g}{tag}", coord)
+        _row(m, on_out(_Lin(sns_p), g, spec(g)["load_step_max_pct"] / 100.0), _Lin(sns_p).var(x),
+             f"Island-event-genset-step-{g}{tag}", coord)
+        credit[g] = _Lin(sns_p).var(x)
 
     # (b↓) downward power: the GFM storage absorbs the surplus.
-    down = _Lin(sns_p)
-    for s in gfm:
-        _add_nominal(down, n, "StorageUnit", s, 1.0)
-        p_store(down, s, 1.0)
+    def headroom_down(without=None):
+        down = _Lin(sns_p)
+        for s in gfm:
+            if s == without:
+                continue
+            _add_nominal(down, n, "StorageUnit", s, 1.0)
+            p_store(down, s, 1.0)
+        return down
+
+    up, down = headroom_up(), headroom_down()
+    _row(m, up, dp_up, f"Island-headroom-up{tag}", coord, facts=facts)
     _row(m, down, dp_down, f"Island-headroom-down{tag}", coord, facts=facts)
+    if event_rows:
+        _event_rows(n, m, sns_p, coord, tag, units=units, gfm=gfm, gensets=gensets,
+                    active=active, period=period, p_out=p_out, p_store=p_store,
+                    headroom_up=lambda without=None: headroom_up(without, credit),
+                    headroom_down=headroom_down, blocks=blocks, facts=facts,
+                    genset_credit_max=sum(_genset_credit_max(n, g, spec(g)) for g in online + spinning))
 
     # (b↓) SoC room until frequency-watt has curtailed the surplus.
     t_curt = max((spec(f)["fw_delay_s"] + spec(f)["fw_p_limit_mw"] / spec(f)["fw_ramp_mw_per_s"]
@@ -1263,6 +1330,115 @@ def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gf
     elif facts["seamless_bridge"] is None:
         facts["seamless_bridge"] = "zero step"
     return bridge
+
+
+def _rating_max(n, comp, name) -> float:
+    """The most an asset can be built to: its p_nom, or its p_nom_max when extendable."""
+    static = getattr(n, _LIST_NAMES[comp])
+    if bool(static.at[name, "p_nom_extendable"]):
+        return float(static.at[name, "p_nom_max"])
+    return float(static.at[name, "p_nom"])
+
+
+def _genset_credit_max(n, g, values) -> float:
+    """The most a genset's event credit can be (the infeasibility hint's
+    bound): min(its room at full commitment and its minimum load, its load
+    step), at its largest rating and availability."""
+    comp, eta = _genset_out(n, g)
+    p_nom = _rating_max(n, comp, g) * eta
+    avail = float(_dense(n, comp, "p_max_pu", n.snapshots, [g])[g].max())
+    room = p_nom * (avail - float(values.get("p_min_pu", 0.0) or 0.0))
+    return max(0.0, min(room, p_nom * values["load_step_max_pct"] / 100.0))
+
+
+def _event_rows(n, m, sns_p, coord, tag, *, units, gfm, gensets, active, period, p_out, p_store,
+                headroom_up, headroom_down, blocks, facts, genset_credit_max=0.0):
+    """The seamless island's own events at 0⁺, as I6 judges them (gridspine
+    ``frequency.campus_frequency_study``), on the same headroom as (b↑)/(b↓),
+    a genset credited at min(its share, its load step):
+
+    * E2, the largest load step: ``max(pickup_blocks)`` when given, else the
+      hour's largest draw of any unit (frequency.py:1277): the largest load,
+      a constant ``p_set`` per hour, or a GFM battery's charging, a variable
+      (a row each); up headroom ≥ it;
+    * E3, a unit trips: I6 trips the largest |P| of its sources (every model
+      but ups/none, frequency.py:1284–1286); a row per source covers
+      whichever that is: the headroom without it ≥ p_u up, and for storage
+      ≥ −p_u down (a charging battery's trip is surplus). A trip that leaves
+      no grid-forming unit gets no row: no dispatch survives it (facts
+      ``n1_no_former``);
+    * E5, the island's PV output is lost (``kind`` pv only,
+      frequency.py:1290): up headroom ≥ Σ p_pv.
+
+    ``headroom_up(without)`` / ``headroom_down(without)``: (b↑)/(b↓) less
+    one unit's own share."""
+    if not gfm:
+        return                   # no former at all: the MVA row refuses (c)
+    loads = list(n.loads.index)          # the campus is drafted from every load of the network
+    pv = active([u for u, s in units.items() if s["kind"] == "pv" and u in n.generators.index],
+                lambda _: "Generator", period)
+    gfl = active([u for u, s in units.items() if s["kind"] in ("pv", "wind", "fuel_cell")
+                  and u in n.generators.index], lambda _: "Generator", period)
+    n1 = facts.setdefault("n1_no_former", [])
+
+    # E2
+    if blocks:
+        step = pd.Series(float(max(blocks)), index=sns_p)
+    elif loads:
+        step = _dense(n, "Load", "p_set", sns_p, loads).max(axis=1)
+    else:
+        step = None
+    if step is not None:
+        _row(m, headroom_up(), _Lin(sns_p).plus(step), f"Island-e2-up{tag}", coord, facts=facts)
+        # what the row can reach at most, for the infeasibility hint: the GFM
+        # storage at its rating (idle) and the gensets' step credit
+        facts.setdefault("events", []).append({
+            "row": f"Island-e2-up{tag}", "step_mw": float(step.max()),
+            "gfm_mw": float(sum(_rating_max(n, "StorageUnit", s) for s in gfm)),
+            "genset_mw": float(genset_credit_max)})
+    if not blocks:
+        # I6's "largest load" is the most negative p_mw of any campus unit in
+        # the hour (frequency.py:1277 over ``_hour_rows``): a charging battery's
+        # draw counts as a load step too.
+        for s in gfm:
+            _row(m, headroom_up(), p_store(_Lin(sns_p), s, -1.0), f"Island-e2-up-{s}{tag}", coord,
+                 facts=facts)
+    # E3. Left out, as they cannot bind: a PV unit's own trip when E5's row
+    # (every PV unit lost, none below 0) is built, and a unit that cannot run
+    # (p_nom 0, not extendable).
+    implied = set(pv) if pv and (n.generators.loc[pv, "p_min_pu"] >= 0).all() \
+        and not any(u in n.generators_t.p_min_pu for u in pv) else set()
+
+    def can_run(u, comp):
+        comp = comp or _genset_out(n, u)[0]
+        var, fixed = _nominal(n, comp, u)
+        return var is not None or fixed > 0
+
+    sources = ([(s, "StorageUnit") for s in gfm] + [(g, None) for g in gensets]
+               + [(u, "Generator") for u in gfl if u not in implied])
+    for u, comp in sources:
+        if u in gfm and len(gfm) == 1:
+            n1.append(f"E3 of {u} leaves no grid former{tag}: not sized")
+            continue
+        if not can_run(u, comp):
+            continue
+        p_u = _Lin(sns_p)
+        if comp == "StorageUnit":
+            p_store(p_u, u, 1.0)
+        elif comp == "Generator":
+            p_u.var(m.variables["Generator-p"].sel(snapshot=sns_p, name=u), 1.0)
+        else:
+            p_out(p_u, u, 1.0)
+        _row(m, headroom_up(u), p_u, f"Island-n1-up-{u}{tag}", coord, facts=facts)
+        if comp == "StorageUnit":
+            _row(m, headroom_down(u), p_u.scaled(-1.0), f"Island-n1-down-{u}{tag}", coord,
+                 facts=facts)
+    # E5
+    if pv:
+        lost = _Lin(sns_p)
+        for u in pv:
+            lost.var(m.variables["Generator-p"].sel(snapshot=sns_p, name=u), 1.0)
+        _row(m, headroom_up(), lost, f"Island-e5-up{tag}", coord, facts=facts)
 
 
 def not_islandable_hours(n) -> pd.Index:
