@@ -222,7 +222,10 @@ export default function AssistantActivity({ onConversation }: { onConversation: 
       {data?.warnings.includes('activity_history_unavailable') && <p role="status" className="text-xs">
         Retained job history could not be read or saved. Live observations may still be shown; missing history does not mean work never ran.
       </p>}
-      {data?.warnings.some(w => !['activity_history_is_bounded_observation', 'activity_history_unavailable'].includes(w)) &&
+      {data?.warnings.includes('activity_completion_observation_incomplete') && <p role="status" className="text-xs">
+        Some registered jobs could not be observed through completion. Inspect their native records before retrying; missing history does not establish whether work finished.
+      </p>}
+      {data?.warnings.some(w => !['activity_history_is_bounded_observation', 'activity_history_unavailable', 'activity_completion_observation_incomplete'].includes(w)) &&
         <p role="status" className="text-xs">Some activity sources are unavailable or bounded. Refresh or inspect their native records for more detail.</p>}
     </div>
   </section>
