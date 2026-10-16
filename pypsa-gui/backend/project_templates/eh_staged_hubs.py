@@ -190,33 +190,19 @@ CO2_PRICE = {"eur_per_t_by_year": {2027: 80.0, 2030: 120.0}, "money_year": 2020,
              "source": "synthetic demo path"}
 
 
-#: The H2 hub's island sidecar, said in its ledger (both variants; the
-#: single-year one carries the note only). Measured on the staged plan with
-#: the rows on (2026-10-15, live solves).
+#: The staged H2 hub's island-rows ledger row, measured on the staged plan
+#: with the rows on (2026-10-15, live solves); the sidecar and unit-data rows
+#: are shared with the single-year hub (``eh_templates.H2_ISLAND_LEDGER``).
 H2_ISLAND_NOTE = ("Island rows are off: the plan is not sized to island; the island checks "
                   "report what islanding would need.")
-H2_ISLAND_LEDGER = [
-    {"item": "island sidecar",
-     "value": "seamless: the batteries form the island and carry the 40 MW process load; "
-              "no genset, no UPS",
-     "source": "assumed",
-     "note": "the campus run's island checks and the report's islanding chapter read it"},
-    {"item": "island unit data",
-     "value": "batteries: the data center's bess_new block (droop 4 %, tau_f 0.1 s, i_max "
-              "1.2 pu, k_gfm_min 1.0, pf 0.95); fuel cell, wind and PV: gridspine's drafted "
-              "grid-following default (Q(U), pf 0.95); the data center's frequency limits; "
-              "sustained 1 h, bridge 600 s",
-     "source": "assumed",
-     "note": "demo values copied from the data center and gridspine, not from a datasheet or "
-             "a grid code"},
-    {"item": "island rows", "value": "off (island_constraints false)",
-     "source": "assumed",
-     "note": "the plan is not sized to island; turn them on to plan for islanding. Measured on "
-             "this plan: at 1 h sustained they add about 33 MW of battery in 2027, hold the grid "
-             "import to about 3 MW and take the demo NPV from +14.6 M to -2.1 M EUR; at 4 h "
-             "the NPV is -32 M EUR; at 24 h no plan meets them (owner: island data on, rows "
-             "off, the user opts in)"},
-]
+H2_ISLAND_ROWS = {
+    "item": "island rows", "value": "off (island_constraints false)",
+    "source": "assumed",
+    "note": "the plan is not sized to island; turn them on to plan for islanding. Measured on "
+            "this plan: at 1 h sustained they add about 33 MW of battery in 2027, hold the grid "
+            "import to about 3 MW and take the demo NPV from +14.6 M to -2.1 M EUR; at 4 h "
+            "the NPV is -32 M EUR; at 24 h no plan meets them (owner: island data on, rows "
+            "off, the user opts in)"}
 
 
 def _h2_commercial_and_finance(T) -> dict:
@@ -442,7 +428,7 @@ def register(T) -> None:
              "source": "assumed",
              "note": "grid imports carry no CO2 cost, so the avoided CO2 is the grey-H2 "
                      "purchase's alone"},
-            *H2_ISLAND_LEDGER,
+            *T.H2_ISLAND_LEDGER, H2_ISLAND_ROWS,
         ],
         "study_notes": [
             "Each period is the same representative week, with the period's H2 offtake.",

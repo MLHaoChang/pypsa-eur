@@ -508,6 +508,25 @@ BUILDERS = {
 # What the GUI preselects and the assistant recommends for each template.
 # ``pack_overrides`` / ``stages`` / ``dtc_attribution`` are EhStudyRequest
 # fields verbatim, so the panel can post them unchanged.
+
+#: The H2 hubs' island sidecar, said in their ledgers (both variants; each
+#: adds its own "island rows" row with what turning the rows on costs).
+H2_ISLAND_LEDGER = [
+    {"item": "island sidecar",
+     "value": "seamless: the batteries form the island and carry the 40 MW process load; "
+              "no genset, no UPS",
+     "source": "assumed",
+     "note": "the campus run's island checks and the report's islanding chapter read it"},
+    {"item": "island unit data",
+     "value": "batteries: the data center's bess_new block (droop 4 %, tau_f 0.1 s, i_max "
+              "1.2 pu, k_gfm_min 1.0, pf 0.95); fuel cell, wind and PV: gridspine's drafted "
+              "grid-following default (Q(U), pf 0.95); the data center's frequency limits; "
+              "sustained 1 h, bridge 600 s",
+     "source": "assumed",
+     "note": "demo values copied from the data center and gridspine, not from a datasheet or "
+             "a grid code"},
+]
+
 TEMPLATE_META: dict[str, dict] = {
     "eh_datacenter": {
         "id": "eh_datacenter",
@@ -638,6 +657,17 @@ TEMPLATE_META: dict[str, dict] = {
             "The frontier runs by default for strong_grid.",
             "Island rows are off: the plan is not sized to island; the island checks "
             "report what islanding would need.",
+        ],
+        "ledger": [
+            *H2_ISLAND_LEDGER,
+            {"item": "island rows", "value": "off (island_constraints false)",
+             "source": "assumed",
+             "note": "the plan is not sized to island; turn them on to plan for islanding. "
+                     "Measured on this template (live solves, 2026-10-15): the solve's "
+                     "objective goes from 7.0 M to 8.8 M EUR at 1 h sustained (26 MW of new "
+                     "battery), 11.4 M at 4 h (42 MW) and 28.9 M at 24 h (170 MW), and the grid "
+                     "import falls from about 93 MW to 2-10 MW (owner: island data on, rows "
+                     "off, the user opts in)"},
         ],
         "provenance": PROVENANCE,
     },
