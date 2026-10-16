@@ -15,7 +15,9 @@ function observationTime(value: number | null | undefined) {
   return Number.isFinite(date.getTime()) ? date : null
 }
 
-function DecisionInspector({ item, close }: { item: ActivityItem; close: () => void }) {
+function DecisionInspector({ item, close, onConversation, projectName }: {
+  item: ActivityItem; close: () => void; onConversation: () => void; projectName: string | null
+}) {
   const [detail, setDetail] = useState<DecisionObservation | null>(null)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
@@ -55,6 +57,21 @@ function DecisionInspector({ item, close }: { item: ActivityItem; close: () => v
           <ul className="list-disc pl-4">{detail.source_gap.slots.map(slot => <li key={slot.metric} className="break-words">
             {slot.metric}: {slot.disposition.replace(/_/g, ' ')} ({slot.reason})
           </li>)}</ul>
+          {detail.followups?.length ? <>
+            <p className="text-xs">Linked publications describe their own checked turn. They do not resolve this historical gap or certify current evidence.</p>
+            <ul className="list-disc pl-4">{detail.followups.map(link => <li key={link.answer_id} className="text-xs break-all">
+              Follow-up answer: {link.answer_id} · Turn: {link.turn_id} · Chat: {link.session_id} ·
+              {link.request_complete ? ' All requested metrics were answered at publication.' : ' The request was still limited at publication.'}
+            </li>)}</ul>
+          </> : null}
+          {detail.prepared_followup ? <button type="button" className="text-accent" onClick={() => {
+            if (!projectName || useUIStore.getState().currentProject !== projectName || !detail.prepared_followup) return
+            useChatStore.getState().setSourceGapDraft({ ...detail.prepared_followup, projectName,
+              chatSequence: useChatStore.getState().newChatSeq })
+            onConversation()
+          }}>Prepare checked follow-up</button> : <p className="text-xs">{detail.followup_unavailable_reason
+            ?? 'Preparation is unavailable for this record. Use an ordinary checked request.'}</p>}
+          {detail.prepared_followup && <p className="text-xs">Preparation opens a separate request card in your current chat. Review and send it there.</p>}
         </>}
         <p className="text-xs">{detail.reason}</p>
         <p className="text-xs break-all">Project: {detail.project_id} · Chat: {detail.session_id} · {detail.source_gap ? 'Turn' : 'Tool call'}: {detail.tool_use_id}</p>
@@ -189,7 +206,7 @@ export default function AssistantActivity({ onConversation }: { onConversation: 
         {item.decision_id && <button type="button" className="text-accent" onClick={() => setInspecting(item.id)}>{item.family === 'source_gap' ? 'Inspect source gap' : 'Inspect decision'}</button>}
         {item.decision_id && inspecting === item.id && <DecisionInspector
           key={JSON.stringify([key, item.decision_id, item.decision_revision, item.decision_digest])}
-          item={item} close={() => setInspecting(null)} />}
+          item={item} close={() => setInspecting(null)} onConversation={onConversation} projectName={project} />}
         {item.family === 'confirmation' && item.status === 'waiting_for_approval' && (item.session_id === session && item.live_approval_available !== false
           ? <button type="button" className="text-accent" onClick={onConversation}>Open originating chat</button>
           : <p className="text-xs">This decision belongs to another conversation. Return there to inspect it; no approval is granted here.</p>)}

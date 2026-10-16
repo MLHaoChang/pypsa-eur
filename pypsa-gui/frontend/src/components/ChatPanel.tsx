@@ -30,6 +30,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { acknowledgeMountedView, type NavigationAcknowledgement } from '../utils/verifiedNavigation'
 import { CheckedEvidenceCard } from './CheckedEvidenceCard'
 import { CheckedAnswerControl } from './CheckedAnswerControl'
+import { SourceGapFollowupCard } from './SourceGapFollowupCard'
+import type { SourceGapDraft } from '../store/chatStore'
 import { CHECKED_ANSWERS_QUERY_KEY, getCheckedAnswerCapabilities } from '../api/reliability'
 import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -668,6 +670,9 @@ export const KIND_COPY: Record<
   assurance_context_persistence_failed: { title: 'Checked conversation state could not be saved' },
   wrong_replica: { title: 'This chat belongs to another application worker' },
   assurance_publication_failed: { title: 'The checked answer could not be published' },
+  source_gap_followup_unavailable: { title: 'Prepare this follow-up again',
+    body: 'Refresh Activity and inspect the source gap before preparing a new checked request.' },
+  invalid_source_gap_followup: { title: 'This follow-up requires the exact checked request' },
   task_checkpoint_failed: {
     title: 'Task progress could not be saved',
     body: 'Inspect the task before retrying.',
@@ -1354,6 +1359,13 @@ export default function ChatPanel() {
   const mismatchLine = projectMismatch ? mismatchSentence(projectMismatch) : null
 
   const currentProject = useUIStore((s) => s.currentProject)
+  const sourceGapDraft = useChatStore(s => s.sourceGapDraft)
+  useEffect(() => {
+    const draft = useChatStore.getState().sourceGapDraft
+    if (draft && (draft.projectName !== currentProject || draft.chatSequence !== newChatSeq)) {
+      useChatStore.getState().setSourceGapDraft(null)
+    }
+  }, [currentProject, newChatSeq, sourceGapDraft])
   const checkedCapabilities = useQuery({ queryKey: CHECKED_ANSWERS_QUERY_KEY,
     queryFn: getCheckedAnswerCapabilities, retry: false, refetchInterval: 30_000 })
   const [checkedSelection, setCheckedSelection] = useState<{ project: string | null; chat: number; on: boolean }>(
@@ -2540,13 +2552,19 @@ export default function ChatPanel() {
       utterance_id?: string
       generation?: number
       requiresChecked?: boolean
+      gapFollowup?: SourceGapDraft
     }) => {
+    if (opts?.gapFollowup && (useUIStore.getState().currentProject !== opts.gapFollowup.projectName
+      || useChatStore.getState().newChatSeq !== opts.gapFollowup.chatSequence
+      || useChatStore.getState().sourceGapDraft !== opts.gapFollowup
+      || useChatStore.getState().streaming || useChatStore.getState().pending != null
+      || useChatStore.getState().requestQueue.length > 0)) return
     const requestedChecks = opts?.requiresChecked === true || optedIntoChecks || requiredChecks
     if (requestedChecks && !checksAvailable) {
       setError({ error_kind: 'assurance_unavailable',
         message: 'Answer checks are unavailable. Retry availability, or explicitly turn off checking for a new message.' })
-      if (opts?.fromCard) useChatStore.setState({ requestQueue: [], activeRequest: null })
-      else setInput(text)
+      if (opts?.fromCard && !opts.gapFollowup) useChatStore.setState({ requestQueue: [], activeRequest: null })
+      else if (!opts?.gapFollowup) setInput(text)
       return
     }
     manualNavigation()
@@ -2574,7 +2592,7 @@ export default function ChatPanel() {
       ...(requestedChecks ? { requiresChecked: true } : {}),
     })
     // A typed turn is nobody's card request: a denial in it drops nothing.
-    if (!opts?.fromCard) useChatStore.getState().setActiveRequest(null)
+    if (!opts?.fromCard || opts.gapFollowup) useChatStore.getState().setActiveRequest(null)
     if (!opts?.fromCard) {
       setInput('')
       dictatedRef.current = false
@@ -2593,6 +2611,8 @@ export default function ChatPanel() {
         session_id: sessionId ?? undefined,
         message: text,
         ...(requestedChecks ? { assurance: { version: 1, mode: 'strict' } as const } : {}),
+        ...(opts?.gapFollowup ? { checked_scope: opts.gapFollowup.checked_scope,
+          source_gap_ref: opts.gapFollowup.source_gap_ref } : {}),
         // Task 13 — `profile_id` is included ONLY when the user actually
         // picked one. `profileId === null` means "the server's active
         // profile", and OMITTING the field (never sending `model` either) is
@@ -2656,6 +2676,7 @@ export default function ChatPanel() {
       },
     )
     setStreamCleanup(cleanup)
+    if (opts?.gapFollowup) useChatStore.getState().setSourceGapDraft(null)
     if (autoUncheckAfterSend && attachIds.length > 0) {
       setAttachedFileIds([])
     }
@@ -3499,6 +3520,15 @@ export default function ChatPanel() {
         mode={checkedCapabilities.data?.mode} busy={streaming || pendingSendText != null}
         onChange={on => setCheckedSelection({ project: currentProject, chat: newChatSeq, on })}
         onRetry={() => { void checkedCapabilities.refetch() }} />
+      {sourceGapDraft && sourceGapDraft.projectName === currentProject && sourceGapDraft.chatSequence === newChatSeq &&
+        <SourceGapFollowupCard draft={sourceGapDraft} unavailable={!checksAvailable}
+          disabled={streaming || notReady || !!mismatchLine || !checksAvailable || !!pendingCard || requestCount > 0 || pendingSendText != null}
+          dismiss={() => useChatStore.getState().setSourceGapDraft(null)} send={() => {
+            if (streaming || notReady || mismatchLine || !checksAvailable || pendingCard || requestCount > 0 || pendingSendText != null) return
+            const draft = useChatStore.getState().sourceGapDraft
+            if (draft) dispatchSend(draft.message, [], { fromCard: true, label: 'Checked source-gap follow-up',
+              requiresChecked: true, gapFollowup: draft })
+          }} />}
       <UploadChipStrip
         uploads={uploads}
         attachedFileIds={attachedFileIds}
