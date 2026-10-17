@@ -45,7 +45,8 @@ def _paths(root, record):
     for path in (directory, lease.parent, lease, lease / '.owner.lock'):
         if path.is_symlink():
             ex._refuse('experiment_checkpoint_unreadable', 'Submission proof contains an unsafe link.')
-    return directory / (record['experiment_id'] + '.json'), lease
+    key = record['experiment_id'] + ('-' + record['_case_id'] if '_case_id' in record else '')
+    return directory / (key + '.json'), lease
 
 
 @contextmanager
@@ -62,9 +63,9 @@ def _lease(root, record):
 
 
 @contextmanager
-def submission_guard(experiment_id):
+def submission_guard(experiment_id, case_id=None):
     from harness.experiment_execution import _load
-    root, record = _load(experiment_id)
+    root, record = _load(experiment_id, case_id)
     with _lease(root, record):
         current = dict(root=root, record=record, attempt_id=None)
         token = _CURRENT.set(current)
@@ -273,19 +274,23 @@ def decorate(root, record, ledger, out):
     if ledger['status'] in {'submitting', 'uncertain', 'unavailable'}:
         state['next_call'] = dict(tool='reconcile_experiment', args=dict(
             experiment_id=record['experiment_id'], receipt_sha256=_reference(ledger, proof)))
+    if '_case_id' in record and 'next_call' in state:
+        state['next_call']['args']['case_id'] = record['_case_id']
     return out
 
 
-def reconcile_experiment(experiment_id: str, receipt_sha256: str) -> dict:
+def reconcile_experiment(experiment_id: str, receipt_sha256: str, case_id: str | None = None) -> dict:
     from harness import experiment_execution as engine
     if _CURRENT.get() is not None:
         _refuse('running')
-    root, record = engine._load(experiment_id)
+    root, record = engine._load(experiment_id, case_id)
+    if len(record["cases"]) != 1:
+        _refuse("unavailable")
     # Authorize before looking up any edit-lock holder; foreign scopes are 404.
     from services.chat_tools import _check_foreign_lock
     _check_foreign_lock('reconcile_experiment')
     with _lease(root, record), network_guard(), ex._LOCK, ex._transaction(root):
-        actual_root, actual_record = engine._load(experiment_id)
+        actual_root, actual_record = engine._load(experiment_id, case_id)
         if actual_root != root or actual_record != record:
             _refuse('stale')
         ledger = engine._read(root, record)
