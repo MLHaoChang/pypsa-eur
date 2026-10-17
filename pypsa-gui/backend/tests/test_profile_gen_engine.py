@@ -194,9 +194,16 @@ def test_unknown_source_refused_with_available_list():
     with pytest.raises(UnknownSourceError, match="synthetic"):
         generate_profile(
             points=[BERLIN], technology="wind", params={},
-            source="atlite",  # lands in Task 3 — until then: typed refusal
+            source="modis",  # genuinely unknown
             year=2023, now=FIXED_NOW,
         )
+
+
+def test_atlite_source_is_registered_but_lazy():
+    """atlite resolves through the lazy registry; engine import must not
+    have imported it (the cage test lives in test_profile_gen_atlite_source)."""
+    from services.profile_gen.engine import _LAZY_SOURCES
+    assert "atlite" in _LAZY_SOURCES
 
 
 # --- meta contract (spec D6) ---------------------------------------------------
