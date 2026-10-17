@@ -16,7 +16,10 @@ import { CardShell } from '../shared/CardShell'
 import { Term, TERM_FALLBACK } from '../shared/Term'
 import { useHubReport, useHubReview, useHubStudy } from '../useHubData'
 import { SECTION_LABEL } from '../sectionLabels'
-import { kpiMoney } from '../plainWords'
+import { costTileLabel, kpiMoney } from '../plainWords'
+import { useQuery } from '@tanstack/react-query'
+import { networkApi } from '../../../api/network'
+import { nk } from '../../../utils/queryKeys'
 import { ChaptersSection } from '../ChaptersSection'
 
 
@@ -49,6 +52,12 @@ export function ResultsCard() {
   const coped = rows.filter(isNoShortfall).map(r => riskName(r.name || r.mode_id))
   const gaps = report ? notEstablishedNotes(report) : []
   const cost = report?.cost_at_target_eur
+  const project = useUIStore(s => s.currentProject)
+  const multiPeriod = report?.period_basis === 'npv_multi_period'
+  const periods = useQuery({
+    queryKey: nk(project, 'investmentPeriods'), queryFn: networkApi.getInvestmentPeriods,
+    enabled: !!project && multiPeriod,
+  })
   const setStep = useHubDesignStore(s => s.setStep)
   // The four category tiles (UX S6, G4/G6), shown whether or not the study ran.
   const summary = review?.summary ?? {}
@@ -120,7 +129,7 @@ export function ResultsCard() {
         // The shared KPI tile (UX S6, G-item 2), the glossary text on hover.
         <div className="max-w-[260px]">
           <Kpi testId="hub-results-cost" headline
-            label="Yearly cost of this design (before any shortfall costs)"
+            label={costTileLabel(report?.period_basis, periods.data?.periods)}
             value={fmtCurrency(cost)} hint={TERM_FALLBACK.cost_at_target} />
         </div>
       )}
