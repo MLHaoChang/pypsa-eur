@@ -16,6 +16,7 @@ import { CardShell } from '../shared/CardShell'
 import { Term, TERM_FALLBACK } from '../shared/Term'
 import { useHubReport, useHubReview, useHubStudy } from '../useHubData'
 import { SECTION_LABEL } from '../sectionLabels'
+import { STALE_TILE_REASON } from '../chapters'
 import { kpiMoney } from '../plainWords'
 import { ChaptersSection } from '../ChaptersSection'
 
@@ -53,11 +54,14 @@ export function ResultsCard() {
   // The four category tiles (UX S6, G4/G6), shown whether or not the study ran.
   const summary = review?.summary ?? {}
   const verdict = summary.verdict
+  // Out-of-date figures are marked on the tiles too, not only above them (UX review N4, L5).
+  const stale = review?.stale === true && study?.edited_since_study !== true
   const chapters = (
     <ChaptersSection reliability={{
       hasResults: studyHasResults(study), running,
       lole: summary.mc_lole_h_per_year ?? report?.mc_lole_h ?? null,
       target: summary.target_lole_h ?? null,
+      stale,
       verdict: verdict === 'pass' || verdict === 'fail' || verdict === 'inconclusive' ? verdict : null,
     }} />
   )
@@ -86,9 +90,10 @@ export function ResultsCard() {
           {EDITED_TEXT}
         </p>
       )}
-      {review?.stale === true && study?.edited_since_study !== true && (
-        // The shared stale state (UX audit L5), not a custom banner.
-        <div data-testid="hub-results-stale"><ResultState state="stale" reason={STALE_TEXT} /></div>
+      {stale && (
+        // The shared stale state (UX audit L5), with the way to refresh it (UX review N4).
+        <div data-testid="hub-results-stale"><ResultState state="stale" reason={STALE_TEXT}
+          action={{ label: 'Go to Goal and run the study', onClick: () => setStep('goal', { user: true }) }} /></div>
       )}
 
       {review ? (
@@ -121,7 +126,8 @@ export function ResultsCard() {
         <div className="max-w-[260px]">
           <Kpi testId="hub-results-cost" headline
             label="Yearly cost of this design (before any shortfall costs)"
-            value={fmtCurrency(cost)} hint={TERM_FALLBACK.cost_at_target} />
+            value={fmtCurrency(cost)} hint={TERM_FALLBACK.cost_at_target}
+            state={stale ? 'stale' : 'ready'} reason={stale ? STALE_TILE_REASON : undefined} />
         </div>
       )}
 

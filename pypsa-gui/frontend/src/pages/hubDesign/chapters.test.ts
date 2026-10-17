@@ -40,6 +40,12 @@ describe('chapterTiles', () => {
       basis: 'Not certified: the goal is 3 h/yr', open: { panel: 'results', tab: 'adequacy' } })
   })
 
+  it('reliability: a stale study dims the figure and says why (UX review N4)', () => {
+    const t = byId({ ...NONE, reliability: { hasResults: true, running: false, lole: 0.6, target: 3,
+      verdict: 'pass', stale: true } }).reliability
+    expect(t).toMatchObject({ state: 'stale', value: '0.6', reason: expect.stringMatching(/changed since the study/) })
+  })
+
   it('reliability: running, and a run with no shortfall figure', () => {
     expect(byId({ ...NONE, reliability: { ...NONE.reliability, running: true } }).reliability.state)
       .toBe('running')
