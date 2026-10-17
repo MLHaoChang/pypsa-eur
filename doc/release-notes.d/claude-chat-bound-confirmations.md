@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Bind chat confirmations to fixed tool arguments and current confirmation rules. Engineering previews show every old/new/unit value in the shared review card, refuse oversized reviews, and recheck the confirmed persisted preview before applying changes.

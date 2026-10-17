@@ -2376,18 +2376,18 @@ def _dispatch_real_tool_call(
     tool_use_id = tu.get("id") or uuid.uuid4().hex
     tool_name = tu.get("name") or "<missing-name>"
     args = tu.get("input") or {}
-    if session.assurance_turn is not None:
-        # Confirmation and execution share an immutable argument snapshot.
-        import json
-        try:
-            args = json.loads(json.dumps(args, allow_nan=False))
-        except (ValueError, TypeError, OverflowError):
-            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
-                                 "error_kind": "validation_error",
-                                 "message": "Checked tool arguments must be finite JSON values."}
-            tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
-                                           "is_error": True, "content": "validation_error"})
-            return
+    # Ordinary and checked calls execute the same finite JSON snapshot. Never
+    # give caller-owned inputs or emitted frames a reference to that snapshot.
+    import json
+    try:
+        args = json.loads(json.dumps(args, allow_nan=False))
+    except (ValueError, TypeError, OverflowError):
+        yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                             "error_kind": "validation_error",
+                             "message": "Tool arguments must be finite JSON values."}
+        tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
+                                       "is_error": True, "content": "validation_error"})
+        return
     from harness import mcp_client
     external = mcp_client.server_for(session, tool_name)   # an MCP tool's server (issue 19)
     tier = _tool_tier(session, tool_name)
@@ -2395,7 +2395,7 @@ def _dispatch_real_tool_call(
     yield "tool_request", {
         "tool_use_id": tool_use_id,
         "tool_name": tool_name,
-        "args": args,
+        "args": json.loads(json.dumps(args)),
         "safety_tier": tier,
     }
 
@@ -2515,6 +2515,8 @@ def _dispatch_real_tool_call(
             tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
                                            "is_error": True, "content": _error_result_content(detail, exc, kind)})
             return
+    from harness import confirm as confirmation_gate
+    policy_revision = confirmation_gate.confirmation_revision()
     approved = yield from _confirm_destructive_tool(
         session,
         tool_use_id=tool_use_id,
@@ -2530,6 +2532,17 @@ def _dispatch_real_tool_call(
 
     task_ticket = None
     try:
+        def require_current_confirmation():
+            if (confirmation_gate.confirmation_revision() != policy_revision
+                    or _tool_tier(session, tool_name) != tier
+                    or mcp_client.server_for(session, tool_name) != external):
+                from fastapi import HTTPException
+                raise HTTPException(409, detail={
+                    "error_kind": "confirmation_revoked",
+                    "message": "The action's confirmation rules changed; request and review it again.",
+                })
+
+        require_current_confirmation()
         effect_fresh = True
         if session.assurance_turn is not None and tool_name == "update_component":
             from harness.effects import reserve
@@ -2594,6 +2607,7 @@ def _dispatch_real_tool_call(
         # autosave — the 30s default is generous so legitimate writes finish well
         # inside it. A tool_not_started call was cancelled and cannot run at all.
         if tool_name in ("run_simulation", "run_ac_pf_stage"):
+            require_current_confirmation()
             result = handler(**(args or {}))
         else:
             # Copy the calling context into the worker thread. Tool handlers
@@ -2613,10 +2627,15 @@ def _dispatch_real_tool_call(
             _ctx_snapshot = contextvars.copy_context()
             checked_turn = session.assurance_turn
             def invoke_handler():
+                require_current_confirmation()
                 if checked_turn is not None and tool_name == "update_component":
                     from harness.effects import execute
                     return execute(checked_turn, tool_name, args, handler)
                 from harness.experiment_execution import invoke
+                if tool_name == 'apply_project_changes':
+                    from services.assistant_tools import confirmed_preview
+                    with confirmed_preview(confirmation_args['review_sha256']):
+                        return invoke(session, tool_name, args or {}, handler)
                 return invoke(session, tool_name, args or {}, handler)
             # PER_TOOL_TIMEOUT_SECONDS is a budget for RUNNING the handler.
             # `future.result(timeout=...)` alone measured queue + run on a pool

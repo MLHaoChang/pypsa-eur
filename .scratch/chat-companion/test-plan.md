@@ -13,7 +13,9 @@ Execution records: [CP-01](issues/01-truthful-state.md), [CP-02](issues/02-canon
 
 The [CP-06a execution contract](issues/06a-effective-permission-visibility.md)
 covers read-only access visibility and existing confirmation/ACL/lock regressions.
-The wider exact-preview, policy-revision and saved-restriction CT-19/20 cases stay
+The [CP-06b contract](issues/06b-bound-confirmations.md) adds fixed ordinary-call
+arguments, confirmation-rule invalidation and complete engineering-preview
+review. Wider effect-preview, durable policy-history and saved-restriction CT-19/20 cases stay
 pending; the new panel is not a permission credential or all-action readiness gate.
 
 Use authenticated public chat/API/SSE and browser interaction. External transport/inference, time and interrupted I/O may be mocked; real ownership, catalogue/admission, ordinary confirmation, stores, job services and exported bytes remain exercised. Do not infer completion from a model sentence, HTTP success, animation or permission grant.

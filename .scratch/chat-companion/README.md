@@ -26,7 +26,10 @@ is merged in #352, preserving the original submission reservation.
 #354 (`fae95896500d6d74625e94e9f3a546d2d6b405af`), with common caps and explicit
 stop/continue policy around separately approved native cases. All five post-merge
 workflows (Test, CodeQL, inventory, control matrix and image build) passed.
-The current continuation is [CP-06a access visibility](issues/06a-effective-permission-visibility.md).
+The [CP-06a access visibility](issues/06a-effective-permission-visibility.md) slice
+is merged in #356 (`e7777aa2e2c086789f1c802d387410a5280dc0cc`); its post-merge
+Test, CodeQL and image workflows passed. The current continuation is
+[CP-06b bound confirmations and complete engineering previews](issues/06b-bound-confirmations.md).
 Broader domain adapters and family journeys remain later work.
 
 The [Dots assessment](../live-voice/dots-design-assessment-2026-10-14.md) supplies the source-reviewed rationale. This folder contains an implementation specification, not an implemented feature or release certificate. Hosted setup, fresh paid-probe authorization, independent domain review and real-use calibration remain separate pending gates.
