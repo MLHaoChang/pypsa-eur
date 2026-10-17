@@ -2503,6 +2503,18 @@ def _dispatch_real_tool_call(
     # The M7 parallel-destructive pre-scan is upstream of this and is NOT
     # relaxed — auto-approve drops the human round-trip, not the serialisation.
     confirmation_args = args
+    from harness import restrictions
+    try:
+        restriction = restrictions.capture(session)
+        restrictions.require_allowed(restriction, tier)
+    except Exception as exc:
+        detail = getattr(exc, 'detail', None)
+        kind = detail.get('error_kind', 'restriction_unavailable') if isinstance(detail, dict) else 'restriction_unavailable'
+        yield 'tool_error', {'tool_use_id': tool_use_id, 'tool_name': tool_name,
+                             'error_kind': kind, 'message': _redact_for_log(detail or exc)}
+        tool_results_collector.append({'type': 'tool_result', 'tool_use_id': tool_use_id,
+                                       'is_error': True, 'content': _error_result_content(detail, exc, kind)})
+        return
     if tool_name == "apply_project_changes":
         try:
             from services.assistant_tools import preview_confirmation
@@ -2526,6 +2538,8 @@ def _dispatch_real_tool_call(
         tool_results_collector=tool_results_collector,
         guided=guided or (session.assurance_turn is not None and tool_name == "update_component"),
         external=external,
+        restriction_mode=restriction['mode'] if restriction else 'standard',
+        restriction_snapshot=restriction,
     )
     if not approved:
         return
@@ -2533,6 +2547,7 @@ def _dispatch_real_tool_call(
     task_ticket = None
     try:
         def require_current_confirmation():
+            restrictions.require_current(restriction, session)
             if (confirmation_gate.confirmation_revision() != policy_revision
                     or _tool_tier(session, tool_name) != tier
                     or mcp_client.server_for(session, tool_name) != external):

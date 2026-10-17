@@ -24,6 +24,7 @@ import asyncio
 import logging
 import threading
 from typing import Any, Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
@@ -1327,6 +1328,25 @@ def _resolve_owned_session(
             },
         )
     return session
+
+
+class RestrictionRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    project_id: UUID
+    revision: UUID
+    mode: Literal['standard', 'confirm_changes', 'read_only']
+
+
+@router.put('/restrictions')
+def save_chat_restrictions(body: RestrictionRequest, response: Response,
+                           actor: User = Depends(require_user), db: DBSession = Depends(get_db)):
+    """Save only the authenticated user's restrictions on the current project."""
+    from harness import restrictions
+
+    project = restrictions.current_project(db, actor, str(body.project_id))
+    result = restrictions.save(db, actor, project, body.revision, body.mode)
+    response.headers['Cache-Control'] = 'no-store'
+    return {**result, 'project_id': str(project.id)}
 
 
 @router.get('/access')

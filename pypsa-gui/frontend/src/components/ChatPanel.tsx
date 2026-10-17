@@ -634,6 +634,14 @@ export const KIND_COPY: Record<
     title: 'Approval could not be recorded',
     body: 'The action did not run. The app could not write its approval log, usually because its data folder is full or not writable.',
   },
+  user_restriction: {
+    title: 'Blocked by your saved rule',
+    body: 'Your personal rule for this project allows read tools only. Open Access and approvals to inspect or change it. This action did not run.',
+  },
+  restriction_unavailable: {
+    title: 'Saved restrictions unavailable',
+    body: 'The assistant could not verify your saved project rules, so this action did not run. Refresh Access and approvals before requesting it again.',
+  },
   rate_limited: { title: 'Rate limited' },
   unauthorized: { title: 'API key rejected' },
   // Fix round 1 (Task 14) — body left unset here on purpose: it's computed
@@ -762,6 +770,7 @@ export const KIND_COPY: Record<
 export const TOOL_ERROR_BANNER_KINDS = new Set([
   'project_exists', 'descendants_exist',
   'confirmation_expired', 'approval_unavailable', 'rate_limited',
+  'user_restriction', 'restriction_unavailable',
   'unauthorized', 'missing_api_key',
   'inactive_acting_user',
   'solver_in_flight', 'parallel_destructive_not_allowed',

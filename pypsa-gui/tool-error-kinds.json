@@ -43,6 +43,14 @@
     "Changing one is a UI decision. Write down why, as the entries do."
   ],
   "kinds": {
+    "restriction_unavailable": {
+      "surface": "banner",
+      "why": "Saved personal project restrictions could not be read at tool admission or worker pickup. Fail closed and direct the user to refresh Access and approvals; never silently assume standard rules."
+    },
+    "user_restriction": {
+      "surface": "banner",
+      "why": "The authenticated user saved a personal read-only project rule. The non-read tool did not run; inspect or change the rule explicitly in Access and approvals, without weakening server confirmation floors."
+    },
     "aborted": {
       "surface": "inline",
       "why": "The user pressed stop. Announcing their own action in a banner is noise."

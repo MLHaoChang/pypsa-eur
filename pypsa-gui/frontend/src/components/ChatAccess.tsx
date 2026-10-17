@@ -1,10 +1,11 @@
 import { useId, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getChatAccess } from '../api/chatAccess'
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
+import ChatRestrictions from './ChatRestrictions'
 
-const disposition = { none: 'No approval card', policy: 'Server policy (audited)', user: 'You confirm' }
+const disposition = { none: 'No approval card', policy: 'Server policy (audited)', user: 'You confirm', blocked: 'Blocked by your rule' }
 const tierNames: Record<string, string> = {
   read: 'Read', write: 'Write', destructive: 'Destructive', execution: 'Execute', execution_long_running: 'Long-running work',
 }
@@ -25,7 +26,9 @@ export default function ChatAccess({ checked }: { checked: boolean }) {
   const session = useChatStore(s => s.sessionId)
   const chat = useChatStore(s => s.newChatSeq)
   const active = open && dockOpen
-  const query = useQuery({ queryKey: ['chat-access', project, session, chat, mode, checked],
+  const queryClient = useQueryClient()
+  const queryKey = ['chat-access', project, session, chat, mode, checked]
+  const query = useQuery({ queryKey,
     queryFn: ({ signal }) => getChatAccess(project, session, mode, checked, signal), enabled: active,
     retry: false, staleTime: 0, gcTime: 0, refetchInterval: active ? 15_000 : false,
     refetchOnWindowFocus: 'always', refetchOnReconnect: 'always' })
@@ -42,10 +45,12 @@ export default function ChatAccess({ checked }: { checked: boolean }) {
       <p>For the next turn’s {mode === 'guided' ? 'Guided' : 'Expert'} selection. Access and prerequisites are rechecked for every action.</p>
       <button type="button" className="underline" disabled={query.isFetching}
         onClick={() => { void query.refetch() }}>Refresh access</button>
+      {current && <p>Project: <strong>{current.scope.project_name ?? 'Unsaved draft'}</strong></p>}
+      <ChatRestrictions key={JSON.stringify(queryKey)} current={current}
+        onSaved={() => { void queryClient.invalidateQueries({ queryKey, exact: true }) }} />
       {query.isFetching ? <p role="status">Refreshing access…</p>
         : !current ? <p role="alert">Current access is unavailable. Refresh before relying on these rules.</p>
         : <>
-          <p>Project: <strong>{current.scope.project_name ?? 'Unsaved draft'}</strong></p>
           <p className="text-muted">Observed at {new Date(current.observed_at * 1000).toLocaleTimeString()}.</p>
           {current.blockers.map(reason => <p key={reason} role="status" className="text-warning">
             {blockers[reason] ?? 'An action prerequisite is unavailable.'}</p>)}
