@@ -59,6 +59,7 @@ export default function AssistantDock() {
   const queued = useChatStore((s) => s.requestQueue.length > 0)
   const error = useChatStore((s) => s.error)
   const [liveOpen, setLiveOpen] = useState(false)
+  const [companionAccessTarget, setCompanionAccessTarget] = useState<HTMLDivElement | null>(null)
   const [liveCaption, setLiveCaption] = useState('')
   const [liveEcho, setLiveEcho] = useState('')
   const [walking, setWalking] = useState(false)
@@ -284,7 +285,7 @@ export default function AssistantDock() {
             slide-panel case. Acceptable for now; revisit if that shows up.
           */}
           <ErrorBoundary label="The assistant crashed">
-            <ChatPanel />
+            <ChatPanel companionAccessTarget={companionAccessTarget} />
           </ErrorBoundary>
         </div>
         {assistantDockOpen && surface === 'activity' && <ErrorBoundary label="Activity could not be displayed">
@@ -343,6 +344,7 @@ export default function AssistantDock() {
         >
           <ErrorBoundary label="The assistant crashed">
             <ConfirmationCard />
+            {liveOpen && <div ref={setCompanionAccessTarget} className="w-72 max-w-full" />}
             {walking && walkNextReady && <button type="button" data-no-panel-close className="fixed bottom-24 right-4 text-xs rounded border border-border bg-panel px-3 py-2" onClick={() => walkCancel.current?.next()}>Next evidence view</button>}
       <CompanionOutcome />
           </ErrorBoundary>

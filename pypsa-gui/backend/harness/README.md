@@ -111,6 +111,14 @@ process that died before persistence. It never advances or retries work. See
 
 ## The contract
 
+In-page chat's access summary reads the same authenticated `/api/chat/access`
+snapshot as the dock. ChatPanel supplies its actual next-turn checked selection
+to both surfaces; opening the summary never sends a message or approves a card.
+The summary hides observations during refresh/failure or a scope mismatch and
+offers the existing full review and revisioned restriction editor. It is an
+observation, not admission authority or proof that a running answer was checked.
+See `.scratch/chat-companion/issues/06d-companion-access-summary.md`.
+
 1. **Layering.** `services/* <- harness <- harness/providers`. Nothing in
    this folder outside `providers/` imports an SDK or names a wire
    (`anthropic`, `openai`, `cache_control`). `tests/test_harness_layout.py`

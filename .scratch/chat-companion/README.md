@@ -30,8 +30,10 @@ The [CP-06a access visibility](issues/06a-effective-permission-visibility.md) sl
 is merged in #356 (`e7777aa2e2c086789f1c802d387410a5280dc0cc`); its post-merge
 Test, CodeQL and image workflows passed. The current continuation is
 [CP-06b bound confirmations and complete engineering previews](issues/06b-bound-confirmations.md)
-is merged in #357 (`3f45c0e7d9ad66ee74e6bd918d655419152f3e8f`). The current slice is
-[CP-06c saved personal project restrictions](issues/06c-saved-restrictions.md).
+is merged in #357 (`3f45c0e7d9ad66ee74e6bd918d655419152f3e8f`).
+[CP-06c saved personal project restrictions](issues/06c-saved-restrictions.md)
+is merged in #358 (`8723578028bcb1952a36948dede20ebd09eb2b91`). The current slice is
+[CP-06d in-page access summary](issues/06d-companion-access-summary.md).
 Broader domain adapters and family journeys remain later work.
 
 The [Dots assessment](../live-voice/dots-design-assessment-2026-10-14.md) supplies the source-reviewed rationale. This folder contains an implementation specification, not an implemented feature or release certificate. Hosted setup, fresh paid-probe authorization, independent domain review and real-use calibration remain separate pending gates.

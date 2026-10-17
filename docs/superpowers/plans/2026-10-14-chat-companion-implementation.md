@@ -32,9 +32,13 @@ post-merge Test, CodeQL and image workflows.
 is merged in #357 (`3f45c0e7d9ad66ee74e6bd918d655419152f3e8f`):
 fixed ordinary-call arguments, current confirmation-rule checks and complete
 old/new/unit reviews for the existing engineering preview adapter. Wider effect
-previews and external readiness remain separate work. The current slice is
+previews and external readiness remain separate work.
 [CP-06c saved personal project restrictions](../../../.scratch/chat-companion/issues/06c-saved-restrictions.md),
-with closed restrictive modes, revisioned saves and waiting/queued action checks.
+merged in #358 (`8723578028bcb1952a36948dede20ebd09eb2b91`), adds closed restrictive
+modes, revisioned saves and waiting/queued action checks. The current slice is
+[CP-06d in-page access summary](../../../.scratch/chat-companion/issues/06d-companion-access-summary.md),
+using the same next-turn checking selection and full access controls as chat.
+Durable policy history and broader effect previews remain separate.
 Wider current-tab navigation, broader domain adapters/family journeys and
 external/live validation remain separate scopes.
 This plan remains the sequence; the linked issues are the execution records.
