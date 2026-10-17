@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Guided's cost and expected-shortfall tiles carry a "From the study" pill while the project itself has no hour-by-hour solve, so the Guided results and Expert's "No results yet" no longer look like a contradiction (UX review N12, owner decision G5). `Kpi` gains a `fromStudy` marker that keeps the figure.
