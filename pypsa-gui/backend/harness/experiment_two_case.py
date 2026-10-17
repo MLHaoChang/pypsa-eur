@@ -203,6 +203,13 @@ def check_admission(root, projection, tool, args):
         ex._refuse('experiment_checkpoint_unreadable', 'The shared execution checkpoint is missing.')
     if not _budget(record, data):
         ex._refuse('experiment_budget_exhausted', 'The shared attempt/time cap was reached; receipts remain inspectable.')
+    if tool == 'wait_for_job':
+        # A known native job may finish after the wait was offered. The single
+        # admission below still checks its exact ID, retained receipt state,
+        # bounded timeout and shared cancellation; no case is advanced here.
+        if data['cancelled']:
+            ex._refuse('experiment_effect_already_reserved', 'This plan no longer admits scoped waits.')
+        return
     selected, status = _selection(record, _views(root, record, data))
     if data['cancelled'] or selected is None or selected['case_id'] != projection['_case_id']:
         ex._refuse('experiment_effect_already_reserved', 'This case is not eligible; inspect the shared plan and its receipts.')

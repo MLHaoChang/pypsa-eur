@@ -84,3 +84,13 @@ inventory (255 tools / 15 tabs / 19 panels), matrix (170 controls / 14 families,
 full_coverage not_established) and diff checks pass. Clean-source offline pilot,
 remote exact-head CI and fresh-master premerge remain required before merge.
 Live-provider/device, domain review and real-use calibration remain pending.
+
+Source review additionally reproduced a terminal-before-wait race: the first
+native job completed before its tracked wait was dispatched, and the parent
+incorrectly selected the second case and refused that wait. A deterministic
+public native-job regression failed with experiment_effect_already_reserved.
+The correction preserves shared budget/cancellation and exact retained job /
+receipt / timeout checks, allowing that already tracked bounded wait without
+advancing any case. Revised native two-case suite: all 33 passed, zero skips.
+The earlier clean-source 133-case offline gate passed on the initial commit;
+it must be repeated on this correction before the PR is opened.

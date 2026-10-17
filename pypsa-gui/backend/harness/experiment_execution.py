@@ -264,7 +264,7 @@ def advance_experiment(experiment_id: str) -> dict:
                 from harness.experiment_two_case import advance
                 return advance(root, record, session)
             if record["domain"] != "network" or len(record["cases"]) != 1:
-                ex._refuse("experiment_adapter_unavailable", "This adapter advances one network case only.")
+                ex._refuse("experiment_adapter_unavailable", "This adapter advances one or two network cases only.")
             if record.get("version") != 2 or ex._public_preflight(record).get("status") != "validated":
                 ex._refuse("experiment_preflight_required", "Prepare the unchanged current network before advancing.")
             ledger = _read(root, record)

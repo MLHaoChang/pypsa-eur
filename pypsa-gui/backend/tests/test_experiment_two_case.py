@@ -477,3 +477,19 @@ def test_future_case_cannot_be_admitted_before_first_case(baseline):
     with pytest.raises(HTTPException):
         chat_tools.run_sensitivity_sweep(**future['args'])
     assert not solve_queue.list_jobs()
+
+
+def test_tracked_wait_can_settle_after_native_job_finishes_without_refresh(baseline):
+    eid = prepared_pair()
+    session, armed = arm(eid)
+    result = invoke(session, armed['next_call'])
+    job = result['cases'][0]['job']['id']
+    # External native completion races the caller's already selected bounded wait.
+    assert chat_tools.wait_for_job(job, 25)['completed']
+    settled = invoke(session, dict(tool='wait_for_job', args=dict(job_id=job, timeout_seconds=20)))
+    assert settled['completed']
+    current = tool('refresh_experiment', experiment_id=eid)
+    assert current['cases'][0]['objective'] == 200 and current['attempts_used'] == 2
+    assert not current['cases'][1]['case_effects_reserved']
+    assert current['next_call']['tool'] == 'run_sensitivity_sweep'
+    assert len(solve_queue.list_jobs()) == 1

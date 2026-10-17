@@ -1,4 +1,4 @@
-"""Read two owned single-case receipts; no execution or comparison override."""
+"""Read two selected owned network-case receipts; no execution or override."""
 import copy
 from dataclasses import asdict
 import math
