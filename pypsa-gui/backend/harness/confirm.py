@@ -42,6 +42,20 @@ def _confirm_tiers(guided: bool) -> frozenset[str]:
     return GUIDED_CONFIRM_TIERS if guided else DESTRUCTIVE_TIERS
 
 
+def confirmation_policy(tier: str, *, guided: bool = False, external: bool = False) -> str:
+    """
+    Current gate disposition, also used by the read-only access view.
+
+    ``policy`` still needs a durable approval record; it is not an unconditional
+    execution grant. External non-read calls never inherit native exemptions.
+    """
+    if tier not in _confirm_tiers(guided) and not (external and tier != 'read'):
+        return 'none'
+    if tier in AUTO_APPROVE_TIERS and not external:
+        return 'policy'
+    return 'user'
+
+
 def _is_guided(ui_context: Any) -> bool:
     """The turn's mode, from the same allow-listed key `_format_ui_context`
     reads: exactly the string 'guided'; anything else is Expert."""
@@ -158,12 +172,13 @@ def _confirm_destructive_tool(
     Phase E of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`;
     see `tests/test_chat_confirmation_gate_seam.py`.
     """
-    if tier not in _confirm_tiers(guided) and not (external and tier != "read"):
+    policy = confirmation_policy(tier, guided=guided, external=bool(external))
+    if policy == 'none':
         return True
     from harness import approvals
 
     link = approvals.links(session, args)
-    if tier in AUTO_APPROVE_TIERS and not external:
+    if policy == 'policy':
         # Issue 18: the log says why no card appeared, and an approval that
         # cannot be put on record does not run (fail closed).
         if approvals.decided(session, call_id=tool_use_id, tool=tool_name, tier=tier,

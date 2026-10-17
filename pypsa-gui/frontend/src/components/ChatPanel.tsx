@@ -30,6 +30,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { acknowledgeMountedView, type NavigationAcknowledgement } from '../utils/verifiedNavigation'
 import { CheckedEvidenceCard } from './CheckedEvidenceCard'
 import { CheckedAnswerControl } from './CheckedAnswerControl'
+import ChatAccess from './ChatAccess'
 import { SourceGapFollowupCard } from './SourceGapFollowupCard'
 import type { SourceGapDraft } from '../store/chatStore'
 import { CHECKED_ANSWERS_QUERY_KEY, getCheckedAnswerCapabilities } from '../api/reliability'
@@ -3515,6 +3516,7 @@ export default function ChatPanel() {
       <WorkflowStrip />
       <GoalStrip />
       <ExternalAgentStrip />
+      <ChatAccess checked={optedIntoChecks || requiredChecks} />
       <CheckedAnswerControl checked={optedIntoChecks || requiredChecks} required={requiredChecks}
         available={checksAvailable} loading={checkedCapabilities.isPending} failed={checkedCapabilities.isError}
         mode={checkedCapabilities.data?.mode} busy={streaming || pendingSendText != null}

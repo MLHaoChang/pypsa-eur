@@ -45,6 +45,7 @@ harness/
   stub.py         the scripted stub loop behind StreamRequest.script
   session.py      ChatSession, PendingConfirmation, the session registry with its TTL and cap
   confirm.py      the confirmation gate: tiers, the Guided write rule, auto-approve, parallel-destructive
+  access.py       authenticated read-only current scope, confirmation policy, locks and configured limits
   approvals.py    every card's asked/decided record per owner and session; an approval that cannot be recorded does not run
   eventlog.py     the session event log: every model-visible input, append-only per owner and session; derive_messages, fork, torn-tail repair; the source of truth (the deque is its fold, a chat not in memory is rebuilt from it, interrupted turns are read off it, chat.jsonl is its projection)
   replay.py       fork a recorded session before one turn and run that turn again on another provider (smoke/replay_session.py)
@@ -154,6 +155,23 @@ process that died before persistence. It never advances or retries work. See
    is a `turn/record` event first. A new writer to `session.messages` goes
    through `eventlog.apply` (`tests/test_harness_eventlog_truth.py` fails on
    one that does not).
+
+## Current access visibility
+
+`GET /api/chat/access` authenticates the current project and optional owned
+session without creating a turn or connecting external servers. It projects the
+same `confirm.confirmation_policy` used by the ordinary gate, current project
+lock, checked selection and configured caps. The Guided/Expert and checked
+query selections describe a next turn, not a running turn. The read-only view is
+not an action capability, remaining-budget estimate, complete readiness check or
+permission to incur charges. Unknown usage is unavailable rather than zero.
+Locks are inspected without pruning expired rows; busy chat state returns 409
+without waiting behind a turn's session lock. The response is `no-store`;
+dispatch and effect commit keep their own current checks. The dock's **Access
+and approvals** disclosure hides stale/failed or mismatched-scope reads. Existing
+Confirmation/Choice cards and Activity remain the decision paths. See
+`.scratch/chat-companion/issues/06a-effective-permission-visibility.md` for limits
+and the remaining CP-06 contract.
 
 ## Local MCP exposure (issue 11)
 

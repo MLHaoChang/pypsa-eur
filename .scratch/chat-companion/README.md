@@ -22,8 +22,11 @@ source-gap follow-ups (#333) are merged. Bounded
 is merged in #351. [CP-05a uncertain-case reconciliation](issues/05a-uncertain-case-reconciliation.md)
 is merged in #352, preserving the original submission reservation.
 [CP-05b1 comparison/export](issues/05b1-case-comparison.md) is merged in #353.
-The current continuation is [CP-05b2 shared two-case admission](issues/05b2-shared-two-case.md):
-common caps and explicit stop/continue policy around separately approved native
-cases. Broader domain adapters and family journeys remain later work.
+[CP-05b2 shared two-case admission](issues/05b2-shared-two-case.md) is merged in
+#354 (`fae95896500d6d74625e94e9f3a546d2d6b405af`), with common caps and explicit
+stop/continue policy around separately approved native cases. All five post-merge
+workflows (Test, CodeQL, inventory, control matrix and image build) passed.
+The current continuation is [CP-06a access visibility](issues/06a-effective-permission-visibility.md).
+Broader domain adapters and family journeys remain later work.
 
 The [Dots assessment](../live-voice/dots-design-assessment-2026-10-14.md) supplies the source-reviewed rationale. This folder contains an implementation specification, not an implemented feature or release certificate. Hosted setup, fresh paid-probe authorization, independent domain review and real-use calibration remain separate pending gates.

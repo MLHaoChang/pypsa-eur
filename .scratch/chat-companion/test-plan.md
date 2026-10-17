@@ -11,6 +11,11 @@ Sequence: [implementation plan](../../docs/superpowers/plans/2026-10-14-chat-com
 
 Execution records: [CP-01](issues/01-truthful-state.md), [CP-02](issues/02-canonical-outcomes.md), and [bounded CP-03](issues/03-source-navigation.md). CP-03 exercises CT-08–10 for retained native evidence and current Expert branch loading; it does not establish all-tab adapters, historical harness completion ACKs, live model verification, domain review or real-use calibration.
 
+The [CP-06a execution contract](issues/06a-effective-permission-visibility.md)
+covers read-only access visibility and existing confirmation/ACL/lock regressions.
+The wider exact-preview, policy-revision and saved-restriction CT-19/20 cases stay
+pending; the new panel is not a permission credential or all-action readiness gate.
+
 Use authenticated public chat/API/SSE and browser interaction. External transport/inference, time and interrupted I/O may be mocked; real ownership, catalogue/admission, ordinary confirmation, stores, job services and exported bytes remain exercised. Do not infer completion from a model sentence, HTTP success, animation or permission grant.
 
 ## Required observable cases
