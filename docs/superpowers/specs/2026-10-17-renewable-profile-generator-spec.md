@@ -1,7 +1,7 @@
 # Spec: Renewable Profile Generator (coordinate-driven time series)
 
-**Status:** revised after independent review (2026-10-17) · **Author:** Kimi
-session · **Owner:** Hao
+**Status:** revised after independent review (2026-10-17); owner rulings
+incorporated 2026-10-18 · **Author:** Kimi session · **Owner:** Hao
 **Depends on:** atlite==0.6.1 (pinned in pixi), the user time-series store
 (`services/user_timeseries.py`), the solve queue, the chat harness.
 **Vocabulary:** per `pypsa-gui/CONTEXT.md` — *profile* here means a per-unit
@@ -117,7 +117,8 @@ profiles download ERA5 weather through atlite.
 
 **Out (ledgered).** Cell interpolation; offshore exclusions (region-scale
 land eligibility is upstream's job); SARAH-3; hydro; wake modelling;
-multi-investment-period support (v1 refuses — §4); ERA5 redistribution terms
+inter-annual weather variability in multi-period networks (the same weather
+year tiles into every period — §4); ERA5 redistribution terms
 beyond the metadata note.
 
 ## 4. Alignment & validity rules (review fixes 9–11, 13–14)
@@ -131,21 +132,27 @@ a network follows **explicit rules — never silent reindexing**:
 | Weather year is leap (8784 h), target year is not | Drop Feb 29, note in meta (`leap_day: dropped`). |
 | Target year is leap, weather year is not | Refuse (fabricating 24 h is worse than refusing). |
 | Partial-year or sub-hourly/segmented snapshots | Refuse with a typed error naming the supported shapes. |
-| Multi-investment-period network (MultiIndex snapshots) | **Refuse in v1** with a typed error; tiling per period is a deliberate later increment, not a fallback. |
+| Multi-investment-period network (MultiIndex snapshots) | **Tile the weather year into every period** (owner ruling D7=B, 2026-10-18): for each period, align weather hours to that period's timesteps by month-day-hour, applying the leap rules above per period. Meta notes `tiled: true` and the weather year. |
 | `snapshot_weightings != 1` | Allowed; the series indexes hours, weightings stay the model's business. |
 | Asset carrier not wind/solar, or artifact technology ≠ component carrier | Refuse at generate and at apply. |
 | Bus has no coordinates and no override given | Refuse with guidance (set bus coordinates or pass the override). |
 
-## 5. Decisions to confirm with the owner
+## 5. Decisions — TAKEN by the owner 2026-10-18
 
-| # | Question | Recommendation |
+Ruled via decision cards: `D1:A · D2:A · D3:A · D4:A · D5:A · D6:A · D7:B`.
+D1–D6 taken as recommended; **D7 taken as B** — multi-investment-period
+networks are supported in v1 by tiling the weather year into every period
+(§4), not refused. A different answer now is a change, not a correction.
+
+| # | Question | Taken |
 |---|---|---|
 | D1 | Engine location | `pypsa-gui/backend/services/profile_gen/`; gridspine untouched. |
-| D2 | CDS key handling | Env / new-format `.cdsapirc` (`url: https://cds.climate.copernicus.eu/api`, bare token; old UID:KEY 404s); `cdsapi>=0.7.2`; the CDS-account **licence acceptance** step is part of setup or downloads fail at runtime. Verify the pixi env's cdsapi pin in the probe. Never stored per project, never in chat, never logged. Missing key → typed refusal with these instructions. |
+| D2 | CDS key handling | Machine-level env / new-format `.cdsapirc` (`url: https://cds.climate.copernicus.eu/api`, bare token; old UID:KEY 404s); `cdsapi>=0.7.2`; the CDS-account **licence acceptance** step is part of setup or downloads fail at runtime. Verify the pixi env's cdsapi pin in the probe. Never stored per project, never in chat, never logged. Missing key → typed refusal with these instructions. |
 | D3 | Cutout cache | `<app data>/cutouts/`, shared, LRU-evictable by hand. |
 | D4 | Queue kind | New kind `profile_gen`, after verifying worker concurrency (§3.5). |
 | D5 | No-parameter default | `default` preset = synthetic source, labelled `source: synthetic` so it can never masquerade as weather-derived. |
-| D6 | Profile metadata | Extends the user-TS store: source, preset, params, weather year, bbox, leap-day handling, generated-at, atlite version. |
+| D6 | Profile metadata | Extends the user-TS store: source, preset, params, weather year, bbox, leap-day handling, tiling flag, generated-at, atlite version. |
+| D7 | Multi-period | Tile the weather year into every investment period (§4). |
 
 ## 6. Risks / honest constraints
 
@@ -155,6 +162,8 @@ a network follows **explicit rules — never silent reindexing**:
   sites instant afterwards.
 - Nearest-cell ≈ 25–30 km: fine for energy profiles, not a siting study;
   UI copy must not oversell.
+- Multi-period tiling repeats one weather year across decades —
+  inter-annual variability is absent by construction (D7=B, ledgered).
 - atlite API drift is fenced behind one lazy-imported module.
 - Tests never touch CDS: atlite path runs against a tiny committed fixture
   cutout (a few cells × a few days; its length contract is the fixture's
@@ -174,3 +183,7 @@ artifact project-validation + path-traversal guard, job timeout, task-order
 inversion, router mutation check, terminology (one term: *coordinate
 profile*), preview honesty. Lows (pending-artifact eviction policy:
 keep-last-N per project; lazy atlite import) are in the plan.
+
+**Owner ruling 2026-10-18:** D1–D6 taken as recommended; D7 taken as **B** —
+multi-period tiling is in v1 scope. Spec §4's multi-period row, §5, and the
+plan's Task 5 were updated accordingly before the final review.

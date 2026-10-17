@@ -1,8 +1,8 @@
 # Plan: Renewable Profile Generator (coordinate-driven time series)
 
 **Spec:** `docs/superpowers/specs/2026-10-17-renewable-profile-generator-spec.md`
-(revised after review — the alignment rules and the chat apply path are
-binding here).
+(revised after review; owner rulings of 2026-10-18 incorporated — the
+alignment rules, the chat apply path, and multi-period tiling are binding).
 **Style:** repo conventions — TDD with RED evidence and a mutation per task
 (including the router task); path-limited commits; gates
 `pixi run gui-tests` and `npx vitest run` + `npx tsc -b`.
@@ -97,8 +97,16 @@ binding here).
 - [ ] `assign_profile(ctx, component, series, meta)` implementing spec §4's
   alignment table exactly: timestamp align on exact-year match; drop-Feb-29
   when source is leap and target is not (meta `leap_day: dropped`); refuse
-  leap target with non-leap source, partial/sub-hourly/segmented snapshots,
-  and multi-period networks — each a distinct typed error with its own test.
+  leap target with non-leap source, partial/sub-hourly/segmented snapshots —
+  each a distinct typed error with its own test.
+- [ ] **Multi-period tiling (owner ruling D7=B):** on a MultiIndex
+  `(period, timestep)` network, tile the weather year into EVERY period —
+  align weather hours to each period's timesteps by month-day-hour, applying
+  the leap rules per period; meta gains `tiled: true` and the weather year.
+  Tests: a two-period fixture (one leap period, one not) verifies per-period
+  alignment and that the periods carry identical month-day-hour values; a
+  mutation dropping the per-period leap handling turns exactly the leap
+  period's test red.
 - [ ] Write store entry `(component, "p_max_pu", name)` + meta; reapply `_t`;
   changelog; dispatch stale via `services/dispatch_status.py`; undo restores
   prior state **including the network-native profile when no earlier user
@@ -183,7 +191,8 @@ binding here).
 ## Out of scope (named so nobody drifts)
 
 Cell interpolation; offshore exclusions; SARAH-3; hydro; wake modelling;
-multi-investment-period support (v1 refuses by design); gridspine code
+inter-annual weather variability across investment periods (the same weather
+year tiles into every period — spec §4); gridspine code
 changes (profiles ride in the network's `p_max_pu`).
 
 ## Review record
@@ -196,3 +205,8 @@ atlite kwarg semantics corrected and deferred to the probe; multi-period and
 leap-year policies specified in spec §4; metadata channel added as Task 5
 work; carrier validation, coordinate override, overwrite/undo, artifact
 guards, server-side timeout, and a router-task mutation added.
+
+**Owner ruling 2026-10-18:** `D1:A · D2:A · D3:A · D4:A · D5:A · D6:A · D7:B`
+via decision cards. D7=B moved multi-period tiling INTO v1 scope: Task 5
+gained the per-period tiling bullets and its leap-period mutation; the
+out-of-scope list was updated to match.
