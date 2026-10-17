@@ -91,6 +91,49 @@ def test_native_checkpoint_fault_never_guesses_unrecorded_effects(baseline, monk
         invoke(session, armed['next_call'])
 
 
+@pytest.mark.parametrize('phase', ['child_created', 'child_saved'])
+def test_a_child_that_exists_before_its_receipt_is_not_certified_as_no_effects(baseline, monkeypatch, phase):
+    """create_scenario commits the child before the receipt that names it.
+
+    A crash on that receipt leaves the ledger ahead of the proof, so refresh
+    refuses the proof instead of certifying no effects. A crash on the next
+    receipt, after the case file is written, stays unresolved. Neither path
+    invents a solve.
+    """
+    from harness import experiment_execution as engine
+    from services import project_registry
+    eid = prepared()
+    _root, record = engine._load(eid)
+    child_name = engine._name(record)
+    before = (baseline[2] / 'network.nc').read_bytes()
+    session, armed = arm(eid)
+    fail_checkpoint(monkeypatch, phase)
+    partial = invoke(session, armed['next_call'])
+    assert partial['status'] == 'partial'
+    with chat_tools._acting() as (db, user):
+        child = project_registry.find_project(db, user, child_name)
+        assert child is not None and str(child.parent_project_id) == baseline[1]
+    assert (baseline[2] / 'network.nc').read_bytes() == before
+    if phase == 'child_created':
+        with pytest.raises(HTTPException) as error:
+            tool('refresh_experiment', experiment_id=eid)
+        assert error.value.detail['error_kind'] == 'experiment_checkpoint_unreadable'
+    else:
+        current = tool('refresh_experiment', experiment_id=eid)
+        call = current['reconciliation']['next_call']
+        result = tool(call['tool'], **call['args'])
+        assert result['reconciliation']['outcome'] == 'unresolved'
+        assert result['status'] == 'uncertain' and not result['result_available']
+        assert result['job_id'] is None and 'objective' not in result
+    assert not solve_queue.list_jobs()
+    with pytest.raises(HTTPException) as error:
+        invoke(session, armed['next_call'])
+    assert error.value.detail['error_kind'] == 'experiment_effect_already_reserved'
+    assert not solve_queue.list_jobs()
+    with chat_tools._acting() as (db, user):
+        assert project_registry.find_project(db, user, child_name) is not None
+
+
 def test_live_detached_submission_cannot_be_reconciled_before_late_return(baseline):
     eid = prepared()
     session, armed = arm(eid)
