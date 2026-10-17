@@ -3,9 +3,9 @@
 Spec: docs/superpowers/specs/2026-10-17-renewable-profile-generator-spec.md
 Plan: docs/superpowers/plans/2026-10-17-renewable-profile-generator.md
 
-One entry point — `generate_profile` — over a source registry. Task 1 ships
-the `synthetic` source only; Task 3 registers `atlite`. Adding a source is
-registering a callable, never editing call sites.
+One entry point — `generate_profile` — over a source registry. `synthetic` is
+eagerly registered; `atlite` resolves lazily on first use (the import cage).
+Adding a source is registering a callable, never editing call sites.
 
 Determinism contract: for a fixed `now`, identical inputs produce a
 byte-identical `ProfileResult.series` (and identical meta). The synthetic
@@ -77,21 +77,47 @@ class ProfileResult:
 
 
 # ---------------------------------------------------------------------------
-# Source registry — Task 3 adds "atlite" here.
+# Source registry. Sources return (frame, meta_extra): the frame is one column
+# per point id on the source's time axis; meta_extra is merged into the
+# spec-D6 meta (e.g. the atlite source records atlite_version there).
 # ---------------------------------------------------------------------------
 
 _SourceFn = Callable[
-    [list[ProfilePoint], str, Mapping[str, Any], int], pd.DataFrame
+    [list[ProfilePoint], str, Mapping[str, Any], int],
+    "tuple[pd.DataFrame, dict[str, Any]]",
 ]
 
 _SOURCES: dict[str, _SourceFn] = {
     "synthetic": synthetic.generate_frame,
 }
 
+# Sources whose module must not be imported at engine import time (the
+# profile_gen import cage: atlite is only imported lazily inside
+# atlite_source functions). Resolved on first use.
+_LAZY_SOURCES: dict[str, tuple[str, str]] = {
+    "atlite": ("services.profile_gen.atlite_source", "generate_frame"),
+}
+
 
 def register_source(name: str, fn: _SourceFn) -> None:
-    """Register an additional generation source (used by the atlite task)."""
+    """Register an additional generation source."""
     _SOURCES[name] = fn
+
+
+def _resolve_source(source: str) -> _SourceFn:
+    if source in _SOURCES:
+        return _SOURCES[source]
+    if source in _LAZY_SOURCES:
+        import importlib
+
+        mod_name, fn_name = _LAZY_SOURCES[source]
+        fn = getattr(importlib.import_module(mod_name), fn_name)
+        _SOURCES[source] = fn
+        return fn
+    raise UnknownSourceError(
+        f"unknown profile source {source!r}; available: "
+        f"{', '.join(sorted([*_SOURCES, *_LAZY_SOURCES]))}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -171,17 +197,13 @@ def generate_profile(
             f"cannot generate a profile for technology {technology!r}; "
             f"supported: {', '.join(SUPPORTED_TECHNOLOGIES)}"
         )
-    if source not in _SOURCES:
-        raise UnknownSourceError(
-            f"unknown profile source {source!r}; available: "
-            f"{', '.join(sorted(_SOURCES))}"
-        )
+    source_fn = _resolve_source(source)
     pts = _normalize_points(points)
     if year is None:
         year = _dt.datetime.now(_dt.timezone.utc).year - 1
     year = int(year)
 
-    frame = _SOURCES[source](pts, tech, params, year)
+    frame, meta_extra = source_fn(pts, tech, params, year)
 
     if now is None:
         generated_at = _dt.datetime.now(_dt.timezone.utc)
@@ -204,6 +226,7 @@ def generate_profile(
         ],
         "leap_day": "kept",  # Feb 29 is dropped at apply time, never here
         "generated_at": generated_at.isoformat(),
-        "atlite_version": None,  # the atlite source overwrites this (Task 3)
+        "atlite_version": None,  # the atlite source overwrites this via extra
     }
+    meta.update(meta_extra)
     return ProfileResult(series=frame, meta=meta)

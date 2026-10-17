@@ -144,11 +144,13 @@ def _wind_point(point: "ProfilePoint", idx: pd.DatetimeIndex,
 
 
 def generate_frame(points: "list[ProfilePoint]", technology: str,
-                   params: Mapping[str, Any], year: int) -> pd.DataFrame:
+                   params: Mapping[str, Any], year: int
+                   ) -> "tuple[pd.DataFrame, dict[str, Any]]":
     """Hourly per-unit profiles for every point, one column per point id.
 
-    Always spans the full weather year: 8760 h, or 8784 h with Feb 29 kept
-    for leap years (the apply path owns any dropping — spec §4).
+    Returns (frame, meta_extra). Always spans the full weather year: 8760 h,
+    or 8784 h with Feb 29 kept for leap years (the apply path owns any
+    dropping — spec §4).
     """
     hours = 8784 if calendar.isleap(year) else 8760
     idx = pd.date_range(f"{year}-01-01 00:00", periods=hours, freq="h")
@@ -157,4 +159,4 @@ def generate_frame(points: "list[ProfilePoint]", technology: str,
         p.id: gen(p, idx, _seed_for(technology, year, p, params))
         for p in points
     }
-    return pd.DataFrame(data, index=idx)
+    return pd.DataFrame(data, index=idx), {}
