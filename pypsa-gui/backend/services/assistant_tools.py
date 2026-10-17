@@ -10,6 +10,8 @@ import re
 import threading
 import uuid
 import zipfile
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
@@ -22,6 +24,43 @@ from services import assistant_tasks as tasks
 from services import workflow_tools as workflow
 
 _CHART_LOCK = threading.Lock()
+_REVIEWED_PREVIEW: ContextVar[str | None] = ContextVar('reviewed_preview', default=None)
+
+
+@contextmanager
+def confirmed_preview(review_sha256: str):
+    """Bind a server-captured review to this invocation, never model arguments."""
+    token = _REVIEWED_PREVIEW.set(review_sha256)
+    try:
+        yield
+    finally:
+        _REVIEWED_PREVIEW.reset(token)
+
+
+def _preview_digest(record):
+    body = {k: v for k, v in record.items() if k != 'review_sha256'}
+    return hashlib.sha256(json.dumps(body, sort_keys=True, allow_nan=False,
+                                    separators=(',', ':')).encode()).hexdigest()
+
+
+def _preview_review(record):
+    """Require the complete bounded review; legacy/clipped records fail closed."""
+    try:
+        rows = record['diff']
+        valid = (record.get('version') == 1 and isinstance(rows, list)
+                 and 1 <= len(rows) <= 20 and record['changes_total'] == len(rows)
+                 and record['review_sha256'] == _preview_digest(record))
+        if not valid:
+            raise ValueError('incomplete or changed preview')
+        out = {'preview_id': record['preview_id'], 'project_id': record['project_id'],
+               'changes_total': len(rows), 'reviewed_changes': copy.deepcopy(rows),
+               'review_sha256': record['review_sha256'],
+               'note': 'Apply these typed changes to unchanged inputs. Existing time-series overrides remain. Changes are left unsaved.'}
+        if len(json.dumps(out, allow_nan=False)) > 3800:
+            raise ValueError('oversized review')
+        return out
+    except (KeyError, TypeError, ValueError, OverflowError):
+        workflow._refuse('invalid_preview', 'Preview is changed, incomplete or too large. Create a new preview with at most 20 values; split large changes into smaller reviews.', 409)
 
 
 def _project():
@@ -228,9 +267,11 @@ def preview_project_changes(changes: list[dict]) -> dict:
         fingerprint = workflow._network_input_fingerprint(ctx)
         _, diffs, validation = _candidate(ctx, parsed)
         preview_id = str(uuid.uuid4())
-        record = {"preview_id": preview_id, "project_id": str(project.id), "owner_id": owner,
+        record = {"version": 1, "preview_id": preview_id, "project_id": str(project.id), "owner_id": owner,
                   "fingerprint": fingerprint, "changes": [c.model_dump() for c in parsed],
-                  "diff": diffs[:20], "changes_total": len(diffs), "applied": False}
+                  "diff": diffs, "changes_total": len(diffs), "applied": False}
+        record['review_sha256'] = _preview_digest(record)
+        _preview_review(record)
         tasks._save(root / "assistant_previews" / (preview_id + ".json"), record)
     out = {"preview_id": preview_id, "project_id": str(project.id), "fingerprint": fingerprint,
            "valid": True, "changes_total": len(diffs), "diff": diffs[:20],
@@ -255,6 +296,10 @@ def apply_project_changes(preview_id: str) -> dict:
         record = workflow._read_json(path)
         if record.get("owner_id") != owner or record.get("project_id") != str(project.id):
             workflow._refuse("preview_not_found", "Preview not found.", 404)
+        _preview_review(record)
+        expected = _REVIEWED_PREVIEW.get()
+        if expected is not None and expected != record['review_sha256']:
+            workflow._refuse('invalid_preview', 'The reviewed preview changed; create and review a new preview.', 409)
         ctx = PyPSAService.get_active_context()
         _idle(ctx, project)
         if record.get("applied"):
@@ -262,10 +307,13 @@ def apply_project_changes(preview_id: str) -> dict:
         if workflow._network_input_fingerprint(ctx) != record["fingerprint"]:
             workflow._refuse("preview_stale", "Project inputs changed; create and review a new preview.", 409)
         candidate, diffs, _ = _candidate(ctx, _changes(record["changes"]))
+        if json.dumps(diffs, sort_keys=True) != json.dumps(record['diff'], sort_keys=True):
+            workflow._refuse('invalid_preview', 'The stored changes do not match the exact review; create a new preview.', 409)
         # Persist uncertainty BEFORE effects, so an interrupted apply cannot replay.
         if record.get("applying"):
             workflow._refuse("preview_apply_uncertain", "Previous application was interrupted; inspect inputs and create a new preview.", 409)
         record["applying"] = True
+        record['review_sha256'] = _preview_digest(record)
         tasks._save(path, record)
         PyPSAService.set_network(candidate.network)
         # The copy still carries the previous solve. Topology is unchanged, so
@@ -284,6 +332,7 @@ def apply_project_changes(preview_id: str) -> dict:
         from services import change_log_service
         change_log_service.log("update", "Network", preview_id, f"Applied reviewed preview: {len(diffs)} engineering values")
         record["applied"] = True
+        record['review_sha256'] = _preview_digest(record)
         tasks._save(path, record)
         return {"preview_id": preview_id, "project_id": str(project.id), "applied": True, "reused": False,
                 "changed_values": len(diffs), "saved": False, "next_tools": ["validate_network", "run_simulation", "save_project"]}
@@ -437,13 +486,17 @@ def preview_confirmation(preview_id):
         preview_id = str(uuid.UUID(preview_id))
     except (ValueError, TypeError, AttributeError):
         workflow._refuse("preview_not_found", "Preview not found.", 404)
-    record = workflow._read_json(root / "assistant_previews" / (preview_id + ".json"))
-    if record.get("owner_id") != owner or record.get("project_id") != str(project.id):
-        workflow._refuse("preview_not_found", "Preview not found.", 404)
-    out = {"preview_id": preview_id, "project_id": str(project.id),
-           "changes_total": record["changes_total"], "reviewed_changes": record["diff"],
-           "note": "Apply these typed changes to unchanged inputs. Existing time-series overrides remain. Changes are left unsaved."}
-    while len(json.dumps(out, default=str)) > 3800 and out["reviewed_changes"]:
-        out["reviewed_changes"].pop()
-        out["diff_truncated"] = True
-    return out
+    with PyPSAService.get_lock():
+        record = workflow._read_json(root / "assistant_previews" / (preview_id + ".json"))
+        if record.get("owner_id") != owner or record.get("project_id") != str(project.id):
+            workflow._refuse("preview_not_found", "Preview not found.", 404)
+        out = _preview_review(record)
+        if record.get('applied') or record.get('applying'):
+            workflow._refuse('invalid_preview', 'Preview was already applied or interrupted; inspect inputs and create a new preview.', 409)
+        ctx = PyPSAService.get_active_context()
+        if workflow._network_input_fingerprint(ctx) != record['fingerprint']:
+            workflow._refuse('preview_stale', 'Project inputs changed; create and review a new preview.', 409)
+        _, diffs, _ = _candidate(ctx, _changes(record['changes']))
+        if json.dumps(diffs, sort_keys=True) != json.dumps(record['diff'], sort_keys=True):
+            workflow._refuse('invalid_preview', 'The stored changes do not match the exact review; create a new preview.', 409)
+        return out
