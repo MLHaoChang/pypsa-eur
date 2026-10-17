@@ -774,6 +774,14 @@
     "experiment_worker_running": {
       "surface": "inline",
       "why": "The owned submission still holds its native fence. The failed tool line explains waiting; no result, reconciliation or retry has occurred."
+    },
+    "invalid_experiment_comparison": {
+      "surface": "inline",
+      "why": "The comparison requires two distinct owned plan IDs. The failed tool line requests a valid selection without exposing foreign sources."
+    },
+    "experiment_comparison_changed": {
+      "surface": "inline",
+      "why": "The inspected comparison no longer matches current owned sources. The failed export line requests fresh inspection; no old report or calculation is substituted."
     }
   }
 }
