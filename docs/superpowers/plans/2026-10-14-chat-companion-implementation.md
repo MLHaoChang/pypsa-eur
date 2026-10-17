@@ -27,12 +27,15 @@ is merged in #354 (`fae95896500d6d74625e94e9f3a546d2d6b405af`), with common caps
 separate ordinary confirmations/receipts and stop/continue policy. The current
 slice [CP-06a access visibility](../../../.scratch/chat-companion/issues/06a-effective-permission-visibility.md)
 is merged in #356 (`e7777aa2e2c086789f1c802d387410a5280dc0cc`), with successful
-post-merge Test, CodeQL and image workflows. The current slice is
-[CP-06b bound confirmations](../../../.scratch/chat-companion/issues/06b-bound-confirmations.md):
+post-merge Test, CodeQL and image workflows.
+[CP-06b bound confirmations](../../../.scratch/chat-companion/issues/06b-bound-confirmations.md)
+is merged in #357 (`3f45c0e7d9ad66ee74e6bd918d655419152f3e8f`):
 fixed ordinary-call arguments, current confirmation-rule checks and complete
 old/new/unit reviews for the existing engineering preview adapter. Wider effect
-previews, saved restrictions and
-external readiness remain separate work. Wider current-tab navigation, broader domain adapters/family journeys and
+previews and external readiness remain separate work. The current slice is
+[CP-06c saved personal project restrictions](../../../.scratch/chat-companion/issues/06c-saved-restrictions.md),
+with closed restrictive modes, revisioned saves and waiting/queued action checks.
+Wider current-tab navigation, broader domain adapters/family journeys and
 external/live validation remain separate scopes.
 This plan remains the sequence; the linked issues are the execution records.
 

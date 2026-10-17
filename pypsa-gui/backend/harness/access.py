@@ -6,7 +6,7 @@ import time
 from fastapi import HTTPException
 
 from db.models import ProjectLock
-from harness import budget, confirm, session as sessions
+from harness import budget, confirm, restrictions, session as sessions
 from services import project_registry
 from services.pypsa_service import PyPSAService
 
@@ -21,6 +21,7 @@ def snapshot(*, db, user, session, project_id, ui_mode, checked):
     elif ctx.project_uuid:
         project = project_registry.resolve_project(db, user, ctx.project_uuid)
 
+    rule = restrictions.read(db, user.id, project.id) if project is not None else None
     lock_state = 'unlocked' if project is not None else 'not_applicable'
     blockers = []
     if project is not None:
@@ -65,10 +66,13 @@ def snapshot(*, db, user, session, project_id, ui_mode, checked):
         'scope': {'project_id': str(project.id) if project else None,
                   'project_name': project.name if project else None},
         'selection': {'ui_mode': ui_mode, 'checked_requested': checked},
+        'restrictions': rule,
         'confirmation_rules': [
             {'tier': tier,
-             'native': confirm.confirmation_policy(tier, guided=ui_mode == 'guided'),
-             'external': confirm.confirmation_policy(tier, guided=ui_mode == 'guided', external=True)}
+             'native': confirm.confirmation_policy(tier, guided=ui_mode == 'guided',
+                                                   restriction_mode=rule['mode'] if rule else 'standard'),
+             'external': confirm.confirmation_policy(tier, guided=ui_mode == 'guided', external=True,
+                                                     restriction_mode=rule['mode'] if rule else 'standard')}
             for tier in ('read', 'write', 'destructive', 'execution', 'execution_long_running')
         ],
         'project_lock': lock_state, 'blockers': blockers, 'session': session_view,

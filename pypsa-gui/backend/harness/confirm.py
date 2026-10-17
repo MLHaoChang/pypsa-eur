@@ -43,13 +43,20 @@ def _confirm_tiers(guided: bool) -> frozenset[str]:
     return GUIDED_CONFIRM_TIERS if guided else DESTRUCTIVE_TIERS
 
 
-def confirmation_policy(tier: str, *, guided: bool = False, external: bool = False) -> str:
+def confirmation_policy(tier: str, *, guided: bool = False, external: bool = False,
+                        restriction_mode: str = 'standard') -> str:
     """
     Current gate disposition, also used by the read-only access view.
 
     ``policy`` still needs a durable approval record; it is not an unconditional
     execution grant. External non-read calls never inherit native exemptions.
     """
+    if restriction_mode not in {'standard', 'confirm_changes', 'read_only'}:
+        raise ValueError('unknown restriction mode')
+    if tier != 'read' and restriction_mode == 'read_only':
+        return 'blocked'
+    if tier != 'read' and restriction_mode == 'confirm_changes':
+        return 'user'
     if tier not in _confirm_tiers(guided) and not (external and tier != 'read'):
         return 'none'
     if tier in AUTO_APPROVE_TIERS and not external:
@@ -149,6 +156,8 @@ def _confirm_destructive_tool(
     tool_results_collector: list[dict[str, Any]],
     guided: bool = False,
     external: str | None = None,
+    restriction_mode: str = 'standard',
+    restriction_snapshot: dict | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, bool]:
     """
     Gate a destructive tool on the user's confirmation. Returns whether to
@@ -180,7 +189,12 @@ def _confirm_destructive_tool(
     see `tests/test_chat_confirmation_gate_seam.py`.
     """
     revision = confirmation_revision()
-    policy = confirmation_policy(tier, guided=guided, external=bool(external))
+    policy = confirmation_policy(tier, guided=guided, external=bool(external),
+                                 restriction_mode=restriction_mode)
+    if policy == 'blocked':
+        yield from _deny(tool_use_id, tool_name, 'user_restriction',
+                         'Your saved project rule blocks non-read tools.', tool_results_collector)
+        return False
     if policy == 'none':
         return True
     from harness import approvals
@@ -224,6 +238,12 @@ def _confirm_destructive_tool(
     decision = session.wait_for_decision(pc.token)
     if decision == 'approve' and confirmation_revision() != revision:
         decision = 'revoked'
+    if decision == 'approve' and restriction_snapshot is not None:
+        from harness import restrictions
+        try:
+            restrictions.require_current(restriction_snapshot, session)
+        except Exception:  # A failed required policy read cannot approve work.
+            decision = 'revoked'
     outcome, by = _DECISION_OUTCOMES.get(decision, ("unavailable", "system"))
     recorded = approvals.decided(session, call_id=tool_use_id, tool=tool_name, tier=tier,
                                  outcome=outcome, by=by, link=link)

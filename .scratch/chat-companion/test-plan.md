@@ -15,8 +15,10 @@ The [CP-06a execution contract](issues/06a-effective-permission-visibility.md)
 covers read-only access visibility and existing confirmation/ACL/lock regressions.
 The [CP-06b contract](issues/06b-bound-confirmations.md) adds fixed ordinary-call
 arguments, confirmation-rule invalidation and complete engineering-preview
-review. Wider effect-preview, durable policy-history and saved-restriction CT-19/20 cases stay
-pending; the new panel is not a permission credential or all-action readiness gate.
+review. [CP-06c](issues/06c-saved-restrictions.md) adds saved personal project restrictions,
+stale-save protection and revision checks for waiting/queued work. Wider effect-preview
+and durable policy-history cases stay pending; the panel is not a permission
+credential or all-action readiness gate.
 
 Use authenticated public chat/API/SSE and browser interaction. External transport/inference, time and interrupted I/O may be mocked; real ownership, catalogue/admission, ordinary confirmation, stores, job services and exported bytes remain exercised. Do not infer completion from a model sentence, HTTP success, animation or permission grant.
 

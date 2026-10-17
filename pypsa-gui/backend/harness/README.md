@@ -46,6 +46,7 @@ harness/
   session.py      ChatSession, PendingConfirmation, the session registry with its TTL and cap
   confirm.py      the confirmation gate: tiers, the Guided write rule, auto-approve, parallel-destructive
   access.py       authenticated read-only current scope, confirmation policy, locks and configured limits
+  restrictions.py revisioned personal saved-project tool restrictions; fresh admission/pickup checks, no grants
   approvals.py    every card's asked/decided record per owner and session; an approval that cannot be recorded does not run
   eventlog.py     the session event log: every model-visible input, append-only per owner and session; derive_messages, fork, torn-tail repair; the source of truth (the deque is its fold, a chat not in memory is rebuilt from it, interrupted turns are read off it, chat.jsonl is its projection)
   replay.py       fork a recorded session before one turn and run that turn again on another provider (smoke/replay_session.py)
@@ -181,6 +182,22 @@ an effective configuration revision; a change while waiting revokes approval.
 Dispatch also rechecks that revision, the tool's tier and its external server
 identity before admission and at worker pickup. This is not a durable policy
 history or an external-server reconnect/configuration revision (CP-13).
+
+Access and approvals can save the authenticated user's personal rule for the
+current saved project: standard server floors, an ordinary audited card for
+every non-read tool, or refusal of non-read tools. This includes native and
+external dispatch in both modes and checked turns; it grants no new tools or
+checked adapters. Read-only tools can still involve inference and usage limits.
+An additive owner/project database row stores the current mode and revision.
+PUT `/api/chat/restrictions` requires the current project binding and expected
+revision; concurrent or stale saves cannot overwrite another choice. Clearing
+saves standard with a new revision. Missing rows preserve server floors;
+unavailable/corrupt storage refuses admission. Fresh reads after approval and
+at actual worker pickup invalidate changed revisions, including change-and-restore.
+Saving does not cancel handlers already started. Rules are not imported with
+project data, inherited by scenarios or shared with other users. This current
+record is not durable policy history. See
+`.scratch/chat-companion/issues/06c-saved-restrictions.md`.
 
 ## Local MCP exposure (issue 11)
 
