@@ -2557,7 +2557,7 @@ def _dispatch_real_tool_call(
         # fails partway can still have mutated the network, so marking on success
         # only would under-report. Over-marking costs a prompt about already-clean
         # work; under-marking costs the work itself.
-        if effect_fresh and tier != "read" and not external and tool_name not in {"run_sensitivity_sweep", "start_experiment", "prepare_experiment", "advance_experiment", "refresh_experiment", "cancel_experiment", "reconcile_experiment", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
+        if effect_fresh and tier != "read" and not external and tool_name not in {"run_sensitivity_sweep", "start_experiment", "prepare_experiment", "advance_experiment", "refresh_experiment", "cancel_experiment", "reconcile_experiment", "export_experiment_comparison", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
             from services import dirty_state
             dirty_state.mark_dirty()
             # ★ P33b B2: the chat seam of the edit counter. Same placement and

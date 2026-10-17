@@ -17,12 +17,13 @@ First implement **CP-01**, then **CP-02**. These deliver truthful in-page chat a
 Current continuation: CP-01 (#235), CP-02 (#241), bounded CP-03 (#268), Activity
 (#309), retained jobs (#311), retained decisions (#319), source gaps (#327),
 explicit source-gap follow-ups (#333) and bounded native completion observation
-(#351, `319985014d7cd5b74fbc07bb1ad4975aaffcd6f7`) are merged. Their linked issue
-records describe verified boundaries and remaining live/domain gates. The next
-bounded slice is [CP-05a explicit uncertain-case reconciliation](../../../.scratch/chat-companion/issues/05a-uncertain-case-reconciliation.md):
-fenced native submission proof, independently matching child/job/input receipts,
-no automatic retry and no reset of the original reservation. Two-case comparison,
-wider current-tab navigation and broader family journeys remain separate scopes.
+(#351) and [CP-05a explicit uncertain-case reconciliation](../../../.scratch/chat-companion/issues/05a-uncertain-case-reconciliation.md)
+(#352, `e1adb0db95111ec9ef0f1ef8471938313a4e1cb6`) are merged. Their linked issue
+records describe verified boundaries and remaining live/domain gates. The current
+bounded slice is [CP-05b1 comparison/export](../../../.scratch/chat-companion/issues/05b1-case-comparison.md)
+of two individually approved single-case receipts from the same frozen baseline.
+Shared two-case advancement/stop-continue admission, wider current-tab navigation
+and broader family journeys remain separate scopes; CP-05 is not complete.
 This plan remains the sequence; the linked issues are the execution records.
 
 This plan supplements the [earlier assistant plan](2026-10-13-assistant-remaining-work.md). Its bounded prerequisites and first-network-case milestones are already merged in #185/#188. Reuse them; their residual two-case/reconciliation work is CP-05. Existing Live issues 01–12 keep their acceptance scope and remaining external gates.

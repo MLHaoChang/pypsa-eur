@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 253,
+  "tool_count": 255,
   "tools": [
     {
       "name": "list_components",
@@ -5204,6 +5204,56 @@
       ],
       "safety_tier": "destructive",
       "schema_sha256": "e149dd99ba89ecb95755a219220419361394233dde88e3aed0b45257f3a85d37",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_experiment_comparison",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "experiment_id",
+        "baseline_experiment_id",
+        "comparison_sha256"
+      ],
+      "required": [
+        "experiment_id",
+        "baseline_experiment_id",
+        "comparison_sha256"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "2d6806bb2a4e0e57707233ecfd345632e87853bb3d0038efffa6f9e7f7d05eb6",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "compare_experiments",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "experiment_id",
+        "baseline_experiment_id"
+      ],
+      "required": [
+        "experiment_id",
+        "baseline_experiment_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "e23db89541d4a2caaf22cc43628953380bf01c59390c44c1758bf6caa8398ff4",
       "behavioral_fixture": "pending"
     },
     {

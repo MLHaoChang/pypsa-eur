@@ -109,6 +109,9 @@ altered evidence withholds values. Readable old plans keep their original IDs;
 legacy/unsupported plans must obtain a valid current preflight before arming.
 
 Independent review, real-use calibration, paid generation/media probes and
-production activation remain pending/out of scope. The next experiment slice
-extends to two cases and compatible comparison/partial outcomes, with explicit
-reconciliation of uncertain effects before any retry; domain adapters follow.
+production activation remain pending/out of scope. CP-05b1 adds explicit compatible
+comparison/export of two individually approved single-case receipts. It does not
+advance a two-case plan: shared case/attempt/time caps and stop/continue admission
+are still a later slice. Uncertain effects require explicit reconciliation before
+any fresh ordinary retry; domain adapters follow. See
+`../chat-companion/issues/05b1-case-comparison.md` for the bounded contract.

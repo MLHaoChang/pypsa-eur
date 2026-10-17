@@ -36,6 +36,7 @@ harness/
   completion_observer.py bounded weak native-worker status observation while Activity is closed; no advancement or retry
   experiment_execution.py ordinary single-network-case admission and permanent no-replay receipts
   experiment_reconciliation.py explicitly confirmed fenced native submission read-back; no execution or retry
+  experiment_comparison.py current compatible objective comparisons and digest-bound export; no execution authority
   attention.py    bounded owned question/confirmation observations and versioned read-only inspection; no restored approval or answer authority
   owned_snapshots.py private atomic bounded snapshot storage shared by job and decision observations; schemas remain separate
   compose.py      the system prompt for a turn, the live network line, and the per-turn ui-context / Guided / workflow-step blocks
@@ -759,3 +760,17 @@ and caps remain; no retry, solve, abort, activation or deletion is executed.
 This does not add a checked-answer profile or a two-case adapter. See
 `.scratch/chat-companion/issues/05a-uncertain-case-reconciliation.md` and the
 single-case contract for the native proof and remaining-scope boundaries.
+
+`compare_experiments` reads two distinct owned single-network-case plans in the
+active baseline project without executing or refreshing their receipts. Each
+current result must pass the existing exact saved/job/run oracle. Deltas require
+intact referenced baseline evidence matching the frozen preflight digest and
+the same prepared baseline, full horizon, snapshot/investment weights, solver
+configuration, mode and objective units. Declared candidate changes are included;
+failed/unavailable sources retain their own state without a fabricated delta.
+The sole metric is the recorded solver objective, not certified full cost.
+`export_experiment_comparison` re-reads sources and requires the inspected report
+SHA256, then uses the ordinary write/lock/authenticated-download contract. An old
+export is a historical report; it does not certify current evidence. No strict
+profile expansion, shared two-case advancement or stop/continue scheduling is
+added. See `.scratch/chat-companion/issues/05b1-case-comparison.md`.
