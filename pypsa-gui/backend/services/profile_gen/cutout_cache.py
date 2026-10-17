@@ -158,7 +158,7 @@ def _atlite_month_downloader(
         path=str(target),
         module="era5",
         x=slice(w, e),
-        y=slice(n, s),  # atlite convention: latitude slice is north -> south
+        y=slice(s, n),  # atlite Cutout convention: y slice is (south, north)
         time=f"{year}-{month:02d}",
     )
     cutout.prepare()
