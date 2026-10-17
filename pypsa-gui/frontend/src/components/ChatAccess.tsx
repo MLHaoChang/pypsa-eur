@@ -9,6 +9,7 @@ const tierNames: Record<string, string> = {
   read: 'Read', write: 'Write', destructive: 'Destructive', execution: 'Execute', execution_long_running: 'Long-running work',
 }
 const blockers: Record<string, string> = {
+  chat_policy_unavailable: 'Chat policy is unavailable. Server configuration must be repaired before starting a turn.',
   project_writes_locked: 'Project writes are locked by another user. Reads remain available.',
   session_output_budget_exhausted: 'This chat has reached its output-token limit.',
   session_unreported_usage_turn_limit: 'This chat has reached its turn limit without reported usage.',

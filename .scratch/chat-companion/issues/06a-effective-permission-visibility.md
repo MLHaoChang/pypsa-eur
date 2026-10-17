@@ -38,9 +38,10 @@ contracts, six steward semantic suites and the offline expanded pilot.
 
 ## Local implementation evidence
 
-- 17 authenticated access cases pass, including fresh locks/revocation, foreign
+- 18 authenticated access cases pass, including fresh locks/revocation, foreign
   sessions, non-consuming reads, actual configured confirmation floors and
-  unavailable versus reported usage. Included in 400 passing backend regressions
+  unavailable versus reported usage and an invalid server policy blocking every
+  turn even without check opt-in. Included in 401 passing backend regressions
   across confirmation, native/external dispatch, ownership, budgets, Activity,
   layout and all six steward semantic suites. One pre-existing empty KNOWN_GAPS
   parameter is skipped; no new access cases are skipped.

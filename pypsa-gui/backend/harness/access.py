@@ -52,6 +52,7 @@ def snapshot(*, db, user, session, project_id, ui_mode, checked):
     mode = os.environ.get('PYPSA_GUI_ANSWER_ASSURANCE_MODE', 'disabled')
     if mode not in {'disabled', 'shadow', 'pilot', 'strict'}:
         mode = 'unavailable'
+        blockers.append('chat_policy_unavailable')
     checks = mode == 'strict' or (mode == 'pilot' and checked)
     if checked and mode not in {'pilot', 'strict'}:
         blockers.append('requested_checks_unavailable')

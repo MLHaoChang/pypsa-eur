@@ -136,6 +136,14 @@ def test_owned_session_limits_refresh_without_a_provider(client, seeded_identity
         sessions.drop_session(sid)
 
 
+def test_invalid_server_policy_is_visible_even_without_check_opt_in(client, monkeypatch):
+    monkeypatch.setenv('PYPSA_GUI_ANSWER_ASSURANCE_MODE', 'invalid-mode')
+    response = client.get('/api/chat/access')
+    assert response.status_code == 200, response.text
+    assert response.json()['checking']['server_mode'] == 'unavailable'
+    assert 'chat_policy_unavailable' in response.json()['blockers']
+
+
 @pytest.mark.parametrize('params', [{'ui_mode': 'admin'}, {'checked': 'approve-all'}, {'session_id': ''}, {'project_id': 'x' * 121}])
 def test_malformed_selectors_cannot_grant_access(client, params):
     assert client.get('/api/chat/access', params=params).status_code == 422
