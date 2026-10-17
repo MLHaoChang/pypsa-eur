@@ -37,13 +37,17 @@ def snapshot(*, db, user, session, project_id, ui_mode, checked):
 
     session_view = None
     if session is not None:
-        with session._lock:
+        if not session._lock.acquire(blocking=False):
+            raise HTTPException(409, 'Chat state is changing. Refresh access shortly.')
+        try:
             used = session.usage_acc['output_tokens']
             missing_usage_turns_exhausted = (not session.usage_reported
                                              and session.turns_started >= budget.MAX_TURNS_PER_SESSION)
             session_view = {'id': session.session_id,
                             'output_tokens_used': used if session.usage_reported else None,
                             'turn_in_flight': session._turn_in_flight}
+        finally:
+            session._lock.release()
         if used >= budget.MAX_OUTPUT_TOKENS_PER_SESSION:
             blockers.append('session_output_budget_exhausted')
         if missing_usage_turns_exhausted:

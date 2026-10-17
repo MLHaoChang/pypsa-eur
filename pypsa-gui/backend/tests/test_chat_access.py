@@ -144,6 +144,25 @@ def test_invalid_server_policy_is_visible_even_without_check_opt_in(client, monk
     assert 'chat_policy_unavailable' in response.json()['blockers']
 
 
+def test_busy_chat_state_refuses_access_read_without_waiting_for_the_turn(client, seeded_identity):
+    from concurrent.futures import ThreadPoolExecutor
+    from harness import session as sessions
+
+    sid = 'access-busy-' + uuid.uuid4().hex
+    sess = sessions.get_or_create_session(sid, owner_user_id=str(seeded_identity['user_id']))
+    try:
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            sess._lock.acquire()
+            response = worker.submit(client.get, '/api/chat/access', params={'session_id': sid})
+            try:
+                assert response.result(timeout=2).status_code == 409
+            finally:
+                sess._lock.release()
+        assert client.get('/api/chat/access', params={'session_id': sid}).status_code == 200
+    finally:
+        sessions.drop_session(sid)
+
+
 @pytest.mark.parametrize('params', [{'ui_mode': 'admin'}, {'checked': 'approve-all'}, {'session_id': ''}, {'project_id': 'x' * 121}])
 def test_malformed_selectors_cannot_grant_access(client, params):
     assert client.get('/api/chat/access', params=params).status_code == 422

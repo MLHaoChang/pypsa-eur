@@ -10,6 +10,8 @@ turn/session/daily limits. Optional expected project and owned session selectors
 must refuse foreign, missing, revoked or changed bindings. Reading never creates
 a chat, lists/connects external servers, calls a provider, grants an action,
 consumes a confirmation or reserves work. Lock inspection must not prune rows.
+Busy in-memory chat state refuses immediately with 409; the read never waits
+behind a turn's session lock. A later read can recover without changing work.
 
 The requested Guided/Expert and checked selections describe the next turn;
 they are not claims about an already running turn. Reuse one confirmation-policy
@@ -38,10 +40,11 @@ contracts, six steward semantic suites and the offline expanded pilot.
 
 ## Local implementation evidence
 
-- 18 authenticated access cases pass, including fresh locks/revocation, foreign
+- 19 authenticated access cases pass, including fresh locks/revocation, foreign
   sessions, non-consuming reads, actual configured confirmation floors and
   unavailable versus reported usage and an invalid server policy blocking every
-  turn even without check opt-in. Included in 401 passing backend regressions
+  turn even without check opt-in, plus busy-session refusal/recovery. Included in
+  402 passing backend regressions
   across confirmation, native/external dispatch, ownership, budgets, Activity,
   layout and all six steward semantic suites. One pre-existing empty KNOWN_GAPS
   parameter is skipped; no new access cases are skipped.
