@@ -572,6 +572,10 @@ substitute for the approved record. Checksums detect drift, not storage trust
 or domain correctness. Other effect families retain their existing cards;
 their exact-preview adapters remain separate work. See
 `.scratch/chat-companion/issues/06b-bound-confirmations.md`.
+Candidate preparation also reads each assigned native scalar back as a Python
+value and refuses rounding or overflow before a preview is saved. A finite JSON
+integer is not necessarily exactly representable in a native floating-point
+field; representable large values remain supported.
 Topology operations remain the existing CRUD/batch tools.
 
 `create_chart` renders bounded numeric input/result data as PNG. Result

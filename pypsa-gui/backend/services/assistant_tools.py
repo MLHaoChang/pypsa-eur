@@ -214,7 +214,11 @@ def _changes(changes):
         if change.attribute not in workflow._ATTRIBUTES[change.component_class]:
             workflow._refuse("invalid_change_attribute", "This attribute is outside the engineering input allowlist.")
         boolean = change.attribute.endswith("_extendable")
-        if boolean != isinstance(change.value, bool) or (not boolean and not math.isfinite(change.value)):
+        try:
+            finite = math.isfinite(change.value)
+        except OverflowError:
+            finite = False
+        if boolean != isinstance(change.value, bool) or (not boolean and not finite):
             workflow._refuse("invalid_change_value", "Use finite numbers or booleans for extendable flags.")
         for name in change.names:
             key = (change.component_class, name, change.attribute)
@@ -244,6 +248,11 @@ def _candidate(ctx, changes):
                           "before": before.item() if hasattr(before, "item") else before,
                           "after": change.value, "unit": unit})
         component.static.loc[change.names, change.attribute] = change.value
+        for name in change.names:
+            stored = component.static.at[name, change.attribute]
+            stored = stored.item() if hasattr(stored, 'item') else stored
+            if stored != change.value:
+                workflow._refuse('invalid_change_value', 'The native input field would round this value; choose an exactly representable value and create a new preview.', 409)
     with workflow._isolated(candidate):
         validation = chat_tools.validate_network()
     if not validation.get("ok") or validation.get("deferred"):

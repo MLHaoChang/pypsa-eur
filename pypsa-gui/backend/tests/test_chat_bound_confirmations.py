@@ -157,6 +157,37 @@ def test_a_preview_cannot_hide_changes_beyond_the_review_limit(baseline):
     assert chat_tools.get_component('Generator', 'Extra20')['marginal_cost'] == 10
 
 
+@pytest.mark.parametrize('value', [9007199254740993, 10**400], ids=['rounded', 'overflow'])
+def test_preview_refuses_an_integer_the_native_field_cannot_represent(baseline, value):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as failure:
+        chat_tools.preview_project_changes([{
+            'component_class': 'Generator', 'names': ['G1'],
+            'attribute': 'marginal_cost', 'value': value}])
+    assert failure.value.detail['error_kind'] == 'invalid_change_value'
+    assert chat_tools.get_component('Generator', 'G1')['marginal_cost'] == 10
+
+
+def test_a_large_exactly_representable_value_can_still_be_reviewed_and_applied(baseline):
+    value = 9007199254740994
+    preview = chat_tools.preview_project_changes([{
+        'component_class': 'Generator', 'names': ['G1'],
+        'attribute': 'marginal_cost', 'value': value}])
+    assert preview['diff'][0]['after'] == value
+    session, collector, frames = ChatSession(), [], []
+    for event, data in dispatch_tool_call(
+        session, {'id': 'exact-large-value', 'name': 'apply_project_changes',
+                  'input': {'preview_id': preview['preview_id']}}, collector,
+    ):
+        frames.append((event, data))
+        if event == 'tool_pending_confirmation':
+            assert data['args']['reviewed_changes'][0]['after'] == value
+            session.record_decision(data['confirmation_token'], 'approve')
+    assert not [d for e, d in frames if e == 'tool_error'], frames
+    assert chat_tools.get_component('Generator', 'G1')['marginal_cost'] == value
+
+
 def test_complete_preview_uses_owned_http_approval_and_single_use_token(baseline, client, seeded_identity):
     from harness import session as sessions
 

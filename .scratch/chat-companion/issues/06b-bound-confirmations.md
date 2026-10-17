@@ -22,6 +22,11 @@ records, displayed rows, fingerprints, owner/project bindings or incomplete lega
 previews require a new preview. Existing applied/uncertain no-replay semantics,
 ACL, foreign edit lock, study gates and unsaved/undo behavior remain authoritative.
 
+Native candidate assignment must preserve each requested scalar exactly. Reject
+unrepresentable integers (including overflow) before persisting a preview;
+read back Python scalars so NumPy's implicit integer-to-float comparison cannot
+hide rounding. Exactly representable large values remain supported.
+
 The shared Confirmation card renders an accessible old/new/unit table on dock
 and companion. Incomplete/malformed preview cards cannot enable Approve; Deny
 remains available. No new event vocabulary, tools, lower confirmation floor,
@@ -45,14 +50,18 @@ domain approval or production activation claim.
 
 - Three public REDs reproduced the original argument replacement (20 reviewed,
   99 applied), changed-rule approval and persisted-preview replacement paths.
-  The final real-dispatch/HTTP regression selection passes 455 cases, including
-  all 15 new binding cases and all six steward semantic suites. Two deliberate
+  The final real-dispatch/HTTP regression selection passes 458 cases, including
+  all 18 new binding cases and all six steward semantic suites. Two deliberate
   existing skips are the frame recorder and empty KNOWN_GAPS parameter.
 - Owned HTTP approval applies the exact reviewed values; replay is refused.
   Caller/request/card mutation, changed confirmation exemptions/tool tier before
   admission or worker pickup, stale source, foreign edit-lock acquisition,
   missing legacy seals and a consistent replacement record all retain the old
   unapproved value. Oversized reviews cannot hide a twenty-first value.
+- Additional public REDs reproduced native float64 rounding of
+  `9007199254740993` to `9007199254740992` and overflow during numeric admission.
+  Candidate preparation now refuses both before saving a preview; an exactly
+  representable large value still passes ordinary review and applies correctly.
 - 855 frontend cases pass across 40 suites, including ten new rendered review
   cases on both surfaces/modes, malformed/truncated review refusal and preserved
   zero/boolean values. TypeScript and production build pass (existing bundle
