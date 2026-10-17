@@ -321,6 +321,7 @@ def test_authenticated_guided_export_requires_current_ordinary_confirmation(base
 
 
 def test_referenced_baseline_evidence_loss_is_not_ignored_by_pair_comparison(baseline, monkeypatch):
+    import time
     from services import run_evidence, chat_service
     session = chat_service.ChatSession()
     monkeypatch.setattr(session, 'wait_for_decision', lambda _: 'approve')
@@ -330,7 +331,16 @@ def test_referenced_baseline_evidence_loss_is_not_ignored_by_pair_comparison(bas
     assert 'job_id' in result, result
     assert chat_tools.wait_for_job(result['job_id'], 25)['completed']
     baseline_run = run_evidence.foreground_run_id(result['job_id'])
-    assert run_evidence.get_run_evidence(baseline_run)['fingerprint']
+    # Solver completion precedes the detached evidence publisher. Wait for its
+    # public terminal receipt; an unfinished marker is not baseline proof.
+    deadline = time.monotonic() + 10
+    evidence = run_evidence.get_run_evidence(baseline_run)
+    while evidence['status'] == 'running' and time.monotonic() < deadline:
+        time.sleep(0.02)
+        evidence = run_evidence.get_run_evidence(baseline_run)
+    assert evidence['status'] == 'completed' and evidence['evidence_available'], evidence
+    assert evidence['fingerprint']
+    assert evidence['metrics']['objective'] == {'value': 100, 'unit': 'EUR'}
     chat_tools.save_project(baseline[0].loaded_project)
     low, _ = completed_case(20, 'low', baseline_run_id=baseline_run)
     high, _ = completed_case(30, 'high', baseline_run_id=baseline_run)
