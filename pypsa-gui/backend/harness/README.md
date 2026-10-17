@@ -173,6 +173,15 @@ Confirmation/Choice cards and Activity remain the decision paths. See
 `.scratch/chat-companion/issues/06a-effective-permission-visibility.md` for limits
 and the remaining CP-06 contract.
 
+Ordinary and checked dispatch snapshot finite JSON arguments before emitting
+frames. Emitted request/card arguments and the pending token record are separate
+copies. Approval cannot replace the action with a caller-mutated argument.
+Current server confirmation-tier sets, native exemptions and token lifetime form
+an effective configuration revision; a change while waiting revokes approval.
+Dispatch also rechecks that revision, the tool's tier and its external server
+identity before admission and at worker pickup. This is not a durable policy
+history or an external-server reconnect/configuration revision (CP-13).
+
 ## Local MCP exposure (issue 11)
 
 On the desktop (local mode), an agent on this machine drives the app through
@@ -552,6 +561,21 @@ copy and stores an owner/project-bound preview. `apply_project_changes`
 requires normal execution confirmation, unchanged inputs, an idle project,
 and the existing foreign-lock/study/undo gates. It commits a validated private
 candidate, retains unsaved work, and refuses interrupted application replay.
+Previews are limited to a complete review of at most 20 values fitting a
+3800-character card; larger changes must be split. Legacy/clipped records need
+a new preview. The card renders an old/new/unit table on both surfaces and
+disables approval when its review is incomplete. A server-only execution context
+binds the reviewed record's digest to the handler. The handler rechecks the
+record, source fingerprint and independently reconstructed diff under the
+network lock before committing; a consistent replacement checksum cannot
+substitute for the approved record. Checksums detect drift, not storage trust
+or domain correctness. Other effect families retain their existing cards;
+their exact-preview adapters remain separate work. See
+`.scratch/chat-companion/issues/06b-bound-confirmations.md`.
+Candidate preparation also reads each assigned native scalar back as a Python
+value and refuses rounding or overflow before a preview is saved. A finite JSON
+integer is not necessarily exactly representable in a native floating-point
+field; representable large values remain supported.
 Topology operations remain the existing CRUD/batch tools.
 
 `create_chart` renders bounded numeric input/result data as PNG. Result

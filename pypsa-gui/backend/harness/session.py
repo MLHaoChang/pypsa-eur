@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from services.llm_config import DEFAULT_MODEL
 from typing import Any
 import collections
+import copy
 import hashlib
 import os
 import threading
@@ -307,7 +308,7 @@ class ChatSession:
         pc = PendingConfirmation(
             token=token,
             tool_name=tool_name,
-            args=args,
+            args=copy.deepcopy(args),
             safety_tier=safety_tier,
             created_at=now,
             expires_at=now + ttl_seconds,

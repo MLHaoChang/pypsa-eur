@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Generator, Iterable
 from typing import Any
+import copy
 import os
 from harness.session import ChatSession
 from harness import session as harness_session
@@ -54,6 +55,12 @@ def confirmation_policy(tier: str, *, guided: bool = False, external: bool = Fal
     if tier in AUTO_APPROVE_TIERS and not external:
         return 'policy'
     return 'user'
+
+
+def confirmation_revision() -> tuple:
+    """Server-derived effective rules; a changed set invalidates open decisions."""
+    return (DESTRUCTIVE_TIERS, GUIDED_CONFIRM_TIERS, AUTO_APPROVE_TIERS,
+            harness_session.CONFIRMATION_TTL_SECONDS)
 
 
 def _is_guided(ui_context: Any) -> bool:
@@ -172,6 +179,7 @@ def _confirm_destructive_tool(
     Phase E of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`;
     see `tests/test_chat_confirmation_gate_seam.py`.
     """
+    revision = confirmation_revision()
     policy = confirmation_policy(tier, guided=guided, external=bool(external))
     if policy == 'none':
         return True
@@ -205,7 +213,7 @@ def _confirm_destructive_tool(
     card = {
         "tool_use_id": tool_use_id,
         "tool_name": tool_name,
-        "args": args,
+        "args": copy.deepcopy(args),
         "safety_tier": tier,
         "confirmation_token": pc.token,
         "ttl_seconds": harness_session.CONFIRMATION_TTL_SECONDS,
@@ -214,6 +222,8 @@ def _confirm_destructive_tool(
         card["external"] = {"server": external}
     yield "tool_pending_confirmation", card
     decision = session.wait_for_decision(pc.token)
+    if decision == 'approve' and confirmation_revision() != revision:
+        decision = 'revoked'
     outcome, by = _DECISION_OUTCOMES.get(decision, ("unavailable", "system"))
     recorded = approvals.decided(session, call_id=tool_use_id, tool=tool_name, tier=tier,
                                  outcome=outcome, by=by, link=link)
