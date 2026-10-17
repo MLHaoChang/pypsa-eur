@@ -220,6 +220,29 @@ def test_comparison_never_adopts_an_unreconciled_lost_return(baseline):
     assert len(solve_queue.list_jobs()) == 2
 
 
+def test_prepared_multi_case_plans_stay_unavailable_without_a_delta(baseline):
+    """A prepared plan with more than one case is outside the comparison adapter.
+    It must not collapse to the first case or invent an inputs_differ flag."""
+    def plan(request_id):
+        started = ex.start_experiment(title=request_id, request_id=request_id, cases=[
+            {'id': 'low', 'changes': [{'path': 'Generator.G1.marginal_cost', 'value_type': 'number', 'value': 20}]},
+            {'id': 'high', 'changes': [{'path': 'Generator.G1.marginal_cost', 'value_type': 'number', 'value': 30}]},
+        ])
+        return ex.prepare_experiment(started['experiment_id'])['experiment_id']
+
+    report = tool('compare_experiments', experiment_id=plan('left'), baseline_experiment_id=plan('right'))
+    assert report['status'] == 'unavailable' and report['comparable'] is False
+    assert report['deltas'] == {} and report['inputs_differ'] is None and report['basis'] is None
+    assert report['incomparable_reasons'] == ['case_unavailable', 'baseline_case_unavailable']
+    for side in ('case', 'baseline_case'):
+        assert report[side]['status'] == 'unavailable'
+        assert report[side]['last_error'] == 'experiment_adapter_unavailable'
+        assert report[side]['result_available'] is False
+        assert 'objective' not in report[side]
+        assert [item['id'] for item in report[side]['declared_cases']] == ['low', 'high']
+    assert not solve_queue.list_jobs()
+
+
 def test_duplicate_plan_selection_is_refused(baseline):
     eid, _ = completed_case(20, 'one')
     with pytest.raises(HTTPException) as error:

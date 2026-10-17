@@ -430,6 +430,30 @@ def test_a_money_year_refusal_names_both_years_and_what_to_change(
     assert "no price index converts" in text and "reprice the campus asset library in 2020" in text
 
 
+def test_a_currency_mismatch_names_an_exchange_rate(
+        client, install_network, session_ctx, _auth_db, monkeypatch):
+    """The library's USD against the case's EUR is an exchange-rate refusal.
+
+    The money-year path names a price index; swapping those words would tell
+    the owner the wrong conversion, which nothing in this case performs.
+    """
+    from services import campus_electrical_service as ce
+
+    calls = _fake_adapter(monkeypatch)
+    _save(client, install_network, "campus_ic_currency_text")
+    with _row(_auth_db, session_ctx, client) as (_db, row):
+        fake_investment(row, _purchase())
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p: _response([_asset(currency="USD")]))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    body = _run(client)
+    assert body["error_code"] == "campus_assets_money_year_mismatch" and calls == []
+    text = body["error"]
+    assert "not priced in the case currency EUR" in text
+    assert "no exchange rate converts" in text
+    assert "reprice the campus asset library in EUR" in text
+    assert "price index" not in text
+
+
 def test_an_unstated_currency_year_takes_any_agreeing_price_year(
         client, install_network, session_ctx, _auth_db, monkeypatch):
     from services import campus_electrical_service as ce
