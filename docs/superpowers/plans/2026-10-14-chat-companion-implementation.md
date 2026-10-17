@@ -21,10 +21,14 @@ explicit source-gap follow-ups (#333) and bounded native completion observation
 (#352, `e1adb0db95111ec9ef0f1ef8471938313a4e1cb6`) are merged. Their linked issue
 records describe verified boundaries and remaining live/domain gates. The current
 slice [CP-05b1 comparison/export](../../../.scratch/chat-companion/issues/05b1-case-comparison.md)
-is merged in #353. The current bounded slice is
-[CP-05b2 shared two-case admission](../../../.scratch/chat-companion/issues/05b2-shared-two-case.md),
-with common caps, separate ordinary confirmations/receipts and stop/continue
-policy. Wider current-tab navigation, broader domain adapters/family journeys and
+is merged in #353. The bounded slice
+[CP-05b2 shared two-case admission](../../../.scratch/chat-companion/issues/05b2-shared-two-case.md)
+is merged in #354 (`fae95896500d6d74625e94e9f3a546d2d6b405af`), with common caps,
+separate ordinary confirmations/receipts and stop/continue policy. The current
+slice is [CP-06a access visibility](../../../.scratch/chat-companion/issues/06a-effective-permission-visibility.md):
+an authenticated read-only view of current scope, confirmation floors, locks,
+checking and configured limits. Exact expanded previews, saved restrictions and
+external readiness remain separate work. Wider current-tab navigation, broader domain adapters/family journeys and
 external/live validation remain separate scopes.
 This plan remains the sequence; the linked issues are the execution records.
 
