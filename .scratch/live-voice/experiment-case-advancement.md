@@ -1,9 +1,10 @@
 # Single network case advancement
 
 Contract: `experiment_execution` ledger version 1, bound to the version-2 plan
-and the exact prepared-input contract. This delivers one network case only.
-Multiple-case orchestration, cross-domain recipes and scientific/domain approval
-remain separate scopes.
+and the exact prepared-input contract. This remains the version-1 single-case contract. CP-05b2 adds a version-2
+shared two-case wrapper reusing these receipts; see
+`../chat-companion/issues/05b2-shared-two-case.md`. Cross-domain recipes and
+scientific/domain approval remain separate scopes.
 
 ## Ordinary admission
 
@@ -110,8 +111,7 @@ legacy/unsupported plans must obtain a valid current preflight before arming.
 
 Independent review, real-use calibration, paid generation/media probes and
 production activation remain pending/out of scope. CP-05b1 adds explicit compatible
-comparison/export of two individually approved single-case receipts. It does not
-advance a two-case plan: shared case/attempt/time caps and stop/continue admission
-are still a later slice. Uncertain effects require explicit reconciliation before
+comparison/export of two individually approved single-case receipts. CP-05b2 adds shared two-case admission with common caps and stop/continue policy,
+through the same ordinary calls. It does not create unattended execution. Uncertain effects require explicit reconciliation before
 any fresh ordinary retry; domain adapters follow. See
 `../chat-companion/issues/05b1-case-comparison.md` for the bounded contract.

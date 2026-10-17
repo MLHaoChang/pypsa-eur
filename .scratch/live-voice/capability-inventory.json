@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-16",
+  "generated_at": "2026-10-17",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -5196,14 +5196,15 @@
       ],
       "input_keys": [
         "experiment_id",
-        "receipt_sha256"
+        "receipt_sha256",
+        "case_id"
       ],
       "required": [
         "experiment_id",
         "receipt_sha256"
       ],
       "safety_tier": "destructive",
-      "schema_sha256": "e149dd99ba89ecb95755a219220419361394233dde88e3aed0b45257f3a85d37",
+      "schema_sha256": "50b7d96a9252c167417284f46837e231a5465f754a29c2bc3853e254e93e8659",
       "behavioral_fixture": "pending"
     },
     {
@@ -5221,7 +5222,9 @@
       "input_keys": [
         "experiment_id",
         "baseline_experiment_id",
-        "comparison_sha256"
+        "comparison_sha256",
+        "case_id",
+        "baseline_case_id"
       ],
       "required": [
         "experiment_id",
@@ -5229,7 +5232,7 @@
         "comparison_sha256"
       ],
       "safety_tier": "write",
-      "schema_sha256": "2d6806bb2a4e0e57707233ecfd345632e87853bb3d0038efffa6f9e7f7d05eb6",
+      "schema_sha256": "8c8fce545a8997a907233d094bc65af76d0261d75b8d750ccfec1c9917c3d0a5",
       "behavioral_fixture": "pending"
     },
     {
@@ -5246,14 +5249,16 @@
       ],
       "input_keys": [
         "experiment_id",
-        "baseline_experiment_id"
+        "baseline_experiment_id",
+        "case_id",
+        "baseline_case_id"
       ],
       "required": [
         "experiment_id",
         "baseline_experiment_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "e23db89541d4a2caaf22cc43628953380bf01c59390c44c1758bf6caa8398ff4",
+      "schema_sha256": "d5f9190dafe2375049b82eb4c3ae58e9f6b30c2c4f9ce40388d5e5c13abbe683",
       "behavioral_fixture": "pending"
     },
     {

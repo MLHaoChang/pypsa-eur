@@ -1,5 +1,5 @@
 """
-Durable, bounded receipts around ordinary single-network-case dispatches.
+Durable, bounded receipts around ordinary network-case dispatches.
 
 Controls offer calls; only the normal confirmed dispatch invokes their handlers.
 An interrupted submission is never automatically retried.
@@ -31,7 +31,11 @@ def _path(root, experiment_id):
 
 
 def _name(record):
-    return "exp-" + record["experiment_id"].replace("-", "") + "-" + record["cases"][0]["id"][:24]
+    name = "exp-" + record["experiment_id"].replace("-", "") + "-" + record["cases"][0]["id"][:24]
+    if "_parent_record" in record:
+        index = next(i for i, c in enumerate(record["_parent_record"]["cases"]) if c["id"] == record["_case_id"])
+        name += "-" + str(index + 1)
+    return name
 
 
 def _submission(record):
@@ -56,6 +60,9 @@ def _new(record):
 
 
 def _read(root, record):
+    if "_parent_record" in record:
+        from harness.experiment_two_case import read_case
+        return read_case(root, record)
     path = _path(root, record["experiment_id"])
     if not path.exists() and not path.is_symlink():
         if record.get("operations"):
@@ -63,7 +70,10 @@ def _read(root, record):
         return None
     if not record.get("operations"):
         ex._refuse("experiment_checkpoint_unreadable", "The execution ledger has no matching plan reservation.")
-    data = ex._read_json(path)
+    return _validate(record, ex._read_json(path))
+
+
+def _validate(record, data):
     try:
         if (set(data) != set(_new(record)) or type(data["version"]) is not int or data["version"] != 1
                 or any(data[k] != record[k] for k in ("experiment_id", "project_id", "owner_id", "plan_sha256"))
@@ -119,13 +129,19 @@ def _read(root, record):
 
 
 def _save(root, record, ledger):
+    if "_parent_record" in record:
+        from harness.experiment_two_case import save_case
+        return save_case(root, record, ledger)
     ex._save(_path(root, record["experiment_id"]), ledger)
 
 
-def _load(experiment_id):
+def _load(experiment_id, case_id=None):
     root, project, owner = ex._authority()
     ex._load_index(root)
     record = ex._read_record(root, experiment_id, project, owner)
+    if case_id is not None:
+        from harness.experiment_two_case import select_case
+        record = select_case(record, case_id)
     return root, record
 
 
@@ -229,6 +245,9 @@ def describe(record):
     root, project, owner = ex._authority()
     if project != record["project_id"] or owner != record["owner_id"]:
         ex._refuse("experiment_not_found", "Experiment not found.", 404)
+    if len(record["cases"]) == 2:
+        from harness.experiment_two_case import describe as describe_pair
+        return describe_pair(root, record)
     ledger = _read(root, record)
     return None if ledger is None else _view(record, _observe(record, ledger), root=root, ledger=ledger)
 
@@ -241,8 +260,11 @@ def advance_experiment(experiment_id: str) -> dict:
     with network_guard():
         root, record = _load(experiment_id)
         with ex._LOCK, ex._transaction(root):
+            if record["domain"] == "network" and len(record["cases"]) == 2:
+                from harness.experiment_two_case import advance
+                return advance(root, record, session)
             if record["domain"] != "network" or len(record["cases"]) != 1:
-                ex._refuse("experiment_adapter_unavailable", "This adapter advances one network case only.")
+                ex._refuse("experiment_adapter_unavailable", "This adapter advances one or two network cases only.")
             if record.get("version") != 2 or ex._public_preflight(record).get("status") != "validated":
                 ex._refuse("experiment_preflight_required", "Prepare the unchanged current network before advancing.")
             ledger = _read(root, record)
@@ -268,6 +290,9 @@ def refresh_experiment(experiment_id: str) -> dict:
     with network_guard():
         root, record = _load(experiment_id)
         with ex._LOCK, ex._transaction(root):
+            if len(record["cases"]) == 2:
+                from harness.experiment_two_case import refresh
+                return refresh(root, record)
             ledger = _read(root, record)
             if ledger is None:
                 ex._refuse("experiment_not_armed", "Use advance_experiment before observing case execution.")
@@ -280,6 +305,9 @@ def cancel_experiment(experiment_id: str) -> dict:
     with network_guard():
         root, record = _load(experiment_id)
         with ex._LOCK, ex._transaction(root):
+            if len(record["cases"]) == 2:
+                from harness.experiment_two_case import cancel
+                return cancel(root, record)
             ledger = _read(root, record)
             if ledger is None:
                 ex._refuse("experiment_not_armed", "This experiment has no advancement to cancel.")
@@ -301,6 +329,10 @@ def invoke(session, tool, args, handler):
     eid = getattr(session, "experiment_id", None)
     if not eid or tool not in ("run_sensitivity_sweep", "wait_for_job"):
         return _ordinary(session, args, handler)
+    root, record = _load(eid)
+    if len(record["cases"]) == 2:
+        from harness.experiment_two_case import invoke as invoke_pair
+        return invoke_pair(session, root, record, tool, args, handler)
     if tool == "wait_for_job":
         with network_guard():
             root, record = _load(eid)
@@ -327,15 +359,18 @@ def _ordinary(session, args, handler):
             session.experiment_project_id = None
 
 
-def _invoke(session, eid, tool, args, handler):
+def _invoke(session, eid, tool, args, handler, *, case_id=None):
     with network_guard():
-        root, record = _load(eid)
+        root, record = _load(eid, case_id)
         if record["project_id"] != session.experiment_project_id:
             ex._refuse("experiment_context_changed", "The experiment's project binding changed.")
         with ex._LOCK, ex._transaction(root):
             ledger = _read(root, record)
             if ledger is None:
                 ex._refuse("experiment_checkpoint_unreadable", "The armed execution checkpoint is missing.")
+            if "_parent_record" in record:
+                from harness.experiment_two_case import check_admission
+                check_admission(root, record, tool, args)
             if tool == "wait_for_job" and args.get("job_id") != ledger["job_id"]:
                 ex._refuse("experiment_context_changed", "The tracked job changed before its wait.")
             if tool == "run_sensitivity_sweep" and ex._digest(args) != ex._digest(_submission(record)):

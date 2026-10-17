@@ -34,7 +34,8 @@ harness/
   job_adapters.py foreground (fg:…) and later domain job handles for wait_for_job without holding the turn
   activity_history.py bounded owned job-origin/status observations across worker loss; no execution, numerical or approval authority
   completion_observer.py bounded weak native-worker status observation while Activity is closed; no advancement or retry
-  experiment_execution.py ordinary single-network-case admission and permanent no-replay receipts
+  experiment_execution.py ordinary network-case admission and permanent no-replay receipts
+  experiment_two_case.py sequential two-case admission with shared caps and failure policy
   experiment_reconciliation.py explicitly confirmed fenced native submission read-back; no execution or retry
   experiment_comparison.py current compatible objective comparisons and digest-bound export; no execution authority
   attention.py    bounded owned question/confirmation observations and versioned read-only inspection; no restored approval or answer authority
@@ -774,3 +775,22 @@ SHA256, then uses the ordinary write/lock/authenticated-download contract. An ol
 export is a historical report; it does not certify current evidence. No strict
 profile expansion, shared two-case advancement or stop/continue scheduling is
 added. See `.scratch/chat-companion/issues/05b1-case-comparison.md`.
+
+
+Two prepared network cases can now share one explicitly armed plan. The version-2
+parent execution ledger binds two version-1 case receipts without migrating old
+single-case ledgers. Each next_call is still one separately admitted ordinary
+sweep or bounded wait, never an internal execution loop. Combined attempts and
+one start time/cancellation cover both cases and survive recreated chats.
+A verified terminal job failure follows the frozen stop/continue policy;
+uncertain, partial or unavailable effects block both policies. Explicit fenced
+case reconciliation can establish matching native receipts or positive no-effects
+proof, but never resets a reservation or authorizes retry. Native submissions
+share one parent lease; separate case proof files preserve their exact origins.
+
+For two-case plans, reconcile_experiment requires the inspected case_id, and
+compare_experiments/export_experiment_comparison require explicit case_id and
+baseline_case_id selectors for their respective two-case plans. Two distinct
+cases of the same plan are allowed. The existing exact source/basis/digest export
+checks still apply. No strict checked-profile expansion or broader domain adapter
+is introduced. See `.scratch/chat-companion/issues/05b2-shared-two-case.md`.

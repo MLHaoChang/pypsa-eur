@@ -21,8 +21,9 @@ source-gap follow-ups (#333) are merged. Bounded
 [CP-04f native completion observation](issues/04f-native-completion-observation.md)
 is merged in #351. [CP-05a uncertain-case reconciliation](issues/05a-uncertain-case-reconciliation.md)
 is merged in #352, preserving the original submission reservation.
-The current continuation is [CP-05b1 comparison/export](issues/05b1-case-comparison.md)
-of two independently approved single-case receipts. Shared two-case plan
-advancement, common stop/continue admission and broader domains remain later work.
+[CP-05b1 comparison/export](issues/05b1-case-comparison.md) is merged in #353.
+The current continuation is [CP-05b2 shared two-case admission](issues/05b2-shared-two-case.md):
+common caps and explicit stop/continue policy around separately approved native
+cases. Broader domain adapters and family journeys remain later work.
 
 The [Dots assessment](../live-voice/dots-design-assessment-2026-10-14.md) supplies the source-reviewed rationale. This folder contains an implementation specification, not an implemented feature or release certificate. Hosted setup, fresh paid-probe authorization, independent domain review and real-use calibration remain separate pending gates.

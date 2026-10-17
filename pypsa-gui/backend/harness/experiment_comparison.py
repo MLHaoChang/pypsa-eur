@@ -1,4 +1,4 @@
-"""Read two owned single-case receipts; no execution or comparison override."""
+"""Read two selected owned network-case receipts; no execution or override."""
 import copy
 from dataclasses import asdict
 import math
@@ -10,7 +10,7 @@ from services import experiments as ex
 
 _ERRORS = {
     'selection': {'error_kind': 'invalid_experiment_comparison',
-                  'message': 'Select two distinct owned experiment plans.'},
+                  'message': 'Select two distinct owned network case receipts.'},
     'stale': {'error_kind': 'experiment_comparison_changed',
               'message': 'The comparison sources changed; inspect the current report before exporting.'},
 }
@@ -42,6 +42,8 @@ def _case(root, record):
         evidence_sha256=None, cancelled=False, last_error=None,
         case_effects_reserved=False, retry_available=False,
         declared_cases=copy.deepcopy(ex._plan(record)['cases']))
+    if '_case_id' in record:
+        out['case_id'] = record['_case_id']
     basis = None
     if record['domain'] != 'network' or len(record['cases']) != 1 or not record.get('preflight'):
         out.update(status='unavailable', last_error='experiment_adapter_unavailable')
@@ -71,7 +73,8 @@ def _case(root, record):
     return out, basis
 
 
-def compare_experiments(experiment_id: str, baseline_experiment_id: str) -> dict:
+def compare_experiments(experiment_id: str, baseline_experiment_id: str,
+                        case_id: str | None = None, baseline_case_id: str | None = None) -> dict:
     with network_guard():
         root, project, owner = ex._authority()
         with ex._LOCK, ex._transaction(root):
@@ -79,8 +82,15 @@ def compare_experiments(experiment_id: str, baseline_experiment_id: str) -> dict
             # Resolve both scopes before producing any source details.
             record, reference = [ex._read_record(root, eid, project, owner)
                                  for eid in (experiment_id, baseline_experiment_id)]
-            if experiment_id == baseline_experiment_id:
+            if (len(record['cases']) == 2 and case_id is None
+                    or len(reference['cases']) == 2 and baseline_case_id is None
+                    or experiment_id == baseline_experiment_id and case_id == baseline_case_id):
                 raise ex.HTTPException(422, dict(_ERRORS['selection']))
+            from harness.experiment_two_case import select_case
+            if case_id is not None:
+                record = select_case(record, case_id)
+            if baseline_case_id is not None:
+                reference = select_case(reference, baseline_case_id)
             case, case_basis = _case(root, record)
             base, base_basis = _case(root, reference)
             reasons = []
@@ -116,12 +126,13 @@ def compare_experiments(experiment_id: str, baseline_experiment_id: str) -> dict
             return out
 
 
-def export_experiment_comparison(experiment_id: str, baseline_experiment_id: str, comparison_sha256: str) -> dict:
+def export_experiment_comparison(experiment_id: str, baseline_experiment_id: str, comparison_sha256: str,
+                                case_id: str | None = None, baseline_case_id: str | None = None) -> dict:
     from services.chat_tools import _save_agent_export
     with network_guard():
         root, _project, _owner = ex._authority()
         with ex._LOCK, ex._transaction(root):
-            report = compare_experiments(experiment_id, baseline_experiment_id)
+            report = compare_experiments(experiment_id, baseline_experiment_id, case_id, baseline_case_id)
             if comparison_sha256 != report['comparison_sha256']:
                 raise ex.HTTPException(409, dict(_ERRORS['stale']))
             payload = json.dumps(report, sort_keys=True, allow_nan=False, indent=2).encode('utf-8')
