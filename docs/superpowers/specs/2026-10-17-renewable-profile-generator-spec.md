@@ -1,7 +1,7 @@
 # Spec: Renewable Profile Generator (coordinate-driven time series)
 
-**Status:** revised after independent review (2026-10-17); owner rulings
-incorporated 2026-10-18 · **Author:** Kimi session · **Owner:** Hao
+**Status:** revised after independent review (2026-10-17) · **Author:** Kimi
+session · **Owner:** Hao
 **Depends on:** atlite==0.6.1 (pinned in pixi), the user time-series store
 (`services/user_timeseries.py`), the solve queue, the chat harness.
 **Vocabulary:** per `pypsa-gui/CONTEXT.md` — *profile* here means a per-unit
@@ -51,7 +51,7 @@ profiles download ERA5 weather through atlite.
   `p_max_pu`) gets persistence, undo/audit, rename tracking, and solve
   integration for free. **Note (review fix):** the store has no metadata
   channel today — it must be extended to carry per-series meta; that work is
-  in the plan's Task 4.
+  in the plan's Task 5.
 - **gridspine needs no change.** Its case39 fixture keeps synthetic profiles.
   The backend must not import `gridspine.ingest` (engine cage, tested both
   directions).
@@ -162,8 +162,6 @@ networks are supported in v1 by tiling the weather year into every period
   sites instant afterwards.
 - Nearest-cell ≈ 25–30 km: fine for energy profiles, not a siting study;
   UI copy must not oversell.
-- Multi-period tiling repeats one weather year across decades —
-  inter-annual variability is absent by construction (D7=B, ledgered).
 - atlite API drift is fenced behind one lazy-imported module.
 - Tests never touch CDS: atlite path runs against a tiny committed fixture
   cutout (a few cells × a few days; its length contract is the fixture's

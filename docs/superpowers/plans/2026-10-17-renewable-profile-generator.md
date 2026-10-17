@@ -1,8 +1,8 @@
 # Plan: Renewable Profile Generator (coordinate-driven time series)
 
 **Spec:** `docs/superpowers/specs/2026-10-17-renewable-profile-generator-spec.md`
-(revised after review; owner rulings of 2026-10-18 incorporated — the
-alignment rules, the chat apply path, and multi-period tiling are binding).
+(revised after review — the alignment rules and the chat apply path are
+binding here).
 **Style:** repo conventions — TDD with RED evidence and a mutation per task
 (including the router task); path-limited commits; gates
 `pixi run gui-tests` and `npx vitest run` + `npx tsc -b`.
@@ -16,7 +16,7 @@ alignment rules, the chat apply path, and multi-period tiling are binding).
 2. Verify the queue's worker concurrency (`services/solve_queue.py`) —
    spec §3.5's non-blocking claim depends on it.
 3. Verify the user-TS store's write API and whether it has a metadata
-   channel (review fix 12 — Task 4 assumes it gets one).
+   channel (review fix 12 — Task 5 assumes it gets one).
 4. Verify bus `x`/`y` CRS is EPSG:4326.
 5. Verify the pixi env's `cdsapi` version against spec D2.
 
