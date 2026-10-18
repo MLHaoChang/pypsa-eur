@@ -146,3 +146,33 @@ credentials/cookies; private database/project files are removed at teardown.
 
 Real devices, hosted inference/media, independent domain release approval,
 real-use calibration and generic whole-application copilot coverage stay pending.
+
+
+## Final-source verification checkpoint
+
+Production source is unchanged after `fc28935e2dc8d215c65cf1cdf3570125dff606b0`;
+the additional Expert-only canvas-dialog setup is pinned at
+`fc6940d06e6fe76c328920bb36ccaadaf88f6770`. The widget-only local layer lets
+normal Blank-view clicks through and keeps native schematic dialogs outside
+that layer. A new cancel-only Reset-dialog regression first failed against the
+rejected whole-canvas-isolation candidate: the assistant intercepted Cancel.
+It then passed in all seven Expert contexts. Guided intentionally opens Hub
+Design, so only this extra canvas setup is Expert-specific; all126 Guided and
+Expert layout/native-decision states remain required and unchanged.
+
+At production sourcefc28935e, focused component regressions188pass/18suites,
+production build/type-check and helper Ruff/Node syntax checks pass. The
+ordinary composer suite32/32passes at that source, and its recorded SHA256
+hashes still match the final files. These counts overlap earlier runs; never
+sum them. Standards and Spec source reviews independently approve the final
+fc6940d0 candidate with zero findings, conditional on browser and merge gates.
+Final126native-browser cases pass with zero browser errors at sourcefc6940d0;
+all seven Expert contexts also complete the cancel-only native Reset-dialog
+setup. No temporary scenario filters remain. The ordinary32composer cases also
+pass with zero browser errors. Original report bytes and their verified SHA256
+source hashes are retained in
+[narrow-layout.json](../../../.scratch/live-copilot/evidence/narrow-layout.json)
+and [narrow-layout-composer.json](../../../.scratch/live-copilot/evidence/narrow-layout-composer.json).
+The later evidence/handoff-only commit does not change tested application or
+runner bytes. PR/current-head remote CI and fresh-master premerge are still
+pending; local results do not certify those gates.

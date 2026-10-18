@@ -80,3 +80,14 @@ waiting cards reclaim composer space without unmounting state. Component172pass
 across15suites; final126native-browser states and32composer regressions running.
 No paid calls, global clipping substitution, forced clicks or policy changes.
 Two-axis final review, PR, remote checks and premerge still pending.
+
+
+LC-02B accepted local checkpoint: final126/126native-browser states and
+32/32composer regressions pass, including native denial/read-back, multi-select
+and free-text history, state-preserving surfaces, phone Properties reopen and
+seven cancel-only Expert canvas-dialog checks. Component188pass/18suites;
+production build/type-check/helper static checks pass. Final production source
+fc28935e2dc8d215c65cf1cdf3570125dff606b0, browser harness sourcefc6940d0;
+retained source hashes verified. See QA and `../evidence/narrow-layout*.json`.
+Both source review axes zero findings. PR/remote CI/fresh-master premerge remain
+pending; this does not complete generic-context UX or engineering validation.

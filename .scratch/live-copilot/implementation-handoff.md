@@ -283,3 +283,42 @@ pass. Full browser regressions are in progress; no PR/push/CI yet. The old
 "filtered" warning above is historical, but verify source loops and denominators
 before claiming acceptance. Next gates: final browser evidence, two-axis
 source-pinned review, then PR/exact-head CI/fresh-master premerge/ordinary merge.
+
+
+2026-10-18 LC-02B latest source checkpoint: branch `claude/chat-narrow-layout`,
+worktree `/workspace/chat-narrow-layout`, committed source
+`fc6940d06e6fe76c328920bb36ccaadaf88f6770`, still unpushed/no PR. Phone open
+PropertiesPanel now overlays instead of forcing a540px workbench. A rejected
+whole-canvas isolate would trap native dialogs; final source layers only the
+MapModeSwitcher/SnapshotPicker widgets. Real Reset-dialog Cancel RED caught
+that defect, then passed all seven Expert contexts. Guided opens Hub Design,
+so extra canvas setup is Expert-only, while every126 Guided/Expert acceptance
+state is still required. Current full run is
+`/workspace/scratch/github-actions/narrow-final-native.log` (126pass/0fail; all seven Expert native Reset-dialog Cancel setups also pass).
+Production source unchanged sincefc28935e:188component tests/18suites and
+32/32ordinary composer browser tests pass; byte hashes verified. Both internal
+source review axes approvefc6940d0 with zero findings. Retain final browser
+reports/source hashes, finish evidence review, batch push once, create draft PR,
+require all exact-head CI plus actual frontend Type-check/tests and Unit, then
+fresh-master premerge and ordinary expected-head squash merge under owner's
+direct authorization. No external contacts/paid calls/activation. Starting master
+remainsdbc1fa7003a6a005b5b419e67c33920a341afe58. Next isolated task stays LC-01;
+independent domain review and real-use calibration remain pending.
+
+
+2026-10-18 LC-02B accepted local evidence:126/126native browser states at
+fc6940d06e6fe76c328920bb36ccaadaf88f6770,32/32composer browser states at
+fc28935e2dc8d215c65cf1cdf3570125dff606b0, zero browser errors in both. Every
+retained SHA256 matches current application/build/runner bytes; production is
+unchanged between those sources. Final component188pass/18suites. Raw reports
+(without private owner/project/cookie data) are `evidence/narrow-layout.json`
+and `evidence/narrow-layout-composer.json`; QA records commands, historical
+failures and limits. Internal source review axes each zero findings. Latest
+commit adds evidence/handoff only; no PR/push yet. Locate future PR by branch
+`claude/chat-narrow-layout` and preserve running source CI. Next action: final
+data-only review, one batch push/draft PR, require actual frontend Type-check
+and tests plus Unit/all applicable checks, fresh actual-master premerge, then
+ordinary expected-head squash under owner's direct authorization. Keep native
+backend/path-filter skips distinct from executed backend/domain tests. No paid
+calls, reviewer contact, activation or full-coverage claim. After this bounded
+merge, stop; next isolated implementation remains LC-01 discovery.
