@@ -692,7 +692,9 @@ export default function App() {
                   : 'flex-1 min-w-0'
               }`}
             >
-              <div className="relative flex-1 min-h-0 overflow-hidden">
+              {/* Leaflet and view controls layer within the canvas, below
+                  the phone properties panel and assistant overlays. */}
+              <div className="isolate relative flex-1 min-h-0 overflow-hidden">
                 <ErrorBoundary label="Canvas crashed">
                   {canvasView === 'blank'
                     ? <TopologyCanvas />
