@@ -104,6 +104,19 @@ unsent draft and an actual free-text turn. The backend history verifies both
 answers. The component's no-target inline fallback preserves its existing
 standalone frame-normalization contract. Full matrix verification is pending.
 
+The first full126 matrix at source6521e807 returned123pass/3fail, all in
+Expert native-choice geometry. The240px sidebar and300px properties panel
+forced the320/420px workbench to540px; native focus then shifted that body26px.
+Open phone properties now overlay the canvas at their existing300px maximum,
+with actual header close/reopen and fit assertions. Existing PropertiesPanel
+edit/save regressions14pass. The next strict run exposed a canvas view switch
+covering the dock collapse button. Whole-canvas stacking isolation made that
+click pass, but Standards review rejected it because schematic viewport dialogs
+render in place and could be trapped below the dock. That candidate is not
+accepted. A narrower widget-only layering repair and native cancel-only Reset
+dialog regression are being verified. All preceding counts are overlapping
+iterations; no failed case is waived.
+
 Final browser evidence and PR/exact-head CI/premerge remain pending.
 
 

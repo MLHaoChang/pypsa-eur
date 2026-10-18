@@ -93,6 +93,15 @@ export async function runNarrowCases({ browser, authenticated, config, results, 
     }
     try {
       await page.goto(config.base + '/app')
+      // View widgets must stay clickable without trapping viewport dialogs
+      // below the already-open assistant/properties overlays. Cancel only.
+      await page.getByTestId('assistant-dock-collapse').click()
+      await page.getByRole('button', { name: 'Blank', exact: true }).click()
+      await page.getByRole('button', { name: 'Compose a message', exact: true }).click()
+      await page.getByRole('button', { name: 'Reset diagram — clear saved positions and waypoints', exact: true }).click()
+      const resetDialog = page.getByRole('dialog', { name: 'Reset diagram?', exact: true })
+      await resetDialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await resetDialog.waitFor({ state: 'detached' })
       await page.getByTestId('assistant-dock-collapse').click()
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
       await record('workbench-companion-closed')

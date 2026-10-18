@@ -692,9 +692,7 @@ export default function App() {
                   : 'flex-1 min-w-0'
               }`}
             >
-              {/* Leaflet and view controls layer within the canvas, below
-                  the phone properties panel and assistant overlays. */}
-              <div className="isolate relative flex-1 min-h-0 overflow-hidden">
+              <div className="relative flex-1 min-h-0 overflow-hidden">
                 <ErrorBoundary label="Canvas crashed">
                   {canvasView === 'blank'
                     ? <TopologyCanvas />
@@ -706,11 +704,15 @@ export default function App() {
                       )
                       : <MapCanvas mode={canvasView} />}
                 </ErrorBoundary>
-                {/* Mode switcher floats over whichever canvas is active */}
-                <MapModeSwitcher />
-                {/* Snapshot picker / playback bar for the results overlay —
-                    shown on both the blank schematic and the satellite/hybrid map */}
-                <SnapshotPicker />
+                {/* Only view widgets share a local layer above the canvas
+                    and below workbench overlays. Native canvas dialogs stay
+                    outside this layer so they can cover the whole viewport. */}
+                <div className="absolute inset-0 z-10 pointer-events-none [&>*]:pointer-events-auto">
+                  <MapModeSwitcher />
+                  {/* Snapshot picker / playback bar for the results overlay —
+                      shown on both schematic and satellite/hybrid views. */}
+                  <SnapshotPicker />
+                </div>
               </div>
               {/* Zone 4 — Bottom tabbed panel (canvas only). Not in Guided
                   (UX M7, U3): the spreadsheet grids are Expert chrome. */}
