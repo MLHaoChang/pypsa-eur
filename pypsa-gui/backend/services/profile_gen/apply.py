@@ -1,0 +1,322 @@
+"""Apply a generated renewable profile to a network generator.
+
+Spec: docs/superpowers/specs/2026-10-17-renewable-profile-generator-spec.md §4
+Plan: docs/superpowers/plans/2026-10-17-renewable-profile-generator.md Task 5
+
+`assign_profile` is the ONE write path from the profile generator into the
+model. It implements spec §4's alignment table exactly — never silent
+reindexing:
+
+  * target snapshots span the weather year, hourly → align by timestamp
+    (the same-year case of month-day-hour mapping);
+  * leap weather year onto a non-leap target → drop Feb 29, meta
+    ``leap_day: dropped``;
+  * non-leap weather year onto a leap target → typed refusal (fabricating
+    24 h is worse than refusing);
+  * partial-year / sub-hourly / segmented snapshots → typed refusal naming
+    the supported shapes;
+  * MultiIndex (multi-investment-period) snapshots → tile the weather year
+    into EVERY period by month-day-hour, leap rules applied per period
+    (owner ruling D7=B); meta ``tiled: true`` + the weather year.
+
+Write contract: store entry ``("generators", "p_max_pu", name)`` + provenance
+meta (the `_user_ts_meta` channel), `_t` reapply, changelog, dispatch
+invalidation via `services/dispatch_status.clear_dispatch` — a profile change
+invalidates solved results exactly like a topology edit does. Overwrite
+semantics: regenerating overwrites the same key, changelog-stamped. Undo is
+the caller's job (push a snapshot BEFORE calling); the restored payload then
+brings back the prior state, including a network-native profile that had no
+user entry (see tests/test_profile_gen_apply.py).
+"""
+from __future__ import annotations
+
+import datetime as _dt
+from typing import Any, Mapping
+
+import numpy as np
+import pandas as pd
+
+from services import change_log_service
+from services.dispatch_status import clear_dispatch
+from services.profile_gen.engine import ProfileGenError
+from services.pypsa_service import PyPSAService
+from services.user_timeseries import (
+    _reapply_user_ts_to_network,
+    _user_ts_lock,
+)
+
+# ---------------------------------------------------------------------------
+# Typed errors — the router maps ProfileApplyError to a 422 with the message.
+# ---------------------------------------------------------------------------
+
+
+class ProfileApplyError(ProfileGenError):
+    """Base class for typed refusals at the apply boundary."""
+
+
+class ComponentNotFoundError(ProfileApplyError):
+    """The named generator does not exist on the network."""
+
+
+class CarrierMismatchError(ProfileApplyError):
+    """The asset's carrier is not wind/solar, or the artifact's technology
+    disagrees with it (spec §4: refuse at generate AND at apply)."""
+
+
+class UnsupportedSnapshotsError(ProfileApplyError):
+    """The network's snapshots are not a shape a generated profile can be
+    aligned to (spec §4: partial-year, sub-hourly, segmented)."""
+
+
+class LeapYearMismatchError(ProfileApplyError):
+    """The target calendar needs a Feb 29 the weather year does not have."""
+
+
+_ONE_HOUR = pd.Timedelta(hours=1)
+
+
+# ---------------------------------------------------------------------------
+# Shape validation + month-day-hour alignment
+# ---------------------------------------------------------------------------
+
+
+def _validate_year_block(idx: pd.DatetimeIndex, *, what: str) -> int:
+    """Pin the one shape a generated profile can align to: a tz-naive,
+    contiguous, hourly index spanning ONE full calendar year. Returns the
+    year. ``what`` names the block in error messages ("generated series",
+    "network snapshots", "period 2032")."""
+    if not isinstance(idx, pd.DatetimeIndex):
+        raise UnsupportedSnapshotsError(
+            f"{what}: expected a DatetimeIndex, got {type(idx).__name__}"
+        )
+    if idx.tz is not None:
+        raise UnsupportedSnapshotsError(
+            f"{what}: timezone-aware snapshots are not supported — generated "
+            "profiles are tz-naive UTC"
+        )
+    if len(idx) < 2 or idx.has_duplicates or not idx.is_monotonic_increasing:
+        raise UnsupportedSnapshotsError(
+            f"{what}: snapshots must be a strictly increasing, duplicate-free "
+            "full calendar year (Jan 1 00:00 – Dec 31 23:00, hourly)"
+        )
+    diffs = idx.to_series().diff().dropna()
+    if (diffs != _ONE_HOUR).any():
+        med = diffs.median()
+        if med < _ONE_HOUR:
+            raise UnsupportedSnapshotsError(
+                f"{what}: sub-hourly snapshots ({med}) are not supported — "
+                "generated profiles are hourly"
+            )
+        raise UnsupportedSnapshotsError(
+            f"{what}: snapshots must be contiguous hourly steps; found steps "
+            f"from {diffs.min()} to {diffs.max()} — segmented or non-hourly "
+            "horizons are not supported"
+        )
+    years = idx.year.unique().tolist()
+    year = years[0] if len(years) == 1 else None
+    if (
+        year is None
+        or idx[0] != pd.Timestamp(year, 1, 1, 0)
+        or idx[-1] != pd.Timestamp(year, 12, 31, 23)
+    ):
+        raise UnsupportedSnapshotsError(
+            f"{what}: snapshots must span one full calendar year (Jan 1 00:00 "
+            "– Dec 31 23:00, hourly); partial-year horizons are not supported"
+        )
+    return int(year)
+
+
+def _map_by_mdh(series: pd.Series, target_idx: pd.DatetimeIndex, *,
+                src_year: int, label: str) -> tuple[np.ndarray, bool]:
+    """Map weather-year values onto `target_idx` by month-day-hour.
+
+    Returns (values, feb29_dropped). Raises LeapYearMismatchError when the
+    target needs a Feb 29 the weather year does not have — per spec §4,
+    fabricating 24 h is worse than refusing.
+    """
+    src_lookup = {
+        (t.month, t.day, t.hour): v for t, v in series.items()
+    }
+    src_has_feb29 = (2, 29, 0) in src_lookup
+    target_has_feb29 = any(t.month == 2 and t.day == 29 for t in target_idx)
+    if target_has_feb29 and not src_has_feb29:
+        raise LeapYearMismatchError(
+            f"{label} is a leap year but weather year {src_year} has no "
+            "Feb 29 — refusing to fabricate 24 hours. Pick a leap weather "
+            "year, or rebuild the horizon on a non-leap year."
+        )
+    values = np.empty(len(target_idx), dtype=float)
+    for i, t in enumerate(target_idx):
+        values[i] = src_lookup[(t.month, t.day, t.hour)]
+    return values, bool(src_has_feb29 and not target_has_feb29)
+
+
+def _align_to_snapshots(series: pd.Series, snapshots) -> tuple[pd.Series, dict]:
+    """The spec §4 alignment table. Returns (aligned, align_meta) where
+    align_meta carries ``weather_year``, ``leap_day`` and ``tiled``."""
+    src_year = _validate_year_block(
+        pd.DatetimeIndex(series.index), what="generated series",
+    )
+
+    if isinstance(snapshots, pd.MultiIndex):
+        # D7=B: tile the weather year into EVERY investment period, leap
+        # rules per period.
+        lvl0 = snapshots.get_level_values(0)
+        periods = [int(p) for p in lvl0.unique()]
+        out = np.empty(len(snapshots), dtype=float)
+        dropped_any = False
+        for p in periods:
+            mask = np.asarray(lvl0 == p)
+            block = pd.DatetimeIndex(snapshots[mask].get_level_values(1))
+            _validate_year_block(block, what=f"period {p}")
+            values, dropped = _map_by_mdh(
+                series, block, src_year=src_year, label=f"period {p}",
+            )
+            out[mask] = values
+            dropped_any = dropped_any or dropped
+        aligned = pd.Series(out, index=snapshots, name=series.name)
+        return aligned, {
+            "weather_year": src_year,
+            "leap_day": "dropped" if dropped_any else "kept",
+            "tiled": True,
+            "periods": periods,
+        }
+
+    target_idx = pd.DatetimeIndex(snapshots)
+    _validate_year_block(target_idx, what="network snapshots")
+    values, dropped = _map_by_mdh(
+        series, target_idx, src_year=src_year, label="the target year",
+    )
+    aligned = pd.Series(values, index=target_idx, name=series.name)
+    return aligned, {
+        "weather_year": src_year,
+        "leap_day": "dropped" if dropped else "kept",
+        "tiled": False,
+        "periods": None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
+def assign_profile(
+    ctx,
+    component: str,
+    series: pd.Series,
+    meta: Mapping[str, Any],
+    *,
+    now: _dt.datetime | str | None = None,
+) -> dict:
+    """Apply a generated per-unit profile to ``component``'s ``p_max_pu``.
+
+    ``ctx`` is the ProjectContext that owns the network AND the user-ts
+    stores — the two are written as a pair (the tenancy rule of
+    `services/user_timeseries.py`). Returns a summary dict for the caller
+    (router response / chat tool payload). Raises a typed ProfileApplyError
+    subclass on every refusal, having written nothing.
+    """
+    if not isinstance(series, pd.Series):
+        raise ProfileApplyError(
+            f"expected a pandas Series (one component's profile), got "
+            f"{type(series).__name__}"
+        )
+    if not isinstance(meta, Mapping):
+        raise ProfileApplyError("meta must be the engine's provenance dict")
+
+    n = ctx.network
+    if component not in n.generators.index:
+        raise ComponentNotFoundError(
+            f"generator {component!r} not found on the network"
+        )
+    carrier = str(n.generators.at[component, "carrier"] or "")
+    cl = carrier.lower()
+    is_wind = "wind" in cl
+    is_solar = "solar" in cl or "pv" in cl
+    if not (is_wind or is_solar):
+        raise CarrierMismatchError(
+            f"generator {component!r} has carrier {carrier!r}; generated "
+            "profiles apply to wind/solar assets only"
+        )
+    tech = str(meta.get("technology", "")).strip().lower()
+    if tech not in ("wind", "solar"):
+        raise CarrierMismatchError(
+            f"profile meta carries technology {tech!r}; expected wind/solar"
+        )
+    if (tech == "wind" and not is_wind) or (tech == "solar" and not is_solar):
+        raise CarrierMismatchError(
+            f"profile technology {tech!r} does not match generator "
+            f"{component!r}'s carrier {carrier!r}"
+        )
+
+    aligned, align_meta = _align_to_snapshots(series, n.snapshots)
+
+    # A p_max_pu bound must be finite at every snapshot — a NaN masks the
+    # constraint row out of the LP (the Phase 12f rule). Values are clipped
+    # into [0, 1] defensively; a clip is recorded in meta.
+    vals = aligned.to_numpy(dtype=float)
+    if not np.isfinite(vals).all():
+        raise ProfileApplyError(
+            f"profile for {component!r} has non-finite values after "
+            "alignment — refusing to write a bound with holes"
+        )
+    clipped = bool(((vals < 0.0) | (vals > 1.0)).any())
+    if clipped:
+        vals = np.clip(vals, 0.0, 1.0)
+        aligned = pd.Series(vals, index=aligned.index, name=aligned.name)
+
+    if now is None:
+        applied_at = _dt.datetime.now(_dt.timezone.utc)
+    elif isinstance(now, str):
+        applied_at = _dt.datetime.fromisoformat(now)
+    else:
+        applied_at = now
+
+    key = ("generators", "p_max_pu", component)
+    full_meta: dict[str, Any] = {
+        **dict(meta),
+        "weather_year": align_meta["weather_year"],
+        "leap_day": align_meta["leap_day"],
+        "tiled": align_meta["tiled"],
+        "applied_at": applied_at.isoformat(),
+    }
+    if align_meta["periods"] is not None:
+        full_meta["periods"] = align_meta["periods"]
+    if clipped:
+        full_meta["clipped"] = True
+
+    # Store write under the store lock, network write under the PyPSA lock —
+    # the same two-lock dance as the upload path (`_apply_profile_upload`).
+    # Overwrite semantics: regeneration replaces the same key.
+    with _user_ts_lock:
+        ctx.user_ts[key] = aligned
+        ctx.user_ts_meta[key] = full_meta
+    with PyPSAService.get_lock():
+        _reapply_user_ts_to_network(n, store=ctx.user_ts)
+        # A new profile invalidates solved dispatch exactly like a topology
+        # edit — flip freshness so Results can't serve the old solve.
+        dispatch_cleared = clear_dispatch(n)
+
+    desc = (
+        f"Applied generated {tech} profile to {component}: source "
+        f"{meta.get('source', '?')}, weather year {align_meta['weather_year']}"
+    )
+    if align_meta["tiled"]:
+        desc += f", tiled over {len(align_meta['periods'])} investment periods"
+    if align_meta["leap_day"] == "dropped":
+        desc += ", Feb 29 dropped"
+    change_log_service.log("timeseries", "Generator", component, desc)
+
+    return {
+        "component": component,
+        "attribute": "p_max_pu",
+        "hours": int(len(aligned)),
+        "weather_year": align_meta["weather_year"],
+        "leap_day": align_meta["leap_day"],
+        "tiled": align_meta["tiled"],
+        "periods": align_meta["periods"],
+        "dispatch_cleared": bool(dispatch_cleared),
+        "mean": float(aligned.mean()),
+        "peak": float(aligned.max()),
+    }
