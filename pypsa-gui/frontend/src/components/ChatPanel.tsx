@@ -3566,10 +3566,10 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
         </div>
       )}
       <div
-        className="flex flex-col border-t border-border bg-bg-2 shrink-0"
-        // Three 44px touch controls plus settings/gaps must fit inside the
-        // composer; overflowing upward would cover the answer-check toggle.
-        // Clamp layout without rewriting the user's saved resize preference.
+        className="flex flex-col border-t border-border bg-bg-2 shrink-0 min-h-min"
+        // The complete toolbar sets the intrinsic desktop minimum, including
+        // dictation settings. Short saved heights must not let it extend over
+        // Check answers. Keep the touch floor and saved resize preference.
         style={{ height: promptHeight, minHeight: isCoarsePointer ? 200 : undefined }}
         data-testid="chat-prompt-container"
       >

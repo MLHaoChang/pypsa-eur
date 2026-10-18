@@ -20,3 +20,23 @@ neighbors. Record actual source/commands/results and remaining gates here.
 No new capability is enabled by this issue. Paid calls, reviewer contact,
 deployment and full-coverage/domain-approval claims remain outside this package.
 
+## LC-02A implementation checkpoint — 2026-10-18
+
+Owner/session: current Codex implementation session. Branch
+`claude/chat-composer-pointer`, isolated worktree `/workspace/chat-composer-pointer`.
+Starting actual master: `6691bd671887210a84e6891a513835cad1723abd`.
+Scope: composer pointer interception only; LC-02B whole-page overflow remains
+separate. First RED: real authenticated built-app Chromium hit testing and
+normal Check answers clicks with expanded/collapsed Access and saved heights.
+Native backend, isolated database/project and no provider/media calls. Promote
+the reproduction to a portable repository browser runner before fixing layout.
+
+LC-02A local result: intrinsic desktop content floor fixes pointer interception
+without changing saved heights; bottom-aligned dictation settings fixes the
+additional tall-touch Close failure. Portable real-backend runner16/16pass;
+component regressions111pass, production build/type-check and helper static
+checks pass. See [source-pinned QA](../../../docs/superpowers/qa/2026-10-18-chat-composer-pointer.md)
+and [native geometry evidence](../evidence/composer-pointer.json).
+PR/remote checks pending. LC-02B overflow and remaining generic-context UX are
+not complete. Next action: review, exact-head CI and fresh-master premerge.
+
