@@ -103,13 +103,13 @@ from the repository report and the following fixture recipe if unavailable:
 
 ## Slice ledger and dependency order
 
-LC-02A is active as recorded below; other implementation rows are not started.
+LC-02A is merged; LC-02B is active as recorded below. Other implementation rows are not started.
 Approval covers requirements; no row inherits a passing execution claim. LC-02's layout repair
 may precede LC-01; its new resolved-context UX still depends on LC-01.
 
 | Slice / issue | Resume scope | Required predecessors | Current state / evidence |
 | --- | --- | --- | --- |
-| [LC-02](issues/02-companion-interaction.md) | First 02A pointer repair, then 02B overflow attribution/repair; later scope/plan/decision UX | Layout repair independent; new scope UX needs LC-01 | 02A implemented locally, native browser32pass/component111pass; branch `claude/chat-composer-pointer`, base6691bd6; review/PR/CI pending; 02B pending |
+| [LC-02](issues/02-companion-interaction.md) | 02B overflow attribution/repair; later scope/plan/decision UX | Layout repair independent; new scope UX needs LC-01 | 02A merged PR369/dbc1fa7, native browser32pass/component111pass; 02B active in `claude/chat-narrow-layout`, base dbc1fa7; RED attribution pending |
 | [LC-01](issues/01-discovery-and-scope.md) | Eligible capability/schema discovery and exact target resolver; settle concrete DTO/route compatibility before coding | Existing harness and source rebaseline | Not started; LC-T01/02/06/17 |
 | [LC-03](issues/03-results-and-navigation.md) | Typed evidence/navigation interfaces, then small current/retained domain adapters | LC-01 and applicable LC-02 | Not started; LC-T06–10/19 plus mapped LC-D suites |
 | [LC-04](issues/04-generic-parameter-edits.md) | Exact schema/unit/basis previews and verified writes; storage/line examples first | LC-01 and applicable LC-02 | Not started; LC-T02–05 and domain edit cases |
@@ -230,3 +230,95 @@ prevent native dotenv reintroducing provider keys; CLI refusal verified. Both
 review findings addressed without further production changes; final review
 confirmation/PR/exact-head CI pending. Historical16-case counts above remain
 accurate for their iteration, not the final denominator.
+
+2026-10-18 LC-02A verified merged as `dbc1fa7003a6a005b5b419e67c33920a341afe58`
+in PR369; actual frontend tests/type-check, Unit, CodeQL/release and fresh-master
+premerge passed, and all post-merge workflows subsequently passed. LC-02B now
+active in isolated branch `claude/chat-narrow-layout` from that master.
+Next action: native browser320px document/element geometry in five dock/
+companion/Access states before choosing a layout repair. No product change yet.
+
+2026-10-18 LC-02B repair checkpoint: active branch `claude/chat-narrow-layout`,
+worktree `/workspace/chat-narrow-layout`, base `dbc1fa7003a6a005b5b419e67c33920a341afe58`.
+First five-state RED attributed to unanchored screen-reader descriptions; dock
+bounds then required a narrow overlay, preserved desktop width and flex shrink
+at the640px breakpoint. Native Guided approval review found persistent ancestor
+autoscroll, now bounded to the transcript. Tagged diagnostics removed.
+Component135pass; final98 narrow/native decision cases plus32 existing composer
+cases in progress. Source/commands/limits in the
+[LC-02B QA record](../../docs/superpowers/qa/2026-10-18-chat-narrow-layout.md).
+No branch push/PR yet; review/remote CI/premerge pending. Preserve actual state
+rather than treating this intermediate checkpoint as completion. Next: complete
+those gates, then start LC-01 in a fresh isolated branch from reviewed master.
+
+2026-10-18 LC-02B expanded-layout checkpoint (supersedes initial five-state fix):
+source remains unpushed in `/workspace/chat-narrow-layout`, current committed
+implementation0a6c8326ef7bccfd99166c581b42f458d7dd01e1 plus uncommitted repairs.
+Final98-case attempt97pass/1fail exposed native hidden-frame scrolling; a
+focuspreventScroll experiment failed and was reverted. The actual overflow
+owners are now repaired: responsive header wrapping/account alignment and a
+keyboard-scrollable nonwrapping status row. The frame's existing clipping is
+unchanged. Companion is bounded to the positioned workbench body so retained
+answers cannot intercept header controls. Wrapped headers also required a
+ChatPanel-height-bound dictation popover (old70vh Close failed3/32 cases).
+Narrow pending confirmations temporarily hide the disabled composer with CSS,
+keeping its state mounted and making room for reachable native decision buttons.
+Current focused components141pass, separate dictation14pass; browser gates NOT
+complete. No PR/push/CI yet. Temporary diagnostic case filters may be active:
+before final verification require both Guided/Expert × all7viewports ×8states
+(112cases), and restore the original32composer scenarios/denominator. Never
+publish a filtered run as the complete suite. Portable sources and commands
+remain in the QA record; final evidence, two-axis re-review and merge gates are
+pending. Next implementation after this bounded fix remains LC-01.
+
+2026-10-18 LC-02B final-source candidate: all temporary case filters removed.
+Require Guided/Expert ×7viewport/pointer variants ×9states =126native-browser
+cases, plus the original32composer cases. The added Choice state uses actual
+ask_user, preserves picks bidirectionally through one mounted card/DOM portal,
+verifies native multi-select/free-text turns and preserves an unsent draft.
+Exact-choice-bound reveal/return state and allow_free_text remain authoritative
+for this UI; dispatch stays the existing sendRequest path. A native9-state
+short-touch probe passed. Final focused172tests/15suites and production build
+pass. Full browser regressions are in progress; no PR/push/CI yet. The old
+"filtered" warning above is historical, but verify source loops and denominators
+before claiming acceptance. Next gates: final browser evidence, two-axis
+source-pinned review, then PR/exact-head CI/fresh-master premerge/ordinary merge.
+
+
+2026-10-18 LC-02B latest source checkpoint: branch `claude/chat-narrow-layout`,
+worktree `/workspace/chat-narrow-layout`, committed source
+`fc6940d06e6fe76c328920bb36ccaadaf88f6770`, still unpushed/no PR. Phone open
+PropertiesPanel now overlays instead of forcing a540px workbench. A rejected
+whole-canvas isolate would trap native dialogs; final source layers only the
+MapModeSwitcher/SnapshotPicker widgets. Real Reset-dialog Cancel RED caught
+that defect, then passed all seven Expert contexts. Guided opens Hub Design,
+so extra canvas setup is Expert-only, while every126 Guided/Expert acceptance
+state is still required. Current full run is
+`/workspace/scratch/github-actions/narrow-final-native.log` (126pass/0fail; all seven Expert native Reset-dialog Cancel setups also pass).
+Production source unchanged sincefc28935e:188component tests/18suites and
+32/32ordinary composer browser tests pass; byte hashes verified. Both internal
+source review axes approvefc6940d0 with zero findings. Retain final browser
+reports/source hashes, finish evidence review, batch push once, create draft PR,
+require all exact-head CI plus actual frontend Type-check/tests and Unit, then
+fresh-master premerge and ordinary expected-head squash merge under owner's
+direct authorization. No external contacts/paid calls/activation. Starting master
+remainsdbc1fa7003a6a005b5b419e67c33920a341afe58. Next isolated task stays LC-01;
+independent domain review and real-use calibration remain pending.
+
+
+2026-10-18 LC-02B accepted local evidence:126/126native browser states at
+fc6940d06e6fe76c328920bb36ccaadaf88f6770,32/32composer browser states at
+fc28935e2dc8d215c65cf1cdf3570125dff606b0, zero browser errors in both. Every
+retained SHA256 matches current application/build/runner bytes; production is
+unchanged between those sources. Final component188pass/18suites. Raw reports
+(without private owner/project/cookie data) are `evidence/narrow-layout.json`
+and `evidence/narrow-layout-composer.json`; QA records commands, historical
+failures and limits. Internal source review axes each zero findings. Latest
+commit adds evidence/handoff only; no PR/push yet. Locate future PR by branch
+`claude/chat-narrow-layout` and preserve running source CI. Next action: final
+data-only review, one batch push/draft PR, require actual frontend Type-check
+and tests plus Unit/all applicable checks, fresh actual-master premerge, then
+ordinary expected-head squash under owner's direct authorization. Keep native
+backend/path-filter skips distinct from executed backend/domain tests. No paid
+calls, reviewer contact, activation or full-coverage claim. After this bounded
+merge, stop; next isolated implementation remains LC-01 discovery.

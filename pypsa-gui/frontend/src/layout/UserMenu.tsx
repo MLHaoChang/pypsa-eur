@@ -48,7 +48,7 @@ export default function UserMenu() {
   const initial = email.charAt(0).toUpperCase()
 
   return (
-    <div ref={rootRef} className="relative" data-no-panel-close>
+    <div ref={rootRef} className="relative max-xl:ml-auto" data-no-panel-close>
       <button
         onClick={() => setOpen(o => !o)}
         title={email}

@@ -473,7 +473,9 @@ export function GoalStrip() {
  * picks, in option order, joined by "; "; a `plan_review` card is marked as
  * one and shows `detail` as the plan (presentation only, same answer).
  */
-export function ChoiceCard() {
+export function ChoiceCard({ companion = false, target = null, inputOpen = false, onFreeText }: {
+  companion?: boolean; target?: HTMLElement | null; inputOpen?: boolean; onFreeText?: () => void;
+} = {}) {
   const choice = useChatStore((s) => s.choice)
   const setChoice = useChatStore((s) => s.setChoice)
   const sendRequest = useChatStore((s) => s.sendRequest)
@@ -493,9 +495,9 @@ export function ChoiceCard() {
     setPicked((cur) => (cur.includes(label) ? cur.filter((l) => l !== label) : [...cur, label]))
   const sendPicked = () =>
     send(choice.options.map((o) => o.label).filter((l) => picked.includes(l)).join('; '))
-  return (
+  const card = (
     <div
-      className="border border-accent/50 bg-accent/5 rounded p-3 mx-3 my-2"
+      className={`border border-accent/50 bg-accent/5 rounded p-3 mx-3 my-2 ${inputOpen ? 'max-xl:hidden' : ''}`}
       data-testid="chat-choice-card"
       data-intent={planReview ? 'plan_review' : 'choice'}
       role="group"
@@ -569,11 +571,14 @@ export function ChoiceCard() {
       )}
       {choice.allow_free_text && (
         <div className="text-[11px] text-muted mt-2" data-testid="chat-choice-free-text">
-          Or type your own answer below.
+          {onFreeText ? <button type="button" className="underline" onClick={onFreeText}>
+            Type another answer
+          </button> : 'Or type your own answer below.'}
         </div>
       )}
     </div>
   )
+  return companion && target ? createPortal(card, target) : card
 }
 
 /**
@@ -1300,7 +1305,9 @@ function ReplayAttachmentChips({ fileIds }: { fileIds: string[] }) {
 }
 
 
-export default function ChatPanel({ companionAccessTarget = null }: { companionAccessTarget?: HTMLElement | null }) {
+export default function ChatPanel({ companionAccessTarget = null, companionChoiceTarget = null }: {
+  companionAccessTarget?: HTMLElement | null; companionChoiceTarget?: HTMLElement | null;
+}) {
   // Guided swaps the greeting chips for Guided-visible destinations.
   const uiMode = useUIStore(s => s.uiMode)
   const qc = useQueryClient()
@@ -1897,7 +1904,6 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
     useChatStore.getState().seedComposer(null)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [composerSeed])
-  const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Whether the pending composer text arrived by voice. `speech.listening` is
@@ -2024,11 +2030,18 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
   const messagesScrollRef = useRef<HTMLDivElement | null>(null)
   const pendingTokenForScroll = useChatStore((s) => s.pending?.confirmation_token ?? null)
 
+  // Scroll only the transcript. scrollIntoView also scrolls hidden ancestors,
+  // which can shift the narrow workbench horizontally during card updates.
+  const scrollTranscriptToEnd = useCallback(() => {
+    const transcript = messagesScrollRef.current
+    transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' })
+  }, [])
+
   const scrollToLatest = useCallback(() => {
     setStickToBottom(true)
     setShowJumpLatest(false)
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [])
+    scrollTranscriptToEnd()
+  }, [scrollTranscriptToEnd])
 
   const onMessagesScroll = useCallback(() => {
     const el = messagesScrollRef.current
@@ -2042,7 +2055,7 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
   // AssistantDock: while the dock is collapsed this panel sits under a
   // `display:none` ancestor (kept mounted so a streaming turn survives the
   // collapse — see AssistantDock.tsx), and an element with no layout box
-  // cannot be scrolled. `scrollIntoView` calls that land while collapsed are
+  // cannot be scrolled. Transcript scroll calls that land while collapsed are
   // silent no-ops in a real browser (not just jsdom), and none of the other
   // deps here change on an expand-only click, so without this the effect
   // would never re-run and the transcript could sit scrolled to wherever it
@@ -2059,12 +2072,12 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
   // decision a chance to actually run once there's a box to scroll.
   useEffect(() => {
     if (stickToBottom) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      scrollTranscriptToEnd()
       setShowJumpLatest(false)
     } else {
       setShowJumpLatest(true)
     }
-  }, [messages.length, pendingTokenForScroll, stickToBottom, assistantDockOpen])
+  }, [messages.length, pendingTokenForScroll, stickToBottom, assistantDockOpen, scrollTranscriptToEnd])
 
   // Frame handler — translates SSE frames into chatStore updates.
   const handleFrame = useCallback((frame: ChatFrame) => {
@@ -2742,6 +2755,16 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
   // a confirmation card — writes still wait for the user.
   const requestCount = useChatStore((s) => s.requestQueue.length)
   const pendingCard = useChatStore((s) => s.pending)
+  const choice = useChatStore((s) => s.choice)
+  // Reveal/return belongs to this exact card, never a replacement or project.
+  const [choiceInputFor, setChoiceInputFor] = useState<typeof choice>(null)
+  const choiceInputOpen = choice != null && choiceInputFor === choice
+  const revealChoiceInput = () => {
+    if (!choice || choice.allow_free_text === false) return
+    setChoiceInputFor(choice)
+    useUIStore.getState().setAssistantDockOpen(true)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }
   //
   // Without a key for the active profile (`notReady`, the same gate as Send)
   // nothing is posted: the queue is dropped — it must not fire by surprise
@@ -3034,6 +3057,7 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
       return
     }
     if (assistantEntry === 'compose') {
+      if (choice) setChoiceInputFor(choice)
       useUIStore.getState().setAssistantEntry(null)
       return
     }
@@ -3052,7 +3076,7 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
     if (select == null || select.disabled) return
     select.focus()
     useUIStore.getState().setAssistantEntry(null)
-  }, [assistantDockOpen, assistantEntry, profilesQuery.data, profilesQuery.isError, streaming])
+  }, [assistantDockOpen, assistantEntry, profilesQuery.data, profilesQuery.isError, streaming, choice])
 
   const chatProfiles = profilesQuery.data?.profiles ?? []
   const activeProfileId = profilesQuery.data?.active_profile_id ?? null
@@ -3492,9 +3516,9 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
           </div>
           )
         })}
-        <ChoiceCard />
+        <ChoiceCard companion={!assistantDockOpen} target={companionChoiceTarget}
+          inputOpen={assistantDockOpen && choiceInputOpen} onFreeText={revealChoiceInput} />
         {assistantDockOpen ? <ConfirmationCard /> : null}
-        <div ref={messagesEndRef} />
         </div>
         {showJumpLatest && (
           <button
@@ -3565,11 +3589,20 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
           <ApiKeySetup />
         </div>
       )}
+      {choice && choiceInputOpen && <div className="xl:hidden px-3 py-1.5 text-xs shrink-0">
+        {choice.allow_free_text === false && <p>Compose a separate message. Return to the options to answer this choice.</p>}
+        <button type="button" className="underline" onClick={() => {
+          setChoiceInputFor(null)
+          requestAnimationFrame(scrollTranscriptToEnd)
+        }}>Return to choices</button>
+      </div>}
       <div
-        className="flex flex-col border-t border-border bg-bg-2 shrink-0 min-h-min"
+        className={`flex flex-col border-t border-border bg-bg-2 shrink-0 min-h-min ${(pendingCard && streaming) || (choice && !choiceInputOpen) ? 'max-xl:hidden' : ''}`}
         // The complete toolbar sets the intrinsic desktop minimum, including
         // dictation settings. Short saved heights must not let it extend over
         // Check answers. Keep the touch floor and saved resize preference.
+        // On narrow screens a waiting card needs the disabled composer's space;
+        // keep it mounted so the draft and sizing return after the decision.
         style={{ height: promptHeight, minHeight: isCoarsePointer ? 200 : undefined }}
         data-testid="chat-prompt-container"
       >
@@ -3581,7 +3614,7 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
         >
           <div className="w-8 h-[2px] rounded-full bg-border group-hover:bg-accent/60 transition-colors" />
         </div>
-        <div className="relative flex items-stretch gap-2 px-2 pb-2 flex-1 min-h-0">
+        <div className="flex items-stretch gap-2 px-2 pb-2 flex-1 min-h-0">
           <div className="flex flex-col gap-1 self-end pb-0.5">
             {/* Phase D polish #5 — 44×44 px touch targets on coarse pointers
                 (WCAG 2.5.5). Desktop stays compact. */}
