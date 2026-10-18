@@ -16,7 +16,10 @@ covers read-only access visibility and existing confirmation/ACL/lock regression
 The [CP-06b contract](issues/06b-bound-confirmations.md) adds fixed ordinary-call
 arguments, confirmation-rule invalidation and complete engineering-preview
 review. [CP-06c](issues/06c-saved-restrictions.md) adds saved personal project restrictions,
-stale-save protection and revision checks for waiting/queued work. Wider effect-preview
+stale-save protection and revision checks for waiting/queued work.
+[CP-06d](issues/06d-companion-access-summary.md) covers the in-page summary's
+next-turn selection, explicit full review and unavailable/stale observations.
+Wider effect-preview
 and durable policy-history cases stay pending; the panel is not a permission
 credential or all-action readiness gate.
 

@@ -1,6 +1,7 @@
 import { navigationEpoch, manualNavigation } from '../utils/navigationEpoch'
 import AssistantResultCard from './AssistantResultCard'
 import DictationControls from './DictationControls'
+import { createPortal } from 'react-dom'
 /**
  * Phase 3 chatbot integration v6 — ChatPanel.
  *
@@ -1299,7 +1300,7 @@ function ReplayAttachmentChips({ fileIds }: { fileIds: string[] }) {
 }
 
 
-export default function ChatPanel() {
+export default function ChatPanel({ companionAccessTarget = null }: { companionAccessTarget?: HTMLElement | null }) {
   // Guided swaps the greeting chips for Guided-visible destinations.
   const uiMode = useUIStore(s => s.uiMode)
   const qc = useQueryClient()
@@ -3526,6 +3527,11 @@ export default function ChatPanel() {
       <GoalStrip />
       <ExternalAgentStrip />
       <ChatAccess checked={optedIntoChecks || requiredChecks} />
+      {/* Keep this under the mounted panel so the summary observes the exact
+          next-turn selection used by dispatchSend, including a pilot opt-in.
+          The portal changes only its DOM surface, never chat/stream identity. */}
+      {companionAccessTarget && createPortal(
+        <ChatAccess checked={optedIntoChecks || requiredChecks} companion />, companionAccessTarget)}
       <CheckedAnswerControl checked={optedIntoChecks || requiredChecks} required={requiredChecks}
         available={checksAvailable} loading={checkedCapabilities.isPending} failed={checkedCapabilities.isError}
         mode={checkedCapabilities.data?.mode} busy={streaming || pendingSendText != null}

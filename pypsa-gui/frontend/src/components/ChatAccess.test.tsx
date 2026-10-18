@@ -20,15 +20,89 @@ function snapshot(project = 'Project A'): ChatAccessSnapshot {
     limits: { output_tokens_per_turn: 8192, tool_calls_per_turn: 25, output_tokens_per_session: 200000,
       turns_without_reported_usage: 100, daily_project_tokens: null, confirmation_ttl_seconds: 60 } }
 }
-function mount() {
+function mount(companion = false, checked = false) {
   const query = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={query}><ChatAccess checked={false} /></QueryClientProvider>)
+  return render(<QueryClientProvider client={query}><ChatAccess checked={checked} companion={companion} /></QueryClientProvider>)
 }
 beforeEach(() => {
   get.mockReset()
   save.mockReset()
   useUIStore.setState({ currentProject: 'Project A', uiMode: 'expert', assistantDockOpen: true })
   useChatStore.setState({ sessionId: null, newChatSeq: 0 })
+})
+it('shows observed access in in-page chat before opening the full review', async () => {
+  get.mockResolvedValue(snapshot())
+  useUIStore.setState({ assistantDockOpen: false })
+  mount(true)
+  const summary = await screen.findByRole('region', { name: 'In-page chat access' })
+  await screen.findByText('Your rule: Standard')
+  expect(summary.textContent).toContain('Project A · Expert')
+  expect(summary.textContent).toContain('Your rule: Standard')
+  expect(summary.textContent).toContain('Answer checks off for this selection')
+  expect(summary.textContent).toContain('Project writes are locked by another user')
+  expect(screen.queryByRole('table')).toBeNull()
+  expect(screen.queryByRole('combobox', { name: 'Your saved rule' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Access and approvals' }))
+  expect(await screen.findByRole('table')).toBeTruthy()
+  expect(screen.getByRole('combobox', { name: 'Your saved rule' })).toBeTruthy()
+  expect(save).not.toHaveBeenCalled()
+})
+it('hides an in-page observation while refreshing and after a failed refresh', async () => {
+  let fail!: (error: Error) => void
+  get.mockResolvedValueOnce(snapshot()).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject }))
+    .mockResolvedValue(snapshot())
+  useUIStore.setState({ assistantDockOpen: false })
+  mount(true)
+  await screen.findByText('Your rule: Standard')
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh access' }))
+  await screen.findByText('Refreshing access…')
+  expect(screen.queryByText('Your rule: Standard')).toBeNull()
+  await act(async () => fail(new Error('offline')))
+  expect(await screen.findByRole('alert')).toBeTruthy()
+  expect(screen.queryByText('Answer checks off for this selection')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh access' }))
+  expect(await screen.findByText('Your rule: Standard')).toBeTruthy()
+})
+it('rejects a late in-page observation from a previous project', async () => {
+  let finish!: (value: ChatAccessSnapshot) => void
+  get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  get.mockResolvedValue(snapshot('Project B'))
+  useUIStore.setState({ assistantDockOpen: false })
+  mount(true)
+  act(() => useUIStore.setState({ currentProject: 'Project B' }))
+  await screen.findByText('Next turn: Project B · Expert')
+  await act(async () => finish(snapshot()))
+  expect(screen.queryByText('Next turn: Project A · Expert')).toBeNull()
+})
+it.each(['mode', 'session', 'checked'])('refuses an in-page response for the wrong %s selection', async fault => {
+  const data = snapshot()
+  if (fault === 'mode') data.selection.ui_mode = 'guided'
+  if (fault === 'session') data.session = { id: 'other-session', turn_in_flight: false, output_tokens_used: 0 }
+  if (fault === 'checked') data.selection.checked_requested = true
+  get.mockResolvedValue(data)
+  useUIStore.setState({ assistantDockOpen: false })
+  mount(true)
+  expect(await screen.findByRole('alert')).toBeTruthy()
+  expect(screen.queryByText('Your rule: Standard')).toBeNull()
+})
+it('distinguishes an unavailable saved rule from standard and an unsaved draft', async () => {
+  const data = snapshot()
+  data.restrictions = null
+  get.mockResolvedValue(data)
+  useUIStore.setState({ assistantDockOpen: false })
+  mount(true)
+  expect(await screen.findByText('Your rule: Unavailable')).toBeTruthy()
+  expect(screen.queryByText('Your rule: Standard')).toBeNull()
+})
+it('does not label unavailable requested checks as an unchecked selection', async () => {
+  const data = snapshot()
+  data.selection.checked_requested = true
+  data.blockers = ['requested_checks_unavailable']
+  get.mockResolvedValue(data)
+  useUIStore.setState({ assistantDockOpen: false })
+  mount(true, true)
+  expect(await screen.findByText('Requested answer checks unavailable')).toBeTruthy()
+  expect(screen.queryByText('Answer checks off for this selection')).toBeNull()
 })
 it('loads only on explicit disclosure and explains actual rules and blockers', async () => {
   get.mockResolvedValue(snapshot())
@@ -62,9 +136,10 @@ it('hides previous rules on failed refresh and permits recovery', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Refresh access' }))
   expect(await screen.findByText('You confirm')).toBeTruthy()
 })
-it('supports keyboard disclosure and stops observing when collapsed', async () => {
+it.each([false, true])('supports keyboard access review (in-page: %s)', async companion => {
   get.mockResolvedValue(snapshot())
-  mount()
+  useUIStore.setState({ assistantDockOpen: !companion })
+  mount(companion)
   const user = userEvent.setup()
   const button = screen.getByRole('button', { name: 'Access and approvals' })
   button.focus()
@@ -74,7 +149,7 @@ it('supports keyboard disclosure and stops observing when collapsed', async () =
   button.focus()
   await user.keyboard('{Enter}')
   expect(button.getAttribute('aria-expanded')).toBe('false')
-  expect(screen.queryByRole('region')).toBeNull()
+  expect(screen.queryByRole('region', { name: 'Current access and approvals' })).toBeNull()
 })
 it('never presents mismatched server scope as current access', async () => {
   get.mockResolvedValue(snapshot('Another project'))
@@ -84,11 +159,12 @@ it('never presents mismatched server scope as current access', async () => {
   expect(screen.queryByText('Another project')).toBeNull()
   expect(screen.queryByText('You confirm')).toBeNull()
 })
-it('saves a personal restriction only on explicit click and waits for server confirmation', async () => {
+it.each([false, true])('saves a personal restriction only on explicit click and server confirmation (in-page: %s)', async companion => {
   get.mockResolvedValue(snapshot())
   let finish!: (value: { project_id: string; revision: string; mode: 'read_only' }) => void
   save.mockImplementation(() => new Promise(resolve => { finish = resolve }))
-  mount()
+  useUIStore.setState({ assistantDockOpen: !companion })
+  mount(companion)
   fireEvent.click(screen.getByRole('button', { name: 'Access and approvals' }))
   await screen.findByText('You confirm')
   const field = await screen.findByRole('combobox', { name: 'Your saved rule' })
@@ -104,6 +180,7 @@ it('saves a personal restriction only on explicit click and waits for server con
   await act(async () => finish({ project_id: 'p1', revision: 'revision-2', mode: 'read_only' }))
   expect(await screen.findByText('Restriction saved.')).toBeTruthy()
   expect((await screen.findByRole('combobox', { name: 'Your saved rule' }) as HTMLSelectElement).value).toBe('read_only')
+  if (companion) expect(screen.getByText('Your rule: Read-only tools')).toBeTruthy()
   get.mockResolvedValue({ ...updated, restrictions: { mode: 'confirm_changes', revision: 'revision-newer' } })
   fireEvent.click(screen.getByRole('button', { name: 'Refresh access' }))
   await screen.findByText('You confirm')
