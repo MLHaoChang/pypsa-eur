@@ -7,6 +7,13 @@ Status: ready-for-agent
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Implementation: this folder specifies remaining work; it does not enable it.
 
+Planning review: [explicit agent approval](review-approval.md), with no
+unresolved blocking findings for the reviewed plan/specification/test
+requirements. Implementation tests and domain release gates remain pending.
+Continuation: [implementation handoff and progress ledger](implementation-handoff.md)
+contains the first task, dependencies, commands and checkpoint requirements for
+another agent or a session resumed after context loss.
+
 The owner wants one in-page companion that understands and operates the whole
 authorized application: models, tools, editable parameters, jobs and results.
 Load flow, storage costs and “update lines, then run” are representative journeys.

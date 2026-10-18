@@ -8,6 +8,16 @@ Date: 2026-10-18, Europe/Berlin
 Reviewed master: `c75ca5584b873418f10f1bca42f868255d445b7b`
 Plan only: remaining functionality is not implemented by publishing this file.
 
+Planning review: [explicit independent agent approval](../../../.scratch/live-copilot/review-approval.md)
+covers this plan, specification, eight issues and generic/domain test
+requirements at the recorded revision. No blocking planning findings remain;
+all implementation and release gates still apply.
+
+For interruption or a new agent, use the
+[implementation handoff and ledger](../../../.scratch/live-copilot/implementation-handoff.md).
+Keep it and the active issue current at each reviewable commit and CI handoff;
+the repository must carry the continuation state independently of chat memory.
+
 ## Goal and relationship to existing work
 
 Deliver the owner's generic live engineering companion: discover the authorized
