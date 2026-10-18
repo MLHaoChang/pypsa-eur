@@ -5,6 +5,12 @@
 
 ## Current continuation — 2026-10-18
 
+Start with the [portable implementation handoff and progress ledger](../live-copilot/implementation-handoff.md)
+and [explicit planning approval](../live-copilot/review-approval.md). They record
+the reviewed revision, resolved findings, first bounded implementation task,
+dependencies, test commands and required checkpoint state for another agent.
+Requirements were published in PR366; application implementation remains pending.
+
 The current source-reviewed map is the [whole-application live copilot assessment](../live-copilot/gap-assessment.md),
 [specification](../live-copilot/spec.md) and
 [remaining implementation plan](../../docs/superpowers/plans/2026-10-18-whole-application-live-copilot.md),

@@ -7,6 +7,10 @@ Status: ready-for-agent
 Baseline: `c75ca5584b873418f10f1bca42f868255d445b7b`
 Implementation: remaining capabilities below are proposed, not enabled here.
 
+Planning review: [approved at the exact recorded revision](review-approval.md).
+This covers specification/test-requirement completeness, not execution or
+domain release certification.
+
 ## Product outcome
 
 The companion stays beside the workbench. A user can explore an authorized
