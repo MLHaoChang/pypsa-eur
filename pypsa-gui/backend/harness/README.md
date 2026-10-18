@@ -207,6 +207,25 @@ project data, inherited by scenarios or shared with other users. This current
 record is not durable policy history. See
 `.scratch/chat-companion/issues/06c-saved-restrictions.md`.
 
+## Component schema discovery
+
+`get_component_schema` is an ordinary read-tier control, available in every
+toolset and within the existing provider offer caps. It pages the actual
+component request models, PyPSA defaults and asset descriptors: stored/display
+units, declared JSON constraints, defaults, and conservative derived/output
+editability. A page is at most3800 serialized characters; advance `offset` by
+`returned` while `has_more`. An individually oversized field refuses rather
+than silently clipping its schema. Query matches field names/labels, not values.
+
+This is class metadata, including in a networkless planning context, never
+proof that a project has an instance or supports an engine. Actual values stay
+on-demand through existing owned component reads. The metadata hash is not an
+input revision, validation-policy revision or approval. Native handlers still
+validate every write, including cross-field rules absent from JSON Schema.
+Personal read-only rules remain authoritative even for a field marked editable;
+the strict checked pilot continues to refuse this unmapped tool. Non-component
+service/domain schemas and exact target resolution remain LC-01 follow-ups.
+
 ## Local MCP exposure (issue 11)
 
 On the desktop (local mode), an agent on this machine drives the app through
