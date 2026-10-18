@@ -8,6 +8,13 @@ Application baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Scope: implemented and merged permission visibility, bound confirmations,
 personal restrictions and the in-page summary. Remaining CP-06 work is below.
 
+Subsequent browser E2E review exposed two UI failures despite passing CI: pointer
+interception of Check answers and narrow companion-review page overflow. The
+implementation is merged; browser acceptance is incomplete. The owner's current
+whole-application scope and remaining work are recorded in the
+[copilot assessment](../../../.scratch/live-copilot/gap-assessment.md) and
+[implementation amendment](../plans/2026-10-18-whole-application-live-copilot.md).
+
 ## Merged implementation
 
 | Slice | Result | PR | Verified squash commit |
@@ -78,18 +85,23 @@ The complete old/new/unit review covers the existing engineering adapter only.
 
 ## Remaining work and next handoff
 
-1. **Recommended next slice: durable personal policy history.** Specify an
+1. **Current priority: generic whole-application copilot.** Follow the linked
+   amendment for model/tool/parameter discovery, supported edits, verified
+   ordered workflows and generic result adapters, then continuous speech. Fix
+   the recorded browser UI failures as an early slice. Existing permission
+   primitives are reused, not a certificate that every domain is covered.
+2. **Durable personal policy history.** Specify an
    authenticated owner/project history view, explicit save provenance and
    revision/time records, retention and atomic save/history failure behavior.
    History must remain observational and never restore approval or broaden a
    rule. Agree its bounded contract and public API/UI tests before implementation.
-2. **Wider effect previews.** Add one native/domain adapter at a time, with exact
+3. **Wider effect previews.** Add one native/domain adapter at a time, with exact
    target/source/old/new/unit binding, denial/revocation and independent expected
    effects. A generic preview wrapper is not evidence of all-action correctness.
-3. **Separate later packages.** External readiness/admin lifecycle, continuous
+4. **Separate later packages.** External readiness/admin lifecycle, continuous
    media and durable/background responsibilities retain their CP-07–14 contracts.
    This closeout does not implement them or start another experiment case.
-4. **Pending external evidence.** ADR-0002 live provider/device verification,
+5. **Pending external evidence.** ADR-0002 live provider/device verification,
    independent domain review and real-use calibration remain pending by owner
    choice. No paid model/media calls, reviewer contact, manual deployment or
    production activation occurred in this package. There is no full-coverage,

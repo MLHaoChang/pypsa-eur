@@ -1,1 +1,1 @@
-* Docs(pypsa-gui): Record the merged chat-permission slices, verified CI evidence and remaining policy-history, preview and live-validation work.
+* Docs(pypsa-gui): Record chat-permission closeout, real-browser acceptance gaps and a whole-application copilot plan covering model/tool/parameter discovery, confirmed edits, ordered workflows, results and continuous speech.

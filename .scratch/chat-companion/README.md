@@ -40,4 +40,12 @@ the [permission handoff](../../docs/superpowers/handovers/2026-10-18-chat-permis
 Durable policy history and wider effect previews remain separate CP-06 work;
 broader domain adapters and family journeys also remain later work.
 
+The owner's 2026-10-18 continuation prioritizes a generic whole-application
+copilot: model/tool/parameter discovery, supported edits, ordered execution and
+result explanation/navigation, then continuous speech over the same harness.
+Use the [current assessment/spec](../live-copilot/README.md) and
+[execution amendment](../../docs/superpowers/plans/2026-10-18-whole-application-live-copilot.md).
+The later real-browser journey's pointer/overflow failures are open UI work;
+historical passing CI does not certify a complete generic companion.
+
 The [Dots assessment](../live-voice/dots-design-assessment-2026-10-14.md) supplies the source-reviewed rationale. This folder contains an implementation specification, not an implemented feature or release certificate. Hosted setup, fresh paid-probe authorization, independent domain review and real-use calibration remain separate pending gates.
