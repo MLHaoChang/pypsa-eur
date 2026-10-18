@@ -33,10 +33,26 @@ The first expanded matrix passed68/70 cases. Native Guided card review exposed
 an additional persistent1px shift of the workbench's hidden scroll container,
 not document overflow. A repeated short-touch probe reproduced seven failures;
 the shift remained after a2s diagnostic wait. Tagged native scroll tracing
-attributed movement to transcript `scrollIntoView` scrolling outer ancestors.
+identified transcript `scrollIntoView` as an unbounded ancestor-scroll path.
 The repair scrolls only the transcript element with `scrollTo`, preserving the
 existing bottom-follow/scroll-up/expand decisions. Its existing expand
 regression now also requires every scroll target to be the transcript.
+The expanded follow-up still passed97/98. A proposed `preventScroll` on the
+opening focus also failed3/56 repeated diagnostic cases and was reverted;
+focus alone was not established as the residual cause. The outer frame had
+horizontal and vertical scroll space from the overflowing header/status row.
+An independent header-reachability RED then failed before any focus or pointer
+scroll could reveal the clipped header actions.
+
+The header now wraps below1280px with automatic height and its existing44px
+minimum, keeping visible overflow for dropdowns. The account action aligns to
+the right of its wrapped row so its opened menu remains within the screen.
+The status row keeps nonwrapping text in its own keyboard-focusable horizontal
+scroll region with a thin scrollbar. The workbench's existing overflow behavior
+is unchanged; no root `overflow-clip` substitution is used.
+Review also removed the runner's unnecessary window scroll reset and added
+strict zero-scroll assertions for every dock ancestor. Final verification is
+pending; no failing case is waived.
 Diagnostic style changes, wrappers and timing probes are removed from the
 permanent runner. No global scroll reset or relaxed geometry tolerance is used.
 
@@ -45,17 +61,51 @@ states. The dock may now shrink with its flex container above the breakpoint,
 with an explicit zero intrinsic minimum; its saved width is not changed.
 
 Final selected matrix: Guided/Expert at320×850 mouse,320×600 touch,375×850 touch,
-420×600 touch,640×850 mouse,768×600 touch and1440×1000 mouse. Seven states each:
-closed workbench, open companion, expanded companion Access with actual saved
+420×600 touch,640×850 mouse,768×600 touch and1440×1000 mouse. Nine states each:
+closed workbench, header controls/menu/keyboard/status/rename, open companion, expanded companion Access with actual saved
 restriction changes, open dock with pointer checking, expanded dock Access,
-native card review/denial across both surfaces, and desktop width restoration
-with checking/draft retained. This is98 selected cases; final outcome pending.
+native card review/denial across both surfaces, native Choice picks/free text,
+and desktop width restoration
+with checking/draft retained. This is126 selected cases; final outcome pending.
 The native proposal is reviewed in the dock and companion without a forced
 click. Companion Approve/Deny use trial hit tests only; the actual denial is in
 the dock and native network read-back verifies no write. This does not test an
 approved write. All ordinary32 composer regressions are also being rerun.
-Component regression135passed across9 suites, including transcript expansion.
+Earlier component regression135passed across9 suites, including transcript expansion.
+The responsive header snapshot changes only its root responsive classes; its
+complete remaining markup assertion stays strict. Final focused component
+regression:172passed across15suites, including Choice portal/state, frame
+normalization, dictation and toast neighbors. Production build/type-check,
+Ruff and Node syntax checks pass. Full browser regressions are running.
+The first header follow-up exposed a retained answer intercepting the wrapped
+account action. The companion now uses the positioned workbench body as its
+containing block and scrolls within that height, below header/tabs. A genuine
+account selector ambiguity was corrected by targeting its button, not the
+matching email text in its opened menu. The existing32composer regression then
+failed3short-touch Close clicks: a70vh dictation popup exceeded the reduced
+workbench height. Its containing block is now ChatPanel and its maximum is the
+smaller of70vh and available height minus1rem; local scrolling retains all
+settings. The original failing short-touch case passed after that repair.
+
+At320×600, the disabled200px composer also left too little transcript space for
+native confirmation buttons. Narrow waiting confirmations reclaim that space
+with CSS only when streaming; the composer stays mounted and returns after the
+decision. An Expert short-screen24-state probe then passed all states.
+
+Spec review identified the same neighboring Choice risk. A native Choice RED
+failed its ordinary option click at320×600. The existing ChoiceCard now owns
+one set of picks while its DOM portals between transcript and companion.
+Narrow choice view prioritizes options, with an explicit allowed free-text
+route and Return to choices. View selection is bound to exact choice identity;
+Compose remains a separate-message route when free text is forbidden. No
+executor, approval or dispatch policy changes. A9-state native probe passed,
+including bidirectional pick preservation, native multi-select Send, preserved
+unsent draft and an actual free-text turn. The backend history verifies both
+answers. The component's no-target inline fallback preserves its existing
+standalone frame-normalization contract. Full matrix verification is pending.
+
 Final browser evidence and PR/exact-head CI/premerge remain pending.
+
 
 ## Portable verification
 
@@ -71,8 +121,8 @@ PYPSA_COMPOSER_PYTHON=/path/to/test/python CHROMIUM_BIN=/path/to/chromium node s
 
 If needed, set `PLAYWRIGHT_MODULE_PATH` to the runtime's installed package.json.
 The ordinary composer suite continues to refuse every model call. The narrow
-suite uses one explicit finite loopback model wire to request a native
-bulk-update confirmation; approval/restriction HTTP, SSE, dispatch, denial and
+suite uses one explicit finite loopback model wire to request native
+bulk-update confirmations and ask_user choices; approval/restriction HTTP, SSE, dispatch, denial and
 network read-back stay real. It changes an ephemeral personal restriction via
 the UI, denies the proposed write and verifies native G1 marginal_cost remains10.
 This does not certify an approved write or real-model reasoning.

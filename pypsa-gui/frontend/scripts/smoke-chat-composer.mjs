@@ -4,7 +4,7 @@
  * npm run build
  * PYPSA_COMPOSER_PYTHON=<test-env-python> CHROMIUM_BIN=<chromium> node scripts/smoke-chat-composer.mjs
  * Requires Playwright (or PLAYWRIGHT_MODULE_PATH pointing at its package.json).
- * Add --narrow for page/dock geometry and a scripted loopback approval probe.
+ * Add --narrow for page/dock geometry and a scripted loopback decision probes.
  * Artifacts omit credentials/cookies. No paid inference or media calls.
  */
 import assert from 'node:assert/strict'
@@ -31,14 +31,14 @@ const source = { head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: reposit
 for (const name of ['src/components/ChatPanel.tsx', 'src/components/DictationControls.tsx', 'dist/spa.html',
   'scripts/composer-fixture.py', 'scripts/smoke-chat-composer.mjs',
   ...(narrow ? ['src/App.tsx', 'src/components/AssistantDock.tsx', 'src/components/CompanionLauncher.tsx',
-    'src/layout/AppHeader.tsx', 'src/components/StatusBar.tsx', 'scripts/chat-narrow-cases.mjs'] : [])]) {
+    'src/layout/AppHeader.tsx', 'src/layout/UserMenu.tsx', 'src/index.css', 'src/components/StatusBar.tsx', 'scripts/chat-narrow-cases.mjs'] : [])]) {
   source[name] = createHash('sha256').update(await fs.readFile(path.join(frontend, name))).digest('hex')
 }
 let child, browser
 
 async function fixture() {
   child = spawn(python, [path.join(frontend, 'scripts/composer-fixture.py'), '--storage', storage,
-    ...(narrow ? ['--confirmations'] : [])],
+    ...(narrow ? ['--decisions'] : [])],
     { cwd: repository, stdio: ['ignore', 'pipe', 'pipe'] })
   // Startup errors are retained privately, never raw environment/credentials.
   let stderr = ''
@@ -80,7 +80,7 @@ function cleanup() {
       await fs.rm(storage, { recursive: true, force: true })
       await fs.writeFile(path.join(artifacts, 'results.json'), JSON.stringify({ source, suite: narrow ? 'narrow' : 'composer', results, errors,
         app_http: 'real_authenticated_backend', external_model_calls_allowed: false,
-        local_model_wire: narrow ? 'finite_confirmation_fixture' : 'all_calls_refused' }, null, 2))
+        local_model_wire: narrow ? 'finite_decision_fixture' : 'all_calls_refused' }, null, 2))
       console.log('Composer artifacts:', artifacts)
     }
   })()

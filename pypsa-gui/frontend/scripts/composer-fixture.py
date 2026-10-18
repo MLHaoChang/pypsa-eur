@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
 # SPDX-License-Identifier: MIT
-"""Private loopback backend; no external model, optional finite approval wire."""
+"""Private loopback backend; no external model, optional finite decision wire."""
 import argparse
 import http.client
 import json
@@ -19,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--storage", type=Path, required=True)
-    parser.add_argument("--confirmations", action="store_true")
+    parser.add_argument("--decisions", action="store_true")
     args = parser.parse_args()
     storage = args.storage.resolve()
     storage.mkdir(parents=True, exist_ok=True)
@@ -37,21 +37,35 @@ def main():
             pass
 
         def do_POST(self):
-            if args.confirmations and self.path == "/v1/chat/completions":
+            if args.decisions and self.path == "/v1/chat/completions":
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 messages = body["messages"]
-                user = max(i for i, message in enumerate(messages) if message["role"] == "user")
-                if "NARROW_CONFIRMATION" in json.dumps(messages[user]["content"]):
-                    subsequent = any(message["role"] == "tool" for message in messages[user + 1:])
+                origins = [(i, "choice" if "NARROW_CHOICE" in json.dumps(message.get("content")) else "confirmation")
+                           for i, message in enumerate(messages) if message["role"] == "user"
+                           and any(marker in json.dumps(message.get("content"))
+                                   for marker in ("NARROW_CHOICE", "NARROW_CONFIRMATION"))]
+                latest_user = next((message for message in reversed(messages) if message["role"] == "user"), {})
+                expected_input = any(marker in json.dumps(latest_user.get("content")) for marker in (
+                    "NARROW_CHOICE", "NARROW_CONFIRMATION", "First result; Second result", "A different local result"))
+                if origins and expected_input:
+                    origin, kind = origins[-1]
+                    subsequent = any(message["role"] == "tool" for message in messages[origin + 1:])
                     if not subsequent:
+                        tool_name = "ask_user" if kind == "choice" else "bulk_update_components"
                         offered = {tool["function"]["name"] for tool in body.get("tools", [])}
-                        if "bulk_update_components" not in offered:
+                        if tool_name not in offered:
                             self.send_error(503, "Fixture tool absent from admitted catalogue")
                             return
-                        delta = {"tool_calls": [{"index": 0, "id": "narrow-write", "type": "function",
-                            "function": {"name": "bulk_update_components", "arguments": json.dumps({
-                                "component_class": "Generator", "names": ["G1"],
-                                "updates": {"marginal_cost": 20}})}}]}
+                        arguments = ({"title": "Narrow decision", "question": "Which result should be shown?",
+                            "options": [{"label": "First result", "recommended": True,
+                                         "description": "The first local option."},
+                                        {"label": "Second result", "description": "The other local option."}],
+                            "multi_select": True, "allow_free_text": True,
+                            "detail": "Review this local decision.\n\n" * 12}
+                            if kind == "choice" else {"component_class": "Generator", "names": ["G1"],
+                                                     "updates": {"marginal_cost": 20}})
+                        delta = {"tool_calls": [{"index": 0, "id": "narrow-" + kind, "type": "function",
+                            "function": {"name": tool_name, "arguments": json.dumps(arguments)}}]}
                     else:
                         delta = {"content": "Local fixture completed; inspect the native outcome."}
                     self.send_response(200)

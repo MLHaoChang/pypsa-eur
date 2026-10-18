@@ -884,7 +884,7 @@ export default function AppHeader() {
   }, [runSolveRequest, jobRunning, isRunning, jobQueued])
 
   return (
-    <header data-no-panel-close className="h-11 flex items-center gap-2 px-3 bg-bg border-b border-border shrink-0 z-10">
+    <header data-no-panel-close className="h-11 max-xl:h-auto max-xl:min-h-11 max-xl:flex-wrap max-xl:gap-y-1 max-xl:py-1 flex items-center gap-2 px-3 bg-bg border-b border-border shrink-0 z-10">
       {/* S8: when a watched decision-study run ends, open its verdict and toast
           the class. Renders nothing; polls the run status route only. */}
       <DecisionRunWatcher />

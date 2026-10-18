@@ -250,3 +250,36 @@ cases in progress. Source/commands/limits in the
 No branch push/PR yet; review/remote CI/premerge pending. Preserve actual state
 rather than treating this intermediate checkpoint as completion. Next: complete
 those gates, then start LC-01 in a fresh isolated branch from reviewed master.
+
+2026-10-18 LC-02B expanded-layout checkpoint (supersedes initial five-state fix):
+source remains unpushed in `/workspace/chat-narrow-layout`, current committed
+implementation0a6c8326ef7bccfd99166c581b42f458d7dd01e1 plus uncommitted repairs.
+Final98-case attempt97pass/1fail exposed native hidden-frame scrolling; a
+focuspreventScroll experiment failed and was reverted. The actual overflow
+owners are now repaired: responsive header wrapping/account alignment and a
+keyboard-scrollable nonwrapping status row. The frame's existing clipping is
+unchanged. Companion is bounded to the positioned workbench body so retained
+answers cannot intercept header controls. Wrapped headers also required a
+ChatPanel-height-bound dictation popover (old70vh Close failed3/32 cases).
+Narrow pending confirmations temporarily hide the disabled composer with CSS,
+keeping its state mounted and making room for reachable native decision buttons.
+Current focused components141pass, separate dictation14pass; browser gates NOT
+complete. No PR/push/CI yet. Temporary diagnostic case filters may be active:
+before final verification require both Guided/Expert × all7viewports ×8states
+(112cases), and restore the original32composer scenarios/denominator. Never
+publish a filtered run as the complete suite. Portable sources and commands
+remain in the QA record; final evidence, two-axis re-review and merge gates are
+pending. Next implementation after this bounded fix remains LC-01.
+
+2026-10-18 LC-02B final-source candidate: all temporary case filters removed.
+Require Guided/Expert ×7viewport/pointer variants ×9states =126native-browser
+cases, plus the original32composer cases. The added Choice state uses actual
+ask_user, preserves picks bidirectionally through one mounted card/DOM portal,
+verifies native multi-select/free-text turns and preserves an unsent draft.
+Exact-choice-bound reveal/return state and allow_free_text remain authoritative
+for this UI; dispatch stays the existing sendRequest path. A native9-state
+short-touch probe passed. Final focused172tests/15suites and production build
+pass. Full browser regressions are in progress; no PR/push/CI yet. The old
+"filtered" warning above is historical, but verify source loops and denominators
+before claiming acceptance. Next gates: final browser evidence, two-axis
+source-pinned review, then PR/exact-head CI/fresh-master premerge/ordinary merge.

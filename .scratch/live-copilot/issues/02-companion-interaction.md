@@ -70,3 +70,13 @@ ordinary32 composer cases are in progress; component135pass. See
 No PR/push yet. Finish real browser verification, two-axis review, then exact
 source CI and fresh-master premerge. Next isolated implementation is LC-01;
 remaining LC-02 generic scope/plan/source UX depends on it.
+
+LC-02B expanded repair: actual header/status overflow owners now fit or scroll
+locally, and companion content is bounded to the workbench body. Short-screen
+dictation settings use available ChatPanel height. Native Choice RED also found
+unreachable options; one mounted ChoiceCard now portals between surfaces with
+controlled picks retained and an explicit allowed free-text/return route. Narrow
+waiting cards reclaim composer space without unmounting state. Component172pass
+across15suites; final126native-browser states and32composer regressions running.
+No paid calls, global clipping substitution, forced clicks or policy changes.
+Two-axis final review, PR, remote checks and premerge still pending.

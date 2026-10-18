@@ -46,13 +46,20 @@ export async function runNarrowCases({ browser, authenticated, config, results, 
       let geometry
       try {
         const interaction = await action()
-        await page.evaluate(() => window.scrollTo(0, 0))
         geometry = await page.evaluate(() => {
           const rect = element => {
             const box = element.getBoundingClientRect()
             return { left: box.left, right: box.right, width: box.width, top: box.top, bottom: box.bottom }
           }
-          return { viewport: window.innerWidth, height: window.innerHeight,
+          const shiftedAncestors = []
+          for (let element = document.querySelector('[data-testid="assistant-dock"]').parentElement;
+            element; element = element.parentElement) {
+            if (element.scrollLeft || element.scrollTop) shiftedAncestors.push({
+              tag: element.tagName, class: element.className,
+              scrollLeft: element.scrollLeft, scrollTop: element.scrollTop })
+          }
+          return { viewport: window.innerWidth, height: window.innerHeight, scrollX: window.scrollX,
+            shiftedAncestors,
             client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth,
             dock: rect(document.querySelector('[data-testid="assistant-dock"]')),
             companion: document.querySelector('[data-testid="companion-launcher"]')
@@ -64,9 +71,11 @@ export async function runNarrowCases({ browser, authenticated, config, results, 
                 clientWidth: element.clientWidth, ...rect(element) })),
             savedWidth: localStorage.getItem('network-diagram:assistant-dock-width') }
         })
+        assert.equal(geometry.scrollX, 0, 'The document must not shift horizontally')
+        assert.deepEqual(geometry.shiftedAncestors, [], 'Dock ancestors must not scroll')
         assert(geometry.scroll <= geometry.client, `Page overflow: ${geometry.scroll} > ${geometry.client}`)
         assert.equal(geometry.savedWidth, '700', 'Responsive fit must preserve the requested desktop width')
-        if (state.startsWith('dock-') || state === 'native-denial' || state === 'desktop-restored') {
+        if (state.startsWith('dock-') || state === 'native-denial' || state === 'native-choice' || state === 'desktop-restored') {
           assert(geometry.dock.left >= 0 && geometry.dock.right <= geometry.client,
             `Dock controls outside viewport: ${JSON.stringify(geometry.dock)}`)
         }
@@ -87,6 +96,53 @@ export async function runNarrowCases({ browser, authenticated, config, results, 
       await page.getByTestId('assistant-dock-collapse').click()
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
       await record('workbench-companion-closed')
+      await record('header-controls-reachable', async () => {
+        const header = page.locator('header')
+        const controls = [header.getByRole('button', { name: 'Guided', exact: true }),
+          header.getByRole('button', { name: 'Expert', exact: true }),
+          header.getByTestId('header-settings'), header.locator('button[title="composer@example.test"]')]
+        for (const control of controls) {
+          await control.waitFor()
+          const box = await control.boundingBox()
+          assert(box && box.x >= 0 && box.x + box.width <= viewport.width,
+            'Header actions must fit before focus or pointer scrolling')
+          await control.click({ trial: true })
+        }
+        await controls[0].focus()
+        await controls[0].press('Tab')
+        assert(await controls[1].evaluate(element => element === document.activeElement))
+        const reached = []
+        for (let i = 0; i < 3; i++) {
+          await page.keyboard.press('Tab')
+          reached.push(await page.evaluate(() => document.activeElement.getAttribute('data-testid')
+            || document.activeElement.getAttribute('title')))
+        }
+        assert(reached.includes('header-settings') && reached.includes('composer@example.test'),
+          'Keyboard traversal must reach Settings and the account')
+        await controls[3].click()
+        await header.getByText('Signed in', { exact: true }).waitFor()
+        const menu = await header.getByText('Signed in', { exact: true }).evaluate(element => {
+          const box = element.closest('.absolute').getBoundingClientRect()
+          return { left: box.left, right: box.right }
+        })
+        assert(menu.left >= 0 && menu.right <= viewport.width, 'The account menu must stay reachable')
+        await controls[3].click()
+        await header.locator('[data-project-name-editor]').focus()
+        const rename = header.locator('input[maxlength="80"]')
+        await rename.fill('A'.repeat(80))
+        const renameBox = await rename.boundingBox()
+        assert(renameBox && renameBox.x >= 0 && renameBox.x + renameBox.width <= viewport.width)
+        await rename.press('Escape')
+        const status = page.getByRole('region', { name: 'Project status', exact: true })
+        const dimensions = await status.evaluate(element => ({ width: element.clientWidth,
+          contentWidth: element.scrollWidth, height: element.clientHeight, contentHeight: element.scrollHeight }))
+        assert(dimensions.contentHeight <= dimensions.height, 'Status text must not wrap out of its row')
+        if (dimensions.contentWidth > dimensions.width) {
+          await status.focus()
+          await status.press('ArrowRight')
+          await page.waitForFunction(() => document.querySelector('[aria-label="Project status"]').scrollLeft > 0)
+        }
+      })
       await record('companion-open', async () => {
         await page.getByRole('button', { name: 'Chat here', exact: true }).click()
         await page.getByRole('region', { name: 'In-page chat access', exact: true }).waitFor()
@@ -153,6 +209,64 @@ export async function runNarrowCases({ browser, authenticated, config, results, 
         await saveRule('standard')
         await access.click()
         return { companionReview: companionBox, decision: 'denied', nativeMarginalCost: 10 }
+      })
+      await record('native-choice', async () => {
+        const waitIdle = async () => page.waitForFunction(() =>
+          !document.querySelector('[data-testid="chat-input"]')?.disabled)
+        const startedTurn = () => page.waitForEvent('request', { predicate: request =>
+          request.url().endsWith('/api/chat/stream') })
+        const ask = async () => {
+          await page.getByTestId('chat-input').fill('NARROW_CHOICE')
+          const finished = startedTurn()
+          await page.getByTestId('chat-send').click()
+          await finished
+          await page.getByTestId('chat-choice-card').waitFor()
+          await waitIdle()
+        }
+        await ask()
+        await page.getByTestId('chat-choice-option').filter({ hasText: 'First result' }).click()
+        await page.getByTestId('assistant-dock-collapse').click()
+        await page.getByTestId('companion-launcher').getByTestId('chat-choice-card').waitFor()
+        const first = page.getByTestId('chat-choice-option').filter({ hasText: 'First result' })
+        const second = page.getByTestId('chat-choice-option').filter({ hasText: 'Second result' })
+        assert.equal(await first.getAttribute('aria-pressed'), 'true', 'The first pick must survive the move')
+        await second.click()
+        await page.getByRole('button', { name: 'Compose a message', exact: true }).click()
+        const back = page.getByRole('button', { name: 'Return to choices', exact: true })
+        if (viewport.width < 1280) await back.click()
+        assert.equal(await first.getAttribute('aria-pressed'), 'true')
+        assert.equal(await second.getAttribute('aria-pressed'), 'true', 'Both picks must survive the return')
+        await page.getByRole('button', { name: 'Type another answer', exact: true }).click()
+        await page.getByTestId('chat-input').fill('Keep this unsent alternative.')
+        if (viewport.width < 1280) await back.click()
+        const pickedTurn = startedTurn()
+        await page.getByTestId('chat-choice-send').click()
+        await pickedTurn
+        await page.getByTestId('chat-choice-card').waitFor({ state: 'detached' })
+        await waitIdle()
+        assert.equal(await page.getByTestId('chat-input').inputValue(), 'Keep this unsent alternative.')
+        await ask()
+        await page.getByTestId('assistant-dock-collapse').click()
+        await page.getByTestId('companion-launcher').getByTestId('chat-choice-card').waitFor()
+        await page.getByRole('button', { name: 'Type another answer', exact: true }).click()
+        await page.getByTestId('chat-input').fill('A different local result')
+        const freeTextTurn = startedTurn()
+        await page.getByTestId('chat-send').click()
+        await freeTextTurn
+        await page.getByTestId('chat-choice-card').waitFor({ state: 'detached' })
+        await waitIdle()
+        const response = await context.request.get(config.base + '/api/chat/history?limit=200')
+        assert(response.ok())
+        const history = await response.json()
+        const turns = history.turns.slice(-4)
+        assert.deepEqual(turns.map(turn => turn.user), ['NARROW_CHOICE', 'First result; Second result',
+          'NARROW_CHOICE', 'A different local result'])
+        assert(turns.every(turn => !turn.interrupted
+          && JSON.stringify(turn.assistant).includes('Local fixture completed; inspect the native outcome.')),
+        'All four native turns must complete, not merely append the user message')
+        assert.equal(await page.getByTestId('chat-error-banner').count(), 0)
+        return { multiSelect: 'First result; Second result', freeText: 'A different local result',
+          history: 'native', draftPreserved: true }
       })
       await record('desktop-restored', async () => {
         await page.getByTestId('chat-input').fill('Retain this draft across resizing.')
