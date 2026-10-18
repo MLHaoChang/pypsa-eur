@@ -751,9 +751,9 @@ export default function App() {
               it must stay on screen while a full-screen tab owns the main
               area, because it is what put that tab there. A direct flex child
               of this row (not nested inside the `flex-1` zone above) so its
-              open width (stored) / zero-width collapsed column (companion is
-              position: fixed) isn't fought over by the flex
-              algorithm. */}
+              saved width can shrink to available space. On phones both the
+              dock and collapsed companion use this body as their positioned
+              container while the chat stays mounted. */}
           <AssistantDock />
         </div>
 

@@ -133,6 +133,18 @@ export async function runNarrowCases({ browser, authenticated, config, results, 
         const renameBox = await rename.boundingBox()
         assert(renameBox && renameBox.x >= 0 && renameBox.x + renameBox.width <= viewport.width)
         await rename.press('Escape')
+        if (mode === 'expert') {
+          await header.getByRole('button', { name: 'Hide properties panel', exact: true }).click()
+          await header.getByRole('button', { name: 'Show properties panel', exact: true }).click()
+          const hide = page.getByTitle('Hide panel', { exact: true })
+          await hide.waitFor()
+          const properties = await hide.evaluate(element => {
+            const box = element.closest('aside').getBoundingClientRect()
+            return { left: box.left, right: box.right }
+          })
+          assert(properties.left >= 0 && properties.right <= viewport.width,
+            'The reopened properties panel must fit its workbench')
+        }
         const status = page.getByRole('region', { name: 'Project status', exact: true })
         const dimensions = await status.evaluate(element => ({ width: element.clientWidth,
           contentWidth: element.scrollWidth, height: element.clientHeight, contentHeight: element.scrollHeight }))

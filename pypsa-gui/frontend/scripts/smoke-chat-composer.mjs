@@ -31,7 +31,7 @@ const source = { head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: reposit
 for (const name of ['src/components/ChatPanel.tsx', 'src/components/DictationControls.tsx', 'dist/spa.html',
   'scripts/composer-fixture.py', 'scripts/smoke-chat-composer.mjs',
   ...(narrow ? ['src/App.tsx', 'src/components/AssistantDock.tsx', 'src/components/CompanionLauncher.tsx',
-    'src/layout/AppHeader.tsx', 'src/layout/UserMenu.tsx', 'src/index.css', 'src/components/StatusBar.tsx', 'scripts/chat-narrow-cases.mjs'] : [])]) {
+    'src/layout/AppHeader.tsx', 'src/layout/UserMenu.tsx', 'src/layout/PropertiesPanel.tsx', 'src/index.css', 'src/components/StatusBar.tsx', 'scripts/chat-narrow-cases.mjs'] : [])]) {
   source[name] = createHash('sha256').update(await fs.readFile(path.join(frontend, name))).digest('hex')
 }
 let child, browser
