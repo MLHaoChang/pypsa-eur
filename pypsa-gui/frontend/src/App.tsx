@@ -672,7 +672,7 @@ export default function App() {
         <ProjectTabs />
 
         {/* ── Three-column body ──────────────────────────────────────── */}
-        <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="relative flex flex-1 min-h-0 overflow-hidden">
 
           {/* Zone 0 — Sectioned nav sidebar */}
           <Sidebar />

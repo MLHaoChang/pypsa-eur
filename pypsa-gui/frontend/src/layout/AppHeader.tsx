@@ -1153,7 +1153,9 @@ function UiModeSwitch() {
       data-testid="ui-mode-switch"
       role="group"
       aria-label="Interface mode"
-      className="flex items-center h-7 p-0.5 rounded-md border border-border bg-bg-2"
+      // Anchor absolute sr-only descriptions locally. Their static positions
+      // otherwise escape the clipped workbench and widen the document.
+      className="relative flex items-center h-7 p-0.5 rounded-md border border-border bg-bg-2"
     >
       {(['guided', 'expert'] as const).map(m => {
         const on = uiMode === m

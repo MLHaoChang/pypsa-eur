@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
 # SPDX-License-Identifier: MIT
-"""Private loopback backend for smoke-chat-composer.mjs; never calls a model."""
+"""Private loopback backend; no external model, optional finite approval wire."""
 import argparse
 import http.client
 import json
@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--storage", type=Path, required=True)
+    parser.add_argument("--confirmations", action="store_true")
     args = parser.parse_args()
     storage = args.storage.resolve()
     storage.mkdir(parents=True, exist_ok=True)
@@ -31,16 +32,43 @@ def main():
     if not (dist / "spa.html").is_file():
         raise RuntimeError("Build the current frontend with npm run build first")
 
-    class NoModel(BaseHTTPRequestHandler):
+    class LocalModelBoundary(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
 
         def do_POST(self):
+            if args.confirmations and self.path == "/v1/chat/completions":
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                messages = body["messages"]
+                user = max(i for i, message in enumerate(messages) if message["role"] == "user")
+                if "NARROW_CONFIRMATION" in json.dumps(messages[user]["content"]):
+                    subsequent = any(message["role"] == "tool" for message in messages[user + 1:])
+                    if not subsequent:
+                        offered = {tool["function"]["name"] for tool in body.get("tools", [])}
+                        if "bulk_update_components" not in offered:
+                            self.send_error(503, "Fixture tool absent from admitted catalogue")
+                            return
+                        delta = {"tool_calls": [{"index": 0, "id": "narrow-write", "type": "function",
+                            "function": {"name": "bulk_update_components", "arguments": json.dumps({
+                                "component_class": "Generator", "names": ["G1"],
+                                "updates": {"marginal_cost": 20}})}}]}
+                    else:
+                        delta = {"content": "Local fixture completed; inspect the native outcome."}
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    chunk = {"choices": [{"index": 0, "delta": delta,
+                        "finish_reason": "stop" if subsequent else "tool_calls"}],
+                        "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30}}
+                    self.wfile.write(("data: " + json.dumps(chunk) + "\n\ndata: [DONE]\n\n").encode())
+                    self.wfile.flush()
+                    return
             # A layout action must not send inference or start media.
             (storage / "unexpected-provider-call").touch()
             self.send_error(503, "No inference is allowed in this layout fixture")
 
-    model = ThreadingHTTPServer(("127.0.0.1", 0), NoModel)
+    model = ThreadingHTTPServer(("127.0.0.1", 0), LocalModelBoundary)
     threading.Thread(target=model.serve_forever, daemon=True).start()
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))

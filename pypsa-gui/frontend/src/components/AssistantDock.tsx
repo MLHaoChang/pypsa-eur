@@ -202,9 +202,9 @@ export default function AssistantDock() {
   return (
     <>
       <div
-        className={`relative flex flex-col min-h-0 bg-bg shrink-0 transition-[width] duration-300 ease-out motion-reduce:transition-none ${
+        className={`relative flex flex-col min-h-0 min-w-0 bg-bg transition-[width] duration-300 ease-out motion-reduce:transition-none ${
           assistantDockOpen
-            ? 'border-l border-border'
+            ? 'border-l border-border max-sm:absolute max-sm:inset-0 max-sm:z-30 max-sm:max-w-full'
             : 'w-0 overflow-visible border-0'
         }`}
         style={assistantDockOpen ? { width: `${assistantDockWidth}px` } : undefined}

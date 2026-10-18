@@ -103,13 +103,13 @@ from the repository report and the following fixture recipe if unavailable:
 
 ## Slice ledger and dependency order
 
-LC-02A is active as recorded below; other implementation rows are not started.
+LC-02A is merged; LC-02B is active as recorded below. Other implementation rows are not started.
 Approval covers requirements; no row inherits a passing execution claim. LC-02's layout repair
 may precede LC-01; its new resolved-context UX still depends on LC-01.
 
 | Slice / issue | Resume scope | Required predecessors | Current state / evidence |
 | --- | --- | --- | --- |
-| [LC-02](issues/02-companion-interaction.md) | First 02A pointer repair, then 02B overflow attribution/repair; later scope/plan/decision UX | Layout repair independent; new scope UX needs LC-01 | 02A implemented locally, native browser32pass/component111pass; branch `claude/chat-composer-pointer`, base6691bd6; review/PR/CI pending; 02B pending |
+| [LC-02](issues/02-companion-interaction.md) | 02B overflow attribution/repair; later scope/plan/decision UX | Layout repair independent; new scope UX needs LC-01 | 02A merged PR369/dbc1fa7, native browser32pass/component111pass; 02B active in `claude/chat-narrow-layout`, base dbc1fa7; RED attribution pending |
 | [LC-01](issues/01-discovery-and-scope.md) | Eligible capability/schema discovery and exact target resolver; settle concrete DTO/route compatibility before coding | Existing harness and source rebaseline | Not started; LC-T01/02/06/17 |
 | [LC-03](issues/03-results-and-navigation.md) | Typed evidence/navigation interfaces, then small current/retained domain adapters | LC-01 and applicable LC-02 | Not started; LC-T06–10/19 plus mapped LC-D suites |
 | [LC-04](issues/04-generic-parameter-edits.md) | Exact schema/unit/basis previews and verified writes; storage/line examples first | LC-01 and applicable LC-02 | Not started; LC-T02–05 and domain edit cases |
@@ -230,3 +230,23 @@ prevent native dotenv reintroducing provider keys; CLI refusal verified. Both
 review findings addressed without further production changes; final review
 confirmation/PR/exact-head CI pending. Historical16-case counts above remain
 accurate for their iteration, not the final denominator.
+
+2026-10-18 LC-02A verified merged as `dbc1fa7003a6a005b5b419e67c33920a341afe58`
+in PR369; actual frontend tests/type-check, Unit, CodeQL/release and fresh-master
+premerge passed, and all post-merge workflows subsequently passed. LC-02B now
+active in isolated branch `claude/chat-narrow-layout` from that master.
+Next action: native browser320px document/element geometry in five dock/
+companion/Access states before choosing a layout repair. No product change yet.
+
+2026-10-18 LC-02B repair checkpoint: active branch `claude/chat-narrow-layout`,
+worktree `/workspace/chat-narrow-layout`, base `dbc1fa7003a6a005b5b419e67c33920a341afe58`.
+First five-state RED attributed to unanchored screen-reader descriptions; dock
+bounds then required a narrow overlay, preserved desktop width and flex shrink
+at the640px breakpoint. Native Guided approval review found persistent ancestor
+autoscroll, now bounded to the transcript. Tagged diagnostics removed.
+Component135pass; final98 narrow/native decision cases plus32 existing composer
+cases in progress. Source/commands/limits in the
+[LC-02B QA record](../../docs/superpowers/qa/2026-10-18-chat-narrow-layout.md).
+No branch push/PR yet; review/remote CI/premerge pending. Preserve actual state
+rather than treating this intermediate checkpoint as completion. Next: complete
+those gates, then start LC-01 in a fresh isolated branch from reviewed master.

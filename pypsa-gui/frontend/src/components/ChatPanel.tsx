@@ -1897,7 +1897,6 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
     useChatStore.getState().seedComposer(null)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [composerSeed])
-  const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Whether the pending composer text arrived by voice. `speech.listening` is
@@ -2024,11 +2023,18 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
   const messagesScrollRef = useRef<HTMLDivElement | null>(null)
   const pendingTokenForScroll = useChatStore((s) => s.pending?.confirmation_token ?? null)
 
+  // Scroll only the transcript. scrollIntoView also scrolls hidden ancestors,
+  // which can shift the narrow workbench horizontally during card updates.
+  const scrollTranscriptToEnd = useCallback(() => {
+    const transcript = messagesScrollRef.current
+    transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' })
+  }, [])
+
   const scrollToLatest = useCallback(() => {
     setStickToBottom(true)
     setShowJumpLatest(false)
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [])
+    scrollTranscriptToEnd()
+  }, [scrollTranscriptToEnd])
 
   const onMessagesScroll = useCallback(() => {
     const el = messagesScrollRef.current
@@ -2042,7 +2048,7 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
   // AssistantDock: while the dock is collapsed this panel sits under a
   // `display:none` ancestor (kept mounted so a streaming turn survives the
   // collapse — see AssistantDock.tsx), and an element with no layout box
-  // cannot be scrolled. `scrollIntoView` calls that land while collapsed are
+  // cannot be scrolled. Transcript scroll calls that land while collapsed are
   // silent no-ops in a real browser (not just jsdom), and none of the other
   // deps here change on an expand-only click, so without this the effect
   // would never re-run and the transcript could sit scrolled to wherever it
@@ -2059,12 +2065,12 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
   // decision a chance to actually run once there's a box to scroll.
   useEffect(() => {
     if (stickToBottom) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      scrollTranscriptToEnd()
       setShowJumpLatest(false)
     } else {
       setShowJumpLatest(true)
     }
-  }, [messages.length, pendingTokenForScroll, stickToBottom, assistantDockOpen])
+  }, [messages.length, pendingTokenForScroll, stickToBottom, assistantDockOpen, scrollTranscriptToEnd])
 
   // Frame handler — translates SSE frames into chatStore updates.
   const handleFrame = useCallback((frame: ChatFrame) => {
@@ -3494,7 +3500,6 @@ export default function ChatPanel({ companionAccessTarget = null }: { companionA
         })}
         <ChoiceCard />
         {assistantDockOpen ? <ConfirmationCard /> : null}
-        <div ref={messagesEndRef} />
         </div>
         {showJumpLatest && (
           <button

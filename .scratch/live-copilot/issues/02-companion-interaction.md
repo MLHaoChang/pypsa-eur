@@ -46,3 +46,27 @@ refusing `backend/.env` before fixture startup (CLI refusal verified). Spec's
 one short-height coverage finding is resolved by32passing browser cases across
 normal/600px heights. No production source changed after the16-case pass.
 
+## LC-02B implementation checkpoint — 2026-10-18
+
+LC-02A merged in [PR369](https://github.com/MLHaoChang/pypsa-eur/pull/369) as
+`dbc1fa7003a6a005b5b419e67c33920a341afe58`; post-merge Test, CodeQL and image
+workflows passed. LC-02B begins from that freshly verified master in branch
+`claude/chat-narrow-layout`, worktree `/workspace/chat-narrow-layout`.
+First RED: real authenticated built-app document/element geometry at320px,
+measured with dock/companion closed/open and Access collapsed/expanded.
+No production layout change yet. Do not hide overflow with global clipping or
+make approval/restriction controls unreachable; source/CI/PR evidence pending.
+
+
+LC-02B local repair checkpoint: mode-switch descriptions anchored locally;
+narrow dock fits over the relative workbench body, and desktop dock can shrink
+without rewriting its saved width. Native Guided approval review also exposed
+persistent ancestor autoscroll; transcript-only scrolling fixes that cause.
+Initial five-state RED0/5, anchor-only3/5, overlay5/5; expanded68/70 exposed
+ancestor movement. The640px breakpoint RED failed all three open-dock states.
+These are overlapping iterations, never sum. Final98-case browser matrix and
+ordinary32 composer cases are in progress; component135pass. See
+[LC-02B QA](../../../docs/superpowers/qa/2026-10-18-chat-narrow-layout.md).
+No PR/push yet. Finish real browser verification, two-axis review, then exact
+source CI and fresh-master premerge. Next isolated implementation is LC-01;
+remaining LC-02 generic scope/plan/source UX depends on it.
