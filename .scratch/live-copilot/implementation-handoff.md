@@ -103,13 +103,13 @@ from the repository report and the following fixture recipe if unavailable:
 
 ## Slice ledger and dependency order
 
-All implementation rows are **not started** at this handoff. Approval covers
-requirements; no row inherits a passing execution claim. LC-02's layout repair
+LC-02A is active as recorded below; other implementation rows are not started.
+Approval covers requirements; no row inherits a passing execution claim. LC-02's layout repair
 may precede LC-01; its new resolved-context UX still depends on LC-01.
 
 | Slice / issue | Resume scope | Required predecessors | Current state / evidence |
 | --- | --- | --- | --- |
-| [LC-02](issues/02-companion-interaction.md) | First 02A pointer repair, then 02B overflow attribution/repair; later scope/plan/decision UX | Layout repair independent; new scope UX needs LC-01 | Not started; real baseline6pass/2fail |
+| [LC-02](issues/02-companion-interaction.md) | First 02A pointer repair, then 02B overflow attribution/repair; later scope/plan/decision UX | Layout repair independent; new scope UX needs LC-01 | 02A implemented locally, native browser32pass/component111pass; branch `claude/chat-composer-pointer`, base6691bd6; review/PR/CI pending; 02B pending |
 | [LC-01](issues/01-discovery-and-scope.md) | Eligible capability/schema discovery and exact target resolver; settle concrete DTO/route compatibility before coding | Existing harness and source rebaseline | Not started; LC-T01/02/06/17 |
 | [LC-03](issues/03-results-and-navigation.md) | Typed evidence/navigation interfaces, then small current/retained domain adapters | LC-01 and applicable LC-02 | Not started; LC-T06–10/19 plus mapped LC-D suites |
 | [LC-04](issues/04-generic-parameter-edits.md) | Exact schema/unit/basis previews and verified writes; storage/line examples first | LC-01 and applicable LC-02 | Not started; LC-T02–05 and domain edit cases |
@@ -205,3 +205,28 @@ Documentation follow-up branch: `claude/live-copilot-plan-approval`; its PR can
 be located by this exact head branch if publication advanced after this commit.
 The agent separately approved this portable handoff with zero blocking findings.
 No application slice has an active implementation branch at this checkpoint.
+
+2026-10-18 LC-02A started in isolated branch `claude/chat-composer-pointer` from
+actual master `6691bd671887210a84e6891a513835cad1723abd`. The older not-started
+checkpoint above is historical. Next action: portable real-browser RED for the
+composer hit target; no application code changed yet. LC-02B remains pending.
+
+2026-10-18 LC-02A local implementation complete: intrinsic desktop content floor
+and bottom-aligned dictation settings. Native browser RED8pass/8fail, then
+14pass/2fail, finally16pass/0fail after both fixes; overlapping runs, never sum.
+Component111pass and production build/type-check/static checks pass. Source
+hashes, portable command and limits in the
+[LC-02A QA record](../../docs/superpowers/qa/2026-10-18-chat-composer-pointer.md).
+Private fixture data was removed. Native HTTP/auth/backend were real; no
+provider/media calls. Current branch `claude/chat-composer-pointer`, starting
+master `6691bd671887210a84e6891a513835cad1723abd`; review/PR/exact-head CI pending.
+Locate its PR by exact branch and preserve running CI. Next action: finish
+review and merge gates; next implementation after that is LC-02B overflow
+attribution, followed by LC-01 discovery. Do not claim all LC-02 complete.
+
+2026-10-18 review correction: added16required short600px browser cases; final
+expanded runner32pass/0fail. Fixture refuses `backend/.env` before startup to
+prevent native dotenv reintroducing provider keys; CLI refusal verified. Both
+review findings addressed without further production changes; final review
+confirmation/PR/exact-head CI pending. Historical16-case counts above remain
+accurate for their iteration, not the final denominator.
