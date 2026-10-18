@@ -19,8 +19,9 @@ review. [CP-06c](issues/06c-saved-restrictions.md) adds saved personal project r
 stale-save protection and revision checks for waiting/queued work.
 [CP-06d](issues/06d-companion-access-summary.md) covers the in-page summary's
 next-turn selection, explicit full review and unavailable/stale observations.
-Wider effect-preview
-and durable policy-history cases stay pending; the panel is not a permission
+Its exact-source and post-merge evidence is recorded in the
+[CP-06a–d closeout](../../docs/superpowers/handovers/2026-10-18-chat-permissions-closeout.md).
+Wider effect-preview and durable policy-history cases stay pending; the panel is not a permission
 credential or all-action readiness gate.
 
 Use authenticated public chat/API/SSE and browser interaction. External transport/inference, time and interrupted I/O may be mocked; real ownership, catalogue/admission, ordinary confirmation, stores, job services and exported bytes remain exercised. Do not infer completion from a model sentence, HTTP success, animation or permission grant.

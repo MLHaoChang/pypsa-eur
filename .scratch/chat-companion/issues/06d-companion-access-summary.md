@@ -1,6 +1,9 @@
 # CP-06d — access summary in in-page chat
 
 Status: ready-for-human
+Execution: implemented and squash merged in [PR #361](https://github.com/MLHaoChang/pypsa-eur/pull/361)
+Merge: `c75ca5584b873418f10f1bca42f868255d445b7b`
+Tested source: `bf08c89e011601f21bb37f349a9a013f1143711b`
 Baseline: master `8723578028bcb1952a36948dede20ebd09eb2b91` (#358)
 
 Show a concise, server-observed access summary while the user opens “Chat here”.
@@ -50,5 +53,24 @@ master premerge gate remain required for the owner's ordinary squash merge.
 - Existing backend policy/API regressions pass 300 cases with one existing
   empty-KNOWN_GAPS parameter skip, including all six steward semantic suites and
   authenticated access/restriction tests. No backend behavior changed.
-- Remote exact-source CI and fresh-master premerge evidence are recorded in the
-  PR and workspace handoff after they complete; local tests are not remote CI.
+- Exact-source [Test 39076892578](https://github.com/MLHaoChang/pypsa-eur/actions/runs/39076892578)
+  passed: all four actual backend test steps, the pilot/QA steps and aggregate,
+  frontend Type-check/tests and Unit executed successfully. Digest-verified
+  native disjoint JUnit records contain 15,940 passes and 320 known skips; all
+  300 selected policy cases executed without skips. Frontend passed 5,595 cases
+  across 475 suites, including all 12 new cases. The offline pilot passed all
+  133 required cases; QA logs confirmed all 33 drivers. Counts overlap with
+  local selections and are not added. Validator validation/report and documented
+  engine/integration no-change skips do not certify those paths afresh.
+- Exact-source CodeQL, inventory, control matrix and release-note checks passed.
+  Fresh `scripts/coord/premerge.sh 361` exited 0 against baseline master with a
+  clean merge, no overlaps and all 19 checks successful or expected skipped.
+  This frontend/documentation slice did not trigger trial semantic tests; the
+  six semantic suites passed in the local policy selection. The ordinary merge
+  pinned the full tested head; its squash tree equals the CI trial/source tree.
+- Post-merge [Test 39104307790](https://github.com/MLHaoChang/pypsa-eur/actions/runs/39104307790),
+  [CodeQL 39104307787](https://github.com/MLHaoChang/pypsa-eur/actions/runs/39104307787)
+  and [image build 39104307811](https://github.com/MLHaoChang/pypsa-eur/actions/runs/39104307811)
+  completed successfully. The bounded implementation is closed; live/device,
+  independent domain review and real-use calibration remain pending. See the
+  [package handoff](../../../docs/superpowers/handovers/2026-10-18-chat-permissions-closeout.md).

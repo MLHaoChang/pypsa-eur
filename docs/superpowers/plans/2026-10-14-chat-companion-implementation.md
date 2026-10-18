@@ -35,10 +35,15 @@ old/new/unit reviews for the existing engineering preview adapter. Wider effect
 previews and external readiness remain separate work.
 [CP-06c saved personal project restrictions](../../../.scratch/chat-companion/issues/06c-saved-restrictions.md),
 merged in #358 (`8723578028bcb1952a36948dede20ebd09eb2b91`), adds closed restrictive
-modes, revisioned saves and waiting/queued action checks. The current slice is
+modes, revisioned saves and waiting/queued action checks.
 [CP-06d in-page access summary](../../../.scratch/chat-companion/issues/06d-companion-access-summary.md),
-using the same next-turn checking selection and full access controls as chat.
-Durable policy history and broader effect previews remain separate.
+merged in #361 (`c75ca5584b873418f10f1bca42f868255d445b7b`), uses the same
+next-turn checking selection and full access controls as chat. Its post-merge
+Test, CodeQL and image workflows passed. The bounded CP-06a–d implementation
+package is closed out in the [permission handoff](../handovers/2026-10-18-chat-permissions-closeout.md).
+The recommended next CP-06 slice is durable personal policy history; broader
+effect previews need separate domain adapters and tests. Neither is implemented
+by CP-06a–d.
 Wider current-tab navigation, broader domain adapters/family journeys and
 external/live validation remain separate scopes.
 This plan remains the sequence; the linked issues are the execution records.
