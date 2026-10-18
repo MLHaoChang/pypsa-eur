@@ -22,6 +22,12 @@ tools, read-only/computed fields, unsupported checked operations and inaccessibl
 projects remain explicit. Discovery must not expose secret values or confer new
 authority. Generic reachability and independent domain validation are distinct.
 
+The [domain acceptance annex](domain-coverage.md) is normative for LC-C1/C3/C5/
+C6/C10. It maps all 14 inventory families to 24 suites and distinct mathematical
+engines/control models. A generic wrapper and one journey per family do not
+establish that coverage. The source-review agent did not execute those suites
+or provide independent domain release approval.
+
 ## User journeys
 
 | Request | Required behavior |
@@ -45,6 +51,14 @@ filter large models; retrieve values on demand. Support dynamic tool discovery
 within provider offer limits; never send a whole network or secret settings as
 unbounded prompt context. Existing server schemas remain validation authority.
 
+Declare engine/mode/fidelity and supported claim limits as capability metadata.
+Resolve “simulation” before execution: optimization, static AC/security analysis
+and actual aggregate frequency dynamics are distinct operations. Existing
+single-bus RK4 frequency screening is supported within its native limits; it
+does not model voltage dynamics, inter-unit oscillations or detailed inverter
+current-limit dynamics. Unsupported EMT/PLL/transient-voltage claims refuse
+explicitly rather than substituting hourly dispatch or a static handoff.
+
 **LC-C2 Scope resolution.** Resolve names to owned canonical IDs before
 navigation or execution. Bind actor, current project, discussed project/case/run,
 baseline, result source/mode, time window/period, entity and generation/revisions.
@@ -57,7 +71,10 @@ retained sections, completeness, supported filters/entities, provenance,
 units/conventions, bounded fact rows, unavailable reasons and checking profile.
 Persist immutable historical evidence at job completion with manifest/hash/
 retention rules; legacy runs without a section remain unsupported. Reuse a
-shared numerical oracle for API, UI, chat and exported facts. No global
+shared native numerical source for API, UI, chat and exported facts. Separately
+verify correctness using independent analytical/hand-calculated/benchmark
+fixtures per engine as specified in LC-D01–24; agreement among surfaces sharing
+one wrong calculation is insufficient. No global
 “checked” label may be inferred from a successful tool or navigation.
 
 For the copilot's engineering summaries, numerical claims must reference

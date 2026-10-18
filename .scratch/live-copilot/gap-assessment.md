@@ -44,6 +44,17 @@ parity with an external product or its private architecture.
 The control matrix records 170 controls / 14 families and
 `full_coverage=not_established`. Counts describe inventory, not correctness.
 
+The owner-requested independent agent review found LC-T01–19 and one journey
+per family insufficient for comprehensive domain acceptance. The added
+[24 domain suites](domain-coverage.md) separate capacity expansion/multi-period
+planning, AC/proxy/security results, probabilistic/chronological/zonal adequacy,
+Energy Hub planning, control models and actual time-domain frequency screening.
+They require independent physical/numerical oracles and explicit operation
+traceability. The application already has single-bus aggregate RK4 frequency
+simulation; general voltage/EMT/PLL certification is not established. Standard
+MC and zonal/common-mode EH MC are separate existing engines. This source review
+adds requirements, not executed domain tests or independent release approval.
+
 The [real-browser/backend acceptance report](../../docs/superpowers/qa/2026-10-18-chat-companion-browser-e2e.md)
 records 6 passing and 2 failing scenarios with actual native numerical
 read-back. It uses a local scripted model wire, not a hosted model or speech.

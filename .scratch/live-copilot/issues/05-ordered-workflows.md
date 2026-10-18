@@ -10,6 +10,11 @@ Read the [specification](../spec.md), [assessment](../gap-assessment.md),
 [implementation plan](../../../docs/superpowers/plans/2026-10-18-whole-application-live-copilot.md).
 Applicable contracts/cases: LC-C5/C6/C9; LC-T04/05/10/12.
 
+Domain cases: [LC-D06/09/17/19](../domain-coverage.md) plus each effected domain.
+Resolve optimization/static/dynamic intent before execution. Control tuning
+apply and any required re-solve/re-study need distinct verified native steps;
+a recommendation or dispatch success cannot certify a dynamic/AC property.
+
 Persist a finite native-operation graph and dependencies. Verify each required write before one separately admitted solve. Revalidate input/schema/policy revisions, locks, ownership and caps per step. Unknown/partial effects block dependent steps; recovery reconciles and never replays automatically.
 
 Expected ownership: durable operation orchestration over ordinary dispatch, existing receipts/jobs/adapters and owned progress.

@@ -19,6 +19,11 @@ specific component classes are test examples, not the product boundary.
 Read the [gap assessment](../../../.scratch/live-copilot/gap-assessment.md),
 [specification](../../../.scratch/live-copilot/spec.md) and
 [acceptance matrix](../../../.scratch/live-copilot/test-plan.md).
+The owner-requested independent review adds the normative
+[24 domain suites and 14-family mapping](../../../.scratch/live-copilot/domain-coverage.md).
+The generic cases alone were insufficient: capacity planning, static electrical
+analysis, distinct reliability engines, controller models and actual aggregate
+time-domain frequency simulation need separate oracle-backed coverage.
 This plan refines remaining CP-03/06–14 and live-voice issues 01–11 in the
 [existing plan](2026-10-14-chat-companion-implementation.md); do not reimplement
 merged conversation, navigation, permission, case or recovery primitives.
@@ -32,7 +37,7 @@ merged conversation, navigation, permission, case or recovery primitives.
 | [LC-03](../../../.scratch/live-copilot/issues/03-results-and-navigation.md) | Typed result-adapter registry, immutable retained-section capture and source-bound UI ACKs; native publishers, run_evidence, result DTOs/pages and navigation | LC-01/02 | LC-T06–10 pass for each released adapter. Start with shared core time-series/asset/branch infrastructure, then one adapter per result family; every unsupported adapter remains explicit |
 | [LC-04](../../../.scratch/live-copilot/issues/04-generic-parameter-edits.md) | Generic parameter selection over native schemas; adapter-specific basis validation, exact preview and verified native postcondition/effect receipt | LC-01/02 | LC-T03/04/05 pass for storage costs and line parameters; map the rest of the applicable schema families without granting unknown fields |
 | [LC-05](../../../.scratch/live-copilot/issues/05-ordered-workflows.md) | Bounded durable operation graphs over ordinary tools/jobs; dependency/revision checks, leases/budgets, exact receipts and resume/reconciliation | LC-03/04 and existing experiments/jobs/parent stores | LC-T04/05/10/12 pass. Dependent solve starts once after verified edits and its own admission; partial/unknown writes stop advancement; browser loss does not replay work |
-| [LC-06](../../../.scratch/live-copilot/issues/06-family-adapters.md) | Family-by-family discovery/read/edit/effect/result/navigation/export coverage using the common interfaces | LC-01–05 | LC-T16/17 pass per released family; capability matrix refers to executed fixture/oracle evidence and retains pending statuses for all others |
+| [LC-06](../../../.scratch/live-copilot/issues/06-family-adapters.md) | Domain and operation adapters using the common interfaces, with all 24 domain suites mapped to actual engine/control variants | LC-01–05 | LC-T16/17 and applicable LC-D01–24 pass per released capability; matrix links actual tool/parameter/control variants to independent oracles and executed journeys; pending variants remain pending |
 | [LC-07](../../../.scratch/live-copilot/issues/07-continuous-speech.md) | Mocked media lifecycle and durable usage wiring, then actual hosted vendor/LiveKit adapters through the same harness; finalized utterances, captions/playback, interruption and fallback | Stable typed paths; existing parent/utterance/usage primitives | LC-T13–15 pass offline first; then independently authorized real provider/device/resource tests. Continuous voice remains unavailable until actual readiness gates pass |
 | [LC-08](../../../.scratch/live-copilot/issues/08-release-evidence.md) | Integrated whole-family journeys, prolonged/recovery/provider parity, measured speech UX and staged rollout/rollback | Applicable LC-01–07 slices | LC-T16–18 have source-pinned evidence for every released claim. Independent domain review/calibration and production enablement remain separately recorded |
 
@@ -94,12 +99,30 @@ explicit. Ordinary legacy chat is not a substitute for that numerical gate.
 
 ## Coverage and incoming features
 
-Use the current 14-family matrix as the work queue. For each applicable family,
+Use the current 14-family matrix as the work queue, expanded by LC-D01–24.
+One representative family journey cannot close multiple mathematical engines,
+control models or edit/action variants. For each applicable family,
 record discovery, parameter/units/editability, native reads, supported edits,
 previews, effects/jobs, result/source adapters, UI actions, exports and recovery
 with specific fixtures. A family with no editable capability says not applicable
 with a reason. No family becomes validated merely because another uses the same
 wrapper. Preserve Guided/Expert and ordinary/checked distinctions throughout.
+
+Prioritize LC-D04–07 (capacity, multi-period, solver and load flow), D09
+(storage/edit economics), D11–13 (separate reliability engines) and D14–17
+(static electrical, controls and actual time-domain screening). Each adapter
+PR records the annex's source/operation/variant manifest and negative cases.
+These are small independently tested slices within LC-03–06, not a new monolith
+or permission to rewrite scientific engines. Resolve the intended simulation
+engine before the owner's edit-then-run workflow; native optimization does not
+establish that an AC or dynamic property was assessed.
+
+Actual frequency screening already integrates an aggregate ODE at sub-second
+resolution. Expose that supported capability while preserving its absence of
+voltage dynamics, inter-unit oscillations and detailed current-limit dynamics.
+General EMT/RMS/PLL certification remains unsupported. Similarly, adequacy
+adapters expose each engine's own topology, chronology and uncertainty limits;
+one reliability label must not erase those distinctions.
 
 Current pending renewable-profile PRs362–365 are engine/cache/source/preset work;
 their planned generate/apply tools require ordinary admission, pending-artifact
@@ -113,7 +136,9 @@ blindly merge pending branches or advertise them as existing capabilities.
 Write meaningful tests at the agreed public API/SSE/browser/native-worker seams
 before implementation. Reproduce one missing behavior at a time and preserve
 negative/refusal cases. Exact expected numbers come from independent fixtures,
-not the implementation under test. Keep the real browser failure recorded until
+not the implementation under test. Consistency across shared native UI/chat/
+export facts does not replace a separate analytical or benchmark oracle.
+Keep the real browser failure recorded until
 fixed; keyboard success does not certify pointer/touch accessibility.
 
 The local E2E uses a real authenticated backend/database, native handlers and a

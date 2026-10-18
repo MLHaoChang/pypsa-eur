@@ -12,7 +12,8 @@ authorized application: models, tools, editable parameters, jobs and results.
 Load flow, storage costs and “update lines, then run” are representative journeys.
 
 1. Read the [source-reviewed gap assessment](gap-assessment.md).
-2. Follow the [specification](spec.md) and [acceptance matrix](test-plan.md).
+2. Follow the [specification](spec.md), [acceptance matrix](test-plan.md) and
+   [independently reviewed domain suites](domain-coverage.md).
 3. Execute the [implementation plan](../../docs/superpowers/plans/2026-10-18-whole-application-live-copilot.md),
    beginning with [LC-01 discovery and scope](issues/01-discovery-and-scope.md).
 

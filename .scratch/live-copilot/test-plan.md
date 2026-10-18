@@ -14,6 +14,16 @@ separate. Keep the numerical oracle independent of adapter implementation.
 Never use forced clicks, route-fulfilled successes or mutable result state as
 proof that a user action, native effect or job actually succeeded.
 
+The owner-requested independent source review found these 19 generic cases
+insufficient as a domain acceptance specification. The
+[24 mandatory domain suites and 14-family mapping](domain-coverage.md) add
+capacity expansion/multi-period investment, static load flow, distinct adequacy
+engines, control strategies and actual aggregate time-domain frequency tests,
+as well as the other application families. LC-D01–24 are requirements, not
+newly passing tests. One representative journey cannot certify every engine
+inside a family; use the annex's operation/variant traceability and negative
+cases as the release denominator.
+
 | ID | Journey / failure case | Acceptance evidence |
 | --- | --- | --- |
 | LC-T01 | Discover all currently eligible tools under provider offer limits | Schema/dispatcher/route/toolset parity, both provider wires, on-demand discovery then ordinary execution; inaccessible capabilities never offered as authorized |
@@ -31,7 +41,7 @@ proof that a user action, native effect or job actually succeeded.
 | LC-T13 | Finalized speech and corrections | Partials never execute; duplicated/out-of-order final utterances, unit ambiguity, overlap and echo cannot duplicate actions or approve a card |
 | LC-T14 | Playback/caption identity | Same admitted answer/facts, engineering numbers/units pronounced and displayed correctly; barge-in flushes late audio; incomplete/unapproved checked text never spoken |
 | LC-T15 | Media ownership and resource bounds | Mock lifecycle first; real scoped credentials, expiry/rebind/revoke, all cleanup exits, cached/unknown/late usage settlement exactly once and caps across restart |
-| LC-T16 | Full-family release | One source-pinned read, permitted edit/action, result/explanation/navigation/export and refusal/recovery journey per applicable family; all actual eligible tools/controls mapped; no blanket coverage from inventory counts |
+| LC-T16 | Per-capability and domain release | All applicable LC-D01–24 suites and distinct engine/control variants mapped to source-pinned read, permitted edit/action, result/explanation/navigation/export and refusal/recovery evidence; all eligible tools/schema fields/audited controls mapped. One representative family journey or inventory counts cannot certify the rest |
 | LC-T17 | Incoming feature compatibility | After actual merge, profile generation/presets/apply and process-unit fields use native provenance/unit/admission contracts; pending PRs never presented as installed capabilities |
 | LC-T18 | Independent live readiness | Separately authorized capped vendor probes and real browser/device/network/language measurements, including prolonged use; domain review and real-use calibration retain separate evidence |
 | LC-T19 | Unsupported or invented quantitative narrative | Inject extra numbers, wrong units/source, altered paraphrases and unsupported result claims from the model; publication withholds those claims or refuses. Every released engineering numerical claim maps to admitted native facts; no unchecked fallback for a checked request |
