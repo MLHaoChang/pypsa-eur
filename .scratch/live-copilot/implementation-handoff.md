@@ -358,3 +358,17 @@ head squash under owner's standing authorization. No PR/push yet. LC-01 exact
 resolver, named shortcuts, capability eligibility and service/domain schemas
 remain pending; LC-02 generic-context UX still depends on them. No paid calls,
 external contacts, activation or domain release certification.
+
+
+2026-10-18 LC-01A source approved: cfd7e6cfb71f668b08f63e039d4f096670f825f9.
+Both internal Standards/Spec reviewers approved with zero findings. Final local
+combined semantic/provider632pass/2existing skips,124.12s; focused discovery
+43pass. Never sum overlapping runs. Source/log byte hashes and commands are
+in `evidence/component-discovery.json`; QA explains actual native/provider
+seams and scope limits. This latest commit changes evidence/docs only.
+Next: batch push once, draft PR against fresh master, require all exact-head
+checks and actual four backend shards plus pilot/QA steps, then fresh-master
+premerge and ordinary expected-head squash under direct owner authorization.
+No push/PR or merge is claimed here. Do not rewrite the branch during CI.
+LC-01B exact resolution/named shortcuts, richer eligibility and service schemas
+remain pending; this slice does not close LC-01 or certify any domain result.

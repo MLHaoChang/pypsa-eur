@@ -49,7 +49,13 @@ native project/network/dispatch/authentication remain real. No paid calls.
 
 An earlier neighboring run passed1205tests before the last two added cases;
 counts overlap and must not be summed. Final combined semantic/provider
-regressions and source review are pending. Ruff/diff and generated inventory
+regressions passed632tests with2existing skips and296warnings in124.12s.
+The twelve suites include all six current premerge semantic suites, provider
+selection/Responses/frame regressions and catalogue reachability. The skipped
+cases are not counted as successful checks. Both internal Standards and Spec
+source reviews approvedcfd7e6cfb71f668b08f63e039d4f096670f825f9 with zero
+findings; neither review claims test execution. A source-byte/hash manifest
+is retained at `.scratch/live-copilot/evidence/component-discovery.json`. Ruff/diff and generated inventory
 checks pass:256tools/15result tabs/19panels. Control matrix170controls/14families
 retains `full_coverage=not_established`. Inventory is mapping, not correctness.
 
@@ -71,8 +77,8 @@ isolate database, project and app-data paths and release native contexts.
 
 ## Remaining gates and scope
 
-Final source-pinned review, exact-head remote CI and fresh-master premerge are
-pending. This slice does not close LC-01 or certify any engineering result:
+Internal source review and final local regressions are complete. Exact-head
+remote CI and fresh-master premerge remain pending. This slice does not close LC-01 or certify any engineering result:
 exact actor/project/case/run/entity resolution and named shortcuts, richer
 capability eligibility and domain/service-owned schemas remain separate.
 Incoming profile-generation/process-unit PRs are still unmerged capabilities.
