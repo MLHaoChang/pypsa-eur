@@ -10,6 +10,14 @@ Implementation: tracked per slice below; this plan alone does not certify implem
 
 ## Start here
 
+Current execution amendment (2026-10-18): follow the
+[whole-application live copilot plan](2026-10-18-whole-application-live-copilot.md)
+and its source-reviewed gaps for generic model/tool/parameter access, confirmed
+edits, ordered workflows and all-family result adapters. Load flow is a
+representative journey, not the scope boundary. Merged CP-01–06 prerequisites
+are reused; real-browser pointer/overflow failures remain open. The earlier
+sequence below provides background and dependencies.
+
 Read the [specification](../../../.scratch/chat-companion/spec.md), especially its authority/publication invariants and CC-01–CC-16 requirements. The [acceptance matrix](../../../.scratch/chat-companion/test-plan.md) is the pending evidence checklist. The [assessment](../../../.scratch/live-voice/dots-design-assessment-2026-10-14.md) explains the current gaps and reference sources.
 
 First implement **CP-01**, then **CP-02**. These deliver truthful in-page chat and readable outcomes without new hosted media. Do not start a broad avatar rewrite or background effects to complete either slice.
@@ -35,10 +43,15 @@ old/new/unit reviews for the existing engineering preview adapter. Wider effect
 previews and external readiness remain separate work.
 [CP-06c saved personal project restrictions](../../../.scratch/chat-companion/issues/06c-saved-restrictions.md),
 merged in #358 (`8723578028bcb1952a36948dede20ebd09eb2b91`), adds closed restrictive
-modes, revisioned saves and waiting/queued action checks. The current slice is
+modes, revisioned saves and waiting/queued action checks.
 [CP-06d in-page access summary](../../../.scratch/chat-companion/issues/06d-companion-access-summary.md),
-using the same next-turn checking selection and full access controls as chat.
-Durable policy history and broader effect previews remain separate.
+merged in #361 (`c75ca5584b873418f10f1bca42f868255d445b7b`), uses the same
+next-turn checking selection and full access controls as chat. Its post-merge
+Test, CodeQL and image workflows passed. The bounded CP-06a–d implementation
+package is closed out in the [permission handoff](../handovers/2026-10-18-chat-permissions-closeout.md).
+Durable personal policy history and broader effect previews remain CP-06 work;
+the owner's newer generic-copilot priority is ordered in the execution amendment.
+Neither remaining capability is implemented by CP-06a–d.
 Wider current-tab navigation, broader domain adapters/family journeys and
 external/live validation remain separate scopes.
 This plan remains the sequence; the linked issues are the execution records.

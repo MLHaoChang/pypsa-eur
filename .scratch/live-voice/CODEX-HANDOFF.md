@@ -3,6 +3,27 @@
 
 # Codex handoff — whole-application assistant / live voice
 
+## Current continuation — 2026-10-18
+
+The current source-reviewed map is the [whole-application live copilot assessment](../live-copilot/gap-assessment.md),
+[specification](../live-copilot/spec.md) and
+[remaining implementation plan](../../docs/superpowers/plans/2026-10-18-whole-application-live-copilot.md),
+reviewed against master `c75ca5584b873418f10f1bca42f868255d445b7b`.
+The owner clarified that the companion must discover models/tools/parameters,
+edit supported fields and sequence verified changes then simulation across the
+application. Load flow is an example. Begin with generic discovery/scope and
+the recorded browser layout fixes; do not repeat merged CP-01–06 prerequisites.
+
+The [CP-06a–d closeout](../../docs/superpowers/handovers/2026-10-18-chat-permissions-closeout.md)
+records PR356/357/358/361 and their verified boundaries. PR361 implementation
+and post-merge CI passed. A later real-browser/real-backend journey found pointer
+overlap and narrow-review overflow; CI does not erase these open UI failures.
+Current inventory: 255 tools / 15 result tabs / 19 panels; 170 controls / 14
+families, `full_coverage=not_established`. Continuous hosted voice, broader native
+adapters, independent domain review and real-use calibration remain incomplete.
+
+Everything below is historical context, not the current next-task instruction.
+
 2026-10-14 continuation: [CP-02 canonical companion outcomes](../chat-companion/issues/02-canonical-outcomes.md) records the next master-based UI/publication slice. [CP-01 / PR #235](https://github.com/MLHaoChang/pypsa-eur/pull/235) remains a separate dependency with its tested source preserved. These slices do not enable hosted voice or waive live/domain release gates.
 
 ## 2026-10-14 planning continuation
