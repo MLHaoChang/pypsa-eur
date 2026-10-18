@@ -109,7 +109,7 @@ may precede LC-01; its new resolved-context UX still depends on LC-01.
 
 | Slice / issue | Resume scope | Required predecessors | Current state / evidence |
 | --- | --- | --- | --- |
-| [LC-02](issues/02-companion-interaction.md) | First 02A pointer repair, then 02B overflow attribution/repair; later scope/plan/decision UX | Layout repair independent; new scope UX needs LC-01 | 02A implemented locally, native browser16pass/component111pass; branch `claude/chat-composer-pointer`, base6691bd6; review/PR/CI pending; 02B pending |
+| [LC-02](issues/02-companion-interaction.md) | First 02A pointer repair, then 02B overflow attribution/repair; later scope/plan/decision UX | Layout repair independent; new scope UX needs LC-01 | 02A implemented locally, native browser32pass/component111pass; branch `claude/chat-composer-pointer`, base6691bd6; review/PR/CI pending; 02B pending |
 | [LC-01](issues/01-discovery-and-scope.md) | Eligible capability/schema discovery and exact target resolver; settle concrete DTO/route compatibility before coding | Existing harness and source rebaseline | Not started; LC-T01/02/06/17 |
 | [LC-03](issues/03-results-and-navigation.md) | Typed evidence/navigation interfaces, then small current/retained domain adapters | LC-01 and applicable LC-02 | Not started; LC-T06–10/19 plus mapped LC-D suites |
 | [LC-04](issues/04-generic-parameter-edits.md) | Exact schema/unit/basis previews and verified writes; storage/line examples first | LC-01 and applicable LC-02 | Not started; LC-T02–05 and domain edit cases |
@@ -223,3 +223,10 @@ master `6691bd671887210a84e6891a513835cad1723abd`; review/PR/exact-head CI pendi
 Locate its PR by exact branch and preserve running CI. Next action: finish
 review and merge gates; next implementation after that is LC-02B overflow
 attribution, followed by LC-01 discovery. Do not claim all LC-02 complete.
+
+2026-10-18 review correction: added16required short600px browser cases; final
+expanded runner32pass/0fail. Fixture refuses `backend/.env` before startup to
+prevent native dotenv reintroducing provider keys; CLI refusal verified. Both
+review findings addressed without further production changes; final review
+confirmation/PR/exact-head CI pending. Historical16-case counts above remain
+accurate for their iteration, not the final denominator.

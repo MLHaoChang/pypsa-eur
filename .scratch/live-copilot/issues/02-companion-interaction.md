@@ -33,10 +33,16 @@ the reproduction to a portable repository browser runner before fixing layout.
 
 LC-02A local result: intrinsic desktop content floor fixes pointer interception
 without changing saved heights; bottom-aligned dictation settings fixes the
-additional tall-touch Close failure. Portable real-backend runner16/16pass;
+additional tall-touch Close failure. Portable real-backend runner32/32pass,
+including16short-height cases;
 component regressions111pass, production build/type-check and helper static
 checks pass. See [source-pinned QA](../../../docs/superpowers/qa/2026-10-18-chat-composer-pointer.md)
 and [native geometry evidence](../evidence/composer-pointer.json).
 PR/remote checks pending. LC-02B overflow and remaining generic-context UX are
 not complete. Next action: review, exact-head CI and fresh-master premerge.
+
+Review follow-up: Standards had no blockers; its dotenv caveat is resolved by
+refusing `backend/.env` before fixture startup (CLI refusal verified). Spec's
+one short-height coverage finding is resolved by32passing browser cases across
+normal/600px heights. No production source changed after the16-case pass.
 

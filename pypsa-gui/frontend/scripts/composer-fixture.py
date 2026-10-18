@@ -26,6 +26,8 @@ def main():
     repository = Path(__file__).resolve().parents[3]
     backend_dir = repository / "pypsa-gui/backend"
     dist = repository / "pypsa-gui/frontend/dist"
+    if (backend_dir / ".env").exists():
+        raise RuntimeError("Use an isolated checkout without backend/.env; fixture credentials must stay isolated")
     if not (dist / "spa.html").is_file():
         raise RuntimeError("Build the current frontend with npm run build first")
 

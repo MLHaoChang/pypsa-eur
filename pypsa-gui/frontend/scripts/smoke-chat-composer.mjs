@@ -102,16 +102,18 @@ try {
   await owner.close()
 
   const scenarios = []
-  for (const touch of [false, true]) {
-    for (const height of [null, 60, 88, 360]) {
-      for (const expanded of [false, true]) scenarios.push({ touch, height, expanded })
+  for (const short of [false, true]) {
+    for (const touch of [false, true]) {
+      for (const height of [null, 60, 88, 360]) {
+        for (const expanded of [false, true]) scenarios.push({ touch, height, expanded, short })
+      }
     }
   }
   for (const scenario of scenarios) {
-    const { touch, height, expanded } = scenario
-    const name = `${touch ? 'touch' : 'desktop'}-${height ?? 'default'}-${expanded ? 'expanded' : 'collapsed'}`
+    const { touch, height, expanded, short } = scenario
+    const name = `${touch ? 'touch' : 'desktop'}-${height ?? 'default'}-${expanded ? 'expanded' : 'collapsed'}${short ? '-short' : ''}`
     const context = await browser.newContext({ storageState: authenticated, hasTouch: touch,
-      isMobile: touch, viewport: touch ? { width: 420, height: 850 } : { width: 1440, height: 1000 },
+      isMobile: touch, viewport: { width: touch ? 420 : 1440, height: short ? 600 : touch ? 850 : 1000 },
       reducedMotion: 'reduce' })
     await context.route(url => ['http:', 'https:'].includes(url.protocol) && url.hostname !== '127.0.0.1', route => route.abort())
     await context.addInitScript(({ height }) => {
@@ -172,7 +174,7 @@ try {
       assert.equal(requests, 0, 'Layout, dictation settings and checking never send or transcribe')
       const preference = await page.evaluate(() => localStorage.getItem('chat:promptHeight'))
       assert.equal(preference, String(height ?? 88), 'A layout clamp must preserve saved resize preference')
-      if (!touch && height === null && !expanded) {
+      if (!touch && height === null && !expanded && !short) {
         const resize = async (from, to) => {
           const handle = await page.getByTestId('chat-prompt-resize').boundingBox()
           const x = handle.x + handle.width / 2, y = handle.y + handle.height / 2

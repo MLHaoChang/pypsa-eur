@@ -34,15 +34,17 @@ by the app header. The intrinsic floor alone passed14/16 cases. Anchoring the
 settings overlay to the composer's bottom fixes the Close action without
 increasing global z-index or changing media behavior.
 
-Final runner: **16 passed, 0 failed**, no browser page errors. This includes
+Final runner: **32 passed, 0 failed**, no browser page errors. This includes
 desktop and Chromium touch emulation, default/60/88/360 preferences and Access
-expanded/collapsed. Each case uses a normal checkbox pointer action, keyboard
+expanded/collapsed, both at normal heights (1000px desktop /850px touch) and
+short600px height. Each case uses a normal checkbox pointer action, keyboard
 toggle, contained toolbar geometry, editable draft and normal settings Close.
 The default desktop case also drags the actual resize handle to360 then60,
 rechecks pointer access and verifies the saved60 survives a real page reload.
 
 The initial combined runner was8pass/8fail (six checkbox and two settings cases),
-then14pass/2fail after the first fix, then16pass after both fixes. These counts
+then14pass/2fail after the first fix, then16pass after both fixes. Review added
+16short-screen cases, and the final expanded runner passed all32. These counts
 are overlapping iterations, not independent totals. Source byte hashes and
 per-case geometry are committed in
 [the evidence record](../../../.scratch/live-copilot/evidence/composer-pointer.json).
@@ -54,7 +56,11 @@ the tested working changes; verify those hashes against the implementation PR.
 Install the frozen repository test/default Python environments and locked
 frontend dependencies if missing. Playwright and Chromium are explicit browser
 runner prerequisites; Playwright may be installed separately without changing
-the application lockfile. From `pypsa-gui/frontend`:
+the application lockfile. Use an isolated checkout with `backend/.env` absent;
+the helper refuses that file before credentials/backend/provider startup so
+native dotenv loading cannot reintroduce external provider keys. That refusal
+was checked through the helper CLI with an empty fixture `.env`.
+From `pypsa-gui/frontend`:
 
 ```bash
 npm run build
@@ -74,6 +80,23 @@ Production build/type-check, Python helper Ruff, Node syntax and diff checks
 pass. The browser runner is a required recorded local gate for this slice;
 the existing frontend CI job runs type-check/Vitest, not this native backend
 browser runner. A green component job alone does not certify geometry.
+
+## Two-axis review
+
+### Standards
+
+Initial review: approved, zero blocking findings. It noted a nonblocking
+credential-isolation caveat from native dotenv loading. The helper now refuses
+`backend/.env` before startup; the refusal was independently exercised.
+
+### Spec
+
+Initial review: changes required, one P2 finding. Normal-height cases omitted
+the short-screen requirement in LC-T11/LC-C7. The final runner adds all saved
+height/Access/pointer combinations at600px, giving16additional passing cases.
+
+Summary: Standards0blocking findings; Spec1initial finding corrected by actual
+short-height evidence. Final review confirmation is recorded in the PR.
 
 ## Remaining scope
 
