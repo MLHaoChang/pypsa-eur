@@ -232,6 +232,15 @@ class ProjectContext:
     # project or a blank draft) and `build_context` start empty. See those
     # methods for why each way round.
     user_ts: dict[tuple[str, str, str], Any] = field(default_factory=dict)
+    # Provenance metadata for profiles written by the renewable profile
+    # generator (spec D6, plan Task 5), keyed exactly like `user_ts`:
+    # source, preset, params, weather year, bbox, leap-day handling, tiling
+    # flag, generated-at, atlite version. Serialised INTO `user_ts.json`
+    # under a reserved "$meta" top-level key by `_serialize_user_ts`, so the
+    # save/load round-trip and the undo payload carry it with the series —
+    # a second sidecar file would drift. Same lifecycle as `user_ts`:
+    # carried forward (as a COPY) wherever `user_ts` is carried.
+    user_ts_meta: dict[tuple[str, str, str], Any] = field(default_factory=dict)
     # Set by `_hydrate_context_from_disk` when `user_ts.json` exists but cannot
     # be read, cleared by the next save that rewrites it. See
     # `may_rewrite_user_ts`.
