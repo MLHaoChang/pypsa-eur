@@ -1,6 +1,6 @@
 """Read-only current policy through authenticated HTTP; no provider needed."""
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -24,8 +24,53 @@ def peer(_auth_db, seeded_identity):
         yield attach_session(browser, session_local, uid), str(uid)
 
 
+def _replace_lock(session_local, project_id, holder_id, expires_at):
+    from db.models import ProjectLock
+
+    project = uuid.UUID(str(project_id))
+    holder = holder_id if isinstance(holder_id, uuid.UUID) else uuid.UUID(str(holder_id))
+    with session_local() as db:
+        row = db.get(ProjectLock, project)
+        if row is not None:
+            db.delete(row)
+            db.commit()
+        db.add(ProjectLock(project_id=project, holder_user_id=holder,
+                           acquired_at=datetime.now(UTC), expires_at=expires_at))
+        db.commit()
+    return project, holder
+
+
 def test_access_requires_authentication(anon_client):
     assert anon_client.get('/api/chat/access').status_code == 401
+
+
+@pytest.mark.parametrize(('when', 'naive', 'holder', 'state', 'blocked'), [
+    ('past', False, 'peer', 'unlocked', False),
+    ('past', True, 'peer', 'unlocked', False),
+    ('future', True, 'peer', 'other', True),
+    ('future', False, 'self', 'yours', False),
+])
+def test_access_reports_lock_expiry_without_deleting_the_row(
+    client, session_ctx, peer, seeded_identity, _auth_db, when, naive, holder, state, blocked,
+):
+    """A read must not prune an expired lock, and a naive timestamp is still UTC."""
+    from db.models import ProjectLock
+
+    assert client.post('/api/projects/Lock Read', params={'force': True, 'rebind': True}).status_code == 200
+    _, peer_id = peer
+    holder_id = seeded_identity['user_id'] if holder == 'self' else peer_id
+    expiry = datetime.now(UTC) + (timedelta(minutes=10) if when == 'future' else -timedelta(minutes=10))
+    if naive:
+        expiry = expiry.replace(tzinfo=None)
+    project, holder_uuid = _replace_lock(_auth_db[1], session_ctx(client).project_uuid, holder_id, expiry)
+    observed = client.get('/api/chat/access', params={'project_id': str(project)})
+    assert observed.status_code == 200, observed.text
+    body = observed.json()
+    assert body['project_lock'] == state
+    assert ('project_writes_locked' in body['blockers']) is blocked
+    with _auth_db[1]() as db:
+        row = db.get(ProjectLock, project)
+        assert row is not None and row.holder_user_id == holder_uuid
 
 
 def test_access_reports_actual_confirmation_floors(client, monkeypatch):

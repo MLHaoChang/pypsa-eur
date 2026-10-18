@@ -331,6 +331,19 @@ def test_saved_rules_survive_new_connections_and_a_new_chat(baseline, client, _a
     assert chat_tools.get_component('Generator', 'G1')['marginal_cost'] == 10
 
 
+def test_a_chat_owned_by_someone_else_cannot_run_tools(baseline):
+    session = ChatSession(owner_user_id=str(uuid.uuid4()))
+    collector = []
+    frames = list(dispatch_tool_call(session, {
+        'id': 'foreign-chat-owner', 'name': 'bulk_update_components', 'input': {
+            'component_class': 'Generator', 'names': ['G1'],
+            'updates': {'marginal_cost': 20}}}, collector))
+    assert any('Chat ownership changed' in json.dumps(data) for _, data in frames), frames
+    assert not any(event in {'tool_pending_confirmation', 'tool_running'} for event, _ in frames)
+    assert collector and collector[0]['is_error']
+    assert chat_tools.get_component('Generator', 'G1')['marginal_cost'] == 10
+
+
 def test_a_persisted_initial_revision_is_corruption_not_an_absent_rule(baseline, client, _auth_db):
     from sqlalchemy import text
 
