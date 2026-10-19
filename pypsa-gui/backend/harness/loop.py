@@ -1011,6 +1011,7 @@ def run_turn(
     generation: int | None = None,
     checked_scope: dict | None = None,
     checked_operation: dict | None = None,
+    source_gap_ref: dict | None = None,
     binding_generation: int = 0,
     _held_lease: str | None = None,
     _held_generation: int | None = None,
@@ -1199,6 +1200,19 @@ def run_turn(
             session.assurance_turn = assurance.Turn(session, PyPSAService.get_active_context())
             from harness.navigation import begin_turn
             begin_turn(session.assurance_turn, binding_generation)
+            if source_gap_ref is not None:
+                from harness import attention
+                try:
+                    if checked_operation is not None or attachment_file_ids or utterance_id is not None or generation is not None:
+                        raise ValueError('follow-up must be an explicit scoped text request')
+                    session.assurance_turn.source_gap_binding = attention.admit_followup(
+                        session, PyPSAService.get_active_context().project_uuid,
+                        source_gap_ref, message, checked_scope)
+                except (HTTPException, ValueError, TypeError, KeyError, OSError):
+                    yield 'error', {'error_kind': 'source_gap_followup_unavailable',
+                                    'message': 'The source gap changed, is unavailable, or the request no longer matches. Refresh Activity and prepare it again.'}
+                    yield 'session_done', {'reason': 'source_gap_followup_unavailable'}
+                    return
             try:
                 session.assurance_turn.suspend_scope()
             except (HTTPException, OSError, ValueError):
@@ -1209,6 +1223,10 @@ def run_turn(
             session.assurance_turn.prepare_operation(checked_operation)
             if not attachment_file_ids and checked_operation is None:
                 session.assurance_turn.prepare_request(message, ui_context, PyPSAService.get_active_context(), checked_scope)
+        elif source_gap_ref is not None:
+            yield 'error', {'error_kind': 'invalid_source_gap_followup', 'message': 'This follow-up requires a checked request.'}
+            yield 'session_done', {'reason': 'invalid_source_gap_followup'}
+            return
         elif assurance.shadow_configured():
             try:
                 session.shadow_turn = assurance.Turn(session, PyPSAService.get_active_context())
@@ -2358,18 +2376,18 @@ def _dispatch_real_tool_call(
     tool_use_id = tu.get("id") or uuid.uuid4().hex
     tool_name = tu.get("name") or "<missing-name>"
     args = tu.get("input") or {}
-    if session.assurance_turn is not None:
-        # Confirmation and execution share an immutable argument snapshot.
-        import json
-        try:
-            args = json.loads(json.dumps(args, allow_nan=False))
-        except (ValueError, TypeError, OverflowError):
-            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
-                                 "error_kind": "validation_error",
-                                 "message": "Checked tool arguments must be finite JSON values."}
-            tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
-                                           "is_error": True, "content": "validation_error"})
-            return
+    # Ordinary and checked calls execute the same finite JSON snapshot. Never
+    # give caller-owned inputs or emitted frames a reference to that snapshot.
+    import json
+    try:
+        args = json.loads(json.dumps(args, allow_nan=False))
+    except (ValueError, TypeError, OverflowError):
+        yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                             "error_kind": "validation_error",
+                             "message": "Tool arguments must be finite JSON values."}
+        tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
+                                       "is_error": True, "content": "validation_error"})
+        return
     from harness import mcp_client
     external = mcp_client.server_for(session, tool_name)   # an MCP tool's server (issue 19)
     tier = _tool_tier(session, tool_name)
@@ -2377,7 +2395,7 @@ def _dispatch_real_tool_call(
     yield "tool_request", {
         "tool_use_id": tool_use_id,
         "tool_name": tool_name,
-        "args": args,
+        "args": json.loads(json.dumps(args)),
         "safety_tier": tier,
     }
 
@@ -2485,6 +2503,18 @@ def _dispatch_real_tool_call(
     # The M7 parallel-destructive pre-scan is upstream of this and is NOT
     # relaxed — auto-approve drops the human round-trip, not the serialisation.
     confirmation_args = args
+    from harness import restrictions
+    try:
+        restriction = restrictions.capture(session)
+        restrictions.require_allowed(restriction, tier)
+    except Exception as exc:
+        detail = getattr(exc, 'detail', None)
+        kind = detail.get('error_kind', 'restriction_unavailable') if isinstance(detail, dict) else 'restriction_unavailable'
+        yield 'tool_error', {'tool_use_id': tool_use_id, 'tool_name': tool_name,
+                             'error_kind': kind, 'message': _redact_for_log(detail or exc)}
+        tool_results_collector.append({'type': 'tool_result', 'tool_use_id': tool_use_id,
+                                       'is_error': True, 'content': _error_result_content(detail, exc, kind)})
+        return
     if tool_name == "apply_project_changes":
         try:
             from services.assistant_tools import preview_confirmation
@@ -2497,6 +2527,8 @@ def _dispatch_real_tool_call(
             tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
                                            "is_error": True, "content": _error_result_content(detail, exc, kind)})
             return
+    from harness import confirm as confirmation_gate
+    policy_revision = confirmation_gate.confirmation_revision()
     approved = yield from _confirm_destructive_tool(
         session,
         tool_use_id=tool_use_id,
@@ -2506,12 +2538,26 @@ def _dispatch_real_tool_call(
         tool_results_collector=tool_results_collector,
         guided=guided or (session.assurance_turn is not None and tool_name == "update_component"),
         external=external,
+        restriction_mode=restriction['mode'] if restriction else 'standard',
+        restriction_snapshot=restriction,
     )
     if not approved:
         return
 
     task_ticket = None
     try:
+        def require_current_confirmation():
+            restrictions.require_current(restriction, session)
+            if (confirmation_gate.confirmation_revision() != policy_revision
+                    or _tool_tier(session, tool_name) != tier
+                    or mcp_client.server_for(session, tool_name) != external):
+                from fastapi import HTTPException
+                raise HTTPException(409, detail={
+                    "error_kind": "confirmation_revoked",
+                    "message": "The action's confirmation rules changed; request and review it again.",
+                })
+
+        require_current_confirmation()
         effect_fresh = True
         if session.assurance_turn is not None and tool_name == "update_component":
             from harness.effects import reserve
@@ -2539,7 +2585,7 @@ def _dispatch_real_tool_call(
         # fails partway can still have mutated the network, so marking on success
         # only would under-report. Over-marking costs a prompt about already-clean
         # work; under-marking costs the work itself.
-        if effect_fresh and tier != "read" and not external and tool_name not in {"run_sensitivity_sweep", "start_experiment", "prepare_experiment", "advance_experiment", "refresh_experiment", "cancel_experiment", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
+        if effect_fresh and tier != "read" and not external and tool_name not in {"run_sensitivity_sweep", "start_experiment", "prepare_experiment", "advance_experiment", "refresh_experiment", "cancel_experiment", "reconcile_experiment", "export_experiment_comparison", "start_task", "resume_task", "cancel_task", "resolve_task_step", "preview_project_changes", "create_chart", "build_delivery"}:
             from services import dirty_state
             dirty_state.mark_dirty()
             # ★ P33b B2: the chat seam of the edit counter. Same placement and
@@ -2576,6 +2622,7 @@ def _dispatch_real_tool_call(
         # autosave — the 30s default is generous so legitimate writes finish well
         # inside it. A tool_not_started call was cancelled and cannot run at all.
         if tool_name in ("run_simulation", "run_ac_pf_stage"):
+            require_current_confirmation()
             result = handler(**(args or {}))
         else:
             # Copy the calling context into the worker thread. Tool handlers
@@ -2595,10 +2642,15 @@ def _dispatch_real_tool_call(
             _ctx_snapshot = contextvars.copy_context()
             checked_turn = session.assurance_turn
             def invoke_handler():
+                require_current_confirmation()
                 if checked_turn is not None and tool_name == "update_component":
                     from harness.effects import execute
                     return execute(checked_turn, tool_name, args, handler)
                 from harness.experiment_execution import invoke
+                if tool_name == 'apply_project_changes':
+                    from services.assistant_tools import confirmed_preview
+                    with confirmed_preview(confirmation_args['review_sha256']):
+                        return invoke(session, tool_name, args or {}, handler)
                 return invoke(session, tool_name, args or {}, handler)
             # PER_TOOL_TIMEOUT_SECONDS is a budget for RUNNING the handler.
             # `future.result(timeout=...)` alone measured queue + run on a pool

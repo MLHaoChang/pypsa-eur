@@ -225,6 +225,10 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/library/items/tariff/import_urdb"): (NOT_PROJECT_DATA, _R_LIBRARY),
     ("DELETE", "/api/changelog/"): (NOT_PROJECT_DATA, _R_CHANGELOG),
     ("PUT", "/api/chat/settings/api-key"): (NOT_PROJECT_DATA, _R_LLM_SETTINGS),
+    ("PUT", "/api/chat/restrictions"): (NOT_PROJECT_DATA,
+        "Changes only the authenticated user's personal restriction row for the current authorized project. "
+        "It changes no shared project inputs, results or configuration and must remain usable while another "
+        "member holds the edit lock. Native handlers retain their own edit-lock and ACL checks."),
     ("DELETE", "/api/chat/settings/api-key"): (NOT_PROJECT_DATA, _R_LLM_SETTINGS),
     ("PUT", "/api/chat/settings/llm/profiles/{profile_id}"): (NOT_PROJECT_DATA, _R_LLM_SETTINGS),
     ("DELETE", "/api/chat/settings/llm/profiles/{profile_id}"): (NOT_PROJECT_DATA, _R_LLM_SETTINGS),

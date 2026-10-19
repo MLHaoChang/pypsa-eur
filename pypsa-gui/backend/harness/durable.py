@@ -27,13 +27,13 @@ def network_guard():
 
 
 @contextmanager
-def transaction(directory):
+def transaction(directory, *, timeout=5):
     with _REGISTRY_LOCK:
         lock = _LOCKS.get(str(directory))
         if lock is None:
             lock = threading.RLock()
             _LOCKS[str(directory)] = lock
-    if not lock.acquire(timeout=5):
+    if not lock.acquire(timeout=timeout):
         raise TimeoutError("assurance storage busy")
     try:
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -66,7 +66,7 @@ def transaction(directory):
                 def release():
                     fcntl.flock(stream, fcntl.LOCK_UN)
 
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + timeout
             while True:
                 try:
                     acquire()

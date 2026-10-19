@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Guided's "Open the campus checks" now shows a "Back to Results" button and a hub-design crumb instead of an Expert "STUDIES" header with no way back (UX review N5, regression of M10). The button is one shared component.

@@ -41,6 +41,8 @@ interface HubDesignState {
   /** The New-project wizard's "Your own site" card asked the Start card to
    *  open the generic site form (consumed once by the Start card). */
   siteFormRequested: boolean
+  /** The assistant set-up banner was dismissed (this page load; UX review L1). */
+  setupCardDismissed: boolean
 
   resetFor: (project: string | null, d: HubDesignDefaults) => void
   setStep: (step: HubStep, opts?: { user?: boolean }) => void
@@ -51,6 +53,7 @@ interface HubDesignState {
   setEnsCap: (v: string) => void
   setSiteSeed: (seed: { params: SiteParams; entered: string[] } | null) => void
   setSiteFormRequested: (v: boolean) => void
+  dismissSetupCard: () => void
 }
 
 export const HUB_DESIGN_INITIAL = {
@@ -64,6 +67,7 @@ export const HUB_DESIGN_INITIAL = {
   userMovedRail: false,
   siteSeed: null as { params: SiteParams; entered: string[] } | null,
   siteFormRequested: false,
+  setupCardDismissed: false,
 }
 
 export const useHubDesignStore = create<HubDesignState>()((set) => ({
@@ -81,4 +85,5 @@ export const useHubDesignStore = create<HubDesignState>()((set) => ({
   setEnsCap: (ensCap) => set({ ensCap }),
   setSiteSeed: (siteSeed) => set({ siteSeed }),
   setSiteFormRequested: (siteFormRequested) => set({ siteFormRequested }),
+  dismissSetupCard: () => set({ setupCardDismissed: true }),
 }))

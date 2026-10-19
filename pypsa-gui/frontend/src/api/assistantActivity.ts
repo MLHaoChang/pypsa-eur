@@ -1,5 +1,9 @@
 import { client } from './client'
 export type ActivityFilter = 'all' | 'running' | 'needs_you' | 'scheduled' | 'completed'
+export interface SourceGapReference { source_id: string; revision: number; digest: string }
+export interface PreparedGapFollowup {
+  message: string; checked_scope: Record<string, unknown>; source_gap_ref: SourceGapReference
+}
 export interface ActivityItem {
   id: string; source_id: string; project_id: string; family: string; title: string
   native_status: string; status: string; evidence_available: boolean; needs_you: boolean
@@ -13,6 +17,9 @@ export interface DecisionObservation {
   source_id: string; project_id: string; session_id: string; tool_use_id: string
   tool_name: string; native_status: string; revision: number; decision_digest: string
   reason: string; inspection_only: true; evidence_available: false
+  prepared_followup?: PreparedGapFollowup | null
+  followup_unavailable_reason?: string | null
+  followups?: { answer_id: string; turn_id: string; session_id: string; request_complete: boolean; observed_at: number }[]
   source_gap?: { answer_id: string; turn_id: string
     request_scope: { profile: string; project_id: string; entity_id?: string | null
       metrics?: string[]; start?: string; end?: string; window?: string

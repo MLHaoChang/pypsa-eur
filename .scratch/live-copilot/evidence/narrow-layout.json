@@ -1,0 +1,4137 @@
+{
+  "source": {
+    "head": "fc6940d06e6fe76c328920bb36ccaadaf88f6770",
+    "src/components/ChatPanel.tsx": "dc1e35ebefb07a0fd0046e8f11384761c835c57b680d9e6f2cb4aaea64824d36",
+    "src/components/DictationControls.tsx": "09b2f78dd682cda697ccba7f6a2c9b8843ef1ef20e5015d7aea3d55bcbe589c3",
+    "dist/spa.html": "2f8bbf9feae03d9c474c3766d66432080bb1804a011e26d6d97eb1a9d484ca23",
+    "scripts/composer-fixture.py": "39c94f182f8f03252472e486dada06d1cb91a1998840da8548b68e50eeeb5fb3",
+    "scripts/smoke-chat-composer.mjs": "7e5cd9be1f265eaef5181a1f1c561c531ba98bf99df4a913d89b12b680e541b2",
+    "src/App.tsx": "5f171b0c9e7de9e47042185ddaa50b7fc9c80ec74343a1b1029d0006b8eaaab6",
+    "src/components/AssistantDock.tsx": "4a9bfc23d23f1860176af9def7260f1f1f942e9b0955472f5670bd4f64424f93",
+    "src/components/CompanionLauncher.tsx": "3afde9a475ae92801aeacb875de0716ae0e7189cc69fe593b577509ed9720a27",
+    "src/layout/AppHeader.tsx": "096e579ec35522cb074f1e730dd498d70c8d818d9bc1e9f3bd9ca6d52342c820",
+    "src/layout/UserMenu.tsx": "b48b605284baa037897903eee5b02de0281f6de50724068a8bfa693dcb5042c7",
+    "src/layout/PropertiesPanel.tsx": "a8385674184e5cb01857ddeab95d105a1acc2ff0dcf21c596b35fe076fac5662",
+    "src/index.css": "0674257a5a71c9f3b6d851bcc643d6252d1a55bee0b1c6dbeaae1e92887d6d74",
+    "src/components/StatusBar.tsx": "f95c5839ee2b9ae9614e1518a9effc460c2d4e13c803431b0e8a44fad5db9019",
+    "scripts/chat-narrow-cases.mjs": "2feddddbc5d22cf0687b0730989a477b45ec0982b13aabe0ae622cf8570f2a3f"
+  },
+  "suite": "narrow",
+  "results": [
+    {
+      "name": "expert-320x850-mouse-workbench-companion-closed",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 233.5,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 560,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-320x850-mouse-header-controls-reachable",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 233.5,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 560,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 1,
+            "scrollWidth": 580,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-320x850-mouse-companion-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 233.5,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 357.75,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 31,
+            "scrollWidth": 580,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-320x850-mouse-companion-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 233.5,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 233.5,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 580,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-320x850-mouse-dock-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 233.5,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 580,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-320x850-mouse-dock-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 233.5,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 580,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-320x850-mouse-native-denial",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 233.5,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 580,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "companionReview": {
+          "x": 46.59375,
+          "y": 254,
+          "width": 237.40625,
+          "height": 255.5
+        },
+        "decision": "denied",
+        "nativeMarginalCost": 10
+      }
+    },
+    {
+      "name": "expert-320x850-mouse-native-choice",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 233.5,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 567,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "multiSelect": "First result; Second result",
+        "freeText": "A different local result",
+        "history": "native",
+        "draftPreserved": true
+      }
+    },
+    {
+      "name": "expert-320x850-mouse-desktop-restored",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-320x600-touch-workbench-companion-closed",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 233.5,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 233.5,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-320x600-touch-header-controls-reachable",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 233.5,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 233.5,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 1,
+            "scrollWidth": 573,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-320x600-touch-companion-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 233.5,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 233.5,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 31,
+            "scrollWidth": 573,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-320x600-touch-companion-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 233.5,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 233.5,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 573,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-320x600-touch-dock-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 233.5,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 573,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-320x600-touch-dock-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 233.5,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 573,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-320x600-touch-native-denial",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 233.5,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 573,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "companionReview": {
+          "x": 46.59375,
+          "y": 241.5,
+          "width": 237.40625,
+          "height": 255.5
+        },
+        "decision": "denied",
+        "nativeMarginalCost": 10
+      }
+    },
+    {
+      "name": "expert-320x600-touch-native-choice",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 233.5,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 573,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "multiSelect": "First result; Second result",
+        "freeText": "A different local result",
+        "history": "native",
+        "draftPreserved": true
+      }
+    },
+    {
+      "name": "expert-320x600-touch-desktop-restored",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-375x850-touch-workbench-companion-closed",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 375,
+          "right": 375,
+          "width": 0,
+          "top": 201.5,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 31,
+          "right": 351,
+          "width": 320,
+          "top": 441.171875,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-375x850-touch-header-controls-reachable",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 375,
+          "right": 375,
+          "width": 0,
+          "top": 201.5,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 31,
+          "right": 351,
+          "width": 320,
+          "top": 441.171875,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 4,
+            "scrollWidth": 573,
+            "clientWidth": 375,
+            "left": 0,
+            "right": 375,
+            "width": 375,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-375x850-touch-companion-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 375,
+          "right": 375,
+          "width": 0,
+          "top": 201.5,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 31,
+          "right": 351,
+          "width": 320,
+          "top": 238.921875,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 36,
+            "scrollWidth": 573,
+            "clientWidth": 375,
+            "left": 0,
+            "right": 375,
+            "width": 375,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-375x850-touch-companion-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 375,
+          "right": 375,
+          "width": 0,
+          "top": 201.5,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 31,
+          "right": 351,
+          "width": 320,
+          "top": 201.5,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 573,
+            "clientWidth": 375,
+            "left": 0,
+            "right": 375,
+            "width": 375,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-375x850-touch-dock-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 0,
+          "right": 375,
+          "width": 375,
+          "top": 201.5,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 573,
+            "clientWidth": 375,
+            "left": 0,
+            "right": 375,
+            "width": 375,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-375x850-touch-dock-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 0,
+          "right": 375,
+          "width": 375,
+          "top": 201.5,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 573,
+            "clientWidth": 375,
+            "left": 0,
+            "right": 375,
+            "width": 375,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-375x850-touch-native-denial",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 0,
+          "right": 375,
+          "width": 375,
+          "top": 201.5,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 573,
+            "clientWidth": 375,
+            "left": 0,
+            "right": 375,
+            "width": 375,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "companionReview": {
+          "x": 101.59375,
+          "y": 254,
+          "width": 237.40625,
+          "height": 255.5
+        },
+        "decision": "denied",
+        "nativeMarginalCost": 10
+      }
+    },
+    {
+      "name": "expert-375x850-touch-native-choice",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 0,
+          "right": 375,
+          "width": 375,
+          "top": 201.5,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 573,
+            "clientWidth": 375,
+            "left": 0,
+            "right": 375,
+            "width": 375,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "multiSelect": "First result; Second result",
+        "freeText": "A different local result",
+        "history": "native",
+        "draftPreserved": true
+      }
+    },
+    {
+      "name": "expert-375x850-touch-desktop-restored",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-420x600-touch-workbench-companion-closed",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 420,
+          "right": 420,
+          "width": 0,
+          "top": 176.5,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 76,
+          "right": 396,
+          "width": 320,
+          "top": 191.171875,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-420x600-touch-header-controls-reachable",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 420,
+          "right": 420,
+          "width": 0,
+          "top": 176.5,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 76,
+          "right": 396,
+          "width": 320,
+          "top": 191.171875,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 2,
+            "scrollWidth": 573,
+            "clientWidth": 420,
+            "left": 0,
+            "right": 420,
+            "width": 420,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-420x600-touch-companion-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 420,
+          "right": 420,
+          "width": 0,
+          "top": 176.5,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 76,
+          "right": 396,
+          "width": 320,
+          "top": 176.5,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 34,
+            "scrollWidth": 573,
+            "clientWidth": 420,
+            "left": 0,
+            "right": 420,
+            "width": 420,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-420x600-touch-companion-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 420,
+          "right": 420,
+          "width": 0,
+          "top": 176.5,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 76,
+          "right": 396,
+          "width": 320,
+          "top": 176.5,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 573,
+            "clientWidth": 420,
+            "left": 0,
+            "right": 420,
+            "width": 420,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-420x600-touch-dock-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 0,
+          "right": 420,
+          "width": 420,
+          "top": 176.5,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 573,
+            "clientWidth": 420,
+            "left": 0,
+            "right": 420,
+            "width": 420,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-420x600-touch-dock-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 0,
+          "right": 420,
+          "width": 420,
+          "top": 176.5,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 573,
+            "clientWidth": 420,
+            "left": 0,
+            "right": 420,
+            "width": 420,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-420x600-touch-native-denial",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 0,
+          "right": 420,
+          "width": 420,
+          "top": 176.5,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 573,
+            "clientWidth": 420,
+            "left": 0,
+            "right": 420,
+            "width": 420,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "companionReview": {
+          "x": 146.59375,
+          "y": 184.5,
+          "width": 237.40625,
+          "height": 255.5
+        },
+        "decision": "denied",
+        "nativeMarginalCost": 10
+      }
+    },
+    {
+      "name": "expert-420x600-touch-native-choice",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 0,
+          "right": 420,
+          "width": 420,
+          "top": 176.5,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 573,
+            "clientWidth": 420,
+            "left": 0,
+            "right": 420,
+            "width": 420,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "multiSelect": "First result; Second result",
+        "freeText": "A different local result",
+        "history": "native",
+        "draftPreserved": true
+      }
+    },
+    {
+      "name": "expert-420x600-touch-desktop-restored",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-640x850-mouse-workbench-companion-closed",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 640,
+          "right": 640,
+          "width": 0,
+          "top": 145,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 296,
+          "right": 616,
+          "width": 320,
+          "top": 441.171875,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-640x850-mouse-header-controls-reachable",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 640,
+          "right": 640,
+          "width": 0,
+          "top": 145,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 296,
+          "right": 616,
+          "width": 320,
+          "top": 441.171875,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-640x850-mouse-companion-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 640,
+          "right": 640,
+          "width": 0,
+          "top": 145,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 296,
+          "right": 616,
+          "width": 320,
+          "top": 238.921875,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-640x850-mouse-companion-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 640,
+          "right": 640,
+          "width": 0,
+          "top": 145,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 296,
+          "right": 616,
+          "width": 320,
+          "top": 145,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-640x850-mouse-dock-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 540,
+          "right": 640,
+          "width": 100,
+          "top": 145,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-640x850-mouse-dock-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 540,
+          "right": 640,
+          "width": 100,
+          "top": 145,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "SECTION",
+            "class": "mt-2 max-h-64 overflow-auto space-y-2",
+            "scrollLeft": 8,
+            "scrollWidth": 156,
+            "clientWidth": 75,
+            "left": 553,
+            "right": 628,
+            "width": 75,
+            "top": 319,
+            "bottom": 575
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-640x850-mouse-native-denial",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 540,
+          "right": 640,
+          "width": 100,
+          "top": 145,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "flex flex-col h-full overflow-hidden bg-bg relative",
+            "scrollLeft": 11,
+            "scrollWidth": 298,
+            "clientWidth": 99,
+            "left": 541,
+            "right": 640,
+            "width": 99,
+            "top": 181,
+            "bottom": 826
+          },
+          {
+            "tag": "TEXTAREA",
+            "class": "flex-1 min-h-0 bg-bg border border-border rounded px-2 py-1.5 text-[13px] leading-relaxed tracking-[-0.005em] resize-none focus:outline-none focus:border-accent/60",
+            "scrollLeft": 2,
+            "scrollWidth": 20,
+            "clientWidth": 16,
+            "left": 580.484375,
+            "right": 598.484375,
+            "width": 18,
+            "top": 704,
+            "bottom": 818
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "companionReview": {
+          "x": 366.59375,
+          "y": 254,
+          "width": 237.40625,
+          "height": 255.5
+        },
+        "decision": "denied",
+        "nativeMarginalCost": 10
+      }
+    },
+    {
+      "name": "expert-640x850-mouse-native-choice",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 540,
+          "right": 640,
+          "width": 100,
+          "top": 145,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "flex flex-col h-full overflow-hidden bg-bg relative",
+            "scrollLeft": 11,
+            "scrollWidth": 298,
+            "clientWidth": 99,
+            "left": 541,
+            "right": 640,
+            "width": 99,
+            "top": 181,
+            "bottom": 826
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "multiSelect": "First result; Second result",
+        "freeText": "A different local result",
+        "history": "native",
+        "draftPreserved": true
+      }
+    },
+    {
+      "name": "expert-640x850-mouse-desktop-restored",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-768x600-touch-workbench-companion-closed",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 768,
+          "right": 768,
+          "width": 0,
+          "top": 111,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 424,
+          "right": 744,
+          "width": 320,
+          "top": 191.171875,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-768x600-touch-header-controls-reachable",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 768,
+          "right": 768,
+          "width": 0,
+          "top": 111,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 424,
+          "right": 744,
+          "width": 320,
+          "top": 191.171875,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-768x600-touch-companion-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 768,
+          "right": 768,
+          "width": 0,
+          "top": 111,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 424,
+          "right": 744,
+          "width": 320,
+          "top": 111,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-768x600-touch-companion-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 768,
+          "right": 768,
+          "width": 0,
+          "top": 111,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 424,
+          "right": 744,
+          "width": 320,
+          "top": 111,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-768x600-touch-dock-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 540,
+          "right": 768,
+          "width": 228,
+          "top": 111,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-768x600-touch-dock-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 540,
+          "right": 768,
+          "width": 228,
+          "top": 111,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-768x600-touch-native-denial",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 540,
+          "right": 768,
+          "width": 228,
+          "top": 111,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "companionReview": {
+          "x": 494.59375,
+          "y": 119,
+          "width": 237.40625,
+          "height": 255.5
+        },
+        "decision": "denied",
+        "nativeMarginalCost": 10
+      }
+    },
+    {
+      "name": "expert-768x600-touch-native-choice",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 540,
+          "right": 768,
+          "width": 228,
+          "top": 111,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "multiSelect": "First result; Second result",
+        "freeText": "A different local result",
+        "history": "native",
+        "draftPreserved": true
+      }
+    },
+    {
+      "name": "expert-768x600-touch-desktop-restored",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-1440x1000-mouse-workbench-companion-closed",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 1440,
+          "right": 1440,
+          "width": 0,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": {
+          "left": 1096,
+          "right": 1416,
+          "width": 320,
+          "top": 591.171875,
+          "bottom": 976
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-1440x1000-mouse-header-controls-reachable",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 1440,
+          "right": 1440,
+          "width": 0,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": {
+          "left": 1096,
+          "right": 1416,
+          "width": 320,
+          "top": 591.171875,
+          "bottom": 976
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-1440x1000-mouse-companion-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 1440,
+          "right": 1440,
+          "width": 0,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": {
+          "left": 1096,
+          "right": 1416,
+          "width": 320,
+          "top": 388.921875,
+          "bottom": 976
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-1440x1000-mouse-companion-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 1440,
+          "right": 1440,
+          "width": 0,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": {
+          "left": 1096,
+          "right": 1416,
+          "width": 320,
+          "top": 80,
+          "bottom": 976
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-1440x1000-mouse-dock-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-1440x1000-mouse-dock-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "expert-1440x1000-mouse-native-denial",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "companionReview": {
+          "x": 1166.59375,
+          "y": 404,
+          "width": 237.40625,
+          "height": 255.5
+        },
+        "decision": "denied",
+        "nativeMarginalCost": 10
+      }
+    },
+    {
+      "name": "expert-1440x1000-mouse-native-choice",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "multiSelect": "First result; Second result",
+        "freeText": "A different local result",
+        "history": "native",
+        "draftPreserved": true
+      }
+    },
+    {
+      "name": "expert-1440x1000-mouse-desktop-restored",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-320x850-mouse-workbench-companion-closed",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 138,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 560,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-320x850-mouse-header-controls-reachable",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 138,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 421.671875,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 2,
+            "scrollWidth": 567,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-320x850-mouse-companion-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 138,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 219.421875,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 33,
+            "scrollWidth": 567,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-320x850-mouse-companion-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 138,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 138,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 567,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-320x850-mouse-dock-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 138,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 567,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-320x850-mouse-dock-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 138,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 567,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-320x850-mouse-native-denial",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 138,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 567,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "companionReview": {
+          "x": 36,
+          "y": 367,
+          "width": 248,
+          "height": 142.5
+        },
+        "decision": "denied",
+        "nativeMarginalCost": 10
+      }
+    },
+    {
+      "name": "guided-320x850-mouse-native-choice",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 138,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 567,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "multiSelect": "First result; Second result",
+        "freeText": "A different local result",
+        "history": "native",
+        "draftPreserved": true
+      }
+    },
+    {
+      "name": "guided-320x850-mouse-desktop-restored",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-320x600-touch-workbench-companion-closed",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 138,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 310,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-320x600-touch-header-controls-reachable",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 138,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 171.671875,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 3,
+            "scrollWidth": 561,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-320x600-touch-companion-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 138,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 138,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 38,
+            "scrollWidth": 561,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-320x600-touch-companion-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 320,
+          "right": 320,
+          "width": 0,
+          "top": 138,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 24,
+          "right": 296,
+          "width": 272,
+          "top": 138,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 561,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-320x600-touch-dock-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 138,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 561,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-320x600-touch-dock-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 138,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 561,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-320x600-touch-native-denial",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 138,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 561,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "companionReview": {
+          "x": 36,
+          "y": 146,
+          "width": 248,
+          "height": 142.5
+        },
+        "decision": "denied",
+        "nativeMarginalCost": 10
+      }
+    },
+    {
+      "name": "guided-320x600-touch-native-choice",
+      "passed": true,
+      "geometry": {
+        "viewport": 320,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 320,
+        "scroll": 320,
+        "dock": {
+          "left": 0,
+          "right": 320,
+          "width": 320,
+          "top": 138,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 561,
+            "clientWidth": 320,
+            "left": 0,
+            "right": 320,
+            "width": 320,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "multiSelect": "First result; Second result",
+        "freeText": "A different local result",
+        "history": "native",
+        "draftPreserved": true
+      }
+    },
+    {
+      "name": "guided-320x600-touch-desktop-restored",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-375x850-touch-workbench-companion-closed",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 375,
+          "right": 375,
+          "width": 0,
+          "top": 106,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 63,
+          "right": 351,
+          "width": 288,
+          "top": 560,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-375x850-touch-header-controls-reachable",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 375,
+          "right": 375,
+          "width": 0,
+          "top": 106,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 31,
+          "right": 351,
+          "width": 320,
+          "top": 441.171875,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 1,
+            "scrollWidth": 561,
+            "clientWidth": 375,
+            "left": 0,
+            "right": 375,
+            "width": 375,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-375x850-touch-companion-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 375,
+          "right": 375,
+          "width": 0,
+          "top": 106,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 31,
+          "right": 351,
+          "width": 320,
+          "top": 238.921875,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 31,
+            "scrollWidth": 561,
+            "clientWidth": 375,
+            "left": 0,
+            "right": 375,
+            "width": 375,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-375x850-touch-companion-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 375,
+          "right": 375,
+          "width": 0,
+          "top": 106,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 31,
+          "right": 351,
+          "width": 320,
+          "top": 106,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 561,
+            "clientWidth": 375,
+            "left": 0,
+            "right": 375,
+            "width": 375,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-375x850-touch-dock-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 0,
+          "right": 375,
+          "width": 375,
+          "top": 106,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 561,
+            "clientWidth": 375,
+            "left": 0,
+            "right": 375,
+            "width": 375,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-375x850-touch-dock-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 0,
+          "right": 375,
+          "width": 375,
+          "top": 106,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 561,
+            "clientWidth": 375,
+            "left": 0,
+            "right": 375,
+            "width": 375,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-375x850-touch-native-denial",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 0,
+          "right": 375,
+          "width": 375,
+          "top": 106,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 561,
+            "clientWidth": 375,
+            "left": 0,
+            "right": 375,
+            "width": 375,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "companionReview": {
+          "x": 69.578125,
+          "y": 387,
+          "width": 269.421875,
+          "height": 122.5
+        },
+        "decision": "denied",
+        "nativeMarginalCost": 10
+      }
+    },
+    {
+      "name": "guided-375x850-touch-native-choice",
+      "passed": true,
+      "geometry": {
+        "viewport": 375,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 375,
+        "scroll": 375,
+        "dock": {
+          "left": 0,
+          "right": 375,
+          "width": 375,
+          "top": 106,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 561,
+            "clientWidth": 375,
+            "left": 0,
+            "right": 375,
+            "width": 375,
+            "top": 826,
+            "bottom": 850
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "multiSelect": "First result; Second result",
+        "freeText": "A different local result",
+        "history": "native",
+        "draftPreserved": true
+      }
+    },
+    {
+      "name": "guided-375x850-touch-desktop-restored",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-420x600-touch-workbench-companion-closed",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 420,
+          "right": 420,
+          "width": 0,
+          "top": 106,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 108,
+          "right": 396,
+          "width": 288,
+          "top": 310,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-420x600-touch-header-controls-reachable",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 420,
+          "right": 420,
+          "width": 0,
+          "top": 106,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 76,
+          "right": 396,
+          "width": 320,
+          "top": 191.171875,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 1,
+            "scrollWidth": 561,
+            "clientWidth": 420,
+            "left": 0,
+            "right": 420,
+            "width": 420,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-420x600-touch-companion-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 420,
+          "right": 420,
+          "width": 0,
+          "top": 106,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 76,
+          "right": 396,
+          "width": 320,
+          "top": 106,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 39,
+            "scrollWidth": 561,
+            "clientWidth": 420,
+            "left": 0,
+            "right": 420,
+            "width": 420,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-420x600-touch-companion-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 420,
+          "right": 420,
+          "width": 0,
+          "top": 106,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 76,
+          "right": 396,
+          "width": 320,
+          "top": 106,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 561,
+            "clientWidth": 420,
+            "left": 0,
+            "right": 420,
+            "width": 420,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-420x600-touch-dock-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 0,
+          "right": 420,
+          "width": 420,
+          "top": 106,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 561,
+            "clientWidth": 420,
+            "left": 0,
+            "right": 420,
+            "width": 420,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-420x600-touch-dock-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 0,
+          "right": 420,
+          "width": 420,
+          "top": 106,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 561,
+            "clientWidth": 420,
+            "left": 0,
+            "right": 420,
+            "width": 420,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-420x600-touch-native-denial",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 0,
+          "right": 420,
+          "width": 420,
+          "top": 106,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 561,
+            "clientWidth": 420,
+            "left": 0,
+            "right": 420,
+            "width": 420,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "companionReview": {
+          "x": 114.578125,
+          "y": 137,
+          "width": 269.421875,
+          "height": 122.5
+        },
+        "decision": "denied",
+        "nativeMarginalCost": 10
+      }
+    },
+    {
+      "name": "guided-420x600-touch-native-choice",
+      "passed": true,
+      "geometry": {
+        "viewport": 420,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 420,
+        "scroll": 420,
+        "dock": {
+          "left": 0,
+          "right": 420,
+          "width": 420,
+          "top": 106,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [
+          {
+            "tag": "DIV",
+            "class": "relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]",
+            "scrollLeft": 40,
+            "scrollWidth": 561,
+            "clientWidth": 420,
+            "left": 0,
+            "right": 420,
+            "width": 420,
+            "top": 576,
+            "bottom": 600
+          }
+        ],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "multiSelect": "First result; Second result",
+        "freeText": "A different local result",
+        "history": "native",
+        "draftPreserved": true
+      }
+    },
+    {
+      "name": "guided-420x600-touch-desktop-restored",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-640x850-mouse-workbench-companion-closed",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 640,
+          "right": 640,
+          "width": 0,
+          "top": 107,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 328,
+          "right": 616,
+          "width": 288,
+          "top": 560,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-640x850-mouse-header-controls-reachable",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 640,
+          "right": 640,
+          "width": 0,
+          "top": 107,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 296,
+          "right": 616,
+          "width": 320,
+          "top": 441.171875,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-640x850-mouse-companion-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 640,
+          "right": 640,
+          "width": 0,
+          "top": 107,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 296,
+          "right": 616,
+          "width": 320,
+          "top": 238.921875,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-640x850-mouse-companion-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 640,
+          "right": 640,
+          "width": 0,
+          "top": 107,
+          "bottom": 826
+        },
+        "companion": {
+          "left": 296,
+          "right": 616,
+          "width": 320,
+          "top": 107,
+          "bottom": 826
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-640x850-mouse-dock-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 240,
+          "right": 640,
+          "width": 400,
+          "top": 107,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-640x850-mouse-dock-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 240,
+          "right": 640,
+          "width": 400,
+          "top": 107,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-640x850-mouse-native-denial",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 240,
+          "right": 640,
+          "width": 400,
+          "top": 107,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "companionReview": {
+          "x": 334.578125,
+          "y": 387,
+          "width": 269.421875,
+          "height": 122.5
+        },
+        "decision": "denied",
+        "nativeMarginalCost": 10
+      }
+    },
+    {
+      "name": "guided-640x850-mouse-native-choice",
+      "passed": true,
+      "geometry": {
+        "viewport": 640,
+        "height": 850,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 640,
+        "scroll": 640,
+        "dock": {
+          "left": 240,
+          "right": 640,
+          "width": 400,
+          "top": 107,
+          "bottom": 826
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "multiSelect": "First result; Second result",
+        "freeText": "A different local result",
+        "history": "native",
+        "draftPreserved": true
+      }
+    },
+    {
+      "name": "guided-640x850-mouse-desktop-restored",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-768x600-touch-workbench-companion-closed",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 768,
+          "right": 768,
+          "width": 0,
+          "top": 80,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 456,
+          "right": 744,
+          "width": 288,
+          "top": 310,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-768x600-touch-header-controls-reachable",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 768,
+          "right": 768,
+          "width": 0,
+          "top": 80,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 424,
+          "right": 744,
+          "width": 320,
+          "top": 191.171875,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-768x600-touch-companion-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 768,
+          "right": 768,
+          "width": 0,
+          "top": 80,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 424,
+          "right": 744,
+          "width": 320,
+          "top": 80,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-768x600-touch-companion-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 768,
+          "right": 768,
+          "width": 0,
+          "top": 80,
+          "bottom": 576
+        },
+        "companion": {
+          "left": 424,
+          "right": 744,
+          "width": 320,
+          "top": 80,
+          "bottom": 576
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-768x600-touch-dock-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 240,
+          "right": 768,
+          "width": 528,
+          "top": 80,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-768x600-touch-dock-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 240,
+          "right": 768,
+          "width": 528,
+          "top": 80,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-768x600-touch-native-denial",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 240,
+          "right": 768,
+          "width": 528,
+          "top": 80,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "companionReview": {
+          "x": 462.578125,
+          "y": 137,
+          "width": 269.421875,
+          "height": 122.5
+        },
+        "decision": "denied",
+        "nativeMarginalCost": 10
+      }
+    },
+    {
+      "name": "guided-768x600-touch-native-choice",
+      "passed": true,
+      "geometry": {
+        "viewport": 768,
+        "height": 600,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 768,
+        "scroll": 768,
+        "dock": {
+          "left": 240,
+          "right": 768,
+          "width": 528,
+          "top": 80,
+          "bottom": 576
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "multiSelect": "First result; Second result",
+        "freeText": "A different local result",
+        "history": "native",
+        "draftPreserved": true
+      }
+    },
+    {
+      "name": "guided-768x600-touch-desktop-restored",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-1440x1000-mouse-workbench-companion-closed",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 1440,
+          "right": 1440,
+          "width": 0,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": {
+          "left": 1128,
+          "right": 1416,
+          "width": 288,
+          "top": 710,
+          "bottom": 976
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-1440x1000-mouse-header-controls-reachable",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 1440,
+          "right": 1440,
+          "width": 0,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": {
+          "left": 1096,
+          "right": 1416,
+          "width": 320,
+          "top": 591.171875,
+          "bottom": 976
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-1440x1000-mouse-companion-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 1440,
+          "right": 1440,
+          "width": 0,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": {
+          "left": 1096,
+          "right": 1416,
+          "width": 320,
+          "top": 388.921875,
+          "bottom": 976
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-1440x1000-mouse-companion-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 1440,
+          "right": 1440,
+          "width": 0,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": {
+          "left": 1096,
+          "right": 1416,
+          "width": 320,
+          "top": 80,
+          "bottom": 976
+        },
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-1440x1000-mouse-dock-open",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-1440x1000-mouse-dock-access-expanded",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    },
+    {
+      "name": "guided-1440x1000-mouse-native-denial",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "companionReview": {
+          "x": 1134.578125,
+          "y": 537,
+          "width": 269.421875,
+          "height": 122.5
+        },
+        "decision": "denied",
+        "nativeMarginalCost": 10
+      }
+    },
+    {
+      "name": "guided-1440x1000-mouse-native-choice",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      },
+      "interaction": {
+        "multiSelect": "First result; Second result",
+        "freeText": "A different local result",
+        "history": "native",
+        "draftPreserved": true
+      }
+    },
+    {
+      "name": "guided-1440x1000-mouse-desktop-restored",
+      "passed": true,
+      "geometry": {
+        "viewport": 1440,
+        "height": 1000,
+        "scrollX": 0,
+        "shiftedAncestors": [],
+        "client": 1440,
+        "scroll": 1440,
+        "dock": {
+          "left": 740,
+          "right": 1440,
+          "width": 700,
+          "top": 80,
+          "bottom": 976
+        },
+        "companion": null,
+        "shiftedScrollContainers": [],
+        "savedWidth": "700"
+      }
+    }
+  ],
+  "errors": [],
+  "app_http": "real_authenticated_backend",
+  "external_model_calls_allowed": false,
+  "local_model_wire": "finite_decision_fixture"
+}

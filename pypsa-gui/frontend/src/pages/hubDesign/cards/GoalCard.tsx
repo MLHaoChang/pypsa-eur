@@ -123,6 +123,9 @@ export function GoalCard() {
         )}
       </div>
 
+      {/* A set price is a "More settings" item; one that is missing blocks the run, so it stays in view
+          (UX review L3). */}
+      {(advanced || voll == null || vollMissing) && (
       <div data-testid="hub-goal-voll" className="flex flex-wrap items-center gap-2 text-[12px]">
         <span><Term k="voll_plain">Price of undelivered energy</Term>:</span>
         {voll == null ? <span className="text-muted">…</span>
@@ -134,9 +137,10 @@ export function GoalCard() {
                 disabled={liveStudy} disabledTitle={LIVE_STUDY_EDIT} />
             </>
           ) : <span className="text-text">
-            €{voll.toLocaleString('en-US')} per <Term k="mwh">MWh</Term>
+            €{voll.toLocaleString('en-US')} per{' '}<Term k="mwh">MWh</Term>
           </span>}
       </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" data-testid="hub-goal-run"

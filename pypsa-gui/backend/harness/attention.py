@@ -20,6 +20,8 @@ from typing import get_args
 from harness import owned_snapshots
 
 MAX_RECORDS = 256
+MAX_FOLLOWUPS = 8
+FOLLOWUP_MESSAGE = 'Recheck the exact request shown in the checked follow-up card.'
 RETENTION_SECONDS = 30 * 24 * 3600
 _FAILURES = OrderedDict()
 _FAILURE_LOCK = threading.Lock()
@@ -71,6 +73,8 @@ def _question(payload):
 
 def _validate(record):
     fields = _FIELDS | {'source_gap'} if isinstance(record, dict) and record.get('family') == 'source_gap' else _FIELDS
+    if isinstance(record, dict) and record.get('family') == 'source_gap' and 'followups' in record:
+        fields = fields | {'followups'}
     if not isinstance(record, dict) or set(record) != fields:
         raise ValueError('invalid decision record')
     source = _text(record['source_id'], 64)
@@ -101,6 +105,12 @@ def _validate(record):
         if record['question'] is not None or record['tool_name'] != 'checked_answer':
             raise ValueError('invalid source gap origin')
         _gap(record['source_gap'])
+        _followups(record.get('followups', []))
+        if any(i['answer_id'] == record['source_gap']['answer_id']
+               or i['turn_id'] == record['source_gap']['turn_id']
+               or not record['created_at'] <= i['observed_at'] <= record['observed_at']
+               for i in record.get('followups', [])):
+            raise ValueError('invalid follow-up lineage')
         if (record['tool_use_id'] != record['source_gap']['turn_id']
                 or record['source_id'] != _gap_id(record['source_gap']['answer_id'])):
             raise ValueError('invalid source gap identity')
@@ -180,6 +190,96 @@ def _gap_id(answer_id):
     return hashlib.sha256(('checked-gap:' + answer_id).encode()).hexdigest()
 
 
+def _followups(items):
+    if not isinstance(items, list) or len(items) > MAX_FOLLOWUPS:
+        raise ValueError('invalid follow-up observations')
+    for item in items:
+        if not isinstance(item, dict) or set(item) != {'answer_id', 'turn_id', 'session_id', 'request_complete', 'observed_at'}:
+            raise ValueError('invalid follow-up observation')
+        _uuid(item['answer_id'])
+        _uuid(item['turn_id'])
+        _text(item['session_id'], 200)
+        value = item['observed_at']
+        if (type(item['request_complete']) is not bool or isinstance(value, bool)
+                or not isinstance(value, (float, int)) or not math.isfinite(value)
+                or not 0 < value <= time.time() + 300):
+            raise ValueError('invalid follow-up fact')
+    if (len({i['answer_id'] for i in items}) != len(items)
+            or len({i['turn_id'] for i in items}) != len(items)):
+        raise ValueError('duplicate follow-up origin')
+    return items
+
+
+def validate_reference(ref):
+    if (not isinstance(ref, dict) or set(ref) != {'source_id', 'revision', 'digest'}
+            or type(ref['revision']) is not int or not 1 <= ref['revision'] <= 1000000):
+        raise ValueError('invalid source gap reference')
+    for name in ('source_id', 'digest'):
+        if not isinstance(ref[name], str) or not re.fullmatch(r'[0-9a-f]{64}', ref[name]):
+            raise ValueError('invalid source gap reference')
+    return ref
+
+
+def _followup_scope(record, project):
+    from harness.assurance_scope import validate
+    from harness.calculations import requested_metrics
+
+    if record['family'] != 'source_gap' or len(record.get('followups', [])) >= MAX_FOLLOWUPS:
+        raise ValueError('source gap cannot accept a follow-up')
+    if any(s['disposition'] == 'needs_clarification' for s in record['source_gap']['slots']):
+        raise ValueError('the user must specify the unresolved scope in ordinary chat')
+    scope = dict(record['source_gap']['request_scope'])
+    if scope['project_id'] != project:
+        raise ValueError('source gap belongs to another requested project')
+    scope.pop('window', None)  # Legacy scope means the complete current horizon.
+    scope['version'] = 1
+    scope['metrics'] = list(requested_metrics(scope))
+    return validate(scope)
+
+
+def admit_followup(session, project, ref, message, scope):
+    """Read/authorize afresh on the native worker, before provider work."""
+    from fastapi import HTTPException
+    from harness.assurance_scope import validate
+    from services import assurance_records
+
+    owner, project = _scope(session, project)
+    validate_reference(ref)
+    assurance_records.authorize(owner, project)
+    rows, _ = project_records(owner, project, [])
+    record = next((r for r in rows if r['source_id'] == ref['source_id'] and r['family'] == 'source_gap'), None)
+    if record is None:
+        raise HTTPException(404, {'error_kind': 'source_gap_unavailable'})
+    if record['revision'] != ref['revision'] or record['decision_digest'] != ref['digest']:
+        raise HTTPException(409, {'error_kind': 'source_gap_changed'})
+    expected = _followup_scope(record, project)
+    if message != FOLLOWUP_MESSAGE or validate(scope) != expected:
+        raise ValueError('source gap request changed')
+    # Only immutable display origin + typed scope travel to the turn. No old
+    # session, answer values or authority is restored or made model-visible.
+    return dict(source_id=record['source_id'], origin=record['source_gap'], scope=expected)
+
+
+def _append_followup(records, binding, session, answer, project):
+    from harness.assurance_scope import validate
+
+    parent = next((r for r in records if r['source_id'] == binding['source_id']), None)
+    if (parent is None or parent['family'] != 'source_gap'
+            or parent['source_gap'] != binding['origin']):
+        raise ValueError('follow-up origin unavailable')
+    items = parent.get('followups', [])
+    if any(i['answer_id'] == answer['answer_id'] for i in items):
+        return
+    scope = {k: v for k, v in answer['receipt']['request_scope'].items() if k != 'reason'}
+    if _followup_scope(parent, project) != binding['scope'] or validate(scope) != binding['scope']:
+        raise ValueError('follow-up scope changed')
+    complete = answer['receipt']['request_complete']
+    item = dict(answer_id=answer['answer_id'], turn_id=answer['turn_id'], session_id=session.session_id,
+                request_complete=complete, observed_at=time.time())
+    parent['followups'] = _followups([*items, item])
+    _advance(parent, parent['native_status'])
+
+
 def checked_answer(session, project):
     """Observe only the native committed answer at its admitted publication seam."""
     def change(records):
@@ -189,6 +289,9 @@ def checked_answer(session, project):
         if answer['owner_id'] != owner or answer['project_id'] != pid:
             raise ValueError('unbound checked answer')
         receipt = answer['receipt']
+        binding = getattr(turn, 'source_gap_binding', None)
+        if binding is not None:
+            _append_followup(records, binding, session, answer, pid)
         slots = [{k: slot[k] for k in ('metric', 'disposition', 'reason')}
                  for slot in receipt.get('result_slots', []) if slot['disposition'] != 'answered']
         if not slots:
@@ -344,6 +447,18 @@ def project_records(owner, project, live):
                 reason = 'A native confirmation outcome was recorded. This does not establish that work ran or succeeded.'
         view = dict(record, project_id=project, status=status, live_approval_available=active,
                     inspection_only=True, evidence_available=False, reason=reason)
+        if record['family'] == 'source_gap':
+            try:
+                view['followup_scope'] = _followup_scope(record, project)
+                view['followup_unavailable_reason'] = None
+            except (ValueError, TypeError, KeyError):
+                view['followup_scope'] = None
+                view['followup_unavailable_reason'] = ('This request cannot be prepared, or its eight follow-up links are full. '
+                    'Use an ordinary checked request to clarify the entity, project and scope again.')
         view['decision_digest'] = hashlib.sha256(json.dumps([owner, view], sort_keys=True).encode()).hexdigest()
+        if record['family'] == 'source_gap':
+            view['prepared_followup'] = (dict(message=FOLLOWUP_MESSAGE, checked_scope=view['followup_scope'],
+                source_gap_ref=dict(source_id=record['source_id'], revision=record['revision'], digest=view['decision_digest']))
+                if view['followup_scope'] is not None else None)
         result.append(view)
     return result, warnings

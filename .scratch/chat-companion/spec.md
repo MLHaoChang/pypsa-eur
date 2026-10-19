@@ -149,6 +149,14 @@ An explicitly delegated work item has durable authority and limits distinct from
 
 The ordinary worker seam claims a bounded step, revalidates authority, persists its reservation, dispatches the admitted tool and checkpoints the actual result. Restart reads the reservation and native job/effect receipt first. Reconciliation refuses while an originating or detached effect worker may still run. A verified no-effect state can support an explicitly confirmed retry with a new attempt identity; ambiguous history cannot.
 
+The CP-05b2 bounded implementation uses one version-2 parent ledger containing
+two individually validated version-1 case receipts. Its combined attempt/time
+caps and cancellation survive new chats; no automatic runner is introduced.
+Failure policy permits later ordinary admission only after verified terminal
+results or explicit positive no-effects reconciliation. Partial/unknown effects
+block both policies. Explicit case selectors bind reconciliation/comparison.
+See [the bounded contract](issues/05b2-shared-two-case.md).
+
 For two-case comparison, planned input differences are expected: validate each candidate separately and disclose inputs_differ. Require compatible model/mode, snapshot window and weights, units and metric/accounting basis; only the frozen planned changes may explain candidate drift. Never force equal fingerprints for intentionally changed cases or silently compare incompatible economics.
 
 Speech capture uses the Provider's actual endpointing contract. Some streaming transcription models require application-controlled commits; do not assume all support server/semantic VAD. Partial/final ordering is keyed by utterance identity. Speech delivery records its projection/receipt and playback cursor; ending playback does not alter the full approved text record.

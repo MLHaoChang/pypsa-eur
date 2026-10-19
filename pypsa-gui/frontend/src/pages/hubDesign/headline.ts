@@ -50,12 +50,12 @@ export function headline(review: OkReview, report: EhReferenceDesignReport | nul
   const target = num(s.target_lole_h)
 
   if (verdict === 'fail' && lole != null && target != null) {
-    return `Not certified: about ${lole.toFixed(0)} h/yr of shortfall vs a ${g(target)} h/yr goal — driven by ${topRisk(report)}`
+    return `Not certified: about ${lole.toFixed(1)} h/yr of shortfall vs a ${g(target)} h/yr goal — driven by ${topRisk(report)}`
   }
   if (verdict === 'inconclusive' && target != null) {
     const ci = interval(review, report)
     if (ci) {
-      return `Not decided: the shortfall estimate (${ci[0].toFixed(0)}–${ci[1].toFixed(0)} h/yr) straddles the ${g(target)} h/yr goal — more simulation runs would settle it.`
+      return `Not decided: the shortfall estimate (${ci[0].toFixed(1)}–${ci[1].toFixed(1)} h/yr) straddles the ${g(target)} h/yr goal — more simulation runs would settle it.`
     }
   }
   if (verdict === 'pass' && lole != null && target != null) {

@@ -90,7 +90,7 @@ describe('chapterTiles', () => {
       ({ results: { compliance: rows }, stale }) as never
     let t = byId({ ...NONE, grid: { campus: campus([row('pass'), row('pass'), row('fail')]), notHub: false } })
     expect(t.grid_plan).toMatchObject({ state: 'ready', value: '2 of 3', unit: 'checks pass',
-      basis: 'Campus grid checks, with the proposed measures' })
+      basis: 'Grid checks, with the proposed measures' })
     t = byId({ ...NONE, grid: { campus: campus([row('pass')], true), notHub: false } })
     expect(t.grid_plan.state).toBe('stale')
     t = byId({ ...NONE, grid: { campus: { results: null, stale: false } as never, notHub: false } })
@@ -130,7 +130,7 @@ describe('chapterTiles', () => {
     })
     it('not run, recommended, not achievable, stale', () => {
       expect(ctl({ state: 'not_run', reason: '', recommendation: null })).toMatchObject(
-        { state: 'not_run', text: expect.stringMatching(/not recommended for this campus run/) })
+        { state: 'not_run', text: expect.stringMatching(/no recommendation yet/) })
       expect(ctl({ state: 'ready', reason: '', recommendation: rec() })).toMatchObject(
         { state: 'ready', text: expect.stringMatching(/recommended for 2 units, not applied yet/) })
       expect(ctl({ state: 'ready', reason: '', recommendation: rec({ status: 'not_achievable' }) })).toMatchObject(

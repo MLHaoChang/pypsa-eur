@@ -1,0 +1,137 @@
+{
+  "date": "2026-10-19",
+  "base_commit": "0b33685c465e83b2a39c5964845b7e590873e631",
+  "source": {
+    "commit": "0b33685c465e83b2a39c5964845b7e590873e631",
+    "dirty": true,
+    "backend_python_sha256": "203536436702c8e32ac7fc959b160b44bbff1acc37fe13c8cd25d657be56a3e1"
+  },
+  "environment": {
+    "pixi": "0.68.1",
+    "platform": "osx-arm64",
+    "python": "3.13.0",
+    "installation": "pixi install --frozen -e default -e test",
+    "frontend": "npm ci"
+  },
+  "scope": "A6.1 bounded reviewer: incomplete usage withholds interpretations and preserves deterministic facts",
+  "red_cases": 3,
+  "checks": {
+    "red": {
+      "log_sha256": "66632bc820de63662ef332322650d47629cc865413f446a87d07e767f9b165c7",
+      "summary": [
+        "3 failed, 62 deselected, 3 warnings in 11.12s"
+      ]
+    },
+    "harness": {
+      "log_sha256": "1b57303ee6593ce96bb1dbeb957e16309306de6683b251099b40a3097040720b",
+      "summary": [
+        "65 passed, 29 warnings in 49.71s"
+      ]
+    },
+    "phased": {
+      "log_sha256": "c5fd62169c09581bc53c2d33c0d101ef65f23a1836aad74b79d34b63d8f23a4f",
+      "summary": [
+        "54 passed, 3 warnings in 24.84s"
+      ]
+    },
+    "regressions": {
+      "log_sha256": "c49071a6a83fe8e28b0812b9a6647c54937f4ff1215cc5bda8cce10526ec0c7e",
+      "summary": [
+        "204 passed, 4 skipped, 39 warnings in 56.70s"
+      ]
+    },
+    "frontend": {
+      "log_sha256": "8f7716cdafa40b577316168e37734eb6dd4554552aaebca1cd02862dd92ec648",
+      "summary": [
+        " Test Files  3 passed (3)",
+        "      Tests  62 passed (62)"
+      ]
+    },
+    "build": {
+      "log_sha256": "755e422cfec7362543ecf90b86bdd6999633aa692fd2a868cc6db6337d4caf16",
+      "summary": [
+        "\u2713 built in 17.49s"
+      ]
+    }
+  },
+  "evaluation": {
+    "passed": true,
+    "required_cases": 133,
+    "metrics": {
+      "deterministic": {
+        "scored_cases": 133,
+        "false_acceptance": {
+          "count": 0,
+          "denominator": 88,
+          "rate": 0.0
+        },
+        "false_rejection": {
+          "count": 0,
+          "denominator": 45,
+          "rate": 0.0
+        },
+        "incorrect_calculations": {
+          "count": 0,
+          "denominator": 330,
+          "rate": 0.0
+        },
+        "fulfillment": {
+          "count": 330,
+          "denominator": 330,
+          "rate": 1.0
+        },
+        "abstention": {
+          "count": 480,
+          "denominator": 810,
+          "rate": 0.5925925925925926
+        },
+        "unchecked_publication": {
+          "count": 0,
+          "denominator": 133,
+          "rate": 0.0
+        }
+      },
+      "live": {
+        "scored_cases": 0,
+        "false_acceptance": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        },
+        "false_rejection": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        },
+        "incorrect_calculations": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        },
+        "fulfillment": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        },
+        "abstention": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        },
+        "unchecked_publication": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        }
+      }
+    },
+    "live_status": "pending_opt_in",
+    "independent_domain_approval": false
+  },
+  "limitations": [
+    "No fresh complete backend suite or full frontend suite.",
+    "Provider/budget/frame regression selection has four existing opt-in skips; skips are not passes.",
+    "No paid inference, external reviewer contact, production activation or independent domain approval.",
+    "Reported source was uncommitted on the base; exact backend Python hash records the tested files. Only documentation and evidence are added after these tests."
+  ]
+}

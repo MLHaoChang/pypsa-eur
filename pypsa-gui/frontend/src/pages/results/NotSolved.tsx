@@ -23,3 +23,12 @@ export default function NotSolved({ what, why }: {
     </div>
   )
 }
+
+/** The campus routes refuse an unsolved project in words ("the project is not solved; solve it and
+ *  save, then draft the campus"). Guided has no header run button, so that sentence was a dead end
+ *  (UX review N1): show the same state and the same action as a result tab. */
+export const isNotSolvedRefusal = (message: string): boolean => /not solved/i.test(message)
+
+export function NotSolvedRefusal({ what }: { what: string }) {
+  return <NotSolved what={what} why="Run it, then try again." />
+}
