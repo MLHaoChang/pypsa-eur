@@ -1,0 +1,1 @@
+* Test(pypsa-gui): A campus study publish that fails while replacing `run` puts the previous study back, drops a leftover `run.bak` beside a finished study, and unlinks a symlinked study directory without deleting its target.
