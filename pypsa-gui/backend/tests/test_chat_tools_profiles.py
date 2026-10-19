@@ -260,3 +260,94 @@ def test_resolution_schemas_are_declared_in_the_catalogue():
         props = schemas[name]["input_schema"]["properties"]
         assert props["resolution"]["enum"] == ["hourly", "daily", "weekly"], \
             name
+
+
+# ---------------------------------------------------------------------------
+# C3: from_generators — resolve generator names to their bus coordinates
+# ---------------------------------------------------------------------------
+
+
+import contextlib
+
+
+@contextlib.contextmanager
+def _bound_ctx(client, session_ctx):
+    """Bind the session's request context the way a real chat turn does —
+    from_generators reads the network through it (see the apply test)."""
+    from services.pypsa_service import PyPSAService
+
+    ctx = session_ctx(client)
+    token = PyPSAService.bind_request_context(ctx)
+    try:
+        yield ctx
+    finally:
+        PyPSAService.reset_request_context(token)
+
+
+def test_preview_from_generators_matches_explicit_points(client, wind_project,
+                                                         session_ctx):
+    """from_generators=["g_wind"] must resolve to the bus coordinates
+    (8.0, 50.0): the deterministic synthetic source then yields exactly the
+    series an explicit-points call produces."""
+    explicit = chat_tools.DISPATCHERS["preview_renewable_profile"](
+        points=[{"id": "g_wind", "lon": 8.0, "lat": 50.0}],
+        technology="wind", year=2023,
+    )
+    with _bound_ctx(client, session_ctx):
+        resolved = chat_tools.DISPATCHERS["preview_renewable_profile"](
+            from_generators=["g_wind"],
+            technology="wind", year=2023,
+        )
+    assert resolved["series"]["g_wind"] == explicit["series"]["g_wind"]
+
+
+def test_from_generators_unknown_name_is_a_typed_refusal(client, wind_project,
+                                                         session_ctx):
+    with _bound_ctx(client, session_ctx):
+        with pytest.raises(HTTPException) as err:
+            chat_tools.DISPATCHERS["preview_renewable_profile"](
+                from_generators=["no_such_gen"], technology="wind",
+            )
+    assert err.value.status_code == 422
+    assert err.value.detail["error_kind"] == "unknown_generator"
+    assert "no_such_gen" in err.value.detail["message"]
+
+
+def test_neither_points_nor_from_generators_is_a_typed_refusal(client):
+    with pytest.raises(HTTPException) as err:
+        chat_tools.DISPATCHERS["preview_renewable_profile"](technology="wind")
+    assert err.value.status_code == 422
+    assert err.value.detail["error_kind"] == "no_points"
+
+
+def test_generate_from_generators_records_the_bus_coordinates(
+    client, wind_project, session_ctx,
+):
+    with _bound_ctx(client, session_ctx):
+        out = chat_tools.DISPATCHERS["generate_renewable_profile"](
+            project_id=wind_project,
+            from_generators=["g_wind"],
+            technology="wind",
+            year=2023,
+        )
+    assert out["kind"] == "profile_gen"
+    done = _wait_job(out["id"])
+    assert done["status"] == "completed", done["error"]
+
+    pending = chat_tools.DISPATCHERS["list_pending_profiles"](
+        project_id=wind_project,
+    )
+    mine = [p for p in pending["pending"] if p["job_id"] == out["id"]]
+    assert len(mine) == 1
+    assert mine[0]["points"] == ["g_wind"]
+    coords = mine[0]["point_coords"]["g_wind"]
+    assert coords == [8.0, 50.0]
+
+
+def test_from_generators_schema_is_declared_in_the_catalogue():
+    schemas = {t["name"]: t for t in TOOLS}
+    for name in ("preview_renewable_profile", "generate_renewable_profile"):
+        entry = schemas[name]
+        props = entry["input_schema"]["properties"]
+        assert props["from_generators"]["items"]["type"] == "string", name
+        assert "points" not in entry["input_schema"]["required"], name

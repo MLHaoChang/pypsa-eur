@@ -1381,20 +1381,24 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "preview_renewable_profile",
-        "Quick SYNTHETIC preview of a renewable profile for the given points "
-        "(id/lon/lat), downsampled to daily means and labelled an estimate — "
-        "for weighing options before committing to a real generation. "
-        "`resolution` picks the output axis (hourly is downsampled to daily "
-        "for display; daily/weekly are returned as-is). Never enqueues a "
-        "job. Safety: read.",
+        "Quick SYNTHETIC preview of a renewable profile, downsampled to "
+        "daily means and labelled an estimate — for weighing options before "
+        "committing to a real generation. Sites come from `points` "
+        "(id/lon/lat) and/or `from_generators` (generator names; each "
+        "generator's bus coordinates seed its site, and the point id is the "
+        "generator name, so apply needs no mapping) — at least one of the "
+        "two is required. `resolution` picks the output axis (hourly is "
+        "downsampled to daily for display; daily/weekly are returned "
+        "as-is). Never enqueues a job. Safety: read.",
         {"points": {"type": "array", "items": {"type": "object"}},
+         "from_generators": {"type": "array", "items": {"type": "string"}},
          "technology": {"type": "string", "enum": ["wind", "solar"]},
          "preset": {"type": "string"},
          "params": {"type": "object"},
          "year": {"type": "integer"},
          "resolution": {"type": "string",
                         "enum": ["hourly", "daily", "weekly"]}},
-        ["points", "technology"],
+        ["technology"],
     ),
     _t(
         "list_pending_profiles",
@@ -1409,8 +1413,12 @@ TOOLS: list[dict[str, Any]] = [
         "generate_renewable_profile",
         "Queue a renewable-profile generation for a project as a solve-queue "
         "job (kind profile_gen) and answer the job — it does NOT complete "
-        "inline; poll solve_queue_list and then list_pending_profiles. The "
-        "synthetic source works offline; the atlite source needs CDS "
+        "inline; poll solve_queue_list and then list_pending_profiles. Sites "
+        "come from `points` (id/lon/lat) and/or `from_generators` (generator "
+        "names; the bus coordinates seed the sites and the point ids are the "
+        "generator names, so apply_generated_profile needs no point_id "
+        "mapping) — at least one of the two is required. The synthetic "
+        "source works offline; the atlite source needs CDS "
         "credentials and downloads ERA5 weather for the points' bounding box "
         "(minutes). `resolution` aggregates at generation: hourly is the "
         "native axis; daily/weekly are means over the hour (upsampled back "
@@ -1418,6 +1426,7 @@ TOOLS: list[dict[str, Any]] = [
         "kind: the job queues behind a running solve. Safety: execution.",
         {"project_id": {"type": "string"},
          "points": {"type": "array", "items": {"type": "object"}},
+         "from_generators": {"type": "array", "items": {"type": "string"}},
          "technology": {"type": "string", "enum": ["wind", "solar"]},
          "preset": {"type": "string"},
          "params": {"type": "object"},
@@ -1425,7 +1434,7 @@ TOOLS: list[dict[str, Any]] = [
          "year": {"type": "integer"},
          "resolution": {"type": "string",
                         "enum": ["hourly", "daily", "weekly"]}},
-        ["project_id", "points", "technology"],
+        ["project_id", "technology"],
     ),
     _t(
         "apply_generated_profile",
