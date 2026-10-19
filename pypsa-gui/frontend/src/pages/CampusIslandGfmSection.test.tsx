@@ -83,6 +83,26 @@ describe('CampusIslandGfmSection', () => {
     expect(screen.queryByRole('button', { name: /Apply/ })).toBeNull()
   })
 
+  it('not achievable with the island rows off says the hub solve will not show the capacity (UX review N7)', async () => {
+    api.gfmSettings.mockResolvedValue({ ...ready(rec({ status: 'not_achievable', achievable: false, changed: false,
+      settings: {} })), island_rows_now: false })
+    renderSection()
+    expect((await screen.findByTestId('gfm-island-rows-off')).textContent).toMatch(/not sized to island/)
+  })
+
+  it('says nothing about the rows when they are on, or when the server does not say', async () => {
+    api.gfmSettings.mockResolvedValue({ ...ready(rec({ status: 'not_achievable', achievable: false, settings: {} })),
+      island_rows_now: true })
+    const { unmount } = renderSection()
+    await screen.findByTestId('gfm-status')
+    expect(screen.queryByTestId('gfm-island-rows-off')).toBeNull()
+    unmount()
+    api.gfmSettings.mockResolvedValue(ready(rec({ status: 'not_achievable', achievable: false, settings: {} })))
+    renderSection()
+    await screen.findByTestId('gfm-status')
+    expect(screen.queryByTestId('gfm-island-rows-off')).toBeNull()
+  })
+
   it('a collapse case names the collapse without a number', async () => {
     api.gfmSettings.mockResolvedValue(ready(rec({
       status: 'not_achievable', achievable: false,

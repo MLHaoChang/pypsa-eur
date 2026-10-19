@@ -128,6 +128,12 @@ function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 
   return { label, value: String(r.lole), unit: 'h/yr', state: 'ready', basis, open }
 }
 
+/** Why a "capacity is needed" verdict will not show in a hub solve (UX review N7). */
+export const ISLAND_ROWS_OFF_TAIL = ', and the hub solve is not sized to island (island rows are off)'
+export const ISLAND_ROWS_OFF_NOTE =
+  'The island rows are off in the solver settings, so the hub solve is not sized to island: the capacity '
+  + 'above will not appear in its results until they are turned on.'
+
 function control(gfm: GfmSettingsState | null | undefined): ChapterTile['control'] {
   if (!gfm) return undefined
   const rec = gfm.recommendation
@@ -150,7 +156,8 @@ function control(gfm: GfmSettingsState | null | undefined): ChapterTile['control
   const n = Object.keys(rec.settings).length
   const text = rec.status === 'recommended' ? `recommended for ${n} unit${n === 1 ? '' : 's'}, not applied yet`
     : rec.status === 'unchanged' ? 'the current settings pass with margin'
-      : rec.status === 'not_achievable' ? 'no setting passes: capacity is needed'
+      : rec.status === 'not_achievable'
+        ? `no setting passes: capacity is needed${gfm.island_rows_now === false ? ISLAND_ROWS_OFF_TAIL : ''}`
         : 'the search stopped at its cap; recommend again'
   return { state: 'ready', text: `Grid-forming settings (heuristic screening): ${text}.` }
 }

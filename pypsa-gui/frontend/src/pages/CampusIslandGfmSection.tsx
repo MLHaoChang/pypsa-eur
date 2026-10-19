@@ -19,6 +19,7 @@ import {
 } from '../api/campusElectrical'
 import { Btn, Tag } from '../components/PageKit'
 import { useUIStore } from '../store/uiStore'
+import { ISLAND_ROWS_OFF_NOTE } from './hubDesign/chapters'
 
 export const GFM_KEY = (name: string) => ['campusElectrical', 'gfmSettings', name] as const
 const STATE_KEY = (name: string) => ['campusElectrical', 'state', name] as const   // CAMPUS_KEY (the panel imports this file)
@@ -99,7 +100,7 @@ export default function CampusIslandGfmSection({ name }: { name: string }) {
           let i_max rise to 1.5 pu (hardware)
         </label>
       </div>
-      {rec && <RecommendationView rec={rec} />}
+      {rec && <RecommendationView rec={rec} islandRowsOff={data?.island_rows_now === false} />}
       {canApply && (
         <div className="mt-2">
           <Btn onClick={() => apply.mutate()} disabled={apply.isPending || busy}>
@@ -120,7 +121,7 @@ export default function CampusIslandGfmSection({ name }: { name: string }) {
   )
 }
 
-function RecommendationView({ rec }: { rec: GfmRecommendation }) {
+function RecommendationView({ rec, islandRowsOff }: { rec: GfmRecommendation; islandRowsOff: boolean }) {
   const units = Object.entries(rec.settings)
   return (
     <div className="mt-2" data-testid="gfm-recommendation">
@@ -132,6 +133,9 @@ function RecommendationView({ rec }: { rec: GfmRecommendation }) {
         {STATUS_TEXT[rec.status]} ({rec.simulations} of at most {rec.max_simulations} simulations,
         margin {num(100 * rec.margin)} %)
       </p>
+      {rec.status === 'not_achievable' && islandRowsOff && (
+        <p className="text-[12px] mt-1 text-warn" data-testid="gfm-island-rows-off">{ISLAND_ROWS_OFF_NOTE}</p>
+      )}
       {units.length > 0 && (
         <table className="text-[12px] whitespace-nowrap mt-1" data-testid="gfm-settings">
           <thead><tr><th className={TH}>unit</th><th className={TH}>control</th>

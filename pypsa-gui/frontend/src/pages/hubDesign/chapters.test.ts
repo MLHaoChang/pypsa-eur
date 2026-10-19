@@ -128,6 +128,14 @@ describe('chapterTiles', () => {
     it('none without a GFM read (no campus, no island)', () => {
       expect(ctl(null)).toBeUndefined()
     })
+    it('not achievable names the off island rows only when the server says they are off (UX review N7)', () => {
+      const na = rec({ status: 'not_achievable', changed: false, settings: {} })
+      expect(ctl({ state: 'ready', reason: '', recommendation: na, island_rows_now: false })).toMatchObject(
+        { text: expect.stringMatching(/capacity is needed, and the hub solve is not sized to island/) })
+      expect(ctl({ state: 'ready', reason: '', recommendation: na, island_rows_now: true })!.text)
+        .not.toMatch(/island rows/)
+      expect(ctl({ state: 'ready', reason: '', recommendation: na })!.text).not.toMatch(/island rows/)
+    })
     it('not run, recommended, not achievable, stale', () => {
       expect(ctl({ state: 'not_run', reason: '', recommendation: null })).toMatchObject(
         { state: 'not_run', text: expect.stringMatching(/no recommendation yet/) })
