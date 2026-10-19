@@ -193,9 +193,9 @@ def _diagnose_infeasibility(network, config, log_queue,
                  "lost) with what it can build; solve with island_constraints off to check, "
                  "or raise the candidates' p_nom_max.")
             hints += 1
-        from services.solver.island import SHORTFALL_ADVICE, island_shortfalls, shortfall_sentence
+        from services.solver.island import island_shortfalls, shortfall_line
         for sh in island_shortfalls(getattr(n, "_island_facts", None)):
-            emit(f"[INFEASIBLE]   • {sh['row']}: {shortfall_sentence(sh)} {SHORTFALL_ADVICE}")
+            emit(f"[INFEASIBLE]   • {shortfall_line(sh)}")
             hints += 1
     except Exception:
         pass

@@ -241,6 +241,11 @@ def island_shortfalls(facts) -> list[dict]:
     return out
 
 
+def shortfall_line(sh: dict) -> str:
+    """A short row, its sentence and what to do: the text of the log line and of the study's reason."""
+    return f"{sh['row']}: {shortfall_sentence(sh)} {SHORTFALL_ADVICE}"
+
+
 def shortfall_sentence(sh: dict) -> str:
     """One short row in words, exactly as the infeasibility diagnostics print it after the row name."""
     return (f"the largest load step is {sh['step_mw']:,.2f} MW, "

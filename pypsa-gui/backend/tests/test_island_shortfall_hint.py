@@ -72,17 +72,13 @@ def test_a_failed_ens_solve_names_the_missing_mw_in_its_reason(monkeypatch):
     assert "at most 7.00 MW" in reason and "3.00 MW is missing" in reason
 
 
-def test_without_island_facts_the_reason_is_unchanged(monkeypatch):
-    """A plain infeasible study (no island rows): the reason is the old one, byte for byte."""
+def test_without_island_facts_the_reason_is_unchanged_byte_for_byte():
+    """A plain infeasible study (no island rows): exactly the old reason."""
     n = _hub(load=10.0)
-    n.generators.at["supply", "p_nom"] = 1.0          # not enough supply at all: infeasible without rows
-    n.links.at["imp", "p_nom"] = 1.0
+    n.links.at["imp", "p_nom"] = 1.0                  # 1 MW of supply for a 10 MW load: infeasible
+    n.storage_units.at["bess", "p_nom_max"] = 1.0
     st = S._Study(cfg=SolverConfig(), network=n, lock=threading.RLock(), stop_event=threading.Event(),
                   log_queue=queue.SimpleQueue(), solves=0, records=[], sections={}, failed_reason=None)
     S._stage_ens_solve(st)
-    if st.failed_reason is None:
-        pytest.skip("the plain case solved; no failure to compare")
-    assert st.failed_reason.endswith(
-        "the pack's ENS target cannot be met by this network under the pack overlay") \
-        or "infeasible" not in st.failed_reason
-    assert "Island-" not in st.failed_reason
+    assert st.failed_reason == ("ens_solve warning:infeasible — the pack's ENS target cannot be met "
+                                "by this network under the pack overlay")
