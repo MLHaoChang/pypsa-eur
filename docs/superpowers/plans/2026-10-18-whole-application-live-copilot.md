@@ -194,3 +194,32 @@ Paid provider/media probes, external reviewer contact and deployment remain
 outside current authorization. Keep independent review and calibration pending
 as requested. Publish separate, concrete readiness/budget proposals when those
 external gates become the final remaining step.
+
+## Feature-catalogue amendment — 2026-10-19
+
+The owner's seven core features (project summary, results navigation,
+plausibility, multi-asset parametrisation, sensitivities, run/re-run/failure,
+reports) are a floor, not a ceiling. The
+[feature catalogue](../../../.scratch/live-copilot/feature-catalogue.md)
+inventories every human feature from the code and adds journeys OJ-13–46.
+New tickets slot into the existing order without reordering it:
+
+| Layer | New tickets | Journeys added |
+| --- | --- | --- |
+| LC-01 | [LC-15](../../../.scratch/live-copilot/issues/15-project-asset-summary.md) project asset summary | OJ-13, OJ-14, OJ-45 |
+| LC-03 | — (LC-11 covers it) | OJ-15, OJ-16 |
+| LC-04 | [LC-16](../../../.scratch/live-copilot/issues/16-multi-asset-parametrisation.md) multi-asset and settings cards | OJ-21–23, OJ-26 |
+| LC-05 | [LC-17](../../../.scratch/live-copilot/issues/17-sensitivity-create-and-run.md), [LC-18](../../../.scratch/live-copilot/issues/18-sensitivity-comparison.md), [LC-19](../../../.scratch/live-copilot/issues/19-run-lifecycle-and-failure.md) | OJ-20, OJ-27–34 |
+| LC-06 | [LC-22](../../../.scratch/live-copilot/issues/22-unsupported-by-chat.md) named refusals, plus family adapters | OJ-17, 24, 25, 36, 37, 39–44, 46 |
+| LC-08 | — | OJ-38 (the full chain) |
+| After LC-05, first (Q5 = A) | [LC-20](../../../.scratch/live-copilot/issues/20-results-plausibility-check.md) post-solve plausibility | OJ-18, OJ-19 |
+| LC-06, after LC-20 (Q6 = A) | [LC-21](../../../.scratch/live-copilot/issues/21-network-study-report.md) network-study report | OJ-35 |
+
+Owner decisions, 2026-10-19 (relayed by the coordinator). Q5 = A: the
+post-solve plausibility check (LC-20) is the first item after LC-05 closes;
+from LC-03 on, the copilot runs `validate_network`, `diagnose_network` and
+`project_readiness` and says plainly that result-plausibility rules don't
+exist yet. Q6 = A: network-study chapters (model summary, results, load flow,
+prices and costs, sensitivity comparison, plausibility) go into the existing
+report pipeline as LC-21, built in LC-06 after LC-05. This is new application
+scope; humans get the chapters in the Reports panel too.
