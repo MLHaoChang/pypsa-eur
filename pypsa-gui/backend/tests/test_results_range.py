@@ -373,6 +373,9 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         "/eh_levers",
         "/eh_dtc",
         "/eh_dtc_planning",
+        # Grid-to-process 03: the binary operational check, one row per
+        # period (cost gap, extra shortfall, flag) and its ledger.
+        "/process_uc_check",
     }
 
     # Typed native projections do not use index/columns/data or from/to:

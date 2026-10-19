@@ -146,6 +146,8 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     # services rather than from the economics roll-ups this allowlist tracks.
     ("routers/results.py", "get_adequacy"):                    frozenset(),
     ("routers/results.py", "get_reserve_margin"):              frozenset(),
+    # Grid-to-process 03: the binary operational check (operating-cost gap, shortfall), no CAPEX roll-up.
+    ("routers/results.py", "get_process_uc_check"):            frozenset(),
     ("routers/results.py", "get_copt"):                        frozenset(),
     ("routers/results.py", "get_fmea_modes"):                  frozenset(),
     ("routers/results.py", "get_fmea_sweep"):                  frozenset(),
