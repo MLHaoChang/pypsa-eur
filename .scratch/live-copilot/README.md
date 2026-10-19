@@ -38,6 +38,8 @@ call it fully green.
 2026-10-19 feature catalogue: the owner said OJ-01–12 were only examples. The
 [feature catalogue](feature-catalogue.md) maps every page, tab, action, job,
 study, report and admin feature found in the code to its chat tool (or none)
-and its LC layer. It adds journeys OJ-13–46 and gap issues 15–22. Owner
-questions Q5 (where the plausibility check slots) and Q6 (report for network
-studies) are open; the Codex order is unchanged.
+and its LC layer. It adds journeys OJ-13–46 and gap issues 15–22. Owner decisions: Q5 = A
+(plausibility check LC-20 is the first item after LC-05; until then the
+copilot runs the input checks and says result rules don't exist yet) and Q6 =
+A (network-study report chapters, LC-21, in LC-06 after LC-05). The Codex
+order is unchanged.

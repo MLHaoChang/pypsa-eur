@@ -233,7 +233,8 @@ the run card.
   without the three reads.
 
 **OJ-18 · Do the results make sense? (clean case).** Closes the layer the
-owner picks for LC-20 (Q5).
+owner chose for LC-20: the first item after LC-05
+(Q5 = A).
 
 > User: "Do these results make sense?"
 > Copilot: "I checked 11 rules on run r-…: none flagged. Two rules could not
@@ -243,8 +244,13 @@ owner picks for LC-20 (Q5).
 - Trace: LC-20 plausibility read; per finding, its tab on request.
 - Pass: says which rules ran, which could not and why; no verdict without a
   rule. Fail: "the results look correct" with no rule IDs.
+- Interim (LC-03 until LC-20 lands, Q5 = A): the copilot runs
+  `validate_network`, `diagnose_network` and `project_readiness`, reports
+  what they found, and says plainly that result-plausibility rules don't
+  exist yet. Fail: any verdict on the results themselves.
 
-**OJ-19 · Spot what looks wrong.** Closes the layer the owner picks for LC-20.
+**OJ-19 · Spot what looks wrong.** Closes LC-20, the first item after LC-05
+(Q5 = A).
 
 > (on `oj-grid-bad`) User: "Anything wrong with these results?"
 > Copilot: "Five things look wrong, most serious first: 12 MWh of lost load at
@@ -413,7 +419,7 @@ owner picks for LC-20 (Q5).
 ### Core 7: reports and exports
 
 **OJ-35 · Report on a network study.** Closes the layer the owner picks for
-LC-21 (Q6).
+LC-21: network-study chapters in LC-06 (Q6 = A).
 
 > User: "Create a report of this study."
 > Copilot: "I'll include: model summary, headline results, capacity,
@@ -529,8 +535,8 @@ LC-06 onwards.
 | LC-03 | OJ-15, OJ-16 | LC-11 (existing) |
 | LC-04 | OJ-21, OJ-22, OJ-23, OJ-26 | LC-16 |
 | LC-05 | OJ-20, OJ-27–OJ-34 | LC-17, LC-18, LC-19 (with LC-12) |
-| Owner Q5 | OJ-18, OJ-19 | LC-20 |
-| Owner Q6 | OJ-35 | LC-21 |
+| After LC-05, first (Q5 = A) | OJ-18, OJ-19 | LC-20 |
+| LC-06, after LC-20 (Q6 = A) | OJ-35 | LC-21 |
 | LC-06 | OJ-17, OJ-24, OJ-25, OJ-36, OJ-37, OJ-39–OJ-44, OJ-46 | LC-14, LC-22, per-family adapters |
 | LC-08 | OJ-38 | all of the above |
 | LC-07 | OJ-13–OJ-46 spoken, as they land | — |

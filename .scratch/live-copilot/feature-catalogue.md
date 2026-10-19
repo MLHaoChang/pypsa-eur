@@ -23,8 +23,8 @@ acceptance scenarios, and issues 15–22 hold the gaps.
   `none`. "Partial" says what is missing. A tool's existence is not proof the
   journey works: no journey runs end to end yet.
 - **Layer** is the LC layer of the [plan](../../docs/superpowers/plans/2026-10-18-whole-application-live-copilot.md)
-  that closes it, with the ticket when one exists. "Q5" and "Q6" are open
-  owner questions. "Out" means the copilot refuses it by design (LC-22).
+  that closes it, with the ticket when one exists. "Q5" and "Q6" mark the
+  owner's decisions of 2026-10-19 (both A, see below). "Out" means the copilot refuses it by design (LC-22).
 - **Card** is the confirmation the copilot must show. Under owner decision
   Q3, every parameter change gets an old→new card in both modes, even when
   its tool is write tier (Expert cards only destructive and execution tiers
@@ -41,12 +41,14 @@ acceptance scenarios, and issues 15–22 hold the gaps.
    and Energy Hub designs. `sanity_check_results`, `diagnose_results` and
    `generate_run_report` were registered once, never implemented, and removed
    (`services/chat_tools.py:7332-7341`; guard `smoke/qa_e2e.py:254`). LC-20,
-   owner question Q5.
+   Owner decision Q5 = A: the first item after LC-05; from LC-03 the copilot
+   runs the input checks and says result rules don't exist yet.
 3. **Reports exist only for some studies.** `POST /reports/generate`
    answers 400 `no_evidence` unless an Energy Hub, adequacy, FMEA, investment
    or island source exists (`routers/report_jobs.py:154-161`). A grid study
    (dispatch, capacity, load flow, sensitivities) cannot be reported by a
-   human or by chat. LC-21, owner question Q6.
+   human or by chat. LC-21; owner decision Q6 = A: network-study chapters in
+   the existing pipeline, built in LC-06 after LC-05.
 4. **Sensitivities are created and run, but compared only in pairs.**
    `run_sensitivity_sweep` (1–4 cases, up to 20 multi-asset changes each) and
    the experiment tools exist. Every comparison tool is A-vs-B, so "compare
@@ -70,11 +72,11 @@ acceptance scenarios, and issues 15–22 hold the gaps.
 | --- | --- | --- | --- | --- |
 | 1 Open project, summarise assets | `list_projects`, `load_project`/`activate_project`, `get_project_statistics` (thin), `list_components`, `get_meta` | One bounded asset summary; exact names (LC-01B) | LC-01 · LC-15 | OJ-09, 13, 14, 45 |
 | 2 Navigate results with numbers | `ui_open_panel` (15 tabs), `get_results` (31 kinds), `get_loadflow_summary`, `get_adequacy_results`, `get_asset_results`, `explain_investment`, `list_project_runs`, `compare_project_runs` | Per-tab read rule, narration, source ACKs outside load flow, snapshot/asset navigation fixes | LC-03 · LC-09, 11, 14 | OJ-01–04, 15–17 |
-| 3 Plausibility | Pre-solve: `validate_network`, `diagnose_network`, `project_readiness`; Energy Hub: `review_eh_study` | Any post-solve rule set | Q5 · LC-20 | OJ-18, 19, 20 |
+| 3 Plausibility | Pre-solve: `validate_network`, `diagnose_network`, `project_readiness`; Energy Hub: `review_eh_study` | Any post-solve rule set | After LC-05 (Q5) · LC-20 | OJ-18, 19, 20 |
 | 4 Update any asset, several at once | `update_component`, `bulk_update_components`, `preview_project_changes` → `apply_project_changes`, `get_component_schema`, `undo_last` | One old→new card for mixed sets in both modes; relative changes; settings cards | LC-04 · LC-16 | OJ-05, 06, 21–26 |
 | 5 Sensitivity: create, run, compare | `run_sensitivity_sweep`, `create_scenario`, experiment tools, `compare_scenarios`, `compare_experiments`, `get_study_evidence(simulation)` | Conversation flow, N-job continuation, base+N comparison, ranking | LC-05 · LC-17, 18 | OJ-27–30 |
 | 6 Run, re-run, follow, failure | `run_simulation`, `run_ac_pf_stage`, `solve_queue_*`, `abort_simulation`, `wait_for_job` (≤ 25 s), `get_simulation_log_history` | Continuation after 25 s (LC-12), requeue/cancel-queued tools, failure triage, engine choice | LC-05 · LC-12, 19 | OJ-07, 08, 10, 31–34 |
-| 7 Create a report | `generate_report` & report tools (Energy Hub, adequacy, investment, island), `generate_study_report` (decision), exports | Report for a plain network study and sensitivities | Q6 · LC-21 | OJ-35, 36, 37 |
+| 7 Create a report | `generate_report` & report tools (Energy Hub, adequacy, investment, island), `generate_study_report` (decision), exports | Report for a plain network study and sensitivities | LC-06 (Q6) · LC-21 | OJ-35, 36, 37 |
 | All, end to end | — | — | LC-08 | OJ-38 |
 
 ## Inventory
@@ -192,7 +194,7 @@ acceptance scenarios, and issues 15–22 hold the gaps.
 | Run-bound view; run history | Results for a past run | `list_project_runs`, `get_run_evidence`, `discuss_project_run`, `export_run_evidence` | LC-03 | OJ-01, 16 |
 | Compare two runs | — | `compare_project_runs` | LC-03 | OJ-16 |
 | Charts | Chart export | `create_chart` | LC-06 (D20) | — |
-| Plausibility of results | Engineer's judgement | None after a solve | Q5 · LC-20 | OJ-18, 19 |
+| Plausibility of results | Engineer's judgement | None after a solve | After LC-05 (Q5) · LC-20 | OJ-18, 19 |
 
 ### Reliability, Energy Hub, investment
 
@@ -233,7 +235,7 @@ acceptance scenarios, and issues 15–22 hold the gaps.
 | Feature | What a human does | Copilot today | Layer | Journey |
 | --- | --- | --- | --- | --- |
 | Generate report (Energy Hub, adequacy, investment, island) | Reports panel | `generate_report`, `get_report_status`, `abort_report_generation`, `build_study_report` | LC-06 (D21) | OJ-36 |
-| Report for a network study | Not possible today | None (400 `no_evidence`) | Q6 · LC-21 | OJ-35 |
+| Report for a network study | Not possible today | None (400 `no_evidence`) | LC-06 (Q6) · LC-21 | OJ-35 |
 | Evidence-only report | Reports panel | None (route exists, no tool) | LC-06 (D21) | — |
 | View, regenerate section, diff versions | Report viewer | `list_reports`, `get_report`, `get_report_table`, `regenerate_report_section`, `diff_report_versions` | LC-06 (D21) | — |
 | Templates, mapping, round trip | Report viewer | `list_report_templates`, `set_report_template`, `get_report_template`, `propose_report_mapping`, `set_report_mapping`, `import_edited_report`, `list_report_roundtrips` | LC-06 (D21) | — |

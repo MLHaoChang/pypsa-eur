@@ -128,8 +128,8 @@ may precede LC-01; its new resolved-context UX still depends on LC-01.
 | [LC-17](issues/17-sensitivity-create-and-run.md) | Inside LC-05: create and run sensitivities by chat; N-job continuation | LC-12, LC-16 | Added 2026-10-19; not started; OJ-27/28 |
 | [LC-18](issues/18-sensitivity-comparison.md) | Inside LC-05: base + N comparison, ranking, Compare view | LC-17, LC-03 interfaces | Added 2026-10-19; not started; OJ-29/30 |
 | [LC-19](issues/19-run-lifecycle-and-failure.md) | Inside LC-05: requeue, cancel queued, re-run rule, failure triage, engine choice | LC-12 | Added 2026-10-19; not started; OJ-20/31–34 |
-| [LC-20](issues/20-results-plausibility-check.md) | Post-solve plausibility rules; slot is owner question Q5 | LC-03 adapters | Added 2026-10-19; needs-info; OJ-18/19 |
-| [LC-21](issues/21-network-study-report.md) | Report for a network study and sensitivities; scope is owner question Q6 | LC-03, LC-18 | Added 2026-10-19; needs-info; OJ-35 |
+| [LC-20](issues/20-results-plausibility-check.md) | Post-solve plausibility rules; first item after LC-05 (Q5 = A); interim rung from LC-03 | LC-03 adapters, LC-05 closed | Added 2026-10-19; not started; OJ-18/19 |
+| [LC-21](issues/21-network-study-report.md) | Network-study chapters in the existing report pipeline (Q6 = A), in LC-06 after LC-20 | LC-03, LC-18, LC-20 | Added 2026-10-19; not started; OJ-35 |
 | [LC-22](issues/22-unsupported-by-chat.md) | Inside LC-06: named refusals for features that stay out of chat; route-coverage test | LC-01 discovery | Added 2026-10-19; not started; OJ-46 |
 
 ### Owner decisions — 2026-10-19
@@ -415,3 +415,14 @@ Evidence/QA record commands/hashes/failure and scope. Next: refreshed two-axis
 review, one normal batch push, require all new-head CI with actual backend
 steps, fresh-master premerge, ordinary expected-head squash if every gate passes.
 No paid calls, external contacts, deployment or new implementation scope.
+
+
+2026-10-19 feature catalogue (docs only, PR388, branch
+`claude/live-copilot-feature-catalogue`): added `feature-catalogue.md`
+(122 features from code), journeys OJ-13–46 and issues 15–22, with ledger
+rows LC-15–22 appended to the slice table. Owner decisions relayed by the
+coordinator: Q5 = A (LC-20 plausibility is the first item after LC-05; from
+LC-03 the copilot runs the input checks and says result rules don't exist
+yet) and Q6 = A (LC-21 network-study report chapters in LC-06 after LC-05;
+new application scope). The Codex order is unchanged. No application code,
+tests or existing ledger rows changed.

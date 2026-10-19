@@ -3,8 +3,9 @@
 
 # LC-20 — "do these results make sense?"
 
-Status: needs-info (owner question Q5: where it slots). Proposed default:
-first item after LC-05 closes, with an interim rung from LC-03.
+Status: ready-for-agent. Owner decision Q5 = A (2026-10-19): the first item
+after LC-05 closes, ahead of the other LC-06 work, with the interim rung
+(item 4) from LC-03 on.
 Type: task
 Baseline: master `ae95a94a866730c0fe67fad37e238dc281786bd6`
 Dependencies: LC-03 result adapters (the rules read their facts); LC-18 for

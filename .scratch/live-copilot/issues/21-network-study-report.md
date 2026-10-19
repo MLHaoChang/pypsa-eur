@@ -3,8 +3,10 @@
 
 # LC-21 — "create a report" for a network study
 
-Status: needs-info (owner question Q6: new report chapters are application
-scope, not only copilot scope)
+Status: ready-for-agent. Owner decision Q6 = A (2026-10-19): add
+network-study chapters to the existing report pipeline, built in LC-06 after
+LC-05 (after LC-20, whose findings feed the plausibility chapter). This is new
+application scope; humans get the chapters in the Reports panel too.
 Type: task
 Baseline: master `ae95a94a866730c0fe67fad37e238dc281786bd6`
 Dependencies: LC-03 adapters (chapter facts), LC-18 (sensitivity chapter),
@@ -27,7 +29,7 @@ Chat can already: `generate_report`, `get_report_status`,
 `regenerate_report_section`, templates and mapping, `export_report_docx`/
 `pdf`, round trip and diff (`harness/catalogue.py:2249` and neighbours).
 
-## Options (owner question Q6)
+## Options (owner question Q6; A chosen)
 
 - **A (recommended):** add network-study chapters to the existing evidence
   pipeline: model summary (LC-15 read), headline results, capacity, dispatch,
@@ -41,7 +43,7 @@ Chat can already: `generate_report`, `get_report_status`,
 - **C:** defer; the copilot says reports exist for Energy Hub, adequacy,
   investment and island studies only.
 
-## Scope (if A)
+## Scope (option A, chosen)
 
 1. One chapter per adapter, each built from the same native facts the tab
    and chat use, with `not_established` when its source is missing.

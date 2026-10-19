@@ -212,5 +212,14 @@ New tickets slot into the existing order without reordering it:
 | LC-05 | [LC-17](../../../.scratch/live-copilot/issues/17-sensitivity-create-and-run.md), [LC-18](../../../.scratch/live-copilot/issues/18-sensitivity-comparison.md), [LC-19](../../../.scratch/live-copilot/issues/19-run-lifecycle-and-failure.md) | OJ-20, OJ-27–34 |
 | LC-06 | [LC-22](../../../.scratch/live-copilot/issues/22-unsupported-by-chat.md) named refusals, plus family adapters | OJ-17, 24, 25, 36, 37, 39–44, 46 |
 | LC-08 | — | OJ-38 (the full chain) |
-| Owner Q5 | [LC-20](../../../.scratch/live-copilot/issues/20-results-plausibility-check.md) post-solve plausibility | OJ-18, OJ-19 |
-| Owner Q6 | [LC-21](../../../.scratch/live-copilot/issues/21-network-study-report.md) network-study report | OJ-35 |
+| After LC-05, first (Q5 = A) | [LC-20](../../../.scratch/live-copilot/issues/20-results-plausibility-check.md) post-solve plausibility | OJ-18, OJ-19 |
+| LC-06, after LC-20 (Q6 = A) | [LC-21](../../../.scratch/live-copilot/issues/21-network-study-report.md) network-study report | OJ-35 |
+
+Owner decisions, 2026-10-19 (relayed by the coordinator). Q5 = A: the
+post-solve plausibility check (LC-20) is the first item after LC-05 closes;
+from LC-03 on, the copilot runs `validate_network`, `diagnose_network` and
+`project_readiness` and says plainly that result-plausibility rules don't
+exist yet. Q6 = A: network-study chapters (model summary, results, load flow,
+prices and costs, sensitivity comparison, plausibility) go into the existing
+report pipeline as LC-21, built in LC-06 after LC-05. This is new application
+scope; humans get the chapters in the Reports panel too.
