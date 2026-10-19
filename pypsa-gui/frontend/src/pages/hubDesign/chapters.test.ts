@@ -40,6 +40,12 @@ describe('chapterTiles', () => {
       basis: 'Not certified: the goal is 3 h/yr', open: { panel: 'results', tab: 'adequacy' } })
   })
 
+  it('reliability: a stale study dims the figure and says why (UX review N4)', () => {
+    const t = byId({ ...NONE, reliability: { hasResults: true, running: false, lole: 0.6, target: 3,
+      verdict: 'pass', stale: true } }).reliability
+    expect(t).toMatchObject({ state: 'stale', value: '0.6', reason: expect.stringMatching(/changed since the study/) })
+  })
+
   it('reliability: running, and a run with no shortfall figure', () => {
     expect(byId({ ...NONE, reliability: { ...NONE.reliability, running: true } }).reliability.state)
       .toBe('running')
@@ -134,6 +140,14 @@ describe('chapterTiles', () => {
 
     it('none without a GFM read (no campus, no island)', () => {
       expect(ctl(null)).toBeUndefined()
+    })
+    it('not achievable names the off island rows only when the server says they are off (UX review N7)', () => {
+      const na = rec({ status: 'not_achievable', changed: false, settings: {} })
+      expect(ctl({ state: 'ready', reason: '', recommendation: na, island_rows_now: false })).toMatchObject(
+        { text: expect.stringMatching(/capacity is needed, and the hub solve is not sized to island/) })
+      expect(ctl({ state: 'ready', reason: '', recommendation: na, island_rows_now: true })!.text)
+        .not.toMatch(/island rows/)
+      expect(ctl({ state: 'ready', reason: '', recommendation: na })!.text).not.toMatch(/island rows/)
     })
     it('nothing to tune (no case evaluated) is not applicable, with the reason', () => {
       expect(ctl({ state: 'ready', reason: '', recommendation: rec({ status: 'unchanged', changed: false, settings: {},

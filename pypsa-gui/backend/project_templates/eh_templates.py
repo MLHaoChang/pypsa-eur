@@ -427,6 +427,36 @@ def build_eh_h2_hub() -> pypsa.Network:
 
 # ── Island Microgrid (off_grid) ─────────────────────────────────────────────
 
+#: The existing island, in service from the first operating year (overnight
+#: cost 0); the subsea tie is the PoC meter, not an investment.
+MG_EXISTING = ("pv_plant", "wind_turbines", "diesel_1", "diesel_2", "diesel_3",
+               "island_battery", "hospital_feeder")
+MG_CANDIDATES = ("diesel_new", "bess_new")
+#: The representative week is dated 2030 (SNAPSHOTS): the first operating
+#: year. The case runs to the staged templates' 2045 horizon end.
+MG_FIRST_YEAR = int(SNAPSHOTS[0].year)
+MG_HORIZON_END = 2045
+#: The staged microgrid's finance inputs (`eh_staged_hubs._mg_finance`) on
+#: the plain network's names, one COD for every asset (a single period has
+#: no stage). Synthetic illustrative numbers; the ledger says what each is.
+MG_FINANCE: dict = {
+    "currency": "EUR", "currency_year": 2020, "price_basis": "nominal",
+    "financial_close": f"{MG_FIRST_YEAR - 1}-01-01",
+    "cod_by_asset": {a: f"{MG_FIRST_YEAR}-01-01" for a in (*MG_EXISTING, *MG_CANDIDATES)},
+    "capex_phasing": [1.0], "stage_capex_lead_years": 1, "contingency_share": 0.0,
+    "escalation": {c: 0.02 for c in ("opex", "fuel", "tariff", "ppa", "export", "capex")},
+    # Every owned generator and battery: PV 0.5 %/yr, the rest none.
+    "degradation_by_asset": {
+        **{a: (0.005 if a == "pv_plant" else 0.0) for a in MG_EXISTING if a != "hospital_feeder"},
+        **{a: 0.0 for a in MG_CANDIDATES}},
+    "analysis_years": MG_HORIZON_END - MG_FIRST_YEAR,             # 2030-2044
+    "annualise": False,                                           # the week weighs 8,760 h
+    "tax_losses": "offset_other_income", "financing_fee_tax": "not_deducted",
+    "replacement_rule": "part_lifetimes",
+    "terminal_value": {"method": "remaining_life_annuity"},
+    "wacc_nominal": 0.07, "cost_of_equity": 0.07, "inflation": 0.02,
+}
+
 
 def build_eh_microgrid() -> pypsa.Network:
     """A small island system that must run without its mainland tie.
@@ -493,6 +523,15 @@ def build_eh_microgrid() -> pypsa.Network:
     # Feeder outage data → a Class-B contingency for fmea_top once the tie
     # is islanded (the tie itself is closed by the pack).
     _outage(n, "links", "hospital_feeder", 0.01, 8.0)
+    # The existing island is in service and sunk: a typed overnight cost of 0
+    # is an established 0 for the investment case (no capex), and an infinite
+    # lifetime keeps it active. Neither row is extendable and 0 annuitises to
+    # 0, so the LP is unchanged; the staged copy sets the same values.
+    for frame in ("generators", "storage_units", "links"):
+        df = getattr(n, frame)
+        rows = [a for a in MG_EXISTING if a in df.index]
+        df.loc[rows, ["overnight_cost", "discount_rate"]] = [0.0, 0.07]
+        df.loc[rows, "lifetime"] = float("inf")
     return n
 
 
@@ -690,6 +729,89 @@ TEMPLATE_META: dict[str, dict] = {
             "study tie-connected operation.",
             "Class-C stress scenarios (dunkelflaute, heatwave) are "
             "preloaded for the FMEA sweep.",
+            "After a solve the investment case compares the plan with the island as it stands "
+            "today (the existing diesels, PV, wind and battery, no grid), re-solved without the "
+            "candidates. The representative week stands for each of the 15 operating years "
+            f"({MG_FIRST_YEAR}-{MG_HORIZON_END - 1}).",
+        ],
+        "ledger": [
+            {"item": "investment case",
+             "value": "compared with the island as it stands today: the existing diesels, PV, "
+                      "wind and battery, without the candidates, and no grid",
+             "source": "assumed",
+             "note": "the staged microgrid's basis (owner decision M2e a); the investment-case "
+                     "route re-solves the island without the candidates"},
+            {"item": "point of connection", "value": "subsea_tie, normally open (p_max_pu 0), "
+                                                     "no tariff, clock UTC",
+             "source": "assumed",
+             "note": "as the staged microgrid: it seeds the site/grid split and carries nothing"},
+            {"item": "single-year horizon",
+             "value": f"one representative week weighted 8,760/168 h, repeated for each of the "
+                      f"{MG_HORIZON_END - MG_FIRST_YEAR} operating years "
+                      f"{MG_FIRST_YEAR}-{MG_HORIZON_END - 1}, escalated and degraded",
+             "source": "assumed",
+             "note": f"the week is dated {MG_FIRST_YEAR}, the first operating year; the case "
+                     f"ends in {MG_HORIZON_END}, the staged templates' horizon end. The week "
+                     "already weighs a year, so nothing is annualised"},
+            {"item": "dates", "value": f"every COD {MG_FIRST_YEAR}-01-01, financial close "
+                                       f"{MG_FIRST_YEAR - 1}-01-01",
+             "source": "assumed",
+             "note": "a single period has no stage, so every asset shares one COD; close one year "
+                     "before it and capex paid then, as the staged templates"},
+            {"item": "existing island", "value": ", ".join(MG_EXISTING)
+                                                 + ": overnight cost 0, lifetime unlimited",
+             "source": "assumed",
+             "note": "in service and sunk: no capex in the case; only the candidates the plan "
+                     "builds are investments. The solve is unchanged"},
+            {"item": "finance inputs",
+             "value": f"the staged microgrid's: pack prices (2020 price data) taken as real "
+                      f"{MG_FIRST_YEAR} EUR (the base year), escalation 2 %/yr from "
+                      f"{MG_FIRST_YEAR}, inflation 2 %, all equity at 7 %, pre-tax; PV degrades "
+                      "0.5 %/yr, the rest not",
+             "source": "assumed",
+             "note": f"the week's running costs and the pack's capex are held flat to "
+                     f"{MG_FIRST_YEAR} (the first operating year) and escalate from there, the "
+                     "staged microgrid's rule from its first period (2027); the terminal value "
+                     "is the remaining-life annuity of each part"},
+            {"item": "battery inverter replacement", "value": "after 10 years (inv_power_lifetime)",
+             "source": "assumed",
+             "note": "bess_new's inverter is re-bought in 2039 (replacement_rule part_lifetimes); "
+                     "the cash then changes sign twice, so the IRR is flagged "
+                     "irr_multiple_sign_changes. The NPV is unaffected"},
+            {"item": "island sidecar",
+             "value": "seamless: the staged microgrid's blocks on the plain unit names (diesel "
+                      "droop, grid-forming batteries, PV and wind Q(U)); the tie is open, so "
+                      "there is no import to lose",
+             "source": "assumed",
+             "note": "eh_staged_hubs._mg_island_single_year (UX review N2, decision F); the "
+                     "island checks and the report's islanding chapter read it"},
+            {"item": "island unit data",
+             "value": "the staged microgrid's: diesel droop 4 %, H 1.5 s; batteries droop 4 %, "
+                      "tau_f 0.1 s, i_max 1.2 pu, k_gfm_min 1.0, pf 0.95; PV and wind Q(U), "
+                      "pf 0.95; sustained 24 h, bridge 600 s",
+             "source": "assumed",
+             "note": "demo values copied from the staged microgrid, not from a datasheet or a "
+                     "grid code"},
+            {"item": "transition RoCoF limit",
+             "value": "2 Hz/s over 500 ms (the steady island keeps 1 Hz/s)",
+             "source": "assumed",
+             "note": "the staged microgrid's demo value (eh_staged_hubs.MG_TRANSITION_ROCOF), "
+                     "relaxed from the data center's 1 Hz/s so a tuned grid-forming battery can "
+                     "meet it; not taken from a grid code"},
+            {"item": "island rows", "value": "off (island_constraints false)",
+             "source": "assumed",
+             "note": "the plan is not sized for the island requirements; the island checks "
+                     "report what islanding would need. Turn them on to plan for it (owner: "
+                     "island data on, rows off, the user opts in)"},
+            {"item": "island break-even", "value": "not applicable",
+             "source": "assumed",
+             "note": "the island rows are off, so the comparison is not relaxed for them and the "
+                     "case does not price an island capability"},
+            {"item": "diesel running cost", "value": "260 EUR/MWh (fuel and variable O&M)",
+             "source": "synthetic",
+             "note": f"the template's marginal cost, in {MG_FIRST_YEAR} money, escalating "
+                     "2 %/yr (the case books it as opex); replace with the island's fuel "
+                     "contract"},
         ],
         "provenance": PROVENANCE,
     },
@@ -766,8 +888,25 @@ def _staged_commercial_and_finance() -> dict:
             "finance": FinanceInputs.model_validate(DC_FINANCE).model_dump(mode="json")}
 
 
+def _microgrid_commercial_and_finance() -> dict:
+    """The single-year island's commercial config: the open subsea tie is the
+    PoC (it carries nothing), no tariff, the single-owner value flows on the
+    plain network. The case compares against the island as it stands today,
+    which the investment-case route re-solves without the candidates."""
+    from models.commercial import CommercialConfig
+    from models.finance import FinanceInputs
+    from services.commercial import value_flow_templates as VFT
+
+    base = CommercialConfig.model_validate({"poc_link": "subsea_tie", "timezone": "UTC"})
+    vf = VFT.build("single_owner", build_eh_microgrid(), base).config
+    commercial = base.model_copy(update={"value_flows": vf.model_dump(mode="json")})
+    return {"commercial": commercial.model_dump(mode="json"),
+            "finance": FinanceInputs.model_validate(MG_FINANCE).model_dump(mode="json")}
+
+
 #: Template blocks that need the backend's models (built on first use).
-_SOLVER_CONFIG_BUILT = {"eh_datacenter_staged": _staged_commercial_and_finance}
+_SOLVER_CONFIG_BUILT = {"eh_datacenter_staged": _staged_commercial_and_finance,
+                        "eh_microgrid": _microgrid_commercial_and_finance}
 _BUILT_CACHE: dict[str, dict] = {}
 
 

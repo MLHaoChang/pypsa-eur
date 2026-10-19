@@ -110,7 +110,7 @@ may precede LC-01; its new resolved-context UX still depends on LC-01.
 | Slice / issue | Resume scope | Required predecessors | Current state / evidence |
 | --- | --- | --- | --- |
 | [LC-02](issues/02-companion-interaction.md) | Later scope/plan/decision UX; layout repairs complete | New scope UX needs LC-01 | Layout PR369/dbc1fa7 and PR370/97867ad merged; PR370 native126pass/composer32pass/component188pass, remote/premerge and post-merge CI passed |
-| [LC-01](issues/01-discovery-and-scope.md) | Eligible capability/schema discovery and exact target resolver; settle concrete DTO/route compatibility before coding | Existing harness and source rebaseline | LC-01A active in `claude/copilot-discovery`, base97867ad; paged component-schema tool first; LC-T01/02/06/17 remain partially pending |
+| [LC-01](issues/01-discovery-and-scope.md) | Eligible capability/schema discovery and exact target resolver; settle concrete DTO/route compatibility before coding | Existing harness and source rebaseline | LC-01A merged (PR372). LC-01B owned by Claude session_01P7zGt9Y7DKRhRib2czuyRg on `claude/copilot-target-resolution-b` (from WIP 08d0be74 + master ae95a94a); Q4 applied; OJ-09 Tier A green locally; PR/CI pending. LC-10 (LC-T21) next inside LC-01 |
 | [LC-03](issues/03-results-and-navigation.md) | Typed evidence/navigation interfaces, then small current/retained domain adapters | LC-01 and applicable LC-02 | Not started; LC-T06–10/19 plus mapped LC-D suites |
 | [LC-04](issues/04-generic-parameter-edits.md) | Exact schema/unit/basis previews and verified writes; storage/line examples first | LC-01 and applicable LC-02 | Not started; LC-T02–05 and domain edit cases |
 | [LC-05](issues/05-ordered-workflows.md) | Bounded operation graph, verified dependencies and ordinary admitted execution | LC-03/04; existing durable receipts/jobs | Not started; LC-T04/05/10/12 |
@@ -416,6 +416,87 @@ review, one normal batch push, require all new-head CI with actual backend
 steps, fresh-master premerge, ordinary expected-head squash if every gate passes.
 No paid calls, external contacts, deployment or new implementation scope.
 
+2026-10-19 LC-01B started under owner's continue. PR372 is verified merged at
+0b33685c465e83b2a39c5964845b7e590873e631 and every observed post-merge workflow
+passed. Actual master now d006f4beaa302b97432c65757762ae180222731a adds PR376
+reviewer-usage/report-completion fixes; preserve them. Isolated worktree
+/workspace/copilot-target-resolution, branch claude/copilot-target-resolution.
+Concrete first scope and approved seams: issues/01b-exact-project-resolution.md.
+Implement exact native project-name resolution and stop named/qualified inputs
+being eaten by picker/current-tour shortcuts. Resolve does not activate or grant
+permission. Run/case/entity and broader scope binding remain separate follow-ups.
+No production change or test execution in this checkpoint yet; next action is
+one ordinary-dispatch RED, then vertical native and public UI regressions.
+
+2026-10-19 LC-01B owner-requested wrap up: the checkpoint above is superseded by
+`handoff-2026-10-19-target-resolution.md`. Exact read-tier project-name resolution,
+opt-in native name-only lookup and conservative local picker/tour recognizers
+are implemented as UNCOMMITTED work in /workspace/copilot-target-resolution,
+branch claude/copilot-target-resolution, HEAD d006f4beaa302b97432c65757762ae180222731a.
+No LC-01B commit/push/PR/review/CI/premerge/merge yet. Observed frontend regressions
+57pass/4files; earlier backend15pass, then47pass/1invalid mixed-tenant-session
+test failure. Real authenticated tenant A→B→A diagnostic1pass confirmed proper
+native isolation without changing restrictions. The invalid mixed-session test
+was replaced with authenticated HTTP coverage and extended foreign/unknown
+refusal assertions; that latest edit remains UNRUN because automatic approval
+review hit its usage limit before the regression command executed. Do not claim
+final backend success or weaken restriction_unavailable. First resume action:
+inspect saved diff and run updated resolver/identity regressions through normal
+tool policy. Provider-wire journeys, actual browser E2E, wider regression/build/
+lint, generated inventory/matrix, release/QA evidence, two-axis source reviews
+and all publication/merge gates remain. The handoff contains commands, evidence
+paths, diagnosis, constraints and the full remaining gate sequence. PR372 was
+already verified merged; preserve PR376 baseline fixes and freshly reassess
+actual master before publication. No paid calls, external contacts or domain
+coverage claim. Independent domain review and real-use calibration stay pending.
+
+2026-10-19 upload checkpoint: the owner explicitly requested uploading this
+handoff to git. The commit containing this entry preserves the LC-01B WIP
+implementation, tests and resume documents together on
+claude/copilot-target-resolution. This supersedes the earlier uncommitted
+status only; it is not a validated implementation publication, PR or merge.
+No additional implementation tests were executed for this preservation upload.
+Latest backend test edit, browser/provider journeys and all remaining review/
+CI/premerge gates stay pending as detailed in
+handoff-2026-10-19-target-resolution.md. Local raw logs outside the repository
+are not part of the upload; their observed results are recorded in the handoff.
+
+2026-10-19 LC-01B taken over by Claude (session_01P7zGt9Y7DKRhRib2czuyRg,
+commissioned by the coordinator). Checked that `claude/copilot-target-resolution`
+still ended at 08d0be747d0eabab136a2fdd150a3d1da38d649a (no newer pushes), then
+branched `claude/copilot-target-resolution-b` from it with no rewrite and merged
+master ae95a94a (clean). The old branch is left as it is.
+
+- The one failing saved test (tenant A's `/api/network/meta` showed tenant B's
+  renamed project) was a fixture artifact, not a product leak: `baseline`
+  binds a request context and turn cell in the test thread, and TestClient
+  copies that context into every request, so both tenants shared one cell. A
+  per-test fixture now clears that binding so each request binds its own
+  session context, as under uvicorn. No production restriction changed.
+- Q4 applied in `AssistantDock.tsx`: the local results tour and project picker
+  run only when no model is ready; with a model, every sentence is forwarded.
+  The old Guided test that asserted a local tour with a key contradicted Q4
+  and was replaced by the with-key forwarding test; the no-key tests now cover
+  the local tour (Guided kept) and the picker.
+- OJ-09 Tier A: `tests/test_oj09_named_project_journey.py`, all four provider
+  wires: exact resolve → activate by canonical id → native read of the named
+  project (25, not the open project's 10). Guided confirms the activation and a
+  denial leaves the previous project active; Expert runs it under the existing
+  write-tier policy (no policy change in this slice).
+- Inventory regenerated: 257 tools. Control matrix unchanged (170/14).
+
+OJ-09 is half closed: exact resolve → activation → the named project's own
+values pass; "show me its load flow" needs the LC-03 results read (VS-1), so
+OJ-09 stays open until LC-03 lands. Self-review (Standards + Spec) found no
+hard violations; the rendered no-key named-project case and a shared command
+normaliser were added from it. The "still checking" refusal is new behaviour:
+before readiness answers, the dock neither runs a shortcut nor sends.
+Browser: `scripts/smoke-companion-q4.mjs` 5/5 runs green (with model: both
+former shortcuts forwarded and the loopback model called, no picker; no
+model: real Open project dialog, nothing forwarded).
+
+Next: PR for LC-01B, then LC-10 (focus/recency ladder, LC-T21) to close LC-01,
+then LC-03 with VS-1/VS-2.
 
 2026-10-19 feature catalogue (docs only, PR388, branch
 `claude/live-copilot-feature-catalogue`): added `feature-catalogue.md`

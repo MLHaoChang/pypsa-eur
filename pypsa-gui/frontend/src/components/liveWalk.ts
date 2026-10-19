@@ -24,17 +24,21 @@ export const KEY_RESULT_TABS = [
 
 export type KeyResultTab = (typeof KEY_RESULT_TABS)[number]
 
+function normalizedCommand(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
 export function keyResultsWalkRequested(text: string): boolean {
-  const t = text.toLowerCase()
-  const mentionsResults = /\bresults?\b/.test(t)
-  const mentionsTabs = /\btabs?\b/.test(t)
-  const asksToTour = /\b(walk|tour|show|open|each|through|guide|key)\b/.test(t)
-  return mentionsResults && mentionsTabs && asksToTour
+  // Only complete generic UI commands bypass the harness. Names, sources,
+  // windows, negations and additional instructions need ordinary resolution.
+  const command = normalizedCommand(text)
+  return /^(?:please )?(?:walk|guide)(?: me)? through (?:the )?(?:key )?(?:current )?results (?:in )?(?:each|every|all) tabs?(?: please)?[.!?]?$/.test(command)
+    || /^(?:please )?(?:show|open|tour)(?: me)? (?:the )?(?:key )?(?:current )?results? tabs?(?: please)?[.!?]?$/.test(command)
 }
 
 export function openProjectRequested(text: string): boolean {
-  const t = text.toLowerCase()
-  return /\bopen\b/.test(t) && /\bprojects?\b/.test(t) && !keyResultsWalkRequested(text)
+  const command = normalizedCommand(text)
+  return /^(?:please )?open (?:(?:the|my) )?(?:projects|project(?: list| picker)?)(?: please)?[.!?]?$/.test(command)
 }
 
 export type ResultsWalk = (() => void) & { next: () => void }

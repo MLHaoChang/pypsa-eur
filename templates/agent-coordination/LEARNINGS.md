@@ -90,3 +90,23 @@ retro or an owner decision changes the setup (see "Keeping it current" in
   - a PreToolUse hook blocks force-push and history rewrites (adapted from upstream `git-guardrails-claude-code`, which blocks every push; ours allows a normal one);
   - the vendored skills move to upstream commit `49dd158`.
   - Lives in: steward "Gatekeeper checkpoints", gatekeeper skill, `files/dot-claude/hooks/block-dangerous-git.sh`.
+
+## 19 Oct 2026: token retro
+
+Every tool call and every wake re-reads the whole context. The coordinator was the largest cost, about 40% of spend, with a ~220k context and no rotation.
+
+- **The coordinator never rotated.**
+  - Fix: rotate above ~150k context tokens or once a day. The brief travels as content in the new coordinator's first prompt, because the scratchpad is per session. The coordinator's id moved out of `AGENTS.md` into one file.
+  - Lives in: coordinator "Rotation", `docs/agents/coordinator.md`.
+- **PR subscriptions woke the coordinator about 3 times per PR,** with ~3k tokens of boilerplate each.
+  - Fix: merge on sessions' `premerge ok <sha>` reports, never subscribe, sweep every 6 h, and disable the routine while no session is live.
+  - Lives in: coordinator "Wakes", steward "Report green".
+- **Each dashboard refresh took several hand edits.**
+  - Fix: `board.py` edits `board.json` and logs in one call; one upload and one `ArtifactData` update follow, once per owner report.
+  - Lives in: `scripts/coord/board.py`, coordinator "Dashboard".
+- **A blocked premerge said only "blocked".** The coordinator had to scroll the output for the reason.
+  - Fix: the RESULT line names it, e.g. `RESULT: blocked (overlap: 2 code files; checks: 5 running, 1 failed)`. "RESULT: ok to merge <sha>" is unchanged.
+  - Lives in: `scripts/coord/premerge.sh`.
+- **Reading a session's transcript meant reading raw `list_events` output.**
+  - Fix: `events.py` prints time, text and last tool call per event.
+  - Lives in: `scripts/coord/events.py`, coordinator "Tool hygiene".

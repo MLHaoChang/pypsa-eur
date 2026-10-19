@@ -20,6 +20,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--storage", type=Path, required=True)
     parser.add_argument("--decisions", action="store_true")
+    parser.add_argument("--no-model", action="store_true", help="configure no model profile (the no-key path)")
     args = parser.parse_args()
     storage = args.storage.resolve()
     storage.mkdir(parents=True, exist_ok=True)
@@ -111,13 +112,14 @@ def main():
     credentials = storage / "credentials.json"
     credentials.write_text(json.dumps({"email": "composer@example.test", "password": secrets.token_urlsafe(24)}))
     credentials.chmod(0o600)
-    (app_data / "llm-profiles.json").write_text(json.dumps({
-        "active_profile_id": "composer-local", "profiles": [{
-            "id": "composer-local", "label": "Offline layout fixture", "preset": "custom",
-            "wire": "openai", "base_url": f"http://127.0.0.1:{model.server_port}/v1",
-            "model": "no-inference", "tools": True, "vision": False, "auth": "none",
-        }],
-    }))
+    if not args.no_model:
+        (app_data / "llm-profiles.json").write_text(json.dumps({
+            "active_profile_id": "composer-local", "profiles": [{
+                "id": "composer-local", "label": "Offline layout fixture", "preset": "custom",
+                "wire": "openai", "base_url": f"http://127.0.0.1:{model.server_port}/v1",
+                "model": "no-inference", "tools": True, "vision": False, "auth": "none",
+            }],
+        }))
     seed = """
 import json, sys
 from pathlib import Path
