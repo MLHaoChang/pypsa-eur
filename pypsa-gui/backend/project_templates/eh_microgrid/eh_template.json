@@ -35,7 +35,7 @@
     },
     {
       "item": "finance inputs",
-      "note": "running costs are read in 2030 money and escalate from there, as each staged period's from its own year; the terminal value is the remaining-life annuity of each part",
+      "note": "the case reads the week's running costs and the pack's capex as 2030 money (the base year, its first operating year) and escalates them from 2030; 2020 labels the report. The staged microgrid follows the same rule from its first period (2027); the terminal value is the remaining-life annuity of each part",
       "source": "assumed",
       "value": "the staged microgrid's: nominal EUR (2020 money, the pack's), escalation 2 %/yr, inflation 2 %, all equity at 7 %, pre-tax; PV degrades 0.5 %/yr, the rest not"
     },
@@ -53,7 +53,7 @@
     },
     {
       "item": "diesel running cost",
-      "note": "in 2030 money, escalating 2 %/yr (the case books it as opex); replace with the island's fuel contract",
+      "note": "the template's marginal cost, in 2030 money, escalating 2 %/yr (the case books it as opex); replace with the island's fuel contract",
       "source": "synthetic",
       "value": "260 EUR/MWh (fuel and variable O&M)"
     }

@@ -768,9 +768,11 @@ TEMPLATE_META: dict[str, dict] = {
                                                 "all equity at 7 %, pre-tax; PV degrades "
                                                 "0.5 %/yr, the rest not",
              "source": "assumed",
-             "note": f"running costs are read in {MG_FIRST_YEAR} money and escalate from there, as "
-                     "each staged period's from its own year; the terminal value is the "
-                     "remaining-life annuity of each part"},
+             "note": f"the case reads the week's running costs and the pack's capex as "
+                     f"{MG_FIRST_YEAR} money (the base year, its first operating year) and "
+                     f"escalates them from {MG_FIRST_YEAR}; 2020 labels the report. The staged "
+                     "microgrid follows the same rule from its first period (2027); the terminal "
+                     "value is the remaining-life annuity of each part"},
             {"item": "battery inverter replacement", "value": "after 10 years (inv_power_lifetime)",
              "source": "assumed",
              "note": "bess_new's inverter is re-bought in 2039 (replacement_rule part_lifetimes); "
@@ -782,9 +784,9 @@ TEMPLATE_META: dict[str, dict] = {
                      "case does not price an island capability"},
             {"item": "diesel running cost", "value": "260 EUR/MWh (fuel and variable O&M)",
              "source": "synthetic",
-             "note": f"in {MG_FIRST_YEAR} money, escalating 2 %/yr (the case books it as opex); "
-                     "replace with the "
-                     "island's fuel contract"},
+             "note": f"the template's marginal cost, in {MG_FIRST_YEAR} money, escalating "
+                     "2 %/yr (the case books it as opex); replace with the island's fuel "
+                     "contract"},
         ],
         "provenance": PROVENANCE,
     },
