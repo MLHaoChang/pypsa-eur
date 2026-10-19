@@ -3447,9 +3447,11 @@ def generate_renewable_profile(project_id: str, points: list, technology: str,
 
 
 def apply_generated_profile(project_id: str, job_id: str, component: str,
-                            point_id: str | None = None) -> dict:
+                            point_id: str | None = None,
+                            time_basis: str = "UTC") -> dict:
     from routers.profiles import ApplyRequest, apply_profile as _h
-    body = ApplyRequest(job_id=job_id, component=component, point_id=point_id)
+    body = ApplyRequest(job_id=job_id, component=component, point_id=point_id,
+                        time_basis=time_basis)
     return _route(_h, body, proj=_authorized_project(project_id))
 
 

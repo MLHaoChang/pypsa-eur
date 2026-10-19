@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 257,
+  "tool_count": 263,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -2139,6 +2139,147 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "list_profile_presets",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/profiles/presets"
+        ]
+      ],
+      "input_keys": [
+        "technology"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "10e4732f44164e5bf8b46863a0a221fcc243a83303340255989dbfb4936675a5",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_profile_parameters",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "preset",
+        "technology"
+      ],
+      "required": [
+        "preset"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "9bea505ddbdd3528dd9da2b4e1c5d14c7479706956324e24571da2c7b7b02d86",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "preview_renewable_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/profiles/estimate"
+        ]
+      ],
+      "input_keys": [
+        "points",
+        "technology",
+        "preset",
+        "params",
+        "year"
+      ],
+      "required": [
+        "points",
+        "technology"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "26595459a2138de6a74cd86e4415bcd25756efabb52a58e52fd90f6c25727a2a",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_pending_profiles",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/profiles/pending"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "generate_renewable_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/generate"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "points",
+        "technology",
+        "preset",
+        "params",
+        "source",
+        "year"
+      ],
+      "required": [
+        "project_id",
+        "points",
+        "technology"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "bae511ab3de12987dc8603e7bf965ab1763bdcd2e2c829dbbca6050b6059c8d7",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_generated_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/apply"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "job_id",
+        "component",
+        "point_id",
+        "time_basis"
+      ],
+      "required": [
+        "project_id",
+        "job_id",
+        "component"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "2d1ca8a47aa130e9388f8cff4a688ee54fa1a64322fb2100afabfaac8dec1354",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "list_projects",
       "toolsets": [
         "project",
@@ -2988,7 +3129,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "535d08b87cd1d8212e9807dbf0ce164820993e831bf0d047f14db4f145af8106",
+      "schema_sha256": "fb2b39ae90898e86f5908b0d1587da1d96385110887d518774d4140d0d984a58",
       "behavioral_fixture": "pending"
     },
     {
@@ -5957,7 +6098,8 @@
     "reports",
     "campusElectrical",
     "decision",
-    "economics"
+    "economics",
+    "profiles"
   ],
   "tool_panel_enum": [
     "Results",
@@ -6018,7 +6160,9 @@
     "DecisionStudy",
     "decision",
     "Economics",
-    "economics"
+    "economics",
+    "ProfileStudio",
+    "profiles"
   ],
   "slide_panels_not_in_tool_enum": [],
   "requested_aliases": {

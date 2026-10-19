@@ -216,3 +216,40 @@ def test_apply_on_another_orgs_project_is_refused(client, wind_project,
         assert err.value.status_code == 404
     finally:
         ct.set_acting_user(None)
+
+
+# ---------------------------------------------------------------------------
+# Gatekeeper review: the time basis rides the chat tool, and the chat apply
+# path is undoable exactly like the route (it pushes the snapshot first)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_generated_profile_takes_a_time_basis_and_undoes(
+    client, wind_project, session_ctx,
+):
+    gen = chat_tools.DISPATCHERS["generate_renewable_profile"](
+        project_id=wind_project,
+        points=[{"id": "g_wind", "lon": 8.0, "lat": 50.0}],
+        technology="wind",
+        year=2023,
+    )
+    _wait_job(gen["id"])
+    from services.pypsa_service import PyPSAService
+
+    ctx = session_ctx(client)
+    token = PyPSAService.bind_request_context(ctx)
+    try:
+        out = chat_tools.DISPATCHERS["apply_generated_profile"](
+            project_id=wind_project, job_id=gen["id"], component="g_wind",
+            time_basis="Europe/Berlin",
+        )
+    finally:
+        PyPSAService.reset_request_context(token)
+    assert out["time_basis"] == "Europe/Berlin"
+    key = ("generators", "p_max_pu", "g_wind")
+    assert ctx.user_ts_meta[key]["time_basis"] == "Europe/Berlin"
+
+    undo = client.post("/api/network/undo")
+    assert undo.status_code == 200, undo.text
+    payload = client.get("/api/network/timeseries/generators/p_max_pu").json()
+    assert "g_wind" not in payload["columns"]

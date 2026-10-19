@@ -85,6 +85,8 @@ SAFETY_PANEL_ENUM = [
     "DecisionStudy", "decision",
     # Economics in Expert: rates, price basis and every asset's costs.
     "Economics", "economics",
+    # The renewable profile generator (Profile Studio) slide panel.
+    "ProfileStudio", "profiles",
 ]
 RESULTS_TAB_ENUM = [
     "summary",      # M3: the answer-first tab Results opens on after a solve
@@ -1450,12 +1452,18 @@ TOOLS: list[dict[str, Any]] = [
         "feeding the component defaults to the component's own name. Refuses "
         "(422) when the component is gone, its carrier is not wind/solar, or "
         "the artifact holds no column for it; warns when the bus moved since "
-        "generation. `project_id` is the project NAME and must be the open "
+        "generation. `time_basis` says what the snapshots mean: \"UTC\" "
+        "(default; the weather series maps straight on) or the IANA zone "
+        "whose wall clock they are (e.g. \"Europe/Berlin\"; the series is "
+        "shifted by that zone's offset) — ask when the user says the "
+        "horizon is local time; report the time basis from the answer. "
+        "`project_id` is the project NAME and must be the open "
         "project. Safety: write.",
         {"project_id": {"type": "string"},
          "job_id": {"type": "string"},
          "component": {"type": "string"},
-         "point_id": {"type": "string"}},
+         "point_id": {"type": "string"},
+         "time_basis": {"type": "string"}},
         ["project_id", "job_id", "component"],
     ),
 
