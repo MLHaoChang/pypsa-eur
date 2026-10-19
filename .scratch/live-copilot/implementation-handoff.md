@@ -498,6 +498,27 @@ model: real Open project dialog, nothing forwarded).
 Next: PR for LC-01B, then LC-10 (focus/recency ladder, LC-T21) to close LC-01,
 then LC-03 with VS-1/VS-2.
 
+2026-10-19 LC-10 (reference ladder) started by Claude
+(session_01P7zGt9Y7DKRhRib2czuyRg) on `claude/copilot-reference-ladder`,
+stacked on PR #391 (LC-01B); its PR opens against master after #391 merges.
+The coordinator decided, from owner decision Q2, to build the resolver now
+with the prompt rule (see issue 10). Scope additions relayed the same day
+(owner, via the coordinator and the feature-catalogue session, PR #388):
+
+- The copilot covers every core feature by chat; designs stay general (the
+  LC-03 registry spans every result view; LC-04 spans every component family
+  with multi-asset edits).
+- LC-01 also closes on OJ-13, OJ-14 (summary without activation; the LC-01B
+  resolver never activates) and OJ-45, with LC-15 (asset summary) beside LC-10.
+- LC-03 adds OJ-15/16. "Do the results make sense?" runs validate_network,
+  diagnose_network and project_readiness and says plausibility rules do not
+  exist yet (OJ-18 interim; owner decision Q5 = A).
+- LC-04 adds OJ-21/22/23/26 (LC-16). Owner decision Q3's old→new card before
+  every chat edit, Expert included and settings edits too, must land before
+  LC-04 closes.
+- LC-05 adds OJ-20 and OJ-27–34 (LC-17/18/19); LC-20 plausibility follows.
+- PR #388 also appends LC-15–22 rows and a checkpoint to this ledger; keep
+  both sides on any merge conflict.
 2026-10-19 feature catalogue (docs only, PR388, branch
 `claude/live-copilot-feature-catalogue`): added `feature-catalogue.md`
 (122 features from code), journeys OJ-13–46 and issues 15–22, with ledger
@@ -507,3 +528,9 @@ LC-03 the copilot runs the input checks and says result rules don't exist
 yet) and Q6 = A (LC-21 network-study report chapters in LC-06 after LC-05;
 new application scope). The Codex order is unchanged. No application code,
 tests or existing ledger rows changed.
+
+2026-10-19 LC-15 (asset summary) by Claude on `claude/copilot-asset-summary`,
+stacked on `claude/copilot-reference-ladder` (LC-10), which is stacked on PR
+#391. OJ-13 and OJ-14 pass in Tier A (see issue 15). LC-01 still needs OJ-45
+(a family-level capability answer, its own slice) and the merges of #391, LC-10
+and LC-15 before it closes.

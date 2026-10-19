@@ -211,6 +211,25 @@ TOOLS: list[dict[str, Any]] = [
         ["project_name"],
     ),
     _t(
+        "resolve_reference",
+        "Resolve 'this', 'the' or 'latest' to exactly one component, run or snapshot of the active "
+        "project, by one ladder: an explicit name or run_id; what is on screen now (the selection, the "
+        "displayed results or run, the shown snapshot); what was discussed last; the only one that "
+        "exists; otherwise candidates to ask about. component_class 'storage' covers StorageUnit and "
+        "Store; a name without a class searches every class. latest=true takes the newest completed "
+        "run and names newer failed or running runs it skipped. Returns status resolved|ambiguous|"
+        "not_found, via, target, says (always repeat it so the user sees what was resolved), ignored "
+        "hints and, when ambiguous, candidates with key fields: then ask with one ask_user Choice, never "
+        "guess. Hints are re-read; activates, selects and opens nothing. Safety: read.",
+        {"target": {"type": "string", "enum": ["component", "run", "snapshot"]},
+         "component_class": {"type": "string", "enum": [c for c in COMPONENT_CLASS_ENUM
+                                                        if c != "GlobalConstraint"] + ["storage"]},
+         "name": {"type": "string", "minLength": 1, "maxLength": 256},
+         "run_id": {"type": "string", "minLength": 1, "maxLength": 64},
+         "latest": {"type": "boolean"}},
+        ["target"],
+    ),
+    _t(
         "get_component_schema",
         "Discover native component fields before choosing parameters. Paged class metadata only: "
         "stored/display units, request-model types/bounds/enums, native input/output and derived/read-only status. "
@@ -1542,8 +1561,14 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "get_project_statistics",
-        "Offline statistics summary (no activate). Safety: read.",
-        {"name": {"type": "string"}},
+        "Summarise one project's assets without activating it (name or project_id; the active "
+        "project reads its live network, any other its saved files). summary: per-class counts; the "
+        "top `limit` items per class by capacity with has_more; generation MW by carrier, storage MW "
+        "and MWh, line count/length/MVA, extendable assets; snapshot range, resolution and investment "
+        "periods; solver mode; the latest run with whether it is current; validation error/warning "
+        "counts; gaps (variable generators without a profile). Every number you state must come from "
+        "it. Safety: read.",
+        {"name": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}},
         ["name"],
     ),
     _t(
@@ -3653,6 +3678,7 @@ TOOL_ROUTES: dict[str, list] = {
     "find_capabilities": _SERVICE_CALL,
     "get_component_schema": _SERVICE_CALL,
     "resolve_project_target": _SERVICE_CALL,
+    "resolve_reference": _SERVICE_CALL,
     "start_task": _SERVICE_CALL,
     "get_task": _SERVICE_CALL,
     "resume_task": _SERVICE_CALL,

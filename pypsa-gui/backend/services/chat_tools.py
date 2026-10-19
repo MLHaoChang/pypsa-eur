@@ -4062,9 +4062,9 @@ def download_project_bundle(name: str) -> dict:
     )
 
 
-def get_project_statistics(name: str) -> dict:
+def get_project_statistics(name: str, limit: int = 5) -> dict:
     from routers.projects import project_statistics as _h
-    return _route(_h, name)
+    return _route(_h, name, limit=limit)
 
 
 def get_project_network_meta(project_id: str) -> dict:
@@ -7277,8 +7277,11 @@ from services.assistant_tasks import list_tasks, start_task, get_task, resume_ta
 from services.assistant_tools import (find_capabilities, get_file_delivery, inspect_import, import_uploaded_network,
                                       preview_project_changes, apply_project_changes, create_chart, build_delivery)
 
+from services import reference_resolution as _reference_resolution  # noqa: E402
+
 DISPATCHERS: dict[str, Any] = {
     "resolve_project_target": resolve_project_target,
+    "resolve_reference": _reference_resolution.resolve_reference,
     "get_component_schema": get_component_schema,
     "list_project_runs": list_project_runs,
     "get_run_evidence": get_run_evidence,

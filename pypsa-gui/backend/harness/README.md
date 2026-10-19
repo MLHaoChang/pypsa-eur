@@ -226,6 +226,24 @@ Personal read-only rules remain authoritative even for a field marked editable;
 the strict checked pilot continues to refuse this unmapped tool. Non-component
 service/domain schemas and exact target resolution remain LC-01 follow-ups.
 
+## Target and reference resolution (LC-01B, LC-10)
+
+Two read-tier controls name a target before anything reads or changes it.
+Neither activates, selects or opens anything, and neither grants authority:
+every later use rechecks access natively.
+
+- `resolve_project_target(project_name)` maps an exact project name to its
+  canonical `project_id`: no trimming, case-folding, partial match or
+  UUID guessing, and unknown and inaccessible names fail the same way.
+- `resolve_reference(target, ...)` applies one ladder for "this", "the" and
+  "latest": explicit, on screen, discussed last, the only one, otherwise
+  candidates to ask about with one `ask_user` Choice. The on-screen rung
+  reads `ChatSession.turn_ui_context`, which the loop replaces every turn
+  with the request's UI context; it is a hint, re-read against the active
+  network or the project's run records. `says` names what was resolved and
+  `ignored` the hints that were not used. The tools-on prompt part
+  `prompts/reference_ladder.md` tells the model when to call it.
+
 ## Local MCP exposure (issue 11)
 
 On the desktop (local mode), an agent on this machine drives the app through

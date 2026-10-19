@@ -392,7 +392,7 @@ from harness.providers.wiring import (  # noqa: E402, F401 — moved (issue 08);
 
 
 from harness.compose import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _ADEQUACY_GUIDE, _ADEQUACY_GUIDE_CHAINING, _ADEQUACY_GUIDE_FACTS, _ASSISTANT_STANCE, _ASSISTANT_STANCE_CHAINING, _ASSISTANT_STANCE_FACTS, _BASE_IDENTITY, _BASE_IDENTITY_CHAINING, _BASE_IDENTITY_FACTS, _CONFIRMATION_CARD_CONTRACT_TEMPLATE, _DOMAIN_GUIDE, _DOMAIN_GUIDE_CHAINING, _DOMAIN_GUIDE_FACTS, _EH_GUIDE, _EH_GUIDE_CHAINING, _EH_GUIDE_FACTS, _GUIDED_STEPS, _NEXT_STEP_RUBRIC, _NEXT_STEP_RUBRIC_CHAINING, _NEXT_STEP_RUBRIC_FACTS, _PRICE_CONGESTION_GUIDE, _PRICE_CONGESTION_GUIDE_CHAINING, _PRICE_CONGESTION_GUIDE_FACTS, _SOLVER_ERROR_DECODER, _SOLVER_ERROR_DECODER_CHAINING, _SOLVER_ERROR_DECODER_FACTS, _STYLE_GUIDANCE, _UI_CONTEXT_MAX_VALUE_CHARS, _UNTRUSTED_DATA_CLAUSE, _WORKFLOW_STATE_TOOLS, _build_system_prompt, _format_live_network_meta, _format_ui_context, _guided_mode_addendum, _hub_design_workflow, _prompts, _sanitise_ui_value, _workflow_addendum, _workflow_state_payload,
+    _ADEQUACY_GUIDE, _ADEQUACY_GUIDE_CHAINING, _ADEQUACY_GUIDE_FACTS, _ASSISTANT_STANCE, _ASSISTANT_STANCE_CHAINING, _ASSISTANT_STANCE_FACTS, _BASE_IDENTITY, _BASE_IDENTITY_CHAINING, _BASE_IDENTITY_FACTS, _CONFIRMATION_CARD_CONTRACT_TEMPLATE, _DOMAIN_GUIDE, _DOMAIN_GUIDE_CHAINING, _DOMAIN_GUIDE_FACTS, _EH_GUIDE, _EH_GUIDE_CHAINING, _EH_GUIDE_FACTS, _GUIDED_STEPS, _NEXT_STEP_RUBRIC, _NEXT_STEP_RUBRIC_CHAINING, _NEXT_STEP_RUBRIC_FACTS, _PRICE_CONGESTION_GUIDE, _PRICE_CONGESTION_GUIDE_CHAINING, _PRICE_CONGESTION_GUIDE_FACTS, _PROJECT_OVERVIEW, _REFERENCE_LADDER, _SOLVER_ERROR_DECODER, _SOLVER_ERROR_DECODER_CHAINING, _SOLVER_ERROR_DECODER_FACTS, _STYLE_GUIDANCE, _UI_CONTEXT_MAX_VALUE_CHARS, _UNTRUSTED_DATA_CLAUSE, _WORKFLOW_STATE_TOOLS, _build_system_prompt, _format_live_network_meta, _format_ui_context, _guided_mode_addendum, _hub_design_workflow, _prompts, _sanitise_ui_value, _workflow_addendum, _workflow_state_payload,
 )
 
 from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-exported
@@ -1717,6 +1717,7 @@ def _run_turn_body(
     # `history_cache_anchor` still hits. Rewriting old turns' context each
     # turn would break that cache for a fidelity nobody asked for.
     ui_block = _format_ui_context(ui_context)
+    session.turn_ui_context = dict(ui_context) if isinstance(ui_context, dict) else None
     # Issue 13 (shadow): each addendum is its own event as well as part of
     # the user message.
     from harness import eventlog as _eventlog
@@ -3064,6 +3065,8 @@ def _dispatch_real_tool_call(
         "tool_name": tool_name,
         "summary": _truncate_result(result_for_model),
     })
+    from services.reference_resolution import active_project_key
+    session.note_touched_components(active_project_key(), tool_name, tu.get("input"))
     yield "tool_result", {
         "tool_use_id": tool_use_id,
         "tool_name": tool_name,
