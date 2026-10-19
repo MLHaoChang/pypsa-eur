@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Guided's Grid plan tile has a "Run grid checks" button that drafts the campus file from the solved project and runs the study with its default settings, so a Guided user no longer has to meet the YAML form; an unsolved project gets "Run the solve" (UX review M4, owner decision A).

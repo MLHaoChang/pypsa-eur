@@ -44,8 +44,15 @@ describe('chapterTiles', () => {
     expect(byId({ ...NONE, reliability: { ...NONE.reliability, running: true } }).reliability.state)
       .toBe('running')
     const t = byId({ ...NONE, reliability: { hasResults: true, running: false, lole: null,
-                                             target: null, verdict: null } })
+                                             target: 3, verdict: null } })
     expect(t.reliability.state).toBe('unavailable')
+  })
+
+  it('reliability: no goal set is Not modelled, with the step that sets it (UX review N13)', () => {
+    const t = byId({ ...NONE, reliability: { hasResults: true, running: false, lole: null,
+                                             target: null, verdict: null } })
+    expect(t.reliability).toMatchObject({ state: 'not_modelled', open: { step: 'goal' },
+      reason: expect.stringMatching(/No reliability goal is set/) })
   })
 
   it('investment: the post-tax NPV when established, else the pre-tax one, said so', () => {
