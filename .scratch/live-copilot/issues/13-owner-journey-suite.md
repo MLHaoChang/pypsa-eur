@@ -3,7 +3,9 @@
 
 # LC-13 — owner-journey acceptance suite (Tier A in CI, Tier B capped)
 
-Status: ready-for-agent; Tier B waits for owner decision Q2
+Status: ready-for-agent. Owner decision Q2: Tier B is a manual-trigger run with a
+hard cost cap, reported per journey, never a merge gate. The Tier A harness
+lands with the first layer that closes a journey (OJ-09 in LC-01 or OJ-01 in LC-03).
 Type: task
 Baseline: master `d006f4beaa302b97432c65757762ae180222731a`
 Dependencies: none for the harness; each journey lands with its slice

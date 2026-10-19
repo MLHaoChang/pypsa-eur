@@ -109,4 +109,4 @@ with evidence, are in the [vision review](vision-review-2026-10-19.md):
 | Walk-through | Local tour narrates fixed blurbs; prompt gives no read per tab | P0 ([LC-11](issues/11-narrated-walkthrough.md)) |
 | Navigation reach | Snapshot index not set; selection hidden behind slide panels; no edit card, Guided step or campus sub-section target | P1 ([LC-14](issues/14-navigation-reach.md)) |
 | Ordinary-turn ACK | Source-bound ACK issued and answered only in strict turns | P1 ([LC-09](issues/09-vertical-slice-loadflow.md)) |
-| Expert edits | Chat writes apply without an old→new card in Expert | Owner decision |
+| Expert edits | Chat writes apply without an old→new card in Expert | P0, owner decided Q3: card in both modes (LC-04) |

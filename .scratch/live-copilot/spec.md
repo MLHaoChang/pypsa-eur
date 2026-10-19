@@ -45,7 +45,7 @@ or provide independent domain release approval.
 | “Open project X / inspect its parameters” | Resolve an authorized exact target. Do not turn a named-project request into an unlabelled picker or a tour of the previous project. Preserve current/discussed scope and ordinary project-binding policy |
 | “Show me the results of the latest calculation, the load flow results” (added 2026-10-19) | Resolve “latest” to the newest completed run and say which; read the load flow, then open its tab on the same source; explain the key points from the read only. [OJ-01](owner-journeys.md) |
 | “Show me something else” / “next” (added 2026-10-19) | Offer the sections with data not yet shown, one line each; read before showing; the user controls next/stop. [OJ-02/03](owner-journeys.md) |
-| “Help me update the parameters of this line” (added 2026-10-19) | Resolve “this” from the selected component (LC-C11); show old→new with units; read back; offer undo; say results are now stale. [OJ-05/06](owner-journeys.md) |
+| “Help me update the parameters of this line” (added 2026-10-19) | Resolve “this” from the selected component (LC-C11); show old→new with units on a card in both modes (Q3); read back; offer undo; say results are now stale. [OJ-05/06](owner-journeys.md) |
 | “Update these parameters and relaunch, then show me” (added 2026-10-19) | One visible plan; edits verified before one approved run; the conversation continues by itself when the job ends, then walks the new results (LC-C12). [OJ-07/08/10](owner-journeys.md) |
 
 ## Required contracts
@@ -107,6 +107,8 @@ old/new/unit preview and canonical digest. Ordinary dispatch owns confirmation,
 locks, personal rules and checked policy. Verify postconditions through native
 reads and durable effect receipts where required; HTTP 200 or model prose is
 insufficient. A generic envelope does not authorize arbitrary code or URLs.
+Owner decision 2026-10-19 (Q3): every chat parameter edit shows its old→new
+card before applying, in Expert as well as Guided.
 
 **LC-C6 Ordered execution.** Use a bounded versioned operation graph over
 allowlisted native capabilities, not arbitrary scripts. Persist dependencies,

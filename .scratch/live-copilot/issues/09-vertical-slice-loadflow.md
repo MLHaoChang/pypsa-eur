@@ -3,10 +3,12 @@
 
 # LC-09 (VS-1) — "show me the load flow results of the latest calculation"
 
-Status: ready-for-agent once the owner accepts the vertical-slice order (Q1)
+Status: ready-for-agent inside LC-03. Owner decision Q1 kept the Codex order:
+this slice is LC-03's first acceptance target (OJ-01), not a reordering.
 Type: task
 Baseline: master `d006f4beaa302b97432c65757762ae180222731a`
-Dependencies: LC-01B merged; issue 13's Tier A harness (built in this slice)
+Dependencies: LC-01 (incl. LC-01B); LC-03 typed adapter interfaces; issue 13's
+Tier A harness (built here if no earlier layer built it)
 Review: [vision review](../vision-review-2026-10-19.md); journeys OJ-01 in
 [owner journeys](../owner-journeys.md)
 
@@ -35,11 +37,11 @@ typed, in Expert. It is the thinnest path through LC-01/03/C7, not a new layer.
    points (peak loading, branches over limit, what drives it), then offer the
    next section.
 5. **Local shortcut.** With a model available, the dock forwards this sentence
-   to the harness; the local tour is the no-key fallback (Q4).
+   to the harness; the local tour is the no-key fallback (owner decision Q4).
 
 ## Not in scope
 
-Historical load-flow capture (LC-03), other tabs (LC-11), checked publication
+Historical load-flow capture (rest of LC-03), other tabs (LC-11), checked publication
 changes, voice.
 
 ## Done when

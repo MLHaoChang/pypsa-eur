@@ -1,1 +1,1 @@
-* Doc(pypsa-gui): Review the live-copilot plan against the owner's examples and add end-to-end owner journeys, focus/recency target resolution, job-completion continuation and a proposed vertical-slice order.
+* Doc(pypsa-gui): Review the live-copilot plan against the owner's examples and add end-to-end owner journeys, focus/recency target resolution, job-completion continuation, per-layer acceptance targets and the owner's decisions on order, live-model tests, edit previews and local shortcuts.

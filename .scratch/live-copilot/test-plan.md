@@ -48,14 +48,15 @@ cases as the release denominator.
 
 Added 2026-10-19 from the [vision review](vision-review-2026-10-19.md). The
 end-to-end [owner journeys](owner-journeys.md) OJ-01–12 are the acceptance
-denominator for what the owner will try; each released slice names its journeys.
+denominator for what the owner will try; each Codex layer closes on its journeys
+(owner decision Q1).
 
 | ID | Journey / failure case | Acceptance evidence |
 | --- | --- | --- |
 | LC-T20 | Owner journeys end to end (Tier A) | OJ-01–12 as they land: exact tool trace, approvals, native read-back, one job per approved run, UI target shown in a real browser, every answer number traced to a tool fact of the turn. CI, loopback wire, real backend |
 | LC-T21 | Focus/recency resolution | Selection beats earlier talk; class mismatch asks; foreign/stale selection ignored; single candidate used; otherwise one Choice; “latest” skips failed/running runs and names the one used |
 | LC-T22 | Continuation after a long job | Solve longer than 25 s finishes the plan without a new prompt; restart during the job gives one continuation and no second run; cancel or project switch gives none |
-| LC-T23 | Live-model journeys (Tier B) | Same journeys with a real hosted model under an owner-approved cap; pass counts with denominators per journey; never a merge gate |
+| LC-T23 | Live-model journeys (Tier B) | Owner decision Q2: manual trigger only. Same journeys with a real hosted model under a hard cost cap; pass counts with denominators per journey; never a merge gate |
 
 Current browser evidence for the existing permission implementation is recorded
 separately in the permission closeout. Its pointer-accessibility failure remains

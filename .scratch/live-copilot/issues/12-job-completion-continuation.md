@@ -3,10 +3,10 @@
 
 # LC-12 (VS-4) — finish "edit, relaunch, walk me through" across long jobs
 
-Status: ready-for-agent after LC-09 and the LC-04 storage/line slice
+Status: ready-for-agent inside LC-05 scope (owner decision Q1); closes LC-05 with OJ-07/08/10
 Type: task
 Baseline: master `d006f4beaa302b97432c65757762ae180222731a`
-Dependencies: LC-04 first slice; existing `start_task`, `wait_for_job`,
+Dependencies: LC-03 and LC-04 closed; existing `start_task`, `wait_for_job`,
 completion observer; refines [LC-05](05-ordered-workflows.md)
 Contract: LC-C12 in the [specification](../spec.md)
 

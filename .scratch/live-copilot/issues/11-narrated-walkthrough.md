@@ -3,7 +3,7 @@
 
 # LC-11 (VS-2) — narrated walk-through and "show me something else"
 
-Status: ready-for-agent after LC-09
+Status: ready-for-agent inside LC-03, after LC-09; with LC-09 it closes LC-03 (owner decision Q1)
 Type: task
 Baseline: master `d006f4beaa302b97432c65757762ae180222731a`
 Dependencies: LC-09; LC-14 navigation fixes for snapshot and asset steps

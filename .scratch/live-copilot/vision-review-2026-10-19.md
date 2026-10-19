@@ -3,7 +3,7 @@
 
 # Review against the owner's copilot vision
 
-Status: proposal. The sequencing and scope changes in it wait for owner decisions.
+Status: owner decisions recorded (see below). The original proposal is kept as written.
 Date: 2026-10-19, Europe/Berlin
 Reviewed source: master `d006f4beaa302b97432c65757762ae180222731a` (PR376).
 Reviewer: Claude session, commissioned by the coordinator. Documents only; no
@@ -12,6 +12,20 @@ application code changed and no tests run.
 This file adds to the Codex plan. It does not replace it, and it rewrites none
 of the ledger's history. Everything below was checked against code; file:line
 references are at the reviewed source.
+
+## Owner decisions
+
+Owner decisions, 2026-10-19 (relayed by the coordinator):
+Q1 = keep the Codex order (LC-03 → LC-04 → LC-05); the vertical slices become
+the acceptance targets that close those layers, not a reordering.
+Q2 = a manual-trigger live-model tier with a hard cost cap, reported per
+journey, never a merge gate. Q3 = an old→new card before every chat edit, in
+both modes. Q4 = with a model available every sentence goes to the copilot;
+the local tour and project picker work only without a key.
+
+So the slices VS-1..VS-4 below are acceptance targets inside the Codex layers:
+VS-1 and VS-2 close LC-03, VS-3 closes LC-04, VS-4 closes LC-05. The proposed
+reordering in "Proposed order" was declined; it stays here as the record.
 
 ## The vision, as the owner put it
 
@@ -182,7 +196,7 @@ task" question is settled. LC-01A is merged (PR372). LC-01B is in flight. The
 proposal: after LC-01B, run three thin vertical slices before the generic
 LC-03/04/05 layers (owner question Q1).
 
-## Proposed order
+## Proposed order (declined by the owner, Q1; kept as the record)
 
 1. LC-01B exact project names (in flight; unchanged).
 2. **VS-1** "show me the load flow results of the latest calculation": issues

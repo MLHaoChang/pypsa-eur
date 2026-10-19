@@ -6,7 +6,7 @@
 Status: ready-for-agent; small, independent PRs
 Type: task
 Baseline: master `d006f4beaa302b97432c65757762ae180222731a`
-Dependencies: none (each item is its own PR); feeds LC-11 and LC-03
+Dependencies: none (each item is its own PR); inside LC-03 scope, feeds LC-11
 
 Found while checking the owner's "show me something else". Each is a
 reachability defect, not a new capability.

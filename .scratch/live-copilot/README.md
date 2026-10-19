@@ -25,8 +25,8 @@ Load flow, storage costs and “update lines, then run” are representative jou
    beginning with [LC-01 discovery and scope](issues/01-discovery-and-scope.md).
 
 2026-10-19 addendum: a [review against the owner's vision](vision-review-2026-10-19.md)
-adds [owner journeys](owner-journeys.md) OJ-01–12, issues 09–14 and a proposed
-vertical-slice order. The order waits for the owner's decision.
+adds [owner journeys](owner-journeys.md) OJ-01–12 and issues 09–14. The owner kept
+the Codex order; each layer now closes on its journeys (see the review's decisions).
 
 This is an execution amendment to the existing companion/live-voice plans, not a
 second agent or replacement media architecture. Merged CP-01–06 prerequisites

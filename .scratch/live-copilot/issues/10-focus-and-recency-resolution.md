@@ -3,7 +3,7 @@
 
 # LC-10 (LC-01C) — resolving "this", "the" and "latest"
 
-Status: ready-for-agent after LC-01B lands
+Status: ready-for-agent inside LC-01, after LC-01B lands
 Type: task
 Baseline: master `d006f4beaa302b97432c65757762ae180222731a`
 Dependencies: LC-01B (exact names), LC-01A (schema discovery)
@@ -39,6 +39,14 @@ project; failed and running runs are named, not used.
 The answer always says what was resolved ("Line L2, selected on the map").
 Manual selection after the question supersedes it. UI context stays an
 untrusted hint: the server re-reads the entity and checks access on every use.
+
+## Owner decision Q4 (2026-10-19)
+
+With a model available, every sentence goes to the copilot. The dock's local
+results tour and project picker (`frontend/src/components/AssistantDock.tsx:106-133`)
+run only when no key is configured. This narrows LC-01B's exact-phrase
+shortcuts to the no-key path; the LC-01B owner applies it in that slice or the
+next one.
 
 ## Tests
 

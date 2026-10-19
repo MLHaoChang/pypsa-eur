@@ -17,8 +17,8 @@ unit/base. Unsupported checked scopes remain explicit after generic discovery.
 
 Support exact entity/field/unit/basis selection from native schemas, complete old/new previews and verified writes. First independent fixtures cover Store/StorageUnit cost fields and several line parameters; they are examples of the generic interface. Read-only/computed/unknown fields, ambiguity and unavailable checked effects must not be guessed.
 
-2026-10-19: the first storage/line slice is VS-3 in the proposed order and must pass
-[OJ-05/06](../owner-journeys.md). Whether Expert chat edits show an old→new card is an open owner decision.
+2026-10-19 owner decisions: LC-04 closes when [OJ-05/06](../owner-journeys.md) pass (VS-3).
+Every chat edit shows an old→new card before it applies, in Expert and Guided alike (Q3).
 
 Expected ownership: native parameter schema/read/write adapters, confirmation previews and effect receipts; no raw code or URL executor.
 
