@@ -19,6 +19,8 @@ import {
 } from '../api/campusElectrical'
 import { Btn, Tag } from '../components/PageKit'
 import { useUIStore } from '../store/uiStore'
+import { StatePill } from '../components/ResultState'
+import { GFM_NOTHING_TO_TUNE, nothingToTune } from './hubDesign/chapters'
 
 export const GFM_KEY = (name: string) => ['campusElectrical', 'gfmSettings', name] as const
 const STATE_KEY = (name: string) => ['campusElectrical', 'state', name] as const   // CAMPUS_KEY (the panel imports this file)
@@ -125,6 +127,11 @@ function RecommendationView({ rec }: { rec: GfmRecommendation }) {
   return (
     <div className="mt-2" data-testid="gfm-recommendation">
       <p className="text-[11.5px] text-muted italic" data-testid="gfm-label">{rec.label}</p>
+      {nothingToTune(rec) ? (
+        <p className="text-[12px] mt-1 flex flex-wrap items-center gap-2" data-testid="gfm-status">
+          <StatePill state="not_applicable" /> {GFM_NOTHING_TO_TUNE}
+        </p>
+      ) : (
       <p className="text-[12px] mt-1" data-testid="gfm-status">
         <Tag tone={rec.status === 'not_achievable' ? 'err' : rec.status === 'incomplete' ? 'warn' : 'ok'}>
           {rec.status.replace('_', ' ')}
@@ -132,6 +139,7 @@ function RecommendationView({ rec }: { rec: GfmRecommendation }) {
         {STATUS_TEXT[rec.status]} ({rec.simulations} of at most {rec.max_simulations} simulations,
         margin {num(100 * rec.margin)} %)
       </p>
+      )}
       {units.length > 0 && (
         <table className="text-[12px] whitespace-nowrap mt-1" data-testid="gfm-settings">
           <thead><tr><th className={TH}>unit</th><th className={TH}>control</th>
