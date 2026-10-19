@@ -97,7 +97,26 @@ def test_existing_registry_uuid_name_collision_is_resolved_by_name(baseline, cli
     assert activated.status_code == 200 and activated.json()['activated'] == 'Tool Baseline'
 
 
-def test_authenticated_tenant_streams_resolve_their_own_same_name(baseline, client, other_org_client, fake_provider):
+@pytest.fixture
+def per_request_contexts(baseline):
+    """Let each HTTP request bind its own session context, as under uvicorn.
+
+    `baseline` binds a request context and turn cell in the test thread, and
+    TestClient copies that thread's context into every request, so two
+    tenants' requests would otherwise share one cell.
+    """
+    from services.pypsa_service import PyPSAService
+    cell = PyPSAService._turn_cell.set(None)
+    binding = PyPSAService.bind_request_context(None)
+    try:
+        yield
+    finally:
+        PyPSAService.reset_request_context(binding)
+        PyPSAService._turn_cell.reset(cell)
+
+
+def test_authenticated_tenant_streams_resolve_their_own_same_name(
+        baseline, per_request_contexts, client, other_org_client, fake_provider):
     response = other_org_client.post('/api/projects/Tool Baseline', params={'force': True, 'rebind': True})
     assert response.status_code == 200, response.text
     foreign = next(p for p in other_org_client.get('/api/projects/').json() if p['name'] == 'Tool Baseline')

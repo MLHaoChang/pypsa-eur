@@ -52,7 +52,7 @@ export default function AssistantDock() {
   const [surface, setSurface] = useState<'chat' | 'activity'>('chat')
   useEffect(() => { if (!assistantDockOpen) setSurface('chat') }, [assistantDockOpen])
   const profilesQuery = useChatProfiles()
-  const { effectiveProfileId, ready } = useChatReadiness()
+  const { effectiveProfileId, ready, settled: readinessSettled } = useChatReadiness()
   const streaming = useChatStore((s) => s.streaming)
   const pending = useChatStore((s) => s.pending)
   const choice = useChatStore((s) => s.choice)
@@ -104,7 +104,16 @@ export default function AssistantDock() {
   }, [ready])
 
   const onLiveSubmit = useCallback((text: string) => {
-    if (keyResultsWalkRequested(text)) {
+    // With a model available every sentence goes to the copilot (owner
+    // decision Q4); the local tour and picker are the no-key path only, so
+    // they wait until readiness has answered. Answered without a usable
+    // profile is the no-key path too.
+    if (ready === undefined && !readinessSettled) {
+      setLiveCaption('Still checking the assistant. Nothing was sent; try again in a moment.')
+      return
+    }
+    const local = ready !== true
+    if (local && keyResultsWalkRequested(text)) {
       stopWalk()
       setLiveEcho('')
       setWalking(true)
@@ -124,7 +133,7 @@ export default function AssistantDock() {
       })
       return
     }
-    if (openProjectRequested(text)) {
+    if (local && openProjectRequested(text)) {
       stopWalk()
       setLiveEcho('')
       openProjectList()
@@ -157,7 +166,7 @@ export default function AssistantDock() {
       return
     }
     setLiveCaption('Add an API key for the assistant first. You can still open the project list without one.')
-  }, [flashEcho, forwardToHarness, ready, stopWalk])
+  }, [flashEcho, forwardToHarness, ready, readinessSettled, stopWalk])
   const profileLabel =
     profilesQuery.data?.profiles.find((p) => p.id === effectiveProfileId)?.label
     ?? profilesQuery.data?.profiles.find((p) => p.id === profilesQuery.data.active_profile_id)?.label

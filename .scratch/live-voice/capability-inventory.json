@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-18",
+  "generated_at": "2026-10-19",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,8 +10,30 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 256,
+  "tool_count": 257,
   "tools": [
+    {
+      "name": "resolve_project_target",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_name"
+      ],
+      "required": [
+        "project_name"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "5c2e4b5a552480f8f4b512121b9c2048dead2a7cb5c94e72799da14e96e807f1",
+      "behavioral_fixture": "pending"
+    },
     {
       "name": "get_component_schema",
       "toolsets": [
