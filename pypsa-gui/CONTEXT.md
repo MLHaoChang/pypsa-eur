@@ -361,3 +361,66 @@ parts, their lifetimes and the discount rate. When an asset carries an Overnight
 cost, PyPSA uses it and ignores any Capital cost. Always labelled with its
 period.
 _Avoid_: CC (unlabelled), annual CAPEX
+
+## Process language
+
+Grid-to-process plans a client's electrical system and its production as one
+problem; the objective is the client's margin, not the cheapest bill for a fixed
+load. Until the tickets that build each term land, its citation is the design
+(`.scratch/grid-to-process/design.md`); the ticket that builds the code replaces
+it with file and line.
+
+**Process unit**:
+One production step that turns inputs into a product at a rate in t/h: a
+Haber-Bosch loop, a crusher, a grinding mill. It is a Link with `eh_process`
+set: bus0 is the main input, the other inputs sit on `bus2..` and the product on
+bus1. Its electricity follows from throughput × specific energy, and it may be
+committable (on/off with a minimum load). Its size is a fixed client input,
+never a decision of the plan (design §1.2, §2.3).
+_Avoid_: load (a Load is fixed demand; a process unit decides its rate), machine,
+plant (a plant is several process units)
+
+**Product**:
+A material a process unit makes or uses, carried on its own Bus: NH3, ore,
+concentrate. Energy products (H2, NH3) are counted in MWh (LHV); material
+products in tonnes. The Bus's `unit` says which (design §1.2, §3.A).
+_Avoid_: commodity (traded energy in the commercial code), carrier (the PyPSA
+attribute a product Bus has, not the product)
+
+**Inventory**:
+A Store of one Product between two process units, or between a process unit and
+delivery: an H2 tank, an NH3 tank, an ore stockpile, a concentrate shed. Its
+level is in the Product's unit (design §1.2, §2.4).
+_Avoid_: buffer, storage (that is the electrical StorageUnit)
+
+**Production target**:
+What a period must deliver of a Product, as a delivery Load on its Bus. A
+shortfall is supplied by a priced slack, so the target is not a hard constraint
+(design §1.2, §2.5).
+_Avoid_: quota, demand (unqualified, that is the electrical demand)
+
+**Lost-production value**:
+The cost of one unit of a Product not delivered: the client's margin per tonne,
+or a contract's shortfall penalty. It is not a purchase; where the Product can be
+bought in, the buy-in has its own price and the lost-production value must exceed
+it. It is entered per Product with its source; when missing it is Unavailable
+([ADR-0001](docs/adr/0001-unresolvable-figures-ship-as-null.md)), never 0
+(design §1.2, §2.1).
+_Avoid_: VoLL (per MWh of electricity; it stays the price of unserved electrical
+load), penalty (unqualified)
+
+**Criticality tier**:
+How a process unit's electrical supply is ranked when it must be cut: `safety`
+(priced at VoLL), `process_critical` (a stop costs a restart),
+`process_flexible` (it can stop and catch up from Inventory) or `deferrable` (it
+shifts within the day). It extends today's two ranks, the `eh_critical` Bus and
+demand-side response as a priced resource (design §1.2).
+_Avoid_: priority, criticality (unqualified), critical load (that is the
+`eh_critical` Bus only)
+
+**Restart time**:
+The hours a process unit stays down after a stop before it produces again. Its
+cost is the lost tonnes, priced by the Lost-production value, not a start-up
+cost (design §1.2, §2.3).
+_Avoid_: start-up cost (PyPSA's own attribute, unweighted by the time-step
+weighting)

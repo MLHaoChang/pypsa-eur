@@ -1,0 +1,1 @@
+* Bug(pypsa-gui): Aborting a campus run during prepare, ranking or the island checks leaves the previous study as it was. The new study replaces it only after sizing, so the new critical hours are not shown with the previous sizing and purchases.

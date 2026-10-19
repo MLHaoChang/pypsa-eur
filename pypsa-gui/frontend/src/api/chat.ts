@@ -20,6 +20,7 @@ import { client } from './client'
 import { rawFetchHeaders } from './csrf'
 import type { UiContext } from '../utils/uiContext'
 import type { AnswerReceipt } from '../utils/answerAssurance'
+import type { SourceGapReference } from './assistantActivity'
 
 /**
  * A model id. Deliberately a bare `string`, no longer a closed union.
@@ -86,6 +87,7 @@ export interface ChatStreamRequest {
   binding_generation?: number
   checked_scope?: Record<string, unknown>
   checked_operation?: Record<string, unknown>
+  source_gap_ref?: SourceGapReference
 }
 
 export interface ChatFrame {

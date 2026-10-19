@@ -9,6 +9,8 @@ import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import * as speechOut from '../utils/speechOut'
 import ChatPanel from './ChatPanel'
+import AssistantDock from './AssistantDock'
+import type { ChatAccessSnapshot } from '../api/chatAccess'
 
 const unsafe = 'Invented cost 999 EUR and guaranteed profit.'
 let capabilities: Record<string, unknown>
@@ -50,6 +52,7 @@ beforeEach(() => {
     selectedComponent: { type: 'StorageUnit', name: 'Battery' }, projectMismatch: null })
   useChatStore.setState({ sessionId: 'pilot-session', messages: [], error: null, pending: null, choice: null,
     streaming: false, streamCleanup: null, profileId: null, boundProfileId: null, requestQueue: [],
+    sourceGapDraft: null,
     activeRequest: null, lastRequest: null, newChatSeq: 0, suppressHydrationOnce: false, attachedFileIds: [], uploads: [] })
 })
 afterEach(() => { cleanup(); queryClient?.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -76,6 +79,107 @@ function init() {
   emit('session_init', { session_id: 'pilot-session', turn_id: 'turn-1', model: 'test',
     assurance: { version: 1, mode: 'strict', state: 'checking' } })
 }
+
+const preparedGap = () => ({ projectName: 'Demo', chatSequence: useChatStore.getState().newChatSeq,
+  message: 'Recheck the exact request shown in the checked follow-up card.',
+  checked_scope: { version: 1, profile: 'storage-unit-cost/1', project_id: 'owned-project',
+    entity_id: 'Battery', metrics: ['total_cost'], cost_basis: { currency: 'EUR', price_year: 2026, annual_fixed_cost_fraction: 1 } },
+  source_gap_ref: { source_id: 'a'.repeat(64), revision: 1, digest: 'b'.repeat(64) } })
+
+it('prepares a separate request and sends it only on explicit per-message checked consent', async () => {
+  mount()
+  const toggle = await screen.findByRole('checkbox', { name: 'Check answers' }) as HTMLInputElement
+  await waitFor(() => expect(toggle.disabled).toBe(false))
+  fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'Keep my unsent message.' } })
+  act(() => {
+    useChatStore.setState({ attachedFileIds: ['keep-attachment'] })
+    useChatStore.getState().setSourceGapDraft(preparedGap())
+  })
+  expect(await screen.findByRole('region', { name: 'Prepared checked follow-up' })).toBeTruthy()
+  expect(createChatStream).not.toHaveBeenCalled()
+  const liveSession = useChatStore.getState().sessionId
+  const draft = useChatStore.getState().sourceGapDraft!
+  fireEvent.click(screen.getByRole('button', { name: 'Send checked follow-up' }))
+  expect(createChatStream).toHaveBeenCalledOnce()
+  const request = vi.mocked(createChatStream).mock.calls[0][0]
+  expect(request.assurance).toEqual({ version: 1, mode: 'strict' })
+  expect(request.checked_scope).toEqual(draft.checked_scope)
+  expect(request.source_gap_ref).toEqual(draft.source_gap_ref)
+  expect(request.session_id).toBe(liveSession ?? undefined)
+  expect(request.attachment_file_ids).toBeUndefined()
+  expect(request.message).toBe(draft.message)
+  expect((screen.getByTestId('chat-input') as HTMLTextAreaElement).value).toBe('Keep my unsent message.')
+  expect(useChatStore.getState().attachedFileIds).toEqual(['keep-attachment'])
+  expect(useChatStore.getState().sourceGapDraft).toBeNull()
+  expect(useChatStore.getState().requestQueue).toEqual([])
+  expect(toggle.checked).toBe(false)
+})
+
+it.each(['pilot', 'strict'])('shows the same %s checked selection in in-page chat and its actual request', async mode => {
+  capabilities.mode = mode
+  const access = (checked: boolean): ChatAccessSnapshot => ({ version: 1, read_only: true, observed_at: 100,
+    scope: { project_id: 'project-a', project_name: 'Demo' }, selection: { ui_mode: 'expert', checked_requested: checked },
+    restrictions: { mode: 'read_only', revision: 'rule-a' }, confirmation_rules: [], blockers: [],
+    project_lock: 'unlocked', session: { id: 'pilot-session', output_tokens_used: 0, turn_in_flight: false },
+    checking: { server_mode: mode, effective_for_selection: checked, scope: 'bounded_profiles' },
+    limits: { output_tokens_per_turn: 8192, tool_calls_per_turn: 25, output_tokens_per_session: 200000,
+      turns_without_reported_usage: 100, daily_project_tokens: null, confirmation_ttl_seconds: 60 } })
+  vi.mocked(client.get).mockImplementation(async (url, config) => {
+    if (url === '/chat/access') return { data: access(config?.params.checked === true) } as never
+    if (url === '/chat/reliability/capabilities') return { data: capabilities } as never
+    if (url === '/chat/profiles') return { data: { profiles: [{ id: 'test-model', label: 'Test model',
+      wire: 'openai', chat_ready: true }], active_profile_id: 'test-model' } } as never
+    return { data: { workflows: [], chat_ready: true } } as never
+  })
+  vi.spyOn(client, 'post').mockResolvedValue({ data: { thread_id: 'thread-a', generation: 1 } })
+  useUIStore.setState({ uiMode: 'expert', assistantSpeakEnabled: false })
+  useChatStore.setState({ durableThreadId: null, utteranceGeneration: 1 })
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<QueryClientProvider client={queryClient}><AssistantDock /></QueryClientProvider>)
+  if (mode === 'pilot') await optIn()
+  else await waitFor(() => expect((screen.getByRole('checkbox', { name: 'Check answers' }) as HTMLInputElement).checked).toBe(true))
+  fireEvent.click(screen.getByTestId('assistant-dock-collapse'))
+  expect(screen.queryByRole('region', { name: 'In-page chat access' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Chat here' }))
+  expect(await screen.findByText('Answer checks on for supported profiles')).toBeTruthy()
+  expect(screen.getByText('Your rule: Read-only tools')).toBeTruthy()
+  expect(createChatStream).not.toHaveBeenCalled()
+  fireEvent.change(screen.getByRole('textbox', { name: 'Message the assistant' }), { target: { value: 'Explain this asset.' } })
+  fireEvent.click(screen.getByTestId('companion-live-send'))
+  await waitFor(() => expect(createChatStream).toHaveBeenCalledOnce())
+  expect(vi.mocked(createChatStream).mock.calls[0][0].assurance).toEqual({ version: 1, mode: 'strict' })
+  expect(useUIStore.getState().assistantDockOpen).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Close chat here' }))
+  expect(screen.queryByRole('region', { name: 'In-page chat access' })).toBeNull()
+  expect(useChatStore.getState().streaming).toBe(true)
+})
+
+it.each(['disabled', 'shadow'])('never falls back to an unchecked gap send in %s mode', async mode => {
+  capabilities.mode = mode
+  mount()
+  await screen.findByRole('checkbox', { name: 'Check answers' })
+  act(() => useChatStore.getState().setSourceGapDraft(preparedGap()))
+  const button = await screen.findByRole('button', { name: 'Send checked follow-up' })
+  expect((button as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(button)
+  expect(createChatStream).not.toHaveBeenCalled()
+  expect(useChatStore.getState().sourceGapDraft).not.toBeNull()
+})
+
+it.each(['project', 'new chat', 'dismiss'])('clears the prepared request on %s without sending', async change => {
+  mount()
+  await screen.findByRole('checkbox', { name: 'Check answers' })
+  act(() => useChatStore.getState().setSourceGapDraft(preparedGap()))
+  await screen.findByRole('region', { name: 'Prepared checked follow-up' })
+  if (change === 'dismiss') fireEvent.click(screen.getByRole('button', { name: 'Dismiss follow-up' }))
+  else act(() => {
+    if (change === 'project') useUIStore.setState({ currentProject: 'Elsewhere' })
+    else useChatStore.getState().startNewChat()
+  })
+  await waitFor(() => expect(useChatStore.getState().sourceGapDraft).toBeNull())
+  expect(screen.queryByRole('region', { name: 'Prepared checked follow-up' })).toBeNull()
+  expect(createChatStream).not.toHaveBeenCalled()
+})
 function finish(text = 'StorageUnit Battery: total direct cost 51 EUR.') {
   emit('answer_approved', { version: 1, answer_id: 'answer-1', turn_id: 'turn-1', verdict: 'passed',
     receipt: { policy_version: '1', content_sha256: createHash('sha256').update(text).digest('hex'),

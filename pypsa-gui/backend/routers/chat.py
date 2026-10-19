@@ -24,14 +24,17 @@ import asyncio
 import logging
 import threading
 from typing import Any, Literal
+from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from sqlalchemy.orm import Session as DBSession
 from starlette.responses import StreamingResponse
 
 from db.models import Session as SessionRow
 from db.models import User
-from deps import current_session, optional_user
+from db.session import get_db
+from deps import current_session, optional_user, require_user
 from harness import loop as chat_service
 from services import app_secrets, llm_config
 
@@ -93,6 +96,7 @@ class StreamRequest(BaseModel):
     assurance: Any = None
     checked_scope: Any = None
     checked_operation: Any = None
+    source_gap_ref: Any = None
     binding_generation: StrictInt = Field(default=0, ge=0, le=2**31 - 1)
 
 
@@ -1326,6 +1330,45 @@ def _resolve_owned_session(
     return session
 
 
+class RestrictionRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    project_id: UUID
+    revision: UUID
+    mode: Literal['standard', 'confirm_changes', 'read_only']
+
+
+@router.put('/restrictions')
+def save_chat_restrictions(body: RestrictionRequest, response: Response,
+                           actor: User = Depends(require_user), db: DBSession = Depends(get_db)):
+    """Save only the authenticated user's restrictions on the current project."""
+    from harness import restrictions
+
+    project = restrictions.current_project(db, actor, str(body.project_id))
+    result = restrictions.save(db, actor, project, body.revision, body.mode)
+    response.headers['Cache-Control'] = 'no-store'
+    return {**result, 'project_id': str(project.id)}
+
+
+@router.get('/access')
+def chat_access(
+    response: Response,
+    project_id: str | None = Query(default=None, max_length=120),
+    session_id: str | None = Query(default=None, min_length=1, max_length=128),
+    ui_mode: Literal['expert', 'guided'] = 'expert',
+    checked: bool = False,
+    actor: User = Depends(require_user),
+    db: DBSession = Depends(get_db),
+):
+    from harness import access
+    session = _resolve_owned_session(session_id, actor) if session_id is not None else None
+    if session_id is not None and session is None:
+        raise HTTPException(404, 'Chat session is unavailable.')
+    result = access.snapshot(db=db, user=actor, session=session, project_id=project_id,
+                             ui_mode=ui_mode, checked=checked)
+    response.headers['Cache-Control'] = 'no-store'
+    return result
+
+
 class _DisconnectWatcher:
     """
     Abort a turn whose client has gone away (QA #14).
@@ -1462,6 +1505,17 @@ async def chat_stream(
     # still sync and still runs off-loop in the threadpool.
     from harness import assurance
     strict_assurance = assurance.admission(body.assurance)
+    if body.source_gap_ref is not None:
+        from harness.attention import FOLLOWUP_MESSAGE, validate_reference
+        try:
+            validate_reference(body.source_gap_ref)
+        except (ValueError, TypeError):
+            raise HTTPException(422, {'error_kind': 'invalid_source_gap_followup'}) from None
+        if (not strict_assurance or body.checked_scope is None or body.checked_operation is not None
+                or body.attachment_file_ids or body.script is not None or body.utterance_id is not None
+                or body.generation is not None or body.input_mode not in (None, 'text')
+                or body.message != FOLLOWUP_MESSAGE):
+            raise HTTPException(422, {'error_kind': 'invalid_source_gap_followup'})
     if body.checked_scope is not None:
         from harness.assurance_scope import validate
         try:
@@ -1721,6 +1775,7 @@ async def chat_stream(
                     generation=body.generation,
                     checked_scope=body.checked_scope,
                     checked_operation=body.checked_operation,
+                    source_gap_ref=body.source_gap_ref,
                     binding_generation=body.binding_generation,
                 )
             for event_name, payload in events:

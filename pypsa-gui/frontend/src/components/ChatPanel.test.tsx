@@ -468,12 +468,12 @@ it('still closes an idle stream when the panel unmounts', async () => {
 //
 // While the dock is collapsed, ChatPanel sits under a `display:none`
 // ancestor (kept mounted, not unmounted — see AssistantDock.tsx), so a
-// scrollIntoView call made while collapsed lands on an element with no
+// transcript scroll made while collapsed lands on an element with no
 // layout box and is a silent no-op in a real browser. jsdom does no layout
 // at all — there is no way for any test to observe "the transcript ended up
 // visually at the bottom" — so this only pins the narrower, still real
 // precondition: the autoscroll effect has to re-run when the dock expands,
-// so a scrollIntoView call happens at all once there's a box to scroll.
+// so a transcript scroll happens at all once there's a box to scroll.
 // The actual visual outcome (ask a question, collapse, let it stream,
 // expand, see the latest token) needs a manual check in the built app.
 it('re-fires the stick-to-bottom autoscroll when the assistant dock expands', async () => {
@@ -485,11 +485,11 @@ it('re-fires the stick-to-bottom autoscroll when the assistant dock expands', as
   ])
 
   // Restored in a finally: this spy replaces vitest.setup.ts's own
-  // `Element.prototype.scrollIntoView` no-op for the whole prototype, so
+  // `Element.prototype.scrollTo` no-op for the whole prototype, so
   // leaving it installed would silently hand the stand-in to every test
   // appended after this one in the file. Harmless today only because this is
   // currently last.
-  const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView')
+  const scrollSpy = vi.spyOn(Element.prototype, 'scrollTo')
   try {
     scrollSpy.mockClear()
 
@@ -498,6 +498,7 @@ it('re-fires the stick-to-bottom autoscroll when the assistant dock expands', as
     })
 
     expect(scrollSpy).toHaveBeenCalled()
+    expect(scrollSpy.mock.instances.every(element => element === screen.getByTestId('chat-messages'))).toBe(true)
   } finally {
     scrollSpy.mockRestore()
   }

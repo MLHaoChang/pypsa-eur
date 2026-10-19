@@ -18,7 +18,7 @@ describe('AssistantActivity', () => {
     get.mockReset()
     inspect.mockReset()
     useUIStore.setState({ currentProject: 'Project A' })
-    useChatStore.setState({ sessionId: 'session-a' })
+    useChatStore.setState({ sessionId: 'session-a', sourceGapDraft: null, newChatSeq: 0 })
   })
   afterEach(() => vi.useRealTimers())
   it('observes unavailable native states without sending work', async () => {
@@ -107,6 +107,16 @@ describe('AssistantActivity', () => {
     expect(await screen.findByText('Retained observation')).toBeTruthy()
     expect(container.querySelector('time')).toBeNull()
   })
+  it('explains incomplete background observation without offering replay', async () => {
+    const data = snapshot()
+    data.items = []
+    data.warnings = ['activity_completion_observation_incomplete']
+    get.mockResolvedValue(data)
+    render(<AssistantActivity onConversation={vi.fn()} />)
+    expect(await screen.findByText(/Some registered jobs could not be observed through completion/)).toBeTruthy()
+    expect(screen.getByText(/missing history does not establish whether work finished/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /retry|resume|cancel|approve/i })).toBeNull()
+  })
   function question() {
     const data = snapshot()
     data.items[0] = { ...data.items[0], family: 'question', status: 'waiting_for_input',
@@ -144,6 +154,30 @@ describe('AssistantActivity', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Inspect decision' }))
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Refresh Activity'))
     expect(screen.queryByText('Which basis?')).toBeNull()
+  })
+  it('prepares an exact source-gap request in the current chat without sending or restoring history', async () => {
+    const data = question()
+    data.items[0].family = 'source_gap'
+    get.mockResolvedValue(data)
+    const prepared = { message: 'Recheck the exact request shown in the checked follow-up card.',
+      checked_scope: { version: 1, project_id: 'p1', profile: 'generator-dispatch/1', entity_id: 'G1' },
+      source_gap_ref: { source_id: 'a'.repeat(64), revision: 1, digest: 'b'.repeat(64) } }
+    inspect.mockResolvedValue({ ...detail(), question: null, prepared_followup: prepared,
+      source_gap: { answer_id: 'old-answer', turn_id: 'old-turn',
+        request_scope: { project_id: 'p1', profile: 'generator-dispatch/1', entity_id: 'G1' },
+        slots: [{ metric: 'dispatch_energy', disposition: 'unavailable', reason: 'unverified_solve' }] },
+      followups: [{ answer_id: 'later-answer', turn_id: 'later-turn', session_id: 'other-chat',
+        request_complete: true, observed_at: 1792000000 }] })
+    const open = vi.fn()
+    render(<AssistantActivity onConversation={open} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect source gap' }))
+    expect(await screen.findByText(/All requested metrics were answered at publication/)).toBeTruthy()
+    expect(screen.getByText(/They do not resolve this historical gap/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare checked follow-up' }))
+    expect(useChatStore.getState().sourceGapDraft).toEqual({ ...prepared, projectName: 'Project A', chatSequence: 0 })
+    expect(open).toHaveBeenCalledOnce()
+    expect(useChatStore.getState().sessionId).toBe('session-a')
+    expect(useChatStore.getState().requestQueue).toEqual([])
   })
   it('inspects historical missing slots and exact request scope without executing work', async () => {
     const data = question()

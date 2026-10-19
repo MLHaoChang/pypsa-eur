@@ -1,6 +1,6 @@
 # Glossary: the process terms in CONTEXT.md
 
-Status: needs-triage
+Status: done (PR pending)
 Type: task
 Blocked by: none
 Gated: no

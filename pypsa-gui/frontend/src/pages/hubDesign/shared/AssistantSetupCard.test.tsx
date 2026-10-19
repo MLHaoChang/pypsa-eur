@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 import { useUIStore } from '../../../store/uiStore'
 import { AssistantSetupCard } from './AssistantSetupCard'
+import { useHubDesignStore } from '../hubDesignStore'
 import { DelegateButton, NO_ASSISTANT } from './CardShell'
 
 const readiness = vi.hoisted(() => ({ ready: undefined as boolean | undefined }))
@@ -18,7 +19,10 @@ vi.mock('../../../hooks/useChatProfiles', async (orig) => ({
 const mount = (ui: ReactElement) => render(
   <QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>)
 
-beforeEach(() => { useUIStore.setState({ uiMode: 'guided', assistantDockOpen: false }) })
+beforeEach(() => {
+  useUIStore.setState({ uiMode: 'guided', assistantDockOpen: false })
+  useHubDesignStore.setState({ setupCardDismissed: false })
+})
 afterEach(() => cleanup())
 
 describe('Guided without an assistant', () => {
@@ -27,6 +31,16 @@ describe('Guided without an assistant', () => {
     mount(<AssistantSetupCard />)
     fireEvent.click(screen.getByTestId('assistant-setup-open'))
     expect(useUIStore.getState().assistantDockOpen).toBe(true)
+  })
+
+  it('can be dismissed, and stays away on the next step (UX review L1)', () => {
+    readiness.ready = false
+    const { unmount } = mount(<AssistantSetupCard />)
+    fireEvent.click(screen.getByTestId('assistant-setup-dismiss'))
+    expect(screen.queryByTestId('assistant-setup-card')).toBeNull()
+    unmount()
+    mount(<AssistantSetupCard />)
+    expect(screen.queryByTestId('assistant-setup-card')).toBeNull()
   })
 
   it('disables "Let the assistant do this" and says why', () => {

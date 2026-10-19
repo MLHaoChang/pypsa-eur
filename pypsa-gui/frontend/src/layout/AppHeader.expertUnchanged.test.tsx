@@ -12,6 +12,8 @@ import { WRITABLE } from '../utils/lockState'
 // back). The snapshot was recorded before P23 touched AppHeader.tsx; the
 // switch is removed from a clone before comparing, so any OTHER difference —
 // a moved button, a changed class, a lost tooltip — fails here.
+// LC-02B rebases only the header responsive classes; the complete remaining
+// snapshot stays strict. Native browser cases verify wrapped and desktop layout.
 
 vi.mock('../hooks/useSolveQueue', () => ({
   useSolveQueue: () => ({ data: { jobs: [], running: [], paused: false } }),

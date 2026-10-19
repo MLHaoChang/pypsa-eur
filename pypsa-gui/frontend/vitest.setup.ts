@@ -99,18 +99,10 @@ class MediaQueryListStub implements MediaQueryList {
 }
 window.matchMedia = (media: string) => new MediaQueryListStub(media)
 
-// jsdom does not implement Element.scrollIntoView (it does no layout at
-// all, so "scroll to this element" has nothing to compute). ChatPanel.tsx's
-// auto-scroll-to-latest-message effect calls
-// `messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block:
-// 'end' })` unconditionally whenever `stickToBottom` is true (the default),
-// which fires on first mount — so every test that mounts ChatPanel throws
-// `TypeError: messagesEndRef.current?.scrollIntoView is not a function` in
-// a passive effect, fatal to the tree exactly like the ResizeObserver /
-// matchMedia / localStorage gaps above. A no-op is sufficient: the test
-// only needs the call not to throw, not to actually move a viewport that
-// jsdom doesn't render.
+// jsdom has no layout or element scrolling. Keep both browser APIs callable;
+// actual transcript position and ancestor containment need the browser runner.
 Element.prototype.scrollIntoView = () => {}
+Element.prototype.scrollTo = () => {}
 
 // Node ≥22 defines its own experimental `globalThis.localStorage` (behind
 // `--experimental-webstorage`, on by default on the Node 25 this repo's pixi
