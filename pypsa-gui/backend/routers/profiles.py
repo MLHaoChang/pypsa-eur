@@ -26,6 +26,7 @@ this prefix — `_UNDO_PREFIXES` is `/api/network/` + `/api/io/` only):
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import uuid
 from pathlib import Path
@@ -50,7 +51,7 @@ from services.profile_gen.apply import (
 )
 from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
 from services.profile_gen.engine import ProfileGenError
-from services.profile_gen.job import KEEP_PENDING
+from services.profile_gen.job import KEEP_PENDING, write_pending
 
 router = APIRouter()          # global: /api/profiles/…
 project_router = APIRouter()  # scoped: /api/projects/{name}/profiles/…
@@ -268,7 +269,11 @@ def _pending_artifact(proj: AuthorizedProject,
     nc = (pending / f"{job_id}.nc").resolve()
     meta_path = pending / f"{job_id}.json"
     if nc.parent != pending:
-        raise HTTPException(status_code=422, detail="malformed job id")
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "malformed_job_id",
+                    "message": f"malformed job id {job_id!r}"},
+        )
     if not nc.exists() or not meta_path.exists():
         raise HTTPException(
             status_code=404,
@@ -571,7 +576,13 @@ def shape_profile(
     with xr.open_dataset(nc) as ds:
         frame = ds.to_dataframe()
     frame.index = pd.DatetimeIndex(frame.index)
-    wanted = body.points or list(frame.columns)
+    if body.points is not None and not body.points:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "no_points",
+                    "message": "`points` is empty; omit it to shape every point"},
+        )
+    wanted = body.points if body.points is not None else list(frame.columns)
     unknown = [p for p in wanted if p not in frame.columns]
     if unknown:
         raise HTTPException(
@@ -600,19 +611,7 @@ def shape_profile(
                 detail={"error_kind": _error_kind(exc), "message": str(exc)},
             ) from exc
 
-    import datetime as _dt
-    import os
-
-    from services.profile_gen.job import _artifact_paths, _evict_pending
-
     new_id = str(uuid.uuid4())
-    out_nc, out_meta = _artifact_paths(proj.directory, new_id)
-    part = Path(str(out_nc) + ".part")
-    try:
-        pd.DataFrame(shaped).rename_axis("time").to_xarray().to_netcdf(str(part))
-        os.replace(part, out_nc)
-    finally:
-        part.unlink(missing_ok=True)
     record = {
         **parent,
         "job_id": new_id,
@@ -626,7 +625,6 @@ def shape_profile(
         "calibrated": True,
         "shaping": per_point,
     }
-    out_meta.write_text(json.dumps(record, indent=2, default=str))
-    _evict_pending(proj.directory)
+    write_pending(proj.directory, new_id, pd.DataFrame(shaped), record)
     return {"job_id": new_id, "parent_job": body.job_id,
             "points": list(shaped), "stats": per_point}

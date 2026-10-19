@@ -710,3 +710,20 @@ def test_shape_on_another_orgs_project_is_a_404(other_org_client):
     resp = _shape(other_org_client, "Profile Farm", "any",
                   [{"op": "target_flh", "hours": 2000}])
     assert resp.status_code == 404
+
+
+def test_shape_with_an_empty_points_list_is_a_typed_refusal(
+    client, wind_project, completed_job,
+):
+    resp = _shape(client, wind_project, completed_job["id"],
+                  [{"op": "target_flh", "hours": 2000}], points=[])
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "no_points"
+
+
+def test_shape_with_a_malformed_job_id_is_a_typed_refusal(client,
+                                                          wind_project):
+    resp = _shape(client, wind_project, "../escape",
+                  [{"op": "target_flh", "hours": 2000}])
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "malformed_job_id"

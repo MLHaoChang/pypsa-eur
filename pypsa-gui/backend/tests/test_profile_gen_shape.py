@@ -44,8 +44,10 @@ def _spearman(a: pd.Series, b: pd.Series) -> float:
 OPS = [
     {"op": "target_flh", "hours": 2000},
     {"op": "target_cf", "cf": 0.2},
-    {"op": "quantile_map", "quantiles": {"0.1": 0.05, "0.5": 0.25, "0.9": 0.7}},
-    {"op": "tail_damp", "side": "low", "beyond_q": 0.2, "factor": 0.5},
+    # above the solar night share (~50 % zeros), which named quantiles refuse
+    {"op": "quantile_map", "quantiles": {"0.6": 0.05, "0.75": 0.25, "0.9": 0.7}},
+    # 0.7: above the solar night share, so the low tail is not all zeros
+    {"op": "tail_damp", "side": "low", "beyond_q": 0.7, "factor": 0.5},
     {"op": "tail_damp", "side": "high", "beyond_q": 0.9, "factor": 0.5,
      "keep_flh": False},
     {"op": "peak_shift", "hours": 3},
@@ -185,7 +187,7 @@ def test_peak_shift_moves_the_timing_and_wraps_at_the_year_boundary():
     assert meta["ops"][0]["boundary"] == "wrap"
 
 
-def test_peak_shift_refuses_a_coarse_profile():
+def test_shaping_refuses_a_coarse_profile():
     res = generate_profile(points=[("site", 8.0, 50.0)], technology="wind",
                            source="synthetic", year=2023, resolution="daily",
                            now=NOW)
@@ -215,3 +217,72 @@ def test_an_unknown_op_or_an_empty_chain_is_refused():
         apply_chain(_series(), [{"op": "make_it_windier"}])
     with pytest.raises(InvalidShapeOpError, match="at least one"):
         apply_chain(_series(), [])
+
+
+# ── refusals instead of silent coercions (review 2026-10-19) ───────────────
+
+
+def test_a_target_exactly_at_the_reachable_maximum_is_met():
+    s = _series("solar")
+    daylight = int((s > 0).sum())
+    out, _ = apply_chain(s, [{"op": "target_flh", "hours": daylight}])
+    assert profile_stats(out)["flh"] == pytest.approx(daylight)
+
+
+def test_keep_flh_must_be_a_boolean():
+    with pytest.raises(InvalidShapeOpError, match="keep_flh"):
+        apply_chain(_series(), [{"op": "tail_damp", "side": "high",
+                                 "beyond_q": 0.9, "factor": 0.5,
+                                 "keep_flh": "false"}])
+
+
+def test_observed_values_outside_per_unit_are_refused():
+    with pytest.raises(InvalidShapeOpError, match="per-unit"):
+        apply_chain(_series(), [{"op": "quantile_map",
+                                 "observed": [0.1, 0.5, 12.0]}])
+    with pytest.raises(InvalidShapeOpError, match="per-unit"):
+        apply_chain(_series(), [{"op": "quantile_map",
+                                 "observed": [0.1, float("nan"), 0.3]}])
+
+
+def test_damping_an_all_zero_low_tail_is_refused():
+    with pytest.raises(InvalidShapeOpError, match="all zero"):
+        apply_chain(_series("solar"), [{"op": "tail_damp", "side": "low",
+                                        "beyond_q": 0.2, "factor": 0.5}])
+
+
+def test_a_named_quantile_inside_the_solar_nights_is_refused():
+    with pytest.raises(InvalidShapeOpError, match="stay zero"):
+        apply_chain(_series("solar"), [{"op": "quantile_map",
+                                        "quantiles": {"0.2": 0.1}}])
+
+
+def test_a_profile_with_holes_is_refused():
+    s = _series()
+    s.iloc[10] = float("nan")
+    with pytest.raises(InvalidShapeOpError, match="non-finite"):
+        apply_chain(s, [{"op": "target_cf", "cf": 0.2}])
+
+
+# ── seeded property loop: the invariants over years, sites, technologies ───
+
+
+@pytest.mark.parametrize("year", [2019, 2020, 2023])  # 2020: leap
+@pytest.mark.parametrize("site", [(8.0, 50.0), (-3.7, 40.4), (24.9, 60.2)])
+@pytest.mark.parametrize("technology", ["wind", "solar"])
+def test_targets_and_rank_order_hold_across_years_and_sites(year, site,
+                                                            technology):
+    res = generate_profile(points=[("p", *site)], technology=technology,
+                           source="synthetic", year=year, now=NOW)
+    s = res.series["p"]
+    base = profile_stats(s)["flh"]
+    for factor in (0.6, 1.2):
+        target = base * factor
+        out, _ = apply_chain(s, [{"op": "target_flh", "hours": target}])
+        assert abs(profile_stats(out)["flh"] - target) / target < 0.005
+        assert float(out.min()) >= 0.0 and float(out.max()) <= 1.0
+        assert _spearman(s, out) > 0.999
+    out, _ = apply_chain(s, [{"op": "tail_damp", "side": "high",
+                              "beyond_q": 0.9, "factor": 0.5}])
+    assert abs(profile_stats(out)["flh"] - base) / base < 0.005
+    assert len(out) == len(s)

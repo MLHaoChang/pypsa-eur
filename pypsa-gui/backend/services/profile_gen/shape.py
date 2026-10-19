@@ -3,8 +3,10 @@
 Spec: .scratch/renewable-profiles/spec.md R5; gatekeeper conditions of
 2026-10-19 (see tests/test_profile_gen_shape.py).
 
-Every op is a pure function of a per-unit series on the WEATHER year, before
-alignment: same index, values in [0, 1], deterministic. `apply_chain` runs an
+Every op is a pure function of an HOURLY per-unit series on the WEATHER year,
+before alignment: same index, values in [0, 1], deterministic. Daily/weekly
+artifacts are refused (their FLH bound is not the hourly one); regenerate
+at hourly resolution to calibrate. `apply_chain` runs an
 ordered list of ops and returns the shaped series plus its provenance. It
 never touches a network: the router writes the result as a new pending
 artifact and `apply.assign_profile` stays the one writer.
@@ -20,10 +22,12 @@ Ops (``{"op": name, **params}``):
   (interpolated linearly, the series' own min/max as the 0/1 anchors unless
   given) or an observed series' empirical quantiles. Exact zeros stay zero
   (solar nights). Timing comes from the weather year; only the levels move.
-- ``tail_damp {side: low|high, beyond_q, factor, keep_flh=true}``: compress the
-  tail beyond the ``beyond_q`` quantile, continuously and monotonically (low:
-  ``t·(v/t)^(1/factor)``; high: ``t + (v−t)·factor``), then re-hit the
-  original FLH unless ``keep_flh`` is false.
+- ``tail_damp {side: low|high, beyond_q, factor, keep_flh=true}``: damp the
+  tail beyond the ``beyond_q`` quantile, continuously and monotonically. Low
+  pulls the hours below the threshold toward zero (``t·(v/t)^(1/factor)``,
+  "too much low-wind generation"); high pulls the hours above it toward the
+  threshold (``t + (v−t)·factor``, "the peaks are too high"). Then the
+  original FLH is re-hit unless ``keep_flh`` is false.
 - ``peak_shift {hours}``: roll an hourly series by whole hours, wrapping at
   the year boundary. Length and FLH are unchanged.
 """
@@ -99,7 +103,9 @@ def _scale_to_cf(v: np.ndarray, cf: float, *, hours: int, op: str) -> np.ndarray
     if cf <= 0.0:
         raise InvalidShapeOpError(f"{op}: the target must be positive")
     reachable = float((v > 0).mean())
-    if cf >= reachable:
+    if abs(cf - reachable) <= 1e-12:
+        return (v > 0).astype(float)  # every producing hour at full output
+    if cf > reachable:
         raise UnreachableTargetError(
             f"{op}: unreachable — this profile reaches at most "
             f"{reachable * hours:.0f} full-load hours (CF {reachable:.1%}, "
@@ -146,12 +152,19 @@ def _quantile_map(s: pd.Series, p: Mapping[str, Any]) -> tuple[np.ndarray, dict]
     v = s.to_numpy(dtype=float)
     u = _ranks(v)
     if "observed" in p:
-        obs = np.asarray(p["observed"], dtype=float)
-        obs = obs[np.isfinite(obs)]
-        if len(obs) < 2:
+        try:
+            obs = np.asarray(p["observed"], dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise InvalidShapeOpError("quantile_map: `observed` is a list of "
+                                      "per-unit values") from exc
+        if obs.ndim != 1 or len(obs) < 2:
             raise InvalidShapeOpError("quantile_map: `observed` needs at least "
-                                      "two finite values")
-        out = np.quantile(np.clip(obs, 0.0, 1.0), u)
+                                      "two values")
+        if not np.isfinite(obs).all() or obs.min() < 0.0 or obs.max() > 1.0:
+            raise InvalidShapeOpError("quantile_map: `observed` values must be "
+                                      "finite per-unit values in [0, 1] — "
+                                      "divide MW by the capacity first")
+        out = np.quantile(obs, u)
         record = {"observed_n": int(len(obs))}
     elif "quantiles" in p and isinstance(p["quantiles"], Mapping) and p["quantiles"]:
         try:
@@ -169,6 +182,14 @@ def _quantile_map(s: pd.Series, p: Mapping[str, Any]) -> tuple[np.ndarray, dict]
         if any(b < a for a, b in zip(xs, xs[1:])):
             raise InvalidShapeOpError("quantile_map: target values must be "
                                       f"non-decreasing in the quantile; got {pts}")
+        zero_share = float((v == 0.0).mean())
+        night = [q for q, x in pts.items()
+                 if 0.0 < q <= zero_share and x > 0.0]
+        if night:
+            raise InvalidShapeOpError(
+                f"quantile_map: {zero_share:.0%} of the hours are zero (e.g. "
+                f"solar nights) and stay zero, so quantile(s) {sorted(night)} "
+                "cannot be raised above 0 — name quantiles above that share")
         # Invert the series' own quantile positions, so the named quantile of
         # the result (np.quantile's linear rule) lands on the target value.
         out = np.interp(u, qs, xs)
@@ -191,18 +212,24 @@ def _tail_damp(s: pd.Series, p: Mapping[str, Any]) -> tuple[np.ndarray, dict]:
     if not (0.0 < factor <= 1.0):
         raise InvalidShapeOpError("tail_damp: `factor` must lie in (0, 1] "
                                   "(1 leaves the tail as it is)")
-    keep_flh = bool(p.get("keep_flh", True))
+    keep_flh = p.get("keep_flh", True)
+    if not isinstance(keep_flh, bool):
+        raise InvalidShapeOpError("tail_damp: `keep_flh` is true or false")
     v = s.to_numpy(dtype=float)
     t = float(np.quantile(v, q))
     out = v.copy()
     if side == "low":
-        if t > 0.0:
-            m = v < t
-            out[m] = t * (v[m] / t) ** (1.0 / factor)
+        if t <= 0.0:
+            raise InvalidShapeOpError(
+                f"tail_damp: the hours below the {q:.0%} quantile are all "
+                "zero (e.g. solar nights) — nothing to damp; pick a higher "
+                "`beyond_q`")
+        m = v < t
+        out[m] = t * (v[m] / t) ** (1.0 / factor)
     else:
         m = v > t
         out[m] = t + (v[m] - t) * factor
-    if keep_flh and out.mean() > 0.0:
+    if keep_flh:
         out = _scale_to_cf(out, float(v.mean()), hours=_year_hours(s),
                            op="tail_damp(keep_flh)")
     return np.clip(out, 0.0, 1.0), {
@@ -212,9 +239,6 @@ def _tail_damp(s: pd.Series, p: Mapping[str, Any]) -> tuple[np.ndarray, dict]:
 
 
 def _peak_shift(s: pd.Series, p: Mapping[str, Any]) -> tuple[np.ndarray, dict]:
-    if not _is_hourly(s):
-        raise InvalidShapeOpError("peak_shift: needs an hourly profile; "
-                                  "regenerate at hourly resolution")
     hours = _num(p, "hours", "peak_shift")
     if hours != int(hours) or abs(hours) > 24 * 7:
         raise InvalidShapeOpError("peak_shift: `hours` is a whole number of "
@@ -241,6 +265,12 @@ def apply_chain(series: pd.Series,
     and the parent's and result's `profile_stats`."""
     if not ops:
         raise InvalidShapeOpError("give at least one shaping op")
+    if not _is_hourly(series):
+        raise InvalidShapeOpError("shaping needs an hourly profile; "
+                                  "regenerate at hourly resolution")
+    if not np.isfinite(series.to_numpy(dtype=float)).all():
+        raise InvalidShapeOpError("the profile has non-finite values; "
+                                  "regenerate it")
     current = pd.Series(series.to_numpy(dtype=float), index=series.index,
                         name=series.name)
     parent_stats = profile_stats(current)
