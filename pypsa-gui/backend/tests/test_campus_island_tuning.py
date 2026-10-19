@@ -303,3 +303,37 @@ def test_the_start_is_refused_under_another_users_lock_and_the_read_is_not(
     assert client.post("/api/projects/Router Hub/lock").status_code == 200
     assert _is_lock_refusal(same_org_other_user.post(_BASE))
     assert same_org_other_user.get(_BASE).status_code == 200
+
+
+# ── UX review N7: does the hub solve read island rows? ───────────────────────
+
+
+def _set_island_constraints(project, on):
+    from services import project_registry
+    (project_registry.project_dir(project) / "solver_config.json").write_text(
+        json.dumps({"island_constraints": on}))
+
+
+def test_the_state_says_whether_the_hubs_island_rows_are_on_now_in_every_state(hub, monkeypatch):  # noqa: F811
+    """"Not achievable: capacity is needed" means nothing to a user who does not know the hub solve
+    ignores island constraints. The flag is read from the solver settings as they are now (the
+    gatekeeper: it says "now", not "when the hub was last solved") and sits in every state."""
+    _db, _user, project = hub
+    _set_island_constraints(project, False)
+    assert cit.get_settings(project)["island_rows_now"] is False            # not_run
+    _set_island_constraints(project, True)
+    assert cit.get_settings(project)["island_rows_now"] is True
+
+    _frequency_checked(project)
+    (_run_dir(project) / ce.cs.GFM_SETTINGS_JSON).write_text(json.dumps(REC))
+    ready = cit.get_settings(project)
+    assert ready["state"] in ("ready", "stale") and ready["island_rows_now"] is True
+    _set_island_constraints(project, False)
+    assert cit.get_settings(project)["island_rows_now"] is False
+
+
+def test_a_missing_solver_config_means_the_rows_are_off(hub):  # noqa: F811
+    _db, _user, project = hub
+    from services import project_registry
+    (project_registry.project_dir(project) / "solver_config.json").unlink(missing_ok=True)
+    assert cit.get_settings(project)["island_rows_now"] is False
