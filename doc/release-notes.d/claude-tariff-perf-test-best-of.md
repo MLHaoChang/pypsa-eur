@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The tariff engine's "a 15-minute year rates in under a second" test takes the best of three timings, so a loaded CI runner no longer fails it by scheduling noise; the 1 s limit and every other assertion are unchanged.

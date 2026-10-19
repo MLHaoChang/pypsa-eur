@@ -7,7 +7,7 @@ The owner sets direction and makes decisions. Sessions work as one of three role
 - the **gatekeeper** reviews plans and PRs that touch {{GATED_AREAS}} (`.claude/skills/gatekeeper/SKILL.md`);
 - a **work session** builds one work package and drives its PRs to green (`.claude/skills/steward/SKILL.md`).
 
-`docs/agents/roles.md` lists the current session ids and the dashboard link.
+`docs/agents/roles.md` lists the gatekeeper's session id and the dashboard link; `docs/agents/coordinator.md` holds the current coordinator id.
 
 ## Asking the owner
 

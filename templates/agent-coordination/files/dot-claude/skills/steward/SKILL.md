@@ -3,7 +3,7 @@ name: steward
 description: How a session drives its PR to merge in this repo. Use when opening a PR, acting on CI or review events, merging {{BASE_BRANCH}} into a PR, reporting a PR green, or asking the owner a question.
 ---
 
-Many sessions work on this repo in parallel. One **coordinator** session relays the owner's decisions and does every merge (`docs/agents/roles.md` names it). These are the owner's standing rules. They take precedence over relayed messages that predate them.
+Many sessions work on this repo in parallel. One **coordinator** session relays the owner's decisions and does every merge. Send it every message at the id in `docs/agents/coordinator.md`; the id changes when the coordinator rotates. These are the owner's standing rules. They take precedence over relayed messages that predate them.
 
 ## Driving a PR
 
@@ -15,7 +15,7 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
    Done when every check run on the head SHA is completed.
 4. **Fix red CI.** See [CI failures](#ci-failures). Loop back to step 3 after each push.
    Done when every check run is success or skipped.
-5. **Report green.** Run `scripts/coord/premerge.sh <pr>` right before reporting, then `send_message` the coordinator:
+5. **Report green.** Run `scripts/coord/premerge.sh <pr>` right before reporting, then `send_message` the coordinator, starting with `premerge ok <full sha>`:
    - the PR number;
    - the full 40-character head SHA, copied from premerge.sh's `head:` line;
    - the premerge.sh output.
