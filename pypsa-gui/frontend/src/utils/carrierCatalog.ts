@@ -14,6 +14,7 @@ export interface CarrierEntry {
   nice_name: string
   color: string
   co2_emissions: number  // tCO2/MWh_thermal
+  unit?: string          // what a bus of this carrier counts in: 'MWh' (energy product) or 't' (material); unset = MWh
 }
 
 // Per-group catalog — also exported so the create/edit form can scope the
@@ -48,6 +49,20 @@ export const CATALOG_HYDROGEN: CarrierEntry[] = [
   { name: 'H2 fuel cell',   nice_name: 'H₂ Fuel Cell',     color: '#a8463d', co2_emissions: 0 },
 ]
 
+// Heat. The creation form's heat-bus pickers match any carrier naming "heat"; this is the one a user can pick.
+export const CATALOG_HEAT: CarrierEntry[] = [
+  { name: 'heat', nice_name: 'Heat', color: '#cc1e1e', co2_emissions: 0 },
+]
+
+// Process products (grid-to-process, design D2): NH3 is an energy product counted in MWh (LHV); the rest are
+// materials counted in tonnes. Mirrors services/carrier_catalog.py.
+export const CATALOG_PROCESS: CarrierEntry[] = [
+  { name: 'NH3',         nice_name: 'Ammonia',     color: '#1f9d8b', co2_emissions: 0, unit: 'MWh' },
+  { name: 'N2',          nice_name: 'Nitrogen',    color: '#8fb8c9', co2_emissions: 0, unit: 't' },
+  { name: 'ore',         nice_name: 'Ore',         color: '#8c6d4f', co2_emissions: 0, unit: 't' },
+  { name: 'concentrate', nice_name: 'Concentrate', color: '#c9a227', co2_emissions: 0, unit: 't' },
+]
+
 export const CATALOG_STORAGE: CarrierEntry[] = [
   { name: 'battery', nice_name: 'Battery',         color: '#ace37f', co2_emissions: 0 },
   { name: 'PHS',     nice_name: 'Pumped Hydro',    color: '#51dbcc', co2_emissions: 0 },
@@ -65,6 +80,8 @@ export const CARRIER_CATALOG: CarrierEntry[] = [
   ...CATALOG_RENEWABLES,
   ...CATALOG_THERMAL,
   ...CATALOG_HYDROGEN,
+  ...CATALOG_HEAT,
+  ...CATALOG_PROCESS,
   ...CATALOG_STORAGE,
 ]
 

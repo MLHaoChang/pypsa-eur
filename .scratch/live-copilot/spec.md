@@ -47,6 +47,9 @@ or provide independent domain release approval.
 | “Show me something else” / “next” (added 2026-10-19) | Offer the sections with data not yet shown, one line each; read before showing; the user controls next/stop. [OJ-02/03](owner-journeys.md) |
 | “Help me update the parameters of this line” (added 2026-10-19) | Resolve “this” from the selected component (LC-C11); show old→new with units on a card in both modes (Q3); read back; offer undo; say results are now stale. [OJ-05/06](owner-journeys.md) |
 | “Update these parameters and relaunch, then show me” (added 2026-10-19) | One visible plan; edits verified before one approved run; the conversation continues by itself when the job ends, then walks the new results (LC-C12). [OJ-07/08/10](owner-journeys.md) |
+| “Do these results make sense?” (added 2026-10-19, owner Q5 = A) | Until LC-20 lands, run the native input checks and say that result-plausibility rules don't exist yet; never give a verdict on results. With LC-20, report each native rule's verdict with its facts, and the rules that could not run. [OJ-18/19/20](owner-journeys.md) |
+| “Create a report of this study” (added 2026-10-19, owner Q6 = A) | Network studies get chapters in the existing report pipeline (LC-21): every number passes the number audit, and a missing source is `not_established`. Energy Hub, adequacy, investment and island reports are unchanged. [OJ-35/36](owner-journeys.md) |
+| Whole-application catalogue (added 2026-10-19) | Every human feature in the [feature catalogue](feature-catalogue.md) has a chat path, or a named refusal with its reason (LC-22). Journeys OJ-13–46 |
 
 ## Required contracts
 
