@@ -38,45 +38,55 @@ from models.process_unit import product_role_generators
 CHECK_WINDOW = 168
 #: Binary minus linearised operating cost, relative to linearised, above which a period is flagged.
 FLAG_PCT = 0.02
-#: Extra shortfall (product units, weighted) treated as "any".
-SHORTFALL_TOL = 1e-6
+#: Extra shortfall treated as "any": above numerical noise, relative to the product delivered in
+#: the window (weighted), with an absolute floor in product units.
+SHORTFALL_TOL_REL = 1e-6
+SHORTFALL_TOL_ABS = 1e-6
 FLAG_MESSAGE = "linearised UC understates restarts"
 _LIN = {"linearized_unit_commitment": True}
 
 
-def _committable(df: pd.DataFrame) -> pd.Series:
-    if df.empty or "committable" not in df.columns:
+def flag_column(df: pd.DataFrame, col: str) -> pd.Series:
+    """A bool column as a clean bool Series (False where absent or NaN)."""
+    if df.empty or col not in df.columns:
         return pd.Series(False, index=df.index)
-    return df["committable"].fillna(False).astype(bool)
+    return df[col].fillna(False).astype(bool)
 
 
-def _is_process(links: pd.DataFrame) -> pd.Series:
-    if links.empty or "eh_process" not in links.columns:
-        return pd.Series(False, index=links.index)
-    return links["eh_process"].fillna(False).astype(bool)
+def committable_mask(df: pd.DataFrame) -> pd.Series:
+    return flag_column(df, "committable")
+
+
+def process_mask(links: pd.DataFrame) -> pd.Series:
+    """The process units (``eh_process``) among ``links``."""
+    return flag_column(links, "eh_process")
 
 
 def committable_counts(n) -> tuple[int, int]:
     """(committable Generators, committable Links)."""
-    return int(_committable(n.generators).sum()), int(_committable(n.links).sum())
+    return int(committable_mask(n.generators).sum()), int(committable_mask(n.links).sum())
 
 
 def process_committable(n) -> pd.Index:
     """The committable process units."""
-    return n.links.index[_committable(n.links) & _is_process(n.links)]
+    return n.links.index[committable_mask(n.links) & process_mask(n.links)]
 
 
 def other_committable(n) -> tuple[int, int]:
     """(committable Generators, committable non-process Links)."""
-    links = _committable(n.links) & ~_is_process(n.links)
-    return int(_committable(n.generators).sum()), int(links.sum())
+    links = committable_mask(n.links) & ~process_mask(n.links)
+    return int(committable_mask(n.generators).sum()), int(links.sum())
+
+
+def _setting(cfg) -> str:
+    return getattr(cfg, "process_uc", "auto") or "auto"
 
 
 def planning_uc_mode(n, cfg) -> str | None:
     """How the plan commits the process units: "linearised", "binary", or None without any."""
     if not len(process_committable(n)):
         return None
-    mode = getattr(cfg, "process_uc", "auto") or "auto"
+    mode = _setting(cfg)
     if mode == "auto":
         return "binary" if sum(other_committable(n)) else "linearised"
     return mode
@@ -96,7 +106,7 @@ def planning_uc_note(n, cfg) -> str | None:
     gens, links = other_committable(n)
     if mode == "binary":
         why = (" (process_uc auto: other units are committable, so the plan stays binary)"
-               if (getattr(cfg, "process_uc", "auto") or "auto") == "auto" else "")
+               if _setting(cfg) == "auto" else "")
         return f"Process units: binary UC on {k} process link(s){why}"
     line = f"Process units: linearised UC on {k} process link(s)"
     if gens or links:
@@ -111,11 +121,24 @@ def merge_uc_kwargs(island_kw: dict, process_kw: dict) -> dict:
     return {**(island_kw or {}), **(process_kw or {})}
 
 
-def sclopf_model_kwargs(uc_kwargs: dict) -> dict:
-    """``optimize_security_constrained`` builds its model with ``model_kwargs`` (PyPSA 1.1.2
-    ``abstract.py``), so the UC keyword goes there; ``{}`` (no keyword at all) without it."""
+def island_relaxes_binary_note(n, cfg, island_kw: dict) -> str | None:
+    """The WARN line when the island's linearised UC relaxes process units the plan meant to
+    keep binary (the keyword is network-wide), or None."""
+    if planning_uc_mode(n, cfg) == "binary" and (island_kw or {}).get("linearized_unit_commitment"):
+        return (f"WARN: the island's linearised_uc relaxes the {len(process_committable(n))} "
+                "process link(s) too (linearized_unit_commitment is network-wide); the binary "
+                "operational check runs")
+    return None
+
+
+def sclopf_model_kwargs(n, uc_kwargs: dict) -> dict:
+    """The UC keyword for ``optimize_security_constrained`` (PyPSA 1.1.2 ``abstract.py``): it
+    builds its model with ``model_kwargs``, except on a network with no passive branch, where it
+    calls ``optimize`` directly and the keyword must go as itself. ``{}`` without it."""
     if not uc_kwargs:
         return {}
+    if not len(n.passive_branches().index):
+        return dict(uc_kwargs)
     from pypsa import options
 
     return {"model_kwargs": {**options.params.optimize.model_kwargs.copy(), **uc_kwargs}}
@@ -142,7 +165,7 @@ def weighted_start_cost_units(n) -> list[tuple[str, str, str, float]]:
         return []
     out = []
     for comp, df in (("Generator", n.generators), ("Link", n.links)):
-        cmt = _committable(df)
+        cmt = committable_mask(df)
         for attr in ("start_up_cost", "shut_down_cost"):
             if attr not in df.columns:
                 continue
@@ -163,27 +186,34 @@ def _fix_capacities(m) -> None:
         ext = f"{nom}_extendable"
         if df.empty or ext not in df.columns:
             continue
-        rows = df.index[df[ext].fillna(False).astype(bool)]
+        rows = df.index[flag_column(df, ext)]
         if len(rows):
             df.loc[rows, nom] = pd.to_numeric(df.loc[rows, f"{nom}_opt"], errors="coerce").fillna(0.0)
             df.loc[rows, ext] = False
 
 
 def _shortfall(m, sns) -> dict[str, dict]:
-    """Lost production per product bus over ``sns``, weighted like the dispatch (generators
-    weighting): {bus: {value, unit, t}}; ``t`` is tonnes when the bus is in MWh with mwh_per_t."""
+    """Shortfall per product bus over ``sns``: {bus: {value, value_window, delivered, unit, t}}.
+    ``value`` is weighted like the dispatch (generators weighting, so a representative week
+    counts for the year it stands for); ``value_window`` is the window's own; ``delivered`` is
+    the weighted demand on the bus; ``t`` is ``value`` in tonnes when the bus says how (unit t,
+    or MWh with mwh_per_t), else None."""
     lost = product_role_generators(m, "shortfall")
     out: dict[str, dict] = {}
     if not len(lost):
         return out
     w = m.snapshot_weightings["generators"].reindex(sns).fillna(0.0)
     p = m.generators_t.p.reindex(index=sns, columns=lost).fillna(0.0)
+    demand = m.loads_t.p.reindex(index=sns).fillna(0.0)
     for g in lost:
         bus = str(m.generators.at[g, "bus"])
-        value = float((p[g] * w).sum())
-        row = out.setdefault(bus, {"value": 0.0, "unit": _bus_unit(m, bus), "t": None})
-        row["value"] += value
+        row = out.setdefault(bus, {"value": 0.0, "value_window": 0.0, "delivered": 0.0,
+                                   "unit": _bus_unit(m, bus), "t": None})
+        row["value"] += float((p[g] * w).sum())
+        row["value_window"] += float(p[g].sum())
     for bus, row in out.items():
+        loads = [c for c in m.loads.index[m.loads.bus == bus] if c in demand.columns]
+        row["delivered"] = float(demand[loads].sum(axis=1).mul(w).sum()) if loads else 0.0
         row["t"] = _tonnes(m, bus, row["value"])
     return out
 
@@ -210,15 +240,10 @@ def _solve_window(m, sns, multi, cfg, solver_options, kw) -> tuple[str, str, flo
     # operating cost of the window (capex is a constant, not a decision).
     common = dict(snapshots=sns, solver_name=cfg.solver_name, solver_options=solver_options,
                   include_objective_constant=False, **kw)
-    if multi:
-        try:
-            status, cond = m.optimize(multi_investment_periods=True, **common)
-        except Exception:                                        # noqa: BLE001
-            # PyPSA's period-cost check can trip with no extendable left (as the myopic
-            # driver's operational retry): solve the window as a plain single-period LP.
-            status, cond = m.optimize(**common)
-    else:
-        status, cond = m.optimize(**common)
+    # Multi-period: one period's snapshots with multi_investment_periods, so PyPSA applies
+    # build_year and lifetime (an asset not active in the period has no capacity). No
+    # single-period retry: it would make every asset active; a failure is "unverified".
+    status, cond = m.optimize(multi_investment_periods=multi, **common)
     return status, cond, float(m.objective)
 
 
@@ -241,7 +266,8 @@ def _window(n, period) -> pd.Index:
     return sns[:CHECK_WINDOW]
 
 
-def _empty_row(period, window, snapshots) -> dict:
+def _empty_row(period, window=None, snapshots=0) -> dict:
+    """The one shape of a period row, verified or not."""
     return {"period": period, "window": window, "snapshots": snapshots, "status": "ok",
             "reason": None, "cost_lin": None, "cost_bin": None, "delta": None, "pct": None,
             "shortfall_lin": {}, "shortfall_bin": {}, "extra_shortfall": {},
@@ -268,15 +294,17 @@ def _period_row(n, period, cfg, solver_options, solve) -> dict:
     (c_lin, s_lin), (c_bin, s_bin) = results["lin"], results["bin"]
     delta = c_bin - c_lin
     pct = delta / abs(c_lin) if abs(c_lin) > 1e-9 else (0.0 if abs(delta) <= 1e-9 else math.inf)
+    # Both solves read the same shortfall Generators, so both carry the same buses.
     extra = {}
-    for bus in sorted({*s_lin, *s_bin}):
-        lin = s_lin.get(bus, {"value": 0.0})["value"]
-        b = s_bin.get(bus, {"value": 0.0, "unit": _bus_unit(n, bus)})
-        v = b["value"] - lin
-        extra[bus] = {"value": v, "unit": b.get("unit") or _bus_unit(n, bus), "t": _tonnes(n, bus, v)}
+    for bus in sorted(s_bin):
+        lin, b = s_lin[bus], s_bin[bus]
+        v = b["value"] - lin["value"]
+        tol = max(SHORTFALL_TOL_ABS, SHORTFALL_TOL_REL * b["delivered"])
+        extra[bus] = {"value": v, "value_window": b["value_window"] - lin["value_window"],
+                      "unit": b["unit"], "t": _tonnes(n, bus, v), "above_tolerance": v > tol}
     row.update(cost_lin=c_lin, cost_bin=c_bin, delta=delta, pct=pct, shortfall_lin=s_lin,
                shortfall_bin=s_bin, extra_shortfall=extra)
-    row["flagged"] = bool(pct > FLAG_PCT or any(e["value"] > SHORTFALL_TOL for e in extra.values()))
+    row["flagged"] = bool(pct > FLAG_PCT or any(e["above_tolerance"] for e in extra.values()))
     for key in ("cost_lin", "cost_bin", "delta", "pct"):
         if not math.isfinite(row[key]):
             row["non_finite"].append(key)
@@ -295,11 +323,29 @@ def _ledger(rows, cfg) -> list[dict]:
            {"item": "MIP settings", "value": f"gap {gap:.3g}" + (f", time limit {int(limit)} s"
                                                                if limit and limit > 0 else ", no time limit")},
            {"item": "flag", "value": f"> {FLAG_PCT:.0%} cost, or any extra shortfall: \"{FLAG_MESSAGE}\""},
+           {"item": "shortfall basis", "value": "shortfall Generator dispatch (process_role "
+            "'shortfall') weighted by snapshot_weightings.generators, in the product bus unit (t "
+            "where the bus gives a factor); 'any' means above "
+            f"{SHORTFALL_TOL_REL:g} × the weighted delivery (floor {SHORTFALL_TOL_ABS:g})"},
            {"item": "caveat", "value": "extra_functionality not applied (island rows, commercial terms, "
             "reserve and adequacy rows); island gensets keep their own committable flag"}]
-    out += [{"item": f"window {r['period']}" if r["period"] is not None else "window",
-             "value": r["window"]} for r in rows]
+    for r in rows:
+        label = f"period {r['period']}" if r["period"] is not None else "window"
+        out.append({"item": f"{label}: window", "value": r["window"]})
+        out.append({"item": f"{label}: result", "value": result_line(r)})
     return out
+
+
+def result_line(r: dict) -> str:
+    """One period row as a sentence (the ledger and the live log)."""
+    if r["status"] != "ok":
+        return f"unverified ({r['reason']})"
+    pct = "n/a" if r["pct"] is None else f"{r['pct']:+.2%}"
+    delta = "n/a" if r["delta"] is None else f"{r['delta']:,.0f}"
+    extra = ", ".join(f"{b} {e['value']:.4g} {e['unit']}".rstrip()
+                      for b, e in r["extra_shortfall"].items()) or "no shortfall slack"
+    return (f"binary − linearised {delta} ({pct}); extra shortfall {extra}"
+            + (f"; FLAGGED: {FLAG_MESSAGE}" if r["flagged"] else ""))
 
 
 def binary_check(n, cfg, *, solver_options: dict | None = None, solve=None) -> dict:
@@ -314,7 +360,7 @@ def binary_check(n, cfg, *, solver_options: dict | None = None, solve=None) -> d
         try:
             rows.append(_period_row(n, period, cfg, solver_options or {}, solve))
         except Exception as exc:                                 # noqa: BLE001
-            rows.append({**_empty_row(period, None, 0), "status": "unverified",
+            rows.append({**_empty_row(period), "status": "unverified",
                          "reason": f"{type(exc).__name__}: {exc}"})
     verified = [r for r in rows if r["status"] == "ok"]
     flagged = any(r["flagged"] for r in verified)
@@ -328,11 +374,22 @@ def binary_check(n, cfg, *, solver_options: dict | None = None, solve=None) -> d
             f"{r['period']}: {r.get('reason')}" for r in rows if r["status"] != "ok")
     else:
         message = "binary check: linearised UC within the flag threshold in every period"
+    return _payload(n, status, flagged, message, rows, _ledger(rows, cfg), t0)
+
+
+def _payload(n, status, flagged, message, rows, ledger, t0) -> dict:
     return {"status": status, "flagged": flagged, "message": message,
             "process_units": [str(u) for u in process_committable(n)],
-            "threshold": {"pct": FLAG_PCT, "extra_shortfall": SHORTFALL_TOL},
-            "periods": rows, "ledger": _ledger(rows, cfg),
-            "wall_time_s": time.monotonic() - t0}
+            "threshold": {"pct": FLAG_PCT, "extra_shortfall_rel": SHORTFALL_TOL_REL,
+                          "extra_shortfall_abs": SHORTFALL_TOL_ABS},
+            "cost_basis": "operating cost of the window, capacities fixed (capex excluded)",
+            "periods": rows, "ledger": ledger, "wall_time_s": time.monotonic() - t0}
+
+
+def unverified_payload(n, reason: str, t0: float) -> dict:
+    """The payload of a check that could not run at all, in ``binary_check``'s shape."""
+    message = f"binary check unverified: {reason}"
+    return _payload(n, "unverified", False, message, [], [{"item": "result", "value": message}], t0)
 
 
 def sanitize_check_payload(payload: dict) -> dict:

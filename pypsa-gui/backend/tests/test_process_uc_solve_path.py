@@ -493,3 +493,58 @@ def test_the_check_endpoint_serves_strict_json(reset_backend):
     json.dumps(out, allow_nan=False)
     assert out["periods"][0]["pct"] is None
     assert set(out["non_finite_paths"]) == {"periods[0].pct", "periods[0].extra_shortfall.nh3.value"}
+
+
+# ── review follow-ups ──────────────────────────────────────────────────────
+
+
+def test_an_intermediate_product_needs_no_shortfall_slack():
+    n = _process_net()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Link", "electrolyser", bus0="el", bus1="h2", p_nom=5.0, efficiency=0.7)
+    n.add("Link", "h2_to_nh3", bus0="h2", bus1="nh3", p_nom=5.0, efficiency=0.5)
+    n.links.loc[["electrolyser", "h2_to_nh3"], "eh_process"] = True
+    assert refusals(n, {"voll": 0.0}) == []          # h2 carries no Load: intermediate
+
+
+def test_the_island_relaxing_a_binary_plan_is_said():
+    from services.solver_service import SolverConfig
+
+    n = _process_net()
+    cfg = SolverConfig(process_uc="binary")
+    assert PU.island_relaxes_binary_note(n, cfg, {}) is None
+    assert "relaxes the 1 process link(s)" in PU.island_relaxes_binary_note(
+        n, cfg, {"linearized_unit_commitment": True})
+    assert PU.island_relaxes_binary_note(n, SolverConfig(), {"linearized_unit_commitment": True}) is None
+
+
+def test_sclopf_takes_the_keyword_as_itself_without_passive_branches():
+    n = _process_net()
+    assert PU.sclopf_model_kwargs(n, {"linearized_unit_commitment": True}) == \
+        {"linearized_unit_commitment": True}
+    m = _meshed(_process_net())
+    assert PU.sclopf_model_kwargs(m, {"linearized_unit_commitment": True})["model_kwargs"][
+        "linearized_unit_commitment"] is True
+
+
+@pytest.mark.live_solve
+def test_the_ledger_carries_each_periods_result(reset_backend):
+    _, (status, _), state, _ = _run(_process_net(load=1.0, store=False))
+    assert status in ("ok", "optimal")
+    check = state["last_process_uc_check"]
+    results = [r["value"] for r in check["ledger"] if r["item"].endswith(": result")]
+    assert len(results) == 1 and "binary − linearised" in results[0] and "FLAGGED" in results[0]
+    assert check["cost_basis"].startswith("operating cost")
+    (row,) = check["periods"]
+    assert row["extra_shortfall"]["nh3"]["value_window"] == pytest.approx(24.0)
+
+
+def test_an_unverified_payload_has_the_checks_shape():
+    from services.solver_service import SolverConfig
+
+    n = _process_net()
+    n.optimize(solver_name="highs", linearized_unit_commitment=True)
+    ok = PU.binary_check(n, SolverConfig())
+    bad = PU.unverified_payload(n, "boom", 0.0)
+    assert set(bad) == set(ok)
+    assert bad["status"] == "unverified" and bad["flagged"] is False

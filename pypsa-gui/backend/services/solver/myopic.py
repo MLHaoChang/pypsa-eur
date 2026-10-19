@@ -32,6 +32,7 @@ from services.solver.diagnostics import (
     _log_sclopf_post_solve,
 )
 from services.solver.objective import _rescale_results_for_objective
+from services.solver.process_uc import sclopf_model_kwargs
 from services.solver.runtime import _check_stop, ValidationRefused
 from services.validation_service import _check_nonfinite_bounds
 from services.solver.vintage_store import _MYOPIC_VINTAGE_SOURCE, _frozen_vintage_store
@@ -643,7 +644,6 @@ def _run_myopic_foresight(
     # The process units' UC keyword (grid-to-process ticket 03); `{}` passes
     # nothing, so a network without process units solves exactly as before.
     uc_kwargs = dict(uc_kwargs or {})
-    from services.solver.process_uc import sclopf_model_kwargs
     # Clear the per-period objective accumulator so re-solves don't compound
     # across runs. Populated inside the loop below, consumed by the outer
     # status worker to compute the horizon-total objective.
@@ -944,7 +944,7 @@ def _run_myopic_foresight(
                     extra_functionality=_sclopf_extra_fn,
                     solver_name=cfg.solver_name,
                     log_fn=str(tmp_log),
-                    **sclopf_model_kwargs(uc_kwargs),
+                    **sclopf_model_kwargs(network, uc_kwargs),
                     **merged_solver_options,
                 )
             else:

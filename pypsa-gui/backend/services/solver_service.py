@@ -476,26 +476,17 @@ def _run_process_uc_check(network, config, merged_solver_options, phase) -> dict
                                dict(merged_solver_options or {}))
     phase(f"Binary operational check: {len(_process_uc.process_committable(network))} "
           "committable process unit(s), one window per period, capacities fixed")
+    t0 = time.monotonic()
     try:
         check = _process_uc.binary_check(network, config, solver_options=opts)
     except Exception as exc:                                     # noqa: BLE001
         # binary_check records per-period failures itself; this guards the
         # wrapper so the check can never fail the planning run.
-        check = {"status": "unverified", "flagged": False, "periods": [], "ledger": [],
-                 "message": f"binary check unverified: {type(exc).__name__}: {exc}"}
-    for row in check.get("periods", []):
-        if row.get("status") != "ok":
-            phase(f"Binary check {row.get('period')}: unverified ({row.get('reason')})")
-            continue
-        pct = row.get("pct")
-        phase(f"Binary check {row['period'] if row['period'] is not None else 'window'}: "
-              f"binary − linearised {row['delta'] if row['delta'] is not None else 'n/a'} "
-              f"({'n/a' if pct is None else f'{pct:+.2%}'}), extra shortfall "
-              + ", ".join(f"{b} {e['value']:.4g} {e['unit']}".rstrip()
-                          for b, e in row["extra_shortfall"].items())
-              + (" — FLAGGED" if row["flagged"] else ""))
-    phase(("WARN: " if check.get("flagged") or check.get("status") != "ok" else "")
-          + check.get("message", ""))
+        check = _process_uc.unverified_payload(network, f"{type(exc).__name__}: {exc}", t0)
+    for row in check["periods"]:
+        label = row["period"] if row["period"] is not None else "window"
+        phase(f"Binary check {label}: {_process_uc.result_line(row)}")
+    phase(("WARN: " if check["flagged"] or check["status"] != "ok" else "") + check["message"])
     return check
 
 
@@ -1095,7 +1086,7 @@ def run_simulation(
                             extra_functionality=extra_fn,
                             solver_name=config.solver_name,
                             log_fn=str(tmp_log),
-                            **_process_uc.sclopf_model_kwargs(proc_uc_kwargs),
+                            **_process_uc.sclopf_model_kwargs(network, proc_uc_kwargs),
                             **merged_solver_options,
                         )
                         _capture_extendable_p_nom_opt_to_frozen_store(network, phase)
@@ -1161,6 +1152,10 @@ def run_simulation(
                             uc_kwargs = _process_uc.merge_uc_kwargs(island_uc_kwargs,
                                                                     proc_uc_kwargs)
                             plan_uc_kwargs = uc_kwargs
+                            _relaxed = _process_uc.island_relaxes_binary_note(
+                                network, config, island_uc_kwargs)
+                            if _relaxed:
+                                phase(_relaxed)
                             status, condition = network.optimize(
                                 solver_name=config.solver_name,
                                 transmission_losses=tl_kwarg,
