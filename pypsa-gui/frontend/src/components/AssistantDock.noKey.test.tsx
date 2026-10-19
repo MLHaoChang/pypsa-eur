@@ -89,4 +89,28 @@ describe('AssistantDock without API key', () => {
       window.removeEventListener('companion:live-utterance', onUtterance)
     }
   })
+
+  it('never claims a named project was opened without a model key', async () => {
+    const user = userEvent.setup()
+    const heard: string[] = []
+    const picker = vi.fn()
+    const onUtterance = (ev: Event) => heard.push((ev as CustomEvent<string>).detail)
+    window.addEventListener('companion:live-utterance', onUtterance)
+    window.addEventListener('chat:open-project-picker', picker)
+    const view = render(<AssistantDock />)
+    try {
+      await user.click(screen.getByTestId('companion-live'))
+      await user.type(screen.getByTestId('companion-live-input'), 'Open project Sensitivity X')
+      await user.click(screen.getByTestId('companion-live-send'))
+      expect(picker).not.toHaveBeenCalled()
+      expect(heard).toEqual([])
+      const caption = screen.getByTestId('companion-live-caption').textContent ?? ''
+      expect(caption).toContain('Add an API key')
+      expect(caption).not.toMatch(/Sensitivity X|Opening/)
+    } finally {
+      view.unmount()
+      window.removeEventListener('companion:live-utterance', onUtterance)
+      window.removeEventListener('chat:open-project-picker', picker)
+    }
+  })
 })

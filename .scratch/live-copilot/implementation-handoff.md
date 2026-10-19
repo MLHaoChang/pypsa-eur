@@ -477,5 +477,15 @@ master ae95a94a (clean). The old branch is left as it is.
   write-tier policy (no policy change in this slice).
 - Inventory regenerated: 257 tools. Control matrix unchanged (170/14).
 
+OJ-09 is half closed: exact resolve → activation → the named project's own
+values pass; "show me its load flow" needs the LC-03 results read (VS-1), so
+OJ-09 stays open until LC-03 lands. Self-review (Standards + Spec) found no
+hard violations; the rendered no-key named-project case and a shared command
+normaliser were added from it. The "still checking" refusal is new behaviour:
+before readiness answers, the dock neither runs a shortcut nor sends.
+Browser: `scripts/smoke-companion-q4.mjs` 5/5 runs green (with model: both
+former shortcuts forwarded and the loopback model called, no picker; no
+model: real Open project dialog, nothing forwarded).
+
 Next: PR for LC-01B, then LC-10 (focus/recency ladder, LC-T21) to close LC-01,
 then LC-03 with VS-1/VS-2.
