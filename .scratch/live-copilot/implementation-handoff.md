@@ -387,3 +387,48 @@ Evidence/QA record commands/hashes/failure and scope. Next: refreshed two-axis
 review, one normal batch push, require all new-head CI with actual backend
 steps, fresh-master premerge, ordinary expected-head squash if every gate passes.
 No paid calls, external contacts, deployment or new implementation scope.
+
+2026-10-19 LC-01B started under owner's continue. PR372 is verified merged at
+0b33685c465e83b2a39c5964845b7e590873e631 and every observed post-merge workflow
+passed. Actual master now d006f4beaa302b97432c65757762ae180222731a adds PR376
+reviewer-usage/report-completion fixes; preserve them. Isolated worktree
+/workspace/copilot-target-resolution, branch claude/copilot-target-resolution.
+Concrete first scope and approved seams: issues/01b-exact-project-resolution.md.
+Implement exact native project-name resolution and stop named/qualified inputs
+being eaten by picker/current-tour shortcuts. Resolve does not activate or grant
+permission. Run/case/entity and broader scope binding remain separate follow-ups.
+No production change or test execution in this checkpoint yet; next action is
+one ordinary-dispatch RED, then vertical native and public UI regressions.
+
+2026-10-19 LC-01B owner-requested wrap up: the checkpoint above is superseded by
+`handoff-2026-10-19-target-resolution.md`. Exact read-tier project-name resolution,
+opt-in native name-only lookup and conservative local picker/tour recognizers
+are implemented as UNCOMMITTED work in /workspace/copilot-target-resolution,
+branch claude/copilot-target-resolution, HEAD d006f4beaa302b97432c65757762ae180222731a.
+No LC-01B commit/push/PR/review/CI/premerge/merge yet. Observed frontend regressions
+57pass/4files; earlier backend15pass, then47pass/1invalid mixed-tenant-session
+test failure. Real authenticated tenant A→B→A diagnostic1pass confirmed proper
+native isolation without changing restrictions. The invalid mixed-session test
+was replaced with authenticated HTTP coverage and extended foreign/unknown
+refusal assertions; that latest edit remains UNRUN because automatic approval
+review hit its usage limit before the regression command executed. Do not claim
+final backend success or weaken restriction_unavailable. First resume action:
+inspect saved diff and run updated resolver/identity regressions through normal
+tool policy. Provider-wire journeys, actual browser E2E, wider regression/build/
+lint, generated inventory/matrix, release/QA evidence, two-axis source reviews
+and all publication/merge gates remain. The handoff contains commands, evidence
+paths, diagnosis, constraints and the full remaining gate sequence. PR372 was
+already verified merged; preserve PR376 baseline fixes and freshly reassess
+actual master before publication. No paid calls, external contacts or domain
+coverage claim. Independent domain review and real-use calibration stay pending.
+
+2026-10-19 upload checkpoint: the owner explicitly requested uploading this
+handoff to git. The commit containing this entry preserves the LC-01B WIP
+implementation, tests and resume documents together on
+claude/copilot-target-resolution. This supersedes the earlier uncommitted
+status only; it is not a validated implementation publication, PR or merge.
+No additional implementation tests were executed for this preservation upload.
+Latest backend test edit, browser/provider journeys and all remaining review/
+CI/premerge gates stay pending as detailed in
+handoff-2026-10-19-target-resolution.md. Local raw logs outside the repository
+are not part of the upload; their observed results are recorded in the handoff.

@@ -156,7 +156,7 @@ export default function AssistantDock() {
       forwardToHarness(text)
       return
     }
-    setLiveCaption('Add an API key for the assistant first. Tab changes and opening a project still work without one.')
+    setLiveCaption('Add an API key for the assistant first. You can still open the project list without one.')
   }, [flashEcho, forwardToHarness, ready, stopWalk])
   const profileLabel =
     profilesQuery.data?.profiles.find((p) => p.id === effectiveProfileId)?.label
