@@ -16,6 +16,9 @@
 // one-sentence `reason` and an optional `action` whenever there is no
 // computed value — the tile never shows 0 or "—" for a result that was not
 // run, not modelled or does not apply. `stale` keeps the old figure, dimmed.
+// `fromStudy` keeps a figure the reliability study produced and marks it "From
+// the study" while the project has no solve of its own (owner decision G5);
+// `study_only` stays for a figure that does not exist without that solve.
 import { kpiFigure, splitValueUnit } from '../utils/format'
 import { StateAction, StatePill, type ResultAction, type ResultStateKind } from './ResultState'
 
@@ -29,7 +32,7 @@ const TONE: Record<KpiTone, string> = {
 
 export default function Kpi({
   label, value, unit, basis, hint, delta, deltaTone, headline, testId,
-  state = 'ready', reason, action,
+  state = 'ready', reason, action, fromStudy,
 }: {
   label: string
   value: string
@@ -46,6 +49,8 @@ export default function Kpi({
   /** One plain sentence saying why, for any state but ready / zero. */
   reason?: string
   action?: ResultAction
+  /** The figure is the study's; the project itself is not solved (G5). Keeps the figure, adds the pill. */
+  fromStudy?: boolean
 }) {
   const raw = unit !== undefined ? { value, unit } : splitValueUnit(value)
   const parts = kpiFigure(raw.value, raw.unit)
@@ -75,6 +80,7 @@ export default function Kpi({
         </div>
       ) : null}
       {state !== 'ready' && state !== 'zero' && <StatePill state={state} />}
+      {fromStudy && showsFigure && <StatePill state="study_only" />}
       {delta && showsFigure && (
         <div className={`text-[11px] font-medium tabular-nums ${deltaTone ? TONE[deltaTone] : 'text-muted'}`}>
           {delta}
