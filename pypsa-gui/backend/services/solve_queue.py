@@ -1144,6 +1144,7 @@ class SolveQueue:
         of one queue beats a delicate second admission path."""
         from routers import simulation as sim
         from services.profile_gen import job as pg_job
+        from services.profile_gen.cutout_cache import CutoutDownloadAborted
 
         stop_event = threading.Event()
         log_queue = sim.BufferedLogQueue()
@@ -1162,7 +1163,7 @@ class SolveQueue:
             log_queue.put(f"profile generation completed: {nc.name}")
         except BaseException as exc:  # noqa: BLE001 - recorded, never re-raised
             if isinstance(exc, (pg_job.ProfileGenAborted,
-                                pg_job.CutoutDownloadAborted)):
+                                CutoutDownloadAborted)):
                 status = "aborted"
                 log_queue.put("profile generation aborted")
             else:
