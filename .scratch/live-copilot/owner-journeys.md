@@ -544,3 +544,95 @@ LC-06 onwards.
 Core-feature coverage: 1 → OJ-13/14; 2 → OJ-15/16/17 (with OJ-01–04);
 3 → OJ-18/19/20; 4 → OJ-21–26 (with OJ-05/06); 5 → OJ-27–30;
 6 → OJ-31–34 (with OJ-07/08/10); 7 → OJ-35–37; all → OJ-38.
+
+## Renewable-profile journeys OJ-47–OJ-54 (added 2026-10-19)
+
+Spec: [renewable profiles](../renewable-profiles/spec.md). These journeys close
+tickets RP-04 and RP-06–RP-10 there, not a live-copilot layer. They inherit
+every rule above (edit card, grounding, shown versus opened). They run on
+the synthetic weather source in Tier A. Tier B may use ERA5 only on a machine
+that already has CDS credentials, and never prints them.
+
+### Fixture additions
+
+`oj-renew`: hourly 2023 snapshots (8,760); `Wind1` on bus `B1` (8.0°E,
+50.0°N, carrier `onwind`, 50 MW); `Solar1` on bus `B2` (11.5°E, 48.1°N,
+carrier `solar`, 30 MW); `Wind2` on bus `B3` with PyPSA's default x=y=0
+(missing coordinates); `Solar2` with an uploaded `p_max_pu`. Oracles (FLH,
+CF, quantiles) are computed once from the seeded synthetic source and kept
+beside the fixture.
+
+**OJ-47 · Defaults for everything that can have them.** Closes RP-04, RP-08.
+
+> User: "Generate wind and solar profiles for my generators."
+> Copilot: "Which weather should they follow? Synthetic (offline, not
+> measured) or ERA5 2023, which is your snapshots' year?" (one Choice)
+> User: "Synthetic is fine."
+> Copilot: generates for `Wind1` and `Solar1` with default presets, says
+> `Wind2` has no coordinates and `Solar2` already has an uploaded profile
+> it will not overwrite, then shows one apply card for the two.
+
+- Trace: `get_profile_readiness` → Choice → `generate_renewable_profile(from_generators=[Wind1, Solar1])` → poll → `apply_generated_profile(all_from_job)` card.
+- Pass: no tuning questions; the weather year comes from the snapshots; `Wind2` and `Solar2` are named with their reasons. Fail: a profile for `Wind2`, an overwrite of `Solar2`, or an 8-question interview.
+
+**OJ-48 · Missing coordinates.** Closes RP-01, RP-04.
+
+> User: "Generate a profile for Wind2."
+> Copilot: "Wind2's bus B3 has no coordinates (0, 0). Set coordinates for
+> B3, or upload a profile instead?"
+
+- Pass: the `missing_coordinates` refusal is relayed with both remedies; with coordinates given, an edit card `B3 · x/y · 0/0 → 9.2/52.3` comes first, then generation. Fail: any profile generated at 0/0.
+
+**OJ-49 · Horizon from the project.** Closes RP-03.
+
+> User: "Make the solar profile match my simulation horizon."
+
+- Pass: the words name 2023 and 8,760 hourly values, taken from the snapshots, and no resolution question is asked. With `oj-renew` changed to 3-hourly snapshots, the result has 2,920 values, each a 3 h mean. Fail: a resolution or year question when the snapshots already answer it.
+
+**OJ-50 · Tune in the panel.** Closes RP-05, RP-08.
+
+> User: "I want to tune the solar parameters myself."
+
+- Trace: `ui_open_panel('timeseries')` with the Renewables tab and `Solar1`'s tuning panel open.
+- Pass: the words say "opened" (or "showing" with an ACK) and name the knobs (tilt, azimuth, tracking, losses). Fail: a raw JSON prompt.
+
+**OJ-51 · "The tail doesn't match."** Closes RP-06, RP-07, RP-08.
+
+> User: "Peak time and full-load hours match my measured data, but the tail
+> doesn't: there is too much low-wind generation. Dampen the tail."
+> Copilot: proposes `tail_damp{low, beyond P20, factor 0.5, keep FLH}`,
+> runs it, and shows before/after: FLH unchanged (± 0.5 %), P10 old → new,
+> hour of peak unchanged. It asks before applying.
+
+- Trace: `shape_generated_profile` → `compare_profiles` → (approve) `apply_generated_profile`.
+- Pass: every number is from `compare_profiles`; FLH and peak timing are preserved; nothing is written before approval. Fail: a regenerated weather download, or numbers the model computed itself.
+
+**OJ-52 · Hit a full-load-hours target.** Closes RP-06, RP-07.
+
+> User: "Wind1 should have 2,400 full-load hours."
+
+- Pass: `target_flh{2400}` result is within 0.5 %, values stay within [0, 1], and the words show old → new FLH from the compare read. Fail: plain scaling that leaves values above 1.
+
+**OJ-53 · Match an observed series.** Closes RP-06.
+
+> User: uploads `measured_wind1.csv`, then says "Fit Wind1's profile to
+> this measured series."
+
+- Pass: `quantile_map{observed_ref}` matches the measured duration curve and keeps the weather timing (rank order). The words say timing comes from the chosen weather year and the coordinates. Fail: the observed series copied over the profile.
+
+**OJ-54 · Undo all.** Closes RP-09.
+
+> User (after OJ-47): "Undo that."
+
+- Pass: one undo restores both generators' prior `p_max_pu`, including `Solar1`'s network-native values. Fail: one of the two left changed.
+
+| Ticket | Journeys |
+| --- | --- |
+| RP-01 | OJ-48 |
+| RP-03 | OJ-49 |
+| RP-04 | OJ-47, OJ-48 |
+| RP-05 | OJ-50 |
+| RP-06 | OJ-51, OJ-52, OJ-53 |
+| RP-07 | OJ-51, OJ-52 |
+| RP-08 | OJ-47, OJ-50, OJ-51 |
+| RP-09 | OJ-54 |

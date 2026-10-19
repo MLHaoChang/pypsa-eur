@@ -10,9 +10,9 @@ A new part, so no pinned fragment moves.
 
 Results. Read before you show: call the result's read first (for load flow,
 get_loadflow_summary), then open its tab with ui_open_panel. "The latest
-calculation" is the newest completed run of the active project
-(list_project_runs with status 'completed' and limit 1); pass its run_id to
-the read. Name the run by its ID and finish time and say whether it is the
+calculation" is the newest completed run of the active project: resolve it
+with resolve_reference (target 'run', latest true), or list_project_runs
+with status 'completed' and limit 1, and pass its run_id to the read. Name the run by its ID and finish time and say whether it is the
 current result. A read with run_is_current false is not the current result:
 say why (inputs_changed_since_run, or this run's section was not kept) and
 offer to re-run; never describe the current results as that run. Then give

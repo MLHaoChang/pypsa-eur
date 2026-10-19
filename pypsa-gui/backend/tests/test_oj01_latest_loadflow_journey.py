@@ -185,3 +185,16 @@ def test_showing_needs_the_shown_data_to_be_the_data_read(oj_grid, client):
 def test_a_current_run_says_so_at_the_top_level(oj_grid):
     calls, results, frames, _ = run_journey(*PROVIDERS[1], _steps(), MESSAGE)
     assert results[1]['run_is_current'] is True and results[1]['inputs_changed_since_run'] is False
+
+
+def test_latest_resolved_through_the_reference_ladder(oj_grid):
+    """LC-10's resolve_reference is the other admitted way to say 'latest'."""
+    steps = [lambda r: ('resolve_reference', {'target': 'run', 'latest': True}),
+             lambda r: ('get_loadflow_summary', {'run_id': r[0]['target']['run_id']}),
+             lambda r: ('ui_open_panel', {'panel_id': 'results', 'results_tab': 'loadflow'}),
+             lambda r: (None, {})]
+    calls, results, frames, _ = run_journey(*PROVIDERS[0], steps, MESSAGE)
+    assert results[0]['status'] == 'resolved' and results[0]['via'] == 'latest_completed'
+    assert results[0]['target']['run_id'] == oj_grid['latest']['run_id']
+    assert results[1]['status'] == 'ok' and results[1]['run_is_current'] is True
+    assert [row['name'] for row in results[1]['top']] == ORACLE['ranking']

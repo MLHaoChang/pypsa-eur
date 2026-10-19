@@ -309,6 +309,9 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         "/cost_breakdown", "/objective_decomposition", "/economics_by_carrier",
         "/statistics", "/lcoh", "/ac_pf/status", "/losses", "/carrier_kpis",
         "/emissions", "/line_duals", "/price_drivers", "/asset_economics",
+        # Grid-to-process process view (ticket 04): per-product and per-unit
+        # records; each inventory carries its own level list, not index/columns/data.
+        "/process_view",
         # AdequacyReport — a structured report, not a time series (adequacy
         # plan Phase 1 Task 3).
         "/adequacy",
