@@ -2,17 +2,17 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""
+r"""
 Edit the dashboard's ``board.json`` from flags and log the change, in one call.
 
 Run it from the coordinator's scratchpad (or pass ``--dir``), with any mix of::
 
-    python scripts/coord/board.py \\
-        --session "Package" --doing "#12 in CI" --waiting-on CI --needs-you no \\
-        --remove-session "Old package" \\
-        --merged 11 --merged-title "Short title" --merged-stream "Package" \\
-        --pr 12 --title "Short title" --stream "Package" --state Testing \\
-        --remove-pr 10 \\
+    python scripts/coord/board.py \
+        --session "Package" --doing "#12 in CI" --waiting-on CI --needs-you no \
+        --remove-session "Old package" \
+        --merged 11 --merged-title "Short title" --merged-stream "Package" \
+        --pr 12 --title "Short title" --stream "Package" --state Testing \
+        --remove-pr 10 \
         --log "gatekeeper OK #12 at 1a2b3c4d"
 
 - ``--session NAME`` adds or updates the sessions row (matched by name); give
@@ -36,7 +36,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -146,7 +146,7 @@ def main(argv=None):
     board = args.dir / "board" / "board.json"
     state = args.dir / "coordinator-state.md"
     data = json.loads(board.read_text()) if board.exists() else {"rows": []}
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     notes = apply(data["rows"], args, now)
     if not notes and not args.log:
