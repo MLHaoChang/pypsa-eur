@@ -37,6 +37,7 @@ def unbound_identity():
     "call",
     [
         pytest.param(lambda: chat_tools.list_projects(), id="list_projects"),
+        pytest.param(lambda: chat_tools.resolve_project_target("anything"), id="resolve_project_target"),
         pytest.param(lambda: chat_tools.load_project("anything"), id="load_project"),
         pytest.param(lambda: chat_tools.save_project("anything"), id="save_project"),
         pytest.param(
@@ -101,6 +102,7 @@ def _account_status(session_local, user_id, status: str):
     "call",
     [
         pytest.param(lambda: chat_tools.list_projects(), id="list_projects"),
+        pytest.param(lambda: chat_tools.resolve_project_target("anything"), id="resolve_project_target"),
         pytest.param(lambda: chat_tools.load_project("anything"), id="load_project"),
         pytest.param(lambda: chat_tools.save_project("anything"), id="save_project"),
     ],

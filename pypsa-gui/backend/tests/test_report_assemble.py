@@ -186,11 +186,12 @@ def test_executive_summary_puts_gaps_then_disclosures_before_the_headline():
 # ── every EH section present, with the right status ──────────────────────
 
 
-def test_every_report_section_is_present_in_order_with_its_status():
+def test_every_report_section_is_present_with_its_status():
     doc, ev = _doc(eh=_populated())
     ids = [s.section_id for s in doc.sections]
     eh_ids = [i for i in ids if i in REPORT_SECTIONS]
-    assert eh_ids == list(REPORT_SECTIONS)
+    # Present, each once; their order is the categories' (test_sections_follow_the_four_categories).
+    assert sorted(eh_ids) == sorted(REPORT_SECTIONS)
     by = _by_id(doc)
     for name in REPORT_SECTIONS:
         s = by[name]
@@ -200,6 +201,21 @@ def test_every_report_section_is_present_in_order_with_its_status():
     assert by["fmea_top"].status == "ok"
     assert by["certification"].status == "skipped"
     assert by["multi_energy"].status == "not_established"
+
+
+def test_sections_follow_the_four_categories():
+    """UX review N9 (owner decision E): summary, Investment, Grid plan, Reliability, Operation,
+    then the pipeline; each section keeps its category."""
+    doc, _ = _doc(eh=_populated())
+    cats = [s.category for s in doc.sections]
+    assert doc.sections[0].section_id == "executive_summary" and cats[0] is None
+    assert doc.sections[-1].section_id == "pipeline" and cats[-1] is None
+    order = ["investment", "grid_plan", "reliability", "operation"]
+    middle = [c for c in cats[1:-1]]
+    assert middle == sorted(middle, key=order.index)           # grouped, never interleaved
+    by = _by_id(doc)
+    assert (by["cost"].category, by["fmea_top"].category, by["gates"].category) == (
+        "investment", "reliability", "operation")
 
 
 def test_an_ok_section_references_its_table_and_carries_its_note():
@@ -238,7 +254,7 @@ def test_no_eh_report_at_all_states_every_section_with_the_tool_hint():
         assert s.status == "not_established"
         callouts = [b for b in s.blocks if isinstance(b, Callout)]
         assert len(callouts) == 1 and callouts[0].kind == "not_established"
-        assert "run_eh_study" in callouts[0].text
+        assert "run the study first" in callouts[0].text
     assert "headline" not in doc.tables
     summary = doc.sections[0]
     texts = [b.text for b in summary.blocks if isinstance(b, Callout)]
@@ -386,3 +402,21 @@ def test_pipeline_without_a_record_is_stated_not_omitted():
     assert pipeline.status == "not_established"
     assert [b.kind for b in pipeline.blocks if isinstance(b, Callout)] \
         == ["not_established"]
+
+
+def test_a_list_of_like_records_is_a_table_not_json():
+    """UX review N9: `by_period` printed as `[{"period":"ALL",...}]` in a field row."""
+    from services.reports.assemble import _fields
+    extra: dict = {}
+    blocks = _fields({"system": {"by_period": [{"period": "ALL", "cap_mwh": 27.67, "binding": False},
+                                              {"period": "2030", "cap_mwh": 30.0, "binding": True}],
+                                 "cap_mwh": 27.67}},
+                     section_id="target", extra_tables=extra)
+    refs = [b for b in blocks if isinstance(b, TableRef)]
+    assert [r.table_id for r in refs] == ["target__system_by_period"]
+    t = extra["target__system_by_period"]
+    assert t.columns == ["period", "cap_mwh", "binding"] and len(t.rows) == 2
+    assert t.rows[0][0] == "ALL"
+    assert not any("[{" in getattr(b, "value", "") for b in blocks)
+    # without a collector the old compact JSON stays (callers that cannot register tables)
+    assert any("[{" in getattr(b, "value", "") for b in _fields({"x": [{"a": 1}]}))

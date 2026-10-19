@@ -44,10 +44,15 @@ export interface ChapterInputs {
   reliability: { hasResults: boolean; running: boolean; lole: number | null; target: number | null
                  verdict: 'pass' | 'fail' | 'inconclusive' | null
                  /** The project has its own solve; `false` marks the figure as the study's alone (G5). */
-                 solved?: boolean }
+                 solved?: boolean
+                 /** The review says the study is out of date (N4). */
+                 stale?: boolean }
   /** `gfm`: the campus GFM settings (null when the project has no campus or no island). */
   operation: { status: SimulationStatus | null; gfm?: GfmSettingsState | null }
 }
+
+/** Why a study figure is dimmed (UX review N4): the network was solved or edited after the study. */
+export const STALE_TILE_REASON = 'The network changed since the study ran. Run the study again to refresh.'
 
 /** Whether the project itself has an hour-by-hour solve (stale counts: its figures exist). */
 export function dispatchSolved(status: SimulationStatus | null | undefined): boolean {
@@ -143,8 +148,8 @@ function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 
     : r.verdict === 'inconclusive' ? 'Not decided' : null
   const basis = r.target == null ? 'No goal set'
     : `${verdict ? `${verdict}: ` : ''}the goal is ${Number(r.target.toPrecision(6))} h/yr`
-  return { label, value: String(r.lole), unit: 'h/yr', state: 'ready', basis, open,
-    fromStudy: r.solved === false }
+  return { label, value: String(r.lole), unit: 'h/yr', state: r.stale ? 'stale' : 'ready', basis, open,
+    reason: r.stale ? STALE_TILE_REASON : undefined, fromStudy: r.solved === false && !r.stale }
 }
 
 /** Why a "capacity is needed" verdict will not show in a hub solve (UX review N7). */

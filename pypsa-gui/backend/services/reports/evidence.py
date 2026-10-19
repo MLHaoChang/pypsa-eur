@@ -122,8 +122,8 @@ NO_DATA_HINTS: dict[str, str] = {
         "it produced no dispatch to judge one against"
     ),
     "eh_reference_design": (
-        "no Energy Hub ReferenceDesignReport has been stored — run "
-        "run_eh_study first"
+        "no Energy Hub ReferenceDesignReport has been stored — run the "
+        "study first (the Goal step in Guided, Results → Reliability in Expert)"
     ),
     WORKSHEET_SECTION: "no expert (class-D) rows have been entered in the "
                        "FMEA worksheet",

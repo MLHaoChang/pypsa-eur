@@ -250,6 +250,10 @@ def _stage_ens_solve(st: _Study) -> None:
         if "infeasible" in str(condition):
             reason += (" — the pack's ENS target cannot be met by this "
                        "network under the pack overlay")
+            # The island rows' own hint: which event the site cannot hold, and by how much.
+            from services.solver.island import island_shortfalls, shortfall_line
+            for sh in island_shortfalls(getattr(st.network, "_island_facts", None)):
+                reason += f" — {shortfall_line(sh)}"
         st.failed_reason = reason
         st.mark("ens_solve", "failed", note=reason, solves_charged=1)
         for sec in ("target", "cost", "sizing", "tea", "multi_energy"):

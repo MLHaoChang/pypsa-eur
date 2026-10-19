@@ -19,4 +19,14 @@ describe('NotSolved — a result tab before the solve (UX template audit H2)', (
     fireEvent.click(screen.getByRole('button', { name: 'Run the solve' }))
     expect(useUIStore.getState().runSolveRequest).toBe(before + 1)
   })
+
+  it('warns in Guided, and only there, that solving makes a finished study out of date (UX review N4)', () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    const { unmount } = render(<NotSolved what="Dispatch" />)
+    expect(screen.getByText(/solving makes its results out of date/)).toBeTruthy()
+    unmount()
+    useUIStore.setState({ uiMode: 'expert' })
+    render(<NotSolved what="Dispatch" />)
+    expect(document.body.textContent).not.toMatch(/out of date/)
+  })
 })
