@@ -17,6 +17,10 @@ a recommendation or dispatch success cannot certify a dynamic/AC property.
 
 Persist a finite native-operation graph and dependencies. Verify each required write before one separately admitted solve. Revalidate input/schema/policy revisions, locks, ownership and caps per step. Unknown/partial effects block dependent steps; recovery reconciles and never replays automatically.
 
+2026-10-19 (owner decision Q1): LC-05 closes when OJ-07/08/10 pass (VS-4). Reuse `start_task`
+and `wait_for_job`; the 25 s wait limit and job completion into chat are the explicit
+ticket [LC-12](12-job-completion-continuation.md) (LC-C12) inside this scope.
+
 Expected ownership: durable operation orchestration over ordinary dispatch, existing receipts/jobs/adapters and owned progress.
 
 Rebaseline current master and incoming interfaces before implementation. Write

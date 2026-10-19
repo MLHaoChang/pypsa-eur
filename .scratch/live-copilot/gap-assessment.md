@@ -94,3 +94,19 @@ vendor integration must be completed rather than counted as done from mocks.
 An initial whole-application typed interface is independently useful. Each
 released domain still needs its own adapters and journeys. Continuous speech
 should follow the same commands; it must not become a separate executor.
+
+## Addendum — 2026-10-19 review against the owner's examples
+
+Rechecked at master `d006f4beaa302b97432c65757762ae180222731a`. Added gaps,
+with evidence, are in the [vision review](vision-review-2026-10-19.md):
+
+| Area | Gap | Priority |
+| --- | --- | --- |
+| Owner journeys | No test plays an owner example end to end; browser runners are local; no live-model evaluation | P0 ([LC-13](issues/13-owner-journey-suite.md)) |
+| Deictic targets | No order between utterance, screen focus, recency and asking; no rule for “latest” | P0 ([LC-10](issues/10-focus-and-recency-resolution.md)) |
+| Long jobs | `wait_for_job` ≤25 s and no completion turn into chat; edit→run→walk stops mid-way | P0 ([LC-12](issues/12-job-completion-continuation.md)) |
+| Stale results | Most reads mark stale only on component-shape change; parameter edits leave old results unlabelled | P0 ([LC-12](issues/12-job-completion-continuation.md)) |
+| Walk-through | Local tour narrates fixed blurbs; prompt gives no read per tab | P0 ([LC-11](issues/11-narrated-walkthrough.md)) |
+| Navigation reach | Snapshot index not set; selection hidden behind slide panels; no edit card, Guided step or campus sub-section target | P1 ([LC-14](issues/14-navigation-reach.md)) |
+| Ordinary-turn ACK | Source-bound ACK issued and answered only in strict turns | P1 ([LC-09](issues/09-vertical-slice-loadflow.md)) |
+| Expert edits | Chat writes apply without an old→new card in Expert | P0, owner decided Q3: card in both modes (LC-04) |

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): With no reliability goal set, Guided's Reliability tile says "Not modelled: no reliability goal is set" and links to Goal, instead of "Not available for this run" with no action (UX review N13).

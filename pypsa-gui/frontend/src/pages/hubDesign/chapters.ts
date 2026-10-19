@@ -130,6 +130,11 @@ function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 
       reason: 'The reliability study has not run. Set a goal and run it.' }
   }
   const open: ChapterOpen = { panel: 'results', tab: 'adequacy' }
+  // No goal, so the study certified nothing: the cause is known and the fix is a step (UX review N13).
+  if (r.lole == null && r.target == null) {
+    return { label, value: '', state: 'not_modelled', open: { step: 'goal' },
+      reason: 'No reliability goal is set, so the study gave no shortfall figure. Set an allowed shortfall in Goal and run it again.' }
+  }
   if (r.lole == null) {
     return { label, value: '', state: 'unavailable', open,
       reason: 'The study ran, but its shortfall figure is not established.' }

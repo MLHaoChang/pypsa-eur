@@ -13,6 +13,7 @@ import { isRunJob, useTick } from '../campusRunProgress'
 import { GFM_KEY } from '../CampusIslandGfmSection'
 import { chapterTiles, dispatchSolved, FROM_STUDY_HINT, type ChapterInputs, type ChapterOpen } from './chapters'
 import { useHubDesignStore } from './hubDesignStore'
+import RunGridChecks from './RunGridChecks'
 
 const OPEN_LABEL = (o: ChapterOpen) =>
   'step' in o ? 'Go to Goal' : o.panel === 'campusElectrical' ? 'Open the grid checks' : 'Open the detail'
@@ -84,6 +85,9 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
                     className="text-accent hover:underline">Solve</button>
                 )}
               </p>
+            )}
+            {t.id === 'grid_plan' && project && ['not_run', 'stale', 'unavailable'].includes(t.state) && (
+              <RunGridChecks project={project} again={t.state !== 'not_run'} disabled={t.state === 'running'} />
             )}
             <button type="button" data-testid={`hub-chapter-${t.id}-open`} onClick={() => open(t.open)}
               className="self-start text-[11.5px] text-accent hover:underline">
