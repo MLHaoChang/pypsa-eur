@@ -21,7 +21,7 @@ COPY_UTIL = {'T1': 45.0, 'L1': 30.0, 'L2': 30.0}
 
 
 @pytest.fixture
-def named_copy(oj_grid, client, monkeypatch):
+def named_copy(oj_grid, client, monkeypatch):  # noqa: F811 — the imported fixture
     import harness.confirm as harness_confirm
 
     base_id = next(p['id'] for p in client.get('/api/projects/').json() if p['name'] == NAME)

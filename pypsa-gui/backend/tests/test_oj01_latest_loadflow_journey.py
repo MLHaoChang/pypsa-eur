@@ -93,7 +93,6 @@ def test_latest_load_flow_is_read_then_shown(oj_grid, client, kind, model, base_
             response = client.post('/api/chat/ui-ack', json=body)
             acks.append(response.json())
 
-    answer = {}
     steps = _steps()
     calls, results, frames, _ = run_journey(kind, model, base_url, auth, steps, MESSAGE,
                                             on_frame=browser, ui_ack=True)
