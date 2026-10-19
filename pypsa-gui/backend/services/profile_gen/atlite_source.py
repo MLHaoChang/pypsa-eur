@@ -24,7 +24,11 @@ from typing import Any, Mapping, TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
-from services.profile_gen.engine import InvalidCoordinatesError, ProfileGenError
+from services.profile_gen.engine import (
+    AtliteNotInstalledError,
+    InvalidCoordinatesError,
+    ProfileGenError,
+)
 
 if TYPE_CHECKING:
     from services.profile_gen.engine import ProfilePoint
@@ -56,7 +60,14 @@ def generate_frame(points: "list[ProfilePoint]", technology: str,
     _require(params, technology)
     cutout_path = params["cutout_path"]
 
-    import atlite  # noqa: F401 — the cage: lazy, and only in this module
+    try:
+        import atlite  # noqa: F401 — the cage: lazy, and only in this module
+    except ImportError as exc:
+        raise AtliteNotInstalledError(
+            "the atlite source needs the optional 'atlite' package, which is "
+            "not installed in this environment — use the synthetic source or "
+            "install atlite"
+        ) from exc
 
     cutout = atlite.Cutout(path=str(cutout_path))
     times = pd.DatetimeIndex(cutout.data.time.values)

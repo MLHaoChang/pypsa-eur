@@ -3,9 +3,9 @@
 Spec: docs/superpowers/specs/2026-10-17-renewable-profile-generator-spec.md
 Plan: docs/superpowers/plans/2026-10-17-renewable-profile-generator.md
 
-One entry point — `generate_profile` — over a source registry. `synthetic` is
-eagerly registered; `atlite` resolves lazily on first use (the import cage).
-Adding a source is registering a callable, never editing call sites.
+One entry point — `generate_profile` — over a source registry. Task 1 ships
+the `synthetic` source only; Task 3 registers `atlite`. Adding a source is
+registering a callable, never editing call sites.
 
 Determinism contract: for a fixed `now`, identical inputs produce a
 byte-identical `ProfileResult.series` (and identical meta). The synthetic
@@ -42,6 +42,12 @@ class UnknownSourceError(ProfileGenError):
 
 class InvalidCoordinatesError(ProfileGenError):
     """A point is malformed, duplicated, or outside lon/lat ranges."""
+
+
+class AtliteNotInstalledError(ProfileGenError):
+    """The atlite source was requested but atlite is not installed in this
+    environment (optional dependency — the synthetic source works without
+    it)."""
 
 
 SUPPORTED_TECHNOLOGIES = ("wind", "solar")

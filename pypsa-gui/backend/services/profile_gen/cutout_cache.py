@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from app_paths import app_data_dir
-from services.profile_gen.engine import ProfileGenError
+from services.profile_gen.engine import AtliteNotInstalledError, ProfileGenError
 
 # ---------------------------------------------------------------------------
 # Typed errors
@@ -151,7 +151,14 @@ def _atlite_month_downloader(
     target: Path,
     stop_event: Any,
 ) -> None:
-    import atlite  # lazy: importing atlite is expensive and unneeded offline
+    try:
+        import atlite  # lazy: importing atlite is expensive and unneeded offline
+    except ImportError as exc:
+        raise AtliteNotInstalledError(
+            "cutout download needs the optional 'atlite' package, which is "
+            "not installed in this environment — use the synthetic source or "
+            "install atlite"
+        ) from exc
 
     w, s, e, n = bbox
     cutout = atlite.Cutout(
