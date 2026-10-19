@@ -351,3 +351,34 @@ def test_from_generators_schema_is_declared_in_the_catalogue():
         props = entry["input_schema"]["properties"]
         assert props["from_generators"]["items"]["type"] == "string", name
         assert "points" not in entry["input_schema"]["required"], name
+
+
+# ---------------------------------------------------------------------------
+# RP-01: a generator whose bus has no coordinates is a typed refusal the
+# copilot can relay with both remedies — never a profile for 0°E 0°N
+# ---------------------------------------------------------------------------
+
+
+def test_generate_for_a_bus_without_coordinates_is_a_typed_refusal(
+    client, install_network, session_ctx,
+):
+    n = _wind_network()
+    n.add("Bus", "B0")  # x = y = 0, PyPSA's default
+    n.add("Generator", "g_nocoord", bus="B0", carrier="wind", p_nom=10.0)
+    install_network(n)
+    resp = client.post("/api/projects/Chat Coords",
+                       params={"force": True, "rebind": True})
+    assert resp.status_code == 200, resp.text
+
+    with _bound_ctx(client, session_ctx):
+        with pytest.raises(HTTPException) as err:
+            chat_tools.DISPATCHERS["generate_renewable_profile"](
+                project_id="Chat Coords",
+                from_generators=["g_wind", "g_nocoord"],
+                technology="wind", year=2023,
+            )
+    assert err.value.status_code == 422
+    detail = err.value.detail
+    assert detail["error_kind"] == "missing_coordinates"
+    assert detail["generators"] == ["g_nocoord"]
+    assert "upload" in detail["message"]

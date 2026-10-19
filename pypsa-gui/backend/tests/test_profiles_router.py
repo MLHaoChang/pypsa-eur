@@ -491,3 +491,114 @@ def test_generate_without_points_or_generators_is_a_422(client, wind_project):
     )
     assert resp.status_code == 422
     assert resp.json()["detail"]["error_kind"] == "no_points"
+
+
+# ---------------------------------------------------------------------------
+# RP-01: coordinates come from the generator, else its bus; a missing pair
+# (NaN, or PyPSA's default 0/0) is a typed refusal, never a site at 0°E 0°N
+# ---------------------------------------------------------------------------
+
+
+def _mixed_network() -> pypsa.Network:
+    """g_wind at (8.0, 50.0); g_nocoord on a bus left at PyPSA's default
+    x=y=0; g_nan on a bus with no latitude; g_own on a 0/0 bus but carrying
+    its own x/y columns."""
+    n = _wind_network()
+    n.add("Bus", "B0")  # x = y = 0, PyPSA's default
+    n.add("Bus", "BN", x=9.0, y=51.0)
+    # n.add() fills NaN with the 0 default; an import or a direct edit can
+    # still leave a NaN behind, so set it after the add
+    n.buses.loc["BN", "y"] = float("nan")
+    n.add("Generator", "g_nocoord", bus="B0", carrier="wind", p_nom=10.0)
+    n.add("Generator", "g_nan", bus="BN", carrier="wind", p_nom=10.0)
+    n.add("Generator", "g_own", bus="B0", carrier="wind", p_nom=10.0)
+    n.generators["x"] = float("nan")
+    n.generators["y"] = float("nan")
+    n.generators.loc["g_own", ["x", "y"]] = [7.5, 51.0]
+    return n
+
+
+@pytest.fixture
+def mixed_project(client, install_network):
+    install_network(_mixed_network())
+    _save_as(client, "Coord Farm")
+    return "Coord Farm"
+
+
+def _estimate(client, names):
+    return client.post(
+        "/api/profiles/estimate",
+        json={"from_generators": names, "technology": "wind", "year": 2023},
+    )
+
+
+def test_a_bus_at_the_default_origin_is_a_missing_coordinates_refusal(
+    client, mixed_project,
+):
+    resp = _estimate(client, ["g_nocoord"])
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert detail["error_kind"] == "missing_coordinates"
+    assert detail["generators"] == ["g_nocoord"]
+    assert "B0" in detail["message"]
+    # both remedies are named
+    assert "coordinates" in detail["message"]
+    assert "upload" in detail["message"]
+
+
+def test_a_bus_with_a_nan_latitude_is_a_missing_coordinates_refusal(
+    client, mixed_project,
+):
+    resp = _estimate(client, ["g_nan"])
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "missing_coordinates"
+    assert resp.json()["detail"]["generators"] == ["g_nan"]
+
+
+def test_the_refusal_lists_only_the_generators_missing_coordinates(
+    client, mixed_project,
+):
+    resp = _estimate(client, ["g_wind", "g_nocoord", "g_nan"])
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["generators"] == ["g_nocoord", "g_nan"]
+
+
+def test_a_generators_own_coordinates_win_over_its_bus(client, mixed_project):
+    explicit = client.post(
+        "/api/profiles/estimate",
+        json={"points": [{"id": "g_own", "lon": 7.5, "lat": 51.0}],
+              "technology": "wind", "year": 2023},
+    ).json()
+    resp = _estimate(client, ["g_own"])
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["series"]["g_own"] == explicit["series"]["g_own"]
+
+
+def test_an_explicit_point_overrides_a_generator_without_coordinates(
+    client, mixed_project,
+):
+    resp = client.post(
+        "/api/profiles/estimate",
+        json={"points": [{"id": "g_nocoord", "lon": 9.2, "lat": 52.3}],
+              "from_generators": ["g_nocoord"],
+              "technology": "wind", "year": 2023},
+    )
+    assert resp.status_code == 200, resp.text
+    assert list(resp.json()["series"]) == ["g_nocoord"]
+
+
+def test_generate_for_a_generator_without_coordinates_queues_nothing(
+    client, mixed_project, project_storage_dir, seeded_identity,
+):
+    resp = client.post(
+        f"/api/projects/{mixed_project}/profiles/generate",
+        json={"from_generators": ["g_wind", "g_nocoord"],
+              "technology": "wind", "year": 2023, "source": "synthetic"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "missing_coordinates"
+    pending = client.get(
+        f"/api/projects/{mixed_project}/profiles/pending"
+    ).json()
+    assert pending["pending"] == []
+    assert pending.get("jobs", []) == []

@@ -27,6 +27,7 @@ this prefix — `_UNDO_PREFIXES` is `/api/network/` + `/api/io/` only):
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from pathlib import Path
 from typing import Any, Literal
@@ -103,31 +104,56 @@ class ApplyRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _finite_pair(x: Any, y: Any) -> tuple[float, float] | None:
+    """(lon, lat) when both are finite numbers and not PyPSA's 0/0 default;
+    None means "no coordinates" — no European site sits at 0°E 0°N."""
+    try:
+        lon, lat = float(x), float(y)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(lon) and math.isfinite(lat)):
+        return None
+    if lon == 0.0 and lat == 0.0:
+        return None
+    return lon, lat
+
+
 def points_from_generators(names: list[str]) -> list[dict[str, Any]]:
     """Resolve generator names to profile points (id/lon/lat) from the
-    FOREGROUND network's bus coordinates — the one code path behind the chat
-    tools' `from_generators` and the GUI's default generation flow. The point
-    id IS the generator name, which is what apply defaults to. Unknown names
-    are a 422 listing what was not found."""
+    FOREGROUND network — the one code path behind the chat tools'
+    `from_generators` and the GUI's default generation flow. The point id IS
+    the generator name, which is what apply defaults to.
+
+    Coordinates come from the generator's own x/y columns when the network
+    carries them, else from its bus. Unknown names are a 422
+    `unknown_generator`; generators without coordinates (NaN, or the 0/0
+    default) are a 422 `missing_coordinates` listing them — never a profile
+    generated for 0°E 0°N."""
     from services.pypsa_service import PyPSAService
 
     n = PyPSAService.get_active_context().network
+    gens = n.generators
     points: list[dict[str, Any]] = []
     missing: list[str] = []
+    no_coords: list[tuple[str, str]] = []
     for raw in names:
         g = str(raw)
-        if g not in n.generators.index:
+        if g not in gens.index:
             missing.append(g)
             continue
-        bus = str(n.generators.at[g, "bus"] or "")
+        bus = str(gens.at[g, "bus"] or "")
         if bus not in n.buses.index:
             missing.append(f"{g} (its bus {bus!r} is not on the network)")
             continue
-        points.append({
-            "id": g,
-            "lon": float(n.buses.at[bus, "x"] or 0.0),
-            "lat": float(n.buses.at[bus, "y"] or 0.0),
-        })
+        pair = None
+        if "x" in gens.columns and "y" in gens.columns:
+            pair = _finite_pair(gens.at[g, "x"], gens.at[g, "y"])
+        if pair is None:
+            pair = _finite_pair(n.buses.at[bus, "x"], n.buses.at[bus, "y"])
+        if pair is None:
+            no_coords.append((g, bus))
+            continue
+        points.append({"id": g, "lon": pair[0], "lat": pair[1]})
     if missing:
         raise HTTPException(
             status_code=422,
@@ -135,8 +161,21 @@ def points_from_generators(names: list[str]) -> list[dict[str, Any]]:
                 "error_kind": "unknown_generator",
                 "message": "unknown generator(s): "
                            + ", ".join(missing)
-                           + f"; the network holds {len(n.generators.index)} "
+                           + f"; the network holds {len(gens.index)} "
                            "generators — check the name(s)",
+            },
+        )
+    if no_coords:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "missing_coordinates",
+                "generators": [g for g, _ in no_coords],
+                "message": "no coordinates for "
+                           + ", ".join(f"{g} (bus {b})" for g, b in no_coords)
+                           + ": set the bus x/y (longitude/latitude, WGS-84 "
+                           "degrees) or pass explicit points, or upload a "
+                           "profile for these generators instead",
             },
         )
     return points
@@ -147,7 +186,11 @@ def _merged_points(body: EstimateRequest) -> list[dict[str, Any]]:
     required. Duplicated ids are the engine's typed refusal downstream."""
     merged = [p.model_dump() for p in body.points]
     if body.from_generators:
-        merged.extend(points_from_generators(body.from_generators))
+        # An explicit point for a generator is its coordinate override.
+        explicit = {p["id"] for p in merged}
+        rest = [g for g in body.from_generators if str(g) not in explicit]
+        if rest:
+            merged.extend(points_from_generators(rest))
     if not merged:
         raise HTTPException(
             status_code=422,
