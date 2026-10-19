@@ -90,3 +90,10 @@ def test_without_a_goal_or_overview_it_refuses(args):
 
     with pytest.raises(HTTPException):
         chat_tools.DISPATCHERS["find_capabilities"](**args)
+
+
+def test_every_family_tool_exists_so_a_rename_fails_here():
+    from services.assistant_tools import _FAMILIES
+
+    names = {t["name"] for t in TOOLS}
+    assert {name for spec in _FAMILIES for name in spec["tools"]} <= names
