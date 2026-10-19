@@ -68,7 +68,13 @@ class ProfilePointIn(BaseModel):
 
 
 class EstimateRequest(BaseModel):
-    points: list[ProfilePointIn]
+    # Sites come from explicit `points` and/or `from_generators` (generator
+    # names resolved against the FOREGROUND network's bus coordinates — the
+    # same semantics the chat tools expose; at least one of the two is
+    # required). Point ids from generator names ARE the generator names, so
+    # apply needs no mapping.
+    points: list[ProfilePointIn] = []
+    from_generators: list[str] | None = None
     technology: str
     preset: str | None = None
     params: dict[str, Any] | None = None
@@ -95,6 +101,64 @@ class ApplyRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+
+def points_from_generators(names: list[str]) -> list[dict[str, Any]]:
+    """Resolve generator names to profile points (id/lon/lat) from the
+    FOREGROUND network's bus coordinates — the one code path behind the chat
+    tools' `from_generators` and the GUI's default generation flow. The point
+    id IS the generator name, which is what apply defaults to. Unknown names
+    are a 422 listing what was not found."""
+    from services.pypsa_service import PyPSAService
+
+    n = PyPSAService.get_active_context().network
+    points: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for raw in names:
+        g = str(raw)
+        if g not in n.generators.index:
+            missing.append(g)
+            continue
+        bus = str(n.generators.at[g, "bus"] or "")
+        if bus not in n.buses.index:
+            missing.append(f"{g} (its bus {bus!r} is not on the network)")
+            continue
+        points.append({
+            "id": g,
+            "lon": float(n.buses.at[bus, "x"] or 0.0),
+            "lat": float(n.buses.at[bus, "y"] or 0.0),
+        })
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "unknown_generator",
+                "message": "unknown generator(s): "
+                           + ", ".join(missing)
+                           + f"; the network holds {len(n.generators.index)} "
+                           "generators — check the name(s)",
+            },
+        )
+    return points
+
+
+def _merged_points(body: EstimateRequest) -> list[dict[str, Any]]:
+    """Explicit points plus generator-resolved points; at least one source is
+    required. Duplicated ids are the engine's typed refusal downstream."""
+    merged = [p.model_dump() for p in body.points]
+    if body.from_generators:
+        merged.extend(points_from_generators(body.from_generators))
+    if not merged:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "no_points",
+                "message": "give either `points` (id/lon/lat) or "
+                           "`from_generators` (generator names whose bus "
+                           "coordinates seed the sites)",
+            },
+        )
+    return merged
 
 
 def _validate_technology(technology: str) -> None:
@@ -176,13 +240,15 @@ def estimate_profile(body: EstimateRequest):
         _validate_technology(body.technology)
         params = _preset_params(body)
         result = engine.generate_profile(
-            [p.model_dump() for p in body.points],
+            _merged_points(body),
             body.technology,
             params=params,
             source="synthetic",
             year=body.year,
             resolution=body.resolution,
         )
+    except HTTPException:
+        raise
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
@@ -246,17 +312,20 @@ def generate_profiles(
     now, not a failed job later."""
     _check_lock(proj, db, user)
     spec = body.model_dump()
-    spec["points"] = [p.model_dump() for p in body.points]
+    spec.pop("from_generators", None)  # resolved into concrete points below
     try:
         # Validate the way the runner will, minus the work: points, technology,
         # preset name (resolve_params raises UnknownPresetError), and a CDS
         # preflight for the atlite source. The runner re-resolves params from
         # the raw preset+overrides; nothing computed here is passed down.
+        spec["points"] = _merged_points(body)
         engine._normalize_points(spec["points"])
         _validate_technology(body.technology)
         _preset_params(body)
         if body.source == "atlite":
             cds_preflight()
+    except HTTPException:
+        raise
     except CdsCredentialError as exc:
         raise HTTPException(
             status_code=422,

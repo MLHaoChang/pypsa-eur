@@ -19,7 +19,6 @@ project is a 404, never a 403.
 """
 from __future__ import annotations
 
-import json
 import time
 import uuid
 
@@ -27,8 +26,6 @@ import pandas as pd
 import pypsa
 import pytest
 
-from db.models import User
-from services import project_registry
 from services import solve_queue as sq
 
 SNAPS_2025 = pd.date_range("2025-01-01", periods=8760, freq="h")
@@ -424,3 +421,73 @@ def test_generate_with_daily_resolution_round_trips_to_apply(
 def test_generate_refuses_an_unsupported_resolution(client, wind_project):
     resp = _generate(client, wind_project, _spec(resolution="annual"))
     assert resp.status_code == 422, resp.text
+
+
+# ---------------------------------------------------------------------------
+# E1: from_generators on the HTTP routes (the GUI default path shares the
+# chat tools' resolver — one code path in routers/profiles.py)
+# ---------------------------------------------------------------------------
+
+
+def test_estimate_from_generators_resolves_bus_coordinates(client,
+                                                           wind_project):
+    """The global estimate resolves generator names against the foreground
+    network; the deterministic synthetic source must then match the
+    explicit-points call exactly."""
+    explicit = client.post("/api/profiles/estimate", json=_spec()).json()
+    resp = client.post(
+        "/api/profiles/estimate",
+        json={"from_generators": ["g_wind"], "technology": "wind",
+              "year": 2023},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["series"]["g_wind"] == explicit["series"]["g_wind"]
+
+
+def test_estimate_without_points_or_generators_is_a_422(client):
+    resp = client.post("/api/profiles/estimate",
+                       json={"technology": "wind"})
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error_kind"] == "no_points"
+
+
+def test_estimate_with_an_unknown_generator_is_a_422(client, wind_project):
+    resp = client.post(
+        "/api/profiles/estimate",
+        json={"from_generators": ["no_such_gen"], "technology": "wind"},
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert detail["error_kind"] == "unknown_generator"
+    assert "no_such_gen" in detail["message"]
+
+
+def test_generate_from_generators_records_the_coordinates(
+    client, wind_project, project_storage_dir, seeded_identity,
+):
+    resp = client.post(
+        f"/api/projects/{wind_project}/profiles/generate",
+        json={"from_generators": ["g_wind"], "technology": "wind",
+              "year": 2023, "source": "synthetic"},
+    )
+    assert resp.status_code == 202, resp.text
+    job = resp.json()
+    done = _await_job(client, job["id"])
+    assert done["status"] == "completed", done["error"]
+
+    pending = client.get(
+        f"/api/projects/{wind_project}/profiles/pending"
+    ).json()["pending"]
+    mine = [p for p in pending if p["job_id"] == job["id"]]
+    assert len(mine) == 1
+    assert mine[0]["points"] == ["g_wind"]
+    assert mine[0]["point_coords"]["g_wind"] == [8.0, 50.0]
+
+
+def test_generate_without_points_or_generators_is_a_422(client, wind_project):
+    resp = client.post(
+        f"/api/projects/{wind_project}/profiles/generate",
+        json={"technology": "wind"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error_kind"] == "no_points"
