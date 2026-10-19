@@ -226,6 +226,9 @@ class ChatSession:
     # Issue 06 — discussed project/run/baseline/section identifiers for
     # follow-ups. Identifiers only; numerical truth always comes from tools.
     discussed_refs: dict[str, Any] | None = None
+    # LC-10 — the UI context of the turn in flight, for resolve_reference.
+    # An untrusted hint, replaced every turn; the resolver re-reads it.
+    turn_ui_context: dict[str, Any] | None = None
     # Multi-turn message history for the Anthropic Messages API. Each entry
     # is a dict matching the SDK's message shape ({role, content}). Run_turn
     # appends user + assistant + tool_result messages per turn so subsequent

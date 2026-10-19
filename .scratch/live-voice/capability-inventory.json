@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 257,
+  "tool_count": 258,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -32,6 +32,32 @@
       ],
       "safety_tier": "read",
       "schema_sha256": "5c2e4b5a552480f8f4b512121b9c2048dead2a7cb5c94e72799da14e96e807f1",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "resolve_reference",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "target",
+        "component_class",
+        "name",
+        "run_id",
+        "latest"
+      ],
+      "required": [
+        "target"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "224c2be4ce627c605a643da6dc47e5a104055ce3f40a6a8eb502e028eb4c9ed2",
       "behavioral_fixture": "pending"
     },
     {

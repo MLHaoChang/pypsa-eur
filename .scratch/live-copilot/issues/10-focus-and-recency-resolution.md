@@ -3,7 +3,7 @@
 
 # LC-10 (LC-01C) — resolving "this", "the" and "latest"
 
-Status: ready-for-agent inside LC-01, after LC-01B lands
+Status: implementation in progress (Claude, branch `claude/copilot-reference-ladder`, stacked on PR #391)
 Type: task
 Baseline: master `d006f4beaa302b97432c65757762ae180222731a`
 Dependencies: LC-01B (exact names), LC-01A (schema discovery)
@@ -60,3 +60,31 @@ LC-T21 in the [acceptance matrix](../test-plan.md).
 Prompt rule in `harness/prompts/assistant_stance.md`, a small read-tier
 resolver over existing reads if the prompt alone fails Tier B, and the
 OJ tests. No change to `uiContext.ts`'s identifiers-only rule.
+
+## Coordinator decision, 2026-10-19 (derived from owner decision Q2)
+
+Build the resolver now, together with the prompt rule. Q2 makes the live-model
+tier manual and never a merge gate, so only a ladder in code can be proven in
+CI. Read-only and access-checked; the answer always names what it resolved.
+
+## Implementation (2026-10-19)
+
+- `services/reference_resolution.py`: read-tier `resolve_reference(target,
+  component_class?, name?, run_id?, latest?)`. Rungs: explicit, then on screen
+  (the turn's `selected_component`, or a displayed historical run of the
+  active project), then discussed (the last component a successful tool call
+  named, or `discussed_refs`), then the only one, then ask (up to 12
+  candidates with key fields, plus an `ask_user` instruction).
+  `component_class: "storage"` spans StorageUnit and Store. A selection of
+  another class, or one not in the active network, is reported in `ignored`
+  and never used; a class mismatch asks rather than falling back to "the
+  only one" or "discussed".
+- `harness/loop.py` records each turn's UI context on the session
+  (`turn_ui_context`, replaced every turn), so the hint is the browser's, not
+  something the model retypes.
+- `harness/prompts/reference_ladder.md`: a new tools-on part (no pinned
+  fragment moved), pinned in `test_harness_prompts.py`.
+- Tests: `tests/test_reference_ladder.py` covers LC-T21 and the resolution
+  halves of OJ-05 and OJ-06, through the ordinary turn loop plus one
+  authenticated HTTP stream. The edit halves of OJ-05 and OJ-06 close with
+  LC-04.
