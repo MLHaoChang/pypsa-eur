@@ -1270,6 +1270,11 @@ class CarrierEconomics(BaseModel):
     capex_meur: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     dispatch_gwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     lcoe_eur_per_mwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
+    # Grid-to-process shortfall (ticket 04): Σ shortfall-generator dispatch × its lost-production value × w. Lost
+    # revenue, NOT part of opex_meur. None where the carrier has no shortfall generator, or (with
+    # lost_production_flag "lost_production_value_missing") where one has no value (ADR-0001).
+    lost_production_meur: CarrierPeriodValue | None = None
+    lost_production_flag: str | None = None
 
 
 class AssetLCOHEntry(BaseModel):
@@ -1280,9 +1285,11 @@ class AssetLCOHEntry(BaseModel):
     heat pumps, P2X, H2 pipelines), computes the levelised cost of its
     primary output. Output = ``|p0| × efficiency`` in MWh of the
     bus1-side carrier (H2 for electrolysers, heat for heat pumps, etc.).
-    Cost = annuitised CAPEX (horizon) + OPEX + input-electricity cost
-    at bus0's marginal price. LCOH unit = €/MWh of the Link's output
-    regardless of carrier label.
+    Cost = annuitised CAPEX (horizon) + OPEX + input cost at each input
+    port's marginal price (bus0, and any port above bus1 that withdraws,
+    e.g. a process unit's feed). LCOH unit = €/MWh of the Link's bus1
+    output regardless of carrier label; `output_value_meur` values every
+    output port at its product value and never enters the LCOH.
 
     Per-period breakdowns scale by ``investment_period_weightings.years``
     so multi-period horizons stay year-consistent — matches the rest of
@@ -1297,6 +1304,11 @@ class AssetLCOHEntry(BaseModel):
     input_cost_meur: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     output_gwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     lcoh_eur_per_mwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
+    # Ticket 04: every output port's product (bus1 and any port above it that injects) at its bus's
+    # `product_value`, on the cost weighting. Never part of the LCOH. None with output_value_flag
+    # "product_value_missing" when any output carrying flow has no value (ADR-0001).
+    output_value_meur: CarrierPeriodValue | None = None
+    output_value_flag: str | None = None
 
 
 class EconomicsComparison(BaseModel):

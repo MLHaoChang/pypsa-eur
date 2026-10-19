@@ -27,6 +27,7 @@ from services.compare.support import (
     _safe_capital_cost,
 )
 from services import period_utils
+from services.process_products import SHORTFALL, generator_role, lost_production_value, product_value
 from services.results.load_frames import corrected_marginal_prices
 
 
@@ -140,6 +141,10 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                 "curtailment_cost_eur":    {"total": 0.0, "by_period": {}},
                 "lost_load_cost_eur":      {"total": 0.0, "by_period": {}},
                 "capex_eur":     {"total": 0.0, "by_period": {}},
+                # Grid-to-process shortfall (ticket 04): product not delivered, at its lost-production value. Lost
+                # revenue, never in opex. None until a shortfall generator is seen; "unavailable" when one has no
+                # value (ADR-0001).
+                "lost_production_eur": None,
             }
         return by_carrier[carrier]
 
@@ -297,6 +302,12 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                 series = t_p_df[asset_name].reindex(sns).fillna(0.0).astype(float)
             except Exception:
                 continue
+            if df is n.generators and generator_role(n, asset_name)[0] == SHORTFALL:
+                # A shortfall slack is product NOT delivered: lost revenue at its lost-production value, never an
+                # expense as well, never dispatch and never revenue (ticket 04). A buy-in generator stays an
+                # ordinary expense below.
+                _book_lost_production(b, n, asset_name, series)
+                continue
             # Storage: split the signed series into discharge (positive) and
             # charge (negative magnitude). The dispatch + revenue series use
             # discharge only — matching the dispatch summary's choice and
@@ -390,6 +401,16 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                         _accum(b["storage_charge_cost_eur"], cc_total, cc_pp)
                 except Exception:
                     pass
+
+    def _book_lost_production(bucket: dict, n, gen: str, series) -> None:
+        value = lost_production_value(n, gen)
+        if value is None or bucket["lost_production_eur"] == "unavailable":
+            bucket["lost_production_eur"] = "unavailable"
+            return
+        if bucket["lost_production_eur"] is None:
+            bucket["lost_production_eur"] = {"total": 0.0, "by_period": {}}
+        lost_t = series.clip(lower=0) * value * weights
+        _accum(bucket["lost_production_eur"], float(lost_t.sum()), _per_period_groupby(lost_t, sns, is_multi))
 
     # CAPEX: vintage path first, then plain path for assets without vintages.
     _walk_capex_vintage("Generator",   n.generators)
@@ -551,7 +572,10 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                             - _ll_b["by_period"].get(p, 0.0))
             lcoe_pp[p] = _lcoe(capex_pp, cash_opex_pp, mwh)
 
+        lost_prod = agg.get("lost_production_eur")
         out[c] = CarrierEconomics(
+            lost_production_meur=CarrierPeriodValue(**_to_meur(lost_prod)) if isinstance(lost_prod, dict) else None,
+            lost_production_flag="lost_production_value_missing" if lost_prod == "unavailable" else None,
             revenue_meur=CarrierPeriodValue(**rev_m),
             opex_meur=CarrierPeriodValue(**opex_m),
             gen_cost_meur=CarrierPeriodValue(**gen_cost_m),
@@ -568,9 +592,10 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     # across scenarios because only fleet rollup was exposed. For each
     # extendable Link with non-trivial dispatch, compute LCOH-style metric
     # = (CAPEX horizon-total + OPEX + input-electricity cost at bus0) /
-    # (|p0| × efficiency, in MWh of bus1's carrier). Multi-port Links (bus2
-    # set) only counts bus1 output; bus2's reverse flow contributes via
-    # efficiency2 to the LP balance but isn't separately priced.
+    # (|p0| × efficiency, in MWh of bus1's carrier). The denominator is bus1's
+    # output only. Ports above bus1 (ticket 04): an input port is priced into
+    # the input cost at its bus's price, and every output port is valued at
+    # its product value in `output_value_meur`, which never enters the LCOH.
     per_asset_lcoh: list[AssetLCOHEntry] = []
     if n.links is not None and not n.links.empty:
         links_p0 = getattr(n.links_t, "p0", None) if hasattr(n, "links_t") else None
@@ -630,6 +655,44 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                         input_eur_pp = _per_period_groupby(input_t, sns, is_multi)
                     except Exception:
                         pass
+
+                # Ports above bus1 (ticket 04). A port with positive p withdraws from its bus: an input (a process
+                # unit's feed, efficiency_i < 0), priced at that bus's price as bus0 is. A port with negative p
+                # injects: an output, valued below. Neither enters the LCOH denominator, which stays bus1's output,
+                # so a CHP's heat port leaves its LCOH as it was.
+                ports: list[tuple[str, object]] = [(str(row.get("bus1") or ""), getattr(n.links_t, "p1", None))]
+                for i in (2, 3, 4):
+                    bus_i = row.get(f"bus{i}") if f"bus{i}" in n.links.columns else None
+                    if isinstance(bus_i, str) and bus_i.strip():
+                        ports.append((bus_i, getattr(n.links_t, f"p{i}", None)))
+                port_flows: list[tuple[str, object]] = []
+                for bus_i, p_df in ports:
+                    if p_df is None or link_name not in getattr(p_df, "columns", []):
+                        continue
+                    port_flows.append((bus_i, p_df[link_name].reindex(sns).fillna(0.0).astype(float)))
+                for bus_i, p_i in port_flows[1:]:
+                    if (bus_prices is None or bus_prices.empty or bus_i not in bus_prices.columns
+                            or float(p_i.clip(lower=0).abs().sum()) <= 1e-9):
+                        continue
+                    in_t = p_i.clip(lower=0) * bus_prices[bus_i].reindex(sns).fillna(0.0).astype(float) * weights
+                    input_eur_total += float(in_t.sum())
+                    for k, v in _per_period_groupby(in_t, sns, is_multi).items():
+                        input_eur_pp[k] = input_eur_pp.get(k, 0.0) + v
+
+                # Output value: every output port's product at its product value (the bus's `product_value`).
+                # One output with no value makes the figure Unavailable (ADR-0001): a partial sum would read as
+                # the whole.
+                value_eur: dict | None = {"total": 0.0, "by_period": {}}
+                for bus_i, p_i in port_flows:
+                    out_i = (-p_i).clip(lower=0)
+                    if float(out_i.sum()) <= 1e-9:
+                        continue
+                    v_i = product_value(n, bus_i)
+                    if v_i is None:
+                        value_eur = None
+                        break
+                    val_t = out_i * v_i * weights
+                    _accum(value_eur, float(val_t.sum()), _per_period_groupby(val_t, sns, is_multi))
 
                 # CAPEX: prefer vintage breakdown when present, else plain.
                 cc = _safe_capital_cost(row, pcc, "links")
@@ -702,6 +765,8 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                         by_period={k: v / 1000.0 for k, v in output_mwh_pp.items()},
                     ),
                     lcoh_eur_per_mwh=CarrierPeriodValue(total=lcoh_total, by_period=lcoh_pp),
+                    output_value_meur=CarrierPeriodValue(**_to_meur(value_eur)) if value_eur is not None else None,
+                    output_value_flag=None if value_eur is not None else "product_value_missing",
                 ))
 
         # Cheapest LCOH first — surface the most competitive Link on top.

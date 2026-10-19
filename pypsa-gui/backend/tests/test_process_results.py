@@ -40,7 +40,7 @@ def _hb_network(*, lost_mc: float | None = LOST_EUR_PER_T / MWH_PER_T, product_v
     # rest is shortfall.
     n.add("Generator", "grid", bus="el", carrier="AC", p_nom=100.0, marginal_cost=50.0,
           p_max_pu=[1, 1, 0, 0, 1, 1])
-    n.add("Generator", "h2_supply", bus="h2", carrier="H2", p_nom=200.0, marginal_cost=30.0)
+    n.add("Generator", "h2_supply", bus="h2", carrier="H2", p_nom=200.0, marginal_cost=100.0)
     n.add("Link", "elz", bus0="el", bus1="h2", carrier="H2 electrolysis", p_nom=20.0, efficiency=0.68,
           marginal_cost=1.0, capital_cost=1000.0)
     n.add("Link", "hb", bus0="el", bus1="nh3", bus2="h2", carrier="Haber-Bosch", p_nom=10.0,
@@ -228,3 +228,100 @@ def test_a_network_without_products_has_an_empty_view():
     n.add("Load", "l", bus="el", p_set=1.0)
     n.optimize(solver_name="highs")
     assert compute_process_view(n) == {"products": [], "process_units": []}
+
+
+# ── gatekeeper conditions (2026-10-19) ──────────────────────────────────────
+
+def test_the_economics_still_sum_to_the_objective_with_the_shortfall_moved_out_of_opex(hb):
+    """Nothing here is extendable, so the objective is all variable cost: every carrier's opex plus the lost
+    production booked beside it. Without the lost-production term the sum would fall short by exactly that."""
+    econ = _econ(hb)
+    opex = sum(c.opex_meur.total for c in econ.by_carrier.values())
+    lost = sum(c.lost_production_meur.total for c in econ.by_carrier.values() if c.lost_production_meur)
+    assert lost > 0
+    assert (opex + lost) * 1e6 == pytest.approx(float(hb.objective) + float(hb.objective_constant or 0.0), rel=1e-9)
+
+
+def test_the_investment_case_reads_none_of_the_figures_this_ticket_changes():
+    """Ticket 04 must not change what the investment case books; treating lost tonnes as lost revenue there is
+    ticket 06/11's. The staged-template NPV pins cannot catch it (no shortfall generator), so pin the boundary."""
+    import pathlib
+    import re
+    root = pathlib.Path(__file__).resolve().parents[1]
+    sources = [*(root / "services" / "finance").rglob("*.py"), *(root / "services" / "commercial").rglob("*.py"),
+               *(root / "services" / "study").rglob("*.py"), root / "services" / "results" / "finance_case.py",
+               root / "models" / "commercial.py"]
+    forbidden = re.compile(r"compare\.economics|economics_by_carrier|CarrierEconomics|AssetLCOHEntry|per_asset_lcoh"
+                           r"|_compute_economics_summary|process_view|process_products|lost_production")
+    hits = [str(p.relative_to(root)) for p in sources if p.exists() and forbidden.search(p.read_text())]
+    assert len(sources) > 3 and hits == []
+
+
+def test_the_process_view_is_strict_json_when_a_series_holds_nan():
+    import json
+    n = _hb_network()
+    n.stores_t.e.iloc[1, 0] = float("nan")
+    n.loads_t.p.iloc[2, 0] = float("nan")
+    view = compute_process_view(n)
+    json.dumps(view, allow_nan=False)
+    nh3 = _product(view, "nh3")
+    assert nh3["inventory"][0]["e"][1] is None
+    assert nh3["inventory"][0]["flag"] == "non_finite_values"
+    assert nh3["delivery"]["value"] is None and nh3["delivery"]["t"] is None
+    assert nh3["delivery"]["flag"] == "non_finite_values"
+
+
+def test_the_process_view_endpoint_is_strict_json(monkeypatch, hb):
+    import json
+
+    import routers.results as R
+    from services.pypsa_service import PyPSAService
+    monkeypatch.setattr(PyPSAService, "get_network", staticmethod(lambda: hb))
+    monkeypatch.setattr(R, "_dispatch_ready", lambda n: True)
+    payload = R.get_process_view()
+    json.dumps(payload, allow_nan=False)
+    assert payload["available"] is True
+    assert [p["bus"] for p in payload["products"]] == ["nh3"]
+
+
+def test_every_quantity_names_its_weighting(hb):
+    nh3 = _product(compute_process_view(hb), "nh3")
+    for key in ("production", "delivery", "buy_in", "lost"):
+        assert nh3[key]["weighting"] == "generators"
+    assert nh3["lost"]["eur_weighting"] == "objective"
+    assert nh3["inventory"][0]["weighting"] == "none"
+
+
+def test_the_role_column_decides_and_a_name_alone_is_flagged():
+    from services.process_products import generator_role
+    n = _hb_network()
+    assert generator_role(n, "__lost_nh3") == ("shortfall", "role_from_name")
+    n.generators["process_role"] = ""
+    n.generators.loc["__lost_nh3", "process_role"] = "shortfall"
+    n.generators.loc["__buy_nh3", "process_role"] = "buy_in"
+    assert generator_role(n, "__lost_nh3") == ("shortfall", None)
+    assert _product(compute_process_view(n), "nh3")["role_flag"] is None
+    # A generator tagged by its column books by its role whatever its name.
+    n.generators.loc["grid", "process_role"] = ""
+    assert generator_role(n, "grid") == ("", None)
+
+
+def test_a_bad_process_role_is_refused():
+    from services.adequacy.eh_columns import coerce_eh_value
+    assert coerce_eh_value("Generator", "process_role", " shortfall ") == "shortfall"
+    with pytest.raises(ValueError, match="process role"):
+        coerce_eh_value("Generator", "process_role", "lost")
+
+
+def test_linearised_uc_reports_fractional_status_and_starts_unrounded():
+    n = _hb_network()
+    n.links.loc["hb", "committable"] = True
+    sns = n.snapshots
+    n.links_t.status = pd.DataFrame({"hb": [1.0, 0.6, 0.0, 0.0, 0.5, 1.0]}, index=sns)
+    n.links_t.start_up = pd.DataFrame({"hb": [0.0, 0.0, 0.0, 0.0, 0.5, 0.2]}, index=sns)
+    unit = compute_process_view(n)["process_units"][0]
+    assert unit["flag"] == "linearised_uc"
+    assert unit["running_hours"] == pytest.approx(3.1)
+    assert unit["running_hours_basis"] == "status"
+    assert unit["starts"] == pytest.approx(0.7)
+    assert unit["modelled_hours"] == pytest.approx(6.0)

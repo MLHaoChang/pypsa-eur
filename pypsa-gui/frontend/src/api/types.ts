@@ -862,6 +862,11 @@ export interface CarrierEconomics {
   capex_meur: CarrierPeriodValue
   dispatch_gwh: CarrierPeriodValue
   lcoe_eur_per_mwh: CarrierPeriodValue
+  // Grid-to-process shortfall at its lost-production value: lost revenue, not
+  // part of opex_meur. null when the carrier has none, or (flagged
+  // lost_production_value_missing) when it has no value (ADR-0001).
+  lost_production_meur?: CarrierPeriodValue | null
+  lost_production_flag?: string | null
 }
 
 export interface AssetLCOHEntry {
@@ -873,6 +878,10 @@ export interface AssetLCOHEntry {
   input_cost_meur: CarrierPeriodValue
   output_gwh: CarrierPeriodValue
   lcoh_eur_per_mwh: CarrierPeriodValue
+  // Every output port at its product value; never part of the LCOH. null,
+  // flagged product_value_missing, when an output has no value (ADR-0001).
+  output_value_meur?: CarrierPeriodValue | null
+  output_value_flag?: string | null
 }
 
 export interface EconomicsComparison {
