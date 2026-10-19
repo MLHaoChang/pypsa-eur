@@ -210,6 +210,11 @@ def run_queued(job: Any, progress: Any, stop_event: Any) -> tuple[Path, Path]:
     record["job_id"] = str(job.id)
     record["project_id"] = job.project_id
     record["points"] = list(result.series.columns)
+    # Per-point coordinates, so a later apply can warn when an asset's bus
+    # has moved since its profile was generated.
+    record["point_coords"] = {
+        p.id: [p.lon, p.lat] for p in engine._normalize_points(points)
+    }
     meta_path.write_text(json.dumps(record, indent=2, default=str))
 
     _evict_pending(job.storage_dir)
