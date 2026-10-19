@@ -54,11 +54,11 @@ const verdictText = async () => (await screen.findByTestId('hub-results-verdict'
 describe('ResultsCard headline (§5.5)', () => {
   const cases: [string, ReturnType<typeof review>, EhReferenceDesignReport, string][] = [
     ['fail', review(), REPORT,
-      'Not certified: about 12 h/yr of shortfall vs a 3 h/yr goal — driven by Grid import'],
+      'Not certified: about 12.4 h/yr of shortfall vs a 3 h/yr goal — driven by Grid import'],
     ['inconclusive', review({ summary: { verdict: 'inconclusive', mc_lole_h_per_year: 3.2, target_lole_h: 3 } }),
       { ...REPORT, sections: { certification: { status: 'ok', payload: {
         verdict: 'inconclusive', lole_h_per_year: 3.2, lole_ci: [2.4, 4.1], horizon_years: 1, target_lole_h: 3 } } } },
-      'Not decided: the shortfall estimate (2–4 h/yr) straddles the 3 h/yr goal — more simulation runs would settle it.'],
+      'Not decided: the shortfall estimate (2.4–4.1 h/yr) straddles the 3 h/yr goal — more simulation runs would settle it.'],
     ['pass', review({ summary: { verdict: 'pass', mc_lole_h_per_year: 0.44, target_lole_h: 3 } }), REPORT,
       'Certified: about 0.4 h/yr of shortfall, under the 3 h/yr goal.'],
     ['no target', review({ summary: { verdict: null, mc_lole_h_per_year: 1.25, target_lole_h: null } }), REPORT,

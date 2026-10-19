@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-15",
+  "generated_at": "2026-10-18",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,8 +10,33 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 252,
+  "tool_count": 256,
   "tools": [
+    {
+      "name": "get_component_schema",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "component_class",
+        "query",
+        "offset",
+        "limit"
+      ],
+      "required": [
+        "component_class"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "d989502ae0d5f29cd166dc65f85b0ee61765371baad5f17e4dc3284e6cdec921",
+      "behavioral_fixture": "pending"
+    },
     {
       "name": "list_components",
       "toolsets": [
@@ -5180,6 +5205,85 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "add7aa39807e1175fd337d20587108cc688fda582690e35ca067c2eb5b731000",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "reconcile_experiment",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "experiment_id",
+        "receipt_sha256",
+        "case_id"
+      ],
+      "required": [
+        "experiment_id",
+        "receipt_sha256"
+      ],
+      "safety_tier": "destructive",
+      "schema_sha256": "50b7d96a9252c167417284f46837e231a5465f754a29c2bc3853e254e93e8659",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "export_experiment_comparison",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "experiment_id",
+        "baseline_experiment_id",
+        "comparison_sha256",
+        "case_id",
+        "baseline_case_id"
+      ],
+      "required": [
+        "experiment_id",
+        "baseline_experiment_id",
+        "comparison_sha256"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "8c8fce545a8997a907233d094bc65af76d0261d75b8d750ccfec1c9917c3d0a5",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "compare_experiments",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "experiment_id",
+        "baseline_experiment_id",
+        "case_id",
+        "baseline_case_id"
+      ],
+      "required": [
+        "experiment_id",
+        "baseline_experiment_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "d5f9190dafe2375049b82eb4c3ae58e9f6b30c2c4f9ce40388d5e5c13abbe683",
       "behavioral_fixture": "pending"
     },
     {

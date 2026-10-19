@@ -65,6 +65,12 @@ Review hardening: a deeply nested corrupt JSON record reproduced an authenticate
 
 ## Still pending
 
+[CP-04f](04f-native-completion-observation.md) now addresses bounded observation
+of established registered workers with Activity closed. It is best effort: a
+terminal source lost before capture, or a process lost before persistence, can
+still leave Needs review. It does not provide durable advancement or recovery
+of a running native thread. Source-pinned final validation belongs in its PR.
+
 - Completion capture without an Activity/native-wait observation. A job that
   finishes and loses its native source before any terminal observation remains
   Needs review. No background completion watcher is introduced here.

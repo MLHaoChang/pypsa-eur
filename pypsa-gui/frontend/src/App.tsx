@@ -58,6 +58,7 @@ import { acquireProjectLock, invalidateNetworkQueries, stopLockHeartbeat, switch
 import { nk } from './utils/queryKeys'
 import { appLog, useSimulationStore } from './store/simulationStore'
 import { PanelChromeContext, type PanelChrome } from './components/PageKit'
+import BackToHubResults from './components/BackToHubResults'
 
 // Top-level boundary so any render error in the header/tabs/sidebar/etc. shows
 // a visible error screen instead of whitescreening the entire app.
@@ -171,7 +172,11 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
 }
 
 export function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: () => void }) {
-  const meta = PANEL_META[panel]
+  const uiMode = useUIStore(s => s.uiMode)
+  // Guided reaches the grid checks from the hub design's Results step, so the
+  // header names that step and offers the way back (UX template audit N5).
+  const fromHub = uiMode === 'guided' && panel === 'campusElectrical'
+  const meta = fromHub ? { ...PANEL_META[panel], eyebrow: 'HUB DESIGN · GRID PLAN' } : PANEL_META[panel]
   // A page that draws its own PageHeader claims the header row: it renders
   // ONE compact row with the Close button, and this breadcrumb steps aside
   // (UX assessment Q12; see PanelChromeContext in PageKit).
@@ -194,6 +199,7 @@ export function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: ()
         <span className="text-border-3">/</span>
         <span className="text-[12px] font-semibold text-text tracking-[-0.005em]">{meta.title}</span>
         <span className="flex-1" />
+        {fromHub && <BackToHubResults />}
         <button
           onClick={onClose}
           title="Close (Esc)"
@@ -666,7 +672,7 @@ export default function App() {
         <ProjectTabs />
 
         {/* ── Three-column body ──────────────────────────────────────── */}
-        <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="relative flex flex-1 min-h-0 overflow-hidden">
 
           {/* Zone 0 — Sectioned nav sidebar */}
           <Sidebar />
@@ -698,11 +704,15 @@ export default function App() {
                       )
                       : <MapCanvas mode={canvasView} />}
                 </ErrorBoundary>
-                {/* Mode switcher floats over whichever canvas is active */}
-                <MapModeSwitcher />
-                {/* Snapshot picker / playback bar for the results overlay —
-                    shown on both the blank schematic and the satellite/hybrid map */}
-                <SnapshotPicker />
+                {/* Only view widgets share a local layer above the canvas
+                    and below workbench overlays. Native canvas dialogs stay
+                    outside this layer so they can cover the whole viewport. */}
+                <div className="absolute inset-0 z-10 pointer-events-none [&>*]:pointer-events-auto">
+                  <MapModeSwitcher />
+                  {/* Snapshot picker / playback bar for the results overlay —
+                      shown on both schematic and satellite/hybrid views. */}
+                  <SnapshotPicker />
+                </div>
               </div>
               {/* Zone 4 — Bottom tabbed panel (canvas only). Not in Guided
                   (UX M7, U3): the spreadsheet grids are Expert chrome. */}
@@ -745,9 +755,9 @@ export default function App() {
               it must stay on screen while a full-screen tab owns the main
               area, because it is what put that tab there. A direct flex child
               of this row (not nested inside the `flex-1` zone above) so its
-              open width (stored) / zero-width collapsed column (companion is
-              position: fixed) isn't fought over by the flex
-              algorithm. */}
+              saved width can shrink to available space. On phones both the
+              dock and collapsed companion use this body as their positioned
+              container while the chat stays mounted. */}
           <AssistantDock />
         </div>
 

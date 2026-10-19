@@ -36,6 +36,7 @@ import {
 } from '../api/campusElectrical'
 import { solveQueueApi } from '../api/solveQueue'
 import { useUIStore } from '../store/uiStore'
+import { isNotSolvedRefusal, NotSolvedRefusal } from './results/NotSolved'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
 import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
@@ -194,6 +195,14 @@ function CampusView({ name }: { name: string }) {
   )
 }
 
+/** A refusal in words; an unsolved project gets the state and the action instead of a red sentence. */
+function Refusal({ text, className }: { text: string; className: string }) {
+  if (isNotSolvedRefusal(text)) {
+    return <div className={className} data-testid="campus-not-solved"><NotSolvedRefusal what="The grid checks" /></div>
+  }
+  return <p className={`text-[12px] text-danger ${className}`}>{text}</p>
+}
+
 function CampusFileSection({ name, state, onChange }: {
   name: string; state: CampusState; onChange: (d?: CampusState) => unknown
 }) {
@@ -233,7 +242,7 @@ function CampusFileSection({ name, state, onChange }: {
         </Btn>
       )}
     >
-      {refusal && <p className="text-[12px] text-danger mb-2">{refusal}</p>}
+      {refusal && <Refusal text={refusal} className="mb-2" />}
       {state.skipped.length > 0 && (
         <div className="text-[11.5px] text-muted mb-2">
           Left out of the draft: <ul className="list-disc ml-5">{state.skipped.map(s => <li key={s}>{s}</li>)}</ul>
@@ -373,7 +382,7 @@ function RunSection({ name, state, onChange, lost, outcome, pending, onRunStart,
         <MilpProgress record={milp.record} cancelling={milp.cancelling} onCancel={cancelMilp}
                       stale={state.milp?.stale === true} />
       )}
-      {refusal && <p className="text-[12px] text-danger mt-2">{refusal}</p>}
+      {refusal && <Refusal text={refusal} className="mt-2" />}
       {lost && (
         <p data-testid="campus-run-lost" role="alert" className="text-[12px] text-warn mt-2">
           No answer from the backend to the run ({lost.why}). It may still be running the study, and saves its

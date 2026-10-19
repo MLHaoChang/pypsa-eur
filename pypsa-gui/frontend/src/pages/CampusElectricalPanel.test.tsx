@@ -12,9 +12,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { CampusRunJob, CampusState, InvestmentRow, MilpJobRecord } from '../api/campusElectrical'
 import CampusElectricalPanel from './CampusElectricalPanel'
 
-const store = vi.hoisted(() => ({ currentProject: 'Hub A' as string | null }))
+const store = vi.hoisted(() => ({ currentProject: 'Hub A' as string | null, requestRunSolve: (() => {}) as () => void }))
 vi.mock('../store/uiStore', () => ({
-  useUIStore: (sel: (s: { currentProject: string | null }) => unknown) => sel({ currentProject: store.currentProject }),
+  useUIStore: (sel: (s: { currentProject: string | null; requestRunSolve: () => void }) => unknown) =>
+    sel({ currentProject: store.currentProject, requestRunSolve: () => store.requestRunSolve() }),
 }))
 
 const api = vi.hoisted(() => ({
@@ -106,7 +107,13 @@ describe('CampusElectricalPanel', () => {
     api.draft.mockRejectedValueOnce({ response: { status: 422, data: { detail: "Project 'Hub A' is not solved — solve it and save, then draft" } } })
     renderPanel()
     await userEvent.click(await screen.findByRole('button', { name: 'Draft from project' }))
-    expect(await screen.findByText(/not solved/)).toBeTruthy()
+    // Guided has no header run button: the refusal is a state with the action (UX review N1).
+    expect(await screen.findByTestId('campus-not-solved')).toBeTruthy()
+    expect(screen.getByText('Not run yet')).toBeTruthy()
+    const requestRunSolve = vi.fn()
+    store.requestRunSolve = requestRunSolve
+    await userEvent.click(screen.getByRole('button', { name: 'Run the solve' }))
+    expect(requestRunSolve).toHaveBeenCalled()
     api.draft.mockResolvedValueOnce({ campus_yaml: YAML, skipped: [] })
     api.state.mockResolvedValue({ ...empty, campus_yaml: YAML })
     await userEvent.click(screen.getByRole('button', { name: 'Draft from project' }))

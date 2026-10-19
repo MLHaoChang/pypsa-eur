@@ -5,12 +5,14 @@ CONTROL_TOOLS = frozenset({
     "list_project_runs", "get_run_evidence", "compare_project_runs",
     "discuss_project_run", "export_run_evidence",
     "start_experiment", "prepare_experiment", "list_experiments", "get_experiment",
-    "advance_experiment", "refresh_experiment", "cancel_experiment",
+    "advance_experiment", "refresh_experiment", "cancel_experiment", "reconcile_experiment",
+    "compare_experiments", "export_experiment_comparison",
     "list_tasks", "find_capabilities", "start_task", "get_task", "resume_task", "cancel_task", "resolve_task_step",
     "get_file_delivery", "inspect_import", "preview_project_changes", "apply_project_changes", "create_chart", "build_delivery",
     "ask_user", "use_skill", "start_workflow", "advance_workflow", "end_workflow",
     "set_goal", "pause_goal", "complete_goal",
     "read_result",
+    "get_component_schema",
     "use_toolset", "project_readiness", "wait_for_job", "get_study_evidence",
 })
 DOMAINS = ("all", "project", "network", "simulation", "results", "gridspine")

@@ -148,16 +148,14 @@ def _snapshot_bound_job(job_id, ctx):
     _, key, worker, started = binding
     with ctx.solver_state_lock:
         record = ctx.solver_state if key is None else ctx.solver_state.get(key)
-        if not isinstance(record, dict) or not (
-            (worker is not None and record.get('thread') is worker)
-            or (worker is None and started is not None and record.get('started_at') == started)
-        ):
+        if not _same_origin(record, worker, started):
             return {'status': 'unknown'}
         snap = {k: record.get(k) for k in (
             'status', 'kind', 'objective', 'condition', 'stage', 'error',
             'report_id', 'mode', 'section', 'version',
         )}
         snap['section'] = snap['section'] or record.get('current_section')
+        snap['status'] = _native_status(record, worker)
         snap['running'] = snap['status'] == 'running'
         snap['progress'] = None
         for field in ('iterations', 'points', 'rows'):
@@ -166,6 +164,53 @@ def _snapshot_bound_job(job_id, ctx):
                 snap['progress'] = {field: len(value)}
                 break
         return snap
+
+
+def _same_origin(record, worker, started):
+    return isinstance(record, dict) and (
+        (worker is not None and record.get('thread') is worker)
+        or (worker is None and started is not None and record.get('started_at') == started))
+
+
+def _native_status(record, worker):
+    status = record.get('status')
+    if (status == 'running' and isinstance(worker, threading.Thread)
+            and worker.ident is not None and not worker.is_alive()):
+        return 'unknown'  # An exited thread does not prove success/failure/no effect.
+    return status or 'unknown'
+
+
+def _completion_status(job_id, ctx, project):
+    """Nonblocking, identity-bound status only; None means a busy lifecycle lock."""
+    if not _LOCK.acquire(blocking=False):
+        return None
+    try:
+        binding = _ACTIVITY_BINDINGS.get(job_id)
+    finally:
+        _LOCK.release()
+    if binding is None or binding[0] != id(ctx):
+        return 'unknown'
+    _, key, worker, started = binding
+    if not ctx.solver_state_lock.acquire(blocking=False):
+        return None
+    try:
+        if str(ctx.project_uuid) != project:
+            return 'unknown'
+        record = ctx.solver_state if key is None else ctx.solver_state.get(key)
+        return _native_status(record, worker) if _same_origin(record, worker, started) else 'unknown'
+    finally:
+        ctx.solver_state_lock.release()
+
+
+def _watch_activity(handle, ctx):
+    from harness import completion_observer
+    with _LOCK:
+        binding = _ACTIVITY_BINDINGS.get(handle.job_id)
+    if binding is not None:
+        try:
+            completion_observer.watch(handle, ctx, binding[2])
+        except Exception:  # noqa: BLE001 -- observation cannot change job handoff.
+            completion_observer.note_incomplete(handle.owner_user_id, handle.project_uuid)
 
 
 def activity_jobs(ctx, *, owner_id: str, project_id: str) -> list[dict]:
@@ -233,6 +278,7 @@ def register_foreground_solve(
         origin = _bind_activity(job_id, ctx)
         handle = _FOREGROUND[job_id]
     _remember_activity(handle, origin)
+    _watch_activity(handle, origin)
     return job_id
 
 
@@ -267,6 +313,7 @@ def register_study_job(
         origin = _bind_activity(job_id, ctx, study_key)
         handle = _STUDIES[job_id]
     _remember_activity(handle, origin)
+    _watch_activity(handle, origin)
     return job_id
 
 
@@ -295,6 +342,7 @@ def register_report_job(
         origin = _bind_activity(job_id, ctx, REPORT_STATE_KEY)
         handle = _REPORTS[job_id]
     _remember_activity(handle, origin)
+    _watch_activity(handle, origin)
     return job_id
 
 
@@ -590,6 +638,8 @@ def wait_report_job(
 
 
 def _reset_for_tests() -> None:
+    from harness import completion_observer
+    completion_observer._reset_for_tests()
     with _LOCK:
         _FOREGROUND.clear()
         _STUDIES.clear()
