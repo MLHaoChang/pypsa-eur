@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The grid-forming settings state now carries a read-only `island_rows_now` flag (whether the project's solver settings have island constraints on), in every state, so a "capacity is needed" verdict can say it will not show in any solve result while they are off (UX review N7, decision C). The assistant tool description names it.
