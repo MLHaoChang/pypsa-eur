@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant resolves a project you name exactly ("Open project oj-grid-copy …") to that project, never a partial match or the one already open. With a model configured, every sentence typed or spoken to the companion now goes to the assistant; the built-in results tour and project picker shortcuts are kept for when no model key is set.

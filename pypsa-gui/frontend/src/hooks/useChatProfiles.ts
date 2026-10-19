@@ -56,12 +56,16 @@ export function chatProfileReadiness(
  * bound session's binding when the request names none); else the active one.
  * The health probe shares `['chat','health']` with ApiKeySetup and
  * AssistantModelSettings, so a key save or a profile switch re-reads it.
+ * `settled` is true once both probes have answered (or failed), so a caller
+ * can tell "not known yet" from "known: no usable profile".
  */
-export function useChatReadiness(): { effectiveProfileId: string | null; ready: boolean | undefined } {
+export function useChatReadiness(): {
+  effectiveProfileId: string | null; ready: boolean | undefined; settled: boolean
+} {
   const picked = useChatStore((s) => s.profileId)
   const bound = useChatStore((s) => s.boundProfileId)
-  const { data: profiles } = useChatProfiles()
-  const { data: health } = useQuery<ChatHealth>({
+  const { data: profiles, isFetched: profilesFetched } = useChatProfiles()
+  const { data: health, isFetched: healthFetched } = useQuery<ChatHealth>({
     queryKey: ['chat', 'health'],
     queryFn: getChatHealth,
     staleTime: 30_000,
@@ -69,5 +73,9 @@ export function useChatReadiness(): { effectiveProfileId: string | null; ready: 
   })
   const effectiveProfileId = picked ?? bound
     ?? profiles?.active_profile_id ?? health?.active_profile?.id ?? null
-  return { effectiveProfileId, ready: chatProfileReadiness(effectiveProfileId, profiles, health) }
+  return {
+    effectiveProfileId,
+    ready: chatProfileReadiness(effectiveProfileId, profiles, health),
+    settled: profilesFetched && healthFetched,
+  }
 }

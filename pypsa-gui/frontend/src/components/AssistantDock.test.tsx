@@ -366,25 +366,32 @@ describe('assistant dock prominence', () => {
     )
   })
 
-  it('keeps Guided policy and does not forward a local walkthrough to a competing model controller', async () => {
+  // Owner decision Q4: with a model available every sentence goes to the
+  // copilot; the local tour and project picker are the no-key path only.
+  it.each(['Walk me through the key results in each tab', 'Open the project'])
+  ('sends a former local shortcut to the copilot when a model is available: %s', async (text) => {
     const user = userEvent.setup()
-    const forwarded = vi.fn()
-    window.addEventListener('companion:live-utterance', forwarded)
+    const forwarded: string[] = []
+    const picker = vi.fn()
+    const onUtterance = (ev: Event) => forwarded.push((ev as CustomEvent<string>).detail)
+    window.addEventListener('companion:live-utterance', onUtterance)
+    window.addEventListener('chat:open-project-picker', picker)
     useUIStore.setState({ currentProject: 'Demo', discussedRun: null,
       activeSlidePanel: null, resultsTabRequest: null, uiMode: 'guided' })
     const view = render(<AssistantDock />)
     try {
       await user.click(screen.getByTestId('companion-live'))
-      await user.type(screen.getByTestId('companion-live-input'), 'Walk me through the key results in each tab')
+      await user.type(screen.getByTestId('companion-live-input'), text)
       await user.click(screen.getByTestId('companion-live-send'))
+      expect(forwarded).toEqual([text])
+      expect(picker).not.toHaveBeenCalled()
+      expect(useUIStore.getState().resultsTabRequest).toBeNull()
       expect(useUIStore.getState().assistantDockOpen).toBe(false)
       expect(useUIStore.getState().uiMode).toBe('guided')
-      expect(useUIStore.getState().resultsTabRequest).toBeNull()
-      expect(screen.getByTestId('companion-live-caption').textContent).toContain('Guided mode')
-      expect(forwarded).not.toHaveBeenCalled()
     } finally {
       view.unmount()
-      window.removeEventListener('companion:live-utterance', forwarded)
+      window.removeEventListener('companion:live-utterance', onUtterance)
+      window.removeEventListener('chat:open-project-picker', picker)
     }
   })
 

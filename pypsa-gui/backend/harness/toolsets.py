@@ -13,6 +13,7 @@ CONTROL_TOOLS = frozenset({
     "set_goal", "pause_goal", "complete_goal",
     "read_result",
     "get_component_schema",
+    "resolve_project_target",
     "use_toolset", "project_readiness", "wait_for_job", "get_study_evidence",
 })
 DOMAINS = ("all", "project", "network", "simulation", "results", "gridspine")

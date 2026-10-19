@@ -46,4 +46,71 @@ describe('AssistantDock without API key', () => {
     expect(useUIStore.getState().assistantDockOpen).toBe(false)
     expect(screen.getByTestId('companion-live-caption').textContent).toContain('Add an API key')
   })
+
+  it('opens the project picker locally without a model key', async () => {
+    const user = userEvent.setup()
+    const heard: string[] = []
+    const picker = vi.fn()
+    const onUtterance = (ev: Event) => heard.push((ev as CustomEvent<string>).detail)
+    window.addEventListener('companion:live-utterance', onUtterance)
+    window.addEventListener('chat:open-project-picker', picker)
+    const view = render(<AssistantDock />)
+    try {
+      await user.click(screen.getByTestId('companion-live'))
+      await user.type(screen.getByTestId('companion-live-input'), 'Open the project')
+      await user.click(screen.getByTestId('companion-live-send'))
+      expect(picker).toHaveBeenCalledTimes(1)
+      expect(heard).toEqual([])
+      expect(screen.getByTestId('companion-live-caption').textContent).toBe('Opening the project list.')
+    } finally {
+      view.unmount()
+      window.removeEventListener('companion:live-utterance', onUtterance)
+      window.removeEventListener('chat:open-project-picker', picker)
+    }
+  })
+
+  it('runs the local results tour without a model key and keeps Guided mode', async () => {
+    const user = userEvent.setup()
+    const heard: string[] = []
+    const onUtterance = (ev: Event) => heard.push((ev as CustomEvent<string>).detail)
+    window.addEventListener('companion:live-utterance', onUtterance)
+    useUIStore.setState({ currentProject: 'Demo', discussedRun: null,
+      activeSlidePanel: null, resultsTabRequest: null, uiMode: 'guided' })
+    const view = render(<AssistantDock />)
+    try {
+      await user.click(screen.getByTestId('companion-live'))
+      await user.type(screen.getByTestId('companion-live-input'), 'Walk me through the key results in each tab')
+      await user.click(screen.getByTestId('companion-live-send'))
+      expect(heard).toEqual([])
+      expect(useUIStore.getState().uiMode).toBe('guided')
+      expect(screen.getByTestId('companion-live-caption').textContent).toContain('Guided mode')
+    } finally {
+      view.unmount()
+      window.removeEventListener('companion:live-utterance', onUtterance)
+    }
+  })
+
+  it('never claims a named project was opened without a model key', async () => {
+    const user = userEvent.setup()
+    const heard: string[] = []
+    const picker = vi.fn()
+    const onUtterance = (ev: Event) => heard.push((ev as CustomEvent<string>).detail)
+    window.addEventListener('companion:live-utterance', onUtterance)
+    window.addEventListener('chat:open-project-picker', picker)
+    const view = render(<AssistantDock />)
+    try {
+      await user.click(screen.getByTestId('companion-live'))
+      await user.type(screen.getByTestId('companion-live-input'), 'Open project Sensitivity X')
+      await user.click(screen.getByTestId('companion-live-send'))
+      expect(picker).not.toHaveBeenCalled()
+      expect(heard).toEqual([])
+      const caption = screen.getByTestId('companion-live-caption').textContent ?? ''
+      expect(caption).toContain('Add an API key')
+      expect(caption).not.toMatch(/Sensitivity X|Opening/)
+    } finally {
+      view.unmount()
+      window.removeEventListener('companion:live-utterance', onUtterance)
+      window.removeEventListener('chat:open-project-picker', picker)
+    }
+  })
 })

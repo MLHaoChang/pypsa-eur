@@ -201,6 +201,16 @@ def _empty(name: str, description: str) -> dict[str, Any]:
 
 TOOLS: list[dict[str, Any]] = [
     _t(
+        "resolve_project_target",
+        "Resolve an exact authorized project name to its canonical project_id and project_name. "
+        "Use before a named-project action; never guess a partial match or substitute the active project. "
+        "Does not activate, navigate, select a run or grant permission. Recheck native authority on use. "
+        "Unknown and inaccessible names have the same not-found outcome; use list_projects and ask "
+        "the user to clarify an incomplete name. Not a checked-answer adapter. Safety: read.",
+        {"project_name": {"type": "string", "minLength": 1, "maxLength": 256}},
+        ["project_name"],
+    ),
+    _t(
         "get_component_schema",
         "Discover native component fields before choosing parameters. Paged class metadata only: "
         "stored/display units, request-model types/bounds/enums, native input/output and derived/read-only status. "
@@ -3646,6 +3656,7 @@ TOOL_ROUTES: dict[str, list] = {
     "list_tasks": _SERVICE_CALL,
     "find_capabilities": _SERVICE_CALL,
     "get_component_schema": _SERVICE_CALL,
+    "resolve_project_target": _SERVICE_CALL,
     "start_task": _SERVICE_CALL,
     "get_task": _SERVICE_CALL,
     "resume_task": _SERVICE_CALL,
