@@ -381,10 +381,18 @@ def _render_block(doc, block, report: ReportDocument,
         _disclosure(doc, f"Unsupported block {getattr(block, 'type', type(block).__name__)!r}.")
 
 
+#: The category headings (UX review N9): the same four names the screens use.
+CATEGORY_TITLES = {"investment": "Investment", "grid_plan": "Grid plan",
+                   "reliability": "Reliability", "operation": "Operation"}
+CATEGORY_BOOKMARK_PREFIX = "cat:"
+
+
 def _render_doc_section(doc, section: Section, report: ReportDocument,
                         figure_bytes: dict[str, bytes], counters: _Counters,
                         bookmarks: _Bookmarks) -> None:
-    _heading(doc, section.heading, 1, bookmarks,
+    # A section that belongs to a category sits one level under that category's heading.
+    level = 2 if section.category in CATEGORY_TITLES else 1
+    _heading(doc, section.heading, level, bookmarks,
              f"{BOOKMARK_PREFIX}{section.section_id}")
     _render_section_body(doc, section, report, figure_bytes, counters)
 
@@ -470,7 +478,12 @@ def render_document_docx(doc: ReportDocument, *, template: Any = None,
         "Every table and figure in this document was computed by the study "
         "engines and rendered by code. Sections the study did not establish "
         "say so."))
+    last_category = None
     for section in doc.sections:
+        if section.category in CATEGORY_TITLES and section.category != last_category:
+            _heading(d, CATEGORY_TITLES[section.category], 1, bookmarks,
+                     f"{CATEGORY_BOOKMARK_PREFIX}{section.category}")
+        last_category = section.category
         _render_doc_section(d, section, doc, figure_bytes, counters, bookmarks)
     _appendix(d, doc, bookmarks)
     buf = io.BytesIO()

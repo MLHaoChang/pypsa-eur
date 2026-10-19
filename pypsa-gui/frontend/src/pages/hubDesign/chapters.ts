@@ -23,6 +23,8 @@ export interface ChapterTile {
   /** The result group's own label (RESULT_GROUPS), so the names match Expert. */
   group: string
   label: string
+  /** The figure is the study's, and the project itself is not solved (G5). */
+  fromStudy?: boolean
   /** '' unless the state shows a figure (ready / zero / stale). */
   value: string
   unit?: string
@@ -40,10 +42,26 @@ export interface ChapterInputs {
   /** `notHub`: the campus route answered that this project has no campus (409). */
   grid: { campus: CampusState | null; notHub: boolean }
   reliability: { hasResults: boolean; running: boolean; lole: number | null; target: number | null
-                 verdict: 'pass' | 'fail' | 'inconclusive' | null }
+                 verdict: 'pass' | 'fail' | 'inconclusive' | null
+                 /** The project has its own solve; `false` marks the figure as the study's alone (G5). */
+                 solved?: boolean
+                 /** The review says the study is out of date (N4). */
+                 stale?: boolean }
   /** `gfm`: the campus GFM settings (null when the project has no campus or no island). */
   operation: { status: SimulationStatus | null; gfm?: GfmSettingsState | null }
 }
+
+/** Why a study figure is dimmed (UX review N4): the network was solved or edited after the study. */
+export const STALE_TILE_REASON = 'The network changed since the study ran. Run the study again to refresh.'
+
+/** Whether the project itself has an hour-by-hour solve (stale counts: its figures exist). */
+export function dispatchSolved(status: SimulationStatus | null | undefined): boolean {
+  return !!status && status.dispatch != null && status.dispatch !== 'none' && num(status.objective) != null
+}
+
+/** The hover text of a figure marked "From the study" (G5). */
+export const FROM_STUDY_HINT =
+  'From the study, which ran on the design. The project itself has not been solved yet.'
 
 const ORDER: ChapterId[] = ['investment', 'grid_plan', 'reliability', 'operation']
 const groupLabel = (id: ChapterId) => RESULT_GROUPS.find(g => g.id === id)?.label ?? id
@@ -130,8 +148,15 @@ function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 
     : r.verdict === 'inconclusive' ? 'Not decided' : null
   const basis = r.target == null ? 'No goal set'
     : `${verdict ? `${verdict}: ` : ''}the goal is ${Number(r.target.toPrecision(6))} h/yr`
-  return { label, value: String(r.lole), unit: 'h/yr', state: 'ready', basis, open }
+  return { label, value: String(r.lole), unit: 'h/yr', state: r.stale ? 'stale' : 'ready', basis, open,
+    reason: r.stale ? STALE_TILE_REASON : undefined, fromStudy: r.solved === false && !r.stale }
 }
+
+/** Why a "capacity is needed" verdict will not show in a hub solve (UX review N7). */
+export const ISLAND_ROWS_OFF_TAIL = ', and the hub solve is not sized to island (island rows are off)'
+export const ISLAND_ROWS_OFF_NOTE =
+  'The island rows are off in the solver settings, so the hub solve is not sized to island: the capacity '
+  + 'above will not appear in its results until they are turned on.'
 
 /** A search that evaluated no case: no grid-forming converter takes part in any island
  *  case (a data center whose only scenario is ups_bridged), so there is nothing to tune. */
@@ -167,7 +192,8 @@ function control(gfm: GfmSettingsState | null | undefined): ChapterTile['control
   const n = Object.keys(rec.settings).length
   const text = rec.status === 'recommended' ? `recommended for ${n} unit${n === 1 ? '' : 's'}, not applied yet`
     : rec.status === 'unchanged' ? 'the current settings pass with margin'
-      : rec.status === 'not_achievable' ? 'no setting passes: capacity is needed'
+      : rec.status === 'not_achievable'
+        ? `no setting passes: capacity is needed${gfm.island_rows_now === false ? ISLAND_ROWS_OFF_TAIL : ''}`
         : 'the search stopped at its cap; recommend again'
   return { state: 'ready', text: `Grid-forming settings (heuristic screening): ${text}.` }
 }
