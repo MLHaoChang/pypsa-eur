@@ -3065,6 +3065,8 @@ def _dispatch_real_tool_call(
         "tool_name": tool_name,
         "summary": _truncate_result(result_for_model),
     })
+    from services.reference_resolution import active_project_key
+    session.note_touched_components(active_project_key(), tool_name, tu.get("input"))
     yield "tool_result", {
         "tool_use_id": tool_use_id,
         "tool_name": tool_name,

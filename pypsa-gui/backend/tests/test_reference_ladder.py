@@ -13,7 +13,7 @@ from tests.test_openai_comprehensive_live import setup_profile, turn
 from tests.test_chat_stream_session_ownership import fake_provider  # noqa: F401
 from tests.test_workflow_tools import baseline, helpers_state  # noqa: F401
 
-TOOLS = {"resolve_reference", "get_component", "discuss_project_run"}
+TOOLS = {"resolve_reference", "get_component", "discuss_project_run", "bulk_update_components"}
 
 
 @pytest.fixture
@@ -157,8 +157,27 @@ def test_a_displayed_run_of_another_project_is_ignored(runs):
     shown = {"results_source": {"scope": "historical", "project_id": "00000000-0000-0000-0000-000000000000",
                                 "run_id": "run-old"}}
     out = resolve(runs, shown, target="run")
-    assert out["target"]["run_id"] == "run-new" and out["via"] == "latest_completed"
-    assert out["ignored"]
+    assert out["status"] == "ambiguous" and out["ignored"]
+    assert [c["run_id"] for c in out["candidates"]] == ["run-new", "run-old"]
+
+
+def test_this_run_with_several_completed_runs_asks(runs):
+    out = resolve(runs, target="run")
+    assert out["status"] == "ambiguous" and out["total_candidates"] == 2
+    assert {s["run_id"] for s in out["skipped"]} == {"run-failed", "run-live"}
+
+
+def test_this_run_with_one_completed_run_uses_it(ladder, baseline):
+    _ctx, project_id, root = baseline
+    _publish(root, project_id, "run-only", "completed", "2026-10-01T10:00:00+00:00")
+    out = resolve(ladder, target="run")
+    assert out["via"] == "only" and out["target"]["run_id"] == "run-only"
+
+
+def test_the_current_results_on_screen_are_these_results(runs):
+    shown = {"panel": "results", "results_source": {"scope": "current", "source": "loadflow"}}
+    out = resolve(runs, shown, target="run")
+    assert out["via"] == "displayed" and out["target"] == {"scope": "current", "source": "loadflow"}
 
 
 def test_no_completed_run_is_not_found_and_still_names_the_others(ladder, baseline):
@@ -173,6 +192,7 @@ def test_no_completed_run_is_not_found_and_still_names_the_others(ladder, baseli
     {"target": "component"},
     {"target": "component", "component_class": "Nope"},
     {"target": "planet"},
+    {"target": "component", "component_class": "storage", "name": ""},
     {"target": "run", "run_id": "x" * 65},
 ])
 def test_invalid_requests_refuse(ladder, args):
@@ -207,3 +227,38 @@ def test_the_browser_selection_reaches_the_ladder_through_the_stream(ladder, cli
         assert result["via"] == "selected" and result["target"]["name"] == "L3"
     finally:
         chat_service.drop_session(session_id)
+
+
+def test_a_name_without_a_class_searches_every_class(ladder):
+    out = resolve(ladder, target="component", name="S1")
+    assert out["target"] == {"component_class": "StorageUnit", "name": "S1"}
+
+
+def test_a_single_name_bulk_update_counts_as_discussed(ladder):
+    _, errors = call(ladder, "bulk_update_components",
+                     {"component_class": "Line", "names": ["L3"], "updates": {"s_nom": 90}})
+    assert not errors
+    out = resolve(ladder, target="component", component_class="Line")
+    assert out["via"] == "discussed" and out["target"]["name"] == "L3"
+
+
+def test_a_component_discussed_in_another_project_is_not_carried_over(ladder):
+    ladder.touched_components.append(("another-project", "Line", "L2"))
+    out = resolve(ladder, target="component", component_class="Line")
+    assert out["status"] == "ambiguous"
+
+
+def test_hint_text_is_cleaned_and_capped_before_it_is_echoed(ladder):
+    noisy = "Ghost\n" + "x" * 500
+    out = resolve(ladder, selected("Generator", noisy), target="component", component_class="Line")
+    note = out["ignored"][0]
+    assert "\n" not in note and len(note) < 200
+
+
+@pytest.mark.parametrize("index,status", [(1, "resolved"), (7, "not_found"), (None, "not_found")])
+def test_this_hour_is_the_snapshot_on_screen(ladder, index, status):
+    hints = {} if index is None else {"snapshot_index": index}
+    out = resolve(ladder, hints, target="snapshot")
+    assert out["status"] == status
+    if status == "resolved":
+        assert out["target"]["snapshot_index"] == 1 and "2026-01-01 01:00" in out["target"]["snapshot"]

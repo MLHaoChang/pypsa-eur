@@ -57,7 +57,7 @@
         "target"
       ],
       "safety_tier": "read",
-      "schema_sha256": "224c2be4ce627c605a643da6dc47e5a104055ce3f40a6a8eb502e028eb4c9ed2",
+      "schema_sha256": "16d68ed9508b52f40c77158769becd50f4b3e19c4c852392cf1b34ad9cbc79a6",
       "behavioral_fixture": "pending"
     },
     {

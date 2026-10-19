@@ -212,15 +212,16 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "resolve_reference",
-        "Resolve 'this', 'the' or 'latest' to exactly one component or run of the active project, "
-        "by one ladder: an explicit name or run_id; what is on screen now (the selection, the displayed "
-        "run); what was discussed last; the only one that exists; otherwise candidates to ask about. "
-        "component_class 'storage' covers StorageUnit and Store. latest=true takes the newest completed "
+        "Resolve 'this', 'the' or 'latest' to exactly one component, run or snapshot of the active "
+        "project, by one ladder: an explicit name or run_id; what is on screen now (the selection, the "
+        "displayed results or run, the shown snapshot); what was discussed last; the only one that "
+        "exists; otherwise candidates to ask about. component_class 'storage' covers StorageUnit and "
+        "Store; a name without a class searches every class. latest=true takes the newest completed "
         "run and names newer failed or running runs it skipped. Returns status resolved|ambiguous|"
         "not_found, via, target, says (always repeat it so the user sees what was resolved), ignored "
         "hints and, when ambiguous, candidates with key fields: then ask with one ask_user Choice, never "
         "guess. Hints are re-read; activates, selects and opens nothing. Safety: read.",
-        {"target": {"type": "string", "enum": ["component", "run"]},
+        {"target": {"type": "string", "enum": ["component", "run", "snapshot"]},
          "component_class": {"type": "string", "enum": [c for c in COMPONENT_CLASS_ENUM
                                                         if c != "GlobalConstraint"] + ["storage"]},
          "name": {"type": "string", "minLength": 1, "maxLength": 256},

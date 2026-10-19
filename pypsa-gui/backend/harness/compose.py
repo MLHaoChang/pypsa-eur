@@ -421,6 +421,9 @@ def _build_system_prompt(
     parts = [
         base,
         _ASSISTANT_STANCE if include_tools else _ASSISTANT_STANCE_FACTS,
+        # LC-10 — the reference ladder, right after the stance it refines
+        # ("this"/"the"/"latest" go through resolve_reference). TOOLS-ON ONLY:
+        # it names a tool. A NEW part, so no pinned constant moves.
         *( [_REFERENCE_LADDER] if include_tools else [] ),
         # Task 10 — profile awareness. TOOLS-ON ONLY, and that is the whole
         # placement rule: it names `set_active_profile`, and Task 8's
