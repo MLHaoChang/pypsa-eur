@@ -3,7 +3,7 @@
 
 # Renewable profiles: the owner's vision, the gaps, and the extension spec
 
-Status: needs-triage (owner questions RP-Q1–RP-Q4 open, see the end)
+Status: ready-for-agent (owner decisions RP-Q1–RP-Q4 taken 2026-10-19; RP-Q5 open)
 Baseline: master `5d5bf26b83aa18c9a2a0a3418d3beeecccc8d086`; profile stack head
 `779feccd48aa9e819b49a0bf5b69dba8f9cbbdfe` (PR #398).
 
@@ -158,14 +158,42 @@ stored in the profile's provenance:
   "peak is an hour late" → `peak_shift`. The copilot shows before/after
   (R6) and asks before apply.
 
+### R8 Time basis (gatekeeper review, 2026-10-19)
+
+- Generated series are UTC. Naive snapshots are read as UTC by default, the
+  PyPSA-Eur convention that `commercial/lp_bindings.py` follows.
+- `time_basis` = an IANA zone declares the snapshots that zone's wall clock.
+  The series is then mapped through each snapshot's UTC instant(s): the
+  repeated autumn hour takes the mean, the skipped spring hour takes the next
+  valid one, and local new-year midnight wraps to the weather year's last hour.
+- The basis is recorded in the profile meta and in the apply answer. This
+  landed in Phase 1 (#380). RP-04 adds the per-project "snapshots are local
+  time in …" choice.
+
+### R9 Representative-week templates (RP-12)
+
+Energy Hub templates solve a representative week, not a calendar year. With
+RP-Q3 = A, a dated week is a partial-year horizon, so it is sliced by
+month-day-hour from the weather year. RP-Q5 decides whether the week can be
+something other than its calendar dates.
+
+## Decisions (owner, 2026-10-19, through the coordinator)
+
+- RP-Q1 = A. The stack lands in 3 units: Phase 1 #380 (squash; it carries
+  #362–#380), Phase C #396 then #394, Phase E #398 plus RP-01. The
+  gatekeeper's apply-path findings (time basis, a clear refusal on
+  representative weeks) go into Phase 1 before its formal OK.
+- RP-Q2 = A. One click: "Generate defaults for all" in the Time Series
+  Manager's Renewables tab and in the chat. The weather source and year are
+  asked once per project, and generators missing coordinates are listed with
+  their fixes. There is no silent background generation.
+- RP-Q3 = A. Partial-year horizons slice the weather year by
+  month-day-hour, with the leap rules unchanged. The spec §4 change is
+  reviewed by the gatekeeper.
+- RP-Q4 = A. Profile Studio becomes an Expert-only advanced view, linked
+  from the Time Series Manager and removed from the sidebar.
+
 ## Owner questions (sent through the coordinator)
 
-- RP-Q1 Landing shape for the stack (3 units / one by one / one PR).
-- RP-Q2 What "automatic" means: one-click defaults (recommended) or silent
-  background generation.
-- RP-Q3 Partial-year horizons: slice the weather year (recommended) or keep
-  refusing.
-- RP-Q4 Profile Studio: keep it as an Expert advanced view linked from the
-  Time Series Manager (recommended), or remove it.
-
-Answers land here under `## Decisions`.
+- RP-Q5 Representative weeks: use the template's calendar dates
+  (recommended), or pick statistically typical weeks from the weather year.

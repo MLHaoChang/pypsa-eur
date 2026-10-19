@@ -3,10 +3,10 @@
 
 # RP-03 — horizon and weather year from the snapshots
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Baseline: master `5d5bf26b83aa18c9a2a0a3418d3beeecccc8d086`
-Blocked by: RP-Q3, gatekeeper review of the rule change
+Blocked by: gatekeeper review of the rule change (RP-Q3 = A: slice)
 Requirements: R2 in [the spec](../spec.md)
 
 - Default weather year: the snapshot year if it is a completed past year, else the last completed year. Used by the routes, the chat tools and the GUI when no `year` is given, and reported as `year_source: snapshots|default`.

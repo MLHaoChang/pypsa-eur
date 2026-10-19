@@ -3,7 +3,7 @@
 
 # Renewable profiles: order of work
 
-Status: ready-for-agent once RP-Q1 is answered
+Status: ready-for-agent (RP-Q1 = A, 2026-10-19)
 Spec: [spec.md](spec.md). Tickets: [issues/](issues/).
 
 ## Step 0: land the existing stack (RP-Q1)
@@ -14,7 +14,8 @@ is in three units, each retargeted to master and green on its own head:
 
 1. Phase 1: #380 (carries #362–#380). Port nothing, since #371's audit fix is
    inside. Merge master for the `catalogue.py` / `chat_tools.py` / `App.tsx`
-   overlap. Gatekeeper: brief review of `assign_profile` (#371).
+   overlap. Gatekeeper findings go in the same head: the time basis (R8) and
+   the representative-week refusal text. Then the gatekeeper's formal OK.
 2. Phase C: #396 (carries #390, #393, #395), then #394 on top.
 3. Phase E: #398 plus RP-01 (the 0/0 coordinates fix) in the same unit, so
    the silent wrong-site path never reaches master.
@@ -35,7 +36,8 @@ Each unit gets `scripts/coord/premerge.sh <pr>`, then "premerge ok <sha>" goes t
 | 8 | RP-06 shaping ops | V7 calibration engine; gatekeeper plan first |
 | 9 | RP-08 chat default-first + tools | after the live-copilot LC-03/04/05 window for `catalogue.py` |
 | 10 | RP-10 Guided offer | after RP-Q2 |
-| 11 | RP-11 QA, live probe, docs | closes the package |
+| 11 | RP-12 representative weeks | after RP-03 and RP-Q5 |
+| 12 | RP-11 QA, live probe, docs | closes the package |
 
 ## Rules for every PR
 
