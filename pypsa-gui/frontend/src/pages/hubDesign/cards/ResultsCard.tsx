@@ -61,7 +61,6 @@ export function ResultsCard() {
     enabled: !!project && multiPeriod,
   })
   const setStep = useHubDesignStore(s => s.setStep)
-  const project = useUIStore(s => s.currentProject)
   // The four category tiles (UX S6, G4/G6), shown whether or not the study ran.
   const summary = review?.summary ?? {}
   const verdict = summary.verdict
