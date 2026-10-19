@@ -35,9 +35,9 @@
     },
     {
       "item": "finance inputs",
-      "note": "the case reads the week's running costs and the pack's capex as 2030 money (the base year, its first operating year) and escalates them from 2030; 2020 labels the report. The staged microgrid follows the same rule from its first period (2027); the terminal value is the remaining-life annuity of each part",
+      "note": "the week's running costs and the pack's capex are held flat to 2030 (the first operating year) and escalate from there, the staged microgrid's rule from its first period (2027); the terminal value is the remaining-life annuity of each part",
       "source": "assumed",
-      "value": "the staged microgrid's: nominal EUR (2020 money, the pack's), escalation 2 %/yr, inflation 2 %, all equity at 7 %, pre-tax; PV degrades 0.5 %/yr, the rest not"
+      "value": "the staged microgrid's: pack prices (2020 price data) taken as real 2030 EUR (the base year), escalation 2 %/yr from 2030, inflation 2 %, all equity at 7 %, pre-tax; PV degrades 0.5 %/yr, the rest not"
     },
     {
       "item": "battery inverter replacement",

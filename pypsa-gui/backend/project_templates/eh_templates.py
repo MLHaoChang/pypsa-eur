@@ -763,16 +763,16 @@ TEMPLATE_META: dict[str, dict] = {
              "source": "assumed",
              "note": "in service and sunk: no capex in the case; only the candidates the plan "
                      "builds are investments. The solve is unchanged"},
-            {"item": "finance inputs", "value": "the staged microgrid's: nominal EUR (2020 money, "
-                                                "the pack's), escalation 2 %/yr, inflation 2 %, "
-                                                "all equity at 7 %, pre-tax; PV degrades "
-                                                "0.5 %/yr, the rest not",
+            {"item": "finance inputs",
+             "value": f"the staged microgrid's: pack prices (2020 price data) taken as real "
+                      f"{MG_FIRST_YEAR} EUR (the base year), escalation 2 %/yr from "
+                      f"{MG_FIRST_YEAR}, inflation 2 %, all equity at 7 %, pre-tax; PV degrades "
+                      "0.5 %/yr, the rest not",
              "source": "assumed",
-             "note": f"the case reads the week's running costs and the pack's capex as "
-                     f"{MG_FIRST_YEAR} money (the base year, its first operating year) and "
-                     f"escalates them from {MG_FIRST_YEAR}; 2020 labels the report. The staged "
-                     "microgrid follows the same rule from its first period (2027); the terminal "
-                     "value is the remaining-life annuity of each part"},
+             "note": f"the week's running costs and the pack's capex are held flat to "
+                     f"{MG_FIRST_YEAR} (the first operating year) and escalate from there, the "
+                     "staged microgrid's rule from its first period (2027); the terminal value "
+                     "is the remaining-life annuity of each part"},
             {"item": "battery inverter replacement", "value": "after 10 years (inv_power_lifetime)",
              "source": "assumed",
              "note": "bess_new's inverter is re-bought in 2039 (replacement_rule part_lifetimes); "
