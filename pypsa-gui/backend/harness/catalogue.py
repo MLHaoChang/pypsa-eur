@@ -1357,6 +1357,84 @@ TOOLS: list[dict[str, Any]] = [
         "Idempotent. No disk/solver impact. Safety: read.",
     ),
 
+    # ── Renewable profile generator (6) ────────────────────────────────────
+    # Thin wrappers over the /api/profiles routes (Task 7). Point ids follow
+    # the generate UI's convention: the point id IS the target component's
+    # name, so apply needs no mapping in the common case.
+
+    _t(
+        "list_profile_presets",
+        "List the renewable-profile presets (wind/solar parameter bundles), "
+        "optionally for one technology. Each entry carries its full params "
+        "dict. Safety: read.",
+        {"technology": {"type": "string", "enum": ["wind", "solar"]}},
+    ),
+    _t(
+        "get_profile_parameters",
+        "The resolved parameter set of ONE preset (turbine/panel, "
+        "orientation, losses…) — the knobs preview_renewable_profile and "
+        "generate_renewable_profile accept as `params` overrides. Unknown "
+        "preset is a 422 listing what exists. Safety: read.",
+        {"preset": {"type": "string"},
+         "technology": {"type": "string", "enum": ["wind", "solar"]}},
+        ["preset"],
+    ),
+    _t(
+        "preview_renewable_profile",
+        "Quick SYNTHETIC preview of a renewable profile for the given points "
+        "(id/lon/lat), downsampled to daily means and labelled an estimate — "
+        "for weighing options before committing to a real generation. Never "
+        "enqueues a job. Safety: read.",
+        {"points": {"type": "array", "items": {"type": "object"}},
+         "technology": {"type": "string", "enum": ["wind", "solar"]},
+         "preset": {"type": "string"},
+         "params": {"type": "object"},
+         "year": {"type": "integer"}},
+        ["points", "technology"],
+    ),
+    _t(
+        "list_pending_profiles",
+        "The project's pending generated profiles (job id, technology, "
+        "weather year, points, generated-at), newest first, plus any "
+        "profile-generation job still queued/running. `project_id` is the "
+        "project NAME. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "generate_renewable_profile",
+        "Queue a renewable-profile generation for a project as a solve-queue "
+        "job (kind profile_gen) and answer the job — it does NOT complete "
+        "inline; poll solve_queue_list and then list_pending_profiles. The "
+        "synthetic source works offline; the atlite source needs CDS "
+        "credentials and downloads ERA5 weather for the points' bounding box "
+        "(minutes). One FIFO serves every kind: the job queues behind a "
+        "running solve. Safety: execution.",
+        {"project_id": {"type": "string"},
+         "points": {"type": "array", "items": {"type": "object"}},
+         "technology": {"type": "string", "enum": ["wind", "solar"]},
+         "preset": {"type": "string"},
+         "params": {"type": "object"},
+         "source": {"type": "string", "enum": ["synthetic", "atlite"]},
+         "year": {"type": "integer"}},
+        ["project_id", "points", "technology"],
+    ),
+    _t(
+        "apply_generated_profile",
+        "Write one PENDING generated profile onto a generator's p_max_pu "
+        "(undoable; the confirmation card authorises the write). The point "
+        "feeding the component defaults to the component's own name. Refuses "
+        "(422) when the component is gone, its carrier is not wind/solar, or "
+        "the artifact holds no column for it; warns when the bus moved since "
+        "generation. `project_id` is the project NAME and must be the open "
+        "project. Safety: write.",
+        {"project_id": {"type": "string"},
+         "job_id": {"type": "string"},
+         "component": {"type": "string"},
+         "point_id": {"type": "string"}},
+        ["project_id", "job_id", "component"],
+    ),
+
     # ── Project management (21) ────────────────────────────────────────────
 
     _empty(
@@ -3769,6 +3847,13 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_queue_list": [("GET", "/api/simulation/queue")],
     "solve_queue_abort": [("POST", "/api/simulation/queue/{job_id}/abort")],
     "solve_queue_clear_finished": [("POST", "/api/simulation/queue/clear_finished")],
+    # profile generator (6)
+    "list_profile_presets": [("GET", "/api/profiles/presets")],
+    "get_profile_parameters": _SERVICE_CALL,
+    "preview_renewable_profile": [("POST", "/api/profiles/estimate")],
+    "list_pending_profiles": [("GET", "/api/projects/{name}/profiles/pending")],
+    "generate_renewable_profile": [("POST", "/api/projects/{name}/profiles/generate")],
+    "apply_generated_profile": [("POST", "/api/projects/{name}/profiles/apply")],
     # project_mgmt (21)
     "list_projects": [("GET", "/api/projects/")],
     "load_project": [("GET", "/api/projects/{name}")],
