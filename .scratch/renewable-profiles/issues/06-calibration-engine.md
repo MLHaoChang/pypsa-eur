@@ -21,3 +21,18 @@ Acceptance (property tests with hypothesis, or seeded loops if hypothesis is abs
 - `tail_damp{high, 0.9, 0.5, keep_flh}` cuts the P99 and keeps the FLH within 0.5 %.
 - The chain is deterministic: the same input gives byte-identical output.
 - Shaping someone else's job id → 404, and a job from another project → 403, mirroring apply.
+
+## Comments
+
+2026-10-19: implemented on `claude/rp-06-shaping` (stacked on RP-01), after the gatekeeper's plan
+OK (conditions: unreachable targets refuse naming the maximum; provenance with `calibrated: true`
+kept through apply; peak_shift wraps on the weather year; apply stays the only writer).
+Deviations from the text above, from the two-axis review:
+- Another project's job id is a 404 (each project's pending folder is its own), the same as apply.
+- Quantile targets are met within 2e-3 and the rank order to Spearman > 0.999. With linear
+  interpolation of np.quantile on 8,760 hours the exact error is about 1e-5, not 1e-6.
+- Named quantiles inside the zero share (solar nights stay zero) are refused, not silently missed.
+- `observed` takes inline per-unit values. A reference to an uploaded series is RP-08's chat
+  step (it reads the upload and passes the values).
+- `peak_shift` takes whole hours, up to ±168. Seasonal shifts are out of scope.
+- Shaping is hourly only; daily/weekly artifacts are refused (their FLH bound is not hourly).
