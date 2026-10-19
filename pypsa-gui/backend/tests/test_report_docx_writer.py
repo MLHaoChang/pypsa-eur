@@ -506,3 +506,32 @@ def test_a_note_already_carried_by_a_callout_is_not_stated_twice():
     text = _text(render_document_docx(doc, figure_bytes={}))
     assert text.count("excludes load-shedding cost") == 1
 
+
+
+def test_a_categorised_document_has_four_category_headings_with_sections_one_level_down():
+    """UX review N9 (owner decision E): the .docx groups its sections under the screens' categories."""
+    from models.report import Callout, ReportDocument, Section
+    from services.reports.docx_writer import render_document_docx
+
+    def sec(sid, heading, category):
+        return Section(section_id=sid, heading=heading, source="code", status="ok", category=category,
+                       blocks=[Callout(kind="disclosure", text=heading)])
+    doc = ReportDocument(
+        report_id="r1", version=1, title="T", created_at="2026-10-16T00:00:00+00:00", evidence_hash="h",
+        mode="evidence_only",
+        sections=[sec("executive_summary", "Executive summary", None),
+                  sec("cost", "Cost at target", "investment"),
+                  sec("target", "Availability target", "reliability"),
+                  sec("certification", "Certification", "reliability"),
+                  sec("gates", "Dynamics gates", "operation"),
+                  sec("pipeline", "Study pipeline", None)],
+        tables={}, figures={})
+    d = Document(io.BytesIO(render_document_docx(doc, figure_bytes={})))
+    heads = [(p.style.name, p.text) for p in d.paragraphs if p.style.name.startswith("Heading")]
+    assert heads[:7] == [
+        ("Heading 1", "Executive summary"),
+        ("Heading 1", "Investment"), ("Heading 2", "Cost at target"),
+        ("Heading 1", "Reliability"), ("Heading 2", "Availability target"), ("Heading 2", "Certification"),
+        ("Heading 1", "Operation")]
+    assert ("Heading 1", "Grid plan") not in heads              # no section, no heading
+    assert heads[-1] == ("Heading 1", "Study pipeline") or ("Heading 1", "Study pipeline") in heads

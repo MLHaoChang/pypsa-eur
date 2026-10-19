@@ -30,6 +30,7 @@ from services.network_undo import apply_undo, push_undo_snapshot
 from services.profile_gen.apply import (
     CarrierMismatchError,
     ComponentNotFoundError,
+    InvalidTimeBasisError,
     LeapYearMismatchError,
     ProfileApplyError,
     UnsupportedSnapshotsError,
@@ -476,3 +477,90 @@ def test_missing_resolution_meta_defaults_to_hourly():
     out = assign_profile(_ctx(), "Solar", series, meta)
     assert out["resolution"] == "hourly"
     assert out["hours"] == 8784
+
+
+# ── time basis: generated series are UTC; snapshots may be a wall clock ────
+#
+# Gatekeeper review of the apply path (2026-10-19): mapping UTC hours onto
+# local wall-clock snapshots shifts solar by the UTC offset. Naive snapshots
+# are read as UTC by default (the PyPSA-Eur convention lp_bindings follows);
+# `time_basis="<IANA zone>"` declares them that zone's wall clock and the
+# series is converted before the month-day-hour map.
+
+
+def _flat(year: int = 2025):
+    n = _net(year=year)
+    series, meta = _weather(year=year)
+    return n, series, meta
+
+
+def test_the_default_time_basis_is_utc_and_recorded():
+    n, series, meta = _flat()
+    out = assign_profile(_ctx(), "Solar", series, meta)
+    assert out["time_basis"] == "UTC"
+    assert _user_ts_meta[KEY]["time_basis"] == "UTC"
+    ts = pd.Timestamp("2025-07-15T12:00")
+    assert float(n.generators_t.p_max_pu["Solar"].loc[ts]) == float(series.loc[ts])
+
+
+def test_a_berlin_wall_clock_shifts_the_series_by_the_utc_offset():
+    n, series, meta = _flat()
+    out = assign_profile(_ctx(), "Solar", series, meta,
+                         time_basis="Europe/Berlin")
+    col = n.generators_t.p_max_pu["Solar"]
+    # CET (+1 h) in January, CEST (+2 h) in July
+    assert float(col.loc[pd.Timestamp("2025-01-15T13:00")]) == float(
+        series.loc[pd.Timestamp("2025-01-15T12:00")])
+    assert float(col.loc[pd.Timestamp("2025-07-15T14:00")]) == float(
+        series.loc[pd.Timestamp("2025-07-15T12:00")])
+    assert out["time_basis"] == "Europe/Berlin"
+    assert _user_ts_meta[KEY]["time_basis"] == "Europe/Berlin"
+
+
+def test_local_new_year_midnight_wraps_to_the_weather_years_last_hour():
+    n, series, meta = _flat()
+    assign_profile(_ctx(), "Solar", series, meta, time_basis="Europe/Berlin")
+    col = n.generators_t.p_max_pu["Solar"]
+    assert float(col.loc[pd.Timestamp("2025-01-01T00:00")]) == float(
+        series.loc[pd.Timestamp("2025-12-31T23:00")])
+
+
+def test_dst_hours_take_the_mean_or_the_next_valid_hour():
+    n, series, meta = _flat(year=2025)
+    assign_profile(_ctx(), "Solar", series, meta, time_basis="Europe/Berlin")
+    col = n.generators_t.p_max_pu["Solar"]
+    # 2025-10-26 02:00 Berlin happens twice: 00:00 and 01:00 UTC → mean
+    both = series.loc[pd.Timestamp("2025-10-26T00:00"):
+                      pd.Timestamp("2025-10-26T01:00")].mean()
+    assert float(col.loc[pd.Timestamp("2025-10-26T02:00")]) == pytest.approx(
+        float(both))
+    # 2025-03-30 02:00 Berlin never happens: the next valid hour, 03:00
+    # CEST = 01:00 UTC
+    assert float(col.loc[pd.Timestamp("2025-03-30T02:00")]) == float(
+        series.loc[pd.Timestamp("2025-03-30T01:00")])
+
+
+def test_an_unknown_time_basis_is_a_typed_refusal():
+    _net(year=2025)
+    series, meta = _weather(year=2025)
+    with pytest.raises(InvalidTimeBasisError, match="Mars/Olympus"):
+        assign_profile(_ctx(), "Solar", series, meta,
+                       time_basis="Mars/Olympus")
+    assert KEY not in _user_ts_meta
+
+
+def test_the_partial_year_refusal_says_what_to_do_on_a_template_week():
+    n = PyPSAService.get_network()
+    idx = pd.date_range("2025-01-06T00:00", periods=168, freq="h")
+    idx.name = "snapshot"
+    n.set_snapshots(idx)
+    n.add("Bus", "B1", x=13.4, y=52.5)
+    n.add("Carrier", "solar")
+    n.add("Generator", "Solar", bus="B1", carrier="solar", p_nom=100.0)
+    series, meta = _weather(year=2025)
+    with pytest.raises(UnsupportedSnapshotsError) as err:
+        assign_profile(_ctx(), "Solar", series, meta)
+    msg = str(err.value)
+    assert "full-year hourly" in msg
+    assert "representative" in msg
+    assert "upload" in msg

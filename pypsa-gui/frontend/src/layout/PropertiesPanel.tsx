@@ -1964,7 +1964,7 @@ export default function PropertiesPanel() {
   // can re-position the new node via posCache afterwards.
   if (creationItem) {
     return (
-      <aside className="shrink-0 bg-bg border-l border-border flex flex-col overflow-hidden shadow-lg" style={{ width: 300 }}>
+      <aside className="max-sm:absolute max-sm:inset-y-0 max-sm:right-0 max-sm:z-20 max-sm:max-w-full shrink-0 bg-bg border-l border-border flex flex-col overflow-hidden shadow-lg" style={{ width: 300 }}>
         <CreationForm item={creationItem} />
       </aside>
     )
@@ -1973,7 +1973,7 @@ export default function PropertiesPanel() {
   // ── Empty state (panel open, nothing selected) ──────────────────────────────
   if (!selectedComponent) {
     return (
-      <aside className="shrink-0 bg-bg border-l border-border flex flex-col overflow-hidden" style={{ width: 300 }}>
+      <aside className="max-sm:absolute max-sm:inset-y-0 max-sm:right-0 max-sm:z-20 max-sm:max-w-full shrink-0 bg-bg border-l border-border flex flex-col overflow-hidden" style={{ width: 300 }}>
         <div className="flex items-center justify-between px-3 h-10 border-b border-border bg-panel shrink-0">
           <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Properties</span>
           <button onClick={toggleRightPanel} className="p-1 text-muted hover:text-text transition-colors" title="Hide panel">
@@ -2009,7 +2009,7 @@ export default function PropertiesPanel() {
     && selectedComponent.type !== 'ShuntImpedance'
 
   return (
-    <aside className="shrink-0 bg-bg border-l border-border flex flex-col overflow-hidden shadow-lg" style={{ width: 300 }}>
+    <aside className="max-sm:absolute max-sm:inset-y-0 max-sm:right-0 max-sm:z-20 max-sm:max-w-full shrink-0 bg-bg border-l border-border flex flex-col overflow-hidden shadow-lg" style={{ width: 300 }}>
       <div className="flex items-center justify-between px-3 h-10 border-b border-border bg-panel shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-accent" />

@@ -385,9 +385,10 @@ html {
   transform: none;
 }
 
-/* Answers/decisions may grow; keep the whole companion reachable on short screens. */
+/* Stay inside the relative workbench body, below header/tabs. Scroll long
+   answers/decisions locally without covering application header controls. */
 .companion-launcher {
-  max-height: calc(100dvh - 3rem);
+  max-height: 100%;
   overflow-y: auto;
 }
 

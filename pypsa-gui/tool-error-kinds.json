@@ -43,6 +43,10 @@
     "Changing one is a UI decision. Write down why, as the entries do."
   ],
   "kinds": {
+    "schema_field_too_large": {
+      "surface": "inline",
+      "why": "get_component_schema refused one field whose complete descriptor exceeds the bounded metadata page. The per-call detail names that field; the assistant reports incomplete discovery rather than clipping it or claiming a complete schema. There is no conversation-wide recovery action."
+    },
     "restriction_unavailable": {
       "surface": "banner",
       "why": "Saved personal project restrictions could not be read at tool admission or worker pickup. Fail closed and direct the user to refresh Access and approvals; never silently assume standard rules."

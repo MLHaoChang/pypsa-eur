@@ -264,6 +264,19 @@ def _paginate(rows: list[dict], offset: int, limit: int | None) -> dict:
     return out
 
 
+def get_component_schema(component_class: str, *, query: str = '', offset: int = 0, limit: int = 8) -> dict:
+    """Read class metadata through the same native models used by CRUD."""
+    from services.asset_schema.fields import fields_for
+    from services.component_discovery import schema_page
+
+    if component_class not in _COMPONENT_CREATE_SCHEMAS:
+        raise HTTPException(400, 'Unknown component_class.')
+    network = PyPSAService.get_network()
+    return schema_page(component_class, _get_schema(_COMPONENT_CREATE_SCHEMAS[component_class]),
+                       network.components[component_class].defaults, fields_for(component_class),
+                       query=query, offset=offset, limit=limit)
+
+
 def list_components(
     component_class: str, *, offset: int = 0, limit: int | None = None,
 ) -> dict:
@@ -3510,9 +3523,11 @@ def generate_renewable_profile(project_id: str, points: list | None = None,
 
 
 def apply_generated_profile(project_id: str, job_id: str, component: str,
-                            point_id: str | None = None) -> dict:
+                            point_id: str | None = None,
+                            time_basis: str = "UTC") -> dict:
     from routers.profiles import ApplyRequest, apply_profile as _h
-    body = ApplyRequest(job_id=job_id, component=component, point_id=point_id)
+    body = ApplyRequest(job_id=job_id, component=component, point_id=point_id,
+                        time_basis=time_basis)
     return _route(_h, body, proj=_authorized_project(project_id))
 
 
@@ -4020,6 +4035,19 @@ def _authorized_project(name: str):
         return require_project_access(name, db=db, user=user)
 
 
+
+
+def resolve_project_target(project_name: str) -> dict:
+    """Resolve a label under fresh native identity without changing Context."""
+    from services import project_registry
+
+    if not isinstance(project_name, str) or not project_name.strip() or len(project_name) > 256:
+        raise HTTPException(400, 'Use an exact nonblank project name of at most 256 characters.')
+    with _acting() as (db, user):
+        project = project_registry.resolve_project(db, user, project_name, name_only=True)
+        return {'version': 1, 'project_id': str(project.id), 'project_name': project.name,
+                'note': 'Resolved for the current acting user, not an activation or permission grant. '
+                        'Every subsequent native use must recheck authority.'}
 
 
 def list_projects() -> list[dict]:
@@ -7396,6 +7424,8 @@ from services.assistant_tools import (find_capabilities, get_file_delivery, insp
                                       preview_project_changes, apply_project_changes, create_chart, build_delivery)
 
 DISPATCHERS: dict[str, Any] = {
+    "resolve_project_target": resolve_project_target,
+    "get_component_schema": get_component_schema,
     "list_project_runs": list_project_runs,
     "get_run_evidence": get_run_evidence,
     "compare_project_runs": compare_project_runs,

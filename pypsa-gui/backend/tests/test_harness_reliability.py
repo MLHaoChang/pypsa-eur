@@ -554,7 +554,11 @@ def test_reviewer_has_no_tools_and_cannot_create_claims(baseline, checked, monke
 
 
 @pytest.mark.parametrize(
-    "fault", ["withhold", "spoof", "unknown_claim", "tool", "no_usage", "bad_source"]
+    "fault",
+    [
+        "withhold", "spoof", "unknown_claim", "tool", "no_usage",
+        "missing_input_usage", "missing_output_usage", "cache_only_usage", "bad_source",
+    ],
 )
 def test_reviewer_failures_retain_useful_facts_and_withhold_interpretation(
     baseline, checked, monkeypatch, fault
@@ -584,6 +588,12 @@ def test_reviewer_failures_retain_useful_facts_and_withhold_interpretation(
     )
     if fault == "no_usage":
         last["usage"] = {}
+    elif fault == "missing_input_usage":
+        last["usage"] = {"output_tokens": 1}
+    elif fault == "missing_output_usage":
+        last["usage"] = {"input_tokens": 1}
+    elif fault == "cache_only_usage":
+        last["usage"] = {"cache_read_tokens": 1}
     frames = checked.run(
         [
             tool_turn("get_component", {"component_class": "Load", "name": "L1"}),

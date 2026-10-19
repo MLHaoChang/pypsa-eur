@@ -85,6 +85,8 @@ SAFETY_PANEL_ENUM = [
     "DecisionStudy", "decision",
     # Economics in Expert: rates, price basis and every asset's costs.
     "Economics", "economics",
+    # The renewable profile generator (Profile Studio) slide panel.
+    "ProfileStudio", "profiles",
 ]
 RESULTS_TAB_ENUM = [
     "summary",      # M3: the answer-first tab Results opens on after a solve
@@ -200,6 +202,30 @@ def _empty(name: str, description: str) -> dict[str, Any]:
 
 
 TOOLS: list[dict[str, Any]] = [
+    _t(
+        "resolve_project_target",
+        "Resolve an exact authorized project name to its canonical project_id and project_name. "
+        "Use before a named-project action; never guess a partial match or substitute the active project. "
+        "Does not activate, navigate, select a run or grant permission. Recheck native authority on use. "
+        "Unknown and inaccessible names have the same not-found outcome; use list_projects and ask "
+        "the user to clarify an incomplete name. Not a checked-answer adapter. Safety: read.",
+        {"project_name": {"type": "string", "minLength": 1, "maxLength": 256}},
+        ["project_name"],
+    ),
+    _t(
+        "get_component_schema",
+        "Discover native component fields before choosing parameters. Paged class metadata only: "
+        "stored/display units, request-model types/bounds/enums, native input/output and derived/read-only status. "
+        "No model values or permissions. Native handlers remain validation authority; JSON Schema does not "
+        "encode every cross-field rule. schema_sha256 identifies metadata only. Filter exact field names or "
+        "labels with query; page with offset += returned while has_more. Use get_component/list_components "
+        "for actual values. Not a checked-answer adapter. Safety: read.",
+        {"component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
+         "query": {"type": "string", "maxLength": 80},
+         "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
+         "limit": {"type": "integer", "minimum": 1, "maximum": 50}},
+        ["component_class"],
+    ),
     # ── Read (22) ──────────────────────────────────────────────────────────
 
     _t(
@@ -1443,12 +1469,18 @@ TOOLS: list[dict[str, Any]] = [
         "feeding the component defaults to the component's own name. Refuses "
         "(422) when the component is gone, its carrier is not wind/solar, or "
         "the artifact holds no column for it; warns when the bus moved since "
-        "generation. `project_id` is the project NAME and must be the open "
+        "generation. `time_basis` says what the snapshots mean: \"UTC\" "
+        "(default; the weather series maps straight on) or the IANA zone "
+        "whose wall clock they are (e.g. \"Europe/Berlin\"; the series is "
+        "shifted by that zone's offset) — ask when the user says the "
+        "horizon is local time; report the time basis from the answer. "
+        "`project_id` is the project NAME and must be the open "
         "project. Safety: write.",
         {"project_id": {"type": "string"},
          "job_id": {"type": "string"},
          "component": {"type": "string"},
-         "point_id": {"type": "string"}},
+         "point_id": {"type": "string"},
+         "time_basis": {"type": "string"}},
         ["project_id", "job_id", "component"],
     ),
 
@@ -3722,6 +3754,8 @@ TOOL_ROUTES: dict[str, list] = {
     "get_loadflow_summary": _SERVICE_CALL,
     "list_tasks": _SERVICE_CALL,
     "find_capabilities": _SERVICE_CALL,
+    "get_component_schema": _SERVICE_CALL,
+    "resolve_project_target": _SERVICE_CALL,
     "start_task": _SERVICE_CALL,
     "get_task": _SERVICE_CALL,
     "resume_task": _SERVICE_CALL,

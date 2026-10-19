@@ -66,3 +66,8 @@ See [validation](../checked-opt-in-validation.json), [coverage ledger](../covera
 and [activation/rollback](../checked-opt-in-runbook.md). No paid calls, full-backend
 fresh run, independent domain approval or full-device/calibration release claim.
 Global deployment remains disabled and this whole phase issue stays open.
+
+
+### 2026-10-19 — recovered source and reviewer usage gate
+
+Published plans, phased tests and implementations were recovered from master, rather than recreated. Three new public-boundary cases reproduced reviewer approval with missing input/output or cache-only usage. The bounded fix requires explicit input/output counts, charges known usage and withholds interpretations while retaining facts. Fresh local validation: 65 harness tests, 54 phased acceptance cases, 133 expanded evaluation cases, 204 related regressions/four opt-in skips, and 62 frontend cases passed; production build and touched-file Ruff passed. Selections are not added as unique coverage. See `docs/superpowers/qa/2026-10-19-assurance-reviewer-usage.md` and `.scratch/assistant-assurance/reviewer-usage-validation.json` for commands/source hashes/limits. No paid calls or independent domain approval; whole-phase requirements remain open.

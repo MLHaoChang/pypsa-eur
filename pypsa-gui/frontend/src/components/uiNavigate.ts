@@ -51,6 +51,8 @@ function _normalizePanelId(raw: string): string {
     DecisionStudy: 'decision', decision: 'decision',
     // Economics in Expert: the inputs that decide what the model charges.
     Economics: 'economics', economics: 'economics',
+    // The renewable profile generator (Profile Studio).
+    ProfileStudio: 'profiles', profiles: 'profiles',
   }
   return aliases[key] ?? key
 }
@@ -160,7 +162,7 @@ function apply(d: NavigationRequest) {
     || panel === 'solveQueue' || panel === 'hubDesign'
     || panel === 'workspace' || panel === 'settings' || panel === 'gridspine'
     || panel === 'reports' || panel === 'campusElectrical' || panel === 'decision'
-    || panel === 'economics'
+    || panel === 'economics' || panel === 'profiles'
   ) {
     ui.setSlidePanel(panel as NonNullable<typeof ui.activeSlidePanel>)
   }
