@@ -553,6 +553,34 @@ def session_state(session_ctx):
 
 
 @pytest.fixture
+def bound_ctx(session_ctx):
+    """Factory: bind a test client's session ProjectContext as the request
+    context, the way a real chat turn does — chat-tool wrappers
+    (`from_generators`, apply) read the network through
+    `PyPSAService.get_network()`, which without this binding returns the
+    PROCESS foreground (empty in tests) instead of the session's network.
+
+    Usage::
+
+        with bound_ctx(client) as ctx:
+            ... call chat_tools.DISPATCHERS[...] ...
+    """
+    import contextlib
+
+    @contextlib.contextmanager
+    def _bound(test_client):
+        from services.pypsa_service import PyPSAService
+
+        ctx = session_ctx(test_client)
+        token = PyPSAService.bind_request_context(ctx)
+        try:
+            yield ctx
+        finally:
+            PyPSAService.reset_request_context(token)
+    return _bound
+
+
+@pytest.fixture
 def api_project(client, install_network):
     """
     Factory: create a REAL project (DB row + org-scoped storage) and return its
