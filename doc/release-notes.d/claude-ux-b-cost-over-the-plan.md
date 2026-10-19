@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): On a multi-period project (staged templates, generic sites) Guided's cost tile reads "Cost over the plan, 2027–2035 (discounted, before any shortfall costs)" instead of "Yearly cost of this design", which showed the discounted total over every period as if it were a year's cost (UX review N3, owner decision B).
