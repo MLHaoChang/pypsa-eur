@@ -44,8 +44,15 @@ describe('chapterTiles', () => {
     expect(byId({ ...NONE, reliability: { ...NONE.reliability, running: true } }).reliability.state)
       .toBe('running')
     const t = byId({ ...NONE, reliability: { hasResults: true, running: false, lole: null,
-                                             target: null, verdict: null } })
+                                             target: 3, verdict: null } })
     expect(t.reliability.state).toBe('unavailable')
+  })
+
+  it('reliability: no goal set is Not modelled, with the step that sets it (UX review N13)', () => {
+    const t = byId({ ...NONE, reliability: { hasResults: true, running: false, lole: null,
+                                             target: null, verdict: null } })
+    expect(t.reliability).toMatchObject({ state: 'not_modelled', open: { step: 'goal' },
+      reason: expect.stringMatching(/No reliability goal is set/) })
   })
 
   it('investment: the post-tax NPV when established, else the pre-tax one, said so', () => {
@@ -127,6 +134,14 @@ describe('chapterTiles', () => {
 
     it('none without a GFM read (no campus, no island)', () => {
       expect(ctl(null)).toBeUndefined()
+    })
+    it('not achievable names the off island rows only when the server says they are off (UX review N7)', () => {
+      const na = rec({ status: 'not_achievable', changed: false, settings: {} })
+      expect(ctl({ state: 'ready', reason: '', recommendation: na, island_rows_now: false })).toMatchObject(
+        { text: expect.stringMatching(/capacity is needed, and the hub solve is not sized to island/) })
+      expect(ctl({ state: 'ready', reason: '', recommendation: na, island_rows_now: true })!.text)
+        .not.toMatch(/island rows/)
+      expect(ctl({ state: 'ready', reason: '', recommendation: na })!.text).not.toMatch(/island rows/)
     })
     it('nothing to tune (no case evaluated) is not applicable, with the reason', () => {
       expect(ctl({ state: 'ready', reason: '', recommendation: rec({ status: 'unchanged', changed: false, settings: {},

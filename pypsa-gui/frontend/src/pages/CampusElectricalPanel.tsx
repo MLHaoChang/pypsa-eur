@@ -58,7 +58,7 @@ function sameSettings(a: CampusSettings | null, b: CampusSettings): boolean {
 }
 
 const INPUT = 'px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20'
-const DEFAULT_SETTINGS: CampusSettings = {
+export const DEFAULT_SETTINGS: CampusSettings = {
   k: 3, pf: null, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true, invest: true, pcc_switchgear_by_operator: false,
   pcc_tap_control: 'campus',
 }
