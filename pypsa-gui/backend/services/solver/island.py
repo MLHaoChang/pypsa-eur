@@ -222,6 +222,38 @@ def _effective_path(network, cfg) -> dict:
     return {"solve_strategy": strategy, "sclopf": sclopf}
 
 
+#: What a short row's hint tells the user to do.
+SHORTFALL_ADVICE = "Raise a grid-forming battery's p_nom_max, or commit or add a genset."
+
+
+def island_shortfalls(facts) -> list[dict]:
+    """The event rows the site cannot hold, from ``n._island_facts["events"]``: the largest load
+    step is more than the grid formers can pick up at the instant (the GFM storage at its rating
+    plus the online gensets' step credit). Pure: one definition for the infeasibility log line and
+    for the study's failure reason (UX review N8). Only rows that are actually short appear."""
+    out = []
+    for ev in ((facts or {}).get("events") or []):
+        reach = ev["gfm_mw"] + ev["genset_mw"]
+        if ev["step_mw"] > reach + 1e-6:
+            out.append({"row": ev["row"], "step_mw": ev["step_mw"], "reach_mw": reach,
+                        "missing_mw": ev["step_mw"] - reach,
+                        "gfm_mw": ev["gfm_mw"], "genset_mw": ev["genset_mw"]})
+    return out
+
+
+def shortfall_line(sh: dict) -> str:
+    """A short row, its sentence and what to do: the text of the log line and of the study's reason."""
+    return f"{sh['row']}: {shortfall_sentence(sh)} {SHORTFALL_ADVICE}"
+
+
+def shortfall_sentence(sh: dict) -> str:
+    """One short row in words, exactly as the infeasibility diagnostics print it after the row name."""
+    return (f"the largest load step is {sh['step_mw']:,.2f} MW, "
+            f"but the grid formers can pick up at most {sh['reach_mw']:,.2f} MW at the instant "
+            f"(GFM storage at its rating {sh['gfm_mw']:,.2f} MW, the online gensets' load "
+            f"step {sh['genset_mw']:,.2f} MW): {sh['missing_mw']:,.2f} MW is missing.")
+
+
 def _wrap_with_island(network, user_fn, cfg, island=_UNSET, log_queue=None,
                       delta_p_plus=None):
     """Compose ``user_fn`` with the island rows when the config opts in.
