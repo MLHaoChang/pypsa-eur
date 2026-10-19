@@ -126,6 +126,8 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_line_results"):               frozenset(),
     ("routers/results.py", "get_link_results"):               frozenset(),
     ("routers/results.py", "get_lcoh"):                       frozenset({"lcoh"}),
+    # Grid-to-process ticket 04: product tonnes and lost-production EUR; no CAPEX or fixed cost.
+    ("routers/results.py", "get_process_view"):               frozenset(),
     ("routers/results.py", "get_ac_pf_status"):               frozenset(),
     ("routers/results.py", "get_losses_summary"):             frozenset(),
     ("routers/results.py", "get_carrier_kpis"):               frozenset(),

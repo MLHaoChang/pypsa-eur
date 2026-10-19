@@ -121,6 +121,29 @@
       "technical_name": "mwh_per_t"
      },
      {
+      "key": "product_value",
+      "group": "identity",
+      "label": "Product value",
+      "help": "What one unit of this product is worth to the client, per the bus's unit (EUR/MWh or EUR/t), with its source in the ledger. Results value a process unit's output at it. Empty: that value is Unavailable, never 0.",
+      "unit_display": "EUR/unit",
+      "unit_storage": "",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": {
+       "unit": [
+        "MWh",
+        "t"
+       ]
+      },
+      "part": null,
+      "blank": "clear",
+      "technical_name": "product_value"
+     },
+     {
       "key": "sub_network",
       "group": "identity",
       "label": "Sub-network",
