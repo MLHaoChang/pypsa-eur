@@ -135,6 +135,14 @@ describe('chapterTiles', () => {
     it('none without a GFM read (no campus, no island)', () => {
       expect(ctl(null)).toBeUndefined()
     })
+    it('not achievable names the off island rows only when the server says they are off (UX review N7)', () => {
+      const na = rec({ status: 'not_achievable', changed: false, settings: {} })
+      expect(ctl({ state: 'ready', reason: '', recommendation: na, island_rows_now: false })).toMatchObject(
+        { text: expect.stringMatching(/capacity is needed, and the hub solve is not sized to island/) })
+      expect(ctl({ state: 'ready', reason: '', recommendation: na, island_rows_now: true })!.text)
+        .not.toMatch(/island rows/)
+      expect(ctl({ state: 'ready', reason: '', recommendation: na })!.text).not.toMatch(/island rows/)
+    })
     it('nothing to tune (no case evaluated) is not applicable, with the reason', () => {
       expect(ctl({ state: 'ready', reason: '', recommendation: rec({ status: 'unchanged', changed: false, settings: {},
         cases: [], simulations: 0 }) })).toMatchObject(
