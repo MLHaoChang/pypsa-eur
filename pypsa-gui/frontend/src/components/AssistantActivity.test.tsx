@@ -107,6 +107,16 @@ describe('AssistantActivity', () => {
     expect(await screen.findByText('Retained observation')).toBeTruthy()
     expect(container.querySelector('time')).toBeNull()
   })
+  it('explains incomplete background observation without offering replay', async () => {
+    const data = snapshot()
+    data.items = []
+    data.warnings = ['activity_completion_observation_incomplete']
+    get.mockResolvedValue(data)
+    render(<AssistantActivity onConversation={vi.fn()} />)
+    expect(await screen.findByText(/Some registered jobs could not be observed through completion/)).toBeTruthy()
+    expect(screen.getByText(/missing history does not establish whether work finished/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /retry|resume|cancel|approve/i })).toBeNull()
+  })
   function question() {
     const data = snapshot()
     data.items[0] = { ...data.items[0], family: 'question', status: 'waiting_for_input',

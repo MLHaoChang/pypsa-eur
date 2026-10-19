@@ -132,8 +132,8 @@ export default function StatusBar() {
     : null
 
   return (
-    <div
-      className="relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0"
+    <div role="region" aria-label="Project status" tabIndex={0}
+      className="relative flex items-center gap-3 px-3 h-6 border-t border-border text-[10.5px] font-mono shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:thin]"
       style={{ background: 'linear-gradient(180deg, var(--color-bg-2) 0%, var(--color-panel) 100%)' }}
     >
       {/* 1px white hairline highlight along the top edge — design system detail */}

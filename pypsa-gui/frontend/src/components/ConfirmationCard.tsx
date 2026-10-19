@@ -209,6 +209,22 @@ export function guidedCardSummary(tool: string, args: Record<string, unknown>): 
   return `The assistant wants to use ${tool.replace(/_/g, ' ')}${target ? ` on ${target}` : ''}`
 }
 
+type ReviewedChange = { component_class: string; name: string; attribute: string;
+  before: string | number | boolean; after: string | number | boolean; unit: string }
+
+function completePreview(args: Record<string, unknown> | undefined): ReviewedChange[] | null {
+  if (!args || args.diff_truncated === true || typeof args.review_sha256 !== 'string'
+    || !/^[a-f0-9]{64}$/.test(args.review_sha256)) return null
+  const rows = args.reviewed_changes
+  const scalar = (v: unknown) => typeof v === 'string' || typeof v === 'boolean'
+    || (typeof v === 'number' && Number.isFinite(v))
+  if (!Array.isArray(rows) || rows.length < 1 || rows.length > 20 || args.changes_total !== rows.length
+    || !rows.every(r => r && typeof r === 'object'
+      && ['component_class', 'name', 'attribute'].every(k => typeof r[k] === 'string' && r[k].length > 0)
+      && typeof r.unit === 'string' && scalar(r.before) && scalar(r.after))) return null
+  return rows as ReviewedChange[]
+}
+
 export function ConfirmationCard() {
   const pending = useChatStore((s) => s.pending)
   const assistantDockOpen = useUIStore((s) => s.assistantDockOpen)
@@ -224,6 +240,8 @@ export function ConfirmationCard() {
   const [secondsLeft, setSecondsLeft] = useState<number>(0)
   const [typedConfirmation, setTypedConfirmation] = useState<string>('')
   const timerRef = useRef<number | null>(null)
+  const review = completePreview(pending?.args)
+  const reviewUnavailable = pending?.tool_name === 'apply_project_changes' && !review
 
   // Reset the typed-confirmation field whenever the pending card changes.
   useEffect(() => { setTypedConfirmation('') }, [pending?.confirmation_token])
@@ -284,6 +302,7 @@ export function ConfirmationCard() {
 
   const onApprove = useCallback(async () => {
     if (!pending || !sessionId) return
+    if (reviewUnavailable) return
     if (useUIStore.getState().projectMismatch) return
     const token = pending.confirmation_token
     try {
@@ -294,7 +313,7 @@ export function ConfirmationCard() {
     } catch (err) {
       toast.error(`confirmation failed: ${(err as Error).message}`)
     }
-  }, [pending, sessionId, clearIfStill])
+  }, [pending, sessionId, clearIfStill, reviewUnavailable])
 
   const onDeny = useCallback(async () => {
     if (!pending || !sessionId) return
@@ -388,6 +407,27 @@ export function ConfirmationCard() {
           </pre>
         </>
       )}
+      {pending.tool_name === 'apply_project_changes' && (review ? (
+        <div className="mb-2 text-xs">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <caption className="text-left font-semibold mb-1">Changes to apply</caption>
+              <thead><tr>{['Asset', 'Field', 'Old value', 'New value', 'Unit'].map(h => (
+                <th key={h} scope="col" className="p-1 border-b border-border">{h}</th>
+              ))}</tr></thead>
+              <tbody>{review.map((r, i) => <tr key={i}>
+                {[`${r.component_class} ${r.name}`, r.attribute, String(r.before), String(r.after),
+                  r.unit || 'No unit'].map((v, j) => (
+                  <td key={j} className="p-1 border-b border-border break-words">{v}</td>
+                ))}
+              </tr>)}</tbody>
+            </table>
+          </div>
+          <p className="mt-1 text-muted">Applies every value shown. Existing time-series overrides remain. Changes are left unsaved.</p>
+        </div>
+      ) : <p role="alert" className="mb-2 text-xs text-warn">
+        The complete change preview is unavailable. Deny this request and ask for a new, smaller preview.
+      </p>)}
       {requiresTyped && typedTarget && (
         <div className="mb-2" data-testid="chat-typed-confirmation">
           <div className="text-[10px] text-muted mb-1">
@@ -409,7 +449,7 @@ export function ConfirmationCard() {
         <button
           className="px-2 py-1 text-xs rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
           onClick={onApprove}
-          disabled={!typedSatisfied || !!mismatchLine}
+          disabled={!typedSatisfied || !!mismatchLine || reviewUnavailable}
           title={mismatchLine ?? undefined}
           data-testid="chat-confirm-approve"
         >
