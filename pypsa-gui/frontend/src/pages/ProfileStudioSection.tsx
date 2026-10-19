@@ -16,7 +16,7 @@ import { Btn, PageSection, Seg, Sparkline, Tag } from '../components/PageKit'
 import {
   errorText, profilesApi,
   type GenerateSpec, type PendingProfile, type ProfilePoint,
-  type ProfileSource, type ProfileTechnology,
+  type ProfileResolution, type ProfileSource, type ProfileTechnology,
 } from '../api/profiles'
 
 export const PRESETS_KEY = (tech: ProfileTechnology) => ['profiles', 'presets', tech] as const
@@ -80,7 +80,9 @@ function PendingCard({ name, record }: { name: string; record: PendingProfile })
     <div className="border border-border rounded p-2.5 mb-2" data-testid={`pending-${record.job_id}`}>
       <div className="flex items-center gap-2 mb-1.5">
         <Tag tone="accent">{record.technology}</Tag>
-        <span className="text-[12px]">{record.weather_year} · {record.source}</span>
+        <span className="text-[12px]">
+          {record.weather_year} · {record.source}{record.resolution && record.resolution !== 'hourly' ? ` · ${record.resolution}` : ''}
+        </span>
         <span className="text-[11px] text-muted">
           {record.points.length} point{record.points.length === 1 ? '' : 's'}
         </span>
@@ -106,6 +108,7 @@ function PendingCard({ name, record }: { name: string; record: PendingProfile })
 export function ProfileStudioView({ name }: { name: string }) {
   const [technology, setTechnology] = useState<ProfileTechnology>('wind')
   const [source, setSource] = useState<ProfileSource>('synthetic')
+  const [resolution, setResolution] = useState<ProfileResolution>('hourly')
   const [preset, setPreset] = useState('default')
   const [year, setYear] = useState<number>(new Date().getUTCFullYear() - 1)
   const [pointsText, setPointsText] = useState('')
@@ -144,7 +147,7 @@ export function ProfileStudioView({ name }: { name: string }) {
         throw new Error('expert overrides are not valid JSON')
       }
     }
-    return { points, technology, preset, params, source, year }
+    return { points, technology, preset, params, source, year, resolution }
   }
 
   const estimateMut = useMutation({
@@ -186,6 +189,15 @@ export function ProfileStudioView({ name }: { name: string }) {
             options={[
               { value: 'synthetic', label: 'Synthetic' },
               { value: 'atlite', label: 'ERA5 (atlite)' },
+            ]}
+          />
+          <Seg
+            value={resolution}
+            onChange={setResolution}
+            options={[
+              { value: 'hourly', label: 'Hourly' },
+              { value: 'daily', label: 'Daily' },
+              { value: 'weekly', label: 'Weekly' },
             ]}
           />
           <select
@@ -249,7 +261,7 @@ export function ProfileStudioView({ name }: { name: string }) {
         {estimate && (
           <div className="mt-2">
             <p className="text-[11px] text-muted mb-1">
-              Estimate — synthetic source, daily means. The queued generation carries the full hourly year.
+              Estimate — synthetic source, {resolution === 'hourly' ? 'daily means (the queued generation keeps the full hourly year)' : `${resolution} means`}.
             </p>
             <SparkPreview series={estimate} />
           </div>

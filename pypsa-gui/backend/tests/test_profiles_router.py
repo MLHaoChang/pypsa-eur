@@ -352,3 +352,75 @@ def test_apply_warns_when_the_bus_moved_since_generation(client,
     assert resp.status_code == 200, resp.text
     warning = resp.json().get("warning")
     assert warning and "moved" in warning.lower()
+
+
+# ---------------------------------------------------------------------------
+# C2: resolution through the HTTP surface
+# ---------------------------------------------------------------------------
+
+
+def test_estimate_honours_daily_resolution(client):
+    resp = client.post("/api/profiles/estimate", json=_spec(resolution="daily"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["resolution"] == "daily"
+    assert len(body["series"]["g_wind"]) == 365  # 2023, non-leap
+
+
+def test_estimate_honours_weekly_resolution(client):
+    resp = client.post("/api/profiles/estimate", json=_spec(resolution="weekly"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["resolution"] == "weekly"
+    assert len(body["series"]["g_wind"]) == 53
+
+
+def test_estimate_default_resolution_is_hourly_downsampled(client):
+    resp = client.post("/api/profiles/estimate", json=_spec())
+    assert resp.status_code == 200
+    assert resp.json()["resolution"] == "hourly"
+
+
+def test_estimate_refuses_an_unsupported_resolution(client):
+    resp = client.post(
+        "/api/profiles/estimate", json=_spec(resolution="fortnightly"),
+    )
+    assert resp.status_code == 422, resp.text
+
+
+def test_generate_with_daily_resolution_round_trips_to_apply(
+    client, wind_project, session_ctx,
+):
+    """Generate at daily resolution, wait for the queued job, apply onto the
+    hourly network: the summary reports 8760 upsampled hours and the
+    daily provenance."""
+    resp = _generate(client, wind_project, _spec(resolution="daily"))
+    assert resp.status_code == 202, resp.text
+    job = resp.json()
+    done = _await_job(client, job["id"])
+    assert done["status"] == "completed", done["error"]
+
+    pending = client.get(
+        f"/api/projects/{wind_project}/profiles/pending"
+    ).json()["pending"]
+    mine = [p for p in pending if p["job_id"] == job["id"]]
+    assert mine and mine[0]["resolution"] == "daily"
+
+    applied = client.post(
+        f"/api/projects/{wind_project}/profiles/apply",
+        json={"job_id": job["id"], "component": "g_wind"},
+    )
+    assert applied.status_code == 200, applied.text
+    summary = applied.json()
+    assert summary["resolution"] == "daily"
+    assert summary["hours"] == 8760  # the 2025 network year, upsampled
+
+    ctx = session_ctx(client)
+    col = ctx.network.generators_t.p_max_pu["g_wind"]
+    day = col.loc["2025-03-05T00:00":"2025-03-05T23:00"]
+    assert (day == day.iloc[0]).all(), "a daily profile holds 24 equal hours"
+
+
+def test_generate_refuses_an_unsupported_resolution(client, wind_project):
+    resp = _generate(client, wind_project, _spec(resolution="annual"))
+    assert resp.status_code == 422, resp.text

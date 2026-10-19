@@ -230,3 +230,95 @@ def test_generated_at_defaults_to_real_time():
     )
     parsed = datetime.fromisoformat(res.meta["generated_at"])
     assert parsed.tzinfo is not None
+
+
+# --- C2: resolution aggregation (aggregate-at-generation, D1=A) --------------
+
+
+def _res(points=(BERLIN,), year=2023, resolution="daily", **kw):
+    return generate_profile(
+        points=list(points), technology="wind",
+        params={"seed": 42}, source="synthetic", year=year,
+        resolution=resolution, now=FIXED_NOW, **kw,
+    )
+
+
+def test_daily_resolution_rows_and_labels():
+    res = _res(year=2023, resolution="daily")
+    idx = res.series.index
+    assert len(idx) == 365
+    assert idx[0] == pd.Timestamp("2023-01-01")
+    assert idx[-1] == pd.Timestamp("2023-12-31")
+    assert (idx.to_series().diff().dropna() == pd.Timedelta(days=1)).all()
+    assert res.meta["resolution"] == "daily"
+
+
+def test_daily_resolution_leap_year_has_366_days():
+    res = _res(year=2020, resolution="daily")
+    assert len(res.series) == 366
+    assert pd.Timestamp("2020-02-29") in res.series.index
+
+
+def test_weekly_resolution_rows_and_monday_labels():
+    res = _res(year=2023, resolution="weekly")
+    idx = res.series.index
+    # 2023 starts on a Sunday: the week containing Jan 1 is labelled
+    # 2022-12-26 (W-MON, left label) and the year yields 53 rows.
+    assert len(idx) == 53
+    assert (idx.weekday == 0).all(), "weekly labels are Mondays (W-MON)"
+    assert idx[0] == pd.Timestamp("2022-12-26")
+    assert idx[0] <= pd.Timestamp("2023-01-01")
+    assert idx[-1] + pd.Timedelta(days=6) >= pd.Timestamp("2023-12-31")
+    assert res.meta["resolution"] == "weekly"
+
+
+def test_aggregation_is_a_mean_over_the_hour():
+    """Daily values equal the mean of that day's 24 hourly values — the
+    aggregation is a plain mean, applied AFTER the source's hourly frame."""
+    hourly = _res(resolution="hourly").series
+    daily = _res(resolution="daily").series
+    expected = hourly.resample("D").mean()
+    pd.testing.assert_frame_equal(daily, expected, check_exact=True)
+
+
+def test_weekly_conserves_annual_mean():
+    hourly = _res(resolution="hourly").series[BERLIN[0]]
+    weekly = _res(resolution="weekly").series[BERLIN[0]]
+    # Weekly means re-weighted by the hours each week covers of the year
+    # reproduce the annual mean up to float noise.
+    hours = hourly.index.to_series()
+    week_of = hours.groupby(
+        [hours.index.to_period("W-SUN").start_time]
+    ).size()
+    wsum = sum(
+        weekly.get(pd.Timestamp(w), np.nan) * h
+        for w, h in week_of.items()
+        if pd.Timestamp(w) in weekly.index
+    )
+    assert abs(wsum / len(hourly) - hourly.mean()) < 1e-9
+
+
+def test_unsupported_resolution_refused():
+    from services.profile_gen import UnsupportedResolutionError
+    with pytest.raises(UnsupportedResolutionError, match="fortnightly"):
+        _res(resolution="fortnightly")
+    with pytest.raises(UnsupportedResolutionError, match="annual"):
+        _res(resolution="annual")  # D4=B: annual is a scalar, not a profile
+
+
+def test_resolution_is_case_insensitive():
+    res = _res(resolution=" Daily ")
+    assert res.meta["resolution"] == "daily"
+    assert len(res.series) == 365
+
+
+def test_coarse_resolution_is_deterministic():
+    a = _res(points=(BERLIN, LISBON), resolution="weekly")
+    b = _res(points=(BERLIN, LISBON), resolution="weekly")
+    pd.testing.assert_frame_equal(a.series, b.series, check_exact=True)
+    assert a.meta == b.meta
+
+
+def test_hourly_default_resolution_meta():
+    res = _wind()
+    assert res.meta["resolution"] == "hourly"

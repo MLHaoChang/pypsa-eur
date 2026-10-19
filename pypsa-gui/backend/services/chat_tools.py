@@ -3409,10 +3409,14 @@ def get_profile_parameters(preset: str, technology: str | None = None) -> dict:
 def preview_renewable_profile(points: list, technology: str,
                               preset: str | None = None,
                               params: dict | None = None,
-                              year: int | None = None) -> dict:
+                              year: int | None = None,
+                              resolution: str | None = None) -> dict:
     from routers.profiles import EstimateRequest, estimate_profile as _h
-    body = EstimateRequest(points=points, technology=technology,
-                           preset=preset, params=params, year=year)
+    kw: dict = {"points": points, "technology": technology,
+                "preset": preset, "params": params, "year": year}
+    if resolution is not None:
+        kw["resolution"] = resolution
+    body = EstimateRequest(**kw)
     return _route(_h, body)
 
 
@@ -3425,11 +3429,15 @@ def generate_renewable_profile(project_id: str, points: list, technology: str,
                                preset: str | None = None,
                                params: dict | None = None,
                                source: str = "synthetic",
-                               year: int | None = None) -> dict:
+                               year: int | None = None,
+                               resolution: str | None = None) -> dict:
     from routers.profiles import GenerateRequest, generate_profiles as _h
-    body = GenerateRequest(points=points, technology=technology,
-                           preset=preset, params=params, source=source,
-                           year=year)
+    kw: dict = {"points": points, "technology": technology,
+                "preset": preset, "params": params, "source": source,
+                "year": year}
+    if resolution is not None:
+        kw["resolution"] = resolution
+    body = GenerateRequest(**kw)
     return _route(_h, body, proj=_authorized_project(project_id))
 
 

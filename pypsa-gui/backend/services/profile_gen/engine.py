@@ -50,7 +50,34 @@ class AtliteNotInstalledError(ProfileGenError):
     it)."""
 
 
+class UnsupportedResolutionError(ProfileGenError):
+    """Requested output resolution is not one the engine can produce
+    (hourly, daily, weekly — the guided-chat ruling D4=B dropped annual:
+    an annual mean is a scalar, not a profile)."""
+
+
 SUPPORTED_TECHNOLOGIES = ("wind", "solar")
+
+# Output resolutions. Aggregation happens AFTER the source produces its
+# hourly frame (ruling D1=A: sources stay hourly-only; coarser resolutions
+# are means over the hour), so every source gets them for free.
+RESOLUTIONS = ("hourly", "daily", "weekly")
+
+
+def _aggregate(frame: pd.DataFrame, resolution: str) -> pd.DataFrame:
+    """Aggregate an hourly frame to the requested resolution (means).
+
+    - daily: calendar-day means (365/366 rows, midnight labels);
+    - weekly: week means, W-MON — the week runs Monday 00:00 to Sunday
+      23:00 and carries its Monday's label. A year yields 52 or 53 rows;
+      the first label can fall in the previous December (2023 → 53 rows,
+      first label 2022-12-26). The apply path upsamples weekly by
+      step-hold and refuses cross-year targets (ruling: weeks do not
+      align across years).
+    """
+    if resolution == "daily":
+        return frame.resample("D").mean()
+    return frame.resample("W-MON", label="left", closed="left").mean()
 
 
 # ---------------------------------------------------------------------------
@@ -74,9 +101,9 @@ class ProfilePoint:
 
 @dataclass(frozen=True)
 class ProfileResult:
-    """`series`: one column per point id, hourly tz-naive UTC index spanning
-    the full weather year. `meta`: the spec-D6 record (see generate_profile).
-    """
+    """`series`: one column per point id, tz-naive index spanning the full
+    weather year at meta's `resolution` (hourly/daily/weekly). `meta`: the
+    spec-D6 record (see generate_profile)."""
 
     series: pd.DataFrame
     meta: dict[str, Any]
@@ -182,9 +209,10 @@ def generate_profile(
     params: Mapping[str, Any] | None = None,
     source: str = "synthetic",
     year: int | None = None,
+    resolution: str = "hourly",
     now: _dt.datetime | str | None = None,
 ) -> ProfileResult:
-    """Generate hourly per-unit capacity-factor profiles for `points`.
+    """Generate per-unit capacity-factor profiles for `points`.
 
     - `technology`: "wind" or "solar" (spec §4 carrier guard, typed refusal).
     - `source`: a registered source name; "synthetic" is always available and
@@ -193,6 +221,9 @@ def generate_profile(
     - `year`: the weather year; defaults to the last completed calendar year.
       Leap years yield 8784 hours with Feb 29 kept (meta `leap_day: kept`;
       dropping is the apply path's job).
+    - `resolution`: "hourly" (the source's native axis), "daily" or "weekly"
+      — aggregated AFTER generation (D1=A), so every source supports every
+      resolution. Coarser resolutions are means over the hour.
     - `now`: injectable clock so tests (and reproducible runs) get
       byte-identical meta.
     """
@@ -203,6 +234,12 @@ def generate_profile(
             f"cannot generate a profile for technology {technology!r}; "
             f"supported: {', '.join(SUPPORTED_TECHNOLOGIES)}"
         )
+    res = str(resolution).strip().lower()
+    if res not in RESOLUTIONS:
+        raise UnsupportedResolutionError(
+            f"unsupported resolution {resolution!r}; supported: "
+            f"{', '.join(RESOLUTIONS)}"
+        )
     source_fn = _resolve_source(source)
     pts = _normalize_points(points)
     if year is None:
@@ -210,6 +247,8 @@ def generate_profile(
     year = int(year)
 
     frame, meta_extra = source_fn(pts, tech, params, year)
+    if res != "hourly":
+        frame = _aggregate(frame, res)
 
     if now is None:
         generated_at = _dt.datetime.now(_dt.timezone.utc)
@@ -224,6 +263,7 @@ def generate_profile(
         "preset": str(params.get("preset", "default")),
         "params": params,
         "weather_year": year,
+        "resolution": res,
         "bbox": [
             min(p.lon for p in pts),
             min(p.lat for p in pts),

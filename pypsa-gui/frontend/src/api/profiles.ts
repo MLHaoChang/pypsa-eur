@@ -11,6 +11,9 @@ import client from './client'
 
 export type ProfileTechnology = 'wind' | 'solar'
 export type ProfileSource = 'synthetic' | 'atlite'
+// C2: aggregation happens at generation (backend ruling D1=A); annual was
+// dropped (D4=B) — an annual mean is a scalar, not a profile.
+export type ProfileResolution = 'hourly' | 'daily' | 'weekly'
 
 export interface ProfilePoint {
   id: string
@@ -30,6 +33,7 @@ export interface ProfileEstimate {
   source: 'synthetic'
   technology: ProfileTechnology
   weather_year: number
+  resolution: ProfileResolution
   timestamps: string[]
   series: Record<string, number[]>
 }
@@ -41,6 +45,9 @@ export interface PendingProfile {
   source: ProfileSource
   preset: string
   weather_year: number
+  // Optional: artifacts generated before C2 carry no resolution (treat as
+  // hourly).
+  resolution?: ProfileResolution
   bbox: [number, number, number, number]
   generated_at: string
   points: string[]
@@ -60,6 +67,7 @@ export interface GenerateSpec {
   params?: Record<string, unknown>
   source?: ProfileSource
   year?: number
+  resolution?: ProfileResolution
 }
 
 export interface ApplyResult {
@@ -70,6 +78,7 @@ export interface ApplyResult {
   leap_day: string
   tiled: boolean
   periods?: number[]
+  resolution: ProfileResolution
   dispatch_cleared: boolean
   mean: number
   peak: number

@@ -1383,13 +1383,17 @@ TOOLS: list[dict[str, Any]] = [
         "preview_renewable_profile",
         "Quick SYNTHETIC preview of a renewable profile for the given points "
         "(id/lon/lat), downsampled to daily means and labelled an estimate — "
-        "for weighing options before committing to a real generation. Never "
-        "enqueues a job. Safety: read.",
+        "for weighing options before committing to a real generation. "
+        "`resolution` picks the output axis (hourly is downsampled to daily "
+        "for display; daily/weekly are returned as-is). Never enqueues a "
+        "job. Safety: read.",
         {"points": {"type": "array", "items": {"type": "object"}},
          "technology": {"type": "string", "enum": ["wind", "solar"]},
          "preset": {"type": "string"},
          "params": {"type": "object"},
-         "year": {"type": "integer"}},
+         "year": {"type": "integer"},
+         "resolution": {"type": "string",
+                        "enum": ["hourly", "daily", "weekly"]}},
         ["points", "technology"],
     ),
     _t(
@@ -1408,15 +1412,19 @@ TOOLS: list[dict[str, Any]] = [
         "inline; poll solve_queue_list and then list_pending_profiles. The "
         "synthetic source works offline; the atlite source needs CDS "
         "credentials and downloads ERA5 weather for the points' bounding box "
-        "(minutes). One FIFO serves every kind: the job queues behind a "
-        "running solve. Safety: execution.",
+        "(minutes). `resolution` aggregates at generation: hourly is the "
+        "native axis; daily/weekly are means over the hour (upsampled back "
+        "to the network's hourly snapshots at apply). One FIFO serves every "
+        "kind: the job queues behind a running solve. Safety: execution.",
         {"project_id": {"type": "string"},
          "points": {"type": "array", "items": {"type": "object"}},
          "technology": {"type": "string", "enum": ["wind", "solar"]},
          "preset": {"type": "string"},
          "params": {"type": "object"},
          "source": {"type": "string", "enum": ["synthetic", "atlite"]},
-         "year": {"type": "integer"}},
+         "year": {"type": "integer"},
+         "resolution": {"type": "string",
+                        "enum": ["hourly", "daily", "weekly"]}},
         ["project_id", "points", "technology"],
     ),
     _t(

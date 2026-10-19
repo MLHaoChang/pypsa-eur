@@ -10,13 +10,15 @@ the authorized storage_dir — the dispatcher thread has neither):
       "preset":     "default",                                   # optional
       "params":     {…},                                         # optional overrides
       "source":     "synthetic" | "atlite",                      # default synthetic
-      "year":       2023                                         # default: engine's
+      "year":       2023,                                        # default: engine's
+      "resolution": "hourly" | "daily" | "weekly"                # default hourly
     }
 
 The runner NEVER touches a network. It writes a PENDING artifact pair under
 the job's authorized storage_dir:
 
-    <storage_dir>/profiles_pending/<job_id>.nc    — the hourly CF frame
+    <storage_dir>/profiles_pending/<job_id>.nc    — the CF frame at the
+                                                    spec's resolution
     <storage_dir>/profiles_pending/<job_id>.json  — the spec-D6 meta record
 
 Applying one to a component is a separate, undoable, ACL-checked step
@@ -191,6 +193,7 @@ def run_queued(job: Any, progress: Any, stop_event: Any) -> tuple[Path, Path]:
         progress("generate", 0, 1)
     result = generate_profile(
         points, technology, params=params, source=source, year=year,
+        resolution=str(spec.get("resolution") or "hourly"),
     )
     _check_stop()
 

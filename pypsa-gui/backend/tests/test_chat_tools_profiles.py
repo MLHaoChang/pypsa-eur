@@ -216,3 +216,47 @@ def test_apply_on_another_orgs_project_is_refused(client, wind_project,
         assert err.value.status_code == 404
     finally:
         ct.set_acting_user(None)
+
+
+# ---------------------------------------------------------------------------
+# C2: resolution passthrough
+# ---------------------------------------------------------------------------
+
+
+def test_preview_tool_passes_resolution_through(client):
+    out = chat_tools.DISPATCHERS["preview_renewable_profile"](
+        points=[{"id": "g_wind", "lon": 8.0, "lat": 50.0}],
+        technology="wind",
+        year=2023,
+        resolution="weekly",
+    )
+    assert out["estimate"] is True
+    assert out["resolution"] == "weekly"
+    assert len(out["series"]["g_wind"]) == 53
+
+
+def test_generate_tool_passes_resolution_through(client, wind_project):
+    out = chat_tools.DISPATCHERS["generate_renewable_profile"](
+        project_id=wind_project,
+        points=[{"id": "g_wind", "lon": 8.0, "lat": 50.0}],
+        technology="wind",
+        year=2023,
+        resolution="daily",
+    )
+    assert out["kind"] == "profile_gen"
+    done = _wait_job(out["id"])
+    assert done["status"] == "completed", done["error"]
+
+    pending = chat_tools.DISPATCHERS["list_pending_profiles"](
+        project_id=wind_project,
+    )
+    mine = [p for p in pending["pending"] if p["job_id"] == out["id"]]
+    assert mine and mine[0]["resolution"] == "daily"
+
+
+def test_resolution_schemas_are_declared_in_the_catalogue():
+    schemas = {t["name"]: t for t in TOOLS}
+    for name in ("preview_renewable_profile", "generate_renewable_profile"):
+        props = schemas[name]["input_schema"]["properties"]
+        assert props["resolution"]["enum"] == ["hourly", "daily", "weekly"], \
+            name
