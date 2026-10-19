@@ -84,6 +84,8 @@ class BusCreate(BaseModel):
     sub_network: str = ""
     # Tonne factor of an energy product bus counted in MWh (CONTEXT.md, Product); written only when sent.
     mwh_per_t: float | None = None
+    # Value of one unit of the product, EUR per bus unit (ticket 04); written only when sent.
+    product_value: float | None = None
 
 
 class CarrierCreate(BaseModel):
@@ -181,7 +183,7 @@ class LengthsFromGeometryRequest(BaseModel):
 
 # Columns a Create model declares but a create writes only when the caller sent them.
 LINK_LAZY_COLUMNS = frozenset({"eh_process", "criticality_tier", "throughput_unit", "specific_energy_kwh_per_t"})
-BUS_LAZY_COLUMNS = frozenset({"mwh_per_t"})
+BUS_LAZY_COLUMNS = frozenset({"mwh_per_t", "product_value"})
 
 
 class LinkCreate(BaseModel):

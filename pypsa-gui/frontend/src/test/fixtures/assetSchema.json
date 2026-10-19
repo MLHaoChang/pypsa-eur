@@ -126,7 +126,7 @@
       "label": "Product value",
       "help": "What one unit of this product is worth to the client, per the bus's unit (EUR/MWh or EUR/t), with its source in the ledger. Results value a process unit's output at it. Empty: that value is Unavailable, never 0.",
       "unit_display": "EUR/unit",
-      "unit_storage": "EUR/unit",
+      "unit_storage": "",
       "scale": 1.0,
       "kind": "number",
       "options": [],
@@ -392,27 +392,6 @@
       "part": null,
       "blank": "keep",
       "technical_name": "bus"
-     },
-     {
-      "key": "process_role",
-      "group": "identity",
-      "label": "Process role",
-      "help": "For a generator on a product bus: buy_in is a real purchase of the product (booked as an expense), shortfall is product not delivered, priced at its lost-production value (booked as lost revenue, never as an expense). Empty: an ordinary generator.",
-      "unit_display": "",
-      "unit_storage": "",
-      "scale": 1.0,
-      "kind": "enum",
-      "options": [
-       "buy_in",
-       "shortfall"
-      ],
-      "required": false,
-      "key_param": false,
-      "derived": false,
-      "reveal_when": null,
-      "part": null,
-      "blank": "empty",
-      "technical_name": "process_role"
      }
     ]
    },

@@ -184,10 +184,6 @@ GENERATOR: tuple[FieldSpec, ...] = (
         "Bus the generator injects into.",
         "Technology carrier (solar, onwind, OCGT, …). Drives CO₂ accounting, grouping and canvas colours.",
     ),
-    FieldSpec("process_role", "identity", "Process role", "For a generator on a product bus: buy_in is a real "
-              "purchase of the product (booked as an expense), shortfall is product not delivered, priced at its "
-              "lost-production value (booked as lost revenue, never as an expense). Empty: an ordinary generator.",
-              kind="enum", options=("buy_in", "shortfall")),
     FieldSpec("p_nom", "size", "Capacity", "Installed active-power capacity. With extendable ticked, the existing "
               "capacity the optimiser starts from.", "MW", "MW", key_param=True),
     *_size_bounds(),
@@ -496,7 +492,7 @@ BUS: tuple[FieldSpec, ...] = (
               "MWh/t", reveal_when={"unit": "MWh"}),
     FieldSpec("product_value", "identity", "Product value", "What one unit of this product is worth to the client, "
               "per the bus's unit (EUR/MWh or EUR/t), with its source in the ledger. Results value a process unit's "
-              "output at it. Empty: that value is Unavailable, never 0.", "EUR/unit", "EUR/unit",
+              "output at it. Empty: that value is Unavailable, never 0.", "EUR/unit",
               reveal_when={"unit": ("MWh", "t")}),
     FieldSpec("sub_network", "identity", "Sub-network", "Manual region label for the 'region' clustering mode: buses "
               "sharing it collapse to one node. Empty: determined from the electrical topology.", kind="text"),
@@ -563,7 +559,7 @@ _CLEAR = {"p_nom_max", "e_nom_max", "s_nom_max", "v_nom_0", "v_nom_1", "lifetime
 # M5: per class. `empty` sends "" (a text column the write model types `str = ""`: an emptied country or display
 # name is a decision, and null would be refused); GlobalConstraint's optional columns clear to null.
 _EMPTY_BY_CLASS = {"Bus": {"country", "sub_network", "unit"}, "Carrier": {"nice_name", "color", "unit"},
-                   "Link": {"bus2", "bus3", "bus4", "criticality_tier"}, "Generator": {"process_role"}}
+                   "Link": {"bus2", "bus3", "bus4", "criticality_tier"}}
 _CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"},
                    "Bus": {"mwh_per_t", "product_value"}}
 
