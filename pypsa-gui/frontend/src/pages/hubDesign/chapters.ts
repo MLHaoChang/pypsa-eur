@@ -133,6 +133,15 @@ function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 
   return { label, value: String(r.lole), unit: 'h/yr', state: 'ready', basis, open }
 }
 
+/** A search that evaluated no case: no grid-forming converter takes part in any island
+ *  case (a data center whose only scenario is ups_bridged), so there is nothing to tune. */
+export const GFM_NOTHING_TO_TUNE =
+  'No grid-forming converter takes part in any island case, so there is nothing to tune. '
+  + 'A seamless island scenario brings the battery in.'
+export function nothingToTune(rec: GfmSettingsState['recommendation']): boolean {
+  return !!rec && rec.status === 'unchanged' && rec.cases.length === 0 && rec.simulations === 0
+}
+
 function control(gfm: GfmSettingsState | null | undefined): ChapterTile['control'] {
   if (!gfm) return undefined
   const rec = gfm.recommendation
@@ -145,6 +154,9 @@ function control(gfm: GfmSettingsState | null | undefined): ChapterTile['control
     return { state: 'stale', resolve: true,
       text: 'Grid-forming settings applied. Re-solve the hub: these settings change its island rows; '
         + 'then run the grid checks again.' }
+  }
+  if (nothingToTune(rec)) {
+    return { state: 'not_applicable', text: `Grid-forming settings: ${GFM_NOTHING_TO_TUNE.charAt(0).toLowerCase()}${GFM_NOTHING_TO_TUNE.slice(1)}` }
   }
   if (gfm.state === 'not_run' || !rec) {
     return { state: 'not_run', text: 'Grid-forming settings: no recommendation yet.' }
