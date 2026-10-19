@@ -24,14 +24,17 @@ import asyncio
 import logging
 import threading
 from typing import Any, Literal
+from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from sqlalchemy.orm import Session as DBSession
 from starlette.responses import StreamingResponse
 
 from db.models import Session as SessionRow
 from db.models import User
-from deps import current_session, optional_user
+from db.session import get_db
+from deps import current_session, optional_user, require_user
 from harness import loop as chat_service
 from services import app_secrets, llm_config
 
@@ -1325,6 +1328,45 @@ def _resolve_owned_session(
             },
         )
     return session
+
+
+class RestrictionRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    project_id: UUID
+    revision: UUID
+    mode: Literal['standard', 'confirm_changes', 'read_only']
+
+
+@router.put('/restrictions')
+def save_chat_restrictions(body: RestrictionRequest, response: Response,
+                           actor: User = Depends(require_user), db: DBSession = Depends(get_db)):
+    """Save only the authenticated user's restrictions on the current project."""
+    from harness import restrictions
+
+    project = restrictions.current_project(db, actor, str(body.project_id))
+    result = restrictions.save(db, actor, project, body.revision, body.mode)
+    response.headers['Cache-Control'] = 'no-store'
+    return {**result, 'project_id': str(project.id)}
+
+
+@router.get('/access')
+def chat_access(
+    response: Response,
+    project_id: str | None = Query(default=None, max_length=120),
+    session_id: str | None = Query(default=None, min_length=1, max_length=128),
+    ui_mode: Literal['expert', 'guided'] = 'expert',
+    checked: bool = False,
+    actor: User = Depends(require_user),
+    db: DBSession = Depends(get_db),
+):
+    from harness import access
+    session = _resolve_owned_session(session_id, actor) if session_id is not None else None
+    if session_id is not None and session is None:
+        raise HTTPException(404, 'Chat session is unavailable.')
+    result = access.snapshot(db=db, user=actor, session=session, project_id=project_id,
+                             ui_mode=ui_mode, checked=checked)
+    response.headers['Cache-Control'] = 'no-store'
+    return result
 
 
 class _DisconnectWatcher:

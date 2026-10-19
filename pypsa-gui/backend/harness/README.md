@@ -33,6 +33,11 @@ harness/
   solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call
   job_adapters.py foreground (fg:…) and later domain job handles for wait_for_job without holding the turn
   activity_history.py bounded owned job-origin/status observations across worker loss; no execution, numerical or approval authority
+  completion_observer.py bounded weak native-worker status observation while Activity is closed; no advancement or retry
+  experiment_execution.py ordinary network-case admission and permanent no-replay receipts
+  experiment_two_case.py sequential two-case admission with shared caps and failure policy
+  experiment_reconciliation.py explicitly confirmed fenced native submission read-back; no execution or retry
+  experiment_comparison.py current compatible objective comparisons and digest-bound export; no execution authority
   attention.py    bounded owned question/confirmation observations and versioned read-only inspection; no restored approval or answer authority
   owned_snapshots.py private atomic bounded snapshot storage shared by job and decision observations; schemas remain separate
   compose.py      the system prompt for a turn, the live network line, and the per-turn ui-context / Guided / workflow-step blocks
@@ -40,6 +45,8 @@ harness/
   stub.py         the scripted stub loop behind StreamRequest.script
   session.py      ChatSession, PendingConfirmation, the session registry with its TTL and cap
   confirm.py      the confirmation gate: tiers, the Guided write rule, auto-approve, parallel-destructive
+  access.py       authenticated read-only current scope, confirmation policy, locks and configured limits
+  restrictions.py revisioned personal saved-project tool restrictions; fresh admission/pickup checks, no grants
   approvals.py    every card's asked/decided record per owner and session; an approval that cannot be recorded does not run
   eventlog.py     the session event log: every model-visible input, append-only per owner and session; derive_messages, fork, torn-tail repair; the source of truth (the deque is its fold, a chat not in memory is rebuilt from it, interrupted turns are read off it, chat.jsonl is its projection)
   replay.py       fork a recorded session before one turn and run that turn again on another provider (smoke/replay_session.py)
@@ -91,7 +98,26 @@ review. Preparation never queues a send, alters the ordinary draft, restores an
 old session or changes global opt-in. See the CP-04e contract in
 `.scratch/chat-companion/issues/04e-explicit-gap-followups.md`.
 
+Registered jobs with an established native Thread can also be observed while
+Activity and native waits are closed. `completion_observer.py` uses one daemon,
+at most 512 weak context bindings and a 24-hour watch limit. It reads only exact
+native status without waiting for lifecycle locks, then journals outside those
+locks to the registration's owned destination. Missing/replaced/rebound sources,
+exited workers without terminal status and missed capture remain unknown/Needs
+review; a completion observation is not engineering evidence or quiescence.
+This best-effort observer cannot recover a terminal slot already replaced or a
+process that died before persistence. It never advances or retries work. See
+`.scratch/chat-companion/issues/04f-native-completion-observation.md`.
+
 ## The contract
+
+In-page chat's access summary reads the same authenticated `/api/chat/access`
+snapshot as the dock. ChatPanel supplies its actual next-turn checked selection
+to both surfaces; opening the summary never sends a message or approves a card.
+The summary hides observations during refresh/failure or a scope mismatch and
+offers the existing full review and revisioned restriction editor. It is an
+observation, not admission authority or proof that a running answer was checked.
+See `.scratch/chat-companion/issues/06d-companion-access-summary.md`.
 
 1. **Layering.** `services/* <- harness <- harness/providers`. Nothing in
    this folder outside `providers/` imports an SDK or names a wire
@@ -138,6 +164,67 @@ old session or changes global opt-in. See the CP-04e contract in
    is a `turn/record` event first. A new writer to `session.messages` goes
    through `eventlog.apply` (`tests/test_harness_eventlog_truth.py` fails on
    one that does not).
+
+## Current access visibility
+
+`GET /api/chat/access` authenticates the current project and optional owned
+session without creating a turn or connecting external servers. It projects the
+same `confirm.confirmation_policy` used by the ordinary gate, current project
+lock, checked selection and configured caps. The Guided/Expert and checked
+query selections describe a next turn, not a running turn. The read-only view is
+not an action capability, remaining-budget estimate, complete readiness check or
+permission to incur charges. Unknown usage is unavailable rather than zero.
+Locks are inspected without pruning expired rows; busy chat state returns 409
+without waiting behind a turn's session lock. The response is `no-store`;
+dispatch and effect commit keep their own current checks. The dock's **Access
+and approvals** disclosure hides stale/failed or mismatched-scope reads. Existing
+Confirmation/Choice cards and Activity remain the decision paths. See
+`.scratch/chat-companion/issues/06a-effective-permission-visibility.md` for limits
+and the remaining CP-06 contract.
+
+Ordinary and checked dispatch snapshot finite JSON arguments before emitting
+frames. Emitted request/card arguments and the pending token record are separate
+copies. Approval cannot replace the action with a caller-mutated argument.
+Current server confirmation-tier sets, native exemptions and token lifetime form
+an effective configuration revision; a change while waiting revokes approval.
+Dispatch also rechecks that revision, the tool's tier and its external server
+identity before admission and at worker pickup. This is not a durable policy
+history or an external-server reconnect/configuration revision (CP-13).
+
+Access and approvals can save the authenticated user's personal rule for the
+current saved project: standard server floors, an ordinary audited card for
+every non-read tool, or refusal of non-read tools. This includes native and
+external dispatch in both modes and checked turns; it grants no new tools or
+checked adapters. Read-only tools can still involve inference and usage limits.
+An additive owner/project database row stores the current mode and revision.
+PUT `/api/chat/restrictions` requires the current project binding and expected
+revision; concurrent or stale saves cannot overwrite another choice. Clearing
+saves standard with a new revision. Missing rows preserve server floors;
+unavailable/corrupt storage refuses admission. Fresh reads after approval and
+at actual worker pickup invalidate changed revisions, including change-and-restore.
+Saving does not cancel handlers already started. Rules are not imported with
+project data, inherited by scenarios or shared with other users. This current
+record is not durable policy history. See
+`.scratch/chat-companion/issues/06c-saved-restrictions.md`.
+
+## Component schema discovery
+
+`get_component_schema` is an ordinary read-tier control, available in every
+toolset and within the existing provider offer caps. It pages the actual
+component request models, PyPSA defaults and asset descriptors: stored/display
+units, declared JSON constraints, defaults, and conservative derived/output
+editability. A page is at most3800 serialized characters; advance `offset` by
+`returned` while `has_more`. An individually oversized field refuses rather
+than silently clipping its schema. Query matches field names/labels, not values.
+
+This is class metadata, including in a networkless planning context, never
+proof that a project has an instance or supports an engine. Actual values stay
+on-demand through existing owned component reads. The metadata hash is not an
+input revision, validation-policy revision or approval. Native handlers still
+validate every write, including cross-field rules absent from JSON Schema.
+Personal read-only rules remain authoritative even for a field marked editable;
+the strict checked pilot continues to refuse this unmapped tool. Non-component
+service/domain schemas and exact target resolution remain LC-01 follow-ups.
 
 ## Local MCP exposure (issue 11)
 
@@ -518,6 +605,21 @@ copy and stores an owner/project-bound preview. `apply_project_changes`
 requires normal execution confirmation, unchanged inputs, an idle project,
 and the existing foreign-lock/study/undo gates. It commits a validated private
 candidate, retains unsaved work, and refuses interrupted application replay.
+Previews are limited to a complete review of at most 20 values fitting a
+3800-character card; larger changes must be split. Legacy/clipped records need
+a new preview. The card renders an old/new/unit table on both surfaces and
+disables approval when its review is incomplete. A server-only execution context
+binds the reviewed record's digest to the handler. The handler rechecks the
+record, source fingerprint and independently reconstructed diff under the
+network lock before committing; a consistent replacement checksum cannot
+substitute for the approved record. Checksums detect drift, not storage trust
+or domain correctness. Other effect families retain their existing cards;
+their exact-preview adapters remain separate work. See
+`.scratch/chat-companion/issues/06b-bound-confirmations.md`.
+Candidate preparation also reads each assigned native scalar back as a Python
+value and refuses rounding or overflow before a preview is saved. A finite JSON
+integer is not necessarily exactly representable in a native floating-point
+field; representable large values remain supported.
 Topology operations remain the existing CRUD/batch tools.
 
 `create_chart` renders bounded numeric input/result data as PNG. Result
@@ -731,3 +833,50 @@ preflight upgrades compatible records. Old ambiguous caps must be replanned.
 
 `start_experiment` and `prepare_experiment` are write-tier, with the same Guided confirmation rule as
 `discuss_project_run`. `list_experiments` and `get_experiment` are read-tier.
+
+New single-case submissions also carry a native fence and bounded submission
+checkpoints. `reconcile_experiment` is a destructive-tier, exact-receipt-bound
+metadata control: current owner/project access precedes edit-lock checks and
+ordinary confirmation is mandatory. Software derives the outcome by reading
+the matching native child/job/input/evidence records. A native child receipt
+binds the original job/attempt; a later same-input job cannot substitute.
+No-effect settlement requires a positive handler-close checkpoint before the
+first effect; a free lease alone cannot prove it. Legacy/missing/corrupt proof,
+lost queue receipts and source drift stay unresolved. The original reservation
+and caps remain; no retry, solve, abort, activation or deletion is executed.
+This does not add a checked-answer profile or a two-case adapter. See
+`.scratch/chat-companion/issues/05a-uncertain-case-reconciliation.md` and the
+single-case contract for the native proof and remaining-scope boundaries.
+
+`compare_experiments` reads two distinct owned single-network-case plans in the
+active baseline project without executing or refreshing their receipts. Each
+current result must pass the existing exact saved/job/run oracle. Deltas require
+intact referenced baseline evidence matching the frozen preflight digest and
+the same prepared baseline, full horizon, snapshot/investment weights, solver
+configuration, mode and objective units. Declared candidate changes are included;
+failed/unavailable sources retain their own state without a fabricated delta.
+The sole metric is the recorded solver objective, not certified full cost.
+`export_experiment_comparison` re-reads sources and requires the inspected report
+SHA256, then uses the ordinary write/lock/authenticated-download contract. An old
+export is a historical report; it does not certify current evidence. No strict
+profile expansion, shared two-case advancement or stop/continue scheduling is
+added. See `.scratch/chat-companion/issues/05b1-case-comparison.md`.
+
+
+Two prepared network cases can now share one explicitly armed plan. The version-2
+parent execution ledger binds two version-1 case receipts without migrating old
+single-case ledgers. Each next_call is still one separately admitted ordinary
+sweep or bounded wait, never an internal execution loop. Combined attempts and
+one start time/cancellation cover both cases and survive recreated chats.
+A verified terminal job failure follows the frozen stop/continue policy;
+uncertain, partial or unavailable effects block both policies. Explicit fenced
+case reconciliation can establish matching native receipts or positive no-effects
+proof, but never resets a reservation or authorizes retry. Native submissions
+share one parent lease; separate case proof files preserve their exact origins.
+
+For two-case plans, reconcile_experiment requires the inspected case_id, and
+compare_experiments/export_experiment_comparison require explicit case_id and
+baseline_case_id selectors for their respective two-case plans. Two distinct
+cases of the same plan are allowed. The existing exact source/basis/digest export
+checks still apply. No strict checked-profile expansion or broader domain adapter
+is introduced. See `.scratch/chat-companion/issues/05b2-shared-two-case.md`.

@@ -264,6 +264,19 @@ def _paginate(rows: list[dict], offset: int, limit: int | None) -> dict:
     return out
 
 
+def get_component_schema(component_class: str, *, query: str = '', offset: int = 0, limit: int = 8) -> dict:
+    """Read class metadata through the same native models used by CRUD."""
+    from services.asset_schema.fields import fields_for
+    from services.component_discovery import schema_page
+
+    if component_class not in _COMPONENT_CREATE_SCHEMAS:
+        raise HTTPException(400, 'Unknown component_class.')
+    network = PyPSAService.get_network()
+    return schema_page(component_class, _get_schema(_COMPONENT_CREATE_SCHEMAS[component_class]),
+                       network.components[component_class].defaults, fields_for(component_class),
+                       query=query, offset=offset, limit=limit)
+
+
 def list_components(
     component_class: str, *, offset: int = 0, limit: int | None = None,
 ) -> dict:
@@ -7245,11 +7258,14 @@ from services.run_evidence import list_project_runs, get_run_evidence, compare_p
 from services.loadflow_summary import get_loadflow_summary
 from services.experiments import start_experiment, prepare_experiment, list_experiments, get_experiment
 from harness.experiment_execution import advance_experiment, refresh_experiment, cancel_experiment
+from harness.experiment_reconciliation import reconcile_experiment
+from harness.experiment_comparison import compare_experiments, export_experiment_comparison
 from services.assistant_tasks import list_tasks, start_task, get_task, resume_task, cancel_task, resolve_task_step
 from services.assistant_tools import (find_capabilities, get_file_delivery, inspect_import, import_uploaded_network,
                                       preview_project_changes, apply_project_changes, create_chart, build_delivery)
 
 DISPATCHERS: dict[str, Any] = {
+    "get_component_schema": get_component_schema,
     "list_project_runs": list_project_runs,
     "get_run_evidence": get_run_evidence,
     "compare_project_runs": compare_project_runs,
@@ -7261,6 +7277,9 @@ DISPATCHERS: dict[str, Any] = {
     "advance_experiment": advance_experiment,
     "refresh_experiment": refresh_experiment,
     "cancel_experiment": cancel_experiment,
+    "reconcile_experiment": reconcile_experiment,
+    "compare_experiments": compare_experiments,
+    "export_experiment_comparison": export_experiment_comparison,
     "list_experiments": list_experiments,
     "get_experiment": get_experiment,
     "list_tasks": list_tasks,

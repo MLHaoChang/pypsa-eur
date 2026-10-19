@@ -43,6 +43,18 @@
     "Changing one is a UI decision. Write down why, as the entries do."
   ],
   "kinds": {
+    "schema_field_too_large": {
+      "surface": "inline",
+      "why": "get_component_schema refused one field whose complete descriptor exceeds the bounded metadata page. The per-call detail names that field; the assistant reports incomplete discovery rather than clipping it or claiming a complete schema. There is no conversation-wide recovery action."
+    },
+    "restriction_unavailable": {
+      "surface": "banner",
+      "why": "Saved personal project restrictions could not be read at tool admission or worker pickup. Fail closed and direct the user to refresh Access and approvals; never silently assume standard rules."
+    },
+    "user_restriction": {
+      "surface": "banner",
+      "why": "The authenticated user saved a personal read-only project rule. The non-read tool did not run; inspect or change the rule explicitly in Access and approvals, without weakening server confirmation floors."
+    },
     "aborted": {
       "surface": "inline",
       "why": "The user pressed stop. Announcing their own action in a banner is noise."
@@ -762,6 +774,26 @@
     "activity_resnapshot_required": {
       "surface": "inline",
       "why": "The Activity snapshot cursor expired or changed; its observer reloads authority without replaying work or approvals."
+    },
+    "experiment_reconciliation_stale": {
+      "surface": "inline",
+      "why": "The confirmation referenced an older owned receipt. Its failed tool line tells the user to inspect and confirm current proof; no project action is replayed."
+    },
+    "experiment_reconciliation_unavailable": {
+      "surface": "inline",
+      "why": "The historical submission lacks the new fenced proof. The failed tool line keeps its reservation unresolved; no fabricated no-effect verdict or retry is offered."
+    },
+    "experiment_worker_running": {
+      "surface": "inline",
+      "why": "The owned submission still holds its native fence. The failed tool line explains waiting; no result, reconciliation or retry has occurred."
+    },
+    "invalid_experiment_comparison": {
+      "surface": "inline",
+      "why": "The comparison requires two distinct owned plan IDs. The failed tool line requests a valid selection without exposing foreign sources."
+    },
+    "experiment_comparison_changed": {
+      "surface": "inline",
+      "why": "The inspected comparison no longer matches current owned sources. The failed export line requests fresh inspection; no old report or calculation is substituted."
     }
   }
 }

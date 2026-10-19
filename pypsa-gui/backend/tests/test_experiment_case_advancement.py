@@ -408,15 +408,16 @@ def test_partial_creation_preserves_child_and_forbids_retry(baseline, monkeypatc
     assert not solve_queue.list_jobs()
 
 
-def test_unprepared_and_multi_case_plans_cannot_arm(baseline):
+def test_unprepared_and_larger_than_two_case_plans_cannot_arm(baseline):
     plan = ex.start_experiment(title="Unprepared", request_id="u",
         cases=[{"id": "a", "changes": [{"path": "Generator.G1.p_nom", "value_type": "number", "value": 30}]}])
     with pytest.raises(HTTPException) as error:
         arm(plan["experiment_id"])
     assert error.value.detail["error_kind"] == "experiment_preflight_required"
-    plan = ex.start_experiment(title="Two", request_id="two", cases=[
+    plan = ex.start_experiment(title="Three", request_id="three", cases=[
         {"id": "a", "changes": [{"path": "Generator.G1.p_nom", "value_type": "number", "value": 30}]},
-        {"id": "b", "changes": [{"path": "Generator.G1.p_nom", "value_type": "number", "value": 40}]}])
+        {"id": "b", "changes": [{"path": "Generator.G1.p_nom", "value_type": "number", "value": 40}]},
+        {"id": "c", "changes": [{"path": "Generator.G1.p_nom", "value_type": "number", "value": 50}]}])
     ex.prepare_experiment(plan["experiment_id"])
     with pytest.raises(HTTPException) as error:
         arm(plan["experiment_id"])

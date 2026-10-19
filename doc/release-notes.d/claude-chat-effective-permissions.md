@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Show current project access, confirmation rules, lock blockers, checked selection and configured limits in the assistant's Access and approvals panel. The view is read-only and preserves native and external-tool approval rules.

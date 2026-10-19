@@ -112,7 +112,13 @@ def review(turn, provider, model, packet, ctx):
                     metrics._metric_add_tokens(
                         usage.get("input_tokens", 0), usage.get("output_tokens", 0)
                     )
-                if not usage or usage.get("output_tokens", 0) > MAX_REVIEW_TOKENS:
+                # Charge the reported counts above even when a provider omits
+                # part of its receipt; missing counts cannot mean zero usage
+                # or authorize publication of an interpretation.
+                if (
+                    not {"input_tokens", "output_tokens"} <= usage.keys()
+                    or usage["output_tokens"] > MAX_REVIEW_TOKENS
+                ):
                     return "withheld_usage"
                 if any(b.get("type") != "text" for b in event.blocks):
                     return "withheld_schema"
