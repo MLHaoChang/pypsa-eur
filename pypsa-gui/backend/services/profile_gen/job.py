@@ -41,10 +41,7 @@ from typing import Any
 import pandas as pd
 
 from services.profile_gen import engine, presets
-from services.profile_gen.cutout_cache import (
-    CutoutDownloadAborted,
-    ensure_cutout,
-)
+from services.profile_gen.cutout_cache import ensure_cutout
 from services.profile_gen.engine import (
     ProfileGenError,
     generate_profile,

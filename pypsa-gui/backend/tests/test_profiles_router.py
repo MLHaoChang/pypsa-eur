@@ -19,7 +19,6 @@ project is a 404, never a 403.
 """
 from __future__ import annotations
 
-import json
 import time
 import uuid
 
@@ -27,8 +26,6 @@ import pandas as pd
 import pypsa
 import pytest
 
-from db.models import User
-from services import project_registry
 from services import solve_queue as sq
 
 SNAPS_2025 = pd.date_range("2025-01-01", periods=8760, freq="h")
