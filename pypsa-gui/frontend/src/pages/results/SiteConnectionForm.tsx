@@ -44,6 +44,9 @@ export default function SiteConnectionForm({ initial, onSaved, onCancel, default
   // `null` = not touched: follow the stored value, else the first suggestion.
   const [poc, setPoc] = useState<string | null>(null)
   const pocValue = poc ?? initial?.poc_link ?? pocHints[0] ?? meters[0]?.name ?? ''
+  // A point of connection that never imports (p_max_pu 0: the island's normally-open tie) means the site
+  // runs as an island: there is no import, export or tariff to set (UX review H4, N14).
+  const island = Number(meters.find(l => l.name === pocValue)?.p_max_pu) === 0
   const expHints = exportCandidates(meters, pocValue, hints)
   const [exp, setExp] = useState<string | null>(null)
   const expValue = exp ?? (initial ? (initial.export_link ?? '') : (expHints[0] ?? ''))
@@ -67,7 +70,7 @@ export default function SiteConnectionForm({ initial, onSaved, onCancel, default
     setSaving(true)
     setError(null)
     try {
-      await commercialApi.saveSiteConnection({ poc_link: pocValue, export_link: expValue || null,
+      await commercialApi.saveSiteConnection({ poc_link: pocValue, export_link: island ? null : (expValue || null),
                                                timezone: tz || null })
       await qc.invalidateQueries({ queryKey: nk(project, 'commercial') })
       await qc.invalidateQueries({ queryKey: nk(project, 'results') })
@@ -103,6 +106,11 @@ export default function SiteConnectionForm({ initial, onSaved, onCancel, default
           {ordered(pocHints).map(n => <option key={n} value={n}>{label(n, pocHints)}</option>)}
         </select>
       </div>
+      {island ? (
+        <p className="text-[11px] text-muted" data-testid="site-connection-island">
+          This site runs as an island: its connection point is the normally open tie, so there is no import,
+          export or tariff to set. Use it as the connection to read the investment case against the island as it stands.</p>
+      ) : (<>
       <div className="flex flex-col gap-0.5">
         <label htmlFor="sc-export" className="text-[11px]">Export link (site → grid)</label>
         <select id="sc-export" className={field} value={expValue} onChange={e => setExp(e.target.value)}>
@@ -120,11 +128,12 @@ export default function SiteConnectionForm({ initial, onSaved, onCancel, default
         <p className="text-[10px] text-muted">
           With a zone set, the snapshots are read as UTC and the tariff's time windows on this clock.</p>
       </div>
+      </>)}
       {error && <p className="text-[11px] text-warn" role="alert">{error}</p>}
       <div className="flex gap-2">
         <button type="submit" className="text-[11px] px-2 py-0.5 border border-border rounded"
                 disabled={saving || !pocValue}>
-          {saving ? 'Saving…' : 'Save site connection'}
+          {saving ? 'Saving…' : island ? `Use ${pocValue} as the connection` : 'Save site connection'}
         </button>
         {onCancel && (
           <button type="button" className="text-[11px] underline" onClick={onCancel}>Cancel</button>
