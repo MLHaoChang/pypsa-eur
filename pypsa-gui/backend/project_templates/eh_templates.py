@@ -607,7 +607,11 @@ TEMPLATE_META: dict[str, dict] = {
              "source": "assumed",
              "note": "in service at the first period and sunk: no capex in the case; only the "
                      "candidates the plan builds are investments, each a stage at its period"},
-            {"item": "finance inputs", "value": "nominal EUR (2020 money, the pack's), escalation "
+            {"item": "money year", "value": "pack prices (2020 price data) are read as real base-year EUR",
+               "source": "assumed",
+               "note": "held flat to the base year, then escalated from it at the case's rates; "
+                       "nothing is converted with a price index"},
+            {"item": "finance inputs", "value": "nominal EUR, escalation "
                                                 "2 %/yr, inflation 2 %, all equity at 7 %, "
                                                 "close 2026-01-01, 18 years to 2045",
              "source": "assumed",

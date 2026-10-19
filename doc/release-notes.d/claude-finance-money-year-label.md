@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The investment case's report and template ledgers now say what the engine does with the defaults pack's 2020 price data: costs are read as real money of the case's base year (for example "nominal basis, costs in real 2027 EUR (2020 price data)"), held flat to the base year and escalated from it. Wording only; no NPV changes.

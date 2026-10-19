@@ -69,10 +69,16 @@
       "value": "gensets 1-4, rooftop_pv, ups_battery, site_transformer: COD 2027-01-01, overnight cost 0"
     },
     {
+      "item": "money year",
+      "note": "held flat to the base year, then escalated from it at the case's rates; nothing is converted with a price index",
+      "source": "assumed",
+      "value": "pack prices (2020 price data) are read as real base-year EUR"
+    },
+    {
       "item": "finance inputs",
       "note": "a later stage's capex is paid one year before its COD; pre-tax (no tax pack); the terminal value is the remaining-life annuity of each part",
       "source": "assumed",
-      "value": "nominal EUR (2020 money, the pack's), escalation 2 %/yr, inflation 2 %, all equity at 7 %, close 2026-01-01, 18 years to 2045"
+      "value": "nominal EUR, escalation 2 %/yr, inflation 2 %, all equity at 7 %, close 2026-01-01, 18 years to 2045"
     },
     {
       "item": "depreciation of the staged assets",

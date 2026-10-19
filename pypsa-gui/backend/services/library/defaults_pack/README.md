@@ -78,6 +78,11 @@ Each row carries its own money year in `currency` and `currency_year`: 2020 for 
 The finance defaults and the seed tariffs are in 2020 EUR. No row is converted with a price index,
 so a caller that mixes rows of both years converts them itself.
 
+In an investment case the engine reads these costs as real prices in the case's base-year money
+(a 2020 row in a case with base year 2027 is used as real 2027 EUR): held flat to the base year,
+then escalated from it at the case's rates. Reports and template ledgers say so ("costs in real
+2027 EUR (2020 price data)"). It is a convention, not a conversion: no price index is applied.
+
 Costs use the asset schema's part vocabulary (S0):
 
 - the battery has a `power` part, priced per MW, which is the inverter;

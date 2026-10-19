@@ -116,6 +116,9 @@ def test_the_blocks_validate_and_say_what_is_missing():
     for tid in IDS:
         items = {r["item"]: r for r in T.TEMPLATE_META[tid]["ledger"]}
         assert "investment case" in items
+        assert "real base-year EUR" in items["money year"]["value"]
+        assert "2020 price data" in items["money year"]["value"]
+        assert "2020 money" not in items["finance inputs"]["value"]
     h2_ledger = {r["item"]: r for r in T.TEMPLATE_META["eh_h2_hub_staged"]["ledger"]}
     for item in ("grey H2 reference price", "CO2 price"):
         assert h2_ledger[item]["source"] == "synthetic"
