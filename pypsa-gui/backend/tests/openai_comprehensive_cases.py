@@ -36,6 +36,9 @@ def minimal_value(schema, key=""):
         return None
     if kind in ("number", "integer"):
         return max(1, schema.get("minimum", 1), schema.get("exclusiveMinimum", 0) + 1)
+    if schema.get("pattern") == "^[0-9a-f]{64}$":
+        # A contract sample must satisfy the same digest shape as a real call.
+        return "0" * 64
     values = {"component_class": "Bus", "name": "B1", "new_name": "B3",
               "start": "2026-01-01T00:00:00", "end": "2026-01-01T02:00:00",
               "workflow_id": "build-network", "step": "components",

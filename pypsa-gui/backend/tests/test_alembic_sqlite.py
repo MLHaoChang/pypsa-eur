@@ -230,7 +230,7 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
     from sqlalchemy.orm import sessionmaker
 
     import local_bootstrap
-    from db.models import OrgMembership, Organization, Project
+    from db.models import LibraryItem, OrgMembership, Organization, Project
     from db.models import Session as SessionRow
     from db.models import SolveJobRow, User
     from db.session import enable_sqlite_foreign_keys
@@ -244,16 +244,14 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
     # column migration also changes what "byte-identical rows" can mean: see
     # NEW_COLUMN below.
     #
-    # 0008_library (Edge Investment Case WP1.1a) adds a TABLE again, so the
-    # table form is the one exercised; `solve_jobs` stays in the seeded set
-    # because its rows must still come through 0008 byte-identical.
-    NEW_TABLE_NAME = "library_items"            # 0008 adds the Library table
+    # 0009 adds personal restrictions. Existing Library rows must survive too.
+    NEW_TABLE_NAME = "chat_restrictions"
     NEW_COLUMN = None                           # (table, column) or None
     # `solve_jobs` joined this list with 0007: the column under test is on it,
     # and a QUEUED job row surviving the migration is the thing that matters —
     # a restart restores those rows into the in-memory queue.
     PRE_EXISTING_TABLES = [
-        "organizations", "users", "org_memberships", "projects", "sessions", "solve_jobs",
+        "organizations", "users", "org_memberships", "projects", "sessions", "solve_jobs", "library_items",
     ]
 
     def _dump_rows(engine, table_names):
@@ -390,13 +388,18 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
                 solver_config=None, enqueued_at=now,
             ),
         ])
+        _seed(conn, [LibraryItem(
+            id=uuid.uuid4(), org_id=org_id, kind='series', name='Existing curve',
+            version=1, hash='a' * 64, path='existing/curve.json', meta_json='{"unit":"EUR/MWh"}',
+            created_by=user_id, created_at=now,
+        )])
 
     with engine.connect() as conn:
         version_before = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
     assert version_before == predecessor
 
     before = _dump_rows(engine, PRE_EXISTING_TABLES)
-    assert [len(before[t]) for t in PRE_EXISTING_TABLES] == [1, 1, 1, 2, 3, 1], (
+    assert [len(before[t]) for t in PRE_EXISTING_TABLES] == [1, 1, 1, 2, 3, 1, 1], (
         "seeding produced the wrong row counts — the byte-identical comparison below "
         "would be vacuous against an empty or partially-seeded table"
     )

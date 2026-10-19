@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Guided's Results tiles no longer say "campus" on templates that are not campuses (hospital, industrial, hydrogen hub, island): "Grid checks", "Open the grid checks", and "Grid-forming settings: no recommendation yet" (UX review M3).

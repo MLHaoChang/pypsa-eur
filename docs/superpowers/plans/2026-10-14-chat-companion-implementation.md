@@ -10,11 +10,51 @@ Implementation: tracked per slice below; this plan alone does not certify implem
 
 ## Start here
 
+Current execution amendment (2026-10-18): follow the
+[whole-application live copilot plan](2026-10-18-whole-application-live-copilot.md)
+and its source-reviewed gaps for generic model/tool/parameter access, confirmed
+edits, ordered workflows and all-family result adapters. Load flow is a
+representative journey, not the scope boundary. Merged CP-01–06 prerequisites
+are reused; real-browser pointer/overflow failures remain open. The earlier
+sequence below provides background and dependencies.
+
 Read the [specification](../../../.scratch/chat-companion/spec.md), especially its authority/publication invariants and CC-01–CC-16 requirements. The [acceptance matrix](../../../.scratch/chat-companion/test-plan.md) is the pending evidence checklist. The [assessment](../../../.scratch/live-voice/dots-design-assessment-2026-10-14.md) explains the current gaps and reference sources.
 
 First implement **CP-01**, then **CP-02**. These deliver truthful in-page chat and readable outcomes without new hosted media. Do not start a broad avatar rewrite or background effects to complete either slice.
 
-Current continuation: CP-01 (#235) and CP-02 (#241) are merged. [CP-01 evidence](../../../.scratch/chat-companion/issues/01-truthful-state.md), [CP-02 evidence](../../../.scratch/chat-companion/issues/02-canonical-outcomes.md), and [bounded CP-03 implementation/evidence](../../../.scratch/chat-companion/issues/03-source-navigation.md) record tested boundaries and remaining gates. CP-03 (#268) covers retained native evidence and the current Expert branch-loading adapter; other current-tab adapters and historical harness completion ACKs remain follow-ups. CP-03 is merged at `5711a6fa0116731ab61cfa2f757ef2d2a5540703`. [CP-04a Activity observer](../../../.scratch/chat-companion/issues/04-activity-needs-you.md) is merged in #309 at `07f90f2316ebdc1f9e42e1fffc17ea22d3b30e6a`: read-only owned snapshots and a reconnecting panel. [CP-04b retained job observations](../../../.scratch/chat-companion/issues/04b-retained-job-observations.md) is merged in #311 at `76835bb3fcf3a66a949a8cca66099a83f545b8ae`. The current bounded slice is [CP-04c retained decision observations](../../../.scratch/chat-companion/issues/04c-retained-decision-observations.md): persistent question/confirmation inspection without restored authority. Wider source-gap/effect decision adapters, unobserved completion capture and wider native worker journeys remain pending. This plan remains the sequence; the linked issues are the execution records.
+Current continuation: CP-01 (#235), CP-02 (#241), bounded CP-03 (#268), Activity
+(#309), retained jobs (#311), retained decisions (#319), source gaps (#327),
+explicit source-gap follow-ups (#333) and bounded native completion observation
+(#351) and [CP-05a explicit uncertain-case reconciliation](../../../.scratch/chat-companion/issues/05a-uncertain-case-reconciliation.md)
+(#352, `e1adb0db95111ec9ef0f1ef8471938313a4e1cb6`) are merged. Their linked issue
+records describe verified boundaries and remaining live/domain gates. The current
+slice [CP-05b1 comparison/export](../../../.scratch/chat-companion/issues/05b1-case-comparison.md)
+is merged in #353. The bounded slice
+[CP-05b2 shared two-case admission](../../../.scratch/chat-companion/issues/05b2-shared-two-case.md)
+is merged in #354 (`fae95896500d6d74625e94e9f3a546d2d6b405af`), with common caps,
+separate ordinary confirmations/receipts and stop/continue policy. The current
+slice [CP-06a access visibility](../../../.scratch/chat-companion/issues/06a-effective-permission-visibility.md)
+is merged in #356 (`e7777aa2e2c086789f1c802d387410a5280dc0cc`), with successful
+post-merge Test, CodeQL and image workflows.
+[CP-06b bound confirmations](../../../.scratch/chat-companion/issues/06b-bound-confirmations.md)
+is merged in #357 (`3f45c0e7d9ad66ee74e6bd918d655419152f3e8f`):
+fixed ordinary-call arguments, current confirmation-rule checks and complete
+old/new/unit reviews for the existing engineering preview adapter. Wider effect
+previews and external readiness remain separate work.
+[CP-06c saved personal project restrictions](../../../.scratch/chat-companion/issues/06c-saved-restrictions.md),
+merged in #358 (`8723578028bcb1952a36948dede20ebd09eb2b91`), adds closed restrictive
+modes, revisioned saves and waiting/queued action checks.
+[CP-06d in-page access summary](../../../.scratch/chat-companion/issues/06d-companion-access-summary.md),
+merged in #361 (`c75ca5584b873418f10f1bca42f868255d445b7b`), uses the same
+next-turn checking selection and full access controls as chat. Its post-merge
+Test, CodeQL and image workflows passed. The bounded CP-06a–d implementation
+package is closed out in the [permission handoff](../handovers/2026-10-18-chat-permissions-closeout.md).
+Durable personal policy history and broader effect previews remain CP-06 work;
+the owner's newer generic-copilot priority is ordered in the execution amendment.
+Neither remaining capability is implemented by CP-06a–d.
+Wider current-tab navigation, broader domain adapters/family journeys and
+external/live validation remain separate scopes.
+This plan remains the sequence; the linked issues are the execution records.
 
 This plan supplements the [earlier assistant plan](2026-10-13-assistant-remaining-work.md). Its bounded prerequisites and first-network-case milestones are already merged in #185/#188. Reuse them; their residual two-case/reconciliation work is CP-05. Existing Live issues 01–12 keep their acceptance scope and remaining external gates.
 

@@ -1,6 +1,7 @@
 import { navigationEpoch, manualNavigation } from '../utils/navigationEpoch'
 import AssistantResultCard from './AssistantResultCard'
 import DictationControls from './DictationControls'
+import { createPortal } from 'react-dom'
 /**
  * Phase 3 chatbot integration v6 — ChatPanel.
  *
@@ -30,6 +31,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { acknowledgeMountedView, type NavigationAcknowledgement } from '../utils/verifiedNavigation'
 import { CheckedEvidenceCard } from './CheckedEvidenceCard'
 import { CheckedAnswerControl } from './CheckedAnswerControl'
+import ChatAccess from './ChatAccess'
+import { SourceGapFollowupCard } from './SourceGapFollowupCard'
+import type { SourceGapDraft } from '../store/chatStore'
 import { CHECKED_ANSWERS_QUERY_KEY, getCheckedAnswerCapabilities } from '../api/reliability'
 import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -469,7 +473,9 @@ export function GoalStrip() {
  * picks, in option order, joined by "; "; a `plan_review` card is marked as
  * one and shows `detail` as the plan (presentation only, same answer).
  */
-export function ChoiceCard() {
+export function ChoiceCard({ companion = false, target = null, inputOpen = false, onFreeText }: {
+  companion?: boolean; target?: HTMLElement | null; inputOpen?: boolean; onFreeText?: () => void;
+} = {}) {
   const choice = useChatStore((s) => s.choice)
   const setChoice = useChatStore((s) => s.setChoice)
   const sendRequest = useChatStore((s) => s.sendRequest)
@@ -489,9 +495,9 @@ export function ChoiceCard() {
     setPicked((cur) => (cur.includes(label) ? cur.filter((l) => l !== label) : [...cur, label]))
   const sendPicked = () =>
     send(choice.options.map((o) => o.label).filter((l) => picked.includes(l)).join('; '))
-  return (
+  const card = (
     <div
-      className="border border-accent/50 bg-accent/5 rounded p-3 mx-3 my-2"
+      className={`border border-accent/50 bg-accent/5 rounded p-3 mx-3 my-2 ${inputOpen ? 'max-xl:hidden' : ''}`}
       data-testid="chat-choice-card"
       data-intent={planReview ? 'plan_review' : 'choice'}
       role="group"
@@ -565,11 +571,14 @@ export function ChoiceCard() {
       )}
       {choice.allow_free_text && (
         <div className="text-[11px] text-muted mt-2" data-testid="chat-choice-free-text">
-          Or type your own answer below.
+          {onFreeText ? <button type="button" className="underline" onClick={onFreeText}>
+            Type another answer
+          </button> : 'Or type your own answer below.'}
         </div>
       )}
     </div>
   )
+  return companion && target ? createPortal(card, target) : card
 }
 
 /**
@@ -631,6 +640,14 @@ export const KIND_COPY: Record<
     title: 'Approval could not be recorded',
     body: 'The action did not run. The app could not write its approval log, usually because its data folder is full or not writable.',
   },
+  user_restriction: {
+    title: 'Blocked by your saved rule',
+    body: 'Your personal rule for this project allows read tools only. Open Access and approvals to inspect or change it. This action did not run.',
+  },
+  restriction_unavailable: {
+    title: 'Saved restrictions unavailable',
+    body: 'The assistant could not verify your saved project rules, so this action did not run. Refresh Access and approvals before requesting it again.',
+  },
   rate_limited: { title: 'Rate limited' },
   unauthorized: { title: 'API key rejected' },
   // Fix round 1 (Task 14) — body left unset here on purpose: it's computed
@@ -668,6 +685,9 @@ export const KIND_COPY: Record<
   assurance_context_persistence_failed: { title: 'Checked conversation state could not be saved' },
   wrong_replica: { title: 'This chat belongs to another application worker' },
   assurance_publication_failed: { title: 'The checked answer could not be published' },
+  source_gap_followup_unavailable: { title: 'Prepare this follow-up again',
+    body: 'Refresh Activity and inspect the source gap before preparing a new checked request.' },
+  invalid_source_gap_followup: { title: 'This follow-up requires the exact checked request' },
   task_checkpoint_failed: {
     title: 'Task progress could not be saved',
     body: 'Inspect the task before retrying.',
@@ -756,6 +776,7 @@ export const KIND_COPY: Record<
 export const TOOL_ERROR_BANNER_KINDS = new Set([
   'project_exists', 'descendants_exist',
   'confirmation_expired', 'approval_unavailable', 'rate_limited',
+  'user_restriction', 'restriction_unavailable',
   'unauthorized', 'missing_api_key',
   'inactive_acting_user',
   'solver_in_flight', 'parallel_destructive_not_allowed',
@@ -1284,7 +1305,9 @@ function ReplayAttachmentChips({ fileIds }: { fileIds: string[] }) {
 }
 
 
-export default function ChatPanel() {
+export default function ChatPanel({ companionAccessTarget = null, companionChoiceTarget = null }: {
+  companionAccessTarget?: HTMLElement | null; companionChoiceTarget?: HTMLElement | null;
+}) {
   // Guided swaps the greeting chips for Guided-visible destinations.
   const uiMode = useUIStore(s => s.uiMode)
   const qc = useQueryClient()
@@ -1354,6 +1377,13 @@ export default function ChatPanel() {
   const mismatchLine = projectMismatch ? mismatchSentence(projectMismatch) : null
 
   const currentProject = useUIStore((s) => s.currentProject)
+  const sourceGapDraft = useChatStore(s => s.sourceGapDraft)
+  useEffect(() => {
+    const draft = useChatStore.getState().sourceGapDraft
+    if (draft && (draft.projectName !== currentProject || draft.chatSequence !== newChatSeq)) {
+      useChatStore.getState().setSourceGapDraft(null)
+    }
+  }, [currentProject, newChatSeq, sourceGapDraft])
   const checkedCapabilities = useQuery({ queryKey: CHECKED_ANSWERS_QUERY_KEY,
     queryFn: getCheckedAnswerCapabilities, retry: false, refetchInterval: 30_000 })
   const [checkedSelection, setCheckedSelection] = useState<{ project: string | null; chat: number; on: boolean }>(
@@ -1874,7 +1904,6 @@ export default function ChatPanel() {
     useChatStore.getState().seedComposer(null)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [composerSeed])
-  const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Whether the pending composer text arrived by voice. `speech.listening` is
@@ -2001,11 +2030,18 @@ export default function ChatPanel() {
   const messagesScrollRef = useRef<HTMLDivElement | null>(null)
   const pendingTokenForScroll = useChatStore((s) => s.pending?.confirmation_token ?? null)
 
+  // Scroll only the transcript. scrollIntoView also scrolls hidden ancestors,
+  // which can shift the narrow workbench horizontally during card updates.
+  const scrollTranscriptToEnd = useCallback(() => {
+    const transcript = messagesScrollRef.current
+    transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' })
+  }, [])
+
   const scrollToLatest = useCallback(() => {
     setStickToBottom(true)
     setShowJumpLatest(false)
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [])
+    scrollTranscriptToEnd()
+  }, [scrollTranscriptToEnd])
 
   const onMessagesScroll = useCallback(() => {
     const el = messagesScrollRef.current
@@ -2019,7 +2055,7 @@ export default function ChatPanel() {
   // AssistantDock: while the dock is collapsed this panel sits under a
   // `display:none` ancestor (kept mounted so a streaming turn survives the
   // collapse — see AssistantDock.tsx), and an element with no layout box
-  // cannot be scrolled. `scrollIntoView` calls that land while collapsed are
+  // cannot be scrolled. Transcript scroll calls that land while collapsed are
   // silent no-ops in a real browser (not just jsdom), and none of the other
   // deps here change on an expand-only click, so without this the effect
   // would never re-run and the transcript could sit scrolled to wherever it
@@ -2036,12 +2072,12 @@ export default function ChatPanel() {
   // decision a chance to actually run once there's a box to scroll.
   useEffect(() => {
     if (stickToBottom) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      scrollTranscriptToEnd()
       setShowJumpLatest(false)
     } else {
       setShowJumpLatest(true)
     }
-  }, [messages.length, pendingTokenForScroll, stickToBottom, assistantDockOpen])
+  }, [messages.length, pendingTokenForScroll, stickToBottom, assistantDockOpen, scrollTranscriptToEnd])
 
   // Frame handler — translates SSE frames into chatStore updates.
   const handleFrame = useCallback((frame: ChatFrame) => {
@@ -2540,13 +2576,19 @@ export default function ChatPanel() {
       utterance_id?: string
       generation?: number
       requiresChecked?: boolean
+      gapFollowup?: SourceGapDraft
     }) => {
+    if (opts?.gapFollowup && (useUIStore.getState().currentProject !== opts.gapFollowup.projectName
+      || useChatStore.getState().newChatSeq !== opts.gapFollowup.chatSequence
+      || useChatStore.getState().sourceGapDraft !== opts.gapFollowup
+      || useChatStore.getState().streaming || useChatStore.getState().pending != null
+      || useChatStore.getState().requestQueue.length > 0)) return
     const requestedChecks = opts?.requiresChecked === true || optedIntoChecks || requiredChecks
     if (requestedChecks && !checksAvailable) {
       setError({ error_kind: 'assurance_unavailable',
         message: 'Answer checks are unavailable. Retry availability, or explicitly turn off checking for a new message.' })
-      if (opts?.fromCard) useChatStore.setState({ requestQueue: [], activeRequest: null })
-      else setInput(text)
+      if (opts?.fromCard && !opts.gapFollowup) useChatStore.setState({ requestQueue: [], activeRequest: null })
+      else if (!opts?.gapFollowup) setInput(text)
       return
     }
     manualNavigation()
@@ -2574,7 +2616,7 @@ export default function ChatPanel() {
       ...(requestedChecks ? { requiresChecked: true } : {}),
     })
     // A typed turn is nobody's card request: a denial in it drops nothing.
-    if (!opts?.fromCard) useChatStore.getState().setActiveRequest(null)
+    if (!opts?.fromCard || opts.gapFollowup) useChatStore.getState().setActiveRequest(null)
     if (!opts?.fromCard) {
       setInput('')
       dictatedRef.current = false
@@ -2593,6 +2635,8 @@ export default function ChatPanel() {
         session_id: sessionId ?? undefined,
         message: text,
         ...(requestedChecks ? { assurance: { version: 1, mode: 'strict' } as const } : {}),
+        ...(opts?.gapFollowup ? { checked_scope: opts.gapFollowup.checked_scope,
+          source_gap_ref: opts.gapFollowup.source_gap_ref } : {}),
         // Task 13 — `profile_id` is included ONLY when the user actually
         // picked one. `profileId === null` means "the server's active
         // profile", and OMITTING the field (never sending `model` either) is
@@ -2656,6 +2700,7 @@ export default function ChatPanel() {
       },
     )
     setStreamCleanup(cleanup)
+    if (opts?.gapFollowup) useChatStore.getState().setSourceGapDraft(null)
     if (autoUncheckAfterSend && attachIds.length > 0) {
       setAttachedFileIds([])
     }
@@ -2710,6 +2755,16 @@ export default function ChatPanel() {
   // a confirmation card — writes still wait for the user.
   const requestCount = useChatStore((s) => s.requestQueue.length)
   const pendingCard = useChatStore((s) => s.pending)
+  const choice = useChatStore((s) => s.choice)
+  // Reveal/return belongs to this exact card, never a replacement or project.
+  const [choiceInputFor, setChoiceInputFor] = useState<typeof choice>(null)
+  const choiceInputOpen = choice != null && choiceInputFor === choice
+  const revealChoiceInput = () => {
+    if (!choice || choice.allow_free_text === false) return
+    setChoiceInputFor(choice)
+    useUIStore.getState().setAssistantDockOpen(true)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }
   //
   // Without a key for the active profile (`notReady`, the same gate as Send)
   // nothing is posted: the queue is dropped — it must not fire by surprise
@@ -3002,6 +3057,7 @@ export default function ChatPanel() {
       return
     }
     if (assistantEntry === 'compose') {
+      if (choice) setChoiceInputFor(choice)
       useUIStore.getState().setAssistantEntry(null)
       return
     }
@@ -3020,7 +3076,7 @@ export default function ChatPanel() {
     if (select == null || select.disabled) return
     select.focus()
     useUIStore.getState().setAssistantEntry(null)
-  }, [assistantDockOpen, assistantEntry, profilesQuery.data, profilesQuery.isError, streaming])
+  }, [assistantDockOpen, assistantEntry, profilesQuery.data, profilesQuery.isError, streaming, choice])
 
   const chatProfiles = profilesQuery.data?.profiles ?? []
   const activeProfileId = profilesQuery.data?.active_profile_id ?? null
@@ -3460,9 +3516,9 @@ export default function ChatPanel() {
           </div>
           )
         })}
-        <ChoiceCard />
+        <ChoiceCard companion={!assistantDockOpen} target={companionChoiceTarget}
+          inputOpen={assistantDockOpen && choiceInputOpen} onFreeText={revealChoiceInput} />
         {assistantDockOpen ? <ConfirmationCard /> : null}
-        <div ref={messagesEndRef} />
         </div>
         {showJumpLatest && (
           <button
@@ -3494,11 +3550,26 @@ export default function ChatPanel() {
       <WorkflowStrip />
       <GoalStrip />
       <ExternalAgentStrip />
+      <ChatAccess checked={optedIntoChecks || requiredChecks} />
+      {/* Keep this under the mounted panel so the summary observes the exact
+          next-turn selection used by dispatchSend, including a pilot opt-in.
+          The portal changes only its DOM surface, never chat/stream identity. */}
+      {companionAccessTarget && createPortal(
+        <ChatAccess checked={optedIntoChecks || requiredChecks} companion />, companionAccessTarget)}
       <CheckedAnswerControl checked={optedIntoChecks || requiredChecks} required={requiredChecks}
         available={checksAvailable} loading={checkedCapabilities.isPending} failed={checkedCapabilities.isError}
         mode={checkedCapabilities.data?.mode} busy={streaming || pendingSendText != null}
         onChange={on => setCheckedSelection({ project: currentProject, chat: newChatSeq, on })}
         onRetry={() => { void checkedCapabilities.refetch() }} />
+      {sourceGapDraft && sourceGapDraft.projectName === currentProject && sourceGapDraft.chatSequence === newChatSeq &&
+        <SourceGapFollowupCard draft={sourceGapDraft} unavailable={!checksAvailable}
+          disabled={streaming || notReady || !!mismatchLine || !checksAvailable || !!pendingCard || requestCount > 0 || pendingSendText != null}
+          dismiss={() => useChatStore.getState().setSourceGapDraft(null)} send={() => {
+            if (streaming || notReady || mismatchLine || !checksAvailable || pendingCard || requestCount > 0 || pendingSendText != null) return
+            const draft = useChatStore.getState().sourceGapDraft
+            if (draft) dispatchSend(draft.message, [], { fromCard: true, label: 'Checked source-gap follow-up',
+              requiresChecked: true, gapFollowup: draft })
+          }} />}
       <UploadChipStrip
         uploads={uploads}
         attachedFileIds={attachedFileIds}
@@ -3518,11 +3589,20 @@ export default function ChatPanel() {
           <ApiKeySetup />
         </div>
       )}
+      {choice && choiceInputOpen && <div className="xl:hidden px-3 py-1.5 text-xs shrink-0">
+        {choice.allow_free_text === false && <p>Compose a separate message. Return to the options to answer this choice.</p>}
+        <button type="button" className="underline" onClick={() => {
+          setChoiceInputFor(null)
+          requestAnimationFrame(scrollTranscriptToEnd)
+        }}>Return to choices</button>
+      </div>}
       <div
-        className="flex flex-col border-t border-border bg-bg-2 shrink-0"
-        // Three 44px touch controls plus settings/gaps must fit inside the
-        // composer; overflowing upward would cover the answer-check toggle.
-        // Clamp layout without rewriting the user's saved resize preference.
+        className={`flex flex-col border-t border-border bg-bg-2 shrink-0 min-h-min ${(pendingCard && streaming) || (choice && !choiceInputOpen) ? 'max-xl:hidden' : ''}`}
+        // The complete toolbar sets the intrinsic desktop minimum, including
+        // dictation settings. Short saved heights must not let it extend over
+        // Check answers. Keep the touch floor and saved resize preference.
+        // On narrow screens a waiting card needs the disabled composer's space;
+        // keep it mounted so the draft and sizing return after the decision.
         style={{ height: promptHeight, minHeight: isCoarsePointer ? 200 : undefined }}
         data-testid="chat-prompt-container"
       >
@@ -3534,7 +3614,7 @@ export default function ChatPanel() {
         >
           <div className="w-8 h-[2px] rounded-full bg-border group-hover:bg-accent/60 transition-colors" />
         </div>
-        <div className="relative flex items-stretch gap-2 px-2 pb-2 flex-1 min-h-0">
+        <div className="flex items-stretch gap-2 px-2 pb-2 flex-1 min-h-0">
           <div className="flex flex-col gap-1 self-end pb-0.5">
             {/* Phase D polish #5 — 44×44 px touch targets on coarse pointers
                 (WCAG 2.5.5). Desktop stays compact. */}

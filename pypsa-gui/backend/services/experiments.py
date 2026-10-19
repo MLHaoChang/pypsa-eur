@@ -278,10 +278,12 @@ def _read_record(root, experiment_id, project, owner):
             raise ValueError()
         operations = record.get('operations', [])
         if operations:
-            reference = {'kind': 'single-network-case-ledger', 'version': 1,
+            count = len(record.get('cases', []))
+            reference = {'kind': 'single-network-case-ledger' if count == 1 else 'two-network-case-ledger',
+                         'version': 1 if count == 1 else 2,
                          'preflight_sha256': _digest(record.get('preflight'))}
             if (record.get('version') != contract.VERSION or record.get('domain') != 'network'
-                    or len(record.get('cases', [])) != 1 or not isinstance(operations, list)
+                    or count not in (1, 2) or not isinstance(operations, list)
                     or len(operations) != 1 or _digest(operations[0]) != _digest(reference)):
                 raise ValueError()
         if (type(record.get('version')) is not int or record.get('version') not in (1, contract.VERSION)
@@ -374,8 +376,11 @@ def _view(record: dict[str, Any], *, detail: bool = False) -> dict[str, Any]:
     if execution is not None:
         out.update(status=execution['status'], executed=execution['executed'],
             execution_available=True, execution=execution, note=execution['note'],
-            job_ids=[execution['job_id']] if execution['job_id'] else [])
-        if detail:
+            job_ids=execution.get('job_ids', [execution['job_id']] if execution.get('job_id') else []))
+        if detail and 'cases' in execution:
+            for case, receipt in zip(out['cases'], execution['cases']):
+                case.update(status=receipt['status'], job_id=receipt['job_id'], run_id=receipt['run_id'])
+        elif detail:
             out['cases'][0].update(status=execution['status'],
                 job_id=execution['job_id'], run_id=execution['run_id'])
     return out

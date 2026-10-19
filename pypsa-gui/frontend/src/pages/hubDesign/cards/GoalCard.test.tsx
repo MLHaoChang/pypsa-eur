@@ -175,8 +175,17 @@ describe('GoalCard run', () => {
     expect(useUIStore.getState().assistantDockOpen).toBe(true)
   })
 
+  it('keeps a set VOLL under More settings, not loose on the card (UX review L3)', async () => {
+    mount()
+    // while the price is still loading the line shows "…"; once read it folds away
+    await waitFor(() => expect(screen.queryByTestId('hub-goal-voll')).toBeNull())
+    await userEvent.click(screen.getByTestId('hub-goal-advanced'))
+    expect(screen.getByTestId('hub-goal-voll')).toBeTruthy()
+  })
+
   it('shows VOLL read-only when it is set', async () => {
     mount()
+    await userEvent.click(await screen.findByTestId('hub-goal-advanced'))
     await waitFor(() => expect(screen.getByTestId('hub-goal-voll').textContent).toContain('€5,000'))
     // the colon sits with its label (no flex gap before it)
     expect(screen.getByTestId('term-voll_plain').parentElement!.textContent)
