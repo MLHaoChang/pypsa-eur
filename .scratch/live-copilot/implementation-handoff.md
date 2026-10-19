@@ -123,6 +123,14 @@ may precede LC-01; its new resolved-context UX still depends on LC-01.
 | [LC-12](issues/12-job-completion-continuation.md) VS-4 | Inside LC-05: 25 s wait limit, job completion into chat, stale labels after edits (LC-C12) | LC-03, LC-04 | Added 2026-10-19; not started; OJ-07/08/10 close LC-05; LC-T22 |
 | [LC-13](issues/13-owner-journey-suite.md) | Owner-journey suite: Tier A in CI, Tier B manual capped live model (Q2) | First layer that closes a journey | Added 2026-10-19; not started; LC-T20/23 |
 | [LC-14](issues/14-navigation-reach.md) | Inside LC-03: small navigation-reach fixes (snapshot, selection, edit card, Guided step, sub-sections) | None | Added 2026-10-19; not started |
+| [LC-15](issues/15-project-asset-summary.md) | Inside LC-01: one bounded project asset summary, active or not | LC-01B | Added 2026-10-19 ([feature catalogue](feature-catalogue.md)); not started; OJ-13/14/45 |
+| [LC-16](issues/16-multi-asset-parametrisation.md) | Inside LC-04: one old→new card for mixed multi-asset and settings edits (Q3) | LC-04 storage/line slice, LC-10 | Added 2026-10-19; not started; OJ-21–23/26 |
+| [LC-17](issues/17-sensitivity-create-and-run.md) | Inside LC-05: create and run sensitivities by chat; N-job continuation | LC-12, LC-16 | Added 2026-10-19; not started; OJ-27/28 |
+| [LC-18](issues/18-sensitivity-comparison.md) | Inside LC-05: base + N comparison, ranking, Compare view | LC-17, LC-03 interfaces | Added 2026-10-19; not started; OJ-29/30 |
+| [LC-19](issues/19-run-lifecycle-and-failure.md) | Inside LC-05: requeue, cancel queued, re-run rule, failure triage, engine choice | LC-12 | Added 2026-10-19; not started; OJ-20/31–34 |
+| [LC-20](issues/20-results-plausibility-check.md) | Post-solve plausibility rules; slot is owner question Q5 | LC-03 adapters | Added 2026-10-19; needs-info; OJ-18/19 |
+| [LC-21](issues/21-network-study-report.md) | Report for a network study and sensitivities; scope is owner question Q6 | LC-03, LC-18 | Added 2026-10-19; needs-info; OJ-35 |
+| [LC-22](issues/22-unsupported-by-chat.md) | Inside LC-06: named refusals for features that stay out of chat; route-coverage test | LC-01 discovery | Added 2026-10-19; not started; OJ-46 |
 
 ### Owner decisions — 2026-10-19
 

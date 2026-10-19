@@ -34,3 +34,10 @@ remain in place. Current evidence supports bounded typed functionality; generic
 results coverage and continuous voice remain incomplete. The permission browser
 journey has recorded pointer-accessibility and narrow-layout failures; do not
 call it fully green.
+
+2026-10-19 feature catalogue: the owner said OJ-01–12 were only examples. The
+[feature catalogue](feature-catalogue.md) maps every page, tab, action, job,
+study, report and admin feature found in the code to its chat tool (or none)
+and its LC layer. It adds journeys OJ-13–46 and gap issues 15–22. Owner
+questions Q5 (where the plausibility check slots) and Q6 (report for network
+studies) are open; the Codex order is unchanged.

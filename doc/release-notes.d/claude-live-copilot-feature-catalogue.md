@@ -1,0 +1,1 @@
+* Doc(pypsa-gui): Add a code-derived feature catalogue for the live copilot, conversational journeys OJ-13–46 covering the owner's seven core features, and gap tickets LC-15–22 (project summary, multi-asset edits, sensitivities, run lifecycle, plausibility check, network-study report, named refusals).
