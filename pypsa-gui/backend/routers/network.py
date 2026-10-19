@@ -4,6 +4,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession
 from models.schemas import (
+    BUS_LAZY_COLUMNS,
+    LINK_LAZY_COLUMNS,
     BusCreate,
     CarrierCreate,
     GeneratorCreate,
@@ -248,7 +250,8 @@ def get_buses():
 
 @router.post("/buses", status_code=201)
 def create_bus(bus: BusCreate):
-    return _create_component("Bus", "buses", bus.name, bus.model_dump(exclude={"name"}))
+    unset_lazy = BUS_LAZY_COLUMNS - bus.model_fields_set
+    return _create_component("Bus", "buses", bus.name, bus.model_dump(exclude={"name"} | unset_lazy))
 
 
 @router.put("/buses/{name}")
@@ -363,7 +366,8 @@ def get_links():
 
 @router.post("/links", status_code=201)
 def create_link(link: LinkCreate):
-    return _create_component("Link", "links", link.name, link.model_dump(exclude={"name"}))
+    unset_lazy = LINK_LAZY_COLUMNS - link.model_fields_set
+    return _create_component("Link", "links", link.name, link.model_dump(exclude={"name"} | unset_lazy))
 
 
 @router.put("/links/{name}")

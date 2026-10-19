@@ -117,6 +117,11 @@ function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 
       reason: 'The reliability study has not run. Set a goal and run it.' }
   }
   const open: ChapterOpen = { panel: 'results', tab: 'adequacy' }
+  // No goal, so the study certified nothing: the cause is known and the fix is a step (UX review N13).
+  if (r.lole == null && r.target == null) {
+    return { label, value: '', state: 'not_modelled', open: { step: 'goal' },
+      reason: 'No reliability goal is set, so the study gave no shortfall figure. Set an allowed shortfall in Goal and run it again.' }
+  }
   if (r.lole == null) {
     return { label, value: '', state: 'unavailable', open,
       reason: 'The study ran, but its shortfall figure is not established.' }
@@ -127,6 +132,12 @@ function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 
     : `${verdict ? `${verdict}: ` : ''}the goal is ${Number(r.target.toPrecision(6))} h/yr`
   return { label, value: String(r.lole), unit: 'h/yr', state: 'ready', basis, open }
 }
+
+/** Why a "capacity is needed" verdict will not show in a hub solve (UX review N7). */
+export const ISLAND_ROWS_OFF_TAIL = ', and the hub solve is not sized to island (island rows are off)'
+export const ISLAND_ROWS_OFF_NOTE =
+  'The island rows are off in the solver settings, so the hub solve is not sized to island: the capacity '
+  + 'above will not appear in its results until they are turned on.'
 
 /** A search that evaluated no case: no grid-forming converter takes part in any island
  *  case (a data center whose only scenario is ups_bridged), so there is nothing to tune. */
@@ -162,7 +173,8 @@ function control(gfm: GfmSettingsState | null | undefined): ChapterTile['control
   const n = Object.keys(rec.settings).length
   const text = rec.status === 'recommended' ? `recommended for ${n} unit${n === 1 ? '' : 's'}, not applied yet`
     : rec.status === 'unchanged' ? 'the current settings pass with margin'
-      : rec.status === 'not_achievable' ? 'no setting passes: capacity is needed'
+      : rec.status === 'not_achievable'
+        ? `no setting passes: capacity is needed${gfm.island_rows_now === false ? ISLAND_ROWS_OFF_TAIL : ''}`
         : 'the search stopped at its cap; recommend again'
   return { state: 'ready', text: `Grid-forming settings (heuristic screening): ${text}.` }
 }

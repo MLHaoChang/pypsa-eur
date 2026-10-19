@@ -1,7 +1,7 @@
 // P24-FE re-gate R8 and notes: every rule of the Improve card's glossary has a
 // case, including the review effects the three templates do not reach.
 import { describe, expect, it } from 'vitest'
-import { evidenceValue, kpiMoney, plainIds, plainWords } from './plainWords'
+import { costTileLabel, evidenceValue, kpiMoney, plainIds, plainWords } from './plainWords'
 
 describe('plainWords', () => {
   it('a bare dtc_planning (dtc_critical_unserved effect)', () => {
@@ -90,5 +90,19 @@ describe('plainIds (UX audit M5): raw ids inside a template note', () => {
       .toBe('IT load is critical (IT bus); cooling and offices are not.')
     expect(plainIds('The grid connection is capped at 40 MW.'))
       .toBe('The grid connection is capped at 40 MW.')
+  })
+})
+
+describe('costTileLabel (UX review N3, decision B)', () => {
+  it('a single-period cost is a yearly cost', () => {
+    expect(costTileLabel('single_period', null)).toBe('Yearly cost of this design (before any shortfall costs)')
+    expect(costTileLabel(undefined, [2030])).toBe('Yearly cost of this design (before any shortfall costs)')
+  })
+  it('a multi-period cost is the discounted cost over the plan, with its years', () => {
+    expect(costTileLabel('npv_multi_period', [2027, 2030, 2035]))
+      .toBe('Cost over the plan, 2027–2035 (discounted, before any shortfall costs)')
+    expect(costTileLabel('npv_multi_period', undefined))
+      .toBe('Cost over the plan (discounted, before any shortfall costs)')
+    expect(costTileLabel('npv_multi_period', [2030])).not.toMatch(/Yearly|–/)
   })
 })
