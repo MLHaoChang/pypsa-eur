@@ -360,3 +360,15 @@ def test_running_hours_split_by_investment_period():
     unit = compute_process_view(_hb_network())["process_units"][0]
     # A flat network has no periods; the split is empty, the total stands alone (as in compare economics).
     assert unit["running_hours_by_period"] == {}
+
+
+def test_the_shared_role_predicate_reads_the_column_never_the_name():
+    from models.process_unit import product_role_generators
+    n = _hb_network(roles=False)
+    assert list(product_role_generators(n, "shortfall")) == []
+    n.generators["process_role"] = ""
+    n.generators.loc["__lost_nh3", "process_role"] = "shortfall"
+    n.generators.loc["grid", "process_role"] = "buy_in"
+    assert list(product_role_generators(n, "shortfall")) == ["__lost_nh3"]
+    assert list(product_role_generators(n, "buy_in")) == ["grid"]
+    assert list(product_role_generators(n, "lost")) == []

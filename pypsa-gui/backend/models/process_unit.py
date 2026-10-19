@@ -24,3 +24,15 @@ PROCESS_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
     "Link": {"eh_process": "bool", "criticality_tier": "tier", "throughput_unit": "text",
              "specific_energy_kwh_per_t": "float_nonneg"},
 }
+
+
+def product_role_generators(n, role: str):
+    """The Generators with this `process_role` (one of PROCESS_GENERATOR_ROLES), as a pandas Index.
+
+    Keyed on the column only, never on a name: empty when the column is missing or no Generator has the role. The
+    product is the Generator's bus. The one predicate tickets 03 (solve path) and 04 (results) share.
+    """
+    gens = n.generators
+    if role not in PROCESS_GENERATOR_ROLES or "process_role" not in gens.columns:
+        return gens.index[:0]
+    return gens.index[gens["process_role"].astype(str).str.strip() == role]

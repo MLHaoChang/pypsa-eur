@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 
-from models.process_unit import PROCESS_GENERATOR_ROLES
+from models.process_unit import PROCESS_GENERATOR_ROLES, product_role_generators
 from services.carrier_catalog import CARRIER_CATALOG
 
 BUY_IN, SHORTFALL = PROCESS_GENERATOR_ROLES
@@ -57,9 +57,9 @@ def product_value(n, bus: str) -> float | None:
 def generator_role(n, gen: str) -> tuple[str, str | None]:
     """(role, flag) for one Generator: the `process_role` column, else the design's name prefix flagged
     `role_from_name`, else ("", None)."""
-    role = str(_cell(n.generators, gen, "process_role") or "").strip()
-    if role in PROCESS_GENERATOR_ROLES:
-        return role, None
+    for role in PROCESS_GENERATOR_ROLES:
+        if gen in product_role_generators(n, role):
+            return role, None
     for prefix, named in _NAME_PREFIX.items():
         if str(gen).startswith(prefix):
             return named, "role_from_name"
