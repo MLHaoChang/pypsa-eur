@@ -50,8 +50,7 @@ with the names it could not find — list the candidates and ask again.
 A generator whose bus has no coordinates (unset, or the 0/0 default) is
 refused with error_kind "missing_coordinates" listing those generators:
 name them and offer both ways out — set the bus coordinates (an edit,
-confirmed like any other) or upload a profile for them instead. Generate
-for the rest only if the user agrees.
+confirmed like any other) or upload a profile for them instead.
 
 ## Step: technology
 

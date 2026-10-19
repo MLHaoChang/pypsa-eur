@@ -381,4 +381,5 @@ def test_generate_for_a_bus_without_coordinates_is_a_typed_refusal(
     detail = err.value.detail
     assert detail["error_kind"] == "missing_coordinates"
     assert detail["generators"] == ["g_nocoord"]
-    assert "upload" in detail["message"]
+    assert "set coordinates on the bus" in detail["message"]
+    assert "upload a profile" in detail["message"]

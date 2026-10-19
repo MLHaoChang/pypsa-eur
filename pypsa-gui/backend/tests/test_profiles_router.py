@@ -351,6 +351,23 @@ def test_apply_warns_when_the_bus_moved_since_generation(client,
     assert warning and "moved" in warning.lower()
 
 
+def test_apply_warns_when_the_bus_lost_its_coordinates(client,
+                                                       install_network,
+                                                       completed_job):
+    """A bus reset to the 0/0 default after generation is no 'move' to
+    (0, 0): the warning says the coordinates are gone."""
+    n = _wind_network()
+    n.buses.loc["B1", ["x", "y"]] = [0.0, 0.0]
+    install_network(n)
+
+    resp = client.post(
+        "/api/projects/Profile Farm/profiles/apply",
+        json={"job_id": completed_job["id"], "component": "g_wind"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "no coordinates now" in (resp.json().get("warning") or "")
+
+
 # ---------------------------------------------------------------------------
 # C2: resolution through the HTTP surface
 # ---------------------------------------------------------------------------
@@ -501,20 +518,17 @@ def test_generate_without_points_or_generators_is_a_422(client, wind_project):
 
 def _mixed_network() -> pypsa.Network:
     """g_wind at (8.0, 50.0); g_nocoord on a bus left at PyPSA's default
-    x=y=0; g_nan on a bus with no latitude; g_own on a 0/0 bus but carrying
-    its own x/y columns."""
+    x=y=0; g_nan on a bus with no latitude; g_far on a bus out of range."""
     n = _wind_network()
     n.add("Bus", "B0")  # x = y = 0, PyPSA's default
     n.add("Bus", "BN", x=9.0, y=51.0)
     # n.add() fills NaN with the 0 default; an import or a direct edit can
     # still leave a NaN behind, so set it after the add
     n.buses.loc["BN", "y"] = float("nan")
+    n.add("Bus", "BF", x=9.0, y=91.0)
     n.add("Generator", "g_nocoord", bus="B0", carrier="wind", p_nom=10.0)
     n.add("Generator", "g_nan", bus="BN", carrier="wind", p_nom=10.0)
-    n.add("Generator", "g_own", bus="B0", carrier="wind", p_nom=10.0)
-    n.generators["x"] = float("nan")
-    n.generators["y"] = float("nan")
-    n.generators.loc["g_own", ["x", "y"]] = [7.5, 51.0]
+    n.add("Generator", "g_far", bus="BF", carrier="wind", p_nom=10.0)
     return n
 
 
@@ -542,8 +556,8 @@ def test_a_bus_at_the_default_origin_is_a_missing_coordinates_refusal(
     assert detail["generators"] == ["g_nocoord"]
     assert "B0" in detail["message"]
     # both remedies are named
-    assert "coordinates" in detail["message"]
-    assert "upload" in detail["message"]
+    assert "set coordinates on the bus" in detail["message"]
+    assert "upload a profile" in detail["message"]
 
 
 def test_a_bus_with_a_nan_latitude_is_a_missing_coordinates_refusal(
@@ -563,15 +577,12 @@ def test_the_refusal_lists_only_the_generators_missing_coordinates(
     assert resp.json()["detail"]["generators"] == ["g_nocoord", "g_nan"]
 
 
-def test_a_generators_own_coordinates_win_over_its_bus(client, mixed_project):
-    explicit = client.post(
-        "/api/profiles/estimate",
-        json={"points": [{"id": "g_own", "lon": 7.5, "lat": 51.0}],
-              "technology": "wind", "year": 2023},
-    ).json()
-    resp = _estimate(client, ["g_own"])
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["series"]["g_own"] == explicit["series"]["g_own"]
+def test_a_bus_out_of_range_is_a_missing_coordinates_refusal(
+    client, mixed_project,
+):
+    resp = _estimate(client, ["g_far"])
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["generators"] == ["g_far"]
 
 
 def test_an_explicit_point_overrides_a_generator_without_coordinates(
@@ -585,6 +596,20 @@ def test_an_explicit_point_overrides_a_generator_without_coordinates(
     )
     assert resp.status_code == 200, resp.text
     assert list(resp.json()["series"]) == ["g_nocoord"]
+
+
+def test_an_explicit_point_does_not_hide_an_unknown_generator(
+    client, mixed_project,
+):
+    resp = client.post(
+        "/api/profiles/estimate",
+        json={"points": [{"id": "g_typo", "lon": 9.2, "lat": 52.3}],
+              "from_generators": ["g_typo"],
+              "technology": "wind", "year": 2023},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "unknown_generator"
+    assert "g_typo" in resp.json()["detail"]["message"]
 
 
 def test_generate_for_a_generator_without_coordinates_queues_nothing(
