@@ -781,15 +781,25 @@ reaches the model with the route's own message.
 
 | Tool | Tier | |
 |---|---|---|
-| `generate_report` | execution | Start the report job for the active project: `title?`, `language?` (default `en`), `sections?` (ids; omitted or `[]` = the executive summary plus every section the evidence established), `instruction?`. Minutes, spends tokens, one job at a time (409 `report_job_in_flight`). 400 `no_evidence` when the session has nothing to report on. Returns `{status: running, report_id, message}`. |
-| `get_report_status` | read | The job record: `status` (running / done / aborted / failed), `report_id`, `version`, `progress{done,total,current}`, `repairs`, `prose_failures`, `error`, `profile_id`, `model`. `{status: no_data}` before any run. |
+| `generate_report` | execution | Start the report job for the active project: `title?`, `language?` (default `en`), `sections?` (ids; omitted or `[]` = the executive summary plus every section the evidence established), `instruction?`. Minutes, spends tokens, one job at a time (409 `report_job_in_flight`). 400 `no_evidence` when the session has nothing to report on. Returns `{status: running, report_id, message}`. `done` and `aborted` are published only after the generation summary is saved; see [Completion and the generation summary](#completion-and-the-generation-summary). |
+| `get_report_status` | read | The job record: `status` (running / done / aborted / failed), `report_id`, `version`, `progress{done,total,current}`, `repairs`, `prose_failures`, `error`, `profile_id`, `model`. `{status: no_data}` before any run. A slow summary write keeps this `running`. |
 | `abort_report_generation` | destructive | Stop after the current section; the written sections are kept and the partial report is saved (status `aborted`). Idempotent; 404 `report_job_not_found` when nothing ever ran. |
-| `list_reports` | read | Every report of the project, newest first, with `latest_version`, `mode`, `profile_id`, `model` and the job's `generation` summary. |
+| `list_reports` | read | Every report of the project, newest first, with `latest_version`, `mode`, `profile_id`, `model` and the job's `generation` summary when that summary was saved. |
 | `get_report` | read | One version (newest report / latest version by default). Paragraphs, bullets and callouts intact; each table as `{table_id, columns, n_rows, caption}`; each figure as its id and caption; `audit` per section. Fits the 4000-char result cap by construction: a report whose prose alone would not fit comes back as an outline (`outline: true`) and `section_id` reads one section in full. 404 `report_not_found` with the remedy (`generate_report`) when there is none. |
 | `get_report_table` | read | The rows of one table, paginated (`offset`, `limit`) in the shared page envelope. 404 `report_table_not_found` lists the ids the report has. |
 | `regenerate_report_section` | execution | One section again from the latest version, optionally under an `instruction`; saved as the next version, every other section byte-identical. Same job slot as `generate_report`. |
 | `export_report_docx` | write | One version as a `.docx` `agent_export` chip (`report_<id>_v<N>.docx` unless `filename` is given), with a "Numbers to check" appendix listing the unverified numbers. |
 | `delete_report` | destructive | The report with every version and figure; refused under a foreign edit lock. |
+
+### Completion and the generation summary
+
+`run_report_job` (`services/reports/report_job.py`) saves the report version first, then writes `reports/<report_id>/meta.json`'s `generation` object, and only then sets the job record to `done` or `aborted`. The object is `{repairs, prose_failures, sections, language, aborted}`. While that write is still in progress, `get_report_status` stays `running`, and another generate, regenerate, or mapping call is still 409 `report_job_in_flight`.
+
+Read `generation` from `list_reports` only after status is `done` or `aborted`. On a first generate, the list can already include the report with `generation: null` while the job is still `running`, because `create_report` writes `meta.json` before the summary. On a regenerate, `save_version` has already bumped `latest_version` and still shows the previous `generation` until the new summary replaces it.
+
+A `failed` job is the exception path. It records `error` and does not write `generation`. If `meta.json` cannot be read after the version is saved, the writer logs a warning and returns; the job can still become `done` or `aborted` with `generation` absent. A missing summary on a finished report means that write did not land. It does not mean the saved document is missing.
+
+A later `save_version` (section regenerate, edited-copy import) carries `generation` forward together with the template and round-trip fields (`store._CARRIED_META_FIELDS`). The in-memory job record remains the authority for the object's shape; `ReportMeta.generation` stores it as a free-form dict.
 
 What the model must and must not do with a report:
 
