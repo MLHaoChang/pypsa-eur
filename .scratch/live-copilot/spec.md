@@ -43,6 +43,13 @@ or provide independent domain release approval.
 | “Run a sensitivity and compare/export it” | Reuse existing isolated cases, common budgets, receipts, reconciliation and native comparisons; expose failure/partial outcomes. Every new recipe needs its own adapter. Creating a plan is not executing it |
 | “What is running? Stop speaking / stop the job” | Report native observed work and freshness without a model polling loop. Playback interruption and actual job cancellation are separate operations; display the eventual native cancellation/effect receipt |
 | “Open project X / inspect its parameters” | Resolve an authorized exact target. Do not turn a named-project request into an unlabelled picker or a tour of the previous project. Preserve current/discussed scope and ordinary project-binding policy |
+| “Show me the results of the latest calculation, the load flow results” (added 2026-10-19) | Resolve “latest” to the newest completed run and say which; read the load flow, then open its tab on the same source; explain the key points from the read only. [OJ-01](owner-journeys.md) |
+| “Show me something else” / “next” (added 2026-10-19) | Offer the sections with data not yet shown, one line each; read before showing; the user controls next/stop. [OJ-02/03](owner-journeys.md) |
+| “Help me update the parameters of this line” (added 2026-10-19) | Resolve “this” from the selected component (LC-C11); show old→new with units on a card in both modes (Q3); read back; offer undo; say results are now stale. [OJ-05/06](owner-journeys.md) |
+| “Update these parameters and relaunch, then show me” (added 2026-10-19) | One visible plan; edits verified before one approved run; the conversation continues by itself when the job ends, then walks the new results (LC-C12). [OJ-07/08/10](owner-journeys.md) |
+| “Do these results make sense?” (added 2026-10-19, owner Q5 = A) | Until LC-20 lands, run the native input checks and say that result-plausibility rules don't exist yet; never give a verdict on results. With LC-20, report each native rule's verdict with its facts, and the rules that could not run. [OJ-18/19/20](owner-journeys.md) |
+| “Create a report of this study” (added 2026-10-19, owner Q6 = A) | Network studies get chapters in the existing report pipeline (LC-21): every number passes the number audit, and a missing source is `not_established`. Energy Hub, adequacy, investment and island reports are unchanged. [OJ-35/36](owner-journeys.md) |
+| Whole-application catalogue (added 2026-10-19) | Every human feature in the [feature catalogue](feature-catalogue.md) has a chat path, or a named refusal with its reason (LC-22). Journeys OJ-13–46 |
 
 ## Required contracts
 
@@ -103,6 +110,8 @@ old/new/unit preview and canonical digest. Ordinary dispatch owns confirmation,
 locks, personal rules and checked policy. Verify postconditions through native
 reads and durable effect receipts where required; HTTP 200 or model prose is
 insufficient. A generic envelope does not authorize arbitrary code or URLs.
+Owner decision 2026-10-19 (Q3): every chat parameter edit shows its old→new
+card before applying, in Expert as well as Guided.
 
 **LC-C6 Ordered execution.** Use a bounded versioned operation graph over
 allowlisted native capabilities, not arbitrary scripts. Persist dependencies,
@@ -134,6 +143,24 @@ late usage. Pin the initial bridge to one authoritative worker. Rebind rotates
 credentials/generation and refreshes refs; it does not restore old approvals,
 replay effects or reset budgets. No current paid/live authorization is created
 by this specification.
+
+**LC-C11 Focus and recency resolution (added 2026-10-19).** Resolve deictic
+targets by a fixed ladder; the first rung giving exactly one target wins:
+explicit name/ID in the utterance; what is on screen now (`ui_context`
+selected component of a matching class, open results tab and source, current
+snapshot); what this conversation discussed or changed last; the only
+candidate of that class; otherwise one Choice question with the real
+candidates. “Latest calculation” is the newest completed run of the active
+project. Say what was resolved. UI context remains an untrusted hint; the
+server re-reads and re-checks every use. See [LC-10](issues/10-focus-and-recency-resolution.md).
+
+**LC-C12 Conversation continuation on job completion (added 2026-10-19).**
+When a job started by a step of this conversation's plan ends, the harness
+posts one continuation turn to that conversation and the plan resumes at its
+next step. Only for the same owner, project and plan; once per job; never
+after a cancel or a project switch; the continuation carries no approval.
+Result reads report inputs changed since the solve as stale, using the solve
+fingerprint. See [LC-12](issues/12-job-completion-continuation.md).
 
 **LC-C10 Compatibility and release.** Regenerate capability mappings when
 schemas/tools change; retain provider parity, current Guided/Expert rules,

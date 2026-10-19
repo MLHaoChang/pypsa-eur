@@ -93,6 +93,36 @@ describe('site connection candidates: the backend rules (review round 1, B1/B3)'
   })
 })
 
+describe('SiteConnectionForm for an island (UX review H4, N14)', () => {
+  const TIE = [link('subsea_tie', 'mainland', 'island', { p_max_pu: 0, eh_role: 'grid_import' })]
+
+  it('a connection point that never imports hides the export link and the time zone and says why', async () => {
+    vi.mocked(networkApi.getLinks).mockResolvedValue(TIE)
+    renderForm()
+    expect(await screen.findByTestId('site-connection-island')).toBeTruthy()
+    expect(screen.queryByLabelText(/export link/i)).toBeNull()
+    expect(screen.queryByLabelText(/time zone/i)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Use subsea_tie as the connection' })).toBeTruthy()
+  })
+
+  it('saves the tie alone: no export link, no time zone', async () => {
+    vi.mocked(networkApi.getLinks).mockResolvedValue(TIE)
+    vi.mocked(commercialApi.saveSiteConnection).mockResolvedValue({} as never)
+    const { onSaved } = renderForm()
+    fireEvent.click(await screen.findByRole('button', { name: 'Use subsea_tie as the connection' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(commercialApi.saveSiteConnection).toHaveBeenCalledWith(
+      { poc_link: 'subsea_tie', export_link: null, timezone: null })
+  })
+
+  it('a grid-connected site keeps every field', async () => {
+    renderForm()
+    expect(await screen.findByLabelText(/export link/i)).toBeTruthy()
+    expect(screen.getByLabelText(/time zone/i)).toBeTruthy()
+    expect(screen.queryByTestId('site-connection-island')).toBeNull()
+  })
+})
+
 describe('SiteConnectionForm', () => {
   it('a new connection defaults to "already site time", like the chat tool', async () => {
     renderForm()

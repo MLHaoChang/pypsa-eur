@@ -117,6 +117,34 @@ may precede LC-01; its new resolved-context UX still depends on LC-01.
 | [LC-06](issues/06-family-adapters.md) | Every applicable domain/engine/control variant, delivered as small adapter PRs | Applicable LC-01–05 interfaces | Not started; LC-T16/17 and LC-D01–24 |
 | [LC-07](issues/07-continuous-speech.md) | Offline lifecycle/resource wiring; then separately gated real media integration | Stable typed contracts; existing parent/utterance primitives | Not started; LC-T13–15; actual hosted/device gates pending |
 | [LC-08](issues/08-release-evidence.md) | Source-pinned integrated evidence, per-capability rollout and rollback | Applicable implementation slices | Not started; LC-T16–19 and domain manifests; external gates pending |
+| [LC-09](issues/09-vertical-slice-loadflow.md) VS-1 | Inside LC-03: “Show me the load flow results of the latest calculation” end to end | LC-01; LC-03 interfaces | Added 2026-10-19 ([vision review](vision-review-2026-10-19.md)); not started; OJ-01 closes LC-03 with OJ-02/03 |
+| [LC-10](issues/10-focus-and-recency-resolution.md) | Inside LC-01: focus/recency ladder for “this”, “the”, “latest” (LC-C11); Q4 no-key shortcuts | LC-01B | Added 2026-10-19; not started; LC-T21 |
+| [LC-11](issues/11-narrated-walkthrough.md) VS-2 | Inside LC-03: narrated walk-through, one read per tab, “something else” | LC-09 | Added 2026-10-19; not started; OJ-02/03 |
+| [LC-12](issues/12-job-completion-continuation.md) VS-4 | Inside LC-05: 25 s wait limit, job completion into chat, stale labels after edits (LC-C12) | LC-03, LC-04 | Added 2026-10-19; not started; OJ-07/08/10 close LC-05; LC-T22 |
+| [LC-13](issues/13-owner-journey-suite.md) | Owner-journey suite: Tier A in CI, Tier B manual capped live model (Q2) | First layer that closes a journey | Added 2026-10-19; not started; LC-T20/23 |
+| [LC-14](issues/14-navigation-reach.md) | Inside LC-03: small navigation-reach fixes (snapshot, selection, edit card, Guided step, sub-sections) | None | Added 2026-10-19; not started |
+| [LC-15](issues/15-project-asset-summary.md) | Inside LC-01: one bounded project asset summary, active or not | LC-01B | Added 2026-10-19 ([feature catalogue](feature-catalogue.md)); not started; OJ-13/14/45 |
+| [LC-16](issues/16-multi-asset-parametrisation.md) | Inside LC-04: one old→new card for mixed multi-asset and settings edits (Q3) | LC-04 storage/line slice, LC-10 | Added 2026-10-19; not started; OJ-21–23/26 |
+| [LC-17](issues/17-sensitivity-create-and-run.md) | Inside LC-05: create and run sensitivities by chat; N-job continuation | LC-12, LC-16 | Added 2026-10-19; not started; OJ-27/28 |
+| [LC-18](issues/18-sensitivity-comparison.md) | Inside LC-05: base + N comparison, ranking, Compare view | LC-17, LC-03 interfaces | Added 2026-10-19; not started; OJ-29/30 |
+| [LC-19](issues/19-run-lifecycle-and-failure.md) | Inside LC-05: requeue, cancel queued, re-run rule, failure triage, engine choice | LC-12 | Added 2026-10-19; not started; OJ-20/31–34 |
+| [LC-20](issues/20-results-plausibility-check.md) | Post-solve plausibility rules; first item after LC-05 (Q5 = A); interim rung from LC-03 | LC-03 adapters, LC-05 closed | Added 2026-10-19; not started; OJ-18/19 |
+| [LC-21](issues/21-network-study-report.md) | Network-study chapters in the existing report pipeline (Q6 = A), in LC-06 after LC-20 | LC-03, LC-18, LC-20 | Added 2026-10-19; not started; OJ-35 |
+| [LC-22](issues/22-unsupported-by-chat.md) | Inside LC-06: named refusals for features that stay out of chat; route-coverage test | LC-01 discovery | Added 2026-10-19; not started; OJ-46 |
+
+### Owner decisions — 2026-10-19
+
+Owner decisions, 2026-10-19 (relayed by the coordinator):
+Q1 = keep the Codex order (LC-03 → LC-04 → LC-05); the vertical slices become
+the acceptance targets that close those layers, not a reordering.
+Q2 = a manual-trigger live-model tier with a hard cost cap, reported per
+journey, never a merge gate. Q3 = an old→new card before every chat edit, in
+both modes. Q4 = with a model available every sentence goes to the copilot;
+the local tour and project picker work only without a key.
+Layer closure: LC-01 on OJ-09 and LC-T21; LC-03 on OJ-01/02/03 (VS-1, VS-2);
+LC-04 on OJ-05/06 (VS-3); LC-05 on OJ-07/08/10 (VS-4); LC-06 per adapter.
+LC-01B owner: Q4 narrows the local results tour and project picker to the
+no-key path. Details in [the vision review](vision-review-2026-10-19.md).
 
 ## Commands and required evidence
 
@@ -387,3 +415,14 @@ Evidence/QA record commands/hashes/failure and scope. Next: refreshed two-axis
 review, one normal batch push, require all new-head CI with actual backend
 steps, fresh-master premerge, ordinary expected-head squash if every gate passes.
 No paid calls, external contacts, deployment or new implementation scope.
+
+
+2026-10-19 feature catalogue (docs only, PR388, branch
+`claude/live-copilot-feature-catalogue`): added `feature-catalogue.md`
+(122 features from code), journeys OJ-13–46 and issues 15–22, with ledger
+rows LC-15–22 appended to the slice table. Owner decisions relayed by the
+coordinator: Q5 = A (LC-20 plausibility is the first item after LC-05; from
+LC-03 the copilot runs the input checks and says result rules don't exist
+yet) and Q6 = A (LC-21 network-study report chapters in LC-06 after LC-05;
+new application scope). The Codex order is unchanged. No application code,
+tests or existing ledger rows changed.
