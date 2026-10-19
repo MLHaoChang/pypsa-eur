@@ -123,6 +123,14 @@ may precede LC-01; its new resolved-context UX still depends on LC-01.
 | [LC-12](issues/12-job-completion-continuation.md) VS-4 | Inside LC-05: 25 s wait limit, job completion into chat, stale labels after edits (LC-C12) | LC-03, LC-04 | Added 2026-10-19; not started; OJ-07/08/10 close LC-05; LC-T22 |
 | [LC-13](issues/13-owner-journey-suite.md) | Owner-journey suite: Tier A in CI, Tier B manual capped live model (Q2) | First layer that closes a journey | Added 2026-10-19; not started; LC-T20/23 |
 | [LC-14](issues/14-navigation-reach.md) | Inside LC-03: small navigation-reach fixes (snapshot, selection, edit card, Guided step, sub-sections) | None | Added 2026-10-19; not started |
+| [LC-15](issues/15-project-asset-summary.md) | Inside LC-01: one bounded project asset summary, active or not | LC-01B | Added 2026-10-19 ([feature catalogue](feature-catalogue.md)); not started; OJ-13/14/45 |
+| [LC-16](issues/16-multi-asset-parametrisation.md) | Inside LC-04: one old→new card for mixed multi-asset and settings edits (Q3) | LC-04 storage/line slice, LC-10 | Added 2026-10-19; not started; OJ-21–23/26 |
+| [LC-17](issues/17-sensitivity-create-and-run.md) | Inside LC-05: create and run sensitivities by chat; N-job continuation | LC-12, LC-16 | Added 2026-10-19; not started; OJ-27/28 |
+| [LC-18](issues/18-sensitivity-comparison.md) | Inside LC-05: base + N comparison, ranking, Compare view | LC-17, LC-03 interfaces | Added 2026-10-19; not started; OJ-29/30 |
+| [LC-19](issues/19-run-lifecycle-and-failure.md) | Inside LC-05: requeue, cancel queued, re-run rule, failure triage, engine choice | LC-12 | Added 2026-10-19; not started; OJ-20/31–34 |
+| [LC-20](issues/20-results-plausibility-check.md) | Post-solve plausibility rules; first item after LC-05 (Q5 = A); interim rung from LC-03 | LC-03 adapters, LC-05 closed | Added 2026-10-19; not started; OJ-18/19 |
+| [LC-21](issues/21-network-study-report.md) | Network-study chapters in the existing report pipeline (Q6 = A), in LC-06 after LC-20 | LC-03, LC-18, LC-20 | Added 2026-10-19; not started; OJ-35 |
+| [LC-22](issues/22-unsupported-by-chat.md) | Inside LC-06: named refusals for features that stay out of chat; route-coverage test | LC-01 discovery | Added 2026-10-19; not started; OJ-46 |
 
 ### Owner decisions — 2026-10-19
 
@@ -489,3 +497,13 @@ model: real Open project dialog, nothing forwarded).
 
 Next: PR for LC-01B, then LC-10 (focus/recency ladder, LC-T21) to close LC-01,
 then LC-03 with VS-1/VS-2.
+
+2026-10-19 feature catalogue (docs only, PR388, branch
+`claude/live-copilot-feature-catalogue`): added `feature-catalogue.md`
+(122 features from code), journeys OJ-13–46 and issues 15–22, with ledger
+rows LC-15–22 appended to the slice table. Owner decisions relayed by the
+coordinator: Q5 = A (LC-20 plausibility is the first item after LC-05; from
+LC-03 the copilot runs the input checks and says result rules don't exist
+yet) and Q6 = A (LC-21 network-study report chapters in LC-06 after LC-05;
+new application scope). The Codex order is unchanged. No application code,
+tests or existing ledger rows changed.
