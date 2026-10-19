@@ -1,0 +1,154 @@
+{
+  "scope": "LC-01A native component-schema discovery; partial LC-01 only",
+  "source_commit": "cfd7e6cfb71f668b08f63e039d4f096670f825f9",
+  "base_master": "97867adecd46098cd58c120728cf1eed693ed265",
+  "source_sha256": {
+    "pypsa-gui/backend/harness/README.md": "85c267fdac32d4044ff31857693fd130e614d60d09c29ff662309905656cc158",
+    "pypsa-gui/backend/harness/catalogue.py": "ab27de001dd917eb8a4bb3144092cb8e1cf3302677ffc23916a3a48f6eb543ab",
+    "pypsa-gui/backend/harness/toolsets.py": "142c5a84730fb4ef87757f7acdd2f6763f9d07ec008f87876831f163fa7e544a",
+    "pypsa-gui/backend/services/chat_tools.py": "ec8344f7eebe6819dd53ecfb138a6a3c2c7e0d397e59e53a0d71fb65c5d30c2e",
+    "pypsa-gui/backend/services/component_discovery.py": "2f29c3a217dd54ace8273578380e1b0d1dddc0cb5d1cdc7216b0f5ef6e9fb985",
+    "pypsa-gui/backend/tests/test_component_discovery.py": "2450ecc8d9fe600ff26630d5cb35cb453ecc1848702df9b8e4e5b07e0e5837f7"
+  },
+  "local_runs": [
+    {
+      "log": "final-discovery.log",
+      "passed": 43,
+      "skipped": 0,
+      "seconds": 15.72,
+      "summary": "43 passed, 3 warnings in 15.72s",
+      "tests": [
+        "tests/test_component_discovery.py"
+      ],
+      "log_sha256": "b68c76cfc4dc830531d97c7fb64484b67bd485bff0bb39975a872fc247dd32e5"
+    },
+    {
+      "log": "final-semantic-provider-2.log",
+      "passed": 632,
+      "skipped": 2,
+      "seconds": 124.12,
+      "summary": "632 passed, 2 skipped, 296 warnings in 124.12s (0:02:04)",
+      "tests": [
+        "tests/test_component_discovery.py",
+        "tests/test_write_surface_lock_policy.py",
+        "tests/test_chat_tools_handler_dependencies.py",
+        "tests/test_chat_tools_argshape.py",
+        "tests/test_project_acl.py",
+        "tests/test_project_route_acl_policy.py",
+        "tests/test_harness_mcp_server.py",
+        "tests/test_assistant_tool_reachability.py",
+        "tests/test_openai_tool_selection.py",
+        "tests/test_openai_responses.py",
+        "tests/test_chat_turn_frame_contract.py",
+        "tests/test_workflow_tools.py"
+      ],
+      "log_sha256": "7c8a2c9ac319fcbefee7a684264346f681ce733aa648c927883a024e3660f7a3"
+    },
+    {
+      "log": "schema-neighbors.log",
+      "passed": 1205,
+      "skipped": 0,
+      "seconds": 129.78,
+      "stage": "Earlier same production bytes, before final two added discovery tests; overlaps other counts, never sum.",
+      "log_sha256": "acaae1c7fd7e51902a6a04cf9d22b8510d66adbbfd74bbc1d4ef205d4e488080"
+    }
+  ],
+  "invocation": {
+    "cwd": "pypsa-gui/backend",
+    "python": "/workspace/pypsa-eur/.pixi/envs/test/bin/python",
+    "pytest_options": [
+      "-o",
+      "addopts=",
+      "-q",
+      "--disable-warnings"
+    ],
+    "environment": {
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "removed_api_keys": [
+      "PYPSA_GUI_OPENAI_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY"
+    ],
+    "network": "Loopback allowed; inference mocked only at external provider HTTP transport; no paid calls."
+  },
+  "internal_source_reviews": {
+    "standards": {
+      "source": "cfd7e6cfb71f668b08f63e039d4f096670f825f9",
+      "verdict": "approved",
+      "findings": 0
+    },
+    "spec": {
+      "source": "cfd7e6cfb71f668b08f63e039d4f096670f825f9",
+      "verdict": "approved",
+      "findings": 0
+    },
+    "limit": "Source reviews did not execute tests and do not replace remote CI or premerge."
+  },
+  "inventory": {
+    "tools": 256,
+    "tabs": 15,
+    "panels": 19,
+    "check": "passed"
+  },
+  "control_matrix": {
+    "controls": 170,
+    "families": 14,
+    "full_coverage": "not_established",
+    "check": "passed"
+  },
+  "publication_gates": "Remote exact-head CI and fresh actual-master premerge pending; no merge claimed.",
+  "remaining": [
+    "Exact actor/project/case/run/entity resolution",
+    "Named-target shortcut repair",
+    "Richer capability eligibility/refusal/checking metadata",
+    "Non-component service-owned schemas",
+    "Independent domain review and real-use calibration"
+  ],
+  "ci_followup": {
+    "failed_head": "11f903a84b59cb5678fe331433d20250bd143027",
+    "run": 39158165700,
+    "job": 117765661134,
+    "url": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/39158165700/job/117765661134",
+    "failure": "test_tool_error_kind_manifest.py::test_the_manifest_still_describes_the_backend: schema_field_too_large had no shared manifest classification",
+    "fix": "Classify the existing per-field refusal inline, with a rationale; no service, emitter, test, scan or page limit changed.",
+    "manifest_sha256": "e472b3e3f943492cb98d7af693c181535ab62937423481bb75ba512288b4cdad",
+    "local_runs": [
+      {
+        "log": "error-kind-red.log",
+        "failed": 1,
+        "seconds": 3.05,
+        "summary": "1 failed, 3 warnings in 3.05s",
+        "log_sha256": "9ab1c898ecfc26c0f5cc67f7f92c422aba5836d8ddb4f3a7da3f9d6acc18d840"
+      },
+      {
+        "log": "error-kind-green.log",
+        "passed": 47,
+        "skipped": 0,
+        "seconds": 21.47,
+        "summary": "47 passed, 3 warnings in 21.47s",
+        "tests": [
+          "tests/test_tool_error_kind_manifest.py",
+          "tests/test_component_discovery.py"
+        ],
+        "log_sha256": "9d52c49467b0924d8bec3fbc5f46871e4173aebc55e1e8f1dbf032c4d177971d"
+      },
+      {
+        "log": "error-kind-frontend.log",
+        "passed": 260,
+        "test_files": 2,
+        "seconds": 6.75,
+        "summary": "Tests  260 passed (260)",
+        "tests": [
+          "src/components/ChatPanel.manifest.test.tsx",
+          "src/components/ChatPanel.profile.test.tsx"
+        ],
+        "log_sha256": "63dd63b68ed151fc7953c5184b743c5f0a998e15fd79efe672c61ac5fe3f1656"
+      }
+    ],
+    "remote_replacement_gates": "Pending: new-source reviews, all exact-head CI and fresh-master premerge. Prior-head green checks do not certify the replacement."
+  }
+}

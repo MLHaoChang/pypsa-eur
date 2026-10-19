@@ -103,14 +103,14 @@ from the repository report and the following fixture recipe if unavailable:
 
 ## Slice ledger and dependency order
 
-LC-02A is merged; LC-02B is active as recorded below. Other implementation rows are not started.
+LC-02A/B layout repairs are merged; LC-01A schema discovery is active as recorded below. Other implementation rows are not started.
 Approval covers requirements; no row inherits a passing execution claim. LC-02's layout repair
 may precede LC-01; its new resolved-context UX still depends on LC-01.
 
 | Slice / issue | Resume scope | Required predecessors | Current state / evidence |
 | --- | --- | --- | --- |
-| [LC-02](issues/02-companion-interaction.md) | 02B overflow attribution/repair; later scope/plan/decision UX | Layout repair independent; new scope UX needs LC-01 | 02A merged PR369/dbc1fa7, native browser32pass/component111pass; 02B active in `claude/chat-narrow-layout`, base dbc1fa7; RED attribution pending |
-| [LC-01](issues/01-discovery-and-scope.md) | Eligible capability/schema discovery and exact target resolver; settle concrete DTO/route compatibility before coding | Existing harness and source rebaseline | Not started; LC-T01/02/06/17 |
+| [LC-02](issues/02-companion-interaction.md) | Later scope/plan/decision UX; layout repairs complete | New scope UX needs LC-01 | Layout PR369/dbc1fa7 and PR370/97867ad merged; PR370 native126pass/composer32pass/component188pass, remote/premerge and post-merge CI passed |
+| [LC-01](issues/01-discovery-and-scope.md) | Eligible capability/schema discovery and exact target resolver; settle concrete DTO/route compatibility before coding | Existing harness and source rebaseline | LC-01A active in `claude/copilot-discovery`, base97867ad; paged component-schema tool first; LC-T01/02/06/17 remain partially pending |
 | [LC-03](issues/03-results-and-navigation.md) | Typed evidence/navigation interfaces, then small current/retained domain adapters | LC-01 and applicable LC-02 | Not started; LC-T06–10/19 plus mapped LC-D suites |
 | [LC-04](issues/04-generic-parameter-edits.md) | Exact schema/unit/basis previews and verified writes; storage/line examples first | LC-01 and applicable LC-02 | Not started; LC-T02–05 and domain edit cases |
 | [LC-05](issues/05-ordered-workflows.md) | Bounded operation graph, verified dependencies and ordinary admitted execution | LC-03/04; existing durable receipts/jobs | Not started; LC-T04/05/10/12 |
@@ -322,3 +322,68 @@ ordinary expected-head squash under owner's direct authorization. Keep native
 backend/path-filter skips distinct from executed backend/domain tests. No paid
 calls, reviewer contact, activation or full-coverage claim. After this bounded
 merge, stop; next isolated implementation remains LC-01 discovery.
+
+
+2026-10-18 LC-01A active checkpoint: owner said “go” for generic discovery.
+Fresh actual master97867adecd46098cd58c120728cf1eed693ed265, isolated worktree
+`/workspace/copilot-discovery`, branch `claude/copilot-discovery`. PR370 merged
+and all three post-merge workflows passed. Current open profile-generation
+PR362–365/371 and process-unit PR338 remain unmerged; no installed adapters
+are inferred from them. Reuse existing find_capabilities and on-demand value
+reads. First new slice adds a bounded read-tier component-schema tool using
+native PyPSA/request/asset metadata, with no new HTTP route or write grant.
+Concrete interface, scope limits and approved public test seam are recorded in
+`issues/01a-component-schema.md`. First ordinary-dispatch RED is running; no
+production implementation yet. Finish that RED→green slice and appropriate
+regressions/reviews/PR gates. Exact project/case/run/entity resolution, unsafe
+named shortcuts, broader capability eligibility and service-schema families
+remain separate LC-01 work; do not mark all LC-01 complete from this slice.
+No paid calls, external reviewer contact, deployment or domain approval claim.
+
+
+2026-10-18 LC-01A implementation candidate: paged read-tier get_component_schema
+now uses actual request/PyPSA/asset metadata in every toolset. First ordinary
+RED returned unknown_tool; green then passed43discovery tests including native
+HTTP/SSE, all11 classes,4mocked external wire variants, paging/bounds/units,
+strict refusal, personal rule denial and networkless cross-project value
+isolation. Earlier1205neighbor tests pass; overlapping counts, never sum.
+Details/commands and accurate pending gates are in
+`docs/superpowers/qa/2026-10-18-copilot-component-discovery.md`. Inventory256,
+15tabs/19panels; matrix170/14families, full_coverage not_established. Environment
+briefly restarted; source and completed logs survived and were inspected.
+Next action: final semantic/provider regressions and two-axis exact-source
+review, then batch push/PR/all actual backend shards+pilot/QA, CodeQL,
+inventory/control/release checks, fresh-master premerge and ordinary expected-
+head squash under owner's standing authorization. No PR/push yet. LC-01 exact
+resolver, named shortcuts, capability eligibility and service/domain schemas
+remain pending; LC-02 generic-context UX still depends on them. No paid calls,
+external contacts, activation or domain release certification.
+
+
+2026-10-18 LC-01A source approved: cfd7e6cfb71f668b08f63e039d4f096670f825f9.
+Both internal Standards/Spec reviewers approved with zero findings. Final local
+combined semantic/provider632pass/2existing skips,124.12s; focused discovery
+43pass. Never sum overlapping runs. Source/log byte hashes and commands are
+in `evidence/component-discovery.json`; QA explains actual native/provider
+seams and scope limits. This latest commit changes evidence/docs only.
+Next: batch push once, draft PR against fresh master, require all exact-head
+checks and actual four backend shards plus pilot/QA steps, then fresh-master
+premerge and ordinary expected-head squash under direct owner authorization.
+No push/PR or merge is claimed here. Do not rewrite the branch during CI.
+LC-01B exact resolution/named shortcuts, richer eligibility and service schemas
+remain pending; this slice does not close LC-01 or certify any domain result.
+
+
+2026-10-19 LC-01A CI follow-up: PR372 remains draft/unmerged. Actual head
+11f903a84b59cb5678fe331433d20250bd143027 and master97867adecd46098cd58c120728cf1eed693ed265
+are unchanged. Full Test39158165700 failed shard1's shared error-kind manifest
+guard because schema_field_too_large lacked a classification. The other three
+shards, actual pilot/QA, CodeQL/inventory/control/release passed, but cannot
+certify a replacement. No failed-source rerun or merge was attempted. Exact
+existing guard reproduced in3.05s; one inline JSON classification fixes the
+missing contract decision without changing emitter, service, limits or tests.
+Backend manifest+discovery47pass/0skip; frontend manifest/profile260pass/2files.
+Evidence/QA record commands/hashes/failure and scope. Next: refreshed two-axis
+review, one normal batch push, require all new-head CI with actual backend
+steps, fresh-master premerge, ordinary expected-head squash if every gate passes.
+No paid calls, external contacts, deployment or new implementation scope.

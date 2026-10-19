@@ -200,6 +200,20 @@ def _empty(name: str, description: str) -> dict[str, Any]:
 
 
 TOOLS: list[dict[str, Any]] = [
+    _t(
+        "get_component_schema",
+        "Discover native component fields before choosing parameters. Paged class metadata only: "
+        "stored/display units, request-model types/bounds/enums, native input/output and derived/read-only status. "
+        "No model values or permissions. Native handlers remain validation authority; JSON Schema does not "
+        "encode every cross-field rule. schema_sha256 identifies metadata only. Filter exact field names or "
+        "labels with query; page with offset += returned while has_more. Use get_component/list_components "
+        "for actual values. Not a checked-answer adapter. Safety: read.",
+        {"component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
+         "query": {"type": "string", "maxLength": 80},
+         "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
+         "limit": {"type": "integer", "minimum": 1, "maximum": 50}},
+        ["component_class"],
+    ),
     # ── Read (22) ──────────────────────────────────────────────────────────
 
     _t(
@@ -3627,6 +3641,7 @@ TOOL_ROUTES: dict[str, list] = {
     "get_loadflow_summary": _SERVICE_CALL,
     "list_tasks": _SERVICE_CALL,
     "find_capabilities": _SERVICE_CALL,
+    "get_component_schema": _SERVICE_CALL,
     "start_task": _SERVICE_CALL,
     "get_task": _SERVICE_CALL,
     "resume_task": _SERVICE_CALL,
