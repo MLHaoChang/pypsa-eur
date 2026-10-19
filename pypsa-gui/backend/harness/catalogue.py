@@ -1453,10 +1453,11 @@ TOOLS: list[dict[str, Any]] = [
         "(422) when the component is gone, its carrier is not wind/solar, or "
         "the artifact holds no column for it; warns when the bus moved since "
         "generation. `time_basis` says what the snapshots mean: \"UTC\" "
-        "(default; the weather series maps straight on) or the IANA zone "
-        "whose wall clock they are (e.g. \"Europe/Berlin\"; the series is "
-        "shifted by that zone's offset) — ask when the user says the "
-        "horizon is local time; report the time basis from the answer. "
+        "or the IANA zone whose wall clock they are (e.g. "
+        "\"Europe/Berlin\"; the series is shifted by that zone's offset). "
+        "Leave it unset unless the user said; then the answer's `warnings` "
+        "may say UTC was assumed — relay that and offer to set the zone. "
+        "Report the time basis from the answer. "
         "`project_id` is the project NAME and must be the open "
         "project. Safety: write.",
         {"project_id": {"type": "string"},

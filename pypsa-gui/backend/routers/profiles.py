@@ -86,10 +86,11 @@ class ApplyRequest(BaseModel):
     # name itself — the generate UI seeds point ids from the selected
     # generators, so the common case needs no mapping at all.
     point_id: str | None = None
-    # What the network's naive snapshots mean: "UTC" (default, the PyPSA-Eur
-    # convention) or an IANA zone whose wall clock they are — the UTC
-    # weather series is then shifted by that zone's offset (DST included).
-    time_basis: str = "UTC"
+    # What the network's naive snapshots mean: "UTC", or an IANA zone whose
+    # wall clock they are (the UTC weather series is then shifted by that
+    # zone's offset, DST included). Unset: UTC when the project's commercial
+    # timezone is set, else applied unshifted with a `warnings` entry.
+    time_basis: str | None = None
 
 
 # ---------------------------------------------------------------------------
