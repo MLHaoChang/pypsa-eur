@@ -162,6 +162,9 @@ def test_build_system_prompt_matches_the_pre_p25_snapshot(monkeypatch, include_t
     # sanctioned way past the pins); stubbed like the profile block so this
     # test keeps saying "P25 changed nothing else".
     monkeypatch.setattr(harness_compose, "_skills_block", lambda: "")
+    # LC-10's reference ladder is a NEW part too; its own bytes are pinned in
+    # test_harness_prompts.py, so it is blanked here like the skill catalogue.
+    monkeypatch.setattr(harness_compose, "_REFERENCE_LADDER", "")
     session = chat_service.ChatSession(session_id="0123456789abcdef0123456789abcdef")
     now = chat_service._build_system_prompt(session, live_meta="LIVE META",
                                             include_tools=include_tools)

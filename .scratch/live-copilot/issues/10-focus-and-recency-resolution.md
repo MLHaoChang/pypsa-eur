@@ -3,7 +3,7 @@
 
 # LC-10 (LC-01C) — resolving "this", "the" and "latest"
 
-Status: ready-for-agent inside LC-01, after LC-01B lands
+Status: implementation in progress (Claude, branch `claude/copilot-reference-ladder`, stacked on PR #391)
 Type: task
 Baseline: master `d006f4beaa302b97432c65757762ae180222731a`
 Dependencies: LC-01B (exact names), LC-01A (schema discovery)
@@ -60,3 +60,43 @@ LC-T21 in the [acceptance matrix](../test-plan.md).
 Prompt rule in `harness/prompts/assistant_stance.md`, a small read-tier
 resolver over existing reads if the prompt alone fails Tier B, and the
 OJ tests. No change to `uiContext.ts`'s identifiers-only rule.
+
+## Coordinator decision, 2026-10-19 (derived from owner decision Q2)
+
+Build the resolver now, together with the prompt rule. Q2 makes the live-model
+tier manual and never a merge gate, so only a ladder in code can be proven in
+CI. Read-only and access-checked; the answer always names what it resolved.
+
+## Implementation (2026-10-19)
+
+- `services/reference_resolution.py`: read-tier `resolve_reference(target,
+  component_class?, name?, run_id?, latest?)` for components, runs and
+  snapshots.
+  - Components: explicit (a name without a class searches every class); on
+    screen (the turn's `selected_component`); discussed (the last component a
+    successful tool call named in this project); the only one; otherwise
+    ask (up to 12 candidates with key fields, plus an `ask_user`
+    instruction). `component_class: "storage"` spans StorageUnit and Store.
+    A selection of another class, or one not in the active network, goes to
+    `ignored` and is never used. A class mismatch asks rather than falling
+    back to "discussed" or "only one".
+  - Runs: explicit; on screen (current results by source, or a displayed
+    historical run of the active project); discussed (`discussed_refs` of
+    the active project); then, with `latest`, the newest completed run.
+    Otherwise it takes the only completed run, or asks. Failed and running
+    runs newer than the one used are named in `skipped`.
+  - Snapshot: the `snapshot_index` on screen, checked against the network.
+- `harness/loop.py` records each turn's UI context on the session
+  (`turn_ui_context`, replaced every turn). After every successful tool call
+  it records the single component the call named, keyed by the active
+  project (`touched_components`), so a project switch never carries a name
+  across. Hint text is cleaned and capped before it is echoed.
+- `harness/prompts/reference_ladder.md`: a new tools-on part (no pinned
+  fragment moved). The issue named `assistant_stance.md`, but the prompt
+  doctrine adds new guidance as a new fragment. It is pinned in
+  `test_harness_prompts.py` and blanked in the pre-P25 snapshot test like the
+  skill catalogue.
+- Tests: `tests/test_reference_ladder.py` (31) covers LC-T21 and the
+  resolution halves of OJ-05 and OJ-06, through the ordinary turn loop plus
+  one authenticated HTTP stream. The edit halves of OJ-05 and OJ-06 close
+  with LC-04. Whether the model repeats `says` is only checkable in Tier B.

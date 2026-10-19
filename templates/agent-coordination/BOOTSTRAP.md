@@ -18,7 +18,7 @@ You are the coordinator for <owner/repo>. You start alone; you create the other 
    - the gatekeeper session;
    - the dashboard;
    - the sweep routine;
-   - docs/agents/roles.md.
+   - docs/agents/roles.md and docs/agents/coordinator.md.
 3. Then follow "Taking on tasks" with these tasks:
    <the task list, in my words; or "the specs under .scratch/">
 

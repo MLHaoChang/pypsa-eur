@@ -2,6 +2,86 @@
   "description": "Island system that must run without its 20 MW subsea tie: PV, wind, battery, three diesel units, a critical hospital feeder and residential demand. Tagged for an off-grid study.",
   "dtc_attribution": null,
   "id": "eh_microgrid",
+  "ledger": [
+    {
+      "item": "investment case",
+      "note": "the staged microgrid's basis (owner decision M2e a); the investment-case route re-solves the island without the candidates",
+      "source": "assumed",
+      "value": "compared with the island as it stands today: the existing diesels, PV, wind and battery, without the candidates, and no grid"
+    },
+    {
+      "item": "point of connection",
+      "note": "as the staged microgrid: it seeds the site/grid split and carries nothing",
+      "source": "assumed",
+      "value": "subsea_tie, normally open (p_max_pu 0), no tariff, clock UTC"
+    },
+    {
+      "item": "single-year horizon",
+      "note": "the week is dated 2030, the first operating year; the case ends in 2045, the staged templates' horizon end. The week already weighs a year, so nothing is annualised",
+      "source": "assumed",
+      "value": "one representative week weighted 8,760/168 h, repeated for each of the 15 operating years 2030-2044, escalated and degraded"
+    },
+    {
+      "item": "dates",
+      "note": "a single period has no stage, so every asset shares one COD; close one year before it and capex paid then, as the staged templates",
+      "source": "assumed",
+      "value": "every COD 2030-01-01, financial close 2029-01-01"
+    },
+    {
+      "item": "existing island",
+      "note": "in service and sunk: no capex in the case; only the candidates the plan builds are investments. The solve is unchanged",
+      "source": "assumed",
+      "value": "pv_plant, wind_turbines, diesel_1, diesel_2, diesel_3, island_battery, hospital_feeder: overnight cost 0, lifetime unlimited"
+    },
+    {
+      "item": "finance inputs",
+      "note": "the week's running costs and the pack's capex are held flat to 2030 (the first operating year) and escalate from there, the staged microgrid's rule from its first period (2027); the terminal value is the remaining-life annuity of each part",
+      "source": "assumed",
+      "value": "the staged microgrid's: pack prices (2020 price data) taken as real 2030 EUR (the base year), escalation 2 %/yr from 2030, inflation 2 %, all equity at 7 %, pre-tax; PV degrades 0.5 %/yr, the rest not"
+    },
+    {
+      "item": "battery inverter replacement",
+      "note": "bess_new's inverter is re-bought in 2039 (replacement_rule part_lifetimes); the cash then changes sign twice, so the IRR is flagged irr_multiple_sign_changes. The NPV is unaffected",
+      "source": "assumed",
+      "value": "after 10 years (inv_power_lifetime)"
+    },
+    {
+      "item": "island sidecar",
+      "note": "eh_staged_hubs._mg_island_single_year (UX review N2, decision F); the island checks and the report's islanding chapter read it",
+      "source": "assumed",
+      "value": "seamless: the staged microgrid's blocks on the plain unit names (diesel droop, grid-forming batteries, PV and wind Q(U)); the tie is open, so there is no import to lose"
+    },
+    {
+      "item": "island unit data",
+      "note": "demo values copied from the staged microgrid, not from a datasheet or a grid code",
+      "source": "assumed",
+      "value": "the staged microgrid's: diesel droop 4 %, H 1.5 s; batteries droop 4 %, tau_f 0.1 s, i_max 1.2 pu, k_gfm_min 1.0, pf 0.95; PV and wind Q(U), pf 0.95; sustained 24 h, bridge 600 s"
+    },
+    {
+      "item": "transition RoCoF limit",
+      "note": "the staged microgrid's demo value (eh_staged_hubs.MG_TRANSITION_ROCOF), relaxed from the data center's 1 Hz/s so a tuned grid-forming battery can meet it; not taken from a grid code",
+      "source": "assumed",
+      "value": "2 Hz/s over 500 ms (the steady island keeps 1 Hz/s)"
+    },
+    {
+      "item": "island rows",
+      "note": "the plan is not sized for the island requirements; the island checks report what islanding would need. Turn them on to plan for it (owner: island data on, rows off, the user opts in)",
+      "source": "assumed",
+      "value": "off (island_constraints false)"
+    },
+    {
+      "item": "island break-even",
+      "note": "the island rows are off, so the comparison is not relaxed for them and the case does not price an island capability",
+      "source": "assumed",
+      "value": "not applicable"
+    },
+    {
+      "item": "diesel running cost",
+      "note": "the template's marginal cost, in 2030 money, escalating 2 %/yr (the case books it as opex); replace with the island's fuel contract",
+      "source": "synthetic",
+      "value": "260 EUR/MWh (fuel and variable O&M)"
+    }
+  ],
   "name": "Island Microgrid",
   "pack_overrides": {},
   "provenance": "synthetic illustrative data (P19 template) \u2014 representative week, public-catalogue-range costs; replace with project data before any decision",
@@ -10,6 +90,7 @@
   "study_notes": [
     "The off_grid pack islands the subsea tie; the island must be adequate on its own resources.",
     "The subsea tie is normally open (p_max_pu = 0), so the FMEA worksheet sweeps the same islanded system; set it to 1 to study tie-connected operation.",
-    "Class-C stress scenarios (dunkelflaute, heatwave) are preloaded for the FMEA sweep."
+    "Class-C stress scenarios (dunkelflaute, heatwave) are preloaded for the FMEA sweep.",
+    "After a solve the investment case compares the plan with the island as it stands today (the existing diesels, PV, wind and battery, no grid), re-solved without the candidates. The representative week stands for each of the 15 operating years (2030-2044)."
   ]
 }

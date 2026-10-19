@@ -213,6 +213,25 @@ TOOLS: list[dict[str, Any]] = [
         ["project_name"],
     ),
     _t(
+        "resolve_reference",
+        "Resolve 'this', 'the' or 'latest' to exactly one component, run or snapshot of the active "
+        "project, by one ladder: an explicit name or run_id; what is on screen now (the selection, the "
+        "displayed results or run, the shown snapshot); what was discussed last; the only one that "
+        "exists; otherwise candidates to ask about. component_class 'storage' covers StorageUnit and "
+        "Store; a name without a class searches every class. latest=true takes the newest completed "
+        "run and names newer failed or running runs it skipped. Returns status resolved|ambiguous|"
+        "not_found, via, target, says (always repeat it so the user sees what was resolved), ignored "
+        "hints and, when ambiguous, candidates with key fields: then ask with one ask_user Choice, never "
+        "guess. Hints are re-read; activates, selects and opens nothing. Safety: read.",
+        {"target": {"type": "string", "enum": ["component", "run", "snapshot"]},
+         "component_class": {"type": "string", "enum": [c for c in COMPONENT_CLASS_ENUM
+                                                        if c != "GlobalConstraint"] + ["storage"]},
+         "name": {"type": "string", "minLength": 1, "maxLength": 256},
+         "run_id": {"type": "string", "minLength": 1, "maxLength": 64},
+         "latest": {"type": "boolean"}},
+        ["target"],
+    ),
+    _t(
         "get_component_schema",
         "Discover native component fields before choosing parameters. Paged class metadata only: "
         "stored/display units, request-model types/bounds/enums, native input/output and derived/read-only status. "
@@ -3095,8 +3114,12 @@ TOOLS: list[dict[str, Any]] = [
         "I7 cuts would buy instead), the GFM-vs-GFL comparison, the search "
         "ledger (every bound assumed), the simulations used, and applied once "
         "applied (with hub_resolve_needed: the hub must be re-solved, since "
-        "droop and inertia change its island rows). job: the running or last "
-        "recommend job (null when none). Say it is heuristic screening and "
+        "droop and inertia change its island rows). island_rows_now: whether the "
+        "solver settings have island constraints on as they stand now; when "
+        "false the hub solve leaves the island rows out, so the capacity a "
+        "not_achievable result asks for does not shape its dispatch. job: the "
+        "running or last recommend job (null when none). Say it is heuristic "
+        "screening and "
         "which inputs are assumed; when not_achievable, say capacity is "
         "needed, never that settings fix it. 409 for a project of another "
         "kind. Safety: read.",
@@ -3740,6 +3763,7 @@ TOOL_ROUTES: dict[str, list] = {
     "find_capabilities": _SERVICE_CALL,
     "get_component_schema": _SERVICE_CALL,
     "resolve_project_target": _SERVICE_CALL,
+    "resolve_reference": _SERVICE_CALL,
     "start_task": _SERVICE_CALL,
     "get_task": _SERVICE_CALL,
     "resume_task": _SERVICE_CALL,

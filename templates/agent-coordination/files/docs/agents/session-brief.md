@@ -3,7 +3,7 @@
 The coordinator fills in this template when it spawns a session, and sends it as the first message. Replace every `<…>`; write "none" rather than deleting a section.
 
 ```markdown
-You are a session for {{REPO}}, commissioned by the owner through the coordinator session (<coordinator session id>).
+You are a session for {{REPO}}, commissioned by the owner through the coordinator session (the id in `docs/agents/coordinator.md`).
 
 **Task.** <What to build or fix, and the outcome that marks it done.>
 
@@ -23,6 +23,6 @@ You are a session for {{REPO}}, commissioned by the owner through the coordinato
 **Process.** Follow `.claude/skills/steward/SKILL.md`:
 - one PR on its own `claude/*` branch;
 - a release-note fragment;
-- report the full head SHA and the `scripts/coord/premerge.sh` output to the coordinator once green;
+- report `premerge ok <full head SHA>` and the `scripts/coord/premerge.sh` output to the coordinator (`docs/agents/coordinator.md`) once green;
 - send questions to the coordinator as 2–4 options.
 ```
