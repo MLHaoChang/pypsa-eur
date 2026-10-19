@@ -490,6 +490,10 @@ BUS: tuple[FieldSpec, ...] = (
     FieldSpec("mwh_per_t", "identity", "Energy per tonne", "For an energy product in MWh: its lower heating value, "
               "which results use to show tonnes (NH3: 5.166 MWh/t). Empty: tonnes are Unavailable.", "MWh/t",
               "MWh/t", reveal_when={"unit": "MWh"}),
+    FieldSpec("product_value", "identity", "Product value", "What one unit of this product is worth to the client, "
+              "per the bus's unit (EUR/MWh or EUR/t), with its source in the ledger. Results value a process unit's "
+              "output at it. Empty: that value is Unavailable, never 0.", "EUR/unit",
+              reveal_when={"unit": ("MWh", "t")}),
     FieldSpec("sub_network", "identity", "Sub-network", "Manual region label for the 'region' clustering mode: buses "
               "sharing it collapse to one node. Empty: determined from the electrical topology.", kind="text"),
     FieldSpec("x", "identity", "Longitude", "Geographic longitude, east positive. Places the bus on the map and "
@@ -557,7 +561,7 @@ _CLEAR = {"p_nom_max", "e_nom_max", "s_nom_max", "v_nom_0", "v_nom_1", "lifetime
 _EMPTY_BY_CLASS = {"Bus": {"country", "sub_network", "unit"}, "Carrier": {"nice_name", "color", "unit"},
                    "Link": {"bus2", "bus3", "bus4", "criticality_tier"}}
 _CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"},
-                   "Bus": {"mwh_per_t"}}
+                   "Bus": {"mwh_per_t", "product_value"}}
 
 
 def _with_blank(component: str, specs: tuple[FieldSpec, ...]) -> tuple[FieldSpec, ...]:
