@@ -80,6 +80,30 @@ The third is **continuous speech over the same capabilities**, preserving the
 Use existing durable reservations and utterance leases; do not rewrite them or
 select new vendor/model IDs without validating their actual contracts.
 
+## Owner-vision amendment — 2026-10-19 (owner decisions recorded)
+
+A [review against the owner's own examples](../../../.scratch/live-copilot/vision-review-2026-10-19.md)
+found the contracts above sound but no test that plays an owner example end to
+end. The owner kept the delivery sequence above (Q1). Each layer now closes on
+named [owner journeys](../../../.scratch/live-copilot/owner-journeys.md): a
+layer is done only when its acceptance target passes.
+
+| Layer | Acceptance target that closes it | Tickets inside the layer | Journeys |
+| --- | --- | --- | --- |
+| LC-01 | Exact and deictic targets: named project, “this”, “the”, “latest” | LC-01B (in flight), [LC-10](../../../.scratch/live-copilot/issues/10-focus-and-recency-resolution.md) | OJ-09, LC-T21 |
+| LC-03 | VS-1 “Show me the load flow results of the latest calculation” and VS-2 “walk me through it / show me something else” | [LC-09](../../../.scratch/live-copilot/issues/09-vertical-slice-loadflow.md), [LC-11](../../../.scratch/live-copilot/issues/11-narrated-walkthrough.md), [LC-14](../../../.scratch/live-copilot/issues/14-navigation-reach.md) | OJ-01, OJ-02, OJ-03 |
+| LC-04 | VS-3 “Help me update this line's parameters” | storage/line slice; old→new card in both modes (Q3) | OJ-05, OJ-06 |
+| LC-05 | VS-4 “Update these and relaunch, then show me” | [LC-12](../../../.scratch/live-copilot/issues/12-job-completion-continuation.md): the 25 s wait limit and job completion into chat | OJ-07, OJ-08, OJ-10 |
+| LC-06 | Each family adapter's own journey | per adapter | OJ-04, OJ-11, OJ-12 |
+| LC-07 | The same journeys, spoken | — | OJ-01–12 |
+
+The suite itself is [LC-13](../../../.scratch/live-copilot/issues/13-owner-journey-suite.md):
+its Tier A harness lands with the first layer that closes a journey; Tier B is
+the owner's capped manual live-model run (Q2), never a merge gate. LC-05 reuses
+`start_task` and `wait_for_job` and adds the completion continuation (LC-C12)
+rather than a second graph engine. Q4 narrows LC-01B's local shortcuts to the
+no-key path. Every rule in this plan still applies.
+
 ## Common implementation design
 
 1. **Discover:** derive an eligible capability/parameter catalogue from actual

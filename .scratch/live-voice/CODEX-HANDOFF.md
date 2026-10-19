@@ -28,6 +28,10 @@ Current inventory: 255 tools / 15 result tabs / 19 panels; 170 controls / 14
 families, `full_coverage=not_established`. Continuous hosted voice, broader native
 adapters, independent domain review and real-use calibration remain incomplete.
 
+2026-10-19: a [review against the owner's examples](../live-copilot/vision-review-2026-10-19.md)
+adds [owner journeys](../live-copilot/owner-journeys.md) and issues 09–14. Continuous
+voice must pass the same journeys spoken, not a separate set.
+
 Everything below is historical context, not the current next-task instruction.
 
 2026-10-14 continuation: [CP-02 canonical companion outcomes](../chat-companion/issues/02-canonical-outcomes.md) records the next master-based UI/publication slice. [CP-01 / PR #235](https://github.com/MLHaoChang/pypsa-eur/pull/235) remains a separate dependency with its tested source preserved. These slices do not enable hosted voice or waive live/domain release gates.
