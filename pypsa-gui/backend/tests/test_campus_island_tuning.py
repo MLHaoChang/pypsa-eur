@@ -335,5 +335,16 @@ def test_the_state_says_whether_the_hubs_island_rows_are_on_now_in_every_state(h
 def test_a_missing_solver_config_means_the_rows_are_off(hub):  # noqa: F811
     _db, _user, project = hub
     from services import project_registry
-    (project_registry.project_dir(project) / "solver_config.json").unlink(missing_ok=True)
+    _set_island_constraints(project, True)
+    (project_registry.project_dir(project) / "solver_config.json").unlink()
     assert cit.get_settings(project)["island_rows_now"] is False
+
+
+def test_a_stale_state_carries_the_flag_too(hub):  # noqa: F811
+    _db, _user, project = hub
+    (_run_dir(project) / ce.cs.GFM_SETTINGS_JSON).write_text(json.dumps(REC))
+    time.sleep(0.02)
+    _frequency_checked(project)                      # the run's check is newer than the recommendation
+    _set_island_constraints(project, True)
+    out = cit.get_settings(project)
+    assert out["state"] == "stale" and out["island_rows_now"] is True
