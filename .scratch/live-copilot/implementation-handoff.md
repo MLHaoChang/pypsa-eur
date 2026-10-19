@@ -117,6 +117,12 @@ may precede LC-01; its new resolved-context UX still depends on LC-01.
 | [LC-06](issues/06-family-adapters.md) | Every applicable domain/engine/control variant, delivered as small adapter PRs | Applicable LC-01–05 interfaces | Not started; LC-T16/17 and LC-D01–24 |
 | [LC-07](issues/07-continuous-speech.md) | Offline lifecycle/resource wiring; then separately gated real media integration | Stable typed contracts; existing parent/utterance primitives | Not started; LC-T13–15; actual hosted/device gates pending |
 | [LC-08](issues/08-release-evidence.md) | Source-pinned integrated evidence, per-capability rollout and rollback | Applicable implementation slices | Not started; LC-T16–19 and domain manifests; external gates pending |
+| [LC-09](issues/09-vertical-slice-loadflow.md) VS-1 | “Show me the load flow results of the latest calculation” end to end | LC-01B; owner decision Q1 | Proposed 2026-10-19 ([vision review](vision-review-2026-10-19.md)); not started; OJ-01 |
+| [LC-10](issues/10-focus-and-recency-resolution.md) | Focus/recency ladder for “this”, “the”, “latest” (LC-C11) | LC-01B | Proposed 2026-10-19; not started; LC-T21 |
+| [LC-11](issues/11-narrated-walkthrough.md) VS-2 | Narrated walk-through, one read per tab, “something else” | LC-09 | Proposed 2026-10-19; not started; OJ-02/03 |
+| [LC-12](issues/12-job-completion-continuation.md) VS-4 | Continuation turn on job completion; stale labels after edits (LC-C12) | LC-09, LC-04 first slice | Proposed 2026-10-19; not started; LC-T22 |
+| [LC-13](issues/13-owner-journey-suite.md) | Owner-journey suite: Tier A in CI, Tier B capped live model | None; Tier B needs owner decision Q2 | Proposed 2026-10-19; not started; LC-T20/23 |
+| [LC-14](issues/14-navigation-reach.md) | Small navigation-reach fixes (snapshot, selection, edit card, Guided step, sub-sections) | None | Proposed 2026-10-19; not started |
 
 ## Commands and required evidence
 

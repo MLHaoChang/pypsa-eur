@@ -17,6 +17,9 @@ a recommendation or dispatch success cannot certify a dynamic/AC property.
 
 Persist a finite native-operation graph and dependencies. Verify each required write before one separately admitted solve. Revalidate input/schema/policy revisions, locks, ownership and caps per step. Unknown/partial effects block dependent steps; recovery reconciles and never replays automatically.
 
+2026-10-19: reuse `start_task` and `wait_for_job`; the missing piece is the completion
+continuation in [LC-12](12-job-completion-continuation.md) (LC-C12), proven by OJ-07/08/10.
+
 Expected ownership: durable operation orchestration over ordinary dispatch, existing receipts/jobs/adapters and owned progress.
 
 Rebaseline current master and incoming interfaces before implementation. Write

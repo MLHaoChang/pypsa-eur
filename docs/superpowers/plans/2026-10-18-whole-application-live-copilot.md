@@ -80,6 +80,26 @@ The third is **continuous speech over the same capabilities**, preserving the
 Use existing durable reservations and utterance leases; do not rewrite them or
 select new vendor/model IDs without validating their actual contracts.
 
+## Owner-vision amendment — 2026-10-19 (proposed, owner decision pending)
+
+A [review against the owner's own examples](../../../.scratch/live-copilot/vision-review-2026-10-19.md)
+found the contracts above sound but no slice that makes one example work end
+to end before the generic layers. It proposes thin vertical slices after
+LC-01B, each closed by its [owner journeys](../../../.scratch/live-copilot/owner-journeys.md):
+
+| Slice | Owner sentence | Issues | Journeys |
+| --- | --- | --- | --- |
+| VS-1 | “Show me the load flow results of the latest calculation” | [LC-09](../../../.scratch/live-copilot/issues/09-vertical-slice-loadflow.md), [LC-10](../../../.scratch/live-copilot/issues/10-focus-and-recency-resolution.md) (latest), [LC-13](../../../.scratch/live-copilot/issues/13-owner-journey-suite.md) | OJ-01 |
+| VS-2 | “Walk me through it / show me something else” | [LC-11](../../../.scratch/live-copilot/issues/11-narrated-walkthrough.md), [LC-14](../../../.scratch/live-copilot/issues/14-navigation-reach.md) | OJ-02, OJ-03 |
+| VS-3 | “Help me update this line's parameters” | LC-10 (focus), LC-04 storage/line slice | OJ-05, OJ-06 |
+| VS-4 | “Update these and relaunch, then show me” | [LC-12](../../../.scratch/live-copilot/issues/12-job-completion-continuation.md), LC-05 | OJ-07, OJ-08, OJ-10 |
+
+Then the generic LC-03/04/05 adapters, LC-06, LC-07 and LC-08 continue as
+above; each new adapter adds its journey. LC-05 reuses `start_task` and
+`wait_for_job` and adds the completion continuation (LC-C12) rather than a
+second graph engine. Every rule in this plan still applies to every slice.
+Until the owner accepts this order, the delivery sequence above stands.
+
 ## Common implementation design
 
 1. **Discover:** derive an eligible capability/parameter catalogue from actual

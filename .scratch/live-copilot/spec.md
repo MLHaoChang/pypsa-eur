@@ -43,6 +43,10 @@ or provide independent domain release approval.
 | “Run a sensitivity and compare/export it” | Reuse existing isolated cases, common budgets, receipts, reconciliation and native comparisons; expose failure/partial outcomes. Every new recipe needs its own adapter. Creating a plan is not executing it |
 | “What is running? Stop speaking / stop the job” | Report native observed work and freshness without a model polling loop. Playback interruption and actual job cancellation are separate operations; display the eventual native cancellation/effect receipt |
 | “Open project X / inspect its parameters” | Resolve an authorized exact target. Do not turn a named-project request into an unlabelled picker or a tour of the previous project. Preserve current/discussed scope and ordinary project-binding policy |
+| “Show me the results of the latest calculation, the load flow results” (added 2026-10-19) | Resolve “latest” to the newest completed run and say which; read the load flow, then open its tab on the same source; explain the key points from the read only. [OJ-01](owner-journeys.md) |
+| “Show me something else” / “next” (added 2026-10-19) | Offer the sections with data not yet shown, one line each; read before showing; the user controls next/stop. [OJ-02/03](owner-journeys.md) |
+| “Help me update the parameters of this line” (added 2026-10-19) | Resolve “this” from the selected component (LC-C11); show old→new with units; read back; offer undo; say results are now stale. [OJ-05/06](owner-journeys.md) |
+| “Update these parameters and relaunch, then show me” (added 2026-10-19) | One visible plan; edits verified before one approved run; the conversation continues by itself when the job ends, then walks the new results (LC-C12). [OJ-07/08/10](owner-journeys.md) |
 
 ## Required contracts
 
@@ -134,6 +138,24 @@ late usage. Pin the initial bridge to one authoritative worker. Rebind rotates
 credentials/generation and refreshes refs; it does not restore old approvals,
 replay effects or reset budgets. No current paid/live authorization is created
 by this specification.
+
+**LC-C11 Focus and recency resolution (added 2026-10-19).** Resolve deictic
+targets by a fixed ladder; the first rung giving exactly one target wins:
+explicit name/ID in the utterance; what is on screen now (`ui_context`
+selected component of a matching class, open results tab and source, current
+snapshot); what this conversation discussed or changed last; the only
+candidate of that class; otherwise one Choice question with the real
+candidates. “Latest calculation” is the newest completed run of the active
+project. Say what was resolved. UI context remains an untrusted hint; the
+server re-reads and re-checks every use. See [LC-10](issues/10-focus-and-recency-resolution.md).
+
+**LC-C12 Conversation continuation on job completion (added 2026-10-19).**
+When a job started by a step of this conversation's plan ends, the harness
+posts one continuation turn to that conversation and the plan resumes at its
+next step. Only for the same owner, project and plan; once per job; never
+after a cancel or a project switch; the continuation carries no approval.
+Result reads report inputs changed since the solve as stale, using the solve
+fingerprint. See [LC-12](issues/12-job-completion-continuation.md).
 
 **LC-C10 Compatibility and release.** Regenerate capability mappings when
 schemas/tools change; retain provider parity, current Guided/Expert rules,
