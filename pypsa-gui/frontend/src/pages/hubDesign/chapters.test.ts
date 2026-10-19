@@ -136,6 +136,14 @@ describe('chapterTiles', () => {
         .not.toMatch(/island rows/)
       expect(ctl({ state: 'ready', reason: '', recommendation: na })!.text).not.toMatch(/island rows/)
     })
+    it('nothing to tune (no case evaluated) is not applicable, with the reason', () => {
+      expect(ctl({ state: 'ready', reason: '', recommendation: rec({ status: 'unchanged', changed: false, settings: {},
+        cases: [], simulations: 0 }) })).toMatchObject(
+        { state: 'not_applicable', text: expect.stringMatching(/nothing to tune/) })
+      // an unchanged result that evaluated cases is still a pass with margin
+      expect(ctl({ state: 'ready', reason: '', recommendation: rec({ status: 'unchanged', changed: false, settings: {},
+        simulations: 12 }) })).toMatchObject({ state: 'ready', text: expect.stringMatching(/pass with margin/) })
+    })
     it('not run, recommended, not achievable, stale', () => {
       expect(ctl({ state: 'not_run', reason: '', recommendation: null })).toMatchObject(
         { state: 'not_run', text: expect.stringMatching(/no recommendation yet/) })

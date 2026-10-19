@@ -19,7 +19,8 @@ import {
 } from '../api/campusElectrical'
 import { Btn, Tag } from '../components/PageKit'
 import { useUIStore } from '../store/uiStore'
-import { ISLAND_ROWS_OFF_NOTE } from './hubDesign/chapters'
+import { StatePill } from '../components/ResultState'
+import { GFM_NOTHING_TO_TUNE, ISLAND_ROWS_OFF_NOTE, nothingToTune } from './hubDesign/chapters'
 
 export const GFM_KEY = (name: string) => ['campusElectrical', 'gfmSettings', name] as const
 const STATE_KEY = (name: string) => ['campusElectrical', 'state', name] as const   // CAMPUS_KEY (the panel imports this file)
@@ -126,6 +127,11 @@ function RecommendationView({ rec, islandRowsOff }: { rec: GfmRecommendation; is
   return (
     <div className="mt-2" data-testid="gfm-recommendation">
       <p className="text-[11.5px] text-muted italic" data-testid="gfm-label">{rec.label}</p>
+      {nothingToTune(rec) ? (
+        <p className="text-[12px] mt-1 flex flex-wrap items-center gap-2" data-testid="gfm-status">
+          <StatePill state="not_applicable" /> {GFM_NOTHING_TO_TUNE}
+        </p>
+      ) : (
       <p className="text-[12px] mt-1" data-testid="gfm-status">
         <Tag tone={rec.status === 'not_achievable' ? 'err' : rec.status === 'incomplete' ? 'warn' : 'ok'}>
           {rec.status.replace('_', ' ')}
@@ -133,6 +139,7 @@ function RecommendationView({ rec, islandRowsOff }: { rec: GfmRecommendation; is
         {STATUS_TEXT[rec.status]} ({rec.simulations} of at most {rec.max_simulations} simulations,
         margin {num(100 * rec.margin)} %)
       </p>
+      )}
       {rec.status === 'not_achievable' && islandRowsOff && (
         <p className="text-[12px] mt-1 text-warn" data-testid="gfm-island-rows-off">{ISLAND_ROWS_OFF_NOTE}</p>
       )}

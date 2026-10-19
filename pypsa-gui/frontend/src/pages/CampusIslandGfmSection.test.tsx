@@ -130,6 +130,23 @@ describe('CampusIslandGfmSection', () => {
     expect(screen.queryByRole('button', { name: /Apply/ })).toBeNull()
   })
 
+  it('no case evaluated reads "Not applicable", not "already pass with margin" (UX review N6)', async () => {
+    api.gfmSettings.mockResolvedValue(ready(rec({ status: 'unchanged', changed: false, settings: {}, cases: [],
+      simulations: 0, notes: ['no grid-forming converter in any case: nothing to tune'] })))
+    renderSection()
+    const status = await screen.findByTestId('gfm-status')
+    expect(status.textContent).toMatch(/Not applicable/)
+    expect(status.textContent).toMatch(/nothing to tune/)
+    expect(status.textContent).not.toMatch(/pass with margin|simulations/)
+    expect(screen.queryByRole('button', { name: /Apply/ })).toBeNull()
+  })
+
+  it('an unchanged result that did evaluate cases still says the settings pass', async () => {
+    api.gfmSettings.mockResolvedValue(ready(rec({ status: 'unchanged', changed: false, settings: {}, simulations: 12 })))
+    renderSection()
+    expect((await screen.findByTestId('gfm-status')).textContent).toMatch(/already pass with margin/)
+  })
+
   it('a null setting reads "not stated"', async () => {
     api.gfmSettings.mockResolvedValue(ready(rec({ settings: { BESS1: { model: 'gfm_droop',
       current: { droop_pct: 4, tau_f_s: 0.1, i_max_pu: null, H_equivalent_s: 0.4 } } } })))
