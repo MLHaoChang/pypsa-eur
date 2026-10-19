@@ -30,6 +30,7 @@ Rules:
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, UTC
 from typing import Any
 
@@ -81,6 +82,45 @@ FIGURE_CAPTIONS: dict[str, str] = {
 }
 
 EXECUTIVE_SUMMARY_ID = "executive_summary"
+
+#: The report follows the four categories the screens use (UX review N9, owner decision E):
+#: Investment, Grid plan, Reliability, Operation. A section's category is fixed here, by id; the
+#: summary and the pipeline appendix belong to none. The campus grid checks have no evidence
+#: chapter yet, so the Grid plan heading appears only once one exists.
+CATEGORY_ORDER = ("investment", "grid_plan", "reliability", "operation")
+_CATEGORY_OF_SECTION = {
+    "investment_case": "investment", "cost": "investment", "sizing": "investment",
+    "redundancy": "investment", "levers": "investment", "tea": "investment",
+    "target": "reliability", "certification": "reliability", "frontier": "reliability",
+    "dtc": "reliability", "fmea_top": "reliability", "multi_energy": "reliability",
+    "gates": "operation", "island": "operation",
+}
+
+
+def section_category(section_id: str) -> str | None:
+    """The category of a section by id; the adequacy surfaces, the per-study adequacy
+    sections and the expert FMEA worksheet are reliability."""
+    if section_id in _CATEGORY_OF_SECTION:
+        return _CATEGORY_OF_SECTION[section_id]
+    if section_id in (EXECUTIVE_SUMMARY_ID, PIPELINE_ID):
+        return None
+    return "reliability"
+
+
+def _grouped(sections: list[Section]) -> list[Section]:
+    """The summary first, the categories in order, the pipeline last; each group keeps its
+    sections' own order."""
+    for sec in sections:
+        sec.category = section_category(sec.section_id)
+    rank = {c: i + 1 for i, c in enumerate(CATEGORY_ORDER)}
+
+    def key(sec: Section) -> int:
+        if sec.section_id == EXECUTIVE_SUMMARY_ID:
+            return 0
+        if sec.category is None:
+            return len(CATEGORY_ORDER) + 1
+        return rank[sec.category]
+    return sorted(sections, key=key)
 ADEQUACY_SURFACES_ID = "adequacy_surfaces"
 PIPELINE_ID = "pipeline"
 
@@ -112,21 +152,48 @@ def _scalar(value: Any) -> str:
     return text
 
 
-def _fields(payload: dict, *, skip: tuple[str, ...] = ()) -> list[Field]:
+def _is_record_list(value: Any) -> bool:
+    """A non-empty list of flat dicts sharing their keys: rows, not a blob (UX review N9)."""
+    return (isinstance(value, list) and bool(value) and all(isinstance(r, dict) and r for r in value)
+            and all(set(r) == set(value[0]) for r in value)
+            and all(v is None or isinstance(v, (str, bool, int, float)) for r in value for v in r.values()))
+
+
+def _record_table(section_id: str, label: str, rows: list[dict],
+                  extra_tables: dict[str, Table]) -> TableRef:
+    """A list of records as a code-rendered table, never as a line of JSON."""
+    table_id = f"{section_id}__{re.sub(r'[^a-z0-9]+', '_', label.lower()).strip('_')}"
+    columns = list(rows[0])
+    extra_tables[table_id] = Table(
+        table_id=table_id, columns=columns, caption=label,
+        rows=[[_scalar(r[c]) for c in columns] for r in rows],
+        source_path=f"/sections/{section_id}/payload")
+    return TableRef(table_id=table_id, caption=label)
+
+
+def _fields(payload: dict, *, skip: tuple[str, ...] = (), section_id: str = "",
+            extra_tables: dict[str, Table] | None = None) -> list[Block]:
     """
     A section's payload as ``Field`` blocks when the collector built no
     table for it: scalars at the top level, one level of nesting joined as
-    ``parent / child``. Deeper structures are shown as compact JSON.
+    ``parent / child``. A list of like records becomes a table when ``extra_tables`` is given;
+    anything deeper is shown as compact JSON.
     """
-    out: list[Field] = []
+    out: list[Block] = []
+
+    def leaf(label: str, value: Any) -> Block:
+        if extra_tables is not None and _is_record_list(value):
+            return _record_table(section_id, label, value, extra_tables)
+        return Field(key=label, value=_scalar(value))
+
     for key, value in payload.items():
         if key in skip:
             continue
         if isinstance(value, dict):
-            for sub, leaf in value.items():
-                out.append(Field(key=f"{key} / {sub}", value=_scalar(leaf)))
+            for sub, item in value.items():
+                out.append(leaf(f"{key} / {sub}", item))
         else:
-            out.append(Field(key=str(key), value=_scalar(value)))
+            out.append(leaf(str(key), value))
         if len(out) >= _MAX_FIELDS:
             break
     return out[:_MAX_FIELDS]
@@ -224,7 +291,7 @@ def _executive_summary(evidence: Evidence, figure_pngs: dict[str, bytes] | None 
 
 
 def _eh_section(evidence: Evidence, name: str, figure_pngs: dict[str, bytes],
-                figures: dict[str, Figure]) -> Section:
+                figures: dict[str, Figure], extra_tables: dict[str, Table] | None = None) -> Section:
     section = evidence.sections[name]
     heading = SECTION_TITLES.get(name, section.title)
     if section.status != "ok" or section.payload is None:
@@ -234,7 +301,8 @@ def _eh_section(evidence: Evidence, name: str, figure_pngs: dict[str, bytes],
     if table_ids:
         blocks.extend(TableRef(table_id=t) for t in table_ids)
     else:
-        blocks.extend(_fields(section.payload, skip=_PAYLOAD_NOTE_KEYS))
+        blocks.extend(_fields(section.payload, skip=_PAYLOAD_NOTE_KEYS, section_id=name,
+                              extra_tables=extra_tables))
     fig = _figure_block(name, figure_pngs, figures)
     if fig is not None:
         blocks.append(fig)
@@ -245,7 +313,7 @@ def _eh_section(evidence: Evidence, name: str, figure_pngs: dict[str, bytes],
                    note=section.note, blocks=blocks)
 
 
-def _adequacy_sections(evidence: Evidence) -> list[Section]:
+def _adequacy_sections(evidence: Evidence, extra_tables: dict[str, Table] | None = None) -> list[Section]:
     out: list[Section] = []
     if "adequacy_sections" in evidence.tables:
         out.append(Section(
@@ -267,7 +335,7 @@ def _adequacy_sections(evidence: Evidence) -> list[Section]:
         if table_ids:
             blocks.extend(TableRef(table_id=t) for t in table_ids)
         else:
-            blocks.extend(_fields(section.payload,
+            blocks.extend(_fields(section.payload, section_id=section_id, extra_tables=extra_tables,
                                   skip=("engine", "fidelity") + _PAYLOAD_NOTE_KEYS))
         if section.note:
             blocks.append(Callout(kind="disclosure", text=section.note))
@@ -336,6 +404,7 @@ def evidence_only_document(evidence: Evidence, *, title: str, report_id: str,
     referenced, and the caller writes them under ``figures/<id>.png``.
     """
     figures: dict[str, Figure] = {}
+    extra_tables: dict[str, Table] = {}
     from services.reports import chapters as C
 
     # D8's order: the summary, the investment case, the reliability case, then
@@ -344,14 +413,15 @@ def evidence_only_document(evidence: Evidence, *, title: str, report_id: str,
     if (inv := _chapter_section(evidence, C.INVESTMENT)) is not None:
         sections.append(inv)
     for name in REPORT_SECTIONS:
-        sections.append(_eh_section(evidence, name, figure_pngs, figures))
-    sections.extend(_adequacy_sections(evidence))
+        sections.append(_eh_section(evidence, name, figure_pngs, figures, extra_tables))
+    sections.extend(_adequacy_sections(evidence, extra_tables))
     worksheet = _worksheet_section(evidence)
     if worksheet is not None:
         sections.append(worksheet)
     if (isl := _chapter_section(evidence, C.ISLAND)) is not None:
         sections.append(isl)
     sections.append(_pipeline_section(evidence))
+    sections = _grouped(sections)
 
     tables = {
         table_id: Table(table_id=t.table_id, columns=list(t.columns),
@@ -359,6 +429,7 @@ def evidence_only_document(evidence: Evidence, *, title: str, report_id: str,
                         source_path=t.source_path)
         for table_id, t in evidence.tables.items()
     }
+    tables.update(extra_tables)
     return ReportDocument(
         report_id=report_id, version=1, title=title or DEFAULT_TITLE,
         created_at=datetime.now(tz=UTC).isoformat(),

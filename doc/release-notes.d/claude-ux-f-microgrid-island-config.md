@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The single-year Island Microgrid template now ships an island config (its own diesel, battery, PV, wind and hospital feeder, seamless scenario), so its grid checks no longer ask a Guided user to "paste an island config". The island rows stay off, so the template's own solve is unchanged (UX review N2, owner decision F).

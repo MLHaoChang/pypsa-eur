@@ -23,6 +23,8 @@ export interface ChapterTile {
   /** The result group's own label (RESULT_GROUPS), so the names match Expert. */
   group: string
   label: string
+  /** The figure is the study's, and the project itself is not solved (G5). */
+  fromStudy?: boolean
   /** '' unless the state shows a figure (ready / zero / stale). */
   value: string
   unit?: string
@@ -40,10 +42,26 @@ export interface ChapterInputs {
   /** `notHub`: the campus route answered that this project has no campus (409). */
   grid: { campus: CampusState | null; notHub: boolean }
   reliability: { hasResults: boolean; running: boolean; lole: number | null; target: number | null
-                 verdict: 'pass' | 'fail' | 'inconclusive' | null }
+                 verdict: 'pass' | 'fail' | 'inconclusive' | null
+                 /** The project has its own solve; `false` marks the figure as the study's alone (G5). */
+                 solved?: boolean
+                 /** The review says the study is out of date (N4). */
+                 stale?: boolean }
   /** `gfm`: the campus GFM settings (null when the project has no campus or no island). */
   operation: { status: SimulationStatus | null; gfm?: GfmSettingsState | null }
 }
+
+/** Why a study figure is dimmed (UX review N4): the network was solved or edited after the study. */
+export const STALE_TILE_REASON = 'The network changed since the study ran. Run the study again to refresh.'
+
+/** Whether the project itself has an hour-by-hour solve (stale counts: its figures exist). */
+export function dispatchSolved(status: SimulationStatus | null | undefined): boolean {
+  return !!status && status.dispatch != null && status.dispatch !== 'none' && num(status.objective) != null
+}
+
+/** The hover text of a figure marked "From the study" (G5). */
+export const FROM_STUDY_HINT =
+  'From the study, which ran on the design. The project itself has not been solved yet.'
 
 const ORDER: ChapterId[] = ['investment', 'grid_plan', 'reliability', 'operation']
 const groupLabel = (id: ChapterId) => RESULT_GROUPS.find(g => g.id === id)?.label ?? id
@@ -130,7 +148,8 @@ function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 
     : r.verdict === 'inconclusive' ? 'Not decided' : null
   const basis = r.target == null ? 'No goal set'
     : `${verdict ? `${verdict}: ` : ''}the goal is ${Number(r.target.toPrecision(6))} h/yr`
-  return { label, value: String(r.lole), unit: 'h/yr', state: 'ready', basis, open }
+  return { label, value: String(r.lole), unit: 'h/yr', state: r.stale ? 'stale' : 'ready', basis, open,
+    reason: r.stale ? STALE_TILE_REASON : undefined, fromStudy: r.solved === false && !r.stale }
 }
 
 /** Why a "capacity is needed" verdict will not show in a hub solve (UX review N7). */

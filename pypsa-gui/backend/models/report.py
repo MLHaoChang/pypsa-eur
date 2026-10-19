@@ -107,6 +107,10 @@ class Section(_Model):
     # keeps every comment verbatim so the viewer can show them.
     pending_instruction: str | None = None
     comments: list[str] = PField(default_factory=list)
+    # UX review N9 (additive): which of the four categories the section belongs to
+    # (investment | grid_plan | reliability | operation); None for the summary
+    # and the pipeline appendix. A stored report from before has none.
+    category: str | None = None
 
 
 # ── tables and figures (rendered by code, referenced by blocks) ─────────────
