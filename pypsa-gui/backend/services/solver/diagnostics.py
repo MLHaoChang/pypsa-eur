@@ -193,15 +193,10 @@ def _diagnose_infeasibility(network, config, log_queue,
                  "lost) with what it can build; solve with island_constraints off to check, "
                  "or raise the candidates' p_nom_max.")
             hints += 1
-        for ev in (getattr(n, "_island_facts", None) or {}).get("events") or []:
-            reach = ev["gfm_mw"] + ev["genset_mw"]
-            if ev["step_mw"] > reach + 1e-6:
-                emit(f"[INFEASIBLE]   • {ev['row']}: the largest load step is {ev['step_mw']:,.2f} MW, "
-                     f"but the grid formers can pick up at most {reach:,.2f} MW at the instant "
-                     f"(GFM storage at its rating {ev['gfm_mw']:,.2f} MW, the online gensets' load "
-                     f"step {ev['genset_mw']:,.2f} MW): {ev['step_mw'] - reach:,.2f} MW is missing. "
-                     "Raise a grid-forming battery's p_nom_max, or commit or add a genset.")
-                hints += 1
+        from services.solver.island import SHORTFALL_ADVICE, island_shortfalls, shortfall_sentence
+        for sh in island_shortfalls(getattr(n, "_island_facts", None)):
+            emit(f"[INFEASIBLE]   • {sh['row']}: {shortfall_sentence(sh)} {SHORTFALL_ADVICE}")
+            hints += 1
     except Exception:
         pass
 

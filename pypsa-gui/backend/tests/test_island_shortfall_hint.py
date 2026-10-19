@@ -35,7 +35,8 @@ def test_island_shortfalls_is_pure_and_lists_only_the_rows_that_are_short():
         {"row": "Island-e2-up", "step_mw": 10.0, "gfm_mw": 7.0, "genset_mw": 0.0},
         {"row": "Island-n1-up", "step_mw": 4.0, "gfm_mw": 7.0, "genset_mw": 0.0}]}
     assert isl.island_shortfalls(facts) == [
-        {"row": "Island-e2-up", "step_mw": 10.0, "reach_mw": 7.0, "missing_mw": 3.0}]
+        {"row": "Island-e2-up", "step_mw": 10.0, "reach_mw": 7.0, "missing_mw": 3.0,
+         "gfm_mw": 7.0, "genset_mw": 0.0}]
     assert isl.island_shortfalls({"events": [{"row": "r", "step_mw": 1.0, "gfm_mw": 5.0, "genset_mw": 0.0}]}) == []
     assert isl.island_shortfalls({}) == [] and isl.island_shortfalls(None) == []
 
