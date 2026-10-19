@@ -672,7 +672,7 @@ export default function App() {
         <ProjectTabs />
 
         {/* ── Three-column body ──────────────────────────────────────── */}
-        <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="relative flex flex-1 min-h-0 overflow-hidden">
 
           {/* Zone 0 — Sectioned nav sidebar */}
           <Sidebar />
@@ -704,11 +704,15 @@ export default function App() {
                       )
                       : <MapCanvas mode={canvasView} />}
                 </ErrorBoundary>
-                {/* Mode switcher floats over whichever canvas is active */}
-                <MapModeSwitcher />
-                {/* Snapshot picker / playback bar for the results overlay —
-                    shown on both the blank schematic and the satellite/hybrid map */}
-                <SnapshotPicker />
+                {/* Only view widgets share a local layer above the canvas
+                    and below workbench overlays. Native canvas dialogs stay
+                    outside this layer so they can cover the whole viewport. */}
+                <div className="absolute inset-0 z-10 pointer-events-none [&>*]:pointer-events-auto">
+                  <MapModeSwitcher />
+                  {/* Snapshot picker / playback bar for the results overlay —
+                      shown on both schematic and satellite/hybrid views. */}
+                  <SnapshotPicker />
+                </div>
               </div>
               {/* Zone 4 — Bottom tabbed panel (canvas only). Not in Guided
                   (UX M7, U3): the spreadsheet grids are Expert chrome. */}
@@ -751,9 +755,9 @@ export default function App() {
               it must stay on screen while a full-screen tab owns the main
               area, because it is what put that tab there. A direct flex child
               of this row (not nested inside the `flex-1` zone above) so its
-              open width (stored) / zero-width collapsed column (companion is
-              position: fixed) isn't fought over by the flex
-              algorithm. */}
+              saved width can shrink to available space. On phones both the
+              dock and collapsed companion use this body as their positioned
+              container while the chat stays mounted. */}
           <AssistantDock />
         </div>
 
