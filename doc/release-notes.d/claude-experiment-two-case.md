@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Admit two prepared network experiment cases through separate ordinary confirmations, sharing durable limits and stop/continue policy. Preserve case-specific native receipts and explicit reconciliation; compare and export selected cases only from verified compatible evidence.

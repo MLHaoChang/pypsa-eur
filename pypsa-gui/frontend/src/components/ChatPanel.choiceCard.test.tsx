@@ -2,7 +2,7 @@
 // a pick does — it SENDS the option label as the next user message through
 // the request queue, labelled "<title>: <option>" (owner decision Q4: the
 // turn does not block on the card).
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { ChoiceCard } from './ChatPanel'
 import { useChatStore } from '../store/chatStore'
@@ -54,8 +54,30 @@ describe('ChoiceCard', () => {
 
   it('hides the free-text hint when the question forbids it', () => {
     useChatStore.setState({ choice: { ...CHOICE, allow_free_text: false } })
-    render(<ChoiceCard />)
+    render(<ChoiceCard onFreeText={vi.fn()} />)
     expect(screen.queryByTestId('chat-choice-free-text')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Type another answer' })).toBeNull()
+  })
+
+  it('keeps both picks when its DOM moves to the companion and back', () => {
+    const target = document.createElement('div')
+    document.body.append(target)
+    try {
+      useChatStore.setState({ choice: { ...CHOICE, multi_select: true } })
+      const view = render(<ChoiceCard target={target} />)
+      fireEvent.click(screen.getAllByTestId('chat-choice-option')[0])
+      view.rerender(<ChoiceCard target={target} companion />)
+      expect(target.contains(screen.getByTestId('chat-choice-card'))).toBe(true)
+      expect(screen.getAllByTestId('chat-choice-option')[0].getAttribute('aria-pressed')).toBe('true')
+      fireEvent.click(screen.getAllByTestId('chat-choice-option')[1])
+      view.rerender(<ChoiceCard target={target} />)
+      expect(target.contains(screen.getByTestId('chat-choice-card'))).toBe(false)
+      expect(screen.getAllByTestId('chat-choice-option').every(o => o.getAttribute('aria-pressed') === 'true')).toBe(true)
+      expect(useChatStore.getState().requestQueue).toHaveLength(0)
+      fireEvent.click(screen.getByTestId('chat-choice-send'))
+      expect(useChatStore.getState().requestQueue[0].text).toBe('Battery; Thermal store')
+      expect(useChatStore.getState().requestQueue[0].source).toBe('choice-card')
+    } finally { cleanup(); target.remove() }
   })
 
   // ── issue 15: detail, multi-select, plan review ─────────────────────────

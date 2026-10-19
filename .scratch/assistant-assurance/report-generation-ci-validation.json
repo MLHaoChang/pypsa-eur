@@ -1,0 +1,122 @@
+{
+  "date": "2026-10-19",
+  "parent_commit": "c468164700ebb954b9e2943c672c026423e606bb",
+  "failed_ci_job": 118029854115,
+  "failed_ci_run": 39243528152,
+  "failure": "qa_reports_phase2: generated report listing had generation={}",
+  "source": {
+    "commit": "493cb593070ab6d113798191cd409c3b6fee4fd9",
+    "dirty": true,
+    "backend_python_sha256": "44924cc8482efc044df3e18f68ee44c14f316543a2863e34e1b86465a4b63dcb"
+  },
+  "checks": {
+    "red": {
+      "log_sha256": "ca44d8ae9762fb3d6ef501f993dbd0b4203d59efdff37b6438b3b4da25f5d211",
+      "summary": [
+        "1 failed, 10 deselected, 3 warnings in 1.42s"
+      ]
+    },
+    "reports": {
+      "log_sha256": "ee0fb68e27d94495ec2532c604bf0c254b1c945d016c9b76169315483534c25b",
+      "summary": [
+        "57 passed, 3 warnings in 8.25s"
+      ]
+    },
+    "phase2": {
+      "log_sha256": "4d5fd738bc8aa79b976157e34c4f13cdbe1b9a930ef5c680059218f40d25ebf9",
+      "summary": [
+        "[6] live probe SKIPPED \u2014 set PYPSA_GUI_TEST_LIVE_OPENAI_PROFILE (and _MODEL) to run one real generate on a local openai-wire model; this means the wire is UNPROBED here, not that it passed",
+        "Total: 47",
+        "Pass:  47",
+        "Fail:  0"
+      ]
+    },
+    "combined": {
+      "log_sha256": "d4a7093711cf784852fa1483435fe0223ba67c06985a70f8df70a921a6e00b7a",
+      "summary": [
+        "380 passed, 4 skipped, 65 warnings in 146.95s (0:02:26)"
+      ]
+    }
+  },
+  "evaluation": {
+    "passed": true,
+    "required_cases": 133,
+    "metrics": {
+      "deterministic": {
+        "scored_cases": 133,
+        "false_acceptance": {
+          "count": 0,
+          "denominator": 88,
+          "rate": 0.0
+        },
+        "false_rejection": {
+          "count": 0,
+          "denominator": 45,
+          "rate": 0.0
+        },
+        "incorrect_calculations": {
+          "count": 0,
+          "denominator": 330,
+          "rate": 0.0
+        },
+        "fulfillment": {
+          "count": 330,
+          "denominator": 330,
+          "rate": 1.0
+        },
+        "abstention": {
+          "count": 480,
+          "denominator": 810,
+          "rate": 0.5925925925925926
+        },
+        "unchecked_publication": {
+          "count": 0,
+          "denominator": 133,
+          "rate": 0.0
+        }
+      },
+      "live": {
+        "scored_cases": 0,
+        "false_acceptance": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        },
+        "false_rejection": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        },
+        "incorrect_calculations": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        },
+        "fulfillment": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        },
+        "abstention": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        },
+        "unchecked_publication": {
+          "count": 0,
+          "denominator": 0,
+          "rate": null
+        }
+      }
+    },
+    "live_status": "pending_opt_in"
+  },
+  "full_qa_local": "still running at publication; final outcome is recorded separately in the PR",
+  "scope": "Persist generation metadata before publishing done/aborted status; no domain engine or accounting changes",
+  "limits": [
+    "No paid calls or independent domain approval.",
+    "Frontend source unchanged; initial 62 passing frontend cases/build remain the frontend evidence.",
+    "Four existing provider/recording opt-in skips are not passes.",
+    "No complete local backend suite or remote passing CI claimed at this point."
+  ]
+}

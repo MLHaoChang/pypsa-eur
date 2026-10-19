@@ -109,7 +109,9 @@ export default function DictationControls({ speech, language, onLanguage, onInse
     <button className="px-1 py-1 text-[10px] rounded border border-border text-muted hover:bg-bg-3"
       aria-label="Dictation settings" aria-expanded={open} onClick={() => { speech.stop(); setOpen(previous => !previous); if (open) audio.cancel() }} disabled={streaming}
       data-testid="dictation-settings">Voice</button>
-    {open && <div className="absolute bottom-full left-2 right-2 mb-2 z-40 rounded border border-border bg-bg-2 p-3 shadow-xl max-h-[70vh] overflow-y-auto" role="dialog" aria-label="Dictation" data-testid="dictation-panel"
+    {/* ChatPanel owns the positioned container. Bound the dialog to that
+        available height so wrapped headers cannot obscure Close. */}
+    {open && <div className="absolute bottom-0 left-2 right-2 mb-2 z-40 rounded border border-border bg-bg-2 p-3 shadow-xl max-h-[min(70vh,calc(100%_-_1rem))] overflow-y-auto" role="dialog" aria-label="Dictation" data-testid="dictation-panel"
       onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel() } }}>
       <div className="flex justify-between items-center mb-2"><strong className="text-sm">Dictation</strong><button onClick={cancel} aria-label="Close dictation">×</button></div>
       <div className="flex gap-2 flex-wrap text-xs">

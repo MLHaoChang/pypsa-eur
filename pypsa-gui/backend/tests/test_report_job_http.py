@@ -114,6 +114,44 @@ def test_report_worker_blocks_reset_then_finished_record_is_cleared(
     assert client.get(f"/api/projects/{name}/reports/generate/status").status_code == 204
     assert client.get(f"/api/projects/{name}/reports/{report_id}").status_code == 200
 
+def test_done_waits_for_persisted_generation_summary(
+        client, api_project, session_state, monkeypatch):
+    """A slow metadata write cannot expose a completed job with missing receipts."""
+    from services.reports import report_job
+
+    name = api_project("gen-meta-receipt")
+    _store_eh_report(session_state(client))
+    _install_provider(monkeypatch, FakeProvider(_script()))
+    entered = threading.Event()
+    release = threading.Event()
+    write = report_job.atomic_write_text
+
+    def delayed_write(path, text):
+        if path.name == "meta.json" and '"generation"' in text:
+            entered.set()
+            if not release.wait(timeout=10):
+                raise TimeoutError("test metadata write not released")
+        return write(path, text)
+
+    monkeypatch.setattr(report_job, "atomic_write_text", delayed_write)
+    try:
+        started = client.post(f"/api/projects/{name}/reports/generate", json={
+            "title": "Generation receipt", "sections": [EXECUTIVE_SUMMARY_ID, "fmea_top"],
+        })
+        assert started.status_code == 200, started.text
+        assert entered.wait(timeout=10), "worker did not reach metadata persistence"
+        while_saving = client.get(f"/api/projects/{name}/reports/generate/status").json()
+    finally:
+        release.set()
+        finished = _poll(client, name)
+    assert while_saving["status"] == "running", while_saving
+    assert finished["status"] == "done", finished
+    reports = client.get(f"/api/projects/{name}/reports").json()
+    meta = next(r for r in reports if r["report_id"] == finished["report_id"])
+    assert meta["generation"]["sections"] == [EXECUTIVE_SUMMARY_ID, "fmea_top"]
+    assert meta["generation"]["aborted"] is False
+
+
 def test_status_is_204_before_any_run(client, api_project):
     name = api_project("gen-204")
     r = client.get(f"/api/projects/{name}/reports/generate/status")

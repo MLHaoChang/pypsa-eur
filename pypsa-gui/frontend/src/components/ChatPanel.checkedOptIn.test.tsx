@@ -9,6 +9,8 @@ import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import * as speechOut from '../utils/speechOut'
 import ChatPanel from './ChatPanel'
+import AssistantDock from './AssistantDock'
+import type { ChatAccessSnapshot } from '../api/chatAccess'
 
 const unsafe = 'Invented cost 999 EUR and guaranteed profit.'
 let capabilities: Record<string, unknown>
@@ -111,6 +113,45 @@ it('prepares a separate request and sends it only on explicit per-message checke
   expect(useChatStore.getState().sourceGapDraft).toBeNull()
   expect(useChatStore.getState().requestQueue).toEqual([])
   expect(toggle.checked).toBe(false)
+})
+
+it.each(['pilot', 'strict'])('shows the same %s checked selection in in-page chat and its actual request', async mode => {
+  capabilities.mode = mode
+  const access = (checked: boolean): ChatAccessSnapshot => ({ version: 1, read_only: true, observed_at: 100,
+    scope: { project_id: 'project-a', project_name: 'Demo' }, selection: { ui_mode: 'expert', checked_requested: checked },
+    restrictions: { mode: 'read_only', revision: 'rule-a' }, confirmation_rules: [], blockers: [],
+    project_lock: 'unlocked', session: { id: 'pilot-session', output_tokens_used: 0, turn_in_flight: false },
+    checking: { server_mode: mode, effective_for_selection: checked, scope: 'bounded_profiles' },
+    limits: { output_tokens_per_turn: 8192, tool_calls_per_turn: 25, output_tokens_per_session: 200000,
+      turns_without_reported_usage: 100, daily_project_tokens: null, confirmation_ttl_seconds: 60 } })
+  vi.mocked(client.get).mockImplementation(async (url, config) => {
+    if (url === '/chat/access') return { data: access(config?.params.checked === true) } as never
+    if (url === '/chat/reliability/capabilities') return { data: capabilities } as never
+    if (url === '/chat/profiles') return { data: { profiles: [{ id: 'test-model', label: 'Test model',
+      wire: 'openai', chat_ready: true }], active_profile_id: 'test-model' } } as never
+    return { data: { workflows: [], chat_ready: true } } as never
+  })
+  vi.spyOn(client, 'post').mockResolvedValue({ data: { thread_id: 'thread-a', generation: 1 } })
+  useUIStore.setState({ uiMode: 'expert', assistantSpeakEnabled: false })
+  useChatStore.setState({ durableThreadId: null, utteranceGeneration: 1 })
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<QueryClientProvider client={queryClient}><AssistantDock /></QueryClientProvider>)
+  if (mode === 'pilot') await optIn()
+  else await waitFor(() => expect((screen.getByRole('checkbox', { name: 'Check answers' }) as HTMLInputElement).checked).toBe(true))
+  fireEvent.click(screen.getByTestId('assistant-dock-collapse'))
+  expect(screen.queryByRole('region', { name: 'In-page chat access' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Chat here' }))
+  expect(await screen.findByText('Answer checks on for supported profiles')).toBeTruthy()
+  expect(screen.getByText('Your rule: Read-only tools')).toBeTruthy()
+  expect(createChatStream).not.toHaveBeenCalled()
+  fireEvent.change(screen.getByRole('textbox', { name: 'Message the assistant' }), { target: { value: 'Explain this asset.' } })
+  fireEvent.click(screen.getByTestId('companion-live-send'))
+  await waitFor(() => expect(createChatStream).toHaveBeenCalledOnce())
+  expect(vi.mocked(createChatStream).mock.calls[0][0].assurance).toEqual({ version: 1, mode: 'strict' })
+  expect(useUIStore.getState().assistantDockOpen).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Close chat here' }))
+  expect(screen.queryByRole('region', { name: 'In-page chat access' })).toBeNull()
+  expect(useChatStore.getState().streaming).toBe(true)
 })
 
 it.each(['disabled', 'shadow'])('never falls back to an unchecked gap send in %s mode', async mode => {
