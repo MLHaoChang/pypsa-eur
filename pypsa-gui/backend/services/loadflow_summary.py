@@ -384,12 +384,43 @@ def get_loadflow_view(source: str = "lopf", window_from: int | None = None,
         return _loadflow(source, MAX_LIMIT, window_from, window_to, None, view=True)
 
 
+def _run_binding(run_id: str) -> tuple[dict | None, dict]:
+    """Is `run_id` the solve the current results came from?
+
+    Only when it is the project's newest completed run, its recorded inputs are
+    the ones the current results were solved from, and nothing changed since.
+    Otherwise the current results are not that run and are never reported as it.
+    """
+    from services import workflow_tools
+
+    try:
+        record = run_evidence.get_run_evidence(run_id)
+    except HTTPException:
+        return None, {"run_is_current": False}
+    latest = run_evidence.list_project_runs(limit=1, status="completed")["items"]
+    recorded = record.get("fingerprint")
+    n = PyPSAService.get_network()
+    changed = (isinstance(recorded, str)
+               and recorded != workflow_tools._network_input_fingerprint(PyPSAService.get_active_context()))
+    facts = {"run_is_current": False, "inputs_changed_since_run": bool(changed)}
+    if (record.get("status") == "completed" and isinstance(recorded, str) and not changed
+            and latest and latest[0]["run_id"] == run_id
+            and n.meta.get("assistant_solve_input_fingerprint") == recorded):
+        return {"run_id": run_id, "finished_at": record.get("finished_at"), "is_current": True}, facts
+    return None, facts
+
+
 def _loadflow(source: str, limit: int, window_from: int | None,
-              window_to: int | None, run_id: str | None, *, view: bool = False) -> dict:
+              window_to: int | None, run_id: str | None, *, view: bool = False,
+              run: dict | None = None) -> dict:
     _check_args(source, limit, window_from, window_to, run_id)
     _root, project_id, _owner = run_evidence._authority()
     if run_id is not None:
-        return _historical(run_id)
+        run, facts = _run_binding(run_id)
+        out = _loadflow(source, limit, window_from, window_to, None, run=run) if run else None
+        if out is None or out.get("status") != "ok":
+            out = {**(out if out is not None else _historical(run_id)), "run_id": run_id, **facts}
+        return out
 
     n = PyPSAService.get_network()
     solve = _solve_state()
@@ -528,6 +559,8 @@ def _loadflow(source: str, limit: int, window_from: int | None,
         "scope_note": "Lines and transformers only. Drill down with get_asset_results.",
         "top": rows[:limit],
     }
+    if run is not None:
+        out["run"] = run
     if source == "ac_pf":
         out["ac_pf"] = {**(ac_info or {}), "unconverged_snapshots_excluded": excluded}
     # Shed the weakest-ranked rows, then the skipped list, until the whole

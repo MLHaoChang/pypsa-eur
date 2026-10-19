@@ -32,7 +32,7 @@ def test_every_live_view_reads_through_real_read_tools(view):
     assert view.reads, f'{view.view_id} has no read'
     for read in view.reads:
         assert read.tool in _TOOLS, read.tool
-        assert safety_tier_for(_TOOLS[read.tool]) == 'read', read.tool
+        assert safety_tier_for(read.tool) == 'read', read.tool
         schema = _TOOLS[read.tool]['input_schema']
         assert set(read.args) <= set(schema.get('properties', {})), (read.tool, read.args)
         for key, value in read.args.items():
@@ -57,7 +57,7 @@ def test_gated_views_wait_for_their_tools():
     gated = [v for v in rv.RESULT_VIEWS if v.requires_tools]
     assert gated, 'the renewable-profile views must be declared'
     for v in gated:
-        assert v.live() == set(v.requires_tools) <= set(_TOOLS)
+        assert v.live() == (set(v.requires_tools) <= set(_TOOLS))
     profile = {t for v in gated for t in v.requires_tools}
     assert {'preview_renewable_profile', 'list_pending_profiles'} <= profile
 

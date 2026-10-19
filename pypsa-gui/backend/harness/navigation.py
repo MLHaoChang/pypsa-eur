@@ -220,3 +220,52 @@ def acknowledge(owner, body):
             }
     except (HTTPException, ValueError, KeyError, TypeError):
         raise HTTPException(409, {"error_kind": "ui_ack_mismatch"}) from None
+
+
+# ── Ordinary turns (LC-03, LC-09 item 3) ─────────────────────────────────────
+# The same issued actions and ACK records as checked turns, with no new
+# vocabulary. The words say "showing" only after a displayed-data ACK.
+
+ACK_WAIT_SECONDS = 4.0
+_ACK_POLL_SECONDS = 0.05
+
+
+class OrdinaryTurn:
+    """The identity `issue` binds an action to, for a turn that is not checked."""
+
+    def __init__(self, session, ctx, generation):
+        self.session = session
+        self.turn_id = str(uuid.uuid4())
+        self.owner = session.owner_user_id or records.actor_id()
+        self.project_id = ctx.project_uuid
+        self.binding_generation = generation
+
+
+def open_ordinary(session, generation):
+    """Bind this turn's navigation for ACKs; None when nothing can be bound."""
+    ctx = PyPSAService.get_active_context()
+    if ctx.project_uuid is None:
+        return None
+    turn = OrdinaryTurn(session, ctx, generation)
+    begin_turn(turn, generation)
+    return turn
+
+
+def display(turn, acknowledgement, wait=ACK_WAIT_SECONDS):
+    """What the model may say about an issued navigation: `showing` only after
+    the browser acknowledged the exact displayed data. Waits briefly for the
+    ACK (the frame has already been sent); the model never polls."""
+    if not acknowledgement:
+        return {"verification": "submitted", "say": "opened"}
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            record = records.load(turn.owner, acknowledgement["action_id"], "ui_action")
+        except (HTTPException, OSError, KeyError, ValueError):
+            record = {}
+        if record.get("outcome") == "completed" or time.monotonic() >= deadline:
+            break
+        time.sleep(_ACK_POLL_SECONDS)
+    verification = record.get("verification") if record.get("outcome") == "completed" else "submitted"
+    return {"verification": verification or "submitted",
+            "say": "showing" if verification == "browser_displayed_data" else "opened"}

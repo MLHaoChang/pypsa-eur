@@ -83,6 +83,8 @@ _p = _prompts.load("assistant_stance")
 _ASSISTANT_STANCE_FACTS = _p["facts"]
 _ASSISTANT_STANCE_CHAINING = _p["chaining"]
 _ASSISTANT_STANCE = _ASSISTANT_STANCE_FACTS + _ASSISTANT_STANCE_CHAINING
+# LC-03: read a result before showing it. Tools-on only (it names tools).
+_RESULTS_WALK = _prompts.load("results_walk")["text"]
 
 # Deixis, data half.
 #
@@ -419,6 +421,10 @@ def _build_system_prompt(
     parts = [
         base,
         _ASSISTANT_STANCE if include_tools else _ASSISTANT_STANCE_FACTS,
+        # LC-03 — read before you show, name the run, "showing" only with a
+        # displayed-data ACK. TOOLS-ON ONLY: it names tools. A NEW part, so no
+        # pinned constant moves.
+        *( [_RESULTS_WALK] if include_tools else [] ),
         # Task 10 — profile awareness. TOOLS-ON ONLY, and that is the whole
         # placement rule: it names `set_active_profile`, and Task 8's
         # invariant is that the tools-off prompt names NO tool. A tools-less
