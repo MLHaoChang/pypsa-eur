@@ -1271,8 +1271,9 @@ class CarrierEconomics(BaseModel):
     dispatch_gwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     lcoe_eur_per_mwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     # Grid-to-process shortfall (ticket 04): Σ shortfall-generator dispatch × its lost-production value × w. Lost
-    # revenue, NOT part of opex_meur. None where the carrier has no shortfall generator, or (with
-    # lost_production_flag "lost_production_value_missing") where one has no value (ADR-0001).
+    # revenue, NOT part of opex_meur, booked under the product bus's carrier. None where the carrier has no
+    # shortfall generator, or (with lost_production_flag "lost_production_value_missing") where one has no value
+    # (ADR-0001). The flag reads "role_from_name" when a slack was recognised by its `__lost_` name only.
     lost_production_meur: CarrierPeriodValue | None = None
     lost_production_flag: str | None = None
 

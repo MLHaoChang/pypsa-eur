@@ -175,29 +175,38 @@ def _process_unit(view: _View, link: str) -> dict:
     committable = "committable" in n.links.columns and _as_bool(n.links.at[link, "committable"])
     flag = None
     if committable and status is not None:
-        # Under linearised UC status and start_up are fractional; report them as they are, never rounded.
+        # Under linearised UC status and start_up are fractional; report them as they are, never rounded. The
+        # flag reads the values: a linearised solve that lands on whole values is reported as the binary one it
+        # equals.
         fractional = ((status - status.round()).abs() > _EPS).any() or (
             start_up is not None and ((start_up - start_up.round()).abs() > _EPS).any())
         flag = "linearised_uc" if fractional else None
-        running, _ = view.wsum(status, view.w_energy)
+        running, running_pp = view.wsum(status, view.w_energy)
         running_basis = "status"
-        starts = _finite(start_up.sum()) if start_up is not None else None
+        starts = None
+        if start_up is not None and start_up.map(math.isfinite).all():
+            starts = float(start_up.sum())
     else:
-        on = (p0 > _EPS).astype(float) if p0 is not None else None
-        running, _ = view.wsum(on, view.w_energy)
+        on = None
+        if p0 is not None and p0.map(math.isfinite).all():
+            on = (p0 > _EPS).astype(float)
+        running, running_pp = view.wsum(on, view.w_energy) if on is not None else (None, {})
         running_basis = "p0_positive"
         starts = None if on is None else float(((on.diff() > 0.5).sum()))
-    hours = _finite(n.snapshot_weightings["stores"].reindex(sns).sum()) if "stores" in n.snapshot_weightings else None
+    hours = None
+    if "stores" in n.snapshot_weightings:
+        hours = _finite(n.snapshot_weightings["stores"].reindex(sns).sum(skipna=False))
     return {
         "name": str(link),
         "product_bus": str(n.links.at[link, "bus1"]),
         "running_hours": running,
+        "running_hours_by_period": running_pp,
         "running_hours_basis": running_basis,
         "running_hours_weighting": ENERGY_BASIS,
         "starts": starts,
         "starts_basis": "modelled_snapshots",
         "modelled_hours": hours,
-        "flag": flag if running is not None else "non_finite_values",
+        "flag": flag if running is not None and starts is not None and hours is not None else "non_finite_values",
     }
 
 

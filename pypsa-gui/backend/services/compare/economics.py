@@ -145,6 +145,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                 # revenue, never in opex. None until a shortfall generator is seen; "unavailable" when one has no
                 # value (ADR-0001).
                 "lost_production_eur": None,
+                "lost_production_flag": None,
             }
         return by_carrier[carrier]
 
@@ -297,17 +298,22 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                 continue
             row = df.loc[asset_name]
             carrier = str(row.get("carrier", "unknown") or "unknown").lower()
-            b = _bucket(carrier)
             try:
                 series = t_p_df[asset_name].reindex(sns).fillna(0.0).astype(float)
             except Exception:
                 continue
-            if df is n.generators and generator_role(n, asset_name)[0] == SHORTFALL:
+            role, role_flag = generator_role(n, asset_name) if df is n.generators else ("", None)
+            if role == SHORTFALL:
                 # A shortfall slack is product NOT delivered: lost revenue at its lost-production value, never an
-                # expense as well, never dispatch and never revenue (ticket 04). A buy-in generator stays an
+                # expense as well, never dispatch and never revenue (ticket 04). It is booked under the product
+                # bus's carrier, as lost load is, whatever the slack's own carrier. A buy-in generator stays an
                 # ordinary expense below.
-                _book_lost_production(b, n, asset_name, series)
+                bus = row.get("bus")
+                bus_carrier = n.buses.at[bus, "carrier"] if bus in n.buses.index else None
+                _book_lost_production(_bucket(str(bus_carrier or carrier).lower()), n, asset_name, series,
+                                      role_flag)
                 continue
+            b = _bucket(carrier)
             # Storage: split the signed series into discharge (positive) and
             # charge (negative magnitude). The dispatch + revenue series use
             # discharge only — matching the dispatch summary's choice and
@@ -402,11 +408,14 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                 except Exception:
                     pass
 
-    def _book_lost_production(bucket: dict, n, gen: str, series) -> None:
+    def _book_lost_production(bucket: dict, n, gen: str, series, role_flag: str | None) -> None:
         value = lost_production_value(n, gen)
         if value is None or bucket["lost_production_eur"] == "unavailable":
             bucket["lost_production_eur"] = "unavailable"
+            bucket["lost_production_flag"] = "lost_production_value_missing"
             return
+        # A role read from the slack's name only (no process_role column) is booked, and says so.
+        bucket["lost_production_flag"] = bucket["lost_production_flag"] or role_flag
         if bucket["lost_production_eur"] is None:
             bucket["lost_production_eur"] = {"total": 0.0, "by_period": {}}
         lost_t = series.clip(lower=0) * value * weights
@@ -575,7 +584,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
         lost_prod = agg.get("lost_production_eur")
         out[c] = CarrierEconomics(
             lost_production_meur=CarrierPeriodValue(**_to_meur(lost_prod)) if isinstance(lost_prod, dict) else None,
-            lost_production_flag="lost_production_value_missing" if lost_prod == "unavailable" else None,
+            lost_production_flag=agg.get("lost_production_flag"),
             revenue_meur=CarrierPeriodValue(**rev_m),
             opex_meur=CarrierPeriodValue(**opex_m),
             gen_cost_meur=CarrierPeriodValue(**gen_cost_m),

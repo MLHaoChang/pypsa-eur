@@ -24,7 +24,8 @@ LOST_EUR_PER_T = 800.0
 VALUE_EUR_PER_MWH = 120.0
 
 
-def _hb_network(*, lost_mc: float | None = LOST_EUR_PER_T / MWH_PER_T, product_value: float | None = VALUE_EUR_PER_MWH):
+def _hb_network(*, lost_mc: float | None = LOST_EUR_PER_T / MWH_PER_T, product_value: float | None = VALUE_EUR_PER_MWH,
+               roles: bool = True, slack_carrier: str = "NH3"):
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2027-01-01", periods=6, freq="h"))
     n.add("Carrier", ["AC", "H2", "NH3"])
@@ -51,7 +52,12 @@ def _hb_network(*, lost_mc: float | None = LOST_EUR_PER_T / MWH_PER_T, product_v
     n.add("Load", "nh3_delivery", bus="nh3", carrier="NH3", p_set=30.0)
     n.add("Generator", "__buy_nh3", bus="nh3", carrier="NH3", p_nom=5.0, marginal_cost=97.0)
     if lost_mc is not None:
-        n.add("Generator", "__lost_nh3", bus="nh3", carrier="NH3", p_nom=1000.0, marginal_cost=lost_mc)
+        n.add("Generator", "__lost_nh3", bus="nh3", carrier=slack_carrier, p_nom=1000.0, marginal_cost=lost_mc)
+    if roles:
+        n.generators["process_role"] = ""
+        n.generators.loc["__buy_nh3", "process_role"] = "buy_in"
+        if lost_mc is not None:
+            n.generators.loc["__lost_nh3", "process_role"] = "shortfall"
     n.optimize(solver_name="highs")
     return n
 
@@ -294,8 +300,10 @@ def test_every_quantity_names_its_weighting(hb):
 
 def test_the_role_column_decides_and_a_name_alone_is_flagged():
     from services.process_products import generator_role
-    n = _hb_network()
+    n = _hb_network(roles=False)
     assert generator_role(n, "__lost_nh3") == ("shortfall", "role_from_name")
+    assert _product(compute_process_view(n), "nh3")["role_flag"] == "role_from_name"
+    assert _econ(n).by_carrier["nh3"].lost_production_flag == "role_from_name"
     n.generators["process_role"] = ""
     n.generators.loc["__lost_nh3", "process_role"] = "shortfall"
     n.generators.loc["__buy_nh3", "process_role"] = "buy_in"
@@ -325,3 +333,30 @@ def test_linearised_uc_reports_fractional_status_and_starts_unrounded():
     assert unit["running_hours_basis"] == "status"
     assert unit["starts"] == pytest.approx(0.7)
     assert unit["modelled_hours"] == pytest.approx(6.0)
+
+
+def test_the_shortfall_is_booked_under_the_product_bus_carrier_whatever_the_slack_carrier():
+    n = _hb_network(slack_carrier="shortfall")
+    econ = _econ(n)
+    assert "shortfall" not in econ.by_carrier
+    lost_mwh = float(n.generators_t.p["__lost_nh3"].sum())
+    assert econ.by_carrier["nh3"].lost_production_meur.total == pytest.approx(
+        lost_mwh * LOST_EUR_PER_T / MWH_PER_T / 1e6)
+    assert econ.by_carrier["nh3"].lost_production_flag is None
+
+
+def test_a_nan_in_the_process_unit_flow_is_flagged_not_read_as_off():
+    import json
+    n = _hb_network()
+    n.links_t.p0.loc[n.snapshots[0], "hb"] = float("nan")
+    view = compute_process_view(n)
+    json.dumps(view, allow_nan=False)
+    unit = view["process_units"][0]
+    assert unit["running_hours"] is None and unit["starts"] is None
+    assert unit["flag"] == "non_finite_values"
+
+
+def test_running_hours_split_by_investment_period():
+    unit = compute_process_view(_hb_network())["process_units"][0]
+    # A flat network has no periods; the split is empty, the total stands alone (as in compare economics).
+    assert unit["running_hours_by_period"] == {}
