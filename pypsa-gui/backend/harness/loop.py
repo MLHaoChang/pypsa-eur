@@ -814,6 +814,9 @@ def _dispatch_tool_uses(
                     "via_tool": tu_name,
                 }
                 turn_project_holder[0] = new_bound
+                if session.navigation_turn is not None:
+                    from harness.navigation import rebind
+                    rebind(session.navigation_turn)
     return _ToolDispatchOutcome(
         tool_call_count=tool_call_count, switched_mid_turn=switched,
     )
@@ -3007,6 +3010,8 @@ def _dispatch_real_tool_call(
     # sentinel from the Anthropic-facing tool_result payload.
     ui_event_payload: dict[str, Any] | None = None
     result_for_model = result
+    if session.navigation_turn is not None:
+        session.navigation_turn.note_read(tool_name, result)
     if isinstance(result, dict) and result.get("_ui_event") \
             and result.get("kind") == "choice":
         # `ask_user` (chat harness issue 04): a Choice card, not navigation.

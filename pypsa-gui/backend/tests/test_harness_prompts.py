@@ -44,7 +44,7 @@ EXPECTED_SHA256 = {
     "_EH_GUIDE": "1b9fc45244265b489e37c3d8420b389e842dfd9b2871c130ff13415563d20a27",
     "_UNTRUSTED_DATA_CLAUSE": "4909db27d7388788b3457f74a9f927a19173f0d5903eda36d55a88c8f81ba867",
     # LC-03, a new tools-on part (2026-10-19); pinned from its first version.
-    "_RESULTS_WALK": "15b1bd874cb296e3d4faa45f2ecb9efa60dbbbd5a4bc23575031c1acba3e4fc0",
+    "_RESULTS_WALK": "e0760bafa7f96bc570fd2ebaf3d43824eb98960e6fe110e7b56af5649f1002c0",
 }
 
 

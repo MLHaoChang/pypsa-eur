@@ -396,18 +396,19 @@ def _run_binding(run_id: str) -> tuple[dict | None, dict]:
     try:
         record = run_evidence.get_run_evidence(run_id)
     except HTTPException:
-        return None, {"run_is_current": False}
+        return None, {"run_is_current": False, "inputs_changed_since_run": None}
     latest = run_evidence.list_project_runs(limit=1, status="completed")["items"]
     recorded = record.get("fingerprint")
     n = PyPSAService.get_network()
-    changed = (isinstance(recorded, str)
-               and recorded != workflow_tools._network_input_fingerprint(PyPSAService.get_active_context()))
-    facts = {"run_is_current": False, "inputs_changed_since_run": bool(changed)}
-    if (record.get("status") == "completed" and isinstance(recorded, str) and not changed
+    # None = unknown: a run without a recorded fingerprint cannot be compared.
+    changed = None if not isinstance(recorded, str) else (
+        recorded != workflow_tools._network_input_fingerprint(PyPSAService.get_active_context()))
+    if (record.get("status") == "completed" and changed is False
             and latest and latest[0]["run_id"] == run_id
-            and n.meta.get("assistant_solve_input_fingerprint") == recorded):
-        return {"run_id": run_id, "finished_at": record.get("finished_at"), "is_current": True}, facts
-    return None, facts
+            and getattr(n, "meta", {}).get("assistant_solve_input_fingerprint") == recorded):
+        return ({"run_id": run_id, "finished_at": record.get("finished_at"), "is_current": True},
+                {"run_is_current": True, "inputs_changed_since_run": False})
+    return None, {"run_is_current": False, "inputs_changed_since_run": changed}
 
 
 def _loadflow(source: str, limit: int, window_from: int | None,
@@ -417,10 +418,15 @@ def _loadflow(source: str, limit: int, window_from: int | None,
     _root, project_id, _owner = run_evidence._authority()
     if run_id is not None:
         run, facts = _run_binding(run_id)
-        out = _loadflow(source, limit, window_from, window_to, None, run=run) if run else None
-        if out is None or out.get("status") != "ok":
-            out = {**(out if out is not None else _historical(run_id)), "run_id": run_id, **facts}
-        return out
+        if run is not None:
+            return {**_loadflow(source, limit, window_from, window_to, None, run=run),
+                    "run_id": run_id, **facts}
+        out = _historical(run_id)
+        # Bound to a run: the current results are not that run, so no hint to read them.
+        out.pop("current_results_hint", None)
+        if out.get("status") != "ok":
+            out["next_step"] = "Say this run is not the current result and offer to re-run."
+        return {**out, "run_id": run_id, **facts}
 
     n = PyPSAService.get_network()
     solve = _solve_state()

@@ -64,3 +64,7 @@ def test_gated_views_wait_for_their_tools():
 
 def test_no_historical_section_is_claimed_before_it_is_captured():
     assert all(v.historical_section is None for v in rv.RESULT_VIEWS)
+
+
+def test_every_view_declares_its_units():
+    assert all(v.units for v in rv.RESULT_VIEWS)

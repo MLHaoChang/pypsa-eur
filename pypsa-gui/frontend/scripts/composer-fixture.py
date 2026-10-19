@@ -79,11 +79,12 @@ def main():
                               "function": {"name": name, "arguments": json.dumps(arguments)}}]}, "tool_calls")
                 return True
             if len(steps) == 1:
-                text = "The solve was started."
+                text = f"The solve was started (job {results[0].get('job_id')})."
             else:
                 run = (results[0].get("items") or [{}])[0]
                 lf, shown = results[1], results[2]
-                top = ", ".join(f"{r['name']} {r['util_pct']} %" for r in lf.get("top", [])[:3])
+                top = ", ".join(f"{r['name']} {r['util_pct']} % ({r['peak_flow']} MW of {r['rating']['value']} MVA)"
+                                for r in lf.get("top", [])[:3])
                 verb = "Showing" if (shown.get("display") or {}).get("say") == "showing" else "Opened"
                 text = (f"OJ01_ANSWER {verb} the Load flow tab for run {run.get('run_id')} "
                         f"(finished {run.get('finished_at')}), current: {(lf.get('run') or {}).get('is_current')}. "

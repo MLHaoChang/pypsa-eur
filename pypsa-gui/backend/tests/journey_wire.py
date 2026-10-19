@@ -4,7 +4,7 @@ Only the provider's HTTP is mocked (an in-process MockTransport). The turn runs
 through the real provider adapter, stream parser, dispatch, handlers and
 frames. Each step is a function of the parsed results so far, so arguments
 come from native results the way a model's would; `None` as the tool name
-ends the turn with `answer` as the text.
+ends the turn with `answer` (text, or a function of the results) as the text.
 """
 import json
 from importlib import import_module
@@ -52,7 +52,8 @@ def run_journey(kind, model, base_url, auth, steps, message, *, mode='expert',
             name, args = steps[min(index, len(steps) - 1)](results)
             calls.append(name)
             if name is None:
-                stream = (_text_anthropic(model, answer) if native else _text_compatible(answer))
+                text = answer(results) if callable(answer) else answer
+                stream = (_text_anthropic(model, text) if native else _text_compatible(text))
             else:
                 stream = (_anthropic_stream(model, f'oj-{index}', name, args) if native
                           else _compatible_stream(f'oj-{index}', name, args))

@@ -85,17 +85,23 @@ try {
   await page.goto(base + '/app')
   await page.getByTestId('chat-input').waitFor()
 
-  // One real solve through the ordinary execution card.
-  await send(page, 'Run the simulation.')
-  await page.getByTestId('chat-confirm-approve').click()
-  await page.getByText('The solve was started.').waitFor({ timeout: 60000 })
-  for (let i = 0; ; i += 1) {
-    const status = await (await context.request.get(base + '/api/simulation/status')).json()
-    if (status.status === 'completed') break
-    assert(i < 240, `solve did not complete: ${JSON.stringify(status)}`)
-    await page.waitForTimeout(500)
+  // Two real solves through the ordinary execution card; "latest" must be the second.
+  const runs = []
+  for (const n of [1, 2]) {
+    await send(page, 'Run the simulation.')
+    await page.getByTestId('chat-confirm-approve').last().click()
+    const started = page.getByTestId('chat-messages').getByText(/The solve was started \(job fg:[0-9a-f]+\)/).nth(n - 1)
+    await started.waitFor({ state: 'attached', timeout: 60000 })
+    runs.push('fg-' + (await started.textContent()).match(/fg:([0-9a-f]+)/)[1])
+    for (let i = 0; ; i += 1) {
+      const status = await (await context.request.get(base + '/api/simulation/status')).json()
+      if (status.status === 'completed') break
+      assert(i < 240, `solve ${n} did not complete: ${JSON.stringify(status)}`)
+      await page.waitForTimeout(500)
+    }
+    await page.waitForTimeout(2000) // the detached monitor publishes the run manifest
   }
-  await page.waitForTimeout(2000) // the detached monitor publishes the run manifest
+  assert.notEqual(runs[0], runs[1])
 
   const started = Date.now()
   await send(page, SENTENCE)
@@ -111,7 +117,15 @@ try {
   await page.screenshot({ path: path.join(artifacts, 'oj01-loadflow.png') })
 
   assert.match(words, /^OJ01_ANSWER Showing the Load flow tab for run \S+ \(finished [^)]+\), current: true\./i)
-  assert.match(words, /Highest loading: T1 45(\.0)? %, L1 15(\.0)? %, L2 15(\.0)? %/)
+  assert.equal(words.match(/for run (\S+) /)[1], runs[1], 'latest is the newest completed run')
+  assert.match(words, /Highest loading: T1 45(\.0)? % \(45(\.0)? MW of 100(\.0)? MVA\), L1 15(\.0)? % \(45(\.0)? MW of 300(\.0)? MVA\), L2 15(\.0)? % \(45(\.0)? MW of 300(\.0)? MVA\)/)
+  // The rendered table shows the same oracle values with their units.
+  const row = name => page.locator('tr', { hasText: name }).first().innerText()
+  for (const [name, rating] of [['T1', '100.00'], ['L1', '300.00'], ['L2', '300.00']]) {
+    const text = await row(name)
+    assert.match(text, new RegExp(`${rating}[\\s\\S]*45\\.00`), `${name} row: ${text}`)
+  }
+  assert.match(await page.getByText(/^Peak flow$/).first().locator('..').innerText(), /45\.0\s*MW/)
   assert.match(words, /Active-power proxy/)
   assert.equal(await tab.count(), 1)
   // Transcript and floating companion carry the same words (LC-C7).
@@ -121,7 +135,7 @@ try {
   assert.equal(binding.source, 'lopf')
   assert.deepEqual([binding.window_from, binding.window_to], [0, 23])
   assert.deepEqual(errors, [])
-  report = { journey: 'OJ-01', passed: true, sentence: SENTENCE, answer: words.replace(/run \S+/, 'run <run_id>'),
+  report = { journey: 'OJ-01', passed: true, sentence: SENTENCE, solves: runs.length, latestIsSecond: true, answer: words.replace(/run \S+/, 'run <run_id>'),
     shown: { tab: 'loadflow', scope: binding.scope, source: binding.source,
       window: [binding.window_from, binding.window_to] }, seconds: (Date.now() - started) / 1000,
     screenshot: 'oj01-loadflow.png' }

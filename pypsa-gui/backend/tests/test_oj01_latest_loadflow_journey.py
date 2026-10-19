@@ -75,7 +75,8 @@ def _numbers(text):
 def _answer(results):
     """A narration built only from the turn's facts, as the prompt demands."""
     run, lf = results[0]['items'][0], results[1]
-    top = ', '.join(f"{row['name']} {row['util_pct']} %" for row in lf['top'][:3])
+    top = ', '.join(f"{row['name']} {row['util_pct']} % ({row['peak_flow']} MW of "
+                    f"{row['rating']['value']} MVA)" for row in lf['top'][:3])
     return (f"Latest run {run['run_id']} ({run['finished_at']}) is the current result. "
             f"Highest loading: {top}. Active-power proxy, not an AC thermal check.")
 
@@ -93,9 +94,8 @@ def test_latest_load_flow_is_read_then_shown(oj_grid, client, kind, model, base_
             response = client.post('/api/chat/ui-ack', json=body)
             acks.append(response.json())
 
-    steps = _steps()
-    calls, results, frames, _ = run_journey(kind, model, base_url, auth, steps, MESSAGE,
-                                            on_frame=browser, ui_ack=True)
+    calls, results, frames, _ = run_journey(kind, model, base_url, auth, _steps(), MESSAGE,
+                                            on_frame=browser, ui_ack=True, answer=_answer)
     assert calls == ['list_project_runs', 'get_loadflow_summary', 'ui_open_panel', None]
 
     # Latest = the newest completed run, and it is the current solve.
@@ -125,8 +125,9 @@ def test_latest_load_flow_is_read_then_shown(oj_grid, client, kind, model, base_
     assert frames[-1][0] == 'turn_done'
     assert not [d for e, d in frames if e in {'error', 'tool_error'}]
 
-    # Every number in the narration is a fact of this turn.
-    text = _answer(results)
+    # Every number in the streamed narration is a fact of this turn's results.
+    text = ''.join(d.get('delta', '') for e, d in frames if e == 'token')
+    assert 'T1 45.0 % (45.0 MW of 100.0 MVA)' in text, text
     facts = _numbers(json.dumps(results))
     assert _numbers(text) <= facts, _numbers(text) - facts
 
@@ -159,3 +160,28 @@ def test_latest_run_after_an_input_edit_is_not_the_current_result(oj_grid, clien
     assert lf['status'] == 'unavailable' and 'top' not in lf
     assert lf['run_id'] == oj_grid['latest']['run_id'] and lf['run_is_current'] is False
     assert lf['inputs_changed_since_run'] is True
+
+
+def test_showing_needs_the_shown_data_to_be_the_data_read(oj_grid, client):
+    """The tab renders LOPF over the full window; a narrower read is not what
+    the browser confirms, so the words stay 'opened' and say what differs."""
+    def browser(event, data):
+        if event == 'ui_event' and data.get('acknowledgement'):
+            ack = data['acknowledgement']
+            body = {k: ack[k] for k in ('version', 'action_id', 'turn_id', 'binding_generation', 'target')}
+            client.post('/api/chat/ui-ack', json={**body, 'source_binding': ack['source_binding']})
+
+    steps = [lambda r: ('get_loadflow_summary', {'window_from': 0, 'window_to': 5}),
+             lambda r: ('ui_open_panel', {'panel_id': 'results', 'results_tab': 'loadflow'}),
+             lambda r: (None, {})]
+    calls, results, frames, _ = run_journey(*PROVIDERS[1], steps, MESSAGE, on_frame=browser, ui_ack=True)
+    assert results[1]['display']['say'] == 'opened'
+    assert results[1]['display']['verification'] == 'browser_displayed_data'
+    assert results[1]['display']['differs_from_read'] == {
+        'read': {'source': 'lopf', 'window_from': 0, 'window_to': 5},
+        'shown': {'source': 'lopf', 'window_from': 0, 'window_to': 23}}
+
+
+def test_a_current_run_says_so_at_the_top_level(oj_grid):
+    calls, results, frames, _ = run_journey(*PROVIDERS[1], _steps(), MESSAGE)
+    assert results[1]['run_is_current'] is True and results[1]['inputs_changed_since_run'] is False

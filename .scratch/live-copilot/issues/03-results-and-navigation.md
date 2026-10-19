@@ -71,3 +71,28 @@ OJ-16 deltas only from `compare_project_runs`, and Q5's interim answer.
 `loadflow` section (the same oracle) into the immutable manifest, so
 `get_loadflow_summary(run_id)` answers for older runs; legacy runs without it
 refuse with the exact run ID. Other families follow one adapter per PR.
+
+### PR-A self-review (mp-code-review, 2026-10-19) and dispositions
+
+Fixed:
+- "showing" could describe data other than the read: the v2 ACK binds the
+  tab's default view (LOPF, full window), while a read can use another
+  source or window. The ordinary navigation binding now records the turn's
+  load-flow read; `display.say` is "showing" only when the shown source and
+  window equal it, and otherwise returns `differs_from_read`. The prompt no
+  longer asks for source/window arguments `ui_open_panel` doesn't take.
+- `run_is_current` and `inputs_changed_since_run` are now top-level on every
+  run-bound answer; an unknown fingerprint is `null`, not `false`; a
+  run-bound refusal drops the "read the current results" hint; no-network guard.
+- An in-turn server-issued project switch rebinds the navigation binding and
+  forgets earlier reads (OJ-09 now asserts "showing" on the copy).
+- Units declared per view; the Tier A narration check reads the streamed
+  answer; the browser runner solves twice, checks the answer names the second
+  run, and checks MW/MVA in the rendered table.
+
+Kept, with reasons:
+- `generate_renewable_profile` / `apply_generated_profile` are writes, not
+  result views; LC-04 cards them. The other four PR377 tools are declared.
+- The registry has no production caller until PR-B's `list_result_views`.
+- Prompt-cache: `results_walk` is a new static tools-on part placed after the
+  stance, as LC-10 placed its part; the cache refills once per deploy.

@@ -57,11 +57,17 @@ def test_the_named_projects_load_flow_is_read_and_shown(named_copy, client, kind
     def approve(event, data):
         if event == 'tool_pending_confirmation':
             session.record_decision(data['confirmation_token'], 'approve')
+        if event == 'ui_event' and data.get('acknowledgement'):
+            # The browser renders the copy's own load flow and ACKs it.
+            ack = data['acknowledgement']
+            body = {k: ack[k] for k in ('version', 'action_id', 'turn_id', 'binding_generation', 'target')}
+            client.post('/api/chat/ui-ack', json={**body, 'source_binding': ack['source_binding']})
 
     session = chat_service.ChatSession(model=model)
     calls, results, frames, _ = run_journey(kind, model, base_url, auth, _steps(),
                                             f'Open project {COPY} and show me its load flow.',
-                                            mode='guided', on_frame=approve, session=session)
+                                            mode='guided', on_frame=approve, session=session,
+                                            ui_ack=True)
     assert calls == ['resolve_project_target', 'activate_project', 'get_loadflow_summary',
                      'ui_open_panel', None]
     assert results[0]['project_id'] == named_copy
@@ -69,5 +75,8 @@ def test_the_named_projects_load_flow_is_read_and_shown(named_copy, client, kind
     lf = results[2]
     assert lf['status'] == 'ok' and lf['project_id'] == named_copy
     assert {row['name']: row['util_pct'] for row in lf['top']} == pytest.approx(COPY_UTIL, abs=0.01)
-    assert [d['results_tab'] for e, d in frames if e == 'ui_event'] == ['loadflow']
+    events = [d for e, d in frames if e == 'ui_event']
+    assert [d['results_tab'] for d in events] == ['loadflow']
+    assert events[0]['acknowledgement']['project_id'] == named_copy
+    assert results[3]['display'] == {'verification': 'browser_displayed_data', 'say': 'showing'}
     assert client.get('/api/network/meta').json()['loaded_project'] == COPY
