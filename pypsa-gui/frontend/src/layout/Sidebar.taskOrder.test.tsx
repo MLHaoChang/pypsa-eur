@@ -68,7 +68,7 @@ const ORDER = ['model', 'run', 'results', 'studies', 'reports']
 // What each step holds. Planning → dynamics shows because the mocked project
 // list is empty (unknown is not "not a study", Sidebar.studies.test.tsx).
 const ROWS: Record<string, string[]> = {
-  model: ['Assets', 'Capacity Bounds', 'Model Horizon', 'Time Series', 'Economics'],
+  model: ['Assets', 'Capacity Bounds', 'Profile Studio', 'Model Horizon', 'Time Series', 'Economics'],
   run: ['Solver Settings', 'Issues', 'Solve Queue'],
   results: ['Results'],
   studies: ['Decision study', 'Campus electrical', 'Planning → dynamics'],

@@ -9,7 +9,7 @@ import client from './client'
 export type SolveJobStatus =
   'queued' | 'running' | 'completed' | 'failed' | 'aborted' | 'interrupted'
 
-export type SolveJobKind = 'solve' | 'gridspine' | 'campus'
+export type SolveJobKind = 'solve' | 'gridspine' | 'campus' | 'profile_gen'
 
 export interface SolveJob {
   // UUID string. Was a per-process integer that collided across replicas.
