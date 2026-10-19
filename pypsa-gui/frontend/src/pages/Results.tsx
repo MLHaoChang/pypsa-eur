@@ -2,7 +2,7 @@ import { manualNavigation } from '../utils/navigationEpoch'
 import RunBoundView from './results/RunBoundView'
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase, ArrowLeft } from 'lucide-react'
+import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase } from 'lucide-react'
 import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
@@ -43,7 +43,7 @@ import {
 // at the top so the user always sees solve metadata regardless of tab.
 
 import { RESULT_GROUPS, groupOf, type ResultsGroup, type ResultsTab } from './results/groups'
-import { useHubDesignStore } from './hubDesign/hubDesignStore'
+import BackToHubResults from '../components/BackToHubResults'
 const RESULTS_TAB_KEY = 'results:active-tab'
 
 const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
@@ -168,7 +168,6 @@ export default function Results() {
   const discussedRun = useUIStore(s => s.discussedRun)
   const clearDiscussedRun = useUIStore(s => s.clearDiscussedRun)
   const uiMode = useUIStore(s => s.uiMode)
-  const setSlidePanel = useUIStore(s => s.setSlidePanel)
   // Guided (spec §3.7): a STORED tab Guided does not show is displayed as
   // adequacy. Display only — `tab` and `results:active-tab` keep the user's
   // choice, so switching back to Expert restores it. An explicitly requested
@@ -637,20 +636,7 @@ export default function Results() {
             {/* Guided reaches these tabs from the hub design's "Open the
                 detail"; this is the way back to the step it came from (UX
                 template audit M10, owner decision D2). */}
-            {uiMode === 'guided' && (
-              <button
-                type="button"
-                data-testid="results-back-to-hub"
-                onClick={() => {
-                  useHubDesignStore.getState().setStep('results', { user: true })
-                  setSlidePanel('hubDesign')
-                }}
-                className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] text-text hover:border-accent hover:text-accent"
-              >
-                <ArrowLeft size={12} aria-hidden="true" />
-                Back to Results
-              </button>
-            )}
+            {uiMode === 'guided' && <BackToHubResults />}
             {status && !discussedRun && (
               <span className="font-mono text-[11px] text-muted">
                 {status.condition ?? '—'}

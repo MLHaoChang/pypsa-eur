@@ -109,10 +109,11 @@ def collect(*, db, user, project):
         if str(active.project_uuid) == pid:
             ctx = active
     rows, warnings = _tasks(project_registry.project_dir(project), pid, owner)
-    from harness import activity_history
+    from harness import activity_history, completion_observer
     native_jobs = job_adapters.activity_jobs(ctx, owner_id=owner, project_id=pid)
     observed_jobs, history_warnings = activity_history.project_rows(owner, pid, native_jobs)
     warnings.extend(history_warnings)
+    warnings.extend(completion_observer.warnings(owner, pid))
     for native in observed_jobs:
         rows.append(_row(pid, native['family'], native['source_id'], native['title'],
                          native['native_status'], stage=native['stage'],

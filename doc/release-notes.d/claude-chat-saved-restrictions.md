@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Save personal project rules that require confirmation for non-read assistant tools or block them. Revision checks invalidate waiting actions without weakening mandatory approvals or cancelling work already started.
