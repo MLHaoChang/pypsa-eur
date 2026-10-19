@@ -33,7 +33,9 @@ The metadata digest is not an input/policy fingerprint or grant.
 Bounds: query <=80 characters, offset0–1000000, limit1–50; never accept booleans as
 integers. Pack pages inside the ordinary structured-result budget; no silent
 field/schema clipping or non-advancing pages. Refuse an individually oversized
-field explicitly. No model values, arbitrary DataFrame columns, paths, settings,
+field explicitly. Classify `schema_field_too_large` in the shared tool-error
+manifest as an inline per-field refusal with a rationale; discovery is incomplete
+for that field, rather than silently clipped or claimed complete. No model values, arbitrary DataFrame columns, paths, settings,
 provider credentials or actual project identifiers enter the schema response.
 Values remain on-demand ordinary reads. Strict checked policy is unchanged and
 must refuse this unmapped tool. All11 currently registered component classes are

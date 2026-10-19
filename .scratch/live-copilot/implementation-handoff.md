@@ -372,3 +372,18 @@ premerge and ordinary expected-head squash under direct owner authorization.
 No push/PR or merge is claimed here. Do not rewrite the branch during CI.
 LC-01B exact resolution/named shortcuts, richer eligibility and service schemas
 remain pending; this slice does not close LC-01 or certify any domain result.
+
+
+2026-10-19 LC-01A CI follow-up: PR372 remains draft/unmerged. Actual head
+11f903a84b59cb5678fe331433d20250bd143027 and master97867adecd46098cd58c120728cf1eed693ed265
+are unchanged. Full Test39158165700 failed shard1's shared error-kind manifest
+guard because schema_field_too_large lacked a classification. The other three
+shards, actual pilot/QA, CodeQL/inventory/control/release passed, but cannot
+certify a replacement. No failed-source rerun or merge was attempted. Exact
+existing guard reproduced in3.05s; one inline JSON classification fixes the
+missing contract decision without changing emitter, service, limits or tests.
+Backend manifest+discovery47pass/0skip; frontend manifest/profile260pass/2files.
+Evidence/QA record commands/hashes/failure and scope. Next: refreshed two-axis
+review, one normal batch push, require all new-head CI with actual backend
+steps, fresh-master premerge, ordinary expected-head squash if every gate passes.
+No paid calls, external contacts, deployment or new implementation scope.

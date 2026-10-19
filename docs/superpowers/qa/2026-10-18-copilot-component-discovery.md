@@ -75,10 +75,31 @@ Permit loopback sockets for TestClient's lifespan. Provider transport fixtures
 need no real credentials; do not set live opt-in flags. Existing test fixtures
 isolate database, project and app-data paths and release native contexts.
 
+## CI contract follow-up (19 October)
+
+PR372 at11f903a84b59cb5678fe331433d20250bd143027 failed Test39158165700:
+backend shard1 found `schema_field_too_large` absent from the shared error-kind
+manifest. The aggregate correctly failed. Other three shards and actual
+pilot/QA steps succeeded, as did CodeQL/inventory/control/release checks; none
+of those prior-head results certify the replacement source.
+
+A targeted existing guard reproduced the exact missing-kind failure in3.05s.
+Added one inline classification with its reason: the refusal concerns one
+metadata field, names it in the tool detail, and requires no conversation-wide
+recovery. The assistant must disclose incomplete discovery rather than clip
+or claim completeness. No emitter, service algorithm, page limit, scan or test
+was changed. Backend manifest+discovery47pass/0skip in21.47s; frontend shared
+manifest/profile260pass in2files,6.75s. These counts overlap earlier runs.
+The frontend lockfile matches the reused installed dependencies byte-for-byte.
+Existing frontend path filters do not select a shared-root JSON-only change;
+these are actual local frontend executions, separate from remote path skips.
+The evidence manifest retains the failed head, reproduction and follow-up
+source/log hashes. New-source review, all new-head CI and premerge remain gates.
+
 ## Remaining gates and scope
 
-Internal source review and final local regressions are complete. Exact-head
-remote CI and fresh-master premerge remain pending. This slice does not close LC-01 or certify any engineering result:
+The original source reviews and local regressions passed. The CI follow-up
+requires refreshed review, exact-head remote CI and fresh-master premerge. This slice does not close LC-01 or certify any engineering result:
 exact actor/project/case/run/entity resolution and named shortcuts, richer
 capability eligibility and domain/service-owned schemas remain separate.
 Incoming profile-generation/process-unit PRs are still unmerged capabilities.

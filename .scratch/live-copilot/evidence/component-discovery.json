@@ -107,5 +107,48 @@
     "Richer capability eligibility/refusal/checking metadata",
     "Non-component service-owned schemas",
     "Independent domain review and real-use calibration"
-  ]
+  ],
+  "ci_followup": {
+    "failed_head": "11f903a84b59cb5678fe331433d20250bd143027",
+    "run": 39158165700,
+    "job": 117765661134,
+    "url": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/39158165700/job/117765661134",
+    "failure": "test_tool_error_kind_manifest.py::test_the_manifest_still_describes_the_backend: schema_field_too_large had no shared manifest classification",
+    "fix": "Classify the existing per-field refusal inline, with a rationale; no service, emitter, test, scan or page limit changed.",
+    "manifest_sha256": "e472b3e3f943492cb98d7af693c181535ab62937423481bb75ba512288b4cdad",
+    "local_runs": [
+      {
+        "log": "error-kind-red.log",
+        "failed": 1,
+        "seconds": 3.05,
+        "summary": "1 failed, 3 warnings in 3.05s",
+        "log_sha256": "9ab1c898ecfc26c0f5cc67f7f92c422aba5836d8ddb4f3a7da3f9d6acc18d840"
+      },
+      {
+        "log": "error-kind-green.log",
+        "passed": 47,
+        "skipped": 0,
+        "seconds": 21.47,
+        "summary": "47 passed, 3 warnings in 21.47s",
+        "tests": [
+          "tests/test_tool_error_kind_manifest.py",
+          "tests/test_component_discovery.py"
+        ],
+        "log_sha256": "9d52c49467b0924d8bec3fbc5f46871e4173aebc55e1e8f1dbf032c4d177971d"
+      },
+      {
+        "log": "error-kind-frontend.log",
+        "passed": 260,
+        "test_files": 2,
+        "seconds": 6.75,
+        "summary": "Tests  260 passed (260)",
+        "tests": [
+          "src/components/ChatPanel.manifest.test.tsx",
+          "src/components/ChatPanel.profile.test.tsx"
+        ],
+        "log_sha256": "63dd63b68ed151fc7953c5184b743c5f0a998e15fd79efe672c61ac5fe3f1656"
+      }
+    ],
+    "remote_replacement_gates": "Pending: new-source reviews, all exact-head CI and fresh-master premerge. Prior-head green checks do not certify the replacement."
+  }
 }
