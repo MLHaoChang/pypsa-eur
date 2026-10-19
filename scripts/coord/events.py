@@ -37,6 +37,9 @@ def content_of(event):
     """The content blocks of an assistant event, whichever way it is nested."""
     body = event.get("data") if isinstance(event.get("data"), dict) else event
     body = body.get("assistant") if isinstance(body.get("assistant"), dict) else body
+    # list_events nests the message one level deeper, under this key.
+    inner = body.get("internal_anthropic_catchall")
+    body = inner if isinstance(inner, dict) else body
     if body.get("type", "assistant") != "assistant":
         return []
     message = body.get("message") if isinstance(body.get("message"), dict) else body
