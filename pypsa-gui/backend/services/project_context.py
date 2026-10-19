@@ -561,6 +561,8 @@ class ProjectSolverState:
     # serves. Reset with the rest each solve, so a margin can never outlive
     # the plan that met it.
     last_reserve_margin: Any = None
+    # Grid-to-process ticket 03: the binary operational check payload.
+    last_process_uc_check: Any = None
     # The settings the last SUCCESSFUL solve used (voll, whether an ENS target
     # and a reserve margin were applied) — UX overhaul S2b. Lets the results
     # routes say "solved without this standard" instead of a 204 that also
