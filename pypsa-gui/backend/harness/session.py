@@ -226,6 +226,15 @@ class ChatSession:
     # Issue 06 — discussed project/run/baseline/section identifiers for
     # follow-ups. Identifiers only; numerical truth always comes from tools.
     discussed_refs: dict[str, Any] | None = None
+    # LC-10 — the UI context of the turn in flight, for resolve_reference.
+    # An untrusted hint, replaced every turn; the resolver re-reads it.
+    turn_ui_context: dict[str, Any] | None = None
+    # LC-10 — components that successful tool calls named, newest last, as
+    # (project key, class, name): the "discussed last" rung. Keyed by project
+    # so a switch, by a tool or another tab, never carries a name across.
+    touched_components: collections.deque = field(
+        default_factory=lambda: collections.deque(maxlen=32)
+    )
     # Multi-turn message history for the Anthropic Messages API. Each entry
     # is a dict matching the SDK's message shape ({role, content}). Run_turn
     # appends user + assistant + tool_result messages per turn so subsequent
@@ -476,6 +485,19 @@ class ChatSession:
     def push_result_ref(self, ref: dict[str, Any]) -> None:
         with self._lock:
             self.result_refs.append(ref)
+
+    def note_touched_components(self, project_key: str, tool_name: str, args: Any) -> None:
+        """Record the single component a successful call named (LC-10). A call
+        over several names discussed no one of them."""
+        if tool_name == "resolve_reference" or not isinstance(args, dict):
+            return
+        klass, name = args.get("component_class"), args.get("name")
+        names = args.get("names")
+        if name is None and isinstance(names, list) and len(names) == 1:
+            name = names[0]
+        if isinstance(klass, str) and isinstance(name, str):
+            with self._lock:
+                self.touched_components.append((project_key, klass, name))
 
     def mark_detached_monitor(
         self, tool_use_id: str, tool_name: str, *, active: bool,
