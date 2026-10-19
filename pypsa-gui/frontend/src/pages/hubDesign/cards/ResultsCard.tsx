@@ -1,7 +1,8 @@
 // Step 4 — Results (guided-mode spec §5.3, §5.5): the verdict in one
 // sentence, the cost, the three costliest risks and what the study could not
 // establish — from GET /results/eh_review and the report the Expert panel
-// shows. "Open full report" goes to that panel.
+// shows. "Show the engineering detail" goes to that panel; "Download report (.docx)" is the Guided way
+// to the document.
 import { FileText } from 'lucide-react'
 import Kpi from '../../../components/Kpi'
 import ResultState from '../../../components/ResultState'
@@ -21,6 +22,7 @@ import { useQuery } from '@tanstack/react-query'
 import { networkApi } from '../../../api/network'
 import { nk } from '../../../utils/queryKeys'
 import { ChaptersSection } from '../ChaptersSection'
+import DownloadReport from '../DownloadReport'
 
 
 export const STALE_TEXT =
@@ -59,6 +61,7 @@ export function ResultsCard() {
     enabled: !!project && multiPeriod,
   })
   const setStep = useHubDesignStore(s => s.setStep)
+  const project = useUIStore(s => s.currentProject)
   // The four category tiles (UX S6, G4/G6), shown whether or not the study ran.
   const summary = review?.summary ?? {}
   const verdict = summary.verdict
@@ -176,10 +179,13 @@ export function ResultsCard() {
         </div>
       )}
 
-      <button type="button" data-testid="hub-results-open-report" onClick={openFullReport}
-        className="self-start inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-[12px] text-text hover:border-accent hover:text-accent">
-        <FileText size={13} /> Open full report
-      </button>
+      <div className="flex flex-wrap items-start gap-2">
+        {project && <DownloadReport project={project} />}
+        <button type="button" data-testid="hub-results-open-report" onClick={openFullReport}
+          className="self-start inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-[12px] text-text hover:border-accent hover:text-accent">
+          <FileText size={13} /> Show the engineering detail
+        </button>
+      </div>
       {chapters}
     </CardShell>
   )
