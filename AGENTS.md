@@ -4,7 +4,7 @@
 
 Ask every question as an interactive choice (the `AskUserQuestion` tool): 2–4 concrete answers, each with its consequence, your recommended answer first and marked "(Recommended)", and the reason in its description. The owner picks or types their own.
 
-A coordinated session (one commissioned through the coordinator session, `session_013NDrjK8eU7A4n1bPW9m6Xj`) sends each question in that same form to the coordinator with `send_message`; the coordinator bundles them for the owner.
+A coordinated session (one commissioned through the coordinator session, whose id is in `docs/agents/coordinator.md`) sends each question in that same form to the coordinator with `send_message`; the coordinator bundles them for the owner.
 
 ## Release notes
 

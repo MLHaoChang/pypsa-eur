@@ -13,8 +13,8 @@ A new project starts with the coordinator alone. It creates everything else.
 Follow `BOOTSTRAP.md`. The owner creates the cloud environment and starts one
 coordinator session with the prompt there. The coordinator then:
 1. applies this template with `apply.sh` and merges the setup PR;
-2. creates the gatekeeper session, the dashboard and the 3-hourly sweep routine;
-3. records them in `docs/agents/roles.md`;
+2. creates the gatekeeper session, the dashboard and the 6-hourly sweep routine;
+3. records them in `docs/agents/roles.md` and its own id in `docs/agents/coordinator.md`;
 4. splits the owner's tasks into work packages and opens a session for each ready one, on the model its task table picks.
 
 The coordinator skill holds the steps, under "Bootstrap" and "Taking on tasks".
@@ -29,11 +29,14 @@ The coordinator skill holds the steps, under "Bootstrap" and "Taking on tasks".
 | `.claude/skills/gatekeeper/SKILL.md` | Plan checks, repeated-failure help and head-exact reviews |
 | `.claude/settings.json`, `.claude/hooks/session-start.sh` | SessionStart hook skeleton for cloud sessions |
 | `.claude/hooks/block-dangerous-git.sh`, `test-block-dangerous-git.sh` | PreToolUse hook on Bash: allows a normal `git push`, blocks force-push, `reset --hard`, `rebase`, `commit --amend`, `filter-branch`/`filter-repo`, `clean -f`, `branch -D`; with its matcher tests |
-| `docs/agents/roles.md` | The one place for session ids, the dashboard link, the routine id and the template home |
+| `docs/agents/roles.md` | The one place for the gatekeeper's session id, the dashboard link, the routine id and the template home |
+| `docs/agents/coordinator.md` | The current coordinator session id, which changes when the coordinator rotates |
 | `docs/agents/session-brief.md` | The first message the coordinator sends each new session |
 | `docs/agents/issue-tracker.md`, `triage-labels.md`, `domain.md` | Local markdown issues under `.scratch/`, triage roles, glossary layout |
 | `scripts/coord/premerge.sh` | The whole merge gate: conflicts, overlap, optional semantic tests, every check run |
 | `scripts/coord/sessions.py` | One line per live session from a saved `list_sessions` result |
+| `scripts/coord/events.py` | Time, assistant text and last tool call per event from a saved `list_events` result |
+| `scripts/coord/board.py` | Edits the dashboard's `board.json` from flags, logs the change and prints the upload path |
 | `scripts/coord/board.example.json` | The dashboard's row shape |
 | `{{RELEASE_NOTES_DIR}}/README.md`, `.github/workflows/release-notes-guard.yaml` | One release-note fragment per PR, so notes never conflict, plus a guard against editing the collated file |
 | `.github/pull_request_template.md` | PR body headings, including the fragment line |
@@ -72,7 +75,8 @@ These stay in this folder and are not copied:
 | `{{TEMPLATE_HOME}}` | `MLHaoChang/pypsa-eur` | roles, coordinator bootstrap and retro |
 
 Session ids, the dashboard link and the routine id are not placeholders. They
-live only in `docs/agents/roles.md`, and every other file points there.
+live only in `docs/agents/roles.md` (and the coordinator's in
+`docs/agents/coordinator.md`), and every other file points there.
 
 ## CI
 
