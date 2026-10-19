@@ -42,7 +42,7 @@ from db.session import get_db
 from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services import solve_queue as sq
-from services.profile_gen import engine, presets
+from services.profile_gen import engine, presets, shape
 from services.profile_gen.apply import (
     ComponentNotFoundError,
     ProfileApplyError,
@@ -97,6 +97,14 @@ class ApplyRequest(BaseModel):
     # name itself — the generate UI seeds point ids from the selected
     # generators, so the common case needs no mapping at all.
     point_id: str | None = None
+
+
+class ShapeRequest(BaseModel):
+    # A pending artifact to calibrate, the ordered ops (services/profile_gen/
+    # shape.py), and optionally which points (default: every point).
+    job_id: str
+    ops: list[dict[str, Any]]
+    points: list[str] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +258,23 @@ def _pending_records(proj: AuthorizedProject) -> list[dict[str, Any]]:
             records.append(record)
     records.sort(key=lambda r: r.get("generated_at", ""), reverse=True)
     return records
+
+
+def _pending_artifact(proj: AuthorizedProject,
+                      job_id: str) -> tuple[Path, dict[str, Any]]:
+    """The pending `.nc` path and meta record for `job_id`; 422 for an id
+    that escapes the pending folder, 404 for one with no artifact."""
+    pending = _pending_dir(proj).resolve()
+    nc = (pending / f"{job_id}.nc").resolve()
+    meta_path = pending / f"{job_id}.json"
+    if nc.parent != pending:
+        raise HTTPException(status_code=422, detail="malformed job id")
+    if not nc.exists() or not meta_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"no pending profile for job {job_id!r}",
+        )
+    return nc, json.loads(meta_path.read_text())
 
 
 def _error_kind(exc: Exception) -> str:
@@ -441,17 +466,7 @@ def apply_profile(
     that moved since generation comes back as a `warning` on the 200."""
     _check_lock(proj, db, user)
 
-    pending = _pending_dir(proj).resolve()
-    nc = (pending / f"{body.job_id}.nc").resolve()
-    meta_path = pending / f"{body.job_id}.json"
-    if nc.parent != pending:
-        raise HTTPException(status_code=422, detail="malformed job id")
-    if not nc.exists() or not meta_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"no pending profile for job {body.job_id!r}",
-        )
-    meta = json.loads(meta_path.read_text())
+    nc, meta = _pending_artifact(proj, body.job_id)
 
     point_id = body.point_id or body.component
     try:
@@ -537,3 +552,81 @@ def apply_profile(
     if warning:
         summary["warning"] = warning
     return summary
+
+
+@project_router.post("/{name}/profiles/shape")
+def shape_profile(
+    body: ShapeRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Calibrate a pending profile: run the ops on its weather-year series
+    and write the result as a NEW pending artifact (`parent_job`, op chain,
+    parent/result stats, `calibrated: true`). The network is never written —
+    applying the shaped artifact goes through the same apply route and its
+    refusals."""
+    _check_lock(proj, db, user)
+    nc, parent = _pending_artifact(proj, body.job_id)
+    with xr.open_dataset(nc) as ds:
+        frame = ds.to_dataframe()
+    frame.index = pd.DatetimeIndex(frame.index)
+    wanted = body.points or list(frame.columns)
+    unknown = [p for p in wanted if p not in frame.columns]
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "point_not_in_profile",
+                    "message": f"the pending profile has no column(s) "
+                               f"{unknown}; it holds {list(frame.columns)}"},
+        )
+    shaped: dict[str, pd.Series] = {}
+    per_point: dict[str, dict[str, Any]] = {}
+    for point in wanted:
+        try:
+            shaped[point], per_point[point] = shape.apply_chain(
+                frame[point].astype(float), body.ops)
+        except shape.UnreachableTargetError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"error_kind": "unreachable_target",
+                        "message": f"{point}: {exc}",
+                        "point": point,
+                        "reachable_max": exc.reachable_max},
+            ) from exc
+        except ProfileGenError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"error_kind": _error_kind(exc), "message": str(exc)},
+            ) from exc
+
+    import datetime as _dt
+    import os
+
+    from services.profile_gen.job import _artifact_paths, _evict_pending
+
+    new_id = str(uuid.uuid4())
+    out_nc, out_meta = _artifact_paths(proj.directory, new_id)
+    part = Path(str(out_nc) + ".part")
+    try:
+        pd.DataFrame(shaped).rename_axis("time").to_xarray().to_netcdf(str(part))
+        os.replace(part, out_nc)
+    finally:
+        part.unlink(missing_ok=True)
+    record = {
+        **parent,
+        "job_id": new_id,
+        "parent_job": body.job_id,
+        "parent_generated_at": parent.get("generated_at"),
+        "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "points": list(shaped),
+        "point_coords": {p: c for p, c in
+                         (parent.get("point_coords") or {}).items()
+                         if p in shaped},
+        "calibrated": True,
+        "shaping": per_point,
+    }
+    out_meta.write_text(json.dumps(record, indent=2, default=str))
+    _evict_pending(proj.directory)
+    return {"job_id": new_id, "parent_job": body.job_id,
+            "points": list(shaped), "stats": per_point}
