@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): Record the independent agent's explicit approval of the whole-application copilot plan, specification and test requirements, including resolved findings, exact reviewed revision and pending implementation/domain-validation gates. Add a portable implementation handoff with the first task, dependencies, test commands and continuation ledger.

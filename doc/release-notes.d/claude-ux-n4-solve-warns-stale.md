@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): In Guided, "Run the solve" now says beforehand that a finished study will go out of date; when it does, the cost and expected-shortfall tiles are marked "Out of date" (dimmed, with the reason) and the banner offers "Go to Goal and run the study" (UX review N4, L5).

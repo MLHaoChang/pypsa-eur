@@ -601,6 +601,8 @@ export interface GfmSettingsState {
   recommendation: GfmRecommendation | null
   /** Outlives the recommendation (a campus run removes it); null once the hub is re-solved and saved. */
   applied?: GfmApplied | null
+  /** Whether the solver settings have island constraints on now; absent from a server that predates it. */
+  island_rows_now?: boolean
 }
 
 export interface IslandCuts {

@@ -97,11 +97,12 @@ def _try_uuid(value: str) -> uuid.UUID | None:
         return None
 
 
-def find_project(db: DBSession, user: User, id_or_name: str) -> Project | None:
+def find_project(db: DBSession, user: User, id_or_name: str, *, name_only: bool = False) -> Project | None:
     """
     Resolve ``id_or_name`` to a Project in the caller's org — WITHOUT the
     access check. Accepts a UUID string (exact id match) or a project name
     (unique within an org). Returns None when nothing matches in the org.
+    `name_only` treats even a UUID-shaped label as an exact name, never an ID.
 
     A caller with no org membership resolves to None rather than 403. Every
     lookup outcome the caller is not entitled to must be INDISTINGUISHABLE:
@@ -115,7 +116,7 @@ def find_project(db: DBSession, user: User, id_or_name: str) -> Project | None:
     if org_id is None:
         return None
 
-    as_uuid = _try_uuid(id_or_name)
+    as_uuid = None if name_only else _try_uuid(id_or_name)
     if as_uuid is not None:
         project = db.get(Project, as_uuid)
         if project is not None and project.org_id == org_id:
@@ -130,14 +131,14 @@ def find_project(db: DBSession, user: User, id_or_name: str) -> Project | None:
     )
 
 
-def resolve_project(db: DBSession, user: User, id_or_name: str) -> Project:
+def resolve_project(db: DBSession, user: User, id_or_name: str, *, name_only: bool = False) -> Project:
     """
     Resolve + ACL-gate. Raises 404 both for "no such project in your org" and
     "exists but you can't see it" — the two are deliberately indistinguishable
     to the caller so project existence isn't leaked across the tree/org
     boundary.
     """
-    project = find_project(db, user, id_or_name)
+    project = find_project(db, user, id_or_name, name_only=name_only)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     # ensure_project_access raises 404 when access is denied.

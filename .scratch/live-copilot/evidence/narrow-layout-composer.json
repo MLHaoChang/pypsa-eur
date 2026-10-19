@@ -1,0 +1,2164 @@
+{
+  "source": {
+    "head": "fc28935e2dc8d215c65cf1cdf3570125dff606b0",
+    "src/components/ChatPanel.tsx": "dc1e35ebefb07a0fd0046e8f11384761c835c57b680d9e6f2cb4aaea64824d36",
+    "src/components/DictationControls.tsx": "09b2f78dd682cda697ccba7f6a2c9b8843ef1ef20e5015d7aea3d55bcbe589c3",
+    "dist/spa.html": "2f8bbf9feae03d9c474c3766d66432080bb1804a011e26d6d97eb1a9d484ca23",
+    "scripts/composer-fixture.py": "39c94f182f8f03252472e486dada06d1cb91a1998840da8548b68e50eeeb5fb3",
+    "scripts/smoke-chat-composer.mjs": "7e5cd9be1f265eaef5181a1f1c561c531ba98bf99df4a913d89b12b680e541b2"
+  },
+  "suite": "composer",
+  "results": [
+    {
+      "name": "desktop-default-collapsed",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 845,
+          "width": 419,
+          "height": 131,
+          "top": 845,
+          "bottom": 976
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 805.75,
+          "width": 13,
+          "height": 13,
+          "top": 805.75,
+          "bottom": 818.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 854,
+            "width": 34.484375,
+            "height": 25,
+            "top": 854,
+            "bottom": 879
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 883,
+            "width": 34.484375,
+            "height": 25,
+            "top": 883,
+            "bottom": 908
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 912,
+            "width": 34.484375,
+            "height": 25,
+            "top": 912,
+            "bottom": 937
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 941,
+            "width": 34.484375,
+            "height": 25,
+            "top": 941,
+            "bottom": 966
+          }
+        ],
+        "dictation": {
+          "top": 473,
+          "bottom": 968,
+          "closeTop": 486,
+          "closeLeft": 1409.921875
+        },
+        "dragAndReload": {
+          "savedHeights": [
+            360,
+            60
+          ],
+          "retainedHeight": 60
+        }
+      }
+    },
+    {
+      "name": "desktop-default-expanded",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 845,
+          "width": 419,
+          "height": 131,
+          "top": 845,
+          "bottom": 976
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 805.75,
+          "width": 13,
+          "height": 13,
+          "top": 805.75,
+          "bottom": 818.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 854,
+            "width": 34.484375,
+            "height": 25,
+            "top": 854,
+            "bottom": 879
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 883,
+            "width": 34.484375,
+            "height": 25,
+            "top": 883,
+            "bottom": 908
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 912,
+            "width": 34.484375,
+            "height": 25,
+            "top": 912,
+            "bottom": 937
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 941,
+            "width": 34.484375,
+            "height": 25,
+            "top": 941,
+            "bottom": 966
+          }
+        ],
+        "dictation": {
+          "top": 473,
+          "bottom": 968,
+          "closeTop": 486,
+          "closeLeft": 1409.921875
+        }
+      }
+    },
+    {
+      "name": "desktop-60-collapsed",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 845,
+          "width": 419,
+          "height": 131,
+          "top": 845,
+          "bottom": 976
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 805.75,
+          "width": 13,
+          "height": 13,
+          "top": 805.75,
+          "bottom": 818.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 854,
+            "width": 34.484375,
+            "height": 25,
+            "top": 854,
+            "bottom": 879
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 883,
+            "width": 34.484375,
+            "height": 25,
+            "top": 883,
+            "bottom": 908
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 912,
+            "width": 34.484375,
+            "height": 25,
+            "top": 912,
+            "bottom": 937
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 941,
+            "width": 34.484375,
+            "height": 25,
+            "top": 941,
+            "bottom": 966
+          }
+        ],
+        "dictation": {
+          "top": 473,
+          "bottom": 968,
+          "closeTop": 486,
+          "closeLeft": 1409.921875
+        }
+      }
+    },
+    {
+      "name": "desktop-60-expanded",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 845,
+          "width": 419,
+          "height": 131,
+          "top": 845,
+          "bottom": 976
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 805.75,
+          "width": 13,
+          "height": 13,
+          "top": 805.75,
+          "bottom": 818.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 854,
+            "width": 34.484375,
+            "height": 25,
+            "top": 854,
+            "bottom": 879
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 883,
+            "width": 34.484375,
+            "height": 25,
+            "top": 883,
+            "bottom": 908
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 912,
+            "width": 34.484375,
+            "height": 25,
+            "top": 912,
+            "bottom": 937
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 941,
+            "width": 34.484375,
+            "height": 25,
+            "top": 941,
+            "bottom": 966
+          }
+        ],
+        "dictation": {
+          "top": 473,
+          "bottom": 968,
+          "closeTop": 486,
+          "closeLeft": 1409.921875
+        }
+      }
+    },
+    {
+      "name": "desktop-88-collapsed",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 845,
+          "width": 419,
+          "height": 131,
+          "top": 845,
+          "bottom": 976
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 805.75,
+          "width": 13,
+          "height": 13,
+          "top": 805.75,
+          "bottom": 818.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 854,
+            "width": 34.484375,
+            "height": 25,
+            "top": 854,
+            "bottom": 879
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 883,
+            "width": 34.484375,
+            "height": 25,
+            "top": 883,
+            "bottom": 908
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 912,
+            "width": 34.484375,
+            "height": 25,
+            "top": 912,
+            "bottom": 937
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 941,
+            "width": 34.484375,
+            "height": 25,
+            "top": 941,
+            "bottom": 966
+          }
+        ],
+        "dictation": {
+          "top": 473,
+          "bottom": 968,
+          "closeTop": 486,
+          "closeLeft": 1409.921875
+        }
+      }
+    },
+    {
+      "name": "desktop-88-expanded",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 845,
+          "width": 419,
+          "height": 131,
+          "top": 845,
+          "bottom": 976
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 805.75,
+          "width": 13,
+          "height": 13,
+          "top": 805.75,
+          "bottom": 818.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 854,
+            "width": 34.484375,
+            "height": 25,
+            "top": 854,
+            "bottom": 879
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 883,
+            "width": 34.484375,
+            "height": 25,
+            "top": 883,
+            "bottom": 908
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 912,
+            "width": 34.484375,
+            "height": 25,
+            "top": 912,
+            "bottom": 937
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 941,
+            "width": 34.484375,
+            "height": 25,
+            "top": 941,
+            "bottom": 966
+          }
+        ],
+        "dictation": {
+          "top": 473,
+          "bottom": 968,
+          "closeTop": 486,
+          "closeLeft": 1409.921875
+        }
+      }
+    },
+    {
+      "name": "desktop-360-collapsed",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 616,
+          "width": 419,
+          "height": 360,
+          "top": 616,
+          "bottom": 976
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 576.75,
+          "width": 13,
+          "height": 13,
+          "top": 576.75,
+          "bottom": 589.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 854,
+            "width": 34.484375,
+            "height": 25,
+            "top": 854,
+            "bottom": 879
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 883,
+            "width": 34.484375,
+            "height": 25,
+            "top": 883,
+            "bottom": 908
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 912,
+            "width": 34.484375,
+            "height": 25,
+            "top": 912,
+            "bottom": 937
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 941,
+            "width": 34.484375,
+            "height": 25,
+            "top": 941,
+            "bottom": 966
+          }
+        ],
+        "dictation": {
+          "top": 473,
+          "bottom": 968,
+          "closeTop": 486,
+          "closeLeft": 1409.921875
+        }
+      }
+    },
+    {
+      "name": "desktop-360-expanded",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 616,
+          "width": 419,
+          "height": 360,
+          "top": 616,
+          "bottom": 976
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 576.75,
+          "width": 13,
+          "height": 13,
+          "top": 576.75,
+          "bottom": 589.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 854,
+            "width": 34.484375,
+            "height": 25,
+            "top": 854,
+            "bottom": 879
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 883,
+            "width": 34.484375,
+            "height": 25,
+            "top": 883,
+            "bottom": 908
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 912,
+            "width": 34.484375,
+            "height": 25,
+            "top": 912,
+            "bottom": 937
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 941,
+            "width": 34.484375,
+            "height": 25,
+            "top": 941,
+            "bottom": 966
+          }
+        ],
+        "dictation": {
+          "top": 473,
+          "bottom": 968,
+          "closeTop": 486,
+          "closeLeft": 1409.921875
+        }
+      }
+    },
+    {
+      "name": "touch-default-collapsed",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 626,
+          "width": 419,
+          "height": 200,
+          "top": 626,
+          "bottom": 826
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 586.75,
+          "width": 13,
+          "height": 13,
+          "top": 586.75,
+          "bottom": 599.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 647,
+            "width": 44,
+            "height": 44,
+            "top": 647,
+            "bottom": 691
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 695,
+            "width": 44,
+            "height": 44,
+            "top": 695,
+            "bottom": 739
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 743,
+            "width": 44,
+            "height": 44,
+            "top": 743,
+            "bottom": 787
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 791,
+            "width": 44,
+            "height": 25,
+            "top": 791,
+            "bottom": 816
+          }
+        ],
+        "dictation": {
+          "top": 323,
+          "bottom": 818,
+          "closeTop": 336,
+          "closeLeft": 389.921875
+        }
+      }
+    },
+    {
+      "name": "touch-default-expanded",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 636,
+          "width": 419,
+          "height": 200,
+          "top": 636,
+          "bottom": 836
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 596.75,
+          "width": 13,
+          "height": 13,
+          "top": 596.75,
+          "bottom": 609.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 657,
+            "width": 44,
+            "height": 44,
+            "top": 657,
+            "bottom": 701
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 705,
+            "width": 44,
+            "height": 44,
+            "top": 705,
+            "bottom": 749
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 753,
+            "width": 44,
+            "height": 44,
+            "top": 753,
+            "bottom": 797
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 801,
+            "width": 44,
+            "height": 25,
+            "top": 801,
+            "bottom": 826
+          }
+        ],
+        "dictation": {
+          "top": 323,
+          "bottom": 818,
+          "closeTop": 336,
+          "closeLeft": 389.921875
+        }
+      }
+    },
+    {
+      "name": "touch-60-collapsed",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 626,
+          "width": 419,
+          "height": 200,
+          "top": 626,
+          "bottom": 826
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 586.75,
+          "width": 13,
+          "height": 13,
+          "top": 586.75,
+          "bottom": 599.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 647,
+            "width": 44,
+            "height": 44,
+            "top": 647,
+            "bottom": 691
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 695,
+            "width": 44,
+            "height": 44,
+            "top": 695,
+            "bottom": 739
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 743,
+            "width": 44,
+            "height": 44,
+            "top": 743,
+            "bottom": 787
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 791,
+            "width": 44,
+            "height": 25,
+            "top": 791,
+            "bottom": 816
+          }
+        ],
+        "dictation": {
+          "top": 323,
+          "bottom": 818,
+          "closeTop": 336,
+          "closeLeft": 389.921875
+        }
+      }
+    },
+    {
+      "name": "touch-60-expanded",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 636,
+          "width": 419,
+          "height": 200,
+          "top": 636,
+          "bottom": 836
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 596.75,
+          "width": 13,
+          "height": 13,
+          "top": 596.75,
+          "bottom": 609.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 657,
+            "width": 44,
+            "height": 44,
+            "top": 657,
+            "bottom": 701
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 705,
+            "width": 44,
+            "height": 44,
+            "top": 705,
+            "bottom": 749
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 753,
+            "width": 44,
+            "height": 44,
+            "top": 753,
+            "bottom": 797
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 801,
+            "width": 44,
+            "height": 25,
+            "top": 801,
+            "bottom": 826
+          }
+        ],
+        "dictation": {
+          "top": 323,
+          "bottom": 818,
+          "closeTop": 336,
+          "closeLeft": 389.921875
+        }
+      }
+    },
+    {
+      "name": "touch-88-collapsed",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 626,
+          "width": 419,
+          "height": 200,
+          "top": 626,
+          "bottom": 826
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 586.75,
+          "width": 13,
+          "height": 13,
+          "top": 586.75,
+          "bottom": 599.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 647,
+            "width": 44,
+            "height": 44,
+            "top": 647,
+            "bottom": 691
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 695,
+            "width": 44,
+            "height": 44,
+            "top": 695,
+            "bottom": 739
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 743,
+            "width": 44,
+            "height": 44,
+            "top": 743,
+            "bottom": 787
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 791,
+            "width": 44,
+            "height": 25,
+            "top": 791,
+            "bottom": 816
+          }
+        ],
+        "dictation": {
+          "top": 323,
+          "bottom": 818,
+          "closeTop": 336,
+          "closeLeft": 389.921875
+        }
+      }
+    },
+    {
+      "name": "touch-88-expanded",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 636,
+          "width": 419,
+          "height": 200,
+          "top": 636,
+          "bottom": 836
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 596.75,
+          "width": 13,
+          "height": 13,
+          "top": 596.75,
+          "bottom": 609.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 657,
+            "width": 44,
+            "height": 44,
+            "top": 657,
+            "bottom": 701
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 705,
+            "width": 44,
+            "height": 44,
+            "top": 705,
+            "bottom": 749
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 753,
+            "width": 44,
+            "height": 44,
+            "top": 753,
+            "bottom": 797
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 801,
+            "width": 44,
+            "height": 25,
+            "top": 801,
+            "bottom": 826
+          }
+        ],
+        "dictation": {
+          "top": 323,
+          "bottom": 818,
+          "closeTop": 336,
+          "closeLeft": 389.921875
+        }
+      }
+    },
+    {
+      "name": "touch-360-collapsed",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 466,
+          "width": 419,
+          "height": 360,
+          "top": 466,
+          "bottom": 826
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 426.75,
+          "width": 13,
+          "height": 13,
+          "top": 426.75,
+          "bottom": 439.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 647,
+            "width": 44,
+            "height": 44,
+            "top": 647,
+            "bottom": 691
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 695,
+            "width": 44,
+            "height": 44,
+            "top": 695,
+            "bottom": 739
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 743,
+            "width": 44,
+            "height": 44,
+            "top": 743,
+            "bottom": 787
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 791,
+            "width": 44,
+            "height": 25,
+            "top": 791,
+            "bottom": 816
+          }
+        ],
+        "dictation": {
+          "top": 323,
+          "bottom": 818,
+          "closeTop": 336,
+          "closeLeft": 389.921875
+        }
+      }
+    },
+    {
+      "name": "touch-360-expanded",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 636,
+          "width": 419,
+          "height": 360,
+          "top": 636,
+          "bottom": 996
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 596.75,
+          "width": 13,
+          "height": 13,
+          "top": 596.75,
+          "bottom": 609.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 817,
+            "width": 44,
+            "height": 44,
+            "top": 817,
+            "bottom": 861
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 865,
+            "width": 44,
+            "height": 44,
+            "top": 865,
+            "bottom": 909
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 913,
+            "width": 44,
+            "height": 44,
+            "top": 913,
+            "bottom": 957
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 961,
+            "width": 44,
+            "height": 25,
+            "top": 961,
+            "bottom": 986
+          }
+        ],
+        "dictation": {
+          "top": 153,
+          "bottom": 648,
+          "closeTop": 166,
+          "closeLeft": 389.921875
+        }
+      }
+    },
+    {
+      "name": "desktop-default-collapsed-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 445,
+          "width": 419,
+          "height": 131,
+          "top": 445,
+          "bottom": 576
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 405.75,
+          "width": 13,
+          "height": 13,
+          "top": 405.75,
+          "bottom": 418.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 454,
+            "width": 34.484375,
+            "height": 25,
+            "top": 454,
+            "bottom": 479
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 483,
+            "width": 34.484375,
+            "height": 25,
+            "top": 483,
+            "bottom": 508
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 512,
+            "width": 34.484375,
+            "height": 25,
+            "top": 512,
+            "bottom": 537
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 541,
+            "width": 34.484375,
+            "height": 25,
+            "top": 541,
+            "bottom": 566
+          }
+        ],
+        "dictation": {
+          "top": 148,
+          "bottom": 568,
+          "closeTop": 161,
+          "closeLeft": 1409.921875
+        }
+      }
+    },
+    {
+      "name": "desktop-default-expanded-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 489.5,
+          "width": 419,
+          "height": 131,
+          "top": 489.5,
+          "bottom": 620.5
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 450.25,
+          "width": 13,
+          "height": 13,
+          "top": 450.25,
+          "bottom": 463.25
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 498.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 498.5,
+            "bottom": 523.5
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 527.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 527.5,
+            "bottom": 552.5
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 556.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 556.5,
+            "bottom": 581.5
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 585.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 585.5,
+            "bottom": 610.5
+          }
+        ],
+        "dictation": {
+          "top": 103,
+          "bottom": 523,
+          "closeTop": 116,
+          "closeLeft": 1409.921875
+        }
+      }
+    },
+    {
+      "name": "desktop-60-collapsed-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 445,
+          "width": 419,
+          "height": 131,
+          "top": 445,
+          "bottom": 576
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 405.75,
+          "width": 13,
+          "height": 13,
+          "top": 405.75,
+          "bottom": 418.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 454,
+            "width": 34.484375,
+            "height": 25,
+            "top": 454,
+            "bottom": 479
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 483,
+            "width": 34.484375,
+            "height": 25,
+            "top": 483,
+            "bottom": 508
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 512,
+            "width": 34.484375,
+            "height": 25,
+            "top": 512,
+            "bottom": 537
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 541,
+            "width": 34.484375,
+            "height": 25,
+            "top": 541,
+            "bottom": 566
+          }
+        ],
+        "dictation": {
+          "top": 148,
+          "bottom": 568,
+          "closeTop": 161,
+          "closeLeft": 1409.921875
+        }
+      }
+    },
+    {
+      "name": "desktop-60-expanded-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 489.5,
+          "width": 419,
+          "height": 131,
+          "top": 489.5,
+          "bottom": 620.5
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 450.25,
+          "width": 13,
+          "height": 13,
+          "top": 450.25,
+          "bottom": 463.25
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 498.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 498.5,
+            "bottom": 523.5
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 527.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 527.5,
+            "bottom": 552.5
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 556.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 556.5,
+            "bottom": 581.5
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 585.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 585.5,
+            "bottom": 610.5
+          }
+        ],
+        "dictation": {
+          "top": 103,
+          "bottom": 523,
+          "closeTop": 116,
+          "closeLeft": 1409.921875
+        }
+      }
+    },
+    {
+      "name": "desktop-88-collapsed-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 445,
+          "width": 419,
+          "height": 131,
+          "top": 445,
+          "bottom": 576
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 405.75,
+          "width": 13,
+          "height": 13,
+          "top": 405.75,
+          "bottom": 418.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 454,
+            "width": 34.484375,
+            "height": 25,
+            "top": 454,
+            "bottom": 479
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 483,
+            "width": 34.484375,
+            "height": 25,
+            "top": 483,
+            "bottom": 508
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 512,
+            "width": 34.484375,
+            "height": 25,
+            "top": 512,
+            "bottom": 537
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 541,
+            "width": 34.484375,
+            "height": 25,
+            "top": 541,
+            "bottom": 566
+          }
+        ],
+        "dictation": {
+          "top": 148,
+          "bottom": 568,
+          "closeTop": 161,
+          "closeLeft": 1409.921875
+        }
+      }
+    },
+    {
+      "name": "desktop-88-expanded-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 489.5,
+          "width": 419,
+          "height": 131,
+          "top": 489.5,
+          "bottom": 620.5
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 450.25,
+          "width": 13,
+          "height": 13,
+          "top": 450.25,
+          "bottom": 463.25
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 498.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 498.5,
+            "bottom": 523.5
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 527.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 527.5,
+            "bottom": 552.5
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 556.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 556.5,
+            "bottom": 581.5
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 585.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 585.5,
+            "bottom": 610.5
+          }
+        ],
+        "dictation": {
+          "top": 103,
+          "bottom": 523,
+          "closeTop": 116,
+          "closeLeft": 1409.921875
+        }
+      }
+    },
+    {
+      "name": "desktop-360-collapsed-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 225.5,
+          "width": 419,
+          "height": 360,
+          "top": 225.5,
+          "bottom": 585.5
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 186.25,
+          "width": 13,
+          "height": 13,
+          "top": 186.25,
+          "bottom": 199.25
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 463.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 463.5,
+            "bottom": 488.5
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 492.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 492.5,
+            "bottom": 517.5
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 521.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 521.5,
+            "bottom": 546.5
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 550.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 550.5,
+            "bottom": 575.5
+          }
+        ],
+        "dictation": {
+          "top": 148,
+          "bottom": 568,
+          "closeTop": 161,
+          "closeLeft": 1409.921875
+        }
+      }
+    },
+    {
+      "name": "desktop-360-expanded-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1021,
+          "y": 489.5,
+          "width": 419,
+          "height": 360,
+          "top": 489.5,
+          "bottom": 849.5
+        },
+        "checkbox": {
+          "x": 1033,
+          "y": 450.25,
+          "width": 13,
+          "height": 13,
+          "top": 450.25,
+          "bottom": 463.25
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 1029,
+            "y": 727.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 727.5,
+            "bottom": 752.5
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 1029,
+            "y": 756.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 756.5,
+            "bottom": 781.5
+          },
+          {
+            "id": "chat-mic",
+            "x": 1029,
+            "y": 785.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 785.5,
+            "bottom": 810.5
+          },
+          {
+            "id": "dictation-settings",
+            "x": 1029,
+            "y": 814.5,
+            "width": 34.484375,
+            "height": 25,
+            "top": 814.5,
+            "bottom": 839.5
+          }
+        ],
+        "dictation": {
+          "top": -126,
+          "bottom": 294,
+          "closeTop": -113,
+          "closeLeft": 1409.921875
+        }
+      }
+    },
+    {
+      "name": "touch-default-collapsed-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 376,
+          "width": 419,
+          "height": 200,
+          "top": 376,
+          "bottom": 576
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 336.75,
+          "width": 13,
+          "height": 13,
+          "top": 336.75,
+          "bottom": 349.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 397,
+            "width": 44,
+            "height": 44,
+            "top": 397,
+            "bottom": 441
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 445,
+            "width": 44,
+            "height": 44,
+            "top": 445,
+            "bottom": 489
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 493,
+            "width": 44,
+            "height": 44,
+            "top": 493,
+            "bottom": 537
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 541,
+            "width": 44,
+            "height": 25,
+            "top": 541,
+            "bottom": 566
+          }
+        ],
+        "dictation": {
+          "top": 220.5,
+          "bottom": 568,
+          "closeTop": 233.5,
+          "closeLeft": 389.921875
+        }
+      }
+    },
+    {
+      "name": "touch-default-expanded-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 636,
+          "width": 419,
+          "height": 200,
+          "top": 636,
+          "bottom": 836
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 596.75,
+          "width": 13,
+          "height": 13,
+          "top": 596.75,
+          "bottom": 609.75
+        },
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 657,
+            "width": 44,
+            "height": 44,
+            "top": 657,
+            "bottom": 701
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 705,
+            "width": 44,
+            "height": 44,
+            "top": 705,
+            "bottom": 749
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 753,
+            "width": 44,
+            "height": 44,
+            "top": 753,
+            "bottom": 797
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 801,
+            "width": 44,
+            "height": 25,
+            "top": 801,
+            "bottom": 826
+          }
+        ],
+        "dictation": {
+          "top": -39.5,
+          "bottom": 308,
+          "closeTop": -26.5,
+          "closeLeft": 389.921875
+        }
+      }
+    },
+    {
+      "name": "touch-60-collapsed-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 376,
+          "width": 419,
+          "height": 200,
+          "top": 376,
+          "bottom": 576
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 336.75,
+          "width": 13,
+          "height": 13,
+          "top": 336.75,
+          "bottom": 349.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 397,
+            "width": 44,
+            "height": 44,
+            "top": 397,
+            "bottom": 441
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 445,
+            "width": 44,
+            "height": 44,
+            "top": 445,
+            "bottom": 489
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 493,
+            "width": 44,
+            "height": 44,
+            "top": 493,
+            "bottom": 537
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 541,
+            "width": 44,
+            "height": 25,
+            "top": 541,
+            "bottom": 566
+          }
+        ],
+        "dictation": {
+          "top": 220.5,
+          "bottom": 568,
+          "closeTop": 233.5,
+          "closeLeft": 389.921875
+        }
+      }
+    },
+    {
+      "name": "touch-60-expanded-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 636,
+          "width": 419,
+          "height": 200,
+          "top": 636,
+          "bottom": 836
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 596.75,
+          "width": 13,
+          "height": 13,
+          "top": 596.75,
+          "bottom": 609.75
+        },
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 657,
+            "width": 44,
+            "height": 44,
+            "top": 657,
+            "bottom": 701
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 705,
+            "width": 44,
+            "height": 44,
+            "top": 705,
+            "bottom": 749
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 753,
+            "width": 44,
+            "height": 44,
+            "top": 753,
+            "bottom": 797
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 801,
+            "width": 44,
+            "height": 25,
+            "top": 801,
+            "bottom": 826
+          }
+        ],
+        "dictation": {
+          "top": -29.5,
+          "bottom": 318,
+          "closeTop": -16.5,
+          "closeLeft": 389.921875
+        }
+      }
+    },
+    {
+      "name": "touch-88-collapsed-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 376,
+          "width": 419,
+          "height": 200,
+          "top": 376,
+          "bottom": 576
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 336.75,
+          "width": 13,
+          "height": 13,
+          "top": 336.75,
+          "bottom": 349.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 397,
+            "width": 44,
+            "height": 44,
+            "top": 397,
+            "bottom": 441
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 445,
+            "width": 44,
+            "height": 44,
+            "top": 445,
+            "bottom": 489
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 493,
+            "width": 44,
+            "height": 44,
+            "top": 493,
+            "bottom": 537
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 541,
+            "width": 44,
+            "height": 25,
+            "top": 541,
+            "bottom": 566
+          }
+        ],
+        "dictation": {
+          "top": 220.5,
+          "bottom": 568,
+          "closeTop": 233.5,
+          "closeLeft": 389.921875
+        }
+      }
+    },
+    {
+      "name": "touch-88-expanded-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 636,
+          "width": 419,
+          "height": 200,
+          "top": 636,
+          "bottom": 836
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 596.75,
+          "width": 13,
+          "height": 13,
+          "top": 596.75,
+          "bottom": 609.75
+        },
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 657,
+            "width": 44,
+            "height": 44,
+            "top": 657,
+            "bottom": 701
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 705,
+            "width": 44,
+            "height": 44,
+            "top": 705,
+            "bottom": 749
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 753,
+            "width": 44,
+            "height": 44,
+            "top": 753,
+            "bottom": 797
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 801,
+            "width": 44,
+            "height": 25,
+            "top": 801,
+            "bottom": 826
+          }
+        ],
+        "dictation": {
+          "top": -29.5,
+          "bottom": 318,
+          "closeTop": -16.5,
+          "closeLeft": 389.921875
+        }
+      }
+    },
+    {
+      "name": "touch-360-collapsed-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 372,
+          "width": 419,
+          "height": 360,
+          "top": 372,
+          "bottom": 732
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 332.75,
+          "width": 13,
+          "height": 13,
+          "top": 332.75,
+          "bottom": 345.75
+        },
+        "hit": "INPUT",
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 553,
+            "width": 44,
+            "height": 44,
+            "top": 553,
+            "bottom": 597
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 601,
+            "width": 44,
+            "height": 44,
+            "top": 601,
+            "bottom": 645
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 649,
+            "width": 44,
+            "height": 44,
+            "top": 649,
+            "bottom": 693
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 697,
+            "width": 44,
+            "height": 25,
+            "top": 697,
+            "bottom": 722
+          }
+        ],
+        "dictation": {
+          "top": 64.5,
+          "bottom": 412,
+          "closeTop": 77.5,
+          "closeLeft": 389.921875
+        }
+      }
+    },
+    {
+      "name": "touch-360-expanded-short",
+      "passed": true,
+      "geometry": {
+        "composer": {
+          "x": 1,
+          "y": 636,
+          "width": 419,
+          "height": 360,
+          "top": 636,
+          "bottom": 996
+        },
+        "checkbox": {
+          "x": 13,
+          "y": 596.75,
+          "width": 13,
+          "height": 13,
+          "top": 596.75,
+          "bottom": 609.75
+        },
+        "controls": [
+          {
+            "id": "chat-file-picker",
+            "x": 9,
+            "y": 817,
+            "width": 44,
+            "height": 44,
+            "top": 817,
+            "bottom": 861
+          },
+          {
+            "id": "chat-paste-image",
+            "x": 9,
+            "y": 865,
+            "width": 44,
+            "height": 44,
+            "top": 865,
+            "bottom": 909
+          },
+          {
+            "id": "chat-mic",
+            "x": 9,
+            "y": 913,
+            "width": 44,
+            "height": 44,
+            "top": 913,
+            "bottom": 957
+          },
+          {
+            "id": "dictation-settings",
+            "x": 9,
+            "y": 961,
+            "width": 44,
+            "height": 25,
+            "top": 961,
+            "bottom": 986
+          }
+        ],
+        "dictation": {
+          "top": -199.5,
+          "bottom": 148,
+          "closeTop": -186.5,
+          "closeLeft": 389.921875
+        }
+      }
+    }
+  ],
+  "errors": [],
+  "app_http": "real_authenticated_backend",
+  "external_model_calls_allowed": false,
+  "local_model_wire": "all_calls_refused"
+}

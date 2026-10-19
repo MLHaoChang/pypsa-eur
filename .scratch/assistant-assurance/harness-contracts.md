@@ -171,8 +171,12 @@ model judgments, separate from deterministically verified facts. One optional
 read-only call can pass or withhold all interpretations; it cannot change facts,
 use tools, fetch evidence, repair drafts or publish its own prose. The call is
 bounded to 512 output tokens, 128 events, a 16 KiB packet, a 4 KiB verdict and
-5 seconds caller wait, with two worker slots. Missing usage/schema, exhausted
-known budgets, tools or timeout preserve deterministic facts with a limitation.
+5 seconds caller wait, with two worker slots. Usage must explicitly include
+nonnegative integer `input_tokens` and `output_tokens`; an omitted count is not
+zero, and cache-only counts cannot authorize an interpretation. Valid reported
+counts are still charged when the other required count is missing. Missing
+usage/schema, exhausted known budgets, tools or timeout preserve deterministic
+facts with a limitation.
 This uses the selected provider/model, not an independent expert certificate.
 Unknown/late usage is not a durable cross-restart billing reservation.
 

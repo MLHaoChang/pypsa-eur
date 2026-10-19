@@ -11,8 +11,9 @@ import { nk } from '../../utils/queryKeys'
 import { CAMPUS_KEY, CAMPUS_RUN_POLL_MS } from '../CampusElectricalPanel'
 import { isRunJob, useTick } from '../campusRunProgress'
 import { GFM_KEY } from '../CampusIslandGfmSection'
-import { chapterTiles, type ChapterInputs, type ChapterOpen } from './chapters'
+import { chapterTiles, dispatchSolved, FROM_STUDY_HINT, type ChapterInputs, type ChapterOpen } from './chapters'
 import { useHubDesignStore } from './hubDesignStore'
+import RunGridChecks from './RunGridChecks'
 
 const OPEN_LABEL = (o: ChapterOpen) =>
   'step' in o ? 'Go to Goal' : o.panel === 'campusElectrical' ? 'Open the grid checks' : 'Open the detail'
@@ -54,7 +55,7 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
   const tiles = chapterTiles({
     investment: { study: icStudy.data ?? null, report: icRunning ? null : icReport.data ?? null },
     grid: { campus: campus.data ?? null, notHub: is409(campus.error) },
-    reliability,
+    reliability: { ...reliability, solved: status.isSuccess ? dispatchSolved(status.data) : undefined },
     operation: { status: status.data ?? null, gfm: gfm.data ?? null },
   })
 
@@ -73,7 +74,8 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
           <div key={t.id} className="flex flex-col gap-1" data-testid={`hub-chapter-${t.id}`}>
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{t.group}</span>
             <Kpi label={t.label} value={t.value} unit={t.unit} basis={t.basis}
-              state={t.state} reason={t.reason} testId={`hub-chapter-${t.id}-kpi`} />
+              state={t.state} reason={t.reason} fromStudy={t.fromStudy}
+              hint={t.fromStudy ? FROM_STUDY_HINT : undefined} testId={`hub-chapter-${t.id}-kpi`} />
             {t.control && (
               <p className="text-[11.5px] text-muted" data-testid={`hub-chapter-${t.id}-control`}>
                 {t.control.text}{' '}
@@ -83,6 +85,9 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
                     className="text-accent hover:underline">Solve</button>
                 )}
               </p>
+            )}
+            {t.id === 'grid_plan' && project && ['not_run', 'stale', 'unavailable'].includes(t.state) && (
+              <RunGridChecks project={project} again={t.state !== 'not_run'} disabled={t.state === 'running'} />
             )}
             <button type="button" data-testid={`hub-chapter-${t.id}-open`} onClick={() => open(t.open)}
               className="self-start text-[11.5px] text-accent hover:underline">

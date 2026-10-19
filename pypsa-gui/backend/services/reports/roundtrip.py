@@ -94,6 +94,7 @@ from services.reports.docx_reader import (
 from services.reports.docx_writer import (
     APPENDIX_HEADING,
     BOOKMARK_PREFIX,
+    CATEGORY_BOOKMARK_PREFIX,
     _CODE_FONT,
     _LINK_COLOR,
 )
@@ -377,6 +378,13 @@ def _bookmark_id(p_el) -> str | None:
         if name.startswith(BOOKMARK_PREFIX):
             return name[len(BOOKMARK_PREFIX):]
     return None
+
+
+def _is_category_heading(p_el) -> bool:
+    """A category divider the writer puts above its sections (UX review N9): not a section, and
+    nothing a reviewer edits."""
+    return any((el.get(qn("w:name")) or "").startswith(CATEGORY_BOOKMARK_PREFIX)
+               for el in p_el.iter(_TAG_BOOKMARK_START))
 
 
 def _style_name(p_el, doc) -> str:
@@ -707,6 +715,10 @@ def read_edited_docx(data: bytes, base: ReportDocument) -> RoundTripResult:
         level = _heading_level(paragraph)
         text = _norm(merged_paragraph_text(child))
         bookmark = _bookmark_id(child)
+        if _is_category_heading(child):
+            current = None                  # the divider ends the open section and opens none
+            owner.append(None)
+            continue
         if bookmark == APPENDIX_ID or (
                 level is not None and level >= 1 and text.lower() == APPENDIX_HEADING.lower()):
             stop = True

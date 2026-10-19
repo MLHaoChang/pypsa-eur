@@ -52,13 +52,15 @@ export default function AssistantDock() {
   const [surface, setSurface] = useState<'chat' | 'activity'>('chat')
   useEffect(() => { if (!assistantDockOpen) setSurface('chat') }, [assistantDockOpen])
   const profilesQuery = useChatProfiles()
-  const { effectiveProfileId, ready } = useChatReadiness()
+  const { effectiveProfileId, ready, settled: readinessSettled } = useChatReadiness()
   const streaming = useChatStore((s) => s.streaming)
   const pending = useChatStore((s) => s.pending)
   const choice = useChatStore((s) => s.choice)
   const queued = useChatStore((s) => s.requestQueue.length > 0)
   const error = useChatStore((s) => s.error)
   const [liveOpen, setLiveOpen] = useState(false)
+  const [companionAccessTarget, setCompanionAccessTarget] = useState<HTMLDivElement | null>(null)
+  const [companionChoiceTarget, setCompanionChoiceTarget] = useState<HTMLDivElement | null>(null)
   const [liveCaption, setLiveCaption] = useState('')
   const [liveEcho, setLiveEcho] = useState('')
   const [walking, setWalking] = useState(false)
@@ -102,7 +104,16 @@ export default function AssistantDock() {
   }, [ready])
 
   const onLiveSubmit = useCallback((text: string) => {
-    if (keyResultsWalkRequested(text)) {
+    // With a model available every sentence goes to the copilot (owner
+    // decision Q4); the local tour and picker are the no-key path only, so
+    // they wait until readiness has answered. Answered without a usable
+    // profile is the no-key path too.
+    if (ready === undefined && !readinessSettled) {
+      setLiveCaption('Still checking the assistant. Nothing was sent; try again in a moment.')
+      return
+    }
+    const local = ready !== true
+    if (local && keyResultsWalkRequested(text)) {
       stopWalk()
       setLiveEcho('')
       setWalking(true)
@@ -122,7 +133,7 @@ export default function AssistantDock() {
       })
       return
     }
-    if (openProjectRequested(text)) {
+    if (local && openProjectRequested(text)) {
       stopWalk()
       setLiveEcho('')
       openProjectList()
@@ -154,8 +165,8 @@ export default function AssistantDock() {
       forwardToHarness(text)
       return
     }
-    setLiveCaption('Add an API key for the assistant first. Tab changes and opening a project still work without one.')
-  }, [flashEcho, forwardToHarness, ready, stopWalk])
+    setLiveCaption('Add an API key for the assistant first. You can still open the project list without one.')
+  }, [flashEcho, forwardToHarness, ready, readinessSettled, stopWalk])
   const profileLabel =
     profilesQuery.data?.profiles.find((p) => p.id === effectiveProfileId)?.label
     ?? profilesQuery.data?.profiles.find((p) => p.id === profilesQuery.data.active_profile_id)?.label
@@ -201,9 +212,9 @@ export default function AssistantDock() {
   return (
     <>
       <div
-        className={`relative flex flex-col min-h-0 bg-bg shrink-0 transition-[width] duration-300 ease-out motion-reduce:transition-none ${
+        className={`relative flex flex-col min-h-0 min-w-0 bg-bg transition-[width] duration-300 ease-out motion-reduce:transition-none ${
           assistantDockOpen
-            ? 'border-l border-border'
+            ? 'border-l border-border max-sm:absolute max-sm:inset-0 max-sm:z-30 max-sm:max-w-full'
             : 'w-0 overflow-visible border-0'
         }`}
         style={assistantDockOpen ? { width: `${assistantDockWidth}px` } : undefined}
@@ -284,7 +295,7 @@ export default function AssistantDock() {
             slide-panel case. Acceptable for now; revisit if that shows up.
           */}
           <ErrorBoundary label="The assistant crashed">
-            <ChatPanel />
+            <ChatPanel companionAccessTarget={companionAccessTarget} companionChoiceTarget={companionChoiceTarget} />
           </ErrorBoundary>
         </div>
         {assistantDockOpen && surface === 'activity' && <ErrorBoundary label="Activity could not be displayed">
@@ -343,6 +354,8 @@ export default function AssistantDock() {
         >
           <ErrorBoundary label="The assistant crashed">
             <ConfirmationCard />
+            {choice && <div ref={setCompanionChoiceTarget} className="w-80 max-w-full" />}
+            {liveOpen && <div ref={setCompanionAccessTarget} className="w-72 max-w-full" />}
             {walking && walkNextReady && <button type="button" data-no-panel-close className="fixed bottom-24 right-4 text-xs rounded border border-border bg-panel px-3 py-2" onClick={() => walkCancel.current?.next()}>Next evidence view</button>}
       <CompanionOutcome />
           </ErrorBoundary>
