@@ -565,6 +565,7 @@ def _run_myopic_foresight(
     tmp_log,
     stop_event: threading.Event | None = None,
     iteration_undo: list | None = None,
+    uc_kwargs: dict | None = None,
 ) -> tuple[str, str, list]:
     """
     Sequential per-period multi-investment-period LP. Returns
@@ -639,6 +640,10 @@ def _run_myopic_foresight(
     # post-solve network state.
     if iteration_undo is None:
         iteration_undo = []
+    # The process units' UC keyword (grid-to-process ticket 03); `{}` passes
+    # nothing, so a network without process units solves exactly as before.
+    uc_kwargs = dict(uc_kwargs or {})
+    from services.solver.process_uc import sclopf_model_kwargs
     # Clear the per-period objective accumulator so re-solves don't compound
     # across runs. Populated inside the loop below, consumed by the outer
     # status worker to compute the horizon-total objective.
@@ -732,6 +737,7 @@ def _run_myopic_foresight(
                     log_fn=str(tmp_log),
                     solver_options=merged_solver_options,
                     assign_all_duals=True,
+                    **uc_kwargs,
                 )
             except Exception as exc:
                 # PyPSA can trip its `periodized_cost` / `nyears` check when the
@@ -750,6 +756,7 @@ def _run_myopic_foresight(
                     log_fn=str(tmp_log),
                     solver_options=merged_solver_options,
                     assign_all_duals=True,
+                    **uc_kwargs,
                 )
             _rescale_results_for_objective(network)
             if op_status != "ok":
@@ -937,6 +944,7 @@ def _run_myopic_foresight(
                     extra_functionality=_sclopf_extra_fn,
                     solver_name=cfg.solver_name,
                     log_fn=str(tmp_log),
+                    **sclopf_model_kwargs(uc_kwargs),
                     **merged_solver_options,
                 )
             else:
@@ -949,6 +957,7 @@ def _run_myopic_foresight(
                     log_fn=str(tmp_log),
                     solver_options=merged_solver_options,
                     assign_all_duals=True,
+                    **uc_kwargs,
                 )
             # Rescale n.objective + LP duals back to user-facing € BEFORE
             # the next myopic iteration starts (each iteration sets the

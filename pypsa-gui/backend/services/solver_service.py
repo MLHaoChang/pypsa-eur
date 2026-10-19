@@ -100,6 +100,7 @@ from services.solver.island import (  # noqa: F401  (re-exported)
     _wrap_with_island,
 )
 from services.solver.island import solve_uc as _island_solve_uc
+from services.solver import process_uc as _process_uc
 # Edge Investment Case commercial layer (spec §5.1): the PoC price writer and
 # the LP-terms wrapper, re-exported with the rest of the solver seams.
 from services.commercial.lp_bindings import (  # noqa: F401
@@ -366,6 +367,13 @@ class SolverConfig:
     # pattern as presolve.
     mip_gap: float = 0.01       # relative MIP gap, decimal
     mip_time_limit_s: float = 0  # seconds; 0 = no time limit
+    # ── Process-unit commitment (grid-to-process ticket 03) ────────────────
+    # How a planning solve commits the committable process units (Links with
+    # eh_process): "linearised" passes PyPSA's network-wide
+    # linearized_unit_commitment; "binary" leaves the MILP; "auto" is
+    # linearised unless another unit is committable (a user's binary gensets
+    # are never relaxed silently). See services/solver/process_uc.py.
+    process_uc: Literal["auto", "linearised", "binary"] = "auto"
     # ── Solve strategy ──────────────────────────────────────────────────────
     # Three modes:
     #
@@ -458,6 +466,37 @@ class SolverConfig:
                     pass
 
 
+
+
+def _run_process_uc_check(network, config, merged_solver_options, phase) -> dict:
+    """The binary operational check (``services.solver.process_uc.binary_check``), with its
+    result in the live log. The MIP gap and time limit always apply to its binary solves."""
+    opts = _resolve_mip_kwargs(config.solver_name, getattr(config, "mip_gap", 0.01),
+                               getattr(config, "mip_time_limit_s", 0),
+                               dict(merged_solver_options or {}))
+    phase(f"Binary operational check: {len(_process_uc.process_committable(network))} "
+          "committable process unit(s), one window per period, capacities fixed")
+    try:
+        check = _process_uc.binary_check(network, config, solver_options=opts)
+    except Exception as exc:                                     # noqa: BLE001
+        # binary_check records per-period failures itself; this guards the
+        # wrapper so the check can never fail the planning run.
+        check = {"status": "unverified", "flagged": False, "periods": [], "ledger": [],
+                 "message": f"binary check unverified: {type(exc).__name__}: {exc}"}
+    for row in check.get("periods", []):
+        if row.get("status") != "ok":
+            phase(f"Binary check {row.get('period')}: unverified ({row.get('reason')})")
+            continue
+        pct = row.get("pct")
+        phase(f"Binary check {row['period'] if row['period'] is not None else 'window'}: "
+              f"binary − linearised {row['delta'] if row['delta'] is not None else 'n/a'} "
+              f"({'n/a' if pct is None else f'{pct:+.2%}'}), extra shortfall "
+              + ", ".join(f"{b} {e['value']:.4g} {e['unit']}".rstrip()
+                          for b, e in row["extra_shortfall"].items())
+              + (" — FLAGGED" if row["flagged"] else ""))
+    phase(("WARN: " if check.get("flagged") or check.get("status") != "ok" else "")
+          + check.get("message", ""))
+    return check
 
 
 def run_simulation(
@@ -866,15 +905,12 @@ def run_simulation(
                 if merged_solver_options != (config.solver_options or {}):
                     phase(f"Presolve: {'on' if config.presolve_enabled else 'off'} "
                           f"(solver={config.solver_name})")
-                # MIP knobs — only relevant when at least one generator is
-                # committable (the LP otherwise has no integer variables and
-                # the solver ignores mip_gap / time_limit). Same dispatcher
-                # pattern as presolve.
-                has_committable = (
-                    not network.generators.empty
-                    and "committable" in network.generators.columns
-                    and bool(network.generators["committable"].any())
-                )
+                # MIP knobs — only relevant when at least one generator or
+                # link is committable (the LP otherwise has no integer
+                # variables and the solver ignores mip_gap / time_limit). Same
+                # dispatcher pattern as presolve.
+                _n_cmt_gens, _n_cmt_links = _process_uc.committable_counts(network)
+                has_committable = bool(_n_cmt_gens or _n_cmt_links)
                 if has_committable:
                     merged_solver_options = _resolve_mip_kwargs(
                         config.solver_name,
@@ -883,11 +919,23 @@ def run_simulation(
                         merged_solver_options,
                     )
                     phase(
-                        f"Unit commitment active: {int(network.generators['committable'].sum())} "
-                        f"committable generator(s), MIP gap {getattr(config, 'mip_gap', 0.01):.3g}"
+                        f"Unit commitment active: {_n_cmt_gens} committable generator(s), "
+                        f"{_n_cmt_links} committable link(s), MIP gap {getattr(config, 'mip_gap', 0.01):.3g}"
                         + (f", time limit {int(getattr(config, 'mip_time_limit_s', 0))}s"
                            if getattr(config, 'mip_time_limit_s', 0) > 0 else "")
                     )
+                # Process units (grid-to-process ticket 03): linearised UC in
+                # planning, unless `process_uc` keeps the plan binary. Nothing
+                # is written to the network; `{}` without a committable
+                # process unit, so every other network solves as before.
+                proc_uc_kwargs = _process_uc.planning_uc_kwargs(network, config)
+                _proc_note = _process_uc.planning_uc_note(network, config)
+                if _proc_note:
+                    phase(_proc_note)
+                # The UC keywords the plan actually solved with (the full
+                # branch adds the island's); the binary check runs after a
+                # linearised plan only.
+                plan_uc_kwargs = dict(proc_uc_kwargs)
                 # Solve-strategy dispatch. Three modes share the same lifecycle
                 # (apply_modelling → optimise → restore) but branch differently
                 # at the solve step:
@@ -1026,6 +1074,7 @@ def run_simulation(
                             tmp_log=tmp_log,
                             stop_event=stop_event,
                             iteration_undo=myopic_undo,
+                            uc_kwargs=proc_uc_kwargs,
                         )
                     elif use_sclopf:
                         # PyPSA's optimize_security_constrained has a bug
@@ -1046,6 +1095,7 @@ def run_simulation(
                             extra_functionality=extra_fn,
                             solver_name=config.solver_name,
                             log_fn=str(tmp_log),
+                            **_process_uc.sclopf_model_kwargs(proc_uc_kwargs),
                             **merged_solver_options,
                         )
                         _capture_extendable_p_nom_opt_to_frozen_store(network, phase)
@@ -1076,6 +1126,7 @@ def run_simulation(
                                 overlap=O,
                                 solver_name=config.solver_name,
                                 extra_functionality=extra_fn,
+                                **proc_uc_kwargs,
                                 **merged_solver_options,
                             )
                         finally:
@@ -1104,7 +1155,12 @@ def run_simulation(
                         # Linearised unit commitment for the island's fixed
                         # gensets (campus island I2c): the plain solve only,
                         # committed for this solve and restored after it.
-                        with _island_solve_uc(network, config) as uc_kwargs:
+                        # The process units' keyword composes with it: both
+                        # only set linearized_unit_commitment=True, passed once.
+                        with _island_solve_uc(network, config) as island_uc_kwargs:
+                            uc_kwargs = _process_uc.merge_uc_kwargs(island_uc_kwargs,
+                                                                    proc_uc_kwargs)
+                            plan_uc_kwargs = uc_kwargs
                             status, condition = network.optimize(
                                 solver_name=config.solver_name,
                                 transmission_losses=tl_kwarg,
@@ -1138,6 +1194,18 @@ def run_simulation(
                                 _log_global_constraint_shadow_prices(network, log_queue)
                             except Exception as exc:
                                 phase(f"Post-solve diagnostic failed: {exc}")
+                    # The mandatory binary operational check after a
+                    # linearised plan with committable process units (design
+                    # §2.3). On copies, before the restore so the solve-time
+                    # transforms are on them; it never fails the run.
+                    _proc_check = None
+                    if (status in ("ok", "optimal") and config.mode == "lopf"
+                            and plan_uc_kwargs.get("linearized_unit_commitment")
+                            and len(_process_uc.process_committable(network))
+                            and not getattr(network, "_ic_operational", False)):
+                        _proc_check = _run_process_uc_check(
+                            network, config, merged_solver_options, phase)
+                    _emit_state(last_process_uc_check=_proc_check)
                 finally:
                     # DISARM the abort watcher FIRST — the solve window is over.
                     # From here on the restore walk + modelling-assumption unwind

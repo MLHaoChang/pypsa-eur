@@ -284,6 +284,9 @@ RESULT_STATE_KEYS = (
     "eh_dtc_stress",
     "eh_dtc_planning",
     "last_reserve_margin",
+    # Grid-to-process ticket 03: the binary operational check of a plan with
+    # committable process units (None without one).
+    "last_process_uc_check",
     # UX overhaul S2b: the settings the last successful solve used.
     "last_solve_settings",
     # Edge Investment Case (P0 WP0.5): the report, the billing pass's
