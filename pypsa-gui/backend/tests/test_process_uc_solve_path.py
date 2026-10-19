@@ -344,7 +344,7 @@ def test_a_network_without_process_units_gets_no_uc_keyword():
     for mode in ("auto", "linearised", "binary"):
         assert PU.planning_uc_kwargs(n, SolverConfig(process_uc=mode)) == {}
         assert PU.planning_uc_note(n, SolverConfig(process_uc=mode)) is None
-    assert PU.sclopf_model_kwargs({}) == {}
+    assert PU.sclopf_model_kwargs(n, {}) == {}
 
 
 # ── unchanged kwargs on every branch without process units ─────────────────
@@ -470,7 +470,7 @@ def test_an_infeasible_binary_window_is_unverified_not_a_number():
                             solve=lambda m, sns, multi, cfg, opts, kw: ("warning", "infeasible", 0.0))
     (row,) = check["periods"]
     assert row["status"] == "unverified" and row["pct"] is None and "infeasible" in row["reason"]
-    assert any(r["item"] == "window" and "first 24 snapshots" in r["value"] for r in check["ledger"])
+    assert any(r["item"] == "window: window" and "first 24 snapshots" in r["value"] for r in check["ledger"])
     assert any("extra_functionality not applied" in r["value"] for r in check["ledger"])
     assert any("capex is excluded" in r["value"] for r in check["ledger"])
 
