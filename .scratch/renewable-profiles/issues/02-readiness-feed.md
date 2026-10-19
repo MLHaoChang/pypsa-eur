@@ -10,7 +10,7 @@ Blocked by: RP-01
 Requirements: R1 in [the spec](../spec.md)
 
 `GET /api/projects/{name}/profiles/readiness`, read-only. It returns one row per wind/solar generator (carrier match as in the engine's carrier guard):
-`{generator, technology, bus, lon, lat, coord_source: generator|bus|missing, profile: none|uploaded|generated|network_native, provenance?, stale_reason?}`.
+`{generator, technology, bus, lon, lat, coord_source: bus|missing, profile: none|uploaded|generated|network_native, provenance?, stale_reason?}`.
 `stale_reason` is `bus_moved` when the stored provenance's point differs from the current coordinates, or `horizon_changed` when the snapshots no longer match the applied year.
 
 Acceptance:

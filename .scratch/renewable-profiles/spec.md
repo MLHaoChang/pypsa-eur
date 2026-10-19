@@ -43,7 +43,7 @@ Assessment page with the evidence: https://claude.ai/artifact/Lku1eH1xdKVG2Cgi1y
 | --- | --- | --- | --- |
 | V1 | missing | `TimeSeriesManager.tsx` is untouched by every PR; the Renewables tab (`:56`) is upload-only; the generator is a sidebar island (`App.tsx:170`) | RP-04 |
 | V2 | partial | `routers/profiles.py:106` resolves generators to points; nothing generates by default; the workflow interviews 8 steps first | RP-04, RP-08 |
-| V2 coordinates | partial | the bus only (`profiles.py:122–130`) | RP-01 |
+| V2 coordinates | partial | the bus only (`profiles.py:122–130`); PyPSA generators have no coordinates of their own, so this is the right source | RP-01 |
 | V3 | missing, bug | `profiles.py:128` `float(x or 0.0)`: a bus at PyPSA's default 0/0 yields a profile at 0°E 0°N; spec §4 says refuse | RP-01, RP-02, RP-04 |
 | V4 | covered | source and year on routes, chat and Studio; default year = last calendar year (`engine.py:245`) | RP-03 (default from snapshots) |
 | V5 | partial | always a full calendar weather year at a user-picked resolution; partial-year and non-hourly horizons refused at apply (`apply.py:105–127`) | RP-03 |
@@ -59,17 +59,18 @@ Each requirement is testable. The ticket files hold the acceptance tests.
 
 ### R1 Coordinates (V2, V3)
 
-- Resolution order: the generator's own `x`/`y` when the network carries them
-  as finite numbers, else the bus `x`/`y`.
-- A coordinate pair is missing when either value is NaN, or both are exactly
-  0 (PyPSA's default; no European site sits at 0°E 0°N). An override is the
-  explicit way out.
+- A generator's coordinates are its bus `x`/`y`. PyPSA generators carry
+  none of their own, so "from the generator, or its bus" is one lookup.
+- A coordinate pair is missing when either value is NaN, out of range, or
+  both are exactly 0 (PyPSA's default), which is the rule
+  `network_geometry._bus_coord` already applies to the map. An explicit point
+  is the override.
 - Generating for a generator with missing coordinates is refused with
   `error_kind: missing_coordinates`. The refusal names every affected
   generator and both remedies (set coordinates, or upload a profile). No
   silent default anywhere: route, chat tool or job.
 - A read-only readiness feed lists every wind or solar generator with its
-  coordinate source (`generator`, `bus`, `missing`), its current profile
+  coordinate state (`bus`, `override`, `missing`), its current profile
   state (`none`, `uploaded`, `generated` with provenance, `network-native`),
   and whether its provenance is stale (bus moved, horizon changed).
 
