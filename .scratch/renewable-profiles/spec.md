@@ -3,7 +3,7 @@
 
 # Renewable profiles: the owner's vision, the gaps, and the extension spec
 
-Status: ready-for-agent (owner decisions RP-Q1–RP-Q4 taken 2026-10-19; RP-Q5 open)
+Status: ready-for-agent (owner decisions RP-Q1–RP-Q5 taken 2026-10-19)
 Baseline: master `5d5bf26b83aa18c9a2a0a3418d3beeecccc8d086`; profile stack head
 `779feccd48aa9e819b49a0bf5b69dba8f9cbbdfe` (PR #398).
 
@@ -160,8 +160,12 @@ stored in the profile's provenance:
 
 ### R8 Time basis (gatekeeper review, 2026-10-19)
 
-- Generated series are UTC. Naive snapshots are read as UTC by default, the
-  PyPSA-Eur convention that `commercial/lp_bindings.py` follows.
+- Generated series are UTC. An unstated basis follows the rule
+  `commercial/lp_bindings.py` reads snapshots by (gatekeeper option C).
+  With `commercial.timezone` set, the snapshots are UTC. Without it, they are
+  the site clock of unknown offset: the profile is applied unshifted,
+  recorded as `UTC (assumed; site clock unknown)`, and returned with a
+  `time_basis_assumed_utc` warning until RP-04's project setting exists.
 - `time_basis` = an IANA zone declares the snapshots that zone's wall clock.
   The series is then mapped through each snapshot's UTC instant(s): the
   repeated autumn hour takes the mean, the skipped spring hour takes the next
@@ -174,8 +178,8 @@ stored in the profile's provenance:
 
 Energy Hub templates solve a representative week, not a calendar year. With
 RP-Q3 = A, a dated week is a partial-year horizon, so it is sliced by
-month-day-hour from the weather year. RP-Q5 decides whether the week can be
-something other than its calendar dates.
+month-day-hour from the weather year. Owner decision RP-Q5 = A: the
+template's own calendar dates are used, with weightings untouched.
 
 ## Decisions (owner, 2026-10-19, through the coordinator)
 
@@ -193,7 +197,5 @@ something other than its calendar dates.
 - RP-Q4 = A. Profile Studio becomes an Expert-only advanced view, linked
   from the Time Series Manager and removed from the sidebar.
 
-## Owner questions (sent through the coordinator)
-
-- RP-Q5 Representative weeks: use the template's calendar dates
-  (recommended), or pick statistically typical weeks from the weather year.
+- RP-Q5 = A. Representative-week templates use their own calendar dates
+  from the weather year, with weightings untouched (RP-12).

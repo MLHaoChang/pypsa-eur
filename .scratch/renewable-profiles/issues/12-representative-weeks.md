@@ -3,10 +3,10 @@
 
 # RP-12 — representative-week templates (Energy Hub)
 
-Status: needs-triage (RP-Q5)
+Status: ready-for-agent (RP-Q5 = A: calendar dates)
 Type: task
 Baseline: master `5d5bf26b83aa18c9a2a0a3418d3beeecccc8d086`
-Blocked by: RP-03, RP-Q5
+Blocked by: RP-03
 Requirements: R9 in [the spec](../spec.md)
 
 Energy Hub templates solve a representative week, which apply refuses today. Phase 1's
