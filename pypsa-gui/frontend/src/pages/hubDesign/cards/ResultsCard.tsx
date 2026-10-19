@@ -15,7 +15,8 @@ import { headline, riskName } from '../headline'
 import { useHubDesignStore } from '../hubDesignStore'
 import { CardShell } from '../shared/CardShell'
 import { Term, TERM_FALLBACK } from '../shared/Term'
-import { useHubReport, useHubReview, useHubStudy } from '../useHubData'
+import { useDispatchSolved, useHubReport, useHubReview, useHubStudy } from '../useHubData'
+import { FROM_STUDY_HINT } from '../chapters'
 import { SECTION_LABEL } from '../sectionLabels'
 import { costTileLabel, kpiMoney } from '../plainWords'
 import { useQuery } from '@tanstack/react-query'
@@ -45,6 +46,7 @@ export function ResultsCard() {
   const { study, running } = useHubStudy()
   const { review } = useHubReview(studyHasResults(study))
   const report = useHubReport(study, running)
+  const solved = useDispatchSolved()
   // A unit whose loss causes no shortfall is not a risk (UX S6, G3): it is
   // named once under the list, never ranked in it.
   const rows = report ? fmeaTopRows(report) : []
@@ -132,7 +134,8 @@ export function ResultsCard() {
         <div className="max-w-[260px]">
           <Kpi testId="hub-results-cost" headline
             label={costTileLabel(report?.period_basis, periods.data?.periods)}
-            value={fmtCurrency(cost)} hint={TERM_FALLBACK.cost_at_target} />
+            value={fmtCurrency(cost)} fromStudy={solved === false}
+            hint={solved === false ? `${TERM_FALLBACK.cost_at_target} ${FROM_STUDY_HINT}` : TERM_FALLBACK.cost_at_target} />
         </div>
       )}
 

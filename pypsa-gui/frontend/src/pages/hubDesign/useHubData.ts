@@ -17,6 +17,7 @@ import {
   buildEhStudyBody, EMPTY_PACK_FORM, ehStudyRefetchInterval, formFromTemplate,
   type PackForm,
 } from '../results/EhReferenceDesignPanel'
+import { dispatchSolved } from './chapters'
 import { useHubDesignStore } from './hubDesignStore'
 
 /** The study record (`nk(project,'results','eh_study')`, 2 s poll while running). */
@@ -109,4 +110,13 @@ export function useHubSolverConfig() {
     enabled: !!project,
   })
   return { data: q.data }
+}
+
+/** Whether the project has its own hour-by-hour solve; `undefined` until the status is read (G5). */
+export function useDispatchSolved(): boolean | undefined {
+  const project = useUIStore(s => s.currentProject)
+  const status = useQuery({
+    queryKey: nk(project, 'simulationStatus'), queryFn: simulationApi.getStatus, enabled: !!project,
+  })
+  return status.isSuccess ? dispatchSolved(status.data) : undefined
 }
