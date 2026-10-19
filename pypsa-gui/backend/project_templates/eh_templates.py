@@ -778,6 +778,31 @@ TEMPLATE_META: dict[str, dict] = {
              "note": "bess_new's inverter is re-bought in 2039 (replacement_rule part_lifetimes); "
                      "the cash then changes sign twice, so the IRR is flagged "
                      "irr_multiple_sign_changes. The NPV is unaffected"},
+            {"item": "island sidecar",
+             "value": "seamless: the staged microgrid's blocks on the plain unit names (diesel "
+                      "droop, grid-forming batteries, PV and wind Q(U)); the tie is open, so "
+                      "there is no import to lose",
+             "source": "assumed",
+             "note": "eh_staged_hubs._mg_island_single_year (UX review N2, decision F); the "
+                     "island checks and the report's islanding chapter read it"},
+            {"item": "island unit data",
+             "value": "the staged microgrid's: diesel droop 4 %, H 1.5 s; batteries droop 4 %, "
+                      "tau_f 0.1 s, i_max 1.2 pu, k_gfm_min 1.0, pf 0.95; PV and wind Q(U), "
+                      "pf 0.95; sustained 24 h, bridge 600 s",
+             "source": "assumed",
+             "note": "demo values copied from the staged microgrid, not from a datasheet or a "
+                     "grid code"},
+            {"item": "transition RoCoF limit",
+             "value": "2 Hz/s over 500 ms (the steady island keeps 1 Hz/s)",
+             "source": "assumed",
+             "note": "the staged microgrid's demo value (eh_staged_hubs.MG_TRANSITION_ROCOF), "
+                     "relaxed from the data center's 1 Hz/s so a tuned grid-forming battery can "
+                     "meet it; not taken from a grid code"},
+            {"item": "island rows", "value": "off (island_constraints false)",
+             "source": "assumed",
+             "note": "the plan is not sized for the island requirements; the island checks "
+                     "report what islanding would need. Turn them on to plan for it (owner: "
+                     "island data on, rows off, the user opts in)"},
             {"item": "island break-even", "value": "not applicable",
              "source": "assumed",
              "note": "the island rows are off, so the comparison is not relaxed for them and the "

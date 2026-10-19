@@ -46,6 +46,30 @@
       "value": "after 10 years (inv_power_lifetime)"
     },
     {
+      "item": "island sidecar",
+      "note": "eh_staged_hubs._mg_island_single_year (UX review N2, decision F); the island checks and the report's islanding chapter read it",
+      "source": "assumed",
+      "value": "seamless: the staged microgrid's blocks on the plain unit names (diesel droop, grid-forming batteries, PV and wind Q(U)); the tie is open, so there is no import to lose"
+    },
+    {
+      "item": "island unit data",
+      "note": "demo values copied from the staged microgrid, not from a datasheet or a grid code",
+      "source": "assumed",
+      "value": "the staged microgrid's: diesel droop 4 %, H 1.5 s; batteries droop 4 %, tau_f 0.1 s, i_max 1.2 pu, k_gfm_min 1.0, pf 0.95; PV and wind Q(U), pf 0.95; sustained 24 h, bridge 600 s"
+    },
+    {
+      "item": "transition RoCoF limit",
+      "note": "the staged microgrid's demo value (eh_staged_hubs.MG_TRANSITION_ROCOF), relaxed from the data center's 1 Hz/s so a tuned grid-forming battery can meet it; not taken from a grid code",
+      "source": "assumed",
+      "value": "2 Hz/s over 500 ms (the steady island keeps 1 Hz/s)"
+    },
+    {
+      "item": "island rows",
+      "note": "the plan is not sized for the island requirements; the island checks report what islanding would need. Turn them on to plan for it (owner: island data on, rows off, the user opts in)",
+      "source": "assumed",
+      "value": "off (island_constraints false)"
+    },
+    {
       "item": "island break-even",
       "note": "the island rows are off, so the comparison is not relaxed for them and the case does not price an island capability",
       "source": "assumed",
