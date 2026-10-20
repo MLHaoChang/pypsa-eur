@@ -1439,6 +1439,8 @@ _TEMPLATE_DEFAULT_NAMES = {
     # The staged H2 hub and microgrid (generic-site E2E, H1/M1).
     "eh_h2_hub_staged": "Industrial Hydrogen Hub (staged growth)",
     "eh_microgrid_staged": "Island Microgrid (staged growth)",
+    # Grid-to-process ticket 05 (project_templates/eh_ammonia.py).
+    "eh_ammonia_staged": "Green Ammonia Hub (staged growth)",
 }
 
 # Sidecars a template directory may carry beside network.nc (P19): the EH

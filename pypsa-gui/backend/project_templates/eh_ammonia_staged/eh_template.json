@@ -1,0 +1,219 @@
+{
+  "description": "The hydrogen hub making green ammonia for a contracted delivery of 50 \u2192 100 \u2192 150 t/d over 2027, 2030 and 2035, beside a 40 MW process load on a 200 MW connection. A fixed 160 t/d Haber-Bosch loop (minimum load, restart time), H2 and NH3 tanks to size, wind, solar, battery and electrolyser candidates per period; a shortfall is bought in as grey ammonia or paid as a contract penalty. Multi-period; ready for an Energy Hub study on a strong grid.",
+  "dtc_attribution": null,
+  "energization": [
+    {
+      "available_import_mw": 200.0,
+      "connection_mw": 200.0,
+      "note": "fully energized",
+      "source": "assumed",
+      "year": 2027
+    },
+    {
+      "available_import_mw": 200.0,
+      "connection_mw": 200.0,
+      "note": "fully energized",
+      "source": "assumed",
+      "year": 2030
+    },
+    {
+      "available_import_mw": 200.0,
+      "connection_mw": 200.0,
+      "note": "fully energized",
+      "source": "assumed",
+      "year": 2035
+    }
+  ],
+  "id": "eh_ammonia_staged",
+  "ledger": [
+    {
+      "item": "discount rate",
+      "note": "the solve discounts each period's costs at it",
+      "source": "assumed",
+      "value": "7 % nominal"
+    },
+    {
+      "item": "money year",
+      "note": "held flat to the base year, then escalated from it at the case's rates; nothing is converted with a price index",
+      "source": "assumed",
+      "value": "pack prices (2020 price data) are read as real base-year EUR"
+    },
+    {
+      "item": "finance inputs",
+      "note": "pre-tax; a later stage's capex is paid a year before its COD",
+      "source": "assumed",
+      "value": "nominal EUR, escalation 2 %/yr, all equity at 7 %, close 2026-01-01, to 2045"
+    },
+    {
+      "item": "NH3 energy content",
+      "note": "upstream PyPSA-Eur config.default.yaml:1015 (MWh_NH3_per_tNH3); the NH3 bus is in MWh_NH3 and shows tonnes through this factor",
+      "source": "sourced",
+      "value": "5.166 MWh/t (LHV)"
+    },
+    {
+      "item": "H2 per t NH3",
+      "note": "config.default.yaml:1018, DECHEMA via technology-data (technology-data v0.14.0 has 1.1484 MWh_H2/MWh_NH3, 0.04 % higher)",
+      "source": "sourced",
+      "value": "5.93 MWh_H2/t (1.1479 MWh_H2 per MWh_NH3)"
+    },
+    {
+      "item": "Haber-Bosch electricity (D3)",
+      "note": "technology-data v0.14.0 costs_2030.csv, Haber-Bosch electricity-input (DECHEMA 2017 table 11; unit MWh_el/MWh_NH3). config.default.yaml:1019 carries the same number labelled per t, which is wrong by the factor 5.166: per t it is 1.278 MWh. The description cites 5 GJ/t for compressors; the 0.33 MWh/t for the air separation unit is listed under nitrogen-input and not added here (upstream does not add it either): adding it would raise the figure by 0.0639 MWh_el/MWh_NH3 (26 %)",
+      "source": "sourced",
+      "value": "0.2473 MWh_el per MWh_NH3 = 1.2776 MWh_el per t NH3"
+    },
+    {
+      "item": "Haber-Bosch capex, FOM, lifetime",
+      "note": "technology-data v0.14.0 costs_2030.csv, pack 2026-10-20 (haber-bosch). The loop is a fixed-size, sunk unit in this template, so the solve does not charge it; the rows are there for the investment case",
+      "source": "sourced",
+      "value": "1842.99 EUR/kW_NH3, 3 %/year, 30 years"
+    },
+    {
+      "item": "NH3 tank",
+      "note": "technology-data v0.14.0 'NH3 (l) storage tank incl. liquefaction', pack 2026-10-20 (nh3-tank); extendable, one row built in 2027",
+      "source": "sourced",
+      "value": "211.83 EUR/MWh_NH3, 2 %/year, 20 years"
+    },
+    {
+      "item": "H2 tank",
+      "note": "technology-data v0.14.0 'hydrogen storage tank type 1 including compressor', pack 2026-10-20 (h2-tank); extendable from 0 (the hub's 2000 MWh tank is replaced), one row built in 2027",
+      "source": "sourced",
+      "value": "60.05 EUR/kWh_H2, 1.11 %/year, 30 years"
+    },
+    {
+      "item": "tank size limits",
+      "note": "finite upper bounds the solver needs; about 10 days of the 2035 H2 draw and 8 days of the 2035 delivery, more than the representative week can use",
+      "source": "assumed",
+      "value": "H2 tank up to 10,000 MWh, NH3 tank up to 6,000 MWh_NH3 (about 1,160 t)"
+    },
+    {
+      "item": "electrolyser",
+      "note": "the pack's AEC efficiency is 0.6217; the template keeps today's 0.68 (demo)",
+      "source": "assumed",
+      "value": "pack electrolysis (1886 EUR/kW_e, 25 y), efficiency 0.68"
+    },
+    {
+      "item": "NH3 delivery",
+      "note": "sized so the 2035 Haber-Bosch needs about 37 MW of H2 (about 55 MW of electrolysis), within the 200 MW connection; replace with the offtake contract",
+      "source": "synthetic",
+      "value": "50 / 100 / 150 t/d (2027 / 2030 / 2035)"
+    },
+    {
+      "item": "Haber-Bosch size",
+      "note": "about 7 % headroom over the 2035 delivery, so a stop can be caught up; fixed-size, never extendable (a committable and extendable unit is bilinear)",
+      "source": "synthetic",
+      "value": "160 t/d fixed (8.52 MW_el), in service from 2027"
+    },
+    {
+      "item": "Haber-Bosch minimum load",
+      "note": "flexible-HB literature ranges from about 0.2 to 0.7; the sensitivity sweeps it",
+      "source": "synthetic",
+      "value": "p_min_pu 0.4"
+    },
+    {
+      "item": "Haber-Bosch min up / min down",
+      "note": "min down is the restart time (a warm restart of the synthesis loop); its cost is the lost tonnes the shortfall prices, so start_up_cost and shut_down_cost are 0",
+      "source": "synthetic",
+      "value": "24 h / 8 h"
+    },
+    {
+      "item": "Haber-Bosch ramp",
+      "note": "demo",
+      "source": "synthetic",
+      "value": "0.2 p.u. per hour"
+    },
+    {
+      "item": "unit commitment in planning",
+      "note": "the relaxation understates restarts, so the binary operational check runs after the plan and reports its per-period gap",
+      "source": "assumed",
+      "value": "linearised (process_uc auto), then one binary check per period"
+    },
+    {
+      "item": "grey NH3 buy-in (__buy_nh3)",
+      "note": "upstream PyPSA-Eur default import price, config.default.yaml:982 (imports.price.NH3); a model default, not a market quote. In the plan the purchase also pays the CO2 of grey ammonia at the period's CO2 price: 128 EUR/MWh_NH3 in 2027, 143 from 2030 (still below the lost-production value)",
+      "source": "sourced",
+      "value": "97 EUR/MWh_NH3 (about 501 EUR/t)"
+    },
+    {
+      "item": "lost-production value (__lost_nh3)",
+      "note": "the offtake contract's shortfall penalty, above the buy-in price (the validator checks it); a ledgered input, never a VoLL default",
+      "source": "synthetic",
+      "value": "800 EUR/t (154.86 EUR/MWh_NH3)"
+    },
+    {
+      "item": "NH3 product value",
+      "note": "what a delivered MWh is worth to the client: the grey purchase it replaces",
+      "source": "assumed",
+      "value": "97 EUR/MWh_NH3"
+    },
+    {
+      "item": "grey NH3 CO2 intensity",
+      "note": "stated by the case, as the grey-H2 intensity is",
+      "source": "synthetic",
+      "value": "2 t CO2 per t NH3"
+    },
+    {
+      "item": "CO2 price, tariff, finance",
+      "note": "eh_staged_hubs.py (CO2_PRICE, SYNTHETIC_TARIFF, _h2_finance)",
+      "source": "synthetic",
+      "value": "as the staged H2 hub"
+    },
+    {
+      "item": "wind, PV, prices, process load",
+      "note": "eh_templates.build_eh_h2_hub",
+      "source": "synthetic",
+      "value": "as the H2 hub"
+    },
+    {
+      "item": "dropped from the H2 hub",
+      "note": "the H2 now goes to ammonia; process_load stays a fixed Load",
+      "source": "assumed",
+      "value": "fuel cell, H2 offtake"
+    },
+    {
+      "item": "storage across periods",
+      "note": "each period is one representative week; delivery is continuous, so the week is enough",
+      "source": "assumed",
+      "value": "cyclic within each period"
+    },
+    {
+      "item": "investment case",
+      "note": "the case's reference purchase is the grey NH3 price above; ticket 06 confirms the path",
+      "source": "assumed",
+      "value": "compared with buying grey NH3 for the delivery"
+    }
+  ],
+  "name": "Green Ammonia Hub (staged growth)",
+  "pack_overrides": {},
+  "period_years": {
+    "2027": 3,
+    "2030": 5,
+    "2035": 10
+  },
+  "projected_load": [
+    {
+      "note": "process load plus the electrolysis and Haber-Bosch the delivery needs; synthetic",
+      "peak_mw": 60.83,
+      "year": 2027
+    },
+    {
+      "note": "process load plus the electrolysis and Haber-Bosch the delivery needs; synthetic",
+      "peak_mw": 81.66,
+      "year": 2030
+    },
+    {
+      "note": "process load plus the electrolysis and Haber-Bosch the delivery needs; synthetic",
+      "peak_mw": 102.49,
+      "year": 2035
+    }
+  ],
+  "provenance": "synthetic illustrative data (P19 template) \u2014 representative week, public-catalogue-range costs; replace with project data before any decision",
+  "recommended_archetype": "strong_grid",
+  "stages": null,
+  "study_notes": [
+    "Each period is the same representative week, with the period's NH3 delivery.",
+    "The Haber-Bosch loop is a fixed-size unit; the plan sizes the grid, storage, electrolysers and the two tanks.",
+    "Planning uses linearised unit commitment; the binary operational check after the solve reports what the relaxation understates (restarts and shortfall).",
+    "A stop costs the tonnes the NH3 tank cannot cover: they are bought in as grey ammonia or, beyond the contract's cover, paid at the shortfall penalty."
+  ]
+}
