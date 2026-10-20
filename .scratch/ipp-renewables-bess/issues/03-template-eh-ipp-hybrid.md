@@ -24,7 +24,7 @@ Q-IPP answers.
    - `solver_config.json`: commercial with the `custom` value flows and the PPA, and finance per §6;
    - `cases.json` (ticket 04).
 
-   No `adequacy_stress_scenarios.json` unless the validator requires one; no island sidecar.
+   The meta sets the initial Results tab to Commercial (no reorder). No `adequacy_stress_scenarios.json` unless the validator requires one; no island sidecar.
 3. **G5**: the plants are forced-size candidates. Tests:
    - the IC builds with an empty counterfactual;
    - incremental = total;
@@ -32,7 +32,7 @@ Q-IPP answers.
 4. **The #418 checklist**:
    - `_build.py`: feasibility solve, with the solve time recorded;
    - `routers/projects.py` `_TEMPLATE_DEFAULT_NAMES`;
-   - `NewProjectWizard.tsx` `TEMPLATES`;
+   - the `TEMPLATES` list in `NewProjectWizard.tsx` (the New project › Templates list; no wizard or parameters of its own: entry is Home card → Builder → the flow, #444 §3);
    - `StartCard.tsx` `PURPOSE`, and the order and count in `StartCard.test.tsx`;
    - the `harness/catalogue.py` description and enum;
    - `tests/test_validation_gen_costs.py` `_EXEMPT` (the grid slack);

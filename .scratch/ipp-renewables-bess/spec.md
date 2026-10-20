@@ -90,7 +90,7 @@ The sizes below are recommendation A of Q-IPP2 (§11).
 | `wind_farm` | Generator, fixed new build (G5), synthetic CF | 60 MW | pack `onwind`; profile `generated` |
 | `pv_plant` | Generator, fixed new build (G5), synthetic CF | 50 MWp | pack `solar-utility`; profile `generated` |
 | `bess` | StorageUnit, **candidate**: `p_nom_extendable`, `p_nom_max` 50 MW, `max_hours` 2, round-trip ≈ 0.88, cyclic SoC; throughput cost on dispatch (illustrative €/MWh, against unrealistic cycling) | 0–50 MW / 2 h | pack `battery` (power + energy parts) |
-| no Load | the section-4 card is `not_needed` ("generation-only project"); auxiliaries are inside the plants' net output | — | stated |
+| no Load | export is a Link to the grid slack, not a Load sink. The section-4 card is `not_needed` ("generation-only: export through the POI in section 3"); auxiliaries are inside the plants' net output | — | stated |
 
 Combined nameplate 110 MW on a 70 MW export limit gives an overbuild of 1.57. That is typical of a hybrid POI, and it leaves curtailment for the battery to recover.
 
@@ -151,7 +151,7 @@ The battery size is an LP result. The PPA share and form are case comparisons. T
 |---|---|---|
 | Revenue by stream (merchant, PPA, CfD difference, arbitrage) per year | IC `CashflowLine` grouped by `value_stream` | **G6**: a grouping view in 10 › Commercial |
 | Capture price and capture rate per plant; battery's average charge and discharge price | `asset_results` capture metrics | exists; shown in 10 › Commercial |
-| Curtailment (MWh, %): **by cause**, export limit vs negative price | `results/curtailment.py` + the export Link's loading and the price sign | total exists; **G6** splits it by cause |
+| Curtailment (MWh, %): **by cause**, export limit vs negative price | `results/curtailment.py` + the export Link's loading and the price sign | total exists; **G6** splits it by cause, in 10 › Capacity › Operation, cross-linked from Commercial |
 | Battery size, cycles per year, arbitrage spread | LP result; storage results | exists |
 | Project and equity NPV and IRR, DSCR, payback, LCOE | IC | exists (the run kind `investment_case` after W0; until then the post-solve action, #447 §5) |
 | Break-even PPA price at the IRR target | `solve_ppa` | exists (G2 checks it) |
@@ -217,15 +217,15 @@ The user can switch Grid on later (#448 §4): the POI and export limit already l
 | Section | Pre-fill | State after create |
 |---|---|---|
 | 1 Project & site | name "Renewables IPP with battery"; pin at an illustrative site in the zone (Q-IPP1); planning period 2030 (native, §2.2) | complete; pin `assumed` |
-| 2 Carriers & processes | electricity only | `not_needed` ("electricity only, no process") |
+| 2 Carriers & processes | electricity, pre-filled as the data centre does | complete (a user can add a carrier later) |
 | 3 Connection & grid | POI; export limit 70 MW, import limit 20 MW (`assumed`, "from the connection offer"); bidding zone from the pin (7c shows it, #448 §1) | complete, with `assumed` badges |
-| 4 Loads & demand | none | `not_needed` ("generation-only project") |
+| 4 Loads & demand | none. Export is the `grid_export` Link to the grid slack Generator, not a Load sink, and auxiliaries are netted in the plants' output | `not_needed` ("generation-only: export through the POI in section 3") |
 | 5 Assets & sizing | wind 60 MW and PV 50 MWp (fixed new build); battery candidate 0–50 MW at 2 h; costs and lifetimes from the pack | complete, `assumed` |
 | 6 Time series & profiles | wind and PV CF `generated` (synthetic); DA price shapes `illustrative`; import price derived | complete. Recheck flag: "replace the illustrative prices with your own" |
 | 7 Commercial & parties | 7a export = `da_base`, import charge; 7b PPA pay-as-produced, 70 %, fixed price (illustrative, cited range), 10-yr tenor, negative-price clause; 7c zone and price-data panel; 7d finance (§6); 7e `ipp` / `offtaker` / `market` | complete. Key flags on PPA price and share, the price series and WACC |
 | 8 Scenarios & optimisation | groups §8.1; no reliability goal; VOLL not applicable (no load); the 8 cases (§7) | complete |
 | 9 Readiness → run | — | — |
-| 10 Results → reports | 10 › Commercial first: revenue by stream, capture, curtailment, NPV/IRR, break-even PPA | — |
+| 10 Results → reports | the usual tab order (templates never reorder). The project opens Results on **Commercial** as its initial tab: revenue by stream, capture, NPV/IRR, break-even PPA. Curtailment by cause sits in Capacity › Operation, cross-linked from Commercial | — |
 
 ### 8.3 Home card and artwork brief
 

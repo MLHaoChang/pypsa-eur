@@ -20,4 +20,4 @@ Read [the spec](../spec.md) §5 and §10 G6 first.
   the existing curtailment total (test).
 - Capture price and capture rate, and the battery's average charge and discharge price, read from
   `asset_results`. Nothing is recomputed.
-- The UI in 10 › Commercial, after the UX reviewer's placement note.
+- UI: revenue by stream in 10 › Commercial. Curtailment by cause in 10 › Capacity › Operation, cross-linked from Commercial, not duplicated (UX reviewer, 2026-10-20).
