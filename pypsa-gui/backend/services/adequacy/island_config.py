@@ -27,6 +27,11 @@ try:
         ISLAND_HOURLY_CSV,
         ISLAND_UNIT_HOURLY_COLUMNS,
         ISLAND_UNIT_HOURLY_CSV,
+        PRESETS,
+        SERVICES,
+        has_grid_former,
+        offered_services,
+        select_preset,
         validate_island_config,
         validate_island_hourly,
         validate_island_unit_hourly,
@@ -43,6 +48,13 @@ except ImportError as exc:                      # pragma: no cover - build-shape
 
     validate_island_config = None
     GFM_CONTROLS = frozenset()
+    # The control presets (ticket 04): none without gridspine.
+    PRESETS, SERVICES = {}, ()
+
+    def _needs_gridspine(*args, **kwargs):
+        raise ContractError(f"the control presets need gridspine ({GRIDSPINE_IMPORT_ERROR})")
+
+    has_grid_former = offered_services = select_preset = _needs_gridspine
     # The I3a hourly tables (plan I3a): without gridspine there are none to write.
     ISLAND_UNIT_HOURLY_CSV = "island_unit_hourly.csv"
     ISLAND_HOURLY_CSV = "island_hourly.csv"
@@ -54,6 +66,10 @@ except ImportError as exc:                      # pragma: no cover - build-shape
     validate_island_hourly = validate_island_unit_hourly
 
 SIDECAR_NAME = "island_config.json"
+
+#: The typed warning ``island_warnings`` raises when the effective config has
+#: nothing to form the island's voltage (no GFM bess, no genset).
+NO_GRID_FORMER = "preset_leaves_no_grid_former"
 
 
 def validate(raw: dict) -> dict:
@@ -76,3 +92,15 @@ def load_island_config(path: str | pathlib.Path) -> dict | None:
     except json.JSONDecodeError as exc:
         raise ContractError(f"{path.name} is not valid JSON: {exc}") from exc
     return validate(raw)
+
+
+def island_warnings(cfg: dict) -> list[dict]:
+    """Typed warnings ``{code, message}`` on a validated sidecar: today, an
+    island with no grid former (a bess on a GFM control, or a genset), which
+    a project preset such as ``grid_following`` can leave."""
+    if has_grid_former(cfg):
+        return []
+    why = f" under preset {cfg['preset']!r}" if cfg.get("preset") else ""
+    return [{"code": NO_GRID_FORMER,
+             "message": f"no unit forms the island's voltage{why}: no bess on a grid-forming control and "
+                        "no genset, so the island cannot hold itself up"}]
