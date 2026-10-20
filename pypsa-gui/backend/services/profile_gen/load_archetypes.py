@@ -463,8 +463,12 @@ def generate_frame(ids: list[str], archetype: str, params: Mapping[str, Any],
             "params": stored, "unit": unit, "scale_mw": scale,
             **({} if by_peak else {"per_unit_mean_of": "source_year"}),
             "provenance": PROVENANCE,
-            "time_basis": (f"UTC snapshots, mapped on the {p['timezone']} clock"
-                           if p["timezone"] else "site clock (assumed)")}
+            # The series is on UTC hours (apply's contract); this says how the
+            # working hours were placed. `time_basis` itself is apply's to
+            # record: the snapshots' basis it mapped with.
+            "source_time_basis": (f"UTC (from {p['timezone']} wall clock)"
+                                  if p["timezone"]
+                                  else "UTC (assumed; site clock unknown)")}
     if archetype == "library":
         meta["library_profile"] = str(p["profile_id"])
     return frame, meta
