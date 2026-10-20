@@ -42,8 +42,8 @@ METRICS = {
 }
 DISCLOSURE = (
     "Scope: generators and StorageUnits of this exact carrier; Link outputs and Stores are excluded. "
-    "Generator energy uses generator snapshot weights. StorageUnit energy reads discharging (p_dispatch) "
-    "and charging (p_store) separately, with the StorageUnit profile's store weights and validity checks. "
+    "Storage energy uses store weights; generator energy uses generator weights. StorageUnit energy reads "
+    "discharging (p_dispatch) and charging (p_store) separately, with the StorageUnit profile's validity checks. "
     "An empty population is exactly zero; one invalid member makes the metric unavailable."
 )
 
@@ -193,10 +193,18 @@ def calculate(raw, scope):
     return facts, slots
 
 
-def population(raw):
-    """The always-shown count line: members in scope and those excluded."""
+def notes(raw, scope):
+    """Always-shown lines: members in scope and excluded, and any weighting split."""
     excluded = raw["excluded"]
-    return (
+    lines = [
         f"{len(raw['generators'])} generators and {len(raw['storage_units'])} StorageUnits of this carrier; "
         f"{excluded['Link']} Links and {excluded['Store']} Stores of this carrier excluded."
-    )
+    ]
+    a, b = _window(raw, scope)
+    if any(unit["inputs"]["duration"][a : b + 1] != raw["energy_weight"][a : b + 1]
+           for unit in raw["storage_units"].values()):
+        lines.append(
+            "Store and generator weights differ in this window; PyPSA's energy-balance statistics weight "
+            "storage by generator weights, so that view can show a different StorageUnit figure."
+        )
+    return lines

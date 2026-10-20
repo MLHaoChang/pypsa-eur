@@ -103,6 +103,7 @@ def test_wind_carrier_energy_matches_the_hand_sum(wind, checked):
     assert "2 generators and 0 StorageUnits of this carrier" in text
     assert "0 Links and 0 Stores of this carrier excluded" in text
     assert "Link outputs and Stores are excluded" in text
+    assert "weights differ" not in text
 
 
 def test_whole_message_grammar_selects_the_carrier_profile(wind, checked):
@@ -118,7 +119,11 @@ def test_battery_carrier_reads_split_storage_power_and_an_empty_generator_set(ba
     frames, answer = run(checked, battery, "battery", BATTERY)
     assert answer["receipt"]["request_complete"], answer["receipt"]["result_slots"]
     assert {b["metric"]: b["value"] for b in answer["blocks"]} == pytest.approx(BATTERY)
-    assert "0 generators and 1 StorageUnits of this carrier" in public_text(frames)
+    text = public_text(frames)
+    assert "0 generators and 1 StorageUnits of this carrier" in text
+    assert "Storage energy uses store weights; generator energy uses generator weights" in text
+    # Store weights 2, 1, 1 differ from generator weights 3, 4, 5.
+    assert "Store and generator weights differ in this window" in text
 
 
 def test_simultaneous_charge_and_discharge_count_both_not_the_net(battery, checked):

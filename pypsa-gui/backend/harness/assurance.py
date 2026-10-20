@@ -417,7 +417,7 @@ class Turn:
             f"({record['scope']['start']} to {record['scope']['end']})."
         ]
         if carrier:
-            lines.append(assurance_metrics.carrier.population(record["raw"]))
+            lines.extend(assurance_metrics.carrier.notes(record["raw"], self.request_scope))
         for slot in record["slots"]:
             definition = assurance_metrics.definition(slot["metric"], self.request_scope["profile"])
             fact = next(
