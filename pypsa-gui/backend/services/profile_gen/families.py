@@ -222,6 +222,12 @@ register_family(Family(
 ))
 
 
+def _series_guard(ctx, component_type, component, meta):
+    from services.profile_gen.series import guard
+
+    guard(ctx, component_type, component, meta)
+
+
 def _series_generate(ids, kind, params, year):
     # Imported on first use, as `_load_generate` is.
     from services.profile_gen.series import generate_frame
@@ -235,5 +241,5 @@ register_family(Family(
         ("generators", "marginal_cost"), ("links", "marginal_cost"),
         ("links", "efficiency"), ("storage_units", "inflow"),
     }),
-    generate=_series_generate,
+    guard=_series_guard, generate=_series_generate,
 ))

@@ -2,12 +2,15 @@
 
 One column per component id over the source year's hours:
 
-  * ``tou`` → marginal_cost (generators or links): time-of-use ``bands``,
-    each {"hours": [start, end), "days": "all" | "weekday" | "weekend",
-    "months": [..] (optional), "price"}; the FIRST band matching an hour
-    sets it, and every hour must be matched. ``currency`` (ISO code),
-    ``price_basis`` and ``currency_year`` travel to apply, which refuses a
-    price without them (the money-year convention).
+  * ``tou`` → marginal_cost (generators or links): ``periods``, the tariff
+    engine's own band model (`models.commercial.TariffPeriod`: name, rate,
+    months, weekdays, [start_hour, end_hour) on the local clock), first
+    match wins (`tariff_engine.period_rates`), every hour must be matched.
+    ``currency``, ``price_basis`` and ``currency_year`` travel to apply,
+    which refuses a price off the project's money basis. A link's price is
+    per MWh of its bus0 flow (p0). A price on the point-of-connection Links
+    is refused: a tariff belongs in the commercial configuration, which
+    already prices them.
   * ``inflow`` → storage_units inflow: ``annual_mwh`` over a monthly shape —
     ``shape`` ("snowmelt", "rain_fed", "flat") or ``monthly`` (12 shares) —
     as a source-year-mean-normalised series (``per_unit_mean``), so apply's
@@ -47,7 +50,7 @@ INFLOW_SHAPES = {
     "flat": [1.0] * 12,
 }
 _DEFAULTS: dict[str, dict[str, Any]] = {
-    "tou": {"bands": None, "currency": None, "price_basis": None,
+    "tou": {"periods": None, "currency": None, "price_basis": None,
             "currency_year": None, "component_type": "generators"},
     "inflow": {"annual_mwh": None, "shape": None, "monthly": None},
     "cop": {"source": "air", "sink_c": 45.0, "source_c": 10.0, "eta": 0.45,
@@ -70,6 +73,41 @@ class InvalidSeriesParamsError(SeriesError):
 
 class PartLoadNotASeriesError(SeriesError):
     """A part-load efficiency curve is not a time series."""
+
+
+class PocTariffError(SeriesError):
+    """A price series on a point-of-connection Link, which the tariff prices."""
+
+
+class CopBusError(SeriesError):
+    """A COP on a link whose bus0 is not electricity (efficiency scales p0)."""
+
+
+_ELECTRIC = {"ac", "dc", "electricity", "low voltage", "lv", "mv", "hv"}
+
+
+def guard(ctx, component_type: str, component: str, meta: Mapping[str, Any]) -> None:
+    """The series family's checks on the target component."""
+    n = ctx.network
+    if (component_type, meta.get("target", [None, None])[1]) == ("links", "marginal_cost"):
+        state = getattr(ctx, "solver_state", None) or {}
+        cfg = state.get("solver_config") if isinstance(state, Mapping) else None
+        commercial = getattr(cfg, "commercial", None) or {}
+        get = commercial.get if isinstance(commercial, Mapping) else (
+            lambda k: getattr(commercial, k, None))
+        if component in {get("poc_link"), get("export_link")} - {None}:
+            raise PocTariffError(
+                f"{component!r} is the point-of-connection link: its energy "
+                "price comes from the tariff in the commercial configuration "
+                "(import and export prices are added there); set the tariff "
+                "instead of a price series")
+    if meta.get("kind") == "cop" and component_type == "links":
+        bus0 = str(n.links.at[component, "bus0"])
+        carrier = str(n.buses.at[bus0, "carrier"] or "").lower() if bus0 in n.buses.index else ""
+        if carrier not in _ELECTRIC:
+            raise CopBusError(
+                f"{component!r}'s bus0 {bus0!r} carries {carrier or 'nothing'}, "
+                "not electricity; a COP scales the electric input p0")
 
 
 def _num(p: Mapping[str, Any], key: str, lo: float | None = None,
@@ -96,47 +134,30 @@ def _local(idx: pd.DatetimeIndex, timezone: str | None) -> pd.DatetimeIndex:
 
 
 def _tou(local: pd.DatetimeIndex, p: Mapping[str, Any]) -> tuple[np.ndarray, dict]:
-    bands = p["bands"]
-    if not isinstance(bands, list) or not bands:
-        raise InvalidSeriesParamsError("tou takes a non-empty list of bands")
-    hour = local.hour.to_numpy()
-    weekend = local.dayofweek.to_numpy() >= 5
-    month = local.month.to_numpy()
-    price = np.full(len(local), np.nan)
-    for i, b in enumerate(bands):
-        if not isinstance(b, Mapping):
-            raise InvalidSeriesParamsError(f"bands[{i}] must be an object")
-        hours = b.get("hours", [0, 24])
-        if (not isinstance(hours, list) or len(hours) != 2
-                or not all(isinstance(h, int) and not isinstance(h, bool) for h in hours)
-                or not 0 <= hours[0] < hours[1] <= 24):
-            raise InvalidSeriesParamsError(
-                f"bands[{i}].hours must be [start, end) with 0 <= start < end <= 24")
-        days = b.get("days", "all")
-        if days not in ("all", "weekday", "weekend"):
-            raise InvalidSeriesParamsError(
-                f"bands[{i}].days must be all, weekday or weekend")
-        months = b.get("months")
-        if months is not None and (not isinstance(months, list) or not all(
-                isinstance(m, int) and 1 <= m <= 12 for m in months)):
-            raise InvalidSeriesParamsError(f"bands[{i}].months must list months 1-12")
-        value = _num(b, "price")
-        hit = (hour >= hours[0]) & (hour < hours[1])
-        if days == "weekday":
-            hit &= ~weekend
-        elif days == "weekend":
-            hit &= weekend
-        if months is not None:
-            hit &= np.isin(month, months)
-        price = np.where(np.isnan(price) & hit, value, price)
+    import pydantic
+
+    from models.commercial import TariffPeriod
+    from services.commercial.tariff_engine import period_rates
+
+    raw = p["periods"]
+    if not isinstance(raw, list) or not raw:
+        raise InvalidSeriesParamsError("tou takes a non-empty list of periods")
+    try:
+        periods = [TariffPeriod.model_validate(x) for x in raw]
+    except pydantic.ValidationError as exc:
+        err = exc.errors()[0]
+        raise InvalidSeriesParamsError(
+            f"periods: {'.'.join(map(str, err['loc']))}: {err['msg']}") from None
+    price = period_rates(periods, local)
     if np.isnan(price).any():
         first = local[np.isnan(price)][0]
         raise InvalidSeriesParamsError(
-            f"the bands must price every hour; {first} matches none (add a "
-            "catch-all band last)")
+            f"the periods must price every hour; {first} matches none (add a "
+            "catch-all period last)")
     currency = str(p["currency"] or "")
     meta = {"unit": f"{currency}/MWh", "price_basis": p["price_basis"],
-            "currency_year": p["currency_year"]}
+            "currency_year": p["currency_year"],
+            "price_min": float(price.min()), "price_max": float(price.max())}
     return price, meta
 
 
@@ -169,7 +190,9 @@ def _cop(idx: pd.DatetimeIndex, p: Mapping[str, Any], timezone) -> tuple[np.ndar
     source = p["source"]
     if source not in ("air", "ground"):
         raise InvalidSeriesParamsError(f"source must be air or ground, got {source!r}")
-    eta = _num(p, "eta", 0.05, 1.0)
+    eta = _num(p, "eta", 0.0, 1.0)
+    if eta == 0.0:
+        raise InvalidSeriesParamsError("eta must be in (0, 1]")
     cop_max = _num(p, "cop_max", 1.0, 20.0)
     sink = _num(p, "sink_c", 0.0, 120.0) + 273.15
     extra: dict[str, Any] = {}
@@ -179,6 +202,9 @@ def _cop(idx: pd.DatetimeIndex, p: Mapping[str, Any], timezone) -> tuple[np.ndar
         extra["ambient"] = amb
     else:
         t_src = np.full(len(idx), _num(p, "source_c", -30.0, 60.0) + 273.15)
+        if sink <= t_src[0]:
+            raise InvalidSeriesParamsError(
+                "a ground source at or above the sink temperature lifts no heat")
     lift = sink - t_src
     cop = np.where(lift > 0, eta * sink / np.where(lift > 0, lift, 1.0), cop_max)
     return np.clip(cop, 1.0, cop_max), {"unit": "ratio", **extra}

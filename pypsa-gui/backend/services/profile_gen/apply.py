@@ -575,6 +575,7 @@ BOUND_FORCES_OFF_WARNING = "bound_forces_off"
 MUST_RUN_SINK_WARNING = "must_run_exceeds_sink"
 MIN_STABLE_WARNING = "min_stable_not_must_run"
 REPLACES_SERIES_WARNING = "replaces_existing_series"
+INFLOW_TOOL_WARNING = "inflow_unsupported_by_storage_tool"
 
 # How close a normalised shape's peak/mean must be to 1.
 _NORM_RTOL = 1e-3
@@ -626,7 +627,23 @@ def _scale_power(series: pd.Series, meta: Mapping[str, Any]) -> tuple[float, dic
     return scale, extra
 
 
-def _money(meta: Mapping[str, Any]) -> dict:
+def _project_money(ctx) -> tuple[str, str, int | None]:
+    """The project's money basis: (currency, price basis, currency year) of
+    its finance inputs, or their defaults (EUR, nominal, unstated)."""
+    from models.finance import FinanceInputs
+
+    state = getattr(ctx, "solver_state", None) or {}
+    cfg = state.get("solver_config") if isinstance(state, Mapping) else None
+    raw = getattr(cfg, "finance", None)
+    raw = raw if isinstance(raw, Mapping) else {}
+    fields = FinanceInputs.model_fields
+    year = raw.get("currency_year", fields["currency_year"].default)
+    return (str(raw.get("currency") or fields["currency"].default),
+            str(raw.get("price_basis") or fields["price_basis"].default),
+            int(year) if year is not None else None)
+
+
+def _money(meta: Mapping[str, Any], project: tuple[str, str, int | None]) -> dict:
     """A price series' unit and money basis, in the money-year convention's
     words ("real basis, 2020 EUR")."""
     unit = str(meta.get("unit") or "")
@@ -653,6 +670,16 @@ def _money(meta: Mapping[str, Any]) -> dict:
         raise InvalidSeriesUnitError(
             f"a price series must state its currency_year (the year of its "
             f"price data), got {year!r}") from None
+    p_cur, p_basis, p_year = project
+    if cur != p_cur:
+        raise InvalidSeriesUnitError(
+            f"the series is in {cur} but the project counts in {p_cur}; no "
+            "exchange rate is applied, so convert it first")
+    if basis != p_basis or (p_year is not None and year != p_year):
+        stated = f"{p_basis} basis, {p_year if p_year is not None else 'year unstated'} {p_cur}"
+        raise InvalidSeriesUnitError(
+            f"the series is {basis} basis, {year} {cur} but the project's money "
+            f"is {stated}; restate the series on the project's basis")
     return {"unit": unit, "price_basis": basis, "currency_year": year,
             "money": f"{basis} basis, {year} {cur}"}
 
@@ -947,7 +974,9 @@ def assign_profile(
     if target.kind == "power":
         scale, unit_meta = _scale_power(series, meta)
     elif target.kind == "price":
-        unit_meta = _money(meta)
+        unit_meta = _money(meta, _project_money(ctx))
+        if component_type == "links":
+            unit_meta["per"] = "MWh of p0 (bus0 flow)"
 
     time_basis, recorded_basis, warnings = resolve_time_basis(
         _profile_zone(ctx, meta, time_basis), _commercial_timezone(ctx))
@@ -988,6 +1017,12 @@ def assign_profile(
             )
     aligned = pd.Series(vals, index=aligned.index, name=aligned.name)
 
+    if (component_type, attribute) == ("storage_units", "inflow"):
+        # The network solve takes inflow (PyPSA spills what the unit cannot
+        # store); only the assistant's storage calculator refuses it.
+        warnings = [*warnings, (
+            f"{INFLOW_TOOL_WARNING}: the storage calculator does not model "
+            "inflow (unsupported_storage_inflow); the network solve does")]
     if target.kind == "power":
         energy, energy_warnings = _energy_record(
             n, series, aligned, scale, target, int(align_meta["weather_year"]))
@@ -1079,6 +1114,7 @@ def assign_profile(
         "warnings": warnings,
         "dispatch_cleared": bool(dispatch_cleared),
         "mean": float(aligned.mean()),
+        "min": float(aligned.min()),
         "peak": float(aligned.max()),
         **({"modelled_mwh": unit_meta["modelled_mwh"],
             "profile_annual_mwh": unit_meta["profile_annual_mwh"]}
