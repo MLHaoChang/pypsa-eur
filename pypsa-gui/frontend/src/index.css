@@ -383,7 +383,21 @@ html {
 .companion-actions {
   opacity: 1;
   transform: none;
+  display: none;
+  width: 220px;
 }
+.companion-profile, .companion-voice-note { display: none; }
+.companion-launcher[data-hovered='true'] .companion-actions { display: flex; }
+.companion-launcher[data-hovered='true'] .companion-profile,
+.companion-launcher[data-hovered='true'] .companion-voice-note,
+.companion-launcher[data-live='open'] .companion-profile,
+.companion-launcher[data-live='open'] .companion-voice-note { display: block; }
+.companion-actions > button { display: flex; align-items: center; gap: 12px; min-height: 44px; text-align: left; }
+.companion-actions > span { display: none; }
+.companion-live-orbit { visibility: hidden; }
+.companion-launcher[data-live='open'] .companion-live-orbit { visibility: visible; }
+.companion-character-wrap > span { display: block; }
+
 
 /* Stay inside the relative workbench body, below header/tabs. Scroll long
    answers/decisions locally without covering application header controls. */
@@ -393,6 +407,7 @@ html {
 }
 
 .companion-character-wrap {
+  order: 10;
   transform-origin: center bottom;
 }
 
@@ -418,18 +433,20 @@ html {
   }
 
   .companion-launcher[data-hovered='true'] .companion-actions,
-  .companion-launcher:focus-within .companion-actions,
   .companion-launcher[data-live='open'] .companion-actions {
     opacity: 1;
     transform: translateY(0);
   }
+
+  .companion-launcher[data-live='open'] .companion-idle { animation: companion-live-breathe 3s ease-in-out infinite; }
+  .companion-launcher[data-live='open'] .companion-live-orbit { transform-origin: 42px 42px; animation: companion-think-spin 4s linear infinite; }
 
   .companion-live-echo {
     animation: companion-echo-fade 1.6s ease forwards;
   }
 
   .companion-launcher[data-presence='thinking'] .companion-node-sector {
-    transform-origin: 48px 48px;
+    transform-origin: 42px 42px;
     animation: companion-think-spin 1.1s linear infinite;
   }
 
@@ -458,3 +475,5 @@ html {
   0%, 70% { opacity: 1; }
   100% { opacity: 0; }
 }
+
+@keyframes companion-live-breathe { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-2px) scale(1.025); } }

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { Mic, Pencil } from 'lucide-react'
+import { MessageCircle, Mic, Pencil } from 'lucide-react'
+import Pearl from './Pearl'
 
 // Clears toasts beside the chip (max-w12rem) plus the24px right gutter.
 // The workbench body ends above the24px status row, preserving bottom spacing.
@@ -48,35 +49,6 @@ function useReducedMotion(): boolean {
   return reduce
 }
 
-/**
- * Live's presence: a grid node (a bus with its line ring). The CSS animates a
- * sector turns while response/navigation work runs. Decoration never implies
- * that capture or playback has started.
- */
-function LiveNode({ lit }: { lit: boolean }) {
-  return (
-    <svg width="96" height="96" viewBox="0 0 96 96" fill="none" data-testid="companion-live-node">
-      <circle
-        className="companion-node-halo"
-        cx="48" cy="48" r="34"
-        stroke="var(--color-accent)" strokeOpacity={lit ? 0.35 : 0.18} strokeWidth="1.5"
-      />
-      <circle
-        className="companion-node-ring"
-        cx="48" cy="48" r="26"
-        stroke="var(--color-accent)" strokeOpacity={lit ? 0.75 : 0.4} strokeWidth="2"
-      />
-      <circle cx="48" cy="48" r="14" fill="var(--color-accent)" fillOpacity={lit ? 0.95 : 0.82} />
-      <path
-        className="companion-node-sector"
-        d="M48 34 A14 14 0 0 1 62 48"
-        stroke="var(--color-bg)" strokeWidth="2.5" strokeLinecap="round"
-      />
-      <circle cx="48" cy="48" r="3.5" fill="var(--color-bg)" fillOpacity="0.9" />
-    </svg>
-  )
-}
-
 export default function CompanionLauncher({
   workState = 'idle', navigating = false, profileLabel, onCompose, onSpeak, onLive, onProfiles,
   liveOpen = false, liveCaption = '', liveEcho = '', modelKeyMissing = false, onLiveSubmit,
@@ -86,16 +58,26 @@ export default function CompanionLauncher({
   const [hovered, setHovered] = useState(false)
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const pearlRef = useRef<HTMLButtonElement>(null)
+  const actionsId = useId()
+  const composerId = useId()
   const voiceReasonId = useId()
   useEffect(() => {
     if (liveOpen) inputRef.current?.focus()
   }, [liveOpen])
+  useEffect(() => {
+    const outside = (event: PointerEvent) => { if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setHovered(false) }
+    document.addEventListener('pointerdown', outside)
+    return () => document.removeEventListener('pointerdown', outside)
+  }, [])
   const presence = workState === 'running' ? 'thinking' : 'idle'
   const lit = presence !== 'idle'
   const echo = liveEcho.trim()
   const caption = liveCaption.trim()
   return (
     <div
+      ref={rootRef}
       className="companion-launcher absolute bottom-0 right-6 z-40 flex max-w-[calc(100vw-3rem)] flex-col items-end gap-2"
       data-testid="companion-launcher"
       data-no-panel-close
@@ -106,8 +88,9 @@ export default function CompanionLauncher({
       data-hovered={hovered ? 'true' : 'false'}
       data-live={liveOpen ? 'open' : 'closed'}
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      onFocus={() => setHovered(true)}
+      onMouseLeave={(e) => { if (!e.currentTarget.contains(document.activeElement)) setHovered(false) }}
+      onFocus={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHovered(true) }}
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); pearlRef.current?.focus(); setHovered(false) } }}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHovered(false)
       }}
@@ -121,6 +104,8 @@ export default function CompanionLauncher({
       )}
       {liveOpen && (
         <form
+          id={composerId}
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onLive(); pearlRef.current?.focus(); setHovered(false) } }}
           className="w-72 max-w-full rounded-2xl border border-border bg-bg-2 p-3 shadow-lg"
           data-testid="companion-live-composer"
           onSubmit={(e: FormEvent) => {
@@ -152,7 +137,7 @@ export default function CompanionLauncher({
               ref={inputRef}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="Walk me through the key results in each tab"
+              placeholder="Ask about your model or results…"
               aria-label="Message the assistant"
               className="min-w-0 flex-1 rounded-full border border-border bg-bg px-3 py-1.5 text-[12px] text-text"
             />
@@ -170,31 +155,23 @@ export default function CompanionLauncher({
         type="button"
         onClick={onProfiles}
         data-testid="companion-profile"
-        className="max-w-[12rem] truncate rounded-full border border-border bg-bg-2 px-3 py-1 text-[10px] text-text shadow-lg"
+        className="companion-profile max-w-[12rem] truncate rounded-full border border-border bg-bg-2 px-3 py-1 text-[10px] text-text shadow-lg"
         title={profileLabel}
         aria-label={`Assistant model: ${profileLabel}. Open the model list.`}
       >
         {profileLabel}
       </button>
-      <div className="companion-character-wrap" data-lit={lit ? 'true' : 'false'}>
-        <div
-          aria-hidden="true"
-          data-testid="companion-character"
-          data-shape={liveOpen ? 'live-node' : 'character'}
-          className={reduce ? '' : 'companion-idle'}
-        >
-          {liveOpen ? <LiveNode lit={lit} /> : (
-            <svg width="112" height="112" viewBox="0 0 72 72" fill="none">
-              <rect x="16" y="18" width="40" height="36" rx="14" fill="var(--color-accent)" />
-              <rect x="24" y="28" width="24" height="12" rx="6" fill="var(--color-bg)" />
-              <circle cx="32" cy="34" r="2" fill="var(--color-accent)" />
-              <circle cx="40" cy="34" r="2" fill="var(--color-accent)" />
-            </svg>
-          )}
-        </div>
-      </div>
+      <button type="button" ref={pearlRef} className="companion-character-wrap rounded-full"
+        data-lit={lit ? 'true' : 'false'} onClick={() => setHovered(true)}
+        aria-label="Choose how to chat with GridSpine" aria-expanded={hovered} aria-controls={actionsId}>
+        <span aria-hidden="true" data-testid="companion-character" data-shape="pearl"
+          className={reduce ? '' : 'companion-idle'}>
+          <Pearl />
+        </span>
+      </button>
       <div
-        className="companion-actions flex items-center rounded-full border border-border bg-bg-2 shadow-lg"
+        id={actionsId} role="group" aria-label="GridSpine conversation options"
+        className="companion-actions flex flex-col items-stretch rounded-xl border border-border bg-bg-2 shadow-lg"
         data-testid="companion-actions"
       >
         <button
@@ -205,7 +182,7 @@ export default function CompanionLauncher({
           title="Open the assistant and type"
           className="px-3 py-2 text-text hover:text-accent"
         >
-          <Pencil size={16} />
+          <Pencil size={16} aria-hidden="true" /><span>Write</span>
         </button>
         <span className="h-4 w-px bg-border" aria-hidden="true" />
         <button
@@ -216,22 +193,24 @@ export default function CompanionLauncher({
           title="Open the assistant and review dictation"
           className="px-3 py-2 text-text hover:text-accent"
         >
-          <Mic size={16} />
+          <Mic size={16} aria-hidden="true" /><span>Dictate</span>
         </button>
         <span className="h-4 w-px bg-border" aria-hidden="true" />
         <button
           type="button"
           onClick={onLive}
           data-testid="companion-live"
-          aria-label={liveOpen ? 'Close chat here' : 'Chat here'}
+          aria-label={liveOpen ? 'Close live chat' : 'Live chat'}
+          aria-describedby={voiceReasonId}
+          aria-controls={liveOpen ? composerId : undefined}
           aria-pressed={liveOpen}
           title={liveOpen ? 'Close in-page chat. Running work and pending approvals remain.' : 'Type to the assistant on this page.'}
           className={`px-3 py-2 hover:text-accent ${liveOpen ? 'text-accent' : 'text-text'}`}
         >
-          Chat here
+          <MessageCircle size={16} aria-hidden="true" /><span>{liveOpen ? 'Close live chat' : 'Live chat'}<small className="block text-[10px] font-normal text-muted">Text on this page</small></span>
         </button>
       </div>
-      <div className="max-w-72 rounded-lg border border-border bg-bg-2 px-3 py-2 text-[10px] text-muted">
+      <div className="companion-voice-note max-w-72 rounded-lg border border-border bg-bg-2 px-3 py-2 text-[10px] text-muted">
         <button type="button" disabled aria-describedby={voiceReasonId}
           className="font-medium text-muted disabled:cursor-not-allowed">
           Start voice

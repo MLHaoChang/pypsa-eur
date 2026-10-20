@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Add a dimensional GridSpine companion with hover, keyboard and touch access to Write, reviewed Dictate and in-page Live chat, plus distinct reduced-motion-aware greeting and live-text animations. Continuous voice remains unavailable.
