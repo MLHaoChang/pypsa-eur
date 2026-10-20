@@ -87,7 +87,7 @@ def test_incomplete_execution_never_reuses_a_smaller_denominator(fault):
         results[0]["case_id"] = "unmapped"
     value = report(results, live=fault == "live_missing", execution_failed=fault == "execution")
     assert not value["passed"]
-    assert value["required_cases"] == len(CASES) + (5 if fault == "live_missing" else 0)
+    assert value["required_cases"] == len(CASES) + (len(GOLDEN_CASES) if fault == "live_missing" else 0)
 
 
 def test_adversarial_false_accepts_remain_in_error_rate_when_execution_fails():
