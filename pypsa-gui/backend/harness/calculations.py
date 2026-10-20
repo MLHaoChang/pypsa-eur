@@ -117,10 +117,14 @@ def _series(component, attribute, entity, index):
 
 def solve_matches_inputs(ctx):
     """Both recorded solve fingerprints match the current inputs: the lossy one
-    and the exact one the Load flow tab requires."""
+    and the exact one the Load flow tab requires. After an AC power flow the
+    live outputs are PF values (ac_pf_service overwrites them and keeps the LP
+    aside), so the live network no longer holds the LP solve."""
     n, state = ctx.network, ctx.solver_state
     return (
-        state.get("status") == "completed"
+        state.get("ac_pf_results") is None
+        and state.get("lopf_results") is None
+        and state.get("status") == "completed"
         and state.get("condition") == "optimal"
         and n.meta.get("assistant_solve_input_fingerprint")
         == workflow_tools._network_input_fingerprint(ctx)
