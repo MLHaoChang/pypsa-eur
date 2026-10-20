@@ -17,9 +17,13 @@ Owner requested publication of these design specifications on 2026-10-20. This i
 - Direct guided entry and explicit Resume, with a generic/own-model option. No question-first intake or redundant sidebar Assistant.
 - Three work sections with nine choices. Capacity includes dispatch/economics; grid-code assessment includes the load-flow work it actually needs. Process detail and reliability remain optional additions; targets belong inside the reliability stage.
 - User-editable recommendations, per-section partial state, Select all, Clear and explicit Use example preset. Example changes preserve an edited scope; Resume preserves the saved composition. Expert and the same companion remain available throughout.
-- Six template variants in three industry cards: data center, island microgrid and hydrogen hub, each single-period/staged. Use canonical native IDs and actual period-specific sources. Staged periods are 2027/2030/2035; data-center IT is 12/24/36 MW, distinct from the 50 MW single-period campus peak.
+- One integrated-planning card each for data center, island microgrid and hydrogen hub. Click/right-click enters setup directly; the user chooses planning years, with optional advanced investment dates. The six native template variants are implementation details, not separate public choices. Use canonical native IDs and actual period-specific sources. Staged periods are 2027/2030/2035; data-center IT is 12/24/36 MW, distinct from the 50 MW single-period campus peak.
 - Ammonia (#418) is owner-reported in development and unmerged; mining follows it. Local `concept_*` IDs are preview-only. Do not pass them to project creation or execution as native template identifiers.
 - Shared stress-week inputs and synthetic office/two-shift profiles belong in Model & inputs. Synthetic profiles are made up, not measured; native annual-MWh normalization and provenance require implementation/tests. Legacy IEEE/Belgian/tutorial grids leave this focused gallery while native templates/imports/existing projects remain available.
+
+## Companion update requested for application implementation
+
+Add the three-mode hover/focus/tap menu and distinct greeting/live-text animations described in the spec. Reuse native compose/reviewed-dictation/in-page-chat handlers. Continuous voice remains unavailable; no audio/model calls are part of visual validation. This application change is a separate runtime PR from this design-publication package.
 
 ## Ordered implementation slices
 
@@ -41,6 +45,6 @@ The spec's implementation sequence and acceptance matrix govern these slices; th
 
 This PR contains design/specification documents, a local interactive prototype, original visuals, screenshots and their build/verification tools. It changes no application runtime, template data, prompts, harness policy or production activation. The separate dirty branding implementation is intentionally excluded.
 
-Preview verification passed 14 rendered-browser journey groups with 16 screenshots and zero external asset/API/model requests. Publication is followed by a clean-package regeneration/browser check. These are design journeys, not native scientific E2E. Remote CI must be described from actual current-head results, never inferred from these local checks.
+The earlier preview checkpoint passed 14 rendered-browser journey groups with 16 screenshots; see the current browser-checks.json for the revised interaction/horizon verification and zero external asset/API/model requests. Publication is followed by a clean-package regeneration/browser check. These are design journeys, not native scientific E2E. Remote CI must be described from actual current-head results, never inferred from these local checks.
 
 Owner-supplied scenario quantities and issue development status need reconciliation against current master before integration. Independent domain review and real-use calibration remain pending by owner choice. No paid model/media calls, reviewer contact, deployment or full-domain-coverage claim is part of this handoff publication.

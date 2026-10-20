@@ -166,11 +166,34 @@ Contextual “Help parameterize this stage” opens the same companion and prepa
 
 The graphite/navy dark theme and cool-neutral light theme use bright red primary actions, a light red dark-theme link color and a darker red light-theme link color. Red-tinted branding must stay distinguishable from actual danger states through semantic colors plus labels/icons, and must not recolor scientific voltage/carrier scales.
 
+## Integrated planning entry — latest owner decision
+
+This decision supersedes the earlier single-period/staged-growth buttons. Each industry has one example card. Normal click, right-click (context-menu activation on that card only), keyboard Enter/Space or tap goes directly to workflow setup; do not add a variant chooser or confirmation screen.
+
+The next phase has a **Planning period** with start/end year, retaining the existing editable activity scope. Optional investment dates belong under advanced planning settings. A same-year horizon can represent a point study; a multi-year horizon can require multiple native investment periods, with dates and growth inputs configured for the project. Users do not have to choose a “single period” or “staged” product mode.
+
+Keep horizon/period inputs project/revision-owned. Validate whole-year bounds, end >= start, date uniqueness/order/range, horizon weights, period costs/discounting, staged asset/load/connection schedules and native capabilities. Missing growth inputs stay missing; do not interpolate the data-center 12/24/36 MW values or invent utility connection limits for arbitrary years. The existing template variants are reusable native assets, not duplicate public examples or automatic conversion authority. Current drafts must not change existing saved projects or running plans without ordinary validation and approvals.
+
+Preview defaults are illustrative years 2027–2035. Native implementation must reconcile the latest Model Horizon and project-flow contracts and template/simulator eligibility. The preview does not configure the application or solve a model. Both pointer buttons enter setup only; right-click never creates/runs a project, starts capture or approves an operation. Scope recommendations remain editable and all nine activities still need the backend separability gate.
+
+## Companion modes and dimensional animation
+
+The owner requests both a design preview and application implementation. Hover or keyboard focus on the single companion exposes **Write**, **Dictate** and **Live chat**. Touch users open the same choices by tapping the character. All modes reuse the mounted assistant/session and ordinary harness admission; no second conversation engine or duplicate sidebar entry.
+
+- Write opens the native composer and focuses the retained draft.
+- Dictate opens reviewed dictation. Hover, focus or selecting the mode does not itself request microphone access, record or submit text; use its explicit recording control and native consent/readiness/error states.
+- Live chat opens the existing in-page text conversation. Continuous voice is currently unavailable and must remain clearly labeled. Do not describe an open text panel or a decorative animation as listening, recording, speaking or connected voice.
+- The dimensional character gives a short greeting/tilt on hover or focus. In-page chat uses a separate restrained orbit/breathing presentation; response work remains bound to actual work state. Approval/input waiting, errors and queued work retain their accurate labels. A decorative loop cannot certify a job, model result or media state.
+- Reduced-motion preference disables animation/transitions while keeping mode/state changes legible. All options work by keyboard/tap with explicit labels, visible focus, adequate targets, Escape/outside dismissal and focus restoration. Closing a menu never cancels running work or changes an approval.
+- The local preview shows mode/animation demonstrations only; it captures no audio, connects no voice/model and starts no work. It retains the draft when switching modes.
+
+Acceptance: hover/focus/tap reveal, pointer travel into choices, outside/Escape dismissal, callbacks exactly once, no automatic capture/send, retained draft, actual live-open vs running vs queued/approval/failed labels, continuous-voice unavailable explanation, reduced-motion startup/change, mobile/menu positioning, and native AssistantDock integration parity.
+
 ## Industry library and model-input presets — latest owner revision
 
 Use original dimensional industry illustrations, cooler graphite/steel surfaces, thin borders and a bright red accent. The supplied screenshot informs the image-led library approach only; none of its imagery, meeting content or branding is copied. The prototype contains five original, locally generated vector dioramas with all media embedded. These are illustrative scenes, not exact asset inventories or engineering readouts.
 
-Group the six existing examples into three cards with two explicit buttons each. Stable native identifiers remain distinct; choosing staged growth is not a toggle that silently converts an existing project or reuses a single-period source.
+Show one card per industry, with integrated planning years selected in the next phase. Normal click, right-click or keyboard activation goes directly to workflow setup. Do not expose single-period/staged-growth as separate example choices. The six existing native template identifiers below are implementation details; native source/project conversion still requires explicit, validated binding and cannot reuse incompatible evidence.
 
 | Card / variant | Template identifier | Owner-supplied scenario basis |
 | --- | --- | --- |
@@ -193,7 +216,7 @@ Within **Model & inputs**, offer shared scenario options, separate from the thre
 - Template load profiles, synthetic commercial-office shape, or synthetic two-shift industrial shape. Synthetic shapes are made up, not measured. Scale using the site's annual MWh and the native snapshot weighting/horizon; validate finite non-negative demand and a positive normalization integral. Treat each supported carrier and annual energy basis explicitly.
 - Preview condition drafts are per source and survive Expert round-trips; they neither create profiles nor change a model. Production persistence is project/revision-owned and must use ordinary validated effects and receipts. A new source cannot silently inherit another source's synthetic/stress parameters or validation.
 
-Additional acceptance: all six variants independently reachable; correct native ID and single/staged period/IT basis; no silent variant/project conversion; staged costs/discounting/weights and source compatibility; ammonia unmerged and mining planned notices across builder/guided/Expert/results paths; stress combinations and unsupported sites truthful; synthetic annual-MWh normalization, measured/synthetic provenance, input boundaries and stale-result invalidation; all five embedded images load in normal and script-disabled viewing; both themes remain legible and use the single companion.
+Additional acceptance: one example per industry; normal click/right-click/keyboard direct entry; retained per-example start/end year and optional investment dates; invalid ranges/date schedules blocked before execution; correct underlying native ID and period/IT basis; no silent existing-project conversion; staged costs/discounting/weights and source compatibility; ammonia unmerged and mining planned notices across builder/guided/Expert/results paths; stress combinations and unsupported sites truthful; synthetic annual-MWh normalization, measured/synthetic provenance, input boundaries and stale-result invalidation; all five embedded images load in normal and script-disabled viewing; both themes remain legible and use the single companion.
 
 ## Expert navigation map
 

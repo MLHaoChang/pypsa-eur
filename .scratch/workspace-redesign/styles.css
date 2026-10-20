@@ -133,3 +133,20 @@ h1{font-size:36px;font-weight:650;letter-spacing:-1.5px}
 @media(max-width:580px){.example-library{grid-template-columns:1fr}.example-actions button{min-height:44px}.example-actions small{display:inline}.upcoming-grid .demo{display:flex}.upcoming-grid .demo-art{aspect-ratio:1.8;border-bottom:1px solid var(--line);border-right:0}.upcoming-grid .media-badge{left:12px;top:12px;font-size:8px}.upcoming-grid .demo h3{font-size:21px}.study-conditions select{font-size:12px}}
 
 .condition-field{display:flex;flex-direction:column;gap:8px}.condition-field input,.condition-field select{min-height:40px}
+
+/* Companion modes: no hover/focus event requests audio, sends a message or runs work. */
+#companion-controls{position:fixed;right:26px;bottom:22px;z-index:7;padding-top:12px}
+#companion-controls #companion{position:relative;right:auto;bottom:auto}
+.companion-mode-menu{position:absolute;bottom:100%;right:0;width:250px;padding:7px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 14px 45px #00000035}
+.companion-mode-menu button{display:flex;flex-direction:column;gap:5px;padding:12px;width:100%;text-align:left;border-radius:6px;min-height:54px}
+.companion-mode-menu button:hover,.companion-mode-menu button:focus-visible{background:var(--chip)}
+.companion-mode-menu b{font-size:12px}.companion-mode-menu small{font-size:10px;color:var(--muted)}
+.mode-info{margin:14px 20px 0;font-size:10px;color:var(--muted);line-height:1.8}
+#companion[data-mode='live'] .pearl:after{inset:-5px;border-color:var(--action);border-right-color:transparent;border-bottom-color:transparent}
+@media(prefers-reduced-motion:no-preference){#companion-controls:hover .pearl,#companion-controls:focus-within .pearl{animation:pearl-greet .65s ease-in-out}#companion[data-mode='live'] .pearl{animation:pearl-live 2.8s ease-in-out infinite}#companion[data-mode='live'] .pearl:after{animation:pearl-orbit 3s linear infinite}}
+@keyframes pearl-greet{0%,100%{transform:translateY(0) rotate(0)}40%{transform:translateY(-5px) rotate(-8deg)}75%{transform:translateY(-2px) rotate(5deg)}}
+@keyframes pearl-live{0%,100%{transform:translateY(0);filter:brightness(1)}50%{transform:translateY(-3px);filter:brightness(1.08)}}
+@keyframes pearl-orbit{to{transform:rotate(360deg)}}
+@media(max-width:580px){#companion-controls{right:18px;bottom:10px;padding:0}#companion-controls #companion{bottom:0;right:0}.companion-mode-menu{bottom:calc(100% + 10px);width:min(270px,calc(100vw - 36px))}}
+
+.planning-controls{display:block!important;margin-top:14px;padding-top:16px;border-top:1px solid var(--line)}.planning-controls h3{font-size:12px}.planning-fields{display:flex;align-items:center;gap:12px;margin:15px 0}.planning-fields label{font-size:10px}.planning-controls input{min-width:0;width:100px;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:10px;font-size:11px}.planning-controls details{font-size:10px}.planning-controls details label{display:block;margin:12px 0 7px}.planning-controls details input{width:100%}#planning-error:not(:empty){color:var(--warn)}@media(max-width:580px){.planning-fields{display:grid;grid-template-columns:1fr 1fr}.planning-fields input{width:100%}.planning-fields input,.planning-controls details input{min-height:44px}}

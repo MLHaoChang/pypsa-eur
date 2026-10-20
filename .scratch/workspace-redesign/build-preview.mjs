@@ -30,7 +30,8 @@ const fallbackExamples=[
  {id:'concept_ammonia',title:'Ammonia production',art:'ammonia',note:'50 / 100 / 150 t/day · #418 in development, not merged',status:'IN DEVELOPMENT · #418'},
  {id:'concept_mining',title:'Mining & minerals',art:'mining',note:'Planned after ammonia · template setup required',status:'PLANNED · AFTER AMMONIA'},
 ];
-const fallbackCard=example=>`<article class="demo"><div class="demo-art"><img src="${industryMedia[example.art]}" alt="" width="960" height="600"><span class="media-badge">${example.status??'SINGLE PERIOD + STAGED GROWTH'}</span></div><div class="demo-body"><h3>${example.title}</h3><p>${example.note}</p><div class="example-actions"><button data-demo="${example.id}">${example.staged?'Single-period workflow':'Preview workflow'} →</button>${example.staged?`<button data-demo="${example.staged}">Staged growth <small>2027 / 2030 / 2035</small> →</button>`:''}</div></div></article>`;
+const fallbackCard=example=>`<button class="demo" data-demo="${example.id}"><div class="demo-art"><img src="${industryMedia[example.art]}" alt="" width="960" height="600"><span class="media-badge">${example.status??'CONFIGURABLE PLANNING HORIZON'}</span></div><div class="demo-body"><h3>${example.title}</h3><p>${example.note}</p><span class="demo-link">${example.staged?'Plan this example':'Preview workflow'} →</span></div></button>`;
+
 const fallbackNav = `<div><p class="nav-label">WORKSPACE</p><nav class="home-nav" aria-label="Home sections"><button class="nav-item active" data-home-tab="overview">Overview</button><button class="nav-item" data-home-tab="examples">Examples</button><button class="nav-item" data-home-tab="projects">My projects</button></nav></div>`;
 // Keep the first screen readable if an attachment viewer disables JavaScript.
 // The live script replaces this small static fallback with the full design.

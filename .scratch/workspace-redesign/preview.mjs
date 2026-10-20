@@ -26,7 +26,7 @@ try {
  const openExample=async id=>{await preview('Home');if(!await page.locator(`[data-demo="${id}"]`).count())await page.getByRole('button',{name:'All examples',exact:false}).click();await page.locator(`[data-demo="${id}"]`).click();};
  const check=id=>page.locator(`[data-module="${id}"]`);
  const stage=id=>page.locator(`.step-list [data-step="${id}"]`);
- const photo=async name=>{await page.locator('#toast').evaluate(element=>{element.textContent='';});await page.locator('#main').focus();await page.screenshot({path:path.join(output,name+'.png'),fullPage:true});};
+ const photo=async (name,keepFocus=false)=>{await page.locator('#toast').evaluate(element=>{element.textContent='';});if(!keepFocus)await page.locator('#main').focus();await page.screenshot({path:path.join(output,name+'.png'),fullPage:true});};
  const noOverflow=async()=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&document.querySelector('#shell').scrollWidth<=document.querySelector('#shell').clientWidth),true,'Horizontal overflow');
  const checkContrast=async()=>{
   const colors=await page.evaluate(()=>{
@@ -44,7 +44,7 @@ try {
  assert.equal(await page.getByText('Start with a question',{exact:true}).count(),0);
  assert.equal(await page.locator('.example-library .demo').count(),3);
  assert.equal(await page.locator('.upcoming-grid .demo').count(),2);
- assert.equal(await page.locator('[data-demo]').count(),8);
+ assert.equal(await page.locator('[data-demo]').count(),5);
  assert.equal(await page.locator('body').evaluate(element=>element.classList.contains('dark')),true);
  await page.waitForFunction(()=>[...document.querySelectorAll('[data-industry]')].every(image=>image.complete&&image.naturalWidth===960&&image.src.startsWith('data:image/svg+xml;base64,')));
  assert.equal(await page.locator('[data-industry]').count(),5);
@@ -59,28 +59,33 @@ try {
  await noOverflow();await photo('home-light');
  groups.push('Overview: direct guided entry, example/generic choices, explicit Resume, cool industrial palette and bright red actions, embedded font and logo');
 
- for(const id of ['eh_datacenter_staged','eh_h2_hub_staged','eh_microgrid_staged']){
+ for(const id of ['eh_datacenter','eh_h2_hub','eh_microgrid']){
   await openExample(id);assert.equal(await page.getByLabel('Starting model').inputValue(),id);
-  assert.match(await page.locator('.scenario-context').textContent(),/2027.*2030.*2035/s);
-  await page.locator('#start-workflow').click();await stage('model').click();
-  assert.equal(await page.getByLabel('Stress week').locator('option').count(),4);
-  assert.equal(await page.getByLabel('Load shape').locator('option').count(),3);
+  assert.equal(await page.getByLabel('Start year').inputValue(),'2027');
+  assert.equal(await page.getByLabel('End year').inputValue(),'2035');
+  assert.equal(await page.getByLabel('Starting model').locator('option').count(),6);
  }
- await stage('capacity').click();assert.equal(await page.getByLabel('Investment periods').inputValue(),'2027 / 2030 / 2035');
- await openExample('eh_datacenter_staged');await page.locator('#start-workflow').click();await stage('capacity').click();
- assert.match(await page.getByLabel('Period-specific demand basis').inputValue(),/12.*24.*36/);
- await stage('model').click();await page.getByLabel('Stress week').selectOption('heatwave');
- await page.getByLabel('Load shape',{exact:true}).selectOption('office');
- await page.getByLabel('Annual energy for synthetic load (MWh)').fill('120000');
- await page.getByLabel('Annual energy for synthetic load (MWh)').dispatchEvent('change');
+ await preview('Home');await page.locator('[data-demo="eh_datacenter"]').click({button:'right'});
+ assert.equal(await page.getByLabel('Starting model').inputValue(),'eh_datacenter');
+ await page.getByLabel('Start year').fill('2028');await page.getByLabel('End year').fill('2027');
+ assert.equal(await page.locator('#start-workflow').isDisabled(),true);
+ assert.match(await page.locator('#planning-error').textContent(),/end year/);
+ await page.getByLabel('End year').fill('2040');assert.equal(await page.locator('#start-workflow').isDisabled(),false);
+ await page.getByText('Advanced planning dates',{exact:true}).click();await page.getByLabel('Investment dates (draft)').fill('2030, 2030');assert.equal(await page.locator('#start-workflow').isDisabled(),true);
+ await page.getByLabel('Investment dates (draft)').fill('2030, 2040');assert.equal(await page.locator('#start-workflow').isDisabled(),false);
+ await preview('Expert');await preview('Builder');
+ assert.equal(await page.getByLabel('Start year').inputValue(),'2028');assert.equal(await page.getByLabel('End year').inputValue(),'2040');
+ await page.locator('#start-workflow').click();await stage('model').click();
+ assert.equal(await page.getByLabel('Stress week').locator('option').count(),4);
+ assert.equal(await page.getByLabel('Load shape').locator('option').count(),3);
+ await page.getByLabel('Stress week').selectOption('heatwave');await page.getByLabel('Load shape',{exact:true}).selectOption('office');
+ await page.getByLabel('Annual energy for synthetic load (MWh)').fill('120000');await page.getByLabel('Annual energy for synthetic load (MWh)').dispatchEvent('change');
  await preview('Expert');await preview('Guided');
- assert.equal(await page.getByLabel('Stress week').inputValue(),'heatwave');
- assert.equal(await page.getByLabel('Load shape',{exact:true}).inputValue(),'office');
+ assert.equal(await page.getByLabel('Stress week').inputValue(),'heatwave');assert.equal(await page.getByLabel('Load shape',{exact:true}).inputValue(),'office');
  assert.equal(await page.getByLabel('Annual energy for synthetic load (MWh)').inputValue(),'120000');
  await photo('staged-inputs');
- await openExample('eh_h2_hub_staged');await page.locator('#start-workflow').click();await stage('model').click();
- assert.equal(await page.getByLabel('Stress week').inputValue(),'baseline');
- assert.equal(await page.getByLabel('Annual energy for synthetic load (MWh)').isDisabled(),true);
+ await openExample('eh_h2_hub');await page.locator('#start-workflow').click();await stage('model').click();
+ assert.equal(await page.getByLabel('Stress week').inputValue(),'baseline');assert.equal(await page.getByLabel('Annual energy for synthetic load (MWh)').isDisabled(),true);
  await openExample('concept_ammonia');assert.match(await page.locator('.source-readiness').textContent(),/#418.*not merged/);
  assert.match(await page.locator('.scenario-context').textContent(),/50, 100 and 150/);
  await openExample('concept_mining');assert.match(await page.locator('.source-readiness').textContent(),/planned after ammonia/);
@@ -89,8 +94,8 @@ try {
  assert.match(await page.locator('.form-card .source-readiness').textContent(),/not a bundled or execution-ready model/);
  await preview('Expert');assert.match(await page.locator('#main .source-readiness').textContent(),/planned after ammonia/);
  await preview('Guided');await stage('capacity').click();assert.equal(await page.getByLabel('Native template readiness').inputValue(),'Template setup required — preview only');
- groups.push('Industry catalogue: six single/staged templates in three image-led cards, ammonia unmerged and mining planned; legacy grid examples absent; all five original visuals embedded');
- groups.push('Model-input options: stress-week and synthetic-profile choices, annual-MWh draft retained across Expert, separate per source; staged period/IT basis distinct; no generated profiles or runs');
+ groups.push('Industry catalogue: three integrated-planning industry cards with editable years and direct click/right-click entry, ammonia unmerged and mining planned; legacy grid examples absent; all five original visuals embedded');
+ groups.push('Model-input options: stress-week and synthetic-profile choices, annual-MWh draft retained across Expert, separate per source; invalid horizons blocked and horizon drafts retained; no generated profiles or runs');
  await preview('Home');
  await page.getByRole('button',{name:'Configure workflow',exact:false}).click();
  assert.equal(await page.locator('[data-module]').count(),9);
@@ -226,6 +231,21 @@ try {
  assert.equal(await page.getByRole('button',{name:'Assistant',exact:true}).count(),0);
  groups.push('One companion: stage-specific parameterization draft, no automatic send/edit, draft survives modes, keyboard close/focus and Expert search');
 
+ await page.getByRole('button',{name:'Open GridSpine companion',exact:true}).hover();
+ assert.equal(await page.getByRole('group',{name:'GridSpine conversation options'}).isVisible(),true);
+ await photo('companion-modes',true);
+ await page.getByRole('button',{name:'Dictate',exact:false}).click();
+ assert.match(await page.locator('#mode-info').textContent(),/microphone off/);
+ await page.locator('#message').fill('Retain this reviewed draft');await page.locator('#companion').hover();
+ await page.getByRole('button',{name:'Live chat',exact:false}).click();
+ assert.equal(await page.locator('#companion').getAttribute('data-mode'),'live');
+ assert.match(await page.locator('#mode-info').textContent(),/No microphone, model or backend/);
+ assert.equal(await page.locator('#message').inputValue(),'Retain this reviewed draft');
+ assert.equal(await page.locator('#companion .pearl').evaluate(element=>getComputedStyle(element).animationName),'none');
+ await page.emulateMedia({reducedMotion:'no-preference'});
+ assert.equal(await page.locator('#companion .pearl').evaluate(element=>getComputedStyle(element).animationName),'pearl-live');
+ await photo('companion-live');await page.emulateMedia({reducedMotion:'reduce'});await page.keyboard.press('Escape');
+ groups.push('Companion modes: hover/focus choice, reviewed dictation and live-text previews, no capture/send, retained draft, distinct live animation and reduced-motion suppression');
  await preview('Builder');await page.getByRole('button',{name:'Switch to dark theme'}).click();await checkContrast();await photo('builder-dark');
  await preview('Home');await photo('home-dark');await page.getByRole('button',{name:'Switch to light theme'}).click();
  await page.setViewportSize({width:390,height:844});
@@ -246,6 +266,6 @@ try {
  await staticPage.screenshot({path:path.join(output,'static-fallback.png'),fullPage:true});await fallback.close();
  assert.deepEqual(requests,[entry,entry]);assert.deepEqual(blocked,[]);assert.deepEqual(errors,[]);
  groups.push('Portable preview: bundled HTML only, zero missing resources, styled JavaScript-disabled fallback and zero page errors/API/model calls');
- await writeFile(path.join(directory,'browser-checks.json'),JSON.stringify({purpose:'Modern industry-library and three-section design checks only; not native application E2E or scientific evidence',generatedAt:new Date().toISOString(),groupsPassed:groups.length,groups,standaloneHtml:true,viewports:['1600x1100','390x844'],reducedMotion:true,pageErrors:errors,externalRequests:blocked,apiRequests:0,paidCalls:0,screenshots:['home-light','builder-light','guided-light','expert-light','guided-companion','builder-dark','home-dark','home-mobile','builder-mobile','guided-mobile','expert-mobile','static-fallback','preset-datacenter','preset-hydrogen','home-modern','staged-inputs']},null,2)+'\n');
- process.stdout.write(`${groups.length} design journey groups passed; 16 previews saved. No external assets/API/model requests.\n`);
+ await writeFile(path.join(directory,'browser-checks.json'),JSON.stringify({purpose:'Modern industry-library and three-section design checks only; not native application E2E or scientific evidence',generatedAt:new Date().toISOString(),groupsPassed:groups.length,groups,standaloneHtml:true,viewports:['1600x1100','390x844'],reducedMotion:true,pageErrors:errors,externalRequests:blocked,apiRequests:0,paidCalls:0,screenshots:['home-light','builder-light','guided-light','expert-light','guided-companion','builder-dark','home-dark','home-mobile','builder-mobile','guided-mobile','expert-mobile','static-fallback','preset-datacenter','preset-hydrogen','home-modern','staged-inputs','companion-modes','companion-live']},null,2)+'\n');
+ process.stdout.write(`${groups.length} design journey groups passed; 18 previews saved. No external assets/API/model requests.\n`);
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

@@ -22,10 +22,18 @@
   <section id="chat" role="dialog" aria-modal="false" aria-labelledby="chat-title" hidden>
     <div class="chat-head"><div><span class="eyebrow">YOUR COMPANION</span><h2 id="chat-title">GridSpine</h2></div><button id="close-chat" class="icon-btn" aria-label="Close companion">×</button></div>
     <p class="context-chip" id="chat-context">Context: workspace overview</p>
+    <p id="mode-info" class="mode-info" role="status">Write · review your message before sending.</p>
     <div class="chat-messages" id="messages"><p>I can help you connect analyses, parameterize your model, or explore your results. Proposed changes still need the ordinary checks and approvals.</p><p class="fine">This is a visual prototype. Messages stay here; no model or backend is connected.</p></div>
     <form id="chat-form"><label class="sr-only" for="message">Message GridSpine</label><textarea id="message" placeholder="Ask about this workspace…" rows="2"></textarea><div class="compose-footer"><span>Preview only · no message sent</span><button type="submit" aria-label="Preview message">↑</button></div></form>
   </section>
+  <div id="companion-controls">
+    <div id="companion-actions" class="companion-mode-menu" role="group" aria-label="GridSpine conversation options" hidden>
+      <button data-conversation-mode="write"><b>Write</b><small>Type a message</small></button>
+      <button data-conversation-mode="dictate"><b>Dictate</b><small>Review speech as text</small></button>
+      <button data-conversation-mode="live"><b>Live chat</b><small>Text on this page · voice unavailable</small></button>
+    </div>
   <button id="companion" aria-label="Open GridSpine companion" aria-expanded="false" aria-controls="chat"><span class="pearl"><span class="pearl-face"><i></i><i></i><b></b></span></span><span class="companion-label">Ask GridSpine</span></button>
+  </div>
   <div id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>
