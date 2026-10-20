@@ -1,0 +1,1 @@
+* Docs(project-workflow): design historical price checks, European PPA defaults, the data flows and staleness between work groups, switching a group on later, and base-plus-N sensitivity cases with side-by-side comparison.
