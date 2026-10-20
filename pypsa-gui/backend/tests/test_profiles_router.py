@@ -664,3 +664,131 @@ def test_generate_for_a_generator_without_coordinates_queues_nothing(
     ).json()
     assert pending["pending"] == []
     assert pending.get("jobs", []) == []
+
+
+# ---------------------------------------------------------------------------
+# RP-06: shaping writes a NEW pending artifact (never the network); apply is
+# still the only writer and keeps the calibration provenance
+# ---------------------------------------------------------------------------
+
+
+def _shape(client, name, job_id, ops, **extra):
+    return client.post(f"/api/projects/{name}/profiles/shape",
+                       json={"job_id": job_id, "ops": ops, **extra})
+
+
+def test_shape_writes_a_new_pending_artifact_and_not_the_network(
+    client, wind_project, completed_job,
+):
+    resp = _shape(client, wind_project, completed_job["id"],
+                  [{"op": "target_flh", "hours": 2000}])
+    assert resp.status_code == 200, resp.text
+    out = resp.json()
+    assert out["job_id"] != completed_job["id"]
+    assert out["parent_job"] == completed_job["id"]
+    assert abs(out["stats"]["g_wind"]["result_stats"]["flh"] - 2000) < 10
+
+    pending = client.get(f"/api/projects/{wind_project}/profiles/pending"
+                         ).json()["pending"]
+    shaped = [p for p in pending if p["job_id"] == out["job_id"]]
+    assert len(shaped) == 1
+    assert shaped[0]["calibrated"] is True
+    assert shaped[0]["parent_job"] == completed_job["id"]
+    # the network is untouched until apply
+    payload = client.get("/api/network/timeseries/generators/p_max_pu").json()
+    assert "g_wind" not in payload["columns"]
+
+
+def test_applying_a_shaped_artifact_keeps_its_calibration_provenance(
+    client, wind_project, completed_job, session_ctx,
+):
+    shaped = _shape(client, wind_project, completed_job["id"],
+                    [{"op": "tail_damp", "side": "low", "beyond_q": 0.2,
+                      "factor": 0.5}]).json()
+    resp = client.post(
+        f"/api/projects/{wind_project}/profiles/apply",
+        json={"job_id": shaped["job_id"], "component": "g_wind"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    meta = session_ctx(client).user_ts_meta[
+        ("generators", "p_max_pu", "g_wind")]
+    assert meta["calibrated"] is True
+    assert meta["parent_job"] == completed_job["id"]
+    assert meta["shaping"]["g_wind"]["ops"][0]["op"] == "tail_damp"
+
+
+def test_shape_with_an_unreachable_target_is_a_typed_refusal(
+    client, wind_project, completed_job,
+):
+    resp = _shape(client, wind_project, completed_job["id"],
+                  [{"op": "target_flh", "hours": 8700}])
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert detail["error_kind"] == "unreachable_target"
+    assert detail["reachable_max"] < 8760
+
+
+def test_shape_with_an_unknown_op_is_a_typed_refusal(client, wind_project,
+                                                      completed_job):
+    resp = _shape(client, wind_project, completed_job["id"],
+                  [{"op": "make_it_windier"}])
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "invalid_shape_op"
+
+
+def test_shape_with_an_unknown_job_is_a_404(client, wind_project):
+    resp = _shape(client, wind_project, "no-such-job",
+                  [{"op": "target_flh", "hours": 2000}])
+    assert resp.status_code == 404
+
+
+def test_shape_on_another_orgs_project_is_a_404(other_org_client):
+    resp = _shape(other_org_client, "Profile Farm", "any",
+                  [{"op": "target_flh", "hours": 2000}])
+    assert resp.status_code == 404
+
+
+def test_shape_with_an_empty_points_list_is_a_typed_refusal(
+    client, wind_project, completed_job,
+):
+    resp = _shape(client, wind_project, completed_job["id"],
+                  [{"op": "target_flh", "hours": 2000}], points=[])
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "no_points"
+
+
+def test_shape_with_a_malformed_job_id_is_a_typed_refusal(client,
+                                                          wind_project):
+    resp = _shape(client, wind_project, "../escape",
+                  [{"op": "target_flh", "hours": 2000}])
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "malformed_job_id"
+
+
+def test_reshaping_a_shaped_profile_keeps_the_whole_op_chain(
+    client, wind_project, completed_job, session_ctx,
+):
+    """Gatekeeper (#432): a second shaping round must not drop the first —
+    the applied meta lists both ops in order, the generated root job and
+    the root's stats, even after the first round's artifact is gone."""
+    first = _shape(client, wind_project, completed_job["id"],
+                   [{"op": "target_flh", "hours": 2000}]).json()
+    second = _shape(client, wind_project, first["job_id"],
+                    [{"op": "peak_shift", "hours": 2}])
+    assert second.status_code == 200, second.text
+    second = second.json()
+    resp = client.post(
+        f"/api/projects/{wind_project}/profiles/apply",
+        json={"job_id": second["job_id"], "component": "g_wind"},
+    )
+    assert resp.status_code == 200, resp.text
+    meta = session_ctx(client).user_ts_meta[
+        ("generators", "p_max_pu", "g_wind")]
+    chain = meta["shaping"]["g_wind"]
+    assert [o["op"] for o in chain["ops"]] == ["target_flh", "peak_shift"]
+    assert meta["origin_job"] == completed_job["id"]
+    assert meta["parent_job"] == first["job_id"]
+    root = first["stats"]["g_wind"]["parent_stats"]
+    assert chain["parent_stats"] == root
+    assert abs(chain["result_stats"]["flh"] - 2000) < 10
