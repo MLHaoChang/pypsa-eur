@@ -203,7 +203,7 @@ def build_eh_datacenter(phases=None, load_spec=None) -> pypsa.Network:
         return _staged_datacenter(n, phases, load_spec)
     if load_spec is not None:
         _apply_dc_profile(n, load_spec, SNAPSHOTS, _single_year_phase(load_spec).it_mw,
-                          timezone=None)
+                          timezone=_dc_timezone("eh_datacenter"))
     return n
 
 

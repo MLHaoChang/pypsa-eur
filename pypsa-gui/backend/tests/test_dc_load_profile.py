@@ -7,7 +7,6 @@ center templates keep today's load bit for bit.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import pathlib
 import sys
@@ -25,11 +24,27 @@ sys.path.insert(0, str(BACKEND / "project_templates"))
 import eh_templates as T  # noqa: E402
 
 DC_IDS = ("eh_datacenter", "eh_datacenter_staged")
-#: sha256 of each template's default p_set on master 67a90b5e (before 01).
-DEFAULT_P_SET_SHA = {
-    "eh_datacenter": "f2909d51355732c26e6690db80ffb0b1358ff8cb7ec5e226f9a8f78a67964262",
-    "eh_datacenter_staged": "e0a7c8caf5686cecdadce47bc64375e97736c5830bfc003f42c56fa6fd31dce5",
-}
+
+
+def _master_p_set(staged: bool) -> pd.DataFrame:
+    """The data center's load as master 67a90b5e builds it (before 01),
+    re-derived here in the running environment: a pinned hash is not
+    portable, since exp/normal differ in the last bit across numpy builds."""
+    rng = np.random.default_rng(11)
+    flat = pd.DataFrame({
+        "it_load": 36.0 + rng.normal(0.0, 0.6, T.HOURS),
+        "cooling": T._day_shape(8.0, 14.0),
+        "offices": T._day_shape(0.4, 1.6, peak_hour=12.0, width=3.0),
+    }, index=T.SNAPSHOTS)
+    if not staged:
+        return flat
+    years = [y for y, _it, _pue in T.DC_PHASES]
+    out = pd.DataFrame(np.tile(flat.to_numpy(), (len(years), 1)), columns=flat.columns,
+                       index=pd.MultiIndex.from_product([years, T.SNAPSHOTS]))
+    for y, it_mw, _pue in T.DC_PHASES:
+        for load in ("it_load", "cooling"):
+            out.loc[y, load] = (out.loc[y, load] * (it_mw / 36.0)).to_numpy()
+    return out
 
 
 def _spec(**kw) -> DataCentreLoadSpec:
@@ -39,8 +54,6 @@ def _spec(**kw) -> DataCentreLoadSpec:
     return DataCentreLoadSpec(**{**base, **kw})
 
 
-def _sha(df: pd.DataFrame) -> str:
-    return hashlib.sha256(np.ascontiguousarray(df.to_numpy(dtype=float)).tobytes()).hexdigest()
 
 
 # ── the default build is unchanged ──────────────────────────────────────────
@@ -48,7 +61,10 @@ def _sha(df: pd.DataFrame) -> str:
 
 @pytest.mark.parametrize("tid", DC_IDS)
 def test_without_the_opt_in_the_load_is_bit_for_bit_unchanged(tid):
-    assert _sha(T.BUILDERS[tid]().loads_t.p_set) == DEFAULT_P_SET_SHA[tid]
+    got = T.BUILDERS[tid]().loads_t.p_set
+    want = _master_p_set(tid == "eh_datacenter_staged")
+    assert list(got.columns) == list(want.columns)
+    assert np.array_equal(got.to_numpy(dtype=float), want.to_numpy(dtype=float))   # bit for bit
 
 
 def test_existing_spec_json_still_round_trips():
@@ -162,7 +178,8 @@ def _solve(n):
 @pytest.mark.parametrize("tid", DC_IDS)
 def test_the_template_solves_with_the_profile(tid):
     n = T.BUILDERS[tid](load_spec=T.dc_load_spec(tid, {}))
-    assert _sha(n.loads_t.p_set) != DEFAULT_P_SET_SHA[tid]
+    assert not np.array_equal(n.loads_t.p_set.to_numpy(dtype=float),
+                              _master_p_set(tid == "eh_datacenter_staged").to_numpy(dtype=float))
     assert _solve(n) == ("ok", "optimal")
 
 
