@@ -543,3 +543,25 @@ def apply_profile(
     if warning:
         summary["warning"] = warning
     return summary
+
+
+@project_router.get("/{name}/profiles/readiness")
+def profile_readiness(
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+):
+    """Every wind/solar generator on the open project's network with its
+    coordinate source, profile state, provenance and staleness (RP-02).
+    Read-only; the project must be the open one, as for apply."""
+    from services.profile_gen.readiness import readiness_rows
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.get_active_context()
+    if ctx.loaded_project not in (None, proj.name):
+        raise HTTPException(
+            status_code=409,
+            detail=f"'{proj.name}' is not the open project "
+                   f"(the foreground holds {ctx.loaded_project!r}); "
+                   "open it first",
+        )
+    return {"generators": readiness_rows(ctx)}

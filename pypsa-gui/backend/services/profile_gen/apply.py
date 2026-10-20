@@ -87,6 +87,13 @@ TIME_BASIS_ASSUMED_WARNING = (
 )
 
 
+def carrier_flags(carrier: str) -> tuple[bool, bool]:
+    """(is_wind, is_solar) for a generator carrier — the one rule for
+    which assets a generated profile applies to (apply, readiness)."""
+    cl = str(carrier or "").lower()
+    return "wind" in cl, ("solar" in cl or "pv" in cl)
+
+
 def _commercial_timezone(ctx) -> str | None:
     state = getattr(ctx, "solver_state", None) or {}
     cfg = state.get("solver_config") if isinstance(state, Mapping) else None
@@ -534,9 +541,7 @@ def assign_profile(
             f"generator {component!r} not found on the network"
         )
     carrier = str(n.generators.at[component, "carrier"] or "")
-    cl = carrier.lower()
-    is_wind = "wind" in cl
-    is_solar = "solar" in cl or "pv" in cl
+    is_wind, is_solar = carrier_flags(carrier)
     if not (is_wind or is_solar):
         raise CarrierMismatchError(
             f"generator {component!r} has carrier {carrier!r}; generated "

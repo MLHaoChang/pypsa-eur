@@ -1469,6 +1469,20 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id"],
     ),
     _t(
+        "get_profile_readiness",
+        "Every wind/solar generator on the open project with its coordinate "
+        "source (bus or missing), profile state (none, uploaded, generated, "
+        "network_native), the generated profile's provenance (source, "
+        "weather year, preset, resolution, time basis, calibrated) and "
+        "stale_reason (bus_moved, bus_missing_coordinates). Read it before "
+        "generating: generate defaults for rows with coordinates and no "
+        "profile, never overwrite an uploaded profile unasked, and name the "
+        "missing-coordinates rows with both remedies. `project_id` is the "
+        "project NAME and must be the open project. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
         "generate_renewable_profile",
         "Queue a renewable-profile generation for a project as a solve-queue "
         "job (kind profile_gen) and answer the job — it does NOT complete "
@@ -3950,6 +3964,7 @@ TOOL_ROUTES: dict[str, list] = {
     "get_profile_parameters": _SERVICE_CALL,
     "preview_renewable_profile": [("POST", "/api/profiles/estimate")],
     "list_pending_profiles": [("GET", "/api/projects/{name}/profiles/pending")],
+    "get_profile_readiness": [("GET", "/api/projects/{name}/profiles/readiness")],
     "generate_renewable_profile": [("POST", "/api/projects/{name}/profiles/generate")],
     "apply_generated_profile": [("POST", "/api/projects/{name}/profiles/apply")],
     # project_mgmt (21)

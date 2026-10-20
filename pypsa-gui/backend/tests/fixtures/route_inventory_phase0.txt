@@ -265,6 +265,7 @@ PUT     /api/projects/{name}/members                                            
 POST    /api/projects/{name}/profiles/apply                                        -> apply_profile_api_projects__name__profiles_apply_post
 POST    /api/projects/{name}/profiles/generate                                     -> generate_profiles_api_projects__name__profiles_generate_post
 GET     /api/projects/{name}/profiles/pending                                      -> list_pending_profiles_api_projects__name__profiles_pending_get
+GET     /api/projects/{name}/profiles/readiness                                    -> profile_readiness_api_projects__name__profiles_readiness_get
 POST    /api/projects/{name}/rename                                                -> rename_project_api_projects__name__rename_post
 GET     /api/projects/{name}/reports                                               -> list_reports_api_projects__name__reports_get
 POST    /api/projects/{name}/reports                                               -> create_report_api_projects__name__reports_post
