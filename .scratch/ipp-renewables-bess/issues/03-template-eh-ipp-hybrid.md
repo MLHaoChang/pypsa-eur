@@ -1,0 +1,54 @@
+# The template `eh_ipp_hybrid`
+
+Status: needs-triage
+Type: task
+Blocked by: 01, 02, owner Q-IPP1–5
+Gated: **yes** (G5: IC semantics on a generation-only site); UX for the wizard and StartCard lines
+Model tier: opus
+Size: L
+
+Read [the spec](../spec.md) §2, §6 and §8 first. The id and the numbers follow the owner's
+Q-IPP answers.
+
+## What to build
+
+1. **Module** `project_templates/eh_ipp.py`, registered from `eh_templates.py` like
+   `eh_ammonia.py` (`register(T)`):
+   - the network of spec §2.1, single period, 8 760 h of 2030;
+   - CF profiles from `services.profile_gen.generate_profile(source="synthetic")` at the pin;
+   - the three price shapes of §2.3, generated deterministically and written to `price_series/`
+     (ticket 02);
+   - every number in the ledger, with its label (`assumed`, `illustrative`, `pack`, `generated`).
+2. **Sidecars**:
+   - `eh_template.json`: meta, ledger, groups pre-fill, `not_needed` sections with their reasons;
+   - `solver_config.json`: commercial with the `custom` value flows and the PPA, and finance per §6;
+   - `cases.json` (ticket 04).
+
+   No `adequacy_stress_scenarios.json` unless the validator requires one; no island sidecar.
+3. **G5**: the plants are forced-size candidates. Tests:
+   - the IC builds with an empty counterfactual;
+   - incremental = total;
+   - billing on a site with no load is clean.
+4. **The #418 checklist**:
+   - `_build.py`: feasibility solve, with the solve time recorded;
+   - `routers/projects.py` `_TEMPLATE_DEFAULT_NAMES`;
+   - `NewProjectWizard.tsx` `TEMPLATES`;
+   - `StartCard.tsx` `PURPOSE`, and the order and count in `StartCard.test.tsx`;
+   - the `harness/catalogue.py` description and enum;
+   - `tests/test_validation_gen_costs.py` `_EXEMPT` (the grid slack);
+   - `test_energy_hub_templates.py`;
+   - the `.scratch/live-voice/capability-inventory.json` refresh;
+   - `smoke/check_bundle.py` if a pack version is added;
+   - a release-note fragment.
+5. **Template test** `tests/test_eh_ipp.py`:
+   - feasible;
+   - the battery size is within its bounds;
+   - export never exceeds the limit;
+   - curtailment occurs at negative prices and at the limit;
+   - capture rate below 1 for PV on `da_base`;
+   - the PPA settlement and NPV/IRR are established (not `None`);
+   - every price carries `illustrative`.
+
+## Acceptance
+
+Spec §8.2's state column holds on a freshly created project (`GET /flow`).
