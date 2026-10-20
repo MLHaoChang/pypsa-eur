@@ -296,6 +296,7 @@ The lists below are the parameters a Guided user sets today (generic-site form, 
 | **Grid design & grid-code compliance** (incl. the load flow it needs) | template or user | 3: grid-code profile, ramp MW/min, oscillation band, PF; 5: lines, transformers, electrical infrastructure; 8: load flow, N-1 | `loadflow` (after the gate, §11.1). N-1 SCLOPF is an option of `optimisation`, so it needs no new kind. The grid-readiness scorecard is an **advisory read** shown in 9, never a run kind and never in the `run_ready` AND (gatekeeper; DC-02 plan; R1–R4) | Grid plan: load flow, scorecard, campus electrical (PCC compliance, transformers, reactive compensation, short circuit), connection capacity, connection-point assessment |
 | **Control strategy** | template or user | 5: the Controls block of each converter-coupled asset; 8: island requirements | `control_checks` (after the gate) | Controls: island report, frequency cuts, grid-forming recommendation |
 | **Hand-off to others** | always (owner, Q1 = A: the fourth group card) | 10: deliverable choices (report variant per party, export formats, specialist packet); no input section | none | Hand-off: reports (per-party variant, C4), exports (bundle, NetCDF, Excel, CSV, MATPOWER), the specialist packet (Planning → dynamics export, PowerFactory read-back) |
+| **Commercial & finance** (owner Q7 = A, 2026-10-20) | always on by default; can be switched off | 7: Prices & tariffs, Contracts & PPAs, Markets, Finance, Parties ([commercial-finance.md](commercial-finance.md)) | the LP's tariff and PPA bindings (inside `optimisation`); `investment_case` after the gate | Commercial: bill, investment case, value flows, per-party view |
 
 Template pre-fill:
 
@@ -765,6 +766,7 @@ Answered by the owner on 2026-10-20, about 18:10 CEST, relayed by the coordinato
 | Q3 | Planning period: native horizons / free years at entry | **B**: free start and end years at entry (§3.3, engine slice E1) |
 | Q4 | Site pin places unplaced buses / pin only | **A**: the pin places every unplaced bus around it |
 | Q5 | Converters in Guided: per-asset preset / site-wide preset | **A**: one preset per converter-coupled asset; the full Controls block in Expert |
+| Q7 | Where commercial sits | **A**: a fifth group card, Commercial & finance; see [commercial-finance.md](commercial-finance.md) |
 | Q6 | First AC-PF asset slice: the PyPSA-native set (P1), then campus assets (P2) / everything the campus study models at once / pickers and shunt palette only | **A** (about 18:37 CEST): P1 the PyPSA-native set first, then P2 after P0's data-home agreement, P3 one gated plan each |
 
 ---
