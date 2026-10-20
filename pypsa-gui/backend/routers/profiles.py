@@ -62,7 +62,7 @@ from services.profile_gen.apply import (
 from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
 from services.profile_gen.engine import ProfileGenError
 from services.profile_gen.families import default_target
-from services.profile_gen.job import KEEP_PENDING, write_pending
+from services.profile_gen.job import KEEP_PENDING, PENDING_IO_LOCK, write_pending
 from services.profile_gen.availability import (
     ForcedOutagesNotWrittenError,
     InvalidAvailabilityParamsError,
@@ -1123,7 +1123,7 @@ def preview_default_series(
         record = row.pop("record", None)
         if record is not None:
             nc, _meta = _pending_artifact(proj, row["job_id"])
-            with xr.open_dataset(nc) as ds:
+            with PENDING_IO_LOCK, xr.open_dataset(nc) as ds:
                 frame = ds.to_dataframe()
             frame.index = pd.DatetimeIndex(frame.index)
             dry, weeks = _dry_run(ctx, frame[[row["component"]]], record)
@@ -1166,7 +1166,7 @@ def apply_default_series(
                                 "message": f"{component!r} carries a measured upload "
                                            "now; a default never replaces it"})
                 continue
-            with xr.open_dataset(nc) as ds:
+            with PENDING_IO_LOCK, xr.open_dataset(nc) as ds:
                 frame = ds.to_dataframe()
             frame.index = pd.DatetimeIndex(frame.index)
             summary = assign_profile(ctx, component, frame[component], meta,
@@ -1197,7 +1197,7 @@ def refine_profile(
     _check_lock(proj, db, user)
     ctx = _foreground_ctx(proj, "refine")
     nc, meta = _pending_artifact(proj, body.job_id)
-    with xr.open_dataset(nc) as ds:
+    with PENDING_IO_LOCK, xr.open_dataset(nc) as ds:
         frame = ds.to_dataframe()
     frame.index = pd.DatetimeIndex(frame.index)
     frame = frame[[c for c in meta.get("points", frame.columns) if c in frame.columns]]
@@ -1259,7 +1259,7 @@ def apply_profile(
 
     point_id = body.point_id or body.component
     try:
-        with xr.open_dataset(nc) as ds:
+        with PENDING_IO_LOCK, xr.open_dataset(nc) as ds:
             if point_id not in ds.data_vars:
                 raise HTTPException(
                     status_code=422,
@@ -1358,7 +1358,7 @@ def shape_profile(
     refusals."""
     _check_lock(proj, db, user)
     nc, parent = _pending_artifact(proj, body.job_id)
-    with xr.open_dataset(nc) as ds:
+    with PENDING_IO_LOCK, xr.open_dataset(nc) as ds:
         frame = ds.to_dataframe()
     frame.index = pd.DatetimeIndex(frame.index)
     if body.points is not None and not body.points:

@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -108,6 +109,12 @@ def _evict_pending(storage_dir: str | Path, keep: int = KEEP_PENDING) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: netCDF4/HDF5 is not thread-safe: two pending writes, or a write and a
+#: read, from the API's worker threads at once fail or crash the process
+#: (two previews in flight do it). Every pending .nc access holds this.
+PENDING_IO_LOCK = threading.RLock()
+
+
 def write_pending(storage_dir: str | Path, job_id: str, frame: pd.DataFrame,
                   record: dict[str, Any]) -> tuple[Path, Path]:
     """Write one pending artifact pair and evict the oldest beyond the
@@ -119,7 +126,8 @@ def write_pending(storage_dir: str | Path, job_id: str, frame: pd.DataFrame,
     part = Path(str(nc) + ".part")
     meta_part = Path(str(meta_path) + ".part")
     try:
-        frame.rename_axis("time").to_xarray().to_netcdf(str(part))
+        with PENDING_IO_LOCK:
+            frame.rename_axis("time").to_xarray().to_netcdf(str(part))
         os.replace(part, nc)
         meta_part.write_text(json.dumps(record, indent=2, default=str))
         os.replace(meta_part, meta_path)
