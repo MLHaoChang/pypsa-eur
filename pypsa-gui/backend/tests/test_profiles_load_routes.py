@@ -1,12 +1,12 @@
 """Load profiles over HTTP (time-series generators ticket 01, slice B2).
 
-  * `GET  /api/profiles/load-archetypes` — the archetypes, their parameter
-    defaults and the presets;
-  * `POST /api/projects/{name}/profiles/loads/generate` — generate a load
-    archetype for named loads, synchronously, into the SAME pending store as
-    the renewable jobs (`job.write_pending`);
-  * `POST /api/projects/{name}/profiles/apply` — the one apply route, now
-    told (or inferring from the artifact's family) which target to write.
+* `GET  /api/profiles/load-archetypes`: the archetypes, their parameter
+  defaults and the presets;
+* `POST /api/projects/{name}/profiles/loads/generate`: generate a load
+  archetype for named loads, synchronously, into the SAME pending store as
+  the renewable jobs (`job.write_pending`);
+* `POST /api/projects/{name}/profiles/apply`: the one apply route, now told
+  (or inferring from the artifact's family) which target to write.
 """
 from __future__ import annotations
 
