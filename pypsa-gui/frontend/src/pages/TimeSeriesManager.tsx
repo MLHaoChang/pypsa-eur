@@ -22,6 +22,7 @@ import toast from 'react-hot-toast'
 import { PageHeader } from '../components/PageKit'
 import { Dialog } from '../components/Dialog'
 import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
+import AvailabilityEditor from '../components/series/AvailabilityEditor'
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -710,7 +711,7 @@ function LoadItem({
   )
 }
 
-function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, attrLabel }: {
+function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, onEdit, attrLabel }: {
   gen: Generator
   meta: GeneratorProfileMeta | undefined
   // Whether the generator has a profile for the CURRENTLY-ACTIVE sub-attribute
@@ -726,6 +727,9 @@ function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick,
   onCheck: () => void
   onDownload: () => void
   onUpload: (f: File) => void
+  // Opens the availability editor (TS-02) for this generator; set only where
+  // the active slot is p_max_pu / p_min_pu on the Conventional tab.
+  onEdit?: () => void
   // Drops the (generators, <attrLabel>, <gen.name>) profile from _user_ts.
   // Rendered only when the generator has an uploaded profile for the
   // currently-active attribute.
@@ -767,6 +771,17 @@ function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick,
       >
         <Download size={12} />
       </button>
+      {onEdit && (
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); onEdit() }}
+          className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
+          title={`Generate the availability of '${gen.name}'`}
+          aria-label={`Edit the availability of ${gen.name}`}
+        >
+          <SlidersHorizontal size={12} />
+        </button>
+      )}
       <button
         type="button"
         onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
@@ -800,7 +815,7 @@ function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick,
   )
 }
 
-function LinkItem({ link, meta, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, attrLabel }: {
+function LinkItem({ link, meta, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, onEdit, attrLabel }: {
   link: Link
   meta: LinkProfileMeta | undefined
   // Whether the link has a profile for the CURRENTLY-active attribute (the
@@ -815,6 +830,8 @@ function LinkItem({ link, meta, hasActive, activeRows, selected, checked, onClic
   onCheck: () => void
   onDownload: () => void
   onUpload: (f: File) => void
+  // Opens the availability editor (TS-02) for this link (p_max_pu / p_min_pu).
+  onEdit?: () => void
   // Drops the (links, <attrLabel>, <link.name>) profile from _user_ts.
   // Rendered only when hasActive is true.
   onDelete?: () => void
@@ -857,6 +874,17 @@ function LinkItem({ link, meta, hasActive, activeRows, selected, checked, onClic
       >
         <Download size={12} />
       </button>
+      {onEdit && (
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); onEdit() }}
+          className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
+          title={`Generate the availability of '${link.name}'`}
+          aria-label={`Edit the availability of ${link.name}`}
+        >
+          <SlidersHorizontal size={12} />
+        </button>
+      )}
       <button
         type="button"
         onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
@@ -900,7 +928,12 @@ export default function TimeSeriesManager() {
   const uiMode = useUIStore(s => s.uiMode)
   // The series editor drawer: one load's archetype or measured upload, the
   // same editor its Properties panel mounts (TS-01, UX review 2026-10-20).
-  const [seriesEditor, setSeriesEditor] = useState<{ load: string; tab: 'archetype' | 'upload' } | null>(null)
+  // The series editor drawer: one host for every family's editor (TS UI).
+  const [seriesEditor, setSeriesEditor] = useState<
+    | { family: 'load'; component: string; tab: 'archetype' | 'upload' }
+    | { family: 'availability'; component: string; componentType: 'generators' | 'links' }
+    | null
+  >(null)
 
   // Section sub-tab (only used on Loads).
   const [loadSection, setLoadSection] = useState<LoadSection>('electricity')
@@ -927,6 +960,8 @@ export default function TimeSeriesManager() {
     : activeTab === 'dr'         ? drAttr
     : activeTab === 'links'      ? linkAttr
     : tabCfg.attribute
+  // The slots the availability editor writes (TS-02); marginal cost is not one.
+  const availabilitySlot = effectiveAttr === 'p_max_pu' || effectiveAttr === 'p_min_pu'
   const convAttrCfg = CONV_ATTRS.find(a => a.id === convAttr)!
   // Config block for the currently-active sub-toggle. Drives the chart's
   // unit suffix + "Must-run/Availability/…" copy in the upload pane. Returns
@@ -1632,7 +1667,7 @@ export default function TimeSeriesManager() {
                     onClick={() => setSelectedName(l.name)}
                     onCheck={() => toggleCheck(l.name)}
                     onDownload={() => handleDownloadSingleLoadTemplate(l.name)}
-                    onEdit={tab => setSeriesEditor({ load: l.name, tab })}
+                    onEdit={tab => setSeriesEditor({ family: 'load', component: l.name, tab })}
                     onDelete={() => deleteTsMut.mutate({ component: 'loads', attribute: 'p_set', name: l.name })}
                   />
                 ))}
@@ -1648,7 +1683,7 @@ export default function TimeSeriesManager() {
                     onClick={() => setSelectedName(l.name)}
                     onCheck={() => toggleCheck(l.name)}
                     onDownload={() => handleDownloadSingleLoadTemplate(l.name)}
-                    onEdit={tab => setSeriesEditor({ load: l.name, tab })}
+                    onEdit={tab => setSeriesEditor({ family: 'load', component: l.name, tab })}
                   />
                 ))}
               </>
@@ -1664,6 +1699,7 @@ export default function TimeSeriesManager() {
                     onCheck={() => toggleCheck(l.name)}
                     onDownload={() => handleDownloadSingleLinkTemplate(l.name)}
                     onUpload={f => handleSingleLinkUpload(l.name, f)}
+                    onEdit={availabilitySlot ? () => setSeriesEditor({ family: 'availability', component: l.name, componentType: 'links' }) : undefined}
                     onDelete={() => deleteTsMut.mutate({ component: 'links', attribute: effectiveAttr, name: l.name })}
                     attrLabel={effectiveAttr}
                   />
@@ -1683,6 +1719,7 @@ export default function TimeSeriesManager() {
                     onCheck={() => toggleCheck(l.name)}
                     onDownload={() => handleDownloadSingleLinkTemplate(l.name)}
                     onUpload={f => handleSingleLinkUpload(l.name, f)}
+                    onEdit={availabilitySlot ? () => setSeriesEditor({ family: 'availability', component: l.name, componentType: 'links' }) : undefined}
                     attrLabel={effectiveAttr}
                   />
                 ))}
@@ -1699,6 +1736,7 @@ export default function TimeSeriesManager() {
                     onCheck={() => toggleCheck(g.name)}
                     onDownload={() => handleDownloadSingleGenTemplate(g.name)}
                     onUpload={f => handleSingleGenUpload(g.name, f)}
+                    onEdit={availabilitySlot && activeTab === 'conventional' ? () => setSeriesEditor({ family: 'availability', component: g.name, componentType: 'generators' }) : undefined}
                     onDelete={() => deleteTsMut.mutate({ component: 'generators', attribute: effectiveAttr, name: g.name })}
                     attrLabel={effectiveAttr}
                   />
@@ -1718,6 +1756,7 @@ export default function TimeSeriesManager() {
                     onCheck={() => toggleCheck(g.name)}
                     onDownload={() => handleDownloadSingleGenTemplate(g.name)}
                     onUpload={f => handleSingleGenUpload(g.name, f)}
+                    onEdit={availabilitySlot && activeTab === 'conventional' ? () => setSeriesEditor({ family: 'availability', component: g.name, componentType: 'generators' }) : undefined}
                     attrLabel={effectiveAttr}
                   />
                 ))}
@@ -2052,21 +2091,33 @@ export default function TimeSeriesManager() {
         <Dialog
           open
           onClose={() => setSeriesEditor(null)}
-          title={`Profile of ${seriesEditor.load}`}
+          title={`${seriesEditor.family === 'load' ? 'Profile' : 'Availability'} of ${seriesEditor.component}`}
           panelClassName="bg-bg rounded-xl shadow-2xl w-[560px] max-w-[95vw] max-h-[90vh] overflow-auto p-4"
         >
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-sm font-semibold">Profile of {seriesEditor.load}</h2>
+            <h2 className="text-sm font-semibold">
+              {seriesEditor.family === 'load' ? 'Profile' : 'Availability'} of {seriesEditor.component}
+            </h2>
             <button type="button" aria-label="Close" className="text-muted hover:text-text"
               onClick={() => setSeriesEditor(null)}><X size={14} /></button>
           </div>
-          <LoadSeriesEditor
-            key={`${seriesEditor.load}:${seriesEditor.tab}`}
-            project={currentProject}
-            component={seriesEditor.load}
-            mode={uiMode}
-            initialTab={seriesEditor.tab}
-          />
+          {seriesEditor.family === 'load' ? (
+            <LoadSeriesEditor
+              key={`${seriesEditor.component}:${seriesEditor.tab}`}
+              project={currentProject}
+              component={seriesEditor.component}
+              mode={uiMode}
+              initialTab={seriesEditor.tab}
+            />
+          ) : (
+            <AvailabilityEditor
+              key={`${seriesEditor.componentType}:${seriesEditor.component}`}
+              project={currentProject}
+              component={seriesEditor.component}
+              componentType={seriesEditor.componentType}
+              mode={uiMode}
+            />
+          )}
         </Dialog>
       )}
     </div>

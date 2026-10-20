@@ -9,6 +9,7 @@ import {
 import { H2Icon } from '../components/AssetIcons'
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
 import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
+import AvailabilityEditor from '../components/series/AvailabilityEditor'
 import { useUIStore } from '../store/uiStore'
 import { editScope, loadExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
@@ -1806,6 +1807,7 @@ const TRANSFORMER_VOLTAGES: ReadonlySet<string> = new Set(['v_nom_0', 'v_nom_1']
 function LinkPanel({ name }: { name: string }) {
   const { setSelectedComponent } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
+  const uiMode = useUIStore(s => s.uiMode)
   const { data: links = [] } = useQuery({ queryKey: nk(currentProject, 'links'), queryFn: networkApi.getLinks })
   const link = (links as Link[]).find((l: Link) => l.name === name)
   const { data: schema } = useAssetSchema('Link')
@@ -1817,6 +1819,11 @@ function LinkPanel({ name }: { name: string }) {
         <Row label="To bus"   value={link.bus1} tip={fieldHelp(schema, 'bus1')} />
       </Section>
       <LinkCard key={link.name} link={link} mode="detail" onRename={n => setSelectedComponent({ type: 'Link', name: n })} />
+      {currentProject && (
+        <Section title="Availability">
+          <AvailabilityEditor key={link.name} project={currentProject} component={link.name} componentType="links" mode={uiMode} />
+        </Section>
+      )}
     </div>
   )
 }
@@ -1825,6 +1832,7 @@ function LinkPanel({ name }: { name: string }) {
 function GeneratorPanel({ name }: { name: string }) {
   const { setSelectedComponent } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
+  const uiMode = useUIStore(s => s.uiMode)
   const { data: generators = [] } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })
   const gen = (generators as Generator[]).find(g => g.name === name)
   const { data: schema } = useAssetSchema('Generator')
@@ -1835,6 +1843,12 @@ function GeneratorPanel({ name }: { name: string }) {
         <Row label="Bus" value={gen.bus} tip={fieldHelp(schema, 'bus')} />
       </Section>
       <GeneratorCard key={gen.name} gen={gen} mode="detail" onRename={n => setSelectedComponent({ type: 'Generator', name: n })} />
+      {currentProject && (
+        <Section title="Availability">
+          {/* The same editor the Time Series drawer mounts (TS-02). */}
+          <AvailabilityEditor key={gen.name} project={currentProject} component={gen.name} componentType="generators" mode={uiMode} />
+        </Section>
+      )}
     </div>
   )
 }
