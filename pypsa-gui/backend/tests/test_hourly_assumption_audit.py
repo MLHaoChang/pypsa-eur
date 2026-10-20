@@ -63,6 +63,9 @@ ALLOWED: dict[str, tuple[int, str]] = {
                                           "HOURS by design (load shapes are hourly only); "
                                           "apply aligns it onto the snapshots and refuses "
                                           "a sub-hourly axis"),
+    "profile_gen/load_upload.py": (1, "resamples a meter export to HOURLY power, the load "
+                                      "family's axis: sub-hourly readings are averaged and a "
+                                      "coarser step is refused, never assumed"),
     "profile_shapes.py": (2, "168 h week template used ONLY when there are no snapshots "
                              "to follow; with snapshots the template follows the axis"),
     "results/finance_case.py": (2, "IC P4 C3: a period is a year when its represented hours "
@@ -136,7 +139,8 @@ def test_the_inventory_is_pinned():
     # S1a: `asset_schema/fields.py` (1 site, MTTR help text) is added.
     # Profile generator: synthetic.py (3), atlite_source.py (1), apply.py (1) added.
     # RP-06: profile_gen/shape.py (2) added.
+    # TS 01 B3: profile_gen/load_upload.py (1) added.
     # TS 01 B1: profile_gen/load_archetypes.py (1) added.
-    assert sum(c for c, _ in ALLOWED.values()) == 81
-    assert len(ALLOWED) == 40
+    assert sum(c for c, _ in ALLOWED.values()) == 82
+    assert len(ALLOWED) == 41
     assert all(reason for _, reason in ALLOWED.values())
