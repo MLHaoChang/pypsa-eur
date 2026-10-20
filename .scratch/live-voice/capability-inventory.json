@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 265,
+  "tool_count": 266,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -5707,6 +5707,23 @@
       ],
       "safety_tier": "read",
       "schema_sha256": "8141d78f100db6a8a9c0e566273a6a97fe92d94493d1912c0d50d2f30462899d",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_energy_flows",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "period",
+        "window_from",
+        "window_to",
+        "limit"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "3914ac2afc6ecf565a667beb948839ec1af36bf8a8752d2c19760faf0d59226b",
       "behavioral_fixture": "pending"
     },
     {
