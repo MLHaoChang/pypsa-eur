@@ -77,15 +77,15 @@ The optimisation already reads money values whose home is section 7. Switching t
 Section 7 is therefore **never `not_needed` while Capacity is on**. With the group off, only (b) collapses: its items are `in_scope: false` (#444 §5.2), and 10 › Commercial reads "Outside scope". A block below holds fields of both classes. Its (a) fields stay visible when (b) collapses.
 
 Rules that make it hold:
-- **The tag lives with the field definition**, in one place (the model or its field registry), not in the UI.
-- **A test asserts that every input `lp_bindings` reads is tagged `lp_input`**, so a new LP-bound field can't slip into the collapsible part.
+- **The tag lives with the field definition**, declared once with the editor and flow-item schema, never in the UI.
+- **A test asserts that every input `lp_bindings` reads (and `connection.add_fee_term`, `solver_config.discount_rate`) maps to a field tagged `lp_input`**. It is in K1's done-when, so a new LP-bound field can't slip into the collapsible part.
 - **A dispatch-changing contract** (a PPA with `changes_dispatch`) stays listed with the group off, marked "changes dispatch", and **stays in effect**. Whether switching the group off should offer to exclude it from the LP is an engine question for K0 (§8). Until K0 answers, the default is: listed and in effect.
 
 
 Each value has one home. A value used elsewhere is shown read-only with a link (design §2.2). **Rule for per-asset values:** values the LP reads (overnight cost, lifetime) live on the asset in section 5 (#444 B1). Finance-only per-asset values (COD, degradation, depreciation class) live in 7d's per-asset table and show read-only in the asset form's Commercial block.
 
 ### 7a Prices & tariffs
-- **Import tariff**: the `Tariff` items with their TOU periods, tiers and ratchets; settlement and measured-on.
+- **Import tariff**: the `Tariff` items with their TOU periods, tiers and ratchets; settlement and measured-on. A tariff carries **currency, `price_basis` and `currency_year`** (K0, the same rule #445 applies to price series). A tariff in another currency is refused unless an explicit conversion is given; it is never converted silently.
 - **Export price**: `export_price_ref`, a library price series.
 - **Network charges**: the connection agreement's capacity fee, plus the tariff's demand, capacity and tax-levy items.
 - **Certificates and levies.**
@@ -104,6 +104,12 @@ Each value has one home. A value used elsewhere is shown read-only with a link (
 ### 7c Markets & value streams
 - The **market bundle** per country (C2): wholesale, ancillary, capacity, balancing. Its price series show in section 6's status list.
 - **Reference purchases** (grey H₂, grey NH₃; GTP-06).
+- **The CO₂ price path** has one home: `CommercialConfig.co2_price`, a yearly path that refuses years it doesn't cover.
+  - The optimisation's `co2_price_per_period` is **derived** from it at each period's year when the solve is built, never typed separately. It is `lp_input`, labelled "dispatch CO₂ price (from the path)". The path itself is labelled "valuation CO₂ price (the path)".
+  - The staged hubs' `CO2_PRICE` only seeds the path at create.
+  - The ammonia buy-in (#418) reads the same path.
+  - An Expert override of the dispatch value shows a consistency leg, as for WACC.
+  - Section 8 shows it read-only with a link here.
 - **DR availability and activation** live in 7b's DR contract. Ancillary products come with C2.
 - Capacity and balancing markets don't exist in the engine yet (§8).
 
@@ -116,7 +122,7 @@ Each value has one home. A value used elsewhere is shown read-only with a link (
 - Per-asset COD, degradation and depreciation class.
 - The project-wide default lifetime.
 - The editor-less fields (`stage_capex_lead_years`, `construction_months_by_asset`) gain a field here.
-- **The LP's discount rate** (`solver_config.discount_rate`, labelled **"Optimisation annuity rate"**: it annuitises capital in the optimisation; `lp_input`) also lives here, beside WACC (labelled **"Investment-case discount rate (WACC)"**: it discounts the investment case's cashflows; `commercial`). They are two values with two meanings, and the existing finance gate checks they are consistent. Solver Settings shows the LP rate read-only (#444 §6.2, J6). Whether the LP rate should be derived from WACC is a semantics question for the gatekeeper (§8).
+- **The LP's discount rate** (`solver_config.discount_rate`, labelled **"Discount rate for the optimisation (annuity)"**; `lp_input`) also lives here, beside WACC (labelled **"WACC for the investment case"**; `commercial`). The gatekeeper's rule (K0): the optimisation rate **defaults to `wacc_nominal`**, and the optimisation's inflation to the finance inflation. That is the existing `wacc_gate` basis, with no real or pre-tax conversion. It is overridable, and an override shows the gate's "differs" leg in 7d, never silently. A real-rate optimisation would change the gate, so it needs its own gated plan. They are two values with two meanings, and the existing finance gate checks they are consistent. Solver Settings shows the LP rate read-only (#444 §6.2, J6). Whether the LP rate should be derived from WACC is a semantics question for the gatekeeper (§8).
 
 ### 7e Parties
 - The **party board** (C5) is the only editor of `ValueFlowConfig`: one column per party, income and expense cards, a % split per card, and an "unassigned" tray backed by the ledger's conservation check.
@@ -161,7 +167,7 @@ Same rule as #444 §10a.3: **depth, not reach.**
 
 - **Inside the optimisation** (no new kind): the tariff and PPA LP bindings already price import, export, demand, capacity and dispatch-changing PPAs (`lp_bindings._wrap_with_commercial_bindings`).
 - **After the solve**: the bill (`billing.bill_site`) and contract settlement (`contracts.settle`) read the solved dispatch.
-- **The investment case** (`POST /api/results/investment_case`) becomes the run kind `investment_case`. It is bundled: it needs a solved dispatch, and it goes stale when the optimisation or any 7d input changes (`investment_case_runner.staleness`). Like every kind, it is requested only once W0 gives it a supported row with a lock-free verdict (#444 §11.1). Until then it stays the existing post-solve action in 10 › Commercial.
+- **The investment case** (`POST /api/results/investment_case`) becomes the run kind `investment_case`. It is bundled: it needs the solved dispatch **of the matching network revision** (the `edited_since` mechanism). It goes stale when the optimisation reruns, or when 7a–7e inputs, the CO₂ path or the money basis change (`investment_case_runner.staleness`). Like every kind, it is requested only once W0 gives it a supported row with a lock-free verdict (#444 §11.1). Until then it stays the existing post-solve action in 10 › Commercial.
 - **10 › Commercial**:
   - the bill;
   - the investment case (NPV, IRR, cashflows, debt);
@@ -169,7 +175,7 @@ Same rule as #444 §10a.3: **depth, not reach.**
   - the per-party "my view" against the BAU baseline (C7).
 
   It holds no inputs: each figure links to its 7 block. Report variants by rule (C4) are in 10 › Hand-off.
-- **The plain microgrid gets its own investment case** (owner decision): its template carries its own finance block. This is today's `MG_FINANCE`, defined twice; see §8.
+- **The plain microgrid gets its own investment case** (owner decision): its template carries its own finance block. `MG_FINANCE` / `MG_EXISTING` keep one definition, imported by the other module, with a pin test showing the plain-microgrid case is unchanged (NPV +4,588,396, IRR 14.5 %, horizon 2029–2044; #400).
 
 ---
 
@@ -199,15 +205,15 @@ Package C's order (owner D5: C5 + C6, then C7, C8, C9) is kept. The **K-slices**
 
 | Slice | What | Package C | Gate | After |
 |---|---|---|---|---|
-| **K0 Finance semantics** | a gatekeeper plan: LP discount rate vs WACC; one CO₂ price home (§8); currency on `Tariff`; `MG_FINANCE` / `MG_EXISTING` de-duplication | — | gatekeeper | — |
-| **K1 Section 7 shell** | the five blocks (§2) on W3a's shell, with the W3b moves; Guided cards with key parameters (§4); the group card and the `commercial` scope flag (W4a) | — | UX | W3a, W3b, W4a |
+| **K0 Finance semantics** | per §8: optimisation rate defaulting from WACC with the gate's leg; CO₂ path as the one home and the derived LP price; currency, price basis and currency year on `Tariff`; `MG_FINANCE` / `MG_EXISTING` single definition and its pin test; the dispatch-changing-contract question | — | gatekeeper | — |
+| **K1 Section 7 shell** | the five blocks (§2) on W3a's shell, with the W3b moves; Guided cards with key parameters (§4); the group card and the `commercial` scope flag (W4a). Done when the `lp_input` / `commercial` tags are declared with the field definitions and the test (every `lp_bindings` input, `connection.add_fee_term` and `solver_config.discount_rate` maps to an `lp_input` field) passes | — | UX | W3a, W3b, W4a |
 | **K2 Library scope and pickers** | `scope` common/workspace, the library page, inline pickers in 7a/7b, "update available" on pinned items | C1 | UX; gatekeeper (library schema) | K1 |
 | **K3 Uploads** | the tariff/contract CSV/XLSX templates and parsers; PDF source attachments; copilot proposals on the EditCard; the defaults-pack upload, validation and per-project pin (Q9, Q10 = A) | — | gatekeeper (parsers, pack validation); UX | K2 |
 | **K4 Party board and groups** | the board as the only `ValueFlowConfig` editor; party tags on contracts and per-stream splits | C5 + C6 | gatekeeper (finance); UX | K1 |
 | **K5 Per-party view** | 10 › Commercial "my view" vs BAU; cross-scenario columns | C7 | UX | K4 |
 | **K6 Sector party templates** | data centre, e-mobility, C&I, IPP | C8 | UX | K4 |
 | **K7 Contracts and offsite PPAs** | C3's contract set in 7b; the offsite PPA cards on the board | C3, C9 | gatekeeper; UX | K4 |
-| **K8 Market bundles** | `MarketPack` wired; NO1–NO5 first; ancillary products; capacity and balancing after an engine plan (Q8 = A: user-supplied data and ENTSO-E with the user's own token) | C2 | gatekeeper (engine); UX | K2 |
+| **K8 Market bundles** | its own gated plan, coordinated with DC-06 so there is one reserve model (headroom, no double-counting); `MarketPack` wired; NO1–NO5 first; ancillary products; capacity and balancing after an engine plan (Q8 = A: user-supplied data and ENTSO-E with the user's own token) | C2 | gatekeeper (engine); UX | K2 |
 | **K9 Report variants** | top N by NPV, greatest IRR, per participant | C4 | UX | K5 |
 | **W4b: `investment_case`** | the run kind (§5) | — | gatekeeper; UX | W0 row, W4a |
 
@@ -215,16 +221,17 @@ Order: K0 ∥ K1 → K2 → (K3 ∥ K4) → K5 ∥ K6 ∥ K7 → K9; K8 after K2
 
 ---
 
-## 8. For the gatekeeper (finance semantics, K0)
+## 8. Finance semantics (gatekeeper answers, 2026-10-20) — slice K0
 
-- **LP discount rate vs WACC.** Two values, two meanings, reconciled by a gate today (`services/finance/engine.py:504`). Should the LP rate default from WACC (real, pre-tax) and stay separately editable? Either way both live in 7d and are labelled.
-- **CO₂ price, three places**: `solver_config` (section 8 in design §2.1), `CommercialConfig.co2_price`, and the staged hubs' `CO2_PRICE`. Each needs exactly one home and one meaning (the LP's price vs a valuation price).
-- **Currency on `Tariff`.** It is missing today. Library tariffs from other jurisdictions need it before K2/K3 can import them.
-- **`MG_FINANCE` / `MG_EXISTING`** are defined in both `eh_templates.py` and `eh_staged_hubs.py` (#400).
-- **Price paths and the analysis horizon** follow E1's rules (step-back labelled "held from <year>"; horizon = `end_year`).
-- **Capacity and balancing markets** are engine work before K8 can offer them.
-
----
+| Question | Answer |
+|---|---|
+| LP discount rate vs WACC | The optimisation rate defaults to `wacc_nominal`, and its inflation to the finance inflation (the `wacc_gate` basis). It is overridable, and the gate's "differs" leg shows in 7d. A real-rate LP needs its own gated plan |
+| CO₂ price in three places | One home: `CommercialConfig.co2_price` (the yearly path). The LP's per-period price is derived from it; `CO2_PRICE` only seeds it; the ammonia buy-in reads it; an override shows a consistency leg |
+| Currency on `Tariff` | Add currency, `price_basis` and `currency_year` before K2/K3; refuse another currency unless a conversion is explicit (#445's rule) |
+| `MG_FINANCE` / `MG_EXISTING` | One definition, imported by the other module; a pin test on the plain-microgrid case (#400 figures) |
+| `investment_case` run kind | Bundled. It reads the matching revision's dispatch and goes stale on rerun, 7a–7e, the CO₂ path and the money basis |
+| Market bundles (K8) | Its own gated plan: reserve products change the LP (headroom constraints; energy and reserve on the same MW never double-counted). Coordinated with DC-06 (flex-market revenue on the same BESS/UPS headroom), so there is one reserve model |
+| Dispatch-changing contracts with the group off | Open for K0: the default is listed and in effect (§2.0) |
 
 ## 9. Owner choices
 
