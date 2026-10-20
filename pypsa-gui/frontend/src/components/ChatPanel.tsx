@@ -2382,7 +2382,9 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
         }>(frame)
         try {
           if (!applyUiNavigate(d, streamNavigationEpoch.current)) break
-          if (d.acknowledgement && assuranceRef.current.strict) {
+          // LC-03: every turn's source-bound navigation is acknowledged, so an
+          // ordinary answer can say "showing" only for data actually shown.
+          if (d.acknowledgement) {
             const expected = d.acknowledgement
             const state = assuranceRef.current
             acknowledgeMountedView(expected, () => assuranceRef.current === state
@@ -2657,6 +2659,8 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
         input_mode: voiceTurnRef.current ? 'voice' : 'text',
         ...admission,
         binding_generation: generation,
+        // LC-03: this client ACKs source-bound navigation in every turn.
+        ui_ack: true,
       },
       (frame) => {
         if (!isCurrentStream()) return

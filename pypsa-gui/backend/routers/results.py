@@ -2456,3 +2456,18 @@ def get_eh_dtc_planning():
     if table is None:
         return Response(status_code=204)
     return table
+
+
+@results_router.get("/process_uc_check")
+def get_process_uc_check():
+    """The binary operational check of the last plan with committable process units
+    (grid-to-process ticket 03, ``services.solver.process_uc.binary_check``): per period the
+    binary minus linearised operating cost, the extra shortfall, the flag, and the ledger rows.
+    204 when the last solve had no committable process unit or no linearised plan. Strict JSON:
+    a non-finite number is null and its path is in ``non_finite_paths``."""
+    from services.solver.process_uc import sanitize_check_payload
+
+    payload = _state.get("last_process_uc_check")
+    if not payload:
+        return Response(status_code=204)
+    return sanitize_check_payload(payload)
