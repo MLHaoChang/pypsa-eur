@@ -607,6 +607,89 @@ There is one editor: the island panel's per-unit dropdown and GFM inputs move to
 
 ---
 
+## 10a. The load-flow model: every AC power-flow asset on the canvas, in both modes
+
+The owner's 18:05 words (above) widen §10 from converters to the whole load-flow model. Facts first, from a sweep of `ef0856a`, then the design.
+
+### 10a.1 Two engines today
+
+- **PyPSA's AC power flow.** This is the Grid group's `loadflow`: `services/ac_pf_service.py` runs `n.pf()` after an optimisation. It reads the network the canvas edits.
+- **The campus electrical study**: gridspine with pandapower (`gridspine/ingest/campus.py`, `static/campus_flow.py`, IEC 60909 in `campus_sc.py`). It reads a campus YAML. That file is drafted from the network (`gridspine/producers/campus.py`), and its campus-only parts are typed into a textarea (`CampusElectricalPanel.tsx`). Nothing on the canvas or in a form creates them.
+
+### 10a.2 Asset coverage
+
+Key: **S** supported, **P** partly, **–** missing.
+
+| Asset | PyPSA AC PF | Campus (gridspine) | UI today | Library today |
+|---|---|---|---|---|
+| Bus | S (PQ/PV/Slack; slack picked) | S (`vn_kv`, switchgear `ik_rated_ka`) | palette, Properties, table | — |
+| Line / cable | S (absolute r, x, b) | S (per-km r/x/c, `max_i_ka`, parallel, zero sequence) | palette (Ω/km × length), Properties, table; **no std-type picker** | cable types `gridspine/templates/data/campus_assets.yaml`; `cable.*` in the defaults pack |
+| 2-winding transformer | P (r, x, tap_ratio, phase_shift; no tap changer) | S (vector group, earthing, tap block: changer, side, neutral, min/max, step %, position) | palette with voltage-step presets (duplicated in `CreationForm.tsx` and `routers/network.py`); tap side, position, parallel, g, b not shown; campus taps only in YAML | transformer ratings in `campus_assets.yaml` (no taps or vector group) |
+| 3-winding transformer | – | – | – | – |
+| Converter / IBR | P (a PQ or PV injection; no converter model) | P (sgen with `s_mva`, `k_sc`, `rx_sc`; reactive capability check; island control presets) | generators and storage in the palette; no inverter fields; no preset picker | `gridspine/schema/island.py` `PRESETS` |
+| Shunt capacitor / reactor | S (`ShuntImpedance` g, b) | S (capacitor bank with steps; shunt reactor) | **not in the palette** (API and chat only); Properties `ShuntPanel`; table | capacitor banks and shunt reactors in `campus_assets.yaml` |
+| STATCOM | – | S (an sgen at p = 0, ±q; IEC current source) | YAML only | statcoms in `campus_assets.yaml` |
+| SVC | – | – | – | – |
+| Synchronous generator | P (control PQ/PV/Slack; **no voltage setpoint, no Q limits**) | P (PQ sgen at a power factor; `xd_pp` for short circuit) | palette; control not in the create form or table | — |
+| Load P and Q | S (`p_set`, `q_set`) | S (`p_mw`, lagging `pf`) | `q_set` editable after creation only; **no power-factor field** | — |
+| Storage | P (fixed dispatch as `p_set`) | S (`bess`, `ups`) | palette; no control field | — |
+| HVDC / DC link | – | – | links only as conversion units | — |
+| Switch / breaker | – | P (a priced switchgear item and a bus rating) | – | switchgear in `campus_assets.yaml` |
+| Earthing / short-circuit data (X/R, X0) | – | S (PCC `sk_max/min`, `rx_max/min`, vector groups, zero sequence) | bus `eh_sk_mva`, `eh_ibr_mva` only | — |
+| Reactive compensation sizing | – | S (`reactive_need`, `size_compensation` from the grid-code profile) | campus results only | `campus_assets.yaml`, `grid_codes.yaml` |
+
+**Missing in both engines:** 3-winding transformers, SVC, switches and breakers as network elements, HVDC in AC PF, generator voltage setpoints and Q limits. These are **engine work for the gatekeeper, not a UI promise.** The palette doesn't offer them until an engine plan lands. A user who needs one is told so in words.
+
+### 10a.3 One model, one form, one rule for the two modes
+
+- **The canvas is a view of sections 3 and 5.** Placing an asset on the schematic, map or site plan opens **the same asset form** as "Add asset" in section 5 (B3/W5). There is no canvas-only editor.
+- **Home section** (`section_for_component`, B1 follow-up): a boundary element at the fence (PoC bus, grid transformer, import link, PCC switchgear) goes to section 3; a site-internal one goes to 5. Network-element blocks show under the Grid group. Their inputs **leave Campus electrical** (§6.2): the campus YAML textarea becomes the Expert "raw file" view of the same values, and the campus study reads them, so they are not typed twice.
+- **Where campus-only data lives** (needs the gatekeeper): taps, vector group, earthing, STATCOM, capacitor-bank steps, switchgear ratings and PCC short-circuit data have no PyPSA attribute. The proposal is a project sidecar keyed by component name, like `island_config.json` units. The asset form edits it in an **Electrical** block. The campus draft reads it instead of the textarea, and renaming a component renames its entries (as §10). PyPSA attributes stay in the network and are never copied into the sidecar.
+- **The mode rule** (the owner's words, made explicit):
+  - Guided = pick from a standardised library preset; only the **key parameters** show; the template flags which ones to recheck.
+  - Expert = the same preset as a start, then every parameter editable, with **reset to the preset or default**. "The program assumes you know what you're doing."
+  - Both modes reach the same assets. **The difference is depth, not reach.**
+- **Key parameters are deterministic.** The Guided Required list comes from the library item's key flags, the template's recheck flags and the flow (server), never from the copilot's judgement. The copilot may *suggest* a value or a recheck through LC-04's EditCard (old → new, section named). It never changes which inputs are required.
+- **Reset** in Expert goes through the EditCard, naming the section, as one undo step.
+
+### 10a.4 The library data model
+
+One library, shared by templates, Guided, Expert and the copilot. It extends what exists; no new store.
+
+| Field | Meaning |
+|---|---|
+| `id`, `kind`, `label` | e.g. `trafo_33_11_20mva`, `transformer`, "33/11 kV 20 MVA" |
+| `params` | values with units and per-unit base (`vk_percent`, `vkr_percent`, `sn_mva`, `vn_hv_kv`, …; r, x, c per km for cables) |
+| `key` | the parameters Guided shows and asks to recheck |
+| `source` | `measured` / `datasheet` / `assumed` / `code`, with a reference |
+| `scope` | voltage range, carrier, region, which engine uses it (PF, campus or both) |
+| `version` | the pack version that pins it |
+
+Sources to fold in:
+- `gridspine/templates/data/campus_assets.yaml` (transformers, cables, capacitor banks, shunt reactors, STATCOMs, switchgear; all `assumed`);
+- the defaults pack `services/library/defaults_pack/versions/*` (costs; it already pins `campus_assets.yaml` by hash);
+- the voltage-step transformer presets (one copy, not two);
+- gridspine's island `PRESETS`;
+- `grid_codes.yaml`;
+- DC-02's `assumed` labels.
+
+It is **picked inline from the asset form** in a drawer that returns to the form (C1). An item picked into a project copies its values with `source` and `version`. Editing a value afterwards marks it `user`.
+
+### 10a.5 Guided and Expert per asset
+
+| Asset | Guided: preset + key parameters | Expert adds |
+|---|---|---|
+| Line / cable | cable or line type; length; parallel count | r, x, b (or per km), `s_nom`, zero sequence, thermal rating by season |
+| 2-winding transformer | type (MVA, voltage step); tap changer on or off | vk, vkr, pfe, i0, tap side, min/max/step/position, vector group, earthing, phase shift, parallel |
+| Shunt capacitor / reactor | Mvar (and steps for a bank) | g, b, step size, switching |
+| STATCOM | ±Mvar | control mode, IEC current factor |
+| Converter-coupled asset | preset (§10) | the full Controls block (§10) |
+| Synchronous generator | rating; control PQ or PV | voltage setpoint and Q limits **once the engine supports them** (gatekeeper) |
+| Load | P per stage and a power factor (or Q) | `q_set` series |
+| PCC / connection | fault level (MVA), X/R | `sk_max`, `sk_min`, `rx_max`, `rx_min` |
+
+---
+
 ## 11. What is not adopted from #436, and why
 
 | # | #436 | Instead | Why |
@@ -677,6 +760,7 @@ Answered by the owner on 2026-10-20, about 18:10 CEST, relayed by the coordinato
 | Q3 | Planning period: native horizons / free years at entry | **B**: free start and end years at entry (§3.3, engine slice E1) |
 | Q4 | Site pin places unplaced buses / pin only | **A**: the pin places every unplaced bus around it |
 | Q5 | Converters in Guided: per-asset preset / site-wide preset | **A**: one preset per converter-coupled asset; the full Controls block in Expert |
+| Q6 | First AC-PF asset slice: the PyPSA-native set (P1), then campus assets (P2) / everything the campus study models at once / pickers and shunt palette only | *Pending owner*, drafted on the first (P1 → P2 → P3) |
 
 ---
 
@@ -696,13 +780,17 @@ B1 (#434) stays as is. The queued B2–B6 are re-cut as **W-slices**; the old ti
 | **W4a Scope (data)** | `flow_scope.json` (bundled); the section-8 scope component (mounted by the Builder); show/hide of group blocks, `not_needed`, and `in_scope: false` items (§5.2). No new run kind, so no separability proof | new | gatekeeper told (flow service); UX | B1 |
 | **W4b Run kinds** | each new `run_request` kind with its lock-free verdict and `source` (§5.2), one kind per PR | new | gatekeeper; UX | W0's row for that kind; W4a |
 | **W5 Asset form, picker and converters** | B3 as designed (General → Sizing incl. Capacity Bounds → Controls → Reliability → Commercial → Availability), tiered picker; §10's Controls block wired to the preset route and the GFM settings | B3 | UX; gatekeeper on the preset write path | W3a |
+| **P0 Electrical data plan** | gatekeeper plan for 10a.3: the electrical sidecar keyed by component, the campus draft reading it, per-unit bases and units, typed lines; the library schema (10a.4) and folding `campus_assets.yaml`, the voltage-step presets and the defaults pack into it | new | **gatekeeper** (engine semantics, write paths) | W0 |
+| **P1 AC-PF palette and forms (PyPSA-native)** | bus, line/cable with library types, 2-winding transformer (tap ratio, phase shift; library types), shunt capacitor/reactor in the palette, load power factor, generator control in the create form; each placeable from every canvas and opening the W5 form; Guided key parameters and Expert reset | new (owner 18:05) | UX; gatekeeper on units and typed lines | W5, P0 (library) |
+| **P2 Campus-electrical assets in the model** | taps, vector group, earthing, STATCOM, capacitor-bank steps, switchgear, PCC short-circuit data in the form's Electrical block via the sidecar; the campus YAML becomes the raw view | new | **gatekeeper**; UX | P0, P1 |
+| **P3 Missing engine elements** | 3-winding transformer, SVC, switches/breakers, generator voltage setpoint and Q limits, HVDC in AC PF: one gated engine plan each, then its palette entry | new | **gatekeeper** (engine work) | per plan |
 | **W6 Location and canvases** | §8: the section-1 pin (geocode, map), "place unplaced buses around the pin", switcher labels, Guided thumbnails | new | UX | W3a |
 | **W7 Scenario rows** | B5 in section 8 | B5 | UX | W3b |
 | **W8 Carriers & processes card** | B6 | B6 | UX | GTP-02, W3a |
 | **W9 Companion** | #437's modes on top of #441; "Help with this section"; transient-card rule (§9, with LC-04) | new | UX | #441, #437 |
 | **W10 Results by group** | §6.3 tabs; Hand-off tab (reports, exports, the specialist packet) | new | UX | W3a, W4a |
 
-Order: W0 ∥ E1 ∥ W1 ∥ W4a ∥ W3a → (W2 ∥ W3b ∥ W3c ∥ W5 ∥ W6) → W4b per kind as W0 classifies it → W7 → W10; W8 after GTP-02; W9 once #441 and #437 land. B2's existing condition stands: shell work waits until LC-04 leaves the shell/dock area. Sonnet sessions for the UI slices; Opus for W0 and W4 (contracts others read).
+Order: W0 ∥ E1 ∥ W1 ∥ W4a ∥ W3a → (W2 ∥ W3b ∥ W3c ∥ W5 ∥ W6) → W4b per kind as W0 classifies it → W7 → W10; P0 → P1 → P2, P3 per engine plan; W8 after GTP-02; W9 once #441 and #437 land. B2's existing condition stands: shell work waits until LC-04 leaves the shell/dock area. Sonnet sessions for the UI slices; Opus for W0 and W4 (contracts others read).
 
 ### 13.1 In-flight PRs and how they fold in
 
