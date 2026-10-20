@@ -905,7 +905,7 @@
     },
     "unknown_series_kind": {
       "surface": "inline",
-      "why": "Series generation named a kind that does not exist. The detail lists tou, inflow and cop; the assistant picks one, per call."
+      "why": "Series generation named a kind that does not exist. The detail lists the kinds (tou, inflow, cop, and market and part_load, which are refused with their reasons); the assistant picks one, per call."
     },
     "market_bundles_unavailable": {
       "surface": "inline",

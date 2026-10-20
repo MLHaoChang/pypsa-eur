@@ -94,12 +94,10 @@ def guard(ctx, component_type: str, component: str, meta: Mapping[str, Any]) -> 
     """The series family's checks on the target component."""
     n = ctx.network
     if (component_type, meta.get("target", [None, None])[1]) == ("links", "marginal_cost"):
-        state = getattr(ctx, "solver_state", None) or {}
-        cfg = state.get("solver_config") if isinstance(state, Mapping) else None
-        commercial = getattr(cfg, "commercial", None) or {}
-        get = commercial.get if isinstance(commercial, Mapping) else (
-            lambda k: getattr(commercial, k, None))
-        if component in {get("poc_link"), get("export_link")} - {None}:
+        from services.profile_gen.apply import commercial_config
+
+        commercial = commercial_config(ctx)
+        if component in {commercial.get("poc_link"), commercial.get("export_link")} - {None}:
             raise PocTariffError(
                 f"{component!r} is the point-of-connection link: its energy "
                 "price comes from the tariff in the commercial configuration "
@@ -152,13 +150,27 @@ def _tou(local: pd.DatetimeIndex, p: Mapping[str, Any]) -> tuple[np.ndarray, dic
         err = exc.errors()[0]
         raise InvalidSeriesParamsError(
             f"periods: {'.'.join(map(str, err['loc']))}: {err['msg']}") from None
+    tiered = [p.name for p in periods if p.tier_rates is not None]
+    if tiered:
+        raise InvalidSeriesParamsError(
+            f"periods {tiered} carry tier_rates; a price series has one rate per "
+            "hour, so tiers belong in a tariff, not here")
+    currency = p["currency"]
+    if not (isinstance(currency, str) and len(currency) == 3 and currency.isalpha()
+            and currency.isupper()):
+        raise InvalidSeriesParamsError(f"currency must be an ISO code like EUR, got {currency!r}")
+    if p["price_basis"] not in ("real", "nominal"):
+        raise InvalidSeriesParamsError(
+            f"price_basis must be real or nominal, got {p['price_basis']!r}")
+    year = p["currency_year"]
+    if not isinstance(year, int) or isinstance(year, bool) or not 1900 <= year <= 2200:
+        raise InvalidSeriesParamsError(f"currency_year must be a year, got {year!r}")
     price = period_rates(periods, local)
     if np.isnan(price).any():
         first = local[np.isnan(price)][0]
         raise InvalidSeriesParamsError(
             f"the periods must price every hour; {first} matches none (add a "
             "catch-all period last)")
-    currency = str(p["currency"] or "")
     meta = {"unit": f"{currency}/MWh", "price_basis": p["price_basis"],
             "currency_year": p["currency_year"],
             "price_min": float(price.min()), "price_max": float(price.max())}

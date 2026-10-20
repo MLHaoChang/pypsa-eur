@@ -123,15 +123,29 @@ TIME_BASIS_ASSUMED_WARNING = (
 )
 
 
-def _commercial_timezone(ctx) -> str | None:
+def commercial_config(ctx) -> dict[str, Any]:
+    """The project's commercial configuration (point-of-connection links,
+    timezone) as a plain dict, whether stored as a dict or a model; {} when
+    unset."""
     state = getattr(ctx, "solver_state", None) or {}
     cfg = state.get("solver_config") if isinstance(state, Mapping) else None
     commercial = getattr(cfg, "commercial", None)
     if commercial is None:
-        return None
-    tz = (commercial.get("timezone") if isinstance(commercial, Mapping)
-          else getattr(commercial, "timezone", None))
+        return {}
+    if isinstance(commercial, Mapping):
+        return dict(commercial)
+    dump = getattr(commercial, "model_dump", None)
+    return dict(dump()) if callable(dump) else dict(vars(commercial))
+
+
+def commercial_timezone(ctx) -> str | None:
+    """The project's commercial timezone: what its naive snapshots' clock is
+    (`resolve_time_basis`)."""
+    tz = commercial_config(ctx).get("timezone")
     return str(tz) if tz else None
+
+
+_commercial_timezone = commercial_timezone
 
 
 def resolve_time_basis(stated: str | None,
@@ -582,7 +596,9 @@ BOUND_FORCES_OFF_WARNING = "bound_forces_off"
 MUST_RUN_SINK_WARNING = "must_run_exceeds_sink"
 MIN_STABLE_WARNING = "min_stable_not_must_run"
 REPLACES_SERIES_WARNING = "replaces_existing_series"
-INFLOW_TOOL_WARNING = "inflow_unsupported_by_storage_tool"
+# The storage calculator's own refusal code, so the two read as one reason.
+INFLOW_TOOL_WARNING = "unsupported_storage_inflow"
+MONEY_UNVERIFIED_WARNING = "money_basis_unverified"
 
 # How close a normalised shape's peak/mean must be to 1.
 _NORM_RTOL = 1e-3
@@ -634,23 +650,26 @@ def _scale_power(series: pd.Series, meta: Mapping[str, Any]) -> tuple[float, dic
     return scale, extra
 
 
-def _project_money(ctx) -> tuple[str, str, int | None]:
-    """The project's money basis: (currency, price basis, currency year) of
-    its finance inputs, or their defaults (EUR, nominal, unstated)."""
+def _project_money(ctx) -> tuple[str, str, int | None, bool]:
+    """The project's money basis: (currency, price basis, currency year,
+    stated) of its finance inputs, or their defaults (EUR, nominal, year
+    unstated) with stated False when it has none."""
     from models.finance import FinanceInputs
 
     state = getattr(ctx, "solver_state", None) or {}
     cfg = state.get("solver_config") if isinstance(state, Mapping) else None
     raw = getattr(cfg, "finance", None)
+    stated = isinstance(raw, Mapping) and bool(raw)
     raw = raw if isinstance(raw, Mapping) else {}
     fields = FinanceInputs.model_fields
     year = raw.get("currency_year", fields["currency_year"].default)
     return (str(raw.get("currency") or fields["currency"].default),
             str(raw.get("price_basis") or fields["price_basis"].default),
-            int(year) if year is not None else None)
+            int(year) if year is not None else None, stated)
 
 
-def _money(meta: Mapping[str, Any], project: tuple[str, str, int | None]) -> dict:
+def _money(meta: Mapping[str, Any], project: tuple[str, str, int | None, bool],
+           ) -> tuple[dict, list[str]]:
     """A price series' unit and money basis, in the money-year convention's
     words ("real basis, 2020 EUR")."""
     unit = str(meta.get("unit") or "")
@@ -677,18 +696,27 @@ def _money(meta: Mapping[str, Any], project: tuple[str, str, int | None]) -> dic
         raise InvalidSeriesUnitError(
             f"a price series must state its currency_year (the year of its "
             f"price data), got {year!r}") from None
-    p_cur, p_basis, p_year = project
+    p_cur, p_basis, p_year, p_stated = project
+    record = {"unit": unit, "price_basis": basis, "currency_year": year,
+              "money": f"{basis} basis, {year} {cur}"}
+    project_words = (f"{p_basis} basis, {p_year if p_year is not None else 'year unstated'} "
+                     f"{p_cur}")
+    unverified = [f"{MONEY_UNVERIFIED_WARNING}: the series is {basis} basis, {year} "
+                  f"{cur}; the project's money is {'not set' if not p_stated else project_words}, "
+                  "so the basis could not be checked"]
+    if not p_stated:
+        # No finance inputs: nothing to contradict, so nothing is refused —
+        # but nothing is verified either (gatekeeper note on ticket 03).
+        return record, unverified
     if cur != p_cur:
         raise InvalidSeriesUnitError(
             f"the series is in {cur} but the project counts in {p_cur}; no "
             "exchange rate is applied, so convert it first")
     if basis != p_basis or (p_year is not None and year != p_year):
-        stated = f"{p_basis} basis, {p_year if p_year is not None else 'year unstated'} {p_cur}"
         raise InvalidSeriesUnitError(
             f"the series is {basis} basis, {year} {cur} but the project's money "
-            f"is {stated}; restate the series on the project's basis")
-    return {"unit": unit, "price_basis": basis, "currency_year": year,
-            "money": f"{basis} basis, {year} {cur}"}
+            f"is {project_words}; restate the series on the project's basis")
+    return record, (unverified if p_year is None else [])
 
 
 def _current_bound(n, component_type: str, component: str, attribute: str):
@@ -813,7 +841,8 @@ def _bus_sink_mw(n, bus: str, exclude: str) -> np.ndarray:
     total += (np.clip(-_dense(n, "Link", "p_min_pu", back.index), 0.0, None)
               * _capacity(back)).sum(axis=1)
     lines = n.lines[(n.lines.bus0 == bus) | (n.lines.bus1 == bus)]
-    total += float((lines.s_nom * lines.s_max_pu).sum())
+    total += (_dense(n, "Line", "s_max_pu", lines.index)
+              * lines.s_nom.to_numpy(dtype=float)).sum(axis=1)
     others = n.generators[(n.generators.bus == bus) & (n.generators.index != exclude)]
     total -= (np.clip(_dense(n, "Generator", "p_min_pu", others.index), 0.0, None)
               * _capacity(others)).sum(axis=1)
@@ -851,28 +880,41 @@ def _floor_warnings(n, component_type: str, component: str,
             return "must-run floor", [
                 f"{MUST_RUN_SINK_WARNING}: {component!r}'s must-run floor puts "
                 f"{out[i]:.0f} MW onto bus {bus!r}, which can absorb {sink[i]:.0f} MW "
-                f"(loads, storage charging, links and lines, less other floors) "
-                f"at {n.snapshots[i]} ({over.size} snapshots); the dispatch and "
-                "ENS solves must spill or go infeasible"]
+                f"(loads, storage charging, links, less other floors; includes "
+                f"line export capacity (s_nom·s_max_pu, dense), whose far end "
+                f"must absorb it) at {n.snapshots[i]} ({over.size} snapshots); "
+                "the dispatch and ENS solves must spill or go infeasible. The "
+                "sink is an upper bound: no warning does not prove the solve can "
+                "take the floor"]
     return "must-run floor", []
 
 
 def _two_way_companion(ctx, component: str, vals: np.ndarray, index,
                        ) -> pd.Series | None:
-    """A two-way link's reverse bound under an availability series: its own
-    p_min_pu (static, or a series that is not itself a companion) scaled by
-    the same availability, so a shutdown closes both directions."""
+    """A two-way link's reverse bound under an availability series: its
+    static p_min_pu scaled by the same availability, so a shutdown closes
+    both directions. A link whose reverse bound is already a series of its
+    own (an upload, another profile) is refused rather than overwritten: the
+    replace-or-refuse rule, and a companion built on a companion would
+    compound."""
     n = ctx.network
     key = ("links", "p_min_pu", component)
     previous = ctx.user_ts_meta.get(key) or {}
-    if previous.get("companion_of") or component not in n.links_t.p_min_pu.columns:
-        base = np.full(len(index), float(n.links.at[component, "p_min_pu"]))
-    else:
-        base = n.links_t.p_min_pu[component].reindex(index).fillna(
-            float(n.links.at[component, "p_min_pu"])).to_numpy(dtype=float)
-    if not (base < 0).any():
+    has_own = (component in n.links_t.p_min_pu.columns
+               and not previous.get("companion_of"))
+    static = float(n.links.at[component, "p_min_pu"])
+    if has_own:
+        own = n.links_t.p_min_pu[component].reindex(index).to_numpy(dtype=float)
+        if (own < 0).any():
+            raise ProfileBoundConflictError(
+                f"{component!r} is a two-way link whose reverse bound (p_min_pu) "
+                "is a series of its own; an availability series would replace it. "
+                "Remove that series first, or set both bounds yourself")
         return None
-    return pd.Series(np.where(base < 0, base * vals, base), index=index, name=component)
+    if static >= 0:
+        return None
+    return pd.Series(np.where(vals < 1.0, static * vals, static), index=index,
+                     name=component)
 
 
 def _modelled_mwh(n, aligned: pd.Series, weighting: str) -> dict[str, float]:
@@ -914,7 +956,7 @@ def _profile_zone(ctx, meta: Mapping[str, Any], time_basis: str | None) -> str |
     commercial timezone unset the snapshots are the site clock, and a
     profile drawn on a stated zone (``params.timezone``) says what that clock
     is — so it lands back on that zone's wall clock, converted once."""
-    if time_basis is not None or _commercial_timezone(ctx):
+    if time_basis is not None or commercial_timezone(ctx):
         return time_basis
     params = meta.get("params")
     zone = params.get("timezone") if isinstance(params, Mapping) else None
@@ -935,7 +977,7 @@ def preview_energy(ctx, series: pd.Series, meta: Mapping[str, Any], *,
             f"{component_type}/{attribute} is not a power target; it has no energy")
     scale, _ = _scale_power(series, meta)
     basis, _recorded, warnings = resolve_time_basis(
-        _profile_zone(ctx, meta, time_basis), _commercial_timezone(ctx))
+        _profile_zone(ctx, meta, time_basis), commercial_timezone(ctx))
     resolution = str(meta.get("resolution") or "hourly").strip().lower()
     aligned, align_meta = _align_to_snapshots(
         series, ctx.network.snapshots, resolution=resolution, time_basis=basis)
@@ -1012,16 +1054,18 @@ def prepare_profile(
 
     resolution = str(meta.get("resolution") or "hourly").strip().lower()
     unit_meta: dict[str, Any] = {}
+    money_warnings: list[str] = []
     scale = 1.0
     if target.kind == "power":
         scale, unit_meta = _scale_power(series, meta)
     elif target.kind == "price":
-        unit_meta = _money(meta, _project_money(ctx))
+        unit_meta, money_warnings = _money(meta, _project_money(ctx))
         if component_type == "links":
             unit_meta["per"] = "MWh of p0 (bus0 flow)"
 
     time_basis, recorded_basis, warnings = resolve_time_basis(
-        _profile_zone(ctx, meta, time_basis), _commercial_timezone(ctx))
+        _profile_zone(ctx, meta, time_basis), commercial_timezone(ctx))
+    warnings = [*warnings, *money_warnings]
     aligned, align_meta = _align_to_snapshots(
         series, n.snapshots, resolution=resolution, time_basis=time_basis,
     )
@@ -1063,8 +1107,9 @@ def prepare_profile(
         # The network solve takes inflow (PyPSA spills what the unit cannot
         # store); only the assistant's storage calculator refuses it.
         warnings = [*warnings, (
-            f"{INFLOW_TOOL_WARNING}: the storage calculator does not model "
-            "inflow (unsupported_storage_inflow); the network solve does")]
+            f"{INFLOW_TOOL_WARNING}: the assistant's storage calculator does "
+            "not model inflow; the network solve does (PyPSA spills what the "
+            "unit cannot store)")]
     if target.kind == "power":
         energy, energy_warnings = _energy_record(
             n, series, aligned, scale, target, int(align_meta["weather_year"]))
@@ -1155,9 +1200,13 @@ def assign_profile(
         if companion is not None:
             ckey = ("links", "p_min_pu", component)
             ctx.user_ts[ckey] = companion
-            ctx.user_ts_meta[ckey] = {**full_meta, "companion_of": "p_max_pu",
-                                      "meaning": "reverse bound scaled by the "
-                                                 "same availability"}
+            companion_meta = {k: v for k, v in full_meta.items()
+                              if k not in ("replaced_series", "target", "meaning")}
+            ctx.user_ts_meta[ckey] = {
+                **companion_meta, "target": ["links", "p_min_pu"],
+                "kind": f"{full_meta.get('kind', 'availability')} (reverse bound)",
+                "companion_of": "p_max_pu",
+                "meaning": "reverse bound scaled by the same availability"}
     with PyPSAService.get_lock():
         _reapply_user_ts_to_network(n, store=ctx.user_ts)
         # A new profile invalidates solved dispatch exactly like a topology
