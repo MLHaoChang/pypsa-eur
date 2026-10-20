@@ -177,7 +177,9 @@ def build_workbook(report: InvestmentCaseReport, *, project: str | None = None) 
         ["Of which avoided CO2 cost", _avoided_co2_total(project_payload.get("counterfactual"))],
         # The price basis (GS Q6): a currency year not stated says so, never a guess.
         ["Price basis", project_payload.get("price_basis")],
-        ["Currency year", _currency_year(project_payload)],
+        # The year of the price data; the costs are read as real money of the base year.
+        ["Price data year", _currency_year(project_payload)],
+        ["Base year (real money)", project_payload.get("base_year")],
         ["Basis", project_payload.get("basis_statement")],
         # The terminal value's method (IC S0b plan S6); its terms are on the project sheet.
         ["Terminal value method", (project_payload.get("terminal_value") or {}).get("method")],

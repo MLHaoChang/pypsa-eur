@@ -43,6 +43,10 @@ EXPECTED_SHA256 = {
     "_EH_GUIDE_CHAINING": "1e693728cf7d7fe3a9a5a0d12c59bc75fef1cf21587bfe1b1c977644f89dd052",
     "_EH_GUIDE": "1b9fc45244265b489e37c3d8420b389e842dfd9b2871c130ff13415563d20a27",
     "_UNTRUSTED_DATA_CLAUSE": "4909db27d7388788b3457f74a9f927a19173f0d5903eda36d55a88c8f81ba867",
+    # LC-10, a new tools-on part (2026-10-19); pinned from its first version.
+    "_REFERENCE_LADDER": "d45c3a30b4dab5cd9f2052e2a4880482e58a60f18fdd1e3e489beaf6e0609c17",
+    # LC-15, a new tools-on part (2026-10-19); pinned from its first version.
+    "_PROJECT_OVERVIEW": "2a9eba38855e6dd8fb3cd0cfa3e41f3fa84b601abcc256db9f774709bd22dd7b",
 }
 
 

@@ -426,7 +426,7 @@ def test_a_money_year_refusal_names_both_years_and_what_to_change(
     assert body["error_code"] == "campus_assets_money_year_mismatch" and calls == []
     text = body["error"]
     assert "2026 money (the campus asset library's price_year)" in text
-    assert "the case in 2020 money (the finance inputs' currency_year)" in text
+    assert "the case's price data are 2020 (the finance inputs' currency_year)" in text
     assert "no price index converts" in text and "reprice the campus asset library in 2020" in text
 
 
