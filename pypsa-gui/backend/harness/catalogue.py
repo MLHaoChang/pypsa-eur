@@ -94,6 +94,7 @@ RESULTS_TAB_ENUM = [
     "emissions", "curtailment", "lostload", "storage", "asset",
     "investment",   # IC P3 WP3.4 (the Investment tab, WP3.5)
     "adequacy", "fmea",
+    "flows",        # site commercial UX A1 (Energy flow)
 ]
 BOTTOM_TAB_ENUM = [
     "Log", "History", "Buses", "Lines", "Transformers", "Generators",

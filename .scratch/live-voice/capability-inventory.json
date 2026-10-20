@@ -3178,7 +3178,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "fb2b39ae90898e86f5908b0d1587da1d96385110887d518774d4140d0d984a58",
+      "schema_sha256": "efbad4ff4dfcfd3ca17c5b3fd5934cd268856615dc4371ba98a4fa6440e111eb",
       "behavioral_fixture": "pending"
     },
     {
@@ -5592,7 +5592,7 @@
         "run_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "f387e7960eb347f88bd6bbb61bb4d8ecff9b5c83069a13777410c64fe886ccf2",
+      "schema_sha256": "3fee3fd1579f25938f311af69c6da1ad4df6771e28290a3ca4fbaa9e0e32ce72",
       "behavioral_fixture": "pending"
     },
     {
@@ -6129,11 +6129,10 @@
     "asset",
     "investment",
     "adequacy",
-    "fmea"
-  ],
-  "result_tabs_not_in_tool_enum": [
+    "fmea",
     "flows"
   ],
+  "result_tabs_not_in_tool_enum": [],
   "slide_panels": [
     "timeseries",
     "simparams",
