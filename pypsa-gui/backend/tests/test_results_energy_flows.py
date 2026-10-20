@@ -320,3 +320,51 @@ def test_energy_units_in_any_spelling_still_draw():
     p = energy_flows(_solve(n))
     _assert_conserves(p)
     assert any(r["destination"] == "Losses" for r in p["rows"])
+
+
+def test_a_three_port_link_splits_its_input_mix_over_both_outputs_and_books_the_loss():
+    """A CHP: gas in, electricity and heat out; the heat and power both carry "gas"."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.RangeIndex(4))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    for b in ("gas", "el", "heat"):
+        n.add("Bus", b)
+    n.add("Carrier", ["gas", "solar"])
+    n.add("Generator", "gas_supply", bus="gas", carrier="gas", p_nom=100, marginal_cost=30)
+    n.add("Generator", "pv", bus="el", carrier="solar", p_nom=3, p_max_pu=[1, 0, 1, 0], marginal_cost=0)
+    n.add("Generator", "backup", bus="el", carrier="grid", p_nom=100, marginal_cost=500)
+    n.add("Link", "chp", bus0="gas", bus1="el", bus2="heat", p_nom=50, efficiency=0.4, efficiency2=0.45)
+    n.add("Load", "power", bus="el", p_set=4.0)
+    n.add("Load", "warmth", bus="heat", p_set=3.0)
+    p = energy_flows(_solve(n))
+    _assert_conserves(p)
+    got = _by(p["rows"], "source", "destination")
+    # 4 h × 3 MW heat is all gas; the loss is 15 % of the gas burned
+    assert got[("gas", "warmth")] == pytest.approx(12.0, abs=1e-6)
+    burned = float(n.links_t.p0["chp"].sum())
+    assert got[("gas", "Losses")] == pytest.approx(0.15 * burned, abs=1e-6)
+    # electricity is gas, the sun and (dear) backup; the sun is not turned into heat
+    assert got.get(("solar", "warmth"), 0.0) == pytest.approx(0.0, abs=1e-9)
+    assert got[("solar", "power")] == pytest.approx(float(n.generators_t.p["pv"].sum()), abs=1e-6)
+
+
+def test_surplus_sent_to_the_grid_is_export_with_its_origin():
+    n = pypsa.Network()
+    n.set_snapshots(pd.RangeIndex(4))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.add("Bus", "site")
+    n.add("Bus", "grid")
+    n.add("Carrier", ["solar", "grid"])
+    n.add("Generator", "pv", bus="site", carrier="solar", p_nom=10, p_max_pu=[1, 1, 0, 0], marginal_cost=0)
+    # a grid that also buys: its generator may run negative; the tie is reversible
+    n.add("Generator", "grid_supply", bus="grid", carrier="grid", p_nom=100, p_min_pu=-1, marginal_cost=[20, 20, 40, 40])
+    n.add("Link", "tie", bus0="grid", bus1="site", p_nom=6, p_min_pu=-1, efficiency=0.98)
+    n.add("Load", "demand", bus="site", p_set=[1, 1, 3, 3])
+    p = energy_flows(_solve(n))
+    _assert_conserves(p)
+    got = _by(p["rows"], "source", "destination")
+    exported = float((-n.generators_t.p["grid_supply"].clip(upper=0)).sum())
+    assert exported > 0
+    assert got[("solar", "Export")] == pytest.approx(exported, abs=1e-6)
+    assert got[(GRID_IMPORT, "demand")] == pytest.approx(
+        float(n.loads_t.p["demand"].sum()) - got.get(("solar", "demand"), 0.0), abs=1e-6)

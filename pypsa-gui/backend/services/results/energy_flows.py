@@ -293,6 +293,10 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
 
     storages = _storages(n, result_df, mask, bus_ix, dt)
     nst = len(storages)
+    # The external grid is a bus that only supplies: a "grid" generator on a bus
+    # that also serves load or holds storage is the site's own import, mixed there.
+    for b in set(l_bus) | {st.bus for st in storages}:
+        external[b] = False
 
     # ---- units: the sums below are energy; a commodity port would make "losses" ---
     bus_unit = [str(u or "").strip() for u in n.buses["unit"]] if "unit" in n.buses else [""] * nb
