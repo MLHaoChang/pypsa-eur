@@ -35,7 +35,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import threading
 from pathlib import Path
 from typing import Any
 
@@ -109,10 +108,15 @@ def _evict_pending(storage_dir: str | Path, keep: int = KEEP_PENDING) -> None:
 # ---------------------------------------------------------------------------
 
 
-#: netCDF4/HDF5 is not thread-safe: two pending writes, or a write and a
-#: read, from the API's worker threads at once fail or crash the process
-#: (two previews in flight do it). Every pending .nc access holds this.
-PENDING_IO_LOCK = threading.RLock()
+def pending_io_lock():
+    """The process-wide netCDF lock (`PyPSAService.get_netcdf_io_lock`):
+    netCDF4/HDF5 is not thread-safe per process, so a pending write or read
+    must not run beside another one, a project save/load, an export or a
+    campus read (two previews in flight crashed the API). The lock is not
+    re-entrant: no pending access runs while it is already held."""
+    from services.pypsa_service import PyPSAService
+
+    return PyPSAService.get_netcdf_io_lock()
 
 
 def write_pending(storage_dir: str | Path, job_id: str, frame: pd.DataFrame,
@@ -126,7 +130,7 @@ def write_pending(storage_dir: str | Path, job_id: str, frame: pd.DataFrame,
     part = Path(str(nc) + ".part")
     meta_part = Path(str(meta_path) + ".part")
     try:
-        with PENDING_IO_LOCK:
+        with pending_io_lock():
             frame.rename_axis("time").to_xarray().to_netcdf(str(part))
         os.replace(part, nc)
         meta_part.write_text(json.dumps(record, indent=2, default=str))

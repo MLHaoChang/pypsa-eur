@@ -36,7 +36,7 @@ def _artifact(args: dict) -> tuple[pd.Series, dict]:
     import xarray as xr
 
     from services import chat_tools
-    from services.profile_gen.job import PENDING_IO_LOCK, _artifact_paths
+    from services.profile_gen.job import _artifact_paths, pending_io_lock
 
     proj = chat_tools._authorized_project(str(args.get("project_id") or ""))
     nc, meta_path = _artifact_paths(proj.directory, str(args.get("job_id") or ""))
@@ -46,7 +46,7 @@ def _artifact(args: dict) -> tuple[pd.Series, dict]:
         raise HTTPException(404, f"no pending profile for job {args.get('job_id')!r}")
     meta = json.loads(meta_path.read_text())
     point = args.get("point_id") or args.get("component")
-    with PENDING_IO_LOCK, xr.open_dataset(nc) as ds:
+    with pending_io_lock(), xr.open_dataset(nc) as ds:
         if point not in ds.data_vars:
             from fastapi import HTTPException
 
