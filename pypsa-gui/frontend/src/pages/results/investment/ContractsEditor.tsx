@@ -80,12 +80,14 @@ function Field({ spec, contract, label, parties, series, set }: {
       control = <select aria-label={name} className={input} value={String(v ?? '')}
                         onChange={e => set(e.target.value || null)}>
         {!spec.required && <option value="">(default)</option>}
-        {spec.options!.map(o => <option key={o} value={o}>{o.replace(/_/g, ' ')}</option>)}
+        {spec.options!.map(o => <option key={o} value={o}>
+          {spec.optionLabels?.[o] ?? o.replace(/_/g, ' ')}</option>)}
       </select>
       break
     case 'bool':
-      control = <input type="checkbox" aria-label={name} checked={Boolean(v)}
-                       onChange={e => set(e.target.checked || null)} />
+      control = <input type="checkbox" aria-label={name}
+                       checked={v == null ? Boolean(spec.defaultTrue) : Boolean(v)}
+                       onChange={e => set(e.target.checked || (spec.defaultTrue ? false : null))} />
       break
     case 'ids':
       control = <IdsInput label={name} value={(v as string[] | undefined) ?? []} onChange={set} />

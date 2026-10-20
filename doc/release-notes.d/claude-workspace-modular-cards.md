@@ -1,0 +1,1 @@
+* Docs(project-workflow): design modular work cards (capacity, AC power flow and grid, control, reliability, commercial, hand-off) with at most three sub-options each, where a deselected card is neither parameterised nor run, and templates are example card setups.

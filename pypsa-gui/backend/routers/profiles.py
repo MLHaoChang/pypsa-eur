@@ -46,7 +46,12 @@ from services import solve_queue as sq
 from services.profile_gen import engine, presets, shape
 from services.profile_gen.apply import (
     ComponentNotFoundError,
+    FamilyTargetMismatchError,
+    InvalidSeriesUnitError,
     ProfileApplyError,
+    ProfileBoundConflictError,
+    UnknownFamilyError,
+    UnsupportedTargetError,
     assign_profile,
 )
 from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
@@ -292,6 +297,26 @@ def _error_kind(exc: Exception) -> str:
     return "".join(
         f"_{c.lower()}" if c.isupper() else c for c in name
     ).lstrip("_").removesuffix("_error")
+
+
+# Apply refusals whose error_kind is written out as a literal, so
+# tests/test_tool_error_kind_manifest.py's scan sees each one; the rest fall
+# back to the class-name kind. Subclasses before their bases.
+_APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
+    (ComponentNotFoundError, {"error_kind": "component_not_found"}),
+    (ProfileBoundConflictError, {"error_kind": "profile_bound_conflict"}),
+    (UnsupportedTargetError, {"error_kind": "unsupported_target"}),
+    (UnknownFamilyError, {"error_kind": "unknown_family"}),
+    (FamilyTargetMismatchError, {"error_kind": "family_target_mismatch"}),
+    (InvalidSeriesUnitError, {"error_kind": "invalid_series_unit"}),
+)
+
+
+def _apply_refusal_kind(exc: Exception) -> dict[str, str]:
+    for cls, kind in _APPLY_REFUSALS:
+        if isinstance(exc, cls):
+            return dict(kind)
+    return {"error_kind": _error_kind(exc)}
 
 
 # ---------------------------------------------------------------------------
@@ -546,15 +571,10 @@ def apply_profile(
     try:
         summary = assign_profile(ctx, body.component, series, meta,
                                  time_basis=body.time_basis)
-    except ComponentNotFoundError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"error_kind": "component_not_found", "message": str(exc)},
-        ) from exc
     except ProfileApplyError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"error_kind": _error_kind(exc), "message": str(exc)},
+            detail={**_apply_refusal_kind(exc), "message": str(exc)},
         ) from exc
 
     from routers.simulation import _state_update

@@ -4,7 +4,7 @@
 // and the supply / demand series underneath. Computed server-side from the
 // solved dispatch (services/results/energy_flows.py); a flow the server cannot
 // prove to conserve energy is shown as unavailable, never as zero (ADR-0001).
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
   ResponsiveContainer, Sankey, Tooltip, Layer, Rectangle,
@@ -15,6 +15,7 @@ import { energyFlowsApi, type EnergyFlowsPayload } from '../../api/energyFlows'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { useResultsFilter } from './filterContext'
+import WindowSlider, { useWindowRange } from './WindowSlider'
 import {
   CHART_AXIS, CHART_GRID, CHART_TOOLTIP, downloadCSV, downloadSVG, shortStamp, yAxisLabel,
 } from './shared'
@@ -160,13 +161,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
   const period = shellPeriod ?? localPeriod
 
   // The slider edits `drag`; the request follows it after a pause.
-  const [drag, setDrag] = useState<[number, number] | null>(null)
-  const [range, setRange] = useState<[number, number] | null>(null)
-  useEffect(() => {
-    if (drag === null) return
-    const id = setTimeout(() => setRange(drag), 250)
-    return () => clearTimeout(id)
-  }, [drag])
+  const { drag, range, setDrag, clear, whole } = useWindowRange()
 
   const { data, isFetched } = useQuery({
     queryKey: nk(currentProject, 'results', 'energy_flows', period, range?.[0], range?.[1]),
@@ -200,8 +195,6 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
   }
 
   const win = data.window!
-  const lo = drag?.[0] ?? win.from
-  const hi = drag?.[1] ?? win.to
   const graph = sankeyData(data.rows)
   const total = data.rows.reduce((s, r) => s + r.mwh, 0)
   const lossShare = share(data.rows.filter(r => r.destination === 'Losses').reduce((s, r) => s + r.mwh, 0), total)
@@ -214,7 +207,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
         {periods.length > 1 && shellPeriod == null && (
           <label>
             Period{' '}
-            <select value={data.period ?? ''} onChange={e => { setLocalPeriod(Number(e.target.value)); setDrag(null); setRange(null) }}>
+            <select value={data.period ?? ''} onChange={e => { setLocalPeriod(Number(e.target.value)); clear() }}>
               {periods.map(p => <option key={p} value={p}>{periodLabel(p)}</option>)}
             </select>
           </label>
@@ -232,22 +225,8 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-[11px]" data-testid="ef-window">
-        <span className="text-muted">Window</span>
-        <input aria-label="Window start" type="range" min={0} max={win.snapshots - 1} value={lo}
-               onChange={e => setDrag([Math.min(Number(e.target.value), hi), hi])} />
-        <input aria-label="Window end" type="range" min={0} max={win.snapshots - 1} value={hi}
-               onChange={e => setDrag([lo, Math.max(Number(e.target.value), lo)])} />
-        <span data-testid="ef-window-label">
-          {win.start && win.end ? `${shortStamp(win.start)} → ${shortStamp(win.end)}` : `${lo} → ${hi}`}
-          {' '}({hi - lo + 1} of {win.snapshots})
-        </span>
-        {(lo !== 0 || hi !== win.snapshots - 1) && (
-          <button type="button" className="underline" onClick={() => { setDrag([0, win.snapshots - 1]); setRange(null) }}>
-            Whole period
-          </button>
-        )}
-      </div>
+      <WindowSlider testId="ef-window" snapshots={win.snapshots} from={win.from} to={win.to}
+                    start={win.start} end={win.end} drag={drag} setDrag={setDrag} whole={whole} />
 
       <div className="space-y-1">
         <div className="flex justify-between">
