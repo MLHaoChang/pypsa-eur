@@ -261,7 +261,7 @@ The lists below are the parameters a Guided user sets today (generic-site form, 
   - **stress conditions**: baseline, heatwave, dark and still week, low-wind week, from the project's registry; the editor moves here from FMEA (J13).
 - Required inputs:
   - **VOLL** (€/MWh, > 0). Today it is read-only in Guided (J1); here it is editable;
-  - **CO₂ price**;
+  - CO₂ price: read-only here, with a link to its home in 7c ([commercial-finance.md](commercial-finance.md));
   - Grid group:
     - **load flow** (AC power flow after the optimisation, today's "Stage 2 AC PF");
     - **N-1 security** (SCLOPF);
@@ -296,6 +296,7 @@ The lists below are the parameters a Guided user sets today (generic-site form, 
 | **Grid design & grid-code compliance** (incl. the load flow it needs) | template or user | 3: grid-code profile, ramp MW/min, oscillation band, PF; 5: lines, transformers, electrical infrastructure; 8: load flow, N-1 | `loadflow` (after the gate, §11.1). N-1 SCLOPF is an option of `optimisation`, so it needs no new kind. The grid-readiness scorecard is an **advisory read** shown in 9, never a run kind and never in the `run_ready` AND (gatekeeper; DC-02 plan; R1–R4) | Grid plan: load flow, scorecard, campus electrical (PCC compliance, transformers, reactive compensation, short circuit), connection capacity, connection-point assessment |
 | **Control strategy** | template or user | 5: the Controls block of each converter-coupled asset; 8: island requirements | `control_checks` (after the gate) | Controls: island report, frequency cuts, grid-forming recommendation |
 | **Hand-off to others** | always (owner, Q1 = A: the fourth group card) | 10: deliverable choices (report variant per party, export formats, specialist packet); no input section | none | Hand-off: reports (per-party variant, C4), exports (bundle, NetCDF, Excel, CSV, MATPOWER), the specialist packet (Planning → dynamics export, PowerFactory read-back) |
+| **Commercial & finance** (owner Q7 = A, 2026-10-20) | always on by default; can be switched off (only its class-(b) fields collapse; the prices the optimisation reads stay with Capacity, commercial-finance.md §2.0) | 7: Prices & tariffs, Contracts & PPAs, Markets, Finance, Parties ([commercial-finance.md](commercial-finance.md)) | the LP's tariff and PPA bindings (inside `optimisation`); `investment_case` after the gate | Commercial: bill, investment case, value flows, per-party view |
 
 Template pre-fill:
 
@@ -459,7 +460,8 @@ Gating column: the existing gate is **kept**. RO means "read-only role: the serv
 | Current | New home | Gating kept |
 |---|---|---|
 | RUN › Solver Settings › General (clustering, rolling horizon, Stage 2 AC PF chaining) | 8 (Stage 2 AC PF is the Grid group's `loadflow`) | AC PF needs `canRunAcPf`; rolling disabled with periods |
-| Solver Settings › Solver, Dispatch (MIP, CO₂ price), Add. constraints | 8 | per installed solver |
+| Solver Settings › Solver, Dispatch (MIP), Add. constraints | 8 | per installed solver |
+| Solver Settings › Dispatch › CO₂ price | 7c, the CO₂ path (read-only in 8) | — |
 | Solver Settings › Network (VOLL, ENS target, reserve margin, DR, N-1 SCLOPF) | 8 (VOLL editable in Guided too) | losses off with SCLOPF |
 | Results › Reliability › FMEA › Stress scenario editor | **moves** to 8, Stress conditions (J13); FMEA keeps the results | max 10 scenarios |
 | Guided Goal card (LOLE, ENS, archetype, VOLL) | 8 (archetype → 3) | — |
@@ -765,6 +767,7 @@ Answered by the owner on 2026-10-20, about 18:10 CEST, relayed by the coordinato
 | Q3 | Planning period: native horizons / free years at entry | **B**: free start and end years at entry (§3.3, engine slice E1) |
 | Q4 | Site pin places unplaced buses / pin only | **A**: the pin places every unplaced bus around it |
 | Q5 | Converters in Guided: per-asset preset / site-wide preset | **A**: one preset per converter-coupled asset; the full Controls block in Expert |
+| Q7 | Where commercial sits | **A**: a fifth group card, Commercial & finance; see [commercial-finance.md](commercial-finance.md) |
 | Q6 | First AC-PF asset slice: the PyPSA-native set (P1), then campus assets (P2) / everything the campus study models at once / pickers and shunt palette only | **A** (about 18:37 CEST): P1 the PyPSA-native set first, then P2 after P0's data-home agreement, P3 one gated plan each |
 
 ---
