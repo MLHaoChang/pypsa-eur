@@ -22,6 +22,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LocalSettings from './LocalSettings'
 import { fetchLocalSettings, type LocalSettingsState } from '../api/localSettings'
 import { fetchLLMSettingsOrNull, type LLMSettingsPayload } from '../api/llmSettings'
+import { setAuthEnabled } from '../auth/config'
 
 // Partial mock: keep the real keyFieldPlaceholder/probeMessage/etc (the pane
 // imports and calls them), stub only the network call the hook wraps.
@@ -64,7 +65,9 @@ const renderPane = () => {
   return render(<QueryClientProvider client={qc}><LocalSettings /></QueryClientProvider>)
 }
 
+// The desktop build (auth_enabled false) is the one that reads local settings (N15).
 beforeEach(() => {
+  setAuthEnabled(false)
   vi.clearAllMocks()
   vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(null)
 })

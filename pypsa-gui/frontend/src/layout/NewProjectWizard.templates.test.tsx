@@ -14,6 +14,7 @@ import { projectsApi } from '../api/projects'
 import { ioApi } from '../api/io'
 import { useUIStore } from '../store/uiStore'
 import { fetchLocalSettings, type LocalSettingsState } from '../api/localSettings'
+import { setAuthEnabled } from '../auth/config'
 
 vi.mock('../api/projects')
 vi.mock('../api/network', () => ({ networkApi: { undoInfo: vi.fn() } }))
@@ -33,7 +34,8 @@ function renderWizard() {
   )
 }
 
-beforeEach(() => vi.clearAllMocks())
+// The desktop build (auth_enabled false) is the one that reads local settings (N15).
+beforeEach(() => { vi.clearAllMocks(); setAuthEnabled(false) })
 
 describe('NewProjectWizard — templates', () => {
   it('offers the IEEE 39-bus network and creates from its backend template id', async () => {
