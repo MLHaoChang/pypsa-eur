@@ -130,6 +130,7 @@ Merge one PR at a time:
 
 1. Start from a session's `premerge ok <sha>` report. Run `scripts/coord/premerge.sh <pr>`; it checks conflicts, overlap, the semantic tests on a trial merge and every check run on the head. Done when it ends in `RESULT: ok to merge <sha>`.
 2. For {{GATED_AREAS}}, get the gatekeeper's OK for that same SHA and record it in the state log. A clean `{{BASE_BRANCH}}` merge on top of an OK needs no re-review when the gatekeeper says so.
+   - Where the project has a UX reviewer, a PR that changes UI also needs the reviewer's OK for that same SHA.
 3. Call `merge_pull_request` with `merge_method: merge` and `expectedHeadSha` set to the full 40-character `head:` line. premerge leaves out one check, GitHub's mergeable state; a refused merge reports it. Done when GitHub reports the PR merged.
 4. Tell each dependent session the state log lists for this PR, then go on to the next PR. Each premerge run measures against the new `{{BASE_BRANCH}}`, so run it again after every merge.
 
