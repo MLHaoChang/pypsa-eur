@@ -233,6 +233,9 @@ def test_a_refused_edit_reaches_the_model_as_study_in_flight(
         raise HTTPException(status_code=409, detail=detail)
 
     monkeypatch.setitem(chat_tools.DISPATCHERS, "update_component", _refuse)
+    # The edit's card is policy-approved (LC-04, owner Q3: Expert cards edits).
+    from harness import confirm as harness_confirm
+    monkeypatch.setattr(harness_confirm, "AUTO_APPROVE_TIERS", frozenset({"write"}))
     results: list[dict] = []
     frames, _outcome = _drive(
         chat_service.ChatSession(),

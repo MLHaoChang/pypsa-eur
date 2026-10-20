@@ -95,6 +95,7 @@ RESULTS_TAB_ENUM = [
     "investment",   # IC P3 WP3.4 (the Investment tab, WP3.5)
     "adequacy", "fmea",
     "flows",        # site commercial UX A1 (Energy flow)
+    "loadshape",    # site commercial UX A2 (Load shape)
 ]
 BOTTOM_TAB_ENUM = [
     "Log", "History", "Buses", "Lines", "Transformers", "Generators",
@@ -509,7 +510,7 @@ TOOLS: list[dict[str, Any]] = [
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
             "name": {"type": "string"},
-            "attrs": {"type": "object"},
+            "attrs": {"type": "object", "description": "Field values in each field's STORED unit (get_component_schema unit_storage), e.g. EUR/MWh, never the display unit EUR/kWh."},
             "new_name": {"type": "string"},
         },
         ["component_class", "name"],
@@ -547,7 +548,7 @@ TOOLS: list[dict[str, Any]] = [
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
             "names": {"type": "array", "items": {"type": "string"}},
-            "updates": {"type": "object"},
+            "updates": {"type": "object", "description": "Field values in each field's STORED unit (get_component_schema unit_storage), e.g. EUR/MWh, never the display unit EUR/kWh."},
         },
         ["component_class", "names", "updates"],
     ),
@@ -1770,7 +1771,8 @@ TOOLS: list[dict[str, Any]] = [
         "campus built in three phases 2027/2030/2035, multi-period), "
         "eh_h2_hub (strong_grid), "
         "eh_microgrid (off_grid), eh_h2_hub_staged and eh_microgrid_staged "
-        "(those two planned over 2027/2030/2035, multi-period), eh_site (a generic site that is not a data "
+        "(those two planned over 2027/2030/2035, multi-period), eh_ammonia_staged "
+        "(the H2 hub making ammonia for a contracted delivery, with a Haber-Bosch loop; multi-period), eh_site (a generic site that is not a data "
         "center, parametrized by `params`: site_type industrial | commercial | "
         "hospital | campus | other fills every value from a preset; override "
         "stages [{year, peak_mw}], connection_mw, energization [{year, mw}], "
@@ -1786,7 +1788,8 @@ TOOLS: list[dict[str, Any]] = [
                             "enum": ["3bus", "ieee14", "belgium", "ieee39",
                                      "eh_datacenter", "eh_datacenter_staged",
                                      "eh_h2_hub", "eh_microgrid", "eh_site",
-                                     "eh_h2_hub_staged", "eh_microgrid_staged"]},
+                                     "eh_h2_hub_staged", "eh_microgrid_staged",
+                                     "eh_ammonia_staged"]},
             "new_name": {"type": "string"},
             "params": {"type": "object",
                        "description": "eh_site only: the site's parameters "
@@ -3736,6 +3739,7 @@ TOOLS.extend([
     _t("prepare_experiment", "Validate prerequisites for a persisted network experiment without executing any case: active project/owner, exact static targets, types and schema units, candidate network validity, bounded limits and an optional completed intact recorded baseline matching current inputs. Stores a versioned preflight fingerprint; changes or missing evidence make it stale. Other domains remain persistence-only. This is not confirmation, scientific certification or execution authority; executed and execution_available remain false. Safety: write.", {"experiment_id": {"type": "string", "maxLength": 36}}, ["experiment_id"]),
     _t("list_experiments", "List up to 20 most recently created experiments you own in the active project. Returns status, domain, baseline_run_id and case_count; use get_experiment for case detail. Does not execute plans. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
     _t("get_experiment", "Read one owned experiment in the active project. Returns typed cases, limits, preflight and any durable single-case execution receipt. Planned/queued is not completed; interrupted submissions have executed=null. Recorded objectives require matching completed job, exact solved inputs and intact evidence. No operation is started or replayed. Safety: read.", {"experiment_id": {"type": "string"}}, ["experiment_id"]),
+    _t("get_energy_flows", "Read the CURRENT solve's Energy flow tab: where the site's energy came from (source), what it passed through (via: Direct, a storage, a conversion) and where it went (destination: loads, export, losses), in MWh per modelled year, exactly as the tab computes it (proportional mix at each bus, a proportional pool per storage). Returns the largest rows (default 12, max 40) with rows_total and rows_mwh_total, the conservation check (generation = destinations + storage change), flags, the period and snapshot window, inputs_changed_since_solve, and ui_reference for ui_open_panel(results_tab='flows'). not_delivered holds demand that was NOT delivered (process shortfall per load, shed load): missing energy, never supply; never add it to a source. Unsolved results, or flows the server cannot prove to conserve energy, return status unavailable with no rows; never invent values. period: an investment period (default the first); window_from/window_to: inclusive snapshot indexes. Safety: read.", {"period": {"type": "integer"}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 40}}, []),
     _t("get_loadflow_summary", "Summarise the CURRENT load-flow results of the active project: lines and transformers ranked by peak utilisation = flow / (rating * s_max_pu), computed by software from the same results the Load flow tab reads. Per branch (default 5, max 25, trimmed to a bounded payload): both-terminal peak flow, rating (optimized s_nom_opt or configured s_nom), s_max_pu range, peak/mean utilisation, weighted hours at/over the limit. Returns the exact source, snapshot window, freshness, solve state, ranking convention, skipped branches (missing or zero rating, no flow data) and missing_evidence. LOPF results are an ACTIVE-POWER PROXY, not an AC apparent-power assessment; source='ac_pf' uses apparent power where reactive flows exist and excludes unconverged snapshots. Never proof of full AC thermal compliance (no N-1, no voltage limits). Unsolved, stale, running, infeasible or failed results return status unavailable with a typed unavailable_kind; never invent values. window_from/window_to are inclusive snapshot indexes for follow-ups. run_id: the newest completed run whose inputs are still current answers as the current results (run.is_current true); any other run answers from the load flow captured when it finished (scope historical, run.is_current false; the Load flow tab still shows the current results), or unavailable for a run without a captured section. Safety: read.", {"source": {"type": "string", "enum": ["lopf", "ac_pf"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "run_id": {"type": "string", "maxLength": 64}}, []),
     _t("list_tasks", "List up to 20 most recently updated durable tasks owned by you in the active project. Use a returned ID to resume in a new chat or provider. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
     _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. With overview=true (no goal) answers \"what can you do here?\": the core-feature families (projects, results, checks, edits, sensitivities, studies, reports), each available or not for this project, role, mode and personal rule, with the reason, an example sentence and its offered tools. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}, "overview": {"type": "boolean"}}, []),
@@ -3840,6 +3844,7 @@ TOOL_ROUTES: dict[str, list] = {
     "list_experiments": _SERVICE_CALL,
     "get_experiment": _SERVICE_CALL,
     "get_loadflow_summary": _SERVICE_CALL,
+    "get_energy_flows": _SERVICE_CALL,
     "list_tasks": _SERVICE_CALL,
     "find_capabilities": _SERVICE_CALL,
     "get_component_schema": _SERVICE_CALL,

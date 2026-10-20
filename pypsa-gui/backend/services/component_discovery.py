@@ -38,6 +38,12 @@ def schema_page(component_class, model, native_defaults, asset_fields, *, query=
             or type(offset) is not int or not 0 <= offset <= MAX_OFFSET
             or type(limit) is not int or not 1 <= limit <= 50):
         raise HTTPException(400, 'Use query <=80 characters, offset 0–1000000 and limit 1–50.')
+    rows = field_rows(model, native_defaults, asset_fields)
+    return _page(component_class, rows, query, offset, limit)
+
+
+def field_rows(model, native_defaults, asset_fields):
+    """Every field of one class, unpaged: what schema_page pages and the edit card checks."""
     request = model.model_json_schema()
     # Current component models have no referenced definitions. Refuse a future
     # unsupported shape instead of returning an unresolved validation contract.
@@ -80,6 +86,10 @@ def schema_page(component_class, model, native_defaults, asset_fields, *, query=
             'sources': [source for source, present in [('request', prop is not None),
                         ('pypsa', native is not None), ('asset', asset is not None)] if present],
         })
+    return rows
+
+
+def _page(component_class, rows, query, offset, limit):
     digest = hashlib.sha256(json.dumps(rows, sort_keys=True, allow_nan=False).encode()).hexdigest()
     term = query.strip().casefold()
     filtered = [row for row in rows if term in row['name'].casefold() or term in row['label'].casefold()]

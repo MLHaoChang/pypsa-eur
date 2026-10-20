@@ -1,0 +1,296 @@
+{
+  "auto_discount_periods": true,
+  "commercial": {
+    "co2_price": {
+      "eur_per_t_by_year": {
+        "2027": 80.0,
+        "2030": 120.0
+      },
+      "grid_source": null,
+      "grid_t_per_mwh": null,
+      "money_year": 2020,
+      "source": "synthetic demo path"
+    },
+    "connection": null,
+    "contracts": [],
+    "demand_items": [],
+    "export_link": null,
+    "export_price_ref": null,
+    "grid_cfe_share_ref": null,
+    "group_cap_mw": null,
+    "group_contract": null,
+    "group_members": [],
+    "import_tariff": {
+      "dso_or_retailer": null,
+      "id": "h2_hub_network_tariff_synthetic",
+      "items": [
+        {
+          "direction": "cost",
+          "id": "network_energy",
+          "kind": "energy",
+          "measured_on": "import",
+          "periods": [
+            {
+              "end_hour": 20,
+              "months": [],
+              "name": "day",
+              "rate": 0.025,
+              "start_hour": 8,
+              "tier_rates": null,
+              "weekdays": []
+            },
+            {
+              "end_hour": null,
+              "months": [],
+              "name": "night",
+              "rate": 0.015,
+              "start_hour": null,
+              "tier_rates": null,
+              "weekdays": []
+            }
+          ],
+          "ratchet": null,
+          "settlement": "15min",
+          "tiers": null,
+          "unit": "per_kwh"
+        }
+      ],
+      "jurisdiction": "DE",
+      "name": "Synthetic network tariff (illustrative)",
+      "pack_hash": null,
+      "unsupported_fields": [],
+      "valid_from": "2027-01-01",
+      "valid_to": null
+    },
+    "import_tariff_id": null,
+    "import_tariff_ref": null,
+    "initial_peak_lower_bound": {},
+    "meter_history_energy_kwh": {},
+    "meter_history_peaks_kw": {},
+    "poc_link": "grid_import",
+    "power_factor": null,
+    "reference_purchases": [
+      {
+        "co2_t_per_kg": 0.002,
+        "lhv_kwh_per_kg": 5.166,
+        "load": "nh3_delivery",
+        "price_eur_per_kg": 0.501102,
+        "source": "upstream PyPSA-Eur default import price (config.default.yaml:982), not a market quote; CO2 intensity synthetic demo value"
+      }
+    ],
+    "site_party": "site",
+    "timezone": "UTC",
+    "value_flows": {
+      "allocation": null,
+      "asset_owners": [
+        {
+          "asset_id": "wind_farm",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "solar_park",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "wind_new_2027",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "solar_new_2027",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "wind_new_2030",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "solar_new_2030",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "wind_new_2035",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "solar_new_2035",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "__buy_nh3",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "__lost_nh3",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "site_battery",
+          "component": "StorageUnit",
+          "owner": "site"
+        },
+        {
+          "asset_id": "bess_new_2027",
+          "component": "StorageUnit",
+          "owner": "site"
+        },
+        {
+          "asset_id": "bess_new_2030",
+          "component": "StorageUnit",
+          "owner": "site"
+        },
+        {
+          "asset_id": "bess_new_2035",
+          "component": "StorageUnit",
+          "owner": "site"
+        },
+        {
+          "asset_id": "h2_storage",
+          "component": "Store",
+          "owner": "site"
+        },
+        {
+          "asset_id": "nh3_tank",
+          "component": "Store",
+          "owner": "site"
+        },
+        {
+          "asset_id": "grid_import",
+          "component": "Link",
+          "owner": "site"
+        },
+        {
+          "asset_id": "electrolyser",
+          "component": "Link",
+          "owner": "site"
+        },
+        {
+          "asset_id": "electrolyser_new_2027",
+          "component": "Link",
+          "owner": "site"
+        },
+        {
+          "asset_id": "electrolyser_new_2030",
+          "component": "Link",
+          "owner": "site"
+        },
+        {
+          "asset_id": "electrolyser_new_2035",
+          "component": "Link",
+          "owner": "site"
+        },
+        {
+          "asset_id": "haber_bosch",
+          "component": "Link",
+          "owner": "site"
+        }
+      ],
+      "built_digest": "16ce78e413142a1e",
+      "built_inputs_digest": "33d38e03bd745650",
+      "connection_fee_payee": null,
+      "export_revenue_to": "site_party",
+      "externals": [
+        "retailer",
+        "dso",
+        "tso",
+        "market",
+        "tax_authority",
+        "capex_supplier",
+        "om_contractor"
+      ],
+      "hub_members": [],
+      "participants": [
+        {
+          "currency": "EUR",
+          "id": "site",
+          "name": "site",
+          "role": "site_owner"
+        }
+      ],
+      "tariff_payees": [],
+      "template": "single_owner",
+      "template_version": "single_owner@2"
+    }
+  },
+  "discount_rate": 0.07,
+  "finance": {
+    "acquisition_date": null,
+    "analysis_years": 18,
+    "annualise": false,
+    "capex_phasing": [
+      1.0
+    ],
+    "cod_by_asset": {
+      "electrolyser": "2027-01-01",
+      "haber_bosch": "2027-01-01",
+      "site_battery": "2027-01-01",
+      "solar_park": "2027-01-01",
+      "wind_farm": "2027-01-01"
+    },
+    "construction_months_by_asset": {},
+    "construction_start": null,
+    "contingency_share": 0.0,
+    "cost_of_equity": 0.07,
+    "currency": "EUR",
+    "currency_year": 2020,
+    "debt": [],
+    "degradation_by_asset": {
+      "bess_new_2027": 0.0,
+      "bess_new_2030": 0.0,
+      "bess_new_2035": 0.0,
+      "site_battery": 0.0,
+      "solar_new_2027": 0.005,
+      "solar_new_2030": 0.005,
+      "solar_new_2035": 0.005,
+      "solar_park": 0.005,
+      "wind_farm": 0.0,
+      "wind_new_2027": 0.0,
+      "wind_new_2030": 0.0,
+      "wind_new_2035": 0.0
+    },
+    "depreciation_class_by_asset": {},
+    "escalation": {
+      "capex": 0.02,
+      "export": 0.02,
+      "fuel": 0.02,
+      "opex": 0.02,
+      "ppa": 0.02,
+      "tariff": 0.02
+    },
+    "financial_close": "2026-01-01",
+    "financing_fee_tax": "not_deducted",
+    "hebesatz_pct": null,
+    "incentives": [],
+    "inflation": 0.02,
+    "island_outage": null,
+    "participants": [],
+    "price_basis": "nominal",
+    "pwa_met": null,
+    "replacement_capex": [],
+    "replacement_rule": "part_lifetimes",
+    "reserves_rate": null,
+    "small_business_163j": null,
+    "solve_ppa": null,
+    "stage_capex_lead_years": 1,
+    "state_rate": null,
+    "tax_equity": null,
+    "tax_losses": "offset_other_income",
+    "tax_pack_id": null,
+    "terminal_value": {
+      "method": "remaining_life_annuity",
+      "value": null
+    },
+    "wacc_nominal": 0.07
+  },
+  "multi_investment_periods": true,
+  "voll": 5000.0
+}
