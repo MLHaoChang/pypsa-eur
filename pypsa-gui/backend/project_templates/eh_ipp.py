@@ -180,6 +180,8 @@ COD = f"{YEAR}-01-01"
 FINANCIAL_CLOSE = f"{YEAR - 2}-01-01"
 ANALYSIS_YEARS = 25
 DEGRADATION = {"wind_farm": 0.003, "pv_plant": 0.005, "bess": 0.0}
+HEBESATZ_PCT = 400.0
+BESS_DEPRECIATION = "afa_10"
 
 
 def _placeholder(series: str) -> dict:
@@ -233,6 +235,13 @@ FINANCE: dict = {
     "replacement_rule": "part_lifetimes",
     "terminal_value": {"method": "remaining_life_annuity"},
     "wacc_nominal": 0.07, "cost_of_equity": 0.09, "inflation": 0.02,
+    # German corporate tax (the DE pack): the municipality's Hebesatz and the battery's
+    # depreciation class, which the BMF AfA tables do not list, are stated assumptions.
+    "tax_pack_id": "eu_de", "hebesatz_pct": HEBESATZ_PCT,
+    # The pack's AfA lives (solar 20, onwind 16 years) stated per asset, the battery's assumed.
+    "depreciation_class_by_asset": {"pv_plant": "afa_20", "wind_farm": "afa_16",
+                                    "bess": BESS_DEPRECIATION},
+    "acquisition_date": COD,
     "solve_ppa": {"contract_id": "ppa_wind", "target_irr": 0.08, "target_year": ANALYSIS_YEARS},
 }
 
@@ -336,6 +345,11 @@ def _ledger() -> list[dict]:
         {"item": "finance", "value": "7 % WACC, 9 % cost of equity, 2 % escalation, 25 years",
          "source": "assumed",
          "note": "base-year money (2030), held flat to the base year then escalated (label only)"},
+        {"item": "tax", "value": f"German corporate tax (pack eu_de), Hebesatz {HEBESATZ_PCT:g} %",
+         "source": "assumed",
+         "note": f"the Hebesatz depends on the municipality; the battery's depreciation class "
+                 f"({BESS_DEPRECIATION}, 10-year straight line) is assumed because the BMF AfA "
+                 "tables do not list battery storage"},
         {"item": "degradation", "value": "PV 0.5 %/yr, wind 0.3 %/yr", "source": "assumed",
          "note": "the faster-degradation case doubles them"},
         {"item": "cases", "value": "8 planned cases (editable once sensitivities land; make any now "
@@ -348,7 +362,9 @@ def register(T) -> None:
     """Add the IPP template to ``eh_templates``' registries."""
     T.BUILDERS[TID] = build_eh_ipp_hybrid
     T.STRESS_SCENARIOS[TID] = []
-    T.SOLVER_CONFIG_EXTRA[TID] = {"discount_rate": 0.07}
+    # No load, so nothing to shed: VoLL is not applicable (spec §8.2) and no shedding slacks
+    # are added; a VoLL with no capture would leave the case's served load unknown.
+    T.SOLVER_CONFIG_EXTRA[TID] = {"discount_rate": 0.07, "voll": 0.0}
     T._SOLVER_CONFIG_BUILT[TID] = commercial_and_finance
     T.PRICE_SERIES[TID] = write_price_series
     T.TEMPLATE_META[TID] = {

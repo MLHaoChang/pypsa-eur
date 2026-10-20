@@ -99,6 +99,9 @@ def test_the_ledger_labels_every_price_illustrative_or_assumed():
     assert ledger["PPAs"]["source"] == "illustrative"
     assert ledger["site location"]["value"] == "not set"
     assert ledger["cases"]["value"].startswith("8 planned cases")
+    # The synthetic profiles sit at an assumed reference point until the pin is set (GK 5).
+    assert ledger["site location"]["source"] == "assumed"
+    assert "reference point" in ledger["site location"]["note"]
 
 
 # ── the plan ───────────────────────────────────────────────────────────────
@@ -134,7 +137,13 @@ def _solve(cfg_dict, *, network=None):
     status, cond = run_simulation(cfg, n, PyPSAService.get_lock(), threading.Event(),
                                   queue.SimpleQueue(), state_update=lambda **k: state.update(k))
     assert status in ("ok", "optimal"), (status, cond)
+    _STATE.clear()
+    _STATE.update(state)
     return n, cfg, da
+
+
+#: The last solve's state (its lost-load capture), handed to the case as the IC route does.
+_STATE: dict = {}
 
 
 def _case(n, cfg, fin=None):
@@ -143,9 +152,13 @@ def _case(n, cfg, fin=None):
     from services.finance.engine import run_case
     from services.results.finance_case import build_finance_case
 
+    from services.finance.packs.base import load_pack
+
     case = build_finance_case(n, cfg, FinanceInputs.model_validate(fin or cfg.finance),
-                              result_df=R._result_df)
-    return case, run_case(case)
+                              result_df=R._result_df, lost_load=_STATE.get("last_lost_load"))
+    pack = (load_pack(case.inputs.tax_pack_id, as_of=case.inputs.financial_close)
+            if case.inputs.tax_pack_id else None)        # as the investment-case runner does
+    return case, run_case(case, pack)
 
 
 @pytest.fixture(scope="module")
@@ -182,12 +195,12 @@ def test_the_plants_curtail_at_the_limit_and_at_negative_prices(solved):
     at_limit = exp.to_numpy() >= 70.0 - 1e-6
     assert curt[neg].sum() > 0, "no curtailment at negative prices"
     assert curt[at_limit & ~neg].sum() > 0, "no curtailment at the export limit"
-    # Circulation (G5 trap 3): import costs more than export earns in every hour.
-    from services.commercial import lp_bindings as LP
+    # Circulation (G5 trap 3): import (DA + 20) costs more than export (DA) earns every hour,
+    # so the preflight finds no arbitrage loop.
+    from services.commercial.preflight import commercial_findings
 
-    assert LP.circulation_risk_snapshots(n, LP._parse(_cfg.commercial),
-                                         {"import": np.full(8760, 20.0),
-                                          "export": np.zeros(8760)}, da.to_numpy()) == 0
+    assert "commercial.arbitrage_loop" not in {c for _s, c, *_ in
+                                               commercial_findings(n, _cfg.commercial)}
 
 
 @pytest.mark.live_solve
@@ -201,12 +214,13 @@ def test_the_pv_capture_rate_is_below_one(solved):
 def test_the_investment_case_is_the_developers_standalone_case(solved):
     n, cfg, _da = solved
     case, res = _case(n, cfg)
-    assert case.counterfactual == ()                                   # empty: all candidates
-    assert {a.name for a in case.assets} == {"wind_farm", "pv_plant", "bess"} or \
-        {a.name for a in case.assets} == {"wind_farm", "pv_plant"}
+    # Every asset is a candidate: the counterfactual site builds and bills nothing.
+    assert all(ln.amount == 0.0 for t in case.counterfactual for ln in t.lines)
+    assert {a.name for a in case.assets} == {"wind_farm", "pv_plant", "bess"}
     assert "grid" not in {a.name for a in case.assets}                 # the slack (trap 1)
     assert res.metrics["equity_post_tax_npv"] is not None
     assert res.metrics["project_post_tax_irr"] is not None
+    assert res.reasons == {} or all(not v for v in res.reasons.values())
     lines = {ln.key: ln for ln in case.templates[0].lines}
     # The PPAs settle; the wholesale import is one line apart from the tariff (trap 2).
     assert lines["contract:ppa_wind:ppa_energy"].amount is not None
@@ -222,7 +236,8 @@ def test_no_load_metric_divides_by_zero(solved):
     n, cfg, _da = solved
     _case_, res = _case(n, cfg)
     for k, v in res.metrics.items():
-        assert v is None or np.isfinite(v), k
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            assert np.isfinite(v), k
 
 
 # ── section 7 is the one home (no shadow value) ────────────────────────────
@@ -284,3 +299,53 @@ def test_from_template_mints_the_series_and_binds_every_block(
     assert all(c["reference_price"] == com["export_price_ref"] for c in com["contracts"])
     assert client.get("/api/simulation/finance").json()["status"] == "ok"
     assert client.get("/api/simulation/commercial/value_flows").json()["status"] == "ok"
+
+
+@pytest.mark.live_solve
+def test_the_wacc_gate_passes(solved):
+    """GK 1: the LP discount rate (7 %) and the pack-priced assets sit within the gate."""
+    from services.finance.engine import wacc_gate
+
+    n, cfg, _da = solved
+    case, _res = _case(n, cfg)
+    gate = wacc_gate(case)
+    assert gate["wacc_vs_discount_rate_consistent"] is True, gate
+
+
+@pytest.mark.live_solve
+def test_solve_ppa_names_the_wind_ppa_and_an_unnamed_call_is_ambiguous(solved):
+    """GK 3: two owner-sold PPAs; the template names ppa_wind."""
+    from services.finance.engine import solve_ppa
+    from services.finance.packs.base import load_pack
+
+    n, cfg, _da = solved
+    case, res = _case(n, cfg)
+    assert res.metrics["solved_equity_irr_at_target_year"] == pytest.approx(0.08, abs=1e-6)
+    import dataclasses
+
+    unnamed = dataclasses.replace(case, inputs=case.inputs.model_copy(update={
+        "solve_ppa": case.inputs.solve_ppa.model_copy(update={"contract_id": None})}))
+    pack = load_pack(case.inputs.tax_pack_id, as_of=case.inputs.financial_close)
+    assert solve_ppa(unnamed, pack)["solve_ppa_status"] == "solve_ppa_ambiguous_contract"
+
+
+@pytest.mark.live_solve
+def test_a_negative_price_hour_settles_nothing_and_the_plants_curtail(solved):
+    """GK 4: at ref < 0 the PPA clause suspends the settlement, and the plants curtail."""
+    from services.commercial import contracts as K
+    from models.commercial import PpaContract
+
+    n, cfg, da = solved
+    neg = np.flatnonzero(da.to_numpy() < 0)
+    assert len(neg) > 0
+    h = int(neg[0])
+    avail = float(n.generators_t.p_max_pu["pv_plant"].iloc[h] * n.generators.at["pv_plant",
+                                                                                  "p_nom_opt"])
+    assert float(n.generators_t.p["pv_plant"].iloc[h]) <= avail
+    wind_c = next(c for c in cfg.commercial["contracts"] if c["id"] == "ppa_wind")
+    one = n.snapshots[h:h + 1]
+    inputs = K.SettlementInputs(period=None, index=one, weights=np.array([1.0]),
+                                generators=n.generators_t.p.loc[one],
+                                references={"ppa_wind": (da.loc[one], [])})
+    (line,) = K.settle(PpaContract.model_validate(wind_c), inputs)
+    assert line.amount == 0.0 and line.quantity_mwh == 0.0

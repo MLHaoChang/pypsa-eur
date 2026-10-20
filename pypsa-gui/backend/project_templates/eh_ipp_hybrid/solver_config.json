@@ -201,7 +201,7 @@
   },
   "discount_rate": 0.07,
   "finance": {
-    "acquisition_date": null,
+    "acquisition_date": "2030-01-01",
     "analysis_years": 25,
     "annualise": false,
     "capex_phasing": [
@@ -225,7 +225,11 @@
       "pv_plant": 0.005,
       "wind_farm": 0.003
     },
-    "depreciation_class_by_asset": {},
+    "depreciation_class_by_asset": {
+      "bess": "afa_10",
+      "pv_plant": "afa_20",
+      "wind_farm": "afa_16"
+    },
     "escalation": {
       "capex": 0.02,
       "export": 0.02,
@@ -236,7 +240,7 @@
     },
     "financial_close": "2028-01-01",
     "financing_fee_tax": "not_deducted",
-    "hebesatz_pct": null,
+    "hebesatz_pct": 400.0,
     "incentives": [],
     "inflation": 0.02,
     "island_outage": null,
@@ -256,12 +260,12 @@
     "state_rate": null,
     "tax_equity": null,
     "tax_losses": "offset_other_income",
-    "tax_pack_id": null,
+    "tax_pack_id": "eu_de",
     "terminal_value": {
       "method": "remaining_life_annuity",
       "value": null
     },
     "wacc_nominal": 0.07
   },
-  "voll": 5000.0
+  "voll": 0.0
 }

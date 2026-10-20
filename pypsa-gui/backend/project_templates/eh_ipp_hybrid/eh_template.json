@@ -91,6 +91,12 @@
       "value": "7 % WACC, 9 % cost of equity, 2 % escalation, 25 years"
     },
     {
+      "item": "tax",
+      "note": "the Hebesatz depends on the municipality; the battery's depreciation class (afa_10, 10-year straight line) is assumed because the BMF AfA tables do not list battery storage",
+      "source": "assumed",
+      "value": "German corporate tax (pack eu_de), Hebesatz 400 %"
+    },
+    {
       "item": "degradation",
       "note": "the faster-degradation case doubles them",
       "source": "assumed",
