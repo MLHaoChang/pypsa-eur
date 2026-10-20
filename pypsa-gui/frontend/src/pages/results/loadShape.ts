@@ -49,6 +49,14 @@ export function heatColor(v: number | null, max: number, rgb = '59, 130, 246'): 
   return `rgba(${rgb}, ${(0.05 + 0.85 * Math.min(1, Math.max(0, v) / max)).toFixed(3)})`
 }
 
+/** A cell with no snapshot is hatched, so it cannot be read as the lightest shade. */
+export const NO_SNAPSHOT_HATCH =
+  'repeating-linear-gradient(45deg, #9ca3af 0, #9ca3af 1px, transparent 1px, transparent 4px)'
+
+export function heatBackground(v: number | null, max: number, rgb = '59, 130, 246'): string {
+  return v == null || !Number.isFinite(v) ? NO_SNAPSHOT_HATCH : heatColor(v, max, rgb)
+}
+
 export function cellTitle(day: number, hour: number, v: number | null, n: number): string {
   const when = `${WEEKDAYS[day]} ${String(hour).padStart(2, '0')}:00`
   return v == null ? `${when}: no snapshot` : `${when}: ${fmtMw(v)} (${n} snapshot${n === 1 ? '' : 's'})`

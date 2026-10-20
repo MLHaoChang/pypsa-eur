@@ -60,10 +60,10 @@ Agreed with the workspace-reconciliation session; recorded in PR #448 §5.4.
 | View (tab) | Copilot read | Assurance coverage today | Gap | Plan (profile · module · oracle) | Slice |
 | --- | --- | --- | --- | --- | --- |
 | Summary (`summary`) | `get_results(statistics, cost_breakdown)` | Partial: per-generator energy/expenditure (generator-dispatch/1); network total on a declared basis (network-linear-cost/1) | No per-carrier totals; reads refused | `carrier-energy/1`: Σ_t w(t)·p_g(t) by carrier over generators and storage units, discharge and charge reported separately · `harness/calculations.py` · hand-summed two-carrier fixture | S2 |
-| Dispatch (`dispatch`) | `get_results(generators, storage_dispatch)` | Per entity: generator-dispatch/1, storage-unit-dispatch/1 | No tab-level or multi-entity scope | Multi-entity scope over the existing two profiles (≤ 20 entities) · `assurance_scope.py` · existing fixtures, summed | S2 |
+| Dispatch (`dispatch`) | `get_results(generators, storage_dispatch)` | Per entity: generator-dispatch/1, storage-unit-dispatch/1 | No tab-level scope | One carrier per request (`carrier-energy/1`); multi-entity scope dropped: the browser receipt keys slots by metric (≤ 20) | S2 |
 | Load flow (`loadflow`) | `get_loadflow_summary` | None for values; displayed-data ACK (v2) only | Values unchecked | `branch-loading/1`: matches `loadflow_summary` (see the approved semantics below) · new `harness/branch_calculations.py` · independent raw `p0`/`p1` fixture | S3 |
 | Lost load (`lostload`) | `get_results(lost_load)` | None | Refused | `lost-load/1`: ENS = Σ_t w(t)·p_shed(t) per shedding unit; peak shed MW · new module · seeded shed fixture | S4 |
-| Adequacy (`adequacy`) | `get_adequacy_results(adequacy)` | None | Refused; stochastic study output | `adequacy-indices/1`: LOLE and EENS rebuilt by the producing engine's method (COPT analytical Σ w·LOLP; Monte Carlo sample mean), on the displayed basis; otherwise `method_mismatch` or `samples_not_retained` · new module · per-engine fixture | S4 |
+| Adequacy (`adequacy`) | `get_adequacy_results(adequacy)` | None | Refused; stochastic study output | COPT LOLE/EUE: an independent two-state convolution pinning copt.py's conventions (S4b); withheld until then. Monte Carlo and the EH per-year LOLE: withheld, `samples_not_retained` (no per-sample series is kept) | S4b |
 | Prices (`prices`) | `get_results(prices, price_drivers)` | None | Refused | `bus-price/1`: observed `marginal_price` per bus; time-weighted mean, min, max; hours at VoLL. No price-setter claim · new module · raw-dual fixture | S5 |
 | Emissions (`emissions`) | `get_results(emissions)` | None | Refused | `emissions/1`: Σ w·p/η(t)·co2_emissions over generators; `emissions_outside_scope` when links or storage carry CO2; cap dual observed, never inferred · new module · two-fuel fixture | S5 |
 | Curtailment (`curtailment`) | `get_results(curtailment)` | None | Refused | `curtailment/1`: Σ w·max(0, p_max_pu(t)·p_nom_opt − p) for generators with time-varying `p_max_pu` only; share of available · new module · capped-PV fixture | S5 |
@@ -113,10 +113,13 @@ Each slice is one PR on its own `claude/*` branch, with a release-note fragment.
 
 | Slice | What | Gate |
 | --- | --- | --- |
-| S1 | **Disposition registry and fail-closed proof.** Every `ResultView` gets an `assurance` field (`profile` or `withheld:<reason>`). A catalogue-wide test runs a checked turn against every tool and asserts the refusal, apart from the three allowlisted. A request for a withheld view yields an `unavailable` slot with `outside_checked_scope` and the view's label. `ui_open_asset_detail` is admitted as navigation. | Gatekeeper (dispositions) |
-| S2 | Summary and Dispatch: `carrier-energy/1` and multi-entity scope over the existing profiles | Gatekeeper |
-| S3 | Load flow: `branch-loading/1`, joined to its v2 displayed-data ACK. The first view checked end to end, value plus display | Gatekeeper |
-| S4 | Lost load and adequacy: `lost-load/1`, `adequacy-indices/1` | Gatekeeper (adequacy engine) |
+| S1 (#452) | **Disposition registry and fail-closed proof.** Each `ResultView` declares `checked_profiles` and a `checked_gap`; a catalogue-wide test runs a checked turn against every tool and asserts the refusal, apart from `CHECKED_TOOLS`. Deferred: an `outside_checked_scope` slot naming the view, and admitting `ui_open_asset_detail` as navigation | Gatekeeper (dispositions) |
+| S2 (#457) | Summary and Dispatch: `carrier-energy/1`, one carrier per request; new profiles opt-in (`OPT_IN_PROFILES`) | Gatekeeper |
+| S3 (#460) | Load flow: `branch-loading/1` and `network-loading/1` (LOPF, P only). The v2 displayed-data ACK join is a later slice | Gatekeeper |
+| Fingerprint (#462) | Every profile requires the exact solve-input fingerprint as well as the recorded one | Gatekeeper |
+| S4 (#465) | Lost load: `lost-load/1` from the solve's VoLL capture | Gatekeeper (adequacy engine) |
+| S4b | COPT LOLE/EUE: independent two-state convolution | Gatekeeper (adequacy engine) |
+| S3b | Load flow v2 ACK join: a checked loading answer binds the shown window to its evidence | Gatekeeper and UX reviewer |
 | S5 | Prices, emissions, curtailment | Gatekeeper |
 | S6 | Capacity expansion and storage cycles | Gatekeeper |
 | S7 | Energy flow and Load shape (after #438 and #440 merge) | Gatekeeper |
@@ -177,6 +180,19 @@ The gatekeeper reviewed these at `0a40442` and said "go with changes"; the chang
   - **Nodal revenue** Σ w·p·λ_bus is withheld, or labelled "market value at model prices". It is never compared with investment-case rows, which are tariff and contract based.
 - **S9 scorecard.** Each verdict is recomputed with the row's declared comparator (≤, < or ≥), never an inferred direction.
 
+## Decisions since the first audit
+
+- **S2.** One carrier per request. An empty sub-population is exactly 0, and the answer always counts the excluded Links and Stores. Storage energy reuses the StorageUnit profile's store weights; generator energy uses generator weights, disclosed. `ambiguous_carrier` applies only when the exact name and a case variant both exist; a case variant alone is `unknown_carrier` with a hint.
+- **S3.** LOPF only, with P-only flow max(|p0|, |p1|). The check is refused whenever AC PF results exist. A missing time-varying `s_max_pu` falls back to the static value, as the tab does; any missing flow or zero limit makes the branch unavailable, which is stricter than the tab and disclosed. A class word in the request (line or transformer) must match. A branch named "network" is checkable only by naming its class.
+- **Fingerprint.** Projects solved before the exact fingerprint was recorded read their checked answers as unavailable until they are re-solved.
+- **S4.**
+  - The source is `last_lost_load`, which every solve claim wipes and the same solve rewrites beside both fingerprints.
+  - The demand bound is dropped, because the solve-time demand is not captured.
+  - Energy, peak and cost cover every captured Load, matching the card; shed hours count the electrical Loads, as the engine does.
+  - Bus-keyed legacy captures are refused.
+  - Monte Carlo and the EH per-year LOLE are withheld: retaining samples would be an engine change with its own plan.
+- **Display.** The Adequacy view's units read "over the modelled horizon"; the engines return horizon totals.
+
 ## Open questions
 
-- **Adequacy samples (S4).** For a Monte Carlo source, are the per-sample ENS series retained? If not, a Monte Carlo LOLE is `samples_not_retained`.
+- **S4b.** Which copt.py conventions (grid delta and rounding, strict or non-strict LOLP comparison, period-block sums, generator weights, `k_exact`) the independent convolution must pin.

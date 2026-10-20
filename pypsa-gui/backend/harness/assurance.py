@@ -112,6 +112,12 @@ def _label(value):
     )
 
 
+# The only tools a checked turn may run. Every results read, chart and export
+# is refused before its handler runs; checked results come from the bounded
+# profiles, computed by software from the request scope.
+CHECKED_TOOLS = frozenset({"get_component", "ui_open_panel", "update_component"})
+
+
 class Turn:
     def __init__(self, session, ctx):
         self.turn_id = str(uuid.uuid4())
@@ -483,7 +489,7 @@ class Turn:
         return seed
 
     def tool_guard(self, tool_name, args):
-        if self.effect_pending:
+        if self.effect_pending or tool_name not in CHECKED_TOOLS:
             return False
         if self.operation_contract is not None and tool_name == "update_component":
             from harness.rollout import effects_enabled
