@@ -36,6 +36,7 @@ user entry (see tests/test_profile_gen_apply.py).
 from __future__ import annotations
 
 import datetime as _dt
+from types import SimpleNamespace
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping
 
@@ -949,7 +950,7 @@ def preview_energy(ctx, series: pd.Series, meta: Mapping[str, Any], *,
 # ---------------------------------------------------------------------------
 
 
-def assign_profile(
+def prepare_profile(
     ctx,
     component: str,
     series: pd.Series,
@@ -960,7 +961,12 @@ def assign_profile(
     now: _dt.datetime | str | None = None,
     time_basis: str | None = None,
 ) -> dict:
-    """Apply a generated profile to ``component``'s ``attribute``.
+    """Everything `assign_profile` decides before it writes — target and
+    family checks, alignment, values, warnings, the meta it would store —
+    with NOTHING written. The edit card previews exactly this.
+
+    (assign_profile's contract, which this shares:)
+    Apply a generated profile to ``component``'s ``attribute``.
 
     The target ``(component_type, attribute)`` must be in `TARGETS`, and the
     meta's ``family`` (renewable when absent) must allow it. The defaults are
@@ -1111,6 +1117,35 @@ def assign_profile(
         if meaning.startswith("min stable") and full_meta.get("kind") == "must_run":
             full_meta["kind"] = "min_stable_level"
 
+    return SimpleNamespace(
+        key=key, aligned=aligned, full_meta=full_meta, companion=companion,
+        warnings=warnings, target=target, family_name=family_name,
+        align_meta=align_meta, recorded_basis=recorded_basis, unit_meta=unit_meta,
+        component=component, component_type=component_type, attribute=attribute,
+        meta=meta)
+
+
+def assign_profile(
+    ctx,
+    component: str,
+    series: pd.Series,
+    meta: Mapping[str, Any],
+    *,
+    component_type: str = "generators",
+    attribute: str = "p_max_pu",
+    now: _dt.datetime | str | None = None,
+    time_basis: str | None = None,
+) -> dict:
+    """Apply a generated profile to ``component``'s ``attribute``: what
+    `prepare_profile` decides, written (store, network, dispatch freshness,
+    changelog). See `prepare_profile` for the contract."""
+    p = prepare_profile(ctx, component, series, meta, component_type=component_type,
+                        attribute=attribute, now=now, time_basis=time_basis)
+    key, aligned, full_meta, companion = p.key, p.aligned, p.full_meta, p.companion
+    warnings, target, family_name = p.warnings, p.target, p.family_name
+    align_meta, recorded_basis, unit_meta = p.align_meta, p.recorded_basis, p.unit_meta
+    n = ctx.network
+
     # Store write under the store lock, network write under the PyPSA lock —
     # the same two-lock dance as the upload path (`_apply_profile_upload`).
     # Overwrite semantics: regeneration replaces the same key.
@@ -1143,6 +1178,8 @@ def assign_profile(
         desc += f", tiled over {len(align_meta['periods'])} investment periods"
     if align_meta["leap_day"] == "dropped":
         desc += ", Feb 29 dropped"
+    if meta.get("refinements"):
+        desc += ", refined by " + ", ".join(str(r.get("op")) for r in meta["refinements"])
     change_log_service.log("timeseries", target.display, component, desc)
 
     return {

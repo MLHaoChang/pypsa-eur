@@ -652,6 +652,28 @@ def _undo_readback(args: dict, rows: list[dict]) -> list[Any]:
 register("undo_last", Adapter("parameter_edit", _undo_preview, _undo_readback))
 
 
+# ── Generated series: apply_generated_profile (TS-04) ──────────────────────
+# The series the target holds now against the one the apply would write
+# (`services/profile_gen/card.py`): peak, energy and load factor for a power
+# target, max/mean/min for any other, notes for the hours that change, the
+# apply's warnings and any refinement ops.
+
+
+def _profile_preview(args: dict) -> list[dict]:
+    from services.profile_gen import card
+
+    return card.preview(args)
+
+
+def _profile_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services.profile_gen import card
+
+    return card.readback(args, rows)
+
+
+register("apply_generated_profile", Adapter("series_edit", _profile_preview, _profile_readback))
+
+
 # ── Any other edit: the requested arguments, no old value claimed ──────────
 
 
