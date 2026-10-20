@@ -38,8 +38,8 @@ def test_written_inventory_is_complete_and_explicit_about_unverified_behavior(tm
     assert data['slide_panels_not_in_tool_enum'] == []
     assert {t['id'] for t in data['result_tabs']} >= {'summary', 'adequacy', 'fmea', 'loadflow', 'investment'}
     # 19 panels: Economics in Expert added 'economics' (plan 2026-10-14-economics-in-expert.md).
-    # 15 result tabs: M3 added 'summary' (plan 2026-10-14-m3-results-summary.md).
-    assert len(data['result_tabs']) == 15 and len(data['slide_panels']) == 20
+    # 16 result tabs: M3 added 'summary'; site commercial UX A1 added 'flows'.
+    assert len(data['result_tabs']) == 16 and len(data['slide_panels']) == 20
     assert 'pending' in data['status']
 
 

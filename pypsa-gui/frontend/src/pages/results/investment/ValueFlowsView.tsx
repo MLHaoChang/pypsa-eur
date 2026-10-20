@@ -4,6 +4,7 @@
 // is per period-year, unweighted, in the tariff's currency. A total the server
 // does not establish is shown as unavailable — never as a zero (ADR-0001).
 import { useRef, useState } from 'react'
+import { useUIStore } from '../../../store/uiStore'
 import { ResponsiveContainer, Sankey, Tooltip, Layer, Rectangle } from 'recharts'
 import type { ValueFlowsPayload } from '../../../api/commercial'
 import { useResultsFilter } from '../filterContext'
@@ -148,6 +149,7 @@ export default function ValueFlowsView({ payload, sankeyWidth }: {
   sankeyWidth?: number
 }) {
   const filter = useResultsFilter()
+  const requestResultsTab = useUIStore(s => s.requestResultsTab)
   const keys = periodKeys(payload)
   const [local, setLocal] = useState(keys[0] ?? '_')
   const fromShell = filter.selectedPeriod != null ? String(filter.selectedPeriod) : null
@@ -176,6 +178,13 @@ export default function ValueFlowsView({ payload, sankeyWidth }: {
         {payload.template && (
           <span className="text-[11px] text-muted">Template: {payload.template}</span>
         )}
+        <span className="text-[11px] text-muted">
+          Energy flows:{' '}
+          <button type="button" className="underline" data-testid="vf-to-energy-flows"
+                  onClick={() => requestResultsTab('flows')}>
+            Operation → Energy flow
+          </button>
+        </span>
       </div>
       <ParticipantTable payload={payload} periodKey={periodKey} />
       <div className="space-y-1">
