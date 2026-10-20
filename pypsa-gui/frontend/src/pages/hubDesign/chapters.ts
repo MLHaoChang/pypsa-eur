@@ -46,7 +46,9 @@ export interface ChapterInputs {
                  /** The project has its own solve; `false` marks the figure as the study's alone (G5). */
                  solved?: boolean
                  /** The review says the study is out of date (N4). */
-                 stale?: boolean }
+                 stale?: boolean
+                 /** Years the Monte Carlo modelled (`certification.horizon_years`); names the basis line (N10). */
+                 horizonYears?: number | null }
   /** `gfm`: the campus GFM settings (null when the project has no campus or no island). */
   operation: { status: SimulationStatus | null; gfm?: GfmSettingsState | null }
 }
@@ -149,7 +151,9 @@ function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 
   const basis = r.target == null ? 'No goal set'
     : `${verdict ? `${verdict}: ` : ''}the goal is ${Number(r.target.toPrecision(6))} h/yr`
   // Which engine made the figure (UX review N10): Expert's other panels name theirs.
-  const sampled = `${basis} · Monte Carlo, 8 760 h`
+  const hours = r.horizonYears != null && isFinite(r.horizonYears) && r.horizonYears > 0
+    ? Math.round(r.horizonYears * 8760) : null
+  const sampled = `${basis} · Monte Carlo${hours ? `, ${String(hours).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} h` : ''}`
   return { label, value: String(r.lole), unit: 'h/yr', state: r.stale ? 'stale' : 'ready', basis: sampled, open,
     reason: r.stale ? STALE_TILE_REASON : undefined, fromStudy: r.solved === false && !r.stale }
 }
