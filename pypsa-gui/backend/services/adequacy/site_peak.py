@@ -6,15 +6,16 @@ One check, two callers: a data-center project created with a ``dc_load`` body
 is refused (422) when a period's peak does not fit (``eh_templates._check_dc_peak``),
 and the grid-readiness scorecard reports the same rows (``grid_readiness``).
 
-Per period: peak ≤ Σ energized import × efficiency + firm gensets, where
+Hour by hour: load(t) ≤ Σ energized import(t) × efficiency + firm gensets, and
+each period reports its binding hour (least headroom), where
 
-* the peak is the hourly-mean sum of the fixed loads' ``p_set`` (a flexible
+* the load is the hourly-mean sum of the fixed loads' ``p_set`` (a flexible
   conversion unit such as an electrolyser is a decision and is not counted;
   the in-hour peak of an AI-training load is a few per cent higher, which the
   scorecard reports separately);
-* the energized import is min(p_nom × the Link's highest p_max_pu in the
-  period, the energization schedule's minimum in it) per import Link
-  (``services.adequacy.energization``); a normally open tie supplies 0;
+* the energized import is min(p_nom × the Link's p_max_pu(t), the
+  energization schedule's E(t)) per import Link and hour
+  (``services.adequacy.energization.capped_mw``); a normally open tie supplies 0;
 * the efficiency is each import Link's ``efficiency`` (what reaches the site
   side of the PoC Link; losses further in are not counted);
 * firm gensets are the island sidecar's committed genset fleet less its k
@@ -77,28 +78,30 @@ def _periods(n) -> list[tuple[str, np.ndarray]]:
     return [(label, np.ones(len(n.snapshots), dtype=bool))]
 
 
-def _energized(n, link: str, mask: np.ndarray) -> float:
-    from services.adequacy.energization import energization_mw
+def _energized(n, link: str) -> np.ndarray:
+    """E_l(t) in MW per snapshot: min(p_nom × the Link's own p_max_pu(t), the
+    energization schedule's E(t)). The Link's p_max_pu bounds it too: a
+    normally open tie (p_max_pu 0) supplies nothing, whatever its rating; an
+    hour without a schedule value is not capped by it (``capped_mw``)."""
+    from services.adequacy.energization import capped_mw
 
-    # The Link's own p_max_pu bounds it too: a normally open tie (p_max_pu 0)
-    # supplies nothing, whatever its rating.
     ts = n.links_t.p_max_pu
-    pu = (ts[link].reindex(n.snapshots).to_numpy(dtype=float)[mask].max()
-          if link in ts.columns and mask.any() else float(n.links.at[link, "p_max_pu"]))
-    p_nom = float(n.links.at[link, "p_nom"]) * max(0.0, float(pu))
-    e = energization_mw(n, link)
-    if e is None:
-        return p_nom
-    e = e[mask]
-    e = e[np.isfinite(e)]
-    return min(p_nom, float(e.min())) if e.size else p_nom
+    pu = (ts[link].reindex(n.snapshots).to_numpy(dtype=float) if link in ts.columns
+          else np.full(len(n.snapshots), float(n.links.at[link, "p_max_pu"])))
+    own = float(n.links.at[link, "p_nom"]) * np.clip(np.nan_to_num(pu, nan=1.0), 0.0, None)
+    return capped_mw(n, link, own)
 
 
 def peak_check(n, island: dict | None) -> list[dict]:
-    """One row per period: ``{period, peak_mw, energized_mw, efficiency,
-    delivered_mw, firm: [{source, mw, rule}], firm_mw, cap_mw, headroom_mw,
-    import_links, scheduled}``. An empty list when the network has no import
-    Link (an island-only site has no connection to check)."""
+    """One row per period, evaluated hour by hour (gatekeeper review of #435):
+    cap(t) = Σ_l E_l(t) × efficiency_l + firm, headroom = min_t(cap(t) − load(t)),
+    reported at the binding snapshot (the hour of least headroom):
+    ``{period, binding_snapshot, load_mw, energized_mw, efficiency, delivered_mw,
+    cap_mw, headroom_mw, peak_mw, energized_max_mw, firm: [{source, mw, rule}],
+    firm_mw, import_links, scheduled}``. ``load_mw``/``cap_mw``/``energized_mw``
+    are at the binding hour; ``peak_mw`` is the period's highest load and
+    ``energized_max_mw`` its highest energized import. An empty list when the
+    network has no import Link (an island-only site has no connection to check)."""
     from services.adequacy.energization import energized_links
 
     links = import_links(n)
@@ -107,20 +110,28 @@ def peak_check(n, island: dict | None) -> list[dict]:
     load = _fixed_load(n).to_numpy(dtype=float)
     firm_mw, rule = firm_genset_mw(n, island)
     firm = [{"source": "gensets", "mw": firm_mw, "rule": rule}]
+    firm_total = sum(f["mw"] for f in firm)
     scheduled = sorted(set(links) & set(energized_links(n)))
-    out = []
     eff = {l: float(n.links.at[l, "efficiency"]) for l in links}
+    energized = {l: _energized(n, l) for l in links}
+    total_e = sum(energized.values())
+    delivered = sum(energized[l] * eff[l] for l in links)
+    cap = delivered + firm_total
+    snaps = list(n.snapshots)
+    out = []
     for label, mask in _periods(n):
-        energized = {l: _energized(n, l, mask) for l in links}
-        delivered = sum(energized[l] * eff[l] for l in links)
-        total_e = sum(energized.values())
-        mean_eff = delivered / total_e if total_e > 0 else min(eff.values())
-        cap = delivered + sum(f["mw"] for f in firm)
-        peak = float(load[mask].max()) if mask.any() else 0.0
-        out.append({"period": label, "peak_mw": peak, "energized_mw": total_e,
-                    "efficiency": mean_eff, "delivered_mw": delivered, "firm": firm,
-                    "firm_mw": sum(f["mw"] for f in firm), "cap_mw": cap,
-                    "headroom_mw": cap - peak, "import_links": list(links),
+        idx = np.flatnonzero(mask)
+        if not idx.size:
+            continue
+        t = idx[int(np.argmin(cap[idx] - load[idx]))]
+        e_t = float(total_e[t])
+        out.append({"period": label, "binding_snapshot": str(snaps[t]), "load_mw": float(load[t]),
+                    "energized_mw": e_t,
+                    "efficiency": float(delivered[t]) / e_t if e_t > 0 else min(eff.values()),
+                    "delivered_mw": float(delivered[t]), "cap_mw": float(cap[t]),
+                    "headroom_mw": float(cap[t] - load[t]), "peak_mw": float(load[idx].max()),
+                    "energized_max_mw": float(total_e[idx].max()), "firm": firm,
+                    "firm_mw": firm_total, "import_links": list(links),
                     "scheduled": bool(scheduled)})
     return out
 

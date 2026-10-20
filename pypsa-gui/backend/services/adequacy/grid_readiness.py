@@ -50,8 +50,8 @@ OSCILLATION_BAND_HZ = (0.1, 2.0)
 
 _FREQUENCY_SERVICES = ("grid_forming", "synthetic_inertia", "frequency_containment",
                        "fast_frequency_response")
-_BEFORE_MITIGATION = ("IT-side at the PoC before any UPS/BESS smoothing (DC 01 envelope): "
-                      "the verdict is before mitigation")
+_BEFORE_MITIGATION = ("IT-side at the PoC before UPS/BESS smoothing (DC 03) (DC 01 envelope): "
+                      "the verdict is before mitigation, not final")
 _NO_ENVELOPE = ("no AI-training load envelope: the project was not created with a dc_load "
                 "profile (POST /api/projects/from_template/<id> with dc_load)")
 
@@ -201,7 +201,7 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
 
     loss = inp.marking("import_efficiency")
     target = _target("connection", "Link", inp.link, "eh_energization_mw")
-    req = "Peak load within the energized import (after losses) plus firm gensets"
+    req = "Load within the energized import (after its efficiency) plus firm gensets, hour by hour"
     if inp.n is None or not inp.links:
         return [_row("energization_peak", req, limit=None, unit="MW", source="the network",
                      project_value=None, verdict="unknown", assumed=True,
@@ -209,7 +209,7 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
                      if inp.n is not None else "the project has no saved network",
                      section="connection", target=target)]
     checked = peak_check(inp.n, inp.island_raw)
-    if all(r["energized_mw"] <= 0 for r in checked):
+    if all(r["energized_max_mw"] <= 0 for r in checked):
         return [_row("energization_peak", req, limit=None, unit="MW", source="the network",
                      project_value=None, verdict="unknown", assumed=True,
                      note=(f"the import connection ({', '.join(inp.links)}) is normally open "
@@ -229,7 +229,9 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
         if loss is not None and abs(float(loss["value"]) - r["efficiency"]) > 1e-9:
             loss_src += (f"; the network's {r['efficiency']:.4g} is used, not the ledger's "
                          f"{float(loss['value']):.4g} (the Link was edited)")
-        notes = [f"{r['period']}: hourly-mean peak {r['peak_mw']:.4g} MW against {describe(r)}",
+        notes = [f"{r['period']}: binding hour {r['binding_snapshot']}, hourly-mean load "
+                 f"{r['load_mw']:.4g} MW against {describe(r)} (checked hour by hour; the period's "
+                 f"peak is {r['peak_mw']:.4g} MW)",
                  "energization schedule" if r["scheduled"] else "no energization schedule: p_nom",
                  f"import efficiency from {loss_src}",
                  "fixed loads only (a flexible conversion unit is a decision, not counted)"]
@@ -241,7 +243,7 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
                          source=("energization schedule (template ledger: assumed) and the island "
                                  "sidecar's genset N+k" if r["scheduled"]
                                  else "the import Link's p_nom and the island sidecar's genset N+k"),
-                         project_value=round(r["peak_mw"], 4), verdict=verdict,
+                         project_value=round(r["load_mw"], 4), verdict=verdict,
                          assumed=_marking_assumed(loss) or bool(inp.meta.get("energization")),
                          note="; ".join(notes), section="connection", target=target))
     return rows

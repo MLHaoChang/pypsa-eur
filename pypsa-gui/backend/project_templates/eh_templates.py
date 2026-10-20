@@ -448,8 +448,8 @@ def firm_genset_mw(n, template_id: str) -> tuple[float, str]:
 
 
 def _check_dc_peak(template_id: str, spec) -> None:
-    """Each period's modelled peak must fit the energized import (after the
-    PoC Link's losses) plus the committed fleet's firm genset MW; above that
+    """Each hour's modelled load must fit the energized import (after the
+    PoC Link's efficiency) plus the committed fleet's firm genset MW; above that
     the plan could only shed (gatekeeper review of DC grid readiness 01).
     The one check the grid-readiness scorecard also reports
     (``services.adequacy.site_peak.peak_check``)."""
@@ -460,8 +460,8 @@ def _check_dc_peak(template_id: str, spec) -> None:
     for row in peak_check(n, ISLAND_CONFIG.get(template_id, {"units": {}})):
         if row["headroom_mw"] < -1e-9:
             raise DcLoadError(
-                f"dc_load.phases: the {row['period']} peak is {row['peak_mw']:.1f} MW, above "
-                f"{describe(row)}", "dc_load.phases")
+                f"dc_load.phases: the {row['period']} peak is {row['load_mw']:.1f} MW (at "
+                f"{row['binding_snapshot']}), above {describe(row)}", "dc_load.phases")
 
 
 def dc_load_meta(template_id: str, spec) -> dict:

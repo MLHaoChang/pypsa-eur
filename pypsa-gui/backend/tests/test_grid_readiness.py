@@ -14,11 +14,14 @@ import math
 import pathlib
 import sys
 
+import numpy as np
+import pandas as pd
+import pypsa
 import pytest
 
+from models.flex_archetypes import DataCentreLoadSpec
 from services.adequacy import grid_readiness as G
 from services.adequacy import site_peak as SP
-from models.flex_archetypes import DataCentreLoadSpec
 from services.dc_load_profile import DcLoadError
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
@@ -260,8 +263,52 @@ def test_the_peak_row_reads_the_same_check_as_the_create_time_refusal(tmp_path, 
     assert [r["id"] for r in rows] == [f"energization_peak:{c['period']}" for c in checked]
     for r, c in zip(rows, checked):
         assert r["limit"] == pytest.approx(c["cap_mw"], abs=1e-3)
-        assert r["project_value"] == pytest.approx(c["peak_mw"], abs=1e-3)
+        assert r["project_value"] == pytest.approx(c["load_mw"], abs=1e-3)
         assert (r["verdict"] == "fail") == (c["headroom_mw"] < -1e-9)
+
+
+def _one_period(import_mw=40.0, gen_pu=None, schedule=None, load=None):
+    """A bare 48-hour site: one import Link, one load, no gensets."""
+    snaps = pd.date_range("2030-01-01", periods=48, freq="h")
+    n = pypsa.Network()
+    n.set_snapshots(snaps)
+    n.add("Bus", "grid")
+    n.add("Bus", "site")
+    n.buses["eh_poc"] = [True, False]
+    n.add("Link", "grid_import", bus0="grid", bus1="site", p_nom=import_mw, efficiency=1.0)
+    n.links["eh_role"] = "grid_import"
+    n.add("Load", "demand", bus="site")
+    n.loads_t.p_set = pd.DataFrame({"demand": load}, index=snaps)
+    if gen_pu is not None:
+        n.links_t.p_max_pu = pd.DataFrame({"grid_import": gen_pu}, index=snaps)
+    if schedule is not None:
+        n.links_t["eh_energization_mw"] = pd.DataFrame({"grid_import": schedule}, index=snaps)
+    return n
+
+
+def test_an_energization_step_inside_the_period_is_checked_hour_by_hour():
+    """10 MW for the first day, 40 MW after; the 30 MW peak falls after the
+    step. The period minimum (10 MW) would refuse it; hour by hour it fits."""
+    load = np.r_[np.full(24, 8.0), np.full(24, 30.0)]
+    n = _one_period(schedule=np.r_[np.full(24, 10.0), np.full(24, 40.0)], load=load)
+    (row,) = SP.peak_check(n, None)
+    assert row["headroom_mw"] == pytest.approx(2.0)                  # hour 0-23: 10 - 8
+    assert row["load_mw"] == 8.0 and row["cap_mw"] == 10.0
+    assert row["peak_mw"] == 30.0 and row["energized_max_mw"] == 40.0
+
+
+def test_a_p_max_pu_dip_at_the_peak_hour_fails():
+    """The Link is derated to half at the peak hour: the period's highest
+    p_max_pu would pass it; hour by hour it does not fit."""
+    load = np.full(48, 15.0)
+    load[30] = 30.0
+    pu = np.ones(48)
+    pu[30] = 0.5
+    n = _one_period(gen_pu=pu, load=load)
+    (row,) = SP.peak_check(n, None)
+    assert row["headroom_mw"] == pytest.approx(-10.0)
+    assert row["binding_snapshot"].startswith("2030-01-02 06:00")
+    assert row["load_mw"] == 30.0 and row["cap_mw"] == 20.0
 
 
 def test_the_microgrids_open_tie_supplies_nothing():
@@ -294,8 +341,8 @@ def test_at_the_cap_the_refusal_and_the_row_agree(tmp_path):
         return row
 
     lo, hi = peak(36.0), peak(60.0)                    # the peak is affine in IT MW
-    slope = (hi["peak_mw"] - lo["peak_mw"]) / 24.0
-    at_cap = 36.0 + (lo["cap_mw"] - lo["peak_mw"]) / slope
+    slope = (hi["load_mw"] - lo["load_mw"]) / 24.0
+    at_cap = 36.0 + (lo["cap_mw"] - lo["load_mw"]) / slope
     for it, refused in ((at_cap - 0.01, False), (at_cap + 0.01, True)):
         raw = _at_cap_spec(tid, it)
         if refused:
