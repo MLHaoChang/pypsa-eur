@@ -19,12 +19,13 @@ both.
 
 | Kind | Interval formula (gen = the contracted Generators' output, MW; w = represented hours) |
 |---|---|
-| PPA pay_as_produced, fixed | buyer → seller price_y × gen × w; a volume cap (pro-rated to the represented share of the year) is filled chronologically and the excess is not settled (`ppa_excess_mwh`) |
+| PPA pay_as_produced, fixed | buyer → seller price_y × share × gen × w (`share` is applied to every PPA kind's volume except baseload, before the cap); a volume cap (pro-rated to the represented share of the year) is filled chronologically and the excess is not settled (`ppa_excess_mwh`) |
 | PPA market_plus_premium | clamp(ref + premium_y, floor, cap) × gen × w |
 | PPA baseload | financial: (price_y − ref) × baseload_mw × w |
 | PPA as_consumed_btm | consumed = gen − the gen's pro-rata share of PoC export (capped at gen); BESS charging from the PV counts as consumed |
 | PPA sleeved | as pay_as_produced, plus buyer → sleeving_party sleeving_fee × gen × w |
-| CfD | counterparty → generator_owner (strike_y − ref) × gen × w; `monthly_capture`: the month's generation-weighted ref; `suspend_on_negative_price`: intervals with ref < 0 settle 0 |
+| CfD | counterparty → generator_owner (strike_y − ref) × share × gen × w; `monthly_capture`: the month's generation-weighted ref; `suspend_on_negative_price`: intervals with ref < 0 settle 0 |
+| PPA pay_as_produced, `settlement: financial` (IPP ticket 01) | buyer → seller (price_y − ref) × share × gen × w through the CfD's difference code (`_difference`), the volume cap applied first; `suspend_on_negative_price` (default True) |
 | DR availability (2.2b) | counterparty → site availability × contracted_mw × represented hours / the calendar year's hours (8784 in a leap year) |
 | DR activation (2.2b) | counterparty → site activation × the bus's DSR dispatch attributed pro rata to the named loads' share of the bus load; events (maximal runs with activation > 0) checked against max_events / max_duration_h and flagged |
 | Lease (2.2b) | lessee → lessor annual_payment × represented hours / the year's hours |
@@ -172,7 +173,8 @@ def _ppa(contract, inputs: SettlementInputs) -> list[Line]:
         return [line("ppa_energy", None, None, ["generation_not_established"])]
     ref = None
     ref_flags: list[str] = []
-    if kind == "baseload" or pricing == "market_plus_premium":
+    financial = getattr(contract, "settlement", "physical") == "financial"
+    if kind == "baseload" or pricing == "market_plus_premium" or financial:
         ref, ref_flags = _ref(contract, inputs)
         if ref is None:
             return [line("ppa_energy", None, None, ref_flags)]
@@ -205,6 +207,7 @@ def _ppa(contract, inputs: SettlementInputs) -> list[Line]:
         mw = gen - attributed
     else:  # pay_as_produced, sleeved
         mw = gen
+    mw = mw * getattr(contract, "share", 1.0)
     mwh = mw * w
 
     if pricing == "market_plus_premium":
@@ -227,7 +230,12 @@ def _ppa(contract, inputs: SettlementInputs) -> list[Line]:
         settled = np.clip(cap_eff - (cum - mwh), 0.0, mwh)
         excess = float(mwh.sum() - settled.sum())
         mwh = settled
-    lines.append(line("ppa_energy", mwh.sum(), float((eff * mwh).sum())))
+    if financial:
+        amount, paid = _difference(eff[0] if len(eff) else 0.0, ref, mwh, inputs.index,
+                                   "interval", bool(contract.suspend_on_negative_price))
+        lines.append(line("ppa_energy", paid.sum(), amount))
+    else:
+        lines.append(line("ppa_energy", mwh.sum(), float((eff * mwh).sum())))
     if excess > 1e-9:
         lines.append(line("ppa_excess_mwh", excess, 0.0, ["ppa_volume_cap_exceeded"]))
     if kind == "sleeved":
@@ -259,25 +267,32 @@ def _cfd(contract, inputs: SettlementInputs) -> list[Line]:
                      sorted(set(flags + ["generation_not_established"])))]
     strike_y = indexed(contract.strike, getattr(contract, "indexation_pct_per_year", 0.0),
                        getattr(contract, "base_year", None), y)
-    mwh = gen * w
+    mwh = gen * getattr(contract, "share", 1.0) * w
+    amount, paid = _difference(strike_y, ref, mwh, inputs.index,
+                               getattr(contract, "reference", "interval"),
+                               getattr(contract, "suspend_on_negative_price", False))
+    return [Line(inputs.period, contract.id, payer, payee, "cfd_difference", float(paid.sum()),
+                 float(amount), flags)]
+
+
+def _difference(strike_y: float, ref: np.ndarray, mwh: np.ndarray, index: pd.DatetimeIndex,
+                reference: str, suspend: bool) -> tuple[float, np.ndarray]:
+    """(Σ (strike − ref) × paid, the paid MWh): the CfD's difference, shared with the
+    financial PPA (one calculation)."""
     # §51 EEG style: intervals at a negative price are not supported — the
     # PAYMENT is suspended there; a monthly capture price is still the whole
     # month's generation-weighted reference (review 2.2a #1).
-    paid = (np.where(ref < 0, 0.0, mwh) if getattr(contract, "suspend_on_negative_price", False)
-            else mwh)
-    if getattr(contract, "reference", "interval") == "monthly_capture":
-        months = np.asarray(inputs.index.strftime("%Y-%m"))
+    paid = np.where(ref < 0, 0.0, mwh) if suspend else mwh
+    if reference == "monthly_capture":
+        months = np.asarray(index.strftime("%Y-%m"))
         diff = np.zeros(len(mwh))
         for m in np.unique(months):
             sel = months == m
             vol = float(mwh[sel].sum())
             if vol > 0:
                 diff[sel] = strike_y - float((ref[sel] * mwh[sel]).sum()) / vol
-        amount = float((diff * paid).sum())
-    else:
-        amount = float(((strike_y - ref) * paid).sum())
-    return [Line(inputs.period, contract.id, payer, payee, "cfd_difference", float(paid.sum()),
-                 float(amount), flags)]
+        return float((diff * paid).sum()), paid
+    return float(((strike_y - ref) * paid).sum()), paid
 
 
 def _year_fraction(inputs: SettlementInputs) -> float:

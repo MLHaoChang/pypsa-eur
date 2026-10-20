@@ -15,6 +15,8 @@ export interface FieldSpec {
   required?: boolean
   /** Shown only when this holds on the contract. */
   when?: (c: Record<string, unknown>) => boolean
+  /** A bool whose default is true: unset shows checked, and clearing it sends false. */
+  defaultTrue?: boolean
 }
 
 const common = (extra: FieldSpec[]): FieldSpec[] => [
@@ -41,6 +43,11 @@ export const CONTRACT_FIELDS: Record<ContractType, FieldSpec[]> = {
     { key: 'floor', label: 'floor', kind: 'number', when: c => c.pricing === 'market_plus_premium' },
     { key: 'cap', label: 'cap', kind: 'number', when: c => c.pricing === 'market_plus_premium' },
     { key: 'volume_cap_mwh_per_year', label: 'volume cap (MWh a year)', kind: 'number' },
+    { key: 'share', label: 'share of the output (0–1)', kind: 'number', when: c => c.kind !== 'baseload' },
+    { key: 'settlement', label: 'settlement', kind: 'select', options: ['physical', 'financial'],
+      when: c => c.kind === 'pay_as_produced' },
+    { key: 'suspend_on_negative_price', label: 'suspended at negative prices', kind: 'bool',
+      defaultTrue: true, when: c => c.settlement === 'financial' },
     { key: 'baseload_mw', label: 'baseload (MW)', kind: 'number', when: c => c.kind === 'baseload' },
     { key: 'sleeving_party', label: 'sleeving party', kind: 'party', when: c => c.kind === 'sleeved' },
     { key: 'sleeving_fee_eur_per_mwh', label: 'sleeving fee (per MWh)', kind: 'number',
@@ -57,6 +64,7 @@ export const CONTRACT_FIELDS: Record<ContractType, FieldSpec[]> = {
     { key: 'reference', label: 'reference', kind: 'select', options: ['interval', 'monthly_capture'] },
     { key: 'indexation_pct_per_year', label: 'indexation (% a year)', kind: 'number' },
     { key: 'suspend_on_negative_price', label: 'suspended at negative prices', kind: 'bool' },
+    { key: 'share', label: 'share of the output (0–1)', kind: 'number' },
   ]),
   dr: common([
     { key: 'counterparty', label: 'counterparty (pays)', kind: 'party' },

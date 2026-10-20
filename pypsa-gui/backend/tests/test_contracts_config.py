@@ -328,3 +328,52 @@ def test_contracts_round_trip_through_the_route_save_load_and_a_bundle(
     other = other_org_client.post("/api/projects/import_bundle?name=contracted_there",
                                   files={"file": ("b.zip", b.content, "application/zip")})
     assert [i["reason"] for i in other.json()["library_issues"]] == ["missing"]
+
+
+# ── IPP ticket 01 (G2): the financial PPA the site sells ───────────────────
+
+_REF = {"id": "px", "version": 1, "hash": "a" * 64, "source": "t"}
+
+
+def _financial(**kw):
+    return {**PPA, "seller": "site", "buyer": "Offtaker", "settlement": "financial",
+            "reference_price": _REF, **kw}
+
+
+def _export_priced(n):
+    """The export Link priced by a Library series (`export_price_ref` = `_REF`)."""
+    import pandas as pd
+
+    from services.commercial import lp_bindings as LP
+
+    assert LP.write_export_price(n, "export", pd.Series(50.0, index=n.snapshots)) == 0
+    return {**_cfg(export_link="export", export_price_ref=_REF)}
+
+
+def test_a_financial_ppa_the_site_sells_is_not_a_double_count():
+    n = _exporting()
+    cfg = _export_priced(n)
+    codes = _codes(n, {**cfg, "contracts": [_financial()]})
+    assert ("warning", "commercial.ppa_export_double_count") not in codes
+    assert ("warning", "commercial.ppa_basis_risk") not in codes          # ref = export series
+    # The physical form on the same config still warns.
+    phys = {**PPA, "seller": "site", "buyer": "Offtaker"}
+    assert ("warning", "commercial.ppa_export_double_count") in _codes(
+        n, {**cfg, "contracts": [phys]})
+
+
+def test_a_financial_ppa_on_another_reference_carries_basis_risk():
+    n = _exporting()
+    other = {**_REF, "id": "hub_index"}
+    codes = _codes(n, {**_export_priced(n), "contracts": [_financial(reference_price=other)]})
+    assert ("warning", "commercial.ppa_basis_risk") in codes
+    assert ("warning", "commercial.ppa_export_double_count") not in codes
+
+
+def test_a_financial_ppa_paying_through_negative_prices_is_flagged():
+    n = _exporting()
+    cfg = _export_priced(n)
+    code = ("warning", "commercial.ppa_dispatch_not_contract_optimal")
+    assert code not in _codes(n, {**cfg, "contracts": [_financial()]})
+    assert code in _codes(n, {**cfg, "contracts": [
+        _financial(suspend_on_negative_price=False)]})
