@@ -551,11 +551,17 @@ class TargetSpec:
     noun: str     # error wording, e.g. "generator"
     # The snapshot weighting a power series' energy is counted with.
     weighting: str = "generators"
+    # A per-unit bound's range: a link's p_min_pu may reach -1 (reverse flow).
+    lo: float = 0.0
+    hi: float = 1.0
 
 
 TARGETS: dict[tuple[str, str], TargetSpec] = {
     ("generators", "p_max_pu"): TargetSpec("per_unit", "Generator", "generator"),
     ("generators", "p_min_pu"): TargetSpec("per_unit", "Generator", "generator"),
+    # Link bounds act on p0, the bus0 flow.
+    ("links", "p_max_pu"): TargetSpec("per_unit", "Link", "link"),
+    ("links", "p_min_pu"): TargetSpec("per_unit", "Link", "link", lo=-1.0),
     ("loads", "p_set"): TargetSpec("power", "Load", "load"),
     ("storage_units", "inflow"): TargetSpec("power", "StorageUnit", "storage unit",
                                             weighting="stores"),
@@ -813,29 +819,59 @@ def _bus_sink_mw(n, bus: str, exclude: str) -> np.ndarray:
     return total
 
 
-def _floor_warnings(n, component: str, vals: np.ndarray) -> tuple[str, list[str]]:
-    """The meaning of a generator p_min_pu, and its warnings: on a committable
+def _floor_warnings(n, component_type: str, component: str,
+                    vals: np.ndarray) -> tuple[str, list[str]]:
+    """The meaning of a p_min_pu floor, and its warnings: on a committable
     unit a floor is a minimum stable level when committed, not a must-run;
-    on any other unit, a floor above what its bus can absorb forces spill
-    or makes the dispatch and ENS solves infeasible."""
-    gens = n.generators
-    if "committable" in gens.columns and bool(gens.at[component, "committable"]):
+    on any other, a floor whose output exceeds what the receiving bus can
+    absorb forces spill or makes the dispatch and ENS solves infeasible. A
+    generator feeds its bus; a link feeds bus1 (and bus2/bus3) with p0 x
+    efficiency."""
+    table = getattr(n, component_type)
+    if "committable" in table.columns and bool(table.at[component, "committable"]):
         return "min stable level when committed", [
             f"{MIN_STABLE_WARNING}: {component!r} is committable, so this "
             "floor holds only while it is committed; it does not force it on"]
-    floor = vals * float(_capacity(gens.loc[[component]])[0])
-    sink = _bus_sink_mw(n, str(gens.at[component, "bus"]), component)
-    over = np.flatnonzero(floor > sink + 1e-9)
-    if not over.size:
-        return "must-run floor", []
-    i = int(over[0])
-    return "must-run floor", [
-        f"{MUST_RUN_SINK_WARNING}: {component!r}'s must-run floor of "
-        f"{floor[i]:.0f} MW exceeds the {sink[i]:.0f} MW its bus can absorb "
-        f"(loads, storage charging, links and lines, less other floors) at "
-        f"{n.snapshots[i]} "
-        f"({over.size} snapshots); the dispatch and ENS solves must spill or "
-        "go infeasible"]
+    floor = np.clip(vals, 0.0, None) * float(_capacity(table.loc[[component]])[0])
+    if component_type == "generators":
+        outputs = [(str(table.at[component, "bus"]), floor)]
+    else:
+        outputs = []
+        for k, eff in (("1", "efficiency"), ("2", "efficiency2"), ("3", "efficiency3")):
+            bus = str(table.at[component, f"bus{k}"]) if f"bus{k}" in table.columns else ""
+            if bus and bus in n.buses.index:
+                e = _dense(n, "Link", eff, [component])[:, 0] if eff in table.columns else 1.0
+                outputs.append((bus, floor * np.clip(e, 0.0, None)))
+    for bus, out in outputs:
+        sink = _bus_sink_mw(n, bus, component)
+        over = np.flatnonzero(out > sink + 1e-9)
+        if over.size:
+            i = int(over[0])
+            return "must-run floor", [
+                f"{MUST_RUN_SINK_WARNING}: {component!r}'s must-run floor puts "
+                f"{out[i]:.0f} MW onto bus {bus!r}, which can absorb {sink[i]:.0f} MW "
+                f"(loads, storage charging, links and lines, less other floors) "
+                f"at {n.snapshots[i]} ({over.size} snapshots); the dispatch and "
+                "ENS solves must spill or go infeasible"]
+    return "must-run floor", []
+
+
+def _two_way_companion(ctx, component: str, vals: np.ndarray, index,
+                       ) -> pd.Series | None:
+    """A two-way link's reverse bound under an availability series: its own
+    p_min_pu (static, or a series that is not itself a companion) scaled by
+    the same availability, so a shutdown closes both directions."""
+    n = ctx.network
+    key = ("links", "p_min_pu", component)
+    previous = ctx.user_ts_meta.get(key) or {}
+    if previous.get("companion_of") or component not in n.links_t.p_min_pu.columns:
+        base = np.full(len(index), float(n.links.at[component, "p_min_pu"]))
+    else:
+        base = n.links_t.p_min_pu[component].reindex(index).fillna(
+            float(n.links.at[component, "p_min_pu"])).to_numpy(dtype=float)
+    if not (base < 0).any():
+        return None
+    return pd.Series(np.where(base < 0, base * vals, base), index=index, name=component)
 
 
 def _modelled_mwh(n, aligned: pd.Series, weighting: str) -> dict[str, float]:
@@ -994,10 +1030,10 @@ def assign_profile(
         )
     clipped = False
     if target.kind == "per_unit":
-        # Clipped into [0, 1] defensively; a clip is recorded in meta.
-        clipped = bool(((vals < 0.0) | (vals > 1.0)).any())
+        # Clipped into the bound's range defensively; a clip is recorded.
+        clipped = bool(((vals < target.lo) | (vals > target.hi)).any())
         if clipped:
-            vals = np.clip(vals, 0.0, 1.0)
+            vals = np.clip(vals, target.lo, target.hi)
         warnings = [*warnings, *_check_bound_pair(n, component_type, component,
                                                   attribute, vals)]
     elif target.kind == "power":
@@ -1041,9 +1077,13 @@ def assign_profile(
                                                   _kind_of(meta))
     warnings = [*warnings, *replace_warnings]
     meaning = None
-    if (component_type, attribute) == ("generators", "p_min_pu"):
-        meaning, floor_warnings = _floor_warnings(n, component, vals)
+    if attribute == "p_min_pu" and component_type in ("generators", "links") \
+            and (vals > 0).any():
+        meaning, floor_warnings = _floor_warnings(n, component_type, component, vals)
         warnings = [*warnings, *floor_warnings]
+    companion = None
+    if (component_type, attribute) == ("links", "p_max_pu") and family_name == "availability":
+        companion = _two_way_companion(ctx, component, vals, aligned.index)
     full_meta: dict[str, Any] = {
         **dict(meta),
         **unit_meta,
@@ -1077,6 +1117,12 @@ def assign_profile(
     with _user_ts_lock:
         ctx.user_ts[key] = aligned
         ctx.user_ts_meta[key] = full_meta
+        if companion is not None:
+            ckey = ("links", "p_min_pu", component)
+            ctx.user_ts[ckey] = companion
+            ctx.user_ts_meta[ckey] = {**full_meta, "companion_of": "p_max_pu",
+                                      "meaning": "reverse bound scaled by the "
+                                                 "same availability"}
     with PyPSAService.get_lock():
         _reapply_user_ts_to_network(n, store=ctx.user_ts)
         # A new profile invalidates solved dispatch exactly like a topology

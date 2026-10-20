@@ -198,13 +198,34 @@ def _availability_guard(ctx, component_type: str, component: str,
     series with it is its own future plan); a dated maintenance window
     applies only on a single-period network of its year."""
     from services.profile_gen.apply import CarrierMismatchError
-    from services.profile_gen.availability import check_dated_windows
+    from services.profile_gen.availability import (
+        PocBoundError,
+        TwoWayFloorError,
+        check_dated_windows,
+    )
 
-    carrier = str(ctx.network.generators.at[component, "carrier"] or "").lower()
-    if is_weather_carrier(carrier):
-        raise CarrierMismatchError(
-            f"generator {component!r} ({carrier}) carries a weather profile; an "
-            "availability series would overwrite it")
+    n = ctx.network
+    if component_type == "generators":
+        carrier = str(n.generators.at[component, "carrier"] or "").lower()
+        if is_weather_carrier(carrier):
+            raise CarrierMismatchError(
+                f"generator {component!r} ({carrier}) carries a weather profile; an "
+                "availability series would overwrite it")
+    elif meta.get("kind") == "must_run":
+        state = getattr(ctx, "solver_state", None) or {}
+        cfg = state.get("solver_config") if isinstance(state, Mapping) else None
+        commercial = getattr(cfg, "commercial", None) or {}
+        poc = ({commercial.get("poc_link"), commercial.get("export_link")}
+               if isinstance(commercial, Mapping) else set()) - {None}
+        if component in poc:
+            raise PocBoundError(
+                f"{component!r} is a point-of-connection link; a floor on the "
+                "grid connection is not a process minimum")
+        lo = n.get_switchable_as_dense("Link", "p_min_pu", inds=[component])
+        if (lo.to_numpy() < 0).any():
+            raise TwoWayFloorError(
+                f"{component!r} is a two-way link (p_min_pu < 0); a floor would "
+                "silently forbid its reverse flow")
     check_dated_windows(ctx, meta)
 
 
@@ -217,7 +238,8 @@ def _availability_generate(ids, kind, params, year):
 
 register_family(Family(
     "availability",
-    frozenset({("generators", "p_max_pu"), ("generators", "p_min_pu")}),
+    frozenset({("generators", "p_max_pu"), ("generators", "p_min_pu"),
+               ("links", "p_max_pu"), ("links", "p_min_pu")}),
     guard=_availability_guard, generate=_availability_generate,
 ))
 
