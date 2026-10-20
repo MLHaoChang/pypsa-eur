@@ -242,9 +242,10 @@ class Turn:
                     self.owner, self.request_scope
                 )
             except (ValueError, KeyError, TypeError, HTTPException) as exc:
-                from harness.carrier_calculations import REFUSALS
+                from harness import branch_calculations, carrier_calculations
 
-                named = isinstance(exc, ValueError) and exc.args and exc.args[0] in REFUSALS
+                refusals = carrier_calculations.REFUSALS | branch_calculations.REFUSALS
+                named = isinstance(exc, ValueError) and exc.args and exc.args[0] in refusals
                 self.request_scope["reason"] = (
                     exc.args[0] if named else "unsupported_or_unavailable_source"
                 )
@@ -406,8 +407,11 @@ class Turn:
             )
         scoped = record["source_kind"] == "scoped_result"
         carrier = self.request_scope["profile"] == assurance_metrics.carrier.PROFILE
+        loading = self.request_scope["profile"] in assurance_metrics.branch.PROFILES
         entity_kind = (
             "Carrier" if carrier
+            else "Network" if self.request_scope["profile"] == assurance_metrics.branch.NETWORK_PROFILE
+            else "Branch" if loading
             else "StorageUnit" if self.request_scope["profile"] in assurance_metrics.STORAGE_PROFILES
             else "Network" if self.request_scope["profile"] == "network-linear-cost/1" else "Generator"
         )
@@ -418,6 +422,8 @@ class Turn:
         ]
         if carrier:
             lines.extend(assurance_metrics.carrier.notes(record["raw"], self.request_scope))
+        if loading:
+            lines.extend(assurance_metrics.branch.notes(record["raw"]))
         for slot in record["slots"]:
             definition = assurance_metrics.definition(slot["metric"], self.request_scope["profile"])
             fact = next(
