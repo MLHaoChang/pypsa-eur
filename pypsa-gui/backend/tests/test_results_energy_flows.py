@@ -244,3 +244,44 @@ def test_route_window_is_positional_and_inclusive(client, reset_backend):
     r = client.get("/api/results/energy_flows", params={"period": gf.GOLDEN_PERIODS[0], "from": 0, "to": 5}).json()
     assert r["window"]["from"] == 0 and r["window"]["to"] == 5
     assert r["window"]["snapshots"] == gf.SNAPSHOTS_PER_PERIOD
+
+
+def test_a_non_cyclic_storage_starts_from_its_stock_which_is_named_not_dropped():
+    n = _battery_net()
+    n.storage_units.loc["bat", "cyclic_state_of_charge"] = False
+    n.storage_units.loc["bat", "state_of_charge_initial"] = 6.0
+    n = _solve(n)
+    p = energy_flows(n)
+    _assert_conserves(p)
+    stock = [r for r in p["rows"] if r["source"] == "Stored before the period"]
+    assert stock and sum(r["mwh"] for r in stock) == pytest.approx(6.0, abs=1e-6)
+    assert all(r["via"] == "bat" for r in stock)
+    assert p["conservation"]["stock_mwh"] == pytest.approx(6.0, abs=1e-6)
+
+
+def _two_period_battery(cyclic):
+    n = pypsa.Network()
+    idx = pd.MultiIndex.from_product([[2030, 2040], pd.RangeIndex(4)], names=["period", "timestep"])
+    idx.name = "snapshot"
+    n.set_snapshots(idx)
+    n.investment_periods = [2030, 2040]
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.add("Bus", "site")
+    n.add("Carrier", ["solar", "grid"])
+    n.add("Generator", "pv", bus="site", carrier="solar", p_nom=10, p_max_pu=[1.0, 1.0, 0.0, 0.0] * 2)
+    n.add("Generator", "grid_supply", bus="site", carrier="grid", p_nom=100, marginal_cost=50)
+    n.add("StorageUnit", "bat", bus="site", p_nom=10, max_hours=10, efficiency_store=0.9,
+          efficiency_dispatch=0.9, cyclic_state_of_charge=cyclic,
+          cyclic_state_of_charge_per_period=cyclic)
+    n.add("Load", "demand", bus="site", p_set=[0.0, 0.0, 6.0, 6.0] * 2)
+    return n
+
+
+@pytest.mark.parametrize("cyclic", [True, False])
+def test_each_period_of_a_multi_period_storage_conserves_on_its_own(cyclic):
+    n = _solve(_two_period_battery(cyclic), multi=True)
+    for per in (2030, 2040):
+        p = energy_flows(n, per)
+        _assert_conserves(p)
+        assert p["period"] == per
+        assert any(r["via"] == "bat" for r in p["rows"])

@@ -124,8 +124,16 @@ def _source_label(carrier) -> str:
 
 
 class _Storage:
-    """One storage with a state: its bus, charge/discharge MW, efficiencies."""
+    """One storage with a state: its bus, charge/discharge MW, efficiencies.
+
+    `soc0` is the state it starts the period in: its own initial state for the
+    first snapshot, otherwise the state the previous period ended in."""
     __slots__ = ("name", "bus", "x", "d", "eta_s", "eta_d", "sl", "soc", "cyclic", "soc0")
+
+
+def _before(df: pd.DataFrame, name: str, rows: np.ndarray, fallback: float) -> float:
+    first = int(np.argmax(rows))
+    return float(df[name].iloc[first - 1]) if first > 0 else fallback
 
 
 def _storages(n, result_df, rows, bus_ix, dt) -> list[_Storage]:
@@ -151,13 +159,14 @@ def _storages(n, result_df, rows, bus_ix, dt) -> list[_Storage]:
             st.eta_s, st.eta_d = float(su.at[nm, "efficiency_store"]), float(su.at[nm, "efficiency_dispatch"])
             st.sl = float(su.at[nm, "standing_loss"])
             st.cyclic = bool(su.at[nm, "cyclic_state_of_charge"])
-            st.soc0 = float(su.at[nm, "state_of_charge_initial"])
+            st.soc0 = _before(soc, nm, rows, float(su.at[nm, "state_of_charge_initial"]))
             out.append(st)
     sto = n.stores
     if len(sto):
         names = list(sto.index)
         p = _cols(_frame(n, result_df, "stores_t", "p"), names, "store dispatch", rows)
-        e = _cols(_frame(n, result_df, "stores_t", "e"), names, "store energy", rows)
+        e_df = _frame(n, result_df, "stores_t", "e")
+        e = _cols(e_df, names, "store energy", rows)
         for i, nm in enumerate(names):
             st = _Storage()
             st.name, st.bus = str(nm), bus_ix[str(sto.at[nm, "bus"])]
@@ -165,7 +174,7 @@ def _storages(n, result_df, rows, bus_ix, dt) -> list[_Storage]:
             st.eta_s = st.eta_d = 1.0
             st.sl = float(sto.at[nm, "standing_loss"])
             st.cyclic = bool(sto.at[nm, "e_cyclic"])
-            st.soc0 = float(sto.at[nm, "e_initial"])
+            st.soc0 = _before(e_df, nm, rows, float(sto.at[nm, "e_initial"]))
             out.append(st)
     return out
 
@@ -383,7 +392,7 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
         if st.cyclic:
             P0[k, s_ix[UNATTRIBUTED]] = soc_last[k]
         else:
-            P0[k, s_ix[STOCK_BEFORE]] = _start_stock(st, n, mask)
+            P0[k, s_ix[STOCK_BEFORE]] = max(st.soc0, 0.0)
     passes = 0
     if nst and any(st.cyclic for st in storages):
         for passes in range(1, MAX_PASSES + 1):
@@ -421,7 +430,6 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
 
     # ---- the checks ---------------------------------------------------------------
     checks: dict[str, Any] = {}
-    gen_mwh = float((np.maximum(gp, 0.0).sum(axis=1) * wg).sum()) if len(g_bus) else 0.0
     soc_prev = np.zeros((T, nst))
     for k, st in enumerate(storages):
         start = P0[k].sum() if not st.cyclic else st.soc[-1]
@@ -436,7 +444,6 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
         "ns": ns, "nv": nv, "D": D, "gp": gp, "g_lab": g_lab, "storages": storages,
         "served": served, "lnames": lnames, "shed": shed, "dsoc_t": dsoc_t,
         "bus_bad": bus_bad, "soc_bad": soc_bad, "passes": passes,
-        "gen_mwh": gen_mwh, "unattributed": float(D[:, [s_ix[UNATTRIBUTED] * nv + v for v in range(nv)], :].sum()),
     }
 
 
@@ -445,8 +452,6 @@ def _share_into(ins, y, I, T):
     return np.where(X > _EPS, y / np.where(X > _EPS, X, 1.0), 0.0)
 
 
-def _start_stock(st: _Storage, n, mask) -> float:
-    return max(st.soc0, 0.0)
 
 
 def _unavailable(reason: str, *, periods=None, period=None) -> dict[str, Any]:
@@ -534,10 +539,10 @@ def energy_flows(n, period=None, window: tuple[int, int] | None = None, *,
     gen = float((np.maximum(att["gp"][win], 0.0).sum(axis=1) * w).sum()) if att["gp"].size else 0.0
     dest_total = float(per_label.sum())
     dsoc = float(att["dsoc_t"][win].sum()) if att["storages"] else 0.0
-    # stock carried in from before the period is a source of its own
+    # energy delivered from stock the window started with: a source of its own in the rows
     stock = float(per_label[[s * nv + v for s in (att["srcs"].index(STOCK_BEFORE), att["srcs"].index(UNATTRIBUTED))
                              for v in range(nv)], :].sum())
-    residual = gen + stock - dest_total - dsoc
+    residual = gen - dest_total - dsoc      # stock released in the window is already in dest_total
     tol = REL_TOL * max(gen, dest_total, 1.0) + ABS_TOL_MWH
     checks = {
         "bus_balance": "ok" if not att["bus_bad"] else "failed",
