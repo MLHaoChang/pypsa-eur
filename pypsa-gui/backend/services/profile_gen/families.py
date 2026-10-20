@@ -18,6 +18,25 @@ p_min_pu is clipped to [0, 1] whoever writes it.
 
 A meta without ``family`` is renewable: every artifact and pending job made
 before families existed is a wind/solar capacity factor.
+
+"Generate defaults for all" (`defaults.py`, the Time Series review list and
+the assistant's preview/apply_default_series) asks every family that sets
+``defaults``. To add a family's rows — the renewable plugin (RP-04/RP-09)
+is the next — register (or re-register) the family with::
+
+    def _renewable_defaults(ctx, replace_generated: bool) -> list[dict]:
+        # One row per component: {"family", "component_type", "attribute",
+        # "component"} plus either {"skipped": "why"} or {"plan": {"kind",
+        # "reason", ...}}. Mark nothing measured for replacement; skip a
+        # generated series unless replace_generated.
+        ...
+
+    register_family(Family("renewable", ..., defaults=_renewable_defaults))
+
+and teach `defaults.preview_defaults` to generate that family's plan (today
+it generates load plans; each family's generator sits behind one branch
+there). The rows then appear in the same list, under the same Apply-all and
+the same single undo step.
 """
 from __future__ import annotations
 
