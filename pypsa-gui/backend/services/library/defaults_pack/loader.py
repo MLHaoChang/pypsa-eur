@@ -149,6 +149,8 @@ UNIT_CONVERSIONS: Mapping[tuple[str, str], float] = {
     ("EUR/kW", "EUR/MW"): 1000.0,            # 1 MW = 1000 kW
     ("EUR/kW_e", "EUR/MW"): 1000.0,          # technology-data's electric-kW unit
     ("EUR/kWh", "EUR/MWh"): 1000.0,
+    ("EUR/kW_NH3", "EUR/MW"): 1000.0,        # technology-data's ammonia-output kW (Haber-Bosch)
+    ("EUR/MWh_NH3", "EUR/MWh"): 1.0,         # technology-data's ammonia tank, per MWh_NH3 (LHV)
     ("%/year", "share/year"): 0.01,          # FOM in % of overnight cost -> S0 fom_share
     ("%/full cycle", "share/full cycle"): 0.01,
     ("years", "years"): 1.0,

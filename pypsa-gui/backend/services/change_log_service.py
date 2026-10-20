@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import itertools
 import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -41,6 +43,18 @@ _id_seq = itertools.count(1)
 # interleave such that the deque order doesn't match the id sequence. Lock
 # the pair so the History timeline reads chronologically.
 _lock = threading.Lock()
+# A preview runs a native handler on an isolated copy (harness/edit_card.py);
+# what it would log never happened.
+_SUPPRESSED: ContextVar[bool] = ContextVar("change_log_suppressed", default=False)
+
+
+@contextmanager
+def suppressed():
+    token = _SUPPRESSED.set(True)
+    try:
+        yield
+    finally:
+        _SUPPRESSED.reset(token)
 
 
 def _active_org_id() -> str | None:
@@ -68,6 +82,8 @@ def log(
     description: str,
     org_id: str | None = None,
 ) -> None:
+    if _SUPPRESSED.get():
+        return
     resolved_org = org_id if org_id is not None else _active_org_id()
     with _lock:
         _entries.append(LogEntry(

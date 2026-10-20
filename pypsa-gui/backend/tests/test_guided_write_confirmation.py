@@ -3,9 +3,10 @@ Guided mode: every change goes through the confirmation card (G3; P25 gate
 B1, adopted from the reviewer's probe
 `qa25/probes/test_probe_write_no_card.py`).
 
-In Expert, `write`-tier tools dispatch inline, as they always have
-(`test_chat_e2e.py::test_cold_path_activate_renders_as_success` pins it). In
-Guided — `ui_context.ui_mode == 'guided'`, the same allow-listed key the ui
+In Expert, `write`-tier tools that are not edits dispatch inline
+(`test_chat_e2e.py::test_cold_path_activate_renders_as_success` pins it); an
+edit shows its old→new card in Expert too (LC-04, owner decision Q3,
+`harness/edit_card.py`). In Guided — `ui_context.ui_mode == 'guided'`, the same allow-listed key the ui
 block reads — `write` joins the destructive / execution tiers at the existing
 card: `tool_pending_confirmation`, then nothing changes until the user
 approves; on a denial nothing changes at all.
@@ -172,15 +173,24 @@ def test_guided_write_denied_changes_nothing(world, tool, args, read, applied):
                                  {"ui_mode": "expert", "panel": "hubDesign"},
                                  {"ui_mode": "GUIDED"}])
 @pytest.mark.parametrize("tool,args,read,applied", CASES, ids=[c[0] for c in CASES])
-def test_expert_write_still_applies_directly(world, tool, args, read, applied, ctx):
+def test_expert_edit_waits_for_its_card_too(world, tool, args, read, applied, ctx):
+    """LC-04, owner decision Q3: an old→new card before EVERY chat edit, in
+    Expert as in Guided. (This test used to pin that Expert writes applied
+    directly; Q3 replaced that rule.)"""
     session = chat_service.ChatSession()
-    events = list(chat_service.run_turn(session, "do it", client=_client([(tool, args)]),
-                                        ui_context=ctx))
+    events, _ = _run(session, _client([(tool, args)]), ctx, ["approve"])
     names = _names(events)
-    assert "tool_pending_confirmation" not in names
-    assert names == ["session_init", "tool_request", "tool_running", "tool_result",
-                     "token", "turn_done"]
+    assert names.index("tool_pending_confirmation") < names.index("tool_running")
+    card = next(p for e, p in events if e == "tool_pending_confirmation")
+    assert card["edit_card"]["version"] == 1
     assert read(world) == applied
+
+
+def test_an_expert_write_that_is_not_an_edit_still_runs_directly(world):
+    session = chat_service.ChatSession()
+    events = list(chat_service.run_turn(session, "do it", client=_client(
+        [("discuss_project_run", {"run_id": "missing"})]), ui_context=None))
+    assert "tool_pending_confirmation" not in _names(events)
 
 
 def test_guided_read_tools_are_not_carded(world):

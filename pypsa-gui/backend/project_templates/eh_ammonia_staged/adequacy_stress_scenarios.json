@@ -1,0 +1,13 @@
+{
+  "__schema__": 1,
+  "scenarios": [
+    {
+      "electrical_load_multiplier": 1.0,
+      "frequency_per_year": 1.0,
+      "id": "low_wind_week",
+      "kind": "parametric",
+      "name": "Low-wind week",
+      "renewable_availability_multiplier": 0.35
+    }
+  ]
+}

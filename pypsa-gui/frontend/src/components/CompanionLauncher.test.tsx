@@ -180,4 +180,28 @@ describe('CompanionLauncher', () => {
     expect(gated).toMatch(/\.companion-live-echo\s*\{[^}]*animation:/)
     expect(gated).toMatch(/\.companion-node-sector\s*\{[^}]*animation:/)
   })
+
+  it('keeps the voice note in the DOM at idle, describing the launcher, and reveals it on focus (L2)', () => {
+    mockMotion(false)
+    render(<CompanionLauncher profileLabel="Claude" onCompose={vi.fn()} onSpeak={vi.fn()} onLive={vi.fn()}
+      onProfiles={vi.fn()} />)
+    const root = screen.getByTestId('companion-launcher')
+    const described = document.getElementById(root.getAttribute('aria-describedby') ?? '')
+    expect(described?.textContent).toMatch(/Continuous voice is not connected/)
+    expect(screen.getByRole('button', { name: 'Start voice' }).hasAttribute('disabled')).toBe(true)
+    // Idle: the extras are clipped by CSS (still in the DOM), never removed.
+    expect(screen.getByTestId('companion-voice-note').classList.contains('companion-extras')).toBe(true)
+    expect(screen.getByTestId('companion-extras').contains(screen.getByTestId('companion-profile'))).toBe(true)
+    expect(root.getAttribute('data-hovered')).toBe('false')
+    fireEvent.focus(screen.getByTestId('companion-speak'))
+    expect(root.getAttribute('data-hovered')).toBe('true')
+  })
+
+  it('clips the extras only while idle, never with display:none (L2)', () => {
+    const css = readFileSync(resolve(__dirname, '../index.css'), 'utf8')
+    const rule = css.slice(css.indexOf(".companion-launcher:not([data-hovered='true'])"))
+    expect(rule).toMatch(/:not\(\[data-live='open'\]\):not\(:focus-within\) \.companion-extras \{/)
+    expect(rule.slice(0, rule.indexOf('}'))).toMatch(/clip: rect\(0 0 0 0\)/)
+    expect(rule.slice(0, rule.indexOf('}'))).not.toMatch(/display:\s*none/)
+  })
 })
