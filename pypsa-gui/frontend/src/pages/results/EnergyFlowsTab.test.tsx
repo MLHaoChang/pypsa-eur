@@ -96,6 +96,14 @@ describe('EnergyFlowsTab', () => {
   })
 })
 
+describe('cross-link', () => {
+  it('points at the money view and asks for that tab', async () => {
+    mount()
+    fireEvent.click(await screen.findByTestId('ef-to-value-flows'))
+    expect(useUIStore.getState().resultsTabRequest).toBe('investment')
+  })
+})
+
 describe('FlowSankeyChart', () => {
   it('draws a path per link', () => {
     const { container } = render(<FlowSankeyChart data={sankeyData(ROWS)} width={700} />)

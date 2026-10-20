@@ -285,3 +285,38 @@ def test_each_period_of_a_multi_period_storage_conserves_on_its_own(cyclic):
         _assert_conserves(p)
         assert p["period"] == per
         assert any(r["via"] == "bat" for r in p["rows"])
+
+
+def _commodity_net(commodity_unit="t/h"):
+    """Electricity feeds a process unit whose product is a commodity in t/h."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.RangeIndex(3))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.add("Bus", "el")
+    n.add("Bus", "nh3", unit=commodity_unit)
+    n.add("Carrier", ["grid"])
+    n.add("Generator", "grid_supply", bus="el", carrier="grid", p_nom=100, marginal_cost=10)
+    n.add("Link", "synthesis", bus0="el", bus1="nh3", p_nom=50, efficiency=0.2)
+    n.add("Load", "offtake", bus="nh3", p_set=2.0)
+    return n
+
+
+def test_a_link_into_a_commodity_in_tonnes_is_not_drawn_as_energy_with_losses():
+    p = energy_flows(_solve(_commodity_net()))
+    assert p["status"] == "not_established" and p["rows"] == []
+    assert p["reason"].startswith("mixed units on Link synthesis")
+
+
+def test_a_commodity_only_bus_is_named_not_summed_as_mwh():
+    n = _commodity_net()
+    n.buses.loc["el", "unit"] = "t/h"
+    p = energy_flows(_solve(n))
+    assert p["status"] == "not_established" and "not an energy unit" in p["reason"]
+
+
+def test_energy_units_in_any_spelling_still_draw():
+    n = _commodity_net(commodity_unit="MW_th")
+    n.buses.loc["el", "unit"] = "MW"
+    p = energy_flows(_solve(n))
+    _assert_conserves(p)
+    assert any(r["destination"] == "Losses" for r in p["rows"])

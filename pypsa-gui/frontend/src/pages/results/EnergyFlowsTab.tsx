@@ -151,6 +151,7 @@ function SeriesChart({ title, series, index }: {
 
 export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }) {
   const currentProject = useUIStore(s => s.currentProject)
+  const requestResultsTab = useUIStore(s => s.requestResultsTab)
   const filter = useResultsFilter()
   const shellPeriod = typeof filter.selectedPeriod === 'number' ? filter.selectedPeriod
     : filter.selectedPeriod != null && filter.selectedPeriod !== 'all' && !Number.isNaN(Number(filter.selectedPeriod))
@@ -265,7 +266,12 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
         )}
         <p className="text-[11px] text-muted">
           Source → Via → Destination. “Via” is Direct, or the storage the energy was last held in;
-          a storage hands back the mix it was charged with.
+          a storage hands back the mix it was charged with.{' '}
+          Money flows:{' '}
+          <button type="button" className="underline" data-testid="ef-to-value-flows"
+                  onClick={() => requestResultsTab('investment')}>
+            Investment → Value flows
+          </button>
         </p>
       </div>
 

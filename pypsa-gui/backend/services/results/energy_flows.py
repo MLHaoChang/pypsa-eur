@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from typing import Any, Callable
 
 import numpy as np
@@ -83,6 +84,16 @@ _EPS = 1e-9
 
 class NotEstablished(Exception):
     """A quantity the attribution needs is missing or unusable."""
+
+
+_ENERGY_UNIT = re.compile(r"^[kMGT]?W(h)?([_ ]?[A-Za-z]+)?$")
+
+
+def _is_energy_unit(unit) -> bool:
+    """A bus `unit` the MWh arithmetic can read: unset, or a power / energy unit
+    (MW, kWh, MW_th …). A commodity bus (t/h, kg) is not."""
+    u = str(unit or "").strip()
+    return u == "" or bool(_ENERGY_UNIT.match(u))
 
 
 def _fin(v) -> float | None:
@@ -270,6 +281,18 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
 
     storages = _storages(n, result_df, mask, bus_ix, dt)
     nst = len(storages)
+
+    # ---- units: the sums below are energy; a commodity port would make "losses" ---
+    bus_unit = [str(u or "").strip() for u in n.buses["unit"]] if "unit" in n.buses else [""] * nb
+    for name, pl in elems:
+        units = {bus_unit[b] for b, _ in pl}
+        if not all(_is_energy_unit(u) for u in units) and any(_is_energy_unit(u) for u in units):
+            raise NotEstablished(f"mixed units on {name}: " + ", ".join(sorted(u or "energy" for u in units)))
+    used = set(g_bus) | set(l_bus) | {st.bus for st in storages} | {b for _, pl in elems for b, _ in pl}
+    for b in sorted(used):
+        if not _is_energy_unit(bus_unit[b]):
+            raise NotEstablished(f"bus {buses[b]} is in {bus_unit[b]}, not an energy unit; "
+                                 "the flows are shown for energy carriers only")
 
     # ---- labels -----------------------------------------------------------------
     srcs = sorted(set(g_lab))
