@@ -355,7 +355,7 @@ def _assert_equivalent(client, monkeypatch, name) -> dict:
 
 
 R4_TEMPLATES = ["eh_datacenter", "eh_datacenter_staged", "eh_h2_hub", "eh_h2_hub_staged",
-                "eh_microgrid", "eh_microgrid_staged", "eh_site"]
+                "eh_microgrid", "eh_microgrid_staged", "eh_site", "eh_ammonia_staged"]
 
 
 @pytest.mark.parametrize("tid", R4_TEMPLATES)
@@ -496,6 +496,12 @@ TEMPLATE_STATES = {
                      "connection": "not_needed", "loads": "complete",
                      "assets": "warning", "profiles": "complete",
                      "commercial": "warning", "scenarios": "complete"},
+    # Ammonia (#418): electricity, H2 and NH3 pre-filled. Its assumed rows
+    # (energization; tanks, electrolyser, UC; finance and the NH3 value) read warning.
+    "eh_ammonia_staged": {"project": "warning", "carriers": "complete",
+                          "connection": "warning", "loads": "complete",
+                          "assets": "warning", "profiles": "complete",
+                          "commercial": "warning", "scenarios": "complete"},
     "eh_h2_hub": {"project": "warning", "carriers": "complete",
                   "connection": "complete", "loads": "complete",
                   "assets": "warning", "profiles": "complete",
