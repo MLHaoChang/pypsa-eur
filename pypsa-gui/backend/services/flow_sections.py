@@ -234,19 +234,23 @@ def file_issue(code: str, component_class: str, name: str,
     section = section_for_code(code)
     if section is not None and section != BY_COMPONENT:
         return section
+    return _class_section(component_class, name, connection_links) or "readiness"
+
+
+def _class_section(component_class: str, name: str,
+                   connection_links: frozenset[str]) -> str | None:
+    """The class rule ``file_issue`` and ``section_for`` share: import/export
+    Links are the connection, other classes by ``COMPONENT_SECTION``."""
     if component_class == "Link" and name in connection_links:
         return "connection"
-    if component_class in COMPONENT_SECTION:
-        return COMPONENT_SECTION[component_class]
-    return "readiness"
+    return COMPONENT_SECTION.get(component_class)
 
 
 def section_for(component_class: str, entity: str,
                 connection_links: frozenset[str] = frozenset()) -> dict:
-    """``{id, label, panel}``: the section a component lives in, by the same
-    class rule the flow files issues with (import/export Links are the
-    connection). An unknown class is the project's (Project & site)."""
-    section = COMPONENT_SECTION.get(component_class, "project")
-    if component_class == "Link" and entity in connection_links:
-        section = "connection"
+    """``{id, label, panel}``: the section a component lives in, by the class
+    rule the flow files issues with. An unknown class is the project's
+    (Project & site): an edit to it is a project setting, where an issue with
+    no class files to ``readiness`` so it still shows."""
+    section = _class_section(component_class, entity, connection_links) or "project"
     return {"id": section, "label": SECTION_LABELS[section], "panel": SECTION_PANEL[section]}

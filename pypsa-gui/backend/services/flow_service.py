@@ -547,6 +547,14 @@ def _humanise(item: str) -> str:
     return text[:1].upper() + text[1:]
 
 
+def _shown(value) -> str:
+    """A ledger value as the message shows it: a number at full precision and
+    never in exponent form for an integral MW figure (``1500000``, ``0.85``)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value if value is not None else "")
+    return str(int(value)) if float(value).is_integer() else repr(float(value))
+
+
 def _assumed_items(template: dict) -> list[dict]:
     """The template's `assumed` ledger rows and energization: a default the user
     has not confirmed is a warning (design §3.2). A row may name its own
@@ -559,10 +567,7 @@ def _assumed_items(template: dict) -> list[dict]:
         item = str(row.get("item") or "")
         value = row.get("value")
         unit = row.get("unit")
-        shown = f"{value:g}" if isinstance(value, (int, float)) and not isinstance(value, bool) \
-            else str(value or "")
-        if unit:
-            shown = f"{shown} {unit}"
+        shown = f"{_shown(value)} {unit}" if unit else _shown(value)
         # "<label>: <value> <unit> (assumed) — <hint>"; without a label the
         # item, humanised (checklist §6.9: no raw ids in the UI).
         label = str(row.get("label") or _humanise(item))
@@ -575,15 +580,16 @@ def _assumed_items(template: dict) -> list[dict]:
                              component=str(row.get("component") or ""),
                              entity=str(row.get("entity") or ""),
                              fld=str(row.get("field") or ""),
-                             panel=row.get("panel"), value=shown))
+                             panel=row.get("panel"), value=str(value or "")))
             continue
         out.append(_item("assumed_default", "warning", message, "template",
-                         ledger_section(item) or "project", entity=item, value=shown))
+                         ledger_section(item) or "project", entity=item,
+                         value=str(value or "")))
     energ = [e for e in template.get("energization") or []
              if isinstance(e, dict) and e.get("source") == "assumed"]
     if energ:
         value = json.dumps([[e.get("year"), e.get("available_import_mw")] for e in energ])
-        steps = ", ".join(f"{e.get('year')}: {e.get('available_import_mw'):g} MW"
+        steps = ", ".join(f"{e.get('year')}: {_shown(e.get('available_import_mw'))} MW"
                           if isinstance(e.get("available_import_mw"), (int, float))
                           else str(e.get("year")) for e in energ)
         out.append(_item("assumed_default", "warning",

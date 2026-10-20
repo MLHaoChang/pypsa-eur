@@ -211,3 +211,18 @@ def test_two_rows_on_one_entity_keep_separate_acks(tmp_path):
     acked = {i["code"]: i["acknowledged"] for i in items}
     assert acked["assumed_connection_ramp"] is True
     assert acked["assumed_oscillation"] is False
+
+
+def test_an_assumed_value_shows_at_full_precision():
+    """No exponent form or 6-digit rounding (`1.5e+06`), and the ack value is
+    the raw value, so a change past the 6th digit still re-raises it."""
+    items = S._assumed_items({"ledger": [
+        {"item": "fault_level", "value": 1500000, "unit": "kVA", "source": "assumed",
+         "section": "connection"},
+        {"item": "import_efficiency", "value": 0.9876543, "source": "assumed",
+         "section": "connection"}]})
+    got = {i["code"]: i for i in items}
+    assert got["assumed_fault_level"]["message"].startswith("Fault level: 1500000 kVA (assumed)")
+    assert got["assumed_import_efficiency"]["message"].startswith(
+        "Import efficiency: 0.9876543 (assumed)")
+    assert got["assumed_import_efficiency"]["_value"] == "0.9876543"
