@@ -850,6 +850,20 @@ exists. With no such section the result is
 live results. `window_from` and `window_to` are snapshot indexes;
 `window_from` must not exceed `window_to`.
 
+### Current energy flows
+
+`get_energy_flows` (`services/energy_flows_read.py`) reads the current solve's
+Energy flow tab through the same `services/results/energy_flows.py` payload
+the tab draws: Source → Via → Destination MWh, the largest rows first (default
+12, maximum 40, trimmed under 3800 characters), the conservation check and the
+window. It computes nothing of its own. `not_delivered` carries
+`unserved_product_mwh` (process shortfall per load) and `unserved_mwh` (shed
+load) as energy NOT delivered; neither is ever a row or a source. Before a
+solve it is `unavailable_kind=not_solved`; an attribution the module cannot
+prove to conserve energy is `not_established`, with no rows. Current results
+only; `inputs_changed_since_solve` says when the inputs moved after the solve.
+The `flows` result view (`services/result_views.py`) goes live with this tool.
+
 ### Experiment plans
 
 `start_experiment` writes `<project>/experiments/<uuid>.json` plus
