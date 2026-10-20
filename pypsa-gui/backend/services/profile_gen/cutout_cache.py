@@ -305,6 +305,11 @@ def ensure_cutout(
                 written.append(mpath)  # resume: keep the valid month
             else:
                 mpath.unlink(missing_ok=True)  # corrupt partial: never resume
+                # Not under the netCDF lock: a month can take minutes, and the
+                # lock would stall every project save. atlite's prepare() reads
+                # and writes the month through xarray/netCDF4 IN this process,
+                # so HDF5 is still shared; the fix is a subprocess fetch
+                # (.scratch/renewable-profiles/issues/13-cutout-fetch-subprocess.md).
                 _call_with_timeout(
                     lambda m=month, p=mpath: dl(padded, int(year), m, p, stop_event),
                     timeout_s,
