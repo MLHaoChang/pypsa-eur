@@ -11,6 +11,7 @@ Owner input: 2026-10-20
 
 - D1. Generalise the renewable profile generator (`services/profile_gen/`) into one framework. One engine, one preview/apply/QA path, one library and provenance model; families plug in through `register_source`.
 - D2. The spec lands now. A fresh Opus session builds the backend after the profiles session hands off following RP-06, starting from that hand-off note. The UI waits for the approved project-workflow design (`.scratch/project-workflow/`).
+- D4. Chat refinement (ticket 04) is in scope: the copilot proposes deterministic ops, never raw numbers, behind the old→new card (owner, 2026-10-20).
 - D3. The workflow stays generic. Templates (data centre, energy hub, microgrid, H2, commodity/process) only pre-fill generator choices.
 
 ## Families
@@ -38,6 +39,11 @@ Owner input: 2026-10-20
 - Hydro inflow.
 - Heat-pump COP from temperature; efficiency curves.
 - Process schedules for grid-to-process (production targets, shutdowns).
+
+### 4. Chat refinement of any series → `issues/04`
+- Preview by exemplary week or date range. Refinement through a closed set of deterministic ops (scale peak, scale a time window, floor/cap, shift, smooth, rescale energy).
+- The copilot turns a sentence into ops and shows the old→new card (LC-04) before applying. The same ops are available as controls without a key.
+- The op list is kept in provenance, can be undone, and is replayed on regeneration.
 
 ## Shared contract
 - Each series targets one component field (`p_set`, `p_max_pu`, `p_min_pu`, `marginal_cost`, `efficiency`, `inflow`) through the profile apply path, with the option C time-basis rule.
