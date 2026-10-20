@@ -133,6 +133,51 @@ shown was fetched after that solve and not invalidated since
 than stale ones.
 _Avoid_: overlay (the canvases' per-bus aggregation), playback
 
+**Coordinate profile**:
+A capacity-factor time series (values in [0, 1] over one weather year) that
+the renewable profile generator computes for a named lon/lat point
+(`backend/services/profile_gen/engine.py`). Generating one is a queued
+`profile_gen` job whose artifact waits under
+`<storage>/profiles_pending/<job_id>.nc` until the user **applies** it onto a
+generator's `p_max_pu` (`backend/services/profile_gen/apply.py`) — generation
+never touches the network by itself. The point id doubles as the generator
+name at apply time. The engine's `resolution` argument aggregates at
+generation: `hourly` is the native axis, `daily`/`weekly` are means over the
+hour, upsampled back onto the network's hourly snapshots at apply (weekly
+applies to its own calendar year only and never tiles investment periods).
+The chat assistant drives the same tools through the `renewable-profile`
+guided workflow, and its preview/generate tools accept `from_generators`
+(generator names — the bus coordinates seed the sites) instead of raw
+coordinates.
+_Avoid_: weather series, yield curve, profile upload (that's the xlsx path in
+`routers/network_profiles.py`)
+
+**Profile source**:
+Which engine produced a coordinate profile — `synthetic` (deterministic
+shapes from `services/profile_gen/synthetic.py`, no download, used for
+testing and the estimate preview) or `atlite` (ERA5 reanalysis through
+atlite, `services/profile_gen/atlite_source.py`). The estimate preview is
+always synthetic even when the queued generation is atlite; say which one a
+figure came from.
+_Avoid_: real vs fake, live data, historical mode
+
+**Cutout cache**:
+The on-disk store of atlite ERA5 cutouts keyed by bounding box + weather
+year (`backend/services/profile_gen/cutout_cache.py`), so a second
+generation over the same region does not re-download. Filling it needs CDS
+API credentials; without them the backend refuses with a 422 that names the
+setup (`cds_preflight` → `CdsCredentialError`).
+_Avoid_: weather cache, ERA5 database, download folder
+
+**Profile preset**:
+A named bundle of technology parameters — a wind turbine or solar
+panel/orientation — that the generator resolves into engine params
+(`backend/services/profile_gen/presets.py`, `GET /api/profiles/presets`).
+`default` presets carry empty params (synthetic source only); the real ones
+(`vestas-v90-3mw`, `cdte-horizontal-tracking`, …) feed atlite. Expert-mode
+overrides merge on top via `resolve_params`.
+_Avoid_: template (that's network profiles), turbine type, config
+
 ## Assistant language
 
 The in-app assistant's own vocabulary. The code lives in

@@ -34,6 +34,7 @@ import DecisionPanel from './pages/decision/DecisionPanel'
 import ReportsPanel from './pages/ReportsPanel'
 import EconomicsPanel from './pages/economics/EconomicsPanel'
 import CampusElectricalPanel from './pages/CampusElectricalPanel'
+import ProfileStudioSection from './pages/ProfileStudioSection'
 import { recoveryFor } from './utils/autoRecovery'
 import LocalSettings from './pages/LocalSettings'
 import HubDesignPanel from './pages/hubDesign/HubDesignPanel'
@@ -132,6 +133,7 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   gridspine:  { eyebrow: 'STUDIES',    title: 'Planning → dynamics' },
   reports:    { eyebrow: 'REPORTS',    title: 'Reports' },
   campusElectrical: { eyebrow: 'STUDIES', title: 'Campus electrical' },
+  profiles:   { eyebrow: 'BUILD',     title: 'Profile studio' },
   decision:   { eyebrow: 'STUDIES',    title: 'Decision study' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
   settings:   { eyebrow: 'APPLICATION', title: 'Settings' },
@@ -141,7 +143,7 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
 // half-width panel beside the canvas — their charts, tables, and two-column
 // layouts need the full width.
-const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'reports', 'hubDesign', 'campusElectrical', 'decision'])
+const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'reports', 'hubDesign', 'campusElectrical', 'decision', 'profiles'])
 
 function fullPageContent(panel: SlidePanel): React.ReactNode {
   switch (panel) {
@@ -165,6 +167,7 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'decision':   return <DecisionPanel />
     case 'reports':    return <ReportsPanel />
     case 'campusElectrical': return <CampusElectricalPanel />
+    case 'profiles':   return <ProfileStudioSection />
     case 'settings':   return <LocalSettings />
     case 'hubDesign':  return <HubDesignPanel />
     default:           return null

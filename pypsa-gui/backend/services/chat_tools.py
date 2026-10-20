@@ -3385,6 +3385,152 @@ def solve_queue_clear_finished() -> dict:
     return _route(_h)
 
 
+# ── Renewable profile generator (6) — profile_gen Tasks 6–8 ─────────────────
+#
+# Thin wrappers over `routers/profiles.py`, called in-process through `_route`
+# with the PATH project resolved by `_authorized_project` where a route takes
+# one. The routes own the guards (ProjectAccessDep, project lock, undo push);
+# the wrappers own nothing but argument shaping.
+
+
+def list_profile_presets(technology: str | None = None) -> dict:
+    from routers.profiles import list_profile_presets as _h
+    kw = {"technology": technology} if technology else {}
+    return _route(_h, **kw)
+
+
+def get_profile_parameters(preset: str, technology: str | None = None) -> dict:
+    """The one tool with no HTTP twin: straight to the Task 4 catalogue, the
+    same refusal (UnknownPresetError → 422-shaped) the route would give."""
+    from fastapi import HTTPException
+
+    from services.profile_gen import presets as _presets
+    from services.profile_gen.engine import ProfileGenError
+
+    try:
+        p = _presets.get_preset(preset, technology)
+    except ProfileGenError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "name": p.name,
+        "technology": p.technology,
+        "description": getattr(p, "description", ""),
+        "params": dict(p.params),
+    }
+
+
+def _points_from_generators(names: list) -> list[dict]:
+    """Resolve generator names to profile points (id/lon/lat) from the
+    foreground network's bus coordinates — the chat-facing convenience that
+    lets "generate a wind profile for g_wind" skip coordinates entirely
+    (C3). The point id IS the generator name, which is exactly what the
+    apply path defaults to. Unknown generators are a 422-shaped refusal
+    listing what was not found."""
+    from fastapi import HTTPException
+
+    from services.pypsa_service import PyPSAService
+
+    n = PyPSAService.get_network()
+    points: list[dict] = []
+    missing: list[str] = []
+    for raw in names:
+        g = str(raw)
+        if g not in n.generators.index:
+            missing.append(g)
+            continue
+        bus = str(n.generators.at[g, "bus"] or "")
+        if bus not in n.buses.index:
+            missing.append(f"{g} (its bus {bus!r} is not on the network)")
+            continue
+        points.append({
+            "id": g,
+            "lon": float(n.buses.at[bus, "x"] or 0.0),
+            "lat": float(n.buses.at[bus, "y"] or 0.0),
+        })
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "unknown_generator",
+                "message": "unknown generator(s): "
+                           + ", ".join(missing)
+                           + f"; the network holds {len(n.generators.index)} "
+                           "generators — check the name(s)",
+            },
+        )
+    return points
+
+
+def _merge_points(points: list | None, from_generators: list | None) -> list:
+    """Explicit points plus generator-resolved points; at least one source
+    is required. Duplicated ids are the engine's typed refusal downstream."""
+    from fastapi import HTTPException
+
+    merged = [dict(p) for p in (points or [])]
+    if from_generators:
+        merged.extend(_points_from_generators(from_generators))
+    if not merged:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "no_points",
+                "message": "give either `points` (id/lon/lat) or "
+                           "`from_generators` (generator names whose bus "
+                           "coordinates seed the sites)",
+            },
+        )
+    return merged
+
+
+def preview_renewable_profile(points: list | None = None, technology: str = "",
+                              preset: str | None = None,
+                              params: dict | None = None,
+                              year: int | None = None,
+                              resolution: str | None = None,
+                              from_generators: list | None = None) -> dict:
+    from routers.profiles import EstimateRequest, estimate_profile as _h
+    kw: dict = {"points": _merge_points(points, from_generators),
+                "technology": technology,
+                "preset": preset, "params": params, "year": year}
+    if resolution is not None:
+        kw["resolution"] = resolution
+    body = EstimateRequest(**kw)
+    return _route(_h, body)
+
+
+def list_pending_profiles(project_id: str) -> dict:
+    from routers.profiles import list_pending_profiles as _h
+    return _route(_h, proj=_authorized_project(project_id))
+
+
+def generate_renewable_profile(project_id: str, points: list | None = None,
+                               technology: str = "",
+                               preset: str | None = None,
+                               params: dict | None = None,
+                               source: str = "synthetic",
+                               year: int | None = None,
+                               resolution: str | None = None,
+                               from_generators: list | None = None) -> dict:
+    from routers.profiles import GenerateRequest, generate_profiles as _h
+    kw: dict = {"points": _merge_points(points, from_generators),
+                "technology": technology,
+                "preset": preset, "params": params, "source": source,
+                "year": year}
+    if resolution is not None:
+        kw["resolution"] = resolution
+    body = GenerateRequest(**kw)
+    return _route(_h, body, proj=_authorized_project(project_id))
+
+
+def apply_generated_profile(project_id: str, job_id: str, component: str,
+                            point_id: str | None = None,
+                            time_basis: str | None = None) -> dict:
+    from routers.profiles import ApplyRequest, apply_profile as _h
+    body = ApplyRequest(job_id=job_id, component=component, point_id=point_id,
+                        time_basis=time_basis)
+    return _route(_h, body, proj=_authorized_project(project_id))
+
+
 # ── Project management (21) ─────────────────────────────────────────────────
 
 # ── Acting identity for project-scoped tools (Step 0a) ──────────────────────
@@ -7451,6 +7597,13 @@ DISPATCHERS: dict[str, Any] = {
     "solve_queue_list": solve_queue_list,
     "solve_queue_abort": solve_queue_abort,
     "solve_queue_clear_finished": solve_queue_clear_finished,
+    # Renewable profile generator (6)
+    "list_profile_presets": list_profile_presets,
+    "get_profile_parameters": get_profile_parameters,
+    "preview_renewable_profile": preview_renewable_profile,
+    "list_pending_profiles": list_pending_profiles,
+    "generate_renewable_profile": generate_renewable_profile,
+    "apply_generated_profile": apply_generated_profile,
     # gridspine (16)
     "gridspine_create_study": gridspine_create_study,
     "gridspine_set_dispatch_source": gridspine_set_dispatch_source,

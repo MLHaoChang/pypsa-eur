@@ -195,11 +195,14 @@ describe('switching to guided prunes a hidden slide panel (§3.7)', () => {
     }
   })
 
-  it('switching to expert closes and opens nothing', async () => {
+  it('switching to expert closes the Guided hub design panel (W4) and opens nothing', async () => {
     const s = await freshStore({ 'network-diagram:current-project': 'P' })
     s.setState({ currentProject: 'P', activeSlidePanel: 'hubDesign', uiMode: 'guided' })
     s.getState().setUiMode('expert', { explicit: true })
-    expect(s.getState().activeSlidePanel).toBe('hubDesign')
+    expect(s.getState().activeSlidePanel).toBeNull()
+    s.setState({ activeSlidePanel: 'results' })
+    s.getState().setUiMode('expert', { explicit: true })
+    expect(s.getState().activeSlidePanel).toBe('results')
     s.setState({ activeSlidePanel: null })
     s.getState().setUiMode('expert', { explicit: true })
     expect(s.getState().activeSlidePanel).toBeNull()
@@ -297,11 +300,11 @@ describe('switching to guided keeps the decision study open', () => {
 describe('autosave per mode', () => {
   const AUTOSAVE_KEY = 'network-diagram:autosave'
 
-  it('with no choice it follows the mode, at load and on a switch', async () => {
+  it('with no choice the mode sets the default at load; a switch keeps the state (W5)', async () => {
     const g = await freshStore({ [MODE_KEY]: 'guided' })
     expect(g.getState().autosaveEnabled).toBe(true)
     g.getState().setUiMode('expert')
-    expect(g.getState().autosaveEnabled).toBe(false)
+    expect(g.getState().autosaveEnabled).toBe(true)
     g.getState().setUiMode('guided')
     expect(g.getState().autosaveEnabled).toBe(true)
     expect(localStorage.getItem(AUTOSAVE_KEY)).toBeNull()

@@ -240,6 +240,11 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/local-settings/reveal-log"): (NOT_PROJECT_DATA, _R_LOCAL),
     ("POST", "/api/dictation/transcribe"): (NOT_PROJECT_DATA, _R_NO_PROJECT),
     ("POST", "/api/projects/{name}/studies/preview"): (NOT_PROJECT_DATA, _R_READ_ONLY_PREVIEW),
+    ("POST", "/api/profiles/estimate"): (NOT_PROJECT_DATA,
+        "a POST only to carry a body: it generates a SYNTHETIC preview series "
+        "in memory and returns it downsampled, writes nothing, resolves no "
+        "project — the same shape as studies/preview, without even the path "
+        "project."),
     ("POST", "/api/chat/operations/{operation_id}/reconcile"): (NOT_PROJECT_DATA, _R_ASSURANCE),
     ("POST", "/api/chat/ui-ack"): (NOT_PROJECT_DATA, _R_ASSURANCE),
     # chat session

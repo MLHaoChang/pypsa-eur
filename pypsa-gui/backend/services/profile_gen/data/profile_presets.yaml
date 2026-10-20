@@ -1,0 +1,99 @@
+# Profile presets for the renewable profile generator (spec §3.3).
+#
+# Discipline (gridspine templates v2):
+#   - every top-level `params` field MUST have a `provenance` entry;
+#   - turbine/panel configs are EMBEDDED dicts (offline by construction) —
+#     never atlite library names, which can trigger a runtime OEDB download;
+#   - wind turbine dicts carry V (m/s), POW (MW), hub_height (m), P (MW);
+#   - pv presets carry a full huld `panel` dict + an `orientation` dict.
+#
+# `default` exists once per technology and uses the synthetic source — it
+# must never require a download (spec D5).
+
+- name: default
+  technology: wind
+  source_type: synthetic
+  params: {}
+  provenance:
+    ~: "Synthetic source — seeded closed-form model, no weather data (spec D5)."
+
+- name: default
+  technology: solar
+  source_type: synthetic
+  params: {}
+  provenance:
+    ~: "Synthetic source — seeded closed-form model, no weather data (spec D5)."
+
+- name: vestas-v90-3mw
+  technology: wind
+  source_type: atlite
+  params:
+    turbine:
+      hub_height: 105
+      P: 3.0
+      V: [0.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 25.0, 25.01]
+      POW: [0.0, 0.058, 0.160, 0.338, 0.566, 0.886, 1.301, 1.756, 2.213, 2.615, 2.883, 2.978, 2.997, 3.0, 3.0, 0.0]
+  provenance:
+    turbine: "Vestas V90-3.0MW manufacturer power curve (datasheet values, MW); hub height 105 m (common tubular tower option); trailing zero at 25.01 m/s is the cut-out."
+
+- name: enercon-e82-2mw
+  technology: wind
+  source_type: atlite
+  params:
+    turbine:
+      hub_height: 98
+      P: 2.05
+      V: [0.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 25.0, 25.01]
+      POW: [0.0, 0.003, 0.055, 0.160, 0.330, 0.560, 0.880, 1.240, 1.550, 1.810, 1.980, 2.05, 2.05, 0.0]
+  provenance:
+    turbine: "Enercon E-82 E2 manufacturer curve (datasheet values, MW); hub height 98 m; cut-out at 25 m/s."
+
+- name: csi-fixed-35deg-south
+  technology: solar
+  source_type: atlite
+  params:
+    panel:
+      model: huld
+      efficiency: 0.1
+      c_temp_amb: 1
+      c_temp_irrad: 0.035
+      r_tamb: 293
+      r_tmod: 298
+      r_irradiance: 1000
+      k_1: -0.017162
+      k_2: -0.040289
+      k_3: -0.004681
+      k_4: 0.000148
+      k_5: 0.000169
+      k_6: 0.000005
+      inverter_efficiency: 0.9
+    orientation: {slope: 35.0, azimuth: 180.0}
+  provenance:
+    panel: "Huld et al. 2010 crystalline-silicon fit (verbatim from atlite's shipped CSi panel config; CC-BY-4.0)."
+    orientation: "Fixed tilt 35 deg, south-facing — central-European rule-of-thumb default."
+
+- name: cdte-horizontal-tracking
+  technology: solar
+  source_type: atlite
+  params:
+    panel:
+      model: huld
+      efficiency: 0.1
+      c_temp_amb: 1
+      c_temp_irrad: 0.035
+      r_tamb: 293
+      r_tmod: 298
+      r_irradiance: 1000
+      k_1: -0.103251
+      k_2: -0.040446
+      k_3: -0.001667
+      k_4: 0.002123
+      k_5: 0.000474
+      k_6: -0.000041
+      inverter_efficiency: 0.9
+    orientation: {slope: 0.0, azimuth: 0.0}
+    tracking: horizontal
+  provenance:
+    panel: "Huld et al. 2010 CdTe fit coefficients (same functional form as atlite's shipped panels)."
+    orientation: "Horizontal single-axis tracking uses the orientation dict as the axis definition (atlite convention)."
+    tracking: "N-S horizontal axis, E-W tracking."

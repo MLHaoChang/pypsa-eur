@@ -118,7 +118,12 @@ KIND_GRIDSPINE = "gridspine"
 # it reads the SAVED network and writes under the project directory, like a
 # GridSpine study. Its run settings ride as the job's `solver_config_json`.
 KIND_CAMPUS = "campus"
-KINDS = (KIND_SOLVE, KIND_GRIDSPINE, KIND_CAMPUS)
+# A renewable-profile generation (spec: profile generator, Task 6): the runner
+# (`services/profile_gen/job.py`) downloads/prepares weather data and writes a
+# PENDING artifact under the project's storage_dir — it never touches a
+# network. The spec rides as the job's `solver_config_json`, like campus.
+KIND_PROFILE_GEN = "profile_gen"
+KINDS = (KIND_SOLVE, KIND_GRIDSPINE, KIND_CAMPUS, KIND_PROFILE_GEN)
 
 
 @dataclass
@@ -955,6 +960,8 @@ class SolveQueue:
             self._run_gridspine_job(job)
         elif job.kind == KIND_CAMPUS:
             self._run_campus_job(job)
+        elif job.kind == KIND_PROFILE_GEN:
+            self._run_profile_gen_job(job)
         else:
             self._run_solve_job(job)
 
@@ -1120,6 +1127,49 @@ class SolveQueue:
                 error = f"{type(exc).__name__}: {detail if detail is not None else exc}"
                 log_queue.put(f"campus electrical study failed: {error}")
                 logger.exception("solve_queue: campus job %s failed", job.id)
+        finally:
+            log_queue.put(None)
+            self._finish(job, status, error=error)
+
+    def _run_profile_gen_job(self, job: SolveJob) -> None:
+        """Run one renewable-profile generation (`profile_gen.job.run_queued`)
+        on the project the job's authorized ``storage_dir`` names: the same
+        claim, log, stop event and persisted status as every other kind. The
+        runner writes a pending artifact and never touches a network; the stop
+        event reaches the CDS download and is polled between stages.
+
+        One FIFO, by decision: a profile job queues behind a running solve
+        (MAX_CONCURRENT_SOLVES default 1) rather than riding a second worker
+        pool — generation is seconds for the synthetic source and the honesty
+        of one queue beats a delicate second admission path."""
+        from routers import simulation as sim
+        from services.profile_gen import job as pg_job
+
+        stop_event = threading.Event()
+        log_queue = sim.BufferedLogQueue()
+        claim = self._claim(job, stop_event, log_queue)
+        if claim == "parked":
+            return
+        if claim == "cancelled":
+            self._finish(job, "aborted")
+            return
+
+        status, error = "failed", None
+        try:
+            log_queue.put(f"profile generation starting for {job.project_id!r}")
+            nc, _meta = pg_job.run_queued(job, None, stop_event)
+            status = "completed"
+            log_queue.put(f"profile generation completed: {nc.name}")
+        except BaseException as exc:  # noqa: BLE001 - recorded, never re-raised
+            if isinstance(exc, (pg_job.ProfileGenAborted,
+                                pg_job.CutoutDownloadAborted)):
+                status = "aborted"
+                log_queue.put("profile generation aborted")
+            else:
+                detail = getattr(exc, "detail", None)
+                error = f"{type(exc).__name__}: {detail if detail is not None else exc}"
+                log_queue.put(f"profile generation failed: {error}")
+                logger.exception("solve_queue: profile_gen job %s failed", job.id)
         finally:
             log_queue.put(None)
             self._finish(job, status, error=error)

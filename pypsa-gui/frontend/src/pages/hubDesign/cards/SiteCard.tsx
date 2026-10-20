@@ -46,7 +46,7 @@ export function siteRows(r: EhReadiness, archetype: EhArchetype): Record<SiteFix
 
   const crit = r.critical_buses ?? []
   const critical: Row = crit.length
-    ? { value: names(crit), gap: false }
+    ? { value: `${names(crit)} — everything on ${crit.length > 1 ? 'these buses' : 'this bus'} keeps power`, gap: false }
     : { value: 'none tagged', gap: true, fix: siteFixText('critical') }
 
   const scr = r.scr?.status

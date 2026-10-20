@@ -139,6 +139,112 @@ class _ActiveUserTsStore:
 _user_ts = _ActiveUserTsStore()
 
 
+class _ActiveUserTsMetaStore:
+    """
+    Mapping view of the ACTIVE project context's profile-provenance meta
+    store (profile_gen Task 5, spec D6) — the parallel of
+    `_ActiveUserTsStore` for `ProjectContext.user_ts_meta`, resolving
+    through `PyPSAService.get_user_ts_meta()` on every operation.
+
+    Bound ONCE and never rebound, for the same by-value-importer reason as
+    `_user_ts`. A separate dict rather than entries inside `user_ts` so the
+    3-tuple key contract of every serialise / rename / delete walk is
+    untouched.
+    """
+
+    __slots__ = ()
+
+    @staticmethod
+    def _t() -> dict:
+        return PyPSAService.get_active_context().user_ts_meta
+
+    def __getitem__(self, key):
+        return self._t()[key]
+
+    def __setitem__(self, key, value):
+        self._t()[key] = value
+
+    def __delitem__(self, key):
+        del self._t()[key]
+
+    def __contains__(self, key):
+        return key in self._t()
+
+    def __iter__(self):
+        return iter(self._t())
+
+    def __len__(self):
+        return len(self._t())
+
+    def __repr__(self):
+        return f"_ActiveUserTsMetaStore({self._t()!r})"
+
+    def get(self, key, default=None):
+        return self._t().get(key, default)
+
+    def update(self, *args, **kwargs):
+        self._t().update(*args, **kwargs)
+
+    def clear(self):
+        self._t().clear()
+
+    def keys(self):
+        return self._t().keys()
+
+    def items(self):
+        return self._t().items()
+
+    def values(self):
+        return self._t().values()
+
+    def setdefault(self, key, default=None):
+        return self._t().setdefault(key, default)
+
+    def pop(self, key, *args):
+        return self._t().pop(key, *args)
+
+    def copy(self):
+        return self._t().copy()
+
+
+_user_ts_meta = _ActiveUserTsMetaStore()
+
+
+def _meta_store_for(store: dict) -> dict | None:
+    """
+    Pair an explicitly-passed user_ts store with ITS context's meta store.
+
+    The pairing rule of `_serialize_user_ts` / `_restore_user_ts` is "store
+    and meta store describe the same project" — the same rule the docstrings
+    there state for `n`/`store` pairs. Rather than threading a second
+    parameter through every call site (save, hydrate, undo), the owner is
+    found BY IDENTITY: the one resident context whose `user_ts` IS this dict
+    instance. Candidates mirror `services/shutdown.resident_contexts` — the
+    registry, the process-foreground bootstrap slot, and the request-scoped
+    slot — deduped. None when no resident context claims the store (a
+    throwaway dict in a unit test): the meta channel is then simply skipped,
+    never aimed at the wrong project.
+    """
+    try:
+        candidates = list(PyPSAService._contexts.values())
+        active = PyPSAService._active
+        if active is not None:
+            candidates.append(active)
+        scoped = PyPSAService._scoped()
+        if scoped is not None:
+            candidates.append(scoped)
+        seen: list = []
+        for ctx in candidates:
+            if ctx is None or any(ctx is s for s in seen):
+                continue
+            seen.append(ctx)
+            if getattr(ctx, "user_ts", None) is store:
+                return getattr(ctx, "user_ts_meta", None)
+    except Exception:  # noqa: BLE001 — provenance must never break a save
+        return None
+    return None
+
+
 # Guards multi-step reads/writes of whichever context's store the caller
 # resolved. Deliberately still ONE process-wide RLock and not a per-context one:
 # it protects dict-level atomicity (serialise-while-uploading, the
@@ -175,6 +281,16 @@ def _user_ts_rename_asset(component_attr: str, old_name: str, new_name: str) -> 
         for key in keys_to_move:
             comp, attr, _ = key
             _user_ts[(comp, attr, new_name)] = _user_ts.pop(key)
+        # The provenance channel follows its series (profile_gen Task 5) —
+        # both union and meta key sets are walked because a meta entry whose
+        # series was never written must move too, not orphan.
+        meta_to_move = [
+            (comp, attr, col) for (comp, attr, col) in _user_ts_meta
+            if comp == component_attr and col == old_name
+        ]
+        for key in meta_to_move:
+            comp, attr, _ = key
+            _user_ts_meta[(comp, attr, new_name)] = _user_ts_meta.pop(key)
     return len(keys_to_move)
 
 
@@ -195,6 +311,14 @@ def _user_ts_delete_asset(component_attr: str, name: str) -> int:
         ]
         for key in keys_to_drop:
             del _user_ts[key]
+        # And its provenance entry (profile_gen Task 5) — a future component
+        # reusing the name must not inherit the deleted asset's meta either.
+        meta_to_drop = [
+            (comp, attr, col) for (comp, attr, col) in _user_ts_meta
+            if comp == component_attr and col == name
+        ]
+        for key in meta_to_drop:
+            del _user_ts_meta[key]
     return len(keys_to_drop)
 
 
@@ -277,7 +401,10 @@ def _annual_hourly_reference():
     return idx, None
 
 
-def _serialize_user_ts(store: dict | None = None) -> dict:
+_META_KEY = "$meta"
+
+
+def _serialize_user_ts(store: dict | None = None, meta_store: dict | None = None) -> dict:
     """
     Return a user time-series store as a JSON-serialisable nested dict.
 
@@ -286,6 +413,19 @@ def _serialize_user_ts(store: dict | None = None) -> dict:
     ProjectContext passes `ctx.user_ts` instead, so a save writes the profiles
     of the project it is saving rather than the profiles of whichever project
     happens to be active on the calling thread — see `_save_context`.
+
+    ``meta_store`` is the provenance channel paired with ``store``
+    (profile_gen Task 5, spec D6). When omitted it is resolved: the active
+    context's for an active-store serialise, and the OWNING context's — by
+    dict identity, see `_meta_store_for` — for an explicit one, so a
+    background save (`_save_context` passing `ctx.user_ts`) carries its own
+    provenance with no call-site change. Meta entries are emitted under a
+    reserved top-level ``"$meta"`` key — nested ``comp → attr → col →
+    meta`` — so the save file and the undo payload carry provenance WITH the
+    series instead of in a sidecar that could drift. Only keys actually
+    present in the series payload are emitted (an orphan meta entry is dead
+    weight). ``"$meta"`` collides with no component list-name: PyPSA's are a
+    closed set (``generators``, ``loads``, …) and none starts with ``$``.
 
     Format: ``{component: {attribute: {column: {index: [...], values: [...]}}}}``
     The index entries are:
@@ -302,10 +442,17 @@ def _serialize_user_ts(store: dict | None = None) -> dict:
     # `dictionary changed size during iteration`. Snapshot keys first so a
     # writer waiting on the lock isn't blocked for the JSON-serialisation
     # cost (just the dict-snapshot cost).
+    if meta_store is None:
+        meta_store = (
+            _user_ts_meta
+            if (store is None or store is _user_ts)
+            else _meta_store_for(store)
+        )
     if store is None:
         store = _user_ts
     with _user_ts_lock:
         items = list(store.items())
+        meta_items = dict(meta_store.items()) if meta_store is not None else {}
     for (comp, attr, col), series in items:
         if isinstance(series.index, pd.MultiIndex):
             idx = [
@@ -319,10 +466,18 @@ def _serialize_user_ts(store: dict | None = None) -> dict:
             for v in series.tolist()
         ]
         result.setdefault(comp, {}).setdefault(attr, {})[col] = {"index": idx, "values": vals}
+    if meta_items:
+        emitted = False
+        for (comp, attr, col), meta in meta_items.items():
+            if comp in result and attr in result[comp] and col in result[comp][attr]:
+                result.setdefault(_META_KEY, {}).setdefault(comp, {}).setdefault(attr, {})[col] = meta
+                emitted = True
+        if not emitted:
+            result.pop(_META_KEY, None)
     return result
 
 
-def _restore_user_ts(data: dict, store: dict | None = None) -> None:
+def _restore_user_ts(data: dict, store: dict | None = None, meta_store: dict | None = None) -> None:
     """
     Restore a user time-series store from the format `_serialize_user_ts` writes.
 
@@ -330,6 +485,17 @@ def _restore_user_ts(data: dict, store: dict | None = None) -> None:
     one. This REPLACES the store wholesale, which is why the parameter matters:
     aimed at the wrong dict it discards a project's profiles rather than merely
     reading the wrong ones.
+
+    ``meta_store`` pairs with ``store`` exactly as in `_serialize_user_ts`
+    (profile_gen Task 5): the reserved ``"$meta"`` top-level key, when present,
+    REPLACES that store wholesale too — and its absence clears it, so a
+    pre-meta save file or an explicit ``_restore_user_ts({})`` reset drops
+    stale provenance rather than leaving it to masquerade on a future series.
+    When ``meta_store`` is omitted the owner is resolved by dict identity
+    (`_meta_store_for`); an explicit store no resident context claims touches
+    NO meta store (clearing the active project's provenance while hydrating
+    an unowned dict would corrupt the active project).
+
     Supports both the current nested format and the legacy pipe-separated format
     for backwards compatibility with old user_ts.json files.
     All-NaN series are silently skipped — they represent corrupt/empty data.
@@ -337,6 +503,11 @@ def _restore_user_ts(data: dict, store: dict | None = None) -> None:
     import logging as _logging
     _log = _logging.getLogger(__name__)
     new_store: dict[tuple[str, str, str], pd.Series] = {}
+
+    # Lift the provenance channel out before format detection / the comp
+    # loops — it is neither a legacy marker nor a component name.
+    meta_payload = data.get(_META_KEY) if isinstance(data, dict) else None
+    data = {k: v for k, v in data.items() if k != _META_KEY}
 
     # Detect format: any top-level key containing "|" → legacy pipe format.
     is_legacy = any("|" in k for k in data.keys())
@@ -387,9 +558,34 @@ def _restore_user_ts(data: dict, store: dict | None = None) -> None:
     # Replace the store atomically under the lock — readers in
     # _serialize_user_ts / _user_ts.items() never see a half-populated state.
     target = _user_ts if store is None else store
+    # The provenance channel pairs with the store (see the docstring):
+    # resolved by identity for explicit stores, the active context's for an
+    # active-store restore.
+    if meta_store is None:
+        target_meta = (
+            _user_ts_meta
+            if (store is None or store is _user_ts)
+            else _meta_store_for(store)
+        )
+    else:
+        target_meta = meta_store
+    new_meta: dict[tuple[str, str, str], dict] = {}
+    if isinstance(meta_payload, dict):
+        for comp, attrs in meta_payload.items():
+            if not isinstance(attrs, dict):
+                continue
+            for attr, cols in attrs.items():
+                if not isinstance(cols, dict):
+                    continue
+                for col, meta in cols.items():
+                    if isinstance(meta, dict):
+                        new_meta[(comp, attr, col)] = meta
     with _user_ts_lock:
         target.clear()
         target.update(new_store)
+        if target_meta is not None:
+            target_meta.clear()
+            target_meta.update(new_meta)
 
 
 # Components whose `_t` tables we walk for time-series backup. Every non-empty

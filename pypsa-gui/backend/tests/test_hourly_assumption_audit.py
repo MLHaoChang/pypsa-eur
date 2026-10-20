@@ -91,6 +91,18 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "study/engine_adapter.py": (1, "a bill is annual when Σ objective weights (hours at any "
                                    "resolution) is a 365- or 366-day year, 8760 or 8784 h — a "
                                    "unit, not a step (GS's annual-bill rule, U2 WP5)"),
+    # The renewable profile generator (spec: profile generation via atlite /
+    # synthetic sources). Its product IS an hourly weather-year axis by
+    # design; the apply path pins that shape before aligning to a network.
+    "profile_gen/synthetic.py": (3, "the generator's own axis: one full weather year of "
+                                    "hourly steps (8760, or 8784 with Feb 29 in a leap year) — "
+                                    "a declared hourly product, like study/packs.py, not an "
+                                    "assumption about someone else's axis"),
+    "profile_gen/atlite_source.py": (1, "prose: the axis length contract is the cutout's, "
+                                        "explicitly not assumed to be 8760"),
+    "profile_gen/apply.py": (1, "_ONE_HOUR (Timedelta(hours=1)) verifies the generated axis "
+                                "is contiguous hourly before alignment — a shape check on the "
+                                "artifact, not an assumption about the network's resolution"),
 }
 
 
@@ -115,6 +127,7 @@ def test_every_hourly_assumption_site_is_listed_with_a_reason():
 def test_the_inventory_is_pinned():
     # U2 WP10: GS's `study/tariff.py` (3 sites) is deleted.
     # S1a: `asset_schema/fields.py` (1 site, MTTR help text) is added.
-    assert sum(c for c, _ in ALLOWED.values()) == 73
-    assert len(ALLOWED) == 35
+    # Profile generator: synthetic.py (3), atlite_source.py (1), apply.py (1) added.
+    assert sum(c for c, _ in ALLOWED.values()) == 78
+    assert len(ALLOWED) == 38
     assert all(reason for _, reason in ALLOWED.values())

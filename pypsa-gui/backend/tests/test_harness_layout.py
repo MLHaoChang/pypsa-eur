@@ -431,3 +431,28 @@ def test_a_planned_workflow_is_never_offered(monkeypatch):
     _plan_one(monkeypatch, reg)
     for context in ("expert", "guided"):
         assert "investment-decision" not in [wf.id for wf in workflows.menu(context)]
+
+
+def test_renewable_profile_workflow_shape():
+    """Phase C (chat-guided profile generation): the workflow is active,
+    offered in both bound modes, and its steps walk scope → technology →
+    parameters → weather → resolution → preview → generate → apply. The
+    weather step carries the CDS credential coaching (C4)."""
+    from harness import workflows
+
+    wf = workflows.get("renewable-profile")
+    assert wf.status == "active"
+    assert wf.offered_in("guided") and wf.offered_in("expert")
+    assert not wf.offered_in("unbound")
+    assert [s.id for s in wf.steps] == [
+        "scope", "technology", "parameters", "weather",
+        "resolution", "preview", "generate", "apply",
+    ]
+    weather = wf.step("weather").body
+    assert "cds.climate.copernicus.eu" in weather
+    assert "CDSAPI_KEY" in weather
+    # D4=B: resolutions are hourly/daily/weekly only — no annual.
+    resolution = wf.step("resolution").body
+    assert "hourly" in resolution and "daily" in resolution
+    assert "weekly" in resolution
+    assert "no annual resolution" in resolution

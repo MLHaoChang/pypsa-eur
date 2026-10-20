@@ -22,16 +22,24 @@
  * in that case.
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useAuthMode } from '../auth/AuthModeProvider'
 import { fetchLocalSettings, type LocalSettingsState } from '../api/localSettings'
 
 export const LOCAL_SETTINGS_KEY = ['localSettings'] as const
 
 export function useLocalSettings() {
+  // /api/health says which build this is: auth_enabled is false only on the
+  // desktop app, the only build that has these routes. Asking a web build
+  // logged a 404 on every page load (UX review N15), so wait for health and
+  // skip the request there; the query stays `data === undefined`, which every
+  // consumer already treats as "hide".
+  const { ready, authEnabled } = useAuthMode()
   return useQuery<LocalSettingsState | null>({
     queryKey: LOCAL_SETTINGS_KEY,
     queryFn: fetchLocalSettings,
     staleTime: Infinity,
     retry: 2,
+    enabled: ready && !authEnabled,
   })
 }
 

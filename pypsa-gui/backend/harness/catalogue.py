@@ -85,6 +85,8 @@ SAFETY_PANEL_ENUM = [
     "DecisionStudy", "decision",
     # Economics in Expert: rates, price basis and every asset's costs.
     "Economics", "economics",
+    # The renewable profile generator (Profile Studio) slide panel.
+    "ProfileStudio", "profiles",
 ]
 RESULTS_TAB_ENUM = [
     "summary",      # M3: the answer-first tab Results opens on after a solve
@@ -1410,6 +1412,108 @@ TOOLS: list[dict[str, Any]] = [
         "solve_queue_clear_finished",
         "Drop FINISHED job listing entries from the in-memory queue. "
         "Idempotent. No disk/solver impact. Safety: read.",
+    ),
+
+    # ── Renewable profile generator (6) ────────────────────────────────────
+    # Thin wrappers over the /api/profiles routes (Task 7). Point ids follow
+    # the generate UI's convention: the point id IS the target component's
+    # name, so apply needs no mapping in the common case.
+
+    _t(
+        "list_profile_presets",
+        "List the renewable-profile presets (wind/solar parameter bundles), "
+        "optionally for one technology. Each entry carries its full params "
+        "dict. Safety: read.",
+        {"technology": {"type": "string", "enum": ["wind", "solar"]}},
+    ),
+    _t(
+        "get_profile_parameters",
+        "The resolved parameter set of ONE preset (turbine/panel, "
+        "orientation, losses…) — the knobs preview_renewable_profile and "
+        "generate_renewable_profile accept as `params` overrides. Unknown "
+        "preset is a 422 listing what exists. Safety: read.",
+        {"preset": {"type": "string"},
+         "technology": {"type": "string", "enum": ["wind", "solar"]}},
+        ["preset"],
+    ),
+    _t(
+        "preview_renewable_profile",
+        "Quick SYNTHETIC preview of a renewable profile, downsampled to "
+        "daily means and labelled an estimate — for weighing options before "
+        "committing to a real generation. Sites come from `points` "
+        "(id/lon/lat) and/or `from_generators` (generator names; each "
+        "generator's bus coordinates seed its site, and the point id is the "
+        "generator name, so apply needs no mapping) — at least one of the "
+        "two is required. `resolution` picks the output axis (hourly is "
+        "downsampled to daily for display; daily/weekly are returned "
+        "as-is). Never enqueues a job. Safety: read.",
+        {"points": {"type": "array", "items": {"type": "object"}},
+         "from_generators": {"type": "array", "items": {"type": "string"}},
+         "technology": {"type": "string", "enum": ["wind", "solar"]},
+         "preset": {"type": "string"},
+         "params": {"type": "object"},
+         "year": {"type": "integer"},
+         "resolution": {"type": "string",
+                        "enum": ["hourly", "daily", "weekly"]}},
+        ["technology"],
+    ),
+    _t(
+        "list_pending_profiles",
+        "The project's pending generated profiles (job id, technology, "
+        "weather year, points, generated-at), newest first, plus any "
+        "profile-generation job still queued/running. `project_id` is the "
+        "project NAME. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "generate_renewable_profile",
+        "Queue a renewable-profile generation for a project as a solve-queue "
+        "job (kind profile_gen) and answer the job — it does NOT complete "
+        "inline; poll solve_queue_list and then list_pending_profiles. Sites "
+        "come from `points` (id/lon/lat) and/or `from_generators` (generator "
+        "names; the bus coordinates seed the sites and the point ids are the "
+        "generator names, so apply_generated_profile needs no point_id "
+        "mapping) — at least one of the two is required. The synthetic "
+        "source works offline; the atlite source needs CDS "
+        "credentials and downloads ERA5 weather for the points' bounding box "
+        "(minutes). `resolution` aggregates at generation: hourly is the "
+        "native axis; daily/weekly are means over the hour (upsampled back "
+        "to the network's hourly snapshots at apply). One FIFO serves every "
+        "kind: the job queues behind a running solve. Safety: execution.",
+        {"project_id": {"type": "string"},
+         "points": {"type": "array", "items": {"type": "object"}},
+         "from_generators": {"type": "array", "items": {"type": "string"}},
+         "technology": {"type": "string", "enum": ["wind", "solar"]},
+         "preset": {"type": "string"},
+         "params": {"type": "object"},
+         "source": {"type": "string", "enum": ["synthetic", "atlite"]},
+         "year": {"type": "integer"},
+         "resolution": {"type": "string",
+                        "enum": ["hourly", "daily", "weekly"]}},
+        ["project_id", "technology"],
+    ),
+    _t(
+        "apply_generated_profile",
+        "Write one PENDING generated profile onto a generator's p_max_pu "
+        "(undoable; the confirmation card authorises the write). The point "
+        "feeding the component defaults to the component's own name. Refuses "
+        "(422) when the component is gone, its carrier is not wind/solar, or "
+        "the artifact holds no column for it; warns when the bus moved since "
+        "generation. `time_basis` says what the snapshots mean: \"UTC\" "
+        "or the IANA zone whose wall clock they are (e.g. "
+        "\"Europe/Berlin\"; the series is shifted by that zone's offset). "
+        "Leave it unset unless the user said; then the answer's `warnings` "
+        "may say UTC was assumed — relay that and offer to set the zone. "
+        "Report the time basis from the answer. "
+        "`project_id` is the project NAME and must be the open "
+        "project. Safety: write.",
+        {"project_id": {"type": "string"},
+         "job_id": {"type": "string"},
+         "component": {"type": "string"},
+         "point_id": {"type": "string"},
+         "time_basis": {"type": "string"}},
+        ["project_id", "job_id", "component"],
     ),
 
     # ── Project management (21) ────────────────────────────────────────────
@@ -3588,7 +3692,7 @@ TOOLS.extend([
     _t("get_experiment", "Read one owned experiment in the active project. Returns typed cases, limits, preflight and any durable single-case execution receipt. Planned/queued is not completed; interrupted submissions have executed=null. Recorded objectives require matching completed job, exact solved inputs and intact evidence. No operation is started or replayed. Safety: read.", {"experiment_id": {"type": "string"}}, ["experiment_id"]),
     _t("get_loadflow_summary", "Summarise the CURRENT load-flow results of the active project: lines and transformers ranked by peak utilisation = flow / (rating * s_max_pu), computed by software from the same results the Load flow tab reads. Per branch (default 5, max 25, trimmed to a bounded payload): both-terminal peak flow, rating (optimized s_nom_opt or configured s_nom), s_max_pu range, peak/mean utilisation, weighted hours at/over the limit. Returns the exact source, snapshot window, freshness, solve state, ranking convention, skipped branches (missing or zero rating, no flow data) and missing_evidence. LOPF results are an ACTIVE-POWER PROXY, not an AC apparent-power assessment; source='ac_pf' uses apparent power where reactive flows exist and excludes unconverged snapshots. Never proof of full AC thermal compliance (no N-1, no voltage limits). Unsolved, stale, running, infeasible or failed results return status unavailable with a typed unavailable_kind; never invent values. window_from/window_to are inclusive snapshot indexes for follow-ups. run_id: the newest completed run whose inputs are still current answers as the current results (run.is_current true); any other run answers from the load flow captured when it finished (scope historical, run.is_current false; the Load flow tab still shows the current results), or unavailable for a run without a captured section. Safety: read.", {"source": {"type": "string", "enum": ["lopf", "ac_pf"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "run_id": {"type": "string", "maxLength": 64}}, []),
     _t("list_tasks", "List up to 20 most recently updated durable tasks owned by you in the active project. Use a returned ID to resume in a new chat or provider. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
-    _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}}, ["goal"]),
+    _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. With overview=true (no goal) answers \"what can you do here?\": the core-feature families (projects, results, checks, edits, sensitivities, studies, reports), each available or not for this project, role, mode and personal rule, with the reason, an example sentence and its offered tools. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}, "overview": {"type": "boolean"}}, []),
     _t("start_task", "Persist a project/user-scoped plan of 1–12 ordinary tools. Create/activate the project first; rebinding and task-control tools cannot be steps. Each step has unique id, tool, args. Whole-value $earlier_step.path references resolve saved results. Stable request_id deduplicates identical plans. Returns task_id, status, next_step. Execute next_step via an ordinary offered call; this tool runs no hidden actions. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "steps": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}, "required": ["id", "tool", "args"]}}}, ["title", "steps", "request_id"]),
     _t("get_task", "Read a durable task in the active project owned by the caller. Returns completed steps and the next exact call; no completed step is replayed. Safety: read.", {"task_id": {"type": "string"}}, ["task_id"]),
     _t("resume_task", "Attach a durable task to this chat and return next_step. Execute it as an ordinary offered tool call; all normal gates apply. Interrupted writes become uncertain and require explicit review. No implicit tool execution or job polling. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),
@@ -3838,6 +3942,13 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_queue_list": [("GET", "/api/simulation/queue")],
     "solve_queue_abort": [("POST", "/api/simulation/queue/{job_id}/abort")],
     "solve_queue_clear_finished": [("POST", "/api/simulation/queue/clear_finished")],
+    # profile generator (6)
+    "list_profile_presets": [("GET", "/api/profiles/presets")],
+    "get_profile_parameters": _SERVICE_CALL,
+    "preview_renewable_profile": [("POST", "/api/profiles/estimate")],
+    "list_pending_profiles": [("GET", "/api/projects/{name}/profiles/pending")],
+    "generate_renewable_profile": [("POST", "/api/projects/{name}/profiles/generate")],
+    "apply_generated_profile": [("POST", "/api/projects/{name}/profiles/apply")],
     # project_mgmt (21)
     "list_projects": [("GET", "/api/projects/")],
     "load_project": [("GET", "/api/projects/{name}")],
