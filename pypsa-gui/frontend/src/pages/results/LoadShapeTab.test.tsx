@@ -54,6 +54,8 @@ describe('LoadShapeTab', () => {
     expect(imp.querySelector('[data-cell="0-0"]')!.getAttribute('data-value')).toBe('8')
     expect(imp.querySelector('[data-cell="0-1"]')!.getAttribute('data-value')).toBe('')          // no snapshot
     expect(imp.querySelector('[data-cell="0-1"]')!.getAttribute('title')).toContain('no snapshot')
+    expect((imp.querySelector('[data-cell="0-1"]') as HTMLElement).style.background).toContain('repeating-linear-gradient')
+    expect((imp.querySelector('[data-cell="0-0"]') as HTMLElement).style.background).not.toContain('repeating')
     expect(within(screen.getByTestId('ls-heat-export')).getByText(/no grid connection/)).toBeTruthy()
     expect(screen.queryByTestId('ls-heat-export')!.querySelector('[data-cell]')).toBeNull()
     expectAllButtonsNamed(container)
@@ -71,6 +73,9 @@ describe('LoadShapeTab', () => {
     const monthly = await screen.findByTestId('ls-monthly')
     expect(within(monthly).getByText(/representative snapshots/)).toBeTruthy()
     expect(monthly.querySelector('svg')).toBeNull()
+    // one line, not a framed empty section
+    expect(monthly.tagName).toBe('P')
+    expect(within(monthly).queryByRole('heading')).toBeNull()
   })
 
   it('explains the flags and the picker has the weeks', async () => {
