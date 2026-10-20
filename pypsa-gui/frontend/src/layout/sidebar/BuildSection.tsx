@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, Layers } from 'lucide-react'
+import { ChevronDown, Layers, Wand2 } from 'lucide-react'
 import { SItem, usePanelToggle } from './SidebarRows'
 import AssetPaletteInline from './AssetPaletteInline'
 
@@ -23,6 +23,11 @@ export default function BuildSection({ onCloseModal }: { onCloseModal?: () => vo
         title="Set per-technology minimum/maximum build limits, optionally different for each investment period (vintages)."
         active={activeSlidePanel === 'capacityBounds'}
         onClick={() => toggle('capacityBounds')}
+      />
+      <SItem icon={<Wand2 size={15} />} label="Profile Studio"
+        title="Generate wind/solar capacity-factor profiles for sites (synthetic or ERA5/atlite) and apply them onto generators' p_max_pu."
+        active={activeSlidePanel === 'profiles'}
+        onClick={() => toggle('profiles')}
       />
     </div>
   )

@@ -141,6 +141,26 @@ Line specials: `docs/superpowers/specs/2026-09-13-network-line-specials-lift-des
 Global constraints: `docs/superpowers/specs/2026-09-13-network-global-constraints-lift-design.md`.
 CRUD factory: `docs/superpowers/specs/2026-09-13-network-crud-factory-lift-design.md`.
 
+## Renewable profile generator
+`services/profile_gen/` owns coordinate-profile generation end to end:
+
+| module | owns |
+|---|---|
+| `services/profile_gen/engine.py` | `generate_profile` dispatch, `ProfileResult`, the `ProfileGenError` family |
+| `services/profile_gen/synthetic.py` | deterministic synthetic wind/solar shapes (no download) |
+| `services/profile_gen/atlite_source.py` | ERA5/atlite profiles; guarded lazy atlite import (`AtliteNotInstalledError`) |
+| `services/profile_gen/cutout_cache.py` | bbox+year cutout cache, `cds_preflight`/`CdsCredentialError` |
+| `services/profile_gen/presets.py` | preset catalogue, `resolve_params` override merge |
+| `services/profile_gen/apply.py` | `assign_profile` onto a generator's `p_max_pu` + user-TS meta |
+| `services/profile_gen/job.py` | the `profile_gen` queue job, pending artifacts under `<storage>/profiles_pending/` (last-10 eviction), traversal guard |
+
+Generation runs as a `profile_gen` job in the ordinary solve queue (one
+FIFO). Routes live in `routers/profiles.py` (global presets/estimate +
+project-scoped generate/pending/apply, mounted before `projects.router`);
+the six chat tools are registered in `harness/catalogue.py` +
+`services/chat_tools.py`; the expert panel is
+`frontend/src/pages/ProfileStudioSection.tsx`.
+
 Inject state into `apply_bulk_update` only via its arguments / `PyPSAService` —
 never import `routers.*` from `services/network_bulk.py`. Do not fold the
 inlined coerce loop in `apply_bulk_update` into `_coerce_bulk_value` without a
