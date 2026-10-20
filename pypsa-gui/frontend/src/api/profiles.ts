@@ -166,6 +166,19 @@ export interface PreviewWeek {
   current: number[] | null
 }
 
+export interface CurrentSeries {
+  exists: boolean
+  provenance?: string
+  family?: string | null
+  source?: string | null
+  kind?: string | null
+  rows?: number
+  first?: string | null
+  last?: string | null
+  applied_at?: string | null
+  refinements?: number
+}
+
 export interface PendingSeries {
   job_id: string
   family: string
@@ -226,6 +239,18 @@ export const seriesApi = {
   generateSeries: (project: string, body: {
     kind: string; components: string[]; params: Record<string, unknown>; year?: number
   }) => client.post<PendingSeries>(`${projectPath(project)}/series/generate`, body).then(r => r.data),
+
+  /** What the component carries now for that attribute. */
+  current: (project: string, componentType: string, attribute: string, component: string) =>
+    client.get<CurrentSeries>(`${projectPath(project)}/current`, {
+      params: { component_type: componentType, attribute, component },
+    }).then(r => r.data),
+
+  /** The current series as a pending artifact the refinement ops act on. */
+  fromCurrent: (project: string, componentType: string, attribute: string, component: string) =>
+    client.post<PendingSeries>(`${projectPath(project)}/from-current`, {
+      component_type: componentType, attribute, component,
+    }).then(r => r.data),
 
   refine: (project: string, jobId: string, ops: RefineOp[]) =>
     client.post<PendingSeries>(`${projectPath(project)}/refine`, { job_id: jobId, ops })

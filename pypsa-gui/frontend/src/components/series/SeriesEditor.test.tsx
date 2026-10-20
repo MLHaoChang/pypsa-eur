@@ -15,6 +15,7 @@ import SeriesEditor, { type SeriesKind } from './SeriesEditor'
 const api = vi.hoisted(() => ({
   loadArchetypes: vi.fn(), generateLoad: vi.fn(), uploadLoad: vi.fn(), refine: vi.fn(),
   apply: vi.fn(), generateAvailability: vi.fn(), generateSeries: vi.fn(),
+  current: vi.fn(), fromCurrent: vi.fn(),
 }))
 vi.mock('../../api/profiles', async () => {
   const real = await vi.importActual<typeof import('../../api/profiles')>('../../api/profiles')
@@ -32,6 +33,7 @@ function renderEditor(kind: SeriesKind, mode: 'guided' | 'expert' = 'guided', co
 
 beforeEach(() => {
   vi.clearAllMocks()
+  api.current.mockResolvedValue({ exists: false })
   api.generateSeries.mockResolvedValue({
     job_id: 'job-s', family: 'series', points: ['hp1'], unit: 'EUR/MWh',
     stats: { hp1: { min: 40, mean: 70, max: 120 } }, warnings: [],

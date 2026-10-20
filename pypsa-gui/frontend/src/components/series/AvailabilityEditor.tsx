@@ -18,7 +18,7 @@ import { Pencil, Play, Plus, Trash2 } from 'lucide-react'
 import { Btn, Seg } from '../PageKit'
 import { errorText, seriesApi, type PendingSeries } from '../../api/profiles'
 import { useUIStore } from '../../store/uiStore'
-import { INPUT, PendingCard, RefinePanel, type EditorMode } from './SeriesKit'
+import { CurrentSeriesLine, INPUT, PendingCard, RefinePanel, type EditorMode } from './SeriesKit'
 
 type Kind = 'maintenance' | 'must_run' | 'derating' | 'forced_outages'
 
@@ -137,6 +137,13 @@ export default function AvailabilityEditor({ project, component, componentType, 
       <Seg value={kind} onChange={v => { setKind(v); setPending(null) }}
         options={(Object.keys(KIND_LABELS) as Kind[]).map(k => ({ value: k, label: KIND_LABELS[k] }))} />
 
+      {kind !== 'forced_outages' && (
+        <div className="mt-2">
+          <CurrentSeriesLine project={project} componentType={componentType}
+            attribute={kind === 'must_run' ? 'p_min_pu' : 'p_max_pu'} component={component}
+            onPending={p => { setPending(p); setAdvanced(true) }} />
+        </div>
+      )}
       {kind === 'forced_outages' ? (
         <div className="mt-2 border border-border rounded p-2" data-testid="forced-outages-note">
           <p>Sampled in the reliability study, not in the dispatch.</p>

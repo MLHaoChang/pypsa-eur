@@ -15,6 +15,7 @@ import { useUIStore } from '../../store/uiStore'
 const api = vi.hoisted(() => ({
   loadArchetypes: vi.fn(), generateLoad: vi.fn(), uploadLoad: vi.fn(), refine: vi.fn(),
   apply: vi.fn(), generateAvailability: vi.fn(), generateSeries: vi.fn(),
+  current: vi.fn(), fromCurrent: vi.fn(),
 }))
 vi.mock('../../api/profiles', async () => {
   const real = await vi.importActual<typeof import('../../api/profiles')>('../../api/profiles')
@@ -37,6 +38,7 @@ function renderEditor(mode: 'guided' | 'expert' = 'guided', componentType: 'gene
 
 beforeEach(() => {
   vi.clearAllMocks()
+  api.current.mockResolvedValue({ exists: false })
   api.generateAvailability.mockResolvedValue(PENDING)
 })
 afterEach(() => cleanup())
@@ -115,6 +117,26 @@ describe('AvailabilityEditor', () => {
     expect(useUIStore.getState().activeSlidePanel).toBe('results')
     expect(useUIStore.getState().resultsTabRequest).toBe('adequacy')
     expect(api.generateAvailability).not.toHaveBeenCalled()
+  })
+
+  it('shows an uploaded series as measured and refines it', async () => {
+    api.current.mockResolvedValue({ exists: true, provenance: 'uploaded', rows: 168 })
+    api.fromCurrent.mockResolvedValue({ ...PENDING, job_id: 'job-cur', source: 'current',
+      profile_annual_basis: 'window_mean' })
+    renderEditor('guided')
+    expect((await screen.findByTestId('current-series')).textContent).toContain('measured upload, 168 h')
+    await userEvent.click(screen.getByRole('button', { name: /Refine this series/ }))
+    await waitFor(() => expect(api.fromCurrent).toHaveBeenCalledWith('Site A', 'generators', 'p_max_pu', 'gt1'))
+    // Advanced opens with the refinement ops; a window source has no shift or smoothing.
+    const kinds = Array.from((await screen.findByLabelText('Refinement')).querySelectorAll('option')).map(o => o.value)
+    expect(kinds).not.toContain('shift')
+    expect(kinds).not.toContain('smooth')
+  })
+
+  it('reads must-run against the current floor', async () => {
+    renderEditor()
+    await userEvent.click(screen.getByRole('button', { name: 'Must-run' }))
+    await waitFor(() => expect(api.current).toHaveBeenCalledWith('Site A', 'generators', 'p_min_pu', 'gt1'))
   })
 
   it('shows a refusal inline', async () => {

@@ -14,7 +14,7 @@ import { useMutation } from '@tanstack/react-query'
 import { Play, Plus, Trash2 } from 'lucide-react'
 import { Btn, Seg } from '../PageKit'
 import { errorText, seriesApi, type PendingSeries } from '../../api/profiles'
-import { INPUT, PendingCard, RefinePanel, type EditorMode } from './SeriesKit'
+import { CurrentSeriesLine, INPUT, PendingCard, RefinePanel, type EditorMode } from './SeriesKit'
 
 export type SeriesKind = 'tou' | 'inflow' | 'cop'
 
@@ -120,6 +120,10 @@ export default function SeriesEditor({ project, component, kind, componentType =
 
   return (
     <div className="text-xs space-y-1" data-testid="series-editor">
+      <CurrentSeriesLine project={project}
+        componentType={kind === 'inflow' ? 'storage_units' : kind === 'cop' ? 'links' : componentType}
+        attribute={kind === 'inflow' ? 'inflow' : kind === 'cop' ? 'efficiency' : 'marginal_cost'}
+        component={component} onPending={p => { setPending(p); setAdvanced(true) }} />
       {kind === 'tou' && (
         <>
           {!advanced && (

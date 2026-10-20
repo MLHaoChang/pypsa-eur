@@ -6,7 +6,7 @@
 // Availability block): host-agnostic props, no store reads besides the
 // query client.
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Check, Plus, Trash2, Wand2 } from 'lucide-react'
 import { Btn, Tag } from '../PageKit'
@@ -27,6 +27,39 @@ const fmt = (v: number | undefined | null, digits = 1) =>
 function sumModelled(m: Record<string, number> | null | undefined): number | null {
   if (!m) return null
   return Object.values(m).reduce((a, b) => a + b, 0)
+}
+
+/** What the component carries now, and a way to refine it: an upload is
+ *  shown as measured and the refinement ops act on it like on a generated
+ *  series (UX review; gatekeeper plan M). */
+export function CurrentSeriesLine({
+  project, componentType, attribute, component, onPending,
+}: {
+  project: string
+  componentType: string
+  attribute: string
+  component: string
+  onPending: (p: PendingSeries) => void
+}) {
+  const { data } = useQuery({
+    queryKey: ['series-current', project, componentType, attribute, component],
+    queryFn: () => seriesApi.current(project, componentType, attribute, component),
+  })
+  const take = useMutation({
+    mutationFn: () => seriesApi.fromCurrent(project, componentType, attribute, component),
+    onSuccess: onPending,
+  })
+  if (!data?.exists) return null
+  const what = data.provenance === 'uploaded' ? 'measured upload'
+    : `${data.provenance ?? 'generated'}${data.kind ? `, ${String(data.kind).replace(/_/g, ' ')}` : ''}`
+  return (
+    <div className="flex items-center gap-2 text-[11px] mb-2" data-testid="current-series">
+      <span className="text-muted">Current {attribute}:</span>
+      <span>{what}, {data.rows} h{data.refinements ? `, refined ×${data.refinements}` : ''}</span>
+      <Btn onClick={() => take.mutate()} disabled={take.isPending}><Wand2 size={12} /> Refine this series</Btn>
+      {take.isError && <span className="text-red-600" data-testid="current-error">{errorText(take.error)}</span>}
+    </div>
+  )
 }
 
 const DAY = new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: 'UTC' })
@@ -179,7 +212,7 @@ const OP_LABELS: Record<OpKind, string> = {
 
 interface Draft { kind: OpKind; a: string; b: string; c: string; of: string }
 
-function draftToOp(d: Draft, power: boolean): RefineOp {
+function draftToOp(d: Draft, power: boolean, windowSource = false): RefineOp {
   const n = (s: string) => Number(s)
   switch (d.kind) {
     case 'scale_peak_to':
@@ -194,7 +227,7 @@ function draftToOp(d: Draft, power: boolean): RefineOp {
     case 'smooth':
       return { op: d.kind, window_h: Math.trunc(n(d.a)) }
     case 'rescale_energy':
-      return { op: d.kind, mwh: n(d.a) }
+      return windowSource ? { op: d.kind, mwh: n(d.a), basis: 'window' } : { op: d.kind, mwh: n(d.a) }
   }
 }
 
@@ -228,12 +261,17 @@ export function RefinePanel({
     mutationFn: () => seriesApi.refine(project, pending.job_id, ops),
     onSuccess: r => { setOps([]); onRefined(r) },
   })
-  const kinds = (Object.keys(OP_LABELS) as OpKind[]).filter(k => power || k !== 'rescale_energy')
+  // A series read from a snapshot window knows no hours outside it: no
+  // shift or smoothing, and its energy target is the window's MWh.
+  const windowSource = pending.profile_annual_basis === 'window_mean'
+  const kinds = (Object.keys(OP_LABELS) as OpKind[]).filter(k => (power || k !== 'rescale_energy')
+    && !(windowSource && (k === 'shift' || k === 'smooth')))
 
   return (
     <div className="mt-2 border-t border-border pt-2" data-testid="refine-panel">
       <p className="text-[11px] text-muted mb-1">
         Refine: each edit is applied in order. Put a peak or energy target last.
+        {windowSource && ' Read from the snapshot window: energy is the window\'s MWh.'}
       </p>
       <div className="flex flex-wrap items-center gap-1">
         <select aria-label="Refinement" className={INPUT} value={d.kind}
@@ -256,7 +294,7 @@ export function RefinePanel({
             {power && <option value="connection">% of the grid connection</option>}
           </select>
         )}
-        <Btn onClick={() => { setOps([...ops, draftToOp(d, power)]); setD({ ...d, a: '', b: '', c: '' }) }}
+        <Btn onClick={() => { setOps([...ops, draftToOp(d, power, windowSource)]); setD({ ...d, a: '', b: '', c: '' }) }}
           disabled={!d.a || (d.kind === 'scale_window' && (!d.b || !d.c))}>
           <Plus size={12} /> Add
         </Btn>

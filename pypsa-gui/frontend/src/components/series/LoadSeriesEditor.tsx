@@ -12,7 +12,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { Play, Upload } from 'lucide-react'
 import { Btn, Seg } from '../PageKit'
 import { errorText, seriesApi, type PendingSeries } from '../../api/profiles'
-import { INPUT, PendingCard, RefinePanel, type EditorMode } from './SeriesKit'
+import { CurrentSeriesLine, INPUT, PendingCard, RefinePanel, type EditorMode } from './SeriesKit'
 
 const SCALE_KEYS = new Set(['peak_mw', 'annual_mwh', 'preset'])
 const UNITS = ['kW', 'MW', 'kWh', 'MWh']
@@ -78,6 +78,8 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
 
   return (
     <div className="text-xs" data-testid="load-series-editor">
+      <CurrentSeriesLine project={project} componentType="loads" attribute="p_set" component={component}
+        onPending={p => { setPending(p); setAdvanced(true) }} />
       <Seg value={tab} onChange={v => { setTab(v); setPending(null) }}
         options={[{ value: 'archetype', label: 'Archetype' }, { value: 'upload', label: 'Measured upload' }]} />
 

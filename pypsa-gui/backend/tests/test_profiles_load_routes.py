@@ -499,3 +499,35 @@ def test_an_outage_preview_shows_its_lowest_week_beside_the_current_series(
     assert week["snapshots"][0] == "2025-06-30T00:00:00"   # the Monday before 07-03
     assert week["current"] is not None and len(week["current"]) == len(week["new"])
     assert any(w.startswith("replaces_existing_series") for w in body["warnings"])
+
+
+def test_the_current_series_refines_and_applies_through_the_routes(client, load_project,
+                                                                   session_ctx):
+    gen = _generate(client, load_project).json()
+    client.post(f"/api/projects/{load_project}/profiles/apply",
+                json={"job_id": gen["job_id"], "component": "plant", "time_basis": "UTC"})
+    cur = client.get(f"/api/projects/{load_project}/profiles/current",
+                     params={"component_type": "loads", "attribute": "p_set",
+                             "component": "plant"}).json()
+    assert cur["exists"] and cur["family"] == "load" and cur["rows"] == 8760
+    body = client.post(f"/api/projects/{load_project}/profiles/from-current",
+                       json={"component_type": "loads", "attribute": "p_set",
+                             "component": "plant"})
+    assert body.status_code == 200, body.text
+    pending = body.json()
+    assert pending["source"] == "current" and pending["weeks"]["plant"]["label"] == "peak week"
+    refined = client.post(f"/api/projects/{load_project}/profiles/refine",
+                          json={"job_id": pending["job_id"],
+                                "ops": [{"op": "scale_peak_to", "mw": 2.0}]}).json()
+    applied = client.post(f"/api/projects/{load_project}/profiles/apply",
+                          json={"job_id": refined["job_id"], "component": "plant"})
+    assert applied.status_code == 200, applied.text
+    assert float(session_ctx(client).network.loads_t.p_set["plant"].max()) == pytest.approx(2.0)
+
+
+def test_from_current_without_a_series_is_a_typed_refusal(client, load_project):
+    resp = client.post(f"/api/projects/{load_project}/profiles/from-current",
+                       json={"component_type": "loads", "attribute": "p_set",
+                             "component": "office"})
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error_kind"] == "no_current_series"

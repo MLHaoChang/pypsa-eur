@@ -47,6 +47,8 @@ from services import solve_queue as sq
 from services.profile_gen import engine, presets, shape
 from services.profile_gen.apply import (
     ComponentNotFoundError,
+    CurrentChangedError,
+    CurrentSeriesError,
     DcLoadOwnedError,
     FamilyTargetMismatchError,
     InvalidSeriesUnitError,
@@ -54,6 +56,7 @@ from services.profile_gen.apply import (
     ProfileBoundConflictError,
     UnknownFamilyError,
     UnsupportedTargetError,
+    WindowSourceGapError,
     assign_profile,
 )
 from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
@@ -69,9 +72,11 @@ from services.profile_gen.availability import (
     UnknownAvailabilityKindError,
 )
 from services.profile_gen.refine import (
+    AnnualEnergyOnWindowSourceError,
     InvalidRefineOpError,
     RefineReplayError,
     WindowClockUnknownError,
+    WindowSourceOpError,
 )
 from services.profile_gen.series import (
     CopBusError,
@@ -190,6 +195,14 @@ class SeriesGenerateRequest(BaseModel):
     params: dict[str, Any] | None = None
     year: int | None = None
     refinements: list[dict[str, Any]] | None = None
+
+
+class CurrentSeriesRequest(BaseModel):
+    # The series a component carries now, made into a pending artifact the
+    # refinement ops act on (services/profile_gen/current.py).
+    component_type: str
+    attribute: str
+    component: str
 
 
 class RefineRequest(BaseModel):
@@ -403,6 +416,8 @@ _APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (CopBusError, {"error_kind": "cop_bus"}),
     (TwoWayFloorError, {"error_kind": "two_way_floor"}),
     (PocBoundError, {"error_kind": "poc_bound"}),
+    (CurrentChangedError, {"error_kind": "current_changed_since_refinement"}),
+    (WindowSourceGapError, {"error_kind": "window_source_gap"}),
 )
 
 # Generation and upload refusals (load, availability), literal for the same
@@ -425,6 +440,9 @@ _GENERATE_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (InvalidRefineOpError, {"error_kind": "invalid_refine_op"}),
     (WindowClockUnknownError, {"error_kind": "window_clock_unknown"}),
     (RefineReplayError, {"error_kind": "refine_replay"}),
+    (WindowSourceOpError, {"error_kind": "window_source_op"}),
+    (AnnualEnergyOnWindowSourceError, {"error_kind": "annual_energy_on_window_source"}),
+    (CurrentSeriesError, {"error_kind": "no_current_series"}),
 )
 
 
@@ -1012,6 +1030,63 @@ def generate_series_profiles(
         if body.kind == "inflow":
             stats[col]["annual_mwh"] = float(v.sum())
     warnings, weeks = _dry_run(ctx, result.series, record)
+    return {**record, "stats": stats, "warnings": warnings, "weeks": weeks}
+
+
+@project_router.get("/{name}/profiles/current")
+def get_current_series(
+    component_type: str,
+    attribute: str,
+    component: str,
+    proj: AuthorizedProject = ProjectAccessDep,
+):
+    """What the component carries now for that attribute: nothing, a
+    generated series (its family and provenance), or an upload."""
+    from services.profile_gen.current import describe_current
+
+    ctx = _foreground_ctx(proj, "read its series")
+    return describe_current(ctx, component_type, attribute, component)
+
+
+@project_router.post("/{name}/profiles/from-current")
+def pending_from_current(
+    body: CurrentSeriesRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """The component's current series as a pending artifact, on the
+    snapshot clock it was stored in, so the refinement ops act on a measured
+    upload the same way as on a generated series. Nothing touches the
+    network here; apply refuses the artifact once the stored series changes."""
+    from services.profile_gen.current import series_from_current
+
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "refine its series")
+    try:
+        series, meta = series_from_current(ctx, body.component_type, body.attribute,
+                                           body.component)
+    except ProfileApplyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc), "message": str(exc)},
+        ) from exc
+    frame = series.to_frame(body.component)
+    job_id = str(uuid.uuid4())
+    record = dict(meta)
+    record["job_id"] = job_id
+    record["project_id"] = proj.name
+    record["points"] = [body.component]
+    write_pending(str(proj.directory), job_id, frame, record)
+    v = series.dropna()
+    stats = {body.component: {"min": float(v.min()), "mean": float(v.mean()),
+                              "max": float(v.max())}}
+    if meta.get("unit") == "MW":
+        hours = 24 * (366 if pd.Timestamp(year=int(meta["weather_year"]), month=1,
+                                          day=1).is_leap_year else 365)
+        stats[body.component].update(peak_mw=float(v.max()),
+                                     annual_mwh=float(v.mean()) * hours)
+    warnings, weeks = _dry_run(ctx, frame, record)
     return {**record, "stats": stats, "warnings": warnings, "weeks": weeks}
 
 

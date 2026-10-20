@@ -16,6 +16,7 @@ import LoadSeriesEditor from './LoadSeriesEditor'
 const api = vi.hoisted(() => ({
   loadArchetypes: vi.fn(), generateLoad: vi.fn(), uploadLoad: vi.fn(), refine: vi.fn(),
   apply: vi.fn(), generateAvailability: vi.fn(), generateSeries: vi.fn(),
+  current: vi.fn(), fromCurrent: vi.fn(),
 }))
 vi.mock('../../api/profiles', async () => {
   const real = await vi.importActual<typeof import('../../api/profiles')>('../../api/profiles')
@@ -46,6 +47,7 @@ function renderEditor(mode: 'guided' | 'expert' = 'guided', initialTab?: 'archet
 
 beforeEach(() => {
   vi.clearAllMocks()
+  api.current.mockResolvedValue({ exists: false })
   api.loadArchetypes.mockResolvedValue(CATALOGUE)
 })
 afterEach(() => cleanup())
