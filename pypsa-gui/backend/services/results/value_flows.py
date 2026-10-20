@@ -106,12 +106,15 @@ def _asset_costs(n, cfg, parsed, sides) -> list[P.AssetCost]:
         capex = _per_asset(n.statistics.capex(groupby=False, round=0), periods)
         fom = _per_asset(n.statistics.fom(groupby=False, round=0), periods)
         opex = _per_asset(n.statistics.opex(groupby=False, round=0), periods)
+    roles = P.product_roles(n)
     out = []
     for key in sorted(set(capex) | set(fom) | set(opex)):
         comp, name = key
         side, flags = P.asset_side(n, comp, name, sides)
         if comp == "Generator" and side == "site" and is_fuel_supply(n, parsed, name):
             flags = [*flags, "fuel_supply_generator"]
+        if comp == "Generator" and name in roles:
+            flags = [*flags, f"product_{roles[name]}"]
         out.append(P.AssetCost(component=comp, name=name, side=side, flags=flags,
                                capex=capex.get(key, {}), fom=fom.get(key, {}),
                                opex=opex.get(key, {})))

@@ -98,6 +98,14 @@ def contract_payer_payee(contract, site_party: str) -> tuple[str | None, str | N
     return payer, payee
 
 
+def product_roles(n) -> dict[str, str]:
+    """{Generator: process role} of the product slacks (`buy_in`, `shortfall`): LP terms on a product bus, not
+    assets (grid-to-process ticket 06)."""
+    from models.process_unit import PROCESS_GENERATOR_ROLES, product_role_generators
+
+    return {str(g): r for r in PROCESS_GENERATOR_ROLES for g in product_role_generators(n, r)}
+
+
 def _in(name: str, pool) -> bool:
     return any(same_party(name, p) for p in pool)
 
@@ -566,6 +574,13 @@ def _sources(inputs: LedgerInputs, vf: ValueFlowConfig, p: str) -> list[_Source]
             continue
         owner = owners.get((a.component, a.name), site)
         extra = ["asset_side_unclassified"] if a.side == "unclassified" else []
+        if "product_buy_in" in a.flags or "product_shortfall" in a.flags:
+            buy = "product_buy_in" in a.flags
+            if opex:
+                out.append(_Source("asset", f"opex:{tag}", "fuel" if buy else "lost_production",
+                                   legs=[(owner, "market" if buy else "offtaker", opex)], basis="cash",
+                                   meta=meta, flags=[*a.flags, *extra]))
+            continue
         fuel = "fuel_supply_generator" in a.flags
         for kind, value, payee, stream, basis in (
                 ("capex", capex, "capex_supplier", "capex", "annuity"),

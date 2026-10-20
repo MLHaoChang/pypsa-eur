@@ -123,8 +123,11 @@ def config_digest(vf: ValueFlowConfig) -> str:
 def _site(n, commercial: CommercialConfig, dsr_buses=()) -> _Site:
     sides = P.classify_buses(n, commercial)
     assets = []
+    slacks = P.product_roles(n)
     for comp, frame in _FRAMES:
         for name in getattr(n, frame).index:
+            if comp == "Generator" and str(name) in slacks:
+                continue
             if P.asset_side(n, comp, str(name), sides)[0] == "site":
                 assets.append((comp, str(name)))
     gens = [name for comp, name in assets

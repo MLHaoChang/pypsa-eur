@@ -29,7 +29,7 @@ ValueStreamKind = Literal[
     "demand_charge", "retail_fixed", "ancillary", "dr_availability",
     "dr_activation", "ppa_settlement", "cfd_settlement", "certificates",
     "lease", "eaas_fee", "fuel", "fom", "vom", "capex", "incentive", "tax",
-    "debt_service", "other",
+    "debt_service", "lost_production", "other",
 ]
 
 TariffItemKind = Literal["energy", "demand", "capacity", "fixed", "certificate", "tax_levy"]
