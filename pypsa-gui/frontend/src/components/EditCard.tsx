@@ -1,0 +1,163 @@
+/**
+ * The edit card (LC-04, owner Q3): the old → new table every chat edit shows
+ * before it applies, and the receipt after it was read back. The backend
+ * contract is `harness/edit_card.py`; any edit kind that registers an adapter
+ * there arrives in this one shape, so this component is the only renderer.
+ */
+
+type Scalar = string | number | boolean | null
+
+export interface EditCardRow {
+  component_class: string
+  name: string
+  field: string
+  label: string
+  old: Scalar
+  old_known?: boolean
+  new: Scalar
+  unit: string
+  role: 'typed' | 'derived' | 'follows' | 'at_solve' | 'note'
+  note?: string
+  display?: { old: number | null; new: number; unit: string }
+  readback?: Scalar
+}
+
+export interface EditCard {
+  version: 1
+  kind: string
+  tool: string
+  rows: EditCardRow[]
+  says: string
+  complete: boolean
+  digest: string
+}
+
+export interface EditReceipt {
+  version: 1
+  digest: string
+  outcome: 'verified' | 'uncertain'
+  rows: EditCardRow[]
+  says: string
+  results_stale: boolean
+  undo: { tool: string; available: boolean }
+}
+
+function object(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+function rowsOk(rows: unknown): rows is EditCardRow[] {
+  return Array.isArray(rows) && rows.length > 0 && rows.every(r => {
+    const o = object(r)
+    return !!o && typeof o.field === 'string' && typeof o.unit === 'string' && typeof o.role === 'string'
+  })
+}
+
+/** A well-formed card or null; a malformed one is never shown as complete. */
+export function editCardOf(value: unknown): EditCard | null {
+  const o = object(value)
+  if (!o || o.version !== 1 || typeof o.says !== 'string' || typeof o.digest !== 'string' || !rowsOk(o.rows)) return null
+  return o as unknown as EditCard
+}
+
+export function editReceiptOf(value: unknown): EditReceipt | null {
+  const o = object(value)
+  if (!o || o.version !== 1 || (o.outcome !== 'verified' && o.outcome !== 'uncertain') || !rowsOk(o.rows)) return null
+  return o as unknown as EditReceipt
+}
+
+function show(value: Scalar | undefined, known = true): string {
+  if (!known) return 'Not read'
+  if (value === null || value === undefined) return 'Empty'
+  return typeof value === 'number' ? String(Number(value.toPrecision(12))) : String(value)
+}
+
+/** "Line > L2", or "Line > L1, L2" for a bulk edit: the plain header of PR-1 (the
+ * flow-section header arrives with FlowTarget, after B1's flow-ledger-targets). */
+export function editCardHeader(card: EditCard): string {
+  const byClass = new Map<string, string[]>()
+  for (const r of card.rows) {
+    if (r.role !== 'typed' || !r.component_class) continue
+    const names = byClass.get(r.component_class) ?? []
+    if (!names.includes(r.name)) names.push(r.name)
+    byClass.set(r.component_class, names)
+  }
+  return [...byClass].map(([klass, names]) => `${klass} > ${names.join(', ')}`).join('; ')
+}
+
+export function EditCardTable({ card, guided }: { card: EditCard; guided: boolean }) {
+  const asset = (r: EditCardRow) => [r.component_class, r.name].filter(Boolean).join(' ') || '—'
+  const header = editCardHeader(card)
+  return (
+    <div className="mb-2 text-xs" data-testid="chat-edit-card">
+      {header && <div className="font-medium mb-1" data-testid="chat-edit-header">{header}</div>}
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+          <caption className="text-left font-semibold mb-1">Changes to apply</caption>
+          <thead><tr>{['Asset', 'Field', 'Old', 'New', 'Unit'].map(h => (
+            <th key={h} scope="col" className="p-1 border-b border-border">{h}</th>
+          ))}</tr></thead>
+          <tbody>{card.rows.map((r, i) => {
+            if (r.role === 'note') {
+              return (
+                <tr key={i} className="text-muted" data-testid="chat-edit-row-note">
+                  <td className="p-1 border-b border-border break-words">{asset(r)}</td>
+                  <td colSpan={4} className="p-1 border-b border-border break-words text-[11px]">{r.note}</td>
+                </tr>
+              )
+            }
+            const follows = r.role !== 'typed'
+            const exists = r.field === 'exists'
+            const value = (v: Scalar | undefined, known = true) => exists ? (v ? 'present' : 'absent') : show(v, known)
+            return (
+              <tr key={i} className={follows ? 'text-muted' : ''} data-testid={`chat-edit-row-${r.role}`}>
+                <td className="p-1 border-b border-border break-words">{asset(r)}</td>
+                <td className="p-1 border-b border-border break-words">
+                  {exists ? (r.new ? 'Created by this change' : 'Removed by this change') : guided ? r.label : r.field}
+                  {follows && <span className="block text-[10px]">
+                    {r.role === 'derived' ? 'Follows from the change, read-only'
+                      : r.role === 'at_solve' ? (r.note ?? 'Set at solve time') : 'Follows from the change'}
+                  </span>}
+                </td>
+                <td className="p-1 border-b border-border break-words">{value(r.old, r.old_known !== false)}</td>
+                <td className="p-1 border-b border-border break-words font-medium">{value(r.new)}</td>
+                <td className="p-1 border-b border-border break-words">
+                  {exists ? '' : r.unit || 'No unit'}
+                  {r.display && <span className="block text-[10px] text-muted" data-testid="chat-edit-display">
+                    {show(r.display.new)} {r.display.unit} = {show(r.new)} {r.unit} stored
+                  </span>}
+                </td>
+              </tr>
+            )
+          })}</tbody>
+        </table>
+      </div>
+      {!card.complete && <p className="mt-1 text-muted" data-testid="chat-edit-card-partial">
+        These are the requested values. The current values were not read for this kind of change.
+      </p>}
+    </div>
+  )
+}
+
+export function EditReceiptLine({ receipt, disabled, onRequest }: {
+  receipt: EditReceipt; disabled: boolean; onRequest: (text: string) => void
+}) {
+  const verified = receipt.outcome === 'verified'
+  return (
+    <div className="mt-1 rounded border border-border p-2 font-sans text-xs" data-testid="chat-edit-receipt">
+      <div className={verified ? '' : 'text-warn'}>
+        {verified ? `${receipt.says}. Read back from the project.`
+          : `${receipt.says || 'The change'}: the project does not show the expected values. Check them before going on.`}
+      </div>
+      {receipt.results_stale && <div className="text-muted" data-testid="chat-edit-stale">
+        Results are now stale: they were computed before this change.
+      </div>}
+      {receipt.undo.available && (
+        <button type="button" disabled={disabled} className="mt-1 text-accent disabled:opacity-40"
+          data-testid="chat-edit-undo" onClick={() => onRequest('Undo that change with undo_last.')}>
+          Undo
+        </button>
+      )}
+    </div>
+  )
+}

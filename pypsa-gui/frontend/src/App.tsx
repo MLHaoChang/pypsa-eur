@@ -710,6 +710,14 @@ export default function App() {
                 {/* Only view widgets share a local layer above the canvas
                     and below workbench overlays. Native canvas dialogs stay
                     outside this layer so they can cover the whole viewport. */}
+                {/* L2 (LC-04): the assistant's floating launcher lands here
+                    (AssistantDock portals it), over the canvas only: above the
+                    bottom panel and left of the Properties / slide panel. */}
+                <div id="companion-anchor" data-testid="companion-anchor"
+                  className={`absolute inset-x-0 top-0 z-40 pointer-events-none [&>*]:pointer-events-auto ${
+                    // Above the schematic's minimap (bottom-right); clear of
+                    // the snapshot bar (bottom-centre) on the other views.
+                    canvasView === 'blank' ? 'bottom-[176px]' : 'bottom-14'}`} />
                 <div className="absolute inset-0 z-10 pointer-events-none [&>*]:pointer-events-auto">
                   <MapModeSwitcher />
                   {/* Snapshot picker / playback bar for the results overlay —
