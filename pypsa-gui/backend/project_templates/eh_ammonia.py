@@ -188,7 +188,7 @@ def build_eh_ammonia_staged(T) -> "pypsa.Network":  # noqa: F821
     # Existing: the Haber-Bosch loop is sunk and in service in every period.
     n.links.loc["haber_bosch", ["overnight_cost", "discount_rate", "lifetime"]] = \
         [0.0, DISCOUNT_RATE, float("inf")]
-    n.name = "H2 Hub to Green Ammonia (staged growth)"
+    n.name = "Green Ammonia Hub (staged growth)"
     return n
 
 
@@ -315,7 +315,7 @@ def register(T) -> None:
              + delivery_mw(y) * EL_MWH_PER_T / MWH_PER_T for y in YEARS}
     T.TEMPLATE_META[tid] = {
         "id": tid,
-        "name": "H2 Hub to Green Ammonia (staged growth)",
+        "name": "Green Ammonia Hub (staged growth)",
         "description": (
             "The hydrogen hub making green ammonia for a contracted delivery of 50 → 100 → 150 t/d "
             "over 2027, 2030 and 2035, beside a 40 MW process load on a 200 MW connection. A "
