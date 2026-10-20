@@ -1072,7 +1072,7 @@ export default function AppHeader() {
               : jobQueued
                 ? 'Cancel this queued solve'
                 : `${runLabel}: ${MODE_DESC[mode] ?? ''} — queues the solve; runs now if the queue is free`}
-            className="flex items-center gap-1.5 px-3.5 h-8 rounded-lg text-[11px] font-semibold text-white transition-all select-none hover:brightness-110 active:translate-y-px disabled:opacity-60 disabled:cursor-wait"
+            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3.5 h-8 rounded-lg text-[11px] font-semibold text-white transition-all select-none hover:brightness-110 active:translate-y-px disabled:opacity-60 disabled:cursor-wait"
             style={{
               // Design system: 3-stop gradient with layered + inset shadows.
               // Idle is the brand red (this is the primary CTA and was the last

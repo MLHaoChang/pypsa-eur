@@ -43,6 +43,12 @@ export function openFullReport(): void {
   ui.requestEhReport()
 }
 
+/** Years the Monte Carlo modelled, from the certification section (UX review N10). */
+function horizonYearsOf(report: ReturnType<typeof useHubReport>): number | null {
+  const h = report?.sections?.certification?.payload?.horizon_years
+  return typeof h === 'number' ? h : null
+}
+
 export function ResultsCard() {
   const { study, running } = useHubStudy()
   const { review } = useHubReview(studyHasResults(study))
@@ -74,6 +80,7 @@ export function ResultsCard() {
       hasResults: studyHasResults(study), running,
       lole: summary.mc_lole_h_per_year ?? report?.mc_lole_h ?? null,
       target: summary.target_lole_h ?? null,
+      horizonYears: horizonYearsOf(report),
       stale,
       verdict: verdict === 'pass' || verdict === 'fail' || verdict === 'inconclusive' ? verdict : null,
     }} />

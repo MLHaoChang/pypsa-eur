@@ -58,7 +58,7 @@ export type CanvasMode = 'select' | 'connect'
 // deliberately NOT among them: `activeSlidePanel` holds ONE value, so while
 // `'chat'` was a member the assistant was mutually exclusive with every view
 // it exists to explain. It lives in `assistantDockOpen` below instead.
-export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings' | 'gridspine' | 'hubDesign' | 'reports' | 'campusElectrical' | 'decision' | 'economics'
+export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings' | 'gridspine' | 'hubDesign' | 'reports' | 'campusElectrical' | 'decision' | 'economics' | 'profiles'
 // Command-palette open mode. `null` = closed. `'all'` = full surface (⌘K).
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null
@@ -748,12 +748,15 @@ export const useUIStore = create<UIStore>((set) => ({
     } catch { /* noop */ }
     set(s => {
       const patch: Partial<UIStore> = { uiMode: mode, uiModeExplicit: s.uiModeExplicit || explicit }
-      // UX M7: with no autosave choice of the user's, the mode decides.
-      if (!autosaveChosen()) patch.autosaveEnabled = mode === 'guided'
+      // UX review W5: switching mode keeps the autosave state, so the footer
+      // reads the same for one project in Guided and in Expert. The mode only
+      // seeds the default at load (storedAutosave).
       // §3.7: a slide panel Guided has no navigation for is swapped for the
       // hub-design flow (or closed when there is no project). Results stays —
-      // Guided keeps two of its tabs. Switching to Expert closes nothing.
+      // Guided keeps two of its tabs. Switching to Expert closes the Guided
+      // hub design panel (UX review W4) and nothing else.
       // U3: the decision study is a Guided surface too (the Start card opens it).
+      if (mode === 'expert' && s.activeSlidePanel === 'hubDesign') patch.activeSlidePanel = null
       if (mode === 'guided' && s.activeSlidePanel != null
           && s.activeSlidePanel !== 'hubDesign' && s.activeSlidePanel !== 'results'
           && s.activeSlidePanel !== 'decision') {

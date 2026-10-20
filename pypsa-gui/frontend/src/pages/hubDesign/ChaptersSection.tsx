@@ -69,9 +69,9 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
   return (
     <section data-testid="hub-chapters" className="flex flex-col gap-2">
       <h3 className="text-[12px] font-semibold text-text">The whole picture</h3>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-2">
+      <div className="grid grid-cols-2 gap-2">
         {tiles.map(t => (
-          <div key={t.id} className="flex flex-col gap-1" data-testid={`hub-chapter-${t.id}`}>
+          <div key={t.id} className="flex flex-col gap-1.5 rounded-[10px] border border-border/70 p-2" data-testid={`hub-chapter-${t.id}`}>
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{t.group}</span>
             <Kpi label={t.label} value={t.value} unit={t.unit} basis={t.basis}
               state={t.state} reason={t.reason} fromStudy={t.fromStudy}

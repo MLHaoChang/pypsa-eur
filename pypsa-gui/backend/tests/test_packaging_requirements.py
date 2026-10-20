@@ -95,6 +95,15 @@ OPTIONAL_AT_RUNTIME = {
         ">100-page PDF then reaches Anthropic's cap as a 415 instead of a "
         "clean local truncation banner. Pinned to keep the banner working."
     ),
+    "atlite": (
+        "profile_gen's atlite source and cutout downloader import atlite "
+        "lazily inside a try/except and raise the typed AtliteNotInstalledError, "
+        "telling the user the atlite source is unavailable and the synthetic "
+        "source still works. Atlite is deliberately NOT pinned: it pulls the "
+        "CDS/dask weather stack into the frozen app for a feature that also "
+        "needs user-supplied CDS credentials, and generation has a fully "
+        "working offline source (synthetic) without it."
+    ),
 }
 
 
