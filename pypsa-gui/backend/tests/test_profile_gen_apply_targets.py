@@ -30,6 +30,7 @@ import pytest
 
 from services.network_undo import apply_undo, push_undo_snapshot
 from services.profile_gen.apply import (
+    BOUND_FORCES_OFF_WARNING,
     CarrierMismatchError,
     ComponentNotFoundError,
     ENERGY_MISMATCH_WARNING,
@@ -404,3 +405,38 @@ def test_a_weekly_shape_records_the_source_years_energy():
                          _load_meta(unit="per_unit_peak", resolution="weekly"),
                          component_type="loads", attribute="p_set", now=NOW)
     assert out["profile_annual_mwh"] == pytest.approx(50.0 * 8760)
+
+
+# ── gatekeeper review 1 ─────────────────────────────────────────────────────
+
+def test_a_crossing_bound_on_a_committable_unit_writes_and_warns():
+    # status * p_min_pu <= p/p_nom <= status * p_max_pu: the crossing hours
+    # force the unit off (status = 0), they do not make the LP infeasible.
+    n = _net()
+    n.generators.loc["CHP", "committable"] = True
+    idx = _year(2023)
+    cap = pd.Series(1.0, index=idx)
+    cap.iloc[100:110] = 0.2  # a maintenance window
+    assign_profile(_ctx(), "CHP", cap, _avail_meta(), attribute="p_max_pu", now=NOW)
+    out = assign_profile(_ctx(), "CHP", pd.Series(0.5, index=idx), _avail_meta(),
+                         attribute="p_min_pu", now=NOW)
+    warn = [w for w in out["warnings"] if w.startswith(BOUND_FORCES_OFF_WARNING)]
+    assert warn and "10 snapshots" in warn[0] and str(idx[100]) in warn[0]
+    assert float(n.generators_t.p_min_pu["CHP"].iloc[0]) == pytest.approx(0.5)
+
+
+def test_a_crossing_bound_on_a_non_committable_unit_is_still_refused():
+    n = _net()
+    assert not bool(n.generators.at["CHP", "committable"])
+    n.generators.loc["CHP", "p_max_pu"] = 0.4
+    with pytest.raises(ProfileBoundConflictError):
+        assign_profile(_ctx(), "CHP", pd.Series(0.5, index=_year(2023)),
+                       _avail_meta(), attribute="p_min_pu", now=NOW)
+
+
+def test_a_price_series_without_a_currency_year_is_refused():
+    _net()
+    with pytest.raises(InvalidSeriesUnitError, match="currency_year"):
+        assign_profile(_ctx(), "CHP", pd.Series(40.0, index=_year(2023)),
+                       _price_meta(currency_year=None),
+                       attribute="marginal_cost", now=NOW)
