@@ -345,6 +345,11 @@ def _indexed_price(c, year: int) -> float | None:
     return _K.indexed(c.price, c.indexation_pct_per_year, c.base_year, year)
 
 
+def _is_difference_contract(c) -> bool:
+    """A financial PPA or a CfD: its lines settle (price − ref) × q (IPP ticket 01)."""
+    return c is not None and (getattr(c, "type", None) == "cfd" or _K.is_financial_ppa(c))
+
+
 def _difference_price(c, stream_p2: str, year: int) -> float | None:
     """The strike or price of a DIFFERENCE line ((price − ref) × q; IPP ticket 01): a
     financial PPA's energy line or a CfD's difference, indexed to the money year. None
@@ -518,6 +523,11 @@ def _template_lines(accs: dict[str, _Acc], *, k: str, year: int, base_year: int,
         base = dict(stream=a.stream, esc_class=a.esc_class, tariff_item=a.tariff_item,
                     counterparty=a.counterparty, source=a.source, source_id=a.source_id,
                     period=k)
+        if a.contract_id is not None and _is_difference_contract(contracts.get(a.contract_id)) \
+                and (a.source != "contract" or a.qty is None):
+            # Its volume did not reach the line (an allocation split, an unknown leg): the
+            # whole difference escalates in one class (gatekeeper, #461; disclosed).
+            flags.append(f"difference_line_single_class:{key}")
         if a.source == "contract":
             c = contracts.get(a.contract_id)
             linked, asset, on_owner = _contract_link(c, owner_gens)

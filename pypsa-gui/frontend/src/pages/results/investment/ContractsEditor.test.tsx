@@ -143,7 +143,7 @@ describe('ContractsEditor', () => {
     renderEditor()
     await screen.findByTestId('ce-contract-0')
     expect(screen.queryByLabelText('Contract ppa1 suspended at negative prices')).toBeNull()
-    fireEvent.change(screen.getByLabelText('Contract ppa1 share of the output (0–1)'), { target: { value: '0.7' } })
+    fireEvent.change(screen.getByLabelText("Contract ppa1 share of the plant's output (0–1)"), { target: { value: '0.7' } })
     fireEvent.change(screen.getByLabelText('Contract ppa1 settlement'), { target: { value: 'financial' } })
     const clause = screen.getByLabelText('Contract ppa1 suspended at negative prices') as HTMLInputElement
     expect(clause.checked).toBe(true)

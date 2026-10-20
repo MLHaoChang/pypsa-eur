@@ -1048,3 +1048,28 @@ def test_a_financial_ppa_line_carries_its_price_and_owner_signed_volume(reset_ba
     ln2 = _lines(_case(n2, cfg2, _fin(annualise=True, cod_by_asset={"pv": COD}),
                        owner="developer").templates[0])["contract:ppa1:ppa_energy"]
     assert ln2.price_qty_mwh is None and ln2.price is not None
+
+
+def test_a_difference_line_without_its_volume_is_disclosed(reset_backend, monkeypatch):
+    """Gatekeeper (#461): a financial PPA or CfD line whose volume did not reach it (an
+    allocation split, an unknown leg) escalates in one class, flagged on the case."""
+    from services.commercial import settlement_inputs as SI
+    from services.results import finance_case as FC
+
+    vf = {**copy.deepcopy(VF), "export_revenue_to": "asset_owner",
+          "participants": [{"id": "site", "name": "Site", "role": "offtaker"},
+                           {"id": "developer", "name": "Dev", "role": "developer"}],
+          "asset_owners": [{"asset_id": "pv", "component": "Generator", "owner": "developer"},
+                           {"asset_id": "bess", "component": "StorageUnit", "owner": "site"}]}
+    ppa = {**PPA, "seller": "developer", "changes_dispatch": False, "settlement": "financial",
+           "reference_price": REF}
+    n, cfg = _solve(_edge7(), _commercial(vf, contracts=[ppa]))
+    ref = n.links_t["ic_export_price"]["export"]
+    SI.write_reference_series(n, {SI.contract_column("ppa1"): (ref.to_numpy(), REF)},
+                              frame=SI.REF_PRICE_ATTR)
+    fin = _fin(annualise=True, cod_by_asset={"pv": COD})
+    ok = _case(n, cfg, fin, owner="developer")
+    assert not any(f.startswith("difference_line_single_class:") for f in ok.flags)
+    monkeypatch.setattr(FC, "_settled_qty", lambda *a, **k: None)
+    gap = _case(n, cfg, fin, owner="developer")
+    assert "difference_line_single_class:contract:ppa1:ppa_energy" in gap.flags

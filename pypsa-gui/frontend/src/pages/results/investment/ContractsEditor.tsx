@@ -80,7 +80,8 @@ function Field({ spec, contract, label, parties, series, set }: {
       control = <select aria-label={name} className={input} value={String(v ?? '')}
                         onChange={e => set(e.target.value || null)}>
         {!spec.required && <option value="">(default)</option>}
-        {spec.options!.map(o => <option key={o} value={o}>{o.replace(/_/g, ' ')}</option>)}
+        {spec.options!.map(o => <option key={o} value={o}>
+          {spec.optionLabels?.[o] ?? o.replace(/_/g, ' ')}</option>)}
       </select>
       break
     case 'bool':
