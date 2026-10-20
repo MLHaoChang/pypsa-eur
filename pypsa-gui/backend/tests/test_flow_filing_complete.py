@@ -163,7 +163,8 @@ def test_every_assumed_ledger_row_files_to_a_named_section(tid):
 # DC-02's rows name their own target (`{item, value, unit, source, note,
 # section, field, entity, component, panel}`).
 DC02_ROWS = [
-    {"item": "connection_ramp", "value": 4.0, "unit": "MW/min", "source": "assumed",
+    {"item": "connection_ramp", "label": "Connection ramp limit", "value": 4.0,
+     "unit": "MW/min", "source": "assumed",
      "note": "...", "section": "connection", "panel": None, "component": "Link",
      "entity": "grid_import", "field": "connection_ramp"},
     {"item": "fault_level", "value": 800.0, "unit": "MVA", "source": "assumed", "note": "...",
@@ -172,7 +173,7 @@ DC02_ROWS = [
     {"item": "oscillation", "value": 2.0, "unit": "% of connection", "source": "assumed",
      "note": "n", "section": "connection", "field": "oscillation_band", "entity": "grid_import",
      "component": "Link", "panel": None},
-    {"item": "import_loss_factor", "value": 0.99, "unit": None, "source": "assumed",
+    {"item": "import_efficiency", "value": 0.99, "unit": None, "source": "assumed",
      "note": "n", "section": "connection", "field": "efficiency", "entity": "grid_import",
      "component": "Link", "panel": None},
     {"item": "lole_goal", "value": 0.5, "unit": "h/yr", "source": "assumed", "note": "n",
@@ -188,16 +189,16 @@ def test_a_row_with_its_own_target_is_filed_there():
     assert got["assumed_connection_ramp"] == (
         {"section": "connection", "panel": None, "component": "Link",
          "entity": "grid_import", "field": "connection_ramp"},
-        "connection_ramp: 4 MW/min is a template assumption; confirm it or set your own.")
+        "Connection ramp limit: 4 MW/min (assumed) — confirm it or set your own.")
     assert got["assumed_fault_level"] == (
         {"section": "connection", "panel": None, "component": "Bus", "entity": "poc",
          "field": "eh_sk_mva"},
-        "fault_level: 800 MVA is a template assumption; confirm it or set your own.")
+        "fault_level: 800 MVA (assumed) — confirm it or set your own.")    # no label: the id
     assert len(items) == 6
     assert got["assumed_lole_goal"][0] == {"section": "scenarios", "panel": "simparams",
                                            "component": None, "entity": None,
                                            "field": "target_lole_h"}
-    assert got["assumed_import_loss_factor"][1].startswith("import_loss_factor: 0.99 is")
+    assert got["assumed_import_efficiency"][1].startswith("import_efficiency: 0.99 (assumed)")
     # An older row keeps today's behaviour.
     assert got["assumed_default"][0]["section"] == "commercial"
     assert got["assumed_default"][0]["entity"] == "discount rate"

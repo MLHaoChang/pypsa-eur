@@ -536,7 +536,10 @@ def _assumed_items(template: dict) -> list[dict]:
             else str(value or "")
         if unit:
             shown = f"{shown} {unit}"
-        message = f"{item}: {shown} is a template assumption; confirm it or set your own."
+        # "<label>: <value> <unit> (assumed) — <hint>"; the item id only when
+        # the row has no label (checklist §6.9: no raw ids in the UI).
+        label = str(row.get("label") or item)
+        message = f"{label}: {shown} (assumed) — confirm it or set your own."
         section = row.get("section")
         if section in F.INPUT_SECTIONS:
             # A row that names its own target (DC-02's rows): filed there, and
@@ -557,8 +560,8 @@ def _assumed_items(template: dict) -> list[dict]:
                           if isinstance(e.get("available_import_mw"), (int, float))
                           else str(e.get("year")) for e in energ)
         out.append(_item("assumed_default", "warning",
-                         f"energization schedule ({steps}) is a template assumption; "
-                         "confirm it with the network operator's offer.", "template",
+                         f"Energization schedule: {steps} (assumed) — confirm it with the "
+                         "network operator's offer.", "template",
                          "connection", entity="energization schedule", value=value))
     return out
 
