@@ -56,6 +56,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+from contextvars import ContextVar
 from typing import Any, Callable
 
 import numpy as np
@@ -83,7 +84,18 @@ _EPS = 1e-9
 
 
 class NotEstablished(Exception):
-    """A quantity the attribution needs is missing or unusable."""
+    """A quantity the attribution needs is missing or unusable. Carries no text:
+    the reason is recorded with `_refuse`, so nothing from a caught exception
+    ever reaches a response."""
+
+
+_WHY: ContextVar[list[str]] = ContextVar("energy_flows_why")
+
+
+def _refuse(reason: str):
+    """Record why the flows cannot be established, then stop the attribution."""
+    _WHY.get().append(reason)
+    raise NotEstablished()
 
 
 _ENERGY_UNIT = re.compile(r"^[kMGT]?W(h)?([_ ]?[A-Za-z]+)?$")
@@ -122,10 +134,10 @@ def _cols(df: pd.DataFrame | None, names, what: str, rows: np.ndarray) -> np.nda
     if not names:
         return np.zeros((int(rows.sum()), 0))
     if df is None or any(c not in df.columns for c in names):
-        raise NotEstablished(f"no solved {what} for every component")
+        _refuse(f"no solved {what} for every component")
     out = df[names].to_numpy(dtype=float)[rows]
     if not np.isfinite(out).all():
-        raise NotEstablished(f"{what} has unsolved (NaN) values")
+        _refuse(f"{what} has unsolved (NaN) values")
     return out
 
 
@@ -196,7 +208,7 @@ def _shed(n, capture, rows, load_names, load_bus) -> np.ndarray | None:
     if not isinstance(df, pd.DataFrame) or df.empty:
         return None
     if len(df) != len(n.snapshots):
-        raise NotEstablished("the lost-load capture does not match the snapshots")
+        _refuse("the lost-load capture does not match the snapshots")
     arr = df.to_numpy(dtype=float)[rows]
     out = np.zeros((arr.shape[0], len(load_names)))
     pos = {nm: i for i, nm in enumerate(load_names)}
@@ -218,14 +230,14 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
     bus_ix = {b: i for i, b in enumerate(buses)}
     nb = len(buses)
     if T == 0 or nb == 0:
-        raise NotEstablished("no snapshots in the period")
+        _refuse("no snapshots in the period")
     if T * nb * nb > MAX_CELLS:
-        raise NotEstablished("the network is too large for the flow attribution")
+        _refuse("the network is too large for the flow attribution")
 
     wg = n.snapshot_weightings["generators"].to_numpy(dtype=float)[mask]
     dt = n.snapshot_weightings["stores"].to_numpy(dtype=float)[mask]
     if (dt <= 0).any():
-        raise NotEstablished("the stores weighting has non-positive snapshots")
+        _refuse("the stores weighting has non-positive snapshots")
 
     # ---- generators: sources (p > 0) and absorbing sinks (p < 0) -----------------
     gens = n.generators
@@ -242,12 +254,12 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
     lnames = [str(x) for x in n.loads.index]
     lp = _cols(_frame(n, result_df, "loads_t", "p"), lnames, "load dispatch", mask)
     if (lp < -_EPS).any():
-        raise NotEstablished("a load injects energy (negative demand)")
+        _refuse("a load injects energy (negative demand)")
     l_bus = [bus_ix[str(n.loads.at[x, "bus"])] for x in lnames]
     shed = _shed(n, capture, mask, lnames, [buses[b] for b in l_bus])
     served = lp - (shed if shed is not None else 0.0)
     if (served < -1e-6 * (1 + lp.max(initial=0.0))).any():
-        raise NotEstablished("more demand is recorded as unserved than the load asks for")
+        _refuse("more demand is recorded as unserved than the load asks for")
     served = np.maximum(served, 0.0)
 
     # ---- branches (links with any number of ports; lines; transformers) ---------
@@ -287,11 +299,11 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
     for name, pl in elems:
         units = {bus_unit[b] for b, _ in pl}
         if not all(_is_energy_unit(u) for u in units) and any(_is_energy_unit(u) for u in units):
-            raise NotEstablished(f"mixed units on {name}: " + ", ".join(sorted(u or "energy" for u in units)))
+            _refuse(f"mixed units on {name}: " + ", ".join(sorted(u or "energy" for u in units)))
     used = set(g_bus) | set(l_bus) | {st.bus for st in storages} | {b for _, pl in elems for b, _ in pl}
     for b in sorted(used):
         if not _is_energy_unit(bus_unit[b]):
-            raise NotEstablished(f"bus {buses[b]} is in {bus_unit[b]}, not an energy unit; "
+            _refuse(f"bus {buses[b]} is in {bus_unit[b]}, not an energy unit; "
                                  "the flows are shown for energy carriers only")
 
     # ---- labels -----------------------------------------------------------------
@@ -356,7 +368,7 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
     try:
         N = np.linalg.inv(M)
     except np.linalg.LinAlgError:
-        raise NotEstablished("the branch flows form a lossless cycle; the mix is not unique")
+        _refuse("the branch flows form a lossless cycle; the mix is not unique")
 
     # ---- external supply per label ----------------------------------------------
     S_ext = np.zeros((T, nb, K))
@@ -534,10 +546,14 @@ def energy_flows(n, period=None, window: tuple[int, int] | None = None, *,
         mask = np.asarray(n.snapshots.get_level_values(0)) == period
     else:
         mask = np.ones(len(n.snapshots), dtype=bool)
+    why: list[str] = []
+    token = _WHY.set(why)
     try:
         att = _attribute(n, mask, result_df, lost_load)
-    except NotEstablished as e:
-        return _unavailable(str(e), periods=periods, period=period)
+    except NotEstablished:
+        return _unavailable(why[-1] if why else "not established", periods=periods, period=period)
+    finally:
+        _WHY.reset(token)
     T = att["T"]
     lo, hi = 0, T - 1
     if window is not None:
