@@ -78,6 +78,12 @@ class LibraryText(BaseModel):
     yaml: str
 
 
+class IslandPresetBody(BaseModel):
+    #: A control preset name (gridspine's ``PRESETS``), or None to clear it;
+    #: gridspine refuses an unknown name (422).
+    preset: str | None = None
+
+
 class IslandConfigBody(BaseModel):
     #: The raw sidecar; gridspine's schema validates it in the service (422
     #: naming the field) and the service caps its size (413).
@@ -250,6 +256,19 @@ def save_island(
     """Save the island sidecar, validated by gridspine's schema."""
     _check_lock(proj, db, user)
     return ce.save_island(_row(proj, db), body.config)
+
+
+@router.post("/{name}/island/preset")
+def select_island_preset(
+    body: IslandPresetBody,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Select the project's ESS/UPS/converter control preset in its island
+    sidecar (data-centre grid readiness, ticket 04)."""
+    _check_lock(proj, db, user)
+    return ce.select_island_preset(_row(proj, db), body.preset)
 
 
 @router.post("/{name}/island/study")

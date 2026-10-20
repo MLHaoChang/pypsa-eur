@@ -120,6 +120,10 @@ export const ISSUE_TITLES: Record<string, string> = {
   availability_may_include_outages: 'Availability may already include outages',
   outages_folded_into_availability: 'Outages are folded into availability',
   outages_folded_into_availability_ignored: 'Outages-in-availability flag is ignored',
+
+  // Island control presets (data-centre grid readiness, ticket 04)
+  preset_leaves_no_grid_former: 'No unit forms the island (control preset leaves no grid former)',
+  preset_not_applied_to_unit: 'Control preset not applied to a unit',
 }
 
 /** The plain title for an issue code; an unknown code reads as a sentence. */

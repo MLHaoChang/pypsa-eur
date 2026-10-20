@@ -27,6 +27,12 @@ try:
         ISLAND_HOURLY_CSV,
         ISLAND_UNIT_HOURLY_COLUMNS,
         ISLAND_UNIT_HOURLY_CSV,
+        PRESETS,
+        SERVICES,
+        has_grid_former,
+        offered_services,
+        preset_applies,
+        select_preset,
         validate_island_config,
         validate_island_hourly,
         validate_island_unit_hourly,
@@ -43,6 +49,13 @@ except ImportError as exc:                      # pragma: no cover - build-shape
 
     validate_island_config = None
     GFM_CONTROLS = frozenset()
+    # The control presets (ticket 04): none without gridspine.
+    PRESETS, SERVICES = {}, ()
+
+    def _needs_gridspine(*args, **kwargs):
+        raise ContractError(f"the control presets need gridspine ({GRIDSPINE_IMPORT_ERROR})")
+
+    has_grid_former = offered_services = preset_applies = select_preset = _needs_gridspine
     # The I3a hourly tables (plan I3a): without gridspine there are none to write.
     ISLAND_UNIT_HOURLY_CSV = "island_unit_hourly.csv"
     ISLAND_HOURLY_CSV = "island_hourly.csv"
@@ -54,6 +67,13 @@ except ImportError as exc:                      # pragma: no cover - build-shape
     validate_island_hourly = validate_island_unit_hourly
 
 SIDECAR_NAME = "island_config.json"
+
+#: The typed warning ``island_warnings`` raises when the effective config has
+#: nothing to form the island's voltage (no GFM bess, no genset).
+NO_GRID_FORMER = "preset_leaves_no_grid_former"
+#: ... and per unit the project preset would set but that keeps its own block
+#: (``"preset": null``: opted out, or FFR left it out for want of a rating).
+PRESET_NOT_APPLIED = "preset_not_applied_to_unit"
 
 
 def validate(raw: dict) -> dict:
@@ -76,3 +96,25 @@ def load_island_config(path: str | pathlib.Path) -> dict | None:
     except json.JSONDecodeError as exc:
         raise ContractError(f"{path.name} is not valid JSON: {exc}") from exc
     return validate(raw)
+
+
+def island_warnings(cfg: dict) -> list[dict]:
+    """Typed warnings ``{code, message}`` on a validated sidecar: today, an
+    island with no grid former (a bess on a GFM control, or a genset), which
+    a project preset such as ``grid_following`` can leave."""
+    out = []
+    preset = cfg.get("preset")
+    if preset:
+        for name, u in cfg["units"].items():
+            if "preset" not in u and preset_applies(preset, u["kind"]):
+                out.append({"code": PRESET_NOT_APPLIED,
+                            "message": f"{name} keeps its own block (preset null), not the project's {preset}; "
+                                       + ("an FFR preset needs the unit's rating, which an extendable unit "
+                                          "has only after sizing" if preset == "fast_frequency_response"
+                                          else "it was opted out")})
+    if not has_grid_former(cfg):
+        why = f" under preset {preset!r}" if preset else ""
+        out.append({"code": NO_GRID_FORMER,
+                    "message": f"no unit forms the island's voltage{why}: no bess on a grid-forming control and "
+                               "no genset, so the island cannot hold itself up"})
+    return out

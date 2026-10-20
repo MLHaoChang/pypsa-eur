@@ -77,6 +77,7 @@ import pandas as pd
 
 from gridspine.schema.campus import STANDARD_MVA, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
+from gridspine.schema.island import ffr_sizing, preset_block
 from gridspine.schema.network import MAX_NAME_LEN
 
 #: Power factor a transformer is sized at, from the MW the expansion chose.
@@ -130,7 +131,7 @@ DEFAULT_ISLAND = {
 }
 #: Untagged fields of an island block: enumerations, flags and names.
 _UNTAGGED = ("control", "governor", "excitation", "neutral_earthing", "spinning", "unit_transformer",
-             "transfers_on_islanding", "critical")
+             "transfers_on_islanding", "critical", "preset")
 
 #: Link carriers that become a converter source (a fuel cell) when the Link
 #: feeds an AC bus from another carrier. Other carriers go by ``CARRIER_KIND``.
@@ -216,6 +217,24 @@ def _default_block(kind):
             for f, v in DEFAULT_ISLAND[kind].items()}
 
 
+def _preset_default(u, preset, skipped, uid):
+    """The island block the project ``preset`` gives an unlisted unit, or
+    None when it does not apply to the unit's kind (it then keeps
+    ``DEFAULT_ISLAND``). FFR is sized from the drafted rating; a unit with
+    none offers no FFR and keeps the default, recorded in ``skipped``."""
+    block = preset_block(preset, u["kind"])
+    if block is None:
+        return None
+    if block.get("control") == "gfl_fw":
+        p = float(u["p_mw"]["value"])
+        if not p > 0:
+            skipped.append(f"{uid}: preset {preset} needs a rating, and the unit has none; it keeps the default block")
+            return None
+        block.update(ffr_sizing(p))
+    block["preset"] = preset
+    return block
+
+
 def _retag(block, drop=()):
     """A validated island block (``schema/island.py``) back in the tagged
     file form, without the fields in ``drop``."""
@@ -250,9 +269,11 @@ def _attach_island(n, spec, island, pypsa_ids, skipped):
             if not out["it_load"]:
                 raise ContractError(f"island_config.units.{name}: none of the loads it protects is in the draft")
         u["island"] = out
+    preset = island.get("preset")
     for uid, u in units.items():
         if "island" not in u and u["kind"] in DEFAULT_ISLAND:
-            u["island"] = _default_block(u["kind"])
+            block = _preset_default(u, preset, skipped, uid) if preset else None
+            u["island"] = block if block is not None else _default_block(u["kind"])
     req = island["requirements"]
     out = _retag(req)
     out.update(scenarios=list(req["scenarios"]), linearised_uc=req["linearised_uc"],
