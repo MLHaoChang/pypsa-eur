@@ -69,6 +69,54 @@
       "note": "in service at the first period and sunk",
       "source": "assumed",
       "value": "pv_plant, wind_turbines, diesel_1, diesel_2, diesel_3, island_battery, hospital_feeder: COD 2027-01-01, overnight cost 0"
+    },
+    {
+      "component": "Link",
+      "entity": "subsea_tie",
+      "field": "connection_ramp",
+      "item": "connection_ramp",
+      "note": "assumed: 10% of the 20 MW connection per minute; RfG/DCC set no ramp limit for a demand facility, so this is a placeholder of the order a network operator writes into a connection offer for large loads",
+      "panel": null,
+      "section": "connection",
+      "source": "assumed",
+      "unit": "MW/min",
+      "value": 2.0
+    },
+    {
+      "component": "Link",
+      "entity": "subsea_tie",
+      "field": "oscillation",
+      "item": "oscillation",
+      "note": "assumed: peak-to-peak power oscillation at most 1 % of the connection in the 0.1-2 Hz band (forced-oscillation concern for large loads, NERC 2025 large-loads white paper); no code value",
+      "panel": null,
+      "section": "connection",
+      "source": "assumed",
+      "unit": "% of connection, peak-to-peak",
+      "value": 1.0
+    },
+    {
+      "component": "Link",
+      "entity": "subsea_tie",
+      "field": "efficiency",
+      "item": "import_loss_factor",
+      "note": "assumed: the subsea_tie Link's efficiency; what reaches the site side of the PoC Link. Losses further in (transformers, UPS) are not in this factor",
+      "panel": null,
+      "section": "connection",
+      "source": "assumed",
+      "unit": "p.u.",
+      "value": 0.97
+    },
+    {
+      "component": null,
+      "entity": null,
+      "field": "target_lole_h",
+      "item": "lole_goal",
+      "note": "assumed: the recommended pack's target_lole_h (3 h/yr); the reliability study certifies the site against it",
+      "panel": "simparams",
+      "section": "scenarios",
+      "source": "assumed",
+      "unit": "h/yr",
+      "value": 3.0
     }
   ],
   "name": "Island Microgrid (staged growth)",

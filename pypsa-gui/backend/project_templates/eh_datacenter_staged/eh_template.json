@@ -85,6 +85,66 @@
       "note": "a deliberate deviation: a dated degressive election on a later stage is refused by the investment case (P5), so the staged assets are planned on straight-line AfA",
       "source": "assumed",
       "value": "straight-line AfA (not degressive)"
+    },
+    {
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "connection_ramp",
+      "item": "connection_ramp",
+      "note": "assumed: 10% of the 55 MW connection per minute; RfG/DCC set no ramp limit for a demand facility, so this is a placeholder of the order a network operator writes into a connection offer for large loads",
+      "panel": null,
+      "section": "connection",
+      "source": "assumed",
+      "unit": "MW/min",
+      "value": 5.5
+    },
+    {
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "oscillation",
+      "item": "oscillation",
+      "note": "assumed: peak-to-peak power oscillation at most 1 % of the connection in the 0.1-2 Hz band (forced-oscillation concern for large loads, NERC 2025 large-loads white paper); no code value",
+      "panel": null,
+      "section": "connection",
+      "source": "assumed",
+      "unit": "% of connection, peak-to-peak",
+      "value": 1.0
+    },
+    {
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "efficiency",
+      "item": "import_loss_factor",
+      "note": "assumed: the grid_import Link's efficiency; what reaches the site side of the PoC Link. Losses further in (transformers, UPS) are not in this factor",
+      "panel": null,
+      "section": "connection",
+      "source": "assumed",
+      "unit": "p.u.",
+      "value": 1.0
+    },
+    {
+      "component": "Bus",
+      "entity": "grid",
+      "field": "eh_sk_mva",
+      "item": "fault_level",
+      "note": "assumed: short-circuit power at the PoC (grid); the SCR and rapid-voltage-change screenings read it",
+      "panel": null,
+      "section": "connection",
+      "source": "assumed",
+      "unit": "MVA",
+      "value": 250.0
+    },
+    {
+      "component": null,
+      "entity": null,
+      "field": "target_lole_h",
+      "item": "lole_goal",
+      "note": "assumed: the recommended pack's target_lole_h (3 h/yr); the reliability study certifies the site against it",
+      "panel": "simparams",
+      "section": "scenarios",
+      "source": "assumed",
+      "unit": "h/yr",
+      "value": 3.0
     }
   ],
   "name": "Data Center Energy Hub (staged growth)",
