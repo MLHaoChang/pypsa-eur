@@ -577,7 +577,24 @@ def generate_load_profiles(
               "annual_mwh": float(result.series[col].mean()) * scale * hours}
         for col in result.series.columns
     }
-    return {**record, "stats": stats}
+    # What apply will record, shown before it: the modelled energy on this
+    # network's snapshots (a sampled template sees less than the year) and
+    # the time-basis assumption. A preview that cannot align (a partial-year
+    # network) says why instead; apply refuses the same way.
+    from services.profile_gen.apply import ProfileApplyError, preview_energy
+
+    warnings: set[str] = set()
+    for col in result.series.columns:
+        try:
+            pv = preview_energy(ctx, result.series[col], record,
+                                component_type="loads", attribute="p_set")
+        except ProfileApplyError as exc:
+            stats[col]["modelled_mwh"] = None
+            warnings.add(f"not_applicable: {exc}")
+            continue
+        stats[col]["modelled_mwh"] = pv["modelled_mwh"]
+        warnings.update(pv["warnings"])
+    return {**record, "stats": stats, "warnings": sorted(warnings)}
 
 
 @project_router.get("/{name}/profiles/pending")

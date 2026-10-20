@@ -170,3 +170,37 @@ def test_generate_maps_working_hours_on_the_projects_commercial_timezone(
     explicit = _generate(client, load_project,
                          params={"annual_mwh": 1.0, "timezone": "UTC"}).json()
     assert explicit["params"]["timezone"] == "UTC"
+
+
+def test_generate_previews_the_modelled_energy_and_the_time_basis(client,
+                                                                load_project):
+    body = _generate(client, load_project).json()
+    assert body["stats"]["plant"]["modelled_mwh"] == {"total": pytest.approx(5000.0)}
+    assert any(w.startswith("time_basis_assumed_utc") for w in body["warnings"])
+
+
+def _first_on_hour(series: pd.Series, day: str) -> int:
+    hours = series.loc[day]
+    return int(hours.index[hours.to_numpy() > hours.min() + 1e-9][0].hour)
+
+
+@pytest.mark.parametrize("zone, winter, summer, warned", [
+    ("Europe/Oslo", 5, 4, False),   # 06:00 local is 05:00 UTC (CET), 04:00 (CEST)
+    (None, 6, 6, True),             # no zone: the snapshot clock, with a warning
+])
+def test_an_archetype_lands_once_converted_on_utc_snapshots(
+    client, load_project, session_ctx, monkeypatch, zone, winter, summer, warned,
+):
+    import services.profile_gen.apply as apply_mod
+
+    monkeypatch.setattr(apply_mod, "_commercial_timezone", lambda ctx: zone)
+    job = _generate(client, load_project,
+                    params={"shifts": 1, "peak_mw": 1.0}).json()
+    resp = client.post(f"/api/projects/{load_project}/profiles/apply",
+                       json={"job_id": job["job_id"], "component": "plant"})
+    assert resp.status_code == 200, resp.text
+    assert any(w.startswith("time_basis_assumed_utc")
+               for w in resp.json()["warnings"]) is warned
+    s = session_ctx(client).network.loads_t.p_set["plant"]
+    assert _first_on_hour(s, "2025-01-08") == winter   # a Wednesday
+    assert _first_on_hour(s, "2025-07-09") == summer
