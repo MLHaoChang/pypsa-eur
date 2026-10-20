@@ -465,7 +465,9 @@ class PpaContract(BaseModel):
     suspend_on_negative_price: bool | None = None
 
     @model_validator(mode="after")
-    def _floor_below_cap(self) -> "PpaContract":
+    def _settlement_rules(self) -> "PpaContract":
+        """The share and the financial settlement (IPP ticket 01); a financial PPA's
+        negative-price clause is set to its form's default (True) when unstated."""
         if self.kind == "baseload" and self.share != 1.0:
             raise ValueError("a baseload PPA's volume is baseload_mw; its share must be 1")
         if self.settlement == "financial":
@@ -483,6 +485,10 @@ class PpaContract(BaseModel):
                 self.suspend_on_negative_price = True
         elif self.suspend_on_negative_price is not None:
             raise ValueError("suspend_on_negative_price is the financial settlement's clause")
+        return self
+
+    @model_validator(mode="after")
+    def _floor_below_cap(self) -> "PpaContract":
         if self.floor is not None and self.cap is not None and self.floor > self.cap:
             raise ValueError("PPA floor must not exceed cap")
         if self.pricing == "market_plus_premium":

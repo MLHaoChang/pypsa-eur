@@ -45,7 +45,7 @@ export const CONTRACT_FIELDS: Record<ContractType, FieldSpec[]> = {
     { key: 'volume_cap_mwh_per_year', label: 'volume cap (MWh a year)', kind: 'number' },
     { key: 'share', label: 'share of the output (0–1)', kind: 'number', when: c => c.kind !== 'baseload' },
     { key: 'settlement', label: 'settlement', kind: 'select', options: ['physical', 'financial'],
-      when: c => c.kind === 'pay_as_produced' },
+      when: c => c.kind === 'pay_as_produced' && c.pricing !== 'market_plus_premium' },
     { key: 'suspend_on_negative_price', label: 'suspended at negative prices', kind: 'bool',
       defaultTrue: true, when: c => c.settlement === 'financial' },
     { key: 'baseload_mw', label: 'baseload (MW)', kind: 'number', when: c => c.kind === 'baseload' },

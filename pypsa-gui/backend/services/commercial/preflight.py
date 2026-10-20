@@ -69,6 +69,7 @@ import numpy as np
 import pandas as pd
 
 from services.commercial import lp_bindings as _lp
+from services.commercial.contracts import is_financial_ppa
 
 _SETTLE_H = {"15min": 0.25, "30min": 0.5, "h": 1.0}
 # Steps longer than this are gaps between sampled stretches (representative
@@ -273,8 +274,8 @@ def _contract_warnings(n, cfg, dsr: dict) -> list[tuple[str, str, str, str, str]
                   if (dsr.get("price") or 0) > 0 and (dsr.get("share") or 0) > 0 else set())
     meter = set(_lp.import_links(cfg)) | ({cfg.export_link} if cfg.export_link else set())
     for c in cfg.contracts:
-        financial = c.type == "ppa" and getattr(c, "settlement", "physical") == "financial"
-        if financial and _lp.same_party(c.seller, cfg.site_party):
+        financial = is_financial_ppa(c)
+        if financial:
             # IPP ticket 01 (G2): settled as (price − ref) × share × gen, so the export
             # price on the same MWh is not a double count. A reference other than the
             # export series leaves basis risk; a clause turned off leaves the LP's

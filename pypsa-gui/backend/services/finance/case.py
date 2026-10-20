@@ -93,6 +93,13 @@ class TemplateLine:
     # (WP4.6a review B4). Escalation runs from it.
     money_year: int | None = None
 
+    @property
+    def price_leg(self) -> float | None:
+        """A difference line's price leg, price × price_qty_mwh; None for any other line."""
+        if self.price is None or self.price_qty_mwh is None:
+            return None
+        return self.price * self.price_qty_mwh
+
 
 @dataclass(frozen=True)
 class StorageYear:

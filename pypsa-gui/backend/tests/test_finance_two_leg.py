@@ -108,3 +108,11 @@ def test_a_financial_ppa_below_its_reference_is_still_owner_sold():
     assert _financial()[0].amount < 0
     out = solve_ppa(_case(_financial(), solve=target), layers=LAYER)
     assert out["solve_ppa_status"] == "ok"
+
+
+def test_a_financial_ppa_beside_another_owner_sold_ppa_is_ambiguous():
+    second = TemplateLine("contract:c2:ppa_energy", "ppa_settlement", 1000.0, CONTRACT_CLASS,
+                          indexation=0.0, contract_id="c2", price=50.0)
+    out = solve_ppa(_case(_financial() + (second,),
+                          solve=SolvePpa(target_irr=0.08, target_year=YEARS)), layers=LAYER)
+    assert out["solve_ppa_status"] == "solve_ppa_ambiguous_contract"

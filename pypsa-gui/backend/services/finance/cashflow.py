@@ -196,10 +196,10 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
                 ok = False
                 break
             my = ln.money_year if ln.money_year is not None else money_year[i]
-            if ln.price is not None and ln.price_qty_mwh is not None:
+            leg_p = ln.price_leg
+            if leg_p is not None:
                 # Two legs in one line: the price leg at the contract's rate, the
                 # reference leg at the market's (REFERENCE_CLASS).
-                leg_p = ln.price * ln.price_qty_mwh
                 leg_r = ln.amount - leg_p
                 r_ref = fin.escalation.get(REFERENCE_CLASS)
                 if r_ref is None and leg_r != 0.0:

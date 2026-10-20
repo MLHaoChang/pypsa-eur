@@ -350,8 +350,7 @@ def _difference_price(c, stream_p2: str, year: int) -> float | None:
     financial PPA's energy line or a CfD's difference, indexed to the money year. None
     for any other line."""
     t = getattr(c, "type", None)
-    if t == "ppa" and stream_p2 == "ppa_energy" and \
-            getattr(c, "settlement", "physical") == "financial":
+    if stream_p2 == "ppa_energy" and _K.is_financial_ppa(c):
         return _K.indexed(c.price, c.indexation_pct_per_year, c.base_year, year)
     if t == "cfd" and stream_p2 == "cfd_difference":
         return _K.indexed(c.strike, c.indexation_pct_per_year, c.base_year, year)

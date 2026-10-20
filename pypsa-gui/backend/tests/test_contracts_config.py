@@ -377,3 +377,13 @@ def test_a_financial_ppa_paying_through_negative_prices_is_flagged():
     assert code not in _codes(n, {**cfg, "contracts": [_financial()]})
     assert code in _codes(n, {**cfg, "contracts": [
         _financial(suspend_on_negative_price=False)]})
+
+
+def test_the_financial_ppa_findings_apply_whoever_sells_it():
+    """Basis risk and the negative-price clause are the contract's, not only the site's."""
+    n = _exporting()
+    other = {**_REF, "id": "hub_index"}
+    codes = _codes(n, {**_export_priced(n), "contracts": [
+        _financial(seller="Wind BV", reference_price=other, suspend_on_negative_price=False)]})
+    assert ("warning", "commercial.ppa_basis_risk") in codes
+    assert ("warning", "commercial.ppa_dispatch_not_contract_optimal") in codes

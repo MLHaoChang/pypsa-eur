@@ -1032,6 +1032,17 @@ def test_a_financial_ppa_line_carries_its_price_and_owner_signed_volume(reset_ba
     # The reference leg per MWh is a generation-weighted average of the reference.
     per_mwh = (ln.price * ln.price_qty_mwh - ln.amount) / ln.price_qty_mwh
     assert ref.min() - 1e-9 <= per_mwh <= ref.max() + 1e-9
+    # End to end: solve_ppa finds it as the case's single owner-sold PPA (no contract id).
+    from models.finance import SolvePpa
+    from services.finance.engine import solve_ppa
+
+    n.generators.loc["pv", "overnight_cost"] = 500_000.0
+    fin = _fin(annualise=True, cod_by_asset={"pv": COD},
+               solve_ppa=SolvePpa(target_irr=0.08, target_year=10))
+    out = solve_ppa(_case(n, cfg, fin, owner="developer"))
+    assert out["solve_ppa_status"] not in (
+        "solve_ppa_contract_not_found", "solve_ppa_not_owner_sold", "solve_ppa_not_linear",
+        "solve_ppa_price_unknown", "solve_ppa_ambiguous_contract"), out
     phys = {**PPA, "seller": "developer", "changes_dispatch": False}
     n2, cfg2 = _solve(_edge7(), _commercial(vf, contracts=[phys]))
     ln2 = _lines(_case(n2, cfg2, _fin(annualise=True, cod_by_asset={"pv": COD}),

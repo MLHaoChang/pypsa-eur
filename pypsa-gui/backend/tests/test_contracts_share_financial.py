@@ -202,3 +202,16 @@ def test_existing_ppa_and_cfd_hashes_do_not_move():
     assert H.FIELDS_AFTER_V1[("CfdContract", "share")] == 1.0
     assert H.FIELDS_AFTER_V1[("PpaContract", "settlement")] == "physical"
     assert H.FIELDS_AFTER_V1[("PpaContract", "suspend_on_negative_price")] is None
+
+
+def test_suspended_intervals_take_no_share_of_the_volume_cap(c1):
+    """Suspension comes before the cap, as for a physical PPA with the clause: the capped
+    volume is filled by intervals that are actually paid."""
+    ppa = _financial(volume_cap_mwh_per_year=200.0)
+    line = _one(K.settle(ppa, _inputs(c1, {"p": (c1["ref"], [])})), "ppa_energy")
+    ref = c1["ref"].to_numpy()
+    mwh = np.where(ref < 0, 0.0, 0.7 * c1["generators"]["pv"].to_numpy() * 0.25)
+    cap = 200.0 * (len(c1["index"]) * 0.25) / 8760.0
+    settled = np.clip(cap - (np.cumsum(mwh) - mwh), 0.0, mwh)
+    assert line.quantity_mwh == pytest.approx(settled.sum())
+    assert _cents(line.amount) == _cents(((55.0 - ref) * settled).sum())

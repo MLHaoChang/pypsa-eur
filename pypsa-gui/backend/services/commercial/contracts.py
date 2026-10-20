@@ -110,6 +110,12 @@ def indexed(price: float, pct: float, base_year: int | None, year: int) -> float
     return float(price) * (1.0 + float(pct or 0.0) / 100.0) ** (year - base)
 
 
+def is_financial_ppa(contract) -> bool:
+    """A PPA settled as (price − ref) × share × gen (IPP ticket 01, `settlement: financial`)."""
+    return getattr(contract, "type", None) == "ppa" and \
+        getattr(contract, "settlement", "physical") == "financial"
+
+
 def _hours_in_year(year: int) -> float:
     return 8784.0 if calendar.isleap(year) else _HOURS_PER_YEAR
 
@@ -173,7 +179,7 @@ def _ppa(contract, inputs: SettlementInputs) -> list[Line]:
         return [line("ppa_energy", None, None, ["generation_not_established"])]
     ref = None
     ref_flags: list[str] = []
-    financial = getattr(contract, "settlement", "physical") == "financial"
+    financial = is_financial_ppa(contract)
     if kind == "baseload" or pricing == "market_plus_premium" or financial:
         ref, ref_flags = _ref(contract, inputs)
         if ref is None:
@@ -220,6 +226,10 @@ def _ppa(contract, inputs: SettlementInputs) -> list[Line]:
     else:
         eff = np.full(len(mwh), indexed(contract.price, idx, base, y))
 
+    if financial and contract.suspend_on_negative_price:
+        # Suspended intervals settle nothing, so they take no share of the volume
+        # cap (as a physical PPA with the clause).
+        mwh = np.where(ref < 0, 0.0, mwh)
     excess = 0.0
     cap = contract.volume_cap_mwh_per_year
     if cap is not None:
@@ -231,8 +241,9 @@ def _ppa(contract, inputs: SettlementInputs) -> list[Line]:
         excess = float(mwh.sum() - settled.sum())
         mwh = settled
     if financial:
-        amount, paid = _difference(eff[0] if len(eff) else 0.0, ref, mwh, inputs.index,
-                                   "interval", bool(contract.suspend_on_negative_price))
+        # Suspension is already in `mwh` (before the cap).
+        amount, paid = _difference(indexed(contract.price, idx, base, y), ref, mwh,
+                                   inputs.index, "interval", False)
         lines.append(line("ppa_energy", paid.sum(), amount))
     else:
         lines.append(line("ppa_energy", mwh.sum(), float((eff * mwh).sum())))
