@@ -68,6 +68,11 @@ export interface FlowRunBlocker {
 }
 export type FlowNote = FlowRunBlocker
 
+export interface FlowVerdict {
+  ready: boolean
+  blocker: FlowRunBlocker | null
+}
+
 export interface ProjectFlow {
   sections: FlowSection[]
   /** Exactly the server's verdict (design §3.3 R1); warnings never block
@@ -75,6 +80,12 @@ export interface ProjectFlow {
   run_ready: boolean
   /** The first blocking item, in flow order. */
   run_blocker: FlowRunBlocker | null
+  /** What the one Run does: the optimisation always; the study for a project
+   *  made from an Energy Hub template (until section 8 has a run mode). */
+  run_request: { optimisation: boolean, study: boolean }
+  /** Each run kind's own server verdict; `run_ready` is the AND over the
+   *  requested kinds. `study` is null when the Run has no study. */
+  verdicts: { optimisation: FlowVerdict, study: FlowVerdict | null }
   /** Display-only gaps (non-blocking errors), shown beside an enabled Run. */
   notes: FlowNote[]
   deferred: boolean

@@ -111,6 +111,9 @@ def test_a_filled_site_is_complete_and_ready(client, site):
     assert {s: _states(body)[s] for s in INPUTS} == {s: "complete" for s in INPUTS}
     assert body["run_ready"] is True and body["run_blocker"] is None
     assert body["notes"] == [] and body["deferred"] is False
+    assert body["run_request"] == {"optimisation": True, "study": False}
+    assert body["verdicts"] == {"optimisation": {"ready": True, "blocker": None},
+                                "study": None}
     rows = {s["section"]: s for s in body["sections"]}
     assert rows["readiness"]["state"] is None and rows["readiness"]["summary"] == "0 to do, 0 to check"
     assert rows["results"]["state"] is None and rows["results"]["freshness"] == "not_run"
@@ -431,6 +434,8 @@ def test_r4_study_with_voll_zero(client, tmp_projects_dir, monkeypatch):
     assert client.put("/api/simulation/solver_config", json={**cfg, "voll": 0.0}).status_code == 200
     body = _assert_equivalent(client, monkeypatch, name)
     assert body["run_ready"] is True
+    assert body["verdicts"]["optimisation"]["ready"] is True
+    assert body["verdicts"]["study"]["ready"] is True       # the study starts without VOLL
     assert "presence_voll" in _codes(body, "scenarios")
     # The template's buses are unplaced: the location is a note too.
     assert {x["section"] for x in body["notes"]} == {"project", "scenarios"}
@@ -453,6 +458,13 @@ def test_r4_a_study_start_refusal_blocks_run(client, tmp_projects_dir, monkeypat
     assert body["run_ready"] is False
     assert body["run_blocker"]["section"] == "scenarios"
     assert "eh_study_refused" in _codes(body, "scenarios")
+    # Per run kind: the optimisation is the preflight's verdict alone, so a
+    # client driving Run LOPF is not blocked by the study's refusal.
+    pre = client.post("/api/simulation/preflight").json()
+    assert body["run_request"] == {"optimisation": True, "study": True}
+    assert body["verdicts"]["optimisation"]["ready"] is pre["ok"] is True
+    assert body["verdicts"]["study"]["ready"] is False
+    assert body["verdicts"]["study"]["blocker"] == body["run_blocker"]
 
 
 def test_r4_in_flight(client, site, monkeypatch):
@@ -460,6 +472,7 @@ def test_r4_in_flight(client, site, monkeypatch):
     monkeypatch.setattr(sim_router, "_solver_in_flight", lambda: True)
     body = _assert_equivalent(client, monkeypatch, name)
     assert body["run_ready"] is False
+    assert body["verdicts"]["optimisation"]["ready"] is False
     assert {s: _states(body)[s] for s in INPUTS} == {s: "unknown" for s in INPUTS}
 
 
@@ -544,6 +557,7 @@ def test_an_islanded_microgrid_needs_no_connection(client, tmp_projects_dir):
     rows = {s["section"]: s for s in _flow(client, name)["sections"]}
     assert rows["connection"]["state"] == "not_needed"
     assert rows["connection"]["required"] is False
+    assert rows["connection"]["summary"] == "Off-grid: no grid connection needed"
 
 
 @pytest.mark.parametrize("tid", R4_TEMPLATES)

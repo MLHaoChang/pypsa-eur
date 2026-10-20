@@ -32,7 +32,10 @@ lands it is one more source here.
 ``run_ready`` is exactly the server's verdict (R1): no ``validate_for_run``
 error, and, when the study is requested, ``check_eh_study_start`` passes. Those
 items carry ``blocking: true``; ``run_blocker`` is the first of them in flow
-order. Nothing else feeds ``run_ready``.
+order. Nothing else feeds ``run_ready``. ``verdicts`` gives each run kind's own
+verdict (``optimisation`` from the preflight, ``study`` from its start refusal,
+null when the Run has no study) and ``run_request`` what the one Run does, so a
+client driving one kind (Expert's Run LOPF) reads that kind's verdict alone.
 
 States (design §3.2): ``incomplete`` = an error item (blocking or display-only);
 ``warning`` = an unacknowledged warning; ``complete`` otherwise;
@@ -674,7 +677,8 @@ def _pointer(row_label: str, it: dict) -> dict:
 def project_flow(project_dir: pathlib.Path, *, cache_key: str, db=None,
                  org_id=None) -> dict:
     """The flow payload for the open project at ``project_dir``:
-    ``{sections, run_ready, run_blocker, notes, deferred, deferred_reason}``.
+    ``{sections, run_ready, run_blocker, run_request, verdicts, notes, deferred,
+    deferred_reason}``.
 
     The caller has checked that ``project_dir`` IS the active project (the
     validator reads the foreground network). ``cache_key`` keys the
@@ -698,6 +702,14 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     running = _solver_in_flight() or study_state.running_study() is not None
     freshness = _freshness(n, running=running)
 
+    # What the one Run does (design §3.3, W4): the optimisation always; the
+    # reliability study too for a project made from an EH template (the
+    # hub-design Guided flow). Until section 8 has a run-mode setting (B2),
+    # that is the whole rule; its study refusal is checked and its VOLL noted
+    # for exactly those projects.
+    study_requested = template is not None
+    run_request = {"optimisation": True, "study": study_requested}
+
     if deferred is not None:
         sections = [{"section": s, "label": F.SECTION_LABELS[s],
                      "state": "unknown" if s in F.INPUT_SECTIONS else None,
@@ -705,17 +717,16 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
                      **({"freshness": freshness} if s == "results" else {})}
                     for s in F.SECTION_IDS]
         reason = deferred.get("deferred_reason") or "validation deferred"
-        return ({"sections": sections, "run_ready": False,
-                 "run_blocker": {"section": "readiness", "message": reason,
-                                 "target": {"section": "readiness", "panel": "issues",
-                                            "component": None, "entity": None,
-                                            "field": None}},
+        held = {"section": "readiness", "message": reason,
+                "target": {"section": "readiness", "panel": "issues", "component": None,
+                           "entity": None, "field": None}}
+        not_ready = {"ready": False, "blocker": held}
+        return ({"sections": sections, "run_ready": False, "run_blocker": held,
+                 "run_request": run_request,
+                 "verdicts": {"optimisation": not_ready,
+                              "study": not_ready if study_requested else None},
                  "notes": [], "deferred": True, "deferred_reason": reason}, [])
 
-    # The one Run includes the reliability study for a project made from an EH
-    # template (the hub-design Guided flow): the study's refusal is checked and
-    # its VOLL noted for exactly those projects.
-    study_requested = template is not None
     items: list[dict] = []
     presence = _presence(facts, islanded=islanded, study_requested=study_requested)
     items += presence
@@ -753,6 +764,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             else:
                 state = "complete"
             row.update(state=state, required=required[s] and state != "not_needed")
+            if state == "not_needed":
+                row["summary"] = "Off-grid: no grid connection needed"
         else:
             row.update(state=None, required=False)
         rows.append(row)
@@ -766,8 +779,20 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
 
     # Flow order: the rows are already in it. Islanded connection items are
     # still listed on their row but do not become notes.
-    blocker = next((_pointer(r["label"], it) for r in rows for it in r["items"]
-                    if it["blocking"]), None)
+    # One verdict per run kind, each from its own server check: the
+    # optimisation from `validate_for_run`, the study from its start refusal.
+    # `run_ready` is the AND over the kinds the Run requests (R1).
+    def first_blocking(sources: tuple[str, ...]) -> dict | None:
+        return next((_pointer(r["label"], it) for r in rows for it in r["items"]
+                     if it["blocking"] and it["source"] in sources), None)
+
+    opt_blocker = first_blocking(("validation",))
+    study_blocker = first_blocking(("eh_study",))
+    verdicts = {"optimisation": {"ready": opt_blocker is None, "blocker": opt_blocker},
+                "study": ({"ready": study_blocker is None, "blocker": study_blocker}
+                          if study_requested else None)}
+    blocker = first_blocking(("validation", "eh_study") if study_requested
+                             else ("validation",))
     # Notes: every display-only gap (a non-blocking error, or a presence rule's
     # warning such as the missing site location) not yet acknowledged.
     notes = [_pointer(r["label"], it) for r in rows for it in r["items"]
@@ -775,6 +800,7 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
              and (it["severity"] == "error" or it["code"] in PRESENCE_RULES)
              and r.get("state") != "not_needed"]
     return ({"sections": rows, "run_ready": blocker is None, "run_blocker": blocker,
+             "run_request": run_request, "verdicts": verdicts,
              "notes": notes, "deferred": False, "deferred_reason": None}, items)
 
 
