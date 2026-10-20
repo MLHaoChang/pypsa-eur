@@ -404,6 +404,11 @@ I apply this to the exact head SHA of every PR that changes UI, and reply "OK #<
 9. **Words.** Labels use the glossary (`CONTEXT.md`), no stage ids or code names in the UI, "assumed" shown on assumed values.
 10. **Assistant parity.** If the PR adds a field or a section item, the assistant can read it (flow endpoint) and the harness workflow step names its section.
 11. **Evidence.** Screenshots of the section in Guided and Expert, before and after, on at least one template where the section is pre-filled and one where it is required.
+12. **Examples stay editable** (owner rule, 2026-10-20). Every value a template or example pre-fills can be changed in both modes:
+    - in Guided, as a key parameter or under Advanced on its card;
+    - in Expert, in the full editor, with reset to the template value.
+
+    A template-locked value is allowed only where the engine requires it. It is shown read-only with the reason, and the PR lists every locked value.
 
 ---
 
