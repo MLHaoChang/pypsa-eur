@@ -155,6 +155,17 @@ export interface SeriesStats {
   max?: number
 }
 
+/** One calendar week of what apply would write (the routes' dry run): the
+ *  week holding the series' peak, or its lowest hour for an availability
+ *  cap, beside the component's current series for those snapshots. */
+export interface PreviewWeek {
+  label: 'peak week' | 'lowest week'
+  period: number | null
+  snapshots: string[]
+  new: number[]
+  current: number[] | null
+}
+
 export interface PendingSeries {
   job_id: string
   family: string
@@ -165,6 +176,7 @@ export interface PendingSeries {
   unmatched?: string[]
   qa_warnings?: Array<{ column: string; code: string; message: string }>
   refinements?: Array<Record<string, unknown>>
+  weeks?: Record<string, PreviewWeek>
   [k: string]: unknown
 }
 

@@ -120,6 +120,25 @@ describe('LoadSeriesEditor', () => {
     expect(screen.getByTestId('stat-modelled').textContent).toBe('—')
   })
 
+  it('shows the preview week with its dates and a text alternative', async () => {
+    const snaps = Array.from({ length: 168 }, (_, i) =>
+      new Date(Date.UTC(2030, 0, 14, i)).toISOString().slice(0, 19))
+    api.generateLoad.mockResolvedValue({ ...PENDING, weeks: { plant: {
+      label: 'peak week', period: null, snapshots: snaps,
+      new: snaps.map((_, i) => (i === 10 ? 80 : 40)), current: snaps.map(() => 30) } } })
+    renderEditor()
+    await screen.findByRole('option', { name: 'industrial' })
+    await userEvent.type(screen.getByRole('textbox', { name: 'Peak MW' }), '80')
+    await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
+    const chart = await screen.findByTestId('week-chart')
+    expect(chart.querySelector('figcaption')?.textContent).toBe('peak week: 14–20 Jan 2030')
+    const text = screen.getByTestId('week-chart-text').textContent
+    expect(text).toContain('peak 80 MW')
+    expect(text).toContain('min 40 MW')
+    expect(text).toContain('mean 40.238 MW')
+    expect(text).toContain('current series is the faint line')
+  })
+
   it('reads a measured upload with its unit', async () => {
     api.uploadLoad.mockResolvedValue({ ...PENDING, provenance: 'measured', unmatched: ['shed'] })
     renderEditor('guided', 'upload')

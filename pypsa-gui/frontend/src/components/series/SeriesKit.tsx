@@ -7,11 +7,12 @@
 // query client.
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Check, Plus, Trash2, Wand2 } from 'lucide-react'
 import { Btn, Tag } from '../PageKit'
 import {
   errorText, seriesApi,
-  type PendingSeries, type RefineOp, type SeriesApplyResult, type SeriesStats,
+  type PendingSeries, type PreviewWeek, type RefineOp, type SeriesApplyResult, type SeriesStats,
 } from '../../api/profiles'
 
 export const INPUT =
@@ -26,6 +27,54 @@ const fmt = (v: number | undefined | null, digits = 1) =>
 function sumModelled(m: Record<string, number> | null | undefined): number | null {
   if (!m) return null
   return Object.values(m).reduce((a, b) => a + b, 0)
+}
+
+const DAY = new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: 'UTC' })
+const DAY_MONTH = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+const FULL = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+// Snapshots are naive; read them as written (UTC), never shifted by the browser.
+const stamp = (s: string) => new Date(s.endsWith('Z') ? s : `${s}Z`)
+
+/** "14–20 Jan 2030", or "30 Jun – 6 Jul 2025" across a month. */
+export function weekDates(week: PreviewWeek): string {
+  const a = stamp(week.snapshots[0])
+  const b = stamp(week.snapshots[week.snapshots.length - 1])
+  if (a.getUTCMonth() === b.getUTCMonth() && a.getUTCFullYear() === b.getUTCFullYear()) {
+    return `${DAY.format(a)}–${FULL.format(b)}`
+  }
+  return `${DAY_MONTH.format(a)} – ${FULL.format(b)}`
+}
+
+/** The preview week: what apply would write, the current series faint
+ *  behind it, labelled with the week it shows and described in text. */
+export function WeekChart({ week, unit }: { week: PreviewWeek; unit?: string }) {
+  const rows = week.snapshots.map((t, i) => ({ t, new: week.new[i], current: week.current?.[i] }))
+  const v = week.new.filter(x => Number.isFinite(x))
+  const mean = v.reduce((a, b) => a + b, 0) / Math.max(v.length, 1)
+  const u = unit ? ` ${unit}` : ''
+  const when = `${week.label}: ${weekDates(week)}${week.period != null ? ` (period ${week.period})` : ''}`
+  const text = `${when}. New series peak ${fmt(Math.max(...v), 3)}${u}, mean ${fmt(mean, 3)}${u}, `
+    + `min ${fmt(Math.min(...v), 3)}${u}${week.current ? '; the current series is the faint line' : ''}.`
+  return (
+    <figure className="mt-2" data-testid="week-chart">
+      <figcaption className="text-[11px] text-muted mb-0.5">{when}</figcaption>
+      <div className="h-24" aria-hidden="true">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={rows} margin={{ top: 2, right: 4, bottom: 0, left: 0 }}>
+            <XAxis dataKey="t" hide />
+            <YAxis width={36} tick={{ fontSize: 9 }} />
+            <Tooltip labelFormatter={l => String(l).replace('T', ' ').slice(0, 16)}
+              formatter={(val: number, name: string) => [`${fmt(val, 3)}${u}`, name === 'new' ? 'New' : 'Current']} />
+            {week.current && (
+              <Line dataKey="current" stroke="currentColor" strokeOpacity={0.3} dot={false} isAnimationActive={false} />
+            )}
+            <Line dataKey="new" stroke="var(--color-accent, #e5484d)" dot={false} isAnimationActive={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <p className="sr-only" data-testid="week-chart-text">{text}</p>
+    </figure>
+  )
 }
 
 /** One pending artifact for one component: its numbers, warnings and Apply. */
@@ -84,6 +133,9 @@ export function PendingCard({
             <div><dt className="text-muted">Year</dt><dd data-testid="stat-annual">{fmt(stats.annual_mwh, 0)} MWh</dd></div>
           )}
         </dl>
+      )}
+      {pending.weeks?.[component] && (
+        <WeekChart week={pending.weeks[component]} unit={power ? 'MW' : unit} />
       )}
       {warnings.length > 0 && (
         <ul className="mt-1 text-[11px] text-amber-700 list-disc pl-4" data-testid="pending-warnings">

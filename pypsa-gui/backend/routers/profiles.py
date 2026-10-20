@@ -32,6 +32,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 import xarray as xr
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -666,15 +667,18 @@ def _preview_load_energy(ctx, frame: pd.DataFrame, record: dict,
     return sorted(warnings)
 
 
-def _dry_run_warnings(ctx, frame: pd.DataFrame, record: dict) -> list[str]:
+def _dry_run(ctx, frame: pd.DataFrame, record: dict) -> tuple[list[str], dict[str, dict]]:
     """Apply's own decision for each column, written nowhere
     (`prepare_profile`): its warnings show before Apply, and a refusal it
     would give (a partial-year network, a family guard) shows as
-    ``not_applicable: <why>`` so the editor can hold the button."""
+    ``not_applicable: <why>`` so the editor can hold the button. Also each
+    column's preview week (`_preview_week`) of what apply would write."""
     from services.profile_gen.apply import ProfileApplyError, prepare_profile
+    from services.profile_gen.families import default_target
 
-    component_type, attribute = record["target"]
+    component_type, attribute = default_target(record, None, None)
     warnings: set[str] = set(record.get("warnings") or [])
+    weeks: dict[str, dict] = {}
     for col in frame.columns:
         try:
             prepared = prepare_profile(ctx, col, frame[col], record,
@@ -684,7 +688,38 @@ def _dry_run_warnings(ctx, frame: pd.DataFrame, record: dict) -> list[str]:
             warnings.add(f"not_applicable: {exc}")
             continue
         warnings.update(prepared.warnings)
-    return sorted(warnings)
+        weeks[col] = _preview_week(ctx.network, prepared)
+    return sorted(warnings), weeks
+
+
+def _preview_week(n, prepared) -> dict:
+    """The calendar week (Monday 00:00 on) of the network's snapshots that
+    holds the series' most telling hour — its lowest for an availability
+    cap, its highest otherwise — as apply would write it, beside the
+    component's current series for the same snapshots when it has one."""
+    aligned = prepared.aligned
+    values = aligned.to_numpy(dtype=float)
+    low = prepared.attribute == "p_max_pu"
+    i = int(np.nanargmin(values) if low else np.nanargmax(values))
+    idx = aligned.index
+    stamps = pd.DatetimeIndex(idx.get_level_values(-1) if isinstance(idx, pd.MultiIndex) else idx)
+    monday = stamps[i].normalize() - pd.Timedelta(days=stamps[i].weekday())
+    mask = (stamps >= monday) & (stamps < monday + pd.Timedelta(days=7))
+    if isinstance(idx, pd.MultiIndex):
+        mask &= np.asarray(idx.get_level_values(0) == idx[i][0])
+    table = getattr(n, f"{prepared.component_type}_t")[prepared.attribute]
+    current = None
+    if prepared.component in table.columns:
+        current = [round(float(v), 4) for v in
+                   table[prepared.component].reindex(idx).to_numpy(dtype=float)[mask]]
+    shown = stamps[mask]
+    return {
+        "label": "lowest week" if low else "peak week",
+        "period": int(idx[i][0]) if isinstance(idx, pd.MultiIndex) else None,
+        "snapshots": [t.isoformat() for t in shown],
+        "new": [round(float(v), 4) for v in values[mask]],
+        "current": current,
+    }
 
 
 def _load_stats(frame: pd.DataFrame, scale: float, year: int) -> dict[str, dict]:
@@ -750,7 +785,8 @@ def generate_load_profiles(
     stats = _load_stats(result.series, float(record.get("scale_mw") or 1.0),
                         int(record["weather_year"]))
     warnings = _preview_load_energy(ctx, result.series, record, stats)
-    return {**record, "stats": stats, "warnings": warnings}
+    dry, weeks = _dry_run(ctx, result.series, record)
+    return {**record, "stats": stats, "warnings": sorted({*warnings, *dry}), "weeks": weeks}
 
 
 @project_router.post("/{name}/profiles/loads/upload")
@@ -802,8 +838,9 @@ async def upload_load_profiles(
     write_pending(str(proj.directory), job_id, frame, record)
     stats = _load_stats(frame, 1.0, int(record["weather_year"]))
     preview = _preview_load_energy(ctx, frame, record, stats)
+    dry, weeks = _dry_run(ctx, frame, record)
     return {**record, "unmatched": unmatched, "stats": stats,
-            "warnings": preview}
+            "warnings": sorted({*preview, *dry}), "weeks": weeks}
 
 
 @project_router.post("/{name}/profiles/availability/generate")
@@ -896,8 +933,8 @@ def generate_availability_profiles(
             stats[col]["hours_reduced"] = int((v < 1.0 - 1e-9).sum())
         else:
             stats[col]["hours_floored"] = int((v > 1e-9).sum())
-    warnings = _dry_run_warnings(ctx, result.series, record)
-    return {**record, "stats": stats, "warnings": warnings}
+    warnings, weeks = _dry_run(ctx, result.series, record)
+    return {**record, "stats": stats, "warnings": warnings, "weeks": weeks}
 
 
 _SERIES_TYPES = {"inflow": "storage_units", "cop": "links"}
@@ -974,8 +1011,8 @@ def generate_series_profiles(
         stats[col] = {"min": float(v.min()), "mean": float(v.mean()), "max": float(v.max())}
         if body.kind == "inflow":
             stats[col]["annual_mwh"] = float(v.sum())
-    warnings = _dry_run_warnings(ctx, result.series, record)
-    return {**record, "stats": stats, "warnings": warnings}
+    warnings, weeks = _dry_run(ctx, result.series, record)
+    return {**record, "stats": stats, "warnings": warnings, "weeks": weeks}
 
 
 @project_router.post("/{name}/profiles/refine")
@@ -1011,7 +1048,8 @@ def refine_profile(
     record["project_id"] = proj.name
     record["points"] = list(new.columns)
     write_pending(str(proj.directory), job_id, new, record)
-    return {**record, "stats": stats, "warnings": warnings}
+    dry, weeks = _dry_run(ctx, new, record)
+    return {**record, "stats": stats, "warnings": sorted({*warnings, *dry}), "weeks": weeks}
 
 
 @project_router.get("/{name}/profiles/pending")

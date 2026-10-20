@@ -469,3 +469,32 @@ def test_a_series_on_a_week_network_says_apply_would_refuse(client, install_netw
         warnings = resp.json()["warnings"]
         assert any(w.startswith("not_applicable:") and "full calendar year" in w
                    for w in warnings), warnings
+
+
+def test_a_load_preview_carries_its_peak_week_as_apply_would_write_it(client, load_project):
+    body = _generate(client, load_project).json()
+    week = body["weeks"]["plant"]
+    assert week["label"] == "peak week"
+    stamps = pd.DatetimeIndex(week["snapshots"])
+    # One calendar week from Monday 00:00, cut where the snapshots end (the
+    # year's first week starts on Wednesday 1 January 2025).
+    assert len(stamps) <= 168 and stamps[0].hour == 0
+    assert stamps[0].weekday() == 0 or stamps[0] == pd.Timestamp("2025-01-01")
+    assert (stamps[-1] - stamps[0]) < pd.Timedelta(days=7)
+    assert max(week["new"]) == pytest.approx(body["stats"]["plant"]["peak_mw"], rel=1e-3)
+    assert week["current"] is None          # a static p_set has no series to show
+
+
+def test_an_outage_preview_shows_its_lowest_week_beside_the_current_series(
+    client, plant_project, session_ctx,
+):
+    first = _avail(client, plant_project, kind="derating", params={"floor": 0.8}).json()
+    client.post(f"/api/projects/{plant_project}/profiles/apply",
+                json={"job_id": first["job_id"], "component": "chp", "time_basis": "UTC"})
+    body = _avail(client, plant_project).json()       # maintenance 07-03 – 07-16
+    week = body["weeks"]["chp"]
+    assert week["label"] == "lowest week"
+    assert min(week["new"]) == 0.0
+    assert week["snapshots"][0] == "2025-06-30T00:00:00"   # the Monday before 07-03
+    assert week["current"] is not None and len(week["current"]) == len(week["new"])
+    assert any(w.startswith("replaces_existing_series") for w in body["warnings"])
