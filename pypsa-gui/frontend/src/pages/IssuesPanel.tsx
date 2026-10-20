@@ -15,6 +15,7 @@ import { componentOfKey, usePlacementFindings } from '../site3d/placementFinding
 import type { FindingKind, PlacementFinding } from '../site3d/placementCheck'
 import { useTopologyFindings } from './useTopologyFindings'
 import { TOPOLOGY_FINDING_TITLES, type TopologyFinding } from '../utils/topologyCheck'
+import { GridReadinessScorecard, useGridReadiness } from '../components/gridReadiness/GridReadinessScorecard'
 
 // IssuesPanel — surfaces the backend's preflight validation findings as a
 // browsable list. Reuses /api/simulation/preflight, which is the same gate
@@ -107,6 +108,10 @@ export default function IssuesPanel() {
   // is active (App.tsx) — so `setSlidePanel(null)` is what actually reveals
   // the editor. Without it the component is "selected" but stays invisible
   // behind the still-open Issues panel.
+  // The grid-readiness scorecard (DC 02): shown only when the project has a
+  // saved network to read; a failed read leaves the panel as it was.
+  const { data: gridReadiness } = useGridReadiness(!!currentProject)
+
   const jumpTo = (type: string, name: string) => {
     setSelectedComponent({ type, name })
     setHighlightedComponent({ type, name })
@@ -291,6 +296,18 @@ export default function IssuesPanel() {
               {topologyFindings.map((f, i) => (
                 <TopologyFindingRow key={`${f.component.type}:${f.component.name}-${f.kind}-${f.other ?? ''}-${i}`} finding={f} onJumpTo={jumpTo} />
               ))}
+            </div>
+          </PageSection>
+        )}
+        {gridReadiness && (
+          <PageSection
+            title="Grid readiness"
+            hint="Screening against the connection limits and grid code; advisory, nothing blocks a run"
+            bodyClassName=""
+          >
+            <div data-testid="grid-readiness-group">
+              <GridReadinessScorecard data={gridReadiness} mode="expert"
+                onJump={(type, name) => jumpTo(COMPONENT_TYPE_MAP[type] ?? type, name)} />
             </div>
           </PageSection>
         )}

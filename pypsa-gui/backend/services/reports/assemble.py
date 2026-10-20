@@ -93,7 +93,7 @@ _CATEGORY_OF_SECTION = {
     "redundancy": "investment", "levers": "investment", "tea": "investment",
     "target": "reliability", "certification": "reliability", "frontier": "reliability",
     "dtc": "reliability", "fmea_top": "reliability", "multi_energy": "reliability",
-    "gates": "operation", "island": "operation",
+    "gates": "operation", "island": "operation", "grid_readiness": "grid_plan",
 }
 
 
@@ -360,7 +360,7 @@ def _worksheet_section(evidence: Evidence) -> Section | None:
 
 
 def _chapter_section(evidence: Evidence, section_id: str) -> Section | None:
-    """The investment-case or island chapter (``chapters``): its tables and
+    """The investment-case, island or grid-readiness chapter (``chapters``): its tables and
     its disclosures, or not established; None when its source was not passed."""
     from services.reports import chapters as C
 
@@ -371,8 +371,8 @@ def _chapter_section(evidence: Evidence, section_id: str) -> Section | None:
     if section.status != "ok" or not section.payload:
         return _not_established_section(section_id, heading, section)
     blocks: list[Block] = [TableRef(table_id=t) for t in _tables_for(evidence, section_id)]
-    notes = C.investment_disclosures(section.payload) if section_id == C.INVESTMENT \
-        else C.island_disclosures(section.payload)
+    notes = {C.INVESTMENT: C.investment_disclosures, C.ISLAND: C.island_disclosures,
+             C.GRID_READINESS: C.grid_readiness_disclosures}[section_id](section.payload)
     blocks.extend(Callout(kind="disclosure", text=n) for n in notes)
     return Section(section_id=section_id, heading=heading, source="code", status="ok",
                    note=section.note, blocks=blocks)
@@ -420,6 +420,8 @@ def evidence_only_document(evidence: Evidence, *, title: str, report_id: str,
         sections.append(worksheet)
     if (isl := _chapter_section(evidence, C.ISLAND)) is not None:
         sections.append(isl)
+    if (gr := _chapter_section(evidence, C.GRID_READINESS)) is not None:
+        sections.append(gr)
     sections.append(_pipeline_section(evidence))
     sections = _grouped(sections)
 
