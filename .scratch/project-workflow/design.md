@@ -1,6 +1,6 @@
 # Project workflow: design
 
-Status: needs-triage (draft for the owner's approval)
+Status: approved by the owner, 2026-10-20 (decisions in §8)
 Owner input: 2026-10-20 (goal below; "generic workflow, templates are instantiations", relayed by the coordinator the same day)
 Author: UX reviewer session (the coherence counterpart of the engine gatekeeper)
 Base: master `8119972c`, with the specs from #419 (`claude/dc-grid-readiness-spec`) and #420 (`claude/site-commercial-ux-spec`)
@@ -359,7 +359,7 @@ The spec's package B (B1 scenario rows, B2 tiered picker, B3 asset form, B4 seve
 
 | New | What | Replaces | Files (expected) | Gate |
 |---|---|---|---|---|
-| **B1 Flow backbone** | `services/flow_sections.py` (the code → section table and its completeness test), `GET /api/projects/{name}/flow`, the acknowledgement store, the assistant read tool `get_project_flow`, `flow_section:` on harness workflow steps | new | backend `services/`, `routers/projects.py`, `harness/workflows/*.md`, `harness/catalogue.py` (coordinator's go) | not gated (read-only over existing checks); the gatekeeper is told, since it reads `eh_readiness` |
+| **B1 Flow backbone** ([brief](issues/B1-flow-backbone.md)) | `services/flow_sections.py` (the code → section table and its completeness test), `GET /api/projects/{name}/flow`, the acknowledgement store, the assistant read tool `get_project_flow`, `flow_section:` on harness workflow steps | new | backend `services/`, `routers/projects.py`, `harness/workflows/*.md`, `harness/catalogue.py` (coordinator's go) | not gated (read-only over existing checks); the gatekeeper is told, since it reads `eh_readiness` |
 | **B2 Flow shell** | the Guided rail grows to the 10 sections (`pages/hubDesign/`: `flow.ts` states become content-based); the Expert sidebar regrouped into the 10 sections with state dots (`layout/sidebar/steps.tsx`); the Issues panel grouped by section; the Run button's disabled reason. **Moves:** tariff / contracts / finance / participants editors out of Results › Investment into section 7, leaving Results read-only with links; the discount-rate editor out of Solver settings (read-only there); the grid-code profile choice out of Studies › Campus electrical into section 3; island controls out of the island panel into section 5; an energization table in section 3 (there is no Expert editor today); every Guided card made editable at its depth (J4); the stress-scenario editor out of Results › FMEA into section 8 | spec B4's "Review" step, part of B1 | frontend `layout/`, `pages/hubDesign/`, `pages/results/investment/`, `pages/economics/` | UX gate |
 | **B3 Asset form and picker** | spec B2 + B3 merged: the tiered picker (Standard / Advanced), and one asset form: General → Sizing (manual / auto-sized, min/max) → Controls (DC-04 presets) → Reliability (outage data) → Commercial (party tag, link to 7) → Availability (the series editors: profile, maintenance, must-run, derating; forced outages read from Reliability). Multi-value chips create section-8 variants. **Capacity Bounds** folds into Sizing (J15) | spec B2, B3 | `layout/CreationForm.tsx`, `layout/properties/` | UX gate |
 | **B4 New project** | Details → Location (map pin → lat/lon, country, timezone) → Template, then the project opens **in the flow** at the first incomplete section. The spec's Load, Connection, Tariffs and Review steps are sections 4, 3, 7 and 9; the wizard no longer duplicates them. | spec B4 | `layout/NewProjectWizard.tsx`, `pages/hubDesign/cards/StartCard.tsx` | UX gate |
@@ -417,21 +417,21 @@ Changes I ask for in tickets already queued. I'll send each to its session or to
 
 ---
 
-## 8. Open choices for the owner
+## 8. Owner decisions (2026-10-20)
 
-Sent to the coordinator as options, recommendation first. The owner approves the design.
+The owner approved the design with the recommended answer to each open choice, relayed by the coordinator:
 
-1. **Carriers & processes as its own section.**
-   - (a) Section 2, before the connection *(recommended: every later section picks a carrier, so declaring it first removes a jump in each of them)*;
-   - (b) folded into Assets (5): fewer sections, but then the connection and loads can't offer H2/NH3 until assets exist;
-   - (c) part of Project & site (1).
-2. **Where the model horizon lives.**
-   - (a) In Project & site (1) *(recommended: energization, stage peaks and candidates are all per period)*;
-   - (b) in Time series (6), as in the starting cut: sections 3–5 are then filled before the period list exists.
-3. **Do warnings block Run?**
-   - (a) No; warnings can be acknowledged, but Run unlocks without it *(recommended: "assumed" values are normal early on, the owner's "qualify early" goal)*;
-   - (b) every warning must be acknowledged before Run;
-   - (c) acknowledgement required in Guided only.
-4. **One Run.**
-   - (a) One Run, computing what section 8 asks (optimisation, reliability study, or both) *(recommended: removes J2 and the two meanings of "Run")*;
-   - (b) keep two buttons, renamed "Solve" and "Run reliability study".
+- **W1. Carriers & processes is its own section 2**, before the connection.
+- **W2. The model horizon goes in section 1**, Project & site.
+- **W3. Warnings don't block Run.** A warning can be acknowledged; acknowledgement is optional.
+- **W4. There is one Run.** It computes what section 8 asks: the optimisation, the reliability study, or both.
+
+The rejected options are: carriers folded into Assets or into Project & site; the horizon in Time series; warnings acknowledged before Run (always, or in Guided only); two Run buttons.
+
+The coherence gate (§6) is live from this approval. Every UI-touching PR needs the UX reviewer's "OK #<pr> <sha>" on its exact head. A clean master merge carries the OK (the merge tree equals the head tree).
+
+## 9. Follow-ups outside the build plan
+
+- **Fresh-boot workspace (environment).** On a fresh container the app-data directory `~/.local/share/PyPSA Studio/` didn't exist, so SQLite couldn't open. `admin@example.com` then had no personal workspace, so create-from-template answered 403 "not a member of any organization", contrary to AGENTS.md. The walk fixed it by hand (`tools/bootstrap_super_admin.py`, `ensure_personal_org`). The boot script, or the first API boot, should create both. The coordinator will package it as a small separate issue.
+- **A1b, process node in the energy Sankey.** Option (b) from the #423 review: stop at a "Process <name>" node so an NH3 site still shows its electricity side. After GTP-07.
+- **Glossary.** `CONTEXT.md` gains Project flow, Flow section, Section state and Instantiation with B1.
