@@ -65,7 +65,7 @@ export default function DefaultsReview({ project }: { project: string }) {
       {planned.length > 0 && (
         <table className="w-full border-collapse" data-testid="defaults-rows">
           <thead>
-            <tr className="text-left text-muted text-[10px] uppercase">
+            <tr className="text-left text-muted text-[10px] uppercase [&>th]:px-2 [&>th]:pb-1">
               <th className="w-6" /><th>Component</th><th>Default</th><th>Sized by</th>
               <th className="text-right">Peak MW</th><th className="text-right">Mean MW</th>
             </tr>
@@ -115,7 +115,7 @@ function FragmentRow({ r, ticked, open, onTick, onOpen, onSizing }: {
 }) {
   return (
     <>
-      <tr className="border-t border-border align-top">
+      <tr className="border-t border-border align-top [&>td]:px-2 [&>td]:py-1">
         <td><input type="checkbox" aria-label={`Apply the default for ${r.component}`} checked={ticked} onChange={onTick} /></td>
         <td>
           <button type="button" className="flex items-center gap-1" onClick={onOpen} aria-expanded={open}>

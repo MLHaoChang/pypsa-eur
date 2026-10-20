@@ -1097,6 +1097,8 @@ def pending_from_current(
                                           day=1).is_leap_year else 365)
         stats[body.component].update(peak_mw=float(v.max()),
                                      annual_mwh=float(v.mean()) * hours)
+        if body.component_type == "loads":
+            _preview_load_energy(ctx, frame, record, stats)  # modelled_mwh, as generated loads show
     warnings, weeks = _dry_run(ctx, frame, record)
     return {**record, "stats": stats, "warnings": warnings, "weeks": weeks}
 

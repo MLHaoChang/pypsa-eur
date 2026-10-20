@@ -133,6 +133,7 @@ export function PendingCard({
     },
   })
   const stats = (pending.stats?.[component] ?? {}) as SeriesStats
+  const windowMean = pending.profile_annual_basis === 'window_mean'
   const modelled = sumModelled(stats.modelled_mwh)
   const warnings = [...(pending.warnings ?? []),
     ...(pending.qa_warnings ?? []).filter(w => w.column === component).map(w => w.message)]
@@ -151,7 +152,7 @@ export function PendingCard({
       {power ? (
         <dl className="grid grid-cols-3 gap-1 text-[11px]">
           <div><dt className="text-muted">Peak</dt><dd data-testid="stat-peak">{fmt(stats.peak_mw)} MW</dd></div>
-          <div><dt className="text-muted">Year</dt><dd data-testid="stat-annual">{fmt(stats.annual_mwh, 0)} MWh</dd></div>
+          <div><dt className="text-muted" title={windowMean ? 'The snapshot window\'s mean power over a year: the year outside the window is unknown' : undefined}>{windowMean ? 'Year (window mean)' : 'Year'}</dt><dd data-testid="stat-annual">{fmt(stats.annual_mwh, 0)} MWh</dd></div>
           <div>
             <dt className="text-muted" title="What this model's snapshots count">In model</dt>
             <dd data-testid="stat-modelled">{modelled == null ? '—' : `${fmt(modelled, 0)} MWh`}</dd>
@@ -163,7 +164,7 @@ export function PendingCard({
           <div><dt className="text-muted">Mean</dt><dd>{fmt(stats.mean, 3)}{unit ? ` ${unit}` : ''}</dd></div>
           <div><dt className="text-muted">Max</dt><dd data-testid="stat-max">{fmt(stats.max, 3)}{unit ? ` ${unit}` : ''}</dd></div>
           {stats.annual_mwh != null && (
-            <div><dt className="text-muted">Year</dt><dd data-testid="stat-annual">{fmt(stats.annual_mwh, 0)} MWh</dd></div>
+            <div><dt className="text-muted" title={windowMean ? 'The snapshot window\'s mean power over a year: the year outside the window is unknown' : undefined}>{windowMean ? 'Year (window mean)' : 'Year'}</dt><dd data-testid="stat-annual">{fmt(stats.annual_mwh, 0)} MWh</dd></div>
           )}
         </dl>
       )}

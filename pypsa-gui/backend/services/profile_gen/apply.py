@@ -1314,6 +1314,10 @@ def prepare_profile(
     key = (component_type, attribute, component)
     replaced, replace_warnings = _replaced_series(ctx, key, family_name,
                                                   _kind_of(meta))
+    if meta.get("source") == "current":
+        # A refinement of the series it replaces (the stale guard above
+        # checked it is still that one): saying so would only be noise.
+        replace_warnings = []
     warnings = [*warnings, *replace_warnings]
     meaning = None
     if attribute == "p_min_pu" and component_type in ("generators", "links") \
