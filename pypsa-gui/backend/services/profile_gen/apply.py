@@ -87,6 +87,10 @@ class UnknownFamilyError(ProfileApplyError):
     """The meta names a profile family nobody registered."""
 
 
+class DcLoadOwnedError(ProfileApplyError):
+    """The project's `dc_load` spec owns the data-centre load (#421)."""
+
+
 class UnsupportedTargetError(ProfileApplyError):
     """The (component_type, attribute) pair is not in `TARGETS`."""
 
@@ -746,7 +750,7 @@ def assign_profile(
             f"{target.noun} {component!r} not found on the network"
         )
     if family.guard is not None:
-        family.guard(n, component_type, component, meta)
+        family.guard(ctx, component_type, component, meta)
 
     resolution = str(meta.get("resolution") or "hourly").strip().lower()
     unit_meta: dict[str, Any] = {}
