@@ -251,7 +251,7 @@ def test_participant_and_value_stream_enums_exact():
         "demand_charge", "retail_fixed", "ancillary", "dr_availability",
         "dr_activation", "ppa_settlement", "cfd_settlement", "certificates",
         "lease", "eaas_fee", "fuel", "fom", "vom", "capex", "incentive", "tax",
-        "debt_service", "other"}
+        "debt_service", "lost_production", "other"}
 
 
 def test_single_owner_participants_fixture_round_trips():
