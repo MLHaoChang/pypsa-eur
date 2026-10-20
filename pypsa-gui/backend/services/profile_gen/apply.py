@@ -572,6 +572,9 @@ _BOUND_PAIRS = {"p_min_pu": "p_max_pu", "p_max_pu": "p_min_pu"}
 ENERGY_TOLERANCE = 0.02
 ENERGY_MISMATCH_WARNING = "energy_mismatch"
 BOUND_FORCES_OFF_WARNING = "bound_forces_off"
+MUST_RUN_SINK_WARNING = "must_run_exceeds_sink"
+MIN_STABLE_WARNING = "min_stable_not_must_run"
+REPLACES_SERIES_WARNING = "replaces_existing_series"
 
 # How close a normalised shape's peak/mean must be to 1.
 _NORM_RTOL = 1e-3
@@ -693,6 +696,72 @@ def _check_bound_pair(n, component_type: str, component: str, attribute: str,
         f"{hi[i]:.4g} at snapshot {n.snapshots[i]} ({bad.size} snapshots "
         "in all) — the LP would be infeasible"
     )
+
+
+def _replaced_series(ctx, key: tuple[str, str, str], family: str,
+                     ) -> tuple[str | None, list[str]]:
+    """What series this write replaces — a profile of some family, a user
+    upload, or the network's own — and a warning unless it is a profile of
+    the same family (regeneration). The old series stays in the undo
+    snapshot the caller pushed (gatekeeper review 2026-10-20: replace, and
+    say so; never compose silently)."""
+    component_type, attribute, component = key
+    previous_meta = ctx.user_ts_meta.get(key)
+    if previous_meta is not None:
+        prev_family = family_of(previous_meta)
+        what = f"{prev_family} profile"
+        same = prev_family == family
+    elif key in ctx.user_ts:
+        what, same = "uploaded series", False
+    elif component in getattr(ctx.network, f"{component_type}_t")[attribute].columns:
+        what, same = "network series", False
+    else:
+        return None, []
+    if same:
+        return what, []
+    return what, [f"{REPLACES_SERIES_WARNING}: this replaces {component!r}'s "
+                  f"{attribute} {what}; undo restores it"]
+
+
+def _bus_sink_mw(n, bus: str) -> np.ndarray:
+    """Per snapshot, what a bus can absorb: its loads, its storage units'
+    charging power and its outgoing links' capacity."""
+    total = np.zeros(len(n.snapshots))
+    for name in n.loads.index[n.loads.bus == bus]:
+        if name in n.loads_t.p_set.columns:
+            total += n.loads_t.p_set[name].reindex(n.snapshots).fillna(
+                float(n.loads.at[name, "p_set"])).to_numpy(dtype=float)
+        else:
+            total += float(n.loads.at[name, "p_set"])
+    su = n.storage_units[n.storage_units.bus == bus]
+    total += float(su.p_nom.sum())
+    links = n.links[n.links.bus0 == bus]
+    total += float((links.p_nom * links.p_max_pu).sum())
+    return total
+
+
+def _floor_warnings(n, component: str, vals: np.ndarray) -> tuple[str, list[str]]:
+    """The meaning of a generator p_min_pu, and its warnings: on a committable
+    unit a floor is a minimum stable level when committed, not a must-run;
+    on any other unit, a floor above what its bus can absorb forces spill
+    or makes the dispatch and ENS solves infeasible."""
+    gens = n.generators
+    if "committable" in gens.columns and bool(gens.at[component, "committable"]):
+        return "min stable level when committed", [
+            f"{MIN_STABLE_WARNING}: {component!r} is committable, so this "
+            "floor holds only while it is committed; it does not force it on"]
+    floor = vals * float(gens.at[component, "p_nom"])
+    sink = _bus_sink_mw(n, str(gens.at[component, "bus"]))
+    over = np.flatnonzero(floor > sink + 1e-9)
+    if not over.size:
+        return "must-run floor", []
+    i = int(over[0])
+    return "must-run floor", [
+        f"{MUST_RUN_SINK_WARNING}: {component!r}'s must-run floor of "
+        f"{floor[i]:.0f} MW exceeds the {sink[i]:.0f} MW its bus can absorb "
+        f"(loads, storage charging, export links) at {n.snapshots[i]} "
+        f"({over.size} snapshots); the dispatch and ENS solves must spill or "
+        "go infeasible"]
 
 
 def _modelled_mwh(n, aligned: pd.Series, weighting: str) -> dict[str, float]:
@@ -873,6 +942,12 @@ def assign_profile(
         applied_at = now
 
     key = (component_type, attribute, component)
+    replaced, replace_warnings = _replaced_series(ctx, key, family_name)
+    warnings = [*warnings, *replace_warnings]
+    meaning = None
+    if (component_type, attribute) == ("generators", "p_min_pu"):
+        meaning, floor_warnings = _floor_warnings(n, component, vals)
+        warnings = [*warnings, *floor_warnings]
     full_meta: dict[str, Any] = {
         **dict(meta),
         **unit_meta,
@@ -893,6 +968,10 @@ def assign_profile(
             f"not re-binned at {align_meta['resolution']} resolution")
     if clipped:
         full_meta["clipped"] = True
+    if replaced:
+        full_meta["replaced_series"] = replaced
+    if meaning:
+        full_meta["meaning"] = meaning
 
     # Store write under the store lock, network write under the PyPSA lock —
     # the same two-lock dance as the upload path (`_apply_profile_upload`).

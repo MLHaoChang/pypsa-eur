@@ -84,6 +84,12 @@ def default_target(meta: Mapping[str, Any], component_type: str | None,
     neither names one."""
     if component_type and attribute:
         return component_type, attribute
+    stated = meta.get("target")
+    if isinstance(stated, (list, tuple)) and len(stated) == 2 and (
+            not component_type or component_type == stated[0]):
+        # A family with several targets (availability) says which one this
+        # artifact is for.
+        return str(stated[0]), str(stated[1])
     family = get_family(family_of(meta))
     if family.default_target is None or (
             component_type and component_type != family.default_target[0]):
@@ -170,9 +176,33 @@ def _load_generate(ids, archetype, params, year):
 register_family(Family("load", frozenset({("loads", "p_set")}),
                        guard=_load_guard, generate=_load_generate,
                        default_target=("loads", "p_set")))
+def _availability_guard(ctx, component_type: str, component: str,
+                        meta: Mapping[str, Any]) -> None:
+    """Wind and solar keep their weather profile (composing an availability
+    series with it is its own future plan); a dated maintenance window
+    applies only on a single-period network of its year."""
+    from services.profile_gen.apply import CarrierMismatchError
+    from services.profile_gen.availability import check_dated_windows
+
+    carrier = str(ctx.network.generators.at[component, "carrier"] or "").lower()
+    if any(t in carrier for t in ("wind", "solar", "pv")):
+        raise CarrierMismatchError(
+            f"generator {component!r} ({carrier}) carries a weather profile; an "
+            "availability series would overwrite it")
+    check_dated_windows(ctx, meta)
+
+
+def _availability_generate(ids, kind, params, year):
+    # Imported on first use, as `_load_generate` is.
+    from services.profile_gen.availability import generate_frame
+
+    return generate_frame(ids, kind, params, year)
+
+
 register_family(Family(
     "availability",
     frozenset({("generators", "p_max_pu"), ("generators", "p_min_pu")}),
+    guard=_availability_guard, generate=_availability_generate,
 ))
 register_family(Family(
     "series",
