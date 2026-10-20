@@ -1,0 +1,1 @@
+* Doc(pypsa-gui): The project-flow Run gate is one gate: "ready to run" is exactly what the server would accept, and a gap the server does not refuse shows as a note beside an enabled Run (`.scratch/project-workflow/design.md` §3.3, B1 brief).
