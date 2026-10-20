@@ -890,7 +890,7 @@ def _energy_record(n, series: pd.Series, aligned: pd.Series, scale: float,
     its hours — the plain sum for an hourly series, while a daily or weekly
     one is a mean per step whose edge weeks straddle the year),
     ``modelled_mwh`` per period, and the energy_mismatch warning."""
-    year_hours = 8784 if pd.Timestamp(year=src_year, month=1, day=1).is_leap_year else 8760
+    year_hours = 24 * (366 if pd.Timestamp(year=src_year, month=1, day=1).is_leap_year else 365)
     profile_mwh = float(np.nanmean(series.to_numpy(dtype=float)) * scale * year_hours)
     modelled = _modelled_mwh(n, aligned, target.weighting)
     warnings: list[str] = []
