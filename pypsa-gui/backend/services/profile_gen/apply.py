@@ -311,6 +311,17 @@ def _utc_keys(target_idx: pd.DatetimeIndex,
     return out
 
 
+def _dst_gap_labels(target_idx: pd.DatetimeIndex, time_basis: str) -> list[str]:
+    """The snapshots a local clock skips (the spring-forward hour): on a
+    full year `_utc_keys` reads each as the next valid hour, so they are
+    recorded as ``dst_gap_shifted`` rather than shifted silently."""
+    if time_basis == "UTC":
+        return []
+    local = target_idx.tz_localize(
+        time_basis, ambiguous=np.ones(len(target_idx), dtype=bool), nonexistent="NaT")
+    return [str(t) for t in target_idx[local.isna()]]
+
+
 def _map_by_mdh(series: pd.Series, target_idx: pd.DatetimeIndex, *,
                 src_year: int, label: str,
                 time_basis: str = DEFAULT_TIME_BASIS,
@@ -503,12 +514,15 @@ def _align_to_snapshots(series: pd.Series, snapshots, *,
             out = np.empty(len(snapshots), dtype=float)
             dropped_any = False
             windows: dict[str, dict] = {}
+            gaps: list[str] = []
             for p in periods:
                 mask = np.asarray(lvl0 == p)
                 block = pd.DatetimeIndex(snapshots[mask].get_level_values(1))
                 win = _hourly_window(block, what=f"period {p}")
                 if win is not None:
                     windows[str(p)] = win
+                else:
+                    gaps += _dst_gap_labels(block, time_basis)
                 values, dropped = _map_by_mdh(
                     series, block, src_year=src_year, label=f"period {p}",
                     time_basis=time_basis, window=win is not None,
@@ -523,6 +537,7 @@ def _align_to_snapshots(series: pd.Series, snapshots, *,
                 "periods": periods,
                 "resolution": "hourly",
                 "window": windows or None,
+                "dst_gap_shifted": gaps,
             }
 
         target_idx = pd.DatetimeIndex(snapshots)
@@ -539,6 +554,7 @@ def _align_to_snapshots(series: pd.Series, snapshots, *,
             "periods": None,
             "resolution": "hourly",
             "window": win,
+            "dst_gap_shifted": [] if win is not None else _dst_gap_labels(target_idx, time_basis),
         }
 
     if resolution == "daily":
@@ -1259,6 +1275,8 @@ def prepare_profile(
         full_meta["periods"] = align_meta["periods"]
     if align_meta.get("window"):
         full_meta["window"] = align_meta["window"]
+    if align_meta.get("dst_gap_shifted"):
+        full_meta["dst_gap_shifted"] = align_meta["dst_gap_shifted"]
     if align_meta["resolution"] != "hourly":
         # The basis is recorded, but a day/week mean is not re-binned by a
         # 1–2 h offset — say so, so the provenance cannot imply a shift.

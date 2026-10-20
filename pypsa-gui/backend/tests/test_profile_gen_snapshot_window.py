@@ -242,3 +242,16 @@ def test_a_representative_period_window_passes():
     for v in out["modelled_mwh"].values():
         assert v == pytest.approx(out["profile_annual_mwh"], rel=1e-3)
     assert _mismatch(out) == []
+
+
+def test_a_full_year_on_a_local_clock_records_the_shifted_spring_hour():
+    _net(_year(2023))
+    assign_profile(_ctx(), "L1", _daily(), _load_meta(), component_type="loads",
+                   attribute="p_set", now=NOW, time_basis="Europe/Berlin")
+    assert _user_ts_meta[LOAD]["dst_gap_shifted"] == ["2023-03-26 02:00:00"]
+
+
+def test_a_utc_full_year_records_no_shifted_hour():
+    _net(_year(2023))
+    _apply_load(_daily())
+    assert "dst_gap_shifted" not in _user_ts_meta[LOAD]
