@@ -60,13 +60,30 @@ The model extends #444 §10a.4 (`kind`, `params`, `key`, `source`, `scope`, `ver
 
 Scope (owner Q15 = A): the **web app** saves to the org library (`org`; members read, the author and admins edit); the **desktop/local tool** saves to a local library on that install (`local`). Shipped items are `common`. Promotion from `org` to `common` is an admin action, after the terms check (§3.3).
 
-**Load from library = pick, then pin.** A picked item copies its values into the project with `source` and `version`, and the project pins it (`bundle_pins`). A newer library version shows as "update available" and is never applied silently. Editing a picked value makes that field `user`.
+**Engine rules for the store** (gatekeeper, 2026-10-20):
+- **Provenance, verification and scope are not hashed.** They are metadata on the version row, keyed by its content hash. So "user confirmed", "checked" or org → common promotion never mint a new version or break a project pin. `FIELDS_AFTER_V1` is only for new *value* fields.
+- **`local` is a local pseudo-org** on the same store layout, so content hashes are identical on desktop and web. That is what makes bundles (§2) verifiable.
+- **`checked`** names the Check-answers receipt id and the fetched document's hash. A new version starts `unverified`.
+- **Per-kind rules:**
+  - an `equipment` line or transformer holds *either* a PyPSA standard type name *or* explicit electrical parameters, never both (PyPSA overwrites r/x on typed lines), with units through P0's single per-unit conversion;
+  - loading a `control_preset` goes through gridspine's `_materialise` path (#422), so no unit is left without control;
+  - `load_shape`, `profile_generator` and `price_series` carry #445's metadata (time basis, units, energy record; currency, `price_basis` and `currency_year` for prices);
+  - a `finance_set` carries its money basis and the WACC + inflation pair, and must pass `wacc_gate` at save, not at run;
+  - `stress_set` and `case_set` refuse at use when a named component is missing (never skip); re-applying a case set follows #448 §5.3.
+
+**Provenance feeds the completion model** (UX reviewer; design §3.2, checklist 4):
+- A value in use whose item is `unverified`, `illustrative` or `assumed` raises a **warning** ("to check") on its home section, through B1's existing `_assumed_items` path. It is a ledger-style row with label, value, unit and source. It is never an error, so it never blocks Run (W3).
+- `user_confirmed` or `checked` clears it. So does an acknowledgement (B1's ack, keyed on the value hash, so a new version raises it again).
+- A `fetched` value's item message shows its URL and date.
+- L1's done-when has the test: pick an unverified seed tariff, and section 7 reads `warning`; confirm it, and it reads `complete`.
+
+**Load from library = pick, then pin.** A picked item copies its values into the project with `source` and `version`, and the project pins it (`bundle_pins`). A newer library version shows as "update available" and is never applied silently. Editing a picked value makes that field `user`. On an update, a field the user edited shows a **per-field diff** (the library's new value vs the project value). The user's value is kept unless the user picks the library's, so an update never undoes a local edit.
 
 ---
 
 ## 2. "Save to library"
 
-- **One action** in every Expert editor and on every Guided card that edits an item of a library kind. It is also available through the copilot, behind the old→new card.
+- **One action** in every Expert editor and on every Guided card that edits an item of a library kind. On a Guided card it sits in the card's overflow menu, not as a primary button, so the card stays at ≤3 decisions. It is also available through the copilot, behind the old→new card.
 - **What it saves:** the item's current values, its kind and its key flags, with provenance `derived` (project, revision, field paths). For a fetched item it keeps the original `fetched` source alongside.
 - **Naming and versions.** Save asks for a name. Saving an existing name makes a new version, never an overwrite. Content-identical saves are idempotent (as `put_item` is today).
 - **Validation.** An item is validated against its kind's schema before it is saved, and refused with the field named.
@@ -89,6 +106,13 @@ Owner answer Q13 = A.
 5. **Save to library**, once it works, with `source: fetched` (URL, date) and `verification`.
 
 PPAs follow the same flow where official reference data exists (for example a regulator's published auction strike prices). Otherwise the illustrative defaults apply (#448 §2).
+
+### 3.1a The parser (gatekeeper)
+
+- **Where and what.** The parser lives in `services/library/` next to the URDB importer. It is **pure**: document bytes → a `Tariff` plus a per-value source span, testable offline on fixture documents. It ends in `items.validate_payload("tariff", …)`. The harness tool only fetches, budgets and confirms, then calls it.
+- **Time.** It records the operator's timezone: `TariffPeriod` hours are the site clock.
+- **Units and basis.** It converts ct/kWh → `per_kwh` explicitly, and records whether VAT and levies are included (`price_basis`).
+- **Unmappable values.** Anything that doesn't map onto the existing `TariffItemKind` / `TariffUnit` is returned as a refused value with a reason, never approximated. What the LP can't carry is listed by `lp_bindings`' `not_in_lp`, as today.
 
 ### 3.2 Check answers on fetched values
 
@@ -171,7 +195,7 @@ The tests run against a **recorded fixture server**; CI never touches the intern
 
 | Slice | What | Gate | After |
 |---|---|---|---|
-| **L1 Library kinds** | the §1 kinds on the existing store; the provenance and verification fields; validation per kind; scope `local` / `org` / `common` | **gatekeeper** (schema, hashing via `FIELDS_AFTER_V1`); UX | K2, P0 |
+| **L1 Library kinds** | the §1 kinds on the existing store; provenance, verification and scope as unhashed version metadata; validation per kind; scope `local` / `org` / `common`; provenance → section warnings (test: unverified seed tariff → section 7 `warning`; confirmed → `complete`) | **gatekeeper** (schema, hashing via `FIELDS_AFTER_V1`); UX | K2, P0 |
 | **L2 Save to library** | §2 in every editor and Guided card; copilot proposals via the old→new card | UX | L1 |
 | **L3 Export and import** | library bundles (Q16) | gatekeeper (validation); UX | L1 |
 | **L4 Fetch tool** | §3.1, §3.5 and **§3.6 confinement**: the allowlist, the confirm card, budgets, admin enablement and kill switch, the audit log; the parser into the tariff schema. Done when §3.7's adversarial matrix passes in CI against the fixture server | **gatekeeper** (harness contract, tariff semantics); **a dedicated security review before merge** (an Opus security reviewer, commissioned by the coordinator); coordinator (catalogue) | K0, L1 |
