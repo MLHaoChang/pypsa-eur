@@ -59,25 +59,25 @@ Agreed with the workspace-reconciliation session; recorded in PR #448 §5.4.
 
 | View (tab) | Copilot read | Assurance coverage today | Gap | Plan (profile · module · oracle) | Slice |
 | --- | --- | --- | --- | --- | --- |
-| Summary (`summary`) | `get_results(statistics, cost_breakdown)` | Partial: per-generator energy/expenditure (generator-dispatch/1); network total on a declared basis (network-linear-cost/1) | No per-carrier totals; reads refused | `carrier-energy/1`: Σ_t w_g(t)·p_g(t) grouped by carrier · `harness/calculations.py` · hand-summed two-carrier fixture | S2 |
+| Summary (`summary`) | `get_results(statistics, cost_breakdown)` | Partial: per-generator energy/expenditure (generator-dispatch/1); network total on a declared basis (network-linear-cost/1) | No per-carrier totals; reads refused | `carrier-energy/1`: Σ_t w(t)·p_g(t) by carrier over generators and storage units, discharge and charge reported separately · `harness/calculations.py` · hand-summed two-carrier fixture | S2 |
 | Dispatch (`dispatch`) | `get_results(generators, storage_dispatch)` | Per entity: generator-dispatch/1, storage-unit-dispatch/1 | No tab-level or multi-entity scope | Multi-entity scope over the existing two profiles (≤ 20 entities) · `assurance_scope.py` · existing fixtures, summed | S2 |
-| Load flow (`loadflow`) | `get_loadflow_summary` | None for values; displayed-data ACK (v2) only | Values unchecked | `branch-loading/1`: peak utilisation = max_t \|flow\|/(rating·s_max_pu(t)), rating = `s_nom_opt` if extendable else `s_nom` (as `loadflow_summary._rating`), flow = larger terminal magnitude; weighted hours above 100 %; active-power proxy disclosed · new `harness/branch_calculations.py` · independent raw `p0`/`p1` fixture | S3 |
-| Lost load (`lostload`) | `get_results(lost_load)` | None | Refused | `lost-load/1`: ENS = Σ_t w(t)·p_shed(t) per load bus; peak shed MW · new module · seeded shed fixture | S4 |
-| Adequacy (`adequacy`) | `get_adequacy_results(adequacy)` | None | Refused; stochastic study output | `adequacy-indices/1`: LOLE and EENS recomputed from stored per-sample hourly ENS when the samples are retained, else unavailable (`samples_not_retained`) · new module · fixed-sample fixture | S4 |
-| Prices (`prices`) | `get_results(prices, price_drivers)` | None | Refused | `bus-price/1`: observed `marginal_price` per bus; weighted mean, min, max; hours at VoLL. No price-setter claim · new module · raw-dual fixture | S5 |
-| Emissions (`emissions`) | `get_results(emissions)` | None | Refused | `emissions/1`: Σ w·p/η·co2_emissions per carrier; cap dual observed, never inferred · new module · two-fuel fixture | S5 |
-| Curtailment (`curtailment`) | `get_results(curtailment)` | None | Refused | `curtailment/1`: Σ w·(p_max_pu·p_nom_opt − p) per generator ≥ 0, share of available · new module · capped-PV fixture | S5 |
+| Load flow (`loadflow`) | `get_loadflow_summary` | None for values; displayed-data ACK (v2) only | Values unchecked | `branch-loading/1`: matches `loadflow_summary` (see the approved semantics below) · new `harness/branch_calculations.py` · independent raw `p0`/`p1` fixture | S3 |
+| Lost load (`lostload`) | `get_results(lost_load)` | None | Refused | `lost-load/1`: ENS = Σ_t w(t)·p_shed(t) per shedding unit; peak shed MW · new module · seeded shed fixture | S4 |
+| Adequacy (`adequacy`) | `get_adequacy_results(adequacy)` | None | Refused; stochastic study output | `adequacy-indices/1`: LOLE and EENS rebuilt by the producing engine's method (COPT analytical Σ w·LOLP; Monte Carlo sample mean), on the displayed basis; otherwise `method_mismatch` or `samples_not_retained` · new module · per-engine fixture | S4 |
+| Prices (`prices`) | `get_results(prices, price_drivers)` | None | Refused | `bus-price/1`: observed `marginal_price` per bus; time-weighted mean, min, max; hours at VoLL. No price-setter claim · new module · raw-dual fixture | S5 |
+| Emissions (`emissions`) | `get_results(emissions)` | None | Refused | `emissions/1`: Σ w·p/η(t)·co2_emissions over generators; `emissions_outside_scope` when links or storage carry CO2; cap dual observed, never inferred · new module · two-fuel fixture | S5 |
+| Curtailment (`curtailment`) | `get_results(curtailment)` | None | Refused | `curtailment/1`: Σ w·max(0, p_max_pu(t)·p_nom_opt − p) for generators with time-varying `p_max_pu` only; share of available · new module · capped-PV fixture | S5 |
 | Energy flow (`flows`, #423) | `get_energy_flows` (#438, open) | None; gated until #438 merges | Refused | `energy-flow/1`: per-source and per-destination MWh rebuilt independently; conservation residual ≤ tolerance or unavailable · new module · three-node hub fixture | S7 |
-| Load shape (`loadshape`, #440, open) | `get_load_shape` (#440) | None | Refused | `load-shape/1`: peak, energy, load factor, duration-curve percentiles over a window · new module · synthetic load fixture | S7 |
+| Load shape (`loadshape`, #440, open) | `get_load_shape` (#440) | None | Refused | `load-shape/1`: peak, energy, load factor, weight-aware duration-curve percentiles over a window · new module · synthetic load fixture | S7 |
 | Capacity expansion (`capex`) | `get_results(cost_breakdown, economics_by_carrier)` | Partial: annual and allocated fixed cost per entity on a declared basis | Optimised capacities (`p_nom_opt`) not a profile | `capacity/1`: observed `*_nom_opt` and Δ against `*_nom`, binding flag at `*_nom_max` · new module · bound-hit fixture | S6 |
-| Economics (`economics`) | `get_results(asset_economics)` | None | Revenue and LCOE semantics undecided | Gatekeeper decides: `asset-economics/1` (revenue = Σ w·p·λ_bus; LCOE = cost on a declared basis ÷ energy), or withhold | S8 |
-| Investment case (`investment`) | `get_investment_case` | None | IRR, NPV and cash flows | `investment-case/1`: NPV rebuilt from stored cash-flow rows at the stated rate; IRR checked as a root (\|NPV(IRR)\| ≤ tol) · gatekeeper · hand-built cash-flow fixture | S8 |
-| Storage cycling (`storage`) | `get_results(storage)` | Partial: storage-unit-dispatch/1 energy and final state | Cycle count not a profile | `storage-cycles/1`: discharged energy ÷ usable capacity · extends `storage_calculations.py` · existing fixture | S6 |
+| Economics (`economics`) | `get_results(asset_economics)` | None | Revenue and LCOE semantics undecided | LCOE by the engine's definition (S8); nodal revenue withheld, or labelled "market value at model prices" and never compared with investment-case rows | S8 |
+| Investment case (`investment`) | `get_investment_case` | None | IRR, NPV and cash flows | `investment-case/1`: NPV and a unique IRR root, rebuilt from the stored cash flows (see below) · `finance/engine.py` semantics · hand-built cash-flow fixture | S8 |
+| Storage cycling (`storage`) | `get_results(storage)` | Partial: storage-unit-dispatch/1 energy and final state | Cycle count not a profile | `storage-cycles/1`: Σ w·discharge ÷ energy capacity, cycles over the window, StorageUnits and Stores · extends `storage_calculations.py` · existing fixture | S6 |
 | FMEA (`fmea`) | `get_adequacy_results(fmea_modes)` | None | Ranking semantics belong to the adequacy engine | Withheld: `outside_checked_scope`, tested | S1 |
 | Asset detail (`asset`) | `get_asset_results` | Partial via the per-entity profiles | Arbitrary series | Routed to the per-entity profiles where one exists; otherwise withheld, tested | S1 |
 | Overview (`overview`, multi-period) | `get_vintage_results` | None; every profile refuses investment periods | Multi-period | Withheld: `unsupported_snapshot_scope`, tested | S1 |
 | Profile studio (`profiles_pending`, `profile_preview`) | `list_pending_profiles`, `preview_renewable_profile` | None | Synthetic estimate | Withheld: `synthetic_estimate`, tested | S1 |
-| Grid-readiness scorecard (#435, #442; open) | `campus_grid_readiness` | None | Advisory verdicts | `scorecard-row/1`: each verdict recomputed from `project_value` against `limit`; `unknown` stays `unknown` · after #435 merges | S9 |
+| Grid-readiness scorecard (#435, #442; open) | `campus_grid_readiness` | None | Advisory verdicts | `scorecard-row/1`: each verdict recomputed from `project_value` against `limit` with the row's declared comparator; `unknown` stays `unknown` · after #435 merges | S9 |
 
 ### Copilot reads outside the tabs
 
@@ -120,7 +120,7 @@ Each slice is one PR on its own `claude/*` branch, with a release-note fragment.
 | S5 | Prices, emissions, curtailment | Gatekeeper |
 | S6 | Capacity expansion and storage cycles | Gatekeeper |
 | S7 | Energy flow and Load shape (after #438 and #440 merge) | Gatekeeper |
-| S8 | Economics and investment case, or recorded withholding | Gatekeeper (finance) |
+| S8 | Economics and investment case (withheld as "not checkable yet" until this lands) | Gatekeeper (finance) |
 | S9 | Grid-readiness scorecard rows (after #435 merges) | Gatekeeper |
 | S10 | Checked copilot charts: series slots, "Not drawn" list | Gatekeeper and UX reviewer, on the same head SHA |
 
@@ -139,7 +139,44 @@ Tier B (live model) stays manual and is never a merge gate.
 - LC-04's edit card and CompanionLauncher. Changes to CompanionOutcome are coordinated with LC-04.
 - Hand-merging `capability-inventory.json`. It is regenerated with `smoke/assistant_inventory.py --write`.
 
+## Approved calculation semantics
+
+The gatekeeper reviewed these at `0a40442` and said "go with changes"; the changes are applied here. The owner's answer of 2026-10-20 (~19:23 CEST): under Check answers, finance stays withheld as "not checkable yet" until S8 builds a verified profile, in the planned order.
+
+**Everywhere:**
+- **Weights.** Call `period_utils.snapshot_weights(n, "generators")`, never `snapshot_weightings` directly. It is the basis `loadflow_summary` and `copt` use.
+- **Sums.** MWh, money and capacity sums must match within |a − b| ≤ 1e-6·max(1, |b|).
+
+**Per slice:**
+
+- **S2 carrier energy.** Storage discharge (max(p, 0)) and charge (max(−p, 0)) are reported separately, because a net sum hides cycling. The scope is labelled "generators and storage units"; Link outputs (CHP, electrolysers) are outside it.
+- **S3 branch loading** must match `loadflow_summary` as it stands:
+  - rating = `s_nom_opt` if extendable, else `s_nom`;
+  - flow = max(hypot(p0, q0), hypot(p1, q1)) where q is populated, else max(|p0|, |p1|);
+  - u(t) = flow ÷ (rating·s_max_pu(t)), and "above 100 %" means u > 1 + 1e-6;
+  - a rating ≤ 1e-9 makes the branch unavailable;
+  - the result is disclosed as an active-power proxy (no N-1, no voltage) and joined to the existing v2 displayed-data ACK.
+- **S4 adequacy:**
+  - **Method.** LOLE is rebuilt by the producing engine's method. For COPT that is the analytical Σ_t w·LOLP(t), summed over period blocks; for Monte Carlo it is the sample-mean indicator. Anything else is `method_mismatch`.
+  - **Basis.** The check matches the displayed basis: `lole_h_per_year = lole ÷ horizon_years`, not the per-horizon `lole`, and the receipt says which.
+  - **Threshold.** Use the engine's ENS > ε threshold. Without one, use 1e-6 MW and say so.
+- **S5:**
+  - **Emissions.** Σ w·p/η·co2, with η from `get_switchable_as_dense` (time-varying efficiency). The result is unavailable as `emissions_outside_scope` when any Link feeds a CO2-carrier bus, or a StorageUnit or Store carrier has co2_emissions ≠ 0. It never under-reports.
+  - **Curtailment.** Only generators with a time-varying `p_max_pu`, read dense. Committable units are refused, and a negative residual beyond 1e-6·p_nom_opt makes the generator unavailable.
+  - **Prices.** The mean is labelled "time-weighted". "At VoLL" means λ ≥ VoLL·(1 − 1e-6), with VoLL taken from the run's config.
+- **S6:**
+  - **Capacity.** The bound flag never fires when `*_nom_max` = inf. When max = 0, the tolerance is an absolute 1e-6.
+  - **Storage cycles.** Stores are included (`e_nom_opt`, discharged = Σ w·max(p, 0)). The denominator is the energy capacity, and the result is "cycles over the window", with no per-year scaling. Zero capacity makes it unavailable.
+- **S7:**
+  - **Load shape.** Percentiles are weight-aware when the weights are not uniform; otherwise the request is refused.
+  - **Energy flow.** The conservation residual must be ≤ 1e-6·throughput.
+- **S8 finance (restricted):**
+  - **NPV** is rebuilt from the stored cash-flow rows at the run's stated rate and money basis, within 1e-6·Σ|CF|.
+  - **IRR** is accepted when |NPV(IRR)| ≤ 1e-6·Σ|CF|. It is refused as `irr_not_unique` when the flows change sign more than once.
+  - **LCOE** follows the engine's definition (SAM generalised, `finance/engine.py`): [PV(value) − PV(equity post tax)] ÷ PV(energy), all at the cost of equity. The real LCOE is the same at (1 + r)/(1 + i) − 1, following the engine's flags; when inflation is missing, it is unavailable.
+  - **Nodal revenue** Σ w·p·λ_bus is withheld, or labelled "market value at model prices". It is never compared with investment-case rows, which are tariff and contract based.
+- **S9 scorecard.** Each verdict is recomputed with the row's declared comparator (≤, < or ≥), never an inferred direction.
+
 ## Open questions
 
-- **Economics and investment case (S8):** build profiles, or withhold permanently? Revenue and IRR semantics are finance-engine decisions.
-- **Adequacy indices (S4):** are per-sample ENS series retained by the adequacy store? If not, does S4 add retention, or withhold adequacy?
+- **Adequacy samples (S4).** For a Monte Carlo source, are the per-sample ENS series retained? If not, a Monte Carlo LOLE is `samples_not_retained`.
