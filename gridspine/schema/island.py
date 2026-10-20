@@ -22,13 +22,15 @@ or a list is one tagged value. Enumerations (``control``, ``governor``,
 ``excitation``, ``neutral_earthing``, ``scenarios``, ``gfl_min_case``),
 flags (``critical``, ``spinning``, ``unit_transformer``,
 ``transfers_on_islanding``, ``linearised_uc``) and names (``it_load``,
-``ride_through_storage``) are definitions, so they are untagged.
+``ride_through_storage``, the control ``preset``) are definitions, so they
+are untagged.
 
 A validated block is ``{"kind", "values", "sources", ...untagged fields}``.
 ``values`` holds floats, or lists of floats for curves and lists.
 
 pandas-free and engine-free: plain Python, like ``schema/contracts.py``.
 """
+import copy
 import math
 
 from gridspine.schema.contracts import ContractError
@@ -219,14 +221,152 @@ FIELD_USERS = {
     "gfm_tuning_margin": ("GFM-a",),            # recommended GFM settings (gfm_tuning), not I2b's margin
     "gfl_min_case": ("I5",),
     "i_max_sensitivity_pu": ("I5", "I6"),
+    # control presets (data-centre grid readiness, ticket 04)
+    "preset": ("CP04",),            # control presets: offered_services and the campus draft
 }
 
 ALL_FIELDS = frozenset(
     {"control", "neutral_earthing", "governor", "excitation", "spinning", "unit_transformer", "unit_transformer_oltc",
      "it_load", "transfers_on_islanding", "critical", "scenarios", "frequency_limits",
-     "ride_through_storage", "linearised_uc", "gfl_min_case"}
+     "ride_through_storage", "linearised_uc", "gfl_min_case", "preset"}
     | set(_SCALAR) | set(_LISTS)
 )
+
+
+# ── control presets (data-centre grid readiness, ticket 04) ───────────────
+#
+# A preset names a converter control and a UPS behaviour, so a project can
+# say "grid forming support" without typing a droop. It is template-agnostic:
+# it knows unit kinds, not templates. The sidecar's top-level ``preset`` is
+# the project's choice; a unit's own ``preset`` overrides it, and a unit's
+# ``"preset": null`` keeps the unit out of the project's preset.
+#
+# **Expansion** happens here, in ``validate_unit_island``: the preset fills
+# every field the unit does not give, tagged ``assumed``; a field the unit
+# gives wins with its own source. A unit ``control`` other than the preset's
+# is refused, so a preset never names a mode the unit does not run. Every
+# reader (the hub island LP, the campus draft, the frequency and GFM
+# studies) then sees plain fields.
+#
+# **Kinds.** The hub island LP credits a grid former only on a bess (its
+# E2/E3 former set). ``grid_forming_support`` therefore applies to bess only,
+# and so does ``fast_frequency_response`` by choice (gatekeeper, 2026-10-20):
+# FFR needs energy behind it, which a pv, wind or fuel-cell unit cannot hold
+# in reserve. A hand-written ``gfl_fw`` unit of any kind stays allowed, and
+# the LP and ``offered_services`` credit it. ``grid_following``
+# and ``voltage_support`` to every converter kind. A project preset leaves a
+# kind it does not apply to as it is; a unit preset on such a kind is
+# refused. The UPS block applies to ``ups`` units. Gensets and loads are
+# never touched.
+
+#: The grid services a unit can offer, as ``offered_services`` names them.
+SERVICES = ("grid_forming", "synthetic_inertia", "frequency_containment", "fast_frequency_response",
+            "voltage_control")
+
+_QU_PRESET = [[0.9, 0.33], [0.97, 0.0], [1.03, 0.0], [1.1, -0.33]]
+
+#: ``name: {"kinds", "converter", "ups"}``. Values are plain; expansion tags
+#: them ``assumed``. The UPS blocks: under grid following the UPS goes to its
+#: battery at a grid disturbance (it transfers on islanding, narrow window);
+#: where the site's converters hold the island, it rides through.
+PRESETS = {
+    "grid_following": {
+        "kinds": CONVERTER_KINDS,
+        "converter": {"control": "gfl_pq", "pf_rated": 0.95},
+        "ups": {"walk_in_s": 15.0, "f_window_hz": 0.5, "transfers_on_islanding": True},
+    },
+    "grid_forming_support": {
+        "kinds": ("bess",),
+        "converter": {"control": "gfm_vsm", "pf_rated": 0.95, "droop_pct": 4.0, "q_droop_pct": 4.0,
+                      "H_v_s": 4.0, "i_max_pu": 1.2, "k_gfm_min": 1.0},
+        "ups": {"walk_in_s": 10.0, "f_window_hz": 2.0, "transfers_on_islanding": False},
+    },
+    "fast_frequency_response": {
+        "kinds": ("bess",),
+        "converter": {"control": "gfl_fw", "pf_rated": 0.95, "fw_deadband_hz": 0.2, "fw_delay_s": 0.1},
+        "ups": {"walk_in_s": 10.0, "f_window_hz": 2.0, "transfers_on_islanding": False},
+    },
+    "voltage_support": {
+        "kinds": CONVERTER_KINDS,
+        "converter": {"control": "gfl_qu", "pf_rated": 0.9, "qu_points": _QU_PRESET},
+        "ups": {"walk_in_s": 10.0, "f_window_hz": 2.0, "transfers_on_islanding": False},
+    },
+}
+#: The FFR fields that scale with the unit's rating: the preset cannot know
+#: them, so the unit gives them, or ``ffr_sizing`` makes them from a rating.
+FFR_SIZED = ("fw_k_mw_per_hz", "fw_ramp_mw_per_s", "fw_p_limit_mw")
+#: ``ffr_sizing``: full output this far past the deadband, reached this fast.
+FFR_FULL_HZ, FFR_RAMP_S = 0.3, 0.7
+_UNTAGGED_PRESET = ("control", "transfers_on_islanding")
+
+
+def ffr_sizing(rating_mw) -> dict:
+    """The rating-scaled FFR fields of a ``rating_mw`` unit, tagged
+    ``assumed``: full output (the rating) ``FFR_FULL_HZ`` past the deadband,
+    ramped to in ``FFR_RAMP_S``. A rating of 0 or less (an extendable unit
+    before sizing) has none: refused."""
+    r = float(rating_mw)
+    if not math.isfinite(r) or r <= 0:
+        raise ContractError(f"ffr_sizing needs a positive rating, got {rating_mw!r}: an unsized unit offers no FFR")
+    return {"fw_k_mw_per_hz": {"value": r / FFR_FULL_HZ, "source": "assumed"},
+            "fw_ramp_mw_per_s": {"value": r / FFR_RAMP_S, "source": "assumed"},
+            "fw_p_limit_mw": {"value": r, "source": "assumed"}}
+
+
+def _check_preset_name(where, name):
+    if name is not None and name not in PRESETS:
+        raise ContractError(f"{where}.preset is {name!r}; allowed {list(PRESETS)} or null")
+    return name
+
+
+def preset_applies(name, kind) -> bool:
+    """True when preset ``name`` sets units of ``kind``."""
+    return kind == "ups" or kind in PRESETS[name]["kinds"]
+
+
+def preset_block(name, kind) -> dict | None:
+    """The tagged fields preset ``name`` gives a unit of ``kind``, or None
+    when it does not apply to that kind."""
+    if not preset_applies(name, kind):
+        return None
+    plain = PRESETS[name]["ups" if kind == "ups" else "converter"]
+    return {f: (v if f in _UNTAGGED_PRESET else
+                {"value": [list(x) for x in v] if isinstance(v, list) else v, "source": "assumed"})
+            for f, v in plain.items()}
+
+
+def _expand_preset(where, kind, spec, project_preset):
+    """``(spec with the preset's fields filled, preset name or None)``."""
+    if not isinstance(spec, dict) or "preset" not in spec:
+        name, own = project_preset, False
+    else:
+        name, own = _check_preset_name(where, spec["preset"]), True
+        spec = {k: v for k, v in spec.items() if k != "preset"}
+    if name is None:
+        return spec, None
+    block = preset_block(name, kind)
+    if block is None:
+        if own:
+            if kind not in CONVERTER_KINDS:
+                why = "presets set converter and UPS units only"
+            elif name == "grid_forming_support":
+                why = "the hub island LP credits a grid former on a bess only"
+            else:
+                why = ("FFR presets go on storage-backed units (bess) only, which hold energy in reserve; "
+                       "give the unit its own gfl_fw block instead")
+            raise ContractError(f"{where}: preset {name!r} does not apply to a {kind}: {why}")
+        return spec, None
+    if "control" in spec and spec["control"] != block.get("control", spec["control"]):
+        raise ContractError(
+            f"{where}: control {spec['control']!r} conflicts with preset {name!r} ({block['control']!r}); "
+            "drop the control, or set \"preset\": null to keep the unit's own block")
+    if block.get("control") == "gfl_fw":
+        missing = [f for f in FFR_SIZED if f not in spec]
+        if missing:
+            raise ContractError(
+                f"{where}: preset {name!r} needs {missing}, which scale with the unit's rating; "
+                "ffr_sizing(rating_mw) makes them, or set \"preset\": null")
+    return {**block, **spec}, name
 
 
 def _tag(where, field, entry):
@@ -329,13 +469,19 @@ def _collect(where, spec, fields, out):
             out["values"][f], out["sources"][f] = _value(where, f, spec[f])
 
 
-def validate_unit_island(where, kind, spec, sidecar=False) -> dict:
+def validate_unit_island(where, kind, spec, sidecar=False, preset=None) -> dict:
     """One unit's island block, checked. ``kind`` is the unit's campus kind.
-    ``sidecar`` allows the fields only the hub sidecar carries."""
+    ``sidecar`` allows the fields only the hub sidecar carries. ``preset`` is
+    the project's control preset; the unit's own ``preset`` overrides it
+    (see "control presets" above). The block carries ``preset`` only when
+    one applied."""
     if kind not in UNIT_KINDS:
         raise ContractError(f"{where}: unknown kind {kind!r}; allowed {list(UNIT_KINDS)}")
+    spec, applied = _expand_preset(where, kind, spec, preset)
     extra = _SIDECAR_ONLY.get(kind, ()) if sidecar else ()
     out = {"kind": kind, "values": {}, "sources": {}}
+    if applied is not None:
+        out["preset"] = applied
 
     if kind in CONVERTER_KINDS:
         if not isinstance(spec, dict) or "control" not in spec:
@@ -482,8 +628,9 @@ def check_island(cfg, critical_peak_mw):
 def validate_island_config(cfg) -> dict:
     """The hub sidecar ``island_config.json``: ``{"units": {pypsa_name:
     {"kind", ...}}, "requirements": {...}}``."""
-    _allowed("island_config", cfg, ("units", "requirements"))
+    _allowed("island_config", cfg, ("units", "requirements", "preset"))
     _require("island_config", cfg, ("units", "requirements"))
+    preset = _check_preset_name("island_config", cfg.get("preset"))
     if not isinstance(cfg["units"], dict):
         raise ContractError("island_config.units must be a mapping of PyPSA names")
     units = {}
@@ -492,10 +639,131 @@ def validate_island_config(cfg) -> dict:
         if not isinstance(spec, dict) or "kind" not in spec:
             raise ContractError(f"{where}: missing 'kind'; allowed {list(UNIT_KINDS)}")
         body = {k: v for k, v in spec.items() if k != "kind"}
-        units[str(name)] = validate_unit_island(where, spec["kind"], body, sidecar=True)
+        units[str(name)] = validate_unit_island(where, spec["kind"], body, sidecar=True, preset=preset)
     req = validate_requirements(cfg["requirements"], "island_config.requirements")
     check_cross(units, req, "island_config", strict=False)
-    return {"units": units, "requirements": req}
+    out = {"units": units, "requirements": req}
+    if preset is not None:
+        out["preset"] = preset
+    return out
+
+
+# ── what a project offers the grid, and selecting a preset (ticket 04) ────
+
+#: The services each control offers, as the hub island LP credits them. A
+#: grid former and its inertia count on a bess only (the LP's E2/E3 former
+#: set and its M); a GFM on another kind is listed as not credited.
+_CONTROL_SERVICES = {
+    "gfm_droop": ("grid_forming", "synthetic_inertia", "frequency_containment", "voltage_control"),
+    "gfm_vsm": ("grid_forming", "synthetic_inertia", "frequency_containment", "voltage_control"),
+    "gfl_fw": ("fast_frequency_response",),
+    "gfl_qu": ("voltage_control",),
+    "gfl_pf": (),
+    "gfl_pq": (),
+}
+_GFM_NOT_CREDITED = "the hub island LP credits a grid former on a bess only"
+
+
+def offered_services(cfg) -> dict:
+    """The grid services a project's converters offer, from a validated
+    sidecar (``validate_island_config``) or campus island (``{"units"}``).
+
+    ``{"preset", "units": {name: {"kind", "control", "preset", "services",
+    "not_credited"}}, "services"}``. Services follow each unit's effective
+    control, so a sidecar without a preset answers too; ``services`` is the
+    union over units. ``not_credited`` lists ``{"service", "reason"}`` for a
+    mode the island study does not count (a GFM on pv, wind or a fuel cell).
+    Generic across templates: it reads kinds and controls, nothing else."""
+    units, union = {}, set()
+    for name, u in cfg["units"].items():
+        if u["kind"] not in CONVERTER_KINDS:
+            continue
+        offered = list(_CONTROL_SERVICES[u["control"]])
+        not_credited = []
+        if u["control"] in GFM_CONTROLS and u["kind"] != "bess":
+            not_credited = [{"service": x, "reason": _GFM_NOT_CREDITED} for x in offered]
+            offered = []
+        units[name] = {"kind": u["kind"], "control": u["control"], "preset": u.get("preset"),
+                       "services": offered, "not_credited": not_credited}
+        union |= set(offered)
+    return {"preset": cfg.get("preset"), "units": units, "services": [x for x in SERVICES if x in union]}
+
+
+def has_grid_former(cfg) -> bool:
+    """True when the island has something to form its voltage: a bess with a
+    GFM control (what the LP credits) or a genset."""
+    return any((u["kind"] == "bess" and u.get("control") in GFM_CONTROLS) or u["kind"] == "genset"
+               for u in cfg["units"].values())
+
+
+#: The fields a preset governs, per unit kind group: selecting a preset
+#: clears them from a unit so the preset fills them. Everything else (a
+#: UPS's it_load, a converter's neg_seq) stays.
+_CONVERTER_GOVERNED = frozenset({"control", "pf_rated", "cos_phi", "cosphi_p_points",
+                                 *(f for fs in _CONTROL_FIELDS.values() for f in fs)}) - set(FFR_SIZED)
+_UPS_GOVERNED = frozenset({"walk_in_s", "f_window_hz", "transfers_on_islanding"})
+
+
+def _materialise(raw):
+    """``raw`` without its project preset: each unit the preset set gets the
+    preset's fields under its own (tagged ``assumed``), a ``"preset": null``
+    opt-out is dropped, so the units validate as they did, as custom
+    blocks. A unit's own named preset stays."""
+    old = raw.pop("preset", None)
+    for u in raw.get("units", {}).values():
+        if "preset" in u:
+            if u["preset"] is None:
+                del u["preset"]
+            continue
+        block = preset_block(old, u.get("kind")) if old is not None else None
+        if block is not None:
+            u.update({**block, **u})
+    return raw
+
+
+def select_preset(raw, preset, ratings=None) -> tuple[dict, list[str]]:
+    """The raw sidecar ``raw`` with project preset ``preset`` selected (None
+    clears it), and the units it left out with the reason.
+
+    Each converter of a kind the preset applies to, and each UPS, loses its
+    own preset and the fields the preset governs, so the preset fills them.
+    Under ``fast_frequency_response`` a bess without its rating-scaled
+    fields gets them from ``ffr_sizing(ratings[name])``; with no positive
+    rating (an extendable unit before sizing) it keeps its own block,
+    marked ``"preset": null``, and is listed.
+
+    The previous project preset is first written back into each unit it
+    set, as explicit fields (``_materialise``), so a unit the new preset
+    does not set, or every unit on a clear, keeps what it had and still
+    validates. Pure: ``raw`` is not changed."""
+    _check_preset_name("island_config", preset)
+    out = _materialise(copy.deepcopy(raw))
+    ratings = ratings or {}
+    skipped = []
+    if preset is None:
+        return out, skipped
+    out["preset"] = preset
+    for name, u in out.get("units", {}).items():
+        kind = u.get("kind")
+        block = preset_block(preset, kind)
+        if block is None:
+            continue
+        governed = _UPS_GOVERNED if kind == "ups" else _CONVERTER_GOVERNED
+        if block.get("control") == "gfl_fw" and not all(f in u for f in FFR_SIZED):
+            rating = ratings.get(name)
+            if rating is None or not rating > 0:
+                u["preset"] = None
+                skipped.append(f"{name}: {preset} needs the unit's rating, and it has none yet "
+                               "(an extendable unit before sizing); it keeps its own block and offers no FFR")
+                continue
+            u.update(ffr_sizing(rating))
+        for f in governed:
+            u.pop(f, None)
+        u.pop("preset", None)
+        if block.get("control") != "gfl_fw":
+            for f in FFR_SIZED:
+                u.pop(f, None)
+    return out, skipped
 
 
 # ── the hourly island contracts (plan I3a; owner option A, 2026-10-13) ──────
