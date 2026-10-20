@@ -204,10 +204,20 @@ register_family(Family(
     frozenset({("generators", "p_max_pu"), ("generators", "p_min_pu")}),
     guard=_availability_guard, generate=_availability_generate,
 ))
+
+
+def _series_generate(ids, kind, params, year):
+    # Imported on first use, as `_load_generate` is.
+    from services.profile_gen.series import generate_frame
+
+    return generate_frame(ids, kind, params, year)
+
+
 register_family(Family(
     "series",
     frozenset({
         ("generators", "marginal_cost"), ("links", "marginal_cost"),
         ("links", "efficiency"), ("storage_units", "inflow"),
     }),
+    generate=_series_generate,
 ))
