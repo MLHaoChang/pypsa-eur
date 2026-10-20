@@ -508,7 +508,7 @@ TOOLS: list[dict[str, Any]] = [
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
             "name": {"type": "string"},
-            "attrs": {"type": "object"},
+            "attrs": {"type": "object", "description": "Field values in each field's STORED unit (get_component_schema unit_storage), e.g. EUR/MWh, never the display unit EUR/kWh."},
             "new_name": {"type": "string"},
         },
         ["component_class", "name"],
@@ -546,7 +546,7 @@ TOOLS: list[dict[str, Any]] = [
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
             "names": {"type": "array", "items": {"type": "string"}},
-            "updates": {"type": "object"},
+            "updates": {"type": "object", "description": "Field values in each field's STORED unit (get_component_schema unit_storage), e.g. EUR/MWh, never the display unit EUR/kWh."},
         },
         ["component_class", "names", "updates"],
     ),

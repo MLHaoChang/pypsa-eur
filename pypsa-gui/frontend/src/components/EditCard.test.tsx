@@ -64,3 +64,16 @@ it('an uncertain receipt never reads as success', () => {
   expect(screen.getByTestId('chat-edit-receipt').textContent).toContain('does not show the expected values')
   expect(screen.queryByTestId('chat-edit-undo')).toBeNull()
 })
+
+it('a note row states the rule without inventing values', () => {
+  const pending = useChatStore.getState().pending!
+  const note = { component_class: 'Store', name: 'H2 tank', field: 'overnight_cost', label: 'overnight_cost',
+    old: null, new: null, unit: '', role: 'note', note: 'Annualised by PyPSA at solve time: overnight_cost × annuity' }
+  const stored = { ...typed, component_class: 'Store', name: 'H2 tank', field: 'overnight_cost', old: null,
+    new: 150000, unit: 'EUR/MWh', display: { old: null, new: 150, unit: 'EUR/kWh' } }
+  useChatStore.setState({ pending: { ...pending, edit_card: { ...card, rows: [stored, note] } } })
+  render(<ConfirmationCard />)
+  expect(screen.getByTestId('chat-edit-display').textContent).toBe('150 EUR/kWh = 150000 EUR/MWh stored')
+  expect(screen.getByTestId('chat-edit-row-note').textContent).toContain('Annualised by PyPSA at solve time')
+  expect(screen.getByTestId('chat-edit-row-note').textContent).not.toContain('Empty')
+})

@@ -127,6 +127,8 @@ def _number(value) -> str:
 
 def _says(rows: list[dict]) -> str:
     def one(row):
+        if row["field"] == "exists":
+            return f"{'adds' if row['new'] else 'removes'} {row['component_class']} {row['name']}"
         unit = f" {row['unit']}" if row.get("unit") else ""
         old = "?" if row.get("old") is None and row.get("old_known") is False else _number(row.get("old"))
         return f"{row['name']} {row['field']} {old} → {_number(row['new'])}{unit}"
@@ -189,7 +191,10 @@ def receipt(card: dict, args: dict) -> dict:
     adapter = ADAPTERS.get(card["tool"], _ARGUMENTS)
     values = adapter.readback(args or {}, card["rows"])
     rows = [{**row, "readback": _scalar(value)} for row, value in zip(card["rows"], values)]
-    verified = card["complete"] and all(_same(row["readback"], row["new"]) for row in rows)
+    # Every row the live write stores is compared, derived ones included; a
+    # solve-time row is what PyPSA will write later, not now.
+    verified = card["complete"] and all(_same(row["readback"], row["new"]) for row in rows
+                                        if row["role"] not in ("at_solve", "note"))
     return {"version": VERSION, "digest": card["digest"], "outcome": "verified" if verified else "uncertain",
             "rows": rows, "says": card["says"], "results_stale": _results_stale(), "undo": _undo(card["tool"])}
 
@@ -221,12 +226,19 @@ def _check_value(component_class: str, key: str, value, field: dict) -> None:
             _refuse("invalid_edit_value", "A new name must be a nonblank string.")
         return
     if field is None:
-        _refuse("unknown_field", f"{component_class} has no field {key!r}. Read get_component_schema.")
+        # An app column outside the class schema (eh_* tags and the like): the
+        # native handler decides, and the diff refuses a key it did not store.
+        return
     if field["derived"]:
         _refuse("derived_field", f"{component_class}.{key} is derived from other fields and cannot be set. "
                 "Change the fields it follows from.")
     if not field["editable"]:
         _refuse("read_only_field", f"{component_class}.{key} is {field['editability_reason']} and cannot be set.")
+    if key == "overnight_cost" and "asset" not in field["sources"]:
+        # The app derives this class's capital_cost from its own cost fields;
+        # PyPSA's overnight_cost would be a second basis beside them.
+        _refuse("cost_set_by_parts", f"{component_class} costs are set by its own investment fields "
+                "(see get_component_schema, group investment), not by PyPSA's overnight_cost.")
     kind = field.get("native_type") or ""
     if kind.startswith("float") or kind.startswith("int"):
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -235,6 +247,64 @@ def _check_value(component_class: str, key: str, value, field: dict) -> None:
             _refuse("invalid_edit_value", f"{component_class}.{key} takes a finite number.")
     elif kind.startswith("bool") and not isinstance(value, bool):
         _refuse("invalid_edit_value", f"{component_class}.{key} takes true or false.")
+
+
+# PyPSA rewrites these from the standard type at solve time
+# (`apply_line_types` / `apply_transformer_types`), so a typed component's
+# value would read back and then be discarded.
+TYPE_OWNED = {
+    "Line": ("r", "x", "b"),
+    "Transformer": ("r", "x", "g", "b", "phase_shift", "s_nom", "tap_side", "tap_ratio"),
+}
+# The capacity the optimiser chooses while `<nom>_extendable` is true.
+CAPACITY = {"Line": "s_nom", "Transformer": "s_nom", "Link": "p_nom", "Generator": "p_nom",
+            "StorageUnit": "p_nom", "Store": "e_nom"}
+
+
+def _merged(frame, name: str, attrs: dict, column: str):
+    if column in attrs:
+        return attrs[column]
+    return frame.at[name, column] if column in frame.columns else None
+
+
+def _check_row_rules(component_class: str, frame, name: str, attrs: dict) -> None:
+    owned = TYPE_OWNED.get(component_class, ())
+    kind = _merged(frame, name, attrs, "type")
+    if owned and isinstance(kind, str) and kind:
+        hit = [key for key in attrs if key in owned]
+        if hit:
+            _refuse("type_owned_field", f"{component_class} {name} takes {', '.join(hit)} from its type {kind!r}, "
+                    "which PyPSA applies at solve time. Change the type or clear it.")
+    nom = CAPACITY.get(component_class)
+    if nom and nom in attrs and bool(_merged(frame, name, attrs, f"{nom}_extendable")):
+        low, high = (_scalar(_merged(frame, name, attrs, f"{nom}_{bound}")) for bound in ("min", "max"))
+        _refuse("extendable_capacity", f"{component_class} {name} is extendable, so the optimiser chooses {nom} "
+                f"(bounds {nom}_min={low}, {nom}_max={high}). Change {nom}_min / {nom}_max, or make it "
+                "non-extendable in the same edit.")
+
+
+def _solve_time_rows(component_class: str, network, attr: str, names: list[str]) -> list[dict]:
+    """What PyPSA's type derive will write at solve time, run on a further copy."""
+    owned = TYPE_OWNED.get(component_class)
+    frame = getattr(network, attr)
+    if not owned or "type" not in frame.columns or not (frame.loc[names, "type"].astype(str) != "").any():
+        return []
+    from pypsa.network import power_flow
+
+    typed = network.copy()
+    (power_flow.apply_line_types if component_class == "Line" else power_flow.apply_transformer_types)(typed)
+    solved = getattr(typed, attr)
+    rows = []
+    for name in names:
+        if not frame.at[name, "type"]:
+            continue
+        for column in owned:
+            now, then = _scalar(frame.at[name, column]), _scalar(solved.at[name, column])
+            if not _same(now, then):
+                rows.append({"component_class": component_class, "name": name, "field": column, "label": column,
+                             "old": now, "new": then, "unit": "", "role": "at_solve",
+                             "note": f"set from type {frame.at[name, 'type']!r} at solve time"})
+    return rows
 
 
 def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Callable[[], Any]) -> list[dict]:
@@ -253,6 +323,8 @@ def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Ca
     missing = [name for name, _ in targets if name not in before.index]
     if missing:
         _refuse("component_not_found", f"{component_class} {missing[0]!r} not found.", 404)
+    for name, attrs in targets:
+        _check_row_rules(component_class, before, name, attrs)
     candidate = PyPSAService.build_context()
     candidate.network = workflow_tools._network_copy(active.network)
     candidate.user_ts = copy.deepcopy(active.user_ts)
@@ -267,6 +339,11 @@ def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Ca
     rows = []
     for name, attrs in targets:
         new_name = attrs.get("name", name)
+        dropped = [key for key in attrs if key != "name" and (
+            key not in after.columns or not _same(_scalar(after.at[new_name, key]), attrs[key]))
+            and key not in fields]
+        if dropped:
+            _refuse("unknown_field", f"{component_class} has no field {dropped[0]!r}. Read get_component_schema.")
         if new_name != name:
             rows.append({"component_class": component_class, "name": name, "field": "name", "label": "Name",
                          "old": name, "new": new_name, "unit": "", "role": "typed"})
@@ -279,20 +356,102 @@ def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Ca
             if column not in attrs and _same(old, new):
                 continue
             field = fields.get(column) or {}
+            if column not in attrs and str(field.get("native_status") or "").startswith("Output"):
+                continue  # a solver output, not an input the edit changes
             if column in attrs and isinstance(attrs[column], (int, float)) and not isinstance(attrs[column], bool) \
                     and not _same(new, attrs[column]):
                 _refuse("invalid_edit_value", f"{component_class}.{column} would store {new!r}, not "
                         f"{attrs[column]!r}. Choose a value the field holds exactly.")
             row = {"component_class": component_class, "name": name, "field": column,
                    "label": field.get("label", column), "old": old, "new": new,
-                   "unit": field.get("unit_storage") or field.get("native_unit") or "",
+                   "unit": _carrier_unit(field.get("unit_storage") or field.get("native_unit") or "",
+                                         candidate.network, after, new_name),
                    "role": "typed" if column in attrs else "derived" if field.get("derived") else "follows"}
             scale = field.get("display_scale")
             if scale not in (None, 1, 1.0) and _numeric(new):
                 row["display"] = {"old": old * scale if _numeric(old) else None, "new": new * scale,
                                   "unit": field.get("unit_display")}
             rows.append(row)
+    targets_now = {(component_class, n) for name, attrs in targets for n in (name, attrs.get("name", name))}
+    rows += _existence_rows(active.network, candidate.network, targets_now)
+    rows += _solve_time_rows(component_class, candidate.network, attr, [attrs.get("name", name) for name, attrs in targets])
+    rows += _cost_notes(component_class, candidate.network, attr, targets, rows)
     return rows
+
+
+def _carrier_unit(unit: str, network, frame, name: str) -> str:
+    """A rate or amount in its bus's own unit (t/h, MW_th, …), never an assumed MW."""
+    if unit not in ("MW", "MWh"):
+        return unit
+    column = "bus" if "bus" in frame.columns else "bus0" if "bus0" in frame.columns else None
+    bus = frame.at[name, column] if column else None
+    own = network.buses.at[bus, "unit"] if bus in network.buses.index and "unit" in network.buses.columns else None
+    if not isinstance(own, str) or not own.strip() or own.strip() in ("MW", "None"):
+        return unit
+    own = own.strip()
+    if unit == "MW":
+        return own
+    return own[:-2] if own.endswith("/h") else f"{own}·h"
+
+
+def _rate(frame, name: str) -> tuple[float, str]:
+    """The discount rate a row uses and where it comes from (component, project setting, default)."""
+    own = frame.at[name, "discount_rate"] if "discount_rate" in frame.columns else None
+    if isinstance(own, (int, float)) and math.isfinite(own):
+        return float(own), "component"
+    rate = getattr(_solver_config_object(), "discount_rate", None)
+    return (0.07, "default") if rate is None else (float(rate), "project setting")
+
+
+def _solver_config_object():
+    from services.pypsa_service import PyPSAService
+
+    return PyPSAService.get_active_context().solver_state["solver_config"]
+
+
+def _money_basis(network) -> str:
+    from models.finance import FinanceInputs
+    from services.finance.report import basis_statement
+
+    try:
+        fin = FinanceInputs.model_validate(getattr(_solver_config_object(), "finance", None) or {})
+        periods = list(network.investment_periods)
+        base = int(periods[0]) if periods else int(network.snapshots[0].year)
+        return basis_statement(fin, base)
+    except Exception:  # noqa: BLE001 — a snapshot index without years states no base year
+        return "money basis not stated"
+
+
+def _cost_notes(component_class: str, network, attr: str, targets, rows: list[dict]) -> list[dict]:
+    """The inputs a derived or solve-time annual cost follows from; no number of ours."""
+    frame = getattr(network, attr)
+    notes = []
+    for name, attrs in targets:
+        name = attrs.get("name", name)
+        rate, source = _rate(frame, name)
+        derived = any(r["name"] == name and r["field"] == "capital_cost" and r["role"] == "derived" for r in rows)
+        if derived:
+            notes.append(_note(component_class, name, "capital_cost",
+                               f"Derived by the app from each investment part's overnight cost and lifetime at "
+                               f"discount rate {rate:g} ({source}); {_money_basis(network)}."))
+        if "overnight_cost" in attrs:
+            try:
+                network.components[component_class].periodized_cost
+            except ValueError as exc:
+                _refuse("overnight_cost_refused_here", f"PyPSA refuses overnight_cost on this network: {exc}")
+            life = _scalar(frame.at[name, "lifetime"]) if "lifetime" in frame.columns else None
+            text = (f"Annualised by PyPSA at solve time: overnight_cost × annuity(discount rate {rate:g} ({source}), "
+                    f"lifetime {life}) × nyears, plus fom_cost; {_money_basis(network)}.")
+            old_capital = _scalar(frame.at[name, "capital_cost"]) if "capital_cost" in frame.columns else None
+            if isinstance(old_capital, (int, float)) and old_capital:
+                text += f" It replaces the existing capital_cost {old_capital:g} at solve time."
+            notes.append(_note(component_class, name, "overnight_cost", text))
+    return notes
+
+
+def _note(component_class: str, name: str, field: str, text: str) -> dict:
+    return {"component_class": component_class, "name": name, "field": field, "label": field, "old": None,
+            "new": None, "unit": "", "role": "note", "note": text}
 
 
 def _component_readback(args: dict, rows: list[dict]) -> list[Any]:
@@ -303,12 +462,15 @@ def _component_readback(args: dict, rows: list[dict]) -> list[Any]:
     renamed = {row["name"]: row["new"] for row in rows if row["field"] == "name"}
     out = []
     for row in rows:
+        if row["role"] == "note":
+            out.append(None)
+            continue
         klass = row["component_class"]
-        attr = chat_tools._GENERIC_CRUD_ATTRS.get(klass) or {
-            "Bus": "buses", "Transformer": "transformers", "GlobalConstraint": "global_constraints"}[klass]
-        frame = getattr(network, attr)
+        frame = network.components[klass].static
         name = renamed.get(row["name"], row["name"])
-        if row["field"] == "name":
+        if row["field"] == "exists":
+            out.append(name in frame.index)
+        elif row["field"] == "name":
             out.append(name if name in frame.index else None)
         elif name in frame.index and row["field"] in frame.columns:
             out.append(frame.at[name, row["field"]])
@@ -382,10 +544,116 @@ def _solver_readback(args: dict, rows: list[dict]) -> list[Any]:
 register("update_solver_config", Adapter("settings_edit", _solver_preview, _solver_readback))
 
 
+# ── Undo: the snapshot it restores, against the project now ────────────────
+
+MAX_UNDO_ROWS = 20
+# PyPSA's own bookkeeping tables, rebuilt from the components; never an input.
+SKIP_CLASSES = frozenset({"SubNetwork"})
+
+
+def _plain(value) -> bool:
+    return value is None or isinstance(value, (str, int, float, bool))
+
+
+def _existence_rows(before, after, skip: set[tuple[str, str]]) -> list[dict]:
+    """Components a write adds or removes besides its target (e.g. a carrier it creates)."""
+    rows = []
+    for component in after.components:
+        klass = component.name
+        if klass in SKIP_CLASSES:
+            continue
+        old_names = set(before.components[klass].static.index)
+        new_names = set(component.static.index)
+        for name in sorted(old_names ^ new_names):
+            if (klass, name) in skip:
+                continue
+            rows.append({"component_class": klass, "name": str(name), "field": "exists", "label": "exists",
+                         "old": name in old_names, "new": name in new_names, "unit": "", "role": "follows"})
+    return rows
+
+
+def _blank(value) -> bool:
+    return value is None or value == "" or (isinstance(value, float) and math.isnan(value))
+
+
+def _undo_preview(args: dict) -> list[dict]:
+    import pathlib
+    import tempfile
+
+    import pypsa
+
+    from services import undo_service
+    from services.pypsa_service import PyPSAService
+
+    netcdf = undo_service.peek()
+    if netcdf is None:
+        _refuse("nothing_to_undo", "There is no change to undo.", 409)
+    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as handle:
+        path = pathlib.Path(handle.name)
+        handle.write(netcdf)
+    try:
+        restored = pypsa.Network()
+        restored.import_from_netcdf(path)
+    finally:
+        path.unlink(missing_ok=True)
+    now = PyPSAService.get_network()
+    rows, more = [], 0
+    for component in now.components:
+        klass, current = component.name, component.static
+        if klass in SKIP_CLASSES:
+            continue
+        before = restored.components[klass].static
+        defaults = component.defaults
+        inputs = [c for c in current.columns if c in before.columns
+                  and "Input" in str(defaults.at[c, "status"] if c in defaults.index else "Input")]
+        for name in current.index.union(before.index):
+            if name not in before.index or name not in current.index:
+                change = [("exists", name in current.index, name in before.index)]
+            else:
+                change = [(c, _scalar(current.at[name, c]), _scalar(before.at[name, c])) for c in inputs]
+            for field, old, new in change:
+                if not (_plain(old) and _plain(new)) or (_blank(old) and _blank(new)) or _same(old, new):
+                    continue
+                if len(rows) >= MAX_UNDO_ROWS:
+                    more += 1
+                    continue
+                unit = str(defaults.at[field, "unit"]) if field in defaults.index else ""
+                rows.append({"component_class": klass, "name": str(name), "field": field, "label": field,
+                             "old": old, "new": new, "unit": "" if unit in ("n/a", "nan") else unit,
+                             "role": "typed"})
+    if more:
+        rows.append(_note("", "", "more", f"and {more} more values this undo restores"))
+    if not rows:
+        rows.append(_note("", "", "nothing", "The undo step restores no input value."))
+    return rows
+
+
+def _undo_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services.pypsa_service import PyPSAService
+
+    network = PyPSAService.get_network()
+    out = []
+    for row in rows:
+        if row["role"] == "note":
+            out.append(None)
+            continue
+        frame = network.components[row["component_class"]].static
+        if row["field"] == "exists":
+            out.append(row["name"] in frame.index)
+        else:
+            out.append(frame.at[row["name"], row["field"]] if row["name"] in frame.index else None)
+    return out
+
+
+register("undo_last", Adapter("parameter_edit", _undo_preview, _undo_readback))
+
+
 # ── Any other edit: the requested arguments, no old value claimed ──────────
 
 
 def _arguments_preview(args: dict) -> list[dict]:
+    if not args:
+        return [_note("", "", "arguments", "This change takes no values.")]
     rows = []
     for key, value in sorted(args.items()):
         text = json.dumps(value, default=str, allow_nan=True)

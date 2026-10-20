@@ -16,7 +16,8 @@ export interface EditCardRow {
   old_known?: boolean
   new: Scalar
   unit: string
-  role: 'typed' | 'derived' | 'follows'
+  role: 'typed' | 'derived' | 'follows' | 'at_solve' | 'note'
+  note?: string
   display?: { old: number | null; new: number; unit: string }
   readback?: Scalar
 }
@@ -82,6 +83,14 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
             <th key={h} scope="col" className="p-1 border-b border-border">{h}</th>
           ))}</tr></thead>
           <tbody>{card.rows.map((r, i) => {
+            if (r.role === 'note') {
+              return (
+                <tr key={i} className="text-muted" data-testid="chat-edit-row-note">
+                  <td className="p-1 border-b border-border break-words">{asset(r)}</td>
+                  <td colSpan={4} className="p-1 border-b border-border break-words text-[11px]">{r.note}</td>
+                </tr>
+              )
+            }
             const follows = r.role !== 'typed'
             return (
               <tr key={i} className={follows ? 'text-muted' : ''} data-testid={`chat-edit-row-${r.role}`}>
@@ -89,15 +98,16 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
                 <td className="p-1 border-b border-border break-words">
                   {guided ? r.label : r.field}
                   {follows && <span className="block text-[10px]">
-                    {r.role === 'derived' ? 'Follows from the change, read-only' : 'Follows from the change'}
+                    {r.role === 'derived' ? 'Follows from the change, read-only'
+                      : r.role === 'at_solve' ? (r.note ?? 'Set at solve time') : 'Follows from the change'}
                   </span>}
                 </td>
                 <td className="p-1 border-b border-border break-words">{show(r.old, r.old_known !== false)}</td>
                 <td className="p-1 border-b border-border break-words font-medium">{show(r.new)}</td>
                 <td className="p-1 border-b border-border break-words">
                   {r.unit || 'No unit'}
-                  {r.display && <span className="block text-[10px] text-muted">
-                    = {show(r.display.old)} → {show(r.display.new)} {r.display.unit}
+                  {r.display && <span className="block text-[10px] text-muted" data-testid="chat-edit-display">
+                    {show(r.display.new)} {r.display.unit} = {show(r.new)} {r.unit} stored
                   </span>}
                 </td>
               </tr>

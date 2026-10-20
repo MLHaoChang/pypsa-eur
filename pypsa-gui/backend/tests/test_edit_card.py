@@ -74,7 +74,7 @@ def test_storage_energy_cost_shows_the_derived_annual_cost(grid):
         "component_class": "StorageUnit", "name": "Battery",
         "attrs": {"inv_energy_overnight": 150_000.0, "inv_energy_lifetime": 15.0}})
     assert len(cards) == 1
-    rows = {row["field"]: row for row in cards[0]["edit_card"]["rows"]}
+    rows = {row["field"]: row for row in cards[0]["edit_card"]["rows"] if row["role"] != "note"}
     hand = 150_000.0 * 4 * _annuity(0.07, 15)
     assert hand == pytest.approx(65_876.77, abs=0.01)
     assert rows["inv_energy_overnight"]["role"] == "typed"
@@ -91,7 +91,7 @@ def test_storage_energy_cost_shows_the_derived_annual_cost(grid):
 def test_store_overnight_cost_shows_both_units_and_no_annual_cost(grid):
     frames, cards, result = _dispatch(grid, "update_component", {
         "component_class": "Store", "name": "H2 tank", "attrs": {"overnight_cost": 12_000.0, "lifetime": 30.0}})
-    rows = {row["field"]: row for row in cards[0]["edit_card"]["rows"]}
+    rows = {row["field"]: row for row in cards[0]["edit_card"]["rows"] if row["role"] != "note"}
     assert rows["overnight_cost"]["new"] == 12_000.0 and rows["overnight_cost"]["unit"] == "EUR/MWh"
     assert rows["overnight_cost"]["display"]["new"] == pytest.approx(12.0)
     assert rows["overnight_cost"]["display"]["unit"] == "EUR/kWh"
@@ -174,3 +174,73 @@ def test_an_edit_without_an_adapter_still_shows_a_card(grid):
 def test_a_non_edit_write_runs_without_a_card_in_expert(grid):
     frames, cards, _ = _dispatch(grid, "discuss_project_run", {"run_id": "missing"})
     assert cards == []
+
+
+TYPE = "243-AL1/39-ST1A 110.0"  # a PyPSA standard line type
+
+
+def _typed(grid):
+    PyPSAService.get_network().lines.at["L1", "type"] = TYPE
+
+
+@pytest.mark.parametrize("field", ["r", "x", "b"])
+def test_a_typed_line_refuses_the_fields_its_type_sets(grid, field):
+    _typed(grid)
+    frames, cards, _ = _dispatch(grid, "update_component", {"component_class": "Line", "name": "L1",
+                                                            "attrs": {field: 1.0}})
+    errors = [d for e, d in frames if e == "tool_error"]
+    assert cards == [] and errors[0]["error_kind"] == "type_owned_field"
+    assert TYPE in errors[0]["message"]
+
+
+def test_a_typed_line_length_shows_what_the_type_sets_at_solve(grid):
+    """Hand oracle from PyPSA's shipped type table: r = r_per_length × length / num_parallel."""
+    _typed(grid)
+    per_km = PyPSAService.get_network().line_types.loc[TYPE]
+    frames, cards, result = _dispatch(grid, "update_component", {"component_class": "Line", "name": "L1",
+                                                                 "attrs": {"length": 20.0}})
+    rows = {row["field"]: row for row in cards[0]["edit_card"]["rows"] if row["role"] != "note"}
+    assert rows["length"]["role"] == "typed" and rows["length"]["new"] == 20.0
+    assert rows["r"]["role"] == "at_solve" and rows["r"]["new"] == pytest.approx(per_km["r_per_length"] * 20.0)
+    assert rows["x"]["role"] == "at_solve" and rows["x"]["new"] == pytest.approx(per_km["x_per_length"] * 20.0)
+    # Read back verifies what the write stores now, not what the solve will set.
+    assert result["_edit_receipt"]["outcome"] == "verified"
+
+
+def test_an_extendable_capacity_refuses_and_names_the_bounds(grid):
+    lines = PyPSAService.get_network().lines
+    lines.at["L1", "s_nom_extendable"] = True
+    lines.at["L1", "s_nom_max"] = 800.0
+    frames, cards, _ = _dispatch(grid, "update_component", {"component_class": "Line", "name": "L1",
+                                                            "attrs": {"s_nom": 400.0}})
+    errors = [d for e, d in frames if e == "tool_error"]
+    assert cards == [] and errors[0]["error_kind"] == "extendable_capacity"
+    assert "s_nom_max=800.0" in errors[0]["message"]
+
+
+def test_making_it_fixed_in_the_same_edit_is_allowed(grid):
+    PyPSAService.get_network().lines.at["L1", "s_nom_extendable"] = True
+    frames, cards, result = _dispatch(grid, "update_component", {"component_class": "Line", "name": "L1",
+                                                                 "attrs": {"s_nom": 400.0, "s_nom_extendable": False}})
+    assert result["_edit_receipt"]["outcome"] == "verified"
+
+
+def test_no_solver_output_appears_on_the_card(grid):
+    card = edit_card.preview("update_component", {"component_class": "Line", "name": "L1", "attrs": {"s_nom": 400.0}})
+    assert [row["field"] for row in card["rows"]] == ["s_nom"]
+
+
+def test_a_capacity_is_shown_in_its_bus_unit(grid):
+    network = PyPSAService.get_network()
+    network.add("Bus", "NH3", unit="t/h")
+    network.add("Store", "NH3 tank", bus="NH3", e_nom=50)
+    network.add("Link", "Synth", bus0="NH3", bus1="B1", p_nom=10)
+    store = edit_card.preview("update_component", {"component_class": "Store", "name": "NH3 tank",
+                                                   "attrs": {"e_nom": 80.0}})
+    link = edit_card.preview("update_component", {"component_class": "Link", "name": "Synth",
+                                                  "attrs": {"p_nom": 12.0}})
+    line = edit_card.preview("update_component", {"component_class": "Line", "name": "L1",
+                                                  "attrs": {"s_nom": 400.0}})
+    assert store["rows"][0]["unit"] == "t"
+    assert link["rows"][0]["unit"] == "t/h"
+    assert line["rows"][0]["unit"] == "MVA"

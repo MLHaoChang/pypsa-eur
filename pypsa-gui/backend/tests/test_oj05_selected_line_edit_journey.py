@@ -113,6 +113,14 @@ def test_undo_restores_the_old_value(oj_grid):
                                             'Undo that.', session=session, on_frame=_decide('approve', cards))
     assert calls == ['undo_last', None]
     assert _s_nom() == 300.0
+    # The undo card has the same old -> new shape, and its receipt reads back 300.
+    undo = cards[1]['card']['edit_card']
+    restored = [(r['component_class'], r['name'], r['field'], r['old'], r['new']) for r in undo['rows']]
+    # The write had also created carrier AC (shown on its card); undo removes it.
+    assert restored == [('Carrier', 'AC', 'exists', True, False), ('Line', 'L2', 's_nom', 400.0, 300.0)]
+    assert undo['says'] == 'removes Carrier AC; L2 s_nom 400 → 300 MVA'
+    assert results[0]['_edit_receipt']['outcome'] == 'verified'
+
 
 
 @pytest.mark.parametrize('attrs,code', [
@@ -129,3 +137,15 @@ def test_unsupported_edits_refuse_before_any_card(oj_grid, attrs, code):
     assert cards == [] and _s_nom() == 300.0
     errors = [d for e, d in frames if e == 'tool_error']
     assert errors and code in str(errors[0]), errors
+
+
+def test_an_extendable_l2_refuses_before_any_card(oj_grid):
+    """GK change 2: the optimiser chooses an extendable line's s_nom, so the
+    edit refuses with the bounds instead of a card that would change nothing."""
+    PyPSAService.get_network().lines.at['L2', 's_nom_extendable'] = True
+    cards = []
+    calls, results, frames, _ = run_journey(*PROVIDERS[1], _steps(), MESSAGE, on_frame=_decide('approve', cards),
+                                            ui_context_extra=SELECTED)
+    assert cards == [] and _s_nom() == 300.0
+    errors = [d for e, d in frames if e == 'tool_error']
+    assert errors and errors[0]['error_kind'] == 'extendable_capacity', errors
