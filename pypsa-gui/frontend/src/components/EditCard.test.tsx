@@ -32,6 +32,7 @@ it.each([['expert', 's_nom'], ['guided', 'Rating']] as const)('shows old → new
   const rows = within(screen.getByRole('table', { name: 'Changes to apply' })).getAllByRole('row')
   expect(within(rows[1]).getAllByRole('cell').map(c => c.textContent)).toEqual(['Line L2', field, '300', '400', 'MVA'])
   expect(rows[2].textContent).toContain('Follows from the change, read-only')
+  expect(screen.getByTestId('chat-edit-header').textContent).toBe('Line > L2')
   await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
   expect(postChatConfirm).toHaveBeenCalledWith('session-1', { token: 'token-1', decision: 'approve' })
 })
@@ -76,4 +77,17 @@ it('a note row states the rule without inventing values', () => {
   expect(screen.getByTestId('chat-edit-display').textContent).toBe('150 EUR/kWh = 150000 EUR/MWh stored')
   expect(screen.getByTestId('chat-edit-row-note').textContent).toContain('Annualised by PyPSA at solve time')
   expect(screen.getByTestId('chat-edit-row-note').textContent).not.toContain('Empty')
+})
+
+it('a component the change creates reads as created, not as true/false', () => {
+  const pending = useChatStore.getState().pending!
+  const created = { component_class: 'Carrier', name: 'AC', field: 'exists', label: 'exists', old: false, new: true,
+    unit: '', role: 'follows' }
+  useChatStore.setState({ pending: { ...pending, edit_card: { ...card, rows: [typed, created] } } })
+  render(<ConfirmationCard />)
+  const row = screen.getAllByTestId('chat-edit-row-follows')[0]
+  expect(row.textContent).toContain('Created by this change')
+  expect(row.textContent).toContain('absent')
+  expect(row.textContent).toContain('present')
+  expect(row.textContent).not.toContain('true')
 })

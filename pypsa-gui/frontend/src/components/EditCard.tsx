@@ -72,10 +72,25 @@ function show(value: Scalar | undefined, known = true): string {
   return typeof value === 'number' ? String(Number(value.toPrecision(12))) : String(value)
 }
 
+/** "Line > L2", or "Line > L1, L2" for a bulk edit: the plain header of PR-1 (the
+ * flow-section header arrives with FlowTarget, after B1's flow-ledger-targets). */
+export function editCardHeader(card: EditCard): string {
+  const byClass = new Map<string, string[]>()
+  for (const r of card.rows) {
+    if (r.role !== 'typed' || !r.component_class) continue
+    const names = byClass.get(r.component_class) ?? []
+    if (!names.includes(r.name)) names.push(r.name)
+    byClass.set(r.component_class, names)
+  }
+  return [...byClass].map(([klass, names]) => `${klass} > ${names.join(', ')}`).join('; ')
+}
+
 export function EditCardTable({ card, guided }: { card: EditCard; guided: boolean }) {
   const asset = (r: EditCardRow) => [r.component_class, r.name].filter(Boolean).join(' ') || '—'
+  const header = editCardHeader(card)
   return (
     <div className="mb-2 text-xs" data-testid="chat-edit-card">
+      {header && <div className="font-medium mb-1" data-testid="chat-edit-header">{header}</div>}
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <caption className="text-left font-semibold mb-1">Changes to apply</caption>
@@ -92,20 +107,22 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
               )
             }
             const follows = r.role !== 'typed'
+            const exists = r.field === 'exists'
+            const value = (v: Scalar | undefined, known = true) => exists ? (v ? 'present' : 'absent') : show(v, known)
             return (
               <tr key={i} className={follows ? 'text-muted' : ''} data-testid={`chat-edit-row-${r.role}`}>
                 <td className="p-1 border-b border-border break-words">{asset(r)}</td>
                 <td className="p-1 border-b border-border break-words">
-                  {guided ? r.label : r.field}
+                  {exists ? (r.new ? 'Created by this change' : 'Removed by this change') : guided ? r.label : r.field}
                   {follows && <span className="block text-[10px]">
                     {r.role === 'derived' ? 'Follows from the change, read-only'
                       : r.role === 'at_solve' ? (r.note ?? 'Set at solve time') : 'Follows from the change'}
                   </span>}
                 </td>
-                <td className="p-1 border-b border-border break-words">{show(r.old, r.old_known !== false)}</td>
-                <td className="p-1 border-b border-border break-words font-medium">{show(r.new)}</td>
+                <td className="p-1 border-b border-border break-words">{value(r.old, r.old_known !== false)}</td>
+                <td className="p-1 border-b border-border break-words font-medium">{value(r.new)}</td>
                 <td className="p-1 border-b border-border break-words">
-                  {r.unit || 'No unit'}
+                  {exists ? '' : r.unit || 'No unit'}
                   {r.display && <span className="block text-[10px] text-muted" data-testid="chat-edit-display">
                     {show(r.display.new)} {r.display.unit} = {show(r.new)} {r.unit} stored
                   </span>}
