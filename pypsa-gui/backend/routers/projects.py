@@ -1450,12 +1450,11 @@ _TEMPLATE_SIDECARS = ("eh_template.json", "adequacy_stress_scenarios.json",
                       "island_config.json")
 
 
-def _eh_template_builder(template_key: str):
-    """The EH template builder for ``template_key``, or None.
+def _eh_templates_module():
+    """``project_templates/eh_templates.py``, or None.
 
-    Loaded from ``project_templates/eh_templates.py`` by FILE PATH (the
-    directory is shipped as data, not as a package), so it works in a
-    checkout and in the frozen app alike.
+    Loaded by FILE PATH (the directory is shipped as data, not as a
+    package), so it works in a checkout and in the frozen app alike.
     """
     import importlib.util
 
@@ -1467,7 +1466,18 @@ def _eh_template_builder(template_key: str):
         return None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return getattr(mod, "BUILDERS", {}).get(template_key)
+    return mod
+
+
+def _eh_template_builder(template_key: str):
+    """The EH template builder for ``template_key``, or None."""
+    mod = _eh_templates_module()
+    return None if mod is None else getattr(mod, "BUILDERS", {}).get(template_key)
+
+
+# The data-center templates that take an opt-in AI-training load profile
+# (DC grid readiness 01): a body ``{"dc_load": {...}}``. No body, no change.
+_DC_LOAD_TEMPLATES = ("eh_datacenter", "eh_datacenter_staged")
 
 
 def _eh_site_module():
@@ -1592,6 +1602,7 @@ def create_from_template(
     # refused parameter set (a stage whose peak is above the energized
     # connection, say) leaves nothing behind. Other templates take none.
     site = None
+    dc = None
     if template_key == "eh_site":
         site_mod = _eh_site_module()
         try:
@@ -1602,12 +1613,31 @@ def create_from_template(
                                       "message": str(exc)})
         site_net = site_mod.build_eh_site(site_p)
         site = (site_mod, site_p, site_net, site_mod.solver_config(site_p, site_net))
+    elif template_key in _DC_LOAD_TEMPLATES and params is not None:
+        # Checked, and the network built, before the project row exists too.
+        from services.dc_load_profile import DcLoadError
+
+        extra = sorted(set(params) - {"dc_load"})
+        if extra:
+            raise HTTPException(422, {"code": "dc_load_invalid", "field": extra[0],
+                                      "message": f"{extra[0]}: unknown parameter "
+                                                 "(this template takes only dc_load)"})
+        dc_mod = _eh_templates_module()
+        try:
+            dc_spec = dc_mod.dc_load_spec(template_key, params.get("dc_load"))
+        except DcLoadError as exc:
+            raise HTTPException(422, {"code": "dc_load_invalid", "field": exc.field,
+                                      "message": str(exc)})
+        dc_net = dc_mod.BUILDERS[template_key](load_spec=dc_spec)
+        dc = (dc_net, dc_mod.dc_load_meta(template_key, dc_spec))
     elif params is not None:
         raise HTTPException(422, f"Template '{template_key}' takes no parameters.")
     src_nc = _PROJECT_TEMPLATES_DIR / template_key / "network.nc"
     eh_builder = None
     if site is not None:
         eh_builder = lambda: site[2]  # noqa: E731 — built above
+    elif dc is not None:
+        eh_builder = lambda: dc[0]  # noqa: E731 — built above
     elif not src_nc.exists():
         # P19: network.nc is a gitignored build artifact (build-macos.sh);
         # the EH templates are pure builders (no solve), so a fresh checkout
@@ -1645,6 +1675,13 @@ def create_from_template(
             src = _PROJECT_TEMPLATES_DIR / template_key / sidecar
             if src.is_file():
                 atomic_copy(src, dest / sidecar)
+    if dc is not None:
+        # The opt-in's spec, dynamic envelope and ledger, per project
+        # (`services.dc_load_profile.read_envelope`; get_eh_template serves it).
+        meta_path = dest / "eh_template.json"
+        meta = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
+        meta["dc_load"] = dc[1]
+        atomic_write_text(meta_path, json.dumps(meta, indent=2, sort_keys=True) + "\n")
 
     # Reset + load, mirroring import_bundle / load_project.
     from services import dirty_state, undo_service

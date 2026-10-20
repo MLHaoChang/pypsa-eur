@@ -171,6 +171,22 @@ panel/orientation — that the generator resolves into engine params
 overrides merge on top via `resolve_params`.
 _Avoid_: template (that's network profiles), turbine type, config
 
+**AI-training load profile**:
+The opt-in hourly load of a data-center template built from a
+`DataCentreLoadSpec` with an `AiWorkloadSpec`: IT MW × hourly mean
+utilisation × PUE(ambient), split by `critical_share` over `it_load` and
+`cooling` (`backend/services/dc_load_profile.py`). Chosen with a create body
+`{"dc_load": {...}}`; without it the template keeps its load.
+_Avoid_: GPU profile generator (that's `profile_gen`, renewables)
+
+**Dynamic envelope**:
+The sub-hourly behaviour of an AI-training load that the LP never sees, per
+COD phase: swing (MW), max ΔP/Δt (MW/s), checkpoint dip (MW and MW/s) and the
+oscillation band (peak amplitude in MW, period in s). IT side at the POC,
+before any UPS/BESS smoothing; every value assumed. Stored under `dc_load` in
+the project's `eh_template.json`, read with `read_envelope`.
+_Avoid_: ramp profile, transient study
+
 ## Assistant language
 
 The in-app assistant's own vocabulary. The code lives in
