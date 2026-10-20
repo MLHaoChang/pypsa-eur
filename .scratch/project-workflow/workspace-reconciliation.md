@@ -1,6 +1,6 @@
 # Workspace reconciliation: GridSpine (#436) on the project flow
 
-Status: draft for UX review. Owner choices Q1–Q5 (§12) are drafted on the recommended option and marked *pending owner* until the coordinator relays them.
+Status: draft for UX review. Owner answered Q1–Q5 on 2026-10-20, about 18:10 CEST (§12).
 Date: 2026-10-20
 Author: workspace-reconciliation session (commissioned through the coordinator)
 Base: master `ef0856a`, with #436 (`claude/gridspine-workspace-specs`, files under `.scratch/workspace-redesign/`) and B1 #434 (`claude/flow-backbone-b1`) read at their heads.
@@ -12,9 +12,13 @@ Builds on: [design.md](design.md) (approved 2026-10-20: W1–W4, the Run gate R1
 
 > "I like mostly the front end, and the kind of the design, it's modern, it's very sharp, in terms of fonts, in terms of design that it's used. And the color is okay. I like also the graphics of the different examples. ... in terms of workflow, this is roughly the workflow that I want to set up with. That you can compile the different examples, or you can build your own example. And then you basically go from there. But in terms of details, I think this is much too high level ... even in guided mode, I think there are more parameters to be set, which here would be missing. So that needs to be adapted. In terms of grouping, I think the grouping is fine. We wanted to capacity expansion, wanted to grid design, or grid code compliance, and then we want to do the control strategy and make sure that this can eventually be handed off to others. What is also interesting is have the ability that you switch between guided mode and expert mode. Expert mode, you need to regroup the different settings that we currently have in the UX ... in the expert mode, you have all the current designs ... grouped into coherent groups, the different functionalities. But in guided mode, you're more following this coherent set of instructions, and you only get showcased the necessary requirements or necessary parts to parametrization ... That does not complicate your workflow. ... I also like the current design of the chatbot. In this 3D chat, and you hover, you change things, it gives you options to do the three things as discussed. So that one we can keep. Assess the handoff, integrate it into your current design, as main part, make sure that if something doesn't match, then don't flow into it. ... You have a guided mode, you have an expert mode, and you can switch between them. ... In guided mode, it should be reduced in terms of complication. In expert mode, you can do everything everywhere you want. But then it should be grouped ... so that you still find the necessary things. There's no duplicate."
 
-2026-10-20, about 18:00 CEST:
+2026-10-20, about 18:00 CEST (mode switch, coordinates, canvases, converters):
 
 > "What's important in the UX design is the ability to always switch between expert mode and guided mode. If you're in guided mode, that you keep and your prompted in expert mode with all the details that you want, right? From that section. But then you have from expert mode, the ability to navigate into different parts. And parameterize the different parts. Or change different parts if needed. On top of that, you should also make sure that currently it's missing, but in the examples, you should have the ability to also enter coordinates within the examples. So that you have kind of the mapping of it. And then you should be able to place kind of these currently, I think we have kind of an overview of the site as a plan, that should somehow be kept. Also, you should have an overview of that, but then in the based on the real mapping, And I like the real map example, you have this canvas that you do the design, but then you have the real map canvas. Also think about how do you actually integrate converter setups or parameterized converters in expert mode and guided mode?"
+
+2026-10-20, about 18:05 CEST (the load-flow model, §10a):
+
+> "not only converters, but in general, the load flow part, how we parameterize it. ... if we need to parameterize additional things on the canvas, then we should be able to do it, right? If we need to add a transformer, we need to parameterize it. If we need to add a converter, as an example, we need to parameterize it. We need to add a capacitor or a statcom or whatever asset, we need to parameterize it, and that's missing ... So we need to add that part into the integrated modeling and as part of the overall canvas that cannot be missing. ... make sure that all the from the grid calculation AC power flow perspective, we're able to integrate that as well as part of the model, whether in guided mode and expert ... guided mode, the only difference is that we are able to provide less parameter based on standardized library, where key parameters we are asked to recheck or to update by the template and guided through the AI chatbot or copilot. Expert mode, we have all the details. We can go to all the parameters, reset. Also, we can have a preset library, but then we have all the details. The program assumes you know what you're doing ... That's the main difference."
 
 ## 0. The reconciliation in one paragraph
 
@@ -100,12 +104,25 @@ The Builder asks four things and nothing that a section owns (B4's rule, kept):
 |---|---|---|
 | Project name | 1 | |
 | Site location: a map pin, or an address search | 1 | §8. Optional here; section 1 shows it as a gap until set |
-| Planning period | 1 | *Pending owner, Q3.* Recommended: the native horizons only, "One year (2030)" or "Growth 2027 → 2030 → 2035", which picks the single or staged template. Other years are edited in section 1 after creation. Free start/end years would need template regeneration (engine work), and the DC AI-load spec enforces 2027/2030/2035 |
+| Planning period | 1 | **Free start and end year** (owner, Q3 = B), with optional investment dates under "Advanced". One year means a single-period study, several years a staged one. There is no "single / staged" product choice. See §3.3 for the behaviour until engine slice E1 lands |
 | Work groups (the scope) | 8 | §5. The example pre-fills them, and the user can change them. **The same component** edits the scope in section 8; the Builder is not a second editor |
 
 "Create" calls the existing create-from-template route (`useCreateFromTemplate`, or `POST /from_template/eh_site` for your own site). The project then opens **in the flow, at the first incomplete section**, in Guided. Sections 3, 4 and 7 are never duplicated in the Builder.
 
 "Build your own › Your own site" shows the generic-site form's *site type* only. Its numbers are section 3, 4 and 5 inputs, which open in their sections after creation, pre-filled from the site-type preset and marked `assumed`.
+
+### 3.3 Free planning years before and after E1
+
+The owner chose free years at entry (Q3 = B). Today the templates' periods are fixed in code. The staged builders use 2027 / 2030 / 2035 with a 2045 horizon, the single-period ones a 2030 week, and the DC AI-load spec (`dc_load_spec`) refuses other phase years. So:
+
+- **Never snap silently.** When the entered years differ from the template's native years, the Builder says so before Create, in words: "This example is built for 2027, 2030 and 2035. Your years (2028–2040) need the example rebuilt for them, which isn't available yet." Create is then offered only as **"Create with 2027 / 2030 / 2035"**, an explicit choice. The entered years are kept in the draft, so they apply once E1 lands. The own-site form already takes any 1–3 stage years from 2025 to 2060 (`eh_site.py`), so "Your own site" uses the entered years directly today.
+- **After E1** (§13, an early gated engine slice), the example is built for the entered years:
+  - investment periods from the start and end years plus the optional dates;
+  - weights and discounting per period;
+  - energization steps per period;
+  - DC phases per period;
+  - cost and price sources per period.
+- **Growth inputs that the template does not have for those years stay missing.** IT MW per phase, energized MW per year and H₂ offtake per year show as required inputs in sections 3 and 4 (`incomplete`, by kind (c)). They are never interpolated from 12 / 24 / 36 MW, and no connection limit is invented. The template's own values are offered as "use the example's value", marked `assumed`.
 
 > Creating from the form's full values in one step (today's `GenericSiteForm`) is kept as the Expert path: New project › Your own site.
 
@@ -275,7 +292,7 @@ The lists below are the parameters a Guided user sets today (generic-site form, 
 | **Capacity expansion** (incl. dispatch and economics) | always | sections 1–8 core blocks | `optimisation` (exists); `study` when a reliability goal is set or the template carries the study (exists) | Summary, Investment (capacity expansion, economics, prices, investment case), Reliability (adequacy, lost load, FMEA), Operation (dispatch, energy flow, load shape, storage cycling, curtailment, emissions) |
 | **Grid design & grid-code compliance** (incl. the load flow it needs) | template or user | 3: grid-code profile, ramp MW/min, oscillation band, PF; 5: lines, transformers, electrical infrastructure; 8: load flow, N-1 | `loadflow`, `grid_readiness` (after the gate, §11.1). N-1 SCLOPF is an option of `optimisation`, so it needs no new kind | Grid plan: load flow, scorecard, campus electrical (PCC compliance, transformers, reactive compensation, short circuit), connection capacity, connection-point assessment |
 | **Control strategy** | template or user | 5: the Controls block of each converter-coupled asset; 8: island requirements | `control_checks` (after the gate) | Controls: island report, frequency cuts, grid-forming recommendation |
-| **Hand-off to others** | always (*pending owner, Q1*) | none (no input section) | none | Hand-off: reports (per-party variant, C4), exports (bundle, NetCDF, Excel, CSV, MATPOWER), the specialist packet (Planning → dynamics export, PowerFactory read-back) |
+| **Hand-off to others** | always (owner, Q1 = A: the fourth group card) | 10: deliverable choices (report variant per party, export formats, specialist packet); no input section | none | Hand-off: reports (per-party variant, C4), exports (bundle, NetCDF, Excel, CSV, MATPOWER), the specialist packet (Planning → dynamics export, PowerFactory read-back) |
 
 Template pre-fill:
 
@@ -531,7 +548,7 @@ A group out of scope shows its tab as "Outside scope", never as passed.
   - #436's Expert preview shows the same idea as Network / Map / Site tabs.
   - The switcher keeps its four modes, labelled **Schematic / Map / Hybrid / Site plan**. Guided shows Map and Site plan as a thumbnail on the section-1 and section-5 cards. The existing `SiteThumbnailCard` "Open in 3D" stays.
 - **Site location lives in section 1.** A map pin, or an address search (`api/geocode.ts`) on the real map. Country and timezone are derived. The template examples ship every bus at 0,0, which `utils/geo.ts` and `network_geometry._bus_coord` treat as unplaced, so today renewable profiles refuse them (RP-01 `missing_coordinates`).
-- **Placing the pin** (*pending owner, Q4*): recommended, the pin places every **unplaced** bus in a compact cluster around it, keeping the schematic's arrangement. The user then drags buses on the map. Placed buses are never moved. It is one undoable batch of bus `x/y` writes (the existing `busPositionPatch`), with no engine change. Line lengths are recomputed only where "derive lengths from geometry" is on, as today.
+- **Placing the pin** (owner, Q4 = A): the pin places every **unplaced** bus in a compact cluster around it, keeping the schematic's arrangement. The user then drags buses on the map. Placed buses are never moved. It is one undoable batch of bus `x/y` writes (the existing `busPositionPatch`), with no engine change. Line lengths are recomputed only where "derive lengths from geometry" is on, as today.
 - **Per-bus coordinates** keep their one editor (`CoordPairInput` in the bus form). The Map is the visual editor of the same values.
 - **Section states:**
   - section 1 reads `warning` "no site location" (display only, kind (c); B1 already emits `site_location_missing`);
@@ -572,7 +589,7 @@ Existing pieces:
 | | Guided (Control group in scope) | Expert |
 |---|---|---|
 | Where | the asset's card in section 5 | the B3 asset form's **Controls** block, section 5 |
-| Decision | one **preset** per converter-coupled asset (*pending owner, Q5*): Grid-following / Grid-forming support / Fast frequency response / Voltage support, which is gridspine's `PRESETS`. Only presets valid for the kind are offered (grid-forming support and FFR are BESS-only) | control mode (`gfl_pq`, `gfl_qu`, `gfl_pf`, `gfl_fw`, `gfm_droop`, `gfm_vsm`) and its parameters |
+| Decision | one **preset** per converter-coupled asset (owner, Q5 = A): Grid-following / Grid-forming support / Fast frequency response / Voltage support, which is gridspine's `PRESETS`. Only presets valid for the kind are offered (grid-forming support and FFR are BESS-only) | control mode (`gfl_pq`, `gfl_qu`, `gfl_pf`, `gfl_fw`, `gfm_droop`, `gfm_vsm`) and its parameters |
 | Required inputs | rating (`pf_rated`, read-only, from Sizing); the services it offers (from `offered_services`, read-only) | `pf_rated`, `neg_seq`; `cos_phi` / `cosphi_p_points`; `qu_points`; FFR `fw_k_mw_per_hz`, `fw_deadband_hz`, `fw_delay_s`, `fw_ramp_mw_per_s`, `fw_p_limit_mw`; GFM `droop_pct`, `q_droop_pct`, `tau_f_s` or `H_v_s`, `i_max_pu`, `k_gfm_min`; UPS `walk_in_s`, `f_window_hz`, `transfers_on_islanding` |
 | Site-level | island requirements in 8 (sustained hours, bridge s, fuel autonomy, GFM margin, RoCoF window, frequency limits) | the same, in 8 |
 | Warnings | `preset_leaves_no_grid_former`, `preset_not_applied_to_unit` show as section-5 warnings | the same |
@@ -591,7 +608,6 @@ There is one editor: the island panel's per-unit dropdown and GFM inputs move to
 | N3 | Peak demand edited in the "Capacity expansion" stage | Section 4, one editor; other places read-only with a link | One editor per value (§6 checklist 2) |
 | N4 | Reliability objective inside an optional Reliability stage | Section 8 (reliability goal, VOLL, ENS, stress) | Design §2.1: the question asked of the model lives in 8 |
 | N5 | Stress weeks and synthetic shapes in "Model & inputs" | Stress in 8; shapes on the load (4) under TSG-01 | One home per value; "Model & inputs" is not a section |
-| N6 | Free start/end planning years at entry | Native horizons; other years edited in section 1 (*pending Q3*) | The templates' periods are fixed in code; generating other years is engine work |
 | N7 | "No distinct generic template" | `eh_site` is "your own site" | It exists on master |
 | N8 | Expert groups Network analysis / Reliability / Controls & dynamics holding inputs; Run & validation after Results | Inputs in sections 3, 5, 8; those groups are results tabs in 10; Run (9) before Results | No study-hosted or results-hosted inputs (J7, J8, J10, J13, J16) |
 | N9 | "Contingencies & resilience" and "Frequency & time domain" as selectable activities | N-1 SCLOPF is an option of the optimisation (8, exists). Others are "Not yet available" until classified | Unknown stays non-runnable (§11.1) |
@@ -642,15 +658,17 @@ What B1 (#434) already provides:
 
 ---
 
-## 12. Owner choices (sent to the coordinator, 2026-10-20)
+## 12. Owner choices
 
-| | Choice | Recommended | Status |
-|---|---|---|---|
-| Q1 | Hand-off: a fourth group (always on, owns section 10's deliverables) / the end of each group | fourth group | pending owner |
-| Q2 | #436's nine choices: groups + run-kind options, the rest "not yet available" / all nine with disabled ones / groups only | groups + options | pending owner |
-| Q3 | Planning period: native horizons, other years in section 1 / free years at entry | native horizons | pending owner |
-| Q4 | Site pin places unplaced buses around it / pin only | places them | pending owner |
-| Q5 | Converters in Guided: one preset per converter-coupled asset / one site-wide preset | per asset | pending owner |
+Answered by the owner on 2026-10-20, about 18:10 CEST, relayed by the coordinator.
+
+| | Choice | Answer |
+|---|---|---|
+| Q1 | Hand-off: a fourth group / the end of each group | **A**: the fourth group card, always on, owning section 10's deliverables |
+| Q2 | #436's nine choices | **A**: Capacity always on; Grid and Control switchable; runnable options become run kinds; the rest "Not yet available" until the gate classifies them |
+| Q3 | Planning period: native horizons / free years at entry | **B**: free start and end years at entry (§3.3, engine slice E1) |
+| Q4 | Site pin places unplaced buses / pin only | **A**: the pin places every unplaced bus around it |
+| Q5 | Converters in Guided: per-asset preset / site-wide preset | **A**: one preset per converter-coupled asset; the full Controls block in Expert |
 
 ---
 
