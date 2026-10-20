@@ -837,7 +837,7 @@
     },
     "unknown_load": {
       "surface": "inline",
-      "why": "Load-profile generation named a load that is not on the open network. The detail lists the loads; the assistant asks which one, per call."
+      "why": "Load-profile generation named a load that is not on the open network, or a measured load upload has no column naming one. The detail lists the loads; the assistant asks which one, per call."
     },
     "unknown_archetype": {
       "surface": "inline",
