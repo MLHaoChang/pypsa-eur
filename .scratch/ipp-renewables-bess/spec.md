@@ -86,9 +86,9 @@ The sizes below are recommendation A of Q-IPP2 (§11).
 | `poi` bus | AC, the site side of the meter (`eh_poc`) | — | — |
 | `grid` bus + `grid` Generator | two-way slack, `p_min_pu −1`, cost 0 | — | as `packs.py` |
 | `grid_export` Link | `poi → grid`, `p_nom` = **export limit** | 70 MW | assumed (connection offer) |
-| `grid_import` Link | `grid → poi`, `p_nom` = import limit (battery charging and auxiliaries) | 20 MW | assumed |
-| `wind_farm` | Generator, fixed new build (G5), synthetic CF | 60 MW | pack `onwind`; profile `generated` |
-| `pv_plant` | Generator, fixed new build (G5), synthetic CF | 50 MWp | pack `solar-utility`; profile `generated` |
+| `grid_import` Link | `grid → poi`, `p_nom` = import limit (auxiliaries and any battery grid charging). It carries no private price: its cost is the 7a import tariff | 20 MW | assumed |
+| `wind_farm` | Generator, fixed new build (G5), synthetic CF at the zone's reference coordinates (assumed) until the user sets the pin; regenerated then (never `measured`) | 60 MW | pack `onwind`; profile `generated` |
+| `pv_plant` | Generator, fixed new build (G5), synthetic CF, as the wind | 50 MWp | pack `solar-utility`; profile `generated` |
 | `bess` | StorageUnit, **candidate**: `p_nom_extendable`, `p_nom_max` 50 MW, `max_hours` 2, round-trip ≈ 0.88, cyclic SoC; throughput cost on dispatch (illustrative €/MWh, against unrealistic cycling) | 0–50 MW / 2 h | pack `battery` (power + energy parts) |
 | no Load | export is a Link to the grid slack, not a Load sink. The section-4 card is `not_needed` ("generation-only: export through the POI in section 3"); auxiliaries are inside the plants' net output | — | stated |
 
@@ -110,7 +110,12 @@ The template ships **three illustrative hourly day-ahead shapes** for its zone (
 
 Its own key numbers (mean, negative hours, solar capture rate) go in the ledger. The `da_base` targets are written as **ranges with a cited public source** in the issue (ticket 03), never as a forecast.
 
-Import price: `da_base` plus an illustrative network charge (€/MWh) on `grid_import`, so `circulation_risk_snapshots` stays 0.
+**Tariffs at the POI** (owner, about 19:47 CEST: the IPP case is wired to section 7). They are an ordinary 7a `Tariff`, the import tariff, with no template-private prices:
+- an import energy item: a flat illustrative €/MWh that includes network charges and levies. It is above the highest `da_base` price at every snapshot, so `circulation_risk_snapshots == 0`;
+- an export (injection) item, `measured_on: export`, direction cost. Its illustrative value is 0 €/MWh ("DE: no generator injection charge, assumed") and it is editable in 7a;
+- the connection capacity fee, if the user adds one (`ConnectionAgreement.capacity_fee`).
+
+Battery grid charging is therefore priced at the retail import rate. A wholesale-indexed import price, so the battery charges at DA, needs a series-priced import (an `import_price_ref` beside `export_price_ref`): engine gap **G7**, a later gated slice.
 
 ---
 
@@ -193,12 +198,11 @@ Each case is a **declared change** in the S5 / experiment shape (dotted path, ty
 
 Cases 1 and 2 change two paths that must move together, the export price and the PPA reference. Each case's declared changes list both.
 
-**Delivery** (Q-IPP5): the template ships the case list as a sidecar, `cases.json`, validated against the experiment contract's path and value rules. Section 8's rows (S5) turn it into cases on "Create the example's cases". Until S5:
-- the list shows read-only in section 8 and in the ledger;
-- the network-domain cases (6, 7) can run through today's sweep or experiments;
-- commercial cases wait for S5.
-
-They are never pre-created as hidden scenario copies.
+**Delivery** (Q-IPP5 = A, reconciled with the both-modes rule): the template ships `cases.json` as data only, validated against the experiment contract's path and value rules.
+- **Nothing in the UI shows it as a list until S5.** A read-only list would be a lock that the engine doesn't require (UX reviewer).
+- Section 8's rows (S5) then turn it into ordinary, editable cases on "Create the example's cases".
+- Before S5, the ledger names the 8 prepared sensitivities in one line, without values. The user can still make any of them by hand as a scenario copy and edit it with the normal editors.
+- They are never pre-created as hidden scenario copies.
 
 ---
 
@@ -216,13 +220,13 @@ The user can switch Grid on later (#448 §4): the POI and export limit already l
 
 | Section | Pre-fill | State after create |
 |---|---|---|
-| 1 Project & site | name "Renewables IPP with battery"; pin at an illustrative site in the zone (Q-IPP1); planning period 2030 (native, §2.2) | complete; pin `assumed` |
+| 1 Project & site | name "Renewables IPP with battery"; **no pin** (templates never invent a location, #444 §8); planning period 2030 (native, §2.2) | `warning` "no site location", as every example |
 | 2 Carriers & processes | electricity, pre-filled as the data centre does | complete (a user can add a carrier later) |
 | 3 Connection & grid | POI; export limit 70 MW, import limit 20 MW (`assumed`, "from the connection offer"); bidding zone from the pin (7c shows it, #448 §1) | complete, with `assumed` badges |
 | 4 Loads & demand | none. Export is the `grid_export` Link to the grid slack Generator, not a Load sink, and auxiliaries are netted in the plants' output | `not_needed` ("generation-only: export through the POI in section 3") |
 | 5 Assets & sizing | wind 60 MW and PV 50 MWp (fixed new build); battery candidate 0–50 MW at 2 h; costs and lifetimes from the pack | complete, `assumed` |
 | 6 Time series & profiles | wind and PV CF `generated` (synthetic); DA price shapes `illustrative`; import price derived | complete. Recheck flag: "replace the illustrative prices with your own" |
-| 7 Commercial & parties | 7a export = `da_base`, import charge; 7b PPA pay-as-produced, 70 %, fixed price (illustrative, cited range), 10-yr tenor, negative-price clause; 7c zone and price-data panel; 7d finance (§6); 7e `ipp` / `offtaker` / `market` | complete. Key flags on PPA price and share, the price series and WACC |
+| 7 Commercial & parties | 7a export price = `da_base`, import tariff and injection item (§2.3); 7b PPA pay-as-produced, 70 %, fixed price (illustrative, cited range), 10-yr tenor, negative-price clause; 7c bidding zone **DE-LU, `assumed`** (re-derived when the pin is set) and the price-data panel; 7d finance (§6); 7e `ipp` / `offtaker` / `market` | complete. Key flags on PPA price and share, the price series and WACC |
 | 8 Scenarios & optimisation | groups §8.1; no reliability goal; VOLL not applicable (no load); the 8 cases (§7) | complete |
 | 9 Readiness → run | — | — |
 | 10 Results → reports | the usual tab order (templates never reorder). The project opens Results on **Commercial** as its initial tab: revenue by stream, capture, NPV/IRR, break-even PPA. Curtailment by cause sits in Capacity › Operation, cross-linked from Commercial | — |
@@ -236,30 +240,53 @@ Owner rule (about 19:43 CEST): "all examples should enable user to change parame
 
 | Parameter (pre-fill) | Section / block | Guided | Expert editor |
 |---|---|---|---|
-| Project name; site pin (illustrative DE-LU site) | 1 | key | section 1 editors (name, map pin) |
+| Project name; site pin (**unset**) | 1 | key | section 1 editors (name, map pin) |
 | Planning period 2030 (native) | 1 | key; other years show the E1 note (#444 §3.3), never snap | section 1 planning period |
 | Carrier: electricity | 2 | key (add a carrier) | Carriers & processes card |
 | Export limit 70 MW (`grid_export.p_nom`) | 3 | key | section 3 connection editor; the Link's form in Expert |
 | Import limit 20 MW (`grid_import.p_nom`) | 3 | key | the same |
-| Bidding zone DE-LU (from the pin) | 7c (shown in 3) | key | 7c zone override |
+| Bidding zone DE-LU (`assumed`; re-derived from the pin) | 7c (shown in 3) | key | 7c zone editor |
 | Wind 60 MW, PV 50 MWp (forced size) | 5 | key (size) | asset form (W5): General → Sizing. "Let the study size it" turns the forced bounds into a range |
 | Plant overnight cost, FOM, lifetime (pack) | 5 | Advanced | asset form › Sizing / Commercial; reset to pack |
 | Battery candidate 0–50 MW, 2 h, efficiencies | 5 | key (max MW, duration) | asset form › Sizing; efficiency under Advanced |
 | Battery cost (power + energy parts, pack), throughput cost per MWh discharged | 5 | Advanced | asset form › Commercial; reset to pack |
 | Wind and PV CF (synthetic, `generated`) | 6 | key row (status, regenerate, upload) | Time series row → owner's editor; Profile Studio |
 | DA price shapes (illustrative) | 6 / 7c | key row with the recheck flag | 7c price-data panel; Library series picker |
-| Network charge on import (€/MWh) | 7a | key | 7a tariff editor |
+| Import tariff: energy item (€/MWh incl. network charges), injection item on export | 7a | key | 7a tariff editor (every item); Library tariff picker |
 | PPA: form, price, share 70 %, tenor 10 y | 7b | key | 7b PPA editor |
 | PPA: settlement `financial`, reference = export series, negative-price clause, indexation, base year | 7b | Advanced | 7b PPA editor (every field) |
 | WACC, inflation, analysis years 25, debt share | 7d | key | 7d `FinanceInputs` editor |
 | Financial close, COD, degradation, battery replacement, tax pack, debt terms, LP discount rate | 7d | Advanced | 7d `FinanceInputs` editor; the LP rate beside WACC |
 | Parties `ipp` / `offtaker` / `market`, `export_revenue_to` | 7e | key (who owns, who earns export) | the party board (C5) |
 | Groups (Capacity, Commercial, Hand-off on; Grid, Control off) | 8 | key (the scope component) | the same component |
-| The 8 cases | 8 | read-only list until S5, then editable rows | S5 rows |
+| The 8 cases | 8 | not shown until S5 (§7); then editable rows | S5 rows |
 
-**Engine-required locks** (each field says why):
-- `PpaContract.settlement` can't be `physical` while the site sells and earns the export price. The preflight's double-count warning names the reason; it isn't a hidden lock.
-- A baseload PPA's share is fixed at 1 ("the volume is the baseload MW").
+**This template follows the owner's both-modes rule** (UX checklist item 12): every value above is editable in Guided and in Expert, with reset to the template value.
+
+**Locks**, each shown read-only with its reason and listed in ticket 03's PR:
+- **Engine-required:** a baseload PPA's share is fixed at 1 ("the volume is the baseload MW"; model validator).
+- **Engine-required:** the meter roles. `grid_import` and `grid_export` carry `eh_role` `grid_import` / `grid_export`, and `poi` carries `eh_poc`. The commercial meter, the export price and the settlement bind by them (`commercial.binding`), so the Link form shows the role read-only: "the commercial meter is identified by this role". The Links' sizes stay editable.
+- **Engine-required:** the grid slack (`grid`) is beyond the meter. It is not an `ipp` asset and its cost is 0 both ways (G5), so its form shows it read-only: "the market side of the meter".
+- **This template's form, not an engine refusal:** the 7b editor offers `settlement: financial` as the IPP PPA's form. Switching to `physical` is allowed; the preflight then warns `commercial.ppa_export_double_count` and names the reason. The engine still accepts a physical PPA, so existing projects stay valid (gatekeeper).
+
+### 8.3a Commercial inputs live in section 7 (owner, about 19:47 CEST)
+
+"Ensure that the IPP case is wired to the tariff and commercial section."
+- Every IPP commercial input lives in section 7 and is edited there, through the same editors and Library as any project. None is a template-private copy.
+- The `lp_input` ones stay visible with the Commercial group off (#447 §2.0).
+- Per-asset values the LP reads (overnight cost, lifetime) keep their home on the asset in 5, by #447's rule. 7d shows them read-only with a link.
+
+| Commercial input | Home / editor | Library or pack source | Class |
+|---|---|---|---|
+| PPA: form, share, price, tenor, settlement, negative-price clause, indexation | 7b PPA editor | the PPA defaults item for the form (#448 S2, `illustrative`); until S2, the template's values `illustrative`, with a cited range | `commercial` |
+| Merchant price series `da_base` (and the case shapes) | 7c price-data panel / 7a export price; Library series picker | Library series minted at create (G3), `illustrative`; user-replaceable (upload, ENTSO-E) | `lp_input` |
+| Import tariff: energy and network charge; injection item; capacity fee | 7a tariff editor | a Library tariff item (scope common) shipped with the template, `illustrative` | `lp_input` |
+| Financing: WACC, inflation, debt and equity, tax, 25-year horizon, degradation, battery replacement | 7d `FinanceInputs` editor | pack `finance.yaml` (2026-10-20), else `assumed` with source | `commercial` (the LP discount rate is `lp_input`) |
+| Battery capex (power + energy) | 5, the asset form (home); shown read-only in 7d's capex summary with a link | pack `battery` | `lp_input` |
+| Parties and value flows | 7e party board | — | `commercial` |
+| Investment case | 10 › Commercial (run); its inputs are the rows above | — | — |
+
+Ticket 03 tests "no shadow value". It changes each row's value through its section-7 route (or 5 for the battery capex) and asserts that the solve (for `lp_input`) or the IC (for `commercial`) changes accordingly, with no other copy read.
 
 ### 8.4 Home card and artwork brief
 
@@ -298,6 +325,7 @@ Owner rule (about 19:43 CEST): "all examples should enable user to change parame
 | **G3** | A template can't ship a price series: `export_price_ref` and the contracts' `reference_price` are org Library refs | `project_templates/<id>/price_series/*.csv` + `meta.json`. At create, `from_template` mints each into the org Library with `series_store.put_series` (idempotent on content, as `export_series.put_flat_export_series`), labelled `illustrative`, then writes the refs into the project's `solver_config.commercial`. A refusal leaves no half-made project | gatekeeper: **OK**. The minted meta carries #445/#448's currency, `price_basis`, `currency_year`, `source_time_basis` (UTC) and the `illustrative` label. The hash is content-only, so the same template minted into two orgs hashes the same. The K2/S1 sessions are told |
 | **G4** | Shaped PPA, swap | #448 K7's notional-volume CfD. Not in v1: 7b shows them "Not yet available" | K7 (not here) |
 | **G5** | The plants must carry capex in the IC and drop out of the counterfactual | The plants are candidates with a forced size: `p_nom_extendable`, `p_nom_min = p_nom_max` = size. The IC builds with an empty counterfactual and incremental = total: the developer's standalone case (gatekeeper: **yes**). Traps to test (gatekeeper):<br>1. The grid-side two-way slack is never an `ipp` asset: no capex, vom or COD. It is excluded the way g2p 06 excludes product slacks (it is beyond the meter, `lp.site_generators`), and its marginal cost is 0 both ways.<br>2. With no import tariff, the import cost (`grid_import`'s Link marginal cost × flow) appears **once** as an energy-cost line. It is never dropped and never booked as asset vom. The IC total reconciles with the LP's revenue − cost per stream.<br>3. `circulation_risk_snapshots = 0`: the network charge is > 0 at every snapshot (asserted in the template test).<br>4. No load: per-load, self-sufficiency and `peak_import` capacity metrics give None or "not applicable", never a division by zero (one test over the IC report).<br>5. The battery throughput cost is set as StorageUnit `marginal_cost`, which prices `p_dispatch` only: "per MWh discharged" (not `marginal_cost_storage`, which is per MWh stored).<br>6. Forced-size candidates, `degradation_by_asset` and `part_lifetimes` are fine | gatekeeper: **yes, with these tests** |
+| **G7** | No wholesale-indexed import price: a tariff item has fixed rates, so battery grid charging is priced at the retail import rate | `CommercialConfig.import_price_ref` (a Library series on the import Link, like the export), `lp_input`, edited in 7a. Not in v1 | gatekeeper (a later gated slice) |
 | **G6** | No revenue-by-stream view; curtailment isn't split by cause | A results reader over the IC `CashflowLine`s (merchant, PPA, CfD difference, import cost, O&M) and a curtailment split (export at `p_nom` vs price < 0). No engine change. UI in 10 › Commercial | UX; gatekeeper told |
 
 ---
@@ -312,7 +340,7 @@ Each is sent to the coordinator as 2–4 options, the recommendation first.
 | Q-IPP2 | Plant sizes | **A hybrid: wind 60 MW + PV 50 MWp at a 70 MW export limit**: shows overbuild, curtailment and the battery recovering it · B PV-only 100 MWp at 70 MW: simplest, strongest solar-shape story · C wind-only 80 MW at 80 MW | **A** (about 19:42 CEST) |
 | Q-IPP3 | Battery: candidate or fixed | **A candidate, power sized by the LP at a fixed 2 h duration (0–50 MW)**: answers "how big" · B fixed 30 MW / 60 MWh: revenues only, no sizing · C power and energy both sized (Store + Links): richer, a bigger model change | **A** (about 19:42 CEST) |
 | Q-IPP4 | Single year or staged | **A single year, full hourly 2030, 25-year IC**: what an IPP's COD case needs; prices need the chronology · B staged 2027 / 2030 / 2035 on representative weeks: matches the other examples, loses negative-price hours · C single year on 4 representative weeks: faster, coarser | **A** (about 19:42 CEST) |
-| Q-IPP5 | How the 8 cases ship before S5 | **A a `cases.json` sidecar, read-only list until S5 creates them**: no hidden copies · B pre-create 8 scenario copies at create: usable today, but 9 bundles and no declared changes · C ship only the base; cases come with S5 | **A** (about 19:42 CEST) |
+| Q-IPP5 | How the 8 cases ship before S5 | **A a `cases.json` sidecar, shown only once S5 creates them** (the "read-only list" was dropped for the both-modes rule): no hidden copies · B pre-create 8 scenario copies at create: usable today, but 9 bundles and no declared changes · C ship only the base; cases come with S5 | **A** (about 19:42 CEST) |
 
 ---
 

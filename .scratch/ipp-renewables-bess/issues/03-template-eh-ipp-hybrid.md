@@ -18,7 +18,10 @@ Q-IPP answers.
    - CF profiles from `services.profile_gen.generate_profile(source="synthetic")` at the pin;
    - the three price shapes of §2.3, generated deterministically and written to `price_series/`
      (ticket 02);
-   - every number in the ledger, with its label (`assumed`, `illustrative`, `pack`, `generated`).
+   - every number in the ledger, with its label (`assumed`, `illustrative`, `pack`, `generated`);
+   - no pin (section 1 warns "no site location"); the bidding zone DE-LU `assumed` in 7c;
+   - the POI tariffs as an ordinary import `Tariff` in 7a (spec §2.3): the import rate above
+     the highest `da_base` price, and the injection item; no price on the Links themselves.
 2. **Sidecars**:
    - `eh_template.json`: meta, ledger, groups pre-fill, `not_needed` sections with their reasons;
    - `solver_config.json`: commercial with the `custom` value flows and the PPA, and finance per §6;
@@ -34,7 +37,11 @@ Q-IPP answers.
    - load-based metrics give None or "not applicable" (one test over the IC report);
    - the battery throughput cost is StorageUnit `marginal_cost` (per MWh discharged).
 4. **Both modes**: every pre-filled parameter in spec §8.3 is editable in Guided and in Expert.
-   The test walks the table against the created project's editors and flow items.
+   The test walks the table against the created project's editors and flow items. The PR lists
+   the locks of §8.3 with their reasons.
+   **Section 7 wiring, no shadow value** (spec §8.3a): for each row, change the value through its
+   section-7 route (5 for the battery capex) and assert the solve (`lp_input`) or the IC
+   (`commercial`) changes; with the Commercial group off, the `lp_input` rows stay visible.
 5. **The #418 checklist**:
    - `_build.py`: feasibility solve, with the solve time recorded;
    - `routers/projects.py` `_TEMPLATE_DEFAULT_NAMES`;

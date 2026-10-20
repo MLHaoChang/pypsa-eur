@@ -16,5 +16,6 @@ Read [the spec](../spec.md) §7 first.
   and value rules (`services/experiments._validate_change`).
 - A test that every path resolves on the created project and every `old` equals the template's
   value.
-- Until S5, section 8 lists them read-only (W7 / S5 own the rows). After S5, "Create the example's
-  cases" calls S5's Duplicate-and-change for each.
+- Until S5, nothing in the UI lists them (a read-only list would be a lock the engine does not
+  require); the ledger names them in one line. After S5, "Create the example's cases" calls S5's
+  Duplicate-and-change for each, and they are ordinary editable cases.
