@@ -48,12 +48,22 @@ GENERIC_RAMP_SHARE_PER_MIN = 0.10
 GENERIC_OSCILLATION_PCT = 1.0
 OSCILLATION_BAND_HZ = (0.1, 2.0)
 
+#: The grid services (DC 04's ``SERVICES``) in words, for the panel and the report.
+SERVICE_WORDS = {"grid_forming": "grid forming", "synthetic_inertia": "synthetic inertia",
+                 "frequency_containment": "frequency containment",
+                 "fast_frequency_response": "fast frequency response", "voltage_control": "voltage control"}
+
+
+def _services_text(services) -> str:
+    return ", ".join(SERVICE_WORDS.get(x, x) for x in services)
+
+
 _FREQUENCY_SERVICES = ("grid_forming", "synthetic_inertia", "frequency_containment",
                        "fast_frequency_response")
 _BEFORE_MITIGATION = ("IT-side at the PoC before UPS/BESS smoothing (DC 03) (DC 01 envelope): "
                       "the verdict is before mitigation, not final")
-_NO_ENVELOPE = ("no AI-training load envelope: the project was not created with a dc_load "
-                "profile (POST /api/projects/from_template/<id> with dc_load)")
+_NO_ENVELOPE = ("No AI-training load profile on this project, so its ramp, swing and oscillation "
+                "are not known (a data-centre project created with the AI-training profile has one)")
 
 
 def _target(section, component=None, entity=None, field=None, panel=None) -> dict:
@@ -155,18 +165,21 @@ def _scr_rows(inp: _Inputs) -> list[dict]:
     fault = inp.marking("fault_level")
     fault_assumed = _marking_assumed(fault)
     target = _target("connection", "Bus", (fault or {}).get("entity"), "eh_sk_mva")
-    base = dict(limit=PASS_SCR, unit="SCR (Sk / IBR MVA)",
+    base = dict(limit=PASS_SCR, unit=None,
                 source=("EH product rule on gridspine's SCR bands (moderate edge 3.0); "
                         "assumed, not a grid-code value"),
                 section="connection", target=target)
     if inp.n is None:
         return [_row("scr", "Short-circuit ratio at the PoC", project_value=None,
-                     verdict="unknown", assumed=True, note="the project has no saved network",
+                     verdict="unknown", assumed=True, note="The project has no saved network",
                      **base)]
     gates, status, payload, note = evaluate_network_scr_gate(inp.n)
     if status != "ok" or gates is None:
+        base["source"] += f"; the gate: {note}"
         return [_row("scr", "Short-circuit ratio at the PoC", project_value=None,
-                     verdict="unknown", assumed=True, note=note, **base)]
+                     verdict="unknown", assumed=True,
+                     note=("No short-circuit level and inverter capacity at every point of connection, "
+                           "so the SCR is not known"), **base)]
     verdict = "pass" if gates.scr == "pass" else "warn"
     extra = "; below it an EMT study is recommended" if gates.emt_recommended else ""
     return [_row("scr", "Short-circuit ratio at the PoC", project_value=round(payload["min_scr"], 3),
@@ -205,15 +218,15 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
     if inp.n is None or not inp.links:
         return [_row("energization_peak", req, limit=None, unit="MW", source="the network",
                      project_value=None, verdict="unknown", assumed=True,
-                     note="no import connection (no Link tagged eh_role grid_import or at an eh_poc bus)"
-                     if inp.n is not None else "the project has no saved network",
+                     note="No grid connection is tagged on this project" if inp.n is not None
+                     else "The project has no saved network",
                      section="connection", target=target)]
     checked = peak_check(inp.n, inp.island_raw)
     if all(r["energized_max_mw"] <= 0 for r in checked):
         return [_row("energization_peak", req, limit=None, unit="MW", source="the network",
                      project_value=None, verdict="unknown", assumed=True,
-                     note=(f"the import connection ({', '.join(inp.links)}) is normally open "
-                           "(p_max_pu 0): the island's adequacy is the reliability study's (LOLE row)"),
+                     note=("The grid connection is normally open, so there is no import to check: the "
+                           "island's adequacy is the reliability study's (the LOLE row)"),
                      section="connection", target=target)]
     rows = []
     for r in checked:
@@ -271,7 +284,7 @@ def _ramp_row(inp: _Inputs) -> dict:
     if inp.envelope is None or limit is None:
         return _row("ramp_rate", req, limit=limit, unit="MW/min", source=source,
                     project_value=None, verdict="unknown", assumed=assumed,
-                    note=_NO_ENVELOPE if inp.envelope is None else "no connection to scale the limit by",
+                    note=_NO_ENVELOPE if inp.envelope is None else "No grid connection to scale the limit by",
                     section="connection", target=target)
     per_s = float(inp.envelope["max"]["max_dp_dt_mw_per_s"])
     per_min = mw_per_s_to_mw_per_min(per_s)
@@ -297,7 +310,7 @@ def _oscillation_row(inp: _Inputs) -> dict:
     if inp.envelope is None or not inp.connection_mw:
         return _row("oscillation", req, limit=limit, unit="% of connection, peak-to-peak",
                     source=source, project_value=None, verdict="unknown", assumed=assumed,
-                    note=_NO_ENVELOPE if inp.envelope is None else "no connection to compare against",
+                    note=_NO_ENVELOPE if inp.envelope is None else "No grid connection to compare against",
                     section="connection", target=target)
     amp = float(inp.envelope["max"]["oscillation_amplitude_mw"])
     period = float(inp.envelope["max"]["oscillation_period_s"])
@@ -324,7 +337,7 @@ def _rvc_row(inp: _Inputs) -> dict:
         return _row("rapid_voltage_change", req, limit=None, unit="% of nominal",
                     source=inp.profile_error or "the profile sets no rvc_limit_pct",
                     project_value=None, verdict="unknown", assumed=True,
-                    note="no rapid-voltage-change limit", section="connection", target=target)
+                    note="The grid code sets no rapid-voltage-change limit", section="connection", target=target)
     limit, source = float(lim["value"]), f"{inp.profile['name']}: {lim['clause']}"
     lim_assumed = lim.get("source") != "code"
     sk = _poc_sk_mva(inp.n) if inp.n is not None else None
@@ -332,7 +345,8 @@ def _rvc_row(inp: _Inputs) -> dict:
     if inp.envelope is None or sk is None:
         return _row("rapid_voltage_change", req, limit=limit, unit="% of nominal", source=source,
                     project_value=None, verdict="unknown", assumed=lim_assumed or fault_assumed,
-                    note=_NO_ENVELOPE if inp.envelope is None else "no eh_sk_mva on the eh_poc bus",
+                    note=_NO_ENVELOPE if inp.envelope is None
+                    else "No short-circuit level at the point of connection",
                     section="connection", target=target)
     swing = float(inp.envelope["max"]["swing_mw"])
     d = swing / sk * 100.0
@@ -362,8 +376,8 @@ def _services(inp: _Inputs):
 
 
 def _no_island_note(inp: _Inputs) -> str:
-    return (f"island_config.json is not valid: {inp.island_error}" if inp.island_error
-            else "the project has no island sidecar (island_config.json)")
+    return (f"The island requirements are not valid: {inp.island_error}" if inp.island_error
+            else "The project has no island requirements yet")
 
 
 def _unit_rating(n, name: str) -> tuple[float | None, bool]:
@@ -387,7 +401,7 @@ def _reactive_row(inp: _Inputs) -> dict:
     if not isinstance(lim, dict):
         return _row("reactive_range", req, limit=None, unit="Mvar",
                     source=inp.profile_error or "the profile sets no q_range_demand",
-                    project_value=None, verdict="unknown", assumed=True, note="no reactive range",
+                    project_value=None, verdict="unknown", assumed=True, note="The grid code sets no reactive range",
                     section="assets", target=target)
     source = f"{inp.profile['name']}: {lim['clause']}"
     assumed = lim.get("source") != "code"
@@ -395,7 +409,7 @@ def _reactive_row(inp: _Inputs) -> dict:
     if services is None or not inp.connection_mw:
         return _row("reactive_range", req, limit=None, unit="Mvar", source=source,
                     project_value=None, verdict="unknown", assumed=assumed,
-                    note=_no_island_note(inp) if services is None else "no import connection",
+                    note=_no_island_note(inp) if services is None else "No grid connection is tagged on this project",
                     section="assets", target=target)
     need = float(lim["value"]) * inp.connection_mw
     have, unsized, parts, unrated = 0.0, [], [], []
@@ -421,9 +435,12 @@ def _reactive_row(inp: _Inputs) -> dict:
         verdict = "warn"
     note = (f"needed {lim['value']:g} × {inp.connection_mw:g} MW import = {need:.4g} Mvar; offered "
             f"{have:.4g} Mvar ({', '.join(parts) or 'none'}) as P·tan(acos pf_rated), an assumed "
-            "capability at rated P from the units offering voltage control (offered_services; a "
+            "capability at rated P from the units offering voltage control (a "
             "not-credited unit counts zero)")
-    if unsized:
+    if unsized and verdict == "unknown":
+        note = (f"Not sized yet: {', '.join(unsized)}; run the plan to see the reactive range "
+                f"{'it adds' if len(unsized) == 1 else 'they add'}. " + note[0].upper() + note[1:])
+    elif unsized:
         note += f"; {', '.join(unsized)} extendable and not yet sized (run the plan)"
     if unrated:
         note += f"; {', '.join(unrated)} counted zero: no pf_rated or no rating in the network"
@@ -438,9 +455,9 @@ def _support_rows(inp: _Inputs) -> list[dict]:
     target = _target("assets", None, None, "preset")
     freq = [s for s in (offered or []) if s in _FREQUENCY_SERVICES]
     rows = [_row("frequency_support", "Frequency support offered by the site's converters",
-                 limit="at least one of " + ", ".join(_FREQUENCY_SERVICES), unit=None,
+                 limit="at least one of " + _services_text(_FREQUENCY_SERVICES), unit=None,
                  source="assumed: the scorecard's own expectation for a large connection; no "
-                        "profile limit", project_value=", ".join(offered) if offered else
+                        "profile limit", project_value=_services_text(offered) if offered else
                  ("none" if offered is not None else None),
                  verdict="unknown" if offered is None else ("pass" if freq else "warn"),
                  assumed=True,
@@ -450,7 +467,7 @@ def _support_rows(inp: _Inputs) -> list[dict]:
     for r in (inp.profile or {}).get("dynamic_requirements") or []:
         rows.append(_row(f"dynamic:{r['id']}", r["requirement"], limit=r["value"], unit=None,
                          source=f"{inp.profile['name']}: {r['clause']}",
-                         project_value=(", ".join(offered) if offered else None),
+                         project_value=(_services_text(offered) if offered else None),
                          verdict="unknown", assumed=r.get("source") != "code",
                          note=f"dynamic (EMT) study needed; applies to {r.get('applies_to', 'facility')}; "
                               "a steady-state screening never passes it",
@@ -462,10 +479,10 @@ def _island_rows(inp: _Inputs) -> list[dict]:
     target = _target("assets", None, None, "island")
     scenarios = list(((inp.island_raw or {}).get("requirements") or {}).get("scenarios") or [])
     if inp.island is None:
-        return [_row("grid_former", "A unit that forms the island's voltage", limit="a GFM bess or a genset",
+        return [_row("grid_former", "A unit that forms the island's voltage", limit="a grid-forming battery or a genset",
                      unit=None, source="the island study's own rule (has_grid_former)",
                      project_value=None, verdict="unknown", assumed=False,
-                     note=f"not assessed: {_no_island_note(inp)}", section="assets", target=target)]
+                     note=f"Not assessed: {_no_island_note(inp)}", section="assets", target=target)]
     from services.adequacy.island_config import has_grid_former
 
     # A valid sidecar names at least one islanding scenario (gridspine's
@@ -474,7 +491,7 @@ def _island_rows(inp: _Inputs) -> list[dict]:
     rows = []
     gf = has_grid_former(inp.island)
     rows.append(_row("grid_former", "A unit that forms the island's voltage",
-                     limit="a GFM bess or a genset", unit=None,
+                     limit="a grid-forming battery or a genset", unit=None,
                      source="the island study's own rule (has_grid_former)",
                      project_value="yes" if gf else "none", verdict="pass" if gf else "fail",
                      assumed=False, note=f"islanding scenarios {', '.join(scenarios)}",
@@ -487,7 +504,8 @@ def _island_rows(inp: _Inputs) -> list[dict]:
     for sc in scenarios:
         v = variants.get(sc)
         if inp.island_study is None or v is None:
-            verdict, value, note = "unknown", None, "no island study since the sidecar was saved (run it)"
+            verdict, value, note = ("unknown", None,
+                                    "No island study since the island requirements were saved: run it")
         elif v.get("status") == "ok":
             verdict, value, note = "pass", "feasible", "the hub LP sized with the island rows is feasible"
         else:
@@ -536,7 +554,7 @@ def _lole_row(inp: _Inputs) -> dict:
     else:
         return _row("lole", req, limit=None, unit="h/yr", source="no LOLE goal in the template ledger",
                     project_value=None, verdict="unknown", assumed=True,
-                    note="the project sets no LOLE goal (an ENS cap only, or none)",
+                    note="The project sets no LOLE goal (an ENS cap only, or none)",
                     section="scenarios", target=target)
     years = _num((payload or {}).get("horizon_years"))
     mean = _num((payload or {}).get("lole_h_per_year"))
@@ -546,11 +564,11 @@ def _lole_row(inp: _Inputs) -> dict:
                     verdict="unknown", assumed=assumed, note=note, section="scenarios", target=target)
 
     if payload is None or mean is None or years is None or years <= 0:
-        return unknown("no reliability study for this project in this session" if inp.eh_study is None
-                       else "the reliability study did not certify an MC LOLE")
+        return unknown("No reliability study for this project in this session" if inp.eh_study is None
+                       else "The reliability study did not certify an MC LOLE")
     if inp.study_edited is not False:
-        return unknown("stale: the network was edited since the study, re-run it" if inp.study_edited
-                       else "the study's network revision is not known")
+        return unknown("Stale: the network was edited since the study, re-run it" if inp.study_edited
+                       else "The study's network revision is not known")
     ci = payload.get("lole_ci") or []
     lo, hi = (_num(ci[0]), _num(ci[1])) if len(ci) == 2 else (None, None)
     if lo is None or hi is None:

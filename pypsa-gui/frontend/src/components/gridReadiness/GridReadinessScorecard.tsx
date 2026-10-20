@@ -219,7 +219,10 @@ export function GridReadinessScorecard({ data, mode, onJump = () => {}, fieldLab
           Screening against <span data-testid="gr-profile" className="font-semibold">
             {data.profile.title ?? data.profile.id}</span>
         </div>
-        <div data-testid="gr-summary" className="text-muted">{summaryText(data.summary, mode)}</div>
+        {/* Guided shows the summary on its own collapsed line already. */}
+        {mode === 'expert' && (
+          <div data-testid="gr-summary" className="text-muted">{summaryText(data.summary, mode)}</div>
+        )}
         <div className="text-[11px] text-muted">Advisory: nothing here blocks Run.</div>
         {data.profile.error && (
           <div data-testid="gr-profile-error" className="text-[11px] text-warn">{data.profile.error}</div>
