@@ -322,7 +322,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 174 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 214 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -348,6 +348,12 @@ opt-in) rebuilds one Load's or the network's unserved energy, peak, weighted she
 hours and VoLL cost from the solve's own VoLL-slack capture, which every solve
 claim wipes and rewrites beside the input fingerprints. Monte Carlo LOLE (and
 the EH study's per-year LOLE) stays withheld: no per-sample series is retained.
+`bus-price/1`, `generator-emissions/1`, `network-emissions/1` and `curtailment/1`
+(opt-in, `price_calculations.py`, `emissions_calculations.py`,
+`curtailment_calculations.py`, sharing `profile_common.py`) check one bus's
+time-weighted price, generator CO2 over the time-varying efficiency with the cap's
+dual as −mu, and curtailment of generators with a time-varying availability. Every
+profile refuses once an AC power flow has overwritten the LP outputs.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,

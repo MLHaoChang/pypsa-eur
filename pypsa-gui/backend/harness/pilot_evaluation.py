@@ -11,7 +11,7 @@ import time
 
 from harness.protocol import ProviderError
 
-SUITE_VERSION = "checked-pilot-evaluation/4"
+SUITE_VERSION = "checked-pilot-evaluation/5"
 ORACLE_VERSION = "hand-worked-network-and-carrier-oracles/1"
 UNSAFE = "Unchecked invented narrative: the network is certified safe at 999 MW."
 
@@ -64,6 +64,19 @@ LOST_LOAD = {
     "lost_load_energy": (15, "MWh"), "peak_shed": (5, "MW"),
     "shed_hours": (3, "h"), "lost_load_cost": (10000, "EUR"),
 }
+# Bus B1: G1 at 10 then G2 at 30 set prices 10 and 30; generator weights 1, 3:
+# time-weighted mean (10 + 90)/4 = 25; no hour at VoLL 1000.
+PRICE = {"mean_price": (25, "EUR/MWh"), "min_price": (10, "EUR/MWh"),
+         "max_price": (30, "EUR/MWh"), "hours_at_voll": (0, "h")}
+# G1 burns gas (0.25 t/MWh_th) at efficiency 0.5 for loads 5 and 7 at weights
+# 2, 1: (10 + 7)/0.5*0.25 = 8.5 t. With a 6 t cap and clean G2 at 50, the first
+# hour's ton is cheapest to abate: +40 EUR per MWh_el saves 0.5 t x 2 = 1 t.
+GENERATOR_EMISSIONS = {"generator_emissions": (8.5, "tCO2")}
+NETWORK_EMISSIONS = {"total_emissions": (6, "tCO2"), "co2_cap_shadow_price": (40, "EUR/tCO2")}
+# G1 (20 MW) available 1.0 then 0.5 for loads 5 and 7 at weights 2, 1:
+# available 40 + 10 = 50; curtailed 30 + 3 = 33; 66 %.
+CURTAILMENT = {"available_energy": (50, "MWh"), "curtailed_energy": (33, "MWh"),
+               "curtailment_share": (66, "%")}
 PROFILE_METRICS = {
     "generator-dispatch/1": tuple(GENERATOR)[:3],
     "generator-cost/1": tuple(GENERATOR),
@@ -79,10 +92,21 @@ BATTERY_CARRIER = {
     "carrier_generator_energy": (0, "MWh"), "carrier_peak_generator_output": (0, "MW"),
     "carrier_storage_discharged_energy": (6, "MWh"), "carrier_storage_charged_energy": (15, "MWh"),
 }
-# Opt-in profiles join the pilot suite only; the stress catalogue keeps the first five.
-EVALUATION_PROFILE_METRICS = {**PROFILE_METRICS, "carrier-energy/1": tuple(CARRIER),
-                              "branch-loading/1": tuple(BRANCH), "network-loading/1": tuple(NETWORK_LOADING),
-                              "lost-load/1": tuple(LOST_LOAD)}
+# The profiles beyond the first five: request wording, oracle and the metric a
+# missing or stale source must make unavailable. They join the pilot suite only;
+# the stress catalogue keeps the first five.
+ADDED = {
+    "carrier-energy/1": ("carrier wind", "Give me the key results for", CARRIER, "carrier_generator_energy"),
+    "branch-loading/1": ("line L12", "Show the loading for", BRANCH, "peak_branch_utilisation"),
+    "network-loading/1": ("network", "Show the loading for", NETWORK_LOADING, "max_branch_utilisation"),
+    "lost-load/1": ("load L1", "Show the lost load for", LOST_LOAD, "lost_load_energy"),
+    "bus-price/1": ("bus B1", "Show the price for", PRICE, "mean_price"),
+    "generator-emissions/1": ("generator G1", "Show the emissions for", GENERATOR_EMISSIONS,
+                              "generator_emissions"),
+    "network-emissions/1": ("network", "Show the emissions for", NETWORK_EMISSIONS, "total_emissions"),
+    "curtailment/1": ("generator G1", "Show the curtailment for", CURTAILMENT, "curtailed_energy"),
+}
+EVALUATION_PROFILE_METRICS = {**PROFILE_METRICS, **{p: tuple(v[2]) for p, v in ADDED.items()}}
 # These are public contract labels, not calculated values from the runtime.
 LABELS = {
     "dispatch_energy": "Generator energy", "marginal_expenditure": "Marginal dispatch expenditure",
@@ -108,6 +132,14 @@ LABELS = {
     "peak_shed": "Peak shed power",
     "shed_hours": "Weighted hours with shed above 1e-3 MW",
     "lost_load_cost": "Unserved energy at the solve's VoLL",
+    "mean_price": "Time-weighted mean price (generator snapshot weights)",
+    "min_price": "Lowest price", "max_price": "Highest price",
+    "hours_at_voll": "Weighted hours priced at the solve's VoLL",
+    "generator_emissions": "CO2 emissions of this generator",
+    "total_emissions": "CO2 emissions of all generators",
+    "co2_cap_shadow_price": "CO2 cap shadow price",
+    "available_energy": "Available variable energy", "curtailed_energy": "Curtailed energy",
+    "curtailment_share": "Curtailed share of available energy",
 }
 
 
@@ -136,39 +168,29 @@ class Case:
     def entity(self):
         if self.entity_id is not None:
             return self.entity_id
-        return ("Battery" if self.profile.startswith("storage-") else "network" if self.profile.startswith("network-")
-                else "wind" if self.profile.startswith("carrier-")
-                else "L12" if self.profile.startswith("branch-")
-                else "L1" if self.profile.startswith("lost-") else "G1")
-
+        if self.profile in ADDED:
+            return ADDED[self.profile][0].split()[-1]
+        return "Battery" if self.profile.startswith("storage-") else "network" if self.profile.startswith("network-") else "G1"
 
 def catalogue():
     cases = []
     for profile, metrics in EVALUATION_PROFILE_METRICS.items():
         storage = profile.startswith("storage-")
-        carrier = profile.startswith("carrier-")
         cost = "cost" in profile
-        loading = profile.endswith("-loading/1")
-        shed = profile.startswith("lost-")
-        entity = ("storage unit Battery" if storage else "network" if profile.startswith("network-")
-                  else "carrier wind" if carrier else "line L12" if loading else "load L1" if shed
-                  else "generator G1")
-        question = (f"Show the loading for {entity}" if loading else f"Show the lost load for {entity}" if shed
-                    else f"Give me the key results for {entity}")
-        if cost:
-            question += "; price year 2026; annual fixed cost fraction " + ("0.5" if storage else "1")
-        values = (STORAGE if storage else NETWORK_LOADING if profile == "network-loading/1" else BRANCH if loading
-                  else LOST_LOAD if shed
-                  else NETWORK if profile.startswith("network-") else CARRIER if carrier else GENERATOR)
+        if profile in ADDED:
+            entity, verb, values, target = ADDED[profile]
+            question = f"{verb} {entity}"
+        else:
+            entity = "storage unit Battery" if storage else "network" if profile.startswith("network-") else "generator G1"
+            question = f"Give me the key results for {entity}"
+            if cost:
+                question += "; price year 2026; annual fixed cost fraction " + ("0.5" if storage else "1")
+            values = STORAGE if storage else NETWORK if profile.startswith("network-") else GENERATOR
+            target = "total_cost" if cost else "discharged_energy" if storage else "dispatch_energy"
         expected = {metric: values[metric] for metric in metrics}
         cases.append(Case(profile + ":golden", profile, "golden", question, expected))
         for fault in ("value", "unit", "formula", "source", "omit", "narrative"):
             cases.append(Case(profile + ":" + fault, profile, fault, question, {}, metrics))
-        target = ("total_cost" if cost else "discharged_energy" if storage
-                  else "carrier_generator_energy" if carrier else "max_branch_utilisation"
-                  if profile == "network-loading/1" else "peak_branch_utilisation" if loading
-                  else "lost_load_energy" if shed
-                  else "dispatch_energy")
         for fault in ("missing", "stale"):
             cases.append(Case(profile + ":" + fault, profile, fault, question, {}, (target,)))
         cases.append(Case(profile + ":unsupported", profile, "unsupported", question, expected, ("adequacy_certificate",)))
@@ -177,7 +199,6 @@ def catalogue():
     cases.append(Case("carrier-energy/1:battery", "carrier-energy/1", "battery",
                       "Give me the key results for carrier battery", BATTERY_CARRIER, entity_id="battery"))
     return tuple(cases)
-
 
 CASES = catalogue()
 GOLDEN_CASES = tuple(case for case in CASES if case.fault == "golden")
