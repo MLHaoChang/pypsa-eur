@@ -1,0 +1,14 @@
+{
+  "base_sha": "fed26ad438d082c410e42a5c25a567cd738bc62b",
+  "publication_scope": "Design/specification package only; application branding and native implementation excluded",
+  "clean_package_browser_groups_passed": 14,
+  "screenshots": 16,
+  "portable_html_sha256": "0cc92ac1faf8d79a01098b4195c3b907e2026058c4a8234bc04edf525650ac2a",
+  "package_uses_local_reference_assets": true,
+  "remote_ci": "Not yet run at local packaging checkpoint",
+  "native_application_e2e": "Not run for documentation publication",
+  "native_backend_separability": "Open gate; source reconnaissance requires current-master reassessment",
+  "paid_calls": 0,
+  "portable_html_matches_owner_preview_after_license_whitespace_normalization": true,
+  "normalized_font_license_trailing_whitespace_only": true
+}
