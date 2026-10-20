@@ -177,7 +177,7 @@ def test_list_pending_profiles_tool(client, wind_project):
 
 
 def test_apply_generated_profile_writes_p_max_pu(client, wind_project,
-                                                 session_ctx):
+                                                 bound_ctx):
     gen = chat_tools.DISPATCHERS["generate_renewable_profile"](
         project_id=wind_project,
         points=[{"id": "g_wind", "lon": 8.0, "lat": 50.0}],
@@ -187,18 +187,12 @@ def test_apply_generated_profile_writes_p_max_pu(client, wind_project,
     _wait_job(gen["id"])
 
     # A real chat turn runs tools with the session's request context bound;
-    # a bare dispatcher call must bind it the same way or the write would
-    # land on the process foreground instead of the session's project.
-    from services.pypsa_service import PyPSAService
-
-    ctx = session_ctx(client)
-    token = PyPSAService.bind_request_context(ctx)
-    try:
+    # the bound_ctx fixture binds it the same way, or the write would land on
+    # the process foreground instead of the session's project.
+    with bound_ctx(client) as ctx:
         out = chat_tools.DISPATCHERS["apply_generated_profile"](
             project_id=wind_project, job_id=gen["id"], component="g_wind",
         )
-    finally:
-        PyPSAService.reset_request_context(token)
     assert out["component"] == "g_wind"
     assert out["hours"] == 8760
 
@@ -216,6 +210,124 @@ def test_apply_on_another_orgs_project_is_refused(client, wind_project,
         assert err.value.status_code == 404
     finally:
         ct.set_acting_user(None)
+
+
+# ---------------------------------------------------------------------------
+# C2: resolution passthrough
+# ---------------------------------------------------------------------------
+
+
+def test_preview_tool_passes_resolution_through(client):
+    out = chat_tools.DISPATCHERS["preview_renewable_profile"](
+        points=[{"id": "g_wind", "lon": 8.0, "lat": 50.0}],
+        technology="wind",
+        year=2023,
+        resolution="weekly",
+    )
+    assert out["estimate"] is True
+    assert out["resolution"] == "weekly"
+    assert len(out["series"]["g_wind"]) == 53
+
+
+def test_generate_tool_passes_resolution_through(client, wind_project):
+    out = chat_tools.DISPATCHERS["generate_renewable_profile"](
+        project_id=wind_project,
+        points=[{"id": "g_wind", "lon": 8.0, "lat": 50.0}],
+        technology="wind",
+        year=2023,
+        resolution="daily",
+    )
+    assert out["kind"] == "profile_gen"
+    done = _wait_job(out["id"])
+    assert done["status"] == "completed", done["error"]
+
+    pending = chat_tools.DISPATCHERS["list_pending_profiles"](
+        project_id=wind_project,
+    )
+    mine = [p for p in pending["pending"] if p["job_id"] == out["id"]]
+    assert mine and mine[0]["resolution"] == "daily"
+
+
+def test_resolution_schemas_are_declared_in_the_catalogue():
+    schemas = {t["name"]: t for t in TOOLS}
+    for name in ("preview_renewable_profile", "generate_renewable_profile"):
+        props = schemas[name]["input_schema"]["properties"]
+        assert props["resolution"]["enum"] == ["hourly", "daily", "weekly"], \
+            name
+
+
+# ---------------------------------------------------------------------------
+# C3: from_generators — resolve generator names to their bus coordinates
+# ---------------------------------------------------------------------------
+
+
+def test_preview_from_generators_matches_explicit_points(client, wind_project,
+                                                         bound_ctx):
+    """from_generators=["g_wind"] must resolve to the bus coordinates
+    (8.0, 50.0): the deterministic synthetic source then yields exactly the
+    series an explicit-points call produces."""
+    explicit = chat_tools.DISPATCHERS["preview_renewable_profile"](
+        points=[{"id": "g_wind", "lon": 8.0, "lat": 50.0}],
+        technology="wind", year=2023,
+    )
+    with bound_ctx(client):
+        resolved = chat_tools.DISPATCHERS["preview_renewable_profile"](
+            from_generators=["g_wind"],
+            technology="wind", year=2023,
+        )
+    assert resolved["series"]["g_wind"] == explicit["series"]["g_wind"]
+
+
+def test_from_generators_unknown_name_is_a_typed_refusal(client, wind_project,
+                                                         bound_ctx):
+    with bound_ctx(client):
+        with pytest.raises(HTTPException) as err:
+            chat_tools.DISPATCHERS["preview_renewable_profile"](
+                from_generators=["no_such_gen"], technology="wind",
+            )
+    assert err.value.status_code == 422
+    assert err.value.detail["error_kind"] == "unknown_generator"
+    assert "no_such_gen" in err.value.detail["message"]
+
+
+def test_neither_points_nor_from_generators_is_a_typed_refusal(client):
+    with pytest.raises(HTTPException) as err:
+        chat_tools.DISPATCHERS["preview_renewable_profile"](technology="wind")
+    assert err.value.status_code == 422
+    assert err.value.detail["error_kind"] == "no_points"
+
+
+def test_generate_from_generators_records_the_bus_coordinates(
+    client, wind_project, bound_ctx,
+):
+    with bound_ctx(client):
+        out = chat_tools.DISPATCHERS["generate_renewable_profile"](
+            project_id=wind_project,
+            from_generators=["g_wind"],
+            technology="wind",
+            year=2023,
+        )
+    assert out["kind"] == "profile_gen"
+    done = _wait_job(out["id"])
+    assert done["status"] == "completed", done["error"]
+
+    pending = chat_tools.DISPATCHERS["list_pending_profiles"](
+        project_id=wind_project,
+    )
+    mine = [p for p in pending["pending"] if p["job_id"] == out["id"]]
+    assert len(mine) == 1
+    assert mine[0]["points"] == ["g_wind"]
+    coords = mine[0]["point_coords"]["g_wind"]
+    assert coords == [8.0, 50.0]
+
+
+def test_from_generators_schema_is_declared_in_the_catalogue():
+    schemas = {t["name"]: t for t in TOOLS}
+    for name in ("preview_renewable_profile", "generate_renewable_profile"):
+        entry = schemas[name]
+        props = entry["input_schema"]["properties"]
+        assert props["from_generators"]["items"]["type"] == "string", name
+        assert "points" not in entry["input_schema"]["required"], name
 
 
 # ---------------------------------------------------------------------------

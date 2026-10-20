@@ -1438,16 +1438,24 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "preview_renewable_profile",
-        "Quick SYNTHETIC preview of a renewable profile for the given points "
-        "(id/lon/lat), downsampled to daily means and labelled an estimate — "
-        "for weighing options before committing to a real generation. Never "
-        "enqueues a job. Safety: read.",
+        "Quick SYNTHETIC preview of a renewable profile, downsampled to "
+        "daily means and labelled an estimate — for weighing options before "
+        "committing to a real generation. Sites come from `points` "
+        "(id/lon/lat) and/or `from_generators` (generator names; each "
+        "generator's bus coordinates seed its site, and the point id is the "
+        "generator name, so apply needs no mapping) — at least one of the "
+        "two is required. `resolution` picks the output axis (hourly is "
+        "downsampled to daily for display; daily/weekly are returned "
+        "as-is). Never enqueues a job. Safety: read.",
         {"points": {"type": "array", "items": {"type": "object"}},
+         "from_generators": {"type": "array", "items": {"type": "string"}},
          "technology": {"type": "string", "enum": ["wind", "solar"]},
          "preset": {"type": "string"},
          "params": {"type": "object"},
-         "year": {"type": "integer"}},
-        ["points", "technology"],
+         "year": {"type": "integer"},
+         "resolution": {"type": "string",
+                        "enum": ["hourly", "daily", "weekly"]}},
+        ["technology"],
     ),
     _t(
         "list_pending_profiles",
@@ -1462,19 +1470,28 @@ TOOLS: list[dict[str, Any]] = [
         "generate_renewable_profile",
         "Queue a renewable-profile generation for a project as a solve-queue "
         "job (kind profile_gen) and answer the job — it does NOT complete "
-        "inline; poll solve_queue_list and then list_pending_profiles. The "
-        "synthetic source works offline; the atlite source needs CDS "
+        "inline; poll solve_queue_list and then list_pending_profiles. Sites "
+        "come from `points` (id/lon/lat) and/or `from_generators` (generator "
+        "names; the bus coordinates seed the sites and the point ids are the "
+        "generator names, so apply_generated_profile needs no point_id "
+        "mapping) — at least one of the two is required. The synthetic "
+        "source works offline; the atlite source needs CDS "
         "credentials and downloads ERA5 weather for the points' bounding box "
-        "(minutes). One FIFO serves every kind: the job queues behind a "
-        "running solve. Safety: execution.",
+        "(minutes). `resolution` aggregates at generation: hourly is the "
+        "native axis; daily/weekly are means over the hour (upsampled back "
+        "to the network's hourly snapshots at apply). One FIFO serves every "
+        "kind: the job queues behind a running solve. Safety: execution.",
         {"project_id": {"type": "string"},
          "points": {"type": "array", "items": {"type": "object"}},
+         "from_generators": {"type": "array", "items": {"type": "string"}},
          "technology": {"type": "string", "enum": ["wind", "solar"]},
          "preset": {"type": "string"},
          "params": {"type": "object"},
          "source": {"type": "string", "enum": ["synthetic", "atlite"]},
-         "year": {"type": "integer"}},
-        ["project_id", "points", "technology"],
+         "year": {"type": "integer"},
+         "resolution": {"type": "string",
+                        "enum": ["hourly", "daily", "weekly"]}},
+        ["project_id", "technology"],
     ),
     _t(
         "apply_generated_profile",
@@ -3675,7 +3692,7 @@ TOOLS.extend([
     _t("get_experiment", "Read one owned experiment in the active project. Returns typed cases, limits, preflight and any durable single-case execution receipt. Planned/queued is not completed; interrupted submissions have executed=null. Recorded objectives require matching completed job, exact solved inputs and intact evidence. No operation is started or replayed. Safety: read.", {"experiment_id": {"type": "string"}}, ["experiment_id"]),
     _t("get_loadflow_summary", "Summarise the CURRENT load-flow results of the active project: lines and transformers ranked by peak utilisation = flow / (rating * s_max_pu), computed by software from the same results the Load flow tab reads. Per branch (default 5, max 25, trimmed to a bounded payload): both-terminal peak flow, rating (optimized s_nom_opt or configured s_nom), s_max_pu range, peak/mean utilisation, weighted hours at/over the limit. Returns the exact source, snapshot window, freshness, solve state, ranking convention, skipped branches (missing or zero rating, no flow data) and missing_evidence. LOPF results are an ACTIVE-POWER PROXY, not an AC apparent-power assessment; source='ac_pf' uses apparent power where reactive flows exist and excludes unconverged snapshots. Never proof of full AC thermal compliance (no N-1, no voltage limits). Unsolved, stale, running, infeasible or failed results return status unavailable with a typed unavailable_kind; never invent values. window_from/window_to are inclusive snapshot indexes for follow-ups. run_id (historical) returns unavailable until run evidence artifacts exist (issue 06). Safety: read.", {"source": {"type": "string", "enum": ["lopf", "ac_pf"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "run_id": {"type": "string", "maxLength": 64}}, []),
     _t("list_tasks", "List up to 20 most recently updated durable tasks owned by you in the active project. Use a returned ID to resume in a new chat or provider. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
-    _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}}, ["goal"]),
+    _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. With overview=true (no goal) answers \"what can you do here?\": the core-feature families (projects, results, checks, edits, sensitivities, studies, reports), each available or not for this project, role, mode and personal rule, with the reason, an example sentence and its offered tools. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}, "overview": {"type": "boolean"}}, []),
     _t("start_task", "Persist a project/user-scoped plan of 1–12 ordinary tools. Create/activate the project first; rebinding and task-control tools cannot be steps. Each step has unique id, tool, args. Whole-value $earlier_step.path references resolve saved results. Stable request_id deduplicates identical plans. Returns task_id, status, next_step. Execute next_step via an ordinary offered call; this tool runs no hidden actions. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "steps": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}, "required": ["id", "tool", "args"]}}}, ["title", "steps", "request_id"]),
     _t("get_task", "Read a durable task in the active project owned by the caller. Returns completed steps and the next exact call; no completed step is replayed. Safety: read.", {"task_id": {"type": "string"}}, ["task_id"]),
     _t("resume_task", "Attach a durable task to this chat and return next_step. Execute it as an ordinary offered tool call; all normal gates apply. Interrupted writes become uncertain and require explicit review. No implicit tool execution or job polling. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),

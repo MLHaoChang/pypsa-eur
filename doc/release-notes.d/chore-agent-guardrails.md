@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): Agent guardrails from the profile-generator retro: a ``bound_ctx`` test fixture for chat-tool tests that read the foreground network, ``pypsa-gui/TESTING.md`` and ``pypsa-gui/AGENTS.md`` navigation notes, and a ruff config that stops flagging the GUI's first-line docstring style (D209/D213).

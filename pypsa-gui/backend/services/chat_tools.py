@@ -3419,13 +3419,82 @@ def get_profile_parameters(preset: str, technology: str | None = None) -> dict:
     }
 
 
-def preview_renewable_profile(points: list, technology: str,
+def _points_from_generators(names: list) -> list[dict]:
+    """Resolve generator names to profile points (id/lon/lat) from the
+    foreground network's bus coordinates — the chat-facing convenience that
+    lets "generate a wind profile for g_wind" skip coordinates entirely
+    (C3). The point id IS the generator name, which is exactly what the
+    apply path defaults to. Unknown generators are a 422-shaped refusal
+    listing what was not found."""
+    from fastapi import HTTPException
+
+    from services.pypsa_service import PyPSAService
+
+    n = PyPSAService.get_network()
+    points: list[dict] = []
+    missing: list[str] = []
+    for raw in names:
+        g = str(raw)
+        if g not in n.generators.index:
+            missing.append(g)
+            continue
+        bus = str(n.generators.at[g, "bus"] or "")
+        if bus not in n.buses.index:
+            missing.append(f"{g} (its bus {bus!r} is not on the network)")
+            continue
+        points.append({
+            "id": g,
+            "lon": float(n.buses.at[bus, "x"] or 0.0),
+            "lat": float(n.buses.at[bus, "y"] or 0.0),
+        })
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "unknown_generator",
+                "message": "unknown generator(s): "
+                           + ", ".join(missing)
+                           + f"; the network holds {len(n.generators.index)} "
+                           "generators — check the name(s)",
+            },
+        )
+    return points
+
+
+def _merge_points(points: list | None, from_generators: list | None) -> list:
+    """Explicit points plus generator-resolved points; at least one source
+    is required. Duplicated ids are the engine's typed refusal downstream."""
+    from fastapi import HTTPException
+
+    merged = [dict(p) for p in (points or [])]
+    if from_generators:
+        merged.extend(_points_from_generators(from_generators))
+    if not merged:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "no_points",
+                "message": "give either `points` (id/lon/lat) or "
+                           "`from_generators` (generator names whose bus "
+                           "coordinates seed the sites)",
+            },
+        )
+    return merged
+
+
+def preview_renewable_profile(points: list | None = None, technology: str = "",
                               preset: str | None = None,
                               params: dict | None = None,
-                              year: int | None = None) -> dict:
+                              year: int | None = None,
+                              resolution: str | None = None,
+                              from_generators: list | None = None) -> dict:
     from routers.profiles import EstimateRequest, estimate_profile as _h
-    body = EstimateRequest(points=points, technology=technology,
-                           preset=preset, params=params, year=year)
+    kw: dict = {"points": _merge_points(points, from_generators),
+                "technology": technology,
+                "preset": preset, "params": params, "year": year}
+    if resolution is not None:
+        kw["resolution"] = resolution
+    body = EstimateRequest(**kw)
     return _route(_h, body)
 
 
@@ -3434,15 +3503,22 @@ def list_pending_profiles(project_id: str) -> dict:
     return _route(_h, proj=_authorized_project(project_id))
 
 
-def generate_renewable_profile(project_id: str, points: list, technology: str,
+def generate_renewable_profile(project_id: str, points: list | None = None,
+                               technology: str = "",
                                preset: str | None = None,
                                params: dict | None = None,
                                source: str = "synthetic",
-                               year: int | None = None) -> dict:
+                               year: int | None = None,
+                               resolution: str | None = None,
+                               from_generators: list | None = None) -> dict:
     from routers.profiles import GenerateRequest, generate_profiles as _h
-    body = GenerateRequest(points=points, technology=technology,
-                           preset=preset, params=params, source=source,
-                           year=year)
+    kw: dict = {"points": _merge_points(points, from_generators),
+                "technology": technology,
+                "preset": preset, "params": params, "source": source,
+                "year": year}
+    if resolution is not None:
+        kw["resolution"] = resolution
+    body = GenerateRequest(**kw)
     return _route(_h, body, proj=_authorized_project(project_id))
 
 
