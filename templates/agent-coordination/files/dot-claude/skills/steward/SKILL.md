@@ -31,7 +31,7 @@ The coordinator merges a PR when `scripts/coord/premerge.sh <pr>` exits 0 and Gi
 - no file **overlaps** what `{{BASE_BRANCH}}` changed since the PR's merge-base. Docs-only overlap is fine when the merge is clean, and so is a file identical on both sides;
 - a PR that touches a path in its `semantic_re` passes its `semantic_cmd` on a trial merge with current `{{BASE_BRANCH}}`.
 
-A PR that touches {{GATED_AREAS}} also needs the gatekeeper's OK on that exact head SHA.
+A PR that touches {{GATED_AREAS}} also needs the gatekeeper's OK on that exact head SHA. Where the project has a UX reviewer (`docs/agents/roles.md`), a PR that changes UI also needs its OK on that SHA, checked against the project's approved workflow design.
 
 ## Gatekeeper checkpoints
 
