@@ -26,9 +26,10 @@ on UNDELIVERED tonnes, since the lost-production value is the offtake's shortfal
   end-of-snapshot, so e(t−1), wrapped cyclically within the period, less e_min_pu(t)·e_nom_opt.
 * Units sharing a tank are capped together.
 * ``covered_t`` = min(Σ gross_t, usable inventory) is information. So is ``gross_t``.
-* ``lost_eur`` = undelivered_t × the product's lost-production value (its shortfall Generator's marginal
-  cost, ``process_products.lost_production_value``, per t). Never VoLL and never 0. With no value it is None,
-  flagged ``lost_production_value_missing`` (ADR-0001).
+* ``lost_eur`` = undelivered_t × the product's lost-production value, per t, from the one accessor
+  (``process_products.shortfalls``: its shortfall Generator's value, else the bus's ``lost_production_value``;
+  ``lost_load`` is the solve's capture record). Never VoLL and never 0. With no value it is None, flagged
+  ``lost_production_value_missing`` (ADR-0001).
 
 Snapshots run cyclically within the period (each period is one representative week that repeats).
 Imports no router.
@@ -40,7 +41,7 @@ import math
 import numpy as np
 import pandas as pd
 
-from models.process_unit import CRITICALITY_TIERS, product_role_generators
+from models.process_unit import CRITICALITY_TIERS
 from services import process_products as PP
 from services.solver.process_uc import process_mask
 
@@ -99,7 +100,7 @@ def _delivery(n, bus: str, sns) -> np.ndarray:
     return p.sum(axis=1).to_numpy(dtype=float)
 
 
-def outage_loss(n, period, start: int, hours: float, units=None) -> dict:
+def outage_loss(n, period, start: int, hours: float, units=None, lost_load=None) -> dict:
     """The tonnes and EUR an outage of `hours` from snapshot `start` of `period` costs (module docstring)."""
     links = n.links
     process = [str(u) for u in links.index[process_mask(links)]]
@@ -161,8 +162,7 @@ def outage_loss(n, period, start: int, hours: float, units=None) -> dict:
         undelivered = max(0.0, delivery - inventory - running) * tpu
         row.update(delivery_t=delivery * tpu, inventory_t=inventory * tpu, running_t=running * tpu,
                    covered_t=min(gross, inventory * tpu), undelivered_t=undelivered)
-        values = [PP.lost_production_value(n, g) for g in product_role_generators(n, "shortfall")
-                  if str(n.generators.at[g, "bus"]) == bus]
+        values = [s.value for s in PP.shortfalls(n, lost_load) if s.bus == bus]
         value = next((v for v in values if v is not None), None)
         if value is None:
             row["flag"] = "lost_production_value_missing"

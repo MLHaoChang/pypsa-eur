@@ -1362,7 +1362,10 @@ def run_simulation(
                             pass
                 # Save captured lost-load (if any) into the simulation state
                 # so the /results/lost_load endpoint can serve it.
-                if captured.get("lost_load_t") is not None:
+                # The lost-production capture (grid-to-process ticket 08) rides in the
+                # same record (`captured["lost_production"]`): saved, reloaded and
+                # handed to every reader with it.
+                if captured.get("lost_load_t") is not None or captured.get("lost_production"):
                     try:
                         _emit_state(last_lost_load=captured)
                         phase(

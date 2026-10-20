@@ -580,7 +580,7 @@ def _sources(inputs: LedgerInputs, vf: ValueFlowConfig, p: str) -> list[_Source]
         if role is not None:
             # A product slack is an LP term, not an asset (`build_ledger`): only its opex is a line.
             buy = role == "buy_in"
-            if opex:
+            if opex is None or opex:            # None: a shortfall not captured with the solve (ticket 08)
                 out.append(_Source("asset", f"opex:{tag}", "fuel" if buy else "lost_production",
                                    legs=[(owner, "market" if buy else SHORTFALL_PAYEE, opex)], basis="cash",
                                    meta=meta, flags=[*a.flags, *extra]))

@@ -393,7 +393,9 @@ def build(name: str, n, commercial: CommercialConfig, *, dsr_buses=()) -> Templa
         raise TemplateRefused("template_unknown",
                               f"unknown template {name!r}; one of {sorted(TEMPLATES)}")
     result = tpl.builder(commercial, _site(n, commercial, dsr_buses))
-    shortfall = any(r == "shortfall" for r in product_roles(n).values())
+    from services.solver.lost_production import bus_values
+
+    shortfall = any(r == "shortfall" for r in product_roles(n).values()) or bool(bus_values(n))
     cfg = _with_parties(result.config, commercial, result.draft_contracts,
                         (P.SHORTFALL_PAYEE,) if shortfall else ())
     cfg = cfg.model_copy(update={"template": name, "template_version": f"{name}@{tpl.version}",

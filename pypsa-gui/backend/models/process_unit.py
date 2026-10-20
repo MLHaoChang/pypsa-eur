@@ -20,7 +20,8 @@ CRITICALITY_TIERS: tuple[str, ...] = ("safety", "process_critical", "process_fle
 PROCESS_GENERATOR_ROLES: tuple[str, ...] = ("buy_in", "shortfall")
 
 PROCESS_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
-    "Bus": {"mwh_per_t": "float_nonneg", "product_value": "float_nonneg"},
+    "Bus": {"mwh_per_t": "float_nonneg", "product_value": "float_nonneg",
+            "lost_production_value": "float_nonneg"},
     "Generator": {"process_role": "process_role"},
     "Link": {"eh_process": "bool", "criticality_tier": "tier", "throughput_unit": "text",
              "specific_energy_kwh_per_t": "float_nonneg"},

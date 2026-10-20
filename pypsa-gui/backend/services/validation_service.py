@@ -1757,6 +1757,14 @@ def _check_safety_tier_off_critical_bus(n) -> list[Issue]:
             for name in safety if str(links.at[name, "bus0"]) not in crit]
 
 
+def _check_lost_production_value(n) -> list[Issue]:
+    """A bus's `lost_production_value` at or below its buy-in's highest dense marginal cost (a grey purchase carries
+    its CO2 in a series): the solve-time shortfall slack would let the LP buy by shedding (ticket 08)."""
+    from services.solver.lost_production import refusals
+
+    return [_err("lost_production_value_below_buy_in", "Bus", bus, why) for bus, why in refusals(n)]
+
+
 def _check_lopf(n, solver_config) -> list[Issue]:
     out: list[Issue] = []
 
@@ -1782,6 +1790,7 @@ def _check_lopf(n, solver_config) -> list[Issue]:
     out += _check_p_max_pu_bounds(n)
     out += _check_unweighted_start_costs(n)
     out += _check_safety_tier_off_critical_bus(n)
+    out += _check_lost_production_value(n)
 
     # Generators
     out += _check_extendable_bounds(n.generators, "Generator", "p_nom", True)

@@ -1084,6 +1084,12 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         PyPSAService.unmark_transient("Generator", nm)
                 undo_actions.append(("call", _capture_and_remove_slacks))
 
+        # 5b') Lost-production slacks (grid-to-process ticket 08): one per product bus with a
+        #    lost_production_value and no hand-built shortfall, priced at that value (never VoLL).
+        #    Same transient lifecycle as the VOLL slacks; captured into captured["lost_production"].
+        from services.solver import lost_production as _lost_production
+        _lost_production.apply(n, phase, undo_actions, captured)
+
         # 5c) Demand-response tier (spec §4.4): voluntary, volume-capped, OPT-IN
         #    per bus. Independent of VOLL (a resource, not a failure valve).
         #    Never silently global — an empty opt-in list keeps the tier off

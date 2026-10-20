@@ -63,8 +63,8 @@ import numpy as np
 import pandas as pd
 
 from services.adequacy.slack import slack_generator_mask
-from models.process_unit import product_role_generators
 from services.period_utils import is_multi_period
+from services.process_products import shortfalls
 
 _log = logging.getLogger(__name__)
 
@@ -245,7 +245,14 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
     keep = ~slack_generator_mask(gens) if len(gens) else pd.Series([], dtype=bool)
     # A process shortfall is lost production, never supply (grid-to-process
     # ticket 04): it reduces what the product's load was served, like shed demand.
-    shortfall = [str(g) for g in product_role_generators(n, "shortfall") if str(g) in set(map(str, gens.index))]
+    # The shortfalls from the one accessor (ticket 08): a role Generator, else the solve's capture.
+    lost_src = shortfalls(n, capture, gen_p=_frame(n, result_df, "generators_t", "p"))
+    for s in lost_src:
+        if s.p is None:
+            _refuse(f"the lost production of {s.bus} was not captured with this solve")
+        if s.flag == "lost_production_capture_stale":
+            _refuse(f"the lost-production capture of {s.bus} is from another solve")
+    shortfall = [s.name for s in lost_src if s.source == "generator"]
     if shortfall:
         keep = keep & ~gens.index.astype(str).isin(shortfall)
     gnames = [str(g) for g in gens.index[keep.to_numpy()]]
@@ -264,11 +271,14 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
     l_bus = [bus_ix[str(n.loads.at[x, "bus"])] for x in lnames]
     shed = _shed(n, capture, mask, lnames, [buses[b] for b in l_bus])
     lost = np.zeros_like(lp)       # product shortfall MW per load
-    if shortfall:
-        sp = _cols(_frame(n, result_df, "generators_t", "p"), shortfall, "process shortfall dispatch", mask)
-        for j, g in enumerate(shortfall):
-            at = [i for i, b in enumerate(l_bus) if buses[b] == str(gens.at[g, "bus"])]
-            amount = np.maximum(sp[:, j], 0.0)
+    if lost_src:
+        for s in lost_src:
+            g = s.name
+            at = [i for i, b in enumerate(l_bus) if buses[b] == s.bus]
+            values = s.p.to_numpy(dtype=float)[mask]
+            if not np.isfinite(values).all():
+                _refuse(f"the process shortfall dispatch of {g} is not finite")
+            amount = np.maximum(values, 0.0)
             demand = lp[:, at].sum(axis=1) if at else np.zeros(T)
             if (amount > _EPS).any() and (not at or ((amount > _EPS) & (demand <= _EPS)).any()):
                 _refuse(f"shortfall {g} runs where its bus has no load to leave unserved")
