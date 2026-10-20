@@ -70,6 +70,14 @@ def main():
                          ("get_loadflow_summary", {"run_id": ((results[0].get("items") or [{}])[0].get("run_id")
                                                               if results else None)}),
                          ("ui_open_panel", {"panel_id": "results", "results_tab": "loadflow"})]
+            elif "something else" in said:
+                listing = results[0] if results else {}
+                picked = next((v for v in listing.get("views", []) if v.get("data") == "available"), None)
+                steps = [("list_result_views", {"exclude_shown": True})]
+                if picked:
+                    read = picked["read"][0]
+                    steps += [(read["tool"], read["args"]),
+                              ("ui_open_panel", {"panel_id": "results", "results_tab": picked["id"]})]
             else:
                 return False
             if len(results) < len(steps):
@@ -78,7 +86,14 @@ def main():
                 self._stream({"tool_calls": [{"index": 0, "id": f"oj01-{len(results)}", "type": "function",
                               "function": {"name": name, "arguments": json.dumps(arguments)}}]}, "tool_calls")
                 return True
-            if len(steps) == 1:
+            if "something else" in said:
+                listing = results[0]
+                offered = [v["id"] for v in listing.get("views", []) if v.get("data") == "available"]
+                verb = "Showing" if (results[-1].get("display") or {}).get("say") == "showing" else "Opened"
+                text = (f"OJ03_ANSWER {verb} {offered[0] if offered else 'nothing'}; "
+                        f"also with data: {', '.join(offered[1:]) or 'none'}; "
+                        f"already shown: {', '.join(listing.get('shown', []))}.")
+            elif len(steps) == 1:
                 text = f"The solve was started (job {results[0].get('job_id')})."
             else:
                 run = (results[0].get("items") or [{}])[0]

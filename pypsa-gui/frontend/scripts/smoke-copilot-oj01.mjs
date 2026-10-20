@@ -50,8 +50,16 @@ async function stop(child) {
 }
 
 async function send(page, text) {
-  await page.getByTestId('chat-input').fill(text)
-  await page.getByTestId('chat-send').click()
+  // Full-screen Results hides the dock transcript; the companion has its own input.
+  if (await page.getByTestId('chat-input').isVisible()) {
+    await page.getByTestId('chat-input').fill(text)
+    await page.getByTestId('chat-send').click()
+    return
+  }
+  const input = page.getByTestId('companion-live-input')
+  if (!await input.isVisible()) await page.getByTestId('companion-live').click()
+  await input.fill(text)
+  await page.getByTestId('companion-live-send').click()
 }
 
 const storage = path.join(artifacts, 'storage')
@@ -114,6 +122,7 @@ try {
   const shown = page.locator('[data-result-binding][data-result-tab="loadflow"]')
   await shown.first().waitFor()
   const binding = JSON.parse(await shown.first().getAttribute('data-result-binding'))
+  const oj01Seconds = (Date.now() - started) / 1000
   await page.screenshot({ path: path.join(artifacts, 'oj01-loadflow.png') })
 
   assert.match(words, /^OJ01_ANSWER Showing the Load flow tab for run \S+ \(finished [^)]+\), current: true\./i)
@@ -134,11 +143,24 @@ try {
   assert.equal(binding.scope, 'current')
   assert.equal(binding.source, 'lopf')
   assert.deepEqual([binding.window_from, binding.window_to], [0, 23])
+  // OJ-03: "Show me something else" never repeats Load flow and opens a section with data.
+  await send(page, 'Show me something else.')
+  const other = page.getByTestId('companion-answer-text').getByText(/OJ03_ANSWER/)
+  await other.waitFor({ timeout: 60000 })
+  const otherWords = (await other.textContent()).trim()
+  const otherTab = otherWords.match(/OJ03_ANSWER (?:Showing|Opened) (\w+);/)[1]
+  assert.notEqual(otherTab, 'loadflow')
+  assert.match(otherWords, /already shown: loadflow\./)
+  assert.doesNotMatch(otherWords.split('already shown')[0], /loadflow/)
+  await page.locator(`[data-assurance-tab="${otherTab}"]`).waitFor({ state: 'attached' })
+  await page.screenshot({ path: path.join(artifacts, 'oj03-something-else.png') })
+
   assert.deepEqual(errors, [])
   report = { journey: 'OJ-01', passed: true, sentence: SENTENCE, solves: runs.length, latestIsSecond: true, answer: words.replace(/run \S+/, 'run <run_id>'),
     shown: { tab: 'loadflow', scope: binding.scope, source: binding.source,
-      window: [binding.window_from, binding.window_to] }, seconds: (Date.now() - started) / 1000,
-    screenshot: 'oj01-loadflow.png' }
+      window: [binding.window_from, binding.window_to] }, seconds: oj01Seconds,
+    screenshot: 'oj01-loadflow.png',
+    oj03: { answer: otherWords, opened: otherTab, screenshot: 'oj03-something-else.png' } }
   await context.close()
 } finally {
   await browser.close()

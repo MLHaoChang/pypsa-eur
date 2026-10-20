@@ -47,6 +47,10 @@
       "surface": "inline",
       "why": "resolve_reference refused a malformed request (unknown target or component class, a blank or oversized name or run_id, or no class to resolve against). The per-call detail says which; the assistant asks for the missing piece instead of guessing. There is no conversation-wide recovery action."
     },
+    "invalid_result_views": {
+      "surface": "inline",
+      "why": "list_result_views refused a malformed request (exclude_shown that is not true or false). The per-call detail says which; the assistant retries with a valid flag. There is no conversation-wide recovery action."
+    },
     "schema_field_too_large": {
       "surface": "inline",
       "why": "get_component_schema refused one field whose complete descriptor exceeds the bounded metadata page. The per-call detail names that field; the assistant reports incomplete discovery rather than clipping it or claiming a complete schema. There is no conversation-wide recovery action."

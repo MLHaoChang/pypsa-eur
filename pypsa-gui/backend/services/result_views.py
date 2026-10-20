@@ -169,3 +169,103 @@ def view(view_id: str) -> ResultView:
 
 def for_results_tab(tab: str) -> ResultView | None:
     return next((v for v in RESULT_VIEWS if v.panel == _RESULTS and v.tab == tab), None)
+
+
+# ── list_result_views (LC-11, VS-2) ──────────────────────────────────────────
+# The registry projected on the active project: per view, whether its own read
+# has data now (status only, never a value), whether this conversation already
+# showed it, and the read to call. "Show me something else" and the walk use
+# it; every number still comes from the view's read, called next.
+
+DATA_STATUSES = ("available", "no_data", "unavailable", "not_applicable", "needs_entity")
+
+
+def _probe(view: ResultView) -> tuple[str, str | None]:
+    """Run the view's first read and keep only whether it has data."""
+    from fastapi import HTTPException
+
+    from services import chat_tools
+    from services.pypsa_service import PyPSAService
+
+    if view.needs:
+        return "needs_entity", "needs " + ", ".join(view.needs)
+    if view.multi_period_only:
+        periods = getattr(PyPSAService.get_network(), "investment_periods", None)
+        if periods is None or not len(periods):
+            return "not_applicable", "single investment period"
+    read = view.reads[0]
+    try:
+        out = chat_tools.DISPATCHERS[read.tool](**dict(read.args))
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        return "unavailable", str(detail.get("error_kind") or exc.status_code)[:60]
+    except Exception:  # noqa: BLE001 — a failing read is unavailable, never data
+        return "unavailable", "read_failed"
+    if getattr(out, "status_code", None) == 204:
+        return "no_data", None
+    if isinstance(out, dict):
+        status = out.get("status")
+        if status == "no_data":
+            return "no_data", None
+        if status == "unavailable":
+            return "unavailable", str(out.get("unavailable_kind") or "unavailable")[:60]
+        if out.get("configured") is False:
+            return "no_data", "not_configured"
+    return "available", None
+
+
+def shown_key() -> str:
+    from services.reference_resolution import active_project_key
+
+    return active_project_key()
+
+
+def note_shown(session, results_tab: str | None) -> None:
+    """Remember that this conversation showed a results tab in this project."""
+    if session is None or not isinstance(results_tab, str) or for_results_tab(results_tab) is None:
+        return
+    shown = session.shown_results.setdefault(shown_key(), [])
+    if results_tab not in shown:
+        shown.append(results_tab)
+
+
+def list_result_views(exclude_shown: bool = False) -> dict:
+    from fastapi import HTTPException
+
+    from services import chat_tools
+
+    if not isinstance(exclude_shown, bool):
+        raise HTTPException(422, {"error_kind": "invalid_result_views",
+                                  "message": "exclude_shown must be true or false."})
+    session = chat_tools.chat_session()
+    hints = getattr(session, "turn_ui_context", None) or {}
+    mode = "guided" if hints.get("ui_mode") == "guided" else "expert"
+    # The tab the user has on screen counts as shown: a section they opened
+    # themselves ends the walk there. A hint, so only a registry tab is taken.
+    on_screen = hints.get("results_tab") if hints.get("panel") == "results" else None
+    on_screen = on_screen if isinstance(on_screen, str) and for_results_tab(on_screen) else None
+    if on_screen:
+        note_shown(session, on_screen)
+    shown = list((getattr(session, "shown_results", None) or {}).get(shown_key(), []))
+    views = [v for v in RESULT_VIEWS if v.panel == _RESULTS and v.live()]
+    if mode == "guided":
+        views.sort(key=lambda v: v.guided_label is None)
+    out = []
+    for v in views:
+        if exclude_shown and v.tab in shown:
+            continue
+        data, reason = _probe(v)
+        # A results view's id is its tab id (ui_open_panel results_tab).
+        row = {"id": v.view_id, "label": v.label_for(mode) or f"{v.label} (advanced)",
+               "data": data, "shown": v.tab in shown,
+               "read": [r.call() for r in v.reads]}
+        if v.verification == "displayed_data":
+            row["verification"] = v.verification
+        if reason:
+            row["reason"] = reason
+        if data == "available" and v.tab not in shown:
+            row["shows"] = v.shows
+        out.append(row)
+    return {"status": "ok", "mode": mode, "shown": shown, "on_screen": on_screen, "views": out,
+            "note": ("Statuses only, no values: call a view's read before you open its tab, "
+                     "and quote numbers from that read.")}

@@ -48,7 +48,7 @@ EXPECTED_SHA256 = {
     # LC-15, a new tools-on part (2026-10-19); pinned from its first version.
     "_PROJECT_OVERVIEW": "2a9eba38855e6dd8fb3cd0cfa3e41f3fa84b601abcc256db9f774709bd22dd7b",
     # LC-03, a new tools-on part (2026-10-19); pinned from its first version.
-    "_RESULTS_WALK": "b29388995af4f3bf18942cb6b98b9e326916e25bf12f7eb0e2109bc27f743177",
+    "_RESULTS_WALK": "2eed0f5e855f628149014bcd0907a1b3d6c9db74963599a12925374864d9bcac",
 }
 
 
