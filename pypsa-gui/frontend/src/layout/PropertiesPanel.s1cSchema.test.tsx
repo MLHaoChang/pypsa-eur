@@ -65,6 +65,14 @@ async function openEdit(node: React.ReactNode, seed: Array<[string, unknown]>) {
   await userEvent.click(await screen.findByRole('button', { name: /^Edit / }))
 }
 
+async function openEditWithSeries(node: React.ReactNode, seed: Array<[string, unknown]>,
+  series: Array<[unknown[], unknown]>) {
+  const qc = client(seed)
+  for (const [key, value] of series) qc.setQueryData(key, value)
+  render(<QueryClientProvider client={qc}>{node}</QueryClientProvider>)
+  await userEvent.click(await screen.findByRole('button', { name: /^Edit / }))
+}
+
 async function sent(fn: (...a: never[]) => unknown): Promise<Record<string, unknown>> {
   await userEvent.click(screen.getByRole('button', { name: /^save/i }))
   await waitFor(() => expect(fn).toHaveBeenCalled())
@@ -158,10 +166,21 @@ describe('the Link card', () => {
 describe('the Load card', () => {
   it('saves the demand and keeps the sign', async () => {
     await openEdit(<LoadCard load={LOAD} onRename={() => {}} />, [['loads', [LOAD]]])
-    expect(inputOf('Demand (MW)').value).toBe('40')
-    fireEvent.change(inputOf('Demand (MW)'), { target: { value: '55' } })
+    // No series set: the scalar is the constant the Profile editor starts from.
+    expect(inputOf('Demand — constant (MW)').value).toBe('40')
+    fireEvent.change(inputOf('Demand — constant (MW)'), { target: { value: '55' } })
     const body = await sent(networkApi.updateLoad)
     expect(body.p_set).toBe(55)
     expect(body.sign).toBe(-1)
+  })
+})
+
+describe('a field a series editor also writes (UX review §6.2)', () => {
+  it('is read-only and points to its editor when a series is set', async () => {
+    await openEditWithSeries(<LoadCard load={LOAD} onRename={() => {}} />, [['loads', [LOAD]]],
+      [[['series-current', 'Demo', 'loads', 'p_set', 'demand'], { exists: true, provenance: 'uploaded', rows: 8760 }]])
+    expect(screen.getByTestId('asset-series-p_set').textContent)
+      .toBe('Demand: Time series set (measured upload). Edit it in Profile.')
+    expect(screen.queryByLabelText(/Demand/)).toBeNull()
   })
 })

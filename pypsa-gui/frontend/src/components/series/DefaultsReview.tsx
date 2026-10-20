@@ -9,7 +9,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Check, ChevronDown, ChevronRight } from 'lucide-react'
 import { Btn, Seg, Tag } from '../PageKit'
 import { errorText, seriesApi, type DefaultRow, type DefaultsApplyResult } from '../../api/profiles'
-import { WeekChart } from './SeriesKit'
+import { WarningList, WeekChart } from './SeriesKit'
 
 const fmt = (v: number | undefined, d = 2) =>
   v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: d })
@@ -126,11 +126,7 @@ function FragmentRow({ r, ticked, open, onTick, onOpen, onSizing }: {
           <span className="mr-1">{(r.kind ?? '').replace(/_/g, ' ')}</span>
           {r.assumed && <Tag tone="neutral">assumed</Tag>}
           <div className="text-[10px] text-muted" data-testid={`reason-${r.component}`}>{r.reason}</div>
-          {r.warnings?.length ? (
-            <ul className="text-[10px] text-amber-700 list-disc pl-4">
-              {r.warnings.map(w => <li key={w}>{w}</li>)}
-            </ul>
-          ) : null}
+          <WarningList warnings={r.warnings ?? []} />
         </td>
         <td>
           <Seg value={r.sizing ?? 'mean'} onChange={onSizing}

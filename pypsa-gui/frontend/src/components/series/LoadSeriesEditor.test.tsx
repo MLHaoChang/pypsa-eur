@@ -79,7 +79,8 @@ describe('LoadSeriesEditor', () => {
     }))
     expect((await screen.findByTestId('stat-peak')).textContent).toBe('80 MW')
     expect(screen.getByTestId('stat-modelled').textContent).toBe('399,000 MWh')
-    expect(screen.getByTestId('pending-warnings').textContent).toContain('time_basis_assumed_utc')
+    expect(screen.getByText('Time zone assumed UTC').tagName).toBe('SUMMARY')
+    expect(screen.getByTestId('pending-warnings').textContent).toContain('applied unshifted')
   })
 
   it('sends a preset with its archetype', async () => {

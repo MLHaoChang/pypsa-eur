@@ -8,6 +8,7 @@ import type { AssetFieldSpec, AssetSchema, ProvenanceEntry } from '../../api/ass
 import { ProvenanceChip } from '../../components/ProvenanceChip'
 import type { Bus, Carrier } from '../../api/types'
 import { derivedStored, displayValue, isRevealed, unitLabel } from '../../utils/assetForm'
+import type { SeriesField } from '../../components/series/useSeriesFields'
 import {
   BusSelect, CarrierGroupSelect, ChkInput, FieldLabel, InfoTip, NumInput, SectionHdr, TxtInput,
   type ExpandedItem, type FS, type SetFS,
@@ -46,7 +47,8 @@ function chipOf(stamps: Stamps, key: string) {
  * an unstamped one has no `badge` key at all, so the items are as before.
  */
 export function assetReadoutItems(schema: AssetSchema | undefined, asset: Record<string, unknown>,
-  hidden: ReadonlySet<string> = new Set(), stamps?: Stamps): ExpandedItem[] {
+  hidden: ReadonlySet<string> = new Set(), stamps?: Stamps,
+  series?: Record<string, SeriesField>): ExpandedItem[] {
   const fs: FS = Object.fromEntries(Object.entries(asset).map(([k, v]) => [k, String(v)]))
   const out: ExpandedItem[] = []
   const push = (f: AssetFieldSpec, item: ExpandedItem) => {
@@ -56,6 +58,11 @@ export function assetReadoutItems(schema: AssetSchema | undefined, asset: Record
   for (const f of schemaFields(schema)) {
     if (f.group === 'identity' || hidden.has(f.key) || !isRevealed(f, fs)) continue
     const v = f.derived ? derivedStored(f.key, asset) : asset[f.key]
+    if (series?.[f.key]?.set) {
+      // A series wins over the scalar in the model; show that, not the constant.
+      push(f, { label: f.label, value: `time series (${series[f.key].set})`, tip: f.help })
+      continue
+    }
     if (f.kind === 'bool') {
       if (v === true) push(f, { label: f.label, value: true, tip: f.help })
       continue
@@ -81,6 +88,15 @@ function chipRow(stamps: Stamps, key: string) {
 }
 
 const LABEL_ONLY_KINDS: ReadonlySet<string> = new Set(['text', 'bus', 'carrier'])
+
+function SeriesSetRow({ label, field, k }: { label: string; field: SeriesField; k: string }) {
+  return (
+    <div className="col-span-2 text-[10px]" data-testid={`asset-series-${k}`}>
+      <span className="text-muted">{label}: </span>
+      Time series set ({field.set}). Edit it in {field.editor}.
+    </div>
+  )
+}
 
 function DerivedRow({ spec, value, stamps }: { spec: AssetFieldSpec; value: unknown; stamps?: Stamps }) {
   const d = displayValue(spec, value)
@@ -178,7 +194,7 @@ function PartsTable({ parts, fs, set, stamps }: { parts: AssetFieldSpec[]; fs: F
  * boolean's side effect (Extendable seeds the minimum); `after` places a card's
  * own control after a field (e.g. the per-period bounds link after the maximum).
  */
-export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onCheck, after, hidden, provenance }: {
+export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onCheck, after, hidden, provenance, series }: {
   schema: AssetSchema
   fs: FS
   set: SetFS
@@ -195,6 +211,12 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
    * shows no chip (unknown is not "default").
    */
   provenance?: Record<string, ProvenanceEntry>
+  /**
+   * Fields a series editor also writes (`useSeriesFields`): with a series set
+   * the field is read-only here and points to its editor; without one it is
+   * the constant that editor starts from (UX review, checklist §6.2).
+   */
+  series?: Record<string, SeriesField>
 }) {
   // The typed parts of a composite asset render together, as one table where
   // the first of them would have been (the Investment group).
@@ -219,6 +241,7 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                     {parts.map(p => <Fragment key={p.key}>{after?.[p.key]}</Fragment>)}
                   </>
                 )
+                  : series?.[f.key]?.set ? <SeriesSetRow label={f.label} field={series[f.key]} k={f.key} />
                   : f.derived ? <DerivedRow spec={f} value={derivedStored(f.key, current)} stamps={provenance} />
                   : f.kind === 'bool' ? <ChkInput label={f.label} k={f.key} fs={fs} set={set} tip={f.help} onCheck={onCheck?.[f.key]}
                       badge={chipOf(provenance, f.key)} />
@@ -226,7 +249,10 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                   : f.kind === 'carrier' ? <CarrierGroupSelect k={f.key} fs={fs} set={set} carriers={carriers} tip={f.help} />
                   : f.kind === 'text' ? <TxtInput label={f.label} k={f.key} fs={fs} set={set} tip={f.help} />
                   : f.kind === 'enum' ? <EnumInput spec={f} fs={fs} set={set} badge={chipOf(provenance, f.key)} />
-                  : <NumInput label={f.label} k={f.key} fs={fs} set={set} unit={f.unit_display ? unitLabel(f.unit_display) : undefined} tip={f.help}
+                  : <NumInput label={series?.[f.key] ? `${f.label} — constant` : f.label} k={f.key} fs={fs} set={set} unit={f.unit_display ? unitLabel(f.unit_display) : undefined}
+                      tip={series?.[f.key]
+                        ? `${f.help ?? ''} The constant the ${series[f.key].editor} editor starts from; a series set there replaces it.`.trim()
+                        : f.help}
                       badge={chipOf(provenance, f.key)} />}
                 {!f.derived && f.key !== firstPart && LABEL_ONLY_KINDS.has(f.kind) && chipRow(provenance, f.key)}
                 {f.key !== firstPart && after?.[f.key]}

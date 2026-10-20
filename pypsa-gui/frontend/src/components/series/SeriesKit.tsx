@@ -62,6 +62,52 @@ export function CurrentSeriesLine({
   )
 }
 
+// Plain titles for the apply path's warning codes (`profile_gen/apply.py`,
+// `refine.py`, `defaults.py`): a row reads as its title, the backend's
+// sentence sits behind a disclosure, the code stays for support and search.
+export const SERIES_WARNING_TITLES: Record<string, string> = {
+  time_basis_assumed_utc: 'Time zone assumed UTC',
+  energy_mismatch: 'Energy differs from the source year',
+  bound_forces_off: 'Minimum above maximum forces the unit off',
+  must_run_exceeds_sink: 'Must-run floor exceeds what the bus can take',
+  min_stable_not_must_run: 'Minimum stable output is not a must-run',
+  replaces_existing_series: 'Replaces the current series',
+  unsupported_storage_inflow: 'Storage type does not take an inflow',
+  money_basis_unverified: 'Currency basis not checked against the project',
+  earlier_target_broken: 'A later edit undid an earlier target',
+  connection_changed_since_refinement: 'Grid connection changed since this was refined',
+  not_applicable: 'Cannot be applied to this model',
+  default_peak_above_connection: 'Peak above the grid connection',
+}
+
+function splitWarning(w: string): { code: string | null; text: string } {
+  const m = /^([a-z][a-z0-9_]*):\s*(.*)$/s.exec(w)
+  return m ? { code: m[1], text: m[2] } : { code: null, text: w }
+}
+
+/** Warnings as one line each (a plain title), the sentence on demand. */
+export function WarningList({ warnings, testId }: { warnings: string[]; testId?: string }) {
+  if (!warnings.length) return null
+  return (
+    <ul className="mt-1 text-[11px] text-amber-700 space-y-0.5" data-testid={testId}>
+      {warnings.map(w => {
+        const { code, text } = splitWarning(w)
+        const title = code ? (SERIES_WARNING_TITLES[code] ?? code.replace(/_/g, ' ')) : null
+        return (
+          <li key={w}>
+            {title ? (
+              <details>
+                <summary className="cursor-pointer">{title}</summary>
+                <p className="pl-3 text-[10px]">{text} <span className="text-muted font-mono">({code})</span></p>
+              </details>
+            ) : text}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 const DAY = new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: 'UTC' })
 const DAY_MONTH = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
 const FULL = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -171,11 +217,7 @@ export function PendingCard({
       {pending.weeks?.[component] && (
         <WeekChart week={pending.weeks[component]} unit={power ? 'MW' : unit} />
       )}
-      {warnings.length > 0 && (
-        <ul className="mt-1 text-[11px] text-amber-700 list-disc pl-4" data-testid="pending-warnings">
-          {warnings.map(w => <li key={w}>{w}</li>)}
-        </ul>
-      )}
+      <WarningList warnings={warnings} testId="pending-warnings" />
       <div className="flex items-center gap-2 mt-2">
         <Btn variant="primary" onClick={() => apply.mutate()} disabled={apply.isPending || !!blocked}
           title={blocked ? 'This network cannot take the series yet; see the warning' : undefined}>
@@ -186,11 +228,7 @@ export function PendingCard({
       {applied && (
         <div className="text-[11px] text-green-700 mt-1" data-testid="applied">
           Applied to {applied.component} {applied.attribute} (peak {fmt(applied.peak, 3)}). Undo reverts it.
-          {applied.warnings?.length > 0 && (
-            <ul className="text-amber-700 list-disc pl-4">
-              {applied.warnings.map(w => <li key={w}>{w}</li>)}
-            </ul>
-          )}
+          <WarningList warnings={applied.warnings ?? []} />
         </div>
       )}
     </div>

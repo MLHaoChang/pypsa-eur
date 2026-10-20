@@ -42,7 +42,8 @@ describe('DefaultsReview', () => {
     renderIt()
     expect((await screen.findByTestId('reason-office')).textContent).toContain("matched 'office'")
     expect(screen.getAllByText('assumed')).toHaveLength(2)
-    expect(screen.getByText(/default_peak_above_connection/)).toBeTruthy()
+    // A plain title on one line; the sentence and the code behind a disclosure.
+    expect(screen.getByText('Peak above the grid connection').tagName).toBe('SUMMARY')
     expect(screen.getByTestId('defaults-skipped').textContent).toContain('metered: carries a measured upload')
   })
 

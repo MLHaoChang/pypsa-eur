@@ -10,6 +10,7 @@ import { H2Icon } from '../components/AssetIcons'
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
 import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
 import AvailabilityEditor from '../components/series/AvailabilityEditor'
+import { useSeriesFields } from '../components/series/useSeriesFields'
 import SeriesEditor from '../components/series/SeriesEditor'
 import { useUIStore } from '../store/uiStore'
 import { editScope, loadExtras } from '../utils/extrasStore'
@@ -146,6 +147,8 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   const { data: schema } = useAssetSchema('Generator')
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Generator', gen.name)
+  const series = useSeriesFields(currentProject, 'generators', gen.name,
+    { p_max_pu: 'Availability', p_min_pu: 'Availability', marginal_cost: 'Price series' })
   const specs = schemaFields(schema)
   const asset = gen as unknown as Record<string, unknown>
   // Curtailment cost prices spilled wind and solar; a thermal unit has none to spill.
@@ -204,7 +207,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, gen.name])
 
-  const items: ExpandedItem[] = assetReadoutItems(schema, asset, hidden, provenance)
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset, hidden, provenance, series)
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {
@@ -276,7 +279,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       {schema ? (
         <AssetFieldsEdit
           schema={schema} fs={form} set={setForm} current={asset}
-          carriers={carriers as Carrier[]} buses={buses as Bus[]} hidden={hidden} provenance={provenance}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]} hidden={hidden} provenance={provenance} series={series}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
           after={{
             p_nom_max: (
@@ -325,6 +328,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   const { data: schema } = useAssetSchema('StorageUnit')
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('StorageUnit', su.name)
+  const series = useSeriesFields(currentProject, 'storage_units', su.name, { inflow: 'Inflow' })
   const specs = schemaFields(schema)
   const asset = su as unknown as Record<string, unknown>
 
@@ -371,7 +375,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, su.name])
 
-  const items: ExpandedItem[] = assetReadoutItems(schema, asset, undefined, provenance)
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset, undefined, provenance, series)
   // A unit priced the old way (one overnight cost, no parts) still has that
   // cost; the card says so, since its parts are what the form types now.
   const legacyOvernight = su.overnight_cost != null && Number.isFinite(su.overnight_cost)
@@ -433,7 +437,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       {schema ? (
         <AssetFieldsEdit
           schema={schema} fs={form} set={setForm} current={asset}
-          carriers={carriers as Carrier[]} buses={buses as Bus[]} provenance={provenance}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]} provenance={provenance} series={series}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
           after={{
             p_nom_max: (
@@ -649,6 +653,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   const { data: schema } = useAssetSchema('Load')
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Load', load.name)
+  const series = useSeriesFields(currentProject, 'loads', load.name, { p_set: 'Profile' })
   const specs = schemaFields(schema)
   const asset = load as unknown as Record<string, unknown>
 
@@ -688,7 +693,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, load.name])
 
-  const items: ExpandedItem[] = assetReadoutItems(schema, asset, undefined, provenance)
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset, undefined, provenance, series)
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {
@@ -749,7 +754,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
     <EditShell title={load.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
       {schema ? (
         <AssetFieldsEdit
-          schema={schema} fs={form} set={setForm} current={asset} provenance={provenance}
+          schema={schema} fs={form} set={setForm} current={asset} provenance={provenance} series={series}
           carriers={carriers as Carrier[]} buses={buses as Bus[]}
         />
       ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
@@ -846,6 +851,10 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   const { data: schema } = useAssetSchema('Link')
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Link', link.name)
+  const series = useSeriesFields(currentProject, 'links', link.name, {
+    p_max_pu: 'Availability', p_min_pu: 'Availability', marginal_cost: 'Price series',
+    ...(/heat.?pump/i.test(`${link.carrier} ${link.name}`) ? { efficiency: 'COP' } : {}),
+  })
   const specs = schemaFields(schema)
   const asset = link as unknown as Record<string, unknown>
 
@@ -911,7 +920,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   const items: ExpandedItem[] = [
     { label: 'From bus', value: link.bus0, tip: fieldHelp(schema, 'bus0') },
     { label: 'To bus', value: link.bus1, tip: fieldHelp(schema, 'bus1') },
-    ...assetReadoutItems(schema, asset, undefined, provenance),
+    ...assetReadoutItems(schema, asset, undefined, provenance, series),
   ]
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
@@ -1002,7 +1011,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
       )}
       {schema ? (
         <AssetFieldsEdit
-          schema={schema} fs={form} set={setForm} current={asset} provenance={provenance}
+          schema={schema} fs={form} set={setForm} current={asset} provenance={provenance} series={series}
           carriers={carriers as Carrier[]} buses={buses as Bus[]}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
           after={{
