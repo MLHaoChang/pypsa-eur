@@ -11,8 +11,8 @@ import time
 
 from harness.protocol import ProviderError
 
-SUITE_VERSION = "checked-pilot-evaluation/1"
-ORACLE_VERSION = "hand-worked-two-network-oracles/1"
+SUITE_VERSION = "checked-pilot-evaluation/2"
+ORACLE_VERSION = "hand-worked-network-and-carrier-oracles/1"
 UNSAFE = "Unchecked invented narrative: the network is certified safe at 999 MW."
 
 # Independent arithmetic, never populated from the calculation implementation.
@@ -43,6 +43,13 @@ STORAGE = {
     "annual_fixed_cost": (30, "EUR/year"), "allocated_fixed_cost": (15, "EUR"),
     "total_cost": (51, "EUR"),
 }
+# Carrier "wind": G1 and G2 serve the only load (6, 8, 4 MW) at generator
+# weights 2, 1, 3, however the LP splits it: 12+8+12=32 MWh; peak 8 MW; no
+# StorageUnits of the carrier, so both storage sums are exactly 0.
+CARRIER = {
+    "carrier_generator_energy": (32, "MWh"), "carrier_peak_generator_output": (8, "MW"),
+    "carrier_storage_discharged_energy": (0, "MWh"), "carrier_storage_charged_energy": (0, "MWh"),
+}
 PROFILE_METRICS = {
     "generator-dispatch/1": tuple(GENERATOR)[:3],
     "generator-cost/1": tuple(GENERATOR),
@@ -50,6 +57,8 @@ PROFILE_METRICS = {
     "storage-unit-dispatch/1": tuple(STORAGE)[:6],
     "storage-unit-cost/1": tuple(STORAGE),
 }
+# Opt-in profiles join the pilot suite only; the stress catalogue keeps the first five.
+EVALUATION_PROFILE_METRICS = {**PROFILE_METRICS, "carrier-energy/1": tuple(CARRIER)}
 # These are public contract labels, not calculated values from the runtime.
 LABELS = {
     "dispatch_energy": "Generator energy", "marginal_expenditure": "Marginal dispatch expenditure",
@@ -61,6 +70,10 @@ LABELS = {
     "storage_discharge_expenditure": "StorageUnit discharge expenditure",
     "storage_holding_expenditure": "StorageUnit holding expenditure",
     "storage_operating_expenditure": "Direct StorageUnit operating expenditure",
+    "carrier_generator_energy": "Generator energy of the carrier",
+    "carrier_peak_generator_output": "Peak combined generator output of the carrier",
+    "carrier_storage_discharged_energy": "StorageUnit discharged energy of the carrier (grid side)",
+    "carrier_storage_charged_energy": "StorageUnit charging energy of the carrier (grid side)",
 }
 
 
@@ -86,24 +99,28 @@ class Case:
 
     @property
     def entity(self):
-        return "Battery" if self.profile.startswith("storage-") else "network" if self.profile.startswith("network-") else "G1"
+        return ("Battery" if self.profile.startswith("storage-") else "network" if self.profile.startswith("network-")
+                else "wind" if self.profile.startswith("carrier-") else "G1")
 
 
 def catalogue():
     cases = []
-    for profile, metrics in PROFILE_METRICS.items():
+    for profile, metrics in EVALUATION_PROFILE_METRICS.items():
         storage = profile.startswith("storage-")
+        carrier = profile.startswith("carrier-")
         cost = "cost" in profile
-        entity = "storage unit Battery" if storage else "network" if profile.startswith("network-") else "generator G1"
+        entity = ("storage unit Battery" if storage else "network" if profile.startswith("network-")
+                  else "carrier wind" if carrier else "generator G1")
         question = f"Give me the key results for {entity}"
         if cost:
             question += "; price year 2026; annual fixed cost fraction " + ("0.5" if storage else "1")
-        values = STORAGE if storage else NETWORK if profile.startswith("network-") else GENERATOR
+        values = STORAGE if storage else NETWORK if profile.startswith("network-") else CARRIER if carrier else GENERATOR
         expected = {metric: values[metric] for metric in metrics}
         cases.append(Case(profile + ":golden", profile, "golden", question, expected))
         for fault in ("value", "unit", "formula", "source", "omit", "narrative"):
             cases.append(Case(profile + ":" + fault, profile, fault, question, {}, metrics))
-        target = "total_cost" if cost else "discharged_energy" if storage else "dispatch_energy"
+        target = ("total_cost" if cost else "discharged_energy" if storage
+                  else "carrier_generator_energy" if carrier else "dispatch_energy")
         for fault in ("missing", "stale"):
             cases.append(Case(profile + ":" + fault, profile, fault, question, {}, (target,)))
         cases.append(Case(profile + ":unsupported", profile, "unsupported", question, expected, ("adequacy_certificate",)))

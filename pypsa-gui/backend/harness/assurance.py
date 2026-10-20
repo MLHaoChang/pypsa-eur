@@ -241,8 +241,13 @@ class Turn:
                 self.request_evidence = records.capture_scoped(
                     self.owner, self.request_scope
                 )
-            except (ValueError, KeyError, TypeError, HTTPException):
-                self.request_scope["reason"] = "unsupported_or_unavailable_source"
+            except (ValueError, KeyError, TypeError, HTTPException) as exc:
+                from harness.carrier_calculations import REFUSALS
+
+                named = isinstance(exc, ValueError) and exc.args and exc.args[0] in REFUSALS
+                self.request_scope["reason"] = (
+                    exc.args[0] if named else "unsupported_or_unavailable_source"
+                )
             return
         # Deliberately narrow whole-message grammar. Additional instructions,
         # periods or another requested quantity never silently become this profile.
@@ -400,8 +405,10 @@ class Turn:
                 }
             )
         scoped = record["source_kind"] == "scoped_result"
+        carrier = self.request_scope["profile"] == assurance_metrics.carrier.PROFILE
         entity_kind = (
-            "StorageUnit" if self.request_scope["profile"] in assurance_metrics.STORAGE_PROFILES
+            "Carrier" if carrier
+            else "StorageUnit" if self.request_scope["profile"] in assurance_metrics.STORAGE_PROFILES
             else "Network" if self.request_scope["profile"] == "network-linear-cost/1" else "Generator"
         )
         lines = [
@@ -409,6 +416,8 @@ class Turn:
             f"{'retained run' if self.request_scope.get('retain') else 'requested snapshots' if scoped else 'all current snapshots'} "
             f"({record['scope']['start']} to {record['scope']['end']})."
         ]
+        if carrier:
+            lines.append(assurance_metrics.carrier.population(record["raw"]))
         for slot in record["slots"]:
             definition = assurance_metrics.definition(slot["metric"], self.request_scope["profile"])
             fact = next(

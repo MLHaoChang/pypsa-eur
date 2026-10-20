@@ -10,9 +10,11 @@ from services import assurance_records as records
 
 def profile_enabled(profile):
     value = os.environ.get("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES")
-    return profile in calculations.PROFILES and (
-        value is None or profile in value.split(",")
-    )
+    if profile not in calculations.PROFILES:
+        return False
+    if value is None:
+        return profile not in calculations.OPT_IN_PROFILES
+    return profile in value.split(",")
 
 
 def effects_enabled():

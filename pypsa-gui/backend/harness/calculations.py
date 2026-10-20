@@ -8,6 +8,7 @@ from numbers import Real
 import pandas as pd
 
 from services import workflow_tools
+from harness import carrier_calculations as carrier
 from harness import storage_calculations as storage
 from harness import storage_costs
 
@@ -67,7 +68,8 @@ COMPARISON_METRICS = {
         "dependencies": ("cost_delta",),
     },
 }
-DEFINITIONS = {**METRICS, **COST_METRICS, **COMPARISON_METRICS, **storage.METRICS, **storage_costs.METRICS}
+DEFINITIONS = {**METRICS, **COST_METRICS, **COMPARISON_METRICS, **storage.METRICS, **storage_costs.METRICS,
+               **carrier.METRICS}
 COST_PROFILES = frozenset({"generator-cost/1", "network-linear-cost/1", storage_costs.PROFILE})
 STORAGE_PROFILES = frozenset({storage.PROFILE, storage_costs.PROFILE})
 PROFILES = {
@@ -76,7 +78,11 @@ PROFILES = {
     "network-linear-cost/1": tuple(METRICS) + tuple(COST_METRICS),
     storage.PROFILE: tuple(storage.METRICS),
     storage_costs.PROFILE: tuple(storage.METRICS) + tuple(storage_costs.METRICS) + tuple(COST_METRICS),
+    carrier.PROFILE: tuple(carrier.METRICS),
 }
+# Profiles added after the pilot's first five run only when listed explicitly
+# in PYPSA_GUI_ANSWER_ASSURANCE_PROFILES (`rollout.profile_enabled`).
+OPT_IN_PROFILES = frozenset({carrier.PROFILE})
 DISCLOSURE = (
     "Energy uses generator snapshot weights; expenditure uses objective snapshot weights. "
     "Expenditure excludes fixed, startup, shutdown and quadratic costs; it is not total system cost. "
@@ -283,6 +289,8 @@ def _window(raw, scope):
 
 def scoped_source(ctx, scope, owner=None):
     """Capture complete raw populations under the existing project lock."""
+    if scope["profile"] == carrier.PROFILE:
+        return carrier.source(ctx, scope["entity_id"])
     if scope["profile"] in STORAGE_PROFILES:
         adapter = storage_costs if scope["profile"] == storage_costs.PROFILE else storage
         return _comparison({"storage_unit": adapter.source(ctx, scope["entity_id"])}, scope, owner)
@@ -454,6 +462,8 @@ def _comparison(raw, scope, owner):
 
 def scoped_calculate(raw, scope):
     """A bounded calculation DAG; missing dependencies never become zero."""
+    if scope["profile"] == carrier.PROFILE:
+        return carrier.calculate(raw, scope)
     if scope["profile"] == storage.PROFILE:
         return storage.calculate(raw["storage_unit"], scope)
     if scope["profile"] == storage_costs.PROFILE:
@@ -602,6 +612,8 @@ def _comparison_disclosure(scope):
 
 
 def disclosure(scope):
+    if scope["profile"] == carrier.PROFILE:
+        return carrier.DISCLOSURE
     if scope["profile"] == storage_costs.PROFILE:
         return storage_costs.disclosure(scope)
     if scope["profile"] == storage.PROFILE:

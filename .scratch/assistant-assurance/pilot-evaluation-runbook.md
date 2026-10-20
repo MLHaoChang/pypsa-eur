@@ -1,10 +1,11 @@
 # Run the bounded checked-answer evaluation
 
-The CI gate evaluates 133 versioned requests through the authenticated public stream
+The CI gate evaluates 143 versioned requests through the authenticated public stream
 and owned answer API in disposable projects. Every current default metric in all
-five profiles has an independently specified positive expectation. Network
+six profiles has an independently specified positive expectation. Network
 aggregation uses two generators (300 EUR), generator economics uses one
-(230 EUR), and the StorageUnit trajectory/accounting oracle totals 51 EUR.
+(230 EUR), the StorageUnit trajectory/accounting oracle totals 51 EUR, and the
+opt-in `carrier-energy/1` oracle sums two wind generators to 32 MWh (peak 8 MW).
 See the [plan](pilot-evaluation-plan.md) and the hand-worked comments in
 [the catalogue](../../pypsa-gui/backend/harness/pilot_evaluation.py).
 The additional 80 stress cases cover eight varied numerical scenarios across

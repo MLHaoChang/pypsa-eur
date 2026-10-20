@@ -90,7 +90,8 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                 _r("get_results", result_kind="cost_breakdown")),
                guided_label="Summary",
                units="EUR, MWh",
-               checked_profiles=("generator-dispatch/1", "network-linear-cost/1")),
+               checked_profiles=("generator-dispatch/1", "network-linear-cost/1",
+                                 "carrier-energy/1")),
     ResultView("overview", _RESULTS, "overview", "Overview",
                "the mix and build per investment period", "results",
                (_r("get_vintage_results"),),
@@ -108,7 +109,8 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                (_r("get_results", result_kind="generators"),
                 _r("get_results", result_kind="storage_dispatch")),
                units="MW per snapshot, MWh",
-               checked_profiles=("generator-dispatch/1", "storage-unit-dispatch/1")),
+               checked_profiles=("generator-dispatch/1", "storage-unit-dispatch/1",
+                                 "carrier-energy/1")),
     # Gated: the copilot read for energy flows lands with the catalogue work
     # (site commercial UX A1); the tab itself is navigable now.
     ResultView("flows", _RESULTS, "flows", "Energy flow",

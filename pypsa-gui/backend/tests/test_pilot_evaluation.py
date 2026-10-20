@@ -18,7 +18,14 @@ def evaluation_project(baseline, request):
     ctx = baseline[0]
     n = ctx.network
     n.generators.at["G1", "capital_cost"] = 3
-    if case.profile.startswith("storage-"):
+    if case.profile.startswith("carrier-"):
+        n.set_snapshots(pd.date_range("2026-01-01", periods=3, freq="h"))
+        n.generators.at["G1", "carrier"] = "wind"
+        n.add("Generator", "G2", bus="B1", p_nom=10, marginal_cost=5, carrier="wind")
+        n.generators_t.p_max_pu = pd.DataFrame({"G2": [0.5, 0.5, 0.2]}, index=n.snapshots)
+        n.loads_t.p_set = pd.DataFrame({"L1": [6, 8, 4]}, index=n.snapshots)
+        n.snapshot_weightings.loc[:, "generators"] = [2, 1, 3]
+    elif case.profile.startswith("storage-"):
         n.set_snapshots(pd.date_range("2026-01-01", periods=3, freq="h"))
         n.loads_t.p_set = pd.DataFrame({"L1": [0, 2, 2]}, index=n.snapshots)
         n.generators_t.p_max_pu = pd.DataFrame({"G1": [1, 0, 0]}, index=n.snapshots)
@@ -46,7 +53,9 @@ def evaluation_project(baseline, request):
 @pytest.fixture
 def pilot_harness(client, monkeypatch):
     monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_MODE", "pilot")
-    monkeypatch.delenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", raising=False)
+    from harness.calculations import PROFILES
+
+    monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", ",".join(PROFILES))
     monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_EFFECTS", "disabled")
     monkeypatch.setenv("PYPSA_GUI_ANSWER_REVIEW_MODE", "disabled")
     harness = Harness(client, monkeypatch)
@@ -59,8 +68,7 @@ def run_case(case, ctx, harness, provider, node, mode):
     options = {"message": case.question}
     if case.fault not in ("golden", "basis"):
         scope = {"version": 1, "profile": case.profile, "project_id": ctx.project_uuid,
-                 "entity_id": "Battery" if case.profile.startswith("storage-") else
-                 "network" if case.profile.startswith("network-") else "G1",
+                 "entity_id": case.entity,
                  "retain": False, "metrics": list(case.expected) + list(case.unavailable)}
         if "cost" in case.profile:
             scope["cost_basis"] = {"currency": "EUR", "price_year": 2026,

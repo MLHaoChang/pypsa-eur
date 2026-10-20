@@ -20,7 +20,7 @@ class RequestScope(BaseModel):
     version: Literal[1]
     profile: Literal[
         "generator-dispatch/1", "generator-cost/1", "network-linear-cost/1",
-        "storage-unit-dispatch/1", "storage-unit-cost/1",
+        "storage-unit-dispatch/1", "storage-unit-cost/1", "carrier-energy/1",
     ]
     project_id: str = Field(min_length=1, max_length=128)
     entity_id: str = Field(min_length=1, max_length=128)
@@ -52,6 +52,10 @@ def validate(value):
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_storage_cost_scope")
+    if scope["profile"] == "carrier-energy/1" and (
+        scope.get("cost_basis") or scope.get("comparison_evidence_id")
+    ):
+        raise ValueError("unsupported_carrier_cost_scope")
     return scope
 
 
@@ -82,6 +86,20 @@ def from_message(message, project_id, ui_context):
         }
         if storage[2]:
             value.update(start=storage[2], end=storage[3])
+        return validate(value)
+    carrier = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?key results\s+for\s+"
+        r"carrier\s+([^;]{1,128}?)"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
+        message.strip(), re.I,
+    )
+    if carrier:
+        value = {
+            "version": 1, "profile": "carrier-energy/1",
+            "project_id": project_id, "entity_id": carrier[1], "retain": False,
+        }
+        if carrier[2]:
+            value.update(start=carrier[2], end=carrier[3])
         return validate(value)
     storage_cost = re.fullmatch(
         r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?"
