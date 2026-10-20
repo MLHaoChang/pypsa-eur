@@ -1,0 +1,244 @@
+[
+ {
+  "id": "eh_datacenter",
+  "meta": {
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "import_p_nom_mw": 40.0
+   },
+   "recommended_archetype": "weak_flexible",
+   "stages": null
+  },
+  "study_body": {
+   "archetype": "weak_flexible",
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "import_p_nom_mw": 40.0
+   }
+  }
+ },
+ {
+  "id": "eh_datacenter_staged",
+  "meta": {
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "import_p_nom_mw": 55.0
+   },
+   "recommended_archetype": "weak_flexible",
+   "stages": null
+  },
+  "study_body": {
+   "archetype": "weak_flexible",
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "import_p_nom_mw": 55.0
+   }
+  }
+ },
+ {
+  "id": "eh_h2_hub",
+  "meta": {
+   "dtc_attribution": null,
+   "pack_overrides": {},
+   "recommended_archetype": "strong_grid",
+   "stages": null
+  },
+  "study_body": {
+   "archetype": "strong_grid"
+  }
+ },
+ {
+  "id": "eh_h2_hub_staged",
+  "meta": {
+   "dtc_attribution": null,
+   "pack_overrides": {},
+   "recommended_archetype": "strong_grid",
+   "stages": null
+  },
+  "study_body": {
+   "archetype": "strong_grid"
+  }
+ },
+ {
+  "id": "eh_microgrid",
+  "meta": {
+   "dtc_attribution": null,
+   "pack_overrides": {},
+   "recommended_archetype": "off_grid",
+   "stages": null
+  },
+  "study_body": {
+   "archetype": "off_grid"
+  }
+ },
+ {
+  "id": "eh_microgrid_staged",
+  "meta": {
+   "dtc_attribution": null,
+   "pack_overrides": {},
+   "recommended_archetype": "off_grid",
+   "stages": null
+  },
+  "study_body": {
+   "archetype": "off_grid"
+  }
+ },
+ {
+  "id": "eh_site:industrial",
+  "meta": {
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "import_p_nom_mw": 20.0
+   },
+   "recommended_archetype": "weak_flexible",
+   "stages": null
+  },
+  "study_body": {
+   "archetype": "weak_flexible",
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "import_p_nom_mw": 20.0
+   }
+  }
+ },
+ {
+  "id": "eh_site:commercial",
+  "meta": {
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "import_p_nom_mw": 5.0
+   },
+   "recommended_archetype": "weak_flexible",
+   "stages": null
+  },
+  "study_body": {
+   "archetype": "weak_flexible",
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "import_p_nom_mw": 5.0
+   }
+  }
+ },
+ {
+  "id": "eh_site:hospital",
+  "meta": {
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "import_p_nom_mw": 8.0
+   },
+   "recommended_archetype": "weak_flexible",
+   "stages": null
+  },
+  "study_body": {
+   "archetype": "weak_flexible",
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "import_p_nom_mw": 8.0
+   }
+  }
+ },
+ {
+  "id": "eh_site:campus",
+  "meta": {
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "import_p_nom_mw": 25.0
+   },
+   "recommended_archetype": "weak_flexible",
+   "stages": null
+  },
+  "study_body": {
+   "archetype": "weak_flexible",
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "import_p_nom_mw": 25.0
+   }
+  }
+ },
+ {
+  "id": "eh_site:other",
+  "meta": {
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "import_p_nom_mw": 12.0
+   },
+   "recommended_archetype": "weak_flexible",
+   "stages": null
+  },
+  "study_body": {
+   "archetype": "weak_flexible",
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "import_p_nom_mw": 12.0
+   }
+  }
+ },
+ {
+  "id": "synthetic:all_rules",
+  "meta": {
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "ens_cap_permyriad": 2.0,
+    "import_energy_mwh_per_year": 1000.0,
+    "import_p_nom_mw": 40.0,
+    "target_lole_h": 0.5
+   },
+   "recommended_archetype": "weak_flexible",
+   "stages": [
+    "mc_certify",
+    "frontier",
+    "not_a_stage"
+   ]
+  },
+  "study_body": {
+   "archetype": "weak_flexible",
+   "dtc_attribution": "per_load",
+   "pack_overrides": {
+    "certification_metric": "mc_lole",
+    "ens_cap_permyriad": 2.0,
+    "import_energy_mwh_per_year": 1000.0,
+    "import_p_nom_mw": 40.0,
+    "target_lole_h": 0.5
+   },
+   "stages": [
+    "apply_pack",
+    "ens_solve",
+    "frontier",
+    "mc_certify",
+    "assemble"
+   ]
+  }
+ },
+ {
+  "id": "synthetic:strong_grid_drops_import",
+  "meta": {
+   "dtc_attribution": null,
+   "pack_overrides": {
+    "import_energy_mwh_per_year": -1,
+    "import_p_nom_mw": 40.0
+   },
+   "recommended_archetype": "strong_grid",
+   "stages": []
+  },
+  "study_body": {
+   "archetype": "strong_grid",
+   "stages": [
+    "apply_pack",
+    "ens_solve",
+    "assemble"
+   ]
+  }
+ },
+ {
+  "id": "synthetic:out_of_range_is_null",
+  "meta": {
+   "dtc_attribution": null,
+   "pack_overrides": {
+    "ens_cap_permyriad": 0
+   },
+   "recommended_archetype": "weak_flexible",
+   "stages": null
+  },
+  "study_body": null
+ }
+]

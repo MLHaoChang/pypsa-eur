@@ -12,14 +12,14 @@ beforeEach(() => { get.mockReset(); post.mockReset() })
 
 describe('flow client', () => {
   it('reads the flow of the named project', async () => {
-    get.mockResolvedValue({ data: { sections: [], run_ready: true, run_blocker: null, deferred: false, deferred_reason: null } })
+    get.mockResolvedValue({ data: { sections: [], run_ready: true, run_blocker: null, notes: [], deferred: false, deferred_reason: null } })
     const body = await getProjectFlow('my site')
     expect(get).toHaveBeenCalledWith('/projects/my%20site/flow')
     expect(body.run_ready).toBe(true)
   })
 
   it('acknowledges by code and entity and returns the stored ack', async () => {
-    post.mockResolvedValue({ data: { ack: { code: 'assumed_default', entity: 'discount rate', value_hash: 'h', at: 't' } } })
+    post.mockResolvedValue({ data: { ack: { section: 'commercial', code: 'assumed_default', entity: 'discount rate', value_hash: 'h', at: 't' } } })
     const ack = await ackFlowItem('p', 'assumed_default', 'discount rate')
     expect(post).toHaveBeenCalledWith('/projects/p/flow/ack', { code: 'assumed_default', entity: 'discount rate' })
     expect(ack.value_hash).toBe('h')

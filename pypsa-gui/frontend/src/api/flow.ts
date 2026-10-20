@@ -21,7 +21,7 @@ export type FlowSectionState = 'complete' | 'warning' | 'incomplete' | 'not_need
 export type FlowFreshness = 'not_run' | 'running' | 'fresh' | 'stale'
 
 export type FlowItemSource =
-  | 'validation' | 'eh_readiness' | 'commercial' | 'library' | 'template' | 'flow'
+  | 'validation' | 'eh_study' | 'eh_readiness' | 'commercial' | 'library' | 'template' | 'flow'
 
 /** Where an item's fix lives. `panel` is a `SlidePanel` id, or null for the
  *  component's own Properties (`component` + `entity`); unknowns are null. */
@@ -39,6 +39,9 @@ export interface FlowItem {
   message: string
   source: FlowItemSource
   target: FlowTarget
+  /** A server refusal (`validate_for_run`, or the study's own start refusal):
+   *  only these make `run_ready` false. Other errors are display-only gaps. */
+  blocking: boolean
   /** A warning the user has checked (`POST …/flow/ack`); it no longer counts. */
   acknowledged: boolean
 }
@@ -56,23 +59,30 @@ export interface FlowSection {
   freshness?: FlowFreshness
 }
 
+/** A pointer to one item: the Run's blocker, or a display-only note. */
 export interface FlowRunBlocker {
   section: FlowSectionId
   /** "Connection & grid: …", ready for the disabled Run's reason. */
   message: string
   target: FlowTarget
 }
+export type FlowNote = FlowRunBlocker
 
 export interface ProjectFlow {
   sections: FlowSection[]
-  /** Warnings never block (W3); false while deferred. */
+  /** Exactly the server's verdict (design §3.3 R1); warnings never block
+   *  (W3); false while deferred. */
   run_ready: boolean
+  /** The first blocking item, in flow order. */
   run_blocker: FlowRunBlocker | null
+  /** Display-only gaps (non-blocking errors), shown beside an enabled Run. */
+  notes: FlowNote[]
   deferred: boolean
   deferred_reason: string | null
 }
 
 export interface FlowAck {
+  section: FlowSectionId
   code: string
   entity: string
   value_hash: string

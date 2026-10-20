@@ -234,23 +234,13 @@ def _validate_dtc_config(raw: dict, n) -> DtcConfig:
     return dtc
 
 
-def start_eh_study(
-    body: EhStudyRequest | None,
-    *,
-    solver_state: dict,
-    state_update,
-    publish_study,
-):
-    """
-    Start the Energy Hub reference-design study in a worker thread.
-
-    ASYNCHRONOUS BY CONSTRUCTION: pack apply + ENS solve (+ optional
-    redundancy / levers / DtC stages) must never block a request. 409 while
-    another study or a foreground solve is running (mesh refuse is the
-    caller's job; this publishes under the claim).
-    """
-    from services.adequacy.eh_study import run_eh_study
-
+def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict) -> dict:
+    """Every refusal `POST /results/eh_study` makes before its worker exists
+    (P13), as one function: an `HTTPException(422)` names the refusal, and a
+    pass returns what the worker needs. `start_eh_study` calls it first; the
+    project flow (`services/flow_service.py`) calls it to state the same verdict
+    without starting anything. Takes the network lock briefly (component names
+    and the energy-cap orientation are read from the live network)."""
     body = body or EhStudyRequest()
     archetype = getattr(body, "archetype", None)
     if archetype is None:
@@ -334,6 +324,37 @@ def start_eh_study(
                                    ("mc_seed", mc_opts.seed),
                                    ("mc_cov_target", mc_opts.cov_target))
                  if v is not None}
+    return {"body": body, "archetype": archetype, "budget": budget, "stages": stages,
+            "cfg": cfg, "n": n, "lock": lock, "pack": pack, "raw_dtc": raw_dtc,
+            "dtc_attribution": dtc_attribution, "dtc_config": dtc_config,
+            "dsr_buses": dsr_buses, "mc_kwargs": mc_kwargs}
+
+
+def start_eh_study(
+    body: EhStudyRequest | None,
+    *,
+    solver_state: dict,
+    state_update,
+    publish_study,
+):
+    """
+    Start the Energy Hub reference-design study in a worker thread.
+
+    ASYNCHRONOUS BY CONSTRUCTION: pack apply + ENS solve (+ optional
+    redundancy / levers / DtC stages) must never block a request. 409 while
+    another study or a foreground solve is running (mesh refuse is the
+    caller's job; this publishes under the claim).
+    """
+    from services.adequacy.eh_study import run_eh_study
+
+    # P13: every refusal happens here, before the worker exists.
+    plan = check_eh_study_start(body, solver_state=solver_state)
+    body, archetype, budget, stages = (plan["body"], plan["archetype"],
+                                       plan["budget"], plan["stages"])
+    cfg, n, lock, pack = plan["cfg"], plan["n"], plan["lock"], plan["pack"]
+    raw_dtc, dtc_attribution = plan["raw_dtc"], plan["dtc_attribution"]
+    dtc_config, dsr_buses = plan["dtc_config"], plan["dsr_buses"]
+    mc_kwargs = plan["mc_kwargs"]
 
     stop_event = _threading.Event()
     log_queue: _queue.SimpleQueue = _queue.SimpleQueue()

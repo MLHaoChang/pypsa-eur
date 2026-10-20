@@ -203,7 +203,10 @@ own sub-steps), stage (EH pipeline stages, growth stages), tab, page
 `unknown` while the preflight is deferred (never `complete`). An error item or
 a failed presence rule makes a section `incomplete`; an unacknowledged warning
 (including a template default marked `assumed`) makes it `warning`. Warnings
-never block Run. `readiness` and `results` carry none of their own: readiness
+never block Run, and neither does a display-only gap (a flow `note`): Run is
+ready exactly when the server would accept the run (design §3.3 R1), so a
+section can read `incomplete` beside an enabled Run. `readiness` and `results`
+carry none of their own: readiness
 summarises 1–8, results reports its freshness (`not_run`, `running`, `fresh`,
 `stale`).
 _Avoid_: status (the solve's), done, valid
