@@ -18,7 +18,7 @@ import { useResultsFilter } from './filterContext'
 import WindowSlider, { useWindowRange } from './WindowSlider'
 import { CHART_AXIS, CHART_GRID, CHART_TOOLTIP, shortStamp, yAxisLabel } from './shared'
 import {
-  GROUP_COLOR, GROUP_LABEL, MONTH_STACK, WEEKDAYS, annualStack, cellTitle, fmtMw, fmtMwh, heatColor,
+  GROUP_COLOR, GROUP_LABEL, MONTH_STACK, WEEKDAYS, annualStack, cellTitle, fmtMw, fmtMwh, heatBackground,
   heatMax, missingGroups, monthRows, periodLabel, socRows, weekRows,
 } from './loadShape'
 
@@ -46,12 +46,12 @@ function Heatmap({ title, testId, heat, rgb }: { title: string; testId: string; 
             {heat.mean_mw[di].map((v, h) => (
               <span key={h} className="h-4 border border-border/40" data-cell={`${di}-${h}`}
                     data-value={v ?? ''} title={cellTitle(di, h, v, heat.snapshots[di][h])}
-                    style={{ background: heatColor(v, max, rgb) }} />
+                    style={{ background: heatBackground(v, max, rgb) }} />
             ))}
           </div>
         ))}
       </div>
-      <p className="text-[10px] text-muted">Mean MW per weekday and hour; a blank cell has no snapshot. Peak cell {fmtMw(max)}.</p>
+      <p className="text-[10px] text-muted">Mean MW per weekday and hour; a hatched cell has no snapshot. Peak cell {fmtMw(max)}.</p>
     </div>
   )
 }
@@ -193,9 +193,9 @@ export default function LoadShapeTab() {
         )}
       </section>
 
-      <section className="space-y-2" data-testid="ls-monthly">
-        <h3 className="text-[12px] font-semibold">Monthly site energy</h3>
-        {data.monthly?.status === 'ok' ? (
+      {data.monthly?.status === 'ok' ? (
+        <section className="space-y-2" data-testid="ls-monthly">
+          <h3 className="text-[12px] font-semibold">Monthly site energy</h3>
           <>
             <ResponsiveContainer width="100%" height={240}>
               <ComposedChart data={monthRows(data.monthly.months)} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
@@ -220,10 +220,14 @@ export default function LoadShapeTab() {
               Average daily generation {fmtMwh(data.monthly.average_daily_generation_mwh)} per day.
             </p>
           </>
-        ) : (
-          <ResultState state="unavailable" reason={data.monthly?.status === 'unavailable' ? data.monthly.reason : 'Not available.'} />
-        )}
-      </section>
+        </section>
+      ) : (
+        // One line, not an empty chart frame: on a representative-week run this is always the answer.
+        <p className="text-[11px] text-muted" data-testid="ls-monthly">
+          <span className="font-semibold">Monthly site energy:</span> not available for this run —{' '}
+          {data.monthly?.status === 'unavailable' ? data.monthly.reason : 'not established'}.
+        </p>
+      )}
 
       <section className="space-y-2" data-testid="ls-annual">
         <div className="flex flex-wrap items-center gap-2">
