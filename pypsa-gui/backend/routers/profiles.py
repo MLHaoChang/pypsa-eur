@@ -617,11 +617,26 @@ def shape_profile(
                 detail={"error_kind": _error_kind(exc), "message": str(exc)},
             ) from exc
 
+    # Reshaping a shaped artifact extends its chain: the ops accumulate in
+    # order and the stats stay anchored on the generated, uncalibrated root
+    # — the provenance must not depend on an intermediate artifact that
+    # eviction may delete (gatekeeper, #432).
+    if parent.get("calibrated"):
+        earlier = parent.get("shaping") or {}
+        for point, chain in per_point.items():
+            prior = earlier.get(point)
+            if prior:
+                chain["ops"] = list(prior.get("ops", [])) + chain["ops"]
+                chain["parent_stats"] = prior.get("parent_stats",
+                                                  chain["parent_stats"])
+    origin_job = parent.get("origin_job") or body.job_id
+
     new_id = str(uuid.uuid4())
     record = {
         **parent,
         "job_id": new_id,
         "parent_job": body.job_id,
+        "origin_job": origin_job,
         "parent_generated_at": parent.get("generated_at"),
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
         "points": list(shaped),

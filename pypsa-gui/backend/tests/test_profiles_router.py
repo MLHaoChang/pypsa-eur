@@ -764,3 +764,31 @@ def test_shape_with_a_malformed_job_id_is_a_typed_refusal(client,
                   [{"op": "target_flh", "hours": 2000}])
     assert resp.status_code == 422, resp.text
     assert resp.json()["detail"]["error_kind"] == "malformed_job_id"
+
+
+def test_reshaping_a_shaped_profile_keeps_the_whole_op_chain(
+    client, wind_project, completed_job, session_ctx,
+):
+    """Gatekeeper (#432): a second shaping round must not drop the first —
+    the applied meta lists both ops in order, the generated root job and
+    the root's stats, even after the first round's artifact is gone."""
+    first = _shape(client, wind_project, completed_job["id"],
+                   [{"op": "target_flh", "hours": 2000}]).json()
+    second = _shape(client, wind_project, first["job_id"],
+                    [{"op": "peak_shift", "hours": 2}])
+    assert second.status_code == 200, second.text
+    second = second.json()
+    resp = client.post(
+        f"/api/projects/{wind_project}/profiles/apply",
+        json={"job_id": second["job_id"], "component": "g_wind"},
+    )
+    assert resp.status_code == 200, resp.text
+    meta = session_ctx(client).user_ts_meta[
+        ("generators", "p_max_pu", "g_wind")]
+    chain = meta["shaping"]["g_wind"]
+    assert [o["op"] for o in chain["ops"]] == ["target_flh", "peak_shift"]
+    assert meta["origin_job"] == completed_job["id"]
+    assert meta["parent_job"] == first["job_id"]
+    root = first["stats"]["g_wind"]["parent_stats"]
+    assert chain["parent_stats"] == root
+    assert abs(chain["result_stats"]["flh"] - 2000) < 10

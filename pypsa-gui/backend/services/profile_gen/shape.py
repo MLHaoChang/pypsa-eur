@@ -29,7 +29,9 @@ Ops (``{"op": name, **params}``):
   threshold (``t + (v−t)·factor``, "the peaks are too high"). Then the
   original FLH is re-hit unless ``keep_flh`` is false.
 - ``peak_shift {hours}``: roll an hourly series by whole hours, wrapping at
-  the year boundary. Length and FLH are unchanged.
+  the year boundary. Length and FLH are unchanged. It is NOT a time-zone
+  fix: apply's ``time_basis`` maps the UTC weather onto the snapshots'
+  clock, so shifting by a UTC offset here would shift it twice.
 """
 from __future__ import annotations
 
