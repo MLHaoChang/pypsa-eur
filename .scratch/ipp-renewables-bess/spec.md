@@ -1,6 +1,6 @@
 # IPP renewables + BESS: an example for a developer's revenue case
 
-Status: ready-for-agent (spec; docs only, no code). Owner answered Q-IPP1–5 and the scope question on 2026-10-20, about 19:42 CEST, all A (§11). UX OK at the spec stage; gatekeeper review pending.
+Status: ready-for-agent (spec; docs only, no code). Owner answered Q-IPP1–5 and the scope question on 2026-10-20, about 19:42 CEST, all A (§11). UX OK at the spec stage. Gatekeeper: engine read, "go with changes" (2026-10-20, about 19:42 CEST), folded into §3 and §10.
 Date: 2026-10-20
 Author: ipp-renewables-bess session (commissioned through the coordinator)
 Base: master `ceff6b1` (#447 merged). #448 read at `760a48e` (`claude/workspace-integration-sensitivities`).
@@ -128,7 +128,7 @@ Import price: `da_base` plus an illustrative network charge (€/MWh) on `grid_i
 | **Shaped PPA, swap** | notional-volume CfD (#448 §2, K7). **Not available** until K7: shown in 7b as "Not yet available", never faked | — | — |
 | **Intraday, ancillary, capacity** | later, with K8's market bundle (one reserve model with DC-06). Out of this example's v1 | — | — |
 
-**Negative prices with a PPA.** The LP sees only the merchant price (the PPA settles after the solve), so it curtails the whole plant at a negative price. That matches a PPA with a negative-price clause (common in EU PPAs). The pay-as-produced form's default says so: "the offtaker accepts curtailment at negative day-ahead prices". A PPA that pays through negative prices would change dispatch on the seller side. That is a gatekeeper question (G2), not a v1 feature.
+**Negative prices with a PPA.** The LP sees only the merchant price (the PPA settles after the solve), so it curtails the whole plant at a negative price. That matches a PPA with a negative-price clause (common in EU PPAs). The financial PPA therefore carries the CfD's clause, `suspend_on_negative_price`, which defaults to **True** for this form: no settlement at ref < 0, which is consistent with the LP's curtailment there (gatekeeper). A user who sets it to False gets a warning: "dispatch is not contract-optimal: the LP curtails at negative prices while the contract would pay P − ref". A PPA whose payment changes the seller's dispatch is not a v1 feature.
 
 ---
 
@@ -227,7 +227,41 @@ The user can switch Grid on later (#448 §4): the POI and export limit already l
 | 9 Readiness → run | — | — |
 | 10 Results → reports | the usual tab order (templates never reorder). The project opens Results on **Commercial** as its initial tab: revenue by stream, capture, NPV/IRR, break-even PPA. Curtailment by cause sits in Capacity › Operation, cross-linked from Commercial | — |
 
-### 8.3 Home card and artwork brief
+### 8.3 Every pre-filled parameter is editable in both modes
+
+Owner rule (about 19:43 CEST): "all examples should enable user to change parameters in both guided and expert modes."
+- Each value below is editable in Guided (as a key parameter, or under the section's Advanced) and in Expert (in the same editor component, #444 §4).
+- Nothing is locked unless the engine requires it, and then the field says why.
+- Editing a value makes it `user` (#447 §3).
+
+| Parameter (pre-fill) | Section / block | Guided | Expert editor |
+|---|---|---|---|
+| Project name; site pin (illustrative DE-LU site) | 1 | key | section 1 editors (name, map pin) |
+| Planning period 2030 (native) | 1 | key; other years show the E1 note (#444 §3.3), never snap | section 1 planning period |
+| Carrier: electricity | 2 | key (add a carrier) | Carriers & processes card |
+| Export limit 70 MW (`grid_export.p_nom`) | 3 | key | section 3 connection editor; the Link's form in Expert |
+| Import limit 20 MW (`grid_import.p_nom`) | 3 | key | the same |
+| Bidding zone DE-LU (from the pin) | 7c (shown in 3) | key | 7c zone override |
+| Wind 60 MW, PV 50 MWp (forced size) | 5 | key (size) | asset form (W5): General → Sizing. "Let the study size it" turns the forced bounds into a range |
+| Plant overnight cost, FOM, lifetime (pack) | 5 | Advanced | asset form › Sizing / Commercial; reset to pack |
+| Battery candidate 0–50 MW, 2 h, efficiencies | 5 | key (max MW, duration) | asset form › Sizing; efficiency under Advanced |
+| Battery cost (power + energy parts, pack), throughput cost per MWh discharged | 5 | Advanced | asset form › Commercial; reset to pack |
+| Wind and PV CF (synthetic, `generated`) | 6 | key row (status, regenerate, upload) | Time series row → owner's editor; Profile Studio |
+| DA price shapes (illustrative) | 6 / 7c | key row with the recheck flag | 7c price-data panel; Library series picker |
+| Network charge on import (€/MWh) | 7a | key | 7a tariff editor |
+| PPA: form, price, share 70 %, tenor 10 y | 7b | key | 7b PPA editor |
+| PPA: settlement `financial`, reference = export series, negative-price clause, indexation, base year | 7b | Advanced | 7b PPA editor (every field) |
+| WACC, inflation, analysis years 25, debt share | 7d | key | 7d `FinanceInputs` editor |
+| Financial close, COD, degradation, battery replacement, tax pack, debt terms, LP discount rate | 7d | Advanced | 7d `FinanceInputs` editor; the LP rate beside WACC |
+| Parties `ipp` / `offtaker` / `market`, `export_revenue_to` | 7e | key (who owns, who earns export) | the party board (C5) |
+| Groups (Capacity, Commercial, Hand-off on; Grid, Control off) | 8 | key (the scope component) | the same component |
+| The 8 cases | 8 | read-only list until S5, then editable rows | S5 rows |
+
+**Engine-required locks** (each field says why):
+- `PpaContract.settlement` can't be `physical` while the site sells and earns the export price. The preflight's double-count warning names the reason; it isn't a hidden lock.
+- A baseload PPA's share is fixed at 1 ("the volume is the baseload MW").
+
+### 8.4 Home card and artwork brief
 
 - **Card**:
   - title "Renewables IPP + battery";
@@ -259,11 +293,11 @@ The user can switch Grid on later (#448 §4): the POI and export limit already l
 
 | # | Gap | Proposal | Gate |
 |---|---|---|---|
-| **G1** | No PPA share: `PpaContract` and `CfdContract` take a whole asset's output | `share: float = 1.0`, in (0, 1], on both, applied to `gen` before settlement and before the volume cap. In `hashing.FIELDS_AFTER_V1` (default 1.0, so existing hashes don't move). The degradation tag is unchanged | **gatekeeper** (contract model) |
-| **G2** | A PPA **sold by the site** with merchant export is a double count (`commercial.ppa_export_double_count`) | For a site that exports (`site_party` = seller, an export price set), a pay-as-produced PPA settles as **financial**: `(price − ref) × share × gen`, with `ref` = the export price series. That is cash-identical to "PPA price on the share, merchant on the rest", because the export already earns `ref` on every MWh. The preflight then doesn't warn for that form. 10 › Commercial re-labels it for the user as "PPA revenue = price × share × gen" and "merchant = ref × (1 − share) × gen" (G6). Also: confirm `solve_ppa` finds this contract, and the negative-price rule of §3 | **gatekeeper** (settlement semantics) |
-| **G3** | A template can't ship a price series: `export_price_ref` and the contracts' `reference_price` are org Library refs | `project_templates/<id>/price_series/*.csv` + `meta.json`. At create, `from_template` mints each into the org Library with `series_store.put_series` (idempotent on content, as `export_series.put_flat_export_series`), labelled `illustrative`, then writes the refs into the project's `solver_config.commercial`. A refusal leaves no half-made project | gatekeeper told (Library write path); the K2/S1 sessions told |
+| **G1** | No PPA share: `PpaContract` and `CfdContract` take a whole asset's output | `share: float = 1.0`, in (0, 1], on both, applied to `gen` before settlement and before the volume cap. A baseload PPA refuses a share other than 1. In `hashing.FIELDS_AFTER_V1` (default 1.0). Test: hash stability on an existing PPA and CfD fixture. The degradation tag is unchanged | gatekeeper: **OK as written** |
+| **G2** | A PPA **sold by the site** with merchant export is a double count (`commercial.ppa_export_double_count`) | Gatekeeper, **an explicit field, not an automatic rule** (an automatic rule would silently change the cash of existing contracts):<br>1. `PpaContract.settlement: Literal["physical", "financial"] = "physical"`, in `FIELDS_AFTER_V1`.<br>2. `financial` settles `(price − ref) × share × gen` through **the CfD settlement code** (strike − ref), not a second implementation. Its `reference_price` is the export series.<br>3. The cash identity holds with the battery too: Σ ref · export + Σ (P − ref) · s · gen. The "merchant rest" (export − s · gen) can go negative while the battery charges from the plant. The toy test covers that.<br>4. Negative prices: `suspend_on_negative_price`, default True for this form (§3); False warns.<br>5. Preflight: `ppa_export_double_count` stops **only** for `settlement == "financial"`. An info line is added when the PPA's ref isn't the export series (basis risk, not a double count).<br>6. `solve_ppa`: a financial owner-sold PPA is linear in price with no redispatch, so it counts as the single owner-sold PPA. `solve_ppa_ambiguous_contract` stays when there are two.<br>10 › Commercial re-labels the streams for the user (G6) | gatekeeper: **go with these changes** |
+| **G3** | A template can't ship a price series: `export_price_ref` and the contracts' `reference_price` are org Library refs | `project_templates/<id>/price_series/*.csv` + `meta.json`. At create, `from_template` mints each into the org Library with `series_store.put_series` (idempotent on content, as `export_series.put_flat_export_series`), labelled `illustrative`, then writes the refs into the project's `solver_config.commercial`. A refusal leaves no half-made project | gatekeeper: **OK**. The minted meta carries #445/#448's currency, `price_basis`, `currency_year`, `source_time_basis` (UTC) and the `illustrative` label. The hash is content-only, so the same template minted into two orgs hashes the same. The K2/S1 sessions are told |
 | **G4** | Shaped PPA, swap | #448 K7's notional-volume CfD. Not in v1: 7b shows them "Not yet available" | K7 (not here) |
-| **G5** | The plants must carry capex in the IC and drop out of the counterfactual | The plants are candidates with a forced size: `p_nom_extendable`, `p_nom_min = p_nom_max` = size. Test: on the generation-only network, the IC builds with an empty counterfactual and incremental = total. Also: billing on a site with no load | **gatekeeper** (IC semantics) |
+| **G5** | The plants must carry capex in the IC and drop out of the counterfactual | The plants are candidates with a forced size: `p_nom_extendable`, `p_nom_min = p_nom_max` = size. The IC builds with an empty counterfactual and incremental = total: the developer's standalone case (gatekeeper: **yes**). Traps to test (gatekeeper):<br>1. The grid-side two-way slack is never an `ipp` asset: no capex, vom or COD. It is excluded the way g2p 06 excludes product slacks (it is beyond the meter, `lp.site_generators`), and its marginal cost is 0 both ways.<br>2. With no import tariff, the import cost (`grid_import`'s Link marginal cost × flow) appears **once** as an energy-cost line. It is never dropped and never booked as asset vom. The IC total reconciles with the LP's revenue − cost per stream.<br>3. `circulation_risk_snapshots = 0`: the network charge is > 0 at every snapshot (asserted in the template test).<br>4. No load: per-load, self-sufficiency and `peak_import` capacity metrics give None or "not applicable", never a division by zero (one test over the IC report).<br>5. The battery throughput cost is set as StorageUnit `marginal_cost`, which prices `p_dispatch` only: "per MWh discharged" (not `marginal_cost_storage`, which is per MWh stored).<br>6. Forced-size candidates, `degradation_by_asset` and `part_lifetimes` are fine | gatekeeper: **yes, with these tests** |
 | **G6** | No revenue-by-stream view; curtailment isn't split by cause | A results reader over the IC `CashflowLine`s (merchant, PPA, CfD difference, import cost, O&M) and a curtailment split (export at `p_nom` vs price < 0). No engine change. UI in 10 › Commercial | UX; gatekeeper told |
 
 ---

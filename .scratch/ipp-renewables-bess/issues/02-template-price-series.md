@@ -13,7 +13,8 @@ Read [the spec](../spec.md) §2.3 and §10 G3 first.
 
 - A template directory may carry `price_series/<name>.csv` (a timestamp and a value column) and
   `price_series/meta.json`. The meta gives each series its `unit`, `label`, `source: illustrative`,
-  `vintage_year`, the zone and a note.
+  `vintage_year`, the zone, currency, `price_basis`, `currency_year`, `source_time_basis` (UTC) and
+  a note (gatekeeper). The hash is content-only, so two orgs get the same hash.
 - `POST /from_template/<id>` mints each series into the creating org's Library with
   `series_store.put_series` (idempotent on content, as `export_series.put_flat_export_series`).
   It then writes the refs into the new project's `solver_config.commercial`:

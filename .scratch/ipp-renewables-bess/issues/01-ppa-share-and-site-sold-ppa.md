@@ -18,20 +18,22 @@ Read [the spec](../spec.md) §3 and §10 (G1, G2) first.
    - A baseload PPA refuses a share other than 1 (its volume is `baseload_mw`).
    - The field goes in `services/commercial/hashing.FIELDS_AFTER_V1` with the default 1.0, so every
      existing contract hash stays the same (test).
-2. **The PPA the site sells (G2).** When the seller is the site party and the site earns an export
-   price, a pay-as-produced PPA settles as financial: `(price − ref) × share × gen`, where `ref` is
-   the export price series.
-   - Implement it the way the gatekeeper decides (a settlement mode on the contract, or an automatic
-     rule from the config).
-   - `preflight` then stops warning `commercial.ppa_export_double_count` for that case. It keeps
-     warning for every other case.
+2. **The PPA the site sells (G2)**, as the gatekeeper set it (spec §10 G2):
+   - `PpaContract.settlement: Literal["physical", "financial"] = "physical"`, in `FIELDS_AFTER_V1`;
+   - `financial` settles `(price − ref) × share × gen` by calling the CfD settlement code, not a
+     second implementation. It needs `reference_price` (validator);
+   - `suspend_on_negative_price` on the financial PPA, default True for this form. With False, a
+     warning says dispatch is not contract-optimal;
+   - `preflight`: `commercial.ppa_export_double_count` stops only for `settlement == "financial"`.
+     An info line is added when the PPA's ref isn't the export series (basis risk).
 3. **`solve_ppa`** finds that contract as "the case's single owner-sold PPA" (test).
 4. **The negative-price rule** (spec §3): the LP sees only the merchant price. Settlement uses the
    actual generation. The form's default text names the clause.
 
 ## Acceptance
 
-- A cash-identity test on a toy year: (merchant on all MWh + financial PPA) equals
-  (PPA price on the share + merchant on the rest), to the cent.
-- Hash stability for contracts saved before the change.
+- A cash-identity test on a toy year with a battery: Σ ref · export + Σ (P − ref) · s · gen equals
+  "PPA price on the share + merchant on the rest", to the cent. It includes hours where the
+  merchant rest (export − s · gen) is negative because the battery charges from the plant.
+- Hash stability on an existing PPA and CfD fixture (`share`, `settlement` at their defaults).
 - The double-count warning fires as before for a behind-the-meter seller without export pricing.
