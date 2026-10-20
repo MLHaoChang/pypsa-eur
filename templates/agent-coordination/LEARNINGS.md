@@ -110,3 +110,9 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **Reading a session's transcript meant reading raw `list_events` output.**
   - Fix: `events.py` prints time, text and last tool call per event.
   - Lives in: `scripts/coord/events.py`, coordinator "Tool hygiene".
+
+## 20 Oct 2026: UX coherence gate
+
+- **Features landed in whichever screen their PR touched.** Users had to jump away and back (16 places found in one audit).
+  - Fix: a UX reviewer session writes one generic project workflow (sections, completion states, Run unlocks on complete-or-warning). Once the owner approves it, every UI PR needs the reviewer's OK on its exact head, next to the gatekeeper's.
+  - Lives in: coordinator "Merging", steward "UX reviewer", `docs/agents/roles.md`.

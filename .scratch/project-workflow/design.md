@@ -240,13 +240,26 @@ Rules:
 - **Sections 9 and 10 have no state of their own.** Section 9 summarises 1–8. Section 10 shows the run's freshness: "not run", "running", "fresh", "stale" (the hub-design `stale` rule).
 - **Required sections**: 1–5 and 8 always; 6 when any row has a time-varying input; 7 when the run requests an investment case, bill or ledger. The template table (§2.3) can turn a section `not_needed`, never `required`→optional by itself.
 
-### 3.3 Run unlocks only when the required sections are complete
+### 3.3 Run unlocks when the server would accept the run
 
 There is **one Run**. It runs what section 8 asks for: the optimisation (LOPF), the reliability study (EH study), or both in sequence. Today Guided runs only the study and Expert only LOPF, and both are called Run (§1.6).
 
-Run is enabled when every required section is `complete` or `warning`. It is disabled when any is `incomplete`. The disabled Run says which, in words: "Connection & grid: the connection limit is not set." Its one action opens that field.
+**One gate** (agreed with the gatekeeper and the B1 session, 2026-10-20, rules R1–R4):
 
-This replaces the two Run gates today: the hub-design Goal card's own `hub-goal-blocked`, and the Expert header Run that only finds out at `/run`. The server still refuses a run with errors, so a stale client can't bypass it.
+- **R1.** `run_ready` is exactly the server's verdict on the requested run: `validate_for_run` is ok, and, when section 8 requests the reliability study, the study start endpoint's own refusal path passes. The flow calls the same function that endpoint calls, with the same `eh_readiness` arguments; it never re-derives the check. Nothing else feeds `run_ready`.
+- **R2.** A presence rule (§3.2) is one of three kinds:
+  - (a) already one of those server checks, which the flow only files by section (`snapshots_empty`; VOLL ≤ 0 or no import Link for a study, through the study's refusal);
+  - (b) a new `validate_for_run` error, proposed to the gatekeeper as its own plan. Its first test is a sweep showing that every shipped network passes it (IEEE, Belgium, tutorial, the islanded sites);
+  - (c) display only: it marks the section `incomplete` or `warning` and never touches `run_ready` (a missing site location; a missing connection on a run that doesn't request the study).
+- **R3.** B1 ships kinds (a) and (c) only. A kind-(b) rule is a separate gated validator PR, so the flow never changes what `/run` accepts.
+- **R4.** Tests assert `run_ready` == the server's verdict, in both directions and on broken inputs: the five templates, IEEE 14-bus, an islanded or off-grid network with no import Link (`run_ready` true), `snapshots_empty`, a study request with VOLL ≤ 0, and an in-flight solve (every state `unknown`, `run_ready` false).
+
+What the user sees:
+- Run is disabled when the server would refuse. The disabled Run says why, by section and in words ("Connection & grid: no import connection for the reliability study"). Its one action opens that field.
+- Run is enabled with a note when only display-only gaps remain ("Project & site: no location"). A section can therefore read `incomplete` while Run is enabled, but only for a gap the server doesn't refuse.
+- An islanded site the user or template declared islanded has connection `not_needed`. An undeclared network with no import Link shows connection `incomplete` (display only), which invites the user to set the connection or declare the site islanded.
+
+This replaces the two Run gates today: the hub-design Goal card's own `hub-goal-blocked`, and the Expert header Run that only finds out at `/run`. The server keeps refusing on its own, so a stale client can't bypass it.
 
 ### 3.4 Where the state is shown
 
@@ -380,7 +393,7 @@ I apply this to the exact head SHA of every PR that changes UI, and reply "OK #<
 2. **No duplicate editors.** The value is editable in exactly one place. Elsewhere it is read-only with a link home (§2.2).
 3. **No jump away and back.** Finishing the section never needs another section's panel. A cross-section value opens inline (drawer or expand) and returns to the same place. Results never edit inputs.
 4. **Completion wired.** Any new required input or check emits a flow item (`code`, `severity`, `target`) through an existing source. A new validator code has a row in the code → section table (its test passes). The section's state is right in three cases: empty, filled, broken.
-5. **Run gate.** A new blocker shows in the disabled Run's reason with a working link to the field.
+5. **Run gate.** `run_ready` comes only from the server's verdict (§3.3, R1). A new blocker shows in the disabled Run's reason with a working link to the field. A display-only gap shows as a note beside an enabled Run, never as a client-side block.
 6. **Unknown is not complete.** A value the server can't establish shows as unavailable and keeps the section from a tick (ADR-0001).
 7. **Guided and Expert.** Same section, same state in both modes. Guided shows ≤3 decisions per card and never hides a blocker. An Expert-only control has a Guided route (default, assistant, or "switch to Expert" naming the field).
 8. **Generic.** No template-specific flow, section or ordering. Template-only fields are shown by site type or carrier, not by template id. Any carrier works, with its own unit: nothing adds MWh to tonnes.

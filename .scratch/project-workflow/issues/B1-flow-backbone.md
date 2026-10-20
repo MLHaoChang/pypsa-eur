@@ -18,7 +18,7 @@ One read-only source of truth for "which flow sections are done". Later tickets 
 1. **Section registry**, `pypsa-gui/backend/services/flow_sections.py`:
    - `SECTIONS`: the ten ids in order: `project`, `carriers`, `connection`, `loads`, `assets`, `profiles`, `commercial`, `scenarios`, `readiness`, `results`, each with its label (§2.1).
    - `CODE_SECTION`: issue code → section, for every code `validation_service` can emit. Then a fallback on `component_class` as in design §3.1: Load → loads; Generator, StorageUnit, Store and Link → assets, except the import/export Links that `archetypes.select_import_links_with_rule` picks, which go to connection; Bus, Line and Transformer → connection; snapshot and weighting codes → project; `carrier_*` → carriers; `discount_rate_*` → commercial; solver-mode, `sclopf_*`, `rolling_*`, `myopic_*`, `voll_*` and `co2_*` → scenarios.
-   - **Presence rules.** A short table of required inputs, each read from data that already exists, with no new physics:
+   - **Presence rules.** A short table of required inputs, each read from data that already exists, with no new physics. Each is tagged with its kind from design §3.3 R2: (a) an existing server check, filed only; or (c) display only. B1 adds no kind-(b) validator error (R3):
      - project: snapshots non-empty;
      - connection: at least one import Link, unless the project is islanded (`not_needed`);
      - loads: at least one Load or product demand;
@@ -37,7 +37,11 @@ One read-only source of truth for "which flow sections are done". Later tickets 
    - `complete` otherwise;
    - `not_needed` from the template or an explicit user choice (islanded).
    - `readiness` and `results` carry no state of their own. `readiness` summarises 1–8. `results` reports `not_run` / `running` / `fresh` / `stale`.
-   - Also return `run_ready: bool` and `run_blocker: {section, message, target} | null`: the first incomplete required section, in flow order (W3: warnings never block).
+   - Also return `run_ready: bool`, `run_blocker: {section, message, target} | null` and `notes: [{section, message, target}]`.
+     - `run_ready` is **exactly the server's verdict** (design §3.3 R1): the `validate_for_run` result, plus, when the study is requested, the study start endpoint's own refusal function, called with the same `eh_readiness` arguments (one source for those arguments, the gatekeeper's point 3).
+     - `run_blocker` is the first server refusal, filed by section in flow order.
+     - `notes` lists the display-only (kind-c) gaps. They never make `run_ready` false.
+     - Warnings never block (W3).
 4. **Acknowledgements.** `POST /api/projects/{name}/flow/ack {code, entity}` stores `{code, entity, value_hash, at}` in a project sidecar `flow_acks.json`. A changed value (a different hash) re-raises the warning. Errors can't be acknowledged (422).
 5. **Routes.**
    - `GET /api/projects/{name}/flow` → `{sections: [...], run_ready, run_blocker, deferred}`.
@@ -61,7 +65,7 @@ One read-only source of truth for "which flow sections are done". Later tickets 
 - Deferred preflight (a solver in flight) → every state `unknown`, `run_ready: false`.
 - The five templates (data centre, generic site, microgrid, H2 hub; ammonia when #418 is on master): the expected state per section at create, matching the instantiation table, design §2.3. Record any mismatch in the PR; don't paper over it.
 - An islanded microgrid → connection `not_needed`.
-- `run_ready` agrees with `/simulation/preflight`'s `ok` whenever no presence rule fails.
+- **R4, equivalence:** `run_ready` == the server's verdict, in both directions and on broken inputs. Cover the five templates, IEEE 14-bus, an islanded or off-grid network with no import Link (`run_ready` true, connection display-only `incomplete`, or `not_needed` when declared islanded), `snapshots_empty`, a study request with VOLL ≤ 0, and an in-flight solve (`unknown`, `run_ready` false).
 
 ## Done when
 

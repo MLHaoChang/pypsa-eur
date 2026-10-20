@@ -68,7 +68,14 @@ class ProfilePointIn(BaseModel):
 
 
 class EstimateRequest(BaseModel):
-    points: list[ProfilePointIn]
+    # Sites come from explicit `points` and/or `from_generators` (generator
+    # names resolved against the FOREGROUND network's bus coordinates — the
+    # same semantics the chat tools expose; at least one of the two is
+    # required). Point ids from generator names ARE the generator names, so
+    # apply needs no mapping; an explicit point with a generator's name is
+    # that generator's coordinate override.
+    points: list[ProfilePointIn] = []
+    from_generators: list[str] | None = None
     technology: str
     preset: str | None = None
     params: dict[str, Any] | None = None
@@ -100,6 +107,116 @@ class ApplyRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+
+def points_from_generators(names: list[str]) -> list[dict[str, Any]]:
+    """Resolve generator names to profile points (id/lon/lat) from the
+    FOREGROUND network's bus coordinates — the one code path behind the chat
+    tools' `from_generators` and the GUI's default generation flow. PyPSA
+    generators carry no coordinates of their own: a generator sits at its
+    bus. The point id IS the generator name, which is what apply defaults to.
+
+    Unknown names are a 422 `unknown_generator`. A bus without usable
+    coordinates (NaN, out of range, or PyPSA's 0/0 default — the rule
+    `network_geometry._bus_coord` applies to the map and line lengths) is a
+    422 `missing_coordinates` listing the generators: never a profile
+    generated for 0°E 0°N."""
+    from services.network_geometry import _bus_coord
+    from services.pypsa_service import PyPSAService
+
+    n = PyPSAService.get_active_context().network
+    points: list[dict[str, Any]] = []
+    missing: list[str] = []
+    no_coords: list[tuple[str, str]] = []
+    for raw in names:
+        g = str(raw)
+        if g not in n.generators.index:
+            missing.append(g)
+            continue
+        bus = str(n.generators.at[g, "bus"] or "")
+        if bus not in n.buses.index:
+            missing.append(f"{g} (its bus {bus!r} is not on the network)")
+            continue
+        coord = _bus_coord(n, bus)
+        if coord is None:
+            no_coords.append((g, bus))
+            continue
+        points.append({"id": g, "lon": coord[0], "lat": coord[1]})
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "unknown_generator",
+                "message": "unknown generator(s): "
+                           + ", ".join(missing)
+                           + f"; the network holds {len(n.generators.index)} "
+                           "generators — check the name(s)",
+            },
+        )
+    if no_coords:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "missing_coordinates",
+                "generators": [g for g, _ in no_coords],
+                "message": "no coordinates for "
+                           + ", ".join(f"{g} (bus {b})" for g, b in no_coords)
+                           + ": set coordinates on the bus (x = longitude, "
+                           "y = latitude, WGS-84 degrees) or pass an explicit "
+                           "point for the generator, or upload a profile for "
+                           "it instead",
+            },
+        )
+    return points
+
+
+def _require_generators(names: list[str]) -> None:
+    """422 `unknown_generator` for names the foreground network lacks — the
+    check an explicit coordinate override must not skip."""
+    if not names:
+        return
+    from services.pypsa_service import PyPSAService
+
+    gens = PyPSAService.get_active_context().network.generators.index
+    unknown = [str(g) for g in names if str(g) not in gens]
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "unknown_generator",
+                "message": "unknown generator(s): " + ", ".join(unknown)
+                           + f"; the network holds {len(gens)} generators "
+                           "— check the name(s)",
+            },
+        )
+
+
+def _merged_points(body: EstimateRequest) -> list[dict[str, Any]]:
+    """Explicit points plus generator-resolved points; at least one source is
+    required. Duplicated ids are the engine's typed refusal downstream."""
+    merged = [p.model_dump() for p in body.points]
+    if body.from_generators:
+        # An explicit point for a generator is its coordinate override.
+        # Names it shadows must still exist on the network.
+        explicit = {p["id"] for p in merged}
+        resolved = points_from_generators(
+            [g for g in body.from_generators if str(g) not in explicit]
+        )
+        _require_generators(
+            [g for g in body.from_generators if str(g) in explicit]
+        )
+        merged.extend(resolved)
+    if not merged:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "no_points",
+                "message": "give either `points` (id/lon/lat) or "
+                           "`from_generators` (generator names whose bus "
+                           "coordinates seed the sites)",
+            },
+        )
+    return merged
 
 
 def _validate_technology(technology: str) -> None:
@@ -181,13 +298,15 @@ def estimate_profile(body: EstimateRequest):
         _validate_technology(body.technology)
         params = _preset_params(body)
         result = engine.generate_profile(
-            [p.model_dump() for p in body.points],
+            _merged_points(body),
             body.technology,
             params=params,
             source="synthetic",
             year=body.year,
             resolution=body.resolution,
         )
+    except HTTPException:
+        raise
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
@@ -251,17 +370,20 @@ def generate_profiles(
     now, not a failed job later."""
     _check_lock(proj, db, user)
     spec = body.model_dump()
-    spec["points"] = [p.model_dump() for p in body.points]
+    spec.pop("from_generators", None)  # resolved into concrete points below
     try:
         # Validate the way the runner will, minus the work: points, technology,
         # preset name (resolve_params raises UnknownPresetError), and a CDS
         # preflight for the atlite source. The runner re-resolves params from
         # the raw preset+overrides; nothing computed here is passed down.
+        spec["points"] = _merged_points(body)
         engine._normalize_points(spec["points"])
         _validate_technology(body.technology)
         _preset_params(body)
         if body.source == "atlite":
             cds_preflight()
+    except HTTPException:
+        raise
     except CdsCredentialError as exc:
         raise HTTPException(
             status_code=422,
@@ -379,13 +501,20 @@ def apply_profile(
     if coords is not None and body.component in gen.index:
         bus = str(gen.at[body.component, "bus"])
         if bus in ctx.network.buses.index:
-            bx = float(ctx.network.buses.at[bus, "x"] or 0.0)
-            by = float(ctx.network.buses.at[bus, "y"] or 0.0)
-            if abs(bx - coords[0]) > 0.5 or abs(by - coords[1]) > 0.5:
+            from services.network_geometry import _bus_coord
+
+            now = _bus_coord(ctx.network, bus)
+            if now is None:
+                warning = (
+                    f"bus '{bus}' has no coordinates now: profile was made "
+                    f"for ({coords[0]:.3f}, {coords[1]:.3f})"
+                )
+            elif (abs(now[0] - coords[0]) > 0.5
+                  or abs(now[1] - coords[1]) > 0.5):
                 warning = (
                     f"bus '{bus}' moved since generation: profile was made for "
                     f"({coords[0]:.3f}, {coords[1]:.3f}), the bus now sits at "
-                    f"({bx:.3f}, {by:.3f})"
+                    f"({now[0]:.3f}, {now[1]:.3f})"
                 )
 
     # Undo snapshot BEFORE the write — the middleware only covers

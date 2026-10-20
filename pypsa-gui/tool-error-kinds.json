@@ -822,6 +822,10 @@
     "unknown_generator": {
       "surface": "inline",
       "why": "from_generators named a generator the open network does not hold. The detail lists the names not found; the assistant lists the candidates and asks again, per call."
+    },
+    "missing_coordinates": {
+      "surface": "inline",
+      "why": "from_generators named generators whose bus has no usable coordinates (unset, out of range, or the 0/0 default). The detail lists them; the assistant offers both remedies per call: set the bus coordinates (an edit with its own card) or upload a profile."
     }
   }
 }
