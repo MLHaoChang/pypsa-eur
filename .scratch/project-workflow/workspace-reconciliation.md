@@ -261,7 +261,7 @@ The lists below are the parameters a Guided user sets today (generic-site form, 
   - **stress conditions**: baseline, heatwave, dark and still week, low-wind week, from the project's registry; the editor moves here from FMEA (J13).
 - Required inputs:
   - **VOLL** (€/MWh, > 0). Today it is read-only in Guided (J1); here it is editable;
-  - **CO₂ price**;
+  - CO₂ price: read-only here, with a link to its home in 7c ([commercial-finance.md](commercial-finance.md));
   - Grid group:
     - **load flow** (AC power flow after the optimisation, today's "Stage 2 AC PF");
     - **N-1 security** (SCLOPF);
@@ -460,7 +460,8 @@ Gating column: the existing gate is **kept**. RO means "read-only role: the serv
 | Current | New home | Gating kept |
 |---|---|---|
 | RUN › Solver Settings › General (clustering, rolling horizon, Stage 2 AC PF chaining) | 8 (Stage 2 AC PF is the Grid group's `loadflow`) | AC PF needs `canRunAcPf`; rolling disabled with periods |
-| Solver Settings › Solver, Dispatch (MIP, CO₂ price), Add. constraints | 8 | per installed solver |
+| Solver Settings › Solver, Dispatch (MIP), Add. constraints | 8 | per installed solver |
+| Solver Settings › Dispatch › CO₂ price | 7c, the CO₂ path (read-only in 8) | — |
 | Solver Settings › Network (VOLL, ENS target, reserve margin, DR, N-1 SCLOPF) | 8 (VOLL editable in Guided too) | losses off with SCLOPF |
 | Results › Reliability › FMEA › Stress scenario editor | **moves** to 8, Stress conditions (J13); FMEA keeps the results | max 10 scenarios |
 | Guided Goal card (LOLE, ENS, archetype, VOLL) | 8 (archetype → 3) | — |
