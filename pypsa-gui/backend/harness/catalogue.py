@@ -1544,7 +1544,10 @@ TOOLS: list[dict[str, Any]] = [
         "list_load_profile_archetypes) and a misspelt one is refused. Shapes "
         "are hourly; working hours follow the project's commercial timezone "
         "unless params.timezone says otherwise. The answer gives each load's "
-        "peak MW and annual MWh and the job_id to apply. On a project made "
+        "peak MW, its source-year annual MWh, the MWh this model's snapshots "
+        "will see (modelled_mwh: a sampled template sees less), any "
+        "warnings to relay (energy_mismatch, an assumed UTC clock), and the "
+        "job_id to apply. On a project made "
         "with a data-centre dc_load spec, that spec owns the DC load: apply "
         "refuses a data_centre profile there. `project_id` is the project "
         "NAME and must be the open project. Safety: execution.",
