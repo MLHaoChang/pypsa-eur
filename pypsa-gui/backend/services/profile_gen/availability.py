@@ -16,7 +16,9 @@ One column per generator over the source year's hours, for one bound:
     ``summer_share`` (a heat-led floor following heating degrees under
     ``heating_base_c``), or ``monthly`` (12 shares).
   * ``derating`` → p_max_pu = clip(1 − per_k · max(0, T − threshold_c),
-    floor, 1).
+    floor, 1). The default threshold, 15 °C, is the ISO rating condition of a
+    gas turbine; derate another kind of equipment from its own rating
+    temperature.
   * ``forced_outages`` → refused. The reliability study samples forced
     outages from each asset's own rate and MTTR (`services/adequacy/mc.py`);
     one draw written into the dispatch would be a single arbitrary scenario
