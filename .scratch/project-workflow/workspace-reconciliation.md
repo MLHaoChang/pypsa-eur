@@ -118,10 +118,14 @@ The owner chose free years at entry (Q3 = B). Today the templates' periods are f
 - **Never snap silently.** When the entered years differ from the template's native years, the Builder says so before Create, in words: "This example is built for 2027, 2030 and 2035. Your years (2028–2040) need the example rebuilt for them, which isn't available yet." Create is then offered only as **"Create with 2027 / 2030 / 2035"**, an explicit choice. The entered years are kept in the draft, so they apply once E1 lands. The own-site form already takes any 1–3 stage years from 2025 to 2060 (`eh_site.py`), so "Your own site" uses the entered years directly today.
 - **After E1** (§13, an early gated engine slice), the example is built for the entered years:
   - investment periods from the start and end years plus the optional dates;
-  - weights and discounting per period;
-  - energization steps per period;
-  - DC phases per period;
-  - cost and price sources per period.
+  - weights and discounting from **one place**: the builders set the periods and `end_year`, and the solver's existing auto-discount (`auto_discount_periods`) derives them; the default years stay byte-identical (`investment_period_weightings`);
+  - unequal period lengths (for example 2026 / 2029 / 2040 → 2050) build, pass preflight and solve on every staged template, or are refused at create with a typed reason (PyPSA's `periodized_cost` refuses `overnight_cost` on unequal `nyears`);
+  - energization steps and DC phases per period (`dc_load_spec` accepts the project's periods);
+  - price paths keep their step-back rule (the latest year ≤ the period), labelled in the ledger "assumed, held from <year>";
+  - the investment-case horizon follows `end_year`, not a fixed 2045.
+
+  Per-period cost sourcing is a separate gated follow-up: it changes every staged case's money. E1 keeps the pack's current basis (held flat to the base year, then escalated).
+- **Unset growth inputs are safe downstream** (gatekeeper): `site_peak.peak_check` (#435), the DC-01 refusal and the scorecard answer unknown or incomplete for an unset energization or IT MW. They never crash and never read it as 0.
 - **Growth inputs that the template does not have for those years stay missing.** IT MW per phase, energized MW per year and H₂ offtake per year show as required inputs in sections 3 and 4 (`incomplete`, by kind (c)). They are never interpolated from 12 / 24 / 36 MW, and no connection limit is invented. The template's own values are offered as "use the example's value", marked `assumed`.
 
 > Creating from the form's full values in one step (today's `GenericSiteForm`) is kept as the Expert path: New project › Your own site.
@@ -289,7 +293,7 @@ The lists below are the parameters a Guided user sets today (generic-site form, 
 | Group | On | Adds sections' blocks | Adds to the one Run (`run_request`) | Results (10) |
 |---|---|---|---|---|
 | **Capacity expansion** (incl. dispatch and economics) | always | sections 1–8 core blocks | `optimisation` (exists); `study` when a reliability goal is set or the template carries the study (exists) | Summary, Investment (capacity expansion, economics, prices, investment case), Reliability (adequacy, lost load, FMEA), Operation (dispatch, energy flow, load shape, storage cycling, curtailment, emissions) |
-| **Grid design & grid-code compliance** (incl. the load flow it needs) | template or user | 3: grid-code profile, ramp MW/min, oscillation band, PF; 5: lines, transformers, electrical infrastructure; 8: load flow, N-1 | `loadflow`, `grid_readiness` (after the gate, §11.1). N-1 SCLOPF is an option of `optimisation`, so it needs no new kind | Grid plan: load flow, scorecard, campus electrical (PCC compliance, transformers, reactive compensation, short circuit), connection capacity, connection-point assessment |
+| **Grid design & grid-code compliance** (incl. the load flow it needs) | template or user | 3: grid-code profile, ramp MW/min, oscillation band, PF; 5: lines, transformers, electrical infrastructure; 8: load flow, N-1 | `loadflow` (after the gate, §11.1). N-1 SCLOPF is an option of `optimisation`, so it needs no new kind. The grid-readiness scorecard is an **advisory read** shown in 9, never a run kind and never in the `run_ready` AND (gatekeeper; DC-02 plan; R1–R4) | Grid plan: load flow, scorecard, campus electrical (PCC compliance, transformers, reactive compensation, short circuit), connection capacity, connection-point assessment |
 | **Control strategy** | template or user | 5: the Controls block of each converter-coupled asset; 8: island requirements | `control_checks` (after the gate) | Controls: island report, frequency cuts, grid-forming recommendation |
 | **Hand-off to others** | always (owner, Q1 = A: the fourth group card) | 10: deliverable choices (report variant per party, export formats, specialist packet); no input section | none | Hand-off: reports (per-party variant, C4), exports (bundle, NetCDF, Excel, CSV, MATPOWER), the specialist packet (Planning → dynamics export, PowerFactory read-back) |
 
@@ -309,7 +313,7 @@ These follow #436's presets. The user can change any of them.
 
 - **One home.** The scope is stored per project in `flow_scope.json` `{version, groups, options}`. It is added to `_BUNDLE_FILES` like `flow_acks.json`, so it travels with bundles, snapshots and forks. Section 8 edits it, and the Builder mounts the same component.
 - **It behaves like instantiation.** It shows or hides blocks, marks a section `not_needed`, and extends `run_request`. It never adds or reorders a section. A section none of the groups in scope needs is `not_needed`, with its reason in the summary.
-- **`run_request` and `verdicts` grow additively** (B1 confirmed): `run_request: {optimisation, study, loadflow, grid_readiness, control_checks}` as bools; `verdicts: {kind: {ready, blocker} | null}`, null when not requested. `run_ready` is the AND over the requested kinds (R1). A kind's blocking items are found by their item `source` (`validation`, `eh_study`, then `loadflow`, `grid_readiness`, `control_checks`). `run_blocker` stays the first blocking item in flow order.
+- **`run_request` and `verdicts` grow additively** (B1 confirmed): `run_request: {optimisation, study, loadflow, control_checks}` as bools (the grid-readiness scorecard is an advisory read, not a kind); `verdicts: {kind: {ready, blocker} | null}`, null when not requested. `run_ready` is the AND over the requested kinds (R1). A kind's blocking items are found by their item `source` (`validation`, `eh_study`, then `loadflow`, `control_checks`). `run_blocker` stays the first blocking item in flow order.
 - **Every new verdict function is non-blocking on the network lock** (the gatekeeper's requirement for `check_eh_study_start(lock_blocking=False)`). A held lock answers `deferred`.
 - **Out-of-scope items** stay in the payload with `in_scope: false`. They:
   - don't count toward a section's state;
@@ -594,6 +598,11 @@ Existing pieces:
 | Warnings | `preset_leaves_no_grid_former`, `preset_not_applied_to_unit` show as section-5 warnings | the same |
 | Results | 10 › Controls; the GFM recommendation's "apply" goes through LC-04's EditCard (old → new per field, naming section 5), and its receipt links to the asset's Controls block in 5 | the same |
 
+Write paths (gatekeeper): Guided writes through `POST …/island/preset` and Expert through `PUT …/island`; both validate against gridspine's schema and save under the project lock. The GFM "apply" calls the existing tuning-apply service, not a new writer. Rules:
+- the Controls block never duplicates network fields (`p_nom` stays in the network);
+- renaming a component renames its sidecar unit;
+- a project-wide preset resets unit-level choices (#422's select semantics), and the form says so before applying.
+
 There is one editor: the island panel's per-unit dropdown and GFM inputs move to 5 (J16). DC-04's presets (#422) become this block. The engine side (which kinds and controls the island check credits, and whether the preset route is the right write path from an asset form) goes to the gatekeeper with §11.1.
 
 ---
@@ -644,16 +653,16 @@ What B1 (#434) already provides:
 
 | Kind / study | Entry point | Starting classification (to prove) |
 |---|---|---|
-| `optimisation` | `/simulation/run` | supported (B1) |
+| `optimisation` | `/simulation/run` | supported (B1). Implicit sub-step: `process_uc`'s binary operational check runs after every planning solve (#405) |
 | `study` (EH reliability) | `start_eh_study` / `check_eh_study_start` | supported (B1); mandatory pack and ENS stages are part of it |
-| `loadflow` | `run_ac_pf`; Solver Settings Stage 2 | bundled: needs a solved dispatch, mutates flow and voltage results; verdict needs a lock-free precondition |
-| N-1 SCLOPF | option of `optimisation` | supported as an option (no new kind) |
-| `grid_readiness` | #435 scorecard | likely supported (read-only rows); confirm with #435 |
-| campus electrical | `routers/campus_electrical.py` | unknown: may run least-cost first |
+| `loadflow` | `run_ac_pf`; Solver Settings Stage 2 | bundled: needs a solved dispatch, mutates flow and voltage results, and goes stale when the optimisation reruns; verdict needs a lock-free precondition |
+| N-1 SCLOPF | option of `optimisation` (`sclopf_model_kwargs`) | supported as an option (no new kind) |
+| grid-readiness scorecard | #435 | **not a run kind**: an advisory read shown in 9, outside the `run_ready` AND |
+| campus electrical | `routers/campus_electrical.py` | bundled or unknown: runs its own least-cost solve; W0 proves which |
 | `control_checks` (island study) | `POST /island/study` | unknown |
 | contingencies beyond N-1, connection capacity | `routers/gridspine.py` | unknown |
 | frequency and time domain | Planning → dynamics project; external read-back | unknown; screening ≠ time-domain |
-| detailed process | `services/solver/process_uc.py` | unknown, after GTP |
+| detailed process (beyond the implicit UC check) | `services/solver/process_uc.py` | unknown, after GTP |
 
 ---
 
@@ -678,6 +687,7 @@ B1 (#434) stays as is. The queued B2–B6 are re-cut as **W-slices**; the old ti
 | Slice | What | Replaces | Gate | After |
 |---|---|---|---|---|
 | **W0 Separability matrix** | §11.1 matrix with native tests; lock-free verdict functions for each kind it marks supported | new (#436 slice 0) | gatekeeper | B1 |
+| **E1 Examples for any planning years** | §3.3: builders take start/end years and optional dates; weights via auto-discount; unequal periods; growth inputs left unset and safe downstream; IC horizon = `end_year`. Per-period cost sourcing is a separate gated follow-up | new (owner Q3 = B) | gatekeeper (agreed with changes, 2026-10-20) | B1 |
 | **W1 Visual system** | tokens (Manrope + OFL self-hosted, graphite/navy dark, cool light, red accents), wordmark, `brand.theme.test.ts`; no layout change | new | UX | #437 and #441 merged (they touch `index.css`) |
 | **W2 Home and Builder** | §3: Home (Resume, examples with artwork, build your own, my projects), the Builder (mounts section 1's editors and W4a's scope component) → open in the flow at the first incomplete section; legacy templates under New project | B4 | UX | B1, W4a |
 | **W3a Flow shell and switch** | Guided rail = ten sections with `/flow` states and group chips; Expert sidebar regrouped (§6.1–6.2, navigation only); Issues by section **with a return path (J9)**: an item opens its field in place (drawer or inline), or keeps the Issues/section view to return to, and the item clears live when fixed; #442's Expert Issues placement of the scorecard folds in here; the Run's disabled reason; `activeSection` and the section-anchored switch (§7); the sidebar Assistant button removed | B2 (shell part) | UX | B1 |
@@ -692,7 +702,7 @@ B1 (#434) stays as is. The queued B2–B6 are re-cut as **W-slices**; the old ti
 | **W9 Companion** | #437's modes on top of #441; "Help with this section"; transient-card rule (§9, with LC-04) | new | UX | #441, #437 |
 | **W10 Results by group** | §6.3 tabs; Hand-off tab (reports, exports, the specialist packet) | new | UX | W3a, W4a |
 
-Order: W0 ∥ W1 ∥ W4a ∥ W3a → (W2 ∥ W3b ∥ W3c ∥ W5 ∥ W6) → W4b per kind as W0 classifies it → W7 → W10; W8 after GTP-02; W9 once #441 and #437 land. B2's existing condition stands: shell work waits until LC-04 leaves the shell/dock area. Sonnet sessions for the UI slices; Opus for W0 and W4 (contracts others read).
+Order: W0 ∥ E1 ∥ W1 ∥ W4a ∥ W3a → (W2 ∥ W3b ∥ W3c ∥ W5 ∥ W6) → W4b per kind as W0 classifies it → W7 → W10; W8 after GTP-02; W9 once #441 and #437 land. B2's existing condition stands: shell work waits until LC-04 leaves the shell/dock area. Sonnet sessions for the UI slices; Opus for W0 and W4 (contracts others read).
 
 ### 13.1 In-flight PRs and how they fold in
 
