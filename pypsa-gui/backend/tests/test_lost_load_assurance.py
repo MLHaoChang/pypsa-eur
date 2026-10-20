@@ -90,6 +90,21 @@ def test_network_entity_sums_the_electrical_loads(short, checked, client, sessio
     assert "1 Loads with a VoLL slack; shed hours count the 1 electrical Loads only" in public_text(frames)
 
 
+def test_several_carriers_show_each_carriers_energy_beside_the_total(short, checked, client, session_state):
+    n = short.network
+    n.add("Bus", "H2", carrier="H2")
+    n.add("Load", "Electrolyser", bus="H2", carrier="H2", p_set=[0, 4])
+    state = solve(client, session_state)
+    assert list(state["last_lost_load"]["lost_load_t"]["Electrolyser"]) == pytest.approx([0, 4])
+    # AC 3*5 = 15 MWh, H2 3*4 = 12 MWh; total 27 MWh; summed peak 9 MW at hour two.
+    values = {"lost_load_energy": 27, "peak_shed": 9, "shed_hours": 3, "lost_load_cost": 18000}
+    frames = ask(checked, short, values, entity="network")
+    assert answered(checked, frames) == pytest.approx(values)
+    text = public_text(frames)
+    assert "Energy by carrier: AC 15 MWh, H2 12 MWh" in text
+    assert "Peak shed is the peak of the summed shed, all carriers." in text
+
+
 def test_a_later_solve_replaces_the_capture_it_is_checked_against(short, checked, client, session_state):
     solve(client, session_state)
     # Re-solve with more demand: the capture and both fingerprints move together.

@@ -438,7 +438,7 @@ class Turn:
         if loading:
             lines.extend(assurance_metrics.branch.notes(record["raw"]))
         if shed:
-            lines.extend(assurance_metrics.lost_load.notes(record["raw"]))
+            lines.extend(assurance_metrics.lost_load.notes(record["raw"], self.request_scope, _label))
         for slot in record["slots"]:
             definition = assurance_metrics.definition(slot["metric"], self.request_scope["profile"])
             fact = next(

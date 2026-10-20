@@ -100,9 +100,19 @@ def source(ctx, entity):
         "objective_weight": [_number(v) for v in objective.reindex(index)],
         "shed": {c: [_number(v) for v in frame[c]] for c in columns},
         "electrical": electrical,
+        "carriers": {c: _carrier(n, c) for c in columns},
         "voll": _number(capture.get("voll_eur_per_mwh")),
         "valid_solve": solve_matches_inputs(ctx),
     }
+
+
+def _carrier(n, load):
+    """The Load's carrier, else its bus's: what the shed MWh is energy of."""
+    carrier = n.loads.at[load, "carrier"] if "carrier" in n.loads.columns else ""
+    if not isinstance(carrier, str) or not carrier:
+        bus = n.loads.at[load, "bus"]
+        carrier = n.buses.at[bus, "carrier"] if bus in n.buses.index else ""
+    return carrier if isinstance(carrier, str) and carrier else "unknown"
 
 
 def _window(raw, scope):
@@ -173,11 +183,32 @@ def calculate(raw, scope):
     return facts, slots
 
 
-def notes(raw):
-    """Always-shown scope line: which Loads the figure covers."""
-    if raw["entity_id"] == "network":
-        return [
-            f"{len(raw['shed'])} Loads with a VoLL slack; shed hours count the "
-            f"{len(raw['electrical'])} electrical Loads only, as the engine does."
-        ]
+def notes(raw, scope, label):
+    """Always-shown scope lines; with several carriers, each carrier's energy
+    beside the total, from the same evidence and window."""
+    if raw["entity_id"] != "network":
+        return ["This Load's own VoLL slack only."]
+    lines = [
+        f"{len(raw['shed'])} Loads with a VoLL slack; shed hours count the "
+        f"{len(raw['electrical'])} electrical Loads only, as the engine does."
+    ]
+    carriers = sorted(set(raw["carriers"].values()))
+    if len(carriers) < 2:
+        return lines
+    a, b = _window(raw, scope)
+    split = []
+    for carrier in carriers:
+        values = [raw["shed"][c][i] for c, k in raw["carriers"].items() if k == carrier for i in range(a, b + 1)]
+        weights = raw["energy_weight"][a : b + 1]
+        if not raw["valid_solve"] or any(v is None for v in values + weights):
+            return lines + ["Loads of several carriers; no per-carrier split is available."]
+        energy = math.fsum(
+            raw["energy_weight"][i] * max(raw["shed"][c][i], 0.0)
+            for c, k in raw["carriers"].items() if k == carrier for i in range(a, b + 1)
+        )
+        split.append(f"{label(carrier)} {repr(energy).removesuffix('.0')} MWh")
+    return lines + [
+        "Energy by carrier: " + ", ".join(split) + "; the total adds MWh of different carriers.",
+        "Peak shed is the peak of the summed shed, all carriers.",
+    ]
     return ["This Load's own VoLL slack only."]
