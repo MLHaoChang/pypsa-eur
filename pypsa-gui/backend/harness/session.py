@@ -164,6 +164,9 @@ class ChatSession:
     # Private turn-local checked-answer state; cleared on every exit.
     assurance_turn: Any | None = None
     shadow_turn: Any | None = None
+    # Ordinary-turn navigation binding (LC-03): set only when the client can
+    # ACK, so the browser can prove what a navigation showed. Cleared on exit.
+    navigation_turn: Any | None = None
     # Server-only bounded checked scope; never populated from model/client history.
     assurance_context: dict[str, Any] | None = None
     # Private checkpoint binding; never supplied by client histories or imports.

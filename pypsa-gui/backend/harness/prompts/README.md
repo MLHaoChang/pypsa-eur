@@ -3,7 +3,7 @@
 The system prompt is assembled by `services/chat_service._build_system_prompt`
 from the fragments in this folder, in this order: base_identity (+ the
 confirmation_card_contract when tools are on) + style_guidance,
-assistant_stance, reference_ladder and project_overview (tools on only), the
+assistant_stance, reference_ladder, project_overview and results_walk (tools on only), the
 profile-awareness
 block (built per turn), the skill catalogue (tools on only), domain_guide,
 solver_error_decoder, price_congestion_guide, next_step_rubric,

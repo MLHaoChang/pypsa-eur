@@ -1,0 +1,41 @@
+{
+  "journey": "OJ-01",
+  "command": "npm run build; PYPSA_COMPOSER_PYTHON=<python> CHROMIUM_BIN=/opt/pw-browsers/chromium node scripts/smoke-copilot-oj01.mjs",
+  "date": "2026-10-19",
+  "runs": 3,
+  "passed": 3,
+  "runner_sha256": "1c587be0a16df2f981b43d4d3a4438d14d845b6df5ca807fa531968175f73531",
+  "fixture_sha256": "ddec81b5e4464711a904063b2a7d8a7167407131210c23d91ef84bd92dfa56e0",
+  "result": {
+    "journey": "OJ-01",
+    "passed": true,
+    "sentence": "Show me the results of the latest calculation, the load flow results.",
+    "solves": 2,
+    "latestIsSecond": true,
+    "answer": "OJ01_ANSWER Showing the Load flow tab for run <run_id> (finished 2026-10-19T21:12:22.468076+00:00), current: True. Highest loading: T1 45.0 % (45.0 MW of 100.0 MVA), L1 15.0 % (45.0 MW of 300.0 MVA), L2 15.0 % (45.0 MW of 300.0 MVA). Active-power proxy, not an AC thermal check.",
+    "shown": {
+      "tab": "loadflow",
+      "scope": "current",
+      "source": "lopf",
+      "window": [
+        0,
+        23
+      ]
+    },
+    "seconds": 1.506,
+    "screenshot": "oj01-loadflow.png"
+  },
+  "seconds": [
+    1.506,
+    1.511,
+    2.104
+  ],
+  "checks": [
+    "two real HiGHS solves through the execution card; the answer names the second run",
+    "Load flow tab renders the bound source (lopf, window 0-23, current)",
+    "ACK lets the answer say Showing",
+    "answer and rendered table match the hand oracle with units (T1 45 MW of 100 MVA, L1/L2 45 MW of 300 MVA)",
+    "transcript and companion carry the same words"
+  ],
+  "limits": "Loopback scripted wire plays the model; no paid inference."
+}

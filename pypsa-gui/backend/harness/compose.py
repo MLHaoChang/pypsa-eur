@@ -87,6 +87,8 @@ _ASSISTANT_STANCE = _ASSISTANT_STANCE_FACTS + _ASSISTANT_STANCE_CHAINING
 _REFERENCE_LADDER = _prompts.load("reference_ladder")["text"]
 # LC-15: reading a project summary before describing it. Tools-on only.
 _PROJECT_OVERVIEW = _prompts.load("project_overview")["text"]
+# LC-03: read a result before showing it. Tools-on only (it names tools).
+_RESULTS_WALK = _prompts.load("results_walk")["text"]
 
 # Deixis, data half.
 #
@@ -429,6 +431,10 @@ def _build_system_prompt(
         *( [_REFERENCE_LADDER] if include_tools else [] ),
         # LC-15 — summaries come from get_project_statistics. TOOLS-ON ONLY.
         *( [_PROJECT_OVERVIEW] if include_tools else [] ),
+        # LC-03 — read before you show, name the run, "showing" only with a
+        # displayed-data ACK. TOOLS-ON ONLY: it names tools. A NEW part, so no
+        # pinned constant moves.
+        *( [_RESULTS_WALK] if include_tools else [] ),
         # Task 10 — profile awareness. TOOLS-ON ONLY, and that is the whole
         # placement rule: it names `set_active_profile`, and Task 8's
         # invariant is that the tools-off prompt names NO tool. A tools-less
