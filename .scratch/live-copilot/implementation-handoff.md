@@ -534,3 +534,20 @@ stacked on `claude/copilot-reference-ladder` (LC-10), which is stacked on PR
 #391. OJ-13 and OJ-14 pass in Tier A (see issue 15). LC-01 still needs OJ-45
 (a family-level capability answer, its own slice) and the merges of #391, LC-10
 and LC-15 before it closes.
+
+2026-10-19 OJ-45 ("what can you do here?") by Claude on
+`claude/copilot-capability-overview`, stacked on LC-15 (#404), which needs
+LC-10's `turn_ui_context`. `find_capabilities(overview=true)` lists seven
+core-feature families: projects, results, checks, edits, sensitivities,
+studies and reports. Each says whether it is available for this project,
+role, mode and personal rule, with the reason when it is not, one example
+sentence and its catalogue tools.
+- Results need a completed run.
+- A read-only rule blocks the families that change things.
+- Guided mode or the confirm_changes rule adds a "card before each change"
+  note.
+- `tests/test_capability_overview.py` (10) guards the family tool names
+  against renames.
+With #402, #404 and this slice merged, LC-01's journeys (OJ-09's resolution
+half, LC-T21, OJ-13, OJ-14, OJ-45) pass in Tier A. OJ-09's load-flow half
+waits on LC-03. Next: LC-03 (VS-1, VS-2).
