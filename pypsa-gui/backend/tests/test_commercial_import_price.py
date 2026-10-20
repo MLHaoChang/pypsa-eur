@@ -153,3 +153,17 @@ def test_the_arbitrage_preflight_counts_the_import_price():
             "direction": "revenue", "periods": [{"name": "all", "rate": 0.02}]}
     loop = _config(import_tariff={**TARIFF, "items": [CHARGE, feed]})
     assert "commercial.arbitrage_loop" in {c for _s, c, *_ in commercial_findings(n, loop)}
+
+
+def test_before_the_series_is_written_preflight_is_never_silently_optimistic():
+    """Gatekeeper (G7): the route validates before it writes the series. With the ref set and no
+    `ic_import_price` yet, `validate_for_network` (no loop check) passes, and preflight states
+    the price is not established instead of counting 0 loops."""
+    n = _network()
+    n.generators.loc["grid_supply", "marginal_cost"] = 0.0
+    assert LP.write_export_price(n, "export", _da(n)) == 0         # export priced, import not yet
+    cfg = _config()
+    LP.validate_for_network(n, LP._parse(cfg))                      # no refusal, no loop figure
+    found = commercial_findings(n, cfg)
+    assert any(s == "error" and "import price is not established" in m
+               for s, _c, _cls, _name, m in found), found
