@@ -534,6 +534,29 @@ def _foreground_ctx(proj: AuthorizedProject, verb: str):
     return ctx
 
 
+def _preview_load_energy(ctx, frame: pd.DataFrame, record: dict,
+                         stats: dict[str, dict]) -> list[str]:
+    """What apply will record, shown before it: each load's modelled energy
+    on this network's snapshots (a sampled template sees less than the year)
+    into ``stats``, and the warnings (time basis, energy mismatch). A preview
+    that cannot align (a partial-year network) says why instead; apply
+    refuses the same way."""
+    from services.profile_gen.apply import ProfileApplyError, preview_energy
+
+    warnings: set[str] = set()
+    for col in frame.columns:
+        try:
+            pv = preview_energy(ctx, frame[col], record,
+                                component_type="loads", attribute="p_set")
+        except ProfileApplyError as exc:
+            stats[col]["modelled_mwh"] = None
+            warnings.add(f"not_applicable: {exc}")
+            continue
+        stats[col]["modelled_mwh"] = pv["modelled_mwh"]
+        warnings.update(pv["warnings"])
+    return sorted(warnings)
+
+
 def _load_stats(frame: pd.DataFrame, scale: float, year: int) -> dict[str, dict]:
     hours = 8784 if pd.Timestamp(year=year, month=1, day=1).is_leap_year else 8760
     return {col: {"peak_mw": float(frame[col].max()) * scale,
@@ -595,7 +618,8 @@ def generate_load_profiles(
 
     stats = _load_stats(result.series, float(record["scale_mw"]),
                         int(record["weather_year"]))
-    return {**record, "stats": stats}
+    warnings = _preview_load_energy(ctx, result.series, record, stats)
+    return {**record, "stats": stats, "warnings": warnings}
 
 
 @project_router.post("/{name}/profiles/loads/upload")
@@ -643,10 +667,12 @@ async def upload_load_profiles(
     record["project_id"] = proj.name
     record["points"] = matched
     record["notes"] = up.notes
-    record["warnings"] = up.warnings
+    record["qa_warnings"] = up.warnings  # timeseries_qa findings, per column
     write_pending(str(proj.directory), job_id, frame, record)
-    return {**record, "unmatched": unmatched,
-            "stats": _load_stats(frame, 1.0, int(record["weather_year"]))}
+    stats = _load_stats(frame, 1.0, int(record["weather_year"]))
+    preview = _preview_load_energy(ctx, frame, record, stats)
+    return {**record, "unmatched": unmatched, "stats": stats,
+            "warnings": preview}
 
 
 @project_router.get("/{name}/profiles/pending")
