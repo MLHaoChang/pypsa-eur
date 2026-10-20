@@ -704,6 +704,23 @@ _CONVERTER_GOVERNED = frozenset({"control", "pf_rated", "cos_phi", "cosphi_p_poi
 _UPS_GOVERNED = frozenset({"walk_in_s", "f_window_hz", "transfers_on_islanding"})
 
 
+def _materialise(raw):
+    """``raw`` without its project preset: each unit the preset set gets the
+    preset's fields under its own (tagged ``assumed``), a ``"preset": null``
+    opt-out is dropped, so the units validate as they did, as custom
+    blocks. A unit's own named preset stays."""
+    old = raw.pop("preset", None)
+    for u in raw.get("units", {}).values():
+        if "preset" in u:
+            if u["preset"] is None:
+                del u["preset"]
+            continue
+        block = preset_block(old, u.get("kind")) if old is not None else None
+        if block is not None:
+            u.update({**block, **u})
+    return raw
+
+
 def select_preset(raw, preset, ratings=None) -> tuple[dict, list[str]]:
     """The raw sidecar ``raw`` with project preset ``preset`` selected (None
     clears it), and the units it left out with the reason.
@@ -713,13 +730,17 @@ def select_preset(raw, preset, ratings=None) -> tuple[dict, list[str]]:
     Under ``fast_frequency_response`` a bess without its rating-scaled
     fields gets them from ``ffr_sizing(ratings[name])``; with no positive
     rating (an extendable unit before sizing) it keeps its own block,
-    marked ``"preset": null``, and is listed. Pure: ``raw`` is not changed."""
+    marked ``"preset": null``, and is listed.
+
+    The previous project preset is first written back into each unit it
+    set, as explicit fields (``_materialise``), so a unit the new preset
+    does not set, or every unit on a clear, keeps what it had and still
+    validates. Pure: ``raw`` is not changed."""
     _check_preset_name("island_config", preset)
-    out = copy.deepcopy(raw)
+    out = _materialise(copy.deepcopy(raw))
     ratings = ratings or {}
     skipped = []
     if preset is None:
-        out.pop("preset", None)
         return out, skipped
     out["preset"] = preset
     for name, u in out.get("units", {}).items():

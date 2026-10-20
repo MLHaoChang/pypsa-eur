@@ -148,6 +148,46 @@ def test_selecting_a_preset_keeps_what_it_does_not_govern_and_is_pure():
     assert out["units"]["ups_battery"]["it_load"] == ["it_load"]
     cleared, _ = select_preset(out, None)
     assert "preset" not in cleared
+    validate_island_config(cleared)
+
+
+def _without_preset(cfg):
+    units = {n: {k: v for k, v in u.items() if k != "preset"} for n, u in cfg["units"].items()}
+    return {"units": units, "requirements": cfg["requirements"]}
+
+
+@pytest.mark.parametrize("name", list(PRESETS))
+def test_clearing_a_preset_keeps_the_island_as_it_was_as_a_custom_config(name):
+    """Gatekeeper finding on #422: a clear must not leave units without the
+    fields the preset gave them."""
+    selected, _ = select_preset(sidecar(), name, {"bess_new": 8.0})
+    cleared, _ = select_preset(selected, None)
+    assert "preset" not in cleared
+    assert validate_island_config(cleared) == _without_preset(validate_island_config(selected))
+
+
+def test_switching_presets_then_clearing_keeps_every_unit_valid():
+    """voltage_support sets the pv; grid_forming_support does not, so the pv
+    keeps the Q(U) block it had."""
+    a, _ = select_preset(hub_sidecar(), "voltage_support")
+    a["units"]["rooftop_pv"] = {"kind": "pv"}                  # a unit only the preset fills
+    va = validate_island_config(a)
+    b, _ = select_preset(a, "grid_forming_support")
+    vb = validate_island_config(b)
+    assert vb["units"]["rooftop_pv"]["control"] == "gfl_qu" and "preset" not in vb["units"]["rooftop_pv"]
+    assert vb["units"]["rooftop_pv"]["values"] == va["units"]["rooftop_pv"]["values"]
+    assert vb["units"]["bess_new"]["control"] == "gfm_vsm"
+    c, _ = select_preset(b, None)
+    assert validate_island_config(c) == _without_preset(vb)
+
+
+def test_clearing_drops_an_ffr_opt_out():
+    selected, skipped = select_preset(sidecar(), "fast_frequency_response")
+    assert skipped and selected["units"]["bess_new"]["preset"] is None
+    cleared, _ = select_preset(selected, None)
+    assert "preset" not in cleared["units"]["bess_new"]
+    before = validate_island_config(sidecar())["units"]["bess_new"]
+    assert validate_island_config(cleared)["units"]["bess_new"] == before    # its own block, as before
 
 
 def test_ffr_without_a_rating_keeps_the_units_own_block_and_says_why():

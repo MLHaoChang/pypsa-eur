@@ -72,6 +72,15 @@ def test_ffr_leaves_an_extendable_bess_out_and_says_why(project):  # noqa: F811
     assert "bess" in later[0]["message"] and "rating" in later[0]["message"]
 
 
+def test_clearing_a_selected_preset_saves_and_keeps_the_island(project):  # noqa: F811
+    ce.save_island(project, _config())
+    selected = ce.select_island_preset(project, "grid_forming_support")
+    cleared = ce.select_island_preset(project, None)
+    assert "preset" not in cleared["config"]
+    assert cleared["config"]["units"]["bess"]["control"] == "gfm_vsm"
+    assert cleared["services"]["units"]["bess"]["services"] == selected["services"]["units"]["bess"]["services"]
+
+
 def test_an_unknown_preset_is_422_and_keeps_the_sidecar(project):  # noqa: F811
     ce.save_island(project, _config())
     with pytest.raises(HTTPException) as exc:
