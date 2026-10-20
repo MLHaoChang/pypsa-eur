@@ -1355,7 +1355,7 @@ export default function Dispatch() {
           {/* Lost load — populated only when last LOPF ran with voll > 0
               AND the LP actually shed demand. KPI shows energy + cost so
               users can read the reliability gap at a glance. */}
-          <KPI label="Lost load"
+          <KPI label="Lost load" sub="this dispatch solve, no outages"
                value={lostLoadTotals ? fmtEnergy(lostLoadTotals.mwh) : '—'}
                hint={"Demand the LP couldn't serve across ALL energy carriers (electrical + H2 + heat + …) — absorbed by VOLL slack generators on every bus. Set Solver Settings → VOLL > 0 to enable." + scaleHint} 
                {...lostLoadState} />
@@ -2110,10 +2110,7 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
                     const label = typeof n === 'string' && n.startsWith('Gen:') ? n.slice(4) : n
                     return [`${v.toFixed(1)} MW`, label]
                   }} />
-                <Legend {...CHART_LEGEND}
-                  formatter={(v: string) =>
-                    typeof v === 'string' && v.startsWith('Gen:') ? v.slice(4) : v
-                  } />
+                <Legend {...CHART_LEGEND} />
                 {/* Bottom → top: renewables, storage/conversion ▲, thermal.
                     Charge/conversion ▼ below zero. monotone curves for readability. */}
                 {renewGens.map((gc, idx) => renderGenArea(gc, idx))}
@@ -2592,7 +2589,7 @@ export function CarrierKpiPanel({
                : !curtailTS ? { state: 'unavailable' as const, reason: 'The solve returned no curtailment series.' }
                : zeroOr(dispatch.curtailment))}
              hint={`Σ curtailed energy (server pre-computes max(p_max_pu × p_nom − p, 0)) × weights, over renewables on ${carrierDisplayLabel(carrier)} buses. % = curtailment ÷ (curtailment + renewable_dispatch).${scaleHint}`} />
-        <KPI label="Lost load"           value={fmtEnergy(lostLoadEnergy)}
+        <KPI label="Lost load" sub="this dispatch solve, no outages"  value={fmtEnergy(lostLoadEnergy)}
              {...(lostLoadNotModelled ? lostLoadOff : zeroOr(lostLoadEnergy))}
              hint={`VOLL slack dispatched on ${carrierDisplayLabel(carrier)} buses — non-zero only when the LP couldn't meet demand`} />
       </div>

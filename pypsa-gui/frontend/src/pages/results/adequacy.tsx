@@ -352,6 +352,9 @@ export function CoptChips({ copt, proxyEnsMwh }: {
       <span className="px-2 py-0.5 rounded bg-panel border border-border text-[10px] font-semibold" title={tip}>
         COPT screening
       </span>
+      <span className="px-2 py-0.5 rounded bg-panel border border-border text-[10px] text-muted" title={tip}>
+        screening, thermal only
+      </span>
       <span className="px-2 py-0.5 rounded bg-panel border border-border text-[10px]" title={tip}>
         LOLE {copt.metrics.lole_hours.toFixed(1)} {basisSuffix(copt.metrics)}
       </span>
