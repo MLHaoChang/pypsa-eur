@@ -62,6 +62,7 @@ from services.profile_gen.job import KEEP_PENDING, write_pending
 from services.profile_gen.load_upload import (
     UploadCoverageError,
     UploadFormatError,
+    UploadNoLoadError,
     UploadUnitError,
     read_load_upload,
 )
@@ -341,18 +342,19 @@ _APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (DcLoadOwnedError, {"error_kind": "dc_load_owned"}),
 )
 
-# Load-generation refusals, literal for the same reason.
-_LOAD_GEN_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
+# Load generation and upload refusals, literal for the same reason.
+_LOAD_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (UnknownArchetypeError, {"error_kind": "unknown_archetype"}),
     (InvalidArchetypeParamsError, {"error_kind": "invalid_archetype_params"}),
     (UploadFormatError, {"error_kind": "load_upload_format"}),
     (UploadUnitError, {"error_kind": "load_upload_unit"}),
     (UploadCoverageError, {"error_kind": "load_upload_coverage"}),
+    (UploadNoLoadError, {"error_kind": "unknown_load"}),
 )
 
 
 def _apply_refusal_kind(exc: Exception) -> dict[str, str]:
-    for cls, kind in (*_APPLY_REFUSALS, *_LOAD_GEN_REFUSALS):
+    for cls, kind in (*_APPLY_REFUSALS, *_LOAD_REFUSALS):
         if isinstance(exc, cls):
             return dict(kind)
     return {"error_kind": _error_kind(exc)}
@@ -610,39 +612,38 @@ async def upload_load_profiles(
     """Read a measured load export (`load_upload.read_load_upload`) into the
     pending store, one column per load the network has; apply it through
     `/profiles/apply` like a generated profile. Columns that name no load
-    come back as `unmatched` and are not kept."""
+    come back as `unmatched` and are not read. Naive timestamps default to
+    the project's commercial timezone."""
+    from fastapi.concurrency import run_in_threadpool
+
+    from services.profile_gen.apply import _commercial_timezone
     from services.upload_guard import read_capped
 
     _check_lock(proj, db, user)
     ctx = _foreground_ctx(proj, "upload")
     blob = await read_capped(file)
     try:
-        up = read_load_upload(blob, file.filename or "upload.csv", unit=unit,
-                              timezone=timezone, year=year, annual_mwh=annual_mwh)
+        # A large export is seconds of pandas: off the event loop.
+        up = await run_in_threadpool(
+            read_load_upload, blob, file.filename or "upload.csv", unit=unit,
+            timezone=timezone, default_timezone=_commercial_timezone(ctx),
+            year=year, annual_mwh=annual_mwh, only=set(ctx.network.loads.index),
+        )
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
             detail={**_apply_refusal_kind(exc), "message": str(exc)},
         ) from exc
-    loads = set(ctx.network.loads.index)
-    matched = [c for c in up.frame.columns if c in loads]
-    unmatched = [c for c in up.frame.columns if c not in loads]
-    if not matched:
-        raise HTTPException(
-            status_code=422,
-            detail={"error_kind": "unknown_load",
-                    "message": f"no column names a load on the open network "
-                               f"(columns {unmatched}; loads "
-                               f"{sorted(loads)[:20]})"},
-        )
-    frame = up.frame[matched]
+    matched = list(up.frame.columns)
+    unmatched = up.unmatched
+    frame = up.frame
     job_id = str(uuid.uuid4())
     record = dict(up.meta)
     record["job_id"] = job_id
     record["project_id"] = proj.name
     record["points"] = matched
     record["notes"] = up.notes
-    record["warnings"] = [w for w in up.warnings if w["column"] in matched]
+    record["warnings"] = up.warnings
     write_pending(str(proj.directory), job_id, frame, record)
     return {**record, "unmatched": unmatched,
             "stats": _load_stats(frame, 1.0, int(record["weather_year"]))}
