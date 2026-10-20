@@ -2498,6 +2498,29 @@ def get_energy_flows_csv(
                     headers={"Content-Disposition": 'attachment; filename="energy_flows.csv"'})
 
 
+@results_router.get("/load_shape")
+def get_load_shape(
+    period: int | None = Query(None, description="Investment period (default: the first)."),
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the period's snapshots (heatmaps)."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the period's snapshots (heatmaps)."),
+    week: int | None = Query(None, description="Index into the period's calendar weeks (profile snapshot)."),
+):
+    """Import/export heatmaps, a one-week profile, monthly and annual site
+    energy (`services/results/load_shape.py`). 204 before a solve; 200
+    `status: "not_established"` when the dispatch cannot be read as energy."""
+    from services.results.load_shape import load_shape
+
+    n = PyPSAService.get_network()
+    if _solver_in_flight():
+        raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                                  "message": "a solve is running; read the load shape after it ends"})
+    if not _dispatch_ready(n):
+        return Response(status_code=204)
+    window = None if from_ is None and to_ is None else (from_ or 0, to_ if to_ is not None else 10 ** 9)
+    return load_shape(n, period, window, week, result_df=_result_df,
+                      lost_load=_state.get("last_lost_load"))
+
+
 @results_router.get("/eh_dtc_planning")
 def get_eh_dtc_planning():
     """Last DtC planning table (Phase 4b). 204 if none."""

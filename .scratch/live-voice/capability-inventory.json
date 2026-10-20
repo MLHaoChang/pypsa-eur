@@ -3178,7 +3178,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "efbad4ff4dfcfd3ca17c5b3fd5934cd268856615dc4371ba98a4fa6440e111eb",
+      "schema_sha256": "c375b301eb8bef557b7a963d94c0d28096123d4ae6080075f6abccdda738a7cd",
       "behavioral_fixture": "pending"
     },
     {
@@ -5592,7 +5592,7 @@
         "run_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "3fee3fd1579f25938f311af69c6da1ad4df6771e28290a3ca4fbaa9e0e32ce72",
+      "schema_sha256": "b46446d653180d98e76cef8cbdb028da3cdc19b7ef9a6d79c89c8d4c4805242a",
       "behavioral_fixture": "pending"
     },
     {
@@ -6090,6 +6090,10 @@
       "label": "Energy flow"
     },
     {
+      "id": "loadshape",
+      "label": "Load shape"
+    },
+    {
       "id": "prices",
       "label": "Prices"
     },
@@ -6146,7 +6150,8 @@
     "investment",
     "adequacy",
     "fmea",
-    "flows"
+    "flows",
+    "loadshape"
   ],
   "result_tabs_not_in_tool_enum": [],
   "slide_panels": [
