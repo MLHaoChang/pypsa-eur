@@ -1,0 +1,52 @@
+{
+  "purpose": "Modern industry-library and three-section design checks only; not native application E2E or scientific evidence",
+  "generatedAt": "2026-10-20T15:33:11.432Z",
+  "groupsPassed": 15,
+  "groups": [
+    "Overview: direct guided entry, example/generic choices, explicit Resume, cool industrial palette and bright red actions, embedded font and logo",
+    "Industry catalogue: three integrated-planning industry cards with editable years and direct click/right-click entry, ammonia unmerged and mining planned; legacy grid examples absent; all five original visuals embedded",
+    "Model-input options: stress-week and synthetic-profile choices, annual-MWh draft retained across Expert, separate per source; invalid horizons blocked and horizon drafts retained; no generated profiles or runs",
+    "Three work sections with nine choices: dispatch/economics bundled into capacity, load flow bundled into grid-code work; parent/partial selection and deferred reliability targets",
+    "Capacity planning includes dispatch and cost detail, with no separate peer step; grid/reliability remain optional; Advanced values survive Expert",
+    "Scope-first/source-later: changing the model preserves selected analyses; per-source parameter drafts stay separate",
+    "Editable example presets: microgrid/data center include electrical/control scope; hydrogen emphasizes planning/process; global Select all is idempotent, Clear works, preset reset is explicit and source changes retain edits",
+    "Example-first: editable suggested scope; connected selected-only rail; removing the active stage leaves no orphan, re-adding keeps its draft",
+    "Independent grid-code work can use an existing source; optional reliability has its own target controls, preserved across Expert",
+    "Reliability distinctions: product/energy process coupling, steady-state compliance limits, deterministic contingencies vs adequacy, islanding vs dynamic validation, target preserved across Expert",
+    "Conditional work: unsupported generic controls/external dynamics explicit; preview run has no effect and results remain unavailable",
+    "One companion: stage-specific parameterization draft, no automatic send/edit, draft survives modes, keyboard close/focus and Expert search",
+    "Companion modes: hover/focus choice, reviewed dictation and live-text previews, no capture/send, retained draft, distinct live animation and reduced-motion suppression",
+    "Responsive/visual: four screens at 390px and desktop; light/dark cool industrial palette and bright red actions, reduced motion and a separate mobile companion tray",
+    "Portable preview: bundled HTML only, zero missing resources, styled JavaScript-disabled fallback and zero page errors/API/model calls"
+  ],
+  "standaloneHtml": true,
+  "viewports": [
+    "1600x1100",
+    "390x844"
+  ],
+  "reducedMotion": true,
+  "pageErrors": [],
+  "externalRequests": [],
+  "apiRequests": 0,
+  "paidCalls": 0,
+  "screenshots": [
+    "home-light",
+    "builder-light",
+    "guided-light",
+    "expert-light",
+    "guided-companion",
+    "builder-dark",
+    "home-dark",
+    "home-mobile",
+    "builder-mobile",
+    "guided-mobile",
+    "expert-mobile",
+    "static-fallback",
+    "preset-datacenter",
+    "preset-hydrogen",
+    "home-modern",
+    "staged-inputs",
+    "companion-modes",
+    "companion-live"
+  ]
+}
