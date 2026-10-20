@@ -1,6 +1,6 @@
 # Integration, historical prices, PPA defaults and sensitivities
 
-Status: draft for UX review. Owner choices Q11 and Q12 (§7) are drafted on the recommended option and marked *pending owner*.
+Status: draft for UX review. Owner answered Q11 and Q12 on 2026-10-20, about 19:09 CEST (§7).
 Date: 2026-10-20
 Author: workspace-reconciliation session
 Builds on:
@@ -90,7 +90,7 @@ Defaults exist to "push off a model". They are **never market data**.
 | CfD (financial / virtual PPA) | strike, reference series, tenor | capture mode, negative-price suspension, indexation | `CfdContract` |
 | Swap (fixed for floating) | fixed price, volume, reference series, tenor | settlement | **gap: no contract type**; maps to a CfD without an asset only if the gatekeeper agrees (K0/K7) |
 
-**Numbers** (*pending owner, Q11*). Recommended: one illustrative EU-wide set authored by us, with each value's public reference range cited, and labelled so it can't be mistaken for data. Zone values (DE, NL, ES, Nordics) come only from an org pack (Q10 = A) or the owner's sourcing. The defaults never set `changes_dispatch`.
+**Numbers** (owner Q11 = A): one illustrative EU-wide set authored by us, with each value's public reference range cited, and labelled so it can't be mistaken for data. Zone values (DE, NL, ES, Nordics) come only from an org pack (Q10 = A) or the owner's sourcing. The defaults never set `changes_dispatch`.
 
 ---
 
@@ -138,7 +138,7 @@ W4a's done-when gains a round-trip test: on → set values → off → on keeps 
 ### 5.1 Model
 - **The base case** is the project, or a scenario the user marks as base.
 - **A compare case** is a scenario child: today's full copy, with the parent link. It also records its **declared changes** in the experiment contract's shape: dotted path, typed value, old → new. "What differs" is therefore explicit, not inferred by diffing networks (LC-18's declared input differences).
-- **Limit:** a base plus up to 8 cases (*pending owner, Q12*; the experiment limit). Each case changes 1–2 parameters by default, and up to 12 in Expert.
+- **Limit:** a base plus up to 8 cases (owner Q12 = A; the experiment limit). Each case changes 1–2 parameters by default, and up to 12 in Expert.
 
 ### 5.2 Screens
 
@@ -168,6 +168,47 @@ W4a's done-when gains a round-trip test: on → set values → off → on keeps 
 - **A case's results are stale when its own inputs change.** They are **not** stale when the base changes after the copy: a copy is a copy, and the row says "base changed since copy". Re-deriving a case from a changed base is an explicit action ("Re-apply changes to the current base").
 - A case may switch groups on or off. Compare then lists the group-specific KPIs as "outside scope" for the cases without it.
 
+### 5.4 Check answers: what the user sees (owner input #6)
+
+> Owner, about 19:12 CEST, relayed by the coordinator: with **Check answers** on, every result the copilot states or charts, in every section and results view (the sensitivity compare included), is verified internally by the harness, with no hallucination.
+
+The verification itself is the "Check answers" package (session_01WZre2YpT3SyvNWHk48KsiN). This section is only the **display contract**. It reuses the words the app already shows (`CompanionOutcome.tsx`, `CheckedEvidenceCard.tsx`, the ChatPanel "Check answers" toggle).
+
+**What carries a check state.** Only **copilot-authored** content does:
+- a stated value or sentence;
+- a copilot-generated chart;
+- a copilot narrative over Compare;
+- an "Explain this" note on a results tab.
+
+The app's own result views (tables and charts computed by the software from the engine's outputs) don't get a check badge: they *are* the evidence. They show their freshness instead (§3, S4). The two are never mixed, so a native figure never looks "unchecked".
+
+**States**, the same labels everywhere:
+
+| State | Label | Shown with |
+|---|---|---|
+| checking | "Checking saved answer" | spinner; no value shown yet |
+| all requested results checked | "Requested results checked" | the count of facts checked, evidence links, the export, "This does not certify the engineering model" |
+| partly checked | "Checked evidence and limitations" | each result's disposition and reason; the limitations list |
+| none checkable | "Requested results unavailable" | the reason; no value stated |
+| Check answers off | "Answer not checked" | the plain answer, labelled |
+| interrupted | "Response incomplete — not checked" | — |
+
+**Copilot charts.**
+- With Check answers on, a copilot chart draws only series whose every point traces to evidence. Series it can't check are left out and listed under the chart ("Not drawn: <series> — <reason>"); they are never drawn unlabelled.
+- With Check answers off, the chart header reads "Not checked" and links to the native view of the same data.
+
+**Compare (§5.2).**
+- The KPI deltas are computed by the software, not by the copilot, so they need no check badge.
+- When the copilot summarises a comparison, each case column carries its check state.
+- A case that **can't be checked** (not run, stale, incomparable, evidence missing) gets a greyed column headed "Not checked: <reason>". The copilot states no value or delta for it, and the native table still shows whatever the software computed, with its freshness.
+
+**Results by group (W10).**
+- Each group tab shows the freshness of its native results.
+- Copilot notes on a tab ("Explain this", a pinned copilot chart) each carry their own check state, using the labels above.
+- A tab whose group is out of scope reads "Outside scope". The copilot states no result there.
+
+**Placement.** Check states on transient companion cards follow #444 §9: they dock into the launcher's footprint or collapse, and never cover content.
+
 ---
 
 ## 6. Slices
@@ -183,6 +224,7 @@ These join the W/P/K plan.
 | **S5 Cases** | §5.1–5.2: case changes recorded; section-8 rows (W7); Duplicate and change; grid helper; Run cases | gatekeeper (run and staleness semantics); UX | W7, W4a |
 | **S6 Base + N compare** | §5.2: Compare for base + up to 8, KPI deltas, overlays, incomparable list | UX; gatekeeper on comparability | S5 |
 | **S7 Copilot** | LC-17 and LC-18 over S5/S6 | per LC-05 | S5, S6 |
+| **S8 Check-answers display** | §5.4's display contract on copilot statements, charts, Compare narratives and results-tab notes; the verification is the Check-answers package's | UX; aligned with session_01WZre2YpT3SyvNWHk48KsiN | that package's contract, S6, W10 |
 
 ---
 
@@ -190,5 +232,5 @@ These join the W/P/K plan.
 
 | | Choice | Recommended | Status |
 |---|---|---|---|
-| Q11 | PPA default values: our illustrative EU-wide set with cited ranges / owner-sourced zone values as a pack / no defaults | our illustrative set; zone values later from a pack | *pending owner* |
-| Q12 | Sensitivity size: base + up to 8 cases, 1–2 parameters each, grid helper / pairwise only / unlimited grids | base + 8 | *pending owner* |
+| Q11 | PPA default values: our illustrative EU-wide set with cited ranges / owner-sourced zone values as a pack / no defaults | our illustrative set; zone values later from a pack | **A** (about 19:09 CEST) |
+| Q12 | Sensitivity size: base + up to 8 cases, 1–2 parameters each, grid helper / pairwise only / unlimited grids | base + 8 | **A** (about 19:09 CEST) |
