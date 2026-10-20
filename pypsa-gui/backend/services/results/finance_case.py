@@ -466,7 +466,7 @@ def _owner_lines(ledger, inputs, owner: str, k: str, flags: list[str], *,
         else:
             v = None if ln.amount is None else sign * ln.amount
             other = ln.payer if sign > 0 else ln.payee
-        q = _settled_qty(inputs, ln.source_id, sign) if ln.source == "contract" else None
+        q = _settled_qty(inputs, ln.source_id, owner) if ln.source == "contract" else None
         if key in out:
             out[key].add(v, q)
             out[key].flags += [f for f in ln.flags if f not in out[key].flags]
@@ -479,16 +479,24 @@ def _owner_lines(ledger, inputs, owner: str, k: str, flags: list[str], *,
     return out
 
 
-def _settled_qty(inputs, source_id: str, sign: float | None) -> float | None:
-    """The owner-signed MWh of the settlement line a contract ledger line came from."""
-    if sign is None:
-        return None
+def _settled_qty(inputs, source_id: str, owner: str) -> float | None:
+    """The owner-signed MWh of the settlement line a contract ledger line came from: + when
+    the owner is the contract's payee (the seller of a financial PPA, a CfD's generator owner).
+    The sign follows the CONTRACT's direction, not the ledger leg's (a negative difference is
+    booked with its payer and payee swapped)."""
     _cid, _, tail = source_id.rpartition(":")
     try:
-        q = inputs.settlement[int(tail)].get("quantity_mwh")
+        s = inputs.settlement[int(tail)]
     except (ValueError, IndexError):
         return None
-    return None if q is None or not np.isfinite(q) else sign * float(q)
+    q = s.get("quantity_mwh")
+    if q is None or not np.isfinite(q):
+        return None
+    if same_party(s.get("payee"), owner):
+        return float(q)
+    if same_party(s.get("payer"), owner):
+        return -float(q)
+    return None
 
 
 def _is_commodity(acc: _Acc) -> bool:
@@ -1788,7 +1796,9 @@ def _scale(lines, f: float, monthly: dict[str, float | None] | None = None
     for ln in lines:
         fx = monthly[ln.tariff_item] if ln.tariff_item in monthly else f
         amount = None if (ln.amount is None or fx is None) else ln.amount * fx
-        out.append(dataclasses.replace(ln, amount=amount))
+        # A difference line's volume scales with its amount (IPP ticket 01).
+        qty = None if (ln.price_qty_mwh is None or fx is None) else ln.price_qty_mwh * fx
+        out.append(dataclasses.replace(ln, amount=amount, price_qty_mwh=qty))
     return tuple(out)
 
 
@@ -2444,6 +2454,9 @@ def _canon(o):
             # case keeps its hash; stated, the report re-runs to state its figures.
             if o.inputs.island_outage is None and isinstance(out.get("inputs"), dict):
                 out["inputs"].pop("island_outage", None)
+        # A line that is not a difference line (IPP ticket 01) keeps its hash.
+        if isinstance(o, TemplateLine) and o.price_qty_mwh is None:
+            del out["price_qty_mwh"]
         return out
     if hasattr(o, "model_dump"):
         return _canon(o.model_dump(mode="json"))

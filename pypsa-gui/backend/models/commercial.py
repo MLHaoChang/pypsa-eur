@@ -473,6 +473,9 @@ class PpaContract(BaseModel):
                 raise ValueError("financial settlement is for a fixed-price pay_as_produced PPA")
             if self.reference_price is None:
                 raise ValueError("a financial PPA settles against a reference_price")
+            if self.floor is not None or self.cap is not None:
+                raise ValueError("floor and cap apply to market_plus_premium; a financial PPA "
+                                 "settles its fixed price against the reference")
             if self.changes_dispatch:
                 raise ValueError("a financial PPA settles after the solve; changes_dispatch "
                                  "is refused")

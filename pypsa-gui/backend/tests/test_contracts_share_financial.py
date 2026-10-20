@@ -169,6 +169,8 @@ def test_a_financial_ppa_without_its_reference_is_none_with_a_flag(c1):
     dict(kind="as_consumed_btm"),
     dict(pricing="market_plus_premium", premium_eur_per_mwh=5.0),
     dict(changes_dispatch=True),
+    dict(floor=10.0),                                   # floor/cap: market_plus_premium only
+    dict(cap=90.0),
 ])
 def test_financial_settlement_is_a_fixed_price_pay_as_produced_form_only(bad):
     with pytest.raises(ValidationError):
