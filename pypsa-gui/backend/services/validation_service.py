@@ -1740,6 +1740,23 @@ def _check_unweighted_start_costs(n) -> list[Issue]:
             for comp, name, attr, value in weighted_start_cost_units(n)]
 
 
+def _check_safety_tier_off_critical_bus(n) -> list[Issue]:
+    """A `safety`-tier process unit draws from a bus the design keeps on the critical supply (the `eh_critical`
+    bus, grid-to-process ticket 08): the tier prices its stop at VoLL, the bus is what the island keeps fed. The
+    two stay separate fields, so a unit off that bus is a warning, not a refusal."""
+    links = n.links
+    if links.empty or "criticality_tier" not in links.columns:
+        return []
+    crit = set(n.buses.index[n.buses["eh_critical"].fillna(False).astype(bool)]) \
+        if "eh_critical" in n.buses.columns else set()
+    safety = links.index[links["criticality_tier"].astype(str).str.strip() == "safety"]
+    return [_warn("safety_tier_off_critical_bus", "Link", str(name),
+                  f"Criticality tier 'safety' but its supply bus {links.at[name, 'bus0']!r} is not a critical "
+                  "bus (eh_critical): its stop is priced at VoLL, yet the island would not keep it fed. Put "
+                  "it on the critical bus, or choose another tier.")
+            for name in safety if str(links.at[name, "bus0"]) not in crit]
+
+
 def _check_lopf(n, solver_config) -> list[Issue]:
     out: list[Issue] = []
 
@@ -1764,6 +1781,7 @@ def _check_lopf(n, solver_config) -> list[Issue]:
     out += _check_storage_cyclic_initial(n)
     out += _check_p_max_pu_bounds(n)
     out += _check_unweighted_start_costs(n)
+    out += _check_safety_tier_off_critical_bus(n)
 
     # Generators
     out += _check_extendable_bounds(n.generators, "Generator", "p_nom", True)
