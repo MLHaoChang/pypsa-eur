@@ -20,7 +20,7 @@ import pytest
 from services import flow_service as S
 
 TEMPLATES = ["eh_datacenter", "eh_datacenter_staged", "eh_h2_hub", "eh_h2_hub_staged",
-             "eh_microgrid", "eh_microgrid_staged", "eh_site"]
+             "eh_microgrid", "eh_microgrid_staged", "eh_site", "eh_ammonia_staged"]
 
 
 def _create(client, tid, name="filing"):

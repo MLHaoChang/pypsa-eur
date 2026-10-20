@@ -1,5 +1,17 @@
 [
  {
+  "id": "eh_ammonia_staged",
+  "meta": {
+   "dtc_attribution": null,
+   "pack_overrides": {},
+   "recommended_archetype": "strong_grid",
+   "stages": null
+  },
+  "study_body": {
+   "archetype": "strong_grid"
+  }
+ },
+ {
   "id": "eh_datacenter",
   "meta": {
    "dtc_attribution": "per_load",

@@ -81,14 +81,14 @@ _PIPELINE_ORDER = ("apply_pack", "ens_solve", *_OPTIONAL_STAGES, "assemble")
 # project's) is never reached by a shipped template.
 _LEDGER_SECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("discount", "money year", "finance", "tariff", "escalation", "price",
-      "investment case", "depreciation"), "commercial"),
+      "investment case", "depreciation", "product value"), "commercial"),
     # Island controls and their limits are asset behaviour (design §1.4 J16).
     (("island", "rocof", "frequency", "ride-through"), "assets"),
     (("poc", "connection", "fault level", "energization", "grid", "feeder",
       "transformer", "power factor"), "connection"),
     (("critical", "load", "pue", "offtake", "demand", "delivery"), "loads"),
     (("existing", "battery", "genset", "electrolyser", "inverter", "storage",
-      "ups", "pv", "unit", "fuel cell"), "assets"),
+      "ups", "pv", "unit", "fuel cell", "tank", "dropped from"), "assets"),
     # The model horizon is section 1's (W2).
     (("horizon", "dates", "year", "period"), "project"),
 )
