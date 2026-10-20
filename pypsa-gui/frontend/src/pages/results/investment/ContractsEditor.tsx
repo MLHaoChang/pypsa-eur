@@ -13,6 +13,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { ItemEditor } from './TariffBuilder'
 import { blankItem } from './tariffModel'
+import { SeriesSelect } from './SeriesSelect'
 import {
   blankContract, CONNECTION, CONTRACT_FIELDS, CONTRACT_TYPES, contractErrors, contractType,
   missingRequired, nextContractId, setField, type ContractType, type FieldSpec,
@@ -41,24 +42,6 @@ function IdsInput({ label, value, onChange }: {
   )
 }
 
-const seriesKey = (r: LibraryRef) => `${r.id}@${r.version}`
-
-/** A Library series picker; a stored ref the Library no longer lists (an older
- *  version) stays shown as such — never as "none" (WP3.7c review #3). */
-function SeriesSelect({ label, value, series, onChange }: {
-  label: string; value: LibraryRef | null; series: LibraryRef[]; onChange: (r: LibraryRef | null) => void
-}) {
-  const listed = !value || series.some(r => seriesKey(r) === seriesKey(value))
-  return (
-    <select aria-label={label} className={input} value={value ? seriesKey(value) : ''}
-            onChange={e => onChange(e.target.value === '' ? null
-              : series.find(r => seriesKey(r) === e.target.value) ?? value)}>
-      <option value="">none</option>
-      {series.map(r => <option key={seriesKey(r)} value={seriesKey(r)}>{r.id} v{r.version}</option>)}
-      {!listed && <option value={seriesKey(value!)}>{value!.id} v{value!.version} (not listed)</option>}
-    </select>
-  )
-}
 
 function Field({ spec, contract, label, parties, series, set }: {
   spec: FieldSpec; contract: Record<string, unknown>; label: string; parties: string
