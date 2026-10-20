@@ -18,8 +18,12 @@ reindexing:
     ``leap_day: dropped``;
   * non-leap weather year onto a leap target → typed refusal (fabricating
     24 h is worse than refusing);
-  * partial-year / sub-hourly / segmented snapshots → typed refusal naming
-    the supported shapes;
+  * an hourly snapshot window (a representative week, several sampled
+    weeks, a month) → the weather year sliced to it by month-day-hour, the
+    window recorded as ``window: {first, last, hours, runs}``; an hour the
+    source does not have (Feb 29, a DST-gap hour) is refused, never filled;
+  * sub-hourly / off-the-hour snapshots, or a window that repeats a
+    calendar hour → typed refusal naming the supported shapes;
   * MultiIndex (multi-investment-period) snapshots → tile the weather year
     into EVERY period by month-day-hour, leap rules applied per period
     (owner ruling D7=B); meta ``tiled: true`` + the weather year.
@@ -221,14 +225,47 @@ def _validate_year_block(idx: pd.DatetimeIndex, *, what: str) -> int:
     ):
         raise UnsupportedSnapshotsError(
             f"{what}: snapshots must span one full calendar year (Jan 1 00:00 "
-            "– Dec 31 23:00, hourly); partial-year horizons are not supported "
-            "yet. Generated profiles apply to full-year hourly projects; a "
-            "representative-week template (e.g. an Energy Hub study week) "
-            "needs its weeks sampled from the weather year, which is "
-            "planned — until then, upload a profile for the template's "
-            "snapshots instead"
+            "– Dec 31 23:00, hourly) for a daily or weekly profile. A "
+            "partial-year network (e.g. an Energy Hub study week) takes an "
+            "hourly profile, sliced to its snapshot window — regenerate at "
+            "hourly resolution"
         )
     return int(year)
+
+
+def _hourly_window(idx: pd.DatetimeIndex, *, what: str) -> dict | None:
+    """None when ``idx`` is one full calendar year (`_validate_year_block`);
+    else the window record ``{first, last, hours, runs}`` of an hourly sample
+    of the year: tz-naive, on the hour, strictly increasing, no calendar hour
+    twice (a window covers at most one year). ``runs`` counts the contiguous
+    blocks, so two sampled weeks read as two. Anything else is refused with
+    the full-year check's own reason."""
+    try:
+        _validate_year_block(idx, what=what)
+        return None
+    except UnsupportedSnapshotsError as exc:
+        full_year_error = exc
+    if (not isinstance(idx, pd.DatetimeIndex) or idx.tz is not None or len(idx) == 0
+            or idx.has_duplicates or not idx.is_monotonic_increasing):
+        raise full_year_error
+    steps = idx.to_series().diff().dropna()
+    if (steps < _ONE_HOUR).any():
+        raise full_year_error
+    off = idx[idx != idx.floor("h")]
+    if len(off):
+        raise UnsupportedSnapshotsError(
+            f"{what}: snapshot {off[0]} is not on the hour — generated "
+            "profiles are hourly")
+    seen: set[tuple[int, int, int]] = set()
+    for t in idx:
+        key = (t.month, t.day, t.hour)
+        if key in seen:
+            raise UnsupportedSnapshotsError(
+                f"{what}: snapshot {t} repeats a calendar hour already in the "
+                "window — a window samples at most one year")
+        seen.add(key)
+    return {"first": str(idx[0]), "last": str(idx[-1]), "hours": int(len(idx)),
+            "runs": int(1 + (steps != _ONE_HOUR).sum())}
 
 
 def _check_time_basis(time_basis: str) -> str:
@@ -277,6 +314,7 @@ def _utc_keys(target_idx: pd.DatetimeIndex,
 def _map_by_mdh(series: pd.Series, target_idx: pd.DatetimeIndex, *,
                 src_year: int, label: str,
                 time_basis: str = DEFAULT_TIME_BASIS,
+                window: bool = False,
                 ) -> tuple[np.ndarray, bool]:
     """Map weather-year values onto `target_idx` by month-day-hour of the
     UTC instant each snapshot stands for (see `_utc_keys`).
@@ -284,10 +322,37 @@ def _map_by_mdh(series: pd.Series, target_idx: pd.DatetimeIndex, *,
     Returns (values, feb29_dropped). Raises LeapYearMismatchError when the
     target needs a Feb 29 the weather year does not have — per spec §4,
     fabricating 24 h is worse than refusing.
+
+    ``window``: the target is a sample of the year (`_hourly_window`). Every
+    snapshot is matched after the time-basis conversion, and one that maps
+    to an hour the source does not have — Feb 29 of a non-leap source, the
+    skipped spring hour of a local clock — is refused by name, never filled.
     """
     src_lookup = {
         (t.month, t.day, t.hour): v for t, v in series.items()
     }
+    if window:
+        if time_basis != "UTC":
+            local = target_idx.tz_localize(
+                time_basis, ambiguous=np.ones(len(target_idx), dtype=bool),
+                nonexistent="NaT")
+            if local.isna().any():
+                raise UnsupportedSnapshotsError(
+                    f"{label}: snapshot {target_idx[local.isna()][0]} does not "
+                    f"exist on the {time_basis} clock (the spring-forward "
+                    "hour); a window refuses it rather than fill it")
+        values = np.empty(len(target_idx), dtype=float)
+        for i, keys in enumerate(_utc_keys(target_idx, time_basis)):
+            missing = [k for k in keys if k not in src_lookup]
+            if missing:
+                m, d, h = missing[0]
+                raise LeapYearMismatchError(
+                    f"{label}: snapshot {target_idx[i]} maps to "
+                    f"{m:02d}-{d:02d} {h:02d}:00, which weather year {src_year} "
+                    "does not have (Feb 29) — refusing to fabricate it. Pick "
+                    "a leap weather year, or move the window off Feb 29.")
+            values[i] = float(np.mean([src_lookup[k] for k in keys]))
+        return values, False
     src_has_feb29 = (2, 29, 0) in src_lookup
     target_has_feb29 = any(t.month == 2 and t.day == 29 for t in target_idx)
     if target_has_feb29 and not src_has_feb29:
@@ -437,13 +502,16 @@ def _align_to_snapshots(series: pd.Series, snapshots, *,
             periods = [int(p) for p in lvl0.unique()]
             out = np.empty(len(snapshots), dtype=float)
             dropped_any = False
+            windows: dict[str, dict] = {}
             for p in periods:
                 mask = np.asarray(lvl0 == p)
                 block = pd.DatetimeIndex(snapshots[mask].get_level_values(1))
-                _validate_year_block(block, what=f"period {p}")
+                win = _hourly_window(block, what=f"period {p}")
+                if win is not None:
+                    windows[str(p)] = win
                 values, dropped = _map_by_mdh(
                     series, block, src_year=src_year, label=f"period {p}",
-                    time_basis=time_basis,
+                    time_basis=time_basis, window=win is not None,
                 )
                 out[mask] = values
                 dropped_any = dropped_any or dropped
@@ -454,13 +522,14 @@ def _align_to_snapshots(series: pd.Series, snapshots, *,
                 "tiled": True,
                 "periods": periods,
                 "resolution": "hourly",
+                "window": windows or None,
             }
 
         target_idx = pd.DatetimeIndex(snapshots)
-        _validate_year_block(target_idx, what="network snapshots")
+        win = _hourly_window(target_idx, what="network snapshots")
         values, dropped = _map_by_mdh(
             series, target_idx, src_year=src_year, label="the target year",
-            time_basis=time_basis,
+            time_basis=time_basis, window=win is not None,
         )
         aligned = pd.Series(values, index=target_idx, name=series.name)
         return aligned, {
@@ -469,6 +538,7 @@ def _align_to_snapshots(series: pd.Series, snapshots, *,
             "tiled": False,
             "periods": None,
             "resolution": "hourly",
+            "window": win,
         }
 
     if resolution == "daily":
@@ -927,19 +997,56 @@ def _modelled_mwh(n, aligned: pd.Series, weighting: str) -> dict[str, float]:
     return {"total": float(energy.sum())}
 
 
+def _window_blocks(window: dict | None, modelled: dict[str, float]) -> dict[str, dict]:
+    """The window record of each ``modelled_mwh`` block (``total`` for one
+    horizon, the period for a tiled one) that is a sample of the year."""
+    if not window:
+        return {}
+    if "first" in window:  # one horizon
+        return {k: window for k in modelled}
+    return {k: window[k] for k in modelled if k in window}
+
+
 def _energy_record(n, series: pd.Series, aligned: pd.Series, scale: float,
-                   target: TargetSpec, src_year: int) -> tuple[dict, list[str]]:
+                   target: TargetSpec, src_year: int,
+                   window: dict | None = None) -> tuple[dict, list[str]]:
     """``profile_annual_mwh`` (the source year's energy: its mean power over
     its hours — the plain sum for an hourly series, while a daily or weekly
     one is a mean per step whose edge weeks straddle the year),
-    ``modelled_mwh`` per period, and the energy_mismatch warning."""
+    ``modelled_mwh`` per period, and the energy_mismatch warning.
+
+    A block that samples the year (``window``, `_hourly_window`) is held to
+    what its snapshots claim to represent instead: the source year's energy
+    × Σ weightings (the target's own column, the one ``modelled_mwh`` sums)
+    / the source year's hours. An unweighted week is checked against
+    a week's share of the year, a week weighted ×52 against the year, and a summer
+    week weighted to stand for the year is flagged."""
     year_hours = 24 * (366 if pd.Timestamp(year=src_year, month=1, day=1).is_leap_year else 365)
     profile_mwh = float(np.nanmean(series.to_numpy(dtype=float)) * scale * year_hours)
     modelled = _modelled_mwh(n, aligned, target.weighting)
     warnings: list[str] = []
+    sampled = _window_blocks(window, modelled)
+    if sampled and profile_mwh > 0:
+        w = n.snapshot_weightings[target.weighting].reindex(aligned.index)
+        for k, win in sampled.items():
+            block = w if k == "total" else w.xs(int(k), level=0)
+            sum_w = float(block.sum())
+            expected = profile_mwh * sum_w / year_hours
+            if expected > 0 and abs(modelled[k] - expected) / expected > ENERGY_TOLERANCE:
+                where = "" if k == "total" else f"period {k}: "
+                warnings.append(
+                    f"{ENERGY_MISMATCH_WARNING}: {where}the snapshot window "
+                    f"{win['first']} – {win['last']} ({win['hours']} h in "
+                    f"{win['runs']} run{'s' if win['runs'] != 1 else ''}) carries "
+                    f"weightings summing to {sum_w:,.0f} h, {sum_w / year_hours:.1%} "
+                    f"of the source year; its {profile_mwh:,.0f} MWh × that share is "
+                    f"{expected:,.0f} MWh but the model sees {modelled[k]:,.0f} MWh, "
+                    f"more than {ENERGY_TOLERANCE:.0%} apart — the window does not "
+                    "represent the year's energy at these weightings"
+                )
     if profile_mwh > 0:
-        off = {k: v for k, v in modelled.items()
-               if abs(v - profile_mwh) / profile_mwh > ENERGY_TOLERANCE}
+        off = {k: v for k, v in modelled.items() if k not in sampled
+               and abs(v - profile_mwh) / profile_mwh > ENERGY_TOLERANCE}
         if off:
             parts = ", ".join(f"{k}: {v:,.0f} MWh" for k, v in off.items())
             warnings.append(
@@ -983,7 +1090,8 @@ def preview_energy(ctx, series: pd.Series, meta: Mapping[str, Any], *,
         series, ctx.network.snapshots, resolution=resolution, time_basis=basis)
     aligned = aligned * scale
     energy, energy_warnings = _energy_record(
-        ctx.network, series, aligned, scale, target, int(align_meta["weather_year"]))
+        ctx.network, series, aligned, scale, target, int(align_meta["weather_year"]),
+        window=align_meta.get("window"))
     return {**energy, "warnings": [*warnings, *energy_warnings]}
 
 
@@ -1112,7 +1220,8 @@ def prepare_profile(
             "unit cannot store)")]
     if target.kind == "power":
         energy, energy_warnings = _energy_record(
-            n, series, aligned, scale, target, int(align_meta["weather_year"]))
+            n, series, aligned, scale, target, int(align_meta["weather_year"]),
+            window=align_meta.get("window"))
         unit_meta.update(energy)
         warnings = [*warnings, *energy_warnings]
 
@@ -1148,6 +1257,8 @@ def prepare_profile(
     }
     if align_meta["periods"] is not None:
         full_meta["periods"] = align_meta["periods"]
+    if align_meta.get("window"):
+        full_meta["window"] = align_meta["window"]
     if align_meta["resolution"] != "hourly":
         # The basis is recorded, but a day/week mean is not re-binned by a
         # 1–2 h offset — say so, so the provenance cannot imply a shift.
@@ -1227,6 +1338,8 @@ def assign_profile(
         desc += f", tiled over {len(align_meta['periods'])} investment periods"
     if align_meta["leap_day"] == "dropped":
         desc += ", Feb 29 dropped"
+    if align_meta.get("window"):
+        desc += ", sliced to the snapshot window"
     if meta.get("refinements"):
         desc += ", refined by " + ", ".join(str(r.get("op")) for r in meta["refinements"])
     change_log_service.log("timeseries", target.display, component, desc)
@@ -1242,6 +1355,7 @@ def assign_profile(
         "tiled": align_meta["tiled"],
         "periods": align_meta["periods"],
         "resolution": align_meta["resolution"],
+        "window": align_meta.get("window"),
         "time_basis": recorded_basis,
         "warnings": warnings,
         "dispatch_cleared": bool(dispatch_cleared),

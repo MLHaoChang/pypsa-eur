@@ -450,9 +450,9 @@ def test_availability_shows_what_apply_would_warn_before_apply(client, plant_pro
     assert not any(w.startswith("not_applicable") for w in body["warnings"])
 
 
-def test_a_series_on_a_week_network_says_apply_would_refuse(client, install_network):
+def test_a_series_apply_would_refuse_says_so_at_generation(client, install_network):
     n = _load_network()
-    n.set_snapshots(pd.date_range("2025-06-02", periods=168, freq="h"))
+    n.set_snapshots(pd.date_range("2025-06-02T00:30", periods=168, freq="h"))  # off the hour
     n.add("Bus", "H", carrier="heat")
     n.add("Link", "hp", bus0="B1", bus1="H", p_nom=5.0)
     n.add("Carrier", "gas")
@@ -467,8 +467,9 @@ def test_a_series_on_a_week_network_says_apply_would_refuse(client, install_netw
     ):
         assert resp.status_code == 200, resp.text
         warnings = resp.json()["warnings"]
-        assert any(w.startswith("not_applicable:") and "full calendar year" in w
+        assert any(w.startswith("not_applicable:") and "not on the hour" in w
                    for w in warnings), warnings
+        assert resp.json()["weeks"] == {}
 
 
 def test_a_load_preview_carries_its_peak_week_as_apply_would_write_it(client, load_project):
