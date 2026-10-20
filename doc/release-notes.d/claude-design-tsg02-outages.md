@@ -1,0 +1,1 @@
+* Doc(pypsa-gui): The project workflow design now matches the gatekeeper ruling that forced outages are sampled in the reliability study and never generated into the dispatch: the Availability block shows them read-only, with no generate button (`.scratch/project-workflow/design.md` §4.6).

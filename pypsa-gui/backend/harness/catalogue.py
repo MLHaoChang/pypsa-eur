@@ -95,6 +95,7 @@ RESULTS_TAB_ENUM = [
     "investment",   # IC P3 WP3.4 (the Investment tab, WP3.5)
     "adequacy", "fmea",
     "flows",        # site commercial UX A1 (Energy flow)
+    "loadshape",    # site commercial UX A2 (Load shape)
 ]
 BOTTOM_TAB_ENUM = [
     "Log", "History", "Buses", "Lines", "Transformers", "Generators",

@@ -41,6 +41,11 @@ STREAM_CLASS: dict[str, str] = {
 }
 
 
+#: The escalation class of a difference line's reference leg (`TemplateLine.price_qty_mwh`):
+#: the market price it offsets, as the export revenue (IPP ticket 01; gatekeeper).
+REFERENCE_CLASS = "export"
+
+
 def esc_class_for(stream: str) -> str:
     """The escalation class of a ledger stream (`STREAM_CLASS`); `incentive`
     and `debt_service` are finance-side and have none (ValueError)."""
@@ -191,7 +196,20 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
                 ok = False
                 break
             my = ln.money_year if ln.money_year is not None else money_year[i]
-            arr[i] = ln.amount * (1.0 + r) ** (int(y) - my) * f_deg[i]
+            leg_p = ln.price_leg
+            if leg_p is not None:
+                # Two legs in one line: the price leg at the contract's rate, the
+                # reference leg at the market's (REFERENCE_CLASS).
+                leg_r = ln.amount - leg_p
+                r_ref = fin.escalation.get(REFERENCE_CLASS)
+                if r_ref is None and leg_r != 0.0:
+                    reasons["operating"].append(f"escalation_missing:{REFERENCE_CLASS}:{key}")
+                    ok = False
+                    break
+                arr[i] = (leg_p * (1.0 + r) ** (int(y) - my)
+                          + leg_r * (1.0 + (r_ref or 0.0)) ** (int(y) - my)) * f_deg[i]
+            else:
+                arr[i] = ln.amount * (1.0 + r) ** (int(y) - my) * f_deg[i]
         lines[key] = arr if ok else None
         meta[key] = first
     flags.extend(f"contract_ends:{cid}:{year}" for cid, year in sorted(ends.items()))
