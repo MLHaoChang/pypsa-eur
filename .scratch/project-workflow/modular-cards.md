@@ -18,10 +18,10 @@ Owner input #10, 2026-10-20, about 20:10 CEST:
 | Card | Sub-options (≤ 3) | Run kind | Runnable today |
 |---|---|---|---|
 | **Capacity expansion** | 1. Asset sizing (expansion) · 2. Dispatch & economics · 3. Process detail | `optimisation` | 1 + 2 together yes; 2 alone (sizing off) not yet available (needs the run option in §4); 3 not yet available (W0) |
-| **AC power flow & grid** | 1. Load flow (AC power flow after the optimisation) · 2. Grid code & electrical design (scorecard, campus PCC compliance, transformer and compensation sizing) · 3. N-1 security (SCLOPF) | `loadflow`; campus study; SCLOPF as an `optimisation` option | 1 bundled (needs dispatch); 2 scorecard advisory, campus study per W0; 3 yes |
+| **AC power flow & grid** | 1. Load flow (AC power flow after the optimisation) · 2. Grid code & electrical design (scorecard, campus PCC compliance, transformer and compensation sizing) · 3. N-1 security (SCLOPF) | `loadflow`; campus study; SCLOPF as an `optimisation` option | 1 bundled (needs dispatch); 2 scorecard advisory, campus study per W0; 3 yes, in LOPF mode only (not with the rolling strategy; lines and transformers; linear, no AC) |
 | **Control** | 1. Converter control presets · 2. Island & ride-through checks · 3. Frequency & dynamics | `control_checks` | 1 inputs only; 2 per W0; 3 not yet available |
-| **Reliability** (owner Q17 = A) | 1. Reliability goal & study (LOLE / ENS) · 2. Stress conditions & FMEA · 3. Outage-data screening (COPT) | `study` | 1 yes; 2 yes (sweep); 3 yes (no solve needed) |
-| **Commercial & finance** | 1. Tariffs & bill · 2. Contracts & PPAs · 3. Investment case & parties | the LP's tariff/PPA terms (inside `optimisation`); `investment_case` | 1, 2 yes; 3 per W0 |
+| **Reliability** (owner Q17 = A) | 1. Reliability goal & study (LOLE / ENS) · 2. Stress conditions & FMEA · 3. Outage-data screening (COPT) | `study` | 1 yes; 2 yes (sweep); 3 yes: no solve, but it needs unit outage rates and availability profiles |
+| **Commercial & finance** | 1. Tariffs & bill · 2. Contracts & PPAs · 3. Investment case & parties | the LP's tariff/PPA terms (inside `optimisation`); `investment_case` | 1 yes, after the capacity/dispatch run (the bill reads the solved dispatch); 2 yes; 3 per W0 |
 | **Hand-off** | 1. Reports · 2. Data exports · 3. Specialist packet (Planning → dynamics, PowerFactory read-back) | — | yes |
 
 Earlier items that move into these sub-options:
