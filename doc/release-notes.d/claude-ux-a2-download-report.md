@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Guided's Results card has a "Download report (.docx)" button (the evidence report, rendered and downloaded in one click), and "Open full report" becomes "Show the engineering detail", the one link to the Expert panel (UX review H3, owner decision A).

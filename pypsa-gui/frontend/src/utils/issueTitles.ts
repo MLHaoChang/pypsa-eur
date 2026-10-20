@@ -30,6 +30,7 @@ export const ISSUE_TITLES: Record<string, string> = {
   gen_control_invalid: 'Generator control type not valid for power flow',
   gen_committable_extendable: 'Unit commitment and capacity expansion on the same generator',
   gen_uc_param_invalid: 'Unit-commitment parameter not valid',
+  uc_start_cost_unweighted: 'Start-up cost not weighted by the snapshots',
   p_max_pu_above_one: 'Availability profile above 100 %',
   curtailment_cost_on_thermal: 'Curtailment cost on a non-renewable generator',
   curtailment_cost_negative_prices: 'Curtailment cost can create negative prices',
@@ -119,6 +120,10 @@ export const ISSUE_TITLES: Record<string, string> = {
   availability_may_include_outages: 'Availability may already include outages',
   outages_folded_into_availability: 'Outages are folded into availability',
   outages_folded_into_availability_ignored: 'Outages-in-availability flag is ignored',
+
+  // Island control presets (data-centre grid readiness, ticket 04)
+  preset_leaves_no_grid_former: 'No unit forms the island (control preset leaves no grid former)',
+  preset_not_applied_to_unit: 'Control preset not applied to a unit',
 }
 
 /** The plain title for an issue code; an unknown code reads as a sentence. */

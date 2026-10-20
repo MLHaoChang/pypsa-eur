@@ -302,15 +302,15 @@ def _normalise_flag_column(n, attr: str) -> None:
     boundary that can add a row or replace a frame; a no-op on anything but
     generators, and 0.17 ms on a 300-row frame.
     """
-    if attr in ("buses", "links"):
-        # P14: a first write of an eh_* tag creates the column with NaN for
-        # every other row — make it typed (False / "") before anything saves.
+    if attr in ("buses", "links", "generators"):
+        # P14: a first write of an eh_* tag (or a grid-to-process column, such
+        # as a generator's process_role) creates the column with NaN for every
+        # other row — make it typed (False / "") before anything saves.
         try:
             from services.adequacy.eh_columns import normalise_eh_columns
             normalise_eh_columns(n)
         except Exception:                                     # noqa: BLE001
             pass
-        return
     if attr != "generators":
         return
     try:

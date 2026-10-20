@@ -173,6 +173,22 @@ describe('profile studio: pending + apply', () => {
     expect((await screen.findByTestId('apply-ok')).textContent).toMatch(/applied to g_wind: 8784 h, mean 32\.0%/)
   })
 
+  it('surfaces the assumed-UTC time-basis warning with the result', async () => {
+    api.pending.mockResolvedValue({ pending: [PENDING_RECORD], jobs: [], keep: 10 })
+    api.apply.mockResolvedValue({
+      component: 'g_wind', attribute: 'p_max_pu', hours: 8760, weather_year: 2023,
+      leap_day: 'kept', tiled: false, dispatch_cleared: true, mean: 0.32, peak: 0.91,
+      time_basis: 'UTC (assumed; site clock unknown)',
+      warnings: ['time_basis_assumed_utc: the profile is in UTC and was applied unshifted; if this project\'s snapshots are local time, set the time zone'],
+    })
+    renderPanel()
+    await screen.findByTestId('pending-job-abc123')
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    const ok = await screen.findByTestId('apply-ok')
+    expect(ok.textContent).toMatch(/time basis UTC \(assumed; site clock unknown\)/)
+    expect(ok.textContent).toMatch(/set the time zone/)
+  })
+
   it('surfaces the bus-moved warning with the result', async () => {
     api.pending.mockResolvedValue({ pending: [PENDING_RECORD], jobs: [], keep: 10 })
     api.apply.mockResolvedValue({

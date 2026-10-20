@@ -106,6 +106,9 @@ def preconditions(n, component_class: str, name: str) -> dict[str, Status]:
         REQ_COMMITTABLE,
         REQ_DISPATCH,
         REQ_DUALS,
+        REQ_PORT2,
+        REQ_PORT3,
+        REQ_PORT4,
     )
 
     out: dict[str, Status] = {}
@@ -149,7 +152,24 @@ def preconditions(n, component_class: str, name: str) -> dict[str, Status]:
     # 6. An overnight_cost-priced asset must resolve a discount_rate and a
     #    finite lifetime to annualise — see `capex_unresolved_reason`.
     out[REQ_ANNUITY] = _annuity_status(n, component_class, name)
+
+    # 7. A Link port above bus1 is set on THIS link (ticket 04). An unset port can never carry flow, so it is na,
+    #    not blocked: there is nothing to run.
+    for i, req in ((2, REQ_PORT2), (3, REQ_PORT3), (4, REQ_PORT4)):
+        out[req] = _port_status(n, component_class, name, i)
     return out
+
+
+def _port_status(n, component_class: str, name: str, port: int) -> Status:
+    from .applicability import OK, Status
+    if component_class != "Link":
+        return OK
+    col = f"bus{port}"
+    df = n.links
+    bus = df.at[name, col] if col in df.columns and name in df.index else None
+    if isinstance(bus, str) and bus.strip():
+        return OK
+    return Status("na", f"this link has no {col}")
 
 
 def _duals_status(n, component_class: str) -> Status:

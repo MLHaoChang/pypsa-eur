@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): For a site whose connection point never imports (an island's normally open tie), the Site connection form no longer asks for an export link or a time zone: it says the site runs as an island and offers one button, "Use <tie> as the connection" (UX review H4, N14).

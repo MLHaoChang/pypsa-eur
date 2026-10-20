@@ -83,6 +83,26 @@ describe('CampusIslandGfmSection', () => {
     expect(screen.queryByRole('button', { name: /Apply/ })).toBeNull()
   })
 
+  it('not achievable with the island rows off says the hub solve will not show the capacity (UX review N7)', async () => {
+    api.gfmSettings.mockResolvedValue({ ...ready(rec({ status: 'not_achievable', achievable: false, changed: false,
+      settings: {} })), island_rows_now: false })
+    renderSection()
+    expect((await screen.findByTestId('gfm-island-rows-off')).textContent).toMatch(/not sized to island/)
+  })
+
+  it('says nothing about the rows when they are on, or when the server does not say', async () => {
+    api.gfmSettings.mockResolvedValue({ ...ready(rec({ status: 'not_achievable', achievable: false, settings: {} })),
+      island_rows_now: true })
+    const { unmount } = renderSection()
+    await screen.findByTestId('gfm-status')
+    expect(screen.queryByTestId('gfm-island-rows-off')).toBeNull()
+    unmount()
+    api.gfmSettings.mockResolvedValue(ready(rec({ status: 'not_achievable', achievable: false, settings: {} })))
+    renderSection()
+    await screen.findByTestId('gfm-status')
+    expect(screen.queryByTestId('gfm-island-rows-off')).toBeNull()
+  })
+
   it('a collapse case names the collapse without a number', async () => {
     api.gfmSettings.mockResolvedValue(ready(rec({
       status: 'not_achievable', achievable: false,
@@ -108,6 +128,23 @@ describe('CampusIslandGfmSection', () => {
     expect(cap).not.toMatch(/\+|NaN|undefined|null/)
     expect(screen.getByTestId('gfm-settings').textContent).toMatch(/SITE_BATTERY/)
     expect(screen.queryByRole('button', { name: /Apply/ })).toBeNull()
+  })
+
+  it('no case evaluated reads "Not applicable", not "already pass with margin" (UX review N6)', async () => {
+    api.gfmSettings.mockResolvedValue(ready(rec({ status: 'unchanged', changed: false, settings: {}, cases: [],
+      simulations: 0, notes: ['no grid-forming converter in any case: nothing to tune'] })))
+    renderSection()
+    const status = await screen.findByTestId('gfm-status')
+    expect(status.textContent).toMatch(/Not applicable/)
+    expect(status.textContent).toMatch(/nothing to tune/)
+    expect(status.textContent).not.toMatch(/pass with margin|simulations/)
+    expect(screen.queryByRole('button', { name: /Apply/ })).toBeNull()
+  })
+
+  it('an unchanged result that did evaluate cases still says the settings pass', async () => {
+    api.gfmSettings.mockResolvedValue(ready(rec({ status: 'unchanged', changed: false, settings: {}, simulations: 12 })))
+    renderSection()
+    expect((await screen.findByTestId('gfm-status')).textContent).toMatch(/already pass with margin/)
   })
 
   it('a null setting reads "not stated"', async () => {

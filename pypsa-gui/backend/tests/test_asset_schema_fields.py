@@ -30,7 +30,12 @@ CUSTOM_COLUMNS = {
 
 # M5: GUI columns one class's create model declares (models/schemas.py `BusCreate.country`, `CarrierCreate.unit`,
 # `GlobalConstraintCreate.carrier`), allowed for that class only.
-CUSTOM_BY_CLASS = {"Bus": {"country"}, "Carrier": {"unit"}, "GlobalConstraint": {"carrier"}}
+CUSTOM_BY_CLASS = {"Bus": {"country", "mwh_per_t", "product_value"}, "Carrier": {"unit"},
+                   "GlobalConstraint": {"carrier"},
+                   # Grid-to-process ticket 02: the process-unit columns (models/energy_hub.py EH_CUSTOM_COLUMNS).
+                   "Link": {"eh_process", "criticality_tier", "throughput_unit", "specific_energy_kwh_per_t",
+                            # PyPSA registers extra ports on first use (`pypsa.constants.RE_PORTS_GE_2`).
+                            "bus2", "bus3", "bus4", "efficiency2", "efficiency3", "efficiency4"}}
 
 # Every key the hand-written edit cards let a user change today. S1 must not
 # lose one (capital_cost moves to a derived row; overnight_cost on a battery

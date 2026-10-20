@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Show the current saved rule, checking selection and access blockers beside in-page chat, with the existing access review and restriction controls. Hide stale or unavailable observations and preserve running chat when changing surfaces.

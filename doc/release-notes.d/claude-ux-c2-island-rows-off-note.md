@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): When no grid-forming setting passes and the hub solve is not sized to island (island rows off in the solver settings), the grid-forming section and the Operation tile now say so beside the "capacity is needed" verdict (UX review N7, decision C; reads the `island_rows_now` flag).

@@ -205,7 +205,7 @@ describe('GoalCard study states (from the study record, N2)', () => {
     vi.mocked(resultsApi.abortEhStudy).mockResolvedValue({ status: 'running', aborting: true })
     const user = mount()
     const t = await screen.findByTestId('hub-goal-running')
-    expect(t.textContent).toBe('Studying… (up to 40 calculation steps)')
+    expect(t.textContent).toBe('Studying… (up to 40 calculation steps) · 0:00 elapsed')
     expect(t.textContent).not.toMatch(/poll|get_adequacy_results|solves/)
     expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(true)
     await user.click(screen.getByTestId('hub-goal-abort'))
@@ -218,7 +218,7 @@ describe('GoalCard study states (from the study record, N2)', () => {
         pipeline: { budget_solves: 40 } } })
     mount()
     const t = await screen.findByTestId('hub-goal-running')
-    expect(t.textContent).toBe('Studying… (up to 40 calculation steps)')
+    expect(t.textContent).toBe('Studying… (up to 40 calculation steps) · 0:00 elapsed')
   })
 
   it('running text with a count: "n of N calculation steps"', async () => {
@@ -227,7 +227,7 @@ describe('GoalCard study states (from the study record, N2)', () => {
         pipeline: { budget_solves: 40, solves_consumed: 12 } } })
     mount()
     expect((await screen.findByTestId('hub-goal-running')).textContent)
-      .toBe('Studying… 12 of 40 calculation steps')
+      .toBe('Studying… 12 of 40 calculation steps · 0:00 elapsed')
   })
 
   it('failed: the error and Run again', async () => {

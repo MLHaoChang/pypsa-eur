@@ -248,7 +248,8 @@ function lcosReason(payload: Obj, real: boolean): string | null {
   return shown.length ? shown.join('; ') : null
 }
 
-/** The price basis in words ("real basis, 2020 EUR"; GS Q6), or null when
+/** The price basis in words ("real basis, 2020 EUR", or "nominal basis, costs in
+ *  real 2027 EUR (2020 price data)"; GS Q6), or null when
  *  the report states none. */
 export function basisStatement(report: InvestmentCaseReportPayload): string | null {
   const v = payloadOf(report, 'project').basis_statement

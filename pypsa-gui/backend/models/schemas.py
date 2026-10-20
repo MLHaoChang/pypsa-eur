@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from models.commercial import CommercialConfig
 
@@ -82,6 +82,10 @@ class BusCreate(BaseModel):
     unit: str = "MW"
     control: str = "PQ"
     sub_network: str = ""
+    # Tonne factor of an energy product bus counted in MWh (CONTEXT.md, Product); written only when sent.
+    mwh_per_t: float | None = None
+    # Value of one unit of the product, EUR per bus unit (ticket 04); written only when sent.
+    product_value: float | None = None
 
 
 class CarrierCreate(BaseModel):
@@ -177,6 +181,11 @@ class LengthsFromGeometryRequest(BaseModel):
     keys: list[str] | None = None
 
 
+# Columns a Create model declares but a create writes only when the caller sent them.
+LINK_LAZY_COLUMNS = frozenset({"eh_process", "criticality_tier", "throughput_unit", "specific_energy_kwh_per_t"})
+BUS_LAZY_COLUMNS = frozenset({"mwh_per_t", "product_value"})
+
+
 class LinkCreate(BaseModel):
     # extra='allow' lets an attribute the model does not declare survive
     # model_dump(exclude_unset=True). It is whitelisted against PyPSA's catalog
@@ -209,6 +218,7 @@ class LinkCreate(BaseModel):
     # configured (heat-pump case).
     efficiency2: _NoneToOne = 1.0
     efficiency3: _NoneToOne = 1.0
+    efficiency4: _NoneToOne = 1.0
     p_nom: Finite = 0.0
     p_nom_extendable: bool = False
     p_nom_min: Finite = 0.0
@@ -216,6 +226,15 @@ class LinkCreate(BaseModel):
     marginal_cost: Finite = 0.0
     capital_cost: Finite = 0.0
     fom_cost: Finite = 0.0   # fixed O&M, €/MW/yr (PyPSA-native)
+    # Unit commitment, as on the Generator (grid-to-process ticket 02). PyPSA's own Link defaults, so a Link that
+    # sets none of them is unchanged. The solve path does not read them for Links yet (ticket 03).
+    committable: bool = False
+    ramp_limit_up: float | None = None
+    ramp_limit_down: float | None = None
+    stand_by_cost: Finite = 0.0
+    start_up_cost: Finite = 0.0
+    min_up_time: int = 0
+    min_down_time: int = 0
     overnight_cost: float | None = None  # €/MW; NaN = unset
     # Per-asset discount rate used by PyPSA's native annuity when
     # overnight_cost is set. NaN ⇒ fall back to solver config's global
@@ -230,6 +249,30 @@ class LinkCreate(BaseModel):
     p_max_pu: Finite = Field(default=1.0, allow_inf_nan=False)
     build_year: int = 0
     lifetime: _NoneToPosInf = Field(default=float("inf"))
+    # Process-unit columns (grid-to-process ticket 02; models/energy_hub.py EH_CUSTOM_COLUMNS). Declared so the
+    # chat tools and the API accept them, but only written when sent: `create_link` leaves an unset one out, so a
+    # Link that never sets them never gets the column (`LINK_LAZY_COLUMNS`).
+    eh_process: bool | None = None
+    criticality_tier: str | None = None
+    throughput_unit: str | None = None
+    specific_energy_kwh_per_t: float | None = None
+
+    @model_validator(mode="after")
+    def _process_unit_ports_state_their_efficiency(self):
+        """A process unit's extra port needs its efficiency stated (grid-to-process ticket 02).
+
+        `efficiency2..` default to 1.0, so a `bus2` sent alone would silently become a +1.0 OUTPUT, while a
+        process unit's feed is a negative efficiency. On an `eh_process` Link, a set port must therefore carry
+        its efficiency explicitly; the Asset write spreads the full row, so an edit always does.
+        """
+        if not self.eh_process:
+            return self
+        for i in (2, 3, 4):
+            if getattr(self, f"bus{i}") and f"efficiency{i}" not in self.model_fields_set:
+                raise ValueError(
+                    f"efficiency{i} is required on a process unit with bus{i} set: give the flow per unit of "
+                    f"bus0 (negative for a feed the unit draws, positive for an output)")
+        return self
 
 
 class GeneratorCreate(BaseModel):
@@ -710,6 +753,8 @@ class SolverConfigSchema(BaseModel):
     # 0.01 = stop within 1 % of optimal. mip_time_limit_s = 0 disables the cap.
     mip_gap: float = 0.01
     mip_time_limit_s: float = 0
+    # Process-unit commitment (grid-to-process ticket 03): auto | linearised | binary.
+    process_uc: Literal["auto", "linearised", "binary"] = "auto"
     # Edge Investment Case commercial layer (P1 WP1.3): typed here, a plain
     # dict on the `SolverConfig` dataclass (`update_solver_config` dumps it).
     # Explicit null clears it.
@@ -1229,6 +1274,12 @@ class CarrierEconomics(BaseModel):
     capex_meur: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     dispatch_gwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     lcoe_eur_per_mwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
+    # Grid-to-process shortfall (ticket 04): Σ shortfall-generator dispatch × its lost-production value × w. Lost
+    # revenue, NOT part of opex_meur, booked under the product bus's carrier. None where the carrier has no
+    # shortfall generator, or (with lost_production_flag "lost_production_value_missing") where one has no value
+    # (ADR-0001). The flag reads "role_from_name" when a slack was recognised by its `__lost_` name only.
+    lost_production_meur: CarrierPeriodValue | None = None
+    lost_production_flag: str | None = None
 
 
 class AssetLCOHEntry(BaseModel):
@@ -1239,9 +1290,11 @@ class AssetLCOHEntry(BaseModel):
     heat pumps, P2X, H2 pipelines), computes the levelised cost of its
     primary output. Output = ``|p0| × efficiency`` in MWh of the
     bus1-side carrier (H2 for electrolysers, heat for heat pumps, etc.).
-    Cost = annuitised CAPEX (horizon) + OPEX + input-electricity cost
-    at bus0's marginal price. LCOH unit = €/MWh of the Link's output
-    regardless of carrier label.
+    Cost = annuitised CAPEX (horizon) + OPEX + input cost at each input
+    port's marginal price (bus0, and any port above bus1 that withdraws,
+    e.g. a process unit's feed). LCOH unit = €/MWh of the Link's bus1
+    output regardless of carrier label; `output_value_meur` values every
+    output port at its product value and never enters the LCOH.
 
     Per-period breakdowns scale by ``investment_period_weightings.years``
     so multi-period horizons stay year-consistent — matches the rest of
@@ -1256,6 +1309,11 @@ class AssetLCOHEntry(BaseModel):
     input_cost_meur: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     output_gwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     lcoh_eur_per_mwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
+    # Ticket 04: every output port's product (bus1 and any port above it that injects) at its bus's
+    # `product_value`, on the cost weighting. Never part of the LCOH. None with output_value_flag
+    # "product_value_missing" when any output carrying flow has no value (ADR-0001).
+    output_value_meur: CarrierPeriodValue | None = None
+    output_value_flag: str | None = None
 
 
 class EconomicsComparison(BaseModel):

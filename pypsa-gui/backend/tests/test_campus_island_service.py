@@ -71,7 +71,9 @@ def _sidecar_path(project):
 
 
 def test_a_project_without_a_sidecar_has_no_island_config_and_no_study(project):
-    assert ce.get_island(project) == {"config": None, "study": None}
+    out = ce.get_island(project)
+    assert (out["config"], out["study"], out["services"], out["warnings"]) == (None, None, None, [])
+    assert set(out) == {"config", "study", "presets", "services", "warnings"}
 
 
 def test_the_sidecar_round_trips_as_written(project):
@@ -107,6 +109,7 @@ study = _ces.study                                   # a project of another kind
     lambda p: ce.get_island(p),
     lambda p: ce.save_island(p, _config()),
     lambda p: ce.run_island_study(p),
+    lambda p: ce.select_island_preset(p, "grid_following"),
 ])
 def test_every_island_action_refuses_a_project_of_another_kind(study, action):
     with pytest.raises(HTTPException) as exc:
@@ -165,6 +168,8 @@ def hub(client, _auth_db, seeded_identity):
     ("put", "/island", "save_island", {"config": {"units": {}}}, ({"units": {}},)),
     ("post", "/island/study", "run_island_study", {}, (None,)),
     ("post", "/island/study", "run_island_study", {"scenarios": ["seamless"]}, (["seamless"],)),
+    ("post", "/island/preset", "select_island_preset", {"preset": "grid_following"}, ("grid_following",)),
+    ("post", "/island/preset", "select_island_preset", {"preset": None}, (None,)),
 ])
 def test_each_island_route_calls_its_service_function_with_the_row(client, hub, monkeypatch, method,
                                                                    path, function, payload,
@@ -189,19 +194,21 @@ def test_a_bad_scenario_is_422_before_the_service(client, hub, monkeypatch):
 
 def test_the_island_writes_are_refused_under_another_users_lock_and_the_read_is_not(
         client, hub, same_org_other_user, monkeypatch):  # noqa: F811
-    for function in ("get_island", "save_island", "run_island_study"):
+    for function in ("get_island", "save_island", "run_island_study", "select_island_preset"):
         monkeypatch.setattr(ce, function, lambda *a: {"ok": True})
     assert client.post("/api/projects/Router Hub/lock").status_code == 200
     other = same_org_other_user
     for method, path, payload in [("put", "/island", {"config": {}}),
-                                  ("post", "/island/study", {})]:
+                                  ("post", "/island/study", {}),
+                                  ("post", "/island/preset", {"preset": "grid_following"})]:
         resp = getattr(other, method)(f"/api/campus-electrical/Router Hub{path}", json=payload)
         assert _is_lock_refusal(resp), (method, path, resp.status_code, resp.text)
     assert other.get("/api/campus-electrical/Router Hub/island").status_code == 200
 
 
 def test_another_orgs_project_cannot_reach_the_island_routes(other_org_client, hub):
-    for method, path in (("get", "/island"), ("put", "/island"), ("post", "/island/study")):
-        kw = {"json": {"config": {}}} if method != "get" else {}
+    for method, path in (("get", "/island"), ("put", "/island"), ("post", "/island/study"),
+                         ("post", "/island/preset")):
+        kw = {"json": {"config": {}, "preset": None}} if method != "get" else {}
         resp = getattr(other_org_client, method)(f"/api/campus-electrical/Router Hub{path}", **kw)
         assert resp.status_code == 404, (path, resp.status_code)

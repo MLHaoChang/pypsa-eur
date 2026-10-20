@@ -168,3 +168,28 @@ def test_a_build_without_gridspine_says_so_instead_of_failing_obscurely(tmp_path
     (tmp_path / IC.SIDECAR_NAME).write_text(json.dumps(T.ISLAND_CONFIG["eh_datacenter"]))
     with pytest.raises(IC.ContractError, match="gridspine"):
         IC.load_island_config(tmp_path / IC.SIDECAR_NAME)
+
+
+# ── the single-year island microgrid (UX review N2) ──────────────────────────
+
+
+def test_the_single_year_microgrid_ships_an_island_sidecar_that_matches_its_network():
+    """Its Island section used to say "no island requirements yet. Paste an island config": the
+    sidecar names the template's own units, validates, drafts into a campus, and the template's
+    own solve is unchanged (rows off), as for the H2 hub."""
+    from gridspine.ingest.campus import build_campus
+    from services.adequacy import island_config as IC
+
+    n = T.BUILDERS["eh_microgrid"]()
+    cfg = IC.validate(T.ISLAND_CONFIG["eh_microgrid"])
+    tables = {"bess": "storage_units", "pv": "generators", "wind": "generators",
+              "genset": "generators", "load": "loads"}
+    for name, block in cfg["units"].items():
+        assert name in getattr(n, tables[block["kind"]]).index, (name, block["kind"])
+    assert sorted(cfg["requirements"]["ride_through_storage"]) == sorted(n.storage_units.index)
+    assert [u for u, b in cfg["units"].items() if b["kind"] == "load" and b["critical"]] == ["hospital_load"]
+    for frame in ("generators", "storage_units", "links"):
+        df = getattr(n, frame)
+        df["p_nom_opt"] = df["p_nom"].where(df["p_nom"] > 0, 10.0)
+    build_campus(draft_campus(n, island=cfg).spec)
+    assert not T.solver_config("eh_microgrid").get("island_constraints")

@@ -210,6 +210,13 @@ Changes:
        PyPSA's behaviour there is existing behaviour (ticket 03).
      - This is an upstream PyPSA gap, worth reporting upstream. The design does not depend on a
        fix.
+     - **Upstream report (draft, ticket 03).** In PyPSA 1.1.2, `optimize.py:301-316` adds
+       `start_up_cost · start_up` and `shut_down_cost · shut_down` to the objective with no
+       `snapshot_weightings.objective` factor and no `investment_period_weightings.objective`
+       factor, while marginal and stand-by costs get both (`:211-216`, `:257-275`). So on a
+       clustered or multi-period network the cost of a start is undercounted by the weight. The
+       expected behaviour is to weight start-up and shut-down costs like `stand_by_cost`. The
+       same note is in `pypsa-gui/backend/services/solver/process_uc.py`.
 2. **Committable and extendable together is big-M bilinear.** The owner already decided this for
    gensets (2026-10-13, option A: an extendable unit is never committed, see
    `solver/island.py:368-385`). The same rule applies to process units:

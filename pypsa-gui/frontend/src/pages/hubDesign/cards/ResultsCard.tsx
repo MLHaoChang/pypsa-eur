@@ -1,7 +1,8 @@
 // Step 4 — Results (guided-mode spec §5.3, §5.5): the verdict in one
 // sentence, the cost, the three costliest risks and what the study could not
 // establish — from GET /results/eh_review and the report the Expert panel
-// shows. "Open full report" goes to that panel.
+// shows. "Show the engineering detail" goes to that panel; "Download report (.docx)" is the Guided way
+// to the document.
 import { FileText } from 'lucide-react'
 import Kpi from '../../../components/Kpi'
 import ResultState from '../../../components/ResultState'
@@ -14,10 +15,16 @@ import { headline, riskName } from '../headline'
 import { useHubDesignStore } from '../hubDesignStore'
 import { CardShell } from '../shared/CardShell'
 import { Term, TERM_FALLBACK } from '../shared/Term'
-import { useHubReport, useHubReview, useHubStudy } from '../useHubData'
+import { useDispatchSolved, useHubReport, useHubReview, useHubStudy } from '../useHubData'
+import { FROM_STUDY_HINT } from '../chapters'
 import { SECTION_LABEL } from '../sectionLabels'
-import { kpiMoney } from '../plainWords'
+import { STALE_TILE_REASON } from '../chapters'
+import { costTileLabel, kpiMoney } from '../plainWords'
+import { useQuery } from '@tanstack/react-query'
+import { networkApi } from '../../../api/network'
+import { nk } from '../../../utils/queryKeys'
 import { ChaptersSection } from '../ChaptersSection'
+import DownloadReport from '../DownloadReport'
 
 
 export const STALE_TEXT =
@@ -36,10 +43,17 @@ export function openFullReport(): void {
   ui.requestEhReport()
 }
 
+/** Years the Monte Carlo modelled, from the certification section (UX review N10). */
+function horizonYearsOf(report: ReturnType<typeof useHubReport>): number | null {
+  const h = report?.sections?.certification?.payload?.horizon_years
+  return typeof h === 'number' ? h : null
+}
+
 export function ResultsCard() {
   const { study, running } = useHubStudy()
   const { review } = useHubReview(studyHasResults(study))
   const report = useHubReport(study, running)
+  const solved = useDispatchSolved()
   // A unit whose loss causes no shortfall is not a risk (UX S6, G3): it is
   // named once under the list, never ranked in it.
   const rows = report ? fmeaTopRows(report) : []
@@ -49,15 +63,25 @@ export function ResultsCard() {
   const coped = rows.filter(isNoShortfall).map(r => riskName(r.name || r.mode_id))
   const gaps = report ? notEstablishedNotes(report) : []
   const cost = report?.cost_at_target_eur
+  const project = useUIStore(s => s.currentProject)
+  const multiPeriod = report?.period_basis === 'npv_multi_period'
+  const periods = useQuery({
+    queryKey: nk(project, 'investmentPeriods'), queryFn: networkApi.getInvestmentPeriods,
+    enabled: !!project && multiPeriod,
+  })
   const setStep = useHubDesignStore(s => s.setStep)
   // The four category tiles (UX S6, G4/G6), shown whether or not the study ran.
   const summary = review?.summary ?? {}
   const verdict = summary.verdict
+  // Out-of-date figures are marked on the tiles too, not only above them (UX review N4, L5).
+  const stale = review?.stale === true && study?.edited_since_study !== true
   const chapters = (
     <ChaptersSection reliability={{
       hasResults: studyHasResults(study), running,
       lole: summary.mc_lole_h_per_year ?? report?.mc_lole_h ?? null,
       target: summary.target_lole_h ?? null,
+      horizonYears: horizonYearsOf(report),
+      stale,
       verdict: verdict === 'pass' || verdict === 'fail' || verdict === 'inconclusive' ? verdict : null,
     }} />
   )
@@ -86,9 +110,10 @@ export function ResultsCard() {
           {EDITED_TEXT}
         </p>
       )}
-      {review?.stale === true && study?.edited_since_study !== true && (
-        // The shared stale state (UX audit L5), not a custom banner.
-        <div data-testid="hub-results-stale"><ResultState state="stale" reason={STALE_TEXT} /></div>
+      {stale && (
+        // The shared stale state (UX audit L5), with the way to refresh it (UX review N4).
+        <div data-testid="hub-results-stale"><ResultState state="stale" reason={STALE_TEXT}
+          action={{ label: 'Go to Goal and run the study', onClick: () => setStep('goal', { user: true }) }} /></div>
       )}
 
       {review ? (
@@ -120,8 +145,10 @@ export function ResultsCard() {
         // The shared KPI tile (UX S6, G-item 2), the glossary text on hover.
         <div className="max-w-[260px]">
           <Kpi testId="hub-results-cost" headline
-            label="Yearly cost of this design (before any shortfall costs)"
-            value={fmtCurrency(cost)} hint={TERM_FALLBACK.cost_at_target} />
+            label={costTileLabel(report?.period_basis, periods.data?.periods)}
+            value={fmtCurrency(cost)} fromStudy={solved === false && !stale}
+            hint={solved === false && !stale ? `${TERM_FALLBACK.cost_at_target} ${FROM_STUDY_HINT}` : TERM_FALLBACK.cost_at_target}
+            state={stale ? 'stale' : 'ready'} reason={stale ? STALE_TILE_REASON : undefined} />
         </div>
       )}
 
@@ -167,10 +194,13 @@ export function ResultsCard() {
         </div>
       )}
 
-      <button type="button" data-testid="hub-results-open-report" onClick={openFullReport}
-        className="self-start inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-[12px] text-text hover:border-accent hover:text-accent">
-        <FileText size={13} /> Open full report
-      </button>
+      <div className="flex flex-wrap items-start gap-2">
+        {project && <DownloadReport project={project} />}
+        <button type="button" data-testid="hub-results-open-report" onClick={openFullReport}
+          className="self-start inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-[12px] text-text hover:border-accent hover:text-accent">
+          <FileText size={13} /> Show the engineering detail
+        </button>
+      </div>
       {chapters}
     </CardShell>
   )

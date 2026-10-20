@@ -1727,6 +1727,19 @@ def _zero_cost_generators(n) -> list[str]:
     return [str(name) for name in g.index[mask] if name not in series]
 
 
+def _check_unweighted_start_costs(n) -> list[Issue]:
+    """PyPSA 1.1.2 leaves start-up and shut-down costs unweighted (``services.solver.process_uc``).
+    On a weighted user network that is existing behaviour, so a warning, not a refusal; the
+    template rules (``services.process_template_rules``) refuse the same case."""
+    from services.solver.process_uc import weighted_start_cost_units
+
+    return [_warn("uc_start_cost_unweighted", comp, name,
+                  f"{attr} = {value:g} on a weighted network: PyPSA does not multiply it by the "
+                  "snapshot or period weighting, so the objective undercounts it. Model a restart "
+                  "as min_down_time with the shortfall slack, or put the cost in stand_by_cost.")
+            for comp, name, attr, value in weighted_start_cost_units(n)]
+
+
 def _check_lopf(n, solver_config) -> list[Issue]:
     out: list[Issue] = []
 
@@ -1750,6 +1763,7 @@ def _check_lopf(n, solver_config) -> list[Issue]:
     out += _check_loss_magnitude(n, solver_config)
     out += _check_storage_cyclic_initial(n)
     out += _check_p_max_pu_bounds(n)
+    out += _check_unweighted_start_costs(n)
 
     # Generators
     out += _check_extendable_bounds(n.generators, "Generator", "p_nom", True)

@@ -17,14 +17,21 @@ import numpy as np
 import pandas as pd
 
 from models.energy_hub import EH_CUSTOM_COLUMNS, EH_INTERNAL_ROLES, EH_LINK_ROLES
+from models.process_unit import CRITICALITY_TIERS, PROCESS_CUSTOM_COLUMNS, PROCESS_GENERATOR_ROLES
 
-_ATTR_OF = {"Bus": "buses", "Link": "links"}
+_ATTR_OF = {"Bus": "buses", "Link": "links", "Generator": "generators"}
 _TRUE = ("true", "1", "yes", "y", "t")
 _FALSE = ("false", "0", "no", "n", "f", "")
 
 
+def _all_columns() -> dict[str, dict[str, str]]:
+    """The Energy Hub tags and the grid-to-process columns, per class."""
+    return {c: {**EH_CUSTOM_COLUMNS.get(c, {}), **PROCESS_CUSTOM_COLUMNS.get(c, {})}
+            for c in {*EH_CUSTOM_COLUMNS, *PROCESS_CUSTOM_COLUMNS}}
+
+
 def eh_columns_for(component_class: str) -> dict[str, str]:
-    return EH_CUSTOM_COLUMNS.get(component_class, {})
+    return _all_columns().get(component_class, {})
 
 
 def _as_bool(value) -> bool:
@@ -74,11 +81,26 @@ def coerce_eh_value(component_class: str, col: str, value):
                 f"{[r for r in EH_LINK_ROLES if r and r not in EH_INTERNAL_ROLES]}"
                 " (or empty)")
         return v
+    if kind == "tier":
+        v = "" if value is None else str(value).strip()
+        if v and v not in CRITICALITY_TIERS:
+            raise ValueError(
+                f"{col}: {v!r} is not a criticality tier; expected one of {list(CRITICALITY_TIERS)} (or empty)")
+        return v
+    if kind == "process_role":
+        v = "" if value is None else str(value).strip()
+        if v and v not in PROCESS_GENERATOR_ROLES:
+            raise ValueError(
+                f"{col}: {v!r} is not a process role; expected one of {list(PROCESS_GENERATOR_ROLES)} (or empty)")
+        return v
+    if kind == "text":
+        return "" if value is None else str(value).strip()
     raise ValueError(f"{col}: unknown kind {kind!r}")  # pragma: no cover
 
 
 def _default(kind: str):
-    return {"bool": False, "float_nonneg": float("nan"), "role": ""}[kind]
+    return {"bool": False, "float_nonneg": float("nan"), "role": "", "tier": "", "process_role": "",
+            "text": ""}[kind]
 
 
 def ensure_eh_column(n, component_class: str, col: str) -> None:
@@ -99,7 +121,7 @@ def normalise_eh_columns(n) -> None:
     Idempotent; unparseable cells fall back to the column default rather than
     raising — a save must not fail on a stale value.
     """
-    for component_class, cols in EH_CUSTOM_COLUMNS.items():
+    for component_class, cols in _all_columns().items():
         df = getattr(n, _ATTR_OF[component_class], None)
         if df is None:
             continue

@@ -85,6 +85,8 @@ SAFETY_PANEL_ENUM = [
     "DecisionStudy", "decision",
     # Economics in Expert: rates, price basis and every asset's costs.
     "Economics", "economics",
+    # The renewable profile generator (Profile Studio) slide panel.
+    "ProfileStudio", "profiles",
 ]
 RESULTS_TAB_ENUM = [
     "summary",      # M3: the answer-first tab Results opens on after a solve
@@ -200,6 +202,61 @@ def _empty(name: str, description: str) -> dict[str, Any]:
 
 
 TOOLS: list[dict[str, Any]] = [
+    _t(
+        "resolve_project_target",
+        "Resolve an exact authorized project name to its canonical project_id and project_name. "
+        "Use before a named-project action; never guess a partial match or substitute the active project. "
+        "Does not activate, navigate, select a run or grant permission. Recheck native authority on use. "
+        "Unknown and inaccessible names have the same not-found outcome; use list_projects and ask "
+        "the user to clarify an incomplete name. Not a checked-answer adapter. Safety: read.",
+        {"project_name": {"type": "string", "minLength": 1, "maxLength": 256}},
+        ["project_name"],
+    ),
+    _t(
+        "list_result_views",
+        "The results sections of the active project for a walk-through or \"show me something "
+        "else\": per Results tab its label in the current mode, data status (available | no_data | "
+        "unavailable | not_applicable | needs_entity, with a reason), whether this conversation "
+        "already showed it, the exact read to call before opening it, and how far the browser can "
+        "prove it is shown. Statuses only, never values: read a section with its listed read, then "
+        "open it with ui_open_panel, and quote numbers from that read. exclude_shown=true leaves out "
+        "tabs already shown in this project. Safety: read.",
+        {"exclude_shown": {"type": "boolean"}},
+        [],
+    ),
+    _t(
+        "resolve_reference",
+        "Resolve 'this', 'the' or 'latest' to exactly one component, run or snapshot of the active "
+        "project, by one ladder: an explicit name or run_id; what is on screen now (the selection, the "
+        "displayed results or run, the shown snapshot); what was discussed last; the only one that "
+        "exists; otherwise candidates to ask about. component_class 'storage' covers StorageUnit and "
+        "Store; a name without a class searches every class. latest=true takes the newest completed "
+        "run and names newer failed or running runs it skipped. Returns status resolved|ambiguous|"
+        "not_found, via, target, says (always repeat it so the user sees what was resolved), ignored "
+        "hints and, when ambiguous, candidates with key fields: then ask with one ask_user Choice, never "
+        "guess. Hints are re-read; activates, selects and opens nothing. Safety: read.",
+        {"target": {"type": "string", "enum": ["component", "run", "snapshot"]},
+         "component_class": {"type": "string", "enum": [c for c in COMPONENT_CLASS_ENUM
+                                                        if c != "GlobalConstraint"] + ["storage"]},
+         "name": {"type": "string", "minLength": 1, "maxLength": 256},
+         "run_id": {"type": "string", "minLength": 1, "maxLength": 64},
+         "latest": {"type": "boolean"}},
+        ["target"],
+    ),
+    _t(
+        "get_component_schema",
+        "Discover native component fields before choosing parameters. Paged class metadata only: "
+        "stored/display units, request-model types/bounds/enums, native input/output and derived/read-only status. "
+        "No model values or permissions. Native handlers remain validation authority; JSON Schema does not "
+        "encode every cross-field rule. schema_sha256 identifies metadata only. Filter exact field names or "
+        "labels with query; page with offset += returned while has_more. Use get_component/list_components "
+        "for actual values. Not a checked-answer adapter. Safety: read.",
+        {"component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
+         "query": {"type": "string", "maxLength": 80},
+         "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
+         "limit": {"type": "integer", "minimum": 1, "maximum": 50}},
+        ["component_class"],
+    ),
     # ── Read (22) ──────────────────────────────────────────────────────────
 
     _t(
@@ -1446,12 +1503,19 @@ TOOLS: list[dict[str, Any]] = [
         "feeding the component defaults to the component's own name. Refuses "
         "(422) when the component is gone, its carrier is not wind/solar, or "
         "the artifact holds no column for it; warns when the bus moved since "
-        "generation. `project_id` is the project NAME and must be the open "
+        "generation. `time_basis` says what the snapshots mean: \"UTC\" "
+        "or the IANA zone whose wall clock they are (e.g. "
+        "\"Europe/Berlin\"; the series is shifted by that zone's offset). "
+        "Leave it unset unless the user said; then the answer's `warnings` "
+        "may say UTC was assumed — relay that and offer to set the zone. "
+        "Report the time basis from the answer. "
+        "`project_id` is the project NAME and must be the open "
         "project. Safety: write.",
         {"project_id": {"type": "string"},
          "job_id": {"type": "string"},
          "component": {"type": "string"},
-         "point_id": {"type": "string"}},
+         "point_id": {"type": "string"},
+         "time_basis": {"type": "string"}},
         ["project_id", "job_id", "component"],
     ),
 
@@ -1616,8 +1680,14 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "get_project_statistics",
-        "Offline statistics summary (no activate). Safety: read.",
-        {"name": {"type": "string"}},
+        "Summarise one project's assets without activating it (name or project_id; the active "
+        "project reads its live network, any other its saved files). summary: per-class counts; the "
+        "top `limit` items per class by capacity with has_more; generation MW by carrier, storage MW "
+        "and MWh, line count/length/MVA, extendable assets; snapshot range, resolution and investment "
+        "periods; solver mode; the latest run with whether it is current; validation error/warning "
+        "counts; gaps (variable generators without a profile). Every number you state must come from "
+        "it. Safety: read.",
+        {"name": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}},
         ["name"],
     ),
     _t(
@@ -3082,8 +3152,12 @@ TOOLS: list[dict[str, Any]] = [
         "I7 cuts would buy instead), the GFM-vs-GFL comparison, the search "
         "ledger (every bound assumed), the simulations used, and applied once "
         "applied (with hub_resolve_needed: the hub must be re-solved, since "
-        "droop and inertia change its island rows). job: the running or last "
-        "recommend job (null when none). Say it is heuristic screening and "
+        "droop and inertia change its island rows). island_rows_now: whether the "
+        "solver settings have island constraints on as they stand now; when "
+        "false the hub solve leaves the island rows out, so the capacity a "
+        "not_achievable result asks for does not shape its dispatch. job: the "
+        "running or last recommend job (null when none). Say it is heuristic "
+        "screening and "
         "which inputs are assumed; when not_achievable, say capacity is "
         "needed, never that settings fix it. 409 for a project of another "
         "kind. Safety: read.",
@@ -3621,7 +3695,7 @@ TOOLS.extend([
     _t("get_experiment", "Read one owned experiment in the active project. Returns typed cases, limits, preflight and any durable single-case execution receipt. Planned/queued is not completed; interrupted submissions have executed=null. Recorded objectives require matching completed job, exact solved inputs and intact evidence. No operation is started or replayed. Safety: read.", {"experiment_id": {"type": "string"}}, ["experiment_id"]),
     _t("get_loadflow_summary", "Summarise the CURRENT load-flow results of the active project: lines and transformers ranked by peak utilisation = flow / (rating * s_max_pu), computed by software from the same results the Load flow tab reads. Per branch (default 5, max 25, trimmed to a bounded payload): both-terminal peak flow, rating (optimized s_nom_opt or configured s_nom), s_max_pu range, peak/mean utilisation, weighted hours at/over the limit. Returns the exact source, snapshot window, freshness, solve state, ranking convention, skipped branches (missing or zero rating, no flow data) and missing_evidence. LOPF results are an ACTIVE-POWER PROXY, not an AC apparent-power assessment; source='ac_pf' uses apparent power where reactive flows exist and excludes unconverged snapshots. Never proof of full AC thermal compliance (no N-1, no voltage limits). Unsolved, stale, running, infeasible or failed results return status unavailable with a typed unavailable_kind; never invent values. window_from/window_to are inclusive snapshot indexes for follow-ups. run_id (historical) returns unavailable until run evidence artifacts exist (issue 06). Safety: read.", {"source": {"type": "string", "enum": ["lopf", "ac_pf"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "run_id": {"type": "string", "maxLength": 64}}, []),
     _t("list_tasks", "List up to 20 most recently updated durable tasks owned by you in the active project. Use a returned ID to resume in a new chat or provider. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
-    _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}}, ["goal"]),
+    _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. With overview=true (no goal) answers \"what can you do here?\": the core-feature families (projects, results, checks, edits, sensitivities, studies, reports), each available or not for this project, role, mode and personal rule, with the reason, an example sentence and its offered tools. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}, "overview": {"type": "boolean"}}, []),
     _t("start_task", "Persist a project/user-scoped plan of 1–12 ordinary tools. Create/activate the project first; rebinding and task-control tools cannot be steps. Each step has unique id, tool, args. Whole-value $earlier_step.path references resolve saved results. Stable request_id deduplicates identical plans. Returns task_id, status, next_step. Execute next_step via an ordinary offered call; this tool runs no hidden actions. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "steps": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}, "required": ["id", "tool", "args"]}}}, ["title", "steps", "request_id"]),
     _t("get_task", "Read a durable task in the active project owned by the caller. Returns completed steps and the next exact call; no completed step is replayed. Safety: read.", {"task_id": {"type": "string"}}, ["task_id"]),
     _t("resume_task", "Attach a durable task to this chat and return next_step. Execute it as an ordinary offered tool call; all normal gates apply. Interrupted writes become uncertain and require explicit review. No implicit tool execution or job polling. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),
@@ -3725,6 +3799,10 @@ TOOL_ROUTES: dict[str, list] = {
     "get_loadflow_summary": _SERVICE_CALL,
     "list_tasks": _SERVICE_CALL,
     "find_capabilities": _SERVICE_CALL,
+    "get_component_schema": _SERVICE_CALL,
+    "resolve_project_target": _SERVICE_CALL,
+    "resolve_reference": _SERVICE_CALL,
+    "list_result_views": _SERVICE_CALL,
     "start_task": _SERVICE_CALL,
     "get_task": _SERVICE_CALL,
     "resume_task": _SERVICE_CALL,

@@ -1,6 +1,6 @@
 ---
 name: coordinator
-description: The coordinator session's own procedure (the other side of steward). Use in the coordinator session when bootstrapping a project, turning tasks into sessions, running a sweep, merging a PR, refreshing the dashboard, running a retro, or relaying between sessions and the owner.
+description: The coordinator session's own procedure (the other side of steward). Use in the coordinator session when bootstrapping a project, turning tasks into sessions, running a sweep, rotating to a fresh coordinator, merging a PR, refreshing the dashboard, running a retro, or relaying between sessions and the owner.
 ---
 
 The **coordinator**:
@@ -33,11 +33,11 @@ The owner starts only this session. On a project where `docs/agents/roles.md` st
    - `dash/meta`;
    - one file dataset, `datasets/board`, from `scripts/coord/board.example.json` with its rows emptied;
    - `files/index.html`, from the template's `dashboard/index.html`.
-4. **Sweep routine.** `create_trigger` firing into this session every 3 hours, with the prompt `Run a sweep: follow .claude/skills/coordinator/SKILL.md from "Sweep".`
-5. **Roles.** Fill `docs/agents/roles.md` with the coordinator and gatekeeper ids, the dashboard link and the routine id. Merge it.
+4. **Sweep routine.** `create_trigger` firing into this session every 6 hours, with the prompt `Run a sweep: follow .claude/skills/coordinator/SKILL.md from "Sweep".`
+5. **Roles.** Fill `docs/agents/coordinator.md` with your id, and `docs/agents/roles.md` with the gatekeeper id, the dashboard link and the routine id. Merge it.
 6. **Tasks.** Go on to [Taking on tasks](#taking-on-tasks).
 
-Done when `docs/agents/roles.md` on `{{BASE_BRANCH}}` has no `<…>` left, and the owner has the dashboard link.
+Done when `docs/agents/roles.md` and `docs/agents/coordinator.md` on `{{BASE_BRANCH}}` have no `<…>` left, and the owner has the dashboard link.
 
 ## Taking on tasks
 
@@ -58,22 +58,41 @@ Done when every package is running, queued with a named reason, or merged.
 
 ## Sweep
 
-1. **Notifications.** Call `ReadNotifications` until it reports 0 remaining.
-   Done when 0 remain and each one is either acted on or logged.
-2. **Sessions.** Save the `list_sessions` output to a file, then run `python3 scripts/coord/sessions.py <file>`. Use `get_session` to look at one session.
-   - A session might be waiting on an `AskUserQuestion` in its own window. Fetch the question and bring it to the owner as options.
-   - Done when every live session is on the dashboard's sessions board with its current state.
+1. **Notifications.** Call `ReadNotifications` until it reports 0 remaining; act on or log each one.
+2. **Sessions.** Save the `list_sessions` output to a file, then run `python3 scripts/coord/sessions.py <file>`.
+   - A session waiting on an `AskUserQuestion` in its own window: fetch the question and bring it to the owner as options.
+   - Check [Rotation](#rotation)'s trigger.
+   - Done when every live session is on the sessions board with its current state.
 3. **Merge pass.** Run [Merging](#merging) on every PR the state log lists as pending.
    Done when each one is merged or has a named blocker in the log.
-4. **Dashboard.** Do [Dashboard](#dashboard) if anything changed.
-5. **Owner.** Message the owner only with what landed or what needs a decision, with times in {{TZ_LABEL}}. Ask every question as `AskUserQuestion` options, per `AGENTS.md`.
-6. **Log.** Append each event to the state log with [Time](#time).
+4. **Owner.** Do [Dashboard](#dashboard) if anything changed, then message the owner only with what landed or what needs a decision, times in {{TZ_LABEL}}. Ask every question as `AskUserQuestion` options, per `AGENTS.md`.
 
-## Sweep timing
+Log each event in the state log as `- HH:MMZ ...` ([Time](#time)); `board.py` logs its own edits.
 
-The routine wakes this session for a [Sweep](#sweep) every 3 hours, as a safety net. Between sweeps, merges follow the sessions' green reports.
+## Wakes
 
-A routine that starts a fresh session on each firing begins without the repo and without the session tools. It can't read PRs or reach the coordinator, so the routine fires into this session.
+Every wake re-reads the whole context, so fewer wakes cost less.
+- Merges follow the sessions' `premerge ok <sha>` reports. Never `subscribe_pr_activity`: a subscription costs about 3 wakes and 3k tokens of boilerplate per PR.
+- The sweep routine fires every 6 hours, as a safety net.
+- With no live session, `update_trigger` the routine to `enabled: false`. The next `create_session` re-enables it.
+- A routine created with `create_new_session_on_fire` starts without the repo and without the session tools, so the sweep stays in this session.
+
+## Rotation
+
+A long context is this session's largest cost. Rotate to a fresh coordinator when `get_session` (no id) shows `context_usage.used_tokens` above 150k, or once a day, whichever comes first. The scratchpad is per session, so the new coordinator gets the state as content, not as files.
+
+1. **Brief.** Write a coordinator brief at the top of the state log (`## Coordinator brief`, with [Time](#time)'s stamp):
+   - pending PRs, each with its head SHA and the gatekeeper's OK for that SHA;
+   - live sessions, each with its id and package;
+   - owner decisions in force, in the owner's words;
+   - open owner questions;
+   - the dashboard's last `ArtifactData` `if_version`, and the routine's trigger id.
+2. **Create.** `create_session` the new coordinator on this session's model, with a prompt that carries the brief's full text and says: "You are the coordinator for {{REPO}}. Read `.claude/skills/coordinator/SKILL.md`. First, save the brief below as the top of `coordinator-state.md` in your scratchpad, rebuild `board/board.json` from the dashboard's published file, put your own id (`get_session`) in `docs/agents/coordinator.md` through a tiny PR, and `send_message` me when the brief is saved."
+3. **Hand over the routine.** `update_trigger` the sweep routine with `persistent_session_id` set to the new id. If `update_trigger` has no such field, `delete_trigger` and `create_trigger` again with the same cron and prompt.
+4. **Tell the sessions.** `send_message` each live session the new id.
+5. **Archive** this session once the new coordinator confirms the brief is saved. Relay anything that reaches this session before then.
+
+Done when the routine fires into the new session, every live session has the new id, and `docs/agents/coordinator.md` on `{{BASE_BRANCH}}` holds it.
 
 ## Deciding or asking
 
@@ -93,6 +112,8 @@ Each **work package** gets its own session: one feature or fix, ending when its 
 | Frontend-only fixes, data, CI and infra scripts, docs, walkthrough audits | `claude-sonnet-5-5` |
 | {{GATED_AREAS}}; design-first features; gatekeeper review | `claude-opus-5-5` |
 
+After `create_session`, re-enable the sweep routine if [Wakes](#wakes) disabled it.
+
 Leave `outcome_branch` unset, so the session can open each PR on its own `claude/*` branch. A session bound to one push branch has to hand its fixes over as patches.
 
 Send `docs/agents/session-brief.md`, filled in, as the first message. The brief carries everything the session needs:
@@ -107,8 +128,9 @@ When a package's last PR merges, read the session's hand-off note, `archive_sess
 
 Merge one PR at a time:
 
-1. Run `scripts/coord/premerge.sh <pr>`. It checks conflicts, overlap, the semantic tests on a trial merge and every check run on the head. Done when it ends in `RESULT: ok to merge <sha>`.
+1. Start from a session's `premerge ok <sha>` report. Run `scripts/coord/premerge.sh <pr>`; it checks conflicts, overlap, the semantic tests on a trial merge and every check run on the head. Done when it ends in `RESULT: ok to merge <sha>`.
 2. For {{GATED_AREAS}}, get the gatekeeper's OK for that same SHA and record it in the state log. A clean `{{BASE_BRANCH}}` merge on top of an OK needs no re-review when the gatekeeper says so.
+   - Where the project has a UX reviewer, a PR that changes UI also needs the reviewer's OK for that same SHA.
 3. Call `merge_pull_request` with `merge_method: merge` and `expectedHeadSha` set to the full 40-character `head:` line. premerge leaves out one check, GitHub's mergeable state; a refused merge reports it. Done when GitHub reports the PR merged.
 4. Tell each dependent session the state log lists for this PR, then go on to the next PR. Each premerge run measures against the new `{{BASE_BRANCH}}`, so run it again after every merge.
 
@@ -127,15 +149,17 @@ The dashboard is a Dashboard-type artifact (link in `docs/agents/roles.md`). Its
 | `sessions` | `session`, `doing`, `waiting_on`, `needs_you` (`yes`/`no`) |
 | `merged` | `pr`, `title`, `stream`, `merged` (HH:MM, {{TZ_LABEL}}). Oldest first; append new ones |
 
-Each refresh is two calls:
-1. Edit `board.json` in the scratchpad, then upload it with Artifact `publish`, `asset: true`, `url` set to the dashboard.
-2. Make one `ArtifactData` update to `datasets/board`. It sets `source.url` from the upload reply and `updated: {at, by}`, with `if_version` taken from the last write's result.
+Each refresh is three calls, made at most once per owner report:
+1. One Bash call, `python3 scripts/coord/board.py` (`--help` lists the flags). From flags it upserts or removes session rows, adds merged rows, adds or removes pr rows, appends one line to the state log and prints the path of `board.json`, ready for upload.
+2. Upload that path with Artifact `publish`, `asset: true`, `url` set to the dashboard.
+3. One `ArtifactData` update to `datasets/board`. It sets `source.url` from the upload reply and `updated: {at, by}`, with `if_version` taken from the last write's result.
 
 ## Tool hygiene
 
 - Read check runs through `premerge.sh`, which prints only the runs that block, never through one-off check-run reads per PR.
 - Start a long command with the tool's own background option. A `&` inside a background command detaches it, and its completion notice never arrives.
 - `list_sessions` output is large. Save it and summarize it with `sessions.py`; use `get_session` for a single session.
+- `list_events` output is large too. Save it and read it with `python3 scripts/coord/events.py <file> --chars 200`: each assistant event's time, text and last tool call.
 
 ## Retro
 

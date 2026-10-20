@@ -72,6 +72,54 @@ class LeapYearMismatchError(ProfileApplyError):
     """The target calendar needs a Feb 29 the weather year does not have."""
 
 
+class InvalidTimeBasisError(ProfileApplyError):
+    """The declared snapshot time basis is not "UTC" or an IANA zone."""
+
+
+# The mapping basis when the snapshots' clock is not stated (see
+# `resolve_time_basis`): the UTC weather hours map straight on.
+DEFAULT_TIME_BASIS = "UTC"
+
+TIME_BASIS_ASSUMED_WARNING = (
+    "time_basis_assumed_utc: the profile is in UTC and was applied unshifted; "
+    "if this project's snapshots are local time, set the time zone (a shift "
+    "of the site's UTC offset, e.g. +1/+2 h in Central Europe)"
+)
+
+
+def _commercial_timezone(ctx) -> str | None:
+    state = getattr(ctx, "solver_state", None) or {}
+    cfg = state.get("solver_config") if isinstance(state, Mapping) else None
+    commercial = getattr(cfg, "commercial", None)
+    if commercial is None:
+        return None
+    tz = (commercial.get("timezone") if isinstance(commercial, Mapping)
+          else getattr(commercial, "timezone", None))
+    return str(tz) if tz else None
+
+
+def resolve_time_basis(stated: str | None,
+                       commercial_timezone: str | None,
+                       ) -> tuple[str, str, list[str]]:
+    """(mapping basis, recorded basis, warnings) — the rule
+    `commercial/lp_bindings.py` reads snapshots by (gatekeeper review
+    2026-10-19):
+
+    - stated: map in that basis ("UTC" or an IANA zone's wall clock);
+    - not stated, `commercial.timezone` set: the snapshots are UTC;
+    - not stated, no timezone: the snapshots are the site clock, of unknown
+      offset — map unshifted so a one-click default still works, record the
+      assumption, and warn.
+    """
+    if stated:
+        basis = _check_time_basis(stated)
+        return basis, basis, []
+    if commercial_timezone:
+        return "UTC", "UTC", []
+    return ("UTC", "UTC (assumed; site clock unknown)",
+            [TIME_BASIS_ASSUMED_WARNING])
+
+
 _ONE_HOUR = pd.Timedelta(hours=1)
 _ONE_DAY = pd.Timedelta(days=1)
 _ONE_WEEK = pd.Timedelta(days=7)
@@ -123,14 +171,65 @@ def _validate_year_block(idx: pd.DatetimeIndex, *, what: str) -> int:
     ):
         raise UnsupportedSnapshotsError(
             f"{what}: snapshots must span one full calendar year (Jan 1 00:00 "
-            "– Dec 31 23:00, hourly); partial-year horizons are not supported"
+            "– Dec 31 23:00, hourly); partial-year horizons are not supported "
+            "yet. Generated profiles apply to full-year hourly projects; a "
+            "representative-week template (e.g. an Energy Hub study week) "
+            "needs its weeks sampled from the weather year, which is "
+            "planned — until then, upload a profile for the template's "
+            "snapshots instead"
         )
     return int(year)
 
 
+def _check_time_basis(time_basis: str) -> str:
+    if time_basis == "UTC":
+        return time_basis
+    try:
+        from zoneinfo import ZoneInfo
+
+        ZoneInfo(time_basis)
+    except Exception as exc:  # ValueError / ZoneInfoNotFoundError / TypeError
+        raise InvalidTimeBasisError(
+            f"time basis {time_basis!r} is neither 'UTC' nor an IANA time "
+            "zone (e.g. 'Europe/Berlin') — name the zone whose wall clock "
+            "the snapshots are"
+        ) from exc
+    return time_basis
+
+
+def _utc_keys(target_idx: pd.DatetimeIndex,
+              time_basis: str) -> list[list[tuple[int, int, int]]]:
+    """For each target snapshot, the month-day-hour key(s) of the UTC
+    instant(s) it stands for. UTC: the snapshot itself. A zone's wall clock:
+    the repeated autumn hour stands for both UTC hours (their mean is
+    taken), the skipped spring hour for the next valid one. Keys outside
+    the weather year (local new-year midnight east of Greenwich) wrap by
+    month-day-hour, the same rule as tiling."""
+    if time_basis == "UTC":
+        return [[(t.month, t.day, t.hour)] for t in target_idx]
+    first = target_idx.tz_localize(
+        time_basis, ambiguous=np.ones(len(target_idx), dtype=bool),
+        nonexistent="shift_forward",
+    ).tz_convert("UTC")
+    second = target_idx.tz_localize(
+        time_basis, ambiguous=np.zeros(len(target_idx), dtype=bool),
+        nonexistent="shift_forward",
+    ).tz_convert("UTC")
+    out = []
+    for a, b in zip(first, second):
+        keys = [(a.month, a.day, a.hour)]
+        if b != a:
+            keys.append((b.month, b.day, b.hour))
+        out.append(keys)
+    return out
+
+
 def _map_by_mdh(series: pd.Series, target_idx: pd.DatetimeIndex, *,
-                src_year: int, label: str) -> tuple[np.ndarray, bool]:
-    """Map weather-year values onto `target_idx` by month-day-hour.
+                src_year: int, label: str,
+                time_basis: str = DEFAULT_TIME_BASIS,
+                ) -> tuple[np.ndarray, bool]:
+    """Map weather-year values onto `target_idx` by month-day-hour of the
+    UTC instant each snapshot stands for (see `_utc_keys`).
 
     Returns (values, feb29_dropped). Raises LeapYearMismatchError when the
     target needs a Feb 29 the weather year does not have — per spec §4,
@@ -148,16 +247,9 @@ def _map_by_mdh(series: pd.Series, target_idx: pd.DatetimeIndex, *,
             "year, or rebuild the horizon on a non-leap year."
         )
     values = np.empty(len(target_idx), dtype=float)
-    for i, t in enumerate(target_idx):
-        values[i] = src_lookup[(t.month, t.day, t.hour)]
+    for i, keys in enumerate(_utc_keys(target_idx, time_basis)):
+        values[i] = float(np.mean([src_lookup[k] for k in keys]))
     return values, bool(src_has_feb29 and not target_has_feb29)
-
-
-# ---------------------------------------------------------------------------
-# Daily / weekly source alignment (C2: aggregate-at-generation, upsample-at-
-# apply). The TARGET stays the pinned hourly year block of
-# `_validate_year_block`; only the source's shape changes.
-# ---------------------------------------------------------------------------
 
 
 def _validate_daily_block(idx: pd.DatetimeIndex, *, what: str) -> int:
@@ -265,7 +357,9 @@ def _map_weekly(series: pd.Series, target_idx: pd.DatetimeIndex, *,
 
 
 def _align_to_snapshots(series: pd.Series, snapshots, *,
-                        resolution: str = "hourly") -> tuple[pd.Series, dict]:
+                        resolution: str = "hourly",
+                        time_basis: str = DEFAULT_TIME_BASIS,
+                        ) -> tuple[pd.Series, dict]:
     """The spec §4 alignment table, extended for C2 resolutions. Returns
     (aligned, align_meta) where align_meta carries ``weather_year``,
     ``leap_day``, ``tiled`` and ``resolution``.
@@ -275,6 +369,9 @@ def _align_to_snapshots(series: pd.Series, snapshots, *,
       same leap rules, same period tiling;
     - weekly: step-hold upsample, SAME-CALENDAR-YEAR only (weeks do not
       align across years), no multi-period tiling.
+
+    ``time_basis`` shifts the hourly mapping only (`_utc_keys`); a day or
+    week mean is not re-binned by a 1–2 h offset.
     """
     resolution = str(resolution or "hourly").strip().lower()
 
@@ -296,6 +393,7 @@ def _align_to_snapshots(series: pd.Series, snapshots, *,
                 _validate_year_block(block, what=f"period {p}")
                 values, dropped = _map_by_mdh(
                     series, block, src_year=src_year, label=f"period {p}",
+                    time_basis=time_basis,
                 )
                 out[mask] = values
                 dropped_any = dropped_any or dropped
@@ -312,6 +410,7 @@ def _align_to_snapshots(series: pd.Series, snapshots, *,
         _validate_year_block(target_idx, what="network snapshots")
         values, dropped = _map_by_mdh(
             series, target_idx, src_year=src_year, label="the target year",
+            time_basis=time_basis,
         )
         aligned = pd.Series(values, index=target_idx, name=series.name)
         return aligned, {
@@ -405,6 +504,7 @@ def assign_profile(
     meta: Mapping[str, Any],
     *,
     now: _dt.datetime | str | None = None,
+    time_basis: str | None = None,
 ) -> dict:
     """Apply a generated per-unit profile to ``component``'s ``p_max_pu``.
 
@@ -413,6 +513,12 @@ def assign_profile(
     `services/user_timeseries.py`). Returns a summary dict for the caller
     (router response / chat tool payload). Raises a typed ProfileApplyError
     subclass on every refusal, having written nothing.
+
+    ``time_basis``: what the network's naive snapshots mean — "UTC", or an
+    IANA zone ("Europe/Berlin") whose wall clock they are (the series is
+    shifted by that zone's offset, DST included). None (not stated) follows
+    `resolve_time_basis`: UTC when the project's commercial timezone is set,
+    else an unshifted apply recorded as assumed, with a warning.
     """
     if not isinstance(series, pd.Series):
         raise ProfileApplyError(
@@ -448,8 +554,10 @@ def assign_profile(
         )
 
     resolution = str(meta.get("resolution") or "hourly").strip().lower()
+    time_basis, recorded_basis, warnings = resolve_time_basis(
+        time_basis, _commercial_timezone(ctx))
     aligned, align_meta = _align_to_snapshots(
-        series, n.snapshots, resolution=resolution,
+        series, n.snapshots, resolution=resolution, time_basis=time_basis,
     )
 
     # A p_max_pu bound must be finite at every snapshot — a NaN masks the
@@ -480,10 +588,16 @@ def assign_profile(
         "leap_day": align_meta["leap_day"],
         "tiled": align_meta["tiled"],
         "resolution": align_meta["resolution"],
+        "time_basis": recorded_basis,
         "applied_at": applied_at.isoformat(),
     }
     if align_meta["periods"] is not None:
         full_meta["periods"] = align_meta["periods"]
+    if align_meta["resolution"] != "hourly":
+        # The basis is recorded, but a day/week mean is not re-binned by a
+        # 1–2 h offset — say so, so the provenance cannot imply a shift.
+        full_meta["time_basis_note"] = (
+            f"not re-binned at {align_meta['resolution']} resolution")
     if clipped:
         full_meta["clipped"] = True
 
@@ -520,6 +634,8 @@ def assign_profile(
         "tiled": align_meta["tiled"],
         "periods": align_meta["periods"],
         "resolution": align_meta["resolution"],
+        "time_basis": recorded_basis,
+        "warnings": warnings,
         "dispatch_cleared": bool(dispatch_cleared),
         "mean": float(aligned.mean()),
         "peak": float(aligned.max()),

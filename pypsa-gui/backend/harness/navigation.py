@@ -220,3 +220,78 @@ def acknowledge(owner, body):
             }
     except (HTTPException, ValueError, KeyError, TypeError):
         raise HTTPException(409, {"error_kind": "ui_ack_mismatch"}) from None
+
+
+# ── Ordinary turns (LC-03, LC-09 item 3) ─────────────────────────────────────
+# The same issued actions and ACK records as checked turns, with no new
+# vocabulary. The words say "showing" only after a displayed-data ACK.
+
+ACK_WAIT_SECONDS = 4.0
+_ACK_POLL_SECONDS = 0.05
+
+
+class OrdinaryTurn:
+    """The identity `issue` binds an action to, for a turn that is not checked."""
+
+    def __init__(self, session, ctx, generation):
+        self.session = session
+        self.turn_id = str(uuid.uuid4())
+        self.owner = session.owner_user_id or records.actor_id()
+        self.project_id = ctx.project_uuid
+        self.binding_generation = generation
+        # results tab -> {source, window_from, window_to} of this turn's last read
+        self.reads = {}
+
+    def note_read(self, tool_name, result):
+        """Remember what this turn read, so "showing" means the data read."""
+        if tool_name == "get_loadflow_summary" and isinstance(result, dict) \
+                and result.get("status") == "ok":
+            ref = result.get("ui_reference") or {}
+            self.reads["loadflow"] = {k: ref.get(k) for k in ("source", "window_from", "window_to")}
+
+
+def open_ordinary(session, generation):
+    """Bind this turn's navigation for ACKs; None when nothing can be bound."""
+    ctx = PyPSAService.get_active_context()
+    if ctx.project_uuid is None:
+        return None
+    turn = OrdinaryTurn(session, ctx, generation)
+    begin_turn(turn, generation)
+    return turn
+
+
+def rebind(turn):
+    """Follow a server-issued in-turn project switch (activate_project and
+    friends): later navigation binds to the new project, and nothing read
+    in the old one can make it "showing"."""
+    turn.project_id = PyPSAService.get_active_context().project_uuid
+    turn.reads = {}
+
+
+def display(turn, acknowledgement, wait=ACK_WAIT_SECONDS):
+    """What the model may say about an issued navigation: `showing` only after
+    the browser acknowledged the exact displayed data. Waits briefly for the
+    ACK (the frame has already been sent); the model never polls."""
+    if not acknowledgement:
+        return {"verification": "submitted", "say": "opened"}
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            record = records.load(turn.owner, acknowledgement["action_id"], "ui_action")
+        except (HTTPException, OSError, KeyError, ValueError):
+            record = {}
+        if record.get("outcome") == "completed" or time.monotonic() >= deadline:
+            break
+        time.sleep(_ACK_POLL_SECONDS)
+    verification = record.get("verification") if record.get("outcome") == "completed" else "submitted"
+    out = {"verification": verification or "submitted", "say": "opened"}
+    if verification == "browser_displayed_data":
+        binding = acknowledgement.get("source_binding") or {}
+        shown = {k: binding.get(k) for k in ("source", "window_from", "window_to")}
+        read = turn.reads.get((acknowledgement.get("target") or {}).get("results_tab"))
+        if read == shown:
+            out["say"] = "showing"
+        else:
+            # The tab shows its own default view; the words describe the read.
+            out["differs_from_read"] = {"read": read, "shown": shown}
+    return out

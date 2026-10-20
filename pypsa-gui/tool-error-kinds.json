@@ -43,6 +43,18 @@
     "Changing one is a UI decision. Write down why, as the entries do."
   ],
   "kinds": {
+    "invalid_reference": {
+      "surface": "inline",
+      "why": "resolve_reference refused a malformed request (unknown target or component class, a blank or oversized name or run_id, or no class to resolve against). The per-call detail says which; the assistant asks for the missing piece instead of guessing. There is no conversation-wide recovery action."
+    },
+    "invalid_result_views": {
+      "surface": "inline",
+      "why": "list_result_views refused a malformed request (exclude_shown that is not true or false). The per-call detail says which; the assistant retries with a valid flag. There is no conversation-wide recovery action."
+    },
+    "schema_field_too_large": {
+      "surface": "inline",
+      "why": "get_component_schema refused one field whose complete descriptor exceeds the bounded metadata page. The per-call detail names that field; the assistant reports incomplete discovery rather than clipping it or claiming a complete schema. There is no conversation-wide recovery action."
+    },
     "restriction_unavailable": {
       "surface": "banner",
       "why": "Saved personal project restrictions could not be read at tool admission or worker pickup. Fail closed and direct the user to refresh Access and approvals; never silently assume standard rules."
@@ -790,6 +802,38 @@
     "experiment_comparison_changed": {
       "surface": "inline",
       "why": "The inspected comparison no longer matches current owned sources. The failed export line requests fresh inspection; no old report or calculation is substituted."
+    },
+    "cds_credential": {
+      "surface": "inline",
+      "why": "A renewable-profile generation asked for the ERA5/atlite source without usable CDS credentials. The detail says which setup step is missing; the renewable-profile workflow coaches the CDS account, licence and key setup in words. No conversation-wide action: the synthetic source still works."
+    },
+    "component_not_found": {
+      "surface": "inline",
+      "why": "apply_generated_profile named a generator that is not on the open network (renamed or deleted since generation). The detail names it; the assistant lists the generators and asks which one, per call."
+    },
+    "point_not_in_profile": {
+      "surface": "inline",
+      "why": "apply_generated_profile asked for a point the pending profile does not hold. The detail lists the points it does hold; the assistant picks the right point_id, per call."
+    },
+    "no_points": {
+      "surface": "inline",
+      "why": "A profile preview or generation named no sites: neither points nor from_generators. The assistant asks which generators or coordinates to use, per call."
+    },
+    "unknown_generator": {
+      "surface": "inline",
+      "why": "from_generators named a generator the open network does not hold. The detail lists the names not found; the assistant lists the candidates and asks again, per call."
+    },
+    "missing_coordinates": {
+      "surface": "inline",
+      "why": "from_generators named generators whose bus has no usable coordinates (unset, out of range, or the 0/0 default). The detail lists them; the assistant offers both remedies per call: set the bus coordinates (an edit with its own card) or upload a profile."
+    },
+    "unreachable_target": {
+      "surface": "inline",
+      "why": "A shaping op asked for full-load hours or a capacity factor beyond what the profile can reach by scaling with clip-at-1. The detail names the reachable maximum; the assistant proposes a reachable target or another weather year/preset, per call."
+    },
+    "malformed_job_id": {
+      "surface": "inline",
+      "why": "A pending-profile job id that would escape the project's pending folder. Only a mistyped or forged id reaches this; the assistant lists the pending profiles and uses one of their ids."
     }
   }
 }

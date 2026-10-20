@@ -68,9 +68,12 @@ function PendingCard({ name, record }: { name: string; record: PendingProfile })
     onSuccess: (r) => {
       setMessage(
         `applied to ${r.component}: ${r.hours} h, mean ${(r.mean * 100).toFixed(1)}%`
-        + (r.tiled ? `, tiled over ${r.periods?.length ?? 0} periods` : ''),
+        + (r.tiled ? `, tiled over ${r.periods?.length ?? 0} periods` : '')
+        + (r.time_basis ? `, time basis ${r.time_basis}` : ''),
       )
-      if (r.warning) setMessage(m => `${m} — ⚠ ${r.warning}`)
+      for (const w of [...(r.warnings ?? []), ...(r.warning ? [r.warning] : [])]) {
+        setMessage(m => `${m} — ⚠ ${w}`)
+      }
       qc.invalidateQueries({ queryKey: PENDING_KEY(name) })
     },
     onError: e => setRefusal(errorText(e)),

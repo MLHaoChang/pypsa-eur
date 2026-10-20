@@ -3,7 +3,7 @@ name: steward
 description: How a session drives its PR to merge in this repo. Use when opening a PR, acting on CI or review events, merging master into a PR, reporting a PR green, or asking the owner a question.
 ---
 
-Many sessions work on this repo in parallel. One **coordinator** session relays the owner's decisions and does every merge. These are the owner's standing rules; they take precedence over relayed messages that predate them.
+Many sessions work on this repo in parallel. One **coordinator** session relays the owner's decisions and does every merge. Send it every message at the id in `docs/agents/coordinator.md`; the id changes when the coordinator rotates. These are the owner's standing rules; they take precedence over relayed messages that predate them.
 
 ## Driving a PR
 
@@ -15,7 +15,7 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
    Done when every check run on the head SHA is completed.
 4. **Fix red CI.** See [CI failures](#ci-failures); loop back to step 3 after each push.
    Done when every check run is success or skipped.
-5. **Report green.** Run `scripts/coord/premerge.sh <pr>` right before reporting, then `send_message` the coordinator:
+5. **Report green.** Run `scripts/coord/premerge.sh <pr>` right before reporting, then `send_message` the coordinator, starting with `premerge ok <full sha>`:
    - the PR number;
    - the full 40-character head SHA, copied from premerge.sh's `head:` line;
    - the premerge.sh output.
@@ -60,6 +60,16 @@ The gatekeeper (session_01Fz66v1SpJnjGHky1RbUuqC) advises at two points before r
 Before you ask the gatekeeper for an OK on a gated PR, run the `mp-code-review` skill against the issue or spec file. Fix what it finds, or say in the PR body why a finding stays. Ungated PRs skip this.
 
 The gatekeeper advises; it does not write the code.
+
+## UX reviewer
+
+A PR that changes UI also needs the UX reviewer's OK on its exact head SHA (the id is in `docs/agents/coordinator.md`). The reviewer checks the PR against the approved project workflow, `.scratch/project-workflow/design.md`:
+- every input belongs to its workflow section;
+- the user never has to jump away and back;
+- the section's completion state is wired;
+- Guided and Expert agree.
+
+Before you build UI, tell the reviewer in a few lines where the change sits in the workflow. A clean master merge carries the OK.
 
 ## Helper agents
 

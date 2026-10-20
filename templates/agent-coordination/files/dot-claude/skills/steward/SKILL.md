@@ -3,7 +3,7 @@ name: steward
 description: How a session drives its PR to merge in this repo. Use when opening a PR, acting on CI or review events, merging {{BASE_BRANCH}} into a PR, reporting a PR green, or asking the owner a question.
 ---
 
-Many sessions work on this repo in parallel. One **coordinator** session relays the owner's decisions and does every merge (`docs/agents/roles.md` names it). These are the owner's standing rules. They take precedence over relayed messages that predate them.
+Many sessions work on this repo in parallel. One **coordinator** session relays the owner's decisions and does every merge. Send it every message at the id in `docs/agents/coordinator.md`; the id changes when the coordinator rotates. These are the owner's standing rules. They take precedence over relayed messages that predate them.
 
 ## Driving a PR
 
@@ -15,7 +15,7 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
    Done when every check run on the head SHA is completed.
 4. **Fix red CI.** See [CI failures](#ci-failures). Loop back to step 3 after each push.
    Done when every check run is success or skipped.
-5. **Report green.** Run `scripts/coord/premerge.sh <pr>` right before reporting, then `send_message` the coordinator:
+5. **Report green.** Run `scripts/coord/premerge.sh <pr>` right before reporting, then `send_message` the coordinator, starting with `premerge ok <full sha>`:
    - the PR number;
    - the full 40-character head SHA, copied from premerge.sh's `head:` line;
    - the premerge.sh output.
@@ -31,7 +31,7 @@ The coordinator merges a PR when `scripts/coord/premerge.sh <pr>` exits 0 and Gi
 - no file **overlaps** what `{{BASE_BRANCH}}` changed since the PR's merge-base. Docs-only overlap is fine when the merge is clean, and so is a file identical on both sides;
 - a PR that touches a path in its `semantic_re` passes its `semantic_cmd` on a trial merge with current `{{BASE_BRANCH}}`.
 
-A PR that touches {{GATED_AREAS}} also needs the gatekeeper's OK on that exact head SHA.
+A PR that touches {{GATED_AREAS}} also needs the gatekeeper's OK on that exact head SHA. Where the project has a UX reviewer (`docs/agents/roles.md`), a PR that changes UI also needs its OK on that SHA, checked against the project's approved workflow design.
 
 ## Gatekeeper checkpoints
 

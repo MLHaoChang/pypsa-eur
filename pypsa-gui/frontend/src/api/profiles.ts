@@ -85,6 +85,10 @@ export interface ApplyResult {
   // Set when the component's bus moved more than 0.5° since generation —
   // applied anyway, but the user should know the weather is for elsewhere.
   warning?: string
+  // What the snapshots were read as ("UTC", an IANA zone, or
+  // "UTC (assumed; site clock unknown)" with a matching warning).
+  time_basis?: string
+  warnings?: string[]
 }
 
 export function errorText(e: unknown): string {
