@@ -1,6 +1,6 @@
 # Workspace reconciliation: GridSpine (#436) on the project flow
 
-Status: draft for UX review. Owner answered Q1–Q5 on 2026-10-20, about 18:10 CEST (§12).
+Status: draft for UX review. Owner answered Q1–Q5 on 2026-10-20, about 18:10 CEST, and Q6 about 18:37 CEST (§12).
 Date: 2026-10-20
 Author: workspace-reconciliation session (commissioned through the coordinator)
 Base: master `ef0856a`, with #436 (`claude/gridspine-workspace-specs`, files under `.scratch/workspace-redesign/`) and B1 #434 (`claude/flow-backbone-b1`) read at their heads.
@@ -689,7 +689,7 @@ It is **picked inline from the asset form** in a drawer that returns to the form
 | Shunt capacitor / reactor | Mvar (and steps for a bank) | g, b, step size, switching |
 | STATCOM | ±Mvar | control mode, IEC current factor |
 | Converter-coupled asset | preset (§10) | the full Controls block (§10) |
-| Synchronous generator | rating; control PQ or PV | the PV bus's voltage setpoint (`v_mag_pu_set`, on the bus); Q limits **once the engine enforces them** (P3) |
+| Synchronous generator | rating; control PQ or PV | the PV bus's voltage setpoint (`v_mag_pu_set`): shown in the generator form as **the bus's value**, labelled so and edited with the bus's own editor (one value per bus; two PV generators on a bus never look like two setpoints); Q limits **once the engine enforces them** (P3) |
 | Load | P per stage and a power factor (or Q) | `q_set` series |
 | PCC / connection | fault level (MVA), X/R | `sk_max`, `sk_min`, `rx_max`, `rx_min` |
 
@@ -765,7 +765,7 @@ Answered by the owner on 2026-10-20, about 18:10 CEST, relayed by the coordinato
 | Q3 | Planning period: native horizons / free years at entry | **B**: free start and end years at entry (§3.3, engine slice E1) |
 | Q4 | Site pin places unplaced buses / pin only | **A**: the pin places every unplaced bus around it |
 | Q5 | Converters in Guided: per-asset preset / site-wide preset | **A**: one preset per converter-coupled asset; the full Controls block in Expert |
-| Q6 | First AC-PF asset slice: the PyPSA-native set (P1), then campus assets (P2) / everything the campus study models at once / pickers and shunt palette only | *Pending owner*, drafted on the first (P1 → P2 → P3) |
+| Q6 | First AC-PF asset slice: the PyPSA-native set (P1), then campus assets (P2) / everything the campus study models at once / pickers and shunt palette only | **A** (about 18:37 CEST): P1 the PyPSA-native set first, then P2 after P0's data-home agreement, P3 one gated plan each |
 
 ---
 
