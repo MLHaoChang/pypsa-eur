@@ -1,0 +1,41 @@
+{
+  "journeys": [
+    "OJ-01",
+    "OJ-03"
+  ],
+  "command": "npm run build; PYPSA_COMPOSER_PYTHON=<python> CHROMIUM_BIN=/opt/pw-browsers/chromium node scripts/smoke-copilot-oj01.mjs",
+  "date": "2026-10-20",
+  "runs": 3,
+  "passed": 3,
+  "runner_sha256": "c47a822bb7407b38d6c24425b250ab03ffb0e6a4519a2b4f2fd4d65ee77378b4",
+  "fixture_sha256": "1d176fc9796be7f5993da6a58e3302d4be545a03c65448df0e0bbc62c58c27c9",
+  "result": {
+    "journey": "OJ-01",
+    "passed": true,
+    "sentence": "Show me the results of the latest calculation, the load flow results.",
+    "solves": 2,
+    "latestIsSecond": true,
+    "answer": "OJ01_ANSWER Showing the Load flow tab for run <run_id> (finished 2026-10-20T01:18:23.140045+00:00), current: True. Highest loading: T1 45.0 % (45.0 MW of 100.0 MVA), L1 15.0 % (45.0 MW of 300.0 MVA), L2 15.0 % (45.0 MW of 300.0 MVA). Active-power proxy, not an AC thermal check.",
+    "shown": {
+      "tab": "loadflow",
+      "scope": "current",
+      "source": "lopf",
+      "window": [
+        0,
+        23
+      ]
+    },
+    "seconds": 1.396,
+    "screenshot": "oj01-loadflow.png",
+    "oj03": {
+      "answer": "OJ03_ANSWER Opened summary; also with data: fmea, capex, dispatch, prices, economics, emissions, curtailment, lostload, storage; already shown: loadflow.",
+      "opened": "summary",
+      "screenshot": "oj03-something-else.png"
+    }
+  },
+  "checks": [
+    "OJ-01 as before (two solves, latest = second, Showing, oracle with units in answer and table)",
+    "OJ-03: list_result_views(exclude_shown) leaves out loadflow; the first section with data (summary) is read then opened; adequacy (no data) is not offered; the Summary tab renders EUR 77.6 k, the hand oracle 50 EUR/MWh x 1552.3 MWh"
+  ],
+  "limits": "Loopback scripted wire plays the model; no paid inference."
+}

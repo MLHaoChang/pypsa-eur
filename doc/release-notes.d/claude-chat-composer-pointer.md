@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Keep the chat composer's toolbar inside short saved desktop heights so Upload/Paste cannot cover Check answers. Keep dictation settings Close reachable with a tall touch composer, and add a portable authenticated-backend browser regression.

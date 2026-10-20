@@ -17,7 +17,7 @@ const blockers: Record<string, string> = {
   requested_checks_unavailable: 'Requested answer checks are unavailable on this server.',
 }
 
-export default function ChatAccess({ checked }: { checked: boolean }) {
+export default function ChatAccess({ checked, companion = false }: { checked: boolean; companion?: boolean }) {
   const [open, setOpen] = useState(false)
   const regionId = useId()
   const project = useUIStore(s => s.currentProject)
@@ -25,7 +25,7 @@ export default function ChatAccess({ checked }: { checked: boolean }) {
   const dockOpen = useUIStore(s => s.assistantDockOpen)
   const session = useChatStore(s => s.sessionId)
   const chat = useChatStore(s => s.newChatSeq)
-  const active = open && dockOpen
+  const active = companion ? !dockOpen : open && dockOpen
   const queryClient = useQueryClient()
   const queryKey = ['chat-access', project, session, chat, mode, checked]
   const query = useQuery({ queryKey,
@@ -37,20 +37,40 @@ export default function ChatAccess({ checked }: { checked: boolean }) {
     && data.scope.project_name === project && data.selection.ui_mode === mode
     && data.selection.checked_requested === checked && (data.session?.id ?? null) === session
   const current = !query.isError && !query.isFetching && matching ? data : undefined
-  return <div className="border-t border-border px-3 py-1.5 text-[11px] shrink-0">
+  const ruleNames = { standard: 'Standard', confirm_changes: 'Confirm every change', read_only: 'Read-only tools' }
+  const observation = query.isFetching ? <p role="status">Refreshing access…</p>
+    : !current ? <p role="alert">Current access is unavailable. Refresh before relying on these rules.</p> : null
+  const refresh = <button type="button" className="underline" disabled={query.isFetching}
+    onClick={() => { void query.refetch() }}>Refresh access</button>
+  return <div className={companion
+    ? 'w-72 max-w-full rounded-lg border border-border bg-bg-2 px-3 py-2 text-[11px] break-words'
+    : 'border-t border-border px-3 py-1.5 text-[11px] shrink-0'}>
+    {companion && <section aria-label="In-page chat access" className="space-y-1">
+      {observation}
+      {current && <>
+        <p>Next turn: {current.scope.project_name ?? 'Unsaved draft'} · {mode === 'guided' ? 'Guided' : 'Expert'}</p>
+        <p>Your rule: {current.restrictions ? ruleNames[current.restrictions.mode] ?? 'Unavailable'
+          : current.scope.project_id ? 'Unavailable' : 'No saved project rule'}</p>
+        <p>{current.checking.effective_for_selection
+          ? 'Answer checks on for supported profiles'
+          : checked ? 'Requested answer checks unavailable' : 'Answer checks off for this selection'}</p>
+        {current.blockers.map(reason => <p key={reason} className="text-warning">
+          {blockers[reason] ?? 'An action prerequisite is unavailable.'}</p>)}
+        <p className="text-muted">Observed at {new Date(current.observed_at * 1000).toLocaleTimeString()}. Actions are rechecked.</p>
+        {current.session?.turn_in_flight && <p>A turn is running; this is the next turn’s selection.</p>}
+      </>}
+      {refresh}
+    </section>}
     <button type="button" className="underline text-muted" aria-expanded={open} aria-controls={regionId}
       onClick={() => setOpen(value => !value)}>Access and approvals</button>
     {open && <section id={regionId} aria-label="Current access and approvals"
       className="mt-2 max-h-64 overflow-auto space-y-2">
       <p>For the next turn’s {mode === 'guided' ? 'Guided' : 'Expert'} selection. Access and prerequisites are rechecked for every action.</p>
-      <button type="button" className="underline" disabled={query.isFetching}
-        onClick={() => { void query.refetch() }}>Refresh access</button>
+      {!companion && refresh}
       {current && <p>Project: <strong>{current.scope.project_name ?? 'Unsaved draft'}</strong></p>}
       <ChatRestrictions key={JSON.stringify(queryKey)} current={current}
         onSaved={() => { void queryClient.invalidateQueries({ queryKey, exact: true }) }} />
-      {query.isFetching ? <p role="status">Refreshing access…</p>
-        : !current ? <p role="alert">Current access is unavailable. Refresh before relying on these rules.</p>
-        : <>
+      {current ? <>
           <p className="text-muted">Observed at {new Date(current.observed_at * 1000).toLocaleTimeString()}.</p>
           {current.blockers.map(reason => <p key={reason} role="status" className="text-warning">
             {blockers[reason] ?? 'An action prerequisite is unavailable.'}</p>)}
@@ -81,7 +101,7 @@ export default function ChatAccess({ checked }: { checked: boolean }) {
           <p>Configured limits are not remaining balances or permission to incur charges. Work-item and job limits are checked separately.
             Pending decisions use the exact cards in chat or Needs you.</p>
           {current.session?.turn_in_flight && <p>A turn is running; these selections do not change that turn’s admitted policy.</p>}
-        </>}
+        </> : !companion && observation}
     </section>}
   </div>
 }

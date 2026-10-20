@@ -164,6 +164,13 @@ class ChatSession:
     # Private turn-local checked-answer state; cleared on every exit.
     assurance_turn: Any | None = None
     shadow_turn: Any | None = None
+    # Ordinary-turn navigation binding (LC-03): set only when the client can
+    # ACK, so the browser can prove what a navigation showed. Cleared on exit.
+    navigation_turn: Any | None = None
+    # LC-03 VS-2: results tabs this conversation showed, per project key.
+    # Server-only; not hydrated after a restart (a walk may then re-offer a
+    # section); cleared by reset_history and rewind.
+    shown_results: dict[str, list[str]] = field(default_factory=dict)
     # Server-only bounded checked scope; never populated from model/client history.
     assurance_context: dict[str, Any] | None = None
     # Private checkpoint binding; never supplied by client histories or imports.
@@ -226,6 +233,15 @@ class ChatSession:
     # Issue 06 — discussed project/run/baseline/section identifiers for
     # follow-ups. Identifiers only; numerical truth always comes from tools.
     discussed_refs: dict[str, Any] | None = None
+    # LC-10 — the UI context of the turn in flight, for resolve_reference.
+    # An untrusted hint, replaced every turn; the resolver re-reads it.
+    turn_ui_context: dict[str, Any] | None = None
+    # LC-10 — components that successful tool calls named, newest last, as
+    # (project key, class, name): the "discussed last" rung. Keyed by project
+    # so a switch, by a tool or another tab, never carries a name across.
+    touched_components: collections.deque = field(
+        default_factory=lambda: collections.deque(maxlen=32)
+    )
     # Multi-turn message history for the Anthropic Messages API. Each entry
     # is a dict matching the SDK's message shape ({role, content}). Run_turn
     # appends user + assistant + tool_result messages per turn so subsequent
@@ -282,6 +298,7 @@ class ChatSession:
         replays into it next), through the event log (issue 13)."""
         from harness import eventlog
         eventlog.apply(self, "history/reset")
+        self.shown_results = {}
 
     # ── Confirmation lifecycle (F13 + v4-MINOR-3) ──────────────────────────
     def issue_confirmation(
@@ -476,6 +493,19 @@ class ChatSession:
     def push_result_ref(self, ref: dict[str, Any]) -> None:
         with self._lock:
             self.result_refs.append(ref)
+
+    def note_touched_components(self, project_key: str, tool_name: str, args: Any) -> None:
+        """Record the single component a successful call named (LC-10). A call
+        over several names discussed no one of them."""
+        if tool_name == "resolve_reference" or not isinstance(args, dict):
+            return
+        klass, name = args.get("component_class"), args.get("name")
+        names = args.get("names")
+        if name is None and isinstance(names, list) and len(names) == 1:
+            name = names[0]
+        if isinstance(klass, str) and isinstance(name, str):
+            with self._lock:
+                self.touched_components.append((project_key, klass, name))
 
     def mark_detached_monitor(
         self, tool_use_id: str, tool_name: str, *, active: bool,

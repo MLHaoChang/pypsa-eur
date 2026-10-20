@@ -357,7 +357,7 @@ def _generate_all(job: ReportJob) -> tuple[ReportDocument, bool]:
     return doc, aborted
 
 
-def _write_generation_meta(job: ReportJob) -> None:
+def _write_generation_meta(job: ReportJob, *, aborted: bool) -> None:
     """
     `meta.json` gains a `generation` object (repairs, prose failures, the
     sections written). `ReportMeta` ignores unknown keys, so WP1's readers
@@ -376,7 +376,7 @@ def _write_generation_meta(job: ReportJob) -> None:
             "prose_failures": list(job.record["prose_failures"]),
             "sections": list(job.section_ids),
             "language": job.language,
-            "aborted": job.record["status"] == "aborted",
+            "aborted": aborted,
         }
     atomic_write_text(path, json.dumps(raw, indent=2, ensure_ascii=False))
 
@@ -407,9 +407,11 @@ def run_report_job(job: ReportJob) -> ReportDocument:
         if job.meta_updates:
             store.update_meta(job.project_dir, job.report_id, **job.meta_updates)
         saved = store.load_report(job.project_dir, job.report_id, version)
+        # Terminal status lets clients consume the generation receipt or
+        # start another job, so publish it only after that receipt is saved.
+        _write_generation_meta(job, aborted=aborted)
         _set(job, status="aborted" if aborted else "done", version=version,
              error=None, finished_at=time.time())
-        _write_generation_meta(job)
         return saved
     except Exception as exc:
         _set(job, status="failed", error=str(exc), finished_at=time.time())

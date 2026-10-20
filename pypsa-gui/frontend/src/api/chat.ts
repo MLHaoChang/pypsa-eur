@@ -85,6 +85,8 @@ export interface ChatStreamRequest {
   utterance_id?: string
   generation?: number
   binding_generation?: number
+  /** LC-03: this client ACKs source-bound navigation in ordinary turns too. */
+  ui_ack?: boolean
   checked_scope?: Record<string, unknown>
   checked_operation?: Record<string, unknown>
   source_gap_ref?: SourceGapReference

@@ -72,7 +72,8 @@ class EstimateRequest(BaseModel):
     # names resolved against the FOREGROUND network's bus coordinates — the
     # same semantics the chat tools expose; at least one of the two is
     # required). Point ids from generator names ARE the generator names, so
-    # apply needs no mapping.
+    # apply needs no mapping; an explicit point with a generator's name is
+    # that generator's coordinate override.
     points: list[ProfilePointIn] = []
     from_generators: list[str] | None = None
     technology: str
@@ -96,6 +97,11 @@ class ApplyRequest(BaseModel):
     # name itself — the generate UI seeds point ids from the selected
     # generators, so the common case needs no mapping at all.
     point_id: str | None = None
+    # What the network's naive snapshots mean: "UTC", or an IANA zone whose
+    # wall clock they are (the UTC weather series is then shifted by that
+    # zone's offset, DST included). Unset: UTC when the project's commercial
+    # timezone is set, else applied unshifted with a `warnings` entry.
+    time_basis: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -106,14 +112,22 @@ class ApplyRequest(BaseModel):
 def points_from_generators(names: list[str]) -> list[dict[str, Any]]:
     """Resolve generator names to profile points (id/lon/lat) from the
     FOREGROUND network's bus coordinates — the one code path behind the chat
-    tools' `from_generators` and the GUI's default generation flow. The point
-    id IS the generator name, which is what apply defaults to. Unknown names
-    are a 422 listing what was not found."""
+    tools' `from_generators` and the GUI's default generation flow. PyPSA
+    generators carry no coordinates of their own: a generator sits at its
+    bus. The point id IS the generator name, which is what apply defaults to.
+
+    Unknown names are a 422 `unknown_generator`. A bus without usable
+    coordinates (NaN, out of range, or PyPSA's 0/0 default — the rule
+    `network_geometry._bus_coord` applies to the map and line lengths) is a
+    422 `missing_coordinates` listing the generators: never a profile
+    generated for 0°E 0°N."""
+    from services.network_geometry import _bus_coord
     from services.pypsa_service import PyPSAService
 
     n = PyPSAService.get_active_context().network
     points: list[dict[str, Any]] = []
     missing: list[str] = []
+    no_coords: list[tuple[str, str]] = []
     for raw in names:
         g = str(raw)
         if g not in n.generators.index:
@@ -123,11 +137,11 @@ def points_from_generators(names: list[str]) -> list[dict[str, Any]]:
         if bus not in n.buses.index:
             missing.append(f"{g} (its bus {bus!r} is not on the network)")
             continue
-        points.append({
-            "id": g,
-            "lon": float(n.buses.at[bus, "x"] or 0.0),
-            "lat": float(n.buses.at[bus, "y"] or 0.0),
-        })
+        coord = _bus_coord(n, bus)
+        if coord is None:
+            no_coords.append((g, bus))
+            continue
+        points.append({"id": g, "lon": coord[0], "lat": coord[1]})
     if missing:
         raise HTTPException(
             status_code=422,
@@ -139,7 +153,42 @@ def points_from_generators(names: list[str]) -> list[dict[str, Any]]:
                            "generators — check the name(s)",
             },
         )
+    if no_coords:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "missing_coordinates",
+                "generators": [g for g, _ in no_coords],
+                "message": "no coordinates for "
+                           + ", ".join(f"{g} (bus {b})" for g, b in no_coords)
+                           + ": set coordinates on the bus (x = longitude, "
+                           "y = latitude, WGS-84 degrees) or pass an explicit "
+                           "point for the generator, or upload a profile for "
+                           "it instead",
+            },
+        )
     return points
+
+
+def _require_generators(names: list[str]) -> None:
+    """422 `unknown_generator` for names the foreground network lacks — the
+    check an explicit coordinate override must not skip."""
+    if not names:
+        return
+    from services.pypsa_service import PyPSAService
+
+    gens = PyPSAService.get_active_context().network.generators.index
+    unknown = [str(g) for g in names if str(g) not in gens]
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "unknown_generator",
+                "message": "unknown generator(s): " + ", ".join(unknown)
+                           + f"; the network holds {len(gens)} generators "
+                           "— check the name(s)",
+            },
+        )
 
 
 def _merged_points(body: EstimateRequest) -> list[dict[str, Any]]:
@@ -147,7 +196,16 @@ def _merged_points(body: EstimateRequest) -> list[dict[str, Any]]:
     required. Duplicated ids are the engine's typed refusal downstream."""
     merged = [p.model_dump() for p in body.points]
     if body.from_generators:
-        merged.extend(points_from_generators(body.from_generators))
+        # An explicit point for a generator is its coordinate override.
+        # Names it shadows must still exist on the network.
+        explicit = {p["id"] for p in merged}
+        resolved = points_from_generators(
+            [g for g in body.from_generators if str(g) not in explicit]
+        )
+        _require_generators(
+            [g for g in body.from_generators if str(g) in explicit]
+        )
+        merged.extend(resolved)
     if not merged:
         raise HTTPException(
             status_code=422,
@@ -443,13 +501,20 @@ def apply_profile(
     if coords is not None and body.component in gen.index:
         bus = str(gen.at[body.component, "bus"])
         if bus in ctx.network.buses.index:
-            bx = float(ctx.network.buses.at[bus, "x"] or 0.0)
-            by = float(ctx.network.buses.at[bus, "y"] or 0.0)
-            if abs(bx - coords[0]) > 0.5 or abs(by - coords[1]) > 0.5:
+            from services.network_geometry import _bus_coord
+
+            now = _bus_coord(ctx.network, bus)
+            if now is None:
+                warning = (
+                    f"bus '{bus}' has no coordinates now: profile was made "
+                    f"for ({coords[0]:.3f}, {coords[1]:.3f})"
+                )
+            elif (abs(now[0] - coords[0]) > 0.5
+                  or abs(now[1] - coords[1]) > 0.5):
                 warning = (
                     f"bus '{bus}' moved since generation: profile was made for "
                     f"({coords[0]:.3f}, {coords[1]:.3f}), the bus now sits at "
-                    f"({bx:.3f}, {by:.3f})"
+                    f"({now[0]:.3f}, {now[1]:.3f})"
                 )
 
     # Undo snapshot BEFORE the write — the middleware only covers
@@ -459,7 +524,8 @@ def apply_profile(
     push_undo_snapshot()
 
     try:
-        summary = assign_profile(ctx, body.component, series, meta)
+        summary = assign_profile(ctx, body.component, series, meta,
+                                 time_basis=body.time_basis)
     except ComponentNotFoundError as exc:
         raise HTTPException(
             status_code=422,

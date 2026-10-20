@@ -30,6 +30,7 @@ from services.network_undo import apply_undo, push_undo_snapshot
 from services.profile_gen.apply import (
     CarrierMismatchError,
     ComponentNotFoundError,
+    InvalidTimeBasisError,
     LeapYearMismatchError,
     ProfileApplyError,
     UnsupportedSnapshotsError,
@@ -476,3 +477,140 @@ def test_missing_resolution_meta_defaults_to_hourly():
     out = assign_profile(_ctx(), "Solar", series, meta)
     assert out["resolution"] == "hourly"
     assert out["hours"] == 8784
+
+
+# ── time basis: generated series are UTC; snapshots may be a wall clock ────
+#
+# Gatekeeper review of the apply path (2026-10-19): mapping UTC hours onto
+# local wall-clock snapshots shifts solar by the UTC offset. Naive snapshots
+# follow lp_bindings' rule: UTC when commercial.timezone is set, else the
+# site clock of unknown offset (applied unshifted, recorded as assumed, with
+# a warning); `time_basis="<IANA zone>"` declares a zone's wall clock and
+# the series is converted before the month-day-hour map.
+
+
+def _flat(year: int = 2025):
+    n = _net(year=year)
+    series, meta = _weather(year=year)
+    return n, series, meta
+
+
+def test_unstated_basis_without_a_site_timezone_is_assumed_utc_and_warned():
+    n, series, meta = _flat()
+    out = assign_profile(_ctx(), "Solar", series, meta)
+    assert out["time_basis"] == "UTC (assumed; site clock unknown)"
+    assert _user_ts_meta[KEY]["time_basis"] == "UTC (assumed; site clock unknown)"
+    assert len(out["warnings"]) == 1
+    assert out["warnings"][0].startswith("time_basis_assumed_utc")
+    assert "set the time zone" in out["warnings"][0]
+    ts = pd.Timestamp("2025-07-15T12:00")  # unshifted
+    assert float(n.generators_t.p_max_pu["Solar"].loc[ts]) == float(series.loc[ts])
+
+
+def test_unstated_basis_with_a_commercial_timezone_reads_snapshots_as_utc():
+    n, series, meta = _flat()
+    ctx = _ctx()
+    ctx.solver_state["solver_config"].commercial = {"timezone": "Europe/Berlin"}
+    out = assign_profile(ctx, "Solar", series, meta)
+    assert out["time_basis"] == "UTC"
+    assert out["warnings"] == []
+    ts = pd.Timestamp("2025-07-15T12:00")  # unshifted: the snapshots are UTC
+    assert float(n.generators_t.p_max_pu["Solar"].loc[ts]) == float(series.loc[ts])
+
+
+def test_a_berlin_wall_clock_shifts_the_series_by_the_utc_offset():
+    n, series, meta = _flat()
+    out = assign_profile(_ctx(), "Solar", series, meta,
+                         time_basis="Europe/Berlin")
+    col = n.generators_t.p_max_pu["Solar"]
+    # CET (+1 h) in January, CEST (+2 h) in July
+    assert float(col.loc[pd.Timestamp("2025-01-15T13:00")]) == float(
+        series.loc[pd.Timestamp("2025-01-15T12:00")])
+    assert float(col.loc[pd.Timestamp("2025-07-15T14:00")]) == float(
+        series.loc[pd.Timestamp("2025-07-15T12:00")])
+    assert out["time_basis"] == "Europe/Berlin"
+    assert out["warnings"] == []
+    assert _user_ts_meta[KEY]["time_basis"] == "Europe/Berlin"
+
+
+def test_local_new_year_midnight_wraps_to_the_weather_years_last_hour():
+    n, series, meta = _flat()
+    assign_profile(_ctx(), "Solar", series, meta, time_basis="Europe/Berlin")
+    col = n.generators_t.p_max_pu["Solar"]
+    assert float(col.loc[pd.Timestamp("2025-01-01T00:00")]) == float(
+        series.loc[pd.Timestamp("2025-12-31T23:00")])
+
+
+def test_dst_hours_take_the_mean_or_the_next_valid_hour():
+    n, series, meta = _flat(year=2025)
+    assign_profile(_ctx(), "Solar", series, meta, time_basis="Europe/Berlin")
+    col = n.generators_t.p_max_pu["Solar"]
+    # 2025-10-26 02:00 Berlin happens twice: 00:00 and 01:00 UTC → mean
+    both = series.loc[pd.Timestamp("2025-10-26T00:00"):
+                      pd.Timestamp("2025-10-26T01:00")].mean()
+    assert float(col.loc[pd.Timestamp("2025-10-26T02:00")]) == pytest.approx(
+        float(both))
+    # 2025-03-30 02:00 Berlin never happens: the next valid hour, 03:00
+    # CEST = 01:00 UTC
+    assert float(col.loc[pd.Timestamp("2025-03-30T02:00")]) == float(
+        series.loc[pd.Timestamp("2025-03-30T01:00")])
+
+
+def test_an_unknown_time_basis_is_a_typed_refusal():
+    _net(year=2025)
+    series, meta = _weather(year=2025)
+    with pytest.raises(InvalidTimeBasisError, match="Mars/Olympus"):
+        assign_profile(_ctx(), "Solar", series, meta,
+                       time_basis="Mars/Olympus")
+    assert KEY not in _user_ts_meta
+
+
+def test_the_partial_year_refusal_says_what_to_do_on_a_template_week():
+    n = PyPSAService.get_network()
+    idx = pd.date_range("2025-01-06T00:00", periods=168, freq="h")
+    idx.name = "snapshot"
+    n.set_snapshots(idx)
+    n.add("Bus", "B1", x=13.4, y=52.5)
+    n.add("Carrier", "solar")
+    n.add("Generator", "Solar", bus="B1", carrier="solar", p_nom=100.0)
+    series, meta = _weather(year=2025)
+    with pytest.raises(UnsupportedSnapshotsError) as err:
+        assign_profile(_ctx(), "Solar", series, meta)
+    msg = str(err.value)
+    assert "full-year hourly" in msg
+    assert "representative" in msg
+    assert "upload" in msg
+
+
+# ── gatekeeper notes on #396 (2026-10-20) ───────────────────────────────────
+
+
+def test_weekly_partial_first_week_holds_the_prior_mondays_mean():
+    """2023 starts on a Sunday: Jan 1 belongs to the week labelled Monday
+    2022-12-26, and Monday Jan 2 starts the next week."""
+    _net(year=2023)
+    weekly, meta = _weather_res(year=2023, resolution="weekly")
+    assign_profile(_ctx(), "Solar", weekly, meta)
+    stored = _user_ts[KEY]
+    first = float(weekly.loc[pd.Timestamp("2022-12-26")])
+    jan1 = stored.loc[pd.Timestamp("2023-01-01T00:00"):
+                      pd.Timestamp("2023-01-01T23:00")]
+    assert len(jan1) == 24 and (jan1 == first).all()
+    assert float(stored.loc[pd.Timestamp("2023-01-02T00:00")]) == float(
+        weekly.loc[pd.Timestamp("2023-01-02")])
+
+
+def test_a_coarse_profile_records_that_the_time_basis_was_not_re_binned():
+    _net(year=2024)
+    daily, meta = _weather_res(year=2024, resolution="daily")
+    assign_profile(_ctx(), "Solar", daily, meta, time_basis="Europe/Berlin")
+    m = _user_ts_meta[KEY]
+    assert m["time_basis"] == "Europe/Berlin"
+    assert "not re-binned" in m["time_basis_note"]
+
+
+def test_an_hourly_profile_carries_no_re_binning_note():
+    _net(year=2025)
+    series, meta = _weather(year=2025)
+    assign_profile(_ctx(), "Solar", series, meta, time_basis="Europe/Berlin")
+    assert "time_basis_note" not in _user_ts_meta[KEY]

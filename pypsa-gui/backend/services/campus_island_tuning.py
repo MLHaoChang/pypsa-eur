@@ -72,9 +72,14 @@ def _run_dir(project) -> Path:
 def get_settings(project) -> dict:
     """``_state(project)`` plus ``applied``: the last apply's record while the
     hub has not been re-solved since (``applied_record``), whatever became of
-    the recommendation; None otherwise."""
+    the recommendation; None otherwise; and ``island_rows_now``, whether the
+    solver settings have the island rows on."""
     out = _state(project)
     out["applied"] = applied_record(project)
+    # Read-only (UX review N7): whether the hub solve reads the island rows as the solver settings
+    # stand now, so a "capacity is needed" verdict can say it will not show in any result while they
+    # are off. Not "when the hub was last solved": the name says now.
+    out["island_rows_now"] = _island_rows_on(project)
     return out
 
 

@@ -446,6 +446,8 @@ class ExtraOwnerAsset:
 class FinanceCase:
     inputs: FinanceInputs
     owner: str
+    # Typed costs are real prices in base-year money, whatever `inputs.currency_year`
+    # states (convention: models/finance.py); escalation runs from here.
     base_year: int
     cod: date
     templates: tuple[Template, ...]

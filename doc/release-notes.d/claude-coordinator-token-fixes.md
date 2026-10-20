@@ -1,0 +1,1 @@
+* Feat(coordination): The coordinator rotates to a fresh session (id in `docs/agents/coordinator.md`), merges on `premerge ok` reports without PR subscriptions and sweeps every 6 h. New `scripts/coord/board.py` and `events.py`; `premerge.sh` names the blocking reason on its RESULT line.

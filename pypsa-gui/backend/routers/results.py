@@ -108,6 +108,7 @@ from services.results.statistics import compute_statistics
 from services.results.loads import compute_load_results
 from services.results.losses import compute_losses_summary
 from services.results.economics_by_carrier import compute_economics_by_carrier
+from services.results.process_view import compute_process_view
 from services.results.objective_decomposition import compute_objective_decomposition
 from services.results.load_frames import (
     corrected_marginal_prices as _lf_corrected_marginal_prices,
@@ -424,6 +425,21 @@ def get_economics_by_carrier():
         n, _state.get("solver_config"), _state.get("last_lost_load"),
         result_df=_result_df,
     )
+
+
+@results_router.get("/process_view")
+def get_process_view():
+    """
+    Grid-to-process view (ticket 04): per product bus, production, delivery,
+    buy-in, inventory level and lost production (t, MWh, and EUR at the
+    shortfall generator's lost-production value); per process unit (Link with
+    `eh_process`), running hours and starts. Unresolvable figures are null
+    with a flag beside them (ADR-0001); see `services.results.process_view`.
+    """
+    n = PyPSAService.get_network()
+    if not _dispatch_ready(n):
+        return {"available": False, "products": [], "process_units": []}
+    return {"available": True, **compute_process_view(n)}
 
 
 @results_router.get("/statistics")
@@ -1639,8 +1655,8 @@ def _ic_money_year_problem(assets: list, fin) -> str | None:
         # carries no free-form asset value)
         theirs = (f"{year} money (the campus asset library's price_year)"
                   if isinstance(year, int) and not isinstance(year, bool) else "another money year")
-        return (f"the campus assets are priced in {theirs}, the case in {fin.currency_year} money "
-                "(the finance inputs' currency_year); "
+        return (f"the campus assets are priced in {theirs}, the case's price data are "
+                f"{fin.currency_year} (the finance inputs' currency_year); "
                 + _IC_ONE_MONEY.format(conv="price index", what="money year", case=fin.currency_year))
     return None
 
@@ -2440,3 +2456,18 @@ def get_eh_dtc_planning():
     if table is None:
         return Response(status_code=204)
     return table
+
+
+@results_router.get("/process_uc_check")
+def get_process_uc_check():
+    """The binary operational check of the last plan with committable process units
+    (grid-to-process ticket 03, ``services.solver.process_uc.binary_check``): per period the
+    binary minus linearised operating cost, the extra shortfall, the flag, and the ledger rows.
+    204 when the last solve had no committable process unit or no linearised plan. Strict JSON:
+    a non-finite number is null and its path is in ``non_finite_paths``."""
+    from services.solver.process_uc import sanitize_check_payload
+
+    payload = _state.get("last_process_uc_check")
+    if not payload:
+        return Response(status_code=204)
+    return sanitize_check_payload(payload)

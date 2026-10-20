@@ -14,6 +14,7 @@ import { useUIStore } from '../store/uiStore'
 import { appLog } from '../store/simulationStore'
 import { invalidateNetworkQueries } from '../utils/projectActions'
 import { blockerMessage } from '../utils/blockerMessage'
+import { nameClashFrom, showNameClashToast } from '../utils/nameClashToast'
 
 /** A project switch refused because a study runs on the current network
  *  (P24-FE gate decision): plain words instead of the status-code line. */
@@ -113,6 +114,20 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
       openInWorkbench(res.imported)
     },
     // A refused site parameter is shown beside its field by the form.
-    onError: (e: unknown) => { if (!siteParamsRefusal(e)) toast.error(createErrorMessage(e)) },
+    onError: (e: unknown) => {
+      if (siteParamsRefusal(e)) return
+      // N17: a taken name stays on screen with a way to open that project.
+      const taken = nameClashFrom(blockerMessage(e))
+      if (taken) {
+        showNameClashToast(taken, () => {
+          setCurrentProject(taken)
+          setProjectName(taken)
+          onCreated?.(taken)
+          openInWorkbench(taken)
+        })
+        return
+      }
+      toast.error(createErrorMessage(e))
+    },
   })
 }

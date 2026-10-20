@@ -884,7 +884,7 @@ export default function AppHeader() {
   }, [runSolveRequest, jobRunning, isRunning, jobQueued])
 
   return (
-    <header data-no-panel-close className="h-11 flex items-center gap-2 px-3 bg-bg border-b border-border shrink-0 z-10">
+    <header data-no-panel-close className="h-11 max-xl:h-auto max-xl:min-h-11 max-xl:flex-wrap max-xl:gap-y-1 max-xl:py-1 flex items-center gap-2 px-3 bg-bg border-b border-border shrink-0 z-10">
       {/* S8: when a watched decision-study run ends, open its verdict and toast
           the class. Renders nothing; polls the run status route only. */}
       <DecisionRunWatcher />
@@ -1072,7 +1072,7 @@ export default function AppHeader() {
               : jobQueued
                 ? 'Cancel this queued solve'
                 : `${runLabel}: ${MODE_DESC[mode] ?? ''} — queues the solve; runs now if the queue is free`}
-            className="flex items-center gap-1.5 px-3.5 h-8 rounded-lg text-[11px] font-semibold text-white transition-all select-none hover:brightness-110 active:translate-y-px disabled:opacity-60 disabled:cursor-wait"
+            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3.5 h-8 rounded-lg text-[11px] font-semibold text-white transition-all select-none hover:brightness-110 active:translate-y-px disabled:opacity-60 disabled:cursor-wait"
             style={{
               // Design system: 3-stop gradient with layered + inset shadows.
               // Idle is the brand red (this is the primary CTA and was the last
@@ -1153,7 +1153,9 @@ function UiModeSwitch() {
       data-testid="ui-mode-switch"
       role="group"
       aria-label="Interface mode"
-      className="flex items-center h-7 p-0.5 rounded-md border border-border bg-bg-2"
+      // Anchor absolute sr-only descriptions locally. Their static positions
+      // otherwise escape the clipped workbench and widen the document.
+      className="relative flex items-center h-7 p-0.5 rounded-md border border-border bg-bg-2"
     >
       {(['guided', 'expert'] as const).map(m => {
         const on = uiMode === m

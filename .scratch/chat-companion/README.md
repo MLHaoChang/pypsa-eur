@@ -28,10 +28,24 @@ stop/continue policy around separately approved native cases. All five post-merg
 workflows (Test, CodeQL, inventory, control matrix and image build) passed.
 The [CP-06a access visibility](issues/06a-effective-permission-visibility.md) slice
 is merged in #356 (`e7777aa2e2c086789f1c802d387410a5280dc0cc`); its post-merge
-Test, CodeQL and image workflows passed. The current continuation is
+Test, CodeQL and image workflows passed.
 [CP-06b bound confirmations and complete engineering previews](issues/06b-bound-confirmations.md)
-is merged in #357 (`3f45c0e7d9ad66ee74e6bd918d655419152f3e8f`). The current slice is
-[CP-06c saved personal project restrictions](issues/06c-saved-restrictions.md).
-Broader domain adapters and family journeys remain later work.
+is merged in #357 (`3f45c0e7d9ad66ee74e6bd918d655419152f3e8f`).
+[CP-06c saved personal project restrictions](issues/06c-saved-restrictions.md)
+is merged in #358 (`8723578028bcb1952a36948dede20ebd09eb2b91`).
+[CP-06d in-page access summary](issues/06d-companion-access-summary.md) is merged
+in #361 (`c75ca5584b873418f10f1bca42f868255d445b7b`); its post-merge Test,
+CodeQL and image workflows passed. The bounded CP-06a–d package is closed out in
+the [permission handoff](../../docs/superpowers/handovers/2026-10-18-chat-permissions-closeout.md).
+Durable policy history and wider effect previews remain separate CP-06 work;
+broader domain adapters and family journeys also remain later work.
+
+The owner's 2026-10-18 continuation prioritizes a generic whole-application
+copilot: model/tool/parameter discovery, supported edits, ordered execution and
+result explanation/navigation, then continuous speech over the same harness.
+Use the [current assessment/spec](../live-copilot/README.md) and
+[execution amendment](../../docs/superpowers/plans/2026-10-18-whole-application-live-copilot.md).
+The later real-browser journey's pointer/overflow failures are open UI work;
+historical passing CI does not certify a complete generic companion.
 
 The [Dots assessment](../live-voice/dots-design-assessment-2026-10-14.md) supplies the source-reviewed rationale. This folder contains an implementation specification, not an implemented feature or release certificate. Hosted setup, fresh paid-probe authorization, independent domain review and real-use calibration remain separate pending gates.

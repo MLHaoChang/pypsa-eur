@@ -35,17 +35,39 @@ describe('chapterTiles', () => {
 
   it('reliability: the shortfall against the goal', () => {
     const t = byId({ ...NONE, reliability: { hasResults: true, running: false, lole: 12.38,
-                                             target: 3, verdict: 'fail' } })
+                                             target: 3, verdict: 'fail', horizonYears: 1 } })
     expect(t.reliability).toMatchObject({ state: 'ready', value: '12.38', unit: 'h/yr',
-      basis: 'Not certified: the goal is 3 h/yr', open: { panel: 'results', tab: 'adequacy' } })
+      basis: 'Not certified: the goal is 3 h/yr · Monte Carlo, 8 760 h', open: { panel: 'results', tab: 'adequacy' } })
+  })
+
+  it('reliability: the basis names the hours the study modelled (N10)', () => {
+    const basis = (horizonYears?: number | null) => byId({ ...NONE, reliability: {
+      hasResults: true, running: false, lole: 1, target: 3, verdict: 'pass', horizonYears } }).reliability.basis
+    expect(basis(2)).toBe('Certified: the goal is 3 h/yr · Monte Carlo, 17 520 h')
+    expect(basis(0.5)).toBe('Certified: the goal is 3 h/yr · Monte Carlo, 4 380 h')
+    expect(basis(undefined)).toBe('Certified: the goal is 3 h/yr · Monte Carlo')
+    expect(basis(null)).toBe('Certified: the goal is 3 h/yr · Monte Carlo')
+  })
+
+  it('reliability: a stale study dims the figure and says why (UX review N4)', () => {
+    const t = byId({ ...NONE, reliability: { hasResults: true, running: false, lole: 0.6, target: 3,
+      verdict: 'pass', stale: true } }).reliability
+    expect(t).toMatchObject({ state: 'stale', value: '0.6', reason: expect.stringMatching(/changed since the study/) })
   })
 
   it('reliability: running, and a run with no shortfall figure', () => {
     expect(byId({ ...NONE, reliability: { ...NONE.reliability, running: true } }).reliability.state)
       .toBe('running')
     const t = byId({ ...NONE, reliability: { hasResults: true, running: false, lole: null,
-                                             target: null, verdict: null } })
+                                             target: 3, verdict: null } })
     expect(t.reliability.state).toBe('unavailable')
+  })
+
+  it('reliability: no goal set is Not modelled, with the step that sets it (UX review N13)', () => {
+    const t = byId({ ...NONE, reliability: { hasResults: true, running: false, lole: null,
+                                             target: null, verdict: null } })
+    expect(t.reliability).toMatchObject({ state: 'not_modelled', open: { step: 'goal' },
+      reason: expect.stringMatching(/No reliability goal is set/) })
   })
 
   it('investment: the post-tax NPV when established, else the pre-tax one, said so', () => {
@@ -77,11 +99,11 @@ describe('chapterTiles', () => {
     // a money-year refusal (smoke 2026-10-16, issue 03) reaches the tile whole: both years and the way out
     const money = byId({ ...NONE, investment: { study: { status: 'refused', error_code: 'campus_assets_money_year_mismatch',
       error: "campus_assets_money_year_mismatch: the campus assets are priced in 2026 money (the campus asset library's "
-        + "price_year), the case in 2020 money (the finance inputs' currency_year); no price index converts between "
+        + "price_year), the case's price data are 2020 (the finance inputs' currency_year); no price index converts between "
         + 'them, so a case with the campus assets needs the asset library and the finance inputs in one money year: '
         + "reprice the campus asset library in 2020, or state the finance inputs in the library's money year" } as never,
       report: null } })
-    expect(money.investment.reason).toMatch(/2026 money .* 2020 money .* reprice the campus asset library in 2020/)
+    expect(money.investment.reason).toMatch(/2026 money .* price data are 2020 .* reprice the campus asset library in 2020/)
   })
 
   it('grid plan: the campus checks that pass with the proposed measures', () => {
@@ -127,6 +149,22 @@ describe('chapterTiles', () => {
 
     it('none without a GFM read (no campus, no island)', () => {
       expect(ctl(null)).toBeUndefined()
+    })
+    it('not achievable names the off island rows only when the server says they are off (UX review N7)', () => {
+      const na = rec({ status: 'not_achievable', changed: false, settings: {} })
+      expect(ctl({ state: 'ready', reason: '', recommendation: na, island_rows_now: false })).toMatchObject(
+        { text: expect.stringMatching(/capacity is needed, and the hub solve is not sized to island/) })
+      expect(ctl({ state: 'ready', reason: '', recommendation: na, island_rows_now: true })!.text)
+        .not.toMatch(/island rows/)
+      expect(ctl({ state: 'ready', reason: '', recommendation: na })!.text).not.toMatch(/island rows/)
+    })
+    it('nothing to tune (no case evaluated) is not applicable, with the reason', () => {
+      expect(ctl({ state: 'ready', reason: '', recommendation: rec({ status: 'unchanged', changed: false, settings: {},
+        cases: [], simulations: 0 }) })).toMatchObject(
+        { state: 'not_applicable', text: expect.stringMatching(/nothing to tune/) })
+      // an unchanged result that evaluated cases is still a pass with margin
+      expect(ctl({ state: 'ready', reason: '', recommendation: rec({ status: 'unchanged', changed: false, settings: {},
+        simulations: 12 }) })).toMatchObject({ state: 'ready', text: expect.stringMatching(/pass with margin/) })
     })
     it('not run, recommended, not achievable, stale', () => {
       expect(ctl({ state: 'not_run', reason: '', recommendation: null })).toMatchObject(

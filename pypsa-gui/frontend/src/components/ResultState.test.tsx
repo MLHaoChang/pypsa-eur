@@ -40,6 +40,13 @@ describe('Kpi with a result state', () => {
       expect(tile.getAttribute('data-state')).toBe(state)
     })
 
+  it('fromStudy keeps the figure and adds the "From the study" pill (G5)', () => {
+    render(<Kpi label="Expected shortfall" value="0.6 h/yr" fromStudy testId="k" />)
+    const tile = screen.getByTestId('k')
+    expect(tile.querySelector('[data-kpi-value="0.6 h/yr"]')).not.toBeNull()
+    expect(screen.getByText('From the study')).toBeTruthy()
+  })
+
   it('shows a computed zero as a number, with what makes it zero', () => {
     render(<Kpi label="Curtailed energy" value="0 MWh" state="zero" basis="all available renewable energy used" testId="k" />)
     expect(screen.getByTestId('k').querySelector('[data-kpi-value="0 MWh"]')).not.toBeNull()

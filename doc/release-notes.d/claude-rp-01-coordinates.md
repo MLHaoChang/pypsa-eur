@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Renewable profile generation now refuses generators whose bus has no usable coordinates (unset, out of range, or the 0/0 default) with a typed `missing_coordinates` error naming them and both remedies, instead of generating a profile for 0°E 0°N; an explicit point is the coordinate override, and apply warns when a bus has lost its coordinates since generation.

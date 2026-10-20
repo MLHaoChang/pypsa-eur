@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A project whose island cases hold no grid-forming converter (a data center with only the UPS-bridged scenario) now shows "Not applicable: nothing to tune" on the Control line and in the grid-forming section, instead of "already pass with margin" after 0 simulations (UX review N6, Control re-check a).

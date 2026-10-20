@@ -293,6 +293,43 @@ def test_apply_pushes_an_undo_snapshot_first(client, wind_project,
     assert "g_wind" not in payload["columns"]
 
 
+def test_apply_reports_the_time_basis_it_used(client, wind_project,
+                                             completed_job):
+    resp = client.post(
+        f"/api/projects/{wind_project}/profiles/apply",
+        json={"job_id": completed_job["id"], "component": "g_wind",
+              "time_basis": "Europe/Berlin"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["time_basis"] == "Europe/Berlin"
+    assert resp.json()["warnings"] == []
+
+
+def test_apply_without_a_time_basis_warns_that_utc_was_assumed(
+    client, wind_project, completed_job,
+):
+    resp = client.post(
+        f"/api/projects/{wind_project}/profiles/apply",
+        json={"job_id": completed_job["id"], "component": "g_wind"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["time_basis"] == "UTC (assumed; site clock unknown)"
+    assert body["warnings"][0].startswith("time_basis_assumed_utc")
+
+
+def test_apply_with_an_unknown_time_basis_is_a_typed_refusal(
+    client, wind_project, completed_job,
+):
+    resp = client.post(
+        f"/api/projects/{wind_project}/profiles/apply",
+        json={"job_id": completed_job["id"], "component": "g_wind",
+              "time_basis": "Mars/Olympus"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "invalid_time_basis"
+
+
 def test_apply_to_a_missing_component_is_a_typed_refusal(client, wind_project,
                                                          completed_job):
     resp = client.post(
@@ -349,6 +386,23 @@ def test_apply_warns_when_the_bus_moved_since_generation(client,
     assert resp.status_code == 200, resp.text
     warning = resp.json().get("warning")
     assert warning and "moved" in warning.lower()
+
+
+def test_apply_warns_when_the_bus_lost_its_coordinates(client,
+                                                       install_network,
+                                                       completed_job):
+    """A bus reset to the 0/0 default after generation is no 'move' to
+    (0, 0): the warning says the coordinates are gone."""
+    n = _wind_network()
+    n.buses.loc["B1", ["x", "y"]] = [0.0, 0.0]
+    install_network(n)
+
+    resp = client.post(
+        "/api/projects/Profile Farm/profiles/apply",
+        json={"job_id": completed_job["id"], "component": "g_wind"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "no coordinates now" in (resp.json().get("warning") or "")
 
 
 # ---------------------------------------------------------------------------
@@ -491,3 +545,122 @@ def test_generate_without_points_or_generators_is_a_422(client, wind_project):
     )
     assert resp.status_code == 422
     assert resp.json()["detail"]["error_kind"] == "no_points"
+
+
+# ---------------------------------------------------------------------------
+# RP-01: coordinates come from the generator, else its bus; a missing pair
+# (NaN, or PyPSA's default 0/0) is a typed refusal, never a site at 0°E 0°N
+# ---------------------------------------------------------------------------
+
+
+def _mixed_network() -> pypsa.Network:
+    """g_wind at (8.0, 50.0); g_nocoord on a bus left at PyPSA's default
+    x=y=0; g_nan on a bus with no latitude; g_far on a bus out of range."""
+    n = _wind_network()
+    n.add("Bus", "B0")  # x = y = 0, PyPSA's default
+    n.add("Bus", "BN", x=9.0, y=51.0)
+    # n.add() fills NaN with the 0 default; an import or a direct edit can
+    # still leave a NaN behind, so set it after the add
+    n.buses.loc["BN", "y"] = float("nan")
+    n.add("Bus", "BF", x=9.0, y=91.0)
+    n.add("Generator", "g_nocoord", bus="B0", carrier="wind", p_nom=10.0)
+    n.add("Generator", "g_nan", bus="BN", carrier="wind", p_nom=10.0)
+    n.add("Generator", "g_far", bus="BF", carrier="wind", p_nom=10.0)
+    return n
+
+
+@pytest.fixture
+def mixed_project(client, install_network):
+    install_network(_mixed_network())
+    _save_as(client, "Coord Farm")
+    return "Coord Farm"
+
+
+def _estimate(client, names):
+    return client.post(
+        "/api/profiles/estimate",
+        json={"from_generators": names, "technology": "wind", "year": 2023},
+    )
+
+
+def test_a_bus_at_the_default_origin_is_a_missing_coordinates_refusal(
+    client, mixed_project,
+):
+    resp = _estimate(client, ["g_nocoord"])
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert detail["error_kind"] == "missing_coordinates"
+    assert detail["generators"] == ["g_nocoord"]
+    assert "B0" in detail["message"]
+    # both remedies are named
+    assert "set coordinates on the bus" in detail["message"]
+    assert "upload a profile" in detail["message"]
+
+
+def test_a_bus_with_a_nan_latitude_is_a_missing_coordinates_refusal(
+    client, mixed_project,
+):
+    resp = _estimate(client, ["g_nan"])
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "missing_coordinates"
+    assert resp.json()["detail"]["generators"] == ["g_nan"]
+
+
+def test_the_refusal_lists_only_the_generators_missing_coordinates(
+    client, mixed_project,
+):
+    resp = _estimate(client, ["g_wind", "g_nocoord", "g_nan"])
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["generators"] == ["g_nocoord", "g_nan"]
+
+
+def test_a_bus_out_of_range_is_a_missing_coordinates_refusal(
+    client, mixed_project,
+):
+    resp = _estimate(client, ["g_far"])
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["generators"] == ["g_far"]
+
+
+def test_an_explicit_point_overrides_a_generator_without_coordinates(
+    client, mixed_project,
+):
+    resp = client.post(
+        "/api/profiles/estimate",
+        json={"points": [{"id": "g_nocoord", "lon": 9.2, "lat": 52.3}],
+              "from_generators": ["g_nocoord"],
+              "technology": "wind", "year": 2023},
+    )
+    assert resp.status_code == 200, resp.text
+    assert list(resp.json()["series"]) == ["g_nocoord"]
+
+
+def test_an_explicit_point_does_not_hide_an_unknown_generator(
+    client, mixed_project,
+):
+    resp = client.post(
+        "/api/profiles/estimate",
+        json={"points": [{"id": "g_typo", "lon": 9.2, "lat": 52.3}],
+              "from_generators": ["g_typo"],
+              "technology": "wind", "year": 2023},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "unknown_generator"
+    assert "g_typo" in resp.json()["detail"]["message"]
+
+
+def test_generate_for_a_generator_without_coordinates_queues_nothing(
+    client, mixed_project, project_storage_dir, seeded_identity,
+):
+    resp = client.post(
+        f"/api/projects/{mixed_project}/profiles/generate",
+        json={"from_generators": ["g_wind", "g_nocoord"],
+              "technology": "wind", "year": 2023, "source": "synthetic"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "missing_coordinates"
+    pending = client.get(
+        f"/api/projects/{mixed_project}/profiles/pending"
+    ).json()
+    assert pending["pending"] == []
+    assert pending.get("jobs", []) == []

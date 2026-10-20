@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-17",
+  "generated_at": "2026-10-20",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,8 +10,101 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 255,
+  "tool_count": 265,
   "tools": [
+    {
+      "name": "resolve_project_target",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_name"
+      ],
+      "required": [
+        "project_name"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "5c2e4b5a552480f8f4b512121b9c2048dead2a7cb5c94e72799da14e96e807f1",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_result_views",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "exclude_shown"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "d475a280cf69833ce1b367185a956ef4e36e7e38cb9c722587dd18dc4a4706e4",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "resolve_reference",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "target",
+        "component_class",
+        "name",
+        "run_id",
+        "latest"
+      ],
+      "required": [
+        "target"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "16d68ed9508b52f40c77158769becd50f4b3e19c4c852392cf1b34ad9cbc79a6",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_component_schema",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "component_class",
+        "query",
+        "offset",
+        "limit"
+      ],
+      "required": [
+        "component_class"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "d989502ae0d5f29cd166dc65f85b0ee61765371baad5f17e4dc3284e6cdec921",
+      "behavioral_fixture": "pending"
+    },
     {
       "name": "list_components",
       "toolsets": [
@@ -689,7 +782,7 @@
         "attrs"
       ],
       "safety_tier": "write",
-      "schema_sha256": "1064243f3e1d37c95fd676705e100e82f1cde572a84ebf242becd587c5afcb0d",
+      "schema_sha256": "6e453e7eb9e81a00165b7e973f330357f8cba403c0f6367a16667b03d7c56b65",
       "behavioral_fixture": "pending"
     },
     {
@@ -2092,6 +2185,149 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "list_profile_presets",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/profiles/presets"
+        ]
+      ],
+      "input_keys": [
+        "technology"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "10e4732f44164e5bf8b46863a0a221fcc243a83303340255989dbfb4936675a5",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_profile_parameters",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "preset",
+        "technology"
+      ],
+      "required": [
+        "preset"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "9bea505ddbdd3528dd9da2b4e1c5d14c7479706956324e24571da2c7b7b02d86",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "preview_renewable_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/profiles/estimate"
+        ]
+      ],
+      "input_keys": [
+        "points",
+        "from_generators",
+        "technology",
+        "preset",
+        "params",
+        "year",
+        "resolution"
+      ],
+      "required": [
+        "technology"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "e5188f2e1d2491b60e3d970bc608b3b2751cc958d28fe88b8a7b4508e84b502c",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_pending_profiles",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/profiles/pending"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "generate_renewable_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/generate"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "points",
+        "from_generators",
+        "technology",
+        "preset",
+        "params",
+        "source",
+        "year",
+        "resolution"
+      ],
+      "required": [
+        "project_id",
+        "technology"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "8d5dde33da6c77d62a97471c072428ed3380c53ce41db87f045b5d36ef8a3830",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_generated_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/apply"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "job_id",
+        "component",
+        "point_id",
+        "time_basis"
+      ],
+      "required": [
+        "project_id",
+        "job_id",
+        "component"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "2d1ca8a47aa130e9388f8cff4a688ee54fa1a64322fb2100afabfaac8dec1354",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "list_projects",
       "toolsets": [
         "project",
@@ -2441,13 +2677,14 @@
         ]
       ],
       "input_keys": [
-        "name"
+        "name",
+        "limit"
       ],
       "required": [
         "name"
       ],
       "safety_tier": "read",
-      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "schema_sha256": "454b61bedf3b8e640beb6f1719609c35520a6086bb7558875a8081b53e116a25",
       "behavioral_fixture": "pending"
     },
     {
@@ -2941,7 +3178,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "535d08b87cd1d8212e9807dbf0ce164820993e831bf0d047f14db4f145af8106",
+      "schema_sha256": "fb2b39ae90898e86f5908b0d1587da1d96385110887d518774d4140d0d984a58",
       "behavioral_fixture": "pending"
     },
     {
@@ -5910,7 +6147,8 @@
     "reports",
     "campusElectrical",
     "decision",
-    "economics"
+    "economics",
+    "profiles"
   ],
   "tool_panel_enum": [
     "Results",
@@ -5971,7 +6209,9 @@
     "DecisionStudy",
     "decision",
     "Economics",
-    "economics"
+    "economics",
+    "ProfileStudio",
+    "profiles"
   ],
   "slide_panels_not_in_tool_enum": [],
   "requested_aliases": {

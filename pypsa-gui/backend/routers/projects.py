@@ -15,7 +15,7 @@ import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 import local_mode
@@ -4610,21 +4610,38 @@ def put_project_members(
 @router.get("/{name}/statistics")
 def project_statistics(
     name: str,
+    limit: int = Query(5, ge=1, le=25),
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
-    src, name = _resolve_project_src(name, db, user)
-    nc_path = src / "network.nc"
-    if not nc_path.exists():
-        raise HTTPException(404, f"Project '{name}' not found")
-    import pypsa
-    # netCDF4/HDF5 share process-global, thread-unsafe state — this transient
-    # read must hold the io lock or it races concurrent reads/writes (e.g. a
-    # compare-state/results-summary fan-out, or a background solve once that
-    # lands) and surfaces as "NetCDF: HDF error". No pypsa lock needed (we
-    # never touch the live singleton here).
-    with PyPSAService.get_netcdf_io_lock():
-        n = pypsa.Network(str(nc_path))
+    """Counts plus the LC-15 asset `summary`. The caller's ACTIVE project is
+    summarised from its live network (unsaved edits included); any other from
+    its saved files, so a peek never switches the active project."""
+    from services import project_registry, project_summary
+
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, name)
+    src, name = project_registry.project_dir(project), project.name
+    ctx = PyPSAService.get_active_context()
+    live = ctx.project_uuid == str(project.id)
+    if live:
+        n = PyPSAService.get_network()
+        solver_config = ctx.solver_state.get("solver_config")
+    else:
+        nc_path = src / "network.nc"
+        if not nc_path.exists():
+            raise HTTPException(404, f"Project '{name}' not found")
+        import pypsa
+        # netCDF4/HDF5 share process-global, thread-unsafe state — this transient
+        # read must hold the io lock or it races concurrent reads/writes (e.g. a
+        # compare-state/results-summary fan-out, or a background solve once that
+        # lands) and surfaces as "NetCDF: HDF error". No pypsa lock needed (we
+        # never touch the live singleton here).
+        with PyPSAService.get_netcdf_io_lock():
+            n = pypsa.Network(str(nc_path))
+        cfg_path = src / "solver_config.json"
+        solver_config = (_solver_config_from_dict(json.loads(cfg_path.read_text()))
+                         if cfg_path.exists() else _solver_config_from_dict({}))
     meta = _read_meta(src)
     return {
         "name": name,
@@ -4634,4 +4651,7 @@ def project_statistics(
         "lines": len(n.lines),
         "snapshots": len(n.snapshots),
         "carriers": n.generators.carrier.unique().tolist() if not n.generators.empty else [],
+        "summary": project_summary.summarise(
+            n, solver_config=solver_config, project_id=str(project.id), project_name=name,
+            root=src, live_ctx=ctx if live else None, limit=limit),
     }
