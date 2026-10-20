@@ -40,6 +40,8 @@ export interface EnergyFlowsPayload {
   } | null
   /** Null when the solve did not record unserved demand. */
   unserved_mwh?: number | null
+  /** Product a process could not make, per load: lost production, not supply. */
+  unserved_product_mwh?: Record<string, number>
   flags: string[]
   rule?: string
 }

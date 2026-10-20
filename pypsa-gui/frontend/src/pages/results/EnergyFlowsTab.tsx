@@ -222,6 +222,11 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
         <span className="text-muted">
           {fmtMwh(total)} delivered or lost{lossShare != null ? ` · ${(lossShare * 100).toFixed(1)} % losses` : ''}
         </span>
+        {Object.entries(data.unserved_product_mwh ?? {}).filter(([, v]) => v > 0).map(([load, v]) => (
+          <span key={load} className="text-danger" data-testid={`ef-undelivered-${load}`}>
+            Not delivered to {load}: {fmtMwh(v)}
+          </span>
+        ))}
         {data.unserved_mwh != null && data.unserved_mwh > 0 && (
           <span className="text-danger" data-testid="ef-unserved">Unserved: {fmtMwh(data.unserved_mwh)}</span>
         )}

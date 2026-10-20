@@ -368,3 +368,43 @@ def test_surplus_sent_to_the_grid_is_export_with_its_origin():
     assert got[("solar", "Export")] == pytest.approx(exported, abs=1e-6)
     assert got[(GRID_IMPORT, "demand")] == pytest.approx(
         float(n.loads_t.p["demand"].sum()) - got.get(("solar", "demand"), 0.0), abs=1e-6)
+
+
+def test_a_process_shortfall_is_lost_production_not_supply():
+    """Ticket 04: the product's shortfall generator is never a source; the load is
+    served what was really produced, and the rest is reported beside the rows."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.RangeIndex(4))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.add("Bus", "el")
+    n.add("Bus", "prod")
+    n.add("Carrier", ["grid", "product_shortfall"])
+    n.add("Generator", "grid_supply", bus="el", carrier="grid", p_nom=100, marginal_cost=10)
+    n.add("Link", "unit", bus0="el", bus1="prod", p_nom=3, efficiency=1.0)      # makes at most 3 MW
+    n.add("Generator", "__lost_prod", bus="prod", carrier="product_shortfall", p_nom=100,
+          marginal_cost=1e4, process_role="shortfall")
+    n.add("Load", "delivery", bus="prod", p_set=5.0)
+    n = _solve(n)
+    assert float(n.generators_t.p["__lost_prod"].sum()) > 0            # the fixture really runs it
+    p = energy_flows(n)
+    _assert_conserves(p)
+    assert not [r for r in p["rows"] if r["source"] == "product_shortfall"]
+    served = _by(p["rows"], "destination")[("delivery",)]
+    unserved = p["unserved_product_mwh"]["delivery"]
+    assert unserved == pytest.approx(float(n.generators_t.p["__lost_prod"].sum()), abs=1e-6)
+    assert served + unserved == pytest.approx(float(n.loads_t.p["delivery"].sum()), abs=1e-6)
+
+
+def test_a_process_buy_in_stays_a_source_under_its_own_name():
+    n = pypsa.Network()
+    n.set_snapshots(pd.RangeIndex(3))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.add("Bus", "prod")
+    n.add("Carrier", ["product_purchase"])
+    n.add("Generator", "__buy_prod", bus="prod", carrier="product_purchase", p_nom=100,
+          marginal_cost=50, process_role="buy_in")
+    n.add("Load", "delivery", bus="prod", p_set=2.0)
+    p = energy_flows(_solve(n))
+    _assert_conserves(p)
+    assert _by(p["rows"], "source", "destination")[("product_purchase", "delivery")] == pytest.approx(6.0)
+    assert p["unserved_product_mwh"] == {}

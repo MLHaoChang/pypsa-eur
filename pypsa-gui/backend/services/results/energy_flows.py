@@ -63,6 +63,7 @@ import numpy as np
 import pandas as pd
 
 from services.adequacy.slack import slack_generator_mask
+from models.process_unit import product_role_generators
 from services.period_utils import is_multi_period
 
 _log = logging.getLogger(__name__)
@@ -242,6 +243,11 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
     # ---- generators: sources (p > 0) and absorbing sinks (p < 0) -----------------
     gens = n.generators
     keep = ~slack_generator_mask(gens) if len(gens) else pd.Series([], dtype=bool)
+    # A process shortfall is lost production, never supply (grid-to-process
+    # ticket 04): it reduces what the product's load was served, like shed demand.
+    shortfall = [str(g) for g in product_role_generators(n, "shortfall") if str(g) in set(map(str, gens.index))]
+    if shortfall:
+        keep = keep & ~gens.index.astype(str).isin(shortfall)
     gnames = [str(g) for g in gens.index[keep.to_numpy()]]
     gp = _cols(_frame(n, result_df, "generators_t", "p"), gnames, "generator dispatch", mask)
     g_bus = [bus_ix[str(gens.at[g, "bus"])] for g in gnames]
@@ -257,7 +263,19 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
         _refuse("a load injects energy (negative demand)")
     l_bus = [bus_ix[str(n.loads.at[x, "bus"])] for x in lnames]
     shed = _shed(n, capture, mask, lnames, [buses[b] for b in l_bus])
-    served = lp - (shed if shed is not None else 0.0)
+    lost = np.zeros_like(lp)       # product shortfall MW per load
+    if shortfall:
+        sp = _cols(_frame(n, result_df, "generators_t", "p"), shortfall, "process shortfall dispatch", mask)
+        for j, g in enumerate(shortfall):
+            at = [i for i, b in enumerate(l_bus) if buses[b] == str(gens.at[g, "bus"])]
+            amount = np.maximum(sp[:, j], 0.0)
+            demand = lp[:, at].sum(axis=1) if at else np.zeros(T)
+            if (amount > _EPS).any() and (not at or ((amount > _EPS) & (demand <= _EPS)).any()):
+                _refuse(f"shortfall {g} runs where its bus has no load to leave unserved")
+            share = np.where(demand[:, None] > _EPS, lp[:, at] / np.where(demand > _EPS, demand, 1.0)[:, None], 0.0) if at else 0.0
+            if at:
+                lost[:, at] += amount[:, None] * share
+    served = lp - (shed if shed is not None else 0.0) - lost
     if (served < -1e-6 * (1 + lp.max(initial=0.0))).any():
         _refuse("more demand is recorded as unserved than the load asks for")
     served = np.maximum(served, 0.0)
@@ -481,7 +499,7 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
     return {
         "buses": buses, "T": T, "wg": wg, "dt": dt, "srcs": srcs, "vias": vias, "dests": dests,
         "ns": ns, "nv": nv, "D": D, "gp": gp, "g_lab": g_lab, "storages": storages,
-        "served": served, "lnames": lnames, "shed": shed, "dsoc_t": dsoc_t,
+        "served": served, "lnames": lnames, "shed": shed, "lost": lost, "dsoc_t": dsoc_t,
         "bus_bad": bus_bad, "soc_bad": soc_bad, "passes": passes,
     }
 
@@ -605,6 +623,8 @@ def energy_flows(n, period=None, window: tuple[int, int] | None = None, *,
                          "generation_mwh": gen, "destinations_mwh": dest_total,
                          "storage_delta_mwh": dsoc, "stock_mwh": stock,
                          "residual_mwh": residual, "tolerance_mwh": tol},
+        "unserved_product_mwh": {ld: float((att["lost"][win, i] * w).sum()) for i, ld in enumerate(att["lnames"])
+                                 if att["lost"][:, i].any()},
         "unserved_mwh": None if att["shed"] is None else float((att["shed"][win].sum(axis=1) * w).sum()),
         "flags": flags,
         "rule": "Proportional mix at each bus and a proportional pool per storage; "

@@ -96,6 +96,22 @@ describe('EnergyFlowsTab', () => {
   })
 })
 
+describe('undelivered product', () => {
+  it('names what a process could not deliver, beside the flows', async () => {
+    vi.mocked(energyFlowsApi.get).mockResolvedValue({ ...OK, unserved_product_mwh: { nh3_delivery: 2500 } })
+    mount()
+    expect((await screen.findByTestId('ef-undelivered-nh3_delivery')).textContent).toMatch(/Not delivered to nh3_delivery: 2\.5 GWh/)
+    expect(screen.getByTestId('ef-sankey')).toBeTruthy()
+  })
+
+  it('says nothing when everything was delivered', async () => {
+    vi.mocked(energyFlowsApi.get).mockResolvedValue({ ...OK, unserved_product_mwh: {} })
+    mount()
+    await screen.findByTestId('ef-sankey')
+    expect(document.querySelector('[data-testid^="ef-undelivered"]')).toBeNull()
+  })
+})
+
 describe('cross-link', () => {
   it('points at the money view and asks for that tab', async () => {
     mount()
