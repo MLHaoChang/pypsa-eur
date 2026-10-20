@@ -33,9 +33,9 @@ is the next — register (or re-register) the family with::
 
     register_family(Family("renewable", ..., defaults=_renewable_defaults))
 
-and teach `defaults.preview_defaults` to generate that family's plan (today
-it generates load plans; each family's generator sits behind one branch
-there). The rows then appear in the same list, under the same Apply-all and
+and add its generator to `defaults._GENERATORS` ((ctx, row, peak_sized) ->
+(frame, meta, stats)). A family with rows but no generator shows them as
+skipped, never through another family's generator. The rows then appear in the same list, under the same Apply-all and
 the same single undo step.
 """
 from __future__ import annotations

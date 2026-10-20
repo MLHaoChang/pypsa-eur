@@ -155,6 +155,12 @@ def _generate_load(ctx, row: Mapping[str, Any],
     return result.series[[comp]], meta, seen
 
 
+#: Each family's default generator: (ctx, row, peak_sized) -> (frame, meta,
+#: stats as the model sees them). A family that brings ``defaults`` rows
+#: adds its generator here (see `families` on registering a plugin).
+_GENERATORS = {"load": _generate_load}
+
+
 def preview_defaults(ctx, project_dir: str, project: str, *,
                      replace_generated: bool = False,
                      peak_sized: frozenset[str] = frozenset()) -> list[dict[str, Any]]:
@@ -174,8 +180,13 @@ def preview_defaults(ctx, project_dir: str, project: str, *,
             if "plan" not in row:
                 out.append(row)
                 continue
+            generate = _GENERATORS.get(row["family"])
+            if generate is None:
+                out.append({**{k: v for k, v in row.items() if k != "plan"},
+                            "skipped": f"no default generator for the {row['family']} family yet"})
+                continue
             try:
-                frame, meta, seen = _generate_load(ctx, row, row["component"] in peak_sized)
+                frame, meta, seen = generate(ctx, row, row["component"] in peak_sized)
             except (ProfileGenError, ProfileApplyError) as exc:
                 out.append({**{k: v for k, v in row.items() if k != "plan"},
                             "skipped": f"cannot generate: {exc}"})
