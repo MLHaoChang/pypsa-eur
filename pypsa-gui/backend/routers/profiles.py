@@ -57,7 +57,15 @@ from services.profile_gen.apply import (
 )
 from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
 from services.profile_gen.engine import ProfileGenError
+from services.profile_gen.families import default_target
 from services.profile_gen.job import KEEP_PENDING, write_pending
+from services.profile_gen.load_archetypes import (
+    ARCHETYPES,
+    InvalidArchetypeParamsError,
+    UnknownArchetypeError,
+    list_presets as list_load_presets,
+    resolve_defaults as load_archetype_defaults,
+)
 
 router = APIRouter()          # global: /api/profiles/…
 project_router = APIRouter()  # scoped: /api/projects/{name}/profiles/…
@@ -109,6 +117,20 @@ class ApplyRequest(BaseModel):
     # zone's offset, DST included). Unset: UTC when the project's commercial
     # timezone is set, else applied unshifted with a `warnings` entry.
     time_basis: str | None = None
+    # The target. Unset: the artifact's family default (a renewable capacity
+    # factor onto generators/p_max_pu, a load shape onto loads/p_set).
+    component_type: str | None = None
+    attribute: str | None = None
+
+
+class LoadGenerateRequest(BaseModel):
+    # A load archetype (`services/profile_gen/load_archetypes.py`) for the
+    # named loads of the open network; one column per load, ids = names.
+    archetype: str
+    loads: list[str] = Field(min_length=1)
+    params: dict[str, Any] | None = None
+    year: int | None = None
+    resolution: Literal["hourly", "daily", "weekly"] = "hourly"
 
 
 class ShapeRequest(BaseModel):
@@ -313,9 +335,15 @@ _APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (DcLoadOwnedError, {"error_kind": "dc_load_owned"}),
 )
 
+# Load-generation refusals, literal for the same reason.
+_LOAD_GEN_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
+    (UnknownArchetypeError, {"error_kind": "unknown_archetype"}),
+    (InvalidArchetypeParamsError, {"error_kind": "invalid_archetype_params"}),
+)
+
 
 def _apply_refusal_kind(exc: Exception) -> dict[str, str]:
-    for cls, kind in _APPLY_REFUSALS:
+    for cls, kind in (*_APPLY_REFUSALS, *_LOAD_GEN_REFUSALS):
         if isinstance(exc, cls):
             return dict(kind)
     return {"error_kind": _error_kind(exc)}
@@ -343,6 +371,16 @@ def list_profile_presets(technology: str | None = None):
             }
             for p in found
         ]
+    }
+
+
+@router.get("/load-archetypes")
+def list_load_archetypes():
+    """The load archetypes with their parameter defaults, and the presets."""
+    return {
+        "archetypes": [{"name": a, "params": load_archetype_defaults(a)}
+                       for a in ARCHETYPES],
+        "presets": list_load_presets(),
     }
 
 
@@ -470,6 +508,78 @@ def generate_profiles(
     return sq.solve_queue.get_job(job.id) or job.to_public(None)
 
 
+@project_router.post("/{name}/profiles/loads/generate")
+def generate_load_profiles(
+    body: LoadGenerateRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Generate a load archetype for named loads into the pending store.
+
+    Synchronous: an archetype is closed-form and takes milliseconds, so it
+    skips the solve queue the weather sources need. The artifact is the same
+    pending pair the renewable jobs write (`job.write_pending`) and is applied
+    through the same `/profiles/apply`. Nothing touches the network here."""
+    _check_lock(proj, db, user)
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.get_active_context()
+    if ctx.loaded_project not in (None, proj.name):
+        raise HTTPException(
+            status_code=409,
+            detail=f"'{proj.name}' is not the open project "
+                   f"(the foreground holds {ctx.loaded_project!r}); "
+                   "open it first, then generate",
+        )
+    missing = [ld for ld in body.loads if ld not in ctx.network.loads.index]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "unknown_load",
+                    "message": f"no load named {', '.join(map(repr, missing))} "
+                               f"on the open network; it has "
+                               f"{sorted(ctx.network.loads.index)[:20]}"},
+        )
+    params = dict(body.params or {})
+    # Working hours are on the site's wall clock: with the project's
+    # commercial timezone set, its snapshots are UTC (`resolve_time_basis`),
+    # so the archetype maps on that zone unless the caller names one.
+    if "timezone" not in params:
+        from services.profile_gen.apply import _commercial_timezone
+
+        tz = _commercial_timezone(ctx)
+        if tz:
+            params["timezone"] = tz
+    try:
+        result = engine.generate_profile(
+            body.loads, body.archetype, params=params,
+            year=body.year, resolution=body.resolution, family="load",
+        )
+    except ProfileGenError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc), "message": str(exc)},
+        ) from exc
+
+    job_id = str(uuid.uuid4())
+    record = dict(result.meta)
+    record["job_id"] = job_id
+    record["project_id"] = proj.name
+    record["points"] = list(result.series.columns)
+    write_pending(str(proj.directory), job_id, result.series, record)
+
+    scale = float(record["scale_mw"])
+    year = int(record["weather_year"])
+    hours = 8784 if pd.Timestamp(year=year, month=1, day=1).is_leap_year else 8760
+    stats = {
+        col: {"peak_mw": float(result.series[col].max()) * scale,
+              "annual_mwh": float(result.series[col].mean()) * scale * hours}
+        for col in result.series.columns
+    }
+    return {**record, "stats": stats}
+
+
 @project_router.get("/{name}/profiles/pending")
 def list_pending_profiles(
     proj: AuthorizedProject = ProjectAccessDep,
@@ -495,7 +605,9 @@ def apply_profile(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
-    """Write one pending profile onto a generator's `p_max_pu`.
+    """Write one pending profile onto its target: a generator's `p_max_pu`
+    for a renewable profile, a load's `p_set` for a load shape, or the
+    `component_type`/`attribute` the body names.
 
     Undo FIRST: this prefix is outside the undo middleware's coverage, so the
     snapshot is pushed here, before any write. The component is re-resolved at
@@ -545,7 +657,8 @@ def apply_profile(
     warning = None
     coords = (meta.get("point_coords") or {}).get(point_id)
     gen = ctx.network.generators
-    if coords is not None and body.component in gen.index:
+    if (coords is not None and body.component in gen.index
+            and body.component_type in (None, "generators")):
         bus = str(gen.at[body.component, "bus"])
         if bus in ctx.network.buses.index:
             from services.network_geometry import _bus_coord
@@ -571,7 +684,11 @@ def apply_profile(
     push_undo_snapshot()
 
     try:
+        component_type, attribute = default_target(
+            meta, body.component_type, body.attribute)
         summary = assign_profile(ctx, body.component, series, meta,
+                                 component_type=component_type,
+                                 attribute=attribute,
                                  time_basis=body.time_basis)
     except ProfileApplyError as exc:
         raise HTTPException(

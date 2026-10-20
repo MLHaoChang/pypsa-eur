@@ -384,14 +384,18 @@ def list_presets() -> list[dict[str, Any]]:
             for name, (arch, params) in PRESETS.items()]
 
 
-def resolve_params(archetype: str, params: Mapping[str, Any]) -> dict[str, Any]:
-    """Defaults < preset < the caller's params; unknown keys refused."""
+def resolve_defaults(archetype: str) -> dict[str, Any]:
+    """Every parameter ``archetype`` takes, with its default."""
     if archetype not in ARCHETYPES:
         raise UnknownArchetypeError(
             f"unknown load archetype {archetype!r}; available: "
             f"{', '.join(ARCHETYPES)}")
-    _, defaults = ARCHETYPES[archetype]
-    allowed = {**_COMMON, **defaults}
+    return {**_COMMON, **ARCHETYPES[archetype][1]}
+
+
+def resolve_params(archetype: str, params: Mapping[str, Any]) -> dict[str, Any]:
+    """Defaults < preset < the caller's params; unknown keys refused."""
+    allowed = resolve_defaults(archetype)
     unknown = sorted(set(params) - set(allowed))
     if unknown:
         raise InvalidArchetypeParamsError(

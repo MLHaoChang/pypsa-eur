@@ -835,6 +835,18 @@
       "surface": "inline",
       "why": "A profile apply would overwrite the data-centre load a project's dc_load spec owns (a data-centre archetype, or a profile on the template's it_load/cooling split). The detail says to change the dc_load spec instead; the assistant points there, per call."
     },
+    "unknown_load": {
+      "surface": "inline",
+      "why": "Load-profile generation named a load that is not on the open network. The detail lists the loads; the assistant asks which one, per call."
+    },
+    "unknown_archetype": {
+      "surface": "inline",
+      "why": "Load-profile generation named an archetype or preset that does not exist. The detail lists the available ones; the assistant picks one, per call."
+    },
+    "invalid_archetype_params": {
+      "surface": "inline",
+      "why": "A load archetype's parameters are missing, unknown or out of range (no peak_mw or annual_mwh, a misspelt key, a bad timezone or holiday). The detail names the parameter; the assistant fixes it and retries, per call."
+    },
     "point_not_in_profile": {
       "surface": "inline",
       "why": "apply_generated_profile asked for a point the pending profile does not hold. The detail lists the points it does hold; the assistant picks the right point_id, per call."

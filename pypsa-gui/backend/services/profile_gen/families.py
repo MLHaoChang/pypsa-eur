@@ -47,6 +47,8 @@ class Family:
     # generator behind `engine.generate_profile(family=...)`. The renewable
     # family generates through the engine's source registry instead.
     generate: _Generate | None = None
+    # Where an artifact of this family goes when the caller names no target.
+    default_target: Target | None = None
 
 
 _FAMILIES: dict[str, Family] = {}
@@ -73,6 +75,25 @@ def get_family(name: str) -> Family:
             f"unknown profile family {name!r}; registered: "
             f"{', '.join(sorted(_FAMILIES))}"
         ) from None
+
+
+def default_target(meta: Mapping[str, Any], component_type: str | None,
+                   attribute: str | None) -> Target:
+    """The (component_type, attribute) an apply writes: the caller's, or the
+    family's default. Raises the apply path's UnsupportedTargetError when
+    neither names one."""
+    if component_type and attribute:
+        return component_type, attribute
+    family = get_family(family_of(meta))
+    if family.default_target is None or (
+            component_type and component_type != family.default_target[0]):
+        from services.profile_gen.apply import UnsupportedTargetError
+
+        raise UnsupportedTargetError(
+            f"a {family.name} profile has no default target here; name "
+            "component_type and attribute"
+        )
+    return family.default_target
 
 
 def _renewable_guard(ctx, component_type: str, component: str,
@@ -106,6 +127,7 @@ def _renewable_guard(ctx, component_type: str, component: str,
 register_family(Family(
     "renewable", frozenset({("generators", "p_max_pu")}),
     guard=_renewable_guard,
+    default_target=("generators", "p_max_pu"),
 ))
 # The data-centre template's facility load is split across these two loads by
 # its `dc_load` spec's critical share (#421); a profile on either would break
@@ -146,7 +168,8 @@ def _load_generate(ids, archetype, params, year):
 
 
 register_family(Family("load", frozenset({("loads", "p_set")}),
-                       guard=_load_guard, generate=_load_generate))
+                       guard=_load_guard, generate=_load_generate,
+                       default_target=("loads", "p_set")))
 register_family(Family(
     "availability",
     frozenset({("generators", "p_max_pu"), ("generators", "p_min_pu")}),
