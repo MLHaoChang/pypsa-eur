@@ -344,3 +344,63 @@ def test_a_load_family_cannot_write_a_generator_bound():
     _net()
     with pytest.raises(CarrierMismatchError, match="generators/p_max_pu"):
         assign_profile(_ctx(), "CHP", _shape(), _load_meta(), now=NOW)
+
+
+def test_a_currency_year_that_is_not_a_year_is_a_typed_refusal():
+    _net()
+    with pytest.raises(InvalidSeriesUnitError, match="currency_year"):
+        assign_profile(_ctx(), "CHP", pd.Series(40.0, index=_year(2023)),
+                       _price_meta(currency_year="last year"),
+                       attribute="marginal_cost", now=NOW)
+
+
+# ── links / efficiency, storage_units / inflow ──────────────────────────────
+
+def _link_net():
+    n = _net()
+    n.add("Bus", "B2")
+    n.add("Link", "HP", bus0="B1", bus1="B2", p_nom=10.0)
+    n.add("StorageUnit", "Hydro", bus="B1", p_nom=10.0, max_hours=100.0)
+    return n
+
+
+def test_an_efficiency_series_lands_on_the_link():
+    n = _link_net()
+    assign_profile(_ctx(), "HP", pd.Series(3.2, index=_year(2023)),
+                   _price_meta(unit=None), component_type="links",
+                   attribute="efficiency", now=NOW)
+    assert float(n.links_t.efficiency["HP"].iloc[0]) == pytest.approx(3.2)
+
+
+def test_a_non_positive_efficiency_is_refused():
+    _link_net()
+    s = pd.Series(3.2, index=_year(2023))
+    s.iloc[5] = 0.0
+    with pytest.raises(ProfileApplyError, match="positive"):
+        assign_profile(_ctx(), "HP", s, _price_meta(unit=None),
+                       component_type="links", attribute="efficiency", now=NOW)
+    assert ("links", "efficiency", "HP") not in _user_ts
+
+
+def test_inflow_energy_is_counted_with_the_stores_weighting():
+    n = _link_net()
+    n.snapshot_weightings.loc[:, "generators"] = 0.5  # not the one inflow uses
+    out = assign_profile(_ctx(), "Hydro", pd.Series(2.0, index=_year(2023)),
+                         _price_meta(unit="MW"),
+                         component_type="storage_units", attribute="inflow",
+                         now=NOW)
+    assert float(n.storage_units_t.inflow["Hydro"].iloc[0]) == pytest.approx(2.0)
+    assert out["modelled_mwh"] == {"total": pytest.approx(2.0 * 8760)}
+    assert not any(w.startswith(ENERGY_MISMATCH_WARNING) for w in out["warnings"])
+
+
+def test_a_weekly_shape_records_the_source_years_energy():
+    # A weekly mean series' edge weeks straddle the year; the energy is the
+    # mean power over the year's hours, not 168 h per point.
+    _net()
+    idx = pd.date_range("2022-12-26", "2023-12-25", freq="W-MON")
+    s = pd.Series(1.0, index=idx)
+    out = assign_profile(_ctx(), "L1", s,
+                         _load_meta(unit="per_unit_peak", resolution="weekly"),
+                         component_type="loads", attribute="p_set", now=NOW)
+    assert out["profile_annual_mwh"] == pytest.approx(50.0 * 8760)

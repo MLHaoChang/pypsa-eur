@@ -809,3 +809,21 @@ def test_reshaping_a_shaped_profile_keeps_the_whole_op_chain(
     root = first["stats"]["g_wind"]["parent_stats"]
     assert chain["parent_stats"] == root
     assert abs(chain["result_stats"]["flh"] - 2000) < 10
+
+
+def test_every_new_apply_refusal_maps_to_its_literal_error_kind():
+    from routers.profiles import _apply_refusal_kind
+    from services.profile_gen import apply
+
+    cases = {
+        apply.UnsupportedTargetError: "unsupported_target",
+        apply.UnknownFamilyError: "unknown_family",
+        apply.FamilyTargetMismatchError: "family_target_mismatch",
+        apply.InvalidSeriesUnitError: "invalid_series_unit",
+        apply.ProfileBoundConflictError: "profile_bound_conflict",
+        apply.ComponentNotFoundError: "component_not_found",
+        # Not in the table: the class-name fallback, as before.
+        apply.CarrierMismatchError: "carrier_mismatch",
+    }
+    for cls, kind in cases.items():
+        assert _apply_refusal_kind(cls("x")) == {"error_kind": kind}

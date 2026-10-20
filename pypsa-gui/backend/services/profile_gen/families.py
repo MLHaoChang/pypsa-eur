@@ -22,16 +22,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from services.profile_gen.engine import ProfileGenError
-
 DEFAULT_FAMILY = "renewable"
 
 Target = tuple[str, str]
 _Guard = Callable[[Any, str, str, Mapping[str, Any]], None]
-
-
-class UnknownFamilyError(ProfileGenError):
-    """The meta names a family nobody registered."""
 
 
 @dataclass(frozen=True)
@@ -41,7 +35,6 @@ class Family:
     # (network, component_type, component, meta) -> None; raises a typed
     # ProfileApplyError to refuse.
     guard: _Guard | None = None
-    description: str = ""
 
 
 _FAMILIES: dict[str, Family] = {}
@@ -57,6 +50,10 @@ def family_of(meta: Mapping[str, Any]) -> str:
 
 
 def get_family(name: str) -> Family:
+    # The apply path's error types live in apply.py, which imports this
+    # module — hence the import here, as in `_renewable_guard`.
+    from services.profile_gen.apply import UnknownFamilyError
+
     try:
         return _FAMILIES[name]
     except KeyError:
@@ -96,16 +93,11 @@ def _renewable_guard(n, component_type: str, component: str,
 register_family(Family(
     "renewable", frozenset({("generators", "p_max_pu")}),
     guard=_renewable_guard,
-    description="wind/solar capacity factors from weather data",
 ))
-register_family(Family(
-    "load", frozenset({("loads", "p_set")}),
-    description="demand profiles: archetypes or measured uploads",
-))
+register_family(Family("load", frozenset({("loads", "p_set")})))
 register_family(Family(
     "availability",
     frozenset({("generators", "p_max_pu"), ("generators", "p_min_pu")}),
-    description="maintenance, outages, must-run and derating bounds",
 ))
 register_family(Family(
     "series",
@@ -113,5 +105,4 @@ register_family(Family(
         ("generators", "marginal_cost"), ("links", "marginal_cost"),
         ("links", "efficiency"), ("storage_units", "inflow"),
     }),
-    description="other model series: prices, efficiencies, hydro inflow",
 ))

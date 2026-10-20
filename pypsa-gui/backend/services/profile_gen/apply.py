@@ -1,4 +1,9 @@
-"""Apply a generated renewable profile to a network generator.
+"""Apply a generated profile to a network component.
+
+Originally the renewable path (generator p_max_pu); since the time-series
+generators ticket 01 the target is any ``(component_type, attribute)`` in
+`TARGETS`, and the meta's family (`families.py`) decides which targets it may
+write. The alignment and write contract below hold for every target.
 
 Spec: docs/superpowers/specs/2026-10-17-renewable-profile-generator-spec.md §4
 Plan: docs/superpowers/plans/2026-10-17-renewable-profile-generator.md Task 5
@@ -19,7 +24,7 @@ reindexing:
     into EVERY period by month-day-hour, leap rules applied per period
     (owner ruling D7=B); meta ``tiled: true`` + the weather year.
 
-Write contract: store entry ``("generators", "p_max_pu", name)`` + provenance
+Write contract: store entry ``(component_type, attribute, name)`` + provenance
 meta (the `_user_ts_meta` channel), `_t` reapply, changelog, dispatch
 invalidation via `services/dispatch_status.clear_dispatch` — a profile change
 invalidates solved results exactly like a topology edit does. Overwrite
@@ -32,7 +37,7 @@ from __future__ import annotations
 
 import datetime as _dt
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 import numpy as np
 import pandas as pd
@@ -40,11 +45,7 @@ import pandas as pd
 from services import change_log_service
 from services.dispatch_status import clear_dispatch
 from services.profile_gen.engine import ProfileGenError
-from services.profile_gen.families import (  # noqa: F401 — re-exported
-    UnknownFamilyError,
-    family_of,
-    get_family,
-)
+from services.profile_gen.families import family_of, get_family
 from services.pypsa_service import PyPSAService
 from services.user_timeseries import (
     _reapply_user_ts_to_network,
@@ -80,6 +81,10 @@ class LeapYearMismatchError(ProfileApplyError):
 
 class InvalidTimeBasisError(ProfileApplyError):
     """The declared snapshot time basis is not "UTC" or an IANA zone."""
+
+
+class UnknownFamilyError(ProfileApplyError):
+    """The meta names a profile family nobody registered."""
 
 
 class UnsupportedTargetError(ProfileApplyError):
@@ -537,16 +542,19 @@ class TargetSpec:
       * ``ratio`` — strictly positive (an efficiency or COP).
     """
 
-    kind: str
+    kind: Literal["per_unit", "power", "price", "ratio"]
     display: str  # changelog class, e.g. "Generator"
     noun: str     # error wording, e.g. "generator"
+    # The snapshot weighting a power series' energy is counted with.
+    weighting: str = "generators"
 
 
 TARGETS: dict[tuple[str, str], TargetSpec] = {
     ("generators", "p_max_pu"): TargetSpec("per_unit", "Generator", "generator"),
     ("generators", "p_min_pu"): TargetSpec("per_unit", "Generator", "generator"),
     ("loads", "p_set"): TargetSpec("power", "Load", "load"),
-    ("storage_units", "inflow"): TargetSpec("power", "StorageUnit", "storage unit"),
+    ("storage_units", "inflow"): TargetSpec("power", "StorageUnit", "storage unit",
+                                            weighting="stores"),
     ("generators", "marginal_cost"): TargetSpec("price", "Generator", "generator"),
     ("links", "marginal_cost"): TargetSpec("price", "Link", "link"),
     ("links", "efficiency"): TargetSpec("ratio", "Link", "link"),
@@ -559,10 +567,6 @@ _BOUND_PAIRS = {"p_min_pu": "p_max_pu", "p_max_pu": "p_min_pu"}
 # before the apply warns (gatekeeper review 2026-10-20).
 ENERGY_TOLERANCE = 0.02
 ENERGY_MISMATCH_WARNING = "energy_mismatch"
-
-# Hours one step of a source resolution stands for — a daily or weekly value
-# is a mean over its hours.
-_STEP_HOURS = {"hourly": 1.0, "daily": 24.0, "weekly": 168.0}
 
 # How close a normalised shape's peak/mean must be to 1.
 _NORM_RTOL = 1e-3
@@ -631,18 +635,29 @@ def _money(meta: Mapping[str, Any]) -> dict:
             f"{meta.get('price_basis')!r}"
         )
     year = meta.get("currency_year")
-    money = (f"{basis} basis, {int(year)} {cur}" if year is not None
-             else f"{basis} basis, {cur} (currency year not stated)")
-    return {"unit": unit, "price_basis": basis, "money": money}
+    if year is None:
+        # The money-year convention: never a guessed year
+        # (`finance.report.basis_statement`).
+        return {"unit": unit, "price_basis": basis,
+                "money": f"{basis} basis, {cur} (currency year not stated)"}
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        raise InvalidSeriesUnitError(
+            f"currency_year must be a year, got {year!r}") from None
+    return {"unit": unit, "price_basis": basis, "currency_year": year,
+            "money": f"{basis} basis, {year} {cur}"}
 
 
 def _current_bound(n, component_type: str, component: str, attribute: str):
     """The component's present value of ``attribute`` per snapshot: its
     series when it has one, else its static value."""
+    static = float(getattr(n, component_type).at[component, attribute])
     table = getattr(n, f"{component_type}_t")[attribute]
     if component in table.columns:
-        return table[component].reindex(n.snapshots).to_numpy(dtype=float)
-    static = float(getattr(n, component_type).at[component, attribute])
+        # A gap in the series is the static value, as PyPSA reads it.
+        return (table[component].reindex(n.snapshots).fillna(static)
+                .to_numpy(dtype=float))
     return np.full(len(n.snapshots), static)
 
 
@@ -663,9 +678,9 @@ def _check_bound_pair(n, component_type: str, component: str, attribute: str,
         )
 
 
-def _modelled_mwh(n, aligned: pd.Series) -> dict[str, float]:
-    """Σ value × snapshot_weightings.generators, per investment period."""
-    w = n.snapshot_weightings["generators"].reindex(aligned.index).to_numpy(dtype=float)
+def _modelled_mwh(n, aligned: pd.Series, weighting: str) -> dict[str, float]:
+    """Σ value × snapshot_weightings[weighting], per investment period."""
+    w = n.snapshot_weightings[weighting].reindex(aligned.index).to_numpy(dtype=float)
     energy = pd.Series(aligned.to_numpy(dtype=float) * w, index=aligned.index)
     if isinstance(aligned.index, pd.MultiIndex):
         per = energy.groupby(level=0).sum()
@@ -767,8 +782,8 @@ def assign_profile(
             i = int(np.flatnonzero(vals < 0.0)[0])
             raise ProfileApplyError(
                 f"{target.noun} {component!r}: {attribute} is negative "
-                f"({vals[i]:.4g} MW at {aligned.index[i]}); a net export is "
-                "a generator beside the load, not a negative load"
+                f"({vals[i]:.4g} MW at {aligned.index[i]}); model a net "
+                "export as a generator beside it, not a negative value"
             )
     elif target.kind == "ratio":
         if (vals <= 0.0).any():
@@ -780,9 +795,13 @@ def assign_profile(
     aligned = pd.Series(vals, index=aligned.index, name=aligned.name)
 
     if target.kind == "power":
-        step_h = _STEP_HOURS.get(resolution, 1.0)
-        profile_mwh = float(series.to_numpy(dtype=float).sum() * scale * step_h)
-        modelled = _modelled_mwh(n, aligned)
+        # The source year's energy: its mean power over its hours. For an
+        # hourly series this is the plain sum; a daily or weekly series is a
+        # mean per step, and a weekly one's edge weeks straddle the year.
+        src_year = int(align_meta["weather_year"])
+        year_hours = 8784 if pd.Timestamp(year=src_year, month=1, day=1).is_leap_year else 8760
+        profile_mwh = float(np.nanmean(series.to_numpy(dtype=float)) * scale * year_hours)
+        modelled = _modelled_mwh(n, aligned, target.weighting)
         unit_meta["profile_annual_mwh"] = profile_mwh
         unit_meta["modelled_mwh"] = modelled
         if profile_mwh > 0:
