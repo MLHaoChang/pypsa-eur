@@ -57,10 +57,14 @@ The owner chose Q8 = A: users bring their own market data, and nothing is redist
   - the illustrative price shapes, which stay labelled `illustrative`.
 
   Each of these is an `lp_input` when the LP reads it (#447 §2.0).
-- **Engine work (the gatekeeper):**
-  - a new external fetch service, with timeouts and its own error kinds;
-  - secret storage for the token;
-  - `SeriesMeta` and `PriceSeriesRef` gaining **currency, `price_basis`, `currency_year` and region**: the same rule #445 applies to price series, and K0 applies to tariffs.
+- **Engine rules (gatekeeper, 2026-10-20):**
+  - a new external fetch service, with timeouts and typed error kinds. A missing or invalid token gives a typed refusal, and the token never appears in logs, series meta or error text;
+  - `SeriesMeta` (extra = forbid) and `PriceSeriesRef` gain **currency, `price_basis`, `currency_year` and region**, with defaults. The `PriceSeriesRef` fields go in `services/commercial/hashing.FIELDS_AFTER_V1` (default None), so existing hashes don't move;
+  - **region is the ENTSO-E bidding zone** (DE-LU, NO1…NO5, SE1…SE4, IT-*), not `MarketRegion` (a tariff-market literal that can't name zones);
+  - **times**: stored in UTC with `source_time_basis`, as in #445;
+  - **resolution**: the native one is recorded (day-ahead is 15 min since the SDAC MTU change in October 2025). It is resampled to the snapshot step by a time-weighted mean, and the panel says so;
+  - **money basis**: a multi-year series is `price_basis: nominal` with a `currency_year` per delivery year. It is converted to the study's real basis with the existing money-year escalation, never a second one;
+  - **gaps** follow the load-upload rules. **Negative prices are kept**: CfD `suspend_on_negative_price` reads them.
 
 ---
 
@@ -85,10 +89,10 @@ Defaults exist to "push off a model". They are **never market data**.
 |---|---|---|---|
 | Pay-as-produced | price, tenor, asset | indexation, volume cap, floor/cap (market + premium), base year | `PpaContract` `pay_as_produced` |
 | Baseload | price, MW, tenor | indexation, volume cap | `PpaContract` `baseload` |
-| As-consumed / shaped | price, tenor, load | shape, volume cap | `as_consumed_btm` (behind the meter); **a shaped off-site profile is a gap** |
+| As-consumed / shaped | price, tenor, load | shape, volume cap | `as_consumed_btm` behind the meter; the **shaped off-site (virtual) PPA** is a financial CfD on a shape (the swap row's notional-volume CfD) |
 | Sleeved | price, sleeving fee, tenor | sleeving party, indexation | `PpaContract` `sleeved` |
 | CfD (financial / virtual PPA) | strike, reference series, tenor | capture mode, negative-price suspension, indexation | `CfdContract` |
-| Swap (fixed for floating) | fixed price, volume, reference series, tenor | settlement | **gap: no contract type**; maps to a CfD without an asset only if the gatekeeper agrees (K0/K7) |
+| Swap (fixed for floating) | fixed price, volume, reference series, tenor | settlement | **one type, not a new one** (gatekeeper): `CfdContract` gains a volume basis: either `asset_ids` or a notional volume (baseload MW, or a shape series), exactly one, checked by a validator. A notional-volume CfD settles only and is not an LP term. The new fields go in `FIELDS_AFTER_V1`. It is a gated plan when built (K7) |
 
 **Numbers** (owner Q11 = A): one illustrative EU-wide set authored by us, with each value's public reference range cited, and labelled so it can't be mistaken for data. Zone values (DE, NL, ES, Nordics) come only from an org pack (Q10 = A) or the owner's sourcing. The defaults never set `changes_dispatch`.
 
@@ -111,11 +115,15 @@ The groups share one model. Every hand-over below already exists in code, and ea
 
 **Feedback never edits inputs silently.** A downstream finding (an overloaded transformer, a grid-code fail, a tuning recommendation) comes back as a flow item on its home section. Or it comes as a proposed change on the EditCard (old → new, section named). The user, or the copilot with confirmation, applies it, and the one Run reruns what is stale.
 
-**One Run reruns what is stale.** The flow endpoint's `results.freshness` (B1) grows to one freshness per run kind, `{optimisation, study, loadflow, control_checks, investment_case}`. Run then offers "Run (3 stale)" over the requested kinds whose results are stale. Per-kind freshness **never feeds `run_ready`**: "Run (n stale)" is a convenience, and the gate stays R1. This is a B1 follow-up, and the gatekeeper is told.
+**One Run reruns what is stale.** The flow endpoint's `results.freshness` (B1) grows to one freshness per run kind, `{optimisation, study, loadflow, control_checks, investment_case}`. Run then offers "Run (3 stale)" over the requested kinds whose results are stale. Per-kind freshness **never feeds `run_ready`**: "Run (n stale)" is a convenience, and the gate stays R1. This is a B1 follow-up, and the gatekeeper is told. **Staleness is a hash of the inputs each kind reads, never timestamps** (gatekeeper). The grid-readiness scorecard is not a run kind; the investment case has the wider staleness of #447 §8.
 
 ### 3.1 One inconsistency to settle (gatekeeper)
 
-The campus draft and the SCR gate read the **optimised** sizes. The island study **re-optimises** its own. For integration, the island study should state which sizing it uses, and offer "use the capacity plan's sizes". Whether that's a mode of the island solver or a fixed-size run is engine semantics for the gatekeeper.
+The campus draft and the SCR gate read the **optimised** sizes. The island study **re-optimises** its own. The gatekeeper's answer: offer a **fixed-size island mode**, "use the capacity plan's sizes".
+- It copies the plan's `p_nom_opt` → `p_nom` with extendable off, and records the source run and its hash. It goes stale when that plan reruns.
+- As a bonus, fixed gensets get real unit commitment (extendable ones are skipped today).
+- The default stays the current re-sizing mode, byte-identical.
+- The campus draft and the SCR gate say which sizes they used.
 
 ---
 
@@ -168,6 +176,9 @@ W4a's done-when gains a round-trip test: on → set values → off → on keeps 
 
 - **Declared changes stay true.** While a case is the active project, every write through the normal write path (asset writes, section editors, table edits, the EditCard, the copilot) appends to the case's declared changes (path, old → new). A path that can't append (for example an import that replaces the network) marks the case "edited outside its declared changes". Compare then shows that case's differences as "declared + other edits (see diff)" and links to a network diff against the base. S5's done-when includes a test: edit a case through a normal editor, and its declared changes include the edit.
 - **Never edit the wrong project.** While a case is active, a persistent banner shows in both modes: "Editing case <name> (base: <base>) · Back to base". The Duplicate-and-change form writes only to the new case, and its header names the case. Switching between the base and its cases keeps the section (`activeSection`, #444 §7).
+- **Each case stores its base's hash at copy.**
+- **Re-applying onto a changed base** refuses, change by change, when the target is gone or the base value under it changed since the copy. It never overwrites silently.
+- **Compare refuses or labels a case** whose snapshots, money basis or time basis differ from the base's.
 - **A case's results are stale when its own inputs change.** They are **not** stale when the base changes after the copy: a copy is a copy, and the row says "base changed since copy". Re-deriving a case from a changed base is an explicit action ("Re-apply changes to the current base").
 - A case may switch groups on or off. Compare then lists the group-specific KPIs as "outside scope" for the cases without it.
 
