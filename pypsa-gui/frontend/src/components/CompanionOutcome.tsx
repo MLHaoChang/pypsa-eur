@@ -30,10 +30,14 @@ function checkedLabel(answer: OwnedCheckedAnswer): string {
   return 'Checked evidence and limitations'
 }
 
-function OutcomeCard({ message, checked, failed, download }: {
+function OutcomeCard({ message, checked, failed, download, docked }: {
   message: ChatMessage | null; checked: boolean; failed: boolean;
-  download: ReturnType<typeof downloadHref>;
+  download: ReturnType<typeof downloadHref>; docked: boolean;
 }) {
+  // Docked (a full-screen tab, where the launcher sits over page content): the
+  // answer starts as a one-line chip in the launcher's footprint. Opening it is
+  // the user's act; it never closes on a timer.
+  const [open, setOpen] = useState(!docked)
   const [verified, setVerified] = useState<{ message: ChatMessage; answer: OwnedCheckedAnswer } | null>(null)
   const [unavailable, setUnavailable] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -64,6 +68,20 @@ function OutcomeCard({ message, checked, failed, download }: {
   const label = checked ? answer ? checkedLabel(answer) : missing ? 'Checked answer unavailable' : 'Checking saved answer'
     : failed || message?.interrupted ? 'Response incomplete — not checked' : 'Answer not checked'
   const openTranscript = () => useUIStore.getState().setAssistantDockOpen(true)
+  if (!open) {
+    return <section data-testid="companion-outcome" data-docked="true" data-no-panel-close aria-label="Assistant answer"
+      className="w-max max-w-[10rem] rounded-xl border border-border bg-bg-2 px-3 py-2 shadow-lg text-xs text-text">
+      <p className="font-medium" role="status">{label}</p>
+      <div className="mt-1 flex flex-wrap gap-x-3">
+        <button type="button" className="underline" aria-expanded={false} data-testid="companion-outcome-show"
+          onClick={() => setOpen(true)}>Show answer</button>
+        {!checked && download && <a data-testid="companion-download" className="underline"
+          href={download.href} download={download.filename ?? undefined}>Download</a>}
+      </div>
+      {/* The same words as the transcript (LC-C7): read by screen readers, shown when opened. */}
+      {body && <div className="sr-only" data-testid="companion-answer-text"><ChatMarkdown>{body}</ChatMarkdown></div>}
+    </section>
+  }
   return <section data-testid="companion-outcome" data-no-panel-close
     data-answer-id={answer?.answer_id} data-answer-sha256={answer?.receipt.content_sha256}
     aria-label="Assistant answer"
@@ -90,6 +108,8 @@ function OutcomeCard({ message, checked, failed, download }: {
       {body && <button type="button" className="underline" aria-expanded={expanded}
         onClick={() => setExpanded(v => !v)}>{expanded ? 'Collapse answer' : 'Expand answer'}</button>}
       <button type="button" className="underline" onClick={openTranscript}>Open transcript</button>
+      {docked && <button type="button" className="underline" aria-expanded={true} data-testid="companion-outcome-hide"
+        onClick={() => setOpen(false)}>Hide answer</button>}
       {checked && <button type="button" className="underline" onClick={() => {
         setVerified(null); setRevision(r => r + 1)
       }}>Refresh evidence</button>}
@@ -101,8 +121,9 @@ function OutcomeCard({ message, checked, failed, download }: {
   </section>
 }
 
-/** Latest completed turn only. No model paraphrase, timed dismissal or raw checked artifact admission. */
-export default function CompanionOutcome({ hidden = false }: { hidden?: boolean }) {
+/** Latest completed turn only. No model paraphrase, timed dismissal or raw checked artifact admission.
+ * `docked`: starts as a one-line chip (full-screen tabs, where it would cover page content). */
+export default function CompanionOutcome({ hidden = false, docked = false }: { hidden?: boolean; docked?: boolean }) {
   const messages = useChatStore(s => s.messages)
   const streaming = useChatStore(s => s.streaming)
   const error = useChatStore(s => s.error)
@@ -124,5 +145,5 @@ export default function CompanionOutcome({ hidden = false }: { hidden?: boolean 
   if (hidden || streaming || mismatch || wrongProject
     || (!message && !download && !error)) return null
   const key = JSON.stringify([project, session, sequence, generation, profile, user?.id])
-  return <OutcomeCard key={key} message={message} checked={checked} failed={!!error} download={download} />
+  return <OutcomeCard key={key} message={message} checked={checked} failed={!!error} download={download} docked={docked} />
 }

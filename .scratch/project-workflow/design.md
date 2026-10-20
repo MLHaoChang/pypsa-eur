@@ -114,7 +114,7 @@ One sequence for every project and every template. Each row names what the secti
 | 5 | **Assets & sizing** | generation, storage, conversion and process units: existing vs candidate, sizing (manual or auto-sized: `p_nom_extendable`, `p_nom_min`, `p_nom_max`), unit commitment (min load, min up/down, ramp, restart), backup mode (genset / BESS / hybrid), control presets (grid following, grid forming support, fast frequency response, voltage support), the power architecture (AC, MV UPS, 800 VDC, SST), outage data, overnight cost and lifetime per asset (with an editable "All asset costs" table) | *What is built or could be built, and how it behaves.* An asset's sizing, its controls and its reliability data are one form (B3 pattern), never three panels. | the candidate set (the optimisation), presets (the grid-readiness scorecard), outage data (the reliability study) |
 | 6 | **Time series & profiles** | the overview and QA of every series from sections 3, 4, 5 and 7: load profiles, renewable profiles, availability (maintenance, forced outage, must-run, derating), price series, inflow, COP, process schedules, each with its provenance (`measured`, `generated`, `assumed`, `network_native`, missing) and the `timeseries_qa` result; the bulk action "Generate defaults for all"; Profile Studio (Expert only) | *Overview and QA, not a second place to create a series.* A series is **parametrised where its owner is edited**: a load's archetype or upload on the load (4), maintenance, must-run and outages in the asset's Availability block (5), an energization schedule on the connection (3), a price series on its tariff or market bundle (7). A row here opens that same editor in a drawer, so there is one editor per series. The bulk "Generate defaults for all" is the one action that starts here. | a series on every field the LP reads, each with a provenance |
 | 7 | **Commercial & parties** | tariffs, the market bundle per country, contracts (PPA, swap, demand response, offsite PPA), finance inputs (discount rate, money year, price basis, the project-wide default lifetime; a read-only summary of asset costs, whose home is 5), parties and who owns or earns what (the party board over `ValueFlowConfig`), reserve-market products and their prices | *Money: who pays whom, for what, at what price.* Every price and every money split is here. No price is edited in Results. | the investment case, the bill, the ledger |
-| 8 | **Scenarios & optimisation** | what the run should answer: the objective, foresight, solver, VOLL and CO₂ price, the reliability goal (LOLE / ENS cap), stress scenarios, variants and sweeps (multi-value chips from the asset forms), rolling operation | *The question asked of the model.* Settings that change the answer but not the site. | the run request |
+| 8 | **Scenarios & optimisation** | what the run should answer: the objective, foresight, solver, VOLL, the CO₂ price (read-only; home 7c), the reliability goal (LOLE / ENS cap), stress scenarios, variants and sweeps (multi-value chips from the asset forms), rolling operation | *The question asked of the model.* Settings that change the answer but not the site. | the run request |
 | 9 | **Readiness → run** | the preflight summary of sections 1–8, the grid-readiness scorecard, the EH readiness estimate, Run | *Nothing to edit.* Each line here links to the field in its own section. | a solve, a study |
 | 10 | **Results → reports** | results groups (Summary, Investment, Grid plan, Reliability, Operation), post-solve studies (campus electrical, planning → dynamics, decision study), reports | *What the run found.* Read-only for model inputs: an input shown here links back to its section. | report files |
 
@@ -136,6 +136,7 @@ The rule: **a value is edited in one section and shown read-only wherever it mat
 | Stage peaks | 4 | the energization table in 3 |
 | A party tag on an asset or contract | 5 / 7 (contract) | the party board in 7 |
 | Discount rate | 7 | Solver settings in 8 (today it is editable in both; see §1) |
+| CO₂ price path | 7c (commercial-finance.md) | section 8 (read-only), results |
 | Overnight cost, lifetime of an asset | 5 (asset form, "All asset costs" table) | the cost summary in 7, the investment case in 10 |
 | The reliability goal | 8 | the Reliability results header |
 | Grid-code limits | 3 | the grid-readiness scorecard in 9, the compliance study in 10 |
@@ -403,6 +404,11 @@ I apply this to the exact head SHA of every PR that changes UI, and reply "OK #<
 9. **Words.** Labels use the glossary (`CONTEXT.md`), no stage ids or code names in the UI, "assumed" shown on assumed values.
 10. **Assistant parity.** If the PR adds a field or a section item, the assistant can read it (flow endpoint) and the harness workflow step names its section.
 11. **Evidence.** Screenshots of the section in Guided and Expert, before and after, on at least one template where the section is pre-filled and one where it is required.
+12. **Examples stay editable** (owner rule, 2026-10-20). Every value a template or example pre-fills can be changed in both modes:
+    - in Guided, as a key parameter or under Advanced on its card;
+    - in Expert, in the full editor, with reset to the template value.
+
+    A template-locked value is allowed only where the engine requires it. It is shown read-only with the reason, and the PR lists every locked value.
 
 ---
 
