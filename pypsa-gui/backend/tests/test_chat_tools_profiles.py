@@ -36,6 +36,7 @@ PROFILE_TOOLS = (
     "apply_generated_profile",
     "list_load_profile_archetypes",
     "generate_load_profile",
+    "generate_availability_profile",
 )
 
 SNAPS_2025 = pd.date_range("2025-01-01", periods=8760, freq="h")
@@ -98,6 +99,7 @@ def test_safety_tiers_match_the_declared_markers():
     assert safety_tier_for("apply_generated_profile") == "write"
     assert safety_tier_for("list_load_profile_archetypes") == "read"
     assert safety_tier_for("generate_load_profile") == "execution"
+    assert safety_tier_for("generate_availability_profile") == "execution"
 
 
 def test_route_templates_are_in_the_phase0_inventory():
@@ -456,3 +458,25 @@ def test_apply_generated_profile_passes_an_explicit_target(
             point_id="plant", component_type="generators", attribute="p_max_pu",
         )
     assert err.value.detail["error_kind"] == "family_target_mismatch"
+
+
+def test_a_maintenance_window_applies_through_the_chat_tools(
+    client, install_network, bound_ctx,
+):
+    n = _wind_network()
+    n.add("Carrier", "gas")
+    n.add("Generator", "chp", bus="B1", carrier="gas", p_nom=10.0)
+    install_network(n)
+    assert client.post("/api/projects/Chat CHP",
+                       params={"force": True, "rebind": True}).status_code == 200
+    with bound_ctx(client) as ctx:
+        gen = chat_tools.DISPATCHERS["generate_availability_profile"](
+            project_id="Chat CHP", kind="maintenance", generators=["chp"],
+            params={"windows": [{"from": "07-03", "to": "07-04"}]},
+        )
+        out = chat_tools.DISPATCHERS["apply_generated_profile"](
+            project_id="Chat CHP", job_id=gen["job_id"], component="chp",
+            time_basis="UTC",
+        )
+    assert out["attribute"] == "p_max_pu"
+    assert ("generators", "p_max_pu", "chp") in ctx.user_ts

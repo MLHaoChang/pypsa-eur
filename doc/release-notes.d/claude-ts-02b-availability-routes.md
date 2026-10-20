@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): `POST /api/projects/{name}/profiles/availability/generate` and the `generate_availability_profile` assistant tool generate maintenance, must-run and derating bounds for named generators; the profile apply route writes each to the bound it states.

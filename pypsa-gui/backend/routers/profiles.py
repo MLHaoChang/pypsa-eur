@@ -59,6 +59,12 @@ from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
 from services.profile_gen.engine import ProfileGenError
 from services.profile_gen.families import default_target
 from services.profile_gen.job import KEEP_PENDING, write_pending
+from services.profile_gen.availability import (
+    ForcedOutagesNotWrittenError,
+    InvalidAvailabilityParamsError,
+    MaintenanceYearError,
+    UnknownAvailabilityKindError,
+)
 from services.profile_gen.load_upload import (
     UploadCoverageError,
     UploadFormatError,
@@ -138,6 +144,17 @@ class LoadGenerateRequest(BaseModel):
     params: dict[str, Any] | None = None
     year: int | None = None
     resolution: Literal["hourly", "daily", "weekly"] = "hourly"
+
+
+class AvailabilityGenerateRequest(BaseModel):
+    # An availability kind (`services/profile_gen/availability.py`) for the
+    # named generators of the open network; one column per generator.
+    kind: str
+    generators: list[str] = Field(min_length=1)
+    params: dict[str, Any] | None = None
+    # The source year. Unset: the network's (first period's) year, so dated
+    # maintenance windows land where the user means them.
+    year: int | None = None
 
 
 class ShapeRequest(BaseModel):
@@ -350,6 +367,10 @@ _LOAD_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (UploadUnitError, {"error_kind": "load_upload_unit"}),
     (UploadCoverageError, {"error_kind": "load_upload_coverage"}),
     (UploadNoLoadError, {"error_kind": "unknown_load"}),
+    (ForcedOutagesNotWrittenError, {"error_kind": "forced_outages_not_written"}),
+    (UnknownAvailabilityKindError, {"error_kind": "unknown_availability_kind"}),
+    (InvalidAvailabilityParamsError, {"error_kind": "invalid_availability_params"}),
+    (MaintenanceYearError, {"error_kind": "maintenance_year"}),
 )
 
 
@@ -673,6 +694,75 @@ async def upload_load_profiles(
     preview = _preview_load_energy(ctx, frame, record, stats)
     return {**record, "unmatched": unmatched, "stats": stats,
             "warnings": preview}
+
+
+@project_router.post("/{name}/profiles/availability/generate")
+def generate_availability_profiles(
+    body: AvailabilityGenerateRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Generate an availability bound (maintenance, must_run, derating) for
+    named generators into the pending store; `/profiles/apply` writes it to
+    the target it states (p_max_pu or p_min_pu). Synchronous, like the load
+    archetypes; nothing touches the network here."""
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "generate")
+    gens = ctx.network.generators
+    missing = [g for g in body.generators if g not in gens.index]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "unknown_generator",
+                    "message": f"no generator named {', '.join(map(repr, missing))} "
+                               f"on the open network"},
+        )
+    weather = [g for g in body.generators
+               if any(t in str(gens.at[g, "carrier"] or "").lower()
+                      for t in ("wind", "solar", "pv"))]
+    if weather:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "carrier_mismatch",
+                    "message": f"{', '.join(map(repr, weather))} carry a weather "
+                               "profile; an availability series would overwrite it"},
+        )
+    snaps = ctx.network.snapshots
+    first = (snaps.get_level_values(-1)[0] if isinstance(snaps, pd.MultiIndex)
+             else pd.DatetimeIndex(snaps)[0])
+    params = dict(body.params or {})
+    if "timezone" not in params:
+        from services.profile_gen.apply import _commercial_timezone
+
+        tz = _commercial_timezone(ctx)
+        if tz:
+            params["timezone"] = tz
+    try:
+        result = engine.generate_profile(
+            body.generators, body.kind, params=params,
+            year=body.year or int(first.year), family="availability",
+        )
+    except ProfileGenError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc), "message": str(exc)},
+        ) from exc
+
+    job_id = str(uuid.uuid4())
+    record = dict(result.meta)
+    record["job_id"] = job_id
+    record["project_id"] = proj.name
+    record["points"] = list(result.series.columns)
+    write_pending(str(proj.directory), job_id, result.series, record)
+    stats = {
+        col: {"min": float(result.series[col].min()),
+              "mean": float(result.series[col].mean()),
+              "max": float(result.series[col].max()),
+              "hours_reduced": int((result.series[col] < 1.0 - 1e-9).sum())}
+        for col in result.series.columns
+    }
+    return {**record, "stats": stats}
 
 
 @project_router.get("/{name}/profiles/pending")

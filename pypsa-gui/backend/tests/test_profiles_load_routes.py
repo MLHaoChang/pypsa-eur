@@ -253,3 +253,71 @@ def test_an_archetype_lands_once_converted_on_utc_snapshots(
     s = session_ctx(client).network.loads_t.p_set["plant"]
     assert _first_on_hour(s, "2025-01-08") == winter   # a Wednesday
     assert _first_on_hour(s, "2025-07-09") == summer
+
+
+# ---------------------------------------------------------------------------
+# availability (ticket 02)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def plant_project(client, install_network):
+    n = _load_network()
+    n.add("Carrier", "gas")
+    n.add("Generator", "chp", bus="B1", carrier="gas", p_nom=10.0)
+    install_network(n)
+    resp = client.post("/api/projects/CHP Site",
+                       params={"force": True, "rebind": True})
+    assert resp.status_code == 200, resp.text
+    return "CHP Site"
+
+
+def _avail(client, project, **over):
+    body = {"kind": "maintenance", "generators": ["chp"],
+            "params": {"windows": [{"from": "07-03", "to": "07-16"}]}}
+    body.update(over)
+    return client.post(f"/api/projects/{project}/profiles/availability/generate",
+                       json=body)
+
+
+def test_availability_generates_on_the_networks_year_and_applies(
+    client, plant_project, session_ctx,
+):
+    gen = _avail(client, plant_project)
+    assert gen.status_code == 200, gen.text
+    body = gen.json()
+    assert body["weather_year"] == 2025          # the network's own year
+    assert body["target"] == ["generators", "p_max_pu"]
+    assert body["stats"]["chp"]["hours_reduced"] == 14 * 24
+    applied = client.post(f"/api/projects/{plant_project}/profiles/apply",
+                          json={"job_id": body["job_id"], "component": "chp",
+                                "time_basis": "UTC"})
+    assert applied.status_code == 200, applied.text
+    p = session_ctx(client).network.generators_t.p_max_pu["chp"]
+    assert float(p.loc["2025-07-04T12:00"]) == 0.0
+
+
+def test_must_run_applies_to_p_min_pu_by_its_stated_target(client, plant_project,
+                                                          session_ctx):
+    body = _avail(client, plant_project, kind="must_run",
+                  params={"share": 0.2}).json()
+    applied = client.post(f"/api/projects/{plant_project}/profiles/apply",
+                          json={"job_id": body["job_id"], "component": "chp",
+                                "time_basis": "UTC"})
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["attribute"] == "p_min_pu"
+
+
+@pytest.mark.parametrize("over, kind", [
+    ({"kind": "forced_outages", "params": {}}, "forced_outages_not_written"),
+    ({"kind": "strike", "params": {}}, "unknown_availability_kind"),
+    ({"params": {"windows": "07-03"}}, "invalid_availability_params"),
+    ({"params": {"windows": [{"from": "2031-07-03", "to": "2031-07-04"}]}},
+     "maintenance_year"),
+    ({"generators": ["nope"]}, "unknown_generator"),
+    ({"generators": ["g_wind"]}, "carrier_mismatch"),
+])
+def test_availability_refusals_are_typed(client, plant_project, over, kind):
+    resp = _avail(client, plant_project, **over)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == kind
