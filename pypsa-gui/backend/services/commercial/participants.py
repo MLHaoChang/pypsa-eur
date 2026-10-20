@@ -98,6 +98,16 @@ def contract_payer_payee(contract, site_party: str) -> tuple[str | None, str | N
     return payer, payee
 
 
+# The ledger flags of a product slack (`AssetCost.flags`, set by `results.value_flows` from the `process_role`
+# column) and who the shortfall is owed to (grid-to-process ticket 06).
+PRODUCT_SLACK_FLAGS = {"buy_in": "product_buy_in", "shortfall": "product_shortfall"}
+SHORTFALL_PAYEE = "offtaker"
+
+
+def _product_role(a: AssetCost) -> str | None:
+    return next((r for r, f in PRODUCT_SLACK_FLAGS.items() if f in a.flags), None)
+
+
 def _in(name: str, pool) -> bool:
     return any(same_party(name, p) for p in pool)
 
@@ -566,17 +576,13 @@ def _sources(inputs: LedgerInputs, vf: ValueFlowConfig, p: str) -> list[_Source]
             continue
         owner = owners.get((a.component, a.name), site)
         extra = ["asset_side_unclassified"] if a.side == "unclassified" else []
-        if "product_buy_in" in a.flags or "product_shortfall" in a.flags:
-            # Grid-to-process ticket 06 (gatekeeper): a product slack is an LP term, not an asset. The buy-in's
-            # opex (its dense marginal cost, CO2 included) is the purchase, `fuel` to the market. The
-            # shortfall's opex (its lost-production value, never VoLL) is `lost_production` to the offtaker:
-            # the IC books no product revenue, so this cost is the shortfall's one representation. An offtake
-            # revenue contract added later must replace it, not stand beside it; one with its own indexation
-            # sets the class (`fuel` here, so it moves with the buy-in it must stay above).
-            buy = "product_buy_in" in a.flags
+        role = _product_role(a)
+        if role is not None:
+            # A product slack is an LP term, not an asset (`build_ledger`): only its opex is a line.
+            buy = role == "buy_in"
             if opex:
                 out.append(_Source("asset", f"opex:{tag}", "fuel" if buy else "lost_production",
-                                   legs=[(owner, "market" if buy else "offtaker", opex)], basis="cash",
+                                   legs=[(owner, "market" if buy else SHORTFALL_PAYEE, opex)], basis="cash",
                                    meta=meta, flags=[*a.flags, *extra]))
             continue
         fuel = "fuel_supply_generator" in a.flags
@@ -738,7 +744,16 @@ def build_ledger(inputs: LedgerInputs, vf: ValueFlowConfig) -> Ledger:
     when a party is neither a participant nor an external; notes for volume
     lines, defaulted owners and lines between two externals; the input,
     bill and disclosure flags. (The plan's `site_party` argument is
-    `inputs.site_party`.)"""
+    `inputs.site_party`.)
+
+    A product slack (grid-to-process ticket 06) is no asset: the buy-in's
+    opex (its dense marginal cost, CO2 included) is a `fuel` purchase from
+    the market; the shortfall's (its lost-production value, never VoLL) is
+    `lost_production` owed to the offtaker. The case books no product
+    revenue, so that cost is the shortfall's one representation: an offtake
+    revenue contract added later replaces it, never stands beside it, and
+    one with its own indexation sets its escalation class (`fuel` here, so it
+    moves with the buy-in it must stay above)."""
     ids = [x.id for x in vf.participants]
     flags: set[str] = set(inputs.input_flags)
     notes: list[str] = []
@@ -775,7 +790,7 @@ def build_ledger(inputs: LedgerInputs, vf: ValueFlowConfig) -> Ledger:
     owned = {(o.component, o.asset_id) for o in vf.asset_owners}
     defaulted = sum(1 for a in inputs.assets if a.side != "grid"
                     and (a.component, a.name) not in owned
-                    and not {"product_buy_in", "product_shortfall"} & set(a.flags)
+                    and _product_role(a) is None
                     and any(a.capex.values()) | any(a.fom.values()) | any(a.opex.values()))
     if defaulted:
         notes.append(f"asset_owner_defaulted:{defaulted}")

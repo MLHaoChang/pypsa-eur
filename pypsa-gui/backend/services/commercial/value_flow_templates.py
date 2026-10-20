@@ -14,7 +14,8 @@ builders
   * never invent a saved contract — a structure that needs one the config does
     not have gets an unsaved DRAFT whose money fields are `null`, so it cannot
     be saved (or solved) until the user prices it (`draft_needs:<id>:<fields>`);
-  * own only site-side assets (`participants.classify_buses`); grid-side
+  * own only site-side assets (`participants.classify_buses`), never a
+    product slack (a `process_role` Generator: an LP term); grid-side
     assets are the market's; meter Links and network branches stay with the
     site party (a tenant carries the connection);
   * list every party the contracts name that is not a participant as an
@@ -366,14 +367,15 @@ TEMPLATES: dict[str, Template] = {t.name: t for t in (
 
 
 def _with_parties(cfg: ValueFlowConfig, commercial: CommercialConfig,
-                  drafts: list[dict], also=()) -> ValueFlowConfig:
+                  drafts: list[dict], ledger_parties=()) -> ValueFlowConfig:
     """Every party the contracts (and drafts) name that is not a participant
-    becomes an external; no participant stays an external (review #1). `also`:
-    parties the ledger names without a contract (a shortfall's `offtaker`)."""
+    becomes an external; no participant stays an external (review #1).
+    `ledger_parties`: parties the ledger pays without a contract (a product
+    shortfall's `participants.SHORTFALL_PAYEE`)."""
     ids = [p.id for p in cfg.participants]
     externals = [e for e in cfg.externals if not any(same_party(e, i) for i in ids)]
     named = [p for c in commercial.contracts for _r, p in P._contract_parties(c) if p]
-    named += list(also)
+    named += list(ledger_parties)
     for d in drafts:
         named += [d.get(k) for k in _PARTY_KEYS if d.get(k)]
     for party in named:
@@ -391,9 +393,9 @@ def build(name: str, n, commercial: CommercialConfig, *, dsr_buses=()) -> Templa
         raise TemplateRefused("template_unknown",
                               f"unknown template {name!r}; one of {sorted(TEMPLATES)}")
     result = tpl.builder(commercial, _site(n, commercial, dsr_buses))
-    # A product shortfall is owed to the offtaker (the ledger's `lost_production`, ticket 06).
-    also = ("offtaker",) if any(r == "shortfall" for r in product_roles(n).values()) else ()
-    cfg = _with_parties(result.config, commercial, result.draft_contracts, also)
+    shortfall = any(r == "shortfall" for r in product_roles(n).values())
+    cfg = _with_parties(result.config, commercial, result.draft_contracts,
+                        (P.SHORTFALL_PAYEE,) if shortfall else ())
     cfg = cfg.model_copy(update={"template": name, "template_version": f"{name}@{tpl.version}",
                                  "built_inputs_digest": inputs_digest(
                                      n, commercial, result.draft_contracts)})

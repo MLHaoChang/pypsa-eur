@@ -15,7 +15,8 @@ CRITICALITY_TIERS: tuple[str, ...] = ("safety", "process_critical", "process_fle
 
 # What a Generator on a product bus stands for, so results never infer it from a name (gatekeeper, ticket 04):
 # `buy_in` is a real purchase of the product (an expense), `shortfall` is product not delivered, priced at its
-# lost-production value (lost revenue, never an expense). The empty string is "an ordinary generator".
+# lost-production value (lost revenue, never an O&M or purchase expense: the case books it as its own
+# `lost_production` stream). The empty string is "an ordinary generator".
 PROCESS_GENERATOR_ROLES: tuple[str, ...] = ("buy_in", "shortfall")
 
 PROCESS_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {

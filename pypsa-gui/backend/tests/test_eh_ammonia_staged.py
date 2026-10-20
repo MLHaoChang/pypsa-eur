@@ -466,9 +466,11 @@ def test_on_the_analytic_basis_the_purchase_and_its_co2_match_the_buy_in_per_per
 
 
 @pytest.mark.live_solve
-def test_a_shortfall_is_lost_production_at_its_value_never_an_expense(reset_backend):
+def test_a_shortfall_is_lost_production_at_its_value_never_o_and_m_or_a_purchase(reset_backend):
     """With half the delivery buyable and no electrolysis, the rest is short: the case books it once, as
-    `lost_production` at the lost-production value the LP priced (never VoLL), beside the purchase."""
+    `lost_production` at the lost-production value the LP priced (never VoLL), beside the purchase. The
+    counterfactual buys the whole delivery (grey NH3 is always there), so a lost tonne costs its value less the
+    purchase it avoids, once."""
     from services.process_products import lost_production_value
 
     n, case = _case("half_buy_in", _half_buy_in, site_today=False)
@@ -482,5 +484,10 @@ def test_a_shortfall_is_lost_production_at_its_value_never_an_expense(reset_back
         tonnes_eur = float((w * n.generators_t.p["__lost_nh3"].loc[y]).sum()) * value
         assert tonnes_eur > 0
         assert lost.amount == pytest.approx(-tonnes_eur, rel=1e-9)
+        assert lost.amount == pytest.approx(-_cost_per_year(n, "__lost_nh3", y), rel=1e-9)
+        delivered_t = float((w * n.loads_t.p["nh3_delivery"].loc[y]).sum()) / A.MWH_PER_T
+        assert _line(case, "counterfactual:purchase:nh3_delivery", y, "counterfactual") == \
+            pytest.approx(-delivered_t * 1000.0 * A.GREY_NH3["price_eur_per_kg"], rel=1e-9)
+        assert not [ln for c in case.counterfactual for ln in c.lines if "__lost_nh3" in ln.key]
         assert _line(case, BUY, y) == pytest.approx(-_cost_per_year(n, "__buy_nh3", y), rel=1e-9)
         assert not [ln for ln in t.lines if "__lost_nh3" in ln.key and ln.stream in ("vom", "fuel", "capex")]
