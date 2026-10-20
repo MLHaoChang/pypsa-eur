@@ -72,13 +72,14 @@ def test_the_markings_match_the_built_network(tid):
 @pytest.mark.parametrize("tid", TIDS)
 def test_each_marking_is_an_assumed_ledger_row_with_its_flow_target(tid):
     rows = {r["item"]: r for r in T.TEMPLATE_META[tid]["ledger"]}
-    for item in ("connection_ramp", "oscillation", "import_loss_factor"):
+    for item in ("connection_ramp", "oscillation", "import_efficiency"):
         assert item in rows, item
-    for item in ("connection_ramp", "oscillation", "import_loss_factor", "fault_level", "lole_goal"):
+    for item in ("connection_ramp", "oscillation", "import_efficiency", "fault_level", "lole_goal"):
         r = rows.get(item)
         if r is None:
             continue
         assert r["source"] == "assumed" and r["note"].startswith("assumed")
+        assert r["label"] and r["label"][0].isupper() and "_" not in r["label"]
         assert isinstance(r["value"], float) and r["unit"]
         assert r["section"] in FLOW_SECTIONS
         assert set(r) >= {"panel", "component", "entity", "field"}
@@ -298,7 +299,7 @@ def test_at_the_cap_the_refusal_and_the_row_agree(tmp_path):
     for it, refused in ((at_cap - 0.01, False), (at_cap + 0.01, True)):
         raw = _at_cap_spec(tid, it)
         if refused:
-            with pytest.raises(DcLoadError, match=r"above the 40 MW energized import \(× 0.995 losses\)"):
+            with pytest.raises(DcLoadError, match=r"above the 40 MW energized import \(× 0.995 efficiency\)"):
                 T.dc_load_spec(tid, raw)
         else:
             T.dc_load_spec(tid, raw)

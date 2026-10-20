@@ -1188,7 +1188,7 @@ _register_staged_hubs()
 #
 # The connection limits the grid-readiness scorecard checks against that no
 # grid code here states: the connection ramp limit, the oscillation limit,
-# the PoC Link's loss factor, the PoC fault level and the reliability goal.
+# the PoC Link's efficiency, the PoC fault level and the reliability goal.
 # They are ledger rows like every other template assumption, so the project
 # flow lists them "to check"; each names the flow section and field it
 # belongs to (``section``, ``panel``, ``component``, ``entity``, ``field``,
@@ -1215,9 +1215,10 @@ _GRID_READINESS_SITE = {
 }
 
 
-def _gr_row(item, value, unit, note, section, component=None, entity=None, field=None,
+def _gr_row(item, label, value, unit, note, section, component=None, entity=None, field=None,
             panel=None) -> dict:
-    return {"item": item, "value": value, "unit": unit, "source": "assumed", "note": note,
+    return {"item": item, "label": label, "value": value, "unit": unit, "source": "assumed",
+            "note": note,
             "section": section, "panel": panel, "component": component, "entity": entity,
             "field": field or item}
 
@@ -1226,28 +1227,28 @@ def grid_readiness_ledger(template_id: str) -> list[dict]:
     """The template's grid-readiness ledger rows."""
     link, mw, eff, bus, sk, lole = _GRID_READINESS_SITE[template_id]
     rows = [
-        _gr_row("connection_ramp", round(RAMP_SHARE_PER_MIN * mw, 6), "MW/min",
+        _gr_row("connection_ramp", "Connection ramp limit", round(RAMP_SHARE_PER_MIN * mw, 6), "MW/min",
                 f"assumed: {RAMP_SHARE_PER_MIN:.0%} of the {mw:g} MW connection per minute; RfG/DCC "
                 "set no ramp limit for a demand facility, so this is a placeholder of the order a "
                 "network operator writes into a connection offer for large loads", "connection",
                 "Link", link),
-        _gr_row("oscillation", OSCILLATION_LIMIT_PCT, "% of connection, peak-to-peak",
+        _gr_row("oscillation", "Power oscillation limit", OSCILLATION_LIMIT_PCT, "% of connection, peak-to-peak",
                 f"assumed: peak-to-peak power oscillation at most {OSCILLATION_LIMIT_PCT:g} % of the "
                 f"connection in the {OSCILLATION_BAND_HZ[0]:g}-{OSCILLATION_BAND_HZ[1]:g} Hz band "
                 "(forced-oscillation concern for large loads, NERC 2025 large-loads white paper); "
                 "no code value", "connection", "Link", link),
-        _gr_row("import_loss_factor", eff, "p.u.",
-                f"assumed: the {link} Link's efficiency; what reaches the site side of the PoC "
-                "Link. Losses further in (transformers, UPS) are not in this factor",
+        _gr_row("import_efficiency", "Import efficiency", eff, "p.u.",
+                f"assumed: the {link} Link's efficiency (losses = 1 - efficiency); what reaches the "
+                "site side of the PoC Link. Losses further in (transformers, UPS) are not in it",
                 "connection", "Link", link, "efficiency"),
     ]
     if sk is not None:
-        rows.append(_gr_row("fault_level", sk, "MVA",
+        rows.append(_gr_row("fault_level", "Fault level at the PoC", sk, "MVA",
                             f"assumed: short-circuit power at the PoC ({bus}); the SCR and "
                             "rapid-voltage-change screenings read it", "connection", "Bus", bus,
                             "eh_sk_mva"))
     if lole is not None:
-        rows.append(_gr_row("lole_goal", lole, "h/yr",
+        rows.append(_gr_row("lole_goal", "Reliability goal (LOLE)", lole, "h/yr",
                             f"assumed: the recommended pack's target_lole_h ({lole:g} h/yr); the "
                             "reliability study certifies the site against it", "scenarios",
                             None, None, "target_lole_h", panel="simparams"))

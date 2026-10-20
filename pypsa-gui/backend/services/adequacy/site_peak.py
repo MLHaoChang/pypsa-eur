@@ -6,7 +6,7 @@ One check, two callers: a data-center project created with a ``dc_load`` body
 is refused (422) when a period's peak does not fit (``eh_templates._check_dc_peak``),
 and the grid-readiness scorecard reports the same rows (``grid_readiness``).
 
-Per period: peak ≤ Σ energized import × loss factor + firm gensets, where
+Per period: peak ≤ Σ energized import × efficiency + firm gensets, where
 
 * the peak is the hourly-mean sum of the fixed loads' ``p_set`` (a flexible
   conversion unit such as an electrolyser is a decision and is not counted;
@@ -15,7 +15,7 @@ Per period: peak ≤ Σ energized import × loss factor + firm gensets, where
 * the energized import is min(p_nom × the Link's highest p_max_pu in the
   period, the energization schedule's minimum in it) per import Link
   (``services.adequacy.energization``); a normally open tie supplies 0;
-* the loss factor is each import Link's ``efficiency`` (what reaches the site
+* the efficiency is each import Link's ``efficiency`` (what reaches the site
   side of the PoC Link; losses further in are not counted);
 * firm gensets are the island sidecar's committed genset fleet less its k
   largest units when the requirements ask for genset N+k
@@ -95,7 +95,7 @@ def _energized(n, link: str, mask: np.ndarray) -> float:
 
 
 def peak_check(n, island: dict | None) -> list[dict]:
-    """One row per period: ``{period, peak_mw, energized_mw, loss_factor,
+    """One row per period: ``{period, peak_mw, energized_mw, efficiency,
     delivered_mw, firm: [{source, mw, rule}], firm_mw, cap_mw, headroom_mw,
     import_links, scheduled}``. An empty list when the network has no import
     Link (an island-only site has no connection to check)."""
@@ -114,11 +114,11 @@ def peak_check(n, island: dict | None) -> list[dict]:
         energized = {l: _energized(n, l, mask) for l in links}
         delivered = sum(energized[l] * eff[l] for l in links)
         total_e = sum(energized.values())
-        loss = delivered / total_e if total_e > 0 else min(eff.values())
+        mean_eff = delivered / total_e if total_e > 0 else min(eff.values())
         cap = delivered + sum(f["mw"] for f in firm)
         peak = float(load[mask].max()) if mask.any() else 0.0
         out.append({"period": label, "peak_mw": peak, "energized_mw": total_e,
-                    "loss_factor": loss, "delivered_mw": delivered, "firm": firm,
+                    "efficiency": mean_eff, "delivered_mw": delivered, "firm": firm,
                     "firm_mw": sum(f["mw"] for f in firm), "cap_mw": cap,
                     "headroom_mw": cap - peak, "import_links": list(links),
                     "scheduled": bool(scheduled)})
@@ -127,8 +127,8 @@ def peak_check(n, island: dict | None) -> list[dict]:
 
 def describe(row: dict) -> str:
     """The cap in words, as the 422 and the scorecard both say it."""
-    loss = row["loss_factor"]
-    losses = f" (× {loss:.4g} losses)" if abs(loss - 1.0) > 1e-12 else ""
+    eff = row["efficiency"]
+    shown = f" (× {eff:.4g} efficiency)" if abs(eff - 1.0) > 1e-12 else ""
     firm = " plus ".join(f"{f['mw']:g} MW of firm {f['source']} ({f['rule']})" for f in row["firm"])
-    return (f"the {row['energized_mw']:g} MW energized import{losses} plus {firm} "
+    return (f"the {row['energized_mw']:g} MW energized import{shown} plus {firm} "
             f"= {row['cap_mw']:.4g} MW")

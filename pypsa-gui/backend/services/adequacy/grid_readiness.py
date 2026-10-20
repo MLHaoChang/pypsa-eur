@@ -6,7 +6,7 @@ power-system architecture is fixed.
 **Generic** (owner decision D2): one function for every project. A template
 is an instantiation, never a special case: it reaches the scorecard only
 through what it writes into the project, its ledger rows (``eh_template.json``
-``ledger``, items ``connection_ramp``, ``oscillation``, ``import_loss_factor``,
+``ledger``, items ``connection_ramp``, ``oscillation``, ``import_efficiency``,
 ``fault_level``, ``lole_goal``), its island sidecar and the opt-in AI-training
 envelope (DC 01, ``dc_load_profile.read_envelope``). A project with no ledger
 row for a limit gets the generic placeholder below, marked assumed.
@@ -199,7 +199,7 @@ def _in_hour_uplift_mw(inp: _Inputs, period: str) -> float | None:
 def _peak_rows(inp: _Inputs) -> list[dict]:
     from services.adequacy.site_peak import describe, peak_check
 
-    loss = inp.marking("import_loss_factor")
+    loss = inp.marking("import_efficiency")
     target = _target("connection", "Link", inp.link, "eh_energization_mw")
     req = "Peak load within the energized import (after losses) plus firm gensets"
     if inp.n is None or not inp.links:
@@ -226,12 +226,12 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
             verdict = "pass"
         loss_src = (_marking_source(loss)[0] if loss is not None
                     else "the import Link's efficiency, as entered")
-        if loss is not None and abs(float(loss["value"]) - r["loss_factor"]) > 1e-9:
-            loss_src += (f"; the network's {r['loss_factor']:.4g} is used, not the ledger's "
+        if loss is not None and abs(float(loss["value"]) - r["efficiency"]) > 1e-9:
+            loss_src += (f"; the network's {r['efficiency']:.4g} is used, not the ledger's "
                          f"{float(loss['value']):.4g} (the Link was edited)")
         notes = [f"{r['period']}: hourly-mean peak {r['peak_mw']:.4g} MW against {describe(r)}",
                  "energization schedule" if r["scheduled"] else "no energization schedule: p_nom",
-                 f"loss factor from {loss_src}",
+                 f"import efficiency from {loss_src}",
                  "fixed loads only (a flexible conversion unit is a decision, not counted)"]
         if uplift is not None:
             notes.append(f"the in-hour AI-training step is about {uplift:.3g} MW above the hourly "
