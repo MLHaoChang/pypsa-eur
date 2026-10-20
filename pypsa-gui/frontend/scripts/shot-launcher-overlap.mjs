@@ -57,41 +57,70 @@ try {
     await context.request.post(base + '/api/projects/oj-grid', { headers })
     await page.addInitScript(() => {
       localStorage.setItem('network-diagram:current-project', 'oj-grid')
-      localStorage.setItem('network-diagram:assistant-dock', 'closed')
     })
     await page.goto(base + '/app')
+    await page.getByTestId('ui-mode-expert').click()
+    // One solve through the ordinary chat card, so Results has data.
+    if (!await page.getByTestId('chat-input').isVisible()) await page.getByText('Assistant', { exact: true }).first().click()
+    await page.getByTestId('chat-input').fill('Run the simulation.')
+    await page.getByTestId('chat-send').click()
+    await page.getByTestId('chat-confirm-approve').last().click()
+    for (let i = 0; ; i += 1) {
+      const status = await (await context.request.get(base + '/api/simulation/status')).json()
+      if (status.status === 'completed') break
+      assert(i < 240, 'solve did not complete')
+      await page.waitForTimeout(500)
+    }
+    await page.evaluate(() => localStorage.setItem('network-diagram:assistant-dock', 'closed'))
+    await page.reload()
     const launcher = page.getByTestId('companion-launcher')
     await launcher.waitFor()
-    await page.getByTestId('ui-mode-expert').click()
     await page.keyboard.press('Control+k'); await page.keyboard.type('L2')
     await page.getByText(/^Line · /).first().waitFor(); await page.keyboard.press('Enter')
     await page.waitForTimeout(800)
-    // Idle: no hover, no focus inside the launcher.
-    await page.mouse.move(300, 300)
-    await page.evaluate(() => (document.activeElement instanceof HTMLElement) && document.activeElement.blur())
-    await page.waitForTimeout(600)
-    const covers = async () => {
+    const idle = async () => {
+      await page.mouse.move(5, height - 5)
+      await page.evaluate(() => (document.activeElement instanceof HTMLElement) && document.activeElement.blur())
+      await page.waitForTimeout(600)
+    }
+    const covers = async targets => {
       const l = await box(launcher)
-      const targets = { properties: page.locator('[data-testid="properties-panel"], aside').last(),
-        edit_button: page.getByRole('button', { name: 'Edit Parameters' }),
-        canvas_controls: page.locator('.react-flow__controls'),
-        minimap: page.locator('.react-flow__minimap'),
-        results_bar: page.getByText('Run a simulation to enable'),
-        bottom_panel: page.getByTestId('bottom-panel') }
       const out = { launcher: l }
       for (const [k, v] of Object.entries(targets)) out[k] = overlap(l, await box(v))
       return out
     }
-    report[`${label}_expert`] = await covers()
-    await page.screenshot({ path: path.join(artifacts, `launcher-${label}-expert.png`) })
+    const canvasTargets = {
+      properties_panel: page.getByRole('button', { name: 'Edit Parameters' }).locator('xpath=ancestor::*[contains(@class,"border-l")][1]'),
+      edit_button: page.getByRole('button', { name: 'Edit Parameters' }),
+      minimap: page.locator('.react-flow__minimap'),
+      snapshot_bar: page.locator('.z-\\[900\\]'),
+      canvas_controls: page.locator('.react-flow__controls'),
+      bottom_panel: page.getByRole('button', { name: /^Log$/ }).locator('xpath=ancestor::*[contains(@class,"border-t")][1]'),
+    }
+    await idle()
+    report[`${label}_expert_idle`] = await covers(canvasTargets)
+    await page.screenshot({ path: path.join(artifacts, `launcher-${label}-expert-idle.png`) })
+    { const c = await box(page.getByTestId('companion-character')); await page.mouse.move(c.x + c.width / 2, c.y + c.height / 2) }
+    await page.waitForTimeout(500)
+    report[`${label}_expert_hovered`] = { ...await covers(canvasTargets),
+      voice_note: await box(page.getByTestId('companion-voice-note')) }
+    await page.screenshot({ path: path.join(artifacts, `launcher-${label}-expert-hovered.png`) })
+    // Results, full screen.
+    await idle()
+    await page.getByRole('button', { name: /^Results/ }).first().click().catch(() => {})
+    await page.waitForTimeout(1500)
+    report[`${label}_results`] = await covers({ snapshot_bar: page.locator('.z-\\[900\\]'),
+      results_toolbar_bottom: page.locator('[data-assurance-panel="results"] button').last() })
+    await page.screenshot({ path: path.join(artifacts, `launcher-${label}-results.png`) })
+    // Guided Hub design.
     await page.getByTestId('ui-mode-guided').click()
     await page.waitForTimeout(800)
     const hub = page.getByText('Hub design', { exact: true }).first()
     if (await hub.count()) await hub.click()
     await page.waitForTimeout(1200)
-    const l = await box(launcher)
-    const footer = await box(page.getByRole('button', { name: /^(Ask|Delegate)/ }))
-    report[`${label}_guided_hub`] = { launcher: l, ask_or_delegate: footer, overlaps_footer: overlap(l, footer) }
+    await idle()
+    report[`${label}_guided_hub`] = await covers({ ask_or_delegate: page.getByRole('button', { name: /^(Ask|Delegate)/ }),
+      hub_close: page.getByRole('button', { name: /^Close/ }) })
     await page.screenshot({ path: path.join(artifacts, `launcher-${label}-guided-hub.png`) })
     await context.close()
   }
