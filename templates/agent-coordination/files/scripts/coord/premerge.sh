@@ -36,6 +36,10 @@ docs_only_re='^({{RELEASE_NOTES_DIR}}/.*|docs/.*\.md|(.*/)?(CONTEXT|GLOSSARY)\.m
 # semantic_cmd runs from the trial-merge worktree root.
 semantic_re=''
 semantic_cmd=(python3 -m pytest -q -p no:cacheprovider)
+# Overlap only in paths matching waive_overlap_re does not block when the trial
+# merge is clean and semantic_cmd passes on it (e.g. a generated inventory that
+# many PRs touch). Leave empty to treat every non-docs overlap as code.
+waive_overlap_re=''
 # -------------------------------------------------------------------------
 
 base_ref="refs/remotes/$remote/$base_branch"
@@ -75,6 +79,7 @@ fi
 
 echo
 echo "== files changed on both sides since merge-base"
+waive_overlap=()  # overlap files that pass if the trial merge and semantic_cmd do
 overlap=$(comm -12 \
   <(git diff --name-only "$mbase" "$base_sha" | sort) \
   <(git diff --name-only "$mbase" "$head" | sort))
@@ -90,6 +95,9 @@ else
       echo "  identical  $f"
     elif [[ $f =~ $docs_only_re ]]; then
       echo "  docs-only  $f"
+    elif [[ -n $waive_overlap_re && $f =~ $waive_overlap_re ]]; then
+      echo "  waivable   $f (decided on the trial merge, below)"
+      waive_overlap+=("$f")
     else
       echo "  code       $f"
       fail=1
@@ -104,7 +112,8 @@ fi
 echo
 echo "== semantic tests"
 changed=$(git diff --name-only "$mbase" "$head")
-if [[ -z $semantic_re ]] || ! grep -Eq "$semantic_re" <<<"$changed"; then
+sem_ok=0
+if { [[ -z $semantic_re ]] || ! grep -Eq "$semantic_re" <<<"$changed"; } && ((${#waive_overlap[@]} == 0)); then
   echo "not needed (no path matches semantic_re)"
 elif ((conflict)); then
   echo "skipped: no trial merge while the PR conflicts"
@@ -119,10 +128,23 @@ else
   echo "trial merge $trial"
   if (cd "$wt" && "${semantic_cmd[@]}"); then
     echo "semantic tests: pass"
+    sem_ok=1
   else
     echo "semantic tests: FAIL"
     fail=1
     reasons+=("semantic tests failed")
+  fi
+fi
+
+if ((${#waive_overlap[@]})); then
+  echo
+  echo "== waivable overlap"
+  if ((!conflict && sem_ok)); then
+    echo "  waived      overlap in waive_overlap_re: clean trial merge, semantic pass"
+  else
+    printf '  code        %s\n' "${waive_overlap[@]}"
+    fail=1
+    reasons+=("overlap: ${#waive_overlap[@]} code file$([[ ${#waive_overlap[@]} -eq 1 ]] || echo s)")
   fi
 fi
 
