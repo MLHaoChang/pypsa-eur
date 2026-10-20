@@ -2235,17 +2235,18 @@
       ],
       "input_keys": [
         "points",
+        "from_generators",
         "technology",
         "preset",
         "params",
-        "year"
+        "year",
+        "resolution"
       ],
       "required": [
-        "points",
         "technology"
       ],
       "safety_tier": "read",
-      "schema_sha256": "26595459a2138de6a74cd86e4415bcd25756efabb52a58e52fd90f6c25727a2a",
+      "schema_sha256": "e5188f2e1d2491b60e3d970bc608b3b2751cc958d28fe88b8a7b4508e84b502c",
       "behavioral_fixture": "pending"
     },
     {
@@ -2283,19 +2284,20 @@
       "input_keys": [
         "project_id",
         "points",
+        "from_generators",
         "technology",
         "preset",
         "params",
         "source",
-        "year"
+        "year",
+        "resolution"
       ],
       "required": [
         "project_id",
-        "points",
         "technology"
       ],
       "safety_tier": "execution",
-      "schema_sha256": "bae511ab3de12987dc8603e7bf965ab1763bdcd2e2c829dbbca6050b6059c8d7",
+      "schema_sha256": "8d5dde33da6c77d62a97471c072428ed3380c53ce41db87f045b5d36ef8a3830",
       "behavioral_fixture": "pending"
     },
     {

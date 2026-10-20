@@ -28,9 +28,9 @@ from services import change_log_service
 from services.dispatch_status import dispatch_status
 from services.network_undo import apply_undo, push_undo_snapshot
 from services.profile_gen.apply import (
-    InvalidTimeBasisError,
     CarrierMismatchError,
     ComponentNotFoundError,
+    InvalidTimeBasisError,
     LeapYearMismatchError,
     ProfileApplyError,
     UnsupportedSnapshotsError,
@@ -341,6 +341,144 @@ def test_undo_restores_the_network_native_profile():
         assert (_user_ts[KEY] == 0.42).all()
 
 
+# ── C2: daily / weekly sources (aggregate-at-generation, upsample-at-apply) ──
+
+def _weather_res(technology: str = "solar", year: int = 2024,
+                 resolution: str = "daily"):
+    result = generate_profile(
+        points=[("site", 13.4, 52.5)],
+        technology=technology,
+        source="synthetic",
+        year=year,
+        resolution=resolution,
+        now=NOW,
+    )
+    return result.series["site"], result.meta
+
+
+def test_daily_upsample_holds_the_day_mean_for_24_hours():
+    _net(year=2024)
+    hourly, _ = _weather(year=2024)
+    daily, meta = _weather_res(year=2024, resolution="daily")
+    out = assign_profile(_ctx(), "Solar", daily, meta)
+    assert out["resolution"] == "daily"
+    assert out["hours"] == 8784
+    stored = _user_ts[KEY]
+    # Every hour of a day carries that day's mean of the hourly source.
+    day = pd.Timestamp("2024-03-05")
+    day_hours = stored.loc[day:day + pd.Timedelta(hours=23)]
+    assert (day_hours == day_hours.iloc[0]).all()
+    expected = hourly.loc[day:day + pd.Timedelta(hours=23)].mean()
+    assert abs(float(day_hours.iloc[0]) - float(expected)) < 1e-12
+    assert _user_ts_meta[KEY]["resolution"] == "daily"
+
+
+def test_daily_leap_source_on_nonleap_target_drops_feb29():
+    _net(year=2025)
+    daily, meta = _weather_res(year=2024, resolution="daily")
+    out = assign_profile(_ctx(), "Solar", daily, meta)
+    assert out["hours"] == 8760
+    assert out["leap_day"] == "dropped"
+    stored = _user_ts[KEY]
+    # Mar 1 2025 carries the SOURCE's Mar 1 daily mean, not Feb 29's.
+    assert float(stored.loc[pd.Timestamp("2025-03-01T12:00")]) == float(
+        daily.loc[pd.Timestamp("2024-03-01")]
+    )
+
+
+def test_daily_nonleap_source_on_leap_target_refuses():
+    _net(year=2024)
+    daily, meta = _weather_res(year=2025, resolution="daily")
+    with pytest.raises(LeapYearMismatchError, match="Feb 29"):
+        assign_profile(_ctx(), "Solar", daily, meta)
+    assert KEY not in _user_ts
+
+
+def test_daily_tiles_multi_period_snapshots():
+    n = PyPSAService.get_network()
+    idx2030 = pd.date_range("2030-01-01T00:00", "2030-12-31T23:00", freq="h")
+    idx2032 = pd.date_range("2032-01-01T00:00", "2032-12-31T23:00", freq="h")
+    mi = _build_period_multiindex([2030, 2032], [idx2030, idx2032])
+    n.set_snapshots(mi)
+    n.add("Bus", "B1", x=13.4, y=52.5)
+    n.add("Carrier", "solar")
+    n.add("Generator", "Solar", bus="B1", carrier="solar", p_nom=100.0)
+    daily, meta = _weather_res(year=2024, resolution="daily")  # leap source
+    out = assign_profile(_ctx(), "Solar", daily, meta)
+    assert out["tiled"] is True
+    assert out["resolution"] == "daily"
+    stored = _user_ts[KEY]
+    assert float(stored.loc[(2030, pd.Timestamp("2030-06-01T03:00"))]) == float(
+        daily.loc[pd.Timestamp("2024-06-01")]
+    )
+    assert float(stored.loc[(2032, pd.Timestamp("2032-02-29T03:00"))]) == float(
+        daily.loc[pd.Timestamp("2024-02-29")]
+    )
+
+
+def test_weekly_same_year_applies_step_hold():
+    _net(year=2023)
+    weekly, meta = _weather_res(year=2023, resolution="weekly")
+    out = assign_profile(_ctx(), "Solar", weekly, meta)
+    assert out["resolution"] == "weekly"
+    assert out["hours"] == 8760
+    stored = _user_ts[KEY]
+    # The week labelled Monday 2023-06-05 covers Jun 5 00:00 – Jun 11 23:00;
+    # every one of those hours holds the week's mean.
+    wk = float(weekly.loc[pd.Timestamp("2023-06-05")])
+    week_hours = stored.loc[
+        pd.Timestamp("2023-06-05T00:00"):pd.Timestamp("2023-06-11T23:00")
+    ]
+    assert len(week_hours) == 168
+    assert (week_hours == wk).all()
+    # …and the neighbouring hour belongs to the next week.
+    assert float(stored.loc[pd.Timestamp("2023-06-12T00:00")]) == float(
+        weekly.loc[pd.Timestamp("2023-06-12")]
+    )
+
+
+def test_weekly_cross_year_refuses():
+    _net(year=2024)
+    weekly, meta = _weather_res(year=2023, resolution="weekly")
+    with pytest.raises(UnsupportedSnapshotsError, match="own weather year"):
+        assign_profile(_ctx(), "Solar", weekly, meta)
+    assert KEY not in _user_ts
+
+
+def test_weekly_multi_period_refuses():
+    n = PyPSAService.get_network()
+    idx2030 = pd.date_range("2030-01-01T00:00", "2030-12-31T23:00", freq="h")
+    idx2032 = pd.date_range("2032-01-01T00:00", "2032-12-31T23:00", freq="h")
+    mi = _build_period_multiindex([2030, 2032], [idx2030, idx2032])
+    n.set_snapshots(mi)
+    n.add("Bus", "B1", x=13.4, y=52.5)
+    n.add("Carrier", "solar")
+    n.add("Generator", "Solar", bus="B1", carrier="solar", p_nom=100.0)
+    weekly, meta = _weather_res(year=2030, resolution="weekly")
+    with pytest.raises(UnsupportedSnapshotsError, match="multi-investment"):
+        assign_profile(_ctx(), "Solar", weekly, meta)
+    assert KEY not in _user_ts
+
+
+def test_weekly_leap_year_applies_in_its_own_year():
+    _net(year=2024)  # leap target, same year as the weather year
+    weekly, meta = _weather_res(year=2024, resolution="weekly")
+    out = assign_profile(_ctx(), "Solar", weekly, meta)
+    assert out["hours"] == 8784  # Feb 29 is covered by its week's step-hold
+    assert out["leap_day"] == "kept"
+
+
+def test_missing_resolution_meta_defaults_to_hourly():
+    """Artifacts written before C2 carry no `resolution` — the apply path
+    must treat them as hourly, never refuse."""
+    _net(year=2024)
+    series, meta = _weather(year=2024)
+    meta = {k: v for k, v in meta.items() if k != "resolution"}
+    out = assign_profile(_ctx(), "Solar", series, meta)
+    assert out["resolution"] == "hourly"
+    assert out["hours"] == 8784
+
+
 # ── time basis: generated series are UTC; snapshots may be a wall clock ────
 #
 # Gatekeeper review of the apply path (2026-10-19): mapping UTC hours onto
@@ -442,3 +580,37 @@ def test_the_partial_year_refusal_says_what_to_do_on_a_template_week():
     assert "full-year hourly" in msg
     assert "representative" in msg
     assert "upload" in msg
+
+
+# ── gatekeeper notes on #396 (2026-10-20) ───────────────────────────────────
+
+
+def test_weekly_partial_first_week_holds_the_prior_mondays_mean():
+    """2023 starts on a Sunday: Jan 1 belongs to the week labelled Monday
+    2022-12-26, and Monday Jan 2 starts the next week."""
+    _net(year=2023)
+    weekly, meta = _weather_res(year=2023, resolution="weekly")
+    assign_profile(_ctx(), "Solar", weekly, meta)
+    stored = _user_ts[KEY]
+    first = float(weekly.loc[pd.Timestamp("2022-12-26")])
+    jan1 = stored.loc[pd.Timestamp("2023-01-01T00:00"):
+                      pd.Timestamp("2023-01-01T23:00")]
+    assert len(jan1) == 24 and (jan1 == first).all()
+    assert float(stored.loc[pd.Timestamp("2023-01-02T00:00")]) == float(
+        weekly.loc[pd.Timestamp("2023-01-02")])
+
+
+def test_a_coarse_profile_records_that_the_time_basis_was_not_re_binned():
+    _net(year=2024)
+    daily, meta = _weather_res(year=2024, resolution="daily")
+    assign_profile(_ctx(), "Solar", daily, meta, time_basis="Europe/Berlin")
+    m = _user_ts_meta[KEY]
+    assert m["time_basis"] == "Europe/Berlin"
+    assert "not re-binned" in m["time_basis_note"]
+
+
+def test_an_hourly_profile_carries_no_re_binning_note():
+    _net(year=2025)
+    series, meta = _weather(year=2025)
+    assign_profile(_ctx(), "Solar", series, meta, time_basis="Europe/Berlin")
+    assert "time_basis_note" not in _user_ts_meta[KEY]

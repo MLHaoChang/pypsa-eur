@@ -121,6 +121,8 @@ def resolve_time_basis(stated: str | None,
 
 
 _ONE_HOUR = pd.Timedelta(hours=1)
+_ONE_DAY = pd.Timedelta(days=1)
+_ONE_WEEK = pd.Timedelta(days=7)
 
 
 # ---------------------------------------------------------------------------
@@ -250,53 +252,244 @@ def _map_by_mdh(series: pd.Series, target_idx: pd.DatetimeIndex, *,
     return values, bool(src_has_feb29 and not target_has_feb29)
 
 
+def _validate_daily_block(idx: pd.DatetimeIndex, *, what: str) -> int:
+    """Pin a daily source: tz-naive, contiguous 1-day steps spanning ONE
+    full calendar year (Jan 1 – Dec 31, midnight labels). Returns the year."""
+    if not isinstance(idx, pd.DatetimeIndex) or idx.tz is not None:
+        raise UnsupportedSnapshotsError(
+            f"{what}: expected a tz-naive DatetimeIndex of daily means"
+        )
+    if len(idx) < 2 or idx.has_duplicates or not idx.is_monotonic_increasing:
+        raise UnsupportedSnapshotsError(
+            f"{what}: a daily profile must be strictly increasing and "
+            "duplicate-free (Jan 1 – Dec 31, one row per day)"
+        )
+    diffs = idx.to_series().diff().dropna()
+    if (diffs != _ONE_DAY).any():
+        raise UnsupportedSnapshotsError(
+            f"{what}: a daily profile must step in contiguous 1-day "
+            f"increments; found steps from {diffs.min()} to {diffs.max()}"
+        )
+    years = idx.year.unique().tolist()
+    year = years[0] if len(years) == 1 else None
+    if (
+        year is None
+        or idx[0] != pd.Timestamp(year, 1, 1)
+        or idx[-1] != pd.Timestamp(year, 12, 31)
+    ):
+        raise UnsupportedSnapshotsError(
+            f"{what}: a daily profile must span one full calendar year "
+            "(Jan 1 – Dec 31); partial years are not supported"
+        )
+    return int(year)
+
+
+def _validate_weekly_block(idx: pd.DatetimeIndex, *, what: str) -> int:
+    """Pin a weekly source: tz-naive, contiguous 7-day steps (W-MON labels)
+    covering ONE full calendar year. The first label may fall in the previous
+    December (the week containing Jan 1); the weather year is the maximum
+    label year. Returns that year."""
+    if not isinstance(idx, pd.DatetimeIndex) or idx.tz is not None:
+        raise UnsupportedSnapshotsError(
+            f"{what}: expected a tz-naive DatetimeIndex of weekly means"
+        )
+    if len(idx) < 2 or idx.has_duplicates or not idx.is_monotonic_increasing:
+        raise UnsupportedSnapshotsError(
+            f"{what}: a weekly profile must be strictly increasing and "
+            "duplicate-free (one row per week)"
+        )
+    diffs = idx.to_series().diff().dropna()
+    if (diffs != _ONE_WEEK).any():
+        raise UnsupportedSnapshotsError(
+            f"{what}: a weekly profile must step in contiguous 7-day "
+            f"increments; found steps from {diffs.min()} to {diffs.max()}"
+        )
+    year = int(idx.year.max())
+    if (
+        idx[0] > pd.Timestamp(year, 1, 1)
+        or idx[-1] + pd.Timedelta(days=6) < pd.Timestamp(year, 12, 31)
+    ):
+        raise UnsupportedSnapshotsError(
+            f"{what}: a weekly profile must cover one full calendar year "
+            f"(the weeks containing Jan 1 and Dec 31 of {year})"
+        )
+    return year
+
+
+def _map_by_md(series: pd.Series, target_idx: pd.DatetimeIndex, *,
+               src_year: int, label: str) -> tuple[np.ndarray, bool]:
+    """Map daily weather-year values onto an hourly target by month-day —
+    every hour of a day gets that day's mean. Same leap rules as
+    `_map_by_mdh`."""
+    src_lookup = {(t.month, t.day): v for t, v in series.items()}
+    src_has_feb29 = (2, 29) in src_lookup
+    target_has_feb29 = any(t.month == 2 and t.day == 29 for t in target_idx)
+    if target_has_feb29 and not src_has_feb29:
+        raise LeapYearMismatchError(
+            f"{label} is a leap year but weather year {src_year} has no "
+            "Feb 29 — refusing to fabricate a day. Pick a leap weather "
+            "year, or rebuild the horizon on a non-leap year."
+        )
+    values = np.empty(len(target_idx), dtype=float)
+    for i, t in enumerate(target_idx):
+        values[i] = src_lookup[(t.month, t.day)]
+    return values, bool(src_has_feb29 and not target_has_feb29)
+
+
+def _map_weekly(series: pd.Series, target_idx: pd.DatetimeIndex, *,
+                src_year: int, label: str) -> np.ndarray:
+    """Upsample weekly means onto an hourly target by step-hold: every hour
+    gets the mean of the week containing it (asof on the Monday labels).
+    Same-calendar-year only — weeks do not align across years (ruling), so a
+    different target year is a typed refusal rather than a silent shift."""
+    target_year = int(target_idx[0].year)
+    if target_year != src_year:
+        raise UnsupportedSnapshotsError(
+            f"weekly profiles apply to their own weather year only: source "
+            f"covers {src_year}, {label} is {target_year}. Regenerate at "
+            "hourly or daily resolution to reach a different target year."
+        )
+    src = series.sort_index()
+    values = src.to_numpy(dtype=float)[
+        src.index.searchsorted(target_idx, side="right") - 1
+    ]
+    return values
+
+
 def _align_to_snapshots(series: pd.Series, snapshots, *,
+                        resolution: str = "hourly",
                         time_basis: str = DEFAULT_TIME_BASIS,
                         ) -> tuple[pd.Series, dict]:
-    """The spec §4 alignment table. Returns (aligned, align_meta) where
-    align_meta carries ``weather_year``, ``leap_day`` and ``tiled``."""
-    src_year = _validate_year_block(
-        pd.DatetimeIndex(series.index), what="generated series",
-    )
+    """The spec §4 alignment table, extended for C2 resolutions. Returns
+    (aligned, align_meta) where align_meta carries ``weather_year``,
+    ``leap_day``, ``tiled`` and ``resolution``.
 
-    if isinstance(snapshots, pd.MultiIndex):
-        # D7=B: tile the weather year into EVERY investment period, leap
-        # rules per period.
-        lvl0 = snapshots.get_level_values(0)
-        periods = [int(p) for p in lvl0.unique()]
-        out = np.empty(len(snapshots), dtype=float)
-        dropped_any = False
-        for p in periods:
-            mask = np.asarray(lvl0 == p)
-            block = pd.DatetimeIndex(snapshots[mask].get_level_values(1))
-            _validate_year_block(block, what=f"period {p}")
-            values, dropped = _map_by_mdh(
-                series, block, src_year=src_year, label=f"period {p}",
-                time_basis=time_basis,
-            )
-            out[mask] = values
-            dropped_any = dropped_any or dropped
-        aligned = pd.Series(out, index=snapshots, name=series.name)
+    - hourly: the original month-day-hour mapping (plus D7=B period tiling);
+    - daily: month-day mapping, every hour of a day gets the day's mean,
+      same leap rules, same period tiling;
+    - weekly: step-hold upsample, SAME-CALENDAR-YEAR only (weeks do not
+      align across years), no multi-period tiling.
+
+    ``time_basis`` shifts the hourly mapping only (`_utc_keys`); a day or
+    week mean is not re-binned by a 1–2 h offset.
+    """
+    resolution = str(resolution or "hourly").strip().lower()
+
+    if resolution == "hourly":
+        src_year = _validate_year_block(
+            pd.DatetimeIndex(series.index), what="generated series",
+        )
+
+        if isinstance(snapshots, pd.MultiIndex):
+            # D7=B: tile the weather year into EVERY investment period, leap
+            # rules per period.
+            lvl0 = snapshots.get_level_values(0)
+            periods = [int(p) for p in lvl0.unique()]
+            out = np.empty(len(snapshots), dtype=float)
+            dropped_any = False
+            for p in periods:
+                mask = np.asarray(lvl0 == p)
+                block = pd.DatetimeIndex(snapshots[mask].get_level_values(1))
+                _validate_year_block(block, what=f"period {p}")
+                values, dropped = _map_by_mdh(
+                    series, block, src_year=src_year, label=f"period {p}",
+                    time_basis=time_basis,
+                )
+                out[mask] = values
+                dropped_any = dropped_any or dropped
+            aligned = pd.Series(out, index=snapshots, name=series.name)
+            return aligned, {
+                "weather_year": src_year,
+                "leap_day": "dropped" if dropped_any else "kept",
+                "tiled": True,
+                "periods": periods,
+                "resolution": "hourly",
+            }
+
+        target_idx = pd.DatetimeIndex(snapshots)
+        _validate_year_block(target_idx, what="network snapshots")
+        values, dropped = _map_by_mdh(
+            series, target_idx, src_year=src_year, label="the target year",
+            time_basis=time_basis,
+        )
+        aligned = pd.Series(values, index=target_idx, name=series.name)
         return aligned, {
             "weather_year": src_year,
-            "leap_day": "dropped" if dropped_any else "kept",
-            "tiled": True,
-            "periods": periods,
+            "leap_day": "dropped" if dropped else "kept",
+            "tiled": False,
+            "periods": None,
+            "resolution": "hourly",
         }
 
-    target_idx = pd.DatetimeIndex(snapshots)
-    _validate_year_block(target_idx, what="network snapshots")
-    values, dropped = _map_by_mdh(
-        series, target_idx, src_year=src_year, label="the target year",
-        time_basis=time_basis,
+    if resolution == "daily":
+        src_year = _validate_daily_block(
+            pd.DatetimeIndex(series.index), what="generated series",
+        )
+
+        if isinstance(snapshots, pd.MultiIndex):
+            lvl0 = snapshots.get_level_values(0)
+            periods = [int(p) for p in lvl0.unique()]
+            out = np.empty(len(snapshots), dtype=float)
+            dropped_any = False
+            for p in periods:
+                mask = np.asarray(lvl0 == p)
+                block = pd.DatetimeIndex(snapshots[mask].get_level_values(1))
+                _validate_year_block(block, what=f"period {p}")
+                values, dropped = _map_by_md(
+                    series, block, src_year=src_year, label=f"period {p}",
+                )
+                out[mask] = values
+                dropped_any = dropped_any or dropped
+            aligned = pd.Series(out, index=snapshots, name=series.name)
+            return aligned, {
+                "weather_year": src_year,
+                "leap_day": "dropped" if dropped_any else "kept",
+                "tiled": True,
+                "periods": periods,
+                "resolution": "daily",
+            }
+
+        target_idx = pd.DatetimeIndex(snapshots)
+        _validate_year_block(target_idx, what="network snapshots")
+        values, dropped = _map_by_md(
+            series, target_idx, src_year=src_year, label="the target year",
+        )
+        aligned = pd.Series(values, index=target_idx, name=series.name)
+        return aligned, {
+            "weather_year": src_year,
+            "leap_day": "dropped" if dropped else "kept",
+            "tiled": False,
+            "periods": None,
+            "resolution": "daily",
+        }
+
+    if resolution == "weekly":
+        src_year = _validate_weekly_block(
+            pd.DatetimeIndex(series.index), what="generated series",
+        )
+        if isinstance(snapshots, pd.MultiIndex):
+            raise UnsupportedSnapshotsError(
+                "weekly profiles cannot tile multi-investment-period "
+                "snapshots — regenerate at hourly or daily resolution"
+            )
+        target_idx = pd.DatetimeIndex(snapshots)
+        _validate_year_block(target_idx, what="network snapshots")
+        values = _map_weekly(
+            series, target_idx, src_year=src_year, label="the target year",
+        )
+        aligned = pd.Series(values, index=target_idx, name=series.name)
+        return aligned, {
+            "weather_year": src_year,
+            "leap_day": "kept",  # same-year step-hold covers Feb 29 itself
+            "tiled": False,
+            "periods": None,
+            "resolution": "weekly",
+        }
+
+    raise UnsupportedSnapshotsError(
+        f"unknown profile resolution {resolution!r}; expected one of "
+        "hourly, daily, weekly"
     )
-    aligned = pd.Series(values, index=target_idx, name=series.name)
-    return aligned, {
-        "weather_year": src_year,
-        "leap_day": "dropped" if dropped else "kept",
-        "tiled": False,
-        "periods": None,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -360,10 +553,12 @@ def assign_profile(
             f"{component!r}'s carrier {carrier!r}"
         )
 
+    resolution = str(meta.get("resolution") or "hourly").strip().lower()
     time_basis, recorded_basis, warnings = resolve_time_basis(
         time_basis, _commercial_timezone(ctx))
-    aligned, align_meta = _align_to_snapshots(series, n.snapshots,
-                                              time_basis=time_basis)
+    aligned, align_meta = _align_to_snapshots(
+        series, n.snapshots, resolution=resolution, time_basis=time_basis,
+    )
 
     # A p_max_pu bound must be finite at every snapshot — a NaN masks the
     # constraint row out of the LP (the Phase 12f rule). Values are clipped
@@ -392,11 +587,17 @@ def assign_profile(
         "weather_year": align_meta["weather_year"],
         "leap_day": align_meta["leap_day"],
         "tiled": align_meta["tiled"],
+        "resolution": align_meta["resolution"],
         "time_basis": recorded_basis,
         "applied_at": applied_at.isoformat(),
     }
     if align_meta["periods"] is not None:
         full_meta["periods"] = align_meta["periods"]
+    if align_meta["resolution"] != "hourly":
+        # The basis is recorded, but a day/week mean is not re-binned by a
+        # 1–2 h offset — say so, so the provenance cannot imply a shift.
+        full_meta["time_basis_note"] = (
+            f"not re-binned at {align_meta['resolution']} resolution")
     if clipped:
         full_meta["clipped"] = True
 
@@ -416,6 +617,8 @@ def assign_profile(
         f"Applied generated {tech} profile to {component}: source "
         f"{meta.get('source', '?')}, weather year {align_meta['weather_year']}"
     )
+    if align_meta["resolution"] != "hourly":
+        desc += f", {align_meta['resolution']} means upsampled to hourly"
     if align_meta["tiled"]:
         desc += f", tiled over {len(align_meta['periods'])} investment periods"
     if align_meta["leap_day"] == "dropped":
@@ -430,6 +633,7 @@ def assign_profile(
         "leap_day": align_meta["leap_day"],
         "tiled": align_meta["tiled"],
         "periods": align_meta["periods"],
+        "resolution": align_meta["resolution"],
         "time_basis": recorded_basis,
         "warnings": warnings,
         "dispatch_cleared": bool(dispatch_cleared),

@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 import xarray as xr
@@ -73,6 +73,10 @@ class EstimateRequest(BaseModel):
     preset: str | None = None
     params: dict[str, Any] | None = None
     year: int | None = None
+    # C2: aggregation happens at generation (D1=A); hourly is the source's
+    # native axis. Annual was dropped by ruling D4=B — an annual mean is a
+    # scalar, not a profile.
+    resolution: Literal["hourly", "daily", "weekly"] = "hourly"
 
 
 class GenerateRequest(EstimateRequest):
@@ -182,20 +186,28 @@ def estimate_profile(body: EstimateRequest):
             params=params,
             source="synthetic",
             year=body.year,
+            resolution=body.resolution,
         )
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
             detail={"error_kind": _error_kind(exc), "message": str(exc)},
         ) from exc
-    daily = result.series.resample("1D").mean()
+    # Hourly previews are downsampled to daily means for the map; coarser
+    # resolutions are already compact enough to return as-is.
+    frame = (
+        result.series.resample("1D").mean()
+        if body.resolution == "hourly"
+        else result.series
+    )
     return {
         "estimate": True,
         "source": "synthetic",
         "technology": result.meta["technology"],
         "weather_year": result.meta["weather_year"],
-        "timestamps": [t.isoformat() for t in daily.index],
-        "series": {c: [round(float(v), 6) for v in daily[c]] for c in daily.columns},
+        "resolution": result.meta["resolution"],
+        "timestamps": [t.isoformat() for t in frame.index],
+        "series": {c: [round(float(v), 6) for v in frame[c]] for c in frame.columns},
     }
 
 
