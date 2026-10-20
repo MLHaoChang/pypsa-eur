@@ -651,3 +651,16 @@ def test_a_held_network_lock_defers_the_flow_instead_of_waiting(client, tmp_proj
     assert body["deferred"] is True and body["run_ready"] is False
     assert {s: _states(body)[s] for s in INPUTS} == {s: "unknown" for s in INPUTS}
     assert body["verdicts"]["study"]["ready"] is False
+
+
+def test_section_for_component_uses_the_flows_connection(client, site, bound_ctx):
+    """LC-04's edit card names the section with the flow's own rule."""
+    from services.flow_service import section_for_component
+
+    site()
+    with bound_ctx(client):
+        n = PyPSAService.get_network()
+        cfg = PyPSAService.get_solver_state()["solver_config"]
+        assert section_for_component(n, cfg, None, "Link", "grid_import")["id"] == "connection"
+        assert section_for_component(n, cfg, None, "Generator", "gas") == {
+            "id": "assets", "label": "Assets & sizing", "panel": None}

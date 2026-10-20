@@ -239,3 +239,14 @@ def file_issue(code: str, component_class: str, name: str,
     if component_class in COMPONENT_SECTION:
         return COMPONENT_SECTION[component_class]
     return "readiness"
+
+
+def section_for(component_class: str, entity: str,
+                connection_links: frozenset[str] = frozenset()) -> dict:
+    """``{id, label, panel}``: the section a component lives in, by the same
+    class rule the flow files issues with (import/export Links are the
+    connection). An unknown class is the project's (Project & site)."""
+    section = COMPONENT_SECTION.get(component_class, "project")
+    if component_class == "Link" and entity in connection_links:
+        section = "connection"
+    return {"id": section, "label": SECTION_LABELS[section], "panel": SECTION_PANEL[section]}

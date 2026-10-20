@@ -255,10 +255,11 @@ def _pack_for(body: dict):
 
 # ── Facts under the lock ────────────────────────────────────────────────────
 
-def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
-    from services import dirty_state
+def _connection(n, config, template: dict | None) -> tuple[list[str], set[str]]:
+    """``(import Links, connection Links)``: the Links the archetype selector
+    picks as imports (with the template's pack, as the Site card's readiness
+    does), plus the commercial config's PoC and export Links."""
     from services.adequacy import archetypes as arch
-    from services.network_geometry import _bus_coord
 
     body = _request_for(template) if template is not None else {"archetype": "strong_grid"}
     try:
@@ -273,6 +274,26 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
         for key in ("poc_link", "export_link"):
             if commercial.get(key) and str(commercial[key]) in set(map(str, n.links.index)):
                 connection.add(str(commercial[key]))
+    return list(imports), connection
+
+
+def section_for_component(n, config, project_dir: pathlib.Path | None,
+                          component_class: str, entity: str) -> dict:
+    """``{id, label, panel}``: the flow section a component belongs to, by the
+    flow's own rule (`flow_sections.section_for`, with this project's
+    connection Links). For a caller outside the flow (the chat edit card) that
+    names the section an edit lands in. Read under the caller's lock."""
+    template = read_template(project_dir) if project_dir is not None else None
+    _imports, connection = _connection(n, config, template)
+    return F.section_for(component_class, entity, frozenset(connection))
+
+
+def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
+    from services import dirty_state
+    from services.network_geometry import _bus_coord
+
+    imports, connection = _connection(n, config, template)
+    commercial = getattr(config, "commercial", None)
     links = [str(i) for i in n.links.index]
     # The supply behind the fence (a market Generator on an import Link's grid
     # side) is the connection's, not an asset of the site.
