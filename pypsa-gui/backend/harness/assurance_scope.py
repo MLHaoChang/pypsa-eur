@@ -34,6 +34,7 @@ class RequestScope(BaseModel):
     comparison_evidence_id: str | None = Field(
         default=None, min_length=36, max_length=36
     )
+    component_class: Literal["Line", "Transformer"] | None = None
 
 
 def validate(value):
@@ -61,6 +62,8 @@ def validate(value):
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_loading_cost_scope")
+    if scope.get("component_class") and scope["profile"] != "branch-loading/1":
+        raise ValueError("component_class_requires_branch_scope")
     if (scope["profile"] == "network-loading/1") != (scope["entity_id"] == "network") and (
         scope["profile"] in ("branch-loading/1", "network-loading/1")
     ):
@@ -112,19 +115,21 @@ def from_message(message, project_id, ui_context):
         return validate(value)
     loading = re.fullmatch(
         r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(?:branch\s+)?loading\s+for\s+"
-        r"(network|(?:line|transformer)\s+([^;]{1,128}?))"
+        r"(network|(line|transformer)\s+([^;]{1,128}?))"
         r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
         message.strip(), re.I,
     )
     if loading:
-        network = loading[2] is None
+        network = loading[3] is None
         value = {
             "version": 1, "profile": "network-loading/1" if network else "branch-loading/1",
-            "project_id": project_id, "entity_id": "network" if network else loading[2],
+            "project_id": project_id, "entity_id": "network" if network else loading[3],
             "retain": False,
         }
-        if loading[3]:
-            value.update(start=loading[3], end=loading[4])
+        if not network:
+            value["component_class"] = loading[2].capitalize()
+        if loading[4]:
+            value.update(start=loading[4], end=loading[5])
         return validate(value)
     storage_cost = re.fullmatch(
         r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?"

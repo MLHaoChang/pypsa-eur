@@ -295,7 +295,8 @@ def scoped_source(ctx, scope, owner=None):
     if scope["profile"] == carrier.PROFILE:
         return carrier.source(ctx, scope["entity_id"])
     if scope["profile"] in branch.PROFILES:
-        return branch.source(ctx, scope["entity_id"], scope["profile"] == branch.NETWORK_PROFILE)
+        return branch.source(ctx, scope["entity_id"], scope["profile"] == branch.NETWORK_PROFILE,
+                             scope.get("component_class"))
     if scope["profile"] in STORAGE_PROFILES:
         adapter = storage_costs if scope["profile"] == storage_costs.PROFILE else storage
         return _comparison({"storage_unit": adapter.source(ctx, scope["entity_id"])}, scope, owner)

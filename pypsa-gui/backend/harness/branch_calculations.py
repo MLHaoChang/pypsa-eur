@@ -2,10 +2,12 @@
 
 Matches `services/loadflow_summary.py` on the LOPF source: flow is the larger
 terminal active power, max(|p0|, |p1|); the limit is rating·s_max_pu(t) with a
-time-varying s_max_pu; overload means u > 1 + 1e-6. Any missing value or zero
-limit makes the branch unavailable rather than skipping the snapshot, and an
-AC power-flow result anywhere in the solve state refuses the capture, since
-live flows may then be PF values.
+time-varying s_max_pu (a missing time-varying value falls back to the static
+one, as the tab's `_smax_matrix`); overload means u > 1 + 1e-6. Unlike the tab,
+a missing p0 or p1 at any snapshot, or a zero limit, makes the branch
+unavailable rather than partial or bus0-only. An AC power-flow result in the
+solve state refuses the capture, since live flows may then be PF values, and
+both the recorded and the exact input fingerprints must match the solve.
 """
 
 import math
@@ -64,8 +66,21 @@ DISCLOSURE = (
 )
 
 
+def _s_max_pu(component, name, index):
+    """Static s_max_pu with the time-varying override, NaN falling back to static."""
+    from harness.calculations import _number
+
+    static = _number(component.static.at[name, "s_max_pu"])
+    dynamic = component.dynamic.get("s_max_pu")
+    if dynamic is None or name not in dynamic.columns:
+        return [static] * len(index)
+    if not dynamic.index.equals(index):
+        raise ValueError("misaligned_source")
+    return [static if (v := _number(x)) is None else v for x in dynamic[name]]
+
+
 def _branch(component, name, index):
-    from harness.calculations import _number, _series
+    from harness.calculations import _number
 
     row = component.static.loc[name]
     field = "s_nom_opt" if bool(row["s_nom_extendable"]) else "s_nom"
@@ -79,12 +94,12 @@ def _branch(component, name, index):
     return {
         "rating": _number(row[field]),
         "rating_field": field,
-        "s_max_pu": _series(component, "s_max_pu", name, index),
+        "s_max_pu": _s_max_pu(component, name, index),
         **flows,
     }
 
 
-def source(ctx, entity, network):
+def source(ctx, entity, network, component_class=None):
     """Called under the network lock; refuses rather than guesses which branch."""
     from harness.calculations import MAX_SNAPSHOTS, _number
     from services import period_utils, workflow_tools
@@ -101,7 +116,7 @@ def source(ctx, entity, network):
     ):
         raise ValueError("unsupported_snapshot_scope")
     state = ctx.solver_state
-    if state.get("ac_pf_results") is not None:
+    if state.get("ac_pf_results") is not None or state.get("lopf_results") is not None:
         raise ValueError("ac_pf_present")
     if network != (entity == "network"):
         raise ValueError("network_scope_required")
@@ -110,7 +125,8 @@ def source(ctx, entity, network):
         if len(names) > MAX_BRANCHES:
             raise ValueError("unsupported_branch_population")
     else:
-        names = [(c, entity) for c in BRANCH_CLASSES if entity in n.components[c].static.index]
+        classes = (component_class,) if component_class else BRANCH_CLASSES
+        names = [(c, entity) for c in classes if entity in n.components[c].static.index]
         if len(names) > 1:
             raise ValueError("ambiguous_branch")
     if not names:
@@ -130,7 +146,9 @@ def source(ctx, entity, network):
         "links_excluded": len(n.components["Link"].static),
         "valid_solve": state.get("status") == "completed"
         and state.get("condition") == "optimal"
-        and n.meta.get("assistant_solve_input_fingerprint") == fingerprint,
+        and n.meta.get("assistant_solve_input_fingerprint") == fingerprint
+        and n.meta.get("assistant_solve_exact_input_fingerprint")
+        == workflow_tools._network_input_fingerprint(ctx, exact=True),
     }
 
 

@@ -164,8 +164,30 @@ def test_unsupported_requests_are_refused_by_name(grid, checked, monkeypatch, ca
     ctx.solver_state.pop("ac_pf_results", None)
 
 
+def test_a_named_class_must_match_the_branch(grid, checked):
+    ctx = solve(grid)
+    frames = checked.run(NumericalProvider({}), message="Check loading.",
+                         checked_scope=scope(ctx, "L12", component_class="Transformer"))
+    receipt = approval(frames).get("receipt") or {}
+    assert {s["reason"] for s in receipt["result_slots"]} == {"unknown_branch"}
+
+
+def test_a_missing_time_varying_limit_falls_back_to_the_static_one_like_the_tab(grid):
+    n = grid.network
+    n.lines.at["L12", "s_max_pu"] = 0.9
+    n.lines_t.s_max_pu.iloc[0, 0] = float("nan")
+    # loadflow_summary._smax_matrix fills a missing time-varying value from the static one.
+    assert branch_calculations._s_max_pu(n.components["Line"], "L12", n.snapshots) == [0.9, 1, 0.5]
+
+
 def test_scope_and_grammar():
-    assert assurance_scope.from_message("Show the loading for line L12", "p", {})["profile"] == BRANCH
+    line = assurance_scope.from_message("Show the loading for line L12", "p", {})
+    assert line["profile"] == BRANCH and line["component_class"] == "Line"
+    assert assurance_scope.from_message("Show the loading for transformer T1", "p", {})[
+        "component_class"] == "Transformer"
+    with pytest.raises(ValueError, match="component_class_requires_branch_scope"):
+        assurance_scope.validate({"version": 1, "profile": NETWORK, "project_id": "p",
+                                  "entity_id": "network", "component_class": "Line"})
     network = assurance_scope.from_message("Show loading for network", "p", {})
     assert network["profile"] == NETWORK and network["entity_id"] == "network"
     with pytest.raises(ValueError, match="network_scope_required"):
