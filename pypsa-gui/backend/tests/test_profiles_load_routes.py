@@ -421,3 +421,18 @@ def test_availability_on_a_link_through_the_route(client, heat_project, session_
                                 "component_type": "links", "time_basis": "UTC"})
     assert applied.status_code == 200, applied.text
     assert applied.json()["component_type"] == "links"
+
+
+def test_a_price_on_the_poc_link_is_refused_at_generation(client, heat_project,
+                                                         session_ctx):
+    from types import SimpleNamespace
+
+    ctx = session_ctx(client)
+    state = ctx.solver_state.setdefault("solver_config", SimpleNamespace())
+    state.commercial = {"poc_link": "hp"}
+    resp = _series(client, heat_project, kind="tou", components=["hp"],
+                   params={"component_type": "links", "currency": "EUR",
+                           "price_basis": "nominal", "currency_year": 2025,
+                           "periods": [{"name": "flat", "rate": 50.0}]})
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "poc_tariff"

@@ -847,6 +847,20 @@ def generate_series_profiles(
                     "message": f"no {ctype} named {', '.join(map(repr, missing))} "
                                "on the open network"},
         )
+    if body.kind == "tou" and ctype == "links":
+        # A price on a point-of-connection link is refused before anything
+        # reaches the pending store, as apply would refuse it.
+        from services.profile_gen import series as series_mod
+
+        try:
+            for comp in body.components:
+                series_mod.guard(ctx, "links", comp,
+                                 {"kind": "tou", "target": ["links", "marginal_cost"]})
+        except ProfileGenError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={**_apply_refusal_kind(exc), "message": str(exc)},
+            ) from exc
     if "timezone" not in params and body.kind in ("tou", "cop"):
         from services.profile_gen.apply import _commercial_timezone
 
