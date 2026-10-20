@@ -170,3 +170,54 @@ def test_generate_maps_working_hours_on_the_projects_commercial_timezone(
     explicit = _generate(client, load_project,
                          params={"annual_mwh": 1.0, "timezone": "UTC"}).json()
     assert explicit["params"]["timezone"] == "UTC"
+
+
+def _meter_csv(columns: dict, unit_suffix: str = "") -> bytes:
+    idx = pd.date_range("2025-01-01", "2026-01-01", freq="h", inclusive="left")
+    frame = pd.DataFrame({f"{k}{unit_suffix}": v for k, v in columns.items()},
+                         index=idx)
+    frame.index.name = "timestamp"
+    return frame.to_csv().encode()
+
+
+def test_a_measured_upload_lands_in_pending_and_applies(client, load_project,
+                                                       session_ctx):
+    resp = client.post(
+        f"/api/projects/{load_project}/profiles/loads/upload",
+        files={"file": ("meter.csv", _meter_csv({"plant": 2000.0, "shed": 1.0}),
+                        "text/csv")},
+        data={"unit": "kW"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["provenance"] == "measured"
+    assert body["points"] == ["plant"]
+    assert body["unmatched"] == ["shed"]
+    assert body["stats"]["plant"]["peak_mw"] == pytest.approx(2.0)
+
+    applied = client.post(f"/api/projects/{load_project}/profiles/apply",
+                          json={"job_id": body["job_id"], "component": "plant",
+                                "time_basis": "UTC"})
+    assert applied.status_code == 200, applied.text
+    ctx = session_ctx(client)
+    assert ctx.user_ts_meta[("loads", "p_set", "plant")]["provenance"] == "measured"
+    assert float(ctx.network.loads_t.p_set["plant"].iloc[0]) == pytest.approx(2.0)
+
+
+def test_an_upload_without_a_unit_is_a_typed_refusal(client, load_project):
+    resp = client.post(
+        f"/api/projects/{load_project}/profiles/loads/upload",
+        files={"file": ("meter.csv", _meter_csv({"plant": 1.0}), "text/csv")},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "load_upload_unit"
+
+
+def test_an_upload_naming_no_load_is_refused(client, load_project):
+    resp = client.post(
+        f"/api/projects/{load_project}/profiles/loads/upload",
+        files={"file": ("meter.csv", _meter_csv({"shed": 1.0}), "text/csv")},
+        data={"unit": "MW"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "unknown_load"

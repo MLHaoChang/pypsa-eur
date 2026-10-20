@@ -34,7 +34,7 @@ from typing import Any, Literal
 
 import pandas as pd
 import xarray as xr
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
 
@@ -59,6 +59,12 @@ from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
 from services.profile_gen.engine import ProfileGenError
 from services.profile_gen.families import default_target
 from services.profile_gen.job import KEEP_PENDING, write_pending
+from services.profile_gen.load_upload import (
+    UploadCoverageError,
+    UploadFormatError,
+    UploadUnitError,
+    read_load_upload,
+)
 from services.profile_gen.load_archetypes import (
     ARCHETYPES,
     InvalidArchetypeParamsError,
@@ -339,6 +345,9 @@ _APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
 _LOAD_GEN_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (UnknownArchetypeError, {"error_kind": "unknown_archetype"}),
     (InvalidArchetypeParamsError, {"error_kind": "invalid_archetype_params"}),
+    (UploadFormatError, {"error_kind": "load_upload_format"}),
+    (UploadUnitError, {"error_kind": "load_upload_unit"}),
+    (UploadCoverageError, {"error_kind": "load_upload_coverage"}),
 )
 
 
@@ -508,6 +517,28 @@ def generate_profiles(
     return sq.solve_queue.get_job(job.id) or job.to_public(None)
 
 
+def _foreground_ctx(proj: AuthorizedProject, verb: str):
+    """The active context, refused (409) unless it holds this project."""
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.get_active_context()
+    if ctx.loaded_project not in (None, proj.name):
+        raise HTTPException(
+            status_code=409,
+            detail=f"'{proj.name}' is not the open project "
+                   f"(the foreground holds {ctx.loaded_project!r}); "
+                   f"open it first, then {verb}",
+        )
+    return ctx
+
+
+def _load_stats(frame: pd.DataFrame, scale: float, year: int) -> dict[str, dict]:
+    hours = 8784 if pd.Timestamp(year=year, month=1, day=1).is_leap_year else 8760
+    return {col: {"peak_mw": float(frame[col].max()) * scale,
+                  "annual_mwh": float(frame[col].mean()) * scale * hours}
+            for col in frame.columns}
+
+
 @project_router.post("/{name}/profiles/loads/generate")
 def generate_load_profiles(
     body: LoadGenerateRequest,
@@ -522,16 +553,7 @@ def generate_load_profiles(
     pending pair the renewable jobs write (`job.write_pending`) and is applied
     through the same `/profiles/apply`. Nothing touches the network here."""
     _check_lock(proj, db, user)
-    from services.pypsa_service import PyPSAService
-
-    ctx = PyPSAService.get_active_context()
-    if ctx.loaded_project not in (None, proj.name):
-        raise HTTPException(
-            status_code=409,
-            detail=f"'{proj.name}' is not the open project "
-                   f"(the foreground holds {ctx.loaded_project!r}); "
-                   "open it first, then generate",
-        )
+    ctx = _foreground_ctx(proj, "generate")
     missing = [ld for ld in body.loads if ld not in ctx.network.loads.index]
     if missing:
         raise HTTPException(
@@ -569,15 +591,61 @@ def generate_load_profiles(
     record["points"] = list(result.series.columns)
     write_pending(str(proj.directory), job_id, result.series, record)
 
-    scale = float(record["scale_mw"])
-    year = int(record["weather_year"])
-    hours = 8784 if pd.Timestamp(year=year, month=1, day=1).is_leap_year else 8760
-    stats = {
-        col: {"peak_mw": float(result.series[col].max()) * scale,
-              "annual_mwh": float(result.series[col].mean()) * scale * hours}
-        for col in result.series.columns
-    }
+    stats = _load_stats(result.series, float(record["scale_mw"]),
+                        int(record["weather_year"]))
     return {**record, "stats": stats}
+
+
+@project_router.post("/{name}/profiles/loads/upload")
+async def upload_load_profiles(
+    file: UploadFile = File(...),
+    unit: str | None = Form(None),
+    timezone: str | None = Form(None),
+    year: int | None = Form(None),
+    annual_mwh: float | None = Form(None),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Read a measured load export (`load_upload.read_load_upload`) into the
+    pending store, one column per load the network has; apply it through
+    `/profiles/apply` like a generated profile. Columns that name no load
+    come back as `unmatched` and are not kept."""
+    from services.upload_guard import read_capped
+
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "upload")
+    blob = await read_capped(file)
+    try:
+        up = read_load_upload(blob, file.filename or "upload.csv", unit=unit,
+                              timezone=timezone, year=year, annual_mwh=annual_mwh)
+    except ProfileGenError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc), "message": str(exc)},
+        ) from exc
+    loads = set(ctx.network.loads.index)
+    matched = [c for c in up.frame.columns if c in loads]
+    unmatched = [c for c in up.frame.columns if c not in loads]
+    if not matched:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "unknown_load",
+                    "message": f"no column names a load on the open network "
+                               f"(columns {unmatched}; loads "
+                               f"{sorted(loads)[:20]})"},
+        )
+    frame = up.frame[matched]
+    job_id = str(uuid.uuid4())
+    record = dict(up.meta)
+    record["job_id"] = job_id
+    record["project_id"] = proj.name
+    record["points"] = matched
+    record["notes"] = up.notes
+    record["warnings"] = [w for w in up.warnings if w["column"] in matched]
+    write_pending(str(proj.directory), job_id, frame, record)
+    return {**record, "unmatched": unmatched,
+            "stats": _load_stats(frame, 1.0, int(record["weather_year"]))}
 
 
 @project_router.get("/{name}/profiles/pending")
