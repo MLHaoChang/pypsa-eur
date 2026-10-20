@@ -47,6 +47,7 @@ from services.profile_gen import engine, presets, shape
 from services.profile_gen.apply import (
     ComponentNotFoundError,
     ProfileApplyError,
+    ProfileBoundConflictError,
     assign_profile,
 )
 from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
@@ -550,6 +551,11 @@ def apply_profile(
         raise HTTPException(
             status_code=422,
             detail={"error_kind": "component_not_found", "message": str(exc)},
+        ) from exc
+    except ProfileBoundConflictError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "profile_bound_conflict", "message": str(exc)},
         ) from exc
     except ProfileApplyError as exc:
         raise HTTPException(

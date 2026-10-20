@@ -353,6 +353,23 @@ def test_apply_to_a_gas_generator_is_refused(client, install_network,
     assert resp.status_code == 422, resp.text
 
 
+def test_apply_below_the_generators_p_min_pu_is_a_typed_refusal(
+    client, install_network, completed_job,
+):
+    # A must-run floor above the generated capacity factor at some hour would
+    # make the LP infeasible.
+    n = _wind_network()
+    n.generators.loc["g_wind", "p_min_pu"] = 0.5
+    install_network(n)
+
+    resp = client.post(
+        "/api/projects/Profile Farm/profiles/apply",
+        json={"job_id": completed_job["id"], "component": "g_wind"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "profile_bound_conflict"
+
+
 def test_apply_with_an_unknown_job_id_is_a_404(client, wind_project):
     resp = client.post(
         f"/api/projects/{wind_project}/profiles/apply",
