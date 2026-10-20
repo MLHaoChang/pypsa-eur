@@ -1,6 +1,6 @@
 # Commercial & finance: the fifth work group
 
-Status: draft for UX review. Owner choices Q8–Q10 (§9) are drafted on the recommended option and marked *pending owner*.
+Status: draft for UX review. Owner answered Q7–Q10 on 2026-10-20 (§9).
 Date: 2026-10-20
 Author: workspace-reconciliation session
 Base: master `494a548` (#444 merged). Extends [workspace-reconciliation.md](workspace-reconciliation.md) and [design.md](design.md); folds in package C of [site-commercial-ux/spec.md](../site-commercial-ux/spec.md).
@@ -27,7 +27,7 @@ Commercial gets the same treatment as the other groups (workspace-reconciliation
 - **Parameter sources**: every value comes from a library item, an uploaded file or a defaults pack, and carries its provenance.
 - **Guided** shows the key parameters the template flags for recheck. **Expert** shows everything, with reset. This is the §10a mode rule.
 
-Turning the group off leaves only what the optimisation needs: the energy prices the LP reads. That suits a pure engineering study.
+Turning the group off leaves only what the optimisation reads (§2.0). That suits a pure engineering study.
 
 ---
 
@@ -53,6 +53,29 @@ Today's editors are spread over Economics › Basis / Tariffs & contracts / Libr
 ---
 
 ## 2. Section 7, block by block
+
+### 2.0 The split rule: what follows the group (UX reviewer)
+
+The optimisation already reads money values whose home is section 7. Switching the Commercial group off must never hide them (design §3.2: never hide a blocker; unknown is never complete). So every section-7 field belongs to one of two classes, and **each new money field is classified when it is added**:
+
+- **(a) Read by the optimisation: always shown while Capacity is on**, whatever the Commercial group's state:
+  - every tariff item `lp_bindings` binds: energy and TOU periods, demand, capacity, tiers, group caps;
+  - the connection capacity fee (`connection.add_fee_term`);
+  - the export price series;
+  - PPAs with `changes_dispatch`;
+  - the LP discount rate;
+  - any market series that feeds one of these.
+- **(b) Commercial and finance proper: follows the group**:
+  - bill-only tariff items (fixed per month or day, per kVA-year), which the LP refuses by name;
+  - contracts that settle after the solve;
+  - parties and value flows;
+  - `FinanceInputs` except the LP discount rate;
+  - reference purchases;
+  - the market bundle's products not read by the LP;
+  - report variants.
+
+Section 7 is therefore **never `not_needed` while Capacity is on**. With the group off, only (b) collapses: its items are `in_scope: false` (#444 §5.2), and 10 › Commercial reads "Outside scope". A block below holds fields of both classes. Its (a) fields stay visible when (b) collapses.
+
 
 Each value has one home. A value used elsewhere is shown read-only with a link (design §2.2). **Rule for per-asset values:** values the LP reads (overnight cost, lifetime) live on the asset in section 5 (#444 B1). Finance-only per-asset values (COD, degradation, depreciation class) live in 7d's per-asset table and show read-only in the asset form's Commercial block.
 
@@ -102,12 +125,12 @@ Each value has one home. A value used elsewhere is shown read-only with a link (
 
 Every commercial value has a **source**. Fields carry the same provenance labels as #444 §10a.4: `library` (with id and version), `upload` (with file), `pack` (with pack version), `template`, `user`, plus `assumed` or `illustrative` where the source says so. Editing a value afterwards makes it `user`.
 
-| Source | What it gives | How (*pending owner* where marked) |
+| Source | What it gives | How |
 |---|---|---|
 | **Library** | tariffs, contracts, connection agreements, price series | picked inline from the 7a/7b editors in a drawer (C1). Items gain `scope`: common (shipped) or workspace (the org's). The project pins the version (`bundle_pins`), so a library edit never changes a saved project silently; a newer version shows as "update available" |
-| **Uploaded files** | tariff sheets, PPA and contract term sheets, price series | price series: the existing CSV/XLSX upload. Tariffs and contracts (*Q9*, recommended): our CSV/XLSX templates parse into library items with validation, and URDB JSON stays. A PDF sheet attaches as the source document; the copilot may propose values from it on LC-04's EditCard, never applied silently |
-| **Defaults packs** | technology costs, finance defaults, illustrative tariffs, load shapes | (*Q10*, recommended) an org can upload a pack in the vendored format (`manifest.json`, `values.csv`, `finance.yaml`, `tariffs.json`); it is validated, versioned and org-scoped. The project picks its pack at creation (Builder › Advanced) and pins it |
-| **Market data** | wholesale, ancillary, capacity, balancing series | (*Q8*, recommended) the user brings their own: an uploaded series, or ENTSO-E Transparency with the user's own token. The vendored pack ships only labelled illustrative shapes |
+| **Uploaded files** | tariff sheets, PPA and contract term sheets, price series | price series: the existing CSV/XLSX upload. Tariffs and contracts (owner Q9 = A): our CSV/XLSX templates parse into library items with validation, and URDB JSON stays. A PDF sheet attaches as the source document; the copilot may propose values from it on LC-04's EditCard, never applied silently |
+| **Defaults packs** | technology costs, finance defaults, illustrative tariffs, load shapes | (owner Q10 = A) an org can upload a pack in the vendored format (`manifest.json`, `values.csv`, `finance.yaml`, `tariffs.json`); it is validated, versioned and org-scoped. The project picks its pack at creation (Builder › Advanced) and pins it |
+| **Market data** | wholesale, ancillary, capacity, balancing series | (owner Q8 = A) the user brings their own: an uploaded series, or ENTSO-E Transparency with the user's own token. The vendored pack ships only labelled illustrative shapes |
 | **Templates** | a starting tariff, finance block and party set per example | as today (`DC_TARIFF`, `DC_FINANCE`, `_staged_commercial_and_finance`, …), marked `assumed` where the template says so |
 
 ---
@@ -174,16 +197,16 @@ Package C's order (owner D5: C5 + C6, then C7, C8, C9) is kept. The **K-slices**
 | **K0 Finance semantics** | a gatekeeper plan: LP discount rate vs WACC; one CO₂ price home (§8); currency on `Tariff`; `MG_FINANCE` / `MG_EXISTING` de-duplication | — | gatekeeper | — |
 | **K1 Section 7 shell** | the five blocks (§2) on W3a's shell, with the W3b moves; Guided cards with key parameters (§4); the group card and the `commercial` scope flag (W4a) | — | UX | W3a, W3b, W4a |
 | **K2 Library scope and pickers** | `scope` common/workspace, the library page, inline pickers in 7a/7b, "update available" on pinned items | C1 | UX; gatekeeper (library schema) | K1 |
-| **K3 Uploads** | the tariff/contract CSV/XLSX templates and parsers; PDF source attachments; copilot proposals on the EditCard; the defaults-pack upload, validation and per-project pin (*Q9, Q10*) | — | gatekeeper (parsers, pack validation); UX | K2 |
+| **K3 Uploads** | the tariff/contract CSV/XLSX templates and parsers; PDF source attachments; copilot proposals on the EditCard; the defaults-pack upload, validation and per-project pin (Q9, Q10 = A) | — | gatekeeper (parsers, pack validation); UX | K2 |
 | **K4 Party board and groups** | the board as the only `ValueFlowConfig` editor; party tags on contracts and per-stream splits | C5 + C6 | gatekeeper (finance); UX | K1 |
 | **K5 Per-party view** | 10 › Commercial "my view" vs BAU; cross-scenario columns | C7 | UX | K4 |
 | **K6 Sector party templates** | data centre, e-mobility, C&I, IPP | C8 | UX | K4 |
 | **K7 Contracts and offsite PPAs** | C3's contract set in 7b; the offsite PPA cards on the board | C3, C9 | gatekeeper; UX | K4 |
-| **K8 Market bundles** | `MarketPack` wired; NO1–NO5 first; ancillary products; capacity and balancing after an engine plan (*Q8*) | C2 | gatekeeper (engine); UX | K2, Q8 |
+| **K8 Market bundles** | `MarketPack` wired; NO1–NO5 first; ancillary products; capacity and balancing after an engine plan (Q8 = A: user-supplied data and ENTSO-E with the user's own token) | C2 | gatekeeper (engine); UX | K2 |
 | **K9 Report variants** | top N by NPV, greatest IRR, per participant | C4 | UX | K5 |
 | **W4b: `investment_case`** | the run kind (§5) | — | gatekeeper; UX | W0 row, W4a |
 
-Order: K0 ∥ K1 → K2 → (K3 ∥ K4) → K5 ∥ K6 ∥ K7 → K9; K8 after Q8 and K2. Package C was queued after DC readiness 03/06 and the gatekeeper's queue; that condition stands for K4–K8.
+Order: K0 ∥ K1 → K2 → (K3 ∥ K4) → K5 ∥ K6 ∥ K7 → K9; K8 after K2. Package C was queued after DC readiness 03/06 and the gatekeeper's queue; that condition stands for K4–K8.
 
 ---
 
@@ -203,6 +226,6 @@ Order: K0 ∥ K1 → K2 → (K3 ∥ K4) → K5 ∥ K6 ∥ K7 → K9; K8 after Q8
 | | Choice | Recommended | Status |
 |---|---|---|---|
 | Q7 | Where commercial sits | a fifth group card | **A** (about 18:57 CEST) |
-| Q8 | Market price data: user-supplied (upload, own ENTSO-E token) / vendored ENTSO-E data / a licensed feed | user-supplied | *pending owner* |
-| Q9 | Tariff and term-sheet upload: structured templates + PDF as source + copilot proposals / copilot PDF extraction first / JSON only | structured templates | *pending owner* |
-| Q10 | Defaults packs: org upload, versioned and pinned / vendored only / per-value overrides only | org upload | *pending owner* |
+| Q8 | Market price data: user-supplied (upload, own ENTSO-E token) / vendored ENTSO-E data / a licensed feed | user-supplied | **A** (about 19:01 CEST) |
+| Q9 | Tariff and term-sheet upload: structured templates + PDF as source + copilot proposals / copilot PDF extraction first / JSON only | structured templates | **A** (about 19:01 CEST) |
+| Q10 | Defaults packs: org upload, versioned and pinned / vendored only / per-value overrides only | org upload | **A** (about 19:01 CEST) |
