@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-19",
+  "generated_at": "2026-10-20",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 263,
+  "tool_count": 265,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -32,6 +32,52 @@
       ],
       "safety_tier": "read",
       "schema_sha256": "5c2e4b5a552480f8f4b512121b9c2048dead2a7cb5c94e72799da14e96e807f1",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_result_views",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "exclude_shown"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "d475a280cf69833ce1b367185a956ef4e36e7e38cb9c722587dd18dc4a4706e4",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "resolve_reference",
+      "toolsets": [
+        "project",
+        "network",
+        "simulation",
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "target",
+        "component_class",
+        "name",
+        "run_id",
+        "latest"
+      ],
+      "required": [
+        "target"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "16d68ed9508b52f40c77158769becd50f4b3e19c4c852392cf1b34ad9cbc79a6",
       "behavioral_fixture": "pending"
     },
     {
@@ -736,7 +782,7 @@
         "attrs"
       ],
       "safety_tier": "write",
-      "schema_sha256": "7b8bc039f95826f8aa33a3be53cdc736a7ad4eba454806d5932076d807c74c29",
+      "schema_sha256": "6e453e7eb9e81a00165b7e973f330357f8cba403c0f6367a16667b03d7c56b65",
       "behavioral_fixture": "pending"
     },
     {
@@ -2631,13 +2677,14 @@
         ]
       ],
       "input_keys": [
-        "name"
+        "name",
+        "limit"
       ],
       "required": [
         "name"
       ],
       "safety_tier": "read",
-      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "schema_sha256": "454b61bedf3b8e640beb6f1719609c35520a6086bb7558875a8081b53e116a25",
       "behavioral_fixture": "pending"
     },
     {

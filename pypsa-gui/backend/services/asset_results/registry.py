@@ -45,6 +45,9 @@ REQ_AC_PF = "ac_pf"                # AC PF stage results present in _state
 REQ_DUALS = "duals"                # LP duals captured on this component class
 REQ_COMMITTABLE = "committable"    # this asset has committable=True
 REQ_CO2 = "co2"                    # this asset's carrier declares co2_emissions
+REQ_PORT2 = "port2"                # this Link has bus2 set (multi-port, ticket 04)
+REQ_PORT3 = "port3"
+REQ_PORT4 = "port4"
 REQ_ANNUITY = "annuity"            # overnight_cost-priced asset resolves a
                                     # discount_rate and a finite lifetime
 
@@ -521,6 +524,15 @@ _LINK_METRICS: tuple[Metric, ...] = (
     Metric(id="p0", label="Withdrawal at bus0", unit="MW", kind="series",
            category="dispatch", classes=("Link",), origin="output",
            compute=C.raw("p0"), requires=(REQ_DISPATCH,)),
+    # Every port as PyPSA reports it (grid-to-process ticket 04). Signed: positive withdraws from the port's bus,
+    # negative injects into it, so a process unit's product port reads negative and a feed input positive.
+    Metric(id="p1", label="Flow at bus1", unit="MW", kind="series",
+           category="dispatch", classes=("Link",), origin="output",
+           compute=C.raw("p1"), requires=(REQ_DISPATCH,)),
+    *(Metric(id=f"p{i}", label=f"Flow at bus{i}", unit="MW", kind="series",
+             category="dispatch", classes=("Link",), origin="output",
+             compute=C.raw(f"p{i}"), requires=(REQ_DISPATCH, req))
+      for i, req in ((2, REQ_PORT2), (3, REQ_PORT3), (4, REQ_PORT4))),
     Metric(id="link_output", label="Delivery at bus1", unit="MW", kind="series",
            category="dispatch", classes=("Link",), origin="derived",
            formula="−p1", compute=C.link_output, requires=(REQ_DISPATCH,)),

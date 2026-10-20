@@ -213,6 +213,37 @@ TOOLS: list[dict[str, Any]] = [
         ["project_name"],
     ),
     _t(
+        "list_result_views",
+        "The results sections of the active project for a walk-through or \"show me something "
+        "else\": per Results tab its label in the current mode, data status (available | no_data | "
+        "unavailable | not_applicable | needs_entity, with a reason), whether this conversation "
+        "already showed it, the exact read to call before opening it, and how far the browser can "
+        "prove it is shown. Statuses only, never values: read a section with its listed read, then "
+        "open it with ui_open_panel, and quote numbers from that read. exclude_shown=true leaves out "
+        "tabs already shown in this project. Safety: read.",
+        {"exclude_shown": {"type": "boolean"}},
+        [],
+    ),
+    _t(
+        "resolve_reference",
+        "Resolve 'this', 'the' or 'latest' to exactly one component, run or snapshot of the active "
+        "project, by one ladder: an explicit name or run_id; what is on screen now (the selection, the "
+        "displayed results or run, the shown snapshot); what was discussed last; the only one that "
+        "exists; otherwise candidates to ask about. component_class 'storage' covers StorageUnit and "
+        "Store; a name without a class searches every class. latest=true takes the newest completed "
+        "run and names newer failed or running runs it skipped. Returns status resolved|ambiguous|"
+        "not_found, via, target, says (always repeat it so the user sees what was resolved), ignored "
+        "hints and, when ambiguous, candidates with key fields: then ask with one ask_user Choice, never "
+        "guess. Hints are re-read; activates, selects and opens nothing. Safety: read.",
+        {"target": {"type": "string", "enum": ["component", "run", "snapshot"]},
+         "component_class": {"type": "string", "enum": [c for c in COMPONENT_CLASS_ENUM
+                                                        if c != "GlobalConstraint"] + ["storage"]},
+         "name": {"type": "string", "minLength": 1, "maxLength": 256},
+         "run_id": {"type": "string", "minLength": 1, "maxLength": 64},
+         "latest": {"type": "boolean"}},
+        ["target"],
+    ),
+    _t(
         "get_component_schema",
         "Discover native component fields before choosing parameters. Paged class metadata only: "
         "stored/display units, request-model types/bounds/enums, native input/output and derived/read-only status. "
@@ -1470,10 +1501,11 @@ TOOLS: list[dict[str, Any]] = [
         "(422) when the component is gone, its carrier is not wind/solar, or "
         "the artifact holds no column for it; warns when the bus moved since "
         "generation. `time_basis` says what the snapshots mean: \"UTC\" "
-        "(default; the weather series maps straight on) or the IANA zone "
-        "whose wall clock they are (e.g. \"Europe/Berlin\"; the series is "
-        "shifted by that zone's offset) — ask when the user says the "
-        "horizon is local time; report the time basis from the answer. "
+        "or the IANA zone whose wall clock they are (e.g. "
+        "\"Europe/Berlin\"; the series is shifted by that zone's offset). "
+        "Leave it unset unless the user said; then the answer's `warnings` "
+        "may say UTC was assumed — relay that and offer to set the zone. "
+        "Report the time basis from the answer. "
         "`project_id` is the project NAME and must be the open "
         "project. Safety: write.",
         {"project_id": {"type": "string"},
@@ -1645,8 +1677,14 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "get_project_statistics",
-        "Offline statistics summary (no activate). Safety: read.",
-        {"name": {"type": "string"}},
+        "Summarise one project's assets without activating it (name or project_id; the active "
+        "project reads its live network, any other its saved files). summary: per-class counts; the "
+        "top `limit` items per class by capacity with has_more; generation MW by carrier, storage MW "
+        "and MWh, line count/length/MVA, extendable assets; snapshot range, resolution and investment "
+        "periods; solver mode; the latest run with whether it is current; validation error/warning "
+        "counts; gaps (variable generators without a profile). Every number you state must come from "
+        "it. Safety: read.",
+        {"name": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}},
         ["name"],
     ),
     _t(
@@ -3111,8 +3149,12 @@ TOOLS: list[dict[str, Any]] = [
         "I7 cuts would buy instead), the GFM-vs-GFL comparison, the search "
         "ledger (every bound assumed), the simulations used, and applied once "
         "applied (with hub_resolve_needed: the hub must be re-solved, since "
-        "droop and inertia change its island rows). job: the running or last "
-        "recommend job (null when none). Say it is heuristic screening and "
+        "droop and inertia change its island rows). island_rows_now: whether the "
+        "solver settings have island constraints on as they stand now; when "
+        "false the hub solve leaves the island rows out, so the capacity a "
+        "not_achievable result asks for does not shape its dispatch. job: the "
+        "running or last recommend job (null when none). Say it is heuristic "
+        "screening and "
         "which inputs are assumed; when not_achievable, say capacity is "
         "needed, never that settings fix it. 409 for a project of another "
         "kind. Safety: read.",
@@ -3756,6 +3798,8 @@ TOOL_ROUTES: dict[str, list] = {
     "find_capabilities": _SERVICE_CALL,
     "get_component_schema": _SERVICE_CALL,
     "resolve_project_target": _SERVICE_CALL,
+    "resolve_reference": _SERVICE_CALL,
+    "list_result_views": _SERVICE_CALL,
     "start_task": _SERVICE_CALL,
     "get_task": _SERVICE_CALL,
     "resume_task": _SERVICE_CALL,

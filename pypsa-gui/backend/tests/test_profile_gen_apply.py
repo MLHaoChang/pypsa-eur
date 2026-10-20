@@ -483,9 +483,10 @@ def test_missing_resolution_meta_defaults_to_hourly():
 #
 # Gatekeeper review of the apply path (2026-10-19): mapping UTC hours onto
 # local wall-clock snapshots shifts solar by the UTC offset. Naive snapshots
-# are read as UTC by default (the PyPSA-Eur convention lp_bindings follows);
-# `time_basis="<IANA zone>"` declares them that zone's wall clock and the
-# series is converted before the month-day-hour map.
+# follow lp_bindings' rule: UTC when commercial.timezone is set, else the
+# site clock of unknown offset (applied unshifted, recorded as assumed, with
+# a warning); `time_basis="<IANA zone>"` declares a zone's wall clock and
+# the series is converted before the month-day-hour map.
 
 
 def _flat(year: int = 2025):
@@ -494,12 +495,26 @@ def _flat(year: int = 2025):
     return n, series, meta
 
 
-def test_the_default_time_basis_is_utc_and_recorded():
+def test_unstated_basis_without_a_site_timezone_is_assumed_utc_and_warned():
     n, series, meta = _flat()
     out = assign_profile(_ctx(), "Solar", series, meta)
+    assert out["time_basis"] == "UTC (assumed; site clock unknown)"
+    assert _user_ts_meta[KEY]["time_basis"] == "UTC (assumed; site clock unknown)"
+    assert len(out["warnings"]) == 1
+    assert out["warnings"][0].startswith("time_basis_assumed_utc")
+    assert "set the time zone" in out["warnings"][0]
+    ts = pd.Timestamp("2025-07-15T12:00")  # unshifted
+    assert float(n.generators_t.p_max_pu["Solar"].loc[ts]) == float(series.loc[ts])
+
+
+def test_unstated_basis_with_a_commercial_timezone_reads_snapshots_as_utc():
+    n, series, meta = _flat()
+    ctx = _ctx()
+    ctx.solver_state["solver_config"].commercial = {"timezone": "Europe/Berlin"}
+    out = assign_profile(ctx, "Solar", series, meta)
     assert out["time_basis"] == "UTC"
-    assert _user_ts_meta[KEY]["time_basis"] == "UTC"
-    ts = pd.Timestamp("2025-07-15T12:00")
+    assert out["warnings"] == []
+    ts = pd.Timestamp("2025-07-15T12:00")  # unshifted: the snapshots are UTC
     assert float(n.generators_t.p_max_pu["Solar"].loc[ts]) == float(series.loc[ts])
 
 
@@ -514,6 +529,7 @@ def test_a_berlin_wall_clock_shifts_the_series_by_the_utc_offset():
     assert float(col.loc[pd.Timestamp("2025-07-15T14:00")]) == float(
         series.loc[pd.Timestamp("2025-07-15T12:00")])
     assert out["time_basis"] == "Europe/Berlin"
+    assert out["warnings"] == []
     assert _user_ts_meta[KEY]["time_basis"] == "Europe/Berlin"
 
 

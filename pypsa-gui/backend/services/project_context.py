@@ -293,6 +293,9 @@ RESULT_STATE_KEYS = (
     "eh_dtc_stress",
     "eh_dtc_planning",
     "last_reserve_margin",
+    # Grid-to-process ticket 03: the binary operational check of a plan with
+    # committable process units (None without one).
+    "last_process_uc_check",
     # UX overhaul S2b: the settings the last successful solve used.
     "last_solve_settings",
     # Edge Investment Case (P0 WP0.5): the report, the billing pass's
@@ -567,6 +570,8 @@ class ProjectSolverState:
     # serves. Reset with the rest each solve, so a margin can never outlive
     # the plan that met it.
     last_reserve_margin: Any = None
+    # Grid-to-process ticket 03: the binary operational check payload.
+    last_process_uc_check: Any = None
     # The settings the last SUCCESSFUL solve used (voll, whether an ENS target
     # and a reserve margin were applied) — UX overhaul S2b. Lets the results
     # routes say "solved without this standard" instead of a 204 that also

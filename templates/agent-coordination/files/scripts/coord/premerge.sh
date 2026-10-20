@@ -56,6 +56,7 @@ echo "merge-base: $mbase"
 echo "behind:     $behind merge(s) on $base_branch since merge-base"
 
 fail=0
+reasons=()  # why the PR is blocked; appended to the RESULT line
 
 echo
 echo "== conflicts"
@@ -69,6 +70,7 @@ else
   sed -n '2,/^$/p' <<<"$tree" | sed '/^$/d; s/^/  /'
   conflict=1
   fail=1
+  reasons+=("conflict")
 fi
 
 echo
@@ -79,6 +81,7 @@ overlap=$(comm -12 \
 if [[ -z $overlap ]]; then
   echo "none"
 else
+  code_overlap=0
   while IFS= read -r f; do
     # Same blob on both sides (e.g. a cherry-pick the base already has), or
     # deleted on both: nothing to reconcile.
@@ -90,8 +93,12 @@ else
     else
       echo "  code       $f"
       fail=1
+      code_overlap=$((code_overlap + 1))
     fi
   done <<<"$overlap"
+  if ((code_overlap)); then
+    reasons+=("overlap: $code_overlap code file$([[ $code_overlap -eq 1 ]] || echo s)")
+  fi
 fi
 
 echo
@@ -115,6 +122,7 @@ else
   else
     echo "semantic tests: FAIL"
     fail=1
+    reasons+=("semantic tests failed")
   fi
 fi
 
@@ -131,20 +139,28 @@ if runs=$(command -v gh >/dev/null &&
   if ((total == 0)); then
     echo "  none yet"
     fail=1
+    reasons+=("checks: none yet")
   elif [[ -n $bad ]]; then
     awk -F'\t' '{ printf "  %-11s %-15s %s\n", $1, $2, $3 }' <<<"$bad"
     fail=1
+    running=$(awk -F'\t' 'NF && $1 != "completed"' <<<"$bad" | grep -c . || true)
+    failed=$(awk -F'\t' 'NF && $1 == "completed"' <<<"$bad" | grep -c . || true)
+    msg=()
+    ((running)) && msg+=("$running running")
+    ((failed)) && msg+=("$failed failed")
+    reasons+=("checks: $(IFS=,; echo "${msg[*]}" | sed 's/,/, /g')")
   else
     echo "all success or skipped"
   fi
 else
   echo "checks: not read"
   fail=1
+  reasons+=("checks: not read")
 fi
 
 echo
 if ((fail)); then
-  echo "RESULT: blocked"
+  echo "RESULT: blocked ($(IFS=';'; echo "${reasons[*]}" | sed 's/;/; /g'))"
 else
   echo "RESULT: ok to merge $head"
 fi

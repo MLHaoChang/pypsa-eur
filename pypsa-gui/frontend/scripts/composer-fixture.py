@@ -21,6 +21,8 @@ def main():
     parser.add_argument("--storage", type=Path, required=True)
     parser.add_argument("--decisions", action="store_true")
     parser.add_argument("--no-model", action="store_true", help="configure no model profile (the no-key path)")
+    parser.add_argument("--journey", choices=["oj01"],
+                        help="script a finite owner journey on the loopback wire (LC-03 OJ-01)")
     args = parser.parse_args()
     storage = args.storage.resolve()
     storage.mkdir(parents=True, exist_ok=True)
@@ -37,7 +39,78 @@ def main():
         def log_message(self, *_):
             pass
 
+        def _stream(self, delta, finish):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            chunk = {"choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+                     "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30}}
+            self.wfile.write(("data: " + json.dumps(chunk) + "\n\ndata: [DONE]\n\n").encode())
+            self.wfile.flush()
+
+        def _journey(self, body):
+            """OJ-01 as a model would play it: every argument and every number in
+            the answer comes from the native results of this turn."""
+            messages = body["messages"]
+            last = max(i for i, m in enumerate(messages) if m["role"] == "user")
+            said = json.dumps(messages[last].get("content"))
+            results = []
+            for message in messages[last + 1:]:
+                if message["role"] == "tool":
+                    text = message.get("content") if isinstance(message.get("content"), str) else json.dumps(message.get("content"))
+                    try:
+                        results.append(json.JSONDecoder().raw_decode(text[text.index("{"):])[0])
+                    except ValueError:
+                        results.append({"unparsed": text[:200]})
+            if "Run the simulation" in said:
+                steps = [("run_simulation", {})]
+            elif "load flow results" in said:
+                steps = [("list_project_runs", {"limit": 1, "status": "completed"}),
+                         ("get_loadflow_summary", {"run_id": ((results[0].get("items") or [{}])[0].get("run_id")
+                                                              if results else None)}),
+                         ("ui_open_panel", {"panel_id": "results", "results_tab": "loadflow"})]
+            elif "something else" in said:
+                listing = results[0] if results else {}
+                picked = next((v for v in listing.get("views", []) if v.get("data") == "available"), None)
+                steps = [("list_result_views", {"exclude_shown": True})]
+                if picked:
+                    read = picked["read"][0]
+                    steps += [(read["tool"], read["args"]),
+                              ("ui_open_panel", {"panel_id": "results", "results_tab": picked["id"]})]
+            else:
+                return False
+            if len(results) < len(steps):
+                name, arguments = steps[len(results)]
+                arguments = {k: v for k, v in arguments.items() if v is not None}
+                self._stream({"tool_calls": [{"index": 0, "id": f"oj01-{len(results)}", "type": "function",
+                              "function": {"name": name, "arguments": json.dumps(arguments)}}]}, "tool_calls")
+                return True
+            if "something else" in said:
+                listing = results[0]
+                offered = [v["id"] for v in listing.get("views", []) if v.get("data") == "available"]
+                verb = "Showing" if (results[-1].get("display") or {}).get("say") == "showing" else "Opened"
+                text = (f"OJ03_ANSWER {verb} {offered[0] if offered else 'nothing'}; "
+                        f"also with data: {', '.join(offered[1:]) or 'none'}; "
+                        f"already shown: {', '.join(listing.get('shown', []))}.")
+            elif len(steps) == 1:
+                text = f"The solve was started (job {results[0].get('job_id')})."
+            else:
+                run = (results[0].get("items") or [{}])[0]
+                lf, shown = results[1], results[2]
+                top = ", ".join(f"{r['name']} {r['util_pct']} % ({r['peak_flow']} MW of {r['rating']['value']} MVA)"
+                                for r in lf.get("top", [])[:3])
+                verb = "Showing" if (shown.get("display") or {}).get("say") == "showing" else "Opened"
+                text = (f"OJ01_ANSWER {verb} the Load flow tab for run {run.get('run_id')} "
+                        f"(finished {run.get('finished_at')}), current: {(lf.get('run') or {}).get('is_current')}. "
+                        f"Highest loading: {top}. Active-power proxy, not an AC thermal check.")
+            self._stream({"content": text}, "stop")
+            return True
+
         def do_POST(self):
+            if args.journey and self.path == "/v1/chat/completions":
+                if self._journey(json.loads(self.rfile.read(int(self.headers["Content-Length"])))):
+                    return
             if args.decisions and self.path == "/v1/chat/completions":
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 messages = body["messages"]
@@ -162,8 +235,15 @@ with SessionLocal() as db:
                 time.sleep(0.5)
             else:
                 raise RuntimeError("Backend readiness timeout")
-            print(json.dumps({"base": f"http://127.0.0.1:{port}",
-                              "credentials_file": str(credentials)}), flush=True)
+            ready = {"base": f"http://127.0.0.1:{port}", "credentials_file": str(credentials)}
+            if args.journey == "oj01":
+                # The same oj-grid the Tier A tests use (tests/oj_grid.py), as NetCDF.
+                network = storage / "oj-grid.nc"
+                subprocess.run([sys.executable, "-c", "import sys; from tests.oj_grid import build_oj_grid; "
+                                "build_oj_grid().export_to_netcdf(sys.argv[1])", str(network)],
+                               cwd=backend_dir, env=env, check=True, capture_output=True)
+                ready["network_file"] = str(network)
+            print(json.dumps(ready), flush=True)
             backend.wait()
     except KeyboardInterrupt:
         pass

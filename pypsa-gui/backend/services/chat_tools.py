@@ -3524,7 +3524,7 @@ def generate_renewable_profile(project_id: str, points: list | None = None,
 
 def apply_generated_profile(project_id: str, job_id: str, component: str,
                             point_id: str | None = None,
-                            time_basis: str = "UTC") -> dict:
+                            time_basis: str | None = None) -> dict:
     from routers.profiles import ApplyRequest, apply_profile as _h
     body = ApplyRequest(job_id=job_id, component=component, point_id=point_id,
                         time_basis=time_basis)
@@ -4208,9 +4208,9 @@ def download_project_bundle(name: str) -> dict:
     )
 
 
-def get_project_statistics(name: str) -> dict:
+def get_project_statistics(name: str, limit: int = 5) -> dict:
     from routers.projects import project_statistics as _h
-    return _route(_h, name)
+    return _route(_h, name, limit=limit)
 
 
 def get_project_network_meta(project_id: str) -> dict:
@@ -7423,8 +7423,13 @@ from services.assistant_tasks import list_tasks, start_task, get_task, resume_ta
 from services.assistant_tools import (find_capabilities, get_file_delivery, inspect_import, import_uploaded_network,
                                       preview_project_changes, apply_project_changes, create_chart, build_delivery)
 
+from services import reference_resolution as _reference_resolution  # noqa: E402
+from services import result_views as _result_views  # noqa: E402
+
 DISPATCHERS: dict[str, Any] = {
     "resolve_project_target": resolve_project_target,
+    "resolve_reference": _reference_resolution.resolve_reference,
+    "list_result_views": _result_views.list_result_views,
     "get_component_schema": get_component_schema,
     "list_project_runs": list_project_runs,
     "get_run_evidence": get_run_evidence,

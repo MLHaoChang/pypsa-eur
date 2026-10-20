@@ -76,9 +76,48 @@ class InvalidTimeBasisError(ProfileApplyError):
     """The declared snapshot time basis is not "UTC" or an IANA zone."""
 
 
-# Naive snapshots are read as UTC unless the caller says they are a zone's
-# wall clock — the PyPSA-Eur convention `commercial/lp_bindings.py` follows.
+# The mapping basis when the snapshots' clock is not stated (see
+# `resolve_time_basis`): the UTC weather hours map straight on.
 DEFAULT_TIME_BASIS = "UTC"
+
+TIME_BASIS_ASSUMED_WARNING = (
+    "time_basis_assumed_utc: the profile is in UTC and was applied unshifted; "
+    "if this project's snapshots are local time, set the time zone (a shift "
+    "of the site's UTC offset, e.g. +1/+2 h in Central Europe)"
+)
+
+
+def _commercial_timezone(ctx) -> str | None:
+    state = getattr(ctx, "solver_state", None) or {}
+    cfg = state.get("solver_config") if isinstance(state, Mapping) else None
+    commercial = getattr(cfg, "commercial", None)
+    if commercial is None:
+        return None
+    tz = (commercial.get("timezone") if isinstance(commercial, Mapping)
+          else getattr(commercial, "timezone", None))
+    return str(tz) if tz else None
+
+
+def resolve_time_basis(stated: str | None,
+                       commercial_timezone: str | None,
+                       ) -> tuple[str, str, list[str]]:
+    """(mapping basis, recorded basis, warnings) — the rule
+    `commercial/lp_bindings.py` reads snapshots by (gatekeeper review
+    2026-10-19):
+
+    - stated: map in that basis ("UTC" or an IANA zone's wall clock);
+    - not stated, `commercial.timezone` set: the snapshots are UTC;
+    - not stated, no timezone: the snapshots are the site clock, of unknown
+      offset — map unshifted so a one-click default still works, record the
+      assumption, and warn.
+    """
+    if stated:
+        basis = _check_time_basis(stated)
+        return basis, basis, []
+    if commercial_timezone:
+        return "UTC", "UTC", []
+    return ("UTC", "UTC (assumed; site clock unknown)",
+            [TIME_BASIS_ASSUMED_WARNING])
 
 
 _ONE_HOUR = pd.Timedelta(hours=1)
@@ -465,7 +504,7 @@ def assign_profile(
     meta: Mapping[str, Any],
     *,
     now: _dt.datetime | str | None = None,
-    time_basis: str = DEFAULT_TIME_BASIS,
+    time_basis: str | None = None,
 ) -> dict:
     """Apply a generated per-unit profile to ``component``'s ``p_max_pu``.
 
@@ -475,10 +514,11 @@ def assign_profile(
     (router response / chat tool payload). Raises a typed ProfileApplyError
     subclass on every refusal, having written nothing.
 
-    ``time_basis``: what the network's naive snapshots mean. "UTC" (the
-    default, the PyPSA-Eur convention) maps the UTC weather hours straight
-    on; an IANA zone ("Europe/Berlin") declares them that zone's wall clock
-    and shifts the series by the zone's offset, DST included.
+    ``time_basis``: what the network's naive snapshots mean — "UTC", or an
+    IANA zone ("Europe/Berlin") whose wall clock they are (the series is
+    shifted by that zone's offset, DST included). None (not stated) follows
+    `resolve_time_basis`: UTC when the project's commercial timezone is set,
+    else an unshifted apply recorded as assumed, with a warning.
     """
     if not isinstance(series, pd.Series):
         raise ProfileApplyError(
@@ -514,7 +554,8 @@ def assign_profile(
         )
 
     resolution = str(meta.get("resolution") or "hourly").strip().lower()
-    time_basis = _check_time_basis(time_basis)
+    time_basis, recorded_basis, warnings = resolve_time_basis(
+        time_basis, _commercial_timezone(ctx))
     aligned, align_meta = _align_to_snapshots(
         series, n.snapshots, resolution=resolution, time_basis=time_basis,
     )
@@ -547,7 +588,7 @@ def assign_profile(
         "leap_day": align_meta["leap_day"],
         "tiled": align_meta["tiled"],
         "resolution": align_meta["resolution"],
-        "time_basis": time_basis,
+        "time_basis": recorded_basis,
         "applied_at": applied_at.isoformat(),
     }
     if align_meta["periods"] is not None:
@@ -588,7 +629,8 @@ def assign_profile(
         "tiled": align_meta["tiled"],
         "periods": align_meta["periods"],
         "resolution": align_meta["resolution"],
-        "time_basis": time_basis,
+        "time_basis": recorded_basis,
+        "warnings": warnings,
         "dispatch_cleared": bool(dispatch_cleared),
         "mean": float(aligned.mean()),
         "peak": float(aligned.max()),

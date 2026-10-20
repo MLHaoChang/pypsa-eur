@@ -35,9 +35,18 @@ describe('chapterTiles', () => {
 
   it('reliability: the shortfall against the goal', () => {
     const t = byId({ ...NONE, reliability: { hasResults: true, running: false, lole: 12.38,
-                                             target: 3, verdict: 'fail' } })
+                                             target: 3, verdict: 'fail', horizonYears: 1 } })
     expect(t.reliability).toMatchObject({ state: 'ready', value: '12.38', unit: 'h/yr',
-      basis: 'Not certified: the goal is 3 h/yr', open: { panel: 'results', tab: 'adequacy' } })
+      basis: 'Not certified: the goal is 3 h/yr · Monte Carlo, 8 760 h', open: { panel: 'results', tab: 'adequacy' } })
+  })
+
+  it('reliability: the basis names the hours the study modelled (N10)', () => {
+    const basis = (horizonYears?: number | null) => byId({ ...NONE, reliability: {
+      hasResults: true, running: false, lole: 1, target: 3, verdict: 'pass', horizonYears } }).reliability.basis
+    expect(basis(2)).toBe('Certified: the goal is 3 h/yr · Monte Carlo, 17 520 h')
+    expect(basis(0.5)).toBe('Certified: the goal is 3 h/yr · Monte Carlo, 4 380 h')
+    expect(basis(undefined)).toBe('Certified: the goal is 3 h/yr · Monte Carlo')
+    expect(basis(null)).toBe('Certified: the goal is 3 h/yr · Monte Carlo')
   })
 
   it('reliability: a stale study dims the figure and says why (UX review N4)', () => {
@@ -90,11 +99,11 @@ describe('chapterTiles', () => {
     // a money-year refusal (smoke 2026-10-16, issue 03) reaches the tile whole: both years and the way out
     const money = byId({ ...NONE, investment: { study: { status: 'refused', error_code: 'campus_assets_money_year_mismatch',
       error: "campus_assets_money_year_mismatch: the campus assets are priced in 2026 money (the campus asset library's "
-        + "price_year), the case in 2020 money (the finance inputs' currency_year); no price index converts between "
+        + "price_year), the case's price data are 2020 (the finance inputs' currency_year); no price index converts between "
         + 'them, so a case with the campus assets needs the asset library and the finance inputs in one money year: '
         + "reprice the campus asset library in 2020, or state the finance inputs in the library's money year" } as never,
       report: null } })
-    expect(money.investment.reason).toMatch(/2026 money .* 2020 money .* reprice the campus asset library in 2020/)
+    expect(money.investment.reason).toMatch(/2026 money .* price data are 2020 .* reprice the campus asset library in 2020/)
   })
 
   it('grid plan: the campus checks that pass with the proposed measures', () => {
