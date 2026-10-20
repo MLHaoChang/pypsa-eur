@@ -208,12 +208,18 @@ The app's own result views (tables and charts computed by the software from the 
 | interrupted | "Response incomplete — not checked" | — |
 
 **Copilot charts.**
-- With Check answers on, a copilot chart draws only series whose every point traces to evidence. Series it can't check are left out and listed under the chart ("Not drawn: <series> — <reason>"); they are never drawn unlabelled.
+- With Check answers on, a copilot chart draws only series whose every point traces to evidence. Series it can't check are left out and listed under the chart ("Not drawn: <series> — <reason>"); they are never drawn unlabelled. The list comes from the receipt's **series-level slots** (dispositions `answered` / `unavailable` / `needs_clarification`, with a reason), never from the model. Those slots are the Check-answers package's work; today only known static-input chart data is hash-checked.
 - With Check answers off, the chart header reads "Not checked" and links to the native view of the same data.
+
+**What the package checks today** (Check-answers session, 2026-10-20):
+- In a checked turn, a result read outside its five bounded profiles is refused. Most results questions will therefore read "Requested results unavailable" with a reason such as `outside_checked_scope`, until each profile lands.
+- An "Explain this" note is checkable only for its numeric claims against a profile. Quantitative prose before review is **withheld**, not checked, and labelled so.
+- **Freshness is not verification.** A freshness chip never reads as checked.
+- The copilot may say it is "showing" exact numbers only where a displayed-data acknowledgement exists (load flow today). Elsewhere it may say only "opened".
 
 **Compare (§5.2).**
 - The KPI deltas are computed by the software, not by the copilot, so they need no check badge.
-- When the copilot summarises a comparison, each case column carries its check state.
+- When the copilot summarises a comparison, each case column carries its check state. Today only same-basis cost deltas (generator, network-linear and storage cost profiles) are checkable. Every other KPI a copilot summary mentions reads "Not checked: no checked profile" until its profile lands.
 - A case that **can't be checked** (not run, stale, incomparable, evidence missing) gets a greyed column headed "Not checked: <reason>". The copilot states no value or delta for it, and the native table still shows whatever the software computed, with its freshness.
 
 **Results by group (W10).**
