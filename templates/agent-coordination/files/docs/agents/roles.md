@@ -7,6 +7,7 @@ changes one line. Keep it current in the PR that replaces a session.
 |---|---|---|
 | Coordinator | see `docs/agents/coordinator.md` | Opens every other session, relays decisions, does every merge; rotates, so its id lives there |
 | Gatekeeper | `<session_…>` | Reviews {{GATED_AREAS}}; strongest model |
+| UX reviewer (optional) | `<session_…>` | Writes the project workflow design, then gates every UI PR on coherence |
 
 - **Dashboard:** `<https://claude.ai/artifact/…>`
 - **Sweep routine:** `<trig_…>`, every 6 hours, fires into the coordinator session

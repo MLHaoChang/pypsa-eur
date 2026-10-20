@@ -446,7 +446,7 @@ def test_no_active_project_is_refused(monkeypatch, solved):
     assert exc.value.detail['error_kind'] == 'run_project_required'
 
 
-def test_historical_run_without_artifacts_is_typed_unavailable_pointing_at_issue_06(solved, tmp_path, monkeypatch):
+def test_historical_run_without_a_loadflow_section_is_typed_unavailable(solved, tmp_path, monkeypatch):
     monkeypatch.setattr(re_, '_authority', lambda: (tmp_path, PROJECT, OWNER))
     re_.publish_run(tmp_path, PROJECT, run_id='run-old', kind='simulation', status='completed',
                     started_at='2026-10-01T10:00:00+00:00', finished_at='2026-10-01T10:05:00+00:00',
@@ -455,7 +455,9 @@ def test_historical_run_without_artifacts_is_typed_unavailable_pointing_at_issue
     out = lf.get_loadflow_summary(run_id='run-old')
     assert out['status'] == 'unavailable'
     assert out['unavailable_kind'] == 'historical_loadflow_unavailable'
-    assert out['depends_on'] == 'issue-06 run evidence' and out['run_id'] == 'run-old'
+    assert out['run_id'] == 'run-old' and out['run_is_current'] is False
+    # Issue 06 has landed; a past run never invites reading the current results instead.
+    assert 'depends_on' not in out and 'current_results_hint' not in out
     assert out['reason']
     assert 'top' not in out
 
@@ -475,7 +477,10 @@ def test_historical_run_with_recorded_section_is_returned_as_historical(solved, 
                     mode='lopf', fingerprint='fp', sections={'loadflow': {'top': [{'name': 'X'}]}})
     out = lf.get_loadflow_summary(run_id='run-lf')
     assert out['status'] == 'ok' and out['scope'] == 'historical'
-    assert out['data'] == {'top': [{'name': 'X'}]}
+    # The retained summary is returned like a current read, bound to its run.
+    assert out['top'] == [{'name': 'X'}] and 'data' not in out
+    assert out['run'] == {'run_id': 'run-lf', 'finished_at': '2026-10-01T10:05:00+00:00',
+                          'is_current': False}
 
 
 def test_payload_is_bounded_with_many_branches(solved):

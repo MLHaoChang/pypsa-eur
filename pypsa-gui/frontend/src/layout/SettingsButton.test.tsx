@@ -20,6 +20,7 @@ import { fetchLocalSettings, type LocalSettingsState } from '../api/localSetting
 import { fetchLLMSettingsOrNull, type LLMSettingsPayload } from '../api/llmSettings'
 import Sidebar from './Sidebar'
 import SettingsButton from './SettingsButton'
+import { setAuthEnabled } from '../auth/config'
 
 vi.mock('../api/network', () => ({
   networkApi: { getMeta: vi.fn().mockResolvedValue({ bus_count: 3 }) },
@@ -85,7 +86,9 @@ function renderSidebar() {
   )
 }
 
+// The desktop build (auth_enabled false) is the one that reads local settings (N15).
 beforeEach(() => {
+  setAuthEnabled(false)
   cleanup()
   vi.clearAllMocks()
   useUIStore.setState({

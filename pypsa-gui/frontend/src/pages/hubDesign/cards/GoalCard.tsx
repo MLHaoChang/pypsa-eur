@@ -19,6 +19,7 @@ import { VOLL_TEXT } from '../delegate'
 import { CardShell, DelegateButton } from '../shared/CardShell'
 import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
 import { Term } from '../shared/Term'
+import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
 import {
   templateForm, useHubReadiness, useHubSolverConfig, useHubStudy, useHubTemplate,
 } from '../useHubData'
@@ -75,9 +76,11 @@ export function GoalCard() {
   const pipeline = study?.report?.pipeline
   // Plain words, and a count only when the record has one — never "0 of N".
   const budget = pipeline?.budget_solves ?? study?.budget_solves
-  const runningText = pipeline?.budget_solves && typeof pipeline.solves_consumed === 'number'
+  const elapsed = formatElapsed(useElapsed(running))
+  const runningText = (pipeline?.budget_solves && typeof pipeline.solves_consumed === 'number'
     ? `Studying… ${pipeline.solves_consumed} of ${pipeline.budget_solves} calculation steps`
-    : budget ? `Studying… (up to ${budget} calculation steps)` : 'Studying…'
+    : budget ? `Studying… (up to ${budget} calculation steps)` : 'Studying…')
+    + ` · ${elapsed} elapsed`
   const problem = built.error ?? blocked
   // P24-FE re-gate note 2: without the template the card would silently run
   // the default site type's study instead of the template's recommended one.

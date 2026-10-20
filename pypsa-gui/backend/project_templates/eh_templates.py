@@ -110,7 +110,7 @@ def _price(n, component: str, name: str, technology: str) -> None:
 # ── Data Center Energy Hub (weak_flexible) ─────────────────────────────────
 
 
-def build_eh_datacenter(phases=None) -> pypsa.Network:
+def build_eh_datacenter(phases=None, load_spec=None) -> pypsa.Network:
     """A 50 MW hyperscale campus behind a weak, capped grid connection.
 
     Critical IT sits on its own bus behind the site transformer (a near
@@ -120,6 +120,8 @@ def build_eh_datacenter(phases=None) -> pypsa.Network:
 
     ``phases`` (``DC_PHASES``) makes it the staged-growth campus
     (``_staged_datacenter``); None is the single-year template, unchanged.
+    ``load_spec`` (a checked ``DataCentreLoadSpec``, ``dc_load_spec``) opts in
+    to the AI-training profile; None keeps today's load bit for bit.
     """
     n = _base("Data Center Energy Hub")
     for c, co2 in (("AC", 0.0), ("gas", 0.20), ("solar", 0.0),
@@ -197,7 +199,12 @@ def build_eh_datacenter(phases=None) -> pypsa.Network:
     # Site transformer failure islands the IT bus onto its UPS: a Class-B
     # mode fmea_top should rank.
     _outage(n, "links", "site_transformer", 0.005, 72.0)
-    return n if phases is None else _staged_datacenter(n, phases)
+    if phases is not None:
+        return _staged_datacenter(n, phases, load_spec)
+    if load_spec is not None:
+        _apply_dc_profile(n, load_spec, SNAPSHOTS, _single_year_phase(load_spec).it_mw,
+                          timezone=_dc_timezone("eh_datacenter"))
+    return n
 
 
 # ── Data Center Energy Hub, staged growth (E2E demo plan 2026-10-14, slice 8) ─
@@ -265,7 +272,7 @@ DC_FINANCE: dict = {
 }
 
 
-def _staged_datacenter(n: pypsa.Network, phases) -> pypsa.Network:
+def _staged_datacenter(n: pypsa.Network, phases, load_spec=None) -> pypsa.Network:
     """The single-year campus as a three-period plan: the week repeated in each
     period, the load scaled to ``phases``, the import capped per period by
     ``DC_ENERGIZATION_MW`` (an absolute MW schedule on the ``_DC_POC_MW`` link), and the two expansion
@@ -290,10 +297,16 @@ def _staged_datacenter(n: pypsa.Network, phases) -> pypsa.Network:
         tiled = pd.DataFrame(np.tile(df.to_numpy(), (len(years), 1)), index=snaps, columns=df.columns)
         getattr(n, frame)[attr] = tiled
     p_set = n.loads_t.p_set
-    for y, it_mw, _pue in phases:
-        scale = it_mw / _DC_IT_MW
-        for load in ("it_load", "cooling"):
-            p_set.loc[y, load] = (p_set.loc[y, load] * scale).to_numpy()
+    if load_spec is None:
+        for y, it_mw, _pue in phases:
+            scale = it_mw / _DC_IT_MW
+            for load in ("it_load", "cooling"):
+                p_set.loc[y, load] = (p_set.loc[y, load] * scale).to_numpy()
+    else:
+        it_by_year = {p.cod.year: p.it_mw for p in load_spec.phases}
+        tz = _dc_timezone("eh_datacenter_staged")
+        for y in years:
+            _apply_dc_profile(n, load_spec, SNAPSHOTS, it_by_year[y], timezone=tz, period=y)
     # The energization schedule in MW (`services.adequacy.energization`): a
     # solve turns it into p_max_pu = min(own, E / p_nom), so a lever or an
     # overlay that rewrites p_nom composes as min(E, cap) instead of
@@ -338,8 +351,137 @@ def _staged_datacenter(n: pypsa.Network, phases) -> pypsa.Network:
     return n
 
 
-def build_eh_datacenter_staged() -> pypsa.Network:
-    return build_eh_datacenter(phases=DC_PHASES)
+def build_eh_datacenter_staged(load_spec=None) -> pypsa.Network:
+    return build_eh_datacenter(phases=DC_PHASES, load_spec=load_spec)
+
+
+# ── The AI-training load profile, opt-in (DC grid readiness 01) ─────────────
+#
+# A project created with a ``dc_load`` body replaces the data center's IT and
+# cooling profiles with `services.dc_load_profile`'s facility load: the
+# critical share on it_load (the critical it_bus), the rest on cooling.
+# Offices are kept. Without the body the template is unchanged.
+
+def _dc_timezone(template_id: str) -> str | None:
+    """The template's ``commercial.timezone`` (the staged campus: UTC), so its
+    naive snapshots are UTC mapped on that zone's clock; None (the single-year
+    template has no commercial block) means the site clock, assumed."""
+    commercial = solver_config(template_id).get("commercial") or {}
+    return commercial.get("timezone") or None
+
+
+def dc_load_preset(template_id: str) -> dict:
+    """The opt-in spec's defaults for ``template_id`` (all assumed): today's
+    phases, PUE 1.3 at or below 20 °C plus 0.02 per K above, 75 % critical."""
+    phases = ([{"cod": f"{y}-01-01", "it_mw": it} for y, it, _pue in DC_PHASES]
+              if template_id == "eh_datacenter_staged"
+              else [{"cod": "2030-01-01", "it_mw": _DC_IT_MW}])
+    return {"phases": phases, "utilisation": "ai_training", "pue_at_design": 1.3,
+            "pue_temperature_slope_per_k": 0.02, "redundancy": "N+1",
+            "critical_share": 0.75, "curtailable_share": 0.0}
+
+
+def _single_year_phase(spec):
+    week = SNAPSHOTS[0].date()
+    live = [p for p in spec.phases if p.cod <= week]
+    return live[-1] if live else None
+
+
+def _apply_dc_profile(n, spec, snapshots, it_mw: float, *, timezone, period=None) -> None:
+    from services.dc_load_profile import hourly_profile
+
+    facility = hourly_profile(spec, snapshots, it_mw, timezone=timezone)
+    p_set = n.loads_t.p_set
+    rows = slice(None) if period is None else period
+    p_set.loc[rows, "it_load"] = spec.critical_share * facility
+    p_set.loc[rows, "cooling"] = (1.0 - spec.critical_share) * facility
+
+
+def dc_load_spec(template_id: str, raw: dict | None):
+    """The checked opt-in spec from a create body's ``dc_load`` (merged over
+    ``dc_load_preset``), or ``DcLoadError`` naming the field."""
+    import pydantic
+
+    from models.flex_archetypes import DataCentreLoadSpec
+    from services.dc_load_profile import DcLoadError
+
+    if not isinstance(raw, dict):
+        raise DcLoadError("dc_load: must be an object", "dc_load")
+    merged = {**dc_load_preset(template_id), **raw}
+    merged.setdefault("ai_workload", None)
+    if merged["ai_workload"] is None:
+        merged["ai_workload"] = {}
+    try:
+        spec = DataCentreLoadSpec.model_validate(merged)
+    except pydantic.ValidationError as exc:
+        err = exc.errors()[0]
+        field = ".".join(["dc_load", *(str(x) for x in err["loc"])])
+        raise DcLoadError(f"{field}: {err['msg']}", field) from None
+    if spec.utilisation != "ai_training":
+        raise DcLoadError("dc_load.utilisation: only 'ai_training' is modelled",
+                          "dc_load.utilisation")
+    if spec.critical_share <= 0:
+        raise DcLoadError("dc_load.critical_share: must be > 0 (it_load is the critical load)",
+                          "dc_load.critical_share")
+    if template_id == "eh_datacenter_staged":
+        expected = [y for y, _it, _pue in DC_PHASES]
+        got = [p.cod.year for p in spec.phases]
+        if got != expected:
+            raise DcLoadError(f"dc_load.phases: the staged template's periods are {expected}; "
+                              f"one phase per period with that COD year is needed, got {got}",
+                              "dc_load.phases")
+    elif _single_year_phase(spec) is None:
+        raise DcLoadError(f"dc_load.phases: no phase is in service by the modelled week "
+                          f"({SNAPSHOTS[0].date()})", "dc_load.phases")
+    _check_dc_peak(template_id, spec)
+    return spec
+
+
+def firm_genset_mw(n, template_id: str) -> tuple[float, str]:
+    """The committed genset fleet's firm MW and the rule that gave it: the
+    island requirements' genset N+k (``genset_redundancy_n``) takes out the
+    k largest units; without it the whole fleet counts."""
+    cfg = ISLAND_CONFIG.get(template_id, {})
+    names = [u for u, d in cfg.get("units", {}).items()
+             if d.get("kind") == "genset" and u in n.generators.index
+             and not bool(n.generators.at[u, "p_nom_extendable"])]
+    sizes = sorted((float(n.generators.at[u, "p_nom"]) for u in names), reverse=True)
+    k = int((cfg.get("requirements", {}).get("genset_redundancy_n") or {}).get("value", 0))
+    if k:
+        return sum(sizes[k:]), f"genset N+{k}: the fleet less its {k} largest unit(s)"
+    return sum(sizes), "the whole genset fleet (no genset redundancy required)"
+
+
+def _check_dc_peak(template_id: str, spec) -> None:
+    """Each period's modelled peak must fit the energized import plus the
+    committed fleet's firm genset MW; above that the plan could only shed
+    (gatekeeper review of DC grid readiness 01)."""
+    from services.dc_load_profile import DcLoadError
+
+    n = BUILDERS[template_id](load_spec=spec)
+    firm, rule = firm_genset_mw(n, template_id)
+    total = n.loads_t.p_set.sum(axis=1)
+    if isinstance(n.snapshots, pd.MultiIndex):
+        peaks = total.groupby(level=0).max()
+        energized = {y: DC_ENERGIZATION_MW[y] for y in peaks.index}
+    else:
+        peaks = pd.Series({SNAPSHOTS[0].year: total.max()})
+        energized = {y: float(n.links.at["grid_import", "p_nom"]) for y in peaks.index}
+    for y, peak in peaks.items():
+        cap = energized[y] + firm
+        if peak > cap + 1e-9:
+            raise DcLoadError(
+                f"dc_load.phases: the {y} peak is {peak:.1f} MW, above the {energized[y]:g} MW "
+                f"energized import plus {firm:g} MW of firm gensets ({rule}) = {cap:g} MW",
+                "dc_load.phases")
+
+
+def dc_load_meta(template_id: str, spec) -> dict:
+    """The ``dc_load`` block a project created with the spec carries in its
+    ``eh_template.json`` (spec, dynamic envelope, ledger)."""
+    from services.dc_load_profile import meta_block
+
+    return meta_block(spec, _dc_timezone(template_id))
 
 
 # ── Industrial Hydrogen Hub (strong_grid) ──────────────────────────────────

@@ -698,6 +698,10 @@ class PyPSAService:
                 # a first save can misuse), so it gets no profiles either.
                 user_ts=(dict(prev.user_ts)
                          if carry in ("same", "copy") else {}),
+                # Same rule as `user_ts`: the profile-provenance channel
+                # (profile_gen Task 5) belongs to the workspace.
+                user_ts_meta=(dict(prev.user_ts_meta)
+                              if carry in ("same", "copy") else {}),
             ))
         else:
             cls._publish_active(ProjectContext(network=n))
@@ -766,6 +770,8 @@ class PyPSAService:
             # this would drop every uploaded profile the moment a network is
             # re-clustered. A copy, not the object — see `reset_network`.
             user_ts=dict(prev.user_ts),
+            # The provenance channel follows its series (profile_gen Task 5).
+            user_ts_meta=dict(prev.user_ts_meta),
         ))
         cls._clear_swap_caches()
 

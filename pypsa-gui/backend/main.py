@@ -90,6 +90,7 @@ from routers import (
     library,
     local_settings,
     network,
+    profiles,
     project_network,
     projects,
     report_jobs,
@@ -1314,6 +1315,16 @@ app.include_router(
 # regenerate — the LLM job over the same evidence, same guard, same lock check.
 app.include_router(
     report_jobs.router, prefix="/api/projects", tags=["reports"],
+    dependencies=_projects_router_guard,
+)
+# The renewable profile generator (profile_gen Tasks 6–7). Global
+# presets/estimate at /api/profiles (no project path → no guard); the
+# project-scoped generate/pending/apply carry ProjectAccessDep and the
+# projects-root file guard like every sibling. Registered BEFORE
+# projects.router so its `/{name}/profiles/...` paths beat the catch-all.
+app.include_router(profiles.router, prefix="/api/profiles", tags=["profiles"])
+app.include_router(
+    profiles.project_router, prefix="/api/projects", tags=["profiles"],
     dependencies=_projects_router_guard,
 )
 # Decision studies (guided investment study MVP-1, S1). Path-scoped under the

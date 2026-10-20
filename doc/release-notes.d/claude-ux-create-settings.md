@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Web builds no longer request `/api/local-settings` (a 404 on every page load), and a template create refused because the name is taken keeps a toast with "Open the existing project".

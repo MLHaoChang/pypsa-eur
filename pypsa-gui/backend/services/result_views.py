@@ -101,6 +101,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                "line and transformer loading against their ratings", "results",
                (_r("get_loadflow_summary"),),
                verification="displayed_data", claim_limits=_PROXY,
+               historical_section="loadflow",
                units="%, MW (active-power proxy) or MVA, weighted hours"),
     ResultView("prices", _RESULTS, "prices", "Prices",
                "bus prices and what sets them", "results",

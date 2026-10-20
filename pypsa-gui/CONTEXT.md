@@ -133,6 +133,86 @@ shown was fetched after that solve and not invalidated since
 than stale ones.
 _Avoid_: overlay (the canvases' per-bus aggregation), playback
 
+**Coordinate profile**:
+A capacity-factor time series (values in [0, 1] over one weather year) that
+the renewable profile generator computes for a named lon/lat point
+(`backend/services/profile_gen/engine.py`). Generating one is a queued
+`profile_gen` job whose artifact waits under
+`<storage>/profiles_pending/<job_id>.nc` until the user **applies** it onto a
+generator's `p_max_pu` (`backend/services/profile_gen/apply.py`) — generation
+never touches the network by itself. The point id doubles as the generator
+name at apply time. The engine's `resolution` argument aggregates at
+generation: `hourly` is the native axis, `daily`/`weekly` are means over the
+hour, upsampled back onto the network's hourly snapshots at apply (weekly
+applies to its own calendar year only and never tiles investment periods).
+The chat assistant drives the same tools through the `renewable-profile`
+guided workflow, and its preview/generate tools accept `from_generators`
+(generator names — the bus coordinates seed the sites) instead of raw
+coordinates.
+_Avoid_: weather series, yield curve, profile upload (that's the xlsx path in
+`routers/network_profiles.py`)
+
+**Profile source**:
+Which engine produced a coordinate profile — `synthetic` (deterministic
+shapes from `services/profile_gen/synthetic.py`, no download, used for
+testing and the estimate preview) or `atlite` (ERA5 reanalysis through
+atlite, `services/profile_gen/atlite_source.py`). The estimate preview is
+always synthetic even when the queued generation is atlite; say which one a
+figure came from.
+_Avoid_: real vs fake, live data, historical mode
+
+**Cutout cache**:
+The on-disk store of atlite ERA5 cutouts keyed by bounding box + weather
+year (`backend/services/profile_gen/cutout_cache.py`), so a second
+generation over the same region does not re-download. Filling it needs CDS
+API credentials; without them the backend refuses with a 422 that names the
+setup (`cds_preflight` → `CdsCredentialError`).
+_Avoid_: weather cache, ERA5 database, download folder
+
+**Profile preset**:
+A named bundle of technology parameters — a wind turbine or solar
+panel/orientation — that the generator resolves into engine params
+(`backend/services/profile_gen/presets.py`, `GET /api/profiles/presets`).
+`default` presets carry empty params (synthetic source only); the real ones
+(`vestas-v90-3mw`, `cdte-horizontal-tracking`, …) feed atlite. Expert-mode
+overrides merge on top via `resolve_params`.
+_Avoid_: template (that's network profiles), turbine type, config
+
+**AI-training load profile**:
+The opt-in hourly load of a data-center template built from a
+`DataCentreLoadSpec` with an `AiWorkloadSpec`: IT MW × hourly mean
+utilisation × PUE(ambient), split by `critical_share` over `it_load` and
+`cooling` (`backend/services/dc_load_profile.py`). Chosen with a create body
+`{"dc_load": {...}}`; without it the template keeps its load.
+_Avoid_: GPU profile generator (that's `profile_gen`, renewables)
+
+**Dynamic envelope**:
+The sub-hourly behaviour of an AI-training load that the LP never sees, per
+COD phase: swing (MW), max ΔP/Δt (MW/s), checkpoint dip (MW and MW/s) and the
+oscillation band (peak amplitude in MW, period in s). IT side at the POC,
+before any UPS/BESS smoothing; every value assumed. Stored under `dc_load` in
+the project's `eh_template.json`, read with `read_envelope`.
+_Avoid_: ramp profile, transient study
+
+**Control preset**:
+A named converter control and UPS behaviour for the island sidecar
+(`grid_following`, `grid_forming_support`, `fast_frequency_response`,
+`voltage_support`). It sets the converter mode, its droop and inertia, and
+the UPS ride-through. The presets are gridspine's
+(`gridspine/schema/island.py` `PRESETS`). A project selects one with
+`POST /api/campus-electrical/{name}/island/preset`, and a unit's own
+`preset` overrides the project's. Grid forming and FFR apply to a bess
+only, because that is what the island LP credits.
+_Avoid_: profile preset (that's the profile generator), mode, template
+
+**Grid service**:
+What a project's converters offer the grid, as `offered_services` derives it
+from each unit's effective control: `grid_forming`, `synthetic_inertia`,
+`frequency_containment`, `fast_frequency_response` and `voltage_control`. A
+mode the island study does not credit, such as a GFM on PV, is listed as
+`not_credited`, not offered. The grid-readiness check reads these.
+_Avoid_: ancillary service (that's a market product), capability
+
 ## Assistant language
 
 The in-app assistant's own vocabulary. The code lives in

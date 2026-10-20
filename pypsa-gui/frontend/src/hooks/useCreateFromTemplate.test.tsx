@@ -5,7 +5,7 @@
 // (the wizard closes itself there) runs, then the new project's tab is added
 // and — off /app — the workbench opens (Obstacle 2, spec §2.6).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { act, render as rtlRender, renderHook, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
@@ -32,7 +32,7 @@ vi.mock('react-router-dom', async (importOriginal) => {
   }
 })
 vi.mock('react-hot-toast', () => {
-  const t = Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() })
+  const t = Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), custom: vi.fn(), dismiss: vi.fn() })
   return { default: t }
 })
 
@@ -171,15 +171,23 @@ describe('useCreateFromTemplate', () => {
       'A study is still running — wait for it to finish or abort it before switching project.'))
   })
 
-  it('another 409 (the project exists) keeps its own sentence', async () => {
+  it('a taken name stays on screen and offers to open the existing project (N17)', async () => {
     const toast = (await import('react-hot-toast')).default
     vi.mocked(projectsApi.createFromTemplate).mockRejectedValue(Object.assign(
       new Error('Request failed with status code 409'), { response: { status: 409, data: {
         detail: "Project 'Island Microgrid' already exists" } } }))
     const { hook } = render('/app')
     act(() => hook.result.current.mutate('eh_microgrid'))
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
-      "Template import failed: Project 'Island Microgrid' already exists"))
+    await waitFor(() => expect(toast.custom).toHaveBeenCalled())
+    expect(toast.error).not.toHaveBeenCalled()
+    const [renderToast, opts] = vi.mocked(toast.custom).mock.calls[0] as unknown as
+      [(t: { id: string }) => ReactNode, { duration: number }]
+    expect(opts.duration).toBe(Infinity)
+    rtlRender(<>{renderToast({ id: 't1' })}</>)
+    act(() => screen.getByTestId('name-clash-open').click())
+    expect(calls).toContain('current:Island Microgrid')
+    expect(calls).toContain('tab:Island Microgrid')
+    expect(toast.dismiss).toHaveBeenCalledWith('t1')
   })
 
   it('a failed create toasts and changes nothing (no G4 note, no tab)', async () => {

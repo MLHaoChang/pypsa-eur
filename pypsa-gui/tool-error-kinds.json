@@ -802,6 +802,30 @@
     "experiment_comparison_changed": {
       "surface": "inline",
       "why": "The inspected comparison no longer matches current owned sources. The failed export line requests fresh inspection; no old report or calculation is substituted."
+    },
+    "cds_credential": {
+      "surface": "inline",
+      "why": "A renewable-profile generation asked for the ERA5/atlite source without usable CDS credentials. The detail says which setup step is missing; the renewable-profile workflow coaches the CDS account, licence and key setup in words. No conversation-wide action: the synthetic source still works."
+    },
+    "component_not_found": {
+      "surface": "inline",
+      "why": "apply_generated_profile named a generator that is not on the open network (renamed or deleted since generation). The detail names it; the assistant lists the generators and asks which one, per call."
+    },
+    "point_not_in_profile": {
+      "surface": "inline",
+      "why": "apply_generated_profile asked for a point the pending profile does not hold. The detail lists the points it does hold; the assistant picks the right point_id, per call."
+    },
+    "no_points": {
+      "surface": "inline",
+      "why": "A profile preview or generation named no sites: neither points nor from_generators. The assistant asks which generators or coordinates to use, per call."
+    },
+    "unknown_generator": {
+      "surface": "inline",
+      "why": "from_generators named a generator the open network does not hold. The detail lists the names not found; the assistant lists the candidates and asks again, per call."
+    },
+    "missing_coordinates": {
+      "surface": "inline",
+      "why": "from_generators named generators whose bus has no usable coordinates (unset, out of range, or the 0/0 default). The detail lists them; the assistant offers both remedies per call: set the bus coordinates (an edit with its own card) or upload a profile."
     }
   }
 }
