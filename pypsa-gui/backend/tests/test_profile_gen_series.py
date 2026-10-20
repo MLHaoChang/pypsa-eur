@@ -101,12 +101,12 @@ def test_tou_refuses_a_malformed_period():
         _gen("tou", params)
 
 
-def test_a_tou_price_without_a_currency_year_is_refused_at_apply():
+def test_a_hand_made_price_meta_without_a_currency_year_is_refused_at_apply():
     _price_net()
-    res = _gen("tou", {k: v for k, v in _TOU.items() if k != "currency_year"},
-               ids=("grid",))
+    res = _gen("tou", _TOU, ids=("grid",))
+    meta = {k: v for k, v in res.meta.items() if k != "currency_year"}
     with pytest.raises(InvalidSeriesUnitError, match="currency_year"):
-        _apply_series(res, "grid")
+        _apply_series(SimpleNamespace(series=res.series, meta=meta), "grid")
 
 
 def test_a_price_in_another_currency_than_the_projects_is_refused():
@@ -118,7 +118,7 @@ def test_a_price_in_another_currency_than_the_projects_is_refused():
 
 def test_a_price_on_another_money_basis_is_refused():
     _price_net(finance={"currency": "EUR", "price_basis": "real",
-                        "currency_year": 2020})
+                        "currency_year": 2024})
     with pytest.raises(InvalidSeriesUnitError, match="real"):
         _apply_series(_gen("tou", _TOU, ids=("grid",)), "grid")
 
@@ -252,3 +252,50 @@ def test_cop_applies_on_an_electricity_link():
                ids=("hp",))
     _apply_series(res, "hp")
     assert float(n.links_t.efficiency["hp"].iloc[0]) == pytest.approx(0.45 * 308.15 / 30.0)
+
+
+# ── review round 1 ──────────────────────────────────────────────────────────
+
+def test_a_price_on_a_project_without_finance_is_applied_unverified():
+    _price_net(finance=None)
+    out = _apply_series(_gen("tou", dict(_TOU, price_basis="real"), ids=("grid",)), "grid")
+    assert any(w.startswith("money_basis_unverified") for w in out["warnings"])
+
+
+def test_a_price_year_against_an_unstated_project_year_warns():
+    _price_net(finance={"currency": "EUR", "price_basis": "nominal"})
+    out = _apply_series(_gen("tou", _TOU, ids=("grid",)), "grid")
+    assert any(w.startswith("money_basis_unverified") for w in out["warnings"])
+
+
+def test_a_price_year_off_the_projects_is_refused():
+    _price_net(finance={"currency": "EUR", "price_basis": "nominal", "currency_year": 2020})
+    with pytest.raises(InvalidSeriesUnitError, match="2020"):
+        _apply_series(_gen("tou", _TOU, ids=("grid",)), "grid")
+
+
+def test_tiered_periods_are_refused():
+    params = dict(_TOU, periods=[{"name": "base", "rate": 60.0, "tier_rates": [50.0, 70.0]}])
+    with pytest.raises(InvalidSeriesParamsError, match="tier"):
+        _gen("tou", params)
+
+
+@pytest.mark.parametrize("drop", ["currency", "price_basis", "currency_year"])
+def test_tou_needs_its_money_basis_at_generation(drop):
+    with pytest.raises(InvalidSeriesParamsError, match=drop):
+        _gen("tou", {k: v for k, v in _TOU.items() if k != drop})
+
+
+def test_the_inflow_warning_carries_the_storage_tools_reason_code():
+    n = PyPSAService.get_network()
+    idx = pd.date_range("2023-01-01", "2023-12-31T23:00", freq="h")
+    idx.name = "snapshot"
+    n.set_snapshots(idx)
+    n.add("Bus", "B1")
+    n.add("StorageUnit", "dam", bus="B1", p_nom=10.0, max_hours=500.0)
+    res = _gen("inflow", {"annual_mwh": 1000.0, "shape": "flat"}, ids=("dam",))
+    ct, attr = default_target(res.meta, None, None)
+    out = assign_profile(PyPSAService.get_active_context(), "dam", res.series["dam"],
+                         res.meta, component_type=ct, attribute=attr,
+                         time_basis="UTC", now=NOW)
+    assert any(w.startswith("unsupported_storage_inflow:") for w in out["warnings"])
