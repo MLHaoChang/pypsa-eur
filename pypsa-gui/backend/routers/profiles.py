@@ -666,6 +666,27 @@ def _preview_load_energy(ctx, frame: pd.DataFrame, record: dict,
     return sorted(warnings)
 
 
+def _dry_run_warnings(ctx, frame: pd.DataFrame, record: dict) -> list[str]:
+    """Apply's own decision for each column, written nowhere
+    (`prepare_profile`): its warnings show before Apply, and a refusal it
+    would give (a partial-year network, a family guard) shows as
+    ``not_applicable: <why>`` so the editor can hold the button."""
+    from services.profile_gen.apply import ProfileApplyError, prepare_profile
+
+    component_type, attribute = record["target"]
+    warnings: set[str] = set(record.get("warnings") or [])
+    for col in frame.columns:
+        try:
+            prepared = prepare_profile(ctx, col, frame[col], record,
+                                       component_type=component_type,
+                                       attribute=attribute)
+        except ProfileApplyError as exc:
+            warnings.add(f"not_applicable: {exc}")
+            continue
+        warnings.update(prepared.warnings)
+    return sorted(warnings)
+
+
 def _load_stats(frame: pd.DataFrame, scale: float, year: int) -> dict[str, dict]:
     hours = 8784 if pd.Timestamp(year=year, month=1, day=1).is_leap_year else 8760
     return {col: {"peak_mw": float(frame[col].max()) * scale,
@@ -875,7 +896,8 @@ def generate_availability_profiles(
             stats[col]["hours_reduced"] = int((v < 1.0 - 1e-9).sum())
         else:
             stats[col]["hours_floored"] = int((v > 1e-9).sum())
-    return {**record, "stats": stats}
+    warnings = _dry_run_warnings(ctx, result.series, record)
+    return {**record, "stats": stats, "warnings": warnings}
 
 
 _SERIES_TYPES = {"inflow": "storage_units", "cop": "links"}
@@ -952,7 +974,8 @@ def generate_series_profiles(
         stats[col] = {"min": float(v.min()), "mean": float(v.mean()), "max": float(v.max())}
         if body.kind == "inflow":
             stats[col]["annual_mwh"] = float(v.sum())
-    return {**record, "stats": stats}
+    warnings = _dry_run_warnings(ctx, result.series, record)
+    return {**record, "stats": stats, "warnings": warnings}
 
 
 @project_router.post("/{name}/profiles/refine")

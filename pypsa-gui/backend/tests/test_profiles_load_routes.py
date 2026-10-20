@@ -436,3 +436,36 @@ def test_a_price_on_the_poc_link_is_refused_at_generation(client, heat_project,
                            "periods": [{"name": "flat", "rate": 50.0}]})
     assert resp.status_code == 422, resp.text
     assert resp.json()["detail"]["error_kind"] == "poc_tariff"
+
+
+# ---------------------------------------------------------------------------
+# apply's dry run at generation: the editor holds Apply before a refusal
+# ---------------------------------------------------------------------------
+
+
+def test_availability_shows_what_apply_would_warn_before_apply(client, plant_project):
+    # The bus's loads take 2 MW; a 50 % floor on the 10 MW plant forces 5 MW.
+    body = _avail(client, plant_project, kind="must_run", params={"share": 0.5}).json()
+    assert any(w.startswith("must_run_exceeds_sink") for w in body["warnings"]), body["warnings"]
+    assert not any(w.startswith("not_applicable") for w in body["warnings"])
+
+
+def test_a_series_on_a_week_network_says_apply_would_refuse(client, install_network):
+    n = _load_network()
+    n.set_snapshots(pd.date_range("2025-06-02", periods=168, freq="h"))
+    n.add("Bus", "H", carrier="heat")
+    n.add("Link", "hp", bus0="B1", bus1="H", p_nom=5.0)
+    n.add("Carrier", "gas")
+    n.add("Generator", "chp", bus="B1", carrier="gas", p_nom=10.0)
+    install_network(n)
+    assert client.post("/api/projects/Week Site",
+                       params={"force": True, "rebind": True}).status_code == 200
+    for resp in (
+        _series(client, "Week Site", kind="cop", components=["hp"],
+                params={"source": "ground", "source_c": 5.0, "sink_c": 35.0}),
+        _avail(client, "Week Site", kind="must_run", params={"share": 0.1}, year=2025),
+    ):
+        assert resp.status_code == 200, resp.text
+        warnings = resp.json()["warnings"]
+        assert any(w.startswith("not_applicable:") and "full calendar year" in w
+                   for w in warnings), warnings
