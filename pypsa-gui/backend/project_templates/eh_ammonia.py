@@ -127,6 +127,8 @@ def build_eh_ammonia_staged(T) -> "pypsa.Network":  # noqa: F821
     for carrier in ("NH3", "Haber-Bosch", "NH3 import", "NH3 shortfall"):
         n.add("Carrier", carrier, co2_emissions=0.0)
     n.add("Bus", "nh3", carrier="NH3", unit="MWh", x=0.0, y=0.0)
+    n.buses.at["nh3", "eh_poc"] = False
+    n.buses.at["nh3", "eh_critical"] = False
     n.buses.at["nh3", "mwh_per_t"] = MWH_PER_T
     n.buses.at["nh3", "product_value"] = BUY_EUR_PER_MWH
 
@@ -176,6 +178,8 @@ def build_eh_ammonia_staged(T) -> "pypsa.Network":  # noqa: F821
 
     # Columns made on an empty frame are object dtype until cast (netCDF cannot write them).
     n.links["eh_process"] = n.links["eh_process"].astype(bool)
+    n.buses[["eh_poc", "eh_critical"]] = n.buses[["eh_poc", "eh_critical"]].astype(bool)
+    n.links["eh_role"] = n.links["eh_role"].fillna("")
     for frame, cols in ((n.buses, ("mwh_per_t", "product_value")),
                         (n.links, ("specific_energy_kwh_per_t",))):
         for c in cols:
