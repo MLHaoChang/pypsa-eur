@@ -130,6 +130,24 @@ describe('profile studio: generate', () => {
     await userEvent.click(screen.getByRole('button', { name: /Generate \(queued\)/ }))
     expect((await screen.findByTestId('studio-refusal')).textContent).toMatch(/CDS API key missing/)
   })
+
+  it('sends the chosen resolution in the estimate and generate specs', async () => {
+    api.estimate.mockResolvedValue({
+      estimate: true, source: 'synthetic', technology: 'wind', weather_year: 2023,
+      resolution: 'daily', timestamps: ['2023-01-01'], series: { g_wind: [0.4] },
+    })
+    api.generate.mockResolvedValue({ id: 'job-daily-1', status: 'queued', kind: 'profile_gen' })
+    renderPanel()
+    await screen.findByTestId('profile-studio')
+    await userEvent.click(screen.getByRole('button', { name: 'Daily' }))
+    await userEvent.type(screen.getByTestId('points-input'), 'g_wind, 8.0, 50.0')
+    await userEvent.click(screen.getByRole('button', { name: /Preview estimate/ }))
+    await waitFor(() => expect(api.estimate).toHaveBeenCalled())
+    expect(api.estimate.mock.calls[0][0].resolution).toBe('daily')
+    await userEvent.click(screen.getByRole('button', { name: /Generate \(queued\)/ }))
+    await waitFor(() => expect(api.generate).toHaveBeenCalled())
+    expect(api.generate.mock.calls[0][1].resolution).toBe('daily')
+  })
 })
 
 describe('profile studio: pending + apply', () => {
