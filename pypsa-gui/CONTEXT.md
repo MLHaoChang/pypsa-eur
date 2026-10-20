@@ -141,7 +141,14 @@ the renewable profile generator computes for a named lon/lat point
 `<storage>/profiles_pending/<job_id>.nc` until the user **applies** it onto a
 generator's `p_max_pu` (`backend/services/profile_gen/apply.py`) — generation
 never touches the network by itself. The point id doubles as the generator
-name at apply time.
+name at apply time. The engine's `resolution` argument aggregates at
+generation: `hourly` is the native axis, `daily`/`weekly` are means over the
+hour, upsampled back onto the network's hourly snapshots at apply (weekly
+applies to its own calendar year only and never tiles investment periods).
+The chat assistant drives the same tools through the `renewable-profile`
+guided workflow, and its preview/generate tools accept `from_generators`
+(generator names — the bus coordinates seed the sites) instead of raw
+coordinates.
 _Avoid_: weather series, yield curve, profile upload (that's the xlsx path in
 `routers/network_profiles.py`)
 
