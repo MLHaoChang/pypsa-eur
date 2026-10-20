@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The four result categories sit in a 2 × 2 grid with their control line inside the card, "Run LOPF" no longer wraps, switching to Expert closes the Guided hub design panel, and autosave keeps its state when the mode changes.
