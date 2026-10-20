@@ -2,7 +2,7 @@
 
 Status: needs-triage
 Type: task
-Blocked by: —
+Blocked by: — (owner scope A: built first in this package)
 Gated: **yes** (contract model and settlement semantics)
 Model tier: opus
 Size: M

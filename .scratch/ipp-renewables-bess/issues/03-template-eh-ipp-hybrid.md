@@ -2,7 +2,7 @@
 
 Status: needs-triage
 Type: task
-Blocked by: 01, 02, owner Q-IPP1–5
+Blocked by: 01, 02 (owner Q-IPP1–5 answered: all A)
 Gated: **yes** (G5: IC semantics on a generation-only site); UX for the wizard and StartCard lines
 Model tier: opus
 Size: L

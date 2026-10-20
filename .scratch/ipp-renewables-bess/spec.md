@@ -1,6 +1,6 @@
 # IPP renewables + BESS: an example for a developer's revenue case
 
-Status: needs-triage (spec; docs only, no code). Owner choices pending (§11). Gatekeeper and UX review pending.
+Status: ready-for-agent (spec; docs only, no code). Owner answered Q-IPP1–5 and the scope question on 2026-10-20, about 19:42 CEST, all A (§11). UX OK at the spec stage; gatekeeper review pending.
 Date: 2026-10-20
 Author: ipp-renewables-bess session (commissioned through the coordinator)
 Base: master `ceff6b1` (#447 merged). #448 read at `760a48e` (`claude/workspace-integration-sensitivities`).
@@ -274,11 +274,11 @@ Each is sent to the coordinator as 2–4 options, the recommendation first.
 
 | | Question | Options (recommended first) | Status |
 |---|---|---|---|
-| Q-IPP1 | Reference bidding zone | **A DE-LU**: the largest EU PPA market, frequent negative prices, full ENTSO-E coverage for a user's own data · B ES: strongest solar cannibalisation · C NL | open |
-| Q-IPP2 | Plant sizes | **A hybrid: wind 60 MW + PV 50 MWp at a 70 MW export limit**: shows overbuild, curtailment and the battery recovering it · B PV-only 100 MWp at 70 MW: simplest, strongest solar-shape story · C wind-only 80 MW at 80 MW | open |
-| Q-IPP3 | Battery: candidate or fixed | **A candidate, power sized by the LP at a fixed 2 h duration (0–50 MW)**: answers "how big" · B fixed 30 MW / 60 MWh: revenues only, no sizing · C power and energy both sized (Store + Links): richer, a bigger model change | open |
-| Q-IPP4 | Single year or staged | **A single year, full hourly 2030, 25-year IC**: what an IPP's COD case needs; prices need the chronology · B staged 2027 / 2030 / 2035 on representative weeks: matches the other examples, loses negative-price hours · C single year on 4 representative weeks: faster, coarser | open |
-| Q-IPP5 | How the 8 cases ship before S5 | **A a `cases.json` sidecar, read-only list until S5 creates them**: no hidden copies · B pre-create 8 scenario copies at create: usable today, but 9 bundles and no declared changes · C ship only the base; cases come with S5 | open |
+| Q-IPP1 | Reference bidding zone | **A DE-LU**: the largest EU PPA market, frequent negative prices, full ENTSO-E coverage for a user's own data · B ES: strongest solar cannibalisation · C NL | **A** (about 19:42 CEST) |
+| Q-IPP2 | Plant sizes | **A hybrid: wind 60 MW + PV 50 MWp at a 70 MW export limit**: shows overbuild, curtailment and the battery recovering it · B PV-only 100 MWp at 70 MW: simplest, strongest solar-shape story · C wind-only 80 MW at 80 MW | **A** (about 19:42 CEST) |
+| Q-IPP3 | Battery: candidate or fixed | **A candidate, power sized by the LP at a fixed 2 h duration (0–50 MW)**: answers "how big" · B fixed 30 MW / 60 MWh: revenues only, no sizing · C power and energy both sized (Store + Links): richer, a bigger model change | **A** (about 19:42 CEST) |
+| Q-IPP4 | Single year or staged | **A single year, full hourly 2030, 25-year IC**: what an IPP's COD case needs; prices need the chronology · B staged 2027 / 2030 / 2035 on representative weeks: matches the other examples, loses negative-price hours · C single year on 4 representative weeks: faster, coarser | **A** (about 19:42 CEST) |
+| Q-IPP5 | How the 8 cases ship before S5 | **A a `cases.json` sidecar, read-only list until S5 creates them**: no hidden copies · B pre-create 8 scenario copies at create: usable today, but 9 bundles and no declared changes · C ship only the base; cases come with S5 | **A** (about 19:42 CEST) |
 
 ---
 
@@ -286,7 +286,7 @@ Each is sent to the coordinator as 2–4 options, the recommendation first.
 
 | # | Ticket | Gate | After |
 |---|---|---|---|
-| 01 | [PPA share and the IPP-sold PPA](issues/01-ppa-share-and-site-sold-ppa.md) (G1, G2) | gatekeeper | owner Q-IPP1–4 |
+| 01 | [PPA share and the IPP-sold PPA](issues/01-ppa-share-and-site-sold-ppa.md) (G1, G2) | gatekeeper | first; built in this package (owner scope A) |
 | 02 | [Template price series minted at create](issues/02-template-price-series.md) (G3) | gatekeeper told | — |
 | 03 | [The template `eh_ipp_hybrid`](issues/03-template-eh-ipp-hybrid.md) | gatekeeper (G5, IC); UX (card line) | 01, 02 |
 | 04 | [The example's cases](issues/04-example-cases.md) | gatekeeper told; UX | 03; S5 for creation |
@@ -294,3 +294,5 @@ Each is sent to the coordinator as 2–4 options, the recommendation first.
 | 06 | [Home card and artwork](issues/06-home-card-artwork.md) | UX | 03; W2 places it |
 
 Order: 01 ∥ 02 → 03 → (04 ∥ 05 ∥ 06). One PR per ticket, each on its own `claude/*` branch.
+
+Scope (owner, about 19:42 CEST): **A**. This package builds ticket 01 first, gated by the gatekeeper, and then 02 and 03.
