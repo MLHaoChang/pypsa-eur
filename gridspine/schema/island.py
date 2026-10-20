@@ -248,9 +248,12 @@ ALL_FIELDS = frozenset(
 # reader (the hub island LP, the campus draft, the frequency and GFM
 # studies) then sees plain fields.
 #
-# **Kinds.** The hub island LP credits a grid former, and FFR, only on a
-# storage-backed unit (a bess). ``grid_forming_support`` and
-# ``fast_frequency_response`` therefore apply to bess only; ``grid_following``
+# **Kinds.** The hub island LP credits a grid former only on a bess (its
+# E2/E3 former set). ``grid_forming_support`` therefore applies to bess only,
+# and so does ``fast_frequency_response`` by choice (gatekeeper, 2026-10-20):
+# FFR needs energy behind it, which a pv, wind or fuel-cell unit cannot hold
+# in reserve. A hand-written ``gfl_fw`` unit of any kind stays allowed, and
+# the LP and ``offered_services`` credit it. ``grid_following``
 # and ``voltage_support`` to every converter kind. A project preset leaves a
 # kind it does not apply to as it is; a unit preset on such a kind is
 # refused. The UPS block applies to ``ups`` units. Gensets and loads are
@@ -316,16 +319,17 @@ def _check_preset_name(where, name):
     return name
 
 
+def preset_applies(name, kind) -> bool:
+    """True when preset ``name`` sets units of ``kind``."""
+    return kind == "ups" or kind in PRESETS[name]["kinds"]
+
+
 def preset_block(name, kind) -> dict | None:
     """The tagged fields preset ``name`` gives a unit of ``kind``, or None
     when it does not apply to that kind."""
-    p = PRESETS[name]
-    if kind == "ups":
-        plain = p["ups"]
-    elif kind in p["kinds"]:
-        plain = p["converter"]
-    else:
+    if not preset_applies(name, kind):
         return None
+    plain = PRESETS[name]["ups" if kind == "ups" else "converter"]
     return {f: (v if f in _UNTAGGED_PRESET else
                 {"value": [list(x) for x in v] if isinstance(v, list) else v, "source": "assumed"})
             for f, v in plain.items()}
@@ -343,8 +347,13 @@ def _expand_preset(where, kind, spec, project_preset):
     block = preset_block(name, kind)
     if block is None:
         if own:
-            why = ("the hub island LP credits a grid former and FFR on storage-backed units (bess) only"
-                   if kind in CONVERTER_KINDS else "presets set converter and UPS units only")
+            if kind not in CONVERTER_KINDS:
+                why = "presets set converter and UPS units only"
+            elif name == "grid_forming_support":
+                why = "the hub island LP credits a grid former on a bess only"
+            else:
+                why = ("FFR presets go on storage-backed units (bess) only, which hold energy in reserve; "
+                       "give the unit its own gfl_fw block instead")
             raise ContractError(f"{where}: preset {name!r} does not apply to a {kind}: {why}")
         return spec, None
     if "control" in spec and spec["control"] != block.get("control", spec["control"]):

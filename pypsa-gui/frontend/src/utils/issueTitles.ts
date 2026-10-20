@@ -123,6 +123,7 @@ export const ISSUE_TITLES: Record<string, string> = {
 
   // Island control presets (data-centre grid readiness, ticket 04)
   preset_leaves_no_grid_former: 'No unit forms the island (control preset leaves no grid former)',
+  preset_not_applied_to_unit: 'Control preset not applied to a unit',
 }
 
 /** The plain title for an issue code; an unknown code reads as a sentence. */

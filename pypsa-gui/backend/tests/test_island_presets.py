@@ -24,7 +24,7 @@ from fastapi import HTTPException
 
 from gridspine.schema.island import PRESETS, offered_services, select_preset, validate_island_config
 from services import campus_electrical_service as ce
-from services.adequacy.island_config import NO_GRID_FORMER, island_warnings
+from services.adequacy.island_config import NO_GRID_FORMER, PRESET_NOT_APPLIED, island_warnings
 from services.solver.island import IslandRefusal, island_study
 from tests.test_campus_island_service import _config, _sidecar_path, project, user_and_db  # noqa: F401
 from tests.test_island_config import T
@@ -67,6 +67,9 @@ def test_ffr_leaves_an_extendable_bess_out_and_says_why(project):  # noqa: F811
     out = ce.select_island_preset(project, "fast_frequency_response")
     assert len(out["skipped"]) == 1 and out["skipped"][0].startswith("bess:")
     assert "fast_frequency_response" not in out["services"]["services"]
+    later = ce.get_island(project)["warnings"]               # the reason outlives the response
+    assert [w["code"] for w in later] == [PRESET_NOT_APPLIED]
+    assert "bess" in later[0]["message"] and "rating" in later[0]["message"]
 
 
 def test_an_unknown_preset_is_422_and_keeps_the_sidecar(project):  # noqa: F811
@@ -105,7 +108,9 @@ def test_every_template_sidecar_takes_every_preset(template, preset):
     assert offered["preset"] == preset
     for reason in skipped:
         assert preset == "fast_frequency_response" and "rating" in reason
-    assert all(w["code"] == NO_GRID_FORMER for w in island_warnings(cfg))
+    codes = {w["code"] for w in island_warnings(cfg)}
+    assert codes <= {NO_GRID_FORMER, PRESET_NOT_APPLIED}
+    assert (PRESET_NOT_APPLIED in codes) == bool(skipped)
     try:
         out = island_study(n, cfg)
     except IslandRefusal as exc:

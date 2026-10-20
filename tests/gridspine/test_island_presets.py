@@ -76,7 +76,8 @@ def test_a_control_other_than_the_presets_is_refused():
 @pytest.mark.parametrize("kind", ["pv", "wind", "fuel_cell"])
 @pytest.mark.parametrize("name", ["grid_forming_support", "fast_frequency_response"])
 def test_a_gfm_or_ffr_preset_on_a_non_storage_converter_is_refused(kind, name):
-    with pytest.raises(ContractError, match="storage-backed"):
+    why = "grid former on a bess only" if name == "grid_forming_support" else "storage-backed"
+    with pytest.raises(ContractError, match=why):
         validate_unit_island("u", kind, {"preset": name})
 
 
