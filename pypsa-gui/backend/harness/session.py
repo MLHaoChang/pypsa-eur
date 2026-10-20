@@ -167,6 +167,8 @@ class ChatSession:
     # Ordinary-turn navigation binding (LC-03): set only when the client can
     # ACK, so the browser can prove what a navigation showed. Cleared on exit.
     navigation_turn: Any | None = None
+    # LC-03 VS-2: results tabs this conversation showed, per project key.
+    shown_results: dict[str, list[str]] = field(default_factory=dict)
     # Server-only bounded checked scope; never populated from model/client history.
     assurance_context: dict[str, Any] | None = None
     # Private checkpoint binding; never supplied by client histories or imports.

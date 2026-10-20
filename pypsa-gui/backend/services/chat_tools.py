@@ -7278,10 +7278,12 @@ from services.assistant_tools import (find_capabilities, get_file_delivery, insp
                                       preview_project_changes, apply_project_changes, create_chart, build_delivery)
 
 from services import reference_resolution as _reference_resolution  # noqa: E402
+from services import result_views as _result_views  # noqa: E402
 
 DISPATCHERS: dict[str, Any] = {
     "resolve_project_target": resolve_project_target,
     "resolve_reference": _reference_resolution.resolve_reference,
+    "list_result_views": _result_views.list_result_views,
     "get_component_schema": get_component_schema,
     "list_project_runs": list_project_runs,
     "get_run_evidence": get_run_evidence,

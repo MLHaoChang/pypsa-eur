@@ -3075,6 +3075,10 @@ def _dispatch_real_tool_call(
             if acknowledgement:
                 ui_event_payload.update(acknowledgement=acknowledgement, tool_use_id=tool_use_id)
         yield "ui_event", ui_event_payload
+        if ui_event_payload.get("kind") == "navigate" and ui_event_payload.get("panel_id") == "results" \
+                and ui_event_payload.get("results_tab"):
+            from services.result_views import note_shown
+            note_shown(session, ui_event_payload["results_tab"])
         if session.assurance_turn is None and ui_event_payload.get("kind") == "navigate":
             from harness.navigation import display
             result_for_model["display"] = display(session.navigation_turn, acknowledgement)

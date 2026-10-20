@@ -68,3 +68,8 @@ def test_no_historical_section_is_claimed_before_it_is_captured():
 
 def test_every_view_declares_its_units():
     assert all(v.units for v in rv.RESULT_VIEWS)
+
+
+def test_a_results_view_id_is_its_tab():
+    """list_result_views sends only the id; ui_open_panel takes it as results_tab."""
+    assert all(v.view_id == v.tab for v in rv.RESULT_VIEWS if v.panel == 'results')
