@@ -108,6 +108,7 @@ from services.results.statistics import compute_statistics
 from services.results.loads import compute_load_results
 from services.results.losses import compute_losses_summary
 from services.results.economics_by_carrier import compute_economics_by_carrier
+from services.results.process_view import compute_process_view
 from services.results.objective_decomposition import compute_objective_decomposition
 from services.results.load_frames import (
     corrected_marginal_prices as _lf_corrected_marginal_prices,
@@ -424,6 +425,21 @@ def get_economics_by_carrier():
         n, _state.get("solver_config"), _state.get("last_lost_load"),
         result_df=_result_df,
     )
+
+
+@results_router.get("/process_view")
+def get_process_view():
+    """
+    Grid-to-process view (ticket 04): per product bus, production, delivery,
+    buy-in, inventory level and lost production (t, MWh, and EUR at the
+    shortfall generator's lost-production value); per process unit (Link with
+    `eh_process`), running hours and starts. Unresolvable figures are null
+    with a flag beside them (ADR-0001); see `services.results.process_view`.
+    """
+    n = PyPSAService.get_network()
+    if not _dispatch_ready(n):
+        return {"available": False, "products": [], "process_units": []}
+    return {"available": True, **compute_process_view(n)}
 
 
 @results_router.get("/statistics")

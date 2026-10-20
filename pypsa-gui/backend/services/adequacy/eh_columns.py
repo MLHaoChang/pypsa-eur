@@ -17,9 +17,9 @@ import numpy as np
 import pandas as pd
 
 from models.energy_hub import EH_CUSTOM_COLUMNS, EH_INTERNAL_ROLES, EH_LINK_ROLES
-from models.process_unit import CRITICALITY_TIERS, PROCESS_CUSTOM_COLUMNS
+from models.process_unit import CRITICALITY_TIERS, PROCESS_CUSTOM_COLUMNS, PROCESS_GENERATOR_ROLES
 
-_ATTR_OF = {"Bus": "buses", "Link": "links"}
+_ATTR_OF = {"Bus": "buses", "Link": "links", "Generator": "generators"}
 _TRUE = ("true", "1", "yes", "y", "t")
 _FALSE = ("false", "0", "no", "n", "f", "")
 
@@ -87,13 +87,20 @@ def coerce_eh_value(component_class: str, col: str, value):
             raise ValueError(
                 f"{col}: {v!r} is not a criticality tier; expected one of {list(CRITICALITY_TIERS)} (or empty)")
         return v
+    if kind == "process_role":
+        v = "" if value is None else str(value).strip()
+        if v and v not in PROCESS_GENERATOR_ROLES:
+            raise ValueError(
+                f"{col}: {v!r} is not a process role; expected one of {list(PROCESS_GENERATOR_ROLES)} (or empty)")
+        return v
     if kind == "text":
         return "" if value is None else str(value).strip()
     raise ValueError(f"{col}: unknown kind {kind!r}")  # pragma: no cover
 
 
 def _default(kind: str):
-    return {"bool": False, "float_nonneg": float("nan"), "role": "", "tier": "", "text": ""}[kind]
+    return {"bool": False, "float_nonneg": float("nan"), "role": "", "tier": "", "process_role": "",
+            "text": ""}[kind]
 
 
 def ensure_eh_column(n, component_class: str, col: str) -> None:
