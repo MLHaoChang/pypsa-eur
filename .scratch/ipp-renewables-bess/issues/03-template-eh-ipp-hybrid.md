@@ -2,7 +2,7 @@
 
 Status: needs-triage
 Type: task
-Blocked by: 01, 02 (owner Q-IPP1–5 answered: all A)
+Blocked by: 01, 02, 07 (owner Q-IPP1–5 answered: all A)
 Gated: **yes** (G5: IC semantics on a generation-only site); UX for the wizard and StartCard lines
 Model tier: opus
 Size: L
@@ -20,8 +20,11 @@ Q-IPP answers.
      (ticket 02);
    - every number in the ledger, with its label (`assumed`, `illustrative`, `pack`, `generated`);
    - no pin (section 1 warns "no site location"); the bidding zone DE-LU `assumed` in 7c;
-   - the POI tariffs as an ordinary import `Tariff` in 7a (spec §2.3): the import rate above
-     the highest `da_base` price, and the injection item; no price on the Links themselves.
+   - the POI prices in 7a (spec §2.3): `import_price_ref` and `export_price_ref` = `da_base`
+     (ticket 07); an import `Tariff` with a network-charge energy item > 0 and the injection item;
+     no price on the Links themselves (`grid_import`'s own marginal cost is 0);
+   - the ledger line "8 planned cases (editable once sensitivities land; make any now with
+     Duplicate)".
 2. **Sidecars**:
    - `eh_template.json`: meta, ledger, groups pre-fill, `not_needed` sections with their reasons;
    - `solver_config.json`: commercial with the `custom` value flows and the PPA, and finance per §6;
@@ -31,8 +34,8 @@ Q-IPP answers.
 3. **G5**: the plants are forced-size candidates. Tests (gatekeeper's traps, spec §10 G5):
    - the IC builds with an empty counterfactual, and incremental = total;
    - the grid slack is not an `ipp` asset (no capex, vom or COD) and costs 0 both ways;
-   - the import cost appears once as an energy-cost line, and the IC reconciles with the LP per
-     stream;
+   - the import cost (the wholesale series and the tariff's `ic_energy_price` frames) is booked
+     once, and `grid_import`'s own marginal cost is 0; the IC reconciles with the LP per stream;
    - the network charge is > 0 at every snapshot, so `circulation_risk_snapshots == 0`;
    - load-based metrics give None or "not applicable" (one test over the IC report);
    - the battery throughput cost is StorageUnit `marginal_cost` (per MWh discharged).
