@@ -817,7 +817,7 @@ def assign_profile(
         # hourly series this is the plain sum; a daily or weekly series is a
         # mean per step, and a weekly one's edge weeks straddle the year.
         src_year = int(align_meta["weather_year"])
-        year_hours = 8784 if pd.Timestamp(year=src_year, month=1, day=1).is_leap_year else 8760
+        year_hours = 24 * (366 if pd.Timestamp(year=src_year, month=1, day=1).is_leap_year else 365)
         profile_mwh = float(np.nanmean(series.to_numpy(dtype=float)) * scale * year_hours)
         modelled = _modelled_mwh(n, aligned, target.weighting)
         unit_meta["profile_annual_mwh"] = profile_mwh
