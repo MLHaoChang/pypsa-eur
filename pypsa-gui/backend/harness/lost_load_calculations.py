@@ -18,6 +18,8 @@ MAX_LOADS = 64
 SHED_THRESHOLD_MW = 1e-3
 REFUSALS = frozenset({
     "no_lost_load_capture", "unknown_load", "unsupported_load_population",
+    "legacy_lost_load_capture", "no_electrical_loads", "unsupported_snapshot_scope",
+    "misaligned_source",
 })
 METRICS = {
     "lost_load_energy": {
@@ -71,12 +73,20 @@ def source(ctx, entity):
         raise ValueError("no_lost_load_capture")
     if not frame.index.equals(index) or not frame.columns.is_unique:
         raise ValueError("misaligned_source")
+    if any(str(c) not in n.loads.index for c in frame.columns):
+        # Older captures were keyed by bus; a bus id must never pass as a Load.
+        raise ValueError("legacy_lost_load_capture")
     if entity == "network":
-        columns = [str(c) for c in electrical_columns(n, list(frame.columns))]
+        # As the engine: energy, peak and cost over every captured Load (the
+        # Lost load card's total), shed hours over the electrical ones only.
+        columns = [str(c) for c in frame.columns]
+        electrical = [str(c) for c in electrical_columns(n, columns)]
         if len(columns) > MAX_LOADS:
             raise ValueError("unsupported_load_population")
+        if not electrical:
+            raise ValueError("no_electrical_loads")
     elif entity in frame.columns:
-        columns = [entity]
+        columns = electrical = [entity]
     else:
         raise ValueError("unknown_load")
     energy = period_utils.snapshot_weights(n, "generators")
@@ -89,6 +99,7 @@ def source(ctx, entity):
         "energy_weight": [_number(v) for v in energy.reindex(index)],
         "objective_weight": [_number(v) for v in objective.reindex(index)],
         "shed": {c: [_number(v) for v in frame[c]] for c in columns},
+        "electrical": electrical,
         "voll": _number(capture.get("voll_eur_per_mwh")),
         "valid_solve": solve_matches_inputs(ctx),
     }
@@ -119,11 +130,12 @@ def calculate(raw, scope):
     complete = raw["valid_solve"] and all(v is not None and math.isfinite(v) for v in values + weights)
     if complete and all(w >= 0 for w in weights):
         totals = [math.fsum(max(raw["shed"][c][i], 0.0) for c in raw["shed"]) for i in rows]
+        electrical = [math.fsum(max(raw["shed"][c][i], 0.0) for c in raw["electrical"]) for i in rows]
         available = {
             "lost_load_energy": math.fsum(raw["energy_weight"][i] * t for i, t in zip(rows, totals)),
             "peak_shed": max(totals),
             "shed_hours": math.fsum(
-                raw["energy_weight"][i] for i, t in zip(rows, totals) if t > SHED_THRESHOLD_MW
+                raw["energy_weight"][i] for i, t in zip(rows, electrical) if t > SHED_THRESHOLD_MW
             ),
         }
         voll = raw["voll"]
@@ -163,7 +175,9 @@ def calculate(raw, scope):
 
 def notes(raw):
     """Always-shown scope line: which Loads the figure covers."""
-    count = len(raw["shed"])
     if raw["entity_id"] == "network":
-        return [f"{count} electrical Loads with a VoLL slack; non-electrical Loads excluded."]
+        return [
+            f"{len(raw['shed'])} Loads with a VoLL slack; shed hours count the "
+            f"{len(raw['electrical'])} electrical Loads only, as the engine does."
+        ]
     return ["This Load's own VoLL slack only."]

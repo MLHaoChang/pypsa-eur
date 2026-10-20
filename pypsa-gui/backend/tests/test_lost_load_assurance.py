@@ -87,7 +87,7 @@ def test_network_entity_sums_the_electrical_loads(short, checked, client, sessio
     solve(client, session_state)
     frames = ask(checked, short, SHED, entity="network")
     assert answered(checked, frames) == pytest.approx(SHED)
-    assert "1 electrical Loads with a VoLL slack" in public_text(frames)
+    assert "1 Loads with a VoLL slack; shed hours count the 1 electrical Loads only" in public_text(frames)
 
 
 def test_a_later_solve_replaces_the_capture_it_is_checked_against(short, checked, client, session_state):
@@ -127,6 +127,19 @@ def test_missing_shed_or_voll_is_unavailable_never_partial(short, checked, clien
 def test_an_unknown_load_is_refused_by_name(short, checked, client, session_state):
     solve(client, session_state)
     assert reasons(ask(checked, short, {}, entity="Ghost")) == {"unknown_load"}
+
+
+def test_a_bus_keyed_legacy_capture_is_refused(short, checked, client, session_state):
+    state = solve(client, session_state)
+    state["last_lost_load"]["lost_load_t"].columns = ["B1"]
+    assert reasons(ask(checked, short, {}, entity="B1")) == {"legacy_lost_load_capture"}
+
+
+def test_a_network_without_electrical_loads_is_refused_not_zero(short, checked, client, session_state,
+                                                                monkeypatch):
+    solve(client, session_state)
+    monkeypatch.setattr("services.adequacy.metrics.electrical_columns", lambda n, cols: [])
+    assert reasons(ask(checked, short, {}, entity="network")) == {"no_electrical_loads"}
 
 
 def test_scope_and_grammar():
