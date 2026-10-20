@@ -167,8 +167,8 @@ describe('the Load card', () => {
   it('saves the demand and keeps the sign', async () => {
     await openEdit(<LoadCard load={LOAD} onRename={() => {}} />, [['loads', [LOAD]]])
     // No series set: the scalar is the constant the Profile editor starts from.
-    expect(inputOf('Demand — constant (MW)').value).toBe('40')
-    fireEvent.change(inputOf('Demand — constant (MW)'), { target: { value: '55' } })
+    expect(inputOf('Constant demand (MW)').value).toBe('40')
+    fireEvent.change(inputOf('Constant demand (MW)'), { target: { value: '55' } })
     const body = await sent(networkApi.updateLoad)
     expect(body.p_set).toBe(55)
     expect(body.sign).toBe(-1)
