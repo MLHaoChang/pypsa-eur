@@ -1,6 +1,6 @@
 # Coordinator
 
-Current coordinator session: `session_019jv5ivLebWSXNMHZCKNftP`
+Current coordinator session: `session_01VkKtzn8F7LYf2SE6oGdRUr`
 
 UX reviewer (UI coherence gate, owner decision 2026-10-20): `session_01LtF1LAnp5TM7QpSMiDZ2mF`
 
