@@ -580,3 +580,37 @@ def test_the_partial_year_refusal_says_what_to_do_on_a_template_week():
     assert "full-year hourly" in msg
     assert "representative" in msg
     assert "upload" in msg
+
+
+# ── gatekeeper notes on #396 (2026-10-20) ───────────────────────────────────
+
+
+def test_weekly_partial_first_week_holds_the_prior_mondays_mean():
+    """2023 starts on a Sunday: Jan 1 belongs to the week labelled Monday
+    2022-12-26, and Monday Jan 2 starts the next week."""
+    _net(year=2023)
+    weekly, meta = _weather_res(year=2023, resolution="weekly")
+    assign_profile(_ctx(), "Solar", weekly, meta)
+    stored = _user_ts[KEY]
+    first = float(weekly.loc[pd.Timestamp("2022-12-26")])
+    jan1 = stored.loc[pd.Timestamp("2023-01-01T00:00"):
+                      pd.Timestamp("2023-01-01T23:00")]
+    assert len(jan1) == 24 and (jan1 == first).all()
+    assert float(stored.loc[pd.Timestamp("2023-01-02T00:00")]) == float(
+        weekly.loc[pd.Timestamp("2023-01-02")])
+
+
+def test_a_coarse_profile_records_that_the_time_basis_was_not_re_binned():
+    _net(year=2024)
+    daily, meta = _weather_res(year=2024, resolution="daily")
+    assign_profile(_ctx(), "Solar", daily, meta, time_basis="Europe/Berlin")
+    m = _user_ts_meta[KEY]
+    assert m["time_basis"] == "Europe/Berlin"
+    assert "not re-binned" in m["time_basis_note"]
+
+
+def test_an_hourly_profile_carries_no_re_binning_note():
+    _net(year=2025)
+    series, meta = _weather(year=2025)
+    assign_profile(_ctx(), "Solar", series, meta, time_basis="Europe/Berlin")
+    assert "time_basis_note" not in _user_ts_meta[KEY]

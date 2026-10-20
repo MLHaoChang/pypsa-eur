@@ -593,6 +593,11 @@ def assign_profile(
     }
     if align_meta["periods"] is not None:
         full_meta["periods"] = align_meta["periods"]
+    if align_meta["resolution"] != "hourly":
+        # The basis is recorded, but a day/week mean is not re-binned by a
+        # 1–2 h offset — say so, so the provenance cannot imply a shift.
+        full_meta["time_basis_note"] = (
+            f"not re-binned at {align_meta['resolution']} resolution")
     if clipped:
         full_meta["clipped"] = True
 
