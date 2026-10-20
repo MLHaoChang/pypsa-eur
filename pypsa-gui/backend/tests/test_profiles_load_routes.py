@@ -321,3 +321,32 @@ def test_availability_refusals_are_typed(client, plant_project, over, kind):
     resp = _avail(client, plant_project, **over)
     assert resp.status_code == 422, resp.text
     assert resp.json()["detail"]["error_kind"] == kind
+
+
+def test_a_dated_window_on_a_multi_period_network_is_refused_before_pending(
+    client, install_network,
+):
+    from services.snapshot_index import _build_period_multiindex
+
+    n = pypsa.Network()
+    idx = [pd.date_range(f"{y}-01-01", f"{y}-12-31T23:00", freq="h") for y in (2030, 2031)]
+    n.set_snapshots(_build_period_multiindex([2030, 2031], idx))
+    n.add("Bus", "B1")
+    n.add("Carrier", "gas")
+    n.add("Generator", "chp", bus="B1", carrier="gas", p_nom=10.0)
+    install_network(n)
+    assert client.post("/api/projects/Two Periods",
+                       params={"force": True, "rebind": True}).status_code == 200
+    resp = _avail(client, "Two Periods",
+                  params={"windows": [{"from": "2030-07-03", "to": "2030-07-04"}]})
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "maintenance_year"
+    pending = client.get("/api/projects/Two Periods/profiles/pending").json()
+    assert pending["pending"] == []
+
+
+def test_must_run_stats_count_the_floored_hours(client, plant_project):
+    body = _avail(client, plant_project, kind="must_run",
+                  params={"share": 0.2}).json()
+    assert body["stats"]["chp"]["hours_floored"] == 8760
+    assert "hours_reduced" not in body["stats"]["chp"]

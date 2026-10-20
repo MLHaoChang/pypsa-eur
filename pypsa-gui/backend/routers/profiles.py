@@ -359,8 +359,9 @@ _APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (DcLoadOwnedError, {"error_kind": "dc_load_owned"}),
 )
 
-# Load generation and upload refusals, literal for the same reason.
-_LOAD_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
+# Generation and upload refusals (load, availability), literal for the same
+# reason.
+_GENERATE_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (UnknownArchetypeError, {"error_kind": "unknown_archetype"}),
     (InvalidArchetypeParamsError, {"error_kind": "invalid_archetype_params"}),
     (UploadFormatError, {"error_kind": "load_upload_format"}),
@@ -375,7 +376,7 @@ _LOAD_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
 
 
 def _apply_refusal_kind(exc: Exception) -> dict[str, str]:
-    for cls, kind in (*_APPLY_REFUSALS, *_LOAD_REFUSALS):
+    for cls, kind in (*_APPLY_REFUSALS, *_GENERATE_REFUSALS):
         if isinstance(exc, cls):
             return dict(kind)
     return {"error_kind": _error_kind(exc)}
@@ -718,9 +719,9 @@ def generate_availability_profiles(
                     "message": f"no generator named {', '.join(map(repr, missing))} "
                                f"on the open network"},
         )
-    weather = [g for g in body.generators
-               if any(t in str(gens.at[g, "carrier"] or "").lower()
-                      for t in ("wind", "solar", "pv"))]
+    from services.profile_gen.families import is_weather_carrier
+
+    weather = [g for g in body.generators if is_weather_carrier(gens.at[g, "carrier"])]
     if weather:
         raise HTTPException(
             status_code=422,
@@ -743,6 +744,11 @@ def generate_availability_profiles(
             body.generators, body.kind, params=params,
             year=body.year or int(first.year), family="availability",
         )
+        # A dated window that apply would refuse is refused before anything
+        # reaches the pending store.
+        from services.profile_gen.availability import check_dated_windows
+
+        check_dated_windows(ctx, result.meta)
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
@@ -755,13 +761,16 @@ def generate_availability_profiles(
     record["project_id"] = proj.name
     record["points"] = list(result.series.columns)
     write_pending(str(proj.directory), job_id, result.series, record)
-    stats = {
-        col: {"min": float(result.series[col].min()),
-              "mean": float(result.series[col].mean()),
-              "max": float(result.series[col].max()),
-              "hours_reduced": int((result.series[col] < 1.0 - 1e-9).sum())}
-        for col in result.series.columns
-    }
+    is_cap = record["target"][1] == "p_max_pu"
+    stats = {}
+    for col in result.series.columns:
+        v = result.series[col]
+        stats[col] = {"min": float(v.min()), "mean": float(v.mean()),
+                      "max": float(v.max())}
+        if is_cap:
+            stats[col]["hours_reduced"] = int((v < 1.0 - 1e-9).sum())
+        else:
+            stats[col]["hours_floored"] = int((v > 1e-9).sum())
     return {**record, "stats": stats}
 
 
