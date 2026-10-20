@@ -613,3 +613,41 @@ def test_a_missing_location_is_a_note_beside_an_enabled_run(client, site, edit):
     assert body["run_ready"] is True
     assert [x["section"] for x in body["notes"]] == ["project"]
     assert body["notes"][0]["message"].startswith("Project & site: ")
+
+
+def test_a_held_network_lock_defers_the_flow_instead_of_waiting(client, tmp_projects_dir,
+                                                                monkeypatch):
+    """Gatekeeper: GET /flow is polled, so it never blocks on the lock. The
+    study check runs after the preflight's span; a lock taken in between makes
+    the answer `deferred`, within the budget, with run_ready false."""
+    import threading
+
+    from services.adequacy import eh_study_runner as R
+
+    name = _create(client, "eh_h2_hub", "busy")
+    real = R.check_eh_study_start
+    held, release = threading.Event(), threading.Event()
+
+    def holder(lock):
+        with lock:
+            held.set()
+            release.wait(10)
+
+    def check(*a, **k):
+        # The request's own lock is taken just after the preflight released it.
+        t = threading.Thread(target=holder, args=(PyPSAService.get_lock(),), daemon=True)
+        t.start()
+        held.wait(5)
+        assert k.get("lock_blocking") is False
+        return real(*a, **k)
+
+    monkeypatch.setattr(R, "check_eh_study_start", check)
+    t0 = time.perf_counter()
+    try:
+        body = _flow(client, name)
+    finally:
+        release.set()
+    assert time.perf_counter() - t0 < 3.0
+    assert body["deferred"] is True and body["run_ready"] is False
+    assert {s: _states(body)[s] for s in INPUTS} == {s: "unknown" for s in INPUTS}
+    assert body["verdicts"]["study"]["ready"] is False

@@ -234,13 +234,21 @@ def _validate_dtc_config(raw: dict, n) -> DtcConfig:
     return dtc
 
 
-def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict) -> dict:
+class EhStudyLockBusy(Exception):
+    """`check_eh_study_start(lock_blocking=False)` found the network lock held
+    (a solve or an edit has it): the verdict is deferred, not a refusal."""
+
+
+def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
+                         lock_blocking: bool = True) -> dict:
     """Every refusal `POST /results/eh_study` makes before its worker exists
     (P13), as one function: an `HTTPException(422)` names the refusal, and a
     pass returns what the worker needs. `start_eh_study` calls it first; the
     project flow (`services/flow_service.py`) calls it to state the same verdict
     without starting anything. Takes the network lock briefly (component names
-    and the energy-cap orientation are read from the live network)."""
+    and the energy-cap orientation are read from the live network); with
+    ``lock_blocking=False`` (the polled flow) a held lock raises
+    `EhStudyLockBusy` instead of waiting."""
     body = body or EhStudyRequest()
     archetype = getattr(body, "archetype", None)
     if archetype is None:
@@ -290,7 +298,10 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict) -> 
         _PACK_FACTORY[archetype](), body.pack_overrides, raise_http=True)
     raw_dtc, dtc_attribution = resolve_dtc_attribution(
         body.dtc_config, body.dtc_attribution)
-    with lock:  # component names read from the live network
+    # Component names are read from the live network.
+    if not lock.acquire(blocking=lock_blocking):
+        raise EhStudyLockBusy()
+    try:
         dtc_config = (_validate_dtc_config(raw_dtc, n)
                       if raw_dtc is not None else None)
         bus_names = set(map(str, n.buses.index))
@@ -301,6 +312,8 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict) -> 
             _arch.import_energy_patch(n, pack)
         except _arch.ArchetypePackError as exc:
             raise HTTPException(422, str(exc)) from exc
+    finally:
+        lock.release()
     dsr_buses = None
     if body.dsr_buses is not None:
         dsr_buses = list(dict.fromkeys(str(b) for b in body.dsr_buses))

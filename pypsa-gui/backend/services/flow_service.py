@@ -104,6 +104,11 @@ READINESS_WARNING_PREFIXES: tuple[tuple[str, str, str], ...] = (
     ("VOLL is 0", "eh_voll_zero", "scenarios"),
 )
 
+# Said when the study check finds the network lock held after the preflight's
+# own span (`routers.simulation._deferred_payload`'s running-solve wording).
+_LOCK_BUSY_REASON = ("The network is busy (a solve or an edit holds its lock): validation "
+                     "deferred until it is released. Refresh once it finishes.")
+
 # The presence rules (B1 brief; design §3.3 R2). All kind (c), display only.
 # `snapshots non-empty` is kind (a): the validator's own `snapshots_empty`.
 PRESENCE_RULES: dict[str, tuple[str, str]] = {
@@ -334,7 +339,8 @@ def _validation_items(issues, connection_links: frozenset[str]) -> list[dict]:
 def _study_start_items(body: dict) -> list[dict]:
     """The study start endpoint's own refusal (R1): `check_eh_study_start` on
     the Goal card's body. A refusal blocks Run; it files to section 8, the run
-    request it refuses."""
+    request it refuses. Never waits on the network lock: a held lock raises
+    `EhStudyLockBusy`, which the collector answers as `deferred`."""
     from fastapi import HTTPException
 
     from services.adequacy.eh_study_runner import EhStudyRequest, check_eh_study_start
@@ -342,7 +348,8 @@ def _study_start_items(body: dict) -> list[dict]:
 
     try:
         check_eh_study_start(EhStudyRequest.model_validate(body),
-                             solver_state=PyPSAService.get_solver_state())
+                             solver_state=PyPSAService.get_solver_state(),
+                             lock_blocking=False)
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)
         return [_item("eh_study_refused", "error",
@@ -698,6 +705,16 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     islanded = body is not None and body["archetype"] == "off_grid"
     deferred, issues, facts = preflight_validate(
         lambda n, cfg: _gather(n, cfg, template=template, cache_key=cache_key))
+    study_items: list[dict] = []
+    if deferred is None and body is not None:
+        from services.adequacy.eh_study_runner import EhStudyLockBusy
+
+        try:
+            study_items = _study_start_items(body)
+        except EhStudyLockBusy:
+            # The lock was taken between the preflight's span and this one: the
+            # same answer as the preflight's own gate 3.
+            deferred = {"deferred_reason": _LOCK_BUSY_REASON}
     n = PyPSAService.get_network()
     running = _solver_in_flight() or study_state.running_study() is not None
     freshness = _freshness(n, running=running)
@@ -732,7 +749,7 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     items += presence
     items += _validation_items(issues, frozenset(facts.connection_links))
     if body is not None:
-        items += _study_start_items(body)
+        items += study_items
         r = _readiness(facts, template, cache_key)
         items += _readiness_items(r, voll_noted=any(
             i["code"] == "presence_voll" for i in presence))
