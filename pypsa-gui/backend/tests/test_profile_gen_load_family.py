@@ -315,3 +315,10 @@ def test_other_loads_on_a_dc_load_project_still_apply(tmp_path):
     res = _gen("industrial")
     assign_profile(ctx, "L1", res.series["L1"], res.meta,
                    component_type="loads", attribute="p_set", now=NOW)
+
+
+def test_the_series_clock_is_recorded_as_the_source_time_basis():
+    on_zone = _gen("industrial", {"timezone": "Europe/Oslo"}).meta
+    assert on_zone["source_time_basis"] == "UTC (from Europe/Oslo wall clock)"
+    no_zone = _gen("industrial").meta
+    assert no_zone["source_time_basis"] == "UTC (assumed; site clock unknown)"
