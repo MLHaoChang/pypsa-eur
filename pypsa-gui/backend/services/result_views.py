@@ -121,6 +121,15 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                claim_limits="Energy carriers only; a flow the server cannot prove to conserve "
                             "energy is unavailable, not zero.",
                units="MWh"),
+    # Gated like flows: the copilot read lands with the catalogue work.
+    ResultView("loadshape", _RESULTS, "loadshape", "Load shape",
+               "how import, export and the site's own generation are shaped by weekday, hour, week, month and year",
+               "results", (_r("get_load_shape"),),
+               guided_label="Load shape",
+               requires_tools=("get_load_shape",),
+               claim_limits="Energy carriers only; a group the network does not model, or the run "
+                            "cannot establish, is named, not shown as zero.",
+               units="MW, MWh"),
     ResultView("loadflow", _RESULTS, "loadflow", "Load Flow",
                "line and transformer loading against their ratings", "results",
                (_r("get_loadflow_summary"),),

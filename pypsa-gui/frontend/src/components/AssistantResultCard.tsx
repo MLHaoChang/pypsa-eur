@@ -1,3 +1,5 @@
+import { EditReceiptLine, editReceiptOf } from './EditCard'
+
 /** Read task/artifact metadata from the existing tool_result stream. */
 function object(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -12,6 +14,8 @@ export default function AssistantResultCard({ result, disabled, onRequest }: {
   // Raw checked-mode cards cannot bypass answer/artifact admission. The current
   // pilot has no approved artifact/task-card contract.
   if (object(data._assurance)) return null
+  const receipt = editReceiptOf(data._edit_receipt)
+  if (receipt) return <EditReceiptLine receipt={receipt} disabled={disabled} onRequest={onRequest} />
   const task = object(data._task) ?? (typeof data.task_id === 'string' ? data : null)
   const taskId = typeof task?.task_id === 'string' && /^[0-9a-f-]{36}$/.test(task.task_id) ? task.task_id : null
   const status = typeof task?.status === 'string' ? task.status : ''

@@ -377,7 +377,7 @@ export default function AssistantDock() {
             {choice && <div ref={setCompanionChoiceTarget} className="w-80 max-w-full" />}
             {liveOpen && <div ref={setCompanionAccessTarget} className="w-72 max-w-full" />}
             {walking && walkNextReady && <button type="button" data-no-panel-close className="fixed bottom-24 right-4 text-xs rounded border border-border bg-panel px-3 py-2" onClick={() => walkCancel.current?.next()}>Next evidence view</button>}
-      <CompanionOutcome />
+      <CompanionOutcome docked={!anchor} />
           </ErrorBoundary>
         </CompanionLauncher>,
       )}

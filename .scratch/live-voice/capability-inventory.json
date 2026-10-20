@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 265,
+  "tool_count": 266,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -851,7 +851,7 @@
         "name"
       ],
       "safety_tier": "write",
-      "schema_sha256": "fca6ea6c681833bf188c73ca455fb15c66d77c168938e3e411b2d17b2fa69c5d",
+      "schema_sha256": "620554ac6bc2ecc1d9abf2620676d5e050b7c0f5ad50d0c0d00c1de13f908734",
       "behavioral_fixture": "pending"
     },
     {
@@ -958,7 +958,7 @@
         "updates"
       ],
       "safety_tier": "write",
-      "schema_sha256": "b9d29d6a115f86582ef642db3006a34974a740d6ea90bd8e0d72620e916ea166",
+      "schema_sha256": "eed50b5ccfc78c67d97858ef0a5be66f8648c325b8bc2c738b3f4019bf85f087",
       "behavioral_fixture": "pending"
     },
     {
@@ -2784,7 +2784,7 @@
         "new_name"
       ],
       "safety_tier": "destructive",
-      "schema_sha256": "16a12f5f53640c0e97318c8bc84a8cec4f9ba18da2cf8b2afc3d5889cf2b61c7",
+      "schema_sha256": "7f6fa839e4b0c8795add790518d68197b05c7b9dcf927cb0a28456c6f10d6fba",
       "behavioral_fixture": "pending"
     },
     {
@@ -3178,7 +3178,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "efbad4ff4dfcfd3ca17c5b3fd5934cd268856615dc4371ba98a4fa6440e111eb",
+      "schema_sha256": "c375b301eb8bef557b7a963d94c0d28096123d4ae6080075f6abccdda738a7cd",
       "behavioral_fixture": "pending"
     },
     {
@@ -5592,7 +5592,7 @@
         "run_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "3fee3fd1579f25938f311af69c6da1ad4df6771e28290a3ca4fbaa9e0e32ce72",
+      "schema_sha256": "b46446d653180d98e76cef8cbdb028da3cdc19b7ef9a6d79c89c8d4c4805242a",
       "behavioral_fixture": "pending"
     },
     {
@@ -5707,6 +5707,23 @@
       ],
       "safety_tier": "read",
       "schema_sha256": "8141d78f100db6a8a9c0e566273a6a97fe92d94493d1912c0d50d2f30462899d",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_energy_flows",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "period",
+        "window_from",
+        "window_to",
+        "limit"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "3914ac2afc6ecf565a667beb948839ec1af36bf8a8752d2c19760faf0d59226b",
       "behavioral_fixture": "pending"
     },
     {
@@ -6073,6 +6090,10 @@
       "label": "Energy flow"
     },
     {
+      "id": "loadshape",
+      "label": "Load shape"
+    },
+    {
       "id": "prices",
       "label": "Prices"
     },
@@ -6129,7 +6150,8 @@
     "investment",
     "adequacy",
     "fmea",
-    "flows"
+    "flows",
+    "loadshape"
   ],
   "result_tabs_not_in_tool_enum": [],
   "slide_panels": [

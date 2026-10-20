@@ -224,16 +224,16 @@ def _shed(n, capture, rows, load_names, load_bus) -> np.ndarray | None:
     return out
 
 
-def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
-    """The whole-period attribution: per-snapshot MW by (source, via, dest)."""
+def _read(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
+    """The solved dispatch of one period as arrays (MW per snapshot), with the
+    shed / shortfall removed from what the loads were served and non-energy
+    buses refused. Shared by the flow attribution and the load-shape views."""
     T = int(mask.sum())
     buses = [str(b) for b in n.buses.index]
     bus_ix = {b: i for i, b in enumerate(buses)}
     nb = len(buses)
     if T == 0 or nb == 0:
         _refuse("no snapshots in the period")
-    if T * nb * nb > MAX_CELLS:
-        _refuse("the network is too large for the flow attribution")
 
     wg = n.snapshot_weightings["generators"].to_numpy(dtype=float)[mask]
     dt = n.snapshot_weightings["stores"].to_numpy(dtype=float)[mask]
@@ -328,6 +328,41 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
             _refuse(f"bus {buses[b]} is in {bus_unit[b]}, not an energy unit; "
                                  "the flows are shown for energy carriers only")
 
+    return {"T": T, "buses": buses, "bus_ix": bus_ix, "nb": nb, "wg": wg, "dt": dt, "gnames": gnames,
+            "gp": gp, "g_bus": g_bus, "g_lab": g_lab, "external": external, "lnames": lnames, "lp": lp,
+            "l_bus": l_bus, "shed": shed, "lost": lost, "served": served, "elems": elems,
+            "storages": storages, "bus_unit": bus_unit}
+
+
+def read_dispatch(n, mask: np.ndarray, result_df=None, capture=None) -> tuple[dict[str, Any] | None, str | None]:
+    """`_read` for the other results views: (arrays, None), or (None, why not)."""
+    why: list[str] = []
+    token = _WHY.set(why)
+    try:
+        return _read(n, mask, result_df, capture), None
+    except NotEstablished:
+        return None, (why[-1] if why else "not established")
+    finally:
+        _WHY.reset(token)
+
+
+def period_mask(n, period) -> np.ndarray:
+    """Boolean mask over `n.snapshots` for one investment period (all, if flat)."""
+    if is_multi_period(n):
+        return np.asarray(n.snapshots.get_level_values(0)) == period
+    return np.ones(len(n.snapshots), dtype=bool)
+
+
+def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
+    """The whole-period attribution: per-snapshot MW by (source, via, dest)."""
+    R = _read(n, mask, result_df, capture)
+    T, buses, bus_ix, nb, wg, dt = R["T"], R["buses"], R["bus_ix"], R["nb"], R["wg"], R["dt"]
+    gp, g_bus, g_lab, external = R["gp"], R["g_bus"], R["g_lab"], R["external"]
+    lnames, lp, l_bus, shed, lost, served = R["lnames"], R["lp"], R["l_bus"], R["shed"], R["lost"], R["served"]
+    elems, storages = R["elems"], R["storages"]
+    if T * nb * nb > MAX_CELLS:
+        _refuse("the network is too large for the flow attribution")
+    nst = len(storages)
     # ---- labels -----------------------------------------------------------------
     srcs = sorted(set(g_lab))
     srcs += [STOCK_BEFORE, UNATTRIBUTED]
