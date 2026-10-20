@@ -210,7 +210,7 @@ if runs=$(command -v gh >/dev/null &&
     while IFS=$'\t' read -r st con name id; do
       [[ $st == completed && $con == cancelled && $name == "Integration (macos)" ]] || continue
       [[ $(gh api "repos/$gh_repo/actions/jobs/$id" \
-        --jq '(.runner_id == null) and ((.steps // []) | length == 0)' 2>/dev/null) == true ]] || continue
+        --jq '((.runner_id // 0) == 0) and ((.steps // []) | length == 0)' 2>/dev/null) == true ]] || continue
       waived+="  waived      cancelled       Integration (macos): no runner assigned; ubuntu twin passed"$'\n'
       bad=$(awk -F'\t' -v id="$id" '$4 != id' <<<"$bad")
     done <<<"$bad"
