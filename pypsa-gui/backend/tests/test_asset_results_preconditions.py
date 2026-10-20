@@ -68,7 +68,8 @@ def test_preconditions_returns_exactly_the_declared_set():
     n = build_network(solve=True)
     got = set(C.preconditions(n, "Generator", "gas"))
     assert got == {reg.REQ_DISPATCH, reg.REQ_AC_PF, reg.REQ_DUALS,
-                   reg.REQ_COMMITTABLE, reg.REQ_CO2, reg.REQ_ANNUITY}
+                   reg.REQ_COMMITTABLE, reg.REQ_CO2, reg.REQ_ANNUITY,
+                   reg.REQ_PORT2, reg.REQ_PORT3, reg.REQ_PORT4}
     declared = {r for m in reg.METRICS for r in m.requires}
     assert declared <= got, f"metrics require unevaluated preconditions: {declared - got}"
 

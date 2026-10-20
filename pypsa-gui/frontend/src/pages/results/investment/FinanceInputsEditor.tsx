@@ -380,7 +380,7 @@ function Form({ d, set, errors, report, assets }: {
         <legend className="font-semibold">Case dates and length</legend>
         <TextField label="Currency" hint="(ISO code; blank: EUR)" value={d.currency} errors={e('currency')}
                    onChange={v => set('currency', v ?? undefined)} />
-        <NumField label="Currency year" hint="(the money year of the costs and rates)" int
+        <NumField label="Currency year" hint="(the year of the price data; costs are read as real money of the base year)" int
                   value={d.currency_year} errors={e('currency_year')}
                   onChange={v => set('currency_year', v)} />
         <SelectField label="Price basis" value={d.price_basis} errors={e('price_basis')}

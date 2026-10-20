@@ -748,12 +748,15 @@ export const useUIStore = create<UIStore>((set) => ({
     } catch { /* noop */ }
     set(s => {
       const patch: Partial<UIStore> = { uiMode: mode, uiModeExplicit: s.uiModeExplicit || explicit }
-      // UX M7: with no autosave choice of the user's, the mode decides.
-      if (!autosaveChosen()) patch.autosaveEnabled = mode === 'guided'
+      // UX review W5: switching mode keeps the autosave state, so the footer
+      // reads the same for one project in Guided and in Expert. The mode only
+      // seeds the default at load (storedAutosave).
       // §3.7: a slide panel Guided has no navigation for is swapped for the
       // hub-design flow (or closed when there is no project). Results stays —
-      // Guided keeps two of its tabs. Switching to Expert closes nothing.
+      // Guided keeps two of its tabs. Switching to Expert closes the Guided
+      // hub design panel (UX review W4) and nothing else.
       // U3: the decision study is a Guided surface too (the Start card opens it).
+      if (mode === 'expert' && s.activeSlidePanel === 'hubDesign') patch.activeSlidePanel = null
       if (mode === 'guided' && s.activeSlidePanel != null
           && s.activeSlidePanel !== 'hubDesign' && s.activeSlidePanel !== 'results'
           && s.activeSlidePanel !== 'decision') {

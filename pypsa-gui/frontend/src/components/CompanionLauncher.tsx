@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Mic, Pencil } from 'lucide-react'
 
-// Clears toasts above the chip (max-w 12rem) plus bottom-6 / right-6 (24px).
+// Clears toasts beside the chip (max-w12rem) plus the24px right gutter.
+// The workbench body ends above the24px status row, preserving bottom spacing.
 export const COMPANION_TOAST_OFFSET = 220
 
 export type CompanionWorkState = 'idle' | 'running' | 'queued' | 'waiting_for_approval' | 'waiting_for_input' | 'failed'
@@ -95,7 +96,7 @@ export default function CompanionLauncher({
   const caption = liveCaption.trim()
   return (
     <div
-      className="companion-launcher fixed bottom-6 right-6 z-40 flex max-w-[calc(100vw-3rem)] flex-col items-end gap-2"
+      className="companion-launcher absolute bottom-0 right-6 z-40 flex max-w-[calc(100vw-3rem)] flex-col items-end gap-2"
       data-testid="companion-launcher"
       data-no-panel-close
       data-presence={presence}

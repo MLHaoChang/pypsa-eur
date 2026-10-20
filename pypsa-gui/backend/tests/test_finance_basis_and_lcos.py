@@ -114,9 +114,14 @@ def test_a_real_basis_with_escalation_or_inflation_is_flagged():
 
 
 @pytest.mark.parametrize("over,words", [
-    ({"price_basis": "real", "currency_year": 2020}, "real basis, 2020 EUR"),
+    ({"price_basis": "real", "currency_year": 2031}, "real basis, 2031 EUR"),
     ({}, "nominal basis, EUR (currency year not stated)"),
-    ({"currency": "USD", "currency_year": 2024}, "nominal basis, 2024 USD"),
+    ({"currency": "USD", "currency_year": 2031}, "nominal basis, 2031 USD"),
+    # The case's base year is 2031: costs are read as real base-year money (the
+    # money-year convention, models/finance.py); nothing is converted.
+    ({"currency_year": 2020}, "nominal basis, costs in real 2031 EUR (2020 price data)"),
+    ({"price_basis": "real", "currency_year": 2020},
+     "real basis, costs in real 2031 EUR (2020 price data)"),
 ])
 def test_the_report_echoes_the_basis_and_states_it_in_words(over, words):
     from services.finance.report import assemble_finance_sections
@@ -142,7 +147,8 @@ def test_the_workbook_about_sheet_carries_the_basis():
         ws = load_workbook(io.BytesIO(build_workbook(rep)))["About"]
         rows = {ws.cell(r, 1).value: ws.cell(r, 2).value for r in range(1, ws.max_row + 1)}
         assert rows["Price basis"] == basis
-        assert rows["Currency year"] == year
+        assert rows["Price data year"] == year
+        assert rows["Base year (real money)"] == case.base_year
 
 
 # ── storage LCOS (owner decision 6) ──────────────────────────────────────────

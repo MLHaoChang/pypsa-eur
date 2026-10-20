@@ -1,3 +1,175 @@
 {
+  "commercial": {
+    "co2_price": null,
+    "connection": null,
+    "contracts": [],
+    "demand_items": [],
+    "export_link": null,
+    "export_price_ref": null,
+    "grid_cfe_share_ref": null,
+    "group_cap_mw": null,
+    "group_contract": null,
+    "group_members": [],
+    "import_tariff": null,
+    "import_tariff_id": null,
+    "import_tariff_ref": null,
+    "initial_peak_lower_bound": {},
+    "meter_history_energy_kwh": {},
+    "meter_history_peaks_kw": {},
+    "poc_link": "subsea_tie",
+    "power_factor": null,
+    "reference_purchases": [],
+    "site_party": "site",
+    "timezone": "UTC",
+    "value_flows": {
+      "allocation": null,
+      "asset_owners": [
+        {
+          "asset_id": "pv_plant",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "wind_turbines",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "diesel_1",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "diesel_2",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "diesel_3",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "diesel_new",
+          "component": "Generator",
+          "owner": "site"
+        },
+        {
+          "asset_id": "island_battery",
+          "component": "StorageUnit",
+          "owner": "site"
+        },
+        {
+          "asset_id": "bess_new",
+          "component": "StorageUnit",
+          "owner": "site"
+        },
+        {
+          "asset_id": "subsea_tie",
+          "component": "Link",
+          "owner": "site"
+        },
+        {
+          "asset_id": "hospital_feeder",
+          "component": "Link",
+          "owner": "site"
+        }
+      ],
+      "built_digest": "dd90d30ca00ae130",
+      "built_inputs_digest": "13a391e6ac067ebd",
+      "connection_fee_payee": null,
+      "export_revenue_to": "site_party",
+      "externals": [
+        "retailer",
+        "dso",
+        "tso",
+        "market",
+        "tax_authority",
+        "capex_supplier",
+        "om_contractor"
+      ],
+      "hub_members": [],
+      "participants": [
+        {
+          "currency": "EUR",
+          "id": "site",
+          "name": "site",
+          "role": "site_owner"
+        }
+      ],
+      "tariff_payees": [],
+      "template": "single_owner",
+      "template_version": "single_owner@2"
+    }
+  },
+  "finance": {
+    "acquisition_date": null,
+    "analysis_years": 15,
+    "annualise": false,
+    "capex_phasing": [
+      1.0
+    ],
+    "cod_by_asset": {
+      "bess_new": "2030-01-01",
+      "diesel_1": "2030-01-01",
+      "diesel_2": "2030-01-01",
+      "diesel_3": "2030-01-01",
+      "diesel_new": "2030-01-01",
+      "hospital_feeder": "2030-01-01",
+      "island_battery": "2030-01-01",
+      "pv_plant": "2030-01-01",
+      "wind_turbines": "2030-01-01"
+    },
+    "construction_months_by_asset": {},
+    "construction_start": null,
+    "contingency_share": 0.0,
+    "cost_of_equity": 0.07,
+    "currency": "EUR",
+    "currency_year": 2020,
+    "debt": [],
+    "degradation_by_asset": {
+      "bess_new": 0.0,
+      "diesel_1": 0.0,
+      "diesel_2": 0.0,
+      "diesel_3": 0.0,
+      "diesel_new": 0.0,
+      "island_battery": 0.0,
+      "pv_plant": 0.005,
+      "wind_turbines": 0.0
+    },
+    "depreciation_class_by_asset": {},
+    "escalation": {
+      "capex": 0.02,
+      "export": 0.02,
+      "fuel": 0.02,
+      "opex": 0.02,
+      "ppa": 0.02,
+      "tariff": 0.02
+    },
+    "financial_close": "2029-01-01",
+    "financing_fee_tax": "not_deducted",
+    "hebesatz_pct": null,
+    "incentives": [],
+    "inflation": 0.02,
+    "island_outage": null,
+    "participants": [],
+    "price_basis": "nominal",
+    "pwa_met": null,
+    "replacement_capex": [],
+    "replacement_rule": "part_lifetimes",
+    "reserves_rate": null,
+    "small_business_163j": null,
+    "solve_ppa": null,
+    "stage_capex_lead_years": 1,
+    "state_rate": null,
+    "tax_equity": null,
+    "tax_losses": "offset_other_income",
+    "tax_pack_id": null,
+    "terminal_value": {
+      "method": "remaining_life_annuity",
+      "value": null
+    },
+    "wacc_nominal": 0.07
+  },
   "voll": 5000.0
 }

@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): Renewable-profile plan: the owner's vision mapped onto the profile generator, eleven tickets (coordinates, readiness, Time Series Manager home, horizon from snapshots, tuning panel, calibration, before/after, chat), and owner journeys OJ-47–OJ-54.

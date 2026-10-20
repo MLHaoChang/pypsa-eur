@@ -111,6 +111,14 @@ process that died before persistence. It never advances or retries work. See
 
 ## The contract
 
+In-page chat's access summary reads the same authenticated `/api/chat/access`
+snapshot as the dock. ChatPanel supplies its actual next-turn checked selection
+to both surfaces; opening the summary never sends a message or approves a card.
+The summary hides observations during refresh/failure or a scope mismatch and
+offers the existing full review and revisioned restriction editor. It is an
+observation, not admission authority or proof that a running answer was checked.
+See `.scratch/chat-companion/issues/06d-companion-access-summary.md`.
+
 1. **Layering.** `services/* <- harness <- harness/providers`. Nothing in
    this folder outside `providers/` imports an SDK or names a wire
    (`anthropic`, `openai`, `cache_control`). `tests/test_harness_layout.py`
@@ -198,6 +206,43 @@ Saving does not cancel handlers already started. Rules are not imported with
 project data, inherited by scenarios or shared with other users. This current
 record is not durable policy history. See
 `.scratch/chat-companion/issues/06c-saved-restrictions.md`.
+
+## Component schema discovery
+
+`get_component_schema` is an ordinary read-tier control, available in every
+toolset and within the existing provider offer caps. It pages the actual
+component request models, PyPSA defaults and asset descriptors: stored/display
+units, declared JSON constraints, defaults, and conservative derived/output
+editability. A page is at most3800 serialized characters; advance `offset` by
+`returned` while `has_more`. An individually oversized field refuses rather
+than silently clipping its schema. Query matches field names/labels, not values.
+
+This is class metadata, including in a networkless planning context, never
+proof that a project has an instance or supports an engine. Actual values stay
+on-demand through existing owned component reads. The metadata hash is not an
+input revision, validation-policy revision or approval. Native handlers still
+validate every write, including cross-field rules absent from JSON Schema.
+Personal read-only rules remain authoritative even for a field marked editable;
+the strict checked pilot continues to refuse this unmapped tool. Non-component
+service/domain schemas and exact target resolution remain LC-01 follow-ups.
+
+## Target and reference resolution (LC-01B, LC-10)
+
+Two read-tier controls name a target before anything reads or changes it.
+Neither activates, selects or opens anything, and neither grants authority:
+every later use rechecks access natively.
+
+- `resolve_project_target(project_name)` maps an exact project name to its
+  canonical `project_id`: no trimming, case-folding, partial match or
+  UUID guessing, and unknown and inaccessible names fail the same way.
+- `resolve_reference(target, ...)` applies one ladder for "this", "the" and
+  "latest": explicit, on screen, discussed last, the only one, otherwise
+  candidates to ask about with one `ask_user` Choice. The on-screen rung
+  reads `ChatSession.turn_ui_context`, which the loop replaces every turn
+  with the request's UI context; it is a hint, re-read against the active
+  network or the project's run records. `says` names what was resolved and
+  `ignored` the hints that were not used. The tools-on prompt part
+  `prompts/reference_ladder.md` tells the model when to call it.
 
 ## Local MCP exposure (issue 11)
 

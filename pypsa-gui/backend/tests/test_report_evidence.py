@@ -197,7 +197,7 @@ def test_no_inputs_every_section_not_established_with_hint():
         assert section.note == NO_DATA_HINTS[study_id], study_id
     # The hints are the ones get_adequacy_results gives.
     assert "Monte-Carlo" in ev.sections["mc"].note
-    assert "run_eh_study" in ev.sections["fmea_top"].note
+    assert "run the study first" in ev.sections["fmea_top"].note
     assert len(ev.not_established) >= len(REPORT_SECTIONS) + len(SECTION_ORDER)
     assert ev.tables == {}
 
@@ -493,7 +493,7 @@ def test_adequacy_sections_union_with_engine_fidelity_and_reason():
     assert frontier.source == "get_adequacy_results('frontier')"
     assert "no frontier yet" in frontier.note
     # The EH frontier is a different section and keeps its own hint.
-    assert "run_eh_study" in ev.sections["frontier"].note
+    assert "run the study first" in ev.sections["frontier"].note
     # The study report's own lists ride through untouched.
     for line in sr["required_disclosures"]:
         assert line in ev.required_disclosures

@@ -290,7 +290,7 @@ def _project_payload(result, case) -> dict[str, Any]:
         # The price basis (GS Q6; U1 follow-up d): machine-readable and in words.
         "currency_year": fin.currency_year,
         "price_basis": fin.price_basis,
-        "basis_statement": basis_statement(fin),
+        "basis_statement": basis_statement(fin, case.base_year),
         "years": [int(y) for y in result.tl.years],
         "cod_year": result.tl.cod_year,
         "base_year": result.tl.base_year,
@@ -378,9 +378,12 @@ def _extra_assets_block(case) -> list[dict[str, Any]]:
     if fin.currency_year is not None:
         # IC G3 gate C3: nothing is converted; the investment-case route refuses a
         # campus study in another currency or price year.
-        money = (f"upfront costs in the case's money, {fin.currency_year} {fin.currency}, as "
-                 "passed: the investment-case route refuses a campus study in another currency "
-                 "or price year")
+        read = (f"upfront {costs_money_words(fin, case.base_year)}, as passed"
+                if int(case.base_year) != int(fin.currency_year)
+                else f"upfront costs in the case's money, {fin.currency_year} {fin.currency}, "
+                     "as passed")
+        money = (f"{read}: the investment-case route refuses a campus study in another "
+                 "currency or price year")
     else:
         # IC G2 gate r1 note 5 (flag `extra_asset_money_year_unstated`): nothing to claim.
         money = (f"upfront costs as passed, read as {fin.currency}; the case's currency year is "
@@ -437,13 +440,30 @@ def _terminal_block(result, case) -> dict[str, Any]:
     return out
 
 
-def basis_statement(fin) -> str:
+def basis_statement(fin, base_year: int | None = None) -> str:
     """The price basis in words (IC plan C4; GS Q6): "real basis, 2020 EUR",
     "nominal basis, 2024 USD", or the currency alone with "(currency year
-    not stated)" — never a guessed year."""
-    money = (f"{fin.currency_year} {fin.currency}" if fin.currency_year is not None
-             else f"{fin.currency} (currency year not stated)")
+    not stated)" — never a guessed year.
+
+    The engine reads the typed costs as REAL prices in the case's base-year money
+    (held flat to the base year, escalated from it at the case's rates), so when
+    the currency year is not the base year the statement says that: "nominal
+    basis, costs in real 2027 EUR (2020 price data)". Nothing is converted."""
+    if fin.currency_year is None:
+        money = f"{fin.currency} (currency year not stated)"
+    elif base_year is not None and int(base_year) != int(fin.currency_year):
+        return (f"{fin.price_basis} basis, {costs_money_words(fin, base_year)}")
+    else:
+        money = f"{fin.currency_year} {fin.currency}"
     return f"{fin.price_basis} basis, {money}"
+
+
+def costs_money_words(fin, base_year: int) -> str:
+    """"costs in real 2027 EUR (2020 price data)": how the typed upfront and
+    operating costs are read — as real money of the base year, whatever year their
+    price data states (the money-year convention; no price index is applied)."""
+    return (f"costs in real {int(base_year)} {fin.currency} "
+            f"({fin.currency_year} price data)")
 
 
 def _lcos_block(result) -> dict[str, Any]:

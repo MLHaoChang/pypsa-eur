@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Chart legends sit top-left with plain names instead of raw ids, and the reliability figures say what they were computed from (Monte Carlo, this dispatch solve, thermal-only screening).

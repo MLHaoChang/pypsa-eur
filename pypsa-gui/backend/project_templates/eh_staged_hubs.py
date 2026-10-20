@@ -301,10 +301,8 @@ def _mg_commercial_and_finance(T) -> dict:
 MG_TRANSITION_ROCOF = 2.0
 
 
-def _mg_island(T) -> dict:
-    """The island's own sidecar: diesel droop and a grid-forming battery
-    holding the steady island (``seamless``; the tie is open, so there is no
-    import to lose at 0⁺)."""
+def _mg_island_blocks(T) -> tuple[dict, dict, dict]:
+    """The island's three converter blocks: the grid-forming battery, PV and wind."""
     a = T._a
     bess = {"kind": "bess", "control": "gfm_droop", "pf_rated": a(0.95), "droop_pct": a(4.0),
             "q_droop_pct": a(4.0), "tau_f_s": a(0.1), "i_max_pu": a(1.2), "k_gfm_min": a(1.0)}
@@ -312,25 +310,54 @@ def _mg_island(T) -> dict:
           "qu_points": a([[0.9, 0.33], [0.97, 0.0], [1.03, 0.0], [1.1, -0.33]])}
     wind = {"kind": "wind", "control": "gfl_qu", "pf_rated": a(0.95),
             "qu_points": a([[0.9, 0.33], [0.97, 0.0], [1.03, 0.0], [1.1, -0.33]])}
-    units: dict[str, dict] = {f"diesel_{i}": T._genset_island() for i in range(1, 4)}
-    units["island_battery"] = copy.deepcopy(bess)
-    units["pv_plant"] = copy.deepcopy(pv)
-    units["wind_turbines"] = copy.deepcopy(wind)
-    for y in YEARS:
-        units[f"diesel_new_{y}"] = T._genset_island(unit_mw=a(3.0))
-        units[f"bess_new_{y}"] = copy.deepcopy(bess)
-        units[f"pv_new_{y}"] = copy.deepcopy(pv)
-        units[f"wind_new_{y}"] = copy.deepcopy(wind)
-    units["hospital_load"] = {"kind": "load", "critical": True}
-    units["residential"] = {"kind": "load", "critical": False}
-    return {"units": units, "requirements": {
+    return bess, pv, wind
+
+
+def _mg_requirements(T, ride_through_storage: list[str]) -> dict:
+    a = T._a
+    return {
         "bridge_s": a(600.0), "sustained_h": a(24.0), "fuel_autonomy_h": a(24.0),
         "genset_redundancy_n": a(1), "scenarios": ["seamless"],
         "frequency_limits": {"transition": {**T._LIMITS, "rocof_hz_per_s": a(MG_TRANSITION_ROCOF)},
                              "steady_island": dict(T._LIMITS)},
         "rocof_window_ms": a(500.0), "gfm_margin": a(0.1),
-        "ride_through_storage": ["island_battery", *[f"bess_new_{y}" for y in YEARS]],
-    }}
+        "ride_through_storage": ride_through_storage,
+    }
+
+
+def _mg_island(T) -> dict:
+    """The island's own sidecar: diesel droop and a grid-forming battery
+    holding the steady island (``seamless``; the tie is open, so there is no
+    import to lose at 0⁺)."""
+    bess, pv, wind = _mg_island_blocks(T)
+    units: dict[str, dict] = {f"diesel_{i}": T._genset_island() for i in range(1, 4)}
+    units["island_battery"] = copy.deepcopy(bess)
+    units["pv_plant"] = copy.deepcopy(pv)
+    units["wind_turbines"] = copy.deepcopy(wind)
+    for y in YEARS:
+        units[f"diesel_new_{y}"] = T._genset_island(unit_mw=T._a(3.0))
+        units[f"bess_new_{y}"] = copy.deepcopy(bess)
+        units[f"pv_new_{y}"] = copy.deepcopy(pv)
+        units[f"wind_new_{y}"] = copy.deepcopy(wind)
+    units["hospital_load"] = {"kind": "load", "critical": True}
+    units["residential"] = {"kind": "load", "critical": False}
+    return {"units": units,
+            "requirements": _mg_requirements(T, ["island_battery", *[f"bess_new_{y}" for y in YEARS]])}
+
+
+def _mg_island_single_year(T) -> dict:
+    """The single-year island microgrid's sidecar (UX review N2): the staged island's
+    blocks on its own unit names, so the grid checks have island requirements to read."""
+    bess, pv, wind = _mg_island_blocks(T)
+    units: dict[str, dict] = {f"diesel_{i}": T._genset_island() for i in range(1, 4)}
+    units["diesel_new"] = T._genset_island(unit_mw=T._a(3.0))
+    units["island_battery"] = copy.deepcopy(bess)
+    units["bess_new"] = copy.deepcopy(bess)
+    units["pv_plant"] = copy.deepcopy(pv)
+    units["wind_turbines"] = copy.deepcopy(wind)
+    units["hospital_load"] = {"kind": "load", "critical": True}
+    units["residential"] = {"kind": "load", "critical": False}
+    return {"units": units, "requirements": _mg_requirements(T, ["island_battery", "bess_new"])}
 
 
 # ── The registries ──────────────────────────────────────────────────────────
@@ -343,8 +370,11 @@ def _stages_meta(peaks: dict[int, float], note: str) -> list[dict]:
 _COMMON_LEDGER = [
     {"item": "discount rate", "value": "7 % nominal", "source": "assumed",
      "note": "the solve discounts each period's costs at it"},
-    {"item": "finance inputs", "value": "nominal EUR (2020 money), escalation 2 %/yr, all equity "
-                                        "at 7 %, close 2026-01-01, to 2045", "source": "assumed",
+    {"item": "money year", "value": "pack prices (2020 price data) are read as real base-year EUR",
+         "source": "assumed",
+         "note": "held flat to the base year, then escalated from it at the case's rates; "
+                 "nothing is converted with a price index"},
+    {"item": "finance inputs", "value": "nominal EUR, escalation 2 %/yr, all equity at 7 %, close 2026-01-01, to 2045", "source": "assumed",
      "note": "pre-tax; a later stage's capex is paid a year before its COD"},
 ]
 
@@ -363,6 +393,8 @@ def register(T) -> None:
     T._SOLVER_CONFIG_BUILT["eh_h2_hub_staged"] = lambda: _h2_commercial_and_finance(T)
     T._SOLVER_CONFIG_BUILT["eh_microgrid_staged"] = lambda: _mg_commercial_and_finance(T)
     T.ISLAND_CONFIG["eh_microgrid_staged"] = _mg_island(T)
+    # Island data on, rows off (the template's solve is unchanged): the grid checks read it.
+    T.ISLAND_CONFIG["eh_microgrid"] = _mg_island_single_year(T)
     T.ISLAND_CONFIG["eh_h2_hub_staged"] = T._h2_hub_island(
         [f"bess_new_{y}" for y in YEARS], [f"wind_new_{y}" for y in YEARS],
         [f"solar_new_{y}" for y in YEARS])

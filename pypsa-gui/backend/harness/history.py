@@ -527,6 +527,8 @@ def rewind_session(session: "ChatSession", turns: int = 1) -> int:
             eventlog.apply(session, "history/rewind", turns=turns)
         if before != len(session.messages):
             session.assurance_context = None
+            # What a cut turn showed is no longer part of the conversation.
+            session.shown_results = {}
         return before - len(session.messages)
 
 

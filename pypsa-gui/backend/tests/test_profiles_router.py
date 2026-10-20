@@ -296,6 +296,43 @@ def test_apply_pushes_an_undo_snapshot_first(client, wind_project,
     assert "g_wind" not in payload["columns"]
 
 
+def test_apply_reports_the_time_basis_it_used(client, wind_project,
+                                             completed_job):
+    resp = client.post(
+        f"/api/projects/{wind_project}/profiles/apply",
+        json={"job_id": completed_job["id"], "component": "g_wind",
+              "time_basis": "Europe/Berlin"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["time_basis"] == "Europe/Berlin"
+    assert resp.json()["warnings"] == []
+
+
+def test_apply_without_a_time_basis_warns_that_utc_was_assumed(
+    client, wind_project, completed_job,
+):
+    resp = client.post(
+        f"/api/projects/{wind_project}/profiles/apply",
+        json={"job_id": completed_job["id"], "component": "g_wind"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["time_basis"] == "UTC (assumed; site clock unknown)"
+    assert body["warnings"][0].startswith("time_basis_assumed_utc")
+
+
+def test_apply_with_an_unknown_time_basis_is_a_typed_refusal(
+    client, wind_project, completed_job,
+):
+    resp = client.post(
+        f"/api/projects/{wind_project}/profiles/apply",
+        json={"job_id": completed_job["id"], "component": "g_wind",
+              "time_basis": "Mars/Olympus"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "invalid_time_basis"
+
+
 def test_apply_to_a_missing_component_is_a_typed_refusal(client, wind_project,
                                                          completed_job):
     resp = client.post(

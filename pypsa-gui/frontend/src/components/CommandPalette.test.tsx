@@ -47,6 +47,7 @@ import CommandPalette from './CommandPalette'
 import { useUIStore } from '../store/uiStore'
 import { fetchLocalSettings, type LocalSettingsState } from '../api/localSettings'
 import { fetchLLMSettingsOrNull, type LLMSettingsPayload } from '../api/llmSettings'
+import { setAuthEnabled } from '../auth/config'
 
 // Partial mock, same shape as pages/LocalSettings.test.tsx: keep everything
 // else real, stub only the network call `useLocalSettingsAvailable` wraps.
@@ -71,7 +72,9 @@ vi.mock('../api/llmSettings', async (orig) => ({
   fetchLLMSettingsOrNull: vi.fn(),
 }))
 
+// The desktop build (auth_enabled false) is the one that reads local settings (N15).
 beforeEach(() => {
+  setAuthEnabled(false)
   vi.mocked(fetchLocalSettings).mockResolvedValue(null)
   vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(null)
 })
