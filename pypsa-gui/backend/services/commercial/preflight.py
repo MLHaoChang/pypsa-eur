@@ -69,6 +69,7 @@ import numpy as np
 import pandas as pd
 
 from services.commercial import lp_bindings as _lp
+from services.commercial.contracts import is_financial_ppa
 
 _SETTLE_H = {"15min": 0.25, "30min": 0.5, "h": 1.0}
 # Steps longer than this are gaps between sampled stretches (representative
@@ -276,7 +277,26 @@ def _contract_warnings(n, cfg, dsr: dict) -> list[tuple[str, str, str, str, str]
                   if (dsr.get("price") or 0) > 0 and (dsr.get("share") or 0) > 0 else set())
     meter = set(_lp.import_links(cfg)) | ({cfg.export_link} if cfg.export_link else set())
     for c in cfg.contracts:
-        if c.type == "ppa" and earns_export and not c.changes_dispatch \
+        financial = is_financial_ppa(c)
+        if financial:
+            # IPP ticket 01 (G2): settled as (price − ref) × share × gen, so the export
+            # price on the same MWh is not a double count. A reference other than the
+            # export series leaves basis risk; a clause turned off leaves the LP's
+            # negative-price curtailment out of step with the contract.
+            if c.reference_price is not None and (
+                    cfg.export_price_ref is None
+                    or (c.reference_price.id, c.reference_price.version)
+                    != (cfg.export_price_ref.id, cfg.export_price_ref.version)):
+                out.append(("warning", "commercial.ppa_basis_risk", "", c.id,
+                            f"Financial PPA {c.id!r} settles against a reference other than "
+                            "the export price series: the site keeps the basis risk between "
+                            "the two (not a double count)."))
+            if c.suspend_on_negative_price is False:
+                out.append(("warning", "commercial.ppa_dispatch_not_contract_optimal", "", c.id,
+                            f"Financial PPA {c.id!r} keeps paying (price − ref) at negative "
+                            "prices, but the optimisation curtails there on the market price: "
+                            "the dispatch is not optimal for the contract."))
+        if c.type == "ppa" and earns_export and not c.changes_dispatch and not financial \
                 and _lp.same_party(c.seller, cfg.site_party):
             sold = [a for a in c.asset_ids if a in onsite]
             if sold:
@@ -285,7 +305,8 @@ def _contract_warnings(n, cfg, dsr: dict) -> list[tuple[str, str, str, str, str]
                             f"The site ({cfg.site_party!r}) sells PPA {c.id!r}'s output of "
                             f"{sold} behind the meter, and its exported share also earns the "
                             f"export price through {cfg.export_link!r}: the same MWh is paid "
-                            "twice. Settle one of them, or let the PPA change dispatch."))
+                            "twice. Settle one of them, settle the PPA as financial, or let the "
+                            "PPA change dispatch."))
         if c.type == "dr":
             # DR activation is settled on the DSR dispatch of its loads' buses
             # (WP2.2b): a DR load on a bus without active DSR can never settle
