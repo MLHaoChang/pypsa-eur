@@ -37,7 +37,7 @@ describe('chapterTiles', () => {
     const t = byId({ ...NONE, reliability: { hasResults: true, running: false, lole: 12.38,
                                              target: 3, verdict: 'fail' } })
     expect(t.reliability).toMatchObject({ state: 'ready', value: '12.38', unit: 'h/yr',
-      basis: 'Not certified: the goal is 3 h/yr', open: { panel: 'results', tab: 'adequacy' } })
+      basis: 'Not certified: the goal is 3 h/yr · Monte Carlo, 8 760 h', open: { panel: 'results', tab: 'adequacy' } })
   })
 
   it('reliability: a stale study dims the figure and says why (UX review N4)', () => {

@@ -535,7 +535,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                  ? `${fmtEnergy(kpis.curtailEnergy)}${kpis.curtailPct != null ? ` · ${kpis.curtailPct.toFixed(1)} %` : ''}`
                  : '—'}
                hint={'Σ max(p_max_pu × p_nom − p, 0) over renewable generators' + scaleHint} />
-          <KPI label="Lost load"
+          <KPI label="Lost load" sub="this dispatch solve, no outages"
                value={lostLoadTotals ? fmtEnergy(lostLoadTotals.mwh) : '—'}
                hint={"Demand the LP couldn't serve — absorbed by VOLL slack generators per bus. Set Solver Settings → VOLL > 0 to enable." + scaleHint} 
                {...lostLoadState} />

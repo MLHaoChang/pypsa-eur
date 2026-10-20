@@ -148,7 +148,9 @@ function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 
     : r.verdict === 'inconclusive' ? 'Not decided' : null
   const basis = r.target == null ? 'No goal set'
     : `${verdict ? `${verdict}: ` : ''}the goal is ${Number(r.target.toPrecision(6))} h/yr`
-  return { label, value: String(r.lole), unit: 'h/yr', state: r.stale ? 'stale' : 'ready', basis, open,
+  // Which engine made the figure (UX review N10): Expert's other panels name theirs.
+  const sampled = `${basis} · Monte Carlo, 8 760 h`
+  return { label, value: String(r.lole), unit: 'h/yr', state: r.stale ? 'stale' : 'ready', basis: sampled, open,
     reason: r.stale ? STALE_TILE_REASON : undefined, fromStudy: r.solved === false && !r.stale }
 }
 

@@ -14,6 +14,7 @@ import toast from 'react-hot-toast'
 import { useQuery } from '@tanstack/react-query'
 import { isRenewableCarrier } from '../../utils/carriers'
 import { useUIStore } from '../../store/uiStore'
+import { displayName } from '../../utils/displayName'
 import { nk } from '../../utils/queryKeys'
 import { networkApi } from '../../api/network'
 
@@ -1023,10 +1024,19 @@ export const CHART_AXIS = {
   tickLine: false,
 }
 
+/** A legend entry in plain words: no `Gen:` prefix, no snake_case id
+ *  (UX review N18: `storage_discharge` -> "Storage discharge"). */
+export const legendName = (v: unknown): string =>
+  typeof v !== 'string' ? String(v) : displayName(v.startsWith('Gen:') ? v.slice(4) : v)
+
+// Chart standard: the legend sits top-left, with display names.
 export const CHART_LEGEND = {
   wrapperStyle: { fontSize: 10.5, color: 'var(--color-legend)' } as CSSProperties,
   iconType: 'circle' as const,
   iconSize: 8,
+  verticalAlign: 'top' as const,
+  align: 'left' as const,
+  formatter: legendName,
 }
 
 // `cursor` is intentionally left at Recharts' per-chart-type default — a line
