@@ -4,8 +4,15 @@ import ValueFlowsView from './ValueFlowsView'
 import { TWO_WAY } from './valueFlows.test'
 import { expectAllButtonsNamed } from '../../../test-utils/accessibleName'
 import * as shared from '../shared'
+import { useUIStore } from '../../../store/uiStore'
 
 describe('ValueFlowsView', () => {
+  it('links to the physical energy-flow view', () => {
+    render(<ValueFlowsView payload={TWO_WAY} sankeyWidth={600} />)
+    fireEvent.click(screen.getByTestId('vf-to-energy-flows'))
+    expect(useUIStore.getState().resultsTabRequest).toBe('flows')
+  })
+
   it('shows the table with its sums and a Sankey of a two-way pair', () => {
     const { container } = render(<ValueFlowsView payload={TWO_WAY} sankeyWidth={600} />)
     expect(screen.getByTestId('vf-conservation').getAttribute('data-status')).toBe('ok')

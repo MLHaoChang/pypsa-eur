@@ -22,9 +22,11 @@ says so in ``claims``. Missing or zero ratings, branches without flow data,
 unconverged AC snapshots and uncomputed voltage evidence are reported, never
 silently ranked as zero.
 
-Historical runs are not computed here: ``run_id`` is resolved through the run
-evidence store (issue 06) and answers a typed unavailable until a ``loadflow``
-section artifact exists for that run.
+Historical runs are not recomputed here: ``run_id`` is resolved through the
+run evidence store. The newest completed run whose inputs are still current
+answers with the current summary; any other run answers from the ``loadflow``
+section captured when it finished (``run_evidence._loadflow_section``), and a
+run without that section answers a typed unavailable.
 """
 from __future__ import annotations
 
@@ -105,7 +107,18 @@ def _check_args(source: Any, limit: Any, window_from: Any, window_to: Any,
         _refuse("invalid_loadflow_argument", "run_id must be a run id from list_project_runs.")
 
 
-def _historical(run_id: str) -> dict:
+# What a retained section may carry into a past-run answer: the summary's own
+# facts. Current-only pointers (ui_reference, evidence_token, freshness) and
+# any key added later stay out until listed here.
+_RETAINED_KEYS = ("project_id", "source", "window", "solve", "claims", "bases_present",
+                  "ranking_convention", "units", "weighting_basis", "counts",
+                  "missing_evidence", "skipped", "skipped_truncated", "top", "ac_pf",
+                  "source_provenance")
+
+
+def _historical(run_id: str, source: str | None = None, limit: int | None = None,
+                window_from: int | None = None, window_to: int | None = None) -> dict:
+    """A past run's load flow from the section captured when it finished."""
     try:
         record = run_evidence.get_run_evidence(run_id, HISTORICAL_SECTION)
     except HTTPException as exc:
@@ -113,16 +126,34 @@ def _historical(run_id: str) -> dict:
         if detail.get("error_kind") in ("run_not_found", "evidence_unavailable"):
             return _unavailable(
                 "historical_loadflow_unavailable",
-                "No stored load-flow evidence exists for this run. Historical load-flow "
-                "summaries need run evidence artifacts (live-voice issue 06); only the "
-                "current results can be summarised now.",
+                "No load flow was kept for this run: it was solved before load flow was "
+                "captured, ran outside a chat-started solve, or its section is missing, "
+                "corrupt or not finished. The current results are not this run.",
                 run_id=run_id, reason=detail.get("reason") or detail.get("error_kind"),
-                depends_on="issue-06 run evidence", scope="historical",
-                current_results_hint="Call get_loadflow_summary without run_id for the current results.")
+                scope="historical")
         raise
-    return {"status": "ok", "scope": "historical", "run_id": run_id,
-            "section": HISTORICAL_SECTION, "run_status": record.get("status"),
-            "data": record.get("data")}
+    stored = record.get("data") or {}
+    data = {k: stored[k] for k in _RETAINED_KEYS if k in stored}
+    window = data.get("window") or {}
+    captured = {"source": data.get("source"), "window_from": window.get("from"),
+                "window_to": window.get("to")}
+    asked = {"source": source, "window_from": window_from, "window_to": window_to}
+    if any(v is not None and v != captured[k] for k, v in asked.items()):
+        return _unavailable(
+            "historical_scope_mismatch",
+            "This run kept one load flow: the source and window below. Another source or "
+            "window cannot be recomputed for a past run.",
+            run_id=run_id, scope="historical", captured=captured)
+    top = list(data.get("top") or [])
+    if limit is not None:
+        data["top"] = top[:limit]
+        data["top_shown"] = len(data["top"])
+        data["top_truncated"] = len(top) > limit or bool(stored.get("top_truncated"))
+    return {**data, "status": "ok", "scope": "historical", "run_id": run_id,
+            "section": HISTORICAL_SECTION,
+            "run": {"run_id": run_id, "finished_at": record.get("finished_at"), "is_current": False},
+            "scope_note": "This run's load flow as captured when it finished; the Load flow tab "
+                          "shows the current results, not this run."}
 
 
 def _solve_state() -> dict:
@@ -421,9 +452,8 @@ def _loadflow(source: str, limit: int, window_from: int | None,
         if run is not None:
             return {**_loadflow(source, limit, window_from, window_to, None, run=run),
                     "run_id": run_id, **facts}
-        out = _historical(run_id)
-        # Bound to a run: the current results are not that run, so no hint to read them.
-        out.pop("current_results_hint", None)
+        out = _historical(run_id, source if source != "lopf" else None, limit,
+                          window_from, window_to)
         if out.get("status") != "ok":
             out["next_step"] = "Say this run is not the current result and offer to re-run."
         return {**out, "run_id": run_id, **facts}

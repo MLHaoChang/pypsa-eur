@@ -97,10 +97,21 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                (_r("get_results", result_kind="generators"),
                 _r("get_results", result_kind="storage_dispatch")),
                units="MW per snapshot, MWh"),
+    # Gated: the copilot read for energy flows lands with the catalogue work
+    # (site commercial UX A1); the tab itself is navigable now.
+    ResultView("flows", _RESULTS, "flows", "Energy flow",
+               "where the site's energy came from, what it passed through and where it went",
+               "results", (_r("get_energy_flows"),),
+               guided_label="Energy flow",
+               requires_tools=("get_energy_flows",),
+               claim_limits="Energy carriers only; a flow the server cannot prove to conserve "
+                            "energy is unavailable, not zero.",
+               units="MWh"),
     ResultView("loadflow", _RESULTS, "loadflow", "Load Flow",
                "line and transformer loading against their ratings", "results",
                (_r("get_loadflow_summary"),),
                verification="displayed_data", claim_limits=_PROXY,
+               historical_section="loadflow",
                units="%, MW (active-power proxy) or MVA, weighted hours"),
     ResultView("prices", _RESULTS, "prices", "Prices",
                "bus prices and what sets them", "results",
