@@ -1254,7 +1254,7 @@ def grid_readiness_ledger(template_id: str) -> list[dict]:
     return rows
 
 
-for _tid in _GRID_READINESS_SITE:
+for _tid in _GRID_READINESS_SITE.keys() & TEMPLATE_META.keys():   # staged hubs: when registered
     TEMPLATE_META[_tid]["ledger"] = [*(TEMPLATE_META[_tid].get("ledger") or []),
                                      *grid_readiness_ledger(_tid)]
 

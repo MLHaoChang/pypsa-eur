@@ -4621,8 +4621,10 @@
       "behavioral_fixture": "pending"
     },
     {
-      "name": "grid_readiness",
-      "toolsets": [],
+      "name": "campus_grid_readiness",
+      "toolsets": [
+        "gridspine"
+      ],
       "route": [
         "_service_call_"
       ],

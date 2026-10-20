@@ -3072,7 +3072,7 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id"],
     ),
     _t(
-        "grid_readiness",
+        "campus_grid_readiness",
         "The grid-readiness scorecard of a project (DC grid readiness 02): an "
         "advisory red-flag screening against its connection limits and a "
         "grid-code profile (default the campus study's last profile, else "
@@ -4133,7 +4133,6 @@ TOOL_ROUTES: dict[str, list] = {
     # campus island (3, campus island plan I9a) — service calls; the two
     # write tools check the named project's lock in their dispatchers
     "campus_island_config": _SERVICE_CALL,
-    "grid_readiness": _SERVICE_CALL,
     "campus_set_island_config": _SERVICE_CALL,
     "campus_run_island_study": _SERVICE_CALL,
     "campus_island_cuts": _SERVICE_CALL,
@@ -4141,6 +4140,8 @@ TOOL_ROUTES: dict[str, list] = {
     "campus_island_gfm_settings": _SERVICE_CALL,
     "campus_recommend_gfm_settings": _SERVICE_CALL,
     "campus_apply_gfm_settings": _SERVICE_CALL,
+    # the grid-readiness scorecard (DC grid readiness 02) — a read service call
+    "campus_grid_readiness": _SERVICE_CALL,
     # campus grid codes (2) — service calls; no publish tool (plan C10)
     "campus_list_grid_codes": _SERVICE_CALL,
     "campus_extract_grid_code": _SERVICE_CALL,

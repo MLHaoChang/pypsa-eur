@@ -130,6 +130,15 @@ class _Inputs:
         return self.links[0] if self.links else None
 
 
+def _marking_assumed(row: dict | None) -> bool:
+    """A marking is assumed unless it is there and tagged ``code``."""
+    return row is None or str(row.get("source")) != "code"
+
+
+def _envelope_assumed(inp: _Inputs) -> bool:
+    return str((inp.envelope or {}).get("source", "assumed")) != "code"
+
+
 def _marking_source(row: dict) -> tuple[str, bool]:
     src = str(row.get("source") or "assumed")
     note = row.get("note") or ""
@@ -144,7 +153,7 @@ def _scr_rows(inp: _Inputs) -> list[dict]:
     from services.adequacy.scr_gate import PASS_SCR, evaluate_network_scr_gate
 
     fault = inp.marking("fault_level")
-    fault_assumed = fault is None or str(fault.get("source")) != "code"
+    fault_assumed = _marking_assumed(fault)
     target = _target("connection", "Bus", (fault or {}).get("entity"), "eh_sk_mva")
     base = dict(limit=PASS_SCR, unit="SCR (Sk / IBR MVA)",
                 source=("EH product rule on gridspine's SCR bands (moderate edge 3.0); "
@@ -217,6 +226,9 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
             verdict = "pass"
         loss_src = (_marking_source(loss)[0] if loss is not None
                     else "the import Link's efficiency, as entered")
+        if loss is not None and abs(float(loss["value"]) - r["loss_factor"]) > 1e-9:
+            loss_src += (f"; the network's {r['loss_factor']:.4g} is used, not the ledger's "
+                         f"{float(loss['value']):.4g} (the Link was edited)")
         notes = [f"{r['period']}: hourly-mean peak {r['peak_mw']:.4g} MW against {describe(r)}",
                  "energization schedule" if r["scheduled"] else "no energization schedule: p_nom",
                  f"loss factor from {loss_src}",
@@ -230,8 +242,7 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
                                  "sidecar's genset N+k" if r["scheduled"]
                                  else "the import Link's p_nom and the island sidecar's genset N+k"),
                          project_value=round(r["peak_mw"], 4), verdict=verdict,
-                         assumed=(loss is None or str(loss.get("source")) != "code")
-                         or bool(inp.meta.get("energization")),
+                         assumed=_marking_assumed(loss) or bool(inp.meta.get("energization")),
                          note="; ".join(notes), section="connection", target=target))
     return rows
 
@@ -264,7 +275,7 @@ def _ramp_row(inp: _Inputs) -> dict:
     per_min = mw_per_s_to_mw_per_min(per_s)
     return _row("ramp_rate", req, limit=limit, unit="MW/min", source=source,
                 project_value=round(per_min, 4), verdict="pass" if per_min <= limit else "fail",
-                assumed=True,
+                assumed=assumed or _envelope_assumed(inp),
                 note=(f"envelope max ΔP/Δt {per_s:.4g} MW/s = {per_min:.4g} MW/min (steeper of the "
                       f"step and the oscillation slope); {_BEFORE_MITIGATION}"),
                 section="connection", target=target)
@@ -295,7 +306,8 @@ def _oscillation_row(inp: _Inputs) -> dict:
     band = (f"at {hz:.3g} Hz, inside the band" if in_band
             else f"at {hz:.3g} Hz, outside the assumed {lo:g}-{hi:g} Hz band of concern")
     return _row("oscillation", req, limit=limit, unit="% of connection, peak-to-peak",
-                source=source, project_value=round(pct, 4), verdict=verdict, assumed=True,
+                source=source, project_value=round(pct, 4), verdict=verdict,
+                assumed=assumed or _envelope_assumed(inp),
                 note=(f"{2 * amp:.4g} MW peak-to-peak over the {inp.connection_mw:g} MW connection, "
                       f"{band}; {_BEFORE_MITIGATION}"),
                 section="connection", target=target)
@@ -314,8 +326,7 @@ def _rvc_row(inp: _Inputs) -> dict:
     limit, source = float(lim["value"]), f"{inp.profile['name']}: {lim['clause']}"
     lim_assumed = lim.get("source") != "code"
     sk = _poc_sk_mva(inp.n) if inp.n is not None else None
-    fault = inp.marking("fault_level")
-    fault_assumed = fault is None or str(fault.get("source")) != "code"
+    fault_assumed = _marking_assumed(inp.marking("fault_level"))
     if inp.envelope is None or sk is None:
         return _row("rapid_voltage_change", req, limit=limit, unit="% of nominal", source=source,
                     project_value=None, verdict="unknown", assumed=lim_assumed or fault_assumed,
@@ -325,7 +336,7 @@ def _rvc_row(inp: _Inputs) -> dict:
     d = swing / sk * 100.0
     return _row("rapid_voltage_change", req, limit=limit, unit="% of nominal", source=source,
                 project_value=round(d, 4), verdict="pass" if d <= limit else "warn",
-                assumed=lim_assumed or fault_assumed,
+                assumed=lim_assumed or fault_assumed or _envelope_assumed(inp),
                 note=(f"d ≈ ΔP / Sk × 100 = {swing:.4g} MW / {sk:g} MVA: a screening upper bound "
                       "(IEC 61000-3-7 style) that ignores the grid X/R; above the limit a power-flow "
                       f"or EMT study is needed; {_BEFORE_MITIGATION}"),
@@ -385,7 +396,7 @@ def _reactive_row(inp: _Inputs) -> dict:
                     note=_no_island_note(inp) if services is None else "no import connection",
                     section="assets", target=target)
     need = float(lim["value"]) * inp.connection_mw
-    have, unsized, parts = 0.0, [], []
+    have, unsized, parts, unrated = 0.0, [], [], []
     for name, u in services["units"].items():
         if "voltage_control" not in u["services"]:
             continue
@@ -395,6 +406,7 @@ def _reactive_row(inp: _Inputs) -> dict:
             unsized.append(name)
             continue
         if pf is None or rating is None or not 0 < pf <= 1:
+            unrated.append(name)
             continue
         q = rating * math.tan(math.acos(pf))
         have += q
@@ -411,6 +423,8 @@ def _reactive_row(inp: _Inputs) -> dict:
             "not-credited unit counts zero)")
     if unsized:
         note += f"; {', '.join(unsized)} extendable and not yet sized (run the plan)"
+    if unrated:
+        note += f"; {', '.join(unrated)} counted zero: no pf_rated or no rating in the network"
     return _row("reactive_range", req, limit=round(need, 4), unit="Mvar", source=source,
                 project_value=round(have, 4), verdict=verdict, assumed=True, note=note,
                 section="assets", target=target)
@@ -494,41 +508,61 @@ def _sidecar_assumed(raw: dict) -> bool:
     return any(isinstance(v, dict) and v.get("source") == "assumed" for v in req.values())
 
 
+def _certification(inp: _Inputs) -> dict | None:
+    report = (inp.eh_study or {}).get("report")
+    cert = ((report or {}).get("sections") or {}).get("certification") if isinstance(report, dict) else None
+    payload = cert.get("payload") if isinstance(cert, dict) else None
+    return payload if isinstance(payload, dict) else None
+
+
 def _lole_row(inp: _Inputs) -> dict:
+    """LOLE against the goal. The goal is the one the study certified against
+    (its ``target_lole_h``, set in Scenarios) when a study has one, else the
+    template's ``lole_goal`` marking. Verdict on the MC CI, annualised: pass
+    when its upper bound is within the goal, fail when its lower bound is
+    above it, warn (inconclusive) between or without a CI."""
     row = inp.marking("lole_goal")
     target = _target("scenarios", None, None, "target_lole_h", panel="simparams")
     req = "Loss of load expectation within the reliability goal"
-    if row is None:
+    payload = _certification(inp)
+    study_goal = _num((payload or {}).get("target_lole_h"))
+    if study_goal is not None and (row is None or study_goal != float(row["value"])):
+        limit, source, assumed = study_goal, "the reliability study's target_lole_h (Scenarios)", False
+    elif row is not None:
+        limit = float(row["value"])
+        source, assumed = _marking_source(row)
+    else:
         return _row("lole", req, limit=None, unit="h/yr", source="no LOLE goal in the template ledger",
                     project_value=None, verdict="unknown", assumed=True,
                     note="the project sets no LOLE goal (an ENS cap only, or none)",
                     section="scenarios", target=target)
-    limit = float(row["value"])
-    source, assumed = _marking_source(row)
-    report = (inp.eh_study or {}).get("report") if inp.eh_study else None
-    cert = (((report or {}).get("sections") or {}).get("certification") or {})
-    payload = cert.get("payload") if isinstance(cert, dict) else None
-    if not isinstance(payload, dict) or _num(payload.get("lole_h_per_year")) is None:
-        why = ("no reliability study for this project in this session" if inp.eh_study is None
-               else "the reliability study did not certify an MC LOLE")
+    years = _num((payload or {}).get("horizon_years"))
+    mean = _num((payload or {}).get("lole_h_per_year"))
+
+    def unknown(note):
         return _row("lole", req, limit=limit, unit="h/yr", source=source, project_value=None,
-                    verdict="unknown", assumed=assumed, note=why, section="scenarios", target=target)
+                    verdict="unknown", assumed=assumed, note=note, section="scenarios", target=target)
+
+    if payload is None or mean is None or years is None or years <= 0:
+        return unknown("no reliability study for this project in this session" if inp.eh_study is None
+                       else "the reliability study did not certify an MC LOLE")
     if inp.study_edited is not False:
-        return _row("lole", req, limit=limit, unit="h/yr", source=source, project_value=None,
-                    verdict="unknown", assumed=assumed,
-                    note=("stale: the network was edited since the study, re-run it"
-                          if inp.study_edited else "the study's network revision is not known"),
-                    section="scenarios", target=target)
-    years = float(payload["horizon_years"])
-    mean = float(payload["lole_h_per_year"])
-    hi = (_num((payload.get("lole_ci") or [None, None])[1]) or mean * years) / years
-    verdict = "pass" if hi <= limit else ("warn" if mean <= limit else "fail")
+        return unknown("stale: the network was edited since the study, re-run it" if inp.study_edited
+                       else "the study's network revision is not known")
+    ci = payload.get("lole_ci") or []
+    lo, hi = (_num(ci[0]), _num(ci[1])) if len(ci) == 2 else (None, None)
+    if lo is None or hi is None:
+        verdict, why = "warn", "the study gives no confidence interval"
+    else:
+        lo, hi = lo / years, hi / years
+        verdict = "pass" if hi <= limit else ("fail" if lo > limit else "warn")
+        why = "pass needs the CI upper bound within the goal, fail the lower bound above it"
     return _row("lole", req, limit=limit, unit="h/yr", source=source,
-                project_value={"lole_h_per_year": round(mean, 4), "ci_upper_h_per_year": round(hi, 4),
+                project_value={"lole_h_per_year": round(mean, 4),
+                               "ci_h_per_year": None if hi is None else [round(lo, 4), round(hi, 4)],
                                "horizon_years": years},
                 verdict=verdict, assumed=assumed,
-                note=(f"MC LOLE annualised over {years:g} modelled year(s); pass needs the CI upper "
-                      "bound within the goal, warn when only the mean is"),
+                note=f"MC LOLE annualised over {years:g} modelled year(s); {why}",
                 section="scenarios", target=target)
 
 
@@ -587,18 +621,29 @@ def grid_readiness_for(project, profile: str | None = None) -> dict:
     if profile is None:
         saved = _read_json(d / ce.SUBDIR / ce.SETTINGS_FILE)
         profile = (saved or {}).get("profile") or ce.DEFAULTS["profile"]
-    if not isinstance(profile, str):
-        raise HTTPException(status_code=422, detail=f"profile must be a string, got {profile!r}")
+    known = _known_profiles(codes)
+    if known is not None and profile not in known:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "unknown_grid_code_profile",
+            "message": f"unknown grid-code profile {profile!r}; known {sorted(known)}"})
     nc = d / ce.NETWORK_FILE
     n = None
     if nc.is_file():
         with ce._netcdf_lock():
             n = pypsa.Network(str(nc))
     record, edited = _active_study(d)
-    out = grid_readiness(d, n, profile, profile_dirs=(codes,), eh_study=record, study_edited=edited)
-    if out["profile"]["error"] and "unknown grid-code profile" in out["profile"]["error"]:
-        raise HTTPException(status_code=422, detail=out["profile"]["error"])
-    return out
+    return grid_readiness(d, n, profile, profile_dirs=(codes,), eh_study=record, study_edited=edited)
+
+
+def _known_profiles(codes: pathlib.Path) -> set | None:
+    """The shipped and published profile ids, or None when they cannot be
+    listed (no gridspine, a broken project file): the scorecard then reports
+    the load error on its rows instead of refusing."""
+    try:
+        from gridspine.drivers.campus_study import grid_code_profiles
+        return set(grid_code_profiles(extra_dirs=(codes,)))
+    except Exception:  # noqa: BLE001 — listing is best effort; the rows carry the error
+        return None
 
 
 def _active_study(project_dir: pathlib.Path) -> tuple[dict | None, bool | None]:

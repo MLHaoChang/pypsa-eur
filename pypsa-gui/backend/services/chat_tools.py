@@ -3733,7 +3733,7 @@ def campus_island_config(project_id: str) -> dict:
         return _h(_gridspine_project(db, user, project_id))
 
 
-def grid_readiness(project_id: str, profile: str | None = None) -> dict:
+def campus_grid_readiness(project_id: str, profile: str | None = None) -> dict:
     """The grid-readiness scorecard (DC grid readiness 02); one source with
     ``GET /api/campus-electrical/{name}/grid-readiness``."""
     from services.adequacy.grid_readiness import grid_readiness_for as _h
@@ -7584,7 +7584,7 @@ DISPATCHERS: dict[str, Any] = {
     "campus_get_milp": campus_get_milp,
     # campus island (3, campus island plan I9a)
     "campus_island_config": campus_island_config,
-    "grid_readiness": grid_readiness,
+    "campus_grid_readiness": campus_grid_readiness,
     "campus_set_island_config": campus_set_island_config,
     "campus_run_island_study": campus_run_island_study,
     "campus_island_cuts": campus_island_cuts,

@@ -99,22 +99,22 @@ def peak_check(n, island: dict | None) -> list[dict]:
     delivered_mw, firm: [{source, mw, rule}], firm_mw, cap_mw, headroom_mw,
     import_links, scheduled}``. An empty list when the network has no import
     Link (an island-only site has no connection to check)."""
+    from services.adequacy.energization import energized_links
+
     links = import_links(n)
     if not links:
         return []
     load = _fixed_load(n).to_numpy(dtype=float)
     firm_mw, rule = firm_genset_mw(n, island)
     firm = [{"source": "gensets", "mw": firm_mw, "rule": rule}]
-    from services.adequacy.energization import energized_links
-
     scheduled = sorted(set(links) & set(energized_links(n)))
     out = []
+    eff = {l: float(n.links.at[l, "efficiency"]) for l in links}
     for label, mask in _periods(n):
         energized = {l: _energized(n, l, mask) for l in links}
-        eff = {l: float(n.links.at[l, "efficiency"]) for l in links}
         delivered = sum(energized[l] * eff[l] for l in links)
         total_e = sum(energized.values())
-        loss = delivered / total_e if total_e > 0 else (min(eff.values()) if eff else 1.0)
+        loss = delivered / total_e if total_e > 0 else min(eff.values())
         cap = delivered + sum(f["mw"] for f in firm)
         peak = float(load[mask].max()) if mask.any() else 0.0
         out.append({"period": label, "peak_mw": peak, "energized_mw": total_e,
@@ -129,6 +129,6 @@ def describe(row: dict) -> str:
     """The cap in words, as the 422 and the scorecard both say it."""
     loss = row["loss_factor"]
     losses = f" (× {loss:.4g} losses)" if abs(loss - 1.0) > 1e-12 else ""
-    firm = row["firm"][0]
-    return (f"the {row['energized_mw']:g} MW energized import{losses} plus {firm['mw']:g} MW "
-            f"of firm gensets ({firm['rule']}) = {row['cap_mw']:.4g} MW")
+    firm = " plus ".join(f"{f['mw']:g} MW of firm {f['source']} ({f['rule']})" for f in row["firm"])
+    return (f"the {row['energized_mw']:g} MW energized import{losses} plus {firm} "
+            f"= {row['cap_mw']:.4g} MW")

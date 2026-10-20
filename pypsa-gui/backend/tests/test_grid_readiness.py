@@ -310,6 +310,29 @@ def test_at_the_cap_the_refusal_and_the_row_agree(tmp_path):
         assert (row["verdict"] == "fail") is refused
 
 
+@pytest.mark.parametrize("tid, raw, refused_period", [
+    ("eh_datacenter_staged", {"phases": [{"cod": f"{y}-01-01", "it_mw": 60.0} for y in (2027, 2030, 2035)]},
+     "2027"),
+    ("eh_datacenter_staged", {}, None),
+    ("eh_datacenter", {"phases": [{"cod": "2030-01-01", "it_mw": 80.0}]}, "2030"),
+    ("eh_datacenter", {}, None),
+])
+def test_the_refusal_and_the_row_agree_on_both_data_center_templates(tmp_path, tid, raw, refused_period):
+    if refused_period:
+        with pytest.raises(DcLoadError, match=f"the {refused_period} peak is"):
+            T.dc_load_spec(tid, raw)
+    else:
+        T.dc_load_spec(tid, raw)
+    spec = DataCentreLoadSpec.model_validate({**T.dc_load_preset(tid), **raw, "ai_workload": {}})
+    d = tmp_path / "p"
+    d.mkdir()
+    T.write_sidecars(d, tid)
+    rows = [r for r in G.grid_readiness(d, T.BUILDERS[tid](load_spec=spec), PROFILE)["rows"]
+            if r["id"].startswith("energization_peak")]
+    failed = [r["id"].split(":")[1] for r in rows if r["verdict"] == "fail"]
+    assert (failed[:1] or [None])[0] == refused_period
+
+
 def test_headroom_below_the_in_hour_step_is_a_warning(tmp_path):
     d, n = _project(tmp_path, "eh_datacenter", dc_load={})
     (row,) = SP.peak_check(n, T.ISLAND_CONFIG["eh_datacenter"])
@@ -398,19 +421,24 @@ def test_ride_through_reads_the_stored_island_study(tmp_path, status, verdict):
 # ── LOLE ────────────────────────────────────────────────────────────────────
 
 
-def _study(lole_h_per_year, ci_hi_horizon, years=1.0):
-    return {"status": "done", "report": {"sections": {"certification": {"status": "ok", "payload": {
-        "lole_h_per_year": lole_h_per_year, "lole_ci": [0.0, ci_hi_horizon], "horizon_years": years}}}}}
+def _study(lole_h_per_year, ci, years=1.0, target=None):
+    payload = {"lole_h_per_year": lole_h_per_year, "lole_ci": ci, "horizon_years": years}
+    if target is not None:
+        payload["target_lole_h"] = target
+    return {"status": "done", "report": {"sections": {"certification": {"status": "ok",
+                                                                        "payload": payload}}}}
 
 
 @pytest.mark.parametrize("study, edited, verdict", [
     (None, None, "unknown"),
-    (_study(1.0, 2.0), False, "pass"),
-    (_study(1.0, 4.0), False, "warn"),
-    (_study(4.0, 5.0), False, "fail"),
-    (_study(1.0, 2.0), True, "unknown"),           # stale: edited since the study
-    (_study(1.0, 2.0), None, "unknown"),           # revision unknown
-    (_study(1.0, 4.0, years=2.0), False, "pass"),  # CI 4 h over 2 years = 2 h/yr
+    (_study(1.0, [0.0, 2.0]), False, "pass"),
+    (_study(1.0, [0.0, 4.0]), False, "warn"),        # inconclusive: the CI straddles the goal
+    (_study(4.0, [3.5, 5.0]), False, "fail"),        # the CI's lower bound is above the goal
+    (_study(1.0, []), False, "warn"),                # no CI: never a pass
+    (_study(1.0, [0.0, 2.0]), True, "unknown"),      # stale: edited since the study
+    (_study(1.0, [0.0, 2.0]), None, "unknown"),      # revision unknown
+    (_study(1.0, [0.0, 4.0], years=2.0), False, "pass"),  # CI 4 h over 2 years = 2 h/yr
+    (_study(1.0, [0.0, 2.0], years=0.0), False, "unknown"),
 ])
 def test_the_lole_row(tmp_path, study, edited, verdict):
     d, n = _project(tmp_path, "eh_datacenter")
@@ -423,9 +451,18 @@ def test_the_lole_row(tmp_path, study, edited, verdict):
         assert "stale" in row["note"]
 
 
+def test_the_lole_goal_is_the_one_the_study_certified_against(tmp_path):
+    d, n = _project(tmp_path, "eh_datacenter")
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=_study(1.0, [0.0, 2.0], target=1.5),
+                                 study_edited=False))["lole"]
+    assert row["limit"] == 1.5 and not row["assumed"] and row["verdict"] == "warn"
+    assert "Scenarios" in row["source"]
+
+
 def test_the_h2_hub_sets_no_lole_goal(tmp_path):
     d, n = _project(tmp_path, "eh_h2_hub")
-    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=_study(1.0, 2.0), study_edited=False))["lole"]
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=_study(1.0, [0.0, 2.0]),
+                                 study_edited=False))["lole"]
     assert row["verdict"] == "unknown" and row["limit"] is None
 
 
@@ -457,20 +494,21 @@ def test_the_route_serves_the_scorecard(client, hub):
                    params={"profile": "generic_assumed"})
     assert r.status_code == 200 and r.json()["profile"]["id"] == "generic_assumed"
     r = client.get("/api/campus-electrical/Readiness Hub/grid-readiness", params={"profile": "nope"})
-    assert r.status_code == 422 and "unknown grid-code profile" in r.text
+    assert r.status_code == 422
+    assert r.json()["detail"]["error_kind"] == "unknown_grid_code_profile"
 
 
 def test_the_copilot_tool_is_a_read_service_call(hub, monkeypatch):
     from services import chat_tools
     from services.chat_tools_schema import TOOL_ROUTES, TOOLS, safety_tier_for
 
-    assert "grid_readiness" in {t["name"] for t in TOOLS}
-    assert TOOL_ROUTES["grid_readiness"] == ["_service_call_"]
-    assert safety_tier_for("grid_readiness") == "read"
-    desc = next(t["description"] for t in TOOLS if t["name"] == "grid_readiness")
+    assert "campus_grid_readiness" in {t["name"] for t in TOOLS}
+    assert TOOL_ROUTES["campus_grid_readiness"] == ["_service_call_"]
+    assert safety_tier_for("campus_grid_readiness") == "read"
+    desc = next(t["description"] for t in TOOLS if t["name"] == "campus_grid_readiness")
     assert "never a pass" in desc and "assumed" in desc
     calls = []
     monkeypatch.setattr(G, "grid_readiness_for", lambda p, prof: calls.append((p.name, prof)) or {"ok": 1})
-    assert chat_tools.DISPATCHERS["grid_readiness"](project_id="Readiness Hub",
+    assert chat_tools.DISPATCHERS["campus_grid_readiness"](project_id="Readiness Hub",
                                                     profile="generic_assumed") == {"ok": 1}
     assert calls == [("Readiness Hub", "generic_assumed")]
