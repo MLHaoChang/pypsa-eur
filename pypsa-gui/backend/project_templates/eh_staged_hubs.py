@@ -370,8 +370,11 @@ def _stages_meta(peaks: dict[int, float], note: str) -> list[dict]:
 _COMMON_LEDGER = [
     {"item": "discount rate", "value": "7 % nominal", "source": "assumed",
      "note": "the solve discounts each period's costs at it"},
-    {"item": "finance inputs", "value": "nominal EUR (2020 money), escalation 2 %/yr, all equity "
-                                        "at 7 %, close 2026-01-01, to 2045", "source": "assumed",
+    {"item": "money year", "value": "pack prices (2020 price data) are read as real base-year EUR",
+         "source": "assumed",
+         "note": "held flat to the base year, then escalated from it at the case's rates; "
+                 "nothing is converted with a price index"},
+    {"item": "finance inputs", "value": "nominal EUR, escalation 2 %/yr, all equity at 7 %, close 2026-01-01, to 2045", "source": "assumed",
      "note": "pre-tax; a later stage's capex is paid a year before its COD"},
 ]
 

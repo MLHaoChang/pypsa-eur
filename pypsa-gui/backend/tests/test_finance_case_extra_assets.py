@@ -535,7 +535,8 @@ def test_the_report_block_reads_the_case_assets_and_the_workbook_lists_them(solv
                              "overnight_cost": pytest.approx(1.1 * 1_800_000.0),
                              "lifetime": 40.0, "fom_share": 0.015}]
     assert "within its build year 2030" in trf["cod"]
-    assert "2026 EUR" in trf["money_year"]
+    # base year 2030, price data 2026: read as real 2030 EUR (the money-year convention)
+    assert "real 2030 EUR (2026 price data)" in trf["money_year"]
     # IC G3 gate C3: the case does not convert, and the route refuses another money year.
     assert "converted" not in trf["money_year"] and "refuses" in trf["money_year"]
     assert by["feeder_cable"]["overnight_cost"] == pytest.approx(1.1 * 225_000.0)
