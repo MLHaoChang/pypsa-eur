@@ -139,6 +139,7 @@ class Turn:
         self.usage_before = dict(session.usage_acc)
         self.effect_pending = False
         self.reservation_nonce = None
+        self.scope_hint = None
 
     def review_interpretations(self, blocks, provider, model, ctx):
         if self.clarification is not None:
@@ -249,6 +250,8 @@ class Turn:
                 self.request_scope["reason"] = (
                     exc.args[0] if named else "unsupported_or_unavailable_source"
                 )
+                if named and len(exc.args) > 1 and isinstance(exc.args[1], str):
+                    self.scope_hint = exc.args[1]
             return
         # Deliberately narrow whole-message grammar. Additional instructions,
         # periods or another requested quantity never silently become this profile.
@@ -366,6 +369,13 @@ class Turn:
         if record is None:
             if draft.blocks:
                 raise ValueError("unavailable request")
+            if self.scope_hint is not None:
+                return (
+                    f"No carrier is named exactly {_label(self.request_scope['entity_id'])}; "
+                    f"did you mean {_label(self.scope_hint)}?",
+                    [],
+                    [],
+                )
             return (
                 "Select a generator or StorageUnit with verified current LP results and an exact supported scope to check its key results.",
                 [],

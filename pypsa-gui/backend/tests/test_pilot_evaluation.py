@@ -27,21 +27,21 @@ def evaluation_project(baseline, request):
         n.add("Line", "L12", bus0="B1", bus1="B2", s_nom=8, x=0.1, r=0.01)
         n.lines_t.s_max_pu = pd.DataFrame({"L12": [1, 1, 0.5]}, index=n.snapshots)
         n.snapshot_weightings.loc[:, "generators"] = [2, 1, 3]
-    elif case.profile.startswith("carrier-"):
+    elif case.profile.startswith("carrier-") and case.fault != "battery":
         n.set_snapshots(pd.date_range("2026-01-01", periods=3, freq="h"))
         n.generators.at["G1", "carrier"] = "wind"
         n.add("Generator", "G2", bus="B1", p_nom=10, marginal_cost=5, carrier="wind")
         n.generators_t.p_max_pu = pd.DataFrame({"G2": [0.5, 0.5, 0.2]}, index=n.snapshots)
         n.loads_t.p_set = pd.DataFrame({"L1": [6, 8, 4]}, index=n.snapshots)
         n.snapshot_weightings.loc[:, "generators"] = [2, 1, 3]
-    elif case.profile.startswith("storage-"):
+    elif case.profile.startswith("storage-") or case.fault == "battery":
         n.set_snapshots(pd.date_range("2026-01-01", periods=3, freq="h"))
         n.loads_t.p_set = pd.DataFrame({"L1": [0, 2, 2]}, index=n.snapshots)
         n.generators_t.p_max_pu = pd.DataFrame({"G1": [1, 0, 0]}, index=n.snapshots)
         n.snapshot_weightings.loc[:, "stores"] = [2, 1, 1]
         n.snapshot_weightings.loc[:, "generators"] = [3, 4, 5]
         n.snapshot_weightings.loc[:, "objective"] = [1, 3, 1]
-        n.add("StorageUnit", "Battery", bus="B1", p_nom=10, max_hours=2,
+        n.add("StorageUnit", "Battery", bus="B1", p_nom=10, max_hours=2, carrier="battery",
               efficiency_store=0.8, efficiency_dispatch=0.5,
               state_of_charge_initial=0, cyclic_state_of_charge=False, capital_cost=3)
         n.storage_units_t.marginal_cost = pd.DataFrame({"Battery": [99, 2, 4]}, index=n.snapshots)
@@ -103,6 +103,9 @@ def run_case(case, ctx, harness, provider, node, mode):
 def test_pilot_case(case, evaluation_project, pilot_harness, request):
     n = evaluation_project.network
     storage = case.profile.startswith("storage-")
+    if case.fault == "battery":
+        su = n.storage_units_t
+        su.p_store.iloc[1, 0], su.p_dispatch.iloc[1, 0], su.p.iloc[1, 0] = 5, 4, -1
     if case.fault == "stale":
         n.loads.at["L1", "p_set"] = 6
     elif case.fault == "missing" and case.profile.endswith("-loading/1"):

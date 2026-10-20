@@ -63,8 +63,13 @@ def source(ctx, carrier):
     from services import period_utils
 
     n = ctx.network
-    if any(c != carrier and c.casefold() == carrier.casefold() for c in _carriers(n)):
+    carriers = _carriers(n)
+    variants = sorted(c for c in carriers if c != carrier and c.casefold() == carrier.casefold())
+    if variants and carrier in carriers:
+        # Both spellings exist; a case-folding consumer would merge them silently.
         raise ValueError("ambiguous_carrier")
+    if variants:
+        raise ValueError("unknown_carrier", variants[0])
     members = {}
     for component in ("Generator", "StorageUnit", "Link", "Store"):
         static = n.components[component].static

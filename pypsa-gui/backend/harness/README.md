@@ -280,7 +280,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 163 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 164 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).

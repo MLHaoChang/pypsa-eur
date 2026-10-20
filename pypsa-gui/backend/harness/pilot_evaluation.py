@@ -64,6 +64,14 @@ PROFILE_METRICS = {
     "storage-unit-dispatch/1": tuple(STORAGE)[:6],
     "storage-unit-cost/1": tuple(STORAGE),
 }
+# Carrier "battery": the StorageUnit fixture above with one simultaneous
+# snapshot (1 h: store 5, dispatch 4, state 8 -> 8+.8*5-4/.5 = 4 MWh). Store
+# weights 2, 1, 1: charged 2*5+1*5 = 15 MWh, discharged 1*4+1*2 = 6 MWh (the
+# net would give 11 and 2). No generator of the carrier: 0 MWh, 0 MW.
+BATTERY_CARRIER = {
+    "carrier_generator_energy": (0, "MWh"), "carrier_peak_generator_output": (0, "MW"),
+    "carrier_storage_discharged_energy": (6, "MWh"), "carrier_storage_charged_energy": (15, "MWh"),
+}
 # Opt-in profiles join the pilot suite only; the stress catalogue keeps the first five.
 EVALUATION_PROFILE_METRICS = {**PROFILE_METRICS, "carrier-energy/1": tuple(CARRIER),
                               "branch-loading/1": tuple(BRANCH), "network-loading/1": tuple(NETWORK_LOADING)}
@@ -106,6 +114,7 @@ class Case:
     expected: dict[str, tuple[float, str]]
     unavailable: tuple[str, ...] = ()
     clarification: bool = False
+    entity_id: str | None = None
 
     @property
     def valid(self):
@@ -113,6 +122,8 @@ class Case:
 
     @property
     def entity(self):
+        if self.entity_id is not None:
+            return self.entity_id
         return ("Battery" if self.profile.startswith("storage-") else "network" if self.profile.startswith("network-")
                 else "wind" if self.profile.startswith("carrier-")
                 else "L12" if self.profile.startswith("branch-") else "G1")
@@ -145,6 +156,8 @@ def catalogue():
         cases.append(Case(profile + ":unsupported", profile, "unsupported", question, expected, ("adequacy_certificate",)))
         if cost:
             cases.append(Case(profile + ":basis", profile, "basis", f"Show total cost for {entity}", {}, ("total_cost",), True))
+    cases.append(Case("carrier-energy/1:battery", "carrier-energy/1", "battery",
+                      "Give me the key results for carrier battery", BATTERY_CARRIER, entity_id="battery"))
     return tuple(cases)
 
 
