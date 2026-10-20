@@ -53,7 +53,8 @@ BUY_EUR_PER_MWH = 97.0
 #: The offtake contract's shortfall penalty (EUR/t, demo); above the buy-in price (validator).
 LOST_EUR_PER_T = 800.0
 LOST_EUR_PER_MWH = LOST_EUR_PER_T / MWH_PER_T
-#: Grey NH3 CO2 intensity (t CO2 per t NH3, demo): carried by the case's reference purchase only.
+#: Grey NH3 CO2 intensity (t CO2 per t NH3, demo): in the plan it prices `__buy_nh3` (marginal cost) and the case's
+#: reference purchase (GREY_NH3) carries it too; ticket 06 must not count it twice.
 GREY_CO2_T_PER_T = 2.0
 
 #: Existing hub assets: the fuel cell and the H2 offtake are gone, the H2 tank is a candidate now, and the
@@ -132,7 +133,7 @@ def build_eh_ammonia_staged(T) -> "pypsa.Network":  # noqa: F821
     n.buses.at["nh3", "mwh_per_t"] = MWH_PER_T
     n.buses.at["nh3", "product_value"] = BUY_EUR_PER_MWH
 
-    # The Haber-Bosch loop: bus0 electricity (incl. ASU and compressors), bus1 NH3, bus2 the H2 it draws.
+    # The Haber-Bosch loop: bus0 electricity (HB loop and compressors; the ASU is not included, see the ledger), bus1 NH3, bus2 the H2 it draws.
     n.add("Link", "haber_bosch", bus0="hub", bus1="nh3", bus2="h2", carrier="Haber-Bosch",
           p_nom=hb_p_nom_mw(), p_nom_extendable=False,
           efficiency=1.0 / EL_MWH_PER_MWH,
