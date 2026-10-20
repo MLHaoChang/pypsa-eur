@@ -16,7 +16,8 @@ PROFILE = "curtailment/1"
 MAX_GENERATORS = 64
 RESIDUAL_TOLERANCE = 1e-6
 REFUSALS = frozenset({
-    "unknown_generator", "not_variable", "no_variable_generators", "unsupported_generator_population",
+    "unknown_generator", "not_variable", "committable_unit", "no_variable_generators",
+    "unsupported_generator_population",
     "unsupported_snapshot_scope", "misaligned_source",
 })
 METRICS = {
@@ -76,6 +77,8 @@ def source(ctx, entity):
         raise ValueError("unknown_generator")
     elif entity not in variable:
         raise ValueError("not_variable")
+    elif bool(n.generators.at[entity, "committable"]):
+        raise ValueError("committable_unit")
     else:
         names = [entity]
     if not n.generators_t.p.index.equals(index):

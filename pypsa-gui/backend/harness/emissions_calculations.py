@@ -92,7 +92,9 @@ def source(ctx, entity, network):
     if network:
         if elsewhere:
             raise ValueError("emissions_outside_scope")
-        names = [str(g) for g in n.generators.index]
+        # As PyPSA's primary-energy constraint: inactive generators do not count.
+        active = n.generators["active"] if "active" in n.generators.columns else None
+        names = [str(g) for g in n.generators.index if active is None or bool(active[g])]
         if len(names) > MAX_GENERATORS:
             raise ValueError("unsupported_generator_population")
     elif entity in n.generators.index:
@@ -105,7 +107,8 @@ def source(ctx, entity, network):
     mu, cap = None, False
     gc = n.global_constraints
     if network and not gc.empty and "carrier_attribute" in gc.columns:
-        caps = gc.index[(gc["carrier_attribute"].astype(str) == "co2_emissions")]
+        caps = gc.index[(gc["carrier_attribute"].astype(str) == "co2_emissions")
+                        & (gc["type"].astype(str) == "primary_energy")]
         if len(caps) == 1:
             cap, mu = True, _number(gc.at[caps[0], "mu"]) if "mu" in gc.columns else None
         elif len(caps) > 1:
@@ -134,7 +137,7 @@ def _emissions(unit, weight, a, b):
     total = []
     for i in range(a, b + 1):
         p, eta, w = unit["p"][i], unit["efficiency"][i], weight[i]
-        if not common.finite([p, eta, w]) or eta <= 0:
+        if not common.finite([p, eta, w]) or eta <= 0 or w < 0:
             return None
         total.append(w * p / eta * unit["co2"])
     return math.fsum(total)
@@ -152,7 +155,8 @@ def calculate(raw, scope):
         available["total_emissions" if network else "generator_emissions"] = math.fsum(values)
     if network:
         if raw["cap"] is True and raw["mu"] is not None and raw["valid_solve"]:
-            available["co2_cap_shadow_price"] = -raw["mu"]
+            # A slack cap has mu 0; report 0, not a signed -0.
+            available["co2_cap_shadow_price"] = -raw["mu"] + 0.0
         else:
             reasons["co2_cap_shadow_price"] = (
                 "several_co2_caps" if raw["cap"] == "several" else "no_co2_cap" if not raw["cap"] else base
@@ -169,7 +173,7 @@ def notes(raw, label):
         lines.append(f"{len(undefined)} generators have no carrier entry and count as zero emissions, as in the LP.")
     if raw["entity_id"] != "network" and raw["co2_elsewhere"]:
         lines.append(f"This generator only; {raw['co2_elsewhere']} Links or stores elsewhere carry CO2.")
-    if raw["entity_id"] == "network" and not raw["cap"] and (raw["co2_price"] or 0) > 0:
+    if raw["entity_id"] == "network" and raw["valid_solve"] and not raw["cap"] and (raw["co2_price"] or 0) > 0:
         price = repr(raw["co2_price"]).removesuffix(".0")
         lines.append(f"CO2 is priced at {price} EUR/tCO2 via co2_price (not a cap); no shadow price.")
     return lines

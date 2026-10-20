@@ -142,6 +142,24 @@ def test_network_emissions_refuse_when_storage_carries_co2(gas, checked):
     assert "This generator only; 1 Links or stores elsewhere carry CO2." in public_text(frames)
 
 
+def test_a_link_into_a_co2_bus_refuses_the_network_total(gas, checked):
+    n = gas.network
+    n.add("Bus", "co2 atmosphere", carrier="co2")
+    n.add("Link", "Capture", bus0="B1", bus1="co2 atmosphere", p_nom=0)
+    ctx = solve(gas)
+    frames = ask(checked, ctx, "network-emissions/1", "network", {})
+    assert {s["reason"] for s in approval(frames)["receipt"]["result_slots"]} == {"emissions_outside_scope"}
+
+
+def test_a_co2_price_without_a_cap_is_never_a_shadow_price(gas, checked):
+    gas.solver_state["solver_config"].co2_price = 25.0
+    ctx = solve(gas)
+    frames = ask(checked, ctx, "network-emissions/1", "network", {"total_emissions": 8.5})
+    assert slots(frames)["co2_cap_shadow_price"]["reason"] == "no_co2_cap"
+    assert "CO2 is priced at 25 EUR/tCO2 via co2_price (not a cap); no shadow price." in public_text(frames)
+    gas.solver_state["solver_config"].co2_price = 0.0
+
+
 # ── curtailment ───────────────────────────────────────────────────────────
 
 
@@ -171,6 +189,14 @@ def test_a_dispatchable_unit_is_not_curtailed(windy, checked):
     ctx = solve(windy)
     frames = ask(checked, ctx, "curtailment/1", "G2", {})
     assert {s["reason"] for s in approval(frames)["receipt"]["result_slots"]} == {"not_variable"}
+
+
+def test_a_committable_unit_is_refused_by_name(windy, checked):
+    windy.network.generators.at["G1", "committable"] = True
+    windy.network.generators.at["G1", "p_min_pu"] = 0.0
+    ctx = solve(windy)
+    frames = ask(checked, ctx, "curtailment/1", "G1", {})
+    assert {s["reason"] for s in approval(frames)["receipt"]["result_slots"]} == {"committable_unit"}
 
 
 def test_dispatch_above_availability_names_the_generator(windy, checked):
