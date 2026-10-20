@@ -571,6 +571,7 @@ _BOUND_PAIRS = {"p_min_pu": "p_max_pu", "p_max_pu": "p_min_pu"}
 # before the apply warns (gatekeeper review 2026-10-20).
 ENERGY_TOLERANCE = 0.02
 ENERGY_MISMATCH_WARNING = "energy_mismatch"
+BOUND_FORCES_OFF_WARNING = "bound_forces_off"
 
 # How close a normalised shape's peak/mean must be to 1.
 _NORM_RTOL = 1e-3
@@ -624,7 +625,7 @@ def _scale_power(series: pd.Series, meta: Mapping[str, Any]) -> tuple[float, dic
 
 def _money(meta: Mapping[str, Any]) -> dict:
     """A price series' unit and money basis, in the money-year convention's
-    words ("real basis, 2020 EUR"). Never a guessed year."""
+    words ("real basis, 2020 EUR")."""
     unit = str(meta.get("unit") or "")
     cur, _, per = unit.partition("/")
     if per != "MWh" or not (len(cur) == 3 and cur.isalpha() and cur.isupper()):
@@ -639,16 +640,16 @@ def _money(meta: Mapping[str, Any]) -> dict:
             f"{meta.get('price_basis')!r}"
         )
     year = meta.get("currency_year")
-    if year is None:
-        # The money-year convention: never a guessed year
-        # (`finance.report.basis_statement`).
-        return {"unit": unit, "price_basis": basis,
-                "money": f"{basis} basis, {cur} (currency year not stated)"}
+    # Required: every price in the model is real base-year money read from
+    # its price-data year (the money-year convention), so a price series
+    # without one would carry an unknown into the objective (gatekeeper
+    # review 2026-10-20).
     try:
         year = int(year)
     except (TypeError, ValueError):
         raise InvalidSeriesUnitError(
-            f"currency_year must be a year, got {year!r}") from None
+            f"a price series must state its currency_year (the year of its "
+            f"price data), got {year!r}") from None
     return {"unit": unit, "price_basis": basis, "currency_year": year,
             "money": f"{basis} basis, {year} {cur}"}
 
@@ -666,20 +667,32 @@ def _current_bound(n, component_type: str, component: str, attribute: str):
 
 
 def _check_bound_pair(n, component_type: str, component: str, attribute: str,
-                      vals: np.ndarray) -> None:
+                      vals: np.ndarray) -> list[str]:
+    """Refuse a p_min_pu above p_max_pu at any snapshot — the LP would be
+    infeasible. A committable unit is the exception: its bounds are
+    status·p_min_pu ≤ p/p_nom ≤ status·p_max_pu, so a crossing hour forces it
+    off instead (gatekeeper review 2026-10-20); that is written and warned."""
     other = _BOUND_PAIRS.get(attribute)
     if other is None:
-        return
+        return []
     current = _current_bound(n, component_type, component, other)
     lo, hi = (vals, current) if attribute == "p_min_pu" else (current, vals)
     bad = np.flatnonzero(lo > hi + 1e-9)
-    if bad.size:
-        i = int(bad[0])
-        raise ProfileBoundConflictError(
-            f"{component!r}: p_min_pu {lo[i]:.4g} would exceed p_max_pu "
-            f"{hi[i]:.4g} at snapshot {n.snapshots[i]} ({bad.size} snapshots "
-            "in all) — the LP would be infeasible"
-        )
+    if not bad.size:
+        return []
+    i = int(bad[0])
+    table = getattr(n, component_type)
+    if "committable" in table.columns and bool(table.at[component, "committable"]):
+        return [(
+            f"{BOUND_FORCES_OFF_WARNING}: {component!r} is committable and its "
+            f"p_min_pu exceeds p_max_pu at {bad.size} snapshots (first "
+            f"{n.snapshots[i]}); the unit is forced off in those hours"
+        )]
+    raise ProfileBoundConflictError(
+        f"{component!r}: p_min_pu {lo[i]:.4g} would exceed p_max_pu "
+        f"{hi[i]:.4g} at snapshot {n.snapshots[i]} ({bad.size} snapshots "
+        "in all) — the LP would be infeasible"
+    )
 
 
 def _modelled_mwh(n, aligned: pd.Series, weighting: str) -> dict[str, float]:
@@ -780,7 +793,8 @@ def assign_profile(
         clipped = bool(((vals < 0.0) | (vals > 1.0)).any())
         if clipped:
             vals = np.clip(vals, 0.0, 1.0)
-        _check_bound_pair(n, component_type, component, attribute, vals)
+        warnings = [*warnings, *_check_bound_pair(n, component_type, component,
+                                                  attribute, vals)]
     elif target.kind == "power":
         if (vals < 0.0).any():
             i = int(np.flatnonzero(vals < 0.0)[0])
