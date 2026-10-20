@@ -98,11 +98,75 @@ def _search_index(catalogue_json):
              set(re.findall(r"[a-z0-9]+", tool["description"].lower()))) for tool in catalogue]
 
 
-def find_capabilities(goal: str, limit: int = 3) -> dict:
+# OJ-45: the owner's core features as families. `needs` says what the project
+# must have; `changes` families are refused by a read-only personal rule.
+_FAMILIES = (
+    {"family": "projects", "example": "Open oj-grid and tell me what's in it.", "needs": None,
+     "tools": ("list_projects", "resolve_project_target", "activate_project", "get_project_statistics")},
+    {"family": "results", "example": "Show me the load flow results of the latest calculation.", "needs": "run",
+     "tools": ("get_results", "get_loadflow_summary", "list_project_runs", "get_run_evidence", "read_result")},
+    {"family": "checks", "example": "Do the inputs make sense? Check the network.", "needs": "project",
+     "tools": ("validate_network", "diagnose_network", "project_readiness"),
+     "note": "These check the inputs; rules for whether results are plausible do not exist yet."},
+    {"family": "edits", "example": "Set the battery's max hours to 6 and both lines to 400 MVA.", "needs": "project",
+     "changes": True, "tools": ("update_component", "bulk_update_components", "batch_create_components")},
+    {"family": "sensitivities", "example": "Run the gas price at +20% and compare it with the baseline.",
+     "needs": "project", "changes": True,
+     "tools": ("run_sensitivity_sweep", "create_scenario", "compare_project_runs", "compare_scenarios")},
+    {"family": "studies", "example": "Run the simulation and show me what changed.", "needs": "project",
+     "changes": True, "tools": ("run_simulation", "run_ac_pf_stage", "run_mc_study", "wait_for_job")},
+    {"family": "reports", "example": "Create a report of this study.", "needs": "project", "changes": True,
+     "tools": ("generate_report", "list_reports", "export_report_docx")},
+)
+
+
+def _capability_overview() -> dict:
+    from harness import restrictions
+    from harness.catalogue import TOOLS
+    from services import chat_tools, project_acl, project_registry, run_evidence
+
+    session = chat_tools.chat_session()
+    hints = getattr(session, "turn_ui_context", None) or {}
+    mode = "guided" if isinstance(hints, dict) and hints.get("ui_mode") == "guided" else "expert"
+    known = {t["name"] for t in TOOLS}
+    ctx = PyPSAService.get_active_context()
+    project = rule = role = None
+    has_run = False
+    if ctx.project_uuid:
+        with chat_tools._acting() as (db, user):
+            row = project_registry.resolve_project(db, user, ctx.project_uuid)
+            rule = restrictions.read(db, user.id, row.id)["mode"]
+            role = "manager" if project_acl.can_manage_membership(db, user, row) else "member"
+            project = {"id": str(row.id), "name": row.name}
+        root, project_id, _owner = run_evidence._authority()
+        has_run = any(r["status"] == "completed" for r in run_evidence._all_records(root, project_id))
+    families = []
+    for spec in _FAMILIES:
+        reason = None
+        if spec["needs"] and project is None:
+            reason = "Open or save a project first."
+        elif spec["needs"] == "run" and not has_run:
+            reason = "No completed run yet; run a simulation first."
+        elif spec.get("changes") and rule == "read_only":
+            reason = "Your personal rule for this project is read-only."
+        note = spec.get("note")
+        if spec.get("changes") and not reason and (mode == "guided" or rule == "confirm_changes"):
+            note = "Each change shows a confirmation card before it is applied."
+        families.append({"family": spec["family"], "available": reason is None, "reason": reason,
+                         "example": spec["example"], "note": note,
+                         "tools": [name for name in spec["tools"] if name in known]})
+    return {"overview": True, "project": project, "role": role, "mode": mode, "personal_rule": rule,
+            "families": families,
+            "note": "Discovery grants no permissions; every tool still checks access when used."}
+
+
+def find_capabilities(goal: str | None = None, limit: int = 3, overview: bool = False) -> dict:
     from harness.catalogue import TOOLS, safety_tier_for
     from harness.toolsets import filter_tools
     from harness.providers.wiring import _tools_payload
     from services import chat_tools
+    if overview is True:
+        return _capability_overview()
     if not isinstance(goal, str) or not 1 <= len(goal.strip()) <= 1000 or type(limit) is not int or not 1 <= limit <= 8:
         workflow._refuse("invalid_capability_query", "Use a short goal and a limit of 1–8.")
     words = set(re.findall(r"[a-z0-9]+", goal.lower())) - {"the", "a", "to", "and", "my", "of", "for", "with"}

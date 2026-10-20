@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): "What can you do in this project?" now gets a direct answer. The assistant lists its core features (projects, results, checks, edits, sensitivities, studies, reports), says which ones are available for this project, your role, mode and personal rule, explains why any are not, and gives one example sentence for each.
