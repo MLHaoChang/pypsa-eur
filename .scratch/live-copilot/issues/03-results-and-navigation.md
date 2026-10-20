@@ -122,3 +122,25 @@ Kept, with reasons:
   "(advanced)" and open without a mode switch (as the app already does).
 - Each listing runs one read per view (statuses only); acceptable for the
   network sizes Tier A covers; revisit if a large network is slow.
+
+### PR-C self-review (2026-10-20) and dispositions
+
+Fixed:
+- A past run is not recomputed: a request for another source or window
+  refuses with `historical_scope_mismatch` and the captured source/window;
+  `limit` trims the retained ranking.
+- Retained answers carry an allow-list of the summary's own facts; current-
+  only pointers (ui_reference, evidence_token, freshness) never pass.
+- The solved-input fingerprint is taken before the capture; if the inputs
+  moved during it, no section is stored. A failed or skipped capture is
+  logged and recorded as the manifest warning `loadflow_not_captured`.
+- The refusal no longer points at issue 06 or invites reading the current
+  results; tests cover missing, corrupt and unfinished sections (LC-T08).
+
+Kept, with reasons:
+- Only chat-started foreground solves capture load flow. Queue, study and
+  report runs refuse with their run ID until each gets its own capture.
+- "Latest" stays the newest completed run of any kind (LC-10's rule): a study
+  finishing after a solve makes that solve's run historical, which is honest.
+- The capture reuses the read path (and its network guard) on the monitor
+  thread; a busy guard skips the section with the warning above.

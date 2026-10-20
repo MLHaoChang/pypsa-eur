@@ -148,8 +148,10 @@ def test_an_older_run_never_gets_the_current_values(oj_grid):
     older = oj_grid['older']['run_id']
     calls, results, frames, _ = run_journey(*PROVIDERS[1], _steps(lambda r: older), MESSAGE)
     lf = results[1]
-    assert lf['status'] == 'unavailable' and 'top' not in lf
+    # Its own retained section (LC-03 PR-C), never the current results.
+    assert lf['status'] == 'ok' and lf['scope'] == 'historical'
     assert lf['run_id'] == older and lf['run_is_current'] is False
+    assert lf['run']['is_current'] is False and 'ui_reference' not in lf
 
 
 def test_latest_run_after_an_input_edit_is_not_the_current_result(oj_grid, client):
@@ -157,9 +159,9 @@ def test_latest_run_after_an_input_edit_is_not_the_current_result(oj_grid, clien
     assert response.status_code == 200, response.text
     calls, results, frames, _ = run_journey(*PROVIDERS[1], _steps(), MESSAGE)
     lf = results[1]
-    assert lf['status'] == 'unavailable' and 'top' not in lf
+    assert lf['status'] == 'ok' and lf['scope'] == 'historical'
     assert lf['run_id'] == oj_grid['latest']['run_id'] and lf['run_is_current'] is False
-    assert lf['inputs_changed_since_run'] is True
+    assert lf['inputs_changed_since_run'] is True and 'ui_reference' not in lf
 
 
 def test_showing_needs_the_shown_data_to_be_the_data_read(oj_grid, client):

@@ -187,6 +187,11 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_billing"):                     frozenset(),
     ("routers/results.py", "get_cfe_score"):                   frozenset(),
     ("routers/results.py", "get_value_flows"):                 frozenset(),   # P3 WP3.4
+    # Site commercial UX A1: physical energy (MWh), not an economics figure.
+    ("routers/results.py", "get_energy_flows"):                frozenset(),
+    ("routers/results.py", "get_energy_flows_csv"):            frozenset(),
+    # Site commercial UX A2: load shape (MW, MWh), not an economics figure.
+    ("routers/results.py", "get_load_shape"):                  frozenset(),
     ("routers/results.py", "preview_billing"):                 frozenset(),   # P3 WP3.7b
     # IC P4 WP4.6b — the finance run and its report: its own oracle gate
     # (tests/qa_investment_case.py, the SAM parity cases), not a coverage SURFACE.

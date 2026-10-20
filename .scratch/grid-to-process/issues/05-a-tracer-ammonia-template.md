@@ -1,6 +1,6 @@
 # A tracer: `eh_ammonia_staged`
 
-Status: needs-triage
+Status: done
 Type: task
 Blocked by: 03, 04
 Gated: no (template and pack data; it does not change engine code)

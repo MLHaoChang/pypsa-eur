@@ -26,6 +26,7 @@ this prefix — `_UNDO_PREFIXES` is `/api/network/` + `/api/io/` only):
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import uuid
 from pathlib import Path
@@ -42,15 +43,20 @@ from db.session import get_db
 from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services import solve_queue as sq
-from services.profile_gen import engine, presets
+from services.profile_gen import engine, presets, shape
 from services.profile_gen.apply import (
     ComponentNotFoundError,
+    FamilyTargetMismatchError,
+    InvalidSeriesUnitError,
     ProfileApplyError,
+    ProfileBoundConflictError,
+    UnknownFamilyError,
+    UnsupportedTargetError,
     assign_profile,
 )
 from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
 from services.profile_gen.engine import ProfileGenError
-from services.profile_gen.job import KEEP_PENDING
+from services.profile_gen.job import KEEP_PENDING, write_pending
 
 router = APIRouter()          # global: /api/profiles/…
 project_router = APIRouter()  # scoped: /api/projects/{name}/profiles/…
@@ -102,6 +108,14 @@ class ApplyRequest(BaseModel):
     # zone's offset, DST included). Unset: UTC when the project's commercial
     # timezone is set, else applied unshifted with a `warnings` entry.
     time_basis: str | None = None
+
+
+class ShapeRequest(BaseModel):
+    # A pending artifact to calibrate, the ordered ops (services/profile_gen/
+    # shape.py), and optionally which points (default: every point).
+    job_id: str
+    ops: list[dict[str, Any]]
+    points: list[str] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -257,11 +271,52 @@ def _pending_records(proj: AuthorizedProject) -> list[dict[str, Any]]:
     return records
 
 
+def _pending_artifact(proj: AuthorizedProject,
+                      job_id: str) -> tuple[Path, dict[str, Any]]:
+    """The pending `.nc` path and meta record for `job_id`; 422 for an id
+    that escapes the pending folder, 404 for one with no artifact."""
+    pending = _pending_dir(proj).resolve()
+    nc = (pending / f"{job_id}.nc").resolve()
+    meta_path = pending / f"{job_id}.json"
+    if nc.parent != pending:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "malformed_job_id",
+                    "message": f"malformed job id {job_id!r}"},
+        )
+    if not nc.exists() or not meta_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"no pending profile for job {job_id!r}",
+        )
+    return nc, json.loads(meta_path.read_text())
+
+
 def _error_kind(exc: Exception) -> str:
     name = type(exc).__name__
     return "".join(
         f"_{c.lower()}" if c.isupper() else c for c in name
     ).lstrip("_").removesuffix("_error")
+
+
+# Apply refusals whose error_kind is written out as a literal, so
+# tests/test_tool_error_kind_manifest.py's scan sees each one; the rest fall
+# back to the class-name kind. Subclasses before their bases.
+_APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
+    (ComponentNotFoundError, {"error_kind": "component_not_found"}),
+    (ProfileBoundConflictError, {"error_kind": "profile_bound_conflict"}),
+    (UnsupportedTargetError, {"error_kind": "unsupported_target"}),
+    (UnknownFamilyError, {"error_kind": "unknown_family"}),
+    (FamilyTargetMismatchError, {"error_kind": "family_target_mismatch"}),
+    (InvalidSeriesUnitError, {"error_kind": "invalid_series_unit"}),
+)
+
+
+def _apply_refusal_kind(exc: Exception) -> dict[str, str]:
+    for cls, kind in _APPLY_REFUSALS:
+        if isinstance(exc, cls):
+            return dict(kind)
+    return {"error_kind": _error_kind(exc)}
 
 
 # ---------------------------------------------------------------------------
@@ -446,17 +501,7 @@ def apply_profile(
     that moved since generation comes back as a `warning` on the 200."""
     _check_lock(proj, db, user)
 
-    pending = _pending_dir(proj).resolve()
-    nc = (pending / f"{body.job_id}.nc").resolve()
-    meta_path = pending / f"{body.job_id}.json"
-    if nc.parent != pending:
-        raise HTTPException(status_code=422, detail="malformed job id")
-    if not nc.exists() or not meta_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"no pending profile for job {body.job_id!r}",
-        )
-    meta = json.loads(meta_path.read_text())
+    nc, meta = _pending_artifact(proj, body.job_id)
 
     point_id = body.point_id or body.component
     try:
@@ -526,15 +571,10 @@ def apply_profile(
     try:
         summary = assign_profile(ctx, body.component, series, meta,
                                  time_basis=body.time_basis)
-    except ComponentNotFoundError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"error_kind": "component_not_found", "message": str(exc)},
-        ) from exc
     except ProfileApplyError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"error_kind": _error_kind(exc), "message": str(exc)},
+            detail={**_apply_refusal_kind(exc), "message": str(exc)},
         ) from exc
 
     from routers.simulation import _state_update
@@ -543,3 +583,89 @@ def apply_profile(
     if warning:
         summary["warning"] = warning
     return summary
+
+
+@project_router.post("/{name}/profiles/shape")
+def shape_profile(
+    body: ShapeRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Calibrate a pending profile: run the ops on its weather-year series
+    and write the result as a NEW pending artifact (`parent_job`, op chain,
+    parent/result stats, `calibrated: true`). The network is never written —
+    applying the shaped artifact goes through the same apply route and its
+    refusals."""
+    _check_lock(proj, db, user)
+    nc, parent = _pending_artifact(proj, body.job_id)
+    with xr.open_dataset(nc) as ds:
+        frame = ds.to_dataframe()
+    frame.index = pd.DatetimeIndex(frame.index)
+    if body.points is not None and not body.points:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "no_points",
+                    "message": "`points` is empty; omit it to shape every point"},
+        )
+    wanted = body.points if body.points is not None else list(frame.columns)
+    unknown = [p for p in wanted if p not in frame.columns]
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "point_not_in_profile",
+                    "message": f"the pending profile has no column(s) "
+                               f"{unknown}; it holds {list(frame.columns)}"},
+        )
+    shaped: dict[str, pd.Series] = {}
+    per_point: dict[str, dict[str, Any]] = {}
+    for point in wanted:
+        try:
+            shaped[point], per_point[point] = shape.apply_chain(
+                frame[point].astype(float), body.ops)
+        except shape.UnreachableTargetError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"error_kind": "unreachable_target",
+                        "message": f"{point}: {exc}",
+                        "point": point,
+                        "reachable_max": exc.reachable_max},
+            ) from exc
+        except ProfileGenError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"error_kind": _error_kind(exc), "message": str(exc)},
+            ) from exc
+
+    # Reshaping a shaped artifact extends its chain: the ops accumulate in
+    # order and the stats stay anchored on the generated, uncalibrated root
+    # — the provenance must not depend on an intermediate artifact that
+    # eviction may delete (gatekeeper, #432).
+    if parent.get("calibrated"):
+        earlier = parent.get("shaping") or {}
+        for point, chain in per_point.items():
+            prior = earlier.get(point)
+            if prior:
+                chain["ops"] = list(prior.get("ops", [])) + chain["ops"]
+                chain["parent_stats"] = prior.get("parent_stats",
+                                                  chain["parent_stats"])
+    origin_job = parent.get("origin_job") or body.job_id
+
+    new_id = str(uuid.uuid4())
+    record = {
+        **parent,
+        "job_id": new_id,
+        "parent_job": body.job_id,
+        "origin_job": origin_job,
+        "parent_generated_at": parent.get("generated_at"),
+        "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "points": list(shaped),
+        "point_coords": {p: c for p, c in
+                         (parent.get("point_coords") or {}).items()
+                         if p in shaped},
+        "calibrated": True,
+        "shaping": per_point,
+    }
+    write_pending(proj.directory, new_id, pd.DataFrame(shaped), record)
+    return {"job_id": new_id, "parent_job": body.job_id,
+            "points": list(shaped), "stats": per_point}

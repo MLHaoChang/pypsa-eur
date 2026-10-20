@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import type React from 'react'
 import { PanelRightClose, Pin, PinOff } from 'lucide-react'
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
@@ -33,6 +35,21 @@ function clearTimer(timer: { current: number | null }) {
  * Unmounting it mid-turn is what produced "still streaming, no tokens on
  * screen"; keeping it mounted is the fix, not an optimisation.
  */
+/** L2 (LC-04): the launcher floats over the canvas area only (`#companion-anchor`
+ * in App.tsx: above the bottom panel, left of the Properties or slide panel), so
+ * it never covers a panel. While a full-screen tab hides the canvas it keeps its
+ * place in the workbench row. */
+function useCompanionAnchor(): HTMLElement | null {
+  const activeSlidePanel = useUIStore(s => s.activeSlidePanel)
+  const uiMode = useUIStore(s => s.uiMode)
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    const el = document.getElementById('companion-anchor')
+    setAnchor(el && el.offsetParent !== null ? el : null)
+  }, [activeSlidePanel, uiMode])
+  return anchor
+}
+
 export default function AssistantDock() {
   // Per-field selectors, not the bare useUIStore() — see the identical
   // convention (and rationale) in CommandPalette.tsx: the bare hook
@@ -209,6 +226,9 @@ export default function AssistantDock() {
   // because the assistant WAS the slide panel. Pinned by
   // AssistantDock.eviction.test.tsx; its keyboard twin is the editable-target
   // guard on App.tsx's global Escape handler.
+  const anchor = useCompanionAnchor()
+  const place = (launcher: React.ReactElement) => (anchor ? createPortal(launcher, anchor) : launcher)
+
   return (
     <>
       <div
@@ -302,7 +322,7 @@ export default function AssistantDock() {
           <AssistantActivity onConversation={() => setSurface('chat')} />
         </ErrorBoundary>}
       </div>
-      {!assistantDockOpen && (
+      {!assistantDockOpen && place(
         <CompanionLauncher
           workState={workState}
           navigating={walking}
@@ -357,9 +377,9 @@ export default function AssistantDock() {
             {choice && <div ref={setCompanionChoiceTarget} className="w-80 max-w-full" />}
             {liveOpen && <div ref={setCompanionAccessTarget} className="w-72 max-w-full" />}
             {walking && walkNextReady && <button type="button" data-no-panel-close className="fixed bottom-24 right-4 text-xs rounded border border-border bg-panel px-3 py-2" onClick={() => walkCancel.current?.next()}>Next evidence view</button>}
-      <CompanionOutcome />
+      <CompanionOutcome docked={!anchor} />
           </ErrorBoundary>
-        </CompanionLauncher>
+        </CompanionLauncher>,
       )}
     </>
   )

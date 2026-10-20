@@ -49,7 +49,7 @@ def test_load_flow_is_the_only_view_that_proves_displayed_data_today():
 
 def test_guided_labels_follow_guided_tabs():
     guided = {v.tab for v in rv.RESULT_VIEWS if v.guided_label}
-    assert guided == {'summary', 'adequacy', 'fmea'}
+    assert guided == {'summary', 'adequacy', 'fmea', 'flows', 'loadshape'}
 
 
 def test_gated_views_wait_for_their_tools():
@@ -62,8 +62,11 @@ def test_gated_views_wait_for_their_tools():
     assert {'preview_renewable_profile', 'list_pending_profiles'} <= profile
 
 
-def test_no_historical_section_is_claimed_before_it_is_captured():
-    assert all(v.historical_section is None for v in rv.RESULT_VIEWS)
+def test_only_captured_sections_are_claimed():
+    """A view claims a retained section only when run completion captures it
+    (PR-C: load flow); every other view refuses past runs."""
+    assert {v.view_id: v.historical_section for v in rv.RESULT_VIEWS
+            if v.historical_section} == {'loadflow': 'loadflow'}
 
 
 def test_every_view_declares_its_units():

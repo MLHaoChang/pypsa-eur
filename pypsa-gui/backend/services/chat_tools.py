@@ -7367,6 +7367,7 @@ from services.workflow_tools import (
 from services.run_evidence import list_project_runs, get_run_evidence, compare_project_runs
 # discuss_project_run is defined above with the UI-control tools.
 from services.loadflow_summary import get_loadflow_summary
+from services.energy_flows_read import get_energy_flows
 from services.experiments import start_experiment, prepare_experiment, list_experiments, get_experiment
 from harness.experiment_execution import advance_experiment, refresh_experiment, cancel_experiment
 from harness.experiment_reconciliation import reconcile_experiment
@@ -7389,6 +7390,7 @@ DISPATCHERS: dict[str, Any] = {
     "discuss_project_run": discuss_project_run,
     "export_run_evidence": export_run_evidence,
     "get_loadflow_summary": get_loadflow_summary,
+    "get_energy_flows": get_energy_flows,
     "start_experiment": start_experiment,
     "prepare_experiment": prepare_experiment,
     "advance_experiment": advance_experiment,
