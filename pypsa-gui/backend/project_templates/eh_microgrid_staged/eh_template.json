@@ -11,10 +11,16 @@
       "value": "7 % nominal"
     },
     {
+      "item": "money year",
+      "note": "held flat to the base year, then escalated from it at the case's rates; nothing is converted with a price index",
+      "source": "assumed",
+      "value": "pack prices (2020 price data) are read as real base-year EUR"
+    },
+    {
       "item": "finance inputs",
       "note": "pre-tax; a later stage's capex is paid a year before its COD",
       "source": "assumed",
-      "value": "nominal EUR (2020 money), escalation 2 %/yr, all equity at 7 %, close 2026-01-01, to 2045"
+      "value": "nominal EUR, escalation 2 %/yr, all equity at 7 %, close 2026-01-01, to 2045"
     },
     {
       "item": "load growth",

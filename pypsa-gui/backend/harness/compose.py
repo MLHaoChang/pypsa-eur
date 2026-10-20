@@ -85,6 +85,8 @@ _ASSISTANT_STANCE_CHAINING = _p["chaining"]
 _ASSISTANT_STANCE = _ASSISTANT_STANCE_FACTS + _ASSISTANT_STANCE_CHAINING
 # LC-10: the reference ladder. Tools-on only (it names resolve_reference).
 _REFERENCE_LADDER = _prompts.load("reference_ladder")["text"]
+# LC-15: reading a project summary before describing it. Tools-on only.
+_PROJECT_OVERVIEW = _prompts.load("project_overview")["text"]
 
 # Deixis, data half.
 #
@@ -425,6 +427,8 @@ def _build_system_prompt(
         # ("this"/"the"/"latest" go through resolve_reference). TOOLS-ON ONLY:
         # it names a tool. A NEW part, so no pinned constant moves.
         *( [_REFERENCE_LADDER] if include_tools else [] ),
+        # LC-15 — summaries come from get_project_statistics. TOOLS-ON ONLY.
+        *( [_PROJECT_OVERVIEW] if include_tools else [] ),
         # Task 10 — profile awareness. TOOLS-ON ONLY, and that is the whole
         # placement rule: it names `set_active_profile`, and Task 8's
         # invariant is that the tools-off prompt names NO tool. A tools-less

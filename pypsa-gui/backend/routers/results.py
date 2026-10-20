@@ -1655,8 +1655,8 @@ def _ic_money_year_problem(assets: list, fin) -> str | None:
         # carries no free-form asset value)
         theirs = (f"{year} money (the campus asset library's price_year)"
                   if isinstance(year, int) and not isinstance(year, bool) else "another money year")
-        return (f"the campus assets are priced in {theirs}, the case in {fin.currency_year} money "
-                "(the finance inputs' currency_year); "
+        return (f"the campus assets are priced in {theirs}, the case's price data are "
+                f"{fin.currency_year} (the finance inputs' currency_year); "
                 + _IC_ONE_MONEY.format(conv="price index", what="money year", case=fin.currency_year))
     return None
 

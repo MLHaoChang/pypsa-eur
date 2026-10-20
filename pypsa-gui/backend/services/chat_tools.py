@@ -4132,9 +4132,9 @@ def download_project_bundle(name: str) -> dict:
     )
 
 
-def get_project_statistics(name: str) -> dict:
+def get_project_statistics(name: str, limit: int = 5) -> dict:
     from routers.projects import project_statistics as _h
-    return _route(_h, name)
+    return _route(_h, name, limit=limit)
 
 
 def get_project_network_meta(project_id: str) -> dict:

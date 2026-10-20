@@ -2655,13 +2655,14 @@
         ]
       ],
       "input_keys": [
-        "name"
+        "name",
+        "limit"
       ],
       "required": [
         "name"
       ],
       "safety_tier": "read",
-      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "schema_sha256": "454b61bedf3b8e640beb6f1719609c35520a6086bb7558875a8081b53e116a25",
       "behavioral_fixture": "pending"
     },
     {

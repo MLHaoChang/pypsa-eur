@@ -528,3 +528,9 @@ LC-03 the copilot runs the input checks and says result rules don't exist
 yet) and Q6 = A (LC-21 network-study report chapters in LC-06 after LC-05;
 new application scope). The Codex order is unchanged. No application code,
 tests or existing ledger rows changed.
+
+2026-10-19 LC-15 (asset summary) by Claude on `claude/copilot-asset-summary`,
+stacked on `claude/copilot-reference-ladder` (LC-10), which is stacked on PR
+#391. OJ-13 and OJ-14 pass in Tier A (see issue 15). LC-01 still needs OJ-45
+(a family-level capability answer, its own slice) and the merges of #391, LC-10
+and LC-15 before it closes.

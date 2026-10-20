@@ -1648,8 +1648,14 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "get_project_statistics",
-        "Offline statistics summary (no activate). Safety: read.",
-        {"name": {"type": "string"}},
+        "Summarise one project's assets without activating it (name or project_id; the active "
+        "project reads its live network, any other its saved files). summary: per-class counts; the "
+        "top `limit` items per class by capacity with has_more; generation MW by carrier, storage MW "
+        "and MWh, line count/length/MVA, extendable assets; snapshot range, resolution and investment "
+        "periods; solver mode; the latest run with whether it is current; validation error/warning "
+        "counts; gaps (variable generators without a profile). Every number you state must come from "
+        "it. Safety: read.",
+        {"name": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}},
         ["name"],
     ),
     _t(

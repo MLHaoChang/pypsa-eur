@@ -3,7 +3,7 @@
 
 # LC-15 — "open project X and tell me what's in it"
 
-Status: ready-for-agent inside LC-01, after LC-01B; can run beside LC-10
+Status: implementation in progress (Claude, branch `claude/copilot-asset-summary`, stacked on LC-10 and PR #391)
 Type: task
 Baseline: master `ae95a94a866730c0fe67fad37e238dc281786bd6`
 Dependencies: LC-01B (exact project names), LC-01A (schema discovery)
@@ -49,3 +49,32 @@ Results summaries (LC-03); plausibility (LC-20).
 
 OJ-13 and OJ-14 pass in Tier A with the fixture's hand-counted oracle; the
 inventory and control matrix are regenerated; no new write authority.
+
+## Implementation (2026-10-19)
+
+- `services/project_summary.py`, served by the existing
+  `GET /api/projects/{name}/statistics` (name or ID) and its
+  `get_project_statistics` tool. The old keys are unchanged and a new
+  `summary` holds:
+  - per-class counts, and the top `limit` items per class (default 5, max
+    25) by capacity, with `total` and `has_more`;
+  - generation MW by carrier; storage MW and MWh (StorageUnit
+    p_nom × max_hours plus Store e_nom); link MW and transformer MVA;
+    extendable assets; line count, length and MVA;
+  - snapshot count, first and last, resolution, investment periods;
+  - solver mode; the latest run with `current`; validation error and
+    warning counts with the first three issues;
+  - gaps: variable generators without a profile, loads with time series.
+- The caller's active project is read from its live network (unsaved edits
+  included, `source: live`); any other from its saved files
+  (`source: saved`), with no activation.
+- `current` compares the latest run's fingerprint with the live inputs. For
+  a saved project it is reported as not known, because the fingerprint also
+  covers the context's user time series.
+- Prompt: `prompts/project_overview.md`, a new tools-on part (pinned).
+- Tests: `tests/test_project_asset_summary.py`. A hand-counted fixture is the
+  oracle; OJ-13 runs resolve, activate (Guided card), summary and Overview;
+  OJ-14 runs resolve and summary with the active project unchanged.
+- Not in this slice: OJ-45 ("what can you do here?"). `find_capabilities` is
+  a keyword tool search, not a family-level answer with eligibility and an
+  example per family, so OJ-45 needs its own small slice.
