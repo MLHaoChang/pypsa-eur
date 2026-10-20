@@ -2641,7 +2641,7 @@
         "new_name"
       ],
       "safety_tier": "destructive",
-      "schema_sha256": "16a12f5f53640c0e97318c8bc84a8cec4f9ba18da2cf8b2afc3d5889cf2b61c7",
+      "schema_sha256": "7f6fa839e4b0c8795add790518d68197b05c7b9dcf927cb0a28456c6f10d6fba",
       "behavioral_fixture": "pending"
     },
     {
