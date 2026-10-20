@@ -97,6 +97,7 @@ def test_a_peak_sized_row_and_the_connection_flag(client, site):
     assert rows["office"]["sizing"] == "peak"
     assert rows["office"]["stats"]["peak_mw"] == pytest.approx(2.0)
     mean_rows = _preview(client, site)
+    assert mean_rows["office"]["stats"]["mean_mw"] == pytest.approx(2.0)   # as the model sees it
     # Mean-preserving 2 MW of an office shape peaks above the 3 MW connection.
     assert mean_rows["office"]["stats"]["peak_mw"] > 3.0
     assert any(w.startswith("default_peak_above_connection") for w in mean_rows["office"]["warnings"])

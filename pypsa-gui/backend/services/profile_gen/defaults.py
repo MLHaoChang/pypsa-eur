@@ -118,8 +118,10 @@ def _poc_mw(ctx) -> float | None:
     return None
 
 
-def _generate_load(ctx, row: Mapping[str, Any], peak_sized: bool) -> tuple[pd.DataFrame, dict]:
-    """The plan's archetype, sized on the model's own snapshots."""
+def _generate_load(ctx, row: Mapping[str, Any],
+                   peak_sized: bool) -> tuple[pd.DataFrame, dict, dict[str, float]]:
+    """The plan's archetype, sized on the model's own snapshots, and its
+    peak and weighted mean as the model will see them."""
     from services.profile_gen import engine
     from services.profile_gen.apply import TARGETS, commercial_timezone, prepare_profile
 
@@ -138,17 +140,19 @@ def _generate_load(ctx, row: Mapping[str, Any], peak_sized: bool) -> tuple[pd.Da
                               attribute="p_set").aligned.to_numpy(dtype=float)
     w = ctx.network.snapshot_weightings[TARGETS[("loads", "p_set")].weighting]
     w = w.reindex(ctx.network.snapshots).to_numpy(dtype=float)
+    model_mean = float(np.sum(aligned * w) / np.sum(w))
     if peak_sized:
         factor = p_set / float(np.max(aligned))
         basis = "peak"
     else:
-        factor = p_set / float(np.sum(aligned * w) / np.sum(w))
+        factor = p_set / model_mean
         basis = "mean"
     meta["scale_mw"] = float(meta["scale_mw"]) * factor
     meta["provenance"] = "synthetic/assumed"
     meta["default"] = {"reason": plan["reason"], "sizing": basis,
                        "static_p_set_mw": p_set, "assumed": True}
-    return result.series[[comp]], meta
+    seen = {"peak_mw": float(np.max(aligned)) * factor, "mean_mw": model_mean * factor}
+    return result.series[[comp]], meta, seen
 
 
 def preview_defaults(ctx, project_dir: str, project: str, *,
@@ -171,7 +175,7 @@ def preview_defaults(ctx, project_dir: str, project: str, *,
                 out.append(row)
                 continue
             try:
-                frame, meta = _generate_load(ctx, row, row["component"] in peak_sized)
+                frame, meta, seen = _generate_load(ctx, row, row["component"] in peak_sized)
             except (ProfileGenError, ProfileApplyError) as exc:
                 out.append({**{k: v for k, v in row.items() if k != "plan"},
                             "skipped": f"cannot generate: {exc}"})
@@ -180,20 +184,19 @@ def preview_defaults(ctx, project_dir: str, project: str, *,
             record = {**meta, "job_id": job_id, "project_id": project,
                       "points": list(frame.columns)}
             write_pending(project_dir, job_id, frame, record)
-            comp = row["component"]
-            mw = frame[comp] * float(meta["scale_mw"])
             warnings: list[str] = []
-            if poc is not None and float(mw.max()) > poc:
+            if poc is not None and seen["peak_mw"] > poc:
                 warnings.append(
                     f"{DEFAULT_PEAK_ABOVE_CONNECTION}: the default's peak "
-                    f"{float(mw.max()):,.2f} MW is above the point of connection's "
+                    f"{seen['peak_mw']:,.2f} MW is above the point of connection's "
                     f"{poc:,.2f} MW")
             out.append({k: v for k, v in row.items() if k != "plan"} | {
                 "job_id": job_id, "kind": row["plan"]["kind"],
                 "reason": row["plan"]["reason"], "assumed": True,
                 "sizing": meta["default"]["sizing"],
                 "static_p_set_mw": row["plan"]["static_p_set_mw"],
-                "stats": {"peak_mw": float(mw.max()), "mean_mw": float(mw.mean())},
+                # As the model will see them: on its snapshots, weighted.
+                "stats": seen,
                 "warnings": warnings, "record": record,
             })
     return out
