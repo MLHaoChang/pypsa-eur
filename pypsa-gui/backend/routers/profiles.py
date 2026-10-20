@@ -647,9 +647,9 @@ def generate_load_profiles(
     # commercial timezone set, its snapshots are UTC (`resolve_time_basis`),
     # so the archetype maps on that zone unless the caller names one.
     if "timezone" not in params:
-        from services.profile_gen.apply import _commercial_timezone
+        from services.profile_gen.apply import commercial_timezone
 
-        tz = _commercial_timezone(ctx)
+        tz = commercial_timezone(ctx)
         if tz:
             params["timezone"] = tz
     try:
@@ -694,7 +694,7 @@ async def upload_load_profiles(
     the project's commercial timezone."""
     from fastapi.concurrency import run_in_threadpool
 
-    from services.profile_gen.apply import _commercial_timezone
+    from services.profile_gen.apply import commercial_timezone
     from services.upload_guard import read_capped
 
     _check_lock(proj, db, user)
@@ -704,7 +704,7 @@ async def upload_load_profiles(
         # A large export is seconds of pandas: off the event loop.
         up = await run_in_threadpool(
             read_load_upload, blob, file.filename or "upload.csv", unit=unit,
-            timezone=timezone, default_timezone=_commercial_timezone(ctx),
+            timezone=timezone, default_timezone=commercial_timezone(ctx),
             year=year, annual_mwh=annual_mwh, only=set(ctx.network.loads.index),
         )
     except ProfileGenError as exc:
@@ -780,9 +780,9 @@ def generate_availability_profiles(
              else pd.DatetimeIndex(snaps)[0])
     params = dict(body.params or {})
     if "timezone" not in params:
-        from services.profile_gen.apply import _commercial_timezone
+        from services.profile_gen.apply import commercial_timezone
 
-        tz = _commercial_timezone(ctx)
+        tz = commercial_timezone(ctx)
         if tz:
             params["timezone"] = tz
     try:

@@ -128,3 +128,31 @@ def test_a_link_p_min_pu_may_be_negative_within_minus_one():
     out = assign_profile(_ctx(), "electrolyser", s, meta, component_type="links",
                          attribute="p_min_pu", time_basis="UTC", now=NOW)
     assert out["min"] == -0.5
+
+
+def test_a_two_way_link_with_its_own_reverse_series_is_refused_not_overwritten():
+    from services.profile_gen.apply import ProfileBoundConflictError
+
+    n = _net(two_way=True)
+    n.links_t.p_min_pu["electrolyser"] = pd.Series(-0.5, index=n.snapshots)
+    with pytest.raises(ProfileBoundConflictError, match="reverse bound"):
+        _apply(_gen("maintenance", {"windows": [{"from": "07-03", "to": "07-04"}]}))
+    assert float(n.links_t.p_min_pu["electrolyser"].iloc[0]) == -0.5
+
+
+def test_the_companion_meta_names_its_own_target():
+    _net(two_way=True)
+    _apply(_gen("maintenance", {"windows": [{"from": "07-03", "to": "07-04"}]}))
+    meta = _user_ts_meta[("links", "p_min_pu", "electrolyser")]
+    assert meta["target"] == ["links", "p_min_pu"]
+    assert meta["kind"] == "maintenance (reverse bound)"
+    assert "replaced_series" not in meta
+
+
+def test_regenerating_a_two_way_shutdown_does_not_compound():
+    n = _net(two_way=True)
+    _apply(_gen("derating", {"threshold_c": -50.0, "per_k": 0.01, "floor": 0.5}))
+    _apply(_gen("derating", {"threshold_c": -50.0, "per_k": 0.01, "floor": 0.5}))
+    lo = n.links_t.p_min_pu["electrolyser"]
+    hi = n.links_t.p_max_pu["electrolyser"]
+    assert (lo.to_numpy() == -hi.to_numpy()).all()

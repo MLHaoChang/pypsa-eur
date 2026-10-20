@@ -164,7 +164,7 @@ def test_generate_maps_working_hours_on_the_projects_commercial_timezone(
 ):
     import services.profile_gen.apply as apply_mod
 
-    monkeypatch.setattr(apply_mod, "_commercial_timezone", lambda ctx: "Europe/Berlin")
+    monkeypatch.setattr(apply_mod, "commercial_timezone", lambda ctx: "Europe/Berlin")
     body = _generate(client, load_project).json()
     assert body["params"]["timezone"] == "Europe/Berlin"
     explicit = _generate(client, load_project,
@@ -242,7 +242,7 @@ def test_an_archetype_lands_once_converted_on_utc_snapshots(
 ):
     import services.profile_gen.apply as apply_mod
 
-    monkeypatch.setattr(apply_mod, "_commercial_timezone", lambda ctx: zone)
+    monkeypatch.setattr(apply_mod, "commercial_timezone", lambda ctx: zone)
     job = _generate(client, load_project,
                     params={"shifts": 1, "peak_mw": 1.0}).json()
     resp = client.post(f"/api/projects/{load_project}/profiles/apply",

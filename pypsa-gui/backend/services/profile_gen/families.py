@@ -212,11 +212,10 @@ def _availability_guard(ctx, component_type: str, component: str,
                 f"generator {component!r} ({carrier}) carries a weather profile; an "
                 "availability series would overwrite it")
     elif meta.get("kind") == "must_run":
-        state = getattr(ctx, "solver_state", None) or {}
-        cfg = state.get("solver_config") if isinstance(state, Mapping) else None
-        commercial = getattr(cfg, "commercial", None) or {}
-        poc = ({commercial.get("poc_link"), commercial.get("export_link")}
-               if isinstance(commercial, Mapping) else set()) - {None}
+        from services.profile_gen.apply import commercial_config
+
+        commercial = commercial_config(ctx)
+        poc = {commercial.get("poc_link"), commercial.get("export_link")} - {None}
         if component in poc:
             raise PocBoundError(
                 f"{component!r} is a point-of-connection link; a floor on the "
