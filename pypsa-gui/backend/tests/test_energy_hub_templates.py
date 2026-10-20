@@ -36,8 +36,11 @@ def _optimize(n):
     from services.adequacy.energization import apply_energization
 
     apply_energization(probe)                     # as run_simulation does
-    status, cond = probe.optimize(solver_name="highs",
-                                  multi_investment_periods=_multi(n))
+    # A committable process unit is planned linearised, as the app does (process_uc auto).
+    from services.solver.process_uc import planning_uc_kwargs
+
+    status, cond = probe.optimize(solver_name="highs", multi_investment_periods=_multi(n),
+                                  **planning_uc_kwargs(probe, None))
     return probe, status, cond
 
 

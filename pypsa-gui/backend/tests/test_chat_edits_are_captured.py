@@ -56,9 +56,14 @@ def _dispatch(tool_name: str, args: dict):
     from services import chat_service
     session = chat_service.ChatSession()
     collected: list[dict] = []
-    frames = list(chat_service._dispatch_real_tool_call(
+    frames = []
+    for event, data in chat_service._dispatch_real_tool_call(
         session, {"id": "tu-1", "name": tool_name, "input": args}, collected,
-    ))
+    ):
+        frames.append((event, data))
+        # LC-04 (owner Q3): an edit shows its card in Expert too; approve it.
+        if event == "tool_pending_confirmation":
+            session.record_decision(data["confirmation_token"], "approve")
     return frames, collected
 
 

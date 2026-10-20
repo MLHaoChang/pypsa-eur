@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The assistant's floating launcher no longer covers the Properties panel or the bottom panel. It floats over the canvas only, above the minimap, and stays compact when idle; the model name and the voice-status note appear on hover, keyboard focus or live chat and remain available to screen readers.
