@@ -137,11 +137,28 @@ def test_simultaneous_charge_and_discharge_count_both_not_the_net(battery, check
 
 
 def test_a_carrier_link_is_disclosed_and_not_counted(wind, checked):
-    wind.network.add("Bus", "H2")
-    wind.network.add("Link", "Electrolyser", bus0="B1", bus1="H2", p_nom=0, carrier="wind")
-    frames, answer = run(checked, _solve(wind), "wind", WIND)
-    assert {b["metric"]: b["value"] for b in answer["blocks"]} == pytest.approx(WIND)
-    assert "1 Links and 0 Stores of this carrier excluded" in public_text(frames)
+    n = wind.network
+    # One gas generator, too dear to run, and one gas Link (a CHP-like path).
+    n.add("Generator", "G3", bus="B1", p_nom=5, marginal_cost=50, carrier="gas")
+    n.add("Bus", "Heat")
+    n.add("Link", "CHP", bus0="B1", bus1="Heat", p_nom=0, carrier="gas")
+    zero = dict.fromkeys(METRICS, 0)
+    frames, answer = run(checked, _solve(wind), "gas", zero)
+    assert answer["receipt"]["request_complete"]
+    assert {b["metric"]: b["value"] for b in answer["blocks"]} == pytest.approx(zero)
+    assert "1 generators and 0 StorageUnits of this carrier; 1 Links and 0 Stores of this carrier excluded" in (
+        public_text(frames))
+
+
+def test_a_refused_storage_unit_leaves_the_generator_metrics_answered(wind, checked):
+    n = wind.network
+    n.add("StorageUnit", "Pumped", bus="B1", p_nom=1, max_hours=2, carrier="wind",
+          cyclic_state_of_charge=True, marginal_cost=1000)
+    frames, answer = run(checked, _solve(wind), "wind", {m: WIND[m] for m in METRICS[:2]})
+    got = slots(answer)
+    assert got["carrier_generator_energy"]["disposition"] == "answered"
+    assert got["carrier_storage_charged_energy"]["disposition"] == "unavailable"
+    assert got["carrier_storage_charged_energy"]["reason"] == "invalid_or_missing_storage_trajectory"
 
 
 @pytest.mark.parametrize("case,reason", [

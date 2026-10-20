@@ -53,7 +53,7 @@ def _carriers(n):
     for component in ("Generator", "StorageUnit", "Link", "Store"):
         static = n.components[component].static
         if "carrier" in static:
-            seen.update(str(c) for c in static["carrier"])
+            seen.update(c for c in static["carrier"] if isinstance(c, str))
     return seen
 
 
@@ -85,10 +85,19 @@ def source(ctx, carrier):
         "carrier": carrier,
         "index": [v.isoformat() for v in n.snapshots],
         "energy_weight": [calculations._number(v) for v in weights],
-        "generators": {name: calculations.source(ctx, name) for name in members["Generator"]},
-        "storage_units": {name: storage.source(ctx, name) for name in members["StorageUnit"]},
+        "generators": {name: _member(calculations.source, ctx, name) for name in members["Generator"]},
+        "storage_units": {name: _member(storage.source, ctx, name) for name in members["StorageUnit"]},
         "excluded": {"Link": len(members["Link"]), "Store": len(members["Store"])},
     }
+
+
+def _member(capture, ctx, name):
+    """A member its own profile refuses stays in the population as None, so only
+    that kind's metrics become unavailable; the other kind is still answered."""
+    try:
+        return capture(ctx, name)
+    except ValueError:
+        return None
 
 
 def _window(raw, scope):
@@ -113,8 +122,8 @@ def _generator_values(raw, scope, a, b):
         return None, None
     series = []
     for name, unit in raw["generators"].items():
-        if unit["index"] != raw["index"]:
-            raise ValueError("misaligned_population")
+        if unit is None or unit["index"] != raw["index"]:
+            return None, None
         windowed = calculations._window(unit, scope)
         _, slots = calculations.calculate(windowed, name)
         if any(s["disposition"] != "answered" for s in slots if s["metric"] in ("dispatch_energy", "peak_dispatch")):
@@ -135,8 +144,8 @@ def _storage_values(raw, scope):
     totals = {"charged_energy": [], "discharged_energy": []}
     unit_scope = {k: scope[k] for k in ("start", "end") if k in scope}
     for name, unit in raw["storage_units"].items():
-        if unit["index"] != raw["index"]:
-            raise ValueError("misaligned_population")
+        if unit is None or unit["index"] != raw["index"]:
+            return None, None
         facts, _ = storage.calculate(
             unit, {**unit_scope, "profile": storage.PROFILE, "entity_id": name, "metrics": list(totals)}
         )
@@ -201,7 +210,7 @@ def notes(raw, scope):
         f"{excluded['Link']} Links and {excluded['Store']} Stores of this carrier excluded."
     ]
     a, b = _window(raw, scope)
-    if any(unit["inputs"]["duration"][a : b + 1] != raw["energy_weight"][a : b + 1]
+    if any(unit is not None and unit["inputs"]["duration"][a : b + 1] != raw["energy_weight"][a : b + 1]
            for unit in raw["storage_units"].values()):
         lines.append(
             "Store and generator weights differ in this window; PyPSA's energy-balance statistics weight "
