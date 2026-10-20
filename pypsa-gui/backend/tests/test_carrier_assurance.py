@@ -165,6 +165,7 @@ def test_a_refused_storage_unit_leaves_the_generator_metrics_answered(wind, chec
     ("links_only", "carrier_outside_scope"),
     ("ambiguous", "ambiguous_carrier"),
     ("unknown", "unknown_carrier"),
+    ("case_variant", "unknown_carrier"),
 ])
 def test_unsupported_carriers_are_refused_by_name(wind, checked, case, reason):
     n = wind.network
@@ -175,6 +176,8 @@ def test_unsupported_carriers_are_refused_by_name(wind, checked, case, reason):
         carrier = "hydrogen"
     elif case == "ambiguous":
         n.add("Generator", "G3", bus="B1", p_nom=1, marginal_cost=50, carrier="Wind")
+    elif case == "case_variant":
+        carrier = "WIND"
     else:
         carrier = "solar"
     ctx = _solve(wind)
@@ -185,6 +188,8 @@ def test_unsupported_carriers_are_refused_by_name(wind, checked, case, reason):
     assert receipt.get("request_complete") is False
     assert {s["disposition"] for s in receipt["result_slots"]} == {"unavailable"}
     assert {s["reason"] for s in receipt["result_slots"]} == {reason}
+    if case == "case_variant":
+        assert "did you mean wind?" in public_text(frames)
 
 
 def test_one_invalid_generator_makes_the_carrier_metric_unavailable(wind, checked):
