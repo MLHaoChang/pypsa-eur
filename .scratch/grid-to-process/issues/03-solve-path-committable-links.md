@@ -1,6 +1,6 @@
 # Solve path: committable Links
 
-Status: needs-triage
+Status: done
 Type: task
 Blocked by: 02
 Gated: **yes** (solver engine: send the gatekeeper the plan first)
