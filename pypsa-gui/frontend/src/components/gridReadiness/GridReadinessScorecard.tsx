@@ -16,7 +16,6 @@ import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, Chev
 import { create } from 'zustand'
 import { campusApi, type GridReadiness, type GridReadinessRow, type GridReadinessVerdict }
   from '../../api/campusElectrical'
-import { nk } from '../../utils/queryKeys'
 import { useUIStore } from '../../store/uiStore'
 import { useChatReadiness } from '../../hooks/useChatProfiles'
 import { ask, ASK_TITLE } from '../../pages/hubDesign/delegate'
@@ -67,11 +66,14 @@ export const useScorecardOpen = create<OpenState>(set => ({
 
 export function useGridReadiness(enabled = true) {
   const project = useUIStore(s => s.currentProject)
+  // Under the campus root, so a campus run's invalidation refreshes it too;
+  // read again on each mount, since a network or island edit changes it.
   return useQuery({
-    queryKey: nk(project, 'grid_readiness'),
+    queryKey: ['campusElectrical', 'grid_readiness', project],
     queryFn: () => campusApi.gridReadiness(project ?? ''),
     enabled: !!project && enabled,
-    staleTime: 30_000,
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 }
 
@@ -116,7 +118,7 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
   onJump: (type: string, name: string) => void
   fieldLabels: Record<string, string>; noAssistant: boolean
 }) {
-  const key = `row:${row.id}`
+  const key = `row:${mode}:${row.id}`
   const open = useScorecardOpen(s => s.open[key] ?? false)
   const toggle = useScorecardOpen(s => s.toggle)
   const where = editableIn(row, fieldLabels)
@@ -148,22 +150,25 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
         )}
         {mode === 'guided' && (
           <button type="button" data-testid={`gr-ask-${row.id}`}
+            aria-label={`Ask the assistant about ${row.requirement}`}
             onClick={() => ask(`On the grid-readiness scorecard, explain "${row.requirement}": `
               + `why it reads ${VERDICT[row.verdict].word.toLowerCase()}, what the limit and its source are, `
               + 'and what I could change.')}
             disabled={noAssistant} title={noAssistant ? NO_ASSISTANT : ASK_TITLE}
             className="shrink-0 inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[11px] text-muted hover:border-accent hover:text-accent disabled:opacity-50 disabled:hover:border-border disabled:hover:text-muted">
-            <MessageCircleQuestion size={12} /> Ask the assistant about this
+            <MessageCircleQuestion size={12} /> Ask the assistant
           </button>
         )}
         <button type="button" data-testid={`gr-more-${row.id}`} aria-expanded={open}
+          aria-controls={`gr-detail-${mode}-${row.id}`}
+          aria-label={`${open ? 'Hide' : 'Show'} the source of ${row.requirement}`}
           onClick={() => toggle(key, false)}
           className="shrink-0 text-[11px] text-muted hover:text-accent inline-flex items-center gap-0.5">
           {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />} {open ? 'Less' : 'Source'}
         </button>
       </div>
       {open && (
-        <div data-testid={`gr-detail-${row.id}`} className="ml-[4.5rem] flex flex-col gap-0.5 text-[11px] text-muted">
+        <div id={`gr-detail-${mode}-${row.id}`} data-testid={`gr-detail-${row.id}`} className="ml-[4.5rem] flex flex-col gap-0.5 text-[11px] text-muted">
           <div><span className="text-text">Source:</span> {row.source}</div>
           {row.note && !missing && <div>{row.note}</div>}
           {mode === 'guided' && where && (

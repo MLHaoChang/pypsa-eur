@@ -563,14 +563,25 @@ def test_the_copilot_tool_is_a_read_service_call(hub, monkeypatch):
     assert calls == [("Readiness Hub", "generic_assumed")]
 
 
-@pytest.mark.parametrize("tid", TIDS)
-def test_a_missing_input_is_said_in_plain_words(tmp_path, tid):
-    """The note of an unknown row is what the panel shows first (UX review):
-    no attribute ids, file names or API paths."""
-    d, n = _project(tmp_path, tid)
+RAW_IDS = ("eh_", "/api/", "p_max_pu", "p_nom", "island_config", "sidecar", "dc_load", "ups_bridged",
+           "IBR", "pf_rated", "offered_services", "gridspine", "rvc_limit_pct", "q_range_demand",
+           "eu_rfg_dcc_ce", "generic_assumed", "DC 0", "has_grid_former", "_mva")
+
+
+@pytest.mark.parametrize("tid, dc_load", [(t, None) for t in TIDS] + [(t, {}) for t in DC_IDS])
+def test_the_panel_text_is_in_plain_words(tmp_path, tid, dc_load):
+    """What the panel and the report show (requirement, limit, project value,
+    source, note) carries no attribute ids, file names, API paths, profile or
+    scenario ids (UX review, checklist 6.9). Asset names are the user's own and
+    stay. An unknown row's note, shown first, starts as a sentence."""
+    d, n = _project(tmp_path, tid, dc_load=dc_load)
+    (d / "campus_electrical").mkdir()
+    (d / "campus_electrical" / "island_study.json").write_text(json.dumps(
+        {"variants": {"ups_bridged": {"status": "infeasible"}, "seamless": {"status": "ok"}}}))
     for r in G.grid_readiness(d, n, PROFILE)["rows"]:
-        if r["verdict"] != "unknown" or r["id"].startswith("dynamic:"):
-            continue
-        for word in ("eh_", "/api/", "p_max_pu", "island_config.json", "dc_load"):
-            assert word not in (r["note"] or ""), (r["id"], r["note"])
-        assert r["note"][0].isupper(), (r["id"], r["note"])
+        text = " ".join(str(r[k]) for k in ("requirement", "limit", "project_value", "source", "note")
+                        if r[k] is not None)
+        for word in RAW_IDS:
+            assert word not in text, (r["id"], word, text)
+        if r["verdict"] == "unknown":
+            assert r["note"][0].isupper(), (r["id"], r["note"])

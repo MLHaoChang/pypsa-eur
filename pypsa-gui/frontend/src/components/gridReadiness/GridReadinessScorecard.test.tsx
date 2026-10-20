@@ -128,6 +128,18 @@ describe('GridReadinessScorecard', () => {
     expect(screen.getByTestId('gr-detail-scr')).toBeTruthy()
   })
 
+  it('names each row button for a screen reader, and keeps open rows per mode', async () => {
+    const user = userEvent.setup()
+    const { unmount } = render(<GridReadinessScorecard data={DATA} mode="guided" />)
+    expect(screen.getByRole('button', { name: 'Ask the assistant about Short-circuit ratio at the PoC' }))
+      .toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Show the source of Short-circuit ratio at the PoC' }))
+    expect(screen.getByTestId('gr-detail-scr')).toBeTruthy()
+    unmount()
+    render(<GridReadinessScorecard data={DATA} mode="expert" />)
+    expect(screen.queryByTestId('gr-detail-scr')).toBeNull()       // Expert keeps its own state
+  })
+
   it('words the summary per mode', () => {
     expect(summaryText(DATA.summary, 'expert')).toBe('2 red flags · 2 unknown · 3 assumed')
     expect(summaryText(DATA.summary, 'guided')).toBe('2 things to look at, 2 not yet known')

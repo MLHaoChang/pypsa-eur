@@ -110,7 +110,7 @@ export default function IssuesPanel() {
   // behind the still-open Issues panel.
   // The grid-readiness scorecard (DC 02): shown only when the project has a
   // saved network to read; a failed read leaves the panel as it was.
-  const { data: gridReadiness } = useGridReadiness(!!currentProject)
+  const { data: gridReadiness } = useGridReadiness()
 
   const jumpTo = (type: string, name: string) => {
     setSelectedComponent({ type, name })
@@ -302,7 +302,7 @@ export default function IssuesPanel() {
         {gridReadiness && (
           <PageSection
             title="Grid readiness"
-            hint="Screening against the connection limits and grid code; advisory, nothing blocks a run"
+            hint="Screening against the connection limits and the grid code"
             bodyClassName=""
           >
             <div data-testid="grid-readiness-group">

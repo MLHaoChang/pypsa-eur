@@ -60,8 +60,12 @@ def _services_text(services) -> str:
 
 _FREQUENCY_SERVICES = ("grid_forming", "synthetic_inertia", "frequency_containment",
                        "fast_frequency_response")
-_BEFORE_MITIGATION = ("IT-side at the PoC before UPS/BESS smoothing (DC 03) (DC 01 envelope): "
-                      "the verdict is before mitigation, not final")
+_BEFORE_MITIGATION = ("the AI-training load is read at the point of connection before any UPS or "
+                      "battery smoothing, so the verdict is before mitigation, not final")
+#: The island study's scenarios in words.
+SCENARIO_WORDS = {"ups_bridged": "UPS-bridged", "seamless": "seamless", "planned": "planned"}
+#: Who a dynamic requirement applies to, in words.
+_APPLIES_WORDS = {"ibr": "the site's inverter-based units", "facility": "the site", "load": "the load"}
 _NO_ENVELOPE = ("No AI-training load profile on this project, so its ramp, swing and oscillation "
                 "are not known (a data-centre project created with the AI-training profile has one)")
 
@@ -140,6 +144,11 @@ class _Inputs:
         return self.links[0] if self.links else None
 
 
+def _profile_title(inp: "_Inputs") -> str:
+    """The grid code by its title (a project profile may have none: then its id)."""
+    return str((inp.profile or {}).get("title") or (inp.profile or {}).get("name") or "the grid code")
+
+
 def _marking_assumed(row: dict | None) -> bool:
     """A marking is assumed unless it is there and tagged ``code``."""
     return row is None or str(row.get("source")) != "code"
@@ -152,8 +161,10 @@ def _envelope_assumed(inp: _Inputs) -> bool:
 def _marking_source(row: dict) -> tuple[str, bool]:
     src = str(row.get("source") or "assumed")
     note = row.get("note") or ""
-    return (f"template ledger ({src}): {note}" if note else f"template ledger ({src})",
-            src != "code")
+    if note.lower().startswith("assumed: "):
+        note = note[len("assumed: "):]
+    lead = "Template assumption" if src == "assumed" else f"Template value ({src})"
+    return (f"{lead}: {note}" if note else lead, src != "code")
 
 
 # ── rows ───────────────────────────────────────────────────────────────────
@@ -166,7 +177,7 @@ def _scr_rows(inp: _Inputs) -> list[dict]:
     fault_assumed = _marking_assumed(fault)
     target = _target("connection", "Bus", (fault or {}).get("entity"), "eh_sk_mva")
     base = dict(limit=PASS_SCR, unit=None,
-                source=("EH product rule on gridspine's SCR bands (moderate edge 3.0); "
+                source=("Screening rule: an SCR of 3.0, the edge between moderate and strong grids; "
                         "assumed, not a grid-code value"),
                 section="connection", target=target)
     if inp.n is None:
@@ -175,7 +186,6 @@ def _scr_rows(inp: _Inputs) -> list[dict]:
                      **base)]
     gates, status, payload, note = evaluate_network_scr_gate(inp.n)
     if status != "ok" or gates is None:
-        base["source"] += f"; the gate: {note}"
         return [_row("scr", "Short-circuit ratio at the PoC", project_value=None,
                      verdict="unknown", assumed=True,
                      note=("No short-circuit level and inverter capacity at every point of connection, "
@@ -184,8 +194,9 @@ def _scr_rows(inp: _Inputs) -> list[dict]:
     extra = "; below it an EMT study is recommended" if gates.emt_recommended else ""
     return [_row("scr", "Short-circuit ratio at the PoC", project_value=round(payload["min_scr"], 3),
                  verdict=verdict, assumed=True,
-                 note=(f"min SCR at {payload['min_bus']} (eh_sk_mva over IBR MVA){extra}; "
-                       + ("fault level assumed" if fault_assumed else "fault level as entered")),
+                 note=(f"Lowest SCR, at {payload['min_bus']}: fault level over inverter-based capacity "
+                       f"(MVA){extra}; " + ("fault level assumed" if fault_assumed
+                                            else "fault level as entered")),
                  **base)]
 
 
@@ -245,17 +256,17 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
         notes = [f"{r['period']}: binding hour {r['binding_snapshot']}, hourly-mean load "
                  f"{r['load_mw']:.4g} MW against {describe(r)} (checked hour by hour; the period's "
                  f"peak is {r['peak_mw']:.4g} MW)",
-                 "energization schedule" if r["scheduled"] else "no energization schedule: p_nom",
+                 "energization schedule" if r["scheduled"] else "no energization schedule: the connection's capacity",
                  f"import efficiency from {loss_src}",
                  "fixed loads only (a flexible conversion unit is a decision, not counted)"]
         if uplift is not None:
             notes.append(f"the in-hour AI-training step is about {uplift:.3g} MW above the hourly "
-                         "mean (DC 01 peak_note), so headroom below that is a warning")
+                         "mean, so headroom below that is a warning")
         rows.append(_row(f"energization_peak:{r['period']}", f"{req} ({r['period']})",
                          limit=round(r["cap_mw"], 4), unit="MW",
-                         source=("energization schedule (template ledger: assumed) and the island "
-                                 "sidecar's genset N+k" if r["scheduled"]
-                                 else "the import Link's p_nom and the island sidecar's genset N+k"),
+                         source=("The energization schedule (a template assumption) and the island "
+                                 "requirements' genset N+k" if r["scheduled"]
+                                 else "The connection's capacity and the island requirements' genset N+k"),
                          project_value=round(r["load_mw"], 4), verdict=verdict,
                          assumed=_marking_assumed(loss) or bool(inp.meta.get("energization")),
                          note="; ".join(notes), section="connection", target=target))
@@ -291,8 +302,8 @@ def _ramp_row(inp: _Inputs) -> dict:
     return _row("ramp_rate", req, limit=limit, unit="MW/min", source=source,
                 project_value=round(per_min, 4), verdict="pass" if per_min <= limit else "fail",
                 assumed=assumed or _envelope_assumed(inp),
-                note=(f"envelope max ΔP/Δt {per_s:.4g} MW/s = {per_min:.4g} MW/min (steeper of the "
-                      f"step and the oscillation slope); {_BEFORE_MITIGATION}"),
+                note=(f"Steepest load change {per_s:.4g} MW/s = {per_min:.4g} MW/min (the steeper of the "
+                      f"training step and the oscillation); {_BEFORE_MITIGATION}"),
                 section="connection", target=target)
 
 
@@ -335,10 +346,10 @@ def _rvc_row(inp: _Inputs) -> dict:
     lim = (inp.profile or {}).get("rvc_limit_pct")
     if not isinstance(lim, dict):
         return _row("rapid_voltage_change", req, limit=None, unit="% of nominal",
-                    source=inp.profile_error or "the profile sets no rvc_limit_pct",
+                    source=inp.profile_error or "The grid code sets no rapid-voltage-change limit",
                     project_value=None, verdict="unknown", assumed=True,
                     note="The grid code sets no rapid-voltage-change limit", section="connection", target=target)
-    limit, source = float(lim["value"]), f"{inp.profile['name']}: {lim['clause']}"
+    limit, source = float(lim["value"]), f"{_profile_title(inp)}: {lim['clause']}"
     lim_assumed = lim.get("source") != "code"
     sk = _poc_sk_mva(inp.n) if inp.n is not None else None
     fault_assumed = _marking_assumed(inp.marking("fault_level"))
@@ -353,7 +364,7 @@ def _rvc_row(inp: _Inputs) -> dict:
     return _row("rapid_voltage_change", req, limit=limit, unit="% of nominal", source=source,
                 project_value=round(d, 4), verdict="pass" if d <= limit else "warn",
                 assumed=lim_assumed or fault_assumed or _envelope_assumed(inp),
-                note=(f"d ≈ ΔP / Sk × 100 = {swing:.4g} MW / {sk:g} MVA: a screening upper bound "
+                note=(f"Voltage change ≈ load step / fault level × 100 = {swing:.4g} MW / {sk:g} MVA: a screening upper bound "
                       "(IEC 61000-3-7 style) that ignores the grid X/R; above the limit a power-flow "
                       f"or EMT study is needed; {_BEFORE_MITIGATION}"),
                 section="connection", target=target)
@@ -400,10 +411,10 @@ def _reactive_row(inp: _Inputs) -> dict:
     target = _target("assets", None, None, "control")
     if not isinstance(lim, dict):
         return _row("reactive_range", req, limit=None, unit="Mvar",
-                    source=inp.profile_error or "the profile sets no q_range_demand",
+                    source=inp.profile_error or "The grid code sets no reactive range",
                     project_value=None, verdict="unknown", assumed=True, note="The grid code sets no reactive range",
                     section="assets", target=target)
-    source = f"{inp.profile['name']}: {lim['clause']}"
+    source = f"{_profile_title(inp)}: {lim['clause']}"
     assumed = lim.get("source") != "code"
     services = _services(inp)
     if services is None or not inp.connection_mw:
@@ -433,17 +444,22 @@ def _reactive_row(inp: _Inputs) -> dict:
         verdict = "unknown"
     else:
         verdict = "warn"
-    note = (f"needed {lim['value']:g} × {inp.connection_mw:g} MW import = {need:.4g} Mvar; offered "
-            f"{have:.4g} Mvar ({', '.join(parts) or 'none'}) as P·tan(acos pf_rated), an assumed "
-            "capability at rated P from the units offering voltage control (a "
-            "not-credited unit counts zero)")
-    if unsized and verdict == "unknown":
-        note = (f"Not sized yet: {', '.join(unsized)}; run the plan to see the reactive range "
-                f"{'it adds' if len(unsized) == 1 else 'they add'}. " + note[0].upper() + note[1:])
-    elif unsized:
-        note += f"; {', '.join(unsized)} extendable and not yet sized (run the plan)"
+    derivation = (f"Needed {lim['value']:g} × {inp.connection_mw:g} MW import = {need:.4g} Mvar; "
+                  f"offered {have:.4g} Mvar ({', '.join(parts) or 'none'}) as P × tan(acos rated "
+                  "power factor), an assumed capability at rated power from the units offering "
+                  "voltage control (a unit the island study does not credit counts zero)")
     if unrated:
-        note += f"; {', '.join(unrated)} counted zero: no pf_rated or no rating in the network"
+        derivation += f"; {', '.join(unrated)} counted zero: no rated power factor or no rating"
+    source = f"{source}. {derivation}"
+    if unsized and verdict == "unknown":
+        note = (f"Not sized yet: {', '.join(unsized)} — run the plan to see the reactive range "
+                f"{'it adds' if len(unsized) == 1 else 'they add'}.")
+    elif unsized:
+        note = f"Enough without {', '.join(unsized)}, which are not sized yet"
+    elif verdict == "warn":
+        note = f"Short by {need - have:.4g} Mvar"
+    else:
+        note = "Covered by the units offering voltage control"
     return _row("reactive_range", req, limit=round(need, 4), unit="Mvar", source=source,
                 project_value=round(have, 4), verdict=verdict, assumed=True, note=note,
                 section="assets", target=target)
@@ -456,21 +472,22 @@ def _support_rows(inp: _Inputs) -> list[dict]:
     freq = [s for s in (offered or []) if s in _FREQUENCY_SERVICES]
     rows = [_row("frequency_support", "Frequency support offered by the site's converters",
                  limit="at least one of " + _services_text(_FREQUENCY_SERVICES), unit=None,
-                 source="assumed: the scorecard's own expectation for a large connection; no "
-                        "profile limit", project_value=_services_text(offered) if offered else
+                 source="Assumed: the scorecard's own expectation for a large connection; the grid "
+                        "code sets no limit", project_value=_services_text(offered) if offered else
                  ("none" if offered is not None else None),
                  verdict="unknown" if offered is None else ("pass" if freq else "warn"),
                  assumed=True,
                  note=_no_island_note(inp) if offered is None else
-                 f"control preset {services['preset'] or 'none'}; what each unit offers follows its "
-                 "control (DC 04 offered_services)", section="assets", target=target)]
+                 f"Control preset: {(services['preset'] or 'none').replace('_', ' ')}; what each unit "
+                 "offers follows its control mode", section="assets", target=target)]
     for r in (inp.profile or {}).get("dynamic_requirements") or []:
         rows.append(_row(f"dynamic:{r['id']}", r["requirement"], limit=r["value"], unit=None,
-                         source=f"{inp.profile['name']}: {r['clause']}",
+                         source=f"{_profile_title(inp)}: {r['clause']}",
                          project_value=(_services_text(offered) if offered else None),
                          verdict="unknown", assumed=r.get("source") != "code",
-                         note=f"dynamic (EMT) study needed; applies to {r.get('applies_to', 'facility')}; "
-                              "a steady-state screening never passes it",
+                         note=("Needs a dynamic (EMT) study; it applies to "
+                               f"{_APPLIES_WORDS.get(r.get('applies_to', 'facility'), 'the site')}; a "
+                               "steady-state screening never passes it"),
                          section="assets", target=target))
     return rows
 
@@ -480,7 +497,7 @@ def _island_rows(inp: _Inputs) -> list[dict]:
     scenarios = list(((inp.island_raw or {}).get("requirements") or {}).get("scenarios") or [])
     if inp.island is None:
         return [_row("grid_former", "A unit that forms the island's voltage", limit="a grid-forming battery or a genset",
-                     unit=None, source="the island study's own rule (has_grid_former)",
+                     unit=None, source="The island study's rule: a grid-forming battery or a genset forms the voltage",
                      project_value=None, verdict="unknown", assumed=False,
                      note=f"Not assessed: {_no_island_note(inp)}", section="assets", target=target)]
     from services.adequacy.island_config import has_grid_former
@@ -492,9 +509,10 @@ def _island_rows(inp: _Inputs) -> list[dict]:
     gf = has_grid_former(inp.island)
     rows.append(_row("grid_former", "A unit that forms the island's voltage",
                      limit="a grid-forming battery or a genset", unit=None,
-                     source="the island study's own rule (has_grid_former)",
+                     source="The island study's rule: a grid-forming battery or a genset forms the voltage",
                      project_value="yes" if gf else "none", verdict="pass" if gf else "fail",
-                     assumed=False, note=f"islanding scenarios {', '.join(scenarios)}",
+                     assumed=False,
+                     note=f"Islanding scenarios: {', '.join(SCENARIO_WORDS.get(x, x) for x in scenarios)}",
                      section="assets", target=target))
     vals = (inp.island_raw.get("requirements") or {})
     bridge = _num((vals.get("bridge_s") or {}).get("value") if isinstance(vals.get("bridge_s"), dict)
@@ -507,16 +525,17 @@ def _island_rows(inp: _Inputs) -> list[dict]:
             verdict, value, note = ("unknown", None,
                                     "No island study since the island requirements were saved: run it")
         elif v.get("status") == "ok":
-            verdict, value, note = "pass", "feasible", "the hub LP sized with the island rows is feasible"
+            verdict, value, note = "pass", "feasible", "The plan, sized with the island rows, is feasible"
         else:
             verdict, value = "fail", str(v.get("status"))
-            note = f"the island study's {sc} variant: {v.get('reason') or v.get('condition') or v.get('status')}"
+            note = (f"The island study's {SCENARIO_WORDS.get(sc, sc)} case: "
+                    f"{v.get('reason') or v.get('condition') or v.get('status')}")
         if inp.island_study is not None:
             note += "; the study is the stored one, re-run it after a network edit"
-        rows.append(_row(f"ride_through:{sc}", f"Island ride-through ({sc})",
+        rows.append(_row(f"ride_through:{sc}", f"Island ride-through ({SCENARIO_WORDS.get(sc, sc)})",
                          limit=(f"bridge {bridge:g} s on {', '.join(storage) or 'the site storage'}"
-                                if bridge is not None else "the sidecar's island rows"),
-                         unit=None, source="island sidecar requirements (values tagged in the sidecar)",
+                                if bridge is not None else "the island requirements"),
+                         unit=None, source="The island requirements (each value tagged with its source)",
                          project_value=value, verdict=verdict,
                          assumed=_sidecar_assumed(inp.island_raw), note=note, section="assets",
                          target=target))
@@ -552,7 +571,7 @@ def _lole_row(inp: _Inputs) -> dict:
         limit = float(row["value"])
         source, assumed = _marking_source(row)
     else:
-        return _row("lole", req, limit=None, unit="h/yr", source="no LOLE goal in the template ledger",
+        return _row("lole", req, limit=None, unit="h/yr", source="No LOLE goal in the template's assumptions",
                     project_value=None, verdict="unknown", assumed=True,
                     note="The project sets no LOLE goal (an ENS cap only, or none)",
                     section="scenarios", target=target)
@@ -564,8 +583,8 @@ def _lole_row(inp: _Inputs) -> dict:
                     verdict="unknown", assumed=assumed, note=note, section="scenarios", target=target)
 
     if payload is None or mean is None or years is None or years <= 0:
-        return unknown("No reliability study for this project in this session" if inp.eh_study is None
-                       else "The reliability study did not certify an MC LOLE")
+        return unknown("No reliability study for this project since the app was opened" if inp.eh_study is None
+                       else "The reliability study did not certify a Monte-Carlo LOLE")
     if inp.study_edited is not False:
         return unknown("Stale: the network was edited since the study, re-run it" if inp.study_edited
                        else "The study's network revision is not known")
@@ -582,7 +601,7 @@ def _lole_row(inp: _Inputs) -> dict:
                                "ci_h_per_year": None if hi is None else [round(lo, 4), round(hi, 4)],
                                "horizon_years": years},
                 verdict=verdict, assumed=assumed,
-                note=f"MC LOLE annualised over {years:g} modelled year(s); {why}",
+                note=f"Monte-Carlo LOLE annualised over {years:g} modelled year(s); {why}",
                 section="scenarios", target=target)
 
 
