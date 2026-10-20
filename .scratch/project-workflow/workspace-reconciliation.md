@@ -98,7 +98,7 @@ The legacy IEEE, Belgium and tutorial networks leave Home. They stay under New p
 
 ### 3.2 Builder (#436 screen 2, adapted)
 
-The Builder asks four things and nothing that a section owns (B4's rule, kept):
+The Builder asks four things and nothing that a section owns (B4's rule, kept). It owns none of them either: it **mounts section 1's editors** (name, pin, planning period) and **section 8's scope component**, so each value has one editor:
 
 | Field | Home section | Notes |
 |---|---|---|
@@ -146,7 +146,7 @@ The lists below are the parameters a Guided user sets today (generic-site form, 
 - Required inputs:
   - **project name**;
   - **site location**: lat/lon, with the country and timezone derived from it;
-  - **growth-stage years**: 1–3 stages, whole years from 2025 to 2060, increasing, before the horizon end (2045);
+  - **growth-stage years**: 1–3 stages, whole years from 2025 to 2060, increasing, before the horizon end (2045). Editable where the engine accepts it: the generic site (`eh_site`) today; the example templates only after E1 (§3.3). Before E1, an example shows its years read-only with "Rebuild for other years arrives with E1", so Guided never offers an edit the engine refuses;
   - **time base**: representative weeks, or a chronological year (GTP-09).
 - Advanced:
   - resolution (15 min … monthly; hourly by default);
@@ -213,10 +213,9 @@ The lists below are the parameters a Guided user sets today (generic-site form, 
   - **UPS**: power (MW; 0 or ≥ the critical load) and bridge time (min, 10–240);
   - **ride through grid outages** (needs a battery);
   - **outage data** per firm unit (forced-outage rate, repair time): today an `eh_readiness` "outage data" gap;
-  - **overnight cost** of each candidate (`assumed` from the template).
+  - **overnight cost** and **lifetime** of each candidate (`assumed` from the template; home 5, per asset).
 - Advanced:
   - unit commitment (min load, min up/down, ramp, restart);
-  - lifetimes;
   - the per-period vintage bounds;
   - the full Controls block (§10);
   - availability (maintenance, must-run, derating);
@@ -327,13 +326,13 @@ These follow #436's presets. The user can change any of them.
 
 ### 6.1 Shape
 
-The Expert sidebar becomes the ten sections, in flow order, each row with its state dot (design §3.4) and the group chips of the blocks it holds. It sits under three bands:
+The Expert sidebar becomes the ten sections, in flow order, each row with its state dot (design §3.4) and the group chips of the blocks it holds. It sits under three bands (section 8 holds inputs, hence "Question & run"):
 
 | Band | Sections |
 |---|---|
 | **Set-up** | 1, 2 |
 | **Model** | 3–7 |
-| **Run** | 8, 9 |
+| **Question & run** | 8, 9 |
 
 **Results & hand-off** (10) sits below, sub-grouped by work group (§6.3). **Project** utilities sit at the foot. This answers both of #436's Expert concerns:
 - grouped by purpose;
@@ -428,7 +427,7 @@ Gating column: the existing gate is **kept**. RO means "read-only role: the serv
 | Campus › Island › per-unit control mode | **moves** to 5 › Controls (J16; §10) | — |
 | Campus › Island › Grid-forming settings (droop, τ_f, H, i_max) | inputs → 5 › Controls; the recommendation → 10 › Controls with an "apply" that writes 5 through the confirmation card | after the island config is saved |
 | Campus › Campus file (YAML), Campus › Library | 5 [Grid], electrical infrastructure (raw file Expert-only); the library is picked inline (C1) | hub project kind |
-| Economics › Asset costs (overnight cost) | 5 › Commercial block on each asset; the table view stays as 7's "All asset costs" read-only view linking to 5 | — |
+| Economics › Asset costs (overnight cost) | 5: per asset in the form's Commercial block, **and** an editable "All asset costs" table in 5 (same field editors, bulk editing kept, like "All bounds"); 7 shows a read-only cost summary linking to 5 | — |
 | Time Series › Renewables, Conventional, Demand Response, Links | 6 (overview); each row opens the asset's Availability block in 5 | — |
 | Properties › Bus › Energy Hub › IBR capacity | 5 | — |
 | Rescale dialog | 5 (and 4), unchanged | — |
@@ -448,7 +447,7 @@ Gating column: the existing gate is **kept**. RO means "read-only role: the serv
 | Economics › Tariffs and contracts (tariff, contracts, participants) | 7 | participants RO |
 | Economics › Library | Library page (workspace) + inline pickers in 5 and 7 (C1) | — |
 | Results › Investment case › Participants, Tariff, Contracts, Finance inputs, Library | **move** to 7 (J8); Results keeps the read-only Bill and Investment case with links | RO |
-| Solver Settings › Dispatch › Economic assumptions (discount rate, lifetime) | discount rate read-only, linking to 7 (J6); lifetime → 5 | — |
+| Solver Settings › Dispatch › Economic assumptions (discount rate, lifetime) | discount rate read-only, linking to 7 (J6); per-asset lifetime → 5 (form and the "All asset costs" table); the project-wide default lifetime stays in 7's finance inputs | — |
 | Decision › Prices and tariffs, Finance, Assumptions ledger | stay inside the Decision study (own project kind, desktop-only); not a flow destination | desktop-only |
 
 **8 Scenarios & optimisation**
@@ -470,7 +469,7 @@ Gating column: the existing gate is **kept**. RO means "read-only role: the serv
 
 | Current | New home | Gating kept |
 |---|---|---|
-| RUN › Issues (preflight, site layout, topology) | 9, grouped by section; "Not in scope" list (§5.2) | site layout in site view |
+| RUN › Issues (preflight, site layout, topology) | 9, grouped by section; "Not in scope" list (§5.2); an item opens its field in place and the list stays to return to; fixed items clear live (J9) | site layout in site view |
 | RUN › Solve Queue | 9 | admin actions super-admin |
 | Header Run (LOPF / Load flow / AC PF) | 9 + header (one Run) | gate = server verdict |
 | DC-02 scorecard (#442: Expert Issues, Guided Site card) | 9 [Grid] verdicts; its input rows in 3 | — |
@@ -525,7 +524,7 @@ Each was edited in two places before. Each move is in B2's list (design §5), ke
 |---|---|
 | Capacity | Summary; Investment; Reliability; Operation |
 | Grid | Load flow; scorecard verdicts (read-only copy of 9); campus electrical results; connection capacity; connection-point assessment |
-| Controls | island study results; frequency cuts; grid-forming recommendation (its "apply" writes the section-5 values through the confirmation card) |
+| Controls | island study results; frequency cuts; grid-forming recommendation (its "apply" is confirmed on LC-04's EditCard, old → new naming section 5; the receipt links to 5) |
 | Hand-off | Reports; exports; the specialist packet |
 
 A group out of scope shows its tab as "Outside scope", never as passed.
@@ -593,7 +592,7 @@ Existing pieces:
 | Required inputs | rating (`pf_rated`, read-only, from Sizing); the services it offers (from `offered_services`, read-only) | `pf_rated`, `neg_seq`; `cos_phi` / `cosphi_p_points`; `qu_points`; FFR `fw_k_mw_per_hz`, `fw_deadband_hz`, `fw_delay_s`, `fw_ramp_mw_per_s`, `fw_p_limit_mw`; GFM `droop_pct`, `q_droop_pct`, `tau_f_s` or `H_v_s`, `i_max_pu`, `k_gfm_min`; UPS `walk_in_s`, `f_window_hz`, `transfers_on_islanding` |
 | Site-level | island requirements in 8 (sustained hours, bridge s, fuel autonomy, GFM margin, RoCoF window, frequency limits) | the same, in 8 |
 | Warnings | `preset_leaves_no_grid_former`, `preset_not_applied_to_unit` show as section-5 warnings | the same |
-| Results | 10 › Controls; the GFM recommendation's "apply" writes 5 through the confirmation card | the same |
+| Results | 10 › Controls; the GFM recommendation's "apply" goes through LC-04's EditCard (old → new per field, naming section 5), and its receipt links to the asset's Controls block in 5 | the same |
 
 There is one editor: the island panel's per-unit dropdown and GFM inputs move to 5 (J16). DC-04's presets (#422) become this block. The engine side (which kinds and controls the island check credits, and whether the preset route is the right write path from an asset form) goes to the gatekeeper with §11.1.
 
@@ -680,25 +679,26 @@ B1 (#434) stays as is. The queued B2–B6 are re-cut as **W-slices**; the old ti
 |---|---|---|---|---|
 | **W0 Separability matrix** | §11.1 matrix with native tests; lock-free verdict functions for each kind it marks supported | new (#436 slice 0) | gatekeeper | B1 |
 | **W1 Visual system** | tokens (Manrope + OFL self-hosted, graphite/navy dark, cool light, red accents), wordmark, `brand.theme.test.ts`; no layout change | new | UX | #437 and #441 merged (they touch `index.css`) |
-| **W2 Home and Builder** | §3: Home (Resume, examples with artwork, build your own, my projects), the Builder (name, pin, period, groups) → open in the flow at the first incomplete section; legacy templates under New project | B4 | UX | B1 |
-| **W3a Flow shell and switch** | Guided rail = ten sections with `/flow` states and group chips; Expert sidebar regrouped (§6.1–6.2, navigation only); Issues by section; the Run's disabled reason; `activeSection` and the section-anchored switch (§7); the sidebar Assistant button removed | B2 (shell part) | UX | B1 |
+| **W2 Home and Builder** | §3: Home (Resume, examples with artwork, build your own, my projects), the Builder (mounts section 1's editors and W4a's scope component) → open in the flow at the first incomplete section; legacy templates under New project | B4 | UX | B1, W4a |
+| **W3a Flow shell and switch** | Guided rail = ten sections with `/flow` states and group chips; Expert sidebar regrouped (§6.1–6.2, navigation only); Issues by section **with a return path (J9)**: an item opens its field in place (drawer or inline), or keeps the Issues/section view to return to, and the item clears live when fixed; #442's Expert Issues placement of the scorecard folds in here; the Run's disabled reason; `activeSection` and the section-anchored switch (§7); the sidebar Assistant button removed | B2 (shell part) | UX | B1 |
 | **W3b Moves** | design §5's B2 move list, as the UX reviewer confirmed: investment inputs out of Results; discount rate in 7; grid-code profile, connection PF, PCC → 3; energization table, connection ramp MW/min, oscillation band → 3; stress editor, island requirements, campus study settings → 8 | B2 (moves part) | UX | W3a |
-| **W3c Guided cards at depth** | §4: each card's decisions, Required inputs (same editors) and Advanced; VOLL editable (J1) | B2 (Guided part) | UX | W3a; per-section, can split |
-| **W4 Scope** | `flow_scope.json`; the section-8 scope component (mounted by the Builder too); `run_request` kinds and `in_scope` items (§5.2) | new | gatekeeper told (flow service); UX | W0 for each new kind; W3a |
+| **W3c Guided cards at depth** | §4: each card's decisions, Required inputs (same editors) and Advanced; VOLL editable (J1) | B2 (Guided part) | UX | W3a, W4a; per-section, can split |
+| **W4a Scope (data)** | `flow_scope.json` (bundled); the section-8 scope component (mounted by the Builder); show/hide of group blocks, `not_needed`, and `in_scope: false` items (§5.2). No new run kind, so no separability proof | new | gatekeeper told (flow service); UX | B1 |
+| **W4b Run kinds** | each new `run_request` kind with its lock-free verdict and `source` (§5.2), one kind per PR | new | gatekeeper; UX | W0's row for that kind; W4a |
 | **W5 Asset form, picker and converters** | B3 as designed (General → Sizing incl. Capacity Bounds → Controls → Reliability → Commercial → Availability), tiered picker; §10's Controls block wired to the preset route and the GFM settings | B3 | UX; gatekeeper on the preset write path | W3a |
 | **W6 Location and canvases** | §8: the section-1 pin (geocode, map), "place unplaced buses around the pin", switcher labels, Guided thumbnails | new | UX | W3a |
 | **W7 Scenario rows** | B5 in section 8 | B5 | UX | W3b |
 | **W8 Carriers & processes card** | B6 | B6 | UX | GTP-02, W3a |
 | **W9 Companion** | #437's modes on top of #441; "Help with this section"; transient-card rule (§9, with LC-04) | new | UX | #441, #437 |
-| **W10 Results by group** | §6.3 tabs; Hand-off tab (reports, exports, the specialist packet) | new | UX | W3a, W4 |
+| **W10 Results by group** | §6.3 tabs; Hand-off tab (reports, exports, the specialist packet) | new | UX | W3a, W4a |
 
-Order: W0 ∥ W1 ∥ W2 ∥ W3a → (W3b ∥ W3c ∥ W5 ∥ W6) → W4 → W7 → W10; W8 after GTP-02; W9 once #441 and #437 land. B2's existing condition stands: shell work waits until LC-04 leaves the shell/dock area. Sonnet sessions for the UI slices; Opus for W0 and W4 (contracts others read).
+Order: W0 ∥ W1 ∥ W4a ∥ W3a → (W2 ∥ W3b ∥ W3c ∥ W5 ∥ W6) → W4b per kind as W0 classifies it → W7 → W10; W8 after GTP-02; W9 once #441 and #437 land. B2's existing condition stands: shell work waits until LC-04 leaves the shell/dock area. Sonnet sessions for the UI slices; Opus for W0 and W4 (contracts others read).
 
 ### 13.1 In-flight PRs and how they fold in
 
 | PR | Fold-in |
 |---|---|
-| #434 B1 flow backbone | the backbone; W4 extends `run_request` additively (agreed with its session) |
+| #434 B1 flow backbone | the backbone; W4b extends `run_request` additively (agreed with its session) |
 | #440 A2 Load shape | 10 › Capacity › Operation, after Energy flow; unchanged |
 | #441 LC-04 launcher; LC-04 PR-1 edit card | W9 builds on #441's anchor and clip rule; the edit card names sections; transient-card rule owned by LC-04 |
 | #437 companion modes (draft) | it is W9's runtime; it touches `CompanionLauncher.tsx`, which LC-04 owns, so it rebases on #441 and pings LC-04 on DOM or size changes |
