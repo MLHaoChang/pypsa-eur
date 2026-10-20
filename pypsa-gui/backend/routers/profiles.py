@@ -46,6 +46,7 @@ from services import solve_queue as sq
 from services.profile_gen import engine, presets, shape
 from services.profile_gen.apply import (
     ComponentNotFoundError,
+    DcLoadOwnedError,
     FamilyTargetMismatchError,
     InvalidSeriesUnitError,
     ProfileApplyError,
@@ -309,6 +310,7 @@ _APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (UnknownFamilyError, {"error_kind": "unknown_family"}),
     (FamilyTargetMismatchError, {"error_kind": "family_target_mismatch"}),
     (InvalidSeriesUnitError, {"error_kind": "invalid_series_unit"}),
+    (DcLoadOwnedError, {"error_kind": "dc_load_owned"}),
 )
 
 

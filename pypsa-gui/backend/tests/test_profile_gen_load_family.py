@@ -23,7 +23,7 @@ from services.profile_gen.apply import (
     DcLoadOwnedError,
     assign_profile,
 )
-from services.profile_gen.engine import generate_profile
+from services.profile_gen.engine import UnsupportedResolutionError, generate_profile
 from services.profile_gen.load_archetypes import (
     InvalidArchetypeParamsError,
     UnknownArchetypeError,
@@ -108,10 +108,70 @@ def test_an_unknown_archetype_lists_the_known_ones():
         _gen("bakery")
 
 
-def test_daily_resolution_aggregates_like_the_renewable_path():
-    res = _gen("industrial", resolution="daily")
-    assert len(res.series) == 365
-    assert res.meta["resolution"] == "daily"
+@pytest.mark.parametrize("resolution", ["daily", "weekly"])
+def test_a_load_archetype_is_hourly_only(resolution):
+    # A day or week mean of a load shape loses the shape the archetype
+    # exists to state; the step-hold upsample at apply would flatten it.
+    with pytest.raises(UnsupportedResolutionError, match="hourly"):
+        _gen("industrial", resolution=resolution)
+
+
+def test_an_annual_energy_holds_for_every_load_even_with_noise():
+    res = _gen("residential", {"peak_mw": None, "annual_mwh": 1000.0,
+                               "noise": 0.3}, ids=("A", "B"))
+    assert res.meta["unit"] == "per_unit_mean"
+    for col in ("A", "B"):
+        energy = float((res.series[col] * res.meta["scale_mw"]).sum())
+        assert energy == pytest.approx(1000.0)
+
+
+def test_the_noise_seed_used_is_recorded():
+    res = _gen("residential", {"noise": 0.05})
+    assert isinstance(res.meta["params"]["seed"], int)
+
+
+@pytest.mark.parametrize("holidays", ["12-25", ["1"], ["2022-12-25"], [12]])
+def test_holidays_must_be_a_list_of_dates_in_the_source_year(holidays):
+    with pytest.raises(InvalidArchetypeParamsError, match="holiday"):
+        _gen("industrial", {"holidays": holidays})
+
+
+def test_a_full_date_holiday_in_the_source_year_is_accepted():
+    s = _gen("industrial", {"shifts": 2, "base_share": 0.2,
+                            "holidays": ["2023-12-27"]}).series["L1"]
+    assert _at(s, "2023-12-27T10:00") == pytest.approx(0.2)
+
+
+def test_a_shutdown_week_is_the_source_years_iso_week_only():
+    # 2024-12-30/31 are ISO week 1 of 2025: a week-1 shutdown in 2024 is
+    # 1-7 January 2024 only.
+    s = _gen("industrial", {"shifts": "continuous", "base_share": 0.1,
+                            "shutdown_weeks": [1]}, year=2024).series["L1"]
+    assert _at(s, "2024-01-03T12:00") == pytest.approx(0.1)
+    assert _at(s, "2024-12-31T12:00") == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("params", [
+    {"shutdown_weeks": ["summer"]},
+    {"shutdown_weeks": [54]},
+    {"seed": "abc", "noise": 0.1},
+    {"base_share": -0.2},
+    {"base_share": 1.5},
+])
+def test_bad_numbers_are_typed_refusals(params):
+    with pytest.raises(InvalidArchetypeParamsError):
+        _gen("industrial", params)
+
+
+def test_a_bad_cooling_share_names_the_parameter():
+    with pytest.raises(InvalidArchetypeParamsError, match="cooling_share"):
+        _gen("commercial", {"cooling_share": -1.0})
+
+
+def test_seasonality_is_a_common_parameter():
+    s = _gen("industrial", {"shifts": "continuous",
+                            "seasonal_amplitude": 0.2}).series["L1"]
+    assert s["2023-01"].mean() > s["2023-07"].mean()
 
 
 # ── archetype shapes ────────────────────────────────────────────────────────

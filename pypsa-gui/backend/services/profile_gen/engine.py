@@ -243,28 +243,15 @@ def generate_profile(
             f"cannot generate a profile for technology {technology!r}; "
             f"supported: {', '.join(SUPPORTED_TECHNOLOGIES)}"
         )
-    res = str(resolution).strip().lower()
-    if res not in RESOLUTIONS:
-        raise UnsupportedResolutionError(
-            f"unsupported resolution {resolution!r}; supported: "
-            f"{', '.join(RESOLUTIONS)}"
-        )
+    res, year = _resolve_res_year(resolution, year)
     source_fn = _resolve_source(source)
     pts = _normalize_points(points)
-    if year is None:
-        year = _dt.datetime.now(_dt.timezone.utc).year - 1
-    year = int(year)
 
     frame, meta_extra = source_fn(pts, tech, params, year)
     if res != "hourly":
         frame = _aggregate(frame, res)
 
-    if now is None:
-        generated_at = _dt.datetime.now(_dt.timezone.utc)
-    elif isinstance(now, str):
-        generated_at = _dt.datetime.fromisoformat(now)
-    else:
-        generated_at = now
+    generated_at = _resolve_now(now)
 
     meta: dict[str, Any] = {
         "source": source,
@@ -285,6 +272,14 @@ def generate_profile(
     }
     meta.update(meta_extra)
     return ProfileResult(series=frame, meta=meta)
+
+
+def _resolve_now(now: _dt.datetime | str | None) -> _dt.datetime:
+    if now is None:
+        return _dt.datetime.now(_dt.timezone.utc)
+    if isinstance(now, str):
+        return _dt.datetime.fromisoformat(now)
+    return now
 
 
 def _resolve_res_year(resolution: str, year: int | None) -> tuple[str, int]:
@@ -310,20 +305,18 @@ def _generate_family(family: str, points: Iterable[Any], kind: str,
     if fam.generate is None:
         raise ProfileGenError(f"the {family} family has no generator")
     res, year = _resolve_res_year(resolution, year)
+    if res != "hourly":
+        # A day or week mean of a stated shape loses the shape; the apply
+        # path would hold it flat for 24/168 h.
+        raise UnsupportedResolutionError(
+            f"{family} profiles are hourly only, got {resolution!r}")
     ids = [p if isinstance(p, str) else _as_point(p).id for p in points]
     if not ids:
         raise ProfileGenError("at least one id is required")
     if len(set(ids)) != len(ids):
         raise ProfileGenError(f"ids must be unique; got {ids}")
     frame, meta_extra = fam.generate(ids, str(kind).strip().lower(), params, year)
-    if res != "hourly":
-        frame = _aggregate(frame, res)
-    if now is None:
-        generated_at = _dt.datetime.now(_dt.timezone.utc)
-    elif isinstance(now, str):
-        generated_at = _dt.datetime.fromisoformat(now)
-    else:
-        generated_at = now
+    generated_at = _resolve_now(now)
     meta: dict[str, Any] = {
         "family": family,
         "source": "archetype",

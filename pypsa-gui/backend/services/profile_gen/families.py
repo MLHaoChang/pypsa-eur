@@ -138,6 +138,8 @@ def _load_guard(ctx, component_type: str, component: str,
 
 
 def _load_generate(ids, archetype, params, year):
+    # Imported on first use, as the engine's lazy sources are: the archetype
+    # module pulls in the DC model, which a renewable-only caller never needs.
     from services.profile_gen.load_archetypes import generate_frame
 
     return generate_frame(ids, archetype, params, year)
