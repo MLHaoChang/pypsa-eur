@@ -1,0 +1,1 @@
+* Docs(project-workflow): design one library model for every parameter type with "Save to library", provenance and sharing, and live lookup of published European tariffs from an official-host allowlist.

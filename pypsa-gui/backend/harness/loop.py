@@ -392,7 +392,7 @@ from harness.providers.wiring import (  # noqa: E402, F401 — moved (issue 08);
 
 
 from harness.compose import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _ADEQUACY_GUIDE, _ADEQUACY_GUIDE_CHAINING, _ADEQUACY_GUIDE_FACTS, _ASSISTANT_STANCE, _ASSISTANT_STANCE_CHAINING, _ASSISTANT_STANCE_FACTS, _BASE_IDENTITY, _BASE_IDENTITY_CHAINING, _BASE_IDENTITY_FACTS, _CONFIRMATION_CARD_CONTRACT_TEMPLATE, _DOMAIN_GUIDE, _DOMAIN_GUIDE_CHAINING, _DOMAIN_GUIDE_FACTS, _EH_GUIDE, _EH_GUIDE_CHAINING, _EH_GUIDE_FACTS, _GUIDED_STEPS, _NEXT_STEP_RUBRIC, _NEXT_STEP_RUBRIC_CHAINING, _NEXT_STEP_RUBRIC_FACTS, _PRICE_CONGESTION_GUIDE, _PRICE_CONGESTION_GUIDE_CHAINING, _PRICE_CONGESTION_GUIDE_FACTS, _PROJECT_OVERVIEW, _REFERENCE_LADDER, _RESULTS_WALK, _SOLVER_ERROR_DECODER, _SOLVER_ERROR_DECODER_CHAINING, _SOLVER_ERROR_DECODER_FACTS, _STYLE_GUIDANCE, _UI_CONTEXT_MAX_VALUE_CHARS, _UNTRUSTED_DATA_CLAUSE, _WORKFLOW_STATE_TOOLS, _build_system_prompt, _format_live_network_meta, _format_ui_context, _guided_mode_addendum, _hub_design_workflow, _prompts, _sanitise_ui_value, _workflow_addendum, _workflow_state_payload,
+    _ADEQUACY_GUIDE, _ADEQUACY_GUIDE_CHAINING, _ADEQUACY_GUIDE_FACTS, _ASSISTANT_STANCE, _ASSISTANT_STANCE_CHAINING, _ASSISTANT_STANCE_FACTS, _BASE_IDENTITY, _BASE_IDENTITY_CHAINING, _BASE_IDENTITY_FACTS, _CONFIRMATION_CARD_CONTRACT_TEMPLATE, _DOMAIN_GUIDE, _DOMAIN_GUIDE_CHAINING, _DOMAIN_GUIDE_FACTS, _EDIT_CARD, _EH_GUIDE, _EH_GUIDE_CHAINING, _EH_GUIDE_FACTS, _GUIDED_STEPS, _NEXT_STEP_RUBRIC, _NEXT_STEP_RUBRIC_CHAINING, _NEXT_STEP_RUBRIC_FACTS, _PRICE_CONGESTION_GUIDE, _PRICE_CONGESTION_GUIDE_CHAINING, _PRICE_CONGESTION_GUIDE_FACTS, _PROJECT_OVERVIEW, _REFERENCE_LADDER, _RESULTS_WALK, _SOLVER_ERROR_DECODER, _SOLVER_ERROR_DECODER_CHAINING, _SOLVER_ERROR_DECODER_FACTS, _STYLE_GUIDANCE, _UI_CONTEXT_MAX_VALUE_CHARS, _UNTRUSTED_DATA_CLAUSE, _WORKFLOW_STATE_TOOLS, _build_system_prompt, _format_live_network_meta, _format_ui_context, _guided_mode_addendum, _hub_design_workflow, _prompts, _sanitise_ui_value, _workflow_addendum, _workflow_state_payload,
 )
 
 from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-exported
@@ -2473,6 +2473,11 @@ def _dispatch_real_tool_call(
     # Advisory, not a gate: a validator that raises must leave the tool exactly
     # as callable as it was. It is a courtesy check running ahead of the real
     # handler, which remains the authority on whether the call succeeds.
+    # LC-04 (owner Q3): every chat edit shows its old→new card, in Expert as
+    # in Guided, so an edit is gated as Guided gates a write.
+    from harness import edit_card as edit_cards
+    is_edit = tier != "read" and not external and edit_cards.is_edit(tool_name)
+    guided = guided or is_edit
     if tier in _confirm_tiers(guided):
         from services.chat_tools import PRE_DISPATCH_VALIDATORS
         validator = PRE_DISPATCH_VALIDATORS.get(tool_name)
@@ -2541,6 +2546,20 @@ def _dispatch_real_tool_call(
             tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
                                            "is_error": True, "content": _error_result_content(detail, exc, kind)})
             return
+    edit_card = None
+    if is_edit and session.assurance_turn is None:
+        # The card's rows come from a native run on an isolated copy; a refusal
+        # here means no card and no change.
+        try:
+            edit_card = edit_cards.preview(tool_name, args or {})
+        except Exception as exc:
+            detail = getattr(exc, "detail", None)
+            kind = detail.get("error_kind", "edit_preview_unavailable") if isinstance(detail, dict) else "edit_preview_unavailable"
+            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                                 "error_kind": kind, "message": _redact_for_log(detail or exc)}
+            tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
+                                           "is_error": True, "content": _error_result_content(detail, exc, kind)})
+            return
     from harness import confirm as confirmation_gate
     policy_revision = confirmation_gate.confirmation_revision()
     approved = yield from _confirm_destructive_tool(
@@ -2554,6 +2573,7 @@ def _dispatch_real_tool_call(
         external=external,
         restriction_mode=restriction['mode'] if restriction else 'standard',
         restriction_snapshot=restriction,
+        edit_card=edit_card,
     )
     if not approved:
         return
@@ -2665,6 +2685,12 @@ def _dispatch_real_tool_call(
                     from services.assistant_tools import confirmed_preview
                     with confirmed_preview(confirmation_args['review_sha256']):
                         return invoke(session, tool_name, args or {}, handler)
+                if edit_card is not None:
+                    edit_cards.require_current(tool_name, args or {}, edit_card)
+                    out = invoke(session, tool_name, args or {}, handler)
+                    if isinstance(out, dict):
+                        out = {**out, "_edit_receipt": edit_cards.receipt(edit_card, args or {})}
+                    return out
                 return invoke(session, tool_name, args or {}, handler)
             # PER_TOOL_TIMEOUT_SECONDS is a budget for RUNNING the handler.
             # `future.result(timeout=...)` alone measured queue + run on a pool

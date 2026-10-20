@@ -52,6 +52,7 @@ from services.user_timeseries import (
     _reject_nonfinite_timeseries,
     _user_ts,
     _user_ts_lock,
+    _user_ts_meta,
 )
 
 router = APIRouter()
@@ -263,7 +264,8 @@ def _apply_profile_upload(n, comp_attr: str, attribute: str, display_class: str,
     Shared body of the load/generator/link profile-upload endpoints.
 
     Matches uploaded `df` columns to the component's names, stores each matched
-    column in `_user_ts[(comp_attr, attribute, col)]` (under `_user_ts_lock`,
+    column in `_user_ts[(comp_attr, attribute, col)]` and drops its
+    `_user_ts_meta` entry (under `_user_ts_lock`,
     since autosave's `_serialize_user_ts` iterates concurrently), then reapplies
     to the network under the PyPSA lock — `_ensure_snapshots_cover_user_ts`
     auto-expands `n.snapshots` so a longer-than-current upload isn't truncated,
@@ -289,7 +291,11 @@ def _apply_profile_upload(n, comp_attr: str, attribute: str, display_class: str,
     _reject_nonfinite_timeseries(df[matched], display_class, attribute)
     with _user_ts_lock:
         for col in matched:
-            _user_ts[(comp_attr, attribute, col)] = df[col].astype(float)
+            key = (comp_attr, attribute, col)
+            _user_ts[key] = df[col].astype(float)
+            # The upload replaces the series, so any engine provenance from
+            # `assign_profile` no longer describes it.
+            _user_ts_meta.pop(key, None)
     with PyPSAService.get_lock():
         _ensure_snapshots_cover_user_ts(n)
         _reapply_user_ts_to_network(n)

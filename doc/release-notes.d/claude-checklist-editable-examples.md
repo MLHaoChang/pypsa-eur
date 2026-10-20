@@ -1,0 +1,1 @@
+* Doc(pypsa-gui): The UI review checklist gains the owner rule that every value an example pre-fills stays editable in Guided and Expert, with locked values allowed only where the engine requires them (`.scratch/project-workflow/design.md` §6).

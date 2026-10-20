@@ -156,6 +156,16 @@ def pop() -> tuple[bytes, dict] | None:
     return data["netcdf"], data["user_ts"]
 
 
+def peek() -> bytes | None:
+    """The most recent snapshot's network NetCDF, left on the stack (the undo card's preview)."""
+    u = _active()
+    with u.lock:
+        if not u.stack:
+            return None
+        payload = u.stack[-1][0]
+    return pickle.loads(payload)["netcdf"]
+
+
 def depth() -> int:
     """Number of undo steps currently available for the active project."""
     u = _active()

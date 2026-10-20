@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): On full-screen pages (Results, Guided Hub design) the assistant's latest answer now starts as a small "Show answer" chip beside the launcher instead of a card over the page; the answer opens on request and never closes on a timer.
