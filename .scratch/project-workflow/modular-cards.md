@@ -17,7 +17,7 @@ Owner input #10, 2026-10-20, about 20:10 CEST:
 
 | Card | Sub-options (≤ 3) | Run kind | Runnable today |
 |---|---|---|---|
-| **Capacity expansion** | 1. Asset sizing (expansion) · 2. Dispatch & economics · 3. Process detail | `optimisation` | 1, 2 yes; 3 not yet available (W0) |
+| **Capacity expansion** | 1. Asset sizing (expansion) · 2. Dispatch & economics · 3. Process detail | `optimisation` | 1 + 2 together yes; 2 alone (sizing off) not yet available (needs the run option in §4); 3 not yet available (W0) |
 | **AC power flow & grid** | 1. Load flow (AC power flow after the optimisation) · 2. Grid code & electrical design (scorecard, campus PCC compliance, transformer and compensation sizing) · 3. N-1 security (SCLOPF) | `loadflow`; campus study; SCLOPF as an `optimisation` option | 1 bundled (needs dispatch); 2 scorecard advisory, campus study per W0; 3 yes |
 | **Control** | 1. Converter control presets · 2. Island & ride-through checks · 3. Frequency & dynamics | `control_checks` | 1 inputs only; 2 per W0; 3 not yet available |
 | **Reliability** (owner Q17 = A) | 1. Reliability goal & study (LOLE / ENS) · 2. Stress conditions & FMEA · 3. Outage-data screening (COPT) | `study` | 1 yes; 2 yes (sweep); 3 yes (no solve needed) |
@@ -62,10 +62,14 @@ The own site keeps today's reliability study: B1 requests `study` for every proj
 
 ## 4. Capacity can be deselected (owner Q18 = A)
 
-- **Sizing off.** Turning Capacity's **sizing** off runs **dispatch on the fixed assets**: the optimisation with expansion disabled for the run (extendable off, as in #448 §3.1's fixed-size mode). This is supported.
-- **Sizing off is visible where the sizes live.** Each extendable asset's Sizing block (section 5) reads "Not sized in this run (Capacity › Asset sizing is off); runs at its current size of X MW". Run's summary says "Dispatch on fixed assets". Results label capacities "fixed, not optimised".
+- **Sizing off = dispatch on the sizes of a chosen source** (gatekeeper, 2026-10-20). Simply flipping extendable off is not supported: preflight rejects every never-built candidate at zero capacity (`generator_p_nom_invalid`, `link_p_nom_invalid`).
+  - The mode reuses the existing `adequacy.sweep.freeze_capacities`: extendable stays on, and each size is clamped to its source value.
+  - The source is either **a capacity run** (its `*_nom_opt`) or **the configured nameplate**. The run records which one, and is refused when that source has no sizes. Before any solve, `p_nom_opt` is 0.
+  - It is a new solver-config run option, a gated slice built with #448 §3.1's fixed-size island mode. **It is not runnable today**: the sub-option reads "Not yet available" until that slice lands.
+  - It is incompatible with the myopic and rolling strategies, which freeze capacity themselves; the card says so.
+- **Sizing off is visible where the sizes live.** Each extendable asset's Sizing block (section 5) reads "Not sized in this run (Capacity › Asset sizing is off); runs at X MW from <the capacity run of <date> | the nameplate>". Run's summary says "Dispatch on fixed sizes from <source>". Results label capacities "fixed, not optimised".
 - **The whole card off.** This is allowed only when another source provides the operating points, for example a saved or uploaded dispatch for a load-flow-only study. AC power flow needs a solved dispatch today (`dispatch_status` must be fresh). Until W0 proves the uploaded-dispatch path, "Capacity off" reads "Not yet available: needs a dispatch source".
-- **A commercial-only study** (a bill and an investment case on fixed assets) uses Capacity with sizing off, so the bill reads a real dispatch.
+- **A commercial-only study** (a bill and an investment case on fixed assets) uses Capacity with sizing off, once that option lands, so the bill reads a real dispatch. Until then it runs with sizing on.
 
 ## 5. Owner choices
 
@@ -76,6 +80,7 @@ The own site keeps today's reliability study: B1 requests `study` for every proj
 
 ## 6. What changes in the slice plan
 
+- **Fixed-size run option** (new, gated, with #448 §3.1's island mode): `freeze_capacities` driven by a chosen size source; refused without sizes; incompatible with myopic and rolling.
 - **W4a**: six cards, each with up to three sub-options, in `flow_scope.json`. Done when the off-card test passes: a deselected card's items don't count, aren't "to check", and don't block; its kinds leave `run_request`; its values survive an off/on round-trip.
 - **W0**: classifies each sub-option (§1's last column). A combination is runnable only when all its members are supported.
 - **W2 / templates**: each example's card setup (§3).
