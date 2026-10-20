@@ -134,3 +134,59 @@ def readback(args: dict, rows: list[dict]) -> list[Any]:
 def _note(cls: str, name: str, field: str, text: str) -> dict:
     return {"component_class": cls, "name": name, "field": field, "label": field, "old": None,
             "new": None, "unit": "", "role": "note", "note": text}
+
+
+# ── "Generate defaults for all": one card for the batch (plan D) ────────────
+
+
+def _job_meta(project_id: str, job_id: str) -> dict:
+    import json
+
+    from services import chat_tools
+    from services.profile_gen.job import _artifact_paths
+
+    proj = chat_tools._authorized_project(project_id)
+    _nc, meta_path = _artifact_paths(proj.directory, job_id)
+    if not meta_path.exists():
+        from fastapi import HTTPException
+
+        raise HTTPException(404, f"no pending profile for job {job_id!r}")
+    return json.loads(meta_path.read_text())
+
+
+def _batch(args: dict) -> list[tuple[str, dict]]:
+    project = str(args.get("project_id") or "")
+    out = []
+    for job in args.get("job_ids") or []:
+        meta = _job_meta(project, str(job))
+        out.append((str(job), {"project_id": project, "job_id": str(job),
+                               "component": (meta.get("points") or [""])[0], "_meta": meta}))
+    return out
+
+
+def preview_batch(args: dict) -> list[dict]:
+    """Each default's old → new rows, with why it was picked and how sized."""
+    rows: list[dict] = []
+    for _job, one in _batch(args):
+        meta = one.pop("_meta")
+        sub = preview(one)
+        default = meta.get("default") or {}
+        if default:
+            ct = (meta.get("target") or ["loads"])[0]
+            sub.append(_note(_CLASS.get(ct, ""), one["component"], "default",
+                             f"assumed: {default.get('reason')}; sized by its "
+                             f"{default.get('sizing')} (static p_set "
+                             f"{default.get('static_p_set_mw')} MW)"))
+        rows += sub
+    return rows
+
+
+def readback_batch(args: dict, rows: list[dict]) -> list[Any]:
+    """`readback` per default, matched to its rows by component."""
+    out: list[Any] = [None] * len(rows)
+    for _job, one in _batch(args):
+        one.pop("_meta")
+        idx = [i for i, r in enumerate(rows) if r.get("name") == one["component"]]
+        for i, v in zip(idx, readback(one, [rows[i] for i in idx])):
+            out[i] = v
+    return out

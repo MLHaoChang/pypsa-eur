@@ -134,3 +134,24 @@ def test_on_a_weighted_week_the_weighted_mean_is_the_static_p_set(client, instal
                 json={"job_ids": [rows["office"]["job_id"]]})
     p = session_ctx(client).network.loads_t.p_set["office"].to_numpy()
     assert float(np.mean(p)) == pytest.approx(2.0, rel=1e-6)
+
+
+def test_the_assistant_previews_the_batch_on_one_card_and_applies_it(client, site, bound_ctx):
+    from harness import edit_card
+    from services import chat_tools
+
+    # A chat turn runs its tools with the session's context bound.
+    with bound_ctx(client):
+        res = chat_tools.DISPATCHERS["preview_default_series"](project_id=site)
+        rows = {r["component"]: r for r in res["rows"]}
+        jobs = [rows["office"]["job_id"], rows["misc"]["job_id"]]
+        args = {"project_id": site, "job_ids": jobs}
+        card = edit_card.preview("apply_default_series", args)
+        assert {r["name"] for r in card["rows"]} == {"office", "misc"}
+        notes = [r["note"] for r in card["rows"] if r["field"] == "default"]
+        assert any("matched 'office'" in n and "sized by its mean" in n for n in notes)
+        out = chat_tools.DISPATCHERS["apply_default_series"](**args)
+        assert out["applied"] == 2
+        back = edit_card.ADAPTERS["apply_default_series"].readback(args, card["rows"])
+    typed = [(r, v) for r, v in zip(card["rows"], back) if r["role"] == "typed"]
+    assert typed and all(v == pytest.approx(r["new"], rel=1e-6) for r, v in typed)
