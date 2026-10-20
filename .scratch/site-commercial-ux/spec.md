@@ -14,6 +14,7 @@ Bring that commercial clarity, the library and the results presentation into pyp
 - D1. Three packages in order: **A** results, then **B** design flow, then **C** commercial and library.
 - D2. **Start A now**, as one Sonnet session. B and C are queued.
 - D3. The connection ramp-rate limit and loss factors go into data-centre grid readiness (tickets 01/02), not here.
+- D5. The party / value-stream model (C5–C9) goes into package C, in the order C5+C6, C7, C8, C9 (owner, 2026-10-20).
 - D4. Draft/publish, per-scenario edits and tracking (actuals) are out of scope for now.
 
 ## Packages
@@ -33,7 +34,16 @@ Bring that commercial clarity, the library and the results presentation into pyp
 - C2. Market bundles per country (wholesale, ancillary, capacity, balancing), NO1–NO5 first. Data sourcing and licensing go to the owner when C opens.
 - C3. Contract types: financial PPA (CfD), physical PPA (CfD with floor, cap and negative-price rule), swap, demand response.
 - C4. Report variant selection by rule (top N by NPV, greatest IRR), per participant.
-- C5. Later: the visual commercial-model board, and cross-scenario participant/stream columns with a "relative to baseline" view.
+- C5. Party board: a visual editor over `ValueFlowConfig`. One column per party with Income and Expense cards, drag between parties, a % split per card, and an "Unassigned items" tray backed by the ledger's conservation check. The board is the only editor; the ledger, reports and copilot read the same config.
+- C6. Party groups: tag assets and contracts with a party, and their streams follow automatically. This extends `asset_owners` and `export_revenue_to` to contracts, and adds a per-stream split for shared assets (for example a BESS split 70/30 between operator and aggregator), generalising `AllocationKey`.
+- C7. Per-party "my view": each party's cashflow, NPV/IRR or bill, and the change against the BAU baseline; plus cross-scenario columns per party and value stream.
+- C8. Party templates by sector, beside the existing five:
+  - data centre: operator, supplier, offsite PPA generator, BESS owner/EaaS, aggregator, DSO/TSO;
+  - e-mobility: CPO, site host, supplier, onsite PV/BESS owner;
+  - C&I: landlord/tenant plus onsite PPA;
+  - IPP: generator, offtakers, market.
+- C9. Offsite PPA cards: financial/virtual (settled against a reference price, with no physical flow) and sleeved (passed through the retailer), shown on the board. They use C3's CfD rules.
+- Rule: physical flows (package A Sankey) and money flows (ledger Sankey) stay separate views.
 
 ## What exists to build on
 
