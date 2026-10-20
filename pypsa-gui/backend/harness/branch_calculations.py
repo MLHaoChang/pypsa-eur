@@ -62,7 +62,8 @@ DISCLOSURE = (
     "Active power (P only), from the LOPF: an active-power proxy, not an AC thermal assessment; "
     "no N-1 and no voltage limits. Flow is the larger terminal magnitude; the limit is the rating "
     "times s_max_pu per snapshot. Hours use generator snapshot weights. "
-    "Lines and Transformers only; Links are excluded."
+    "Lines and Transformers only; Links are excluded. "
+    "A branch with any missing flow or zero limit in the window is unavailable."
 )
 
 
@@ -118,10 +119,13 @@ def source(ctx, entity, network, component_class=None):
     state = ctx.solver_state
     if state.get("ac_pf_results") is not None or state.get("lopf_results") is not None:
         raise ValueError("ac_pf_present")
-    if network != (entity == "network"):
+    if network != (entity == "network") and not component_class:
         raise ValueError("network_scope_required")
+    shadowed = []
     if network:
         names = [(c, str(name)) for c in BRANCH_CLASSES for name in n.components[c].static.index]
+        # A branch literally named "network" is checkable only by naming its class.
+        shadowed = [c for c, name in names if name == "network"]
         if len(names) > MAX_BRANCHES:
             raise ValueError("unsupported_branch_population")
     else:
@@ -144,6 +148,7 @@ def source(ctx, entity, network, component_class=None):
         "branches": {f"{c}:{name}": {"class": c, "name": name, **_branch(n.components[c], name, index)}
                      for c, name in names},
         "links_excluded": len(n.components["Link"].static),
+        "shadowed_branch_classes": shadowed,
         "valid_solve": state.get("status") == "completed"
         and state.get("condition") == "optimal"
         and n.meta.get("assistant_solve_input_fingerprint") == fingerprint
@@ -250,7 +255,10 @@ def calculate(raw, scope):
 def notes(raw):
     """Always-shown scope line: which branches, and how many Links were left out."""
     classes = [branch["class"] for branch in raw["branches"].values()]
-    return [
+    lines = [
         f"{classes.count('Line')} Lines and {classes.count('Transformer')} Transformers; "
         f"{raw['links_excluded']} Links excluded."
     ]
+    for component_class in raw.get("shadowed_branch_classes", []):
+        lines.append(f"A {component_class} named network exists; name its class to check that branch.")
+    return lines

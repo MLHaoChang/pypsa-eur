@@ -66,7 +66,7 @@ def validate(value):
         raise ValueError("component_class_requires_branch_scope")
     if (scope["profile"] == "network-loading/1") != (scope["entity_id"] == "network") and (
         scope["profile"] in ("branch-loading/1", "network-loading/1")
-    ):
+    ) and not scope.get("component_class"):
         raise ValueError("network_scope_required")
     return scope
 

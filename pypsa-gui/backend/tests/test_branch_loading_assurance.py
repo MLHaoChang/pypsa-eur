@@ -63,6 +63,23 @@ def overload(ctx):
     return {**LINE, "peak_branch_utilisation": 125, "hours_above_rating": 2, "peak_branch_flow": 10}
 
 
+def solve_named(ctx, name):
+    n = ctx.network
+    assert n.optimize(solver_name="highs") == ("ok", "optimal")
+    assert list(n.lines_t.p0[name]) == pytest.approx([4, 8, 4])
+    ctx.solver_state.update(status="completed", condition="optimal")
+    workflow_tools._record_solve_inputs(n, ctx.solver_state["solver_config"])
+    return ctx
+
+
+def run_scope(checked, ctx, checked_scope, values):
+    frames = checked.run(NumericalProvider(values), message="Check loading.", checked_scope=checked_scope)
+    record = approval(frames)
+    response = checked.client.get("/api/chat/answers/" + record["answer_id"])
+    assert response.status_code == 200, response.text
+    return frames, response.json()
+
+
 def scope(ctx, entity, profile=BRANCH, **options):
     return {"version": 1, "profile": profile, "project_id": ctx.project_uuid,
             "entity_id": entity, "retain": False, **options}
@@ -92,6 +109,7 @@ def test_line_loading_matches_the_hand_values_and_the_load_flow_tab(grid, checke
     text = public_text(frames)
     assert "Branch L12" in text and "Active power (P only)" in text
     assert "no N-1 and no voltage limits" in text
+    assert "any missing flow or zero limit in the window is unavailable" in text
     assert "1 Lines and 0 Transformers; 0 Links excluded." in text
 
 
@@ -178,6 +196,18 @@ def test_a_missing_time_varying_limit_falls_back_to_the_static_one_like_the_tab(
     n.lines_t.s_max_pu.iloc[0, 0] = float("nan")
     # loadflow_summary._smax_matrix fills a missing time-varying value from the static one.
     assert branch_calculations._s_max_pu(n.components["Line"], "L12", n.snapshots) == [0.9, 1, 0.5]
+
+
+def test_a_branch_named_network_needs_its_class(grid, checked):
+    n = grid.network
+    n.lines.rename(index={"L12": "network"}, inplace=True)
+    n.lines_t.s_max_pu.columns = ["network"]
+    ctx = solve_named(grid, "network")
+    frames = checked.run(NumericalProvider({"max_branch_utilisation": 100, "branches_above_rating": 0}),
+                         message="Check loading.", checked_scope=scope(ctx, "network", NETWORK))
+    assert "A Line named network exists; name its class to check that branch." in public_text(frames)
+    _, answer = run_scope(checked, ctx, scope(ctx, "network", component_class="Line"), LINE)
+    assert values(answer) == pytest.approx(LINE)
 
 
 def test_scope_and_grammar():
