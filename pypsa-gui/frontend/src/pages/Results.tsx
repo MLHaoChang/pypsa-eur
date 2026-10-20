@@ -2,7 +2,7 @@ import { manualNavigation } from '../utils/navigationEpoch'
 import RunBoundView from './results/RunBoundView'
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase } from 'lucide-react'
+import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase, Workflow } from 'lucide-react'
 import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
@@ -24,6 +24,7 @@ import AdequacyTab from './results/AdequacyTab'
 import FmeaTab from './results/FmeaTab'
 import InvestmentTab from './results/InvestmentTab'
 import StorageCycling from './results/StorageCycling'
+import EnergyFlowsTab from './results/EnergyFlowsTab'
 import AssetDetail from './results/asset/AssetDetail'
 import SummaryTab from './results/SummaryTab'
 import type { SimulationStatus } from '../api/types'
@@ -49,7 +50,7 @@ const RESULTS_TAB_KEY = 'results:active-tab'
 const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
   'summary', 'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
   'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset',
-  'fmea', 'investment',
+  'fmea', 'investment', 'flows',
 ])
 
 function loadInitialTab(): ResultsTab {
@@ -82,6 +83,7 @@ const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip:
   { id: 'capex',      label: 'Capacity Expansion', Icon: TrendingUp,       tip: 'CAPEX, OPEX, sized assets', expertOnly: true },
   { id: 'dispatch',   label: 'Dispatch',           Icon: Activity,         tip: 'Per-snapshot generation, storage, loads', expertOnly: true },
   { id: 'loadflow',   label: 'Load Flow',          Icon: NetworkIcon,      tip: 'Line flows, voltages, losses', expertOnly: true },
+  { id: 'flows',      label: 'Energy flow',        Icon: Workflow,         tip: 'Where the site\'s energy came from, what it passed through and where it went — Source → Via → Destination in MWh, with a CSV export' },
   { id: 'prices',     label: 'Prices',             Icon: DollarSign,       tip: 'Marginal prices, duration curve, drivers', expertOnly: true },
   { id: 'economics',  label: 'Economics',          Icon: Wallet,           tip: 'Per-asset revenue, profit, LCOE/LCOS — by group or by individual asset', expertOnly: true },
   { id: 'emissions',  label: 'Emissions',          Icon: Cloud,            tip: 'CO₂ totals, cap shadow price, per-carrier breakdown', expertOnly: true },
@@ -119,6 +121,8 @@ const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
   // the nearest quantity the rail can actually put side by side.
   adequacy: 'lost_load',
   storage: 'storage_cycling',
+  // No energy-flow compare tab exists; dispatch is the nearest A-vs-B view.
+  flows: 'dispatch',
   asset: 'overview',
   // No FMEA compare tab exists (yet) — alias to overview like `asset`.
   fmea: 'overview',
@@ -864,6 +868,7 @@ export default function Results() {
                   {t === 'adequacy'    && <AdequacyTab />}
                   {t === 'fmea'        && <FmeaTab />}
                   {t === 'storage'     && <StorageCycling />}
+                  {t === 'flows'       && <EnergyFlowsTab />}
                   {t === 'asset'       && <AssetDetail />}
                   {t === 'investment'  && <InvestmentTab />}
                 </>

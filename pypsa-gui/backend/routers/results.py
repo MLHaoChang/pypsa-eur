@@ -2449,6 +2449,55 @@ def get_value_flows():
     return Response(status_code=204) if payload is None else payload
 
 
+def _energy_flows_payload(period: int | None, from_: int | None, to_: int | None):
+    """The attribution for the solved network, or a Response (409 / 204)."""
+    from services.results.energy_flows import energy_flows
+
+    n = PyPSAService.get_network()
+    if _solver_in_flight():
+        raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                                  "message": "a solve is running; read the energy flows after it "
+                                             "ends"})
+    if not _dispatch_ready(n):
+        return Response(status_code=204)
+    window = None if from_ is None and to_ is None else (from_ or 0, to_ if to_ is not None else 10 ** 9)
+    return energy_flows(n, period, window, result_df=_result_df,
+                        lost_load=_state.get("last_lost_load"))
+
+
+@results_router.get("/energy_flows")
+def get_energy_flows(
+    period: int | None = Query(None, description="Investment period (default: the first)."),
+    from_: int | None = Query(None, alias="from", description="Inclusive start index into the period's snapshots."),
+    to_: int | None = Query(None, alias="to", description="Inclusive end index into the period's snapshots."),
+):
+    """Source → Via → Destination site energy in MWh for one period
+    (`services/results/energy_flows.py`). 204 before a solve; 200
+    `status: "not_established"` (no rows) when the attribution cannot be proved
+    to conserve energy."""
+    return _energy_flows_payload(period, from_, to_)
+
+
+@results_router.get("/energy_flows.csv")
+def get_energy_flows_csv(
+    period: int | None = Query(None),
+    from_: int | None = Query(None, alias="from"),
+    to_: int | None = Query(None, alias="to"),
+):
+    """The rows of `/energy_flows` as CSV (Source, Via, Destination, MWh)."""
+    from services.results.energy_flows import csv_text
+
+    payload = _energy_flows_payload(period, from_, to_)
+    if isinstance(payload, Response):
+        return payload
+    if payload.get("status") != "ok":
+        raise HTTPException(409, {"code": "energy_flows_not_established",
+                                  "message": payload.get("reason") or "; ".join(payload.get("flags") or [])
+                                  or "the energy flows could not be established"})
+    return Response(csv_text(payload), media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="energy_flows.csv"'})
+
+
 @results_router.get("/eh_dtc_planning")
 def get_eh_dtc_planning():
     """Last DtC planning table (Phase 4b). 204 if none."""
