@@ -63,8 +63,6 @@ from services import flow_sections as F
 
 logger = logging.getLogger(__name__)
 
-SECTION_IDS_INPUT = F.INPUT_SECTIONS
-
 ACKS_FILE = "flow_acks.json"
 TEMPLATE_FILE = "eh_template.json"
 
@@ -115,12 +113,19 @@ PRESENCE_RULES: dict[str, tuple[str, str]] = {
 
 
 class FlowAckError(Exception):
-    """An acknowledgement the store refuses: ``status`` is the HTTP code."""
+    """An acknowledgement the store refuses: ``status`` is the HTTP code and
+    ``error_kind`` the typed refusal (`flow_item_unknown`,
+    `flow_ack_not_warning`, `flow_deferred`)."""
 
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, error_kind: str, message: str):
         super().__init__(message)
         self.status = status
+        self.error_kind = error_kind
         self.message = message
+
+
+# One writer at a time for `flow_acks.json` (a read-modify-write).
+_acks_lock = threading.Lock()
 
 
 @dataclass
@@ -544,7 +549,8 @@ def _presence(facts: _Facts, *, islanded: bool, study_requested: bool) -> list[d
             "The site has no location: no bus is placed.", component="Bus", fld="x")
     if not islanded and not facts.connection_links:
         add("presence_connection", "error",
-            "No grid connection: add the import Link, or declare the site islanded.",
+            "No grid connection: add the import Link (an off-grid template marks the "
+            "connection not needed).",
             component="Link", fld="eh_role")
     if facts.loads == 0:
         add("presence_loads", "error", "The site has no load or product demand.",
@@ -594,17 +600,21 @@ def acknowledge(project_dir: pathlib.Path, items: list[dict], code: str,
     entity = entity or ""
     match = [it for it in items if it["code"] == code and (it["target"]["entity"] or "") == entity]
     if not match:
-        raise FlowAckError(404, f"no flow item {code!r} for {entity or 'the project'!r}")
+        raise FlowAckError(404, "flow_item_unknown",
+                           f"no flow item {code!r} for {entity or 'the project'!r}")
     if any(it["severity"] != "warning" for it in match):
-        raise FlowAckError(422, "only a warning can be acknowledged; fix an error instead")
+        raise FlowAckError(422, "flow_ack_not_warning",
+                           "only a warning can be acknowledged; fix an error instead")
     record = {"section": match[0]["target"]["section"], "code": code, "entity": entity,
               "value_hash": _ack_hash(match[0]),
               "at": datetime.now(UTC).isoformat(timespec="seconds")}
-    acks = [a for a in read_acks(project_dir)
-            if not (a.get("code") == code and (a.get("entity") or "") == entity)]
-    acks.append(record)
-    atomic_write_text(project_dir / ACKS_FILE,
-                      json.dumps({"version": 1, "acks": acks}, indent=2, sort_keys=True) + "\n")
+    with _acks_lock:
+        acks = [a for a in read_acks(project_dir)
+                if not (a.get("code") == code and (a.get("entity") or "") == entity)]
+        acks.append(record)
+        atomic_write_text(project_dir / ACKS_FILE,
+                          json.dumps({"version": 1, "acks": acks}, indent=2, sort_keys=True)
+                          + "\n")
     return record
 
 
@@ -703,8 +713,9 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
                  "notes": [], "deferred": True, "deferred_reason": reason}, [])
 
     # The one Run includes the reliability study for a project made from an EH
-    # template (the hub-design Guided flow), or when the config sets a goal.
-    study_requested = template is not None or bool(facts.ens_cap)
+    # template (the hub-design Guided flow): the study's refusal is checked and
+    # its VOLL noted for exactly those projects.
+    study_requested = template is not None
     items: list[dict] = []
     presence = _presence(facts, islanded=islanded, study_requested=study_requested)
     items += presence
@@ -757,8 +768,11 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     # still listed on their row but do not become notes.
     blocker = next((_pointer(r["label"], it) for r in rows for it in r["items"]
                     if it["blocking"]), None)
+    # Notes: every display-only gap (a non-blocking error, or a presence rule's
+    # warning such as the missing site location) not yet acknowledged.
     notes = [_pointer(r["label"], it) for r in rows for it in r["items"]
-             if it["severity"] == "error" and not it["blocking"]
+             if not it["blocking"] and not it["acknowledged"]
+             and (it["severity"] == "error" or it["code"] in PRESENCE_RULES)
              and r.get("state") != "not_needed"]
     return ({"sections": rows, "run_ready": blocker is None, "run_blocker": blocker,
              "notes": notes, "deferred": False, "deferred_reason": None}, items)
@@ -769,5 +783,6 @@ def acknowledge_item(project_dir: pathlib.Path, code: str, entity: str | None, *
     """``POST …/flow/ack``: acknowledge a standing warning of the open project."""
     payload, items = _collect(project_dir, cache_key=cache_key, db=db, org_id=org_id)
     if payload["deferred"]:
-        raise FlowAckError(409, payload["deferred_reason"] or "validation deferred")
+        raise FlowAckError(409, "flow_deferred",
+                           payload["deferred_reason"] or "validation deferred")
     return acknowledge(project_dir, items, code, entity)

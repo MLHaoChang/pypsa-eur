@@ -82,7 +82,7 @@ def test_every_readiness_warning_files_to_a_named_section(
     unfiled = [i["message"] for i in _readiness_items(body) if i["code"] == "eh_readiness_note"]
     assert not unfiled, f"add a prefix to READINESS_WARNING_PREFIXES for: {unfiled}"
     for i in _readiness_items(body):
-        assert i["target"]["section"] in S.SECTION_IDS_INPUT, i
+        assert i["target"]["section"] in S.F.INPUT_SECTIONS, i
 
 
 def test_the_variants_reach_every_prefix(client, tmp_projects_dir, project_storage_dir):

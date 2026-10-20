@@ -140,6 +140,7 @@ def test_a_project_that_is_not_open_answers_409(client, site):
     site(name="second")
     r = client.get(f"/api/projects/{first}/flow")
     assert r.status_code == 409
+    assert r.json()["detail"]["error_kind"] == "flow_project_not_open"
 
 
 # ── per section: empty, filled (above), broken, warning ─────────────────────
@@ -245,12 +246,13 @@ def test_scenarios_section(client, site, set_cfg):
     body = _flow(client, name)
     assert _states(body)["scenarios"] == "incomplete"          # broken
     assert "rolling_horizon_invalid" in _codes(body, "scenarios")
+    # A reliability goal without VOLL: the validator's own check, filed here.
     set_cfg(solve_strategy="full", ens_cap_permyriad=1.0, voll=0.0)
-    body = _flow(client, name)
-    assert _states(body)["scenarios"] == "incomplete"          # empty: a goal needs VOLL
-    assert "presence_voll" in _codes(body, "scenarios")
+    assert "ens_cap_without_voll" in _codes(_flow(client, name), "scenarios")
     set_cfg(voll=5000.0)
-    assert "presence_voll" not in _codes(_flow(client, name), "scenarios")   # filled
+    body = _flow(client, name)
+    assert "ens_cap_without_voll" not in _codes(body, "scenarios")    # filled
+    assert "presence_voll" not in _codes(body, "scenarios")     # no study: not asked
 
 
 # ── acknowledgements ────────────────────────────────────────────────────────
@@ -289,8 +291,10 @@ def test_an_error_cannot_be_acknowledged(client, site, edit):
     r = client.post(f"/api/projects/{name}/flow/ack",
                     json={"code": "load_p_set_invalid", "entity": "it"})
     assert r.status_code == 422
+    assert r.json()["detail"]["error_kind"] == "flow_ack_not_warning"
     r = client.post(f"/api/projects/{name}/flow/ack", json={"code": "no_such_code"})
     assert r.status_code == 404
+    assert r.json()["detail"]["error_kind"] == "flow_item_unknown"
 
 
 # ── deferred ────────────────────────────────────────────────────────────────
@@ -428,7 +432,8 @@ def test_r4_study_with_voll_zero(client, tmp_projects_dir, monkeypatch):
     body = _assert_equivalent(client, monkeypatch, name)
     assert body["run_ready"] is True
     assert "presence_voll" in _codes(body, "scenarios")
-    assert {x["section"] for x in body["notes"]} == {"scenarios"}
+    # The template's buses are unplaced: the location is a note too.
+    assert {x["section"] for x in body["notes"]} == {"project", "scenarios"}
 
 
 def test_r4_a_study_start_refusal_blocks_run(client, tmp_projects_dir, monkeypatch,
@@ -541,7 +546,7 @@ def test_an_islanded_microgrid_needs_no_connection(client, tmp_projects_dir):
     assert rows["connection"]["required"] is False
 
 
-@pytest.mark.parametrize("tid", ["eh_datacenter", "eh_site", "eh_microgrid", "eh_h2_hub"])
+@pytest.mark.parametrize("tid", R4_TEMPLATES)
 def test_flow_answers_within_the_preflights_time(client, tmp_projects_dir, tid, capsys):
     """Done-when: GET /flow answers in about the preflight's time (measured, and
     printed for the PR). The cold call runs eh_readiness on a copy; the next
@@ -582,3 +587,15 @@ def test_the_assistant_tool_returns_the_endpoints_payload(client, site, bound_ct
     with bound_ctx(client):
         out = chat_tools.DISPATCHERS["get_project_flow"](name=name)
     assert out == _flow(client, name)
+
+
+def test_a_missing_location_is_a_note_beside_an_enabled_run(client, site, edit):
+    """Design §3.3: "Run is enabled with a note when only display-only gaps
+    remain ('Project & site: no location')"."""
+    name = site()
+    with edit() as n:
+        n.buses[["x", "y"]] = 0.0
+    body = _flow(client, name)
+    assert body["run_ready"] is True
+    assert [x["section"] for x in body["notes"]] == ["project"]
+    assert body["notes"][0]["message"].startswith("Project & site: ")

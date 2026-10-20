@@ -39,8 +39,10 @@ def _require_open(project: AuthorizedProject) -> None:
 
     active = network_lengths.active_project_dir()
     if active is None or os.path.realpath(active) != os.path.realpath(project.directory):
-        raise HTTPException(
-            409, f"Open project '{project.name}' first: the flow is read from the loaded network.")
+        raise HTTPException(409, {
+            "error_kind": "flow_project_not_open",
+            "message": f"Open project '{project.name}' first: the flow is read from the "
+                       "loaded network."})
 
 
 def _org(project: AuthorizedProject):
@@ -82,5 +84,6 @@ def ack_flow_item(body: FlowAck,
                                             cache_key=project.registry_key, db=db,
                                             org_id=_org(project))
     except flow_service.FlowAckError as exc:
-        raise HTTPException(exc.status, exc.message) from exc
+        raise HTTPException(exc.status, {"error_kind": exc.error_kind,
+                                          "message": exc.message}) from exc
     return {"ack": ack}
