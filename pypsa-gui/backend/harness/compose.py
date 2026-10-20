@@ -85,6 +85,8 @@ _ASSISTANT_STANCE_CHAINING = _p["chaining"]
 _ASSISTANT_STANCE = _ASSISTANT_STANCE_FACTS + _ASSISTANT_STANCE_CHAINING
 # LC-10: the reference ladder. Tools-on only (it names resolve_reference).
 _REFERENCE_LADDER = _prompts.load("reference_ladder")["text"]
+# LC-15: reading a project summary before describing it. Tools-on only.
+_PROJECT_OVERVIEW = _prompts.load("project_overview")["text"]
 # LC-03: read a result before showing it. Tools-on only (it names tools).
 _RESULTS_WALK = _prompts.load("results_walk")["text"]
 
@@ -427,6 +429,8 @@ def _build_system_prompt(
         # ("this"/"the"/"latest" go through resolve_reference). TOOLS-ON ONLY:
         # it names a tool. A NEW part, so no pinned constant moves.
         *( [_REFERENCE_LADDER] if include_tools else [] ),
+        # LC-15 — summaries come from get_project_statistics. TOOLS-ON ONLY.
+        *( [_PROJECT_OVERVIEW] if include_tools else [] ),
         # LC-03 — read before you show, name the run, "showing" only with a
         # displayed-data ACK. TOOLS-ON ONLY: it names tools. A NEW part, so no
         # pinned constant moves.

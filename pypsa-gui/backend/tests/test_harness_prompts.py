@@ -45,6 +45,8 @@ EXPECTED_SHA256 = {
     "_UNTRUSTED_DATA_CLAUSE": "4909db27d7388788b3457f74a9f927a19173f0d5903eda36d55a88c8f81ba867",
     # LC-10, a new tools-on part (2026-10-19); pinned from its first version.
     "_REFERENCE_LADDER": "d45c3a30b4dab5cd9f2052e2a4880482e58a60f18fdd1e3e489beaf6e0609c17",
+    # LC-15, a new tools-on part (2026-10-19); pinned from its first version.
+    "_PROJECT_OVERVIEW": "2a9eba38855e6dd8fb3cd0cfa3e41f3fa84b601abcc256db9f774709bd22dd7b",
     # LC-03, a new tools-on part (2026-10-19); pinned from its first version.
     "_RESULTS_WALK": "b29388995af4f3bf18942cb6b98b9e326916e25bf12f7eb0e2109bc27f743177",
 }

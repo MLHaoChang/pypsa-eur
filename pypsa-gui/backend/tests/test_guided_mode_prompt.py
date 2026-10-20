@@ -165,6 +165,7 @@ def test_build_system_prompt_matches_the_pre_p25_snapshot(monkeypatch, include_t
     # LC-10's reference ladder is a NEW part too; its own bytes are pinned in
     # test_harness_prompts.py, so it is blanked here like the skill catalogue.
     monkeypatch.setattr(harness_compose, "_REFERENCE_LADDER", "")
+    monkeypatch.setattr(harness_compose, "_PROJECT_OVERVIEW", "")
     # LC-03's results walk is a NEW part too; its own bytes are pinned in
     # test_harness_prompts.py, so it is blanked here like the skill catalogue.
     monkeypatch.setattr(harness_compose, "_RESULTS_WALK", "")
