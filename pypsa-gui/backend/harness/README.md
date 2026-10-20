@@ -197,6 +197,10 @@ every non-read tool, or refusal of non-read tools. This includes native and
 external dispatch in both modes and checked turns; it grants no new tools or
 checked adapters. Read-only tools can still involve inference and usage limits.
 An additive owner/project database row stores the current mode and revision.
+A tool that names another saved project is admitted against that project's
+rule as well, and the stricter of the two applies. `activate_project` only
+moves the session pointer, so it is not treated as a write to the project
+it opens.
 PUT `/api/chat/restrictions` requires the current project binding and expected
 revision; concurrent or stale saves cannot overwrite another choice. Clearing
 saves standard with a new revision. Missing rows preserve server floors;

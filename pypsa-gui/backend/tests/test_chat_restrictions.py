@@ -345,3 +345,75 @@ def test_a_persisted_initial_revision_is_corruption_not_an_absent_rule(baseline,
             'updates': {'marginal_cost': 20}}}, []))
     assert any(d.get('error_kind') == 'restriction_unavailable' for _, d in frames), frames
     assert chat_tools.get_component('Generator', 'G1')['marginal_cost'] == 10
+
+
+def _save_copy(client, name):
+    """A second saved project, without moving the open one."""
+    from services import project_registry
+
+    created = client.post(f'/api/projects/{name}')
+    assert created.status_code == 200, created.text
+    with chat_tools._acting() as (db, user):
+        return str(project_registry.resolve_project(db, user, name).id)
+
+
+def _pin_rule(seeded_identity, project_id, mode):
+    """Write the rule row directly. The HTTP save only accepts the open project,
+    and this case is about a project that is not the open one."""
+    from db.models import ChatRestriction
+    from db.session import SessionLocal
+
+    with SessionLocal() as db:
+        db.add(ChatRestriction(
+            user_id=uuid.UUID(str(seeded_identity['user_id'])),
+            project_id=uuid.UUID(str(project_id)),
+            revision=uuid.uuid4(),
+            mode=mode,
+        ))
+        db.commit()
+
+
+def test_read_only_on_another_project_blocks_a_named_write(baseline, client, seeded_identity):
+    """The open project's rule is not the only one. A write that names a
+    different saved project is admitted against that project's rule."""
+    other = _save_copy(client, 'RestrictedOther')
+    _pin_rule(seeded_identity, other, 'read_only')
+
+    frames = list(dispatch_tool_call(ChatSession(), {
+        'id': 'named-write', 'name': 'gridspine_update_config',
+        'input': {'project_id': 'RestrictedOther', 'hours': 48}}, []))
+    assert any(d.get('error_kind') == 'user_restriction' for _, d in frames), frames
+    assert not any(e == 'tool_running' for e, _ in frames)
+    assert not any(e == 'tool_pending_confirmation' for e, _ in frames)
+
+    read_frames = list(dispatch_tool_call(ChatSession(), {
+        'id': 'named-read', 'name': 'get_project_network_meta',
+        'input': {'project_id': 'RestrictedOther'}}, []))
+    assert not any(d.get('error_kind') == 'user_restriction' for _, d in read_frames), read_frames
+
+    opened = list(dispatch_tool_call(ChatSession(), {
+        'id': 'named-open', 'name': 'activate_project',
+        'input': {'project_id': 'RestrictedOther'}}, []))
+    assert not any(d.get('error_kind') == 'user_restriction' for _, d in opened), opened
+
+
+def test_confirm_changes_on_another_project_cards_a_named_write(baseline, client, seeded_identity):
+    other = _save_copy(client, 'ConfirmOther')
+    _pin_rule(seeded_identity, other, 'confirm_changes')
+
+    session, frames = ChatSession(), []
+    for event, data in dispatch_tool_call(session, {
+        'id': 'named-confirm', 'name': 'gridspine_update_config',
+        'input': {'project_id': 'ConfirmOther', 'hours': 48}}, []):
+        frames.append((event, data))
+        if event == 'tool_pending_confirmation':
+            session.record_decision(data['confirmation_token'], 'deny')
+    assert any(e == 'tool_pending_confirmation' for e, _ in frames), frames
+    assert not any(e == 'tool_running' for e, _ in frames)
+
+
+def test_unknown_named_project_is_not_reported_as_a_restriction(baseline, client):
+    frames = list(dispatch_tool_call(ChatSession(), {
+        'id': 'missing-project', 'name': 'gridspine_update_config',
+        'input': {'project_id': 'no-such-project', 'hours': 48}}, []))
+    assert not any(d.get('error_kind') == 'user_restriction' for _, d in frames), frames

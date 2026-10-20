@@ -90,6 +90,57 @@ def require_allowed(snapshot, tier):
                                   'message': 'Your saved project rule blocks non-read tools. Change it in Access and approvals to request this action.'})
 
 
+# Opening a project is not a write to it. read_only is how the assistant is
+# allowed to look at that project; refusing activate_project would lock the
+# user out of the project they just protected.
+NAMED_PROJECT_EXEMPT = frozenset({'activate_project'})
+_RANK = {'standard': 0, 'confirm_changes': 1, 'read_only': 2}
+
+
+def named_project_rule(session, project_id):
+    """The saved rule for a project a tool names, when it is not the open one.
+
+    None when the call does not name a project, names the project ``capture``
+    already read, or the name does not resolve (the tool reports that miss).
+    A storage failure raises, the same as ``capture``: an unreadable rule is
+    never treated as standard.
+    """
+    if not isinstance(project_id, str) or not project_id.strip():
+        return None
+    from services import chat_tools
+
+    with chat_tools._acting() as (db, user):
+        if session.owner_user_id is not None and session.owner_user_id != str(user.id):
+            raise HTTPException(403, 'Chat ownership changed.')
+        try:
+            project = project_registry.resolve_project(db, user, project_id.strip())
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        active = PyPSAService.get_active_context().project_uuid
+        if active and str(project.id) == str(active):
+            return None
+        return {**read(db, user.id, project.id), 'owner_id': str(user.id),
+                'project_id': str(project.id)}
+
+
+def stricter_mode(active, named):
+    """The tighter of the open project's mode and a named project's mode."""
+    if named is None or _RANK[named] <= _RANK[active]:
+        return active
+    return named
+
+
+def require_named_unchanged(snapshot, session, project_id):
+    """A later rule on the project the tool named needs fresh admission."""
+    if snapshot is None:
+        return
+    if named_project_rule(session, project_id) != snapshot:
+        raise HTTPException(409, {'error_kind': 'confirmation_revoked',
+                                  'message': 'Your project restrictions changed. Request and review the action again.'})
+
+
 def require_current(snapshot, session):
     """A later rule (even a change-and-restore) needs fresh tool admission."""
     if capture(session) != snapshot:

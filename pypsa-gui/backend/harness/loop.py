@@ -2518,9 +2518,18 @@ def _dispatch_real_tool_call(
     # relaxed — auto-approve drops the human round-trip, not the serialisation.
     confirmation_args = args
     from harness import restrictions
+    named_rule = None
+    project_arg = args.get('project_id') if isinstance(args, dict) else None
     try:
         restriction = restrictions.capture(session)
         restrictions.require_allowed(restriction, tier)
+        # Tools that take a project_id write THAT project, not whichever one
+        # happens to be open. The open project's rule is not a grant for the
+        # other one: read_only there still refuses, confirm_changes there still
+        # cards. activate_project only moves the session pointer.
+        if tool_name not in restrictions.NAMED_PROJECT_EXEMPT:
+            named_rule = restrictions.named_project_rule(session, project_arg)
+            restrictions.require_allowed(named_rule, tier)
     except Exception as exc:
         detail = getattr(exc, 'detail', None)
         kind = detail.get('error_kind', 'restriction_unavailable') if isinstance(detail, dict) else 'restriction_unavailable'
@@ -2552,8 +2561,12 @@ def _dispatch_real_tool_call(
         tool_results_collector=tool_results_collector,
         guided=guided or (session.assurance_turn is not None and tool_name == "update_component"),
         external=external,
-        restriction_mode=restriction['mode'] if restriction else 'standard',
+        restriction_mode=restrictions.stricter_mode(
+            restriction['mode'] if restriction else 'standard',
+            named_rule['mode'] if named_rule else None),
         restriction_snapshot=restriction,
+        named_rule=named_rule,
+        named_project_id=project_arg,
     )
     if not approved:
         return
@@ -2562,6 +2575,7 @@ def _dispatch_real_tool_call(
     try:
         def require_current_confirmation():
             restrictions.require_current(restriction, session)
+            restrictions.require_named_unchanged(named_rule, session, project_arg)
             if (confirmation_gate.confirmation_revision() != policy_revision
                     or _tool_tier(session, tool_name) != tier
                     or mcp_client.server_for(session, tool_name) != external):
