@@ -1053,6 +1053,25 @@ def _register_staged_hubs() -> None:
 
 _register_staged_hubs()
 
+
+def _register_ammonia() -> None:
+    """The ammonia hub (``eh_ammonia.py``, grid-to-process ticket 05) adds itself to the registries,
+    after the staged hubs it starts from."""
+    import importlib.util
+    import pathlib
+    import types
+
+    path = pathlib.Path(__file__).resolve().with_name("eh_ammonia.py")
+    if not path.is_file():           # this module copied on its own (a test's tmp dir)
+        return
+    spec = importlib.util.spec_from_file_location("_eh_ammonia", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.register(types.SimpleNamespace(**globals()))
+
+
+_register_ammonia()
+
 # Sidecar file names copied by POST /api/projects/from_template/<id>.
 META_FILE = "eh_template.json"
 STRESS_FILE = "adequacy_stress_scenarios.json"
