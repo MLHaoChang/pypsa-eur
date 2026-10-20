@@ -244,3 +244,18 @@ def test_a_capacity_is_shown_in_its_bus_unit(grid):
     assert store["rows"][0]["unit"] == "t"
     assert link["rows"][0]["unit"] == "t/h"
     assert line["rows"][0]["unit"] == "MVA"
+
+
+def test_a_parts_edit_shows_the_native_clear_of_an_imported_overnight_cost(grid):
+    """GK reverse trap: a row with PyPSA's overnight_cost set would keep using it
+    at solve time. The native handler clears it on a parts edit; the card shows
+    that clear, and the read-back confirms it."""
+    PyPSAService.get_network().storage_units.at["Battery", "overnight_cost"] = 1.2e6
+    frames, cards, result = _dispatch(grid, "update_component", {
+        "component_class": "StorageUnit", "name": "Battery",
+        "attrs": {"inv_energy_overnight": 150_000.0, "inv_energy_lifetime": 15.0}})
+    rows = {r["field"]: r for r in cards[0]["edit_card"]["rows"] if r["role"] != "note"}
+    assert (rows["overnight_cost"]["old"], rows["overnight_cost"]["new"]) == (1.2e6, None)
+    assert rows["overnight_cost"]["role"] == "follows"
+    assert result["_edit_receipt"]["outcome"] == "verified"
+    assert PyPSAService.get_network().storage_units["overnight_cost"].isna()["Battery"]

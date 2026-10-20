@@ -135,9 +135,10 @@ def _says(rows: list[dict]) -> str:
     return "; ".join(one(row) for row in rows if row["role"] == "typed")
 
 
-def _digest(card: dict, fingerprint: str | None) -> str:
+def _digest(card: dict) -> str:
+    """Binds what the card SHOWS: a different old, new or derived value is a
+    different card. Edits elsewhere in the project leave it valid."""
     body = {k: v for k, v in card.items() if k != "digest"}
-    body["inputs"] = fingerprint
     return hashlib.sha256(json.dumps(body, sort_keys=True, default=str, allow_nan=False).encode()).hexdigest()
 
 
@@ -157,7 +158,7 @@ def preview(tool_name: str, args: dict) -> dict:
     rows = adapter.preview(args or {})
     card = {"version": VERSION, "kind": adapter.kind, "tool": tool_name, "rows": rows,
             "says": _says(rows), "complete": adapter is not _ARGUMENTS}
-    card["digest"] = _digest(card, _fingerprint())
+    card["digest"] = _digest(card)
     return card
 
 
@@ -237,8 +238,9 @@ def _check_value(component_class: str, key: str, value, field: dict) -> None:
     if key == "overnight_cost" and "asset" not in field["sources"]:
         # The app derives this class's capital_cost from its own cost fields;
         # PyPSA's overnight_cost would be a second basis beside them.
-        _refuse("cost_set_by_parts", f"{component_class} costs are set by its own investment fields "
-                "(see get_component_schema, group investment), not by PyPSA's overnight_cost.")
+        _refuse("cost_set_by_parts", f"A {component_class}'s investment cost comes from its own investment "
+                "fields (for a StorageUnit its power and energy part costs, inv_power_overnight and "
+                "inv_energy_overnight); edit those. PyPSA's overnight_cost would replace that cost at solve time.")
     kind = field.get("native_type") or ""
     if kind.startswith("float") or kind.startswith("int"):
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -333,6 +335,8 @@ def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Ca
         try:
             run()
         except HTTPException as exc:
+            if isinstance(exc.detail, dict) and exc.detail.get("error_kind"):
+                raise  # a native refusal keeps its own kind (study_in_flight, …)
             detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, default=str)
             _refuse("edit_refused", f"The edit would be refused: {detail}", exc.status_code)
     after = getattr(candidate.network, attr)
