@@ -40,7 +40,7 @@ import pandas as pd
 from services.profile_gen.apply import ProfileApplyError
 
 PROVENANCE = "synthetic/assumed"
-KINDS = ("tou", "inflow", "cop", "part_load")
+KINDS = ("tou", "inflow", "cop", "market", "part_load")
 _AMBIENT = {"ambient_annual_mean_c": 10.0, "ambient_seasonal_amplitude_k": 9.0,
             "ambient_diurnal_amplitude_k": 5.0}
 #: Monthly inflow shapes, January first (assumed, illustrative).
@@ -73,6 +73,10 @@ class InvalidSeriesParamsError(SeriesError):
 
 class PartLoadNotASeriesError(SeriesError):
     """A part-load efficiency curve is not a time series."""
+
+
+class MarketBundlesUnavailableError(SeriesError):
+    """Market price bundles (package C2) are not available yet."""
 
 
 class PocTariffError(SeriesError):
@@ -215,6 +219,10 @@ _TARGETS = {"inflow": ["storage_units", "inflow"], "cop": ["links", "efficiency"
 
 def generate_frame(ids: list[str], kind: str, params: Mapping[str, Any],
                    year: int) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if kind == "market":
+        raise MarketBundlesUnavailableError(
+            "market price bundles are not available yet (package C2); use a "
+            "time-of-use price (tou) or upload a measured price series")
     if kind == "part_load":
         raise PartLoadNotASeriesError(
             "a part-load efficiency curve depends on the dispatch, which the "

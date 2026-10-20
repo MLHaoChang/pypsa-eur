@@ -879,6 +879,42 @@
       "surface": "inline",
       "why": "A dated maintenance window does not fall in the year it would apply to, or the network is multi-period. The detail says so; the assistant uses MM-DD windows or the network's year, per call."
     },
+    "unknown_component": {
+      "surface": "inline",
+      "why": "Profile generation named a component (link, storage unit, generator) that is not on the open network. The detail names it; the assistant asks which one, per call."
+    },
+    "poc_tariff": {
+      "surface": "inline",
+      "why": "A price series was aimed at a point-of-connection link, whose energy price the tariff in the commercial configuration sets. The detail says so; the assistant points to the tariff, per call."
+    },
+    "cop_bus": {
+      "surface": "inline",
+      "why": "A heat-pump COP was aimed at a link whose bus0 is not electricity, so it would scale the wrong input. The detail names the bus; the assistant picks the right link, per call."
+    },
+    "two_way_floor": {
+      "surface": "inline",
+      "why": "A must-run floor was aimed at a two-way link, where it would forbid reverse flow. The detail says so; the assistant picks another link or a shutdown instead, per call."
+    },
+    "poc_bound": {
+      "surface": "inline",
+      "why": "A must-run floor was aimed at a point-of-connection link, which is the grid connection, not a process. The detail says so; the assistant picks the process link, per call."
+    },
+    "part_load_not_a_series": {
+      "surface": "inline",
+      "why": "A part-load efficiency curve was asked for as a series; it depends on the dispatch, which the linear model cannot take as a time series. The detail says so; the assistant explains, per call."
+    },
+    "unknown_series_kind": {
+      "surface": "inline",
+      "why": "Series generation named a kind that does not exist. The detail lists tou, inflow and cop; the assistant picks one, per call."
+    },
+    "market_bundles_unavailable": {
+      "surface": "inline",
+      "why": "A market price series was asked for, but market price bundles (package C2) are not available yet. The detail suggests a time-of-use price or an upload; the assistant offers those, per call."
+    },
+    "invalid_series_params": {
+      "surface": "inline",
+      "why": "A series kind's parameters are missing, unknown or out of range (an unpriced hour, a malformed period, a bad COP temperature). The detail names the parameter; the assistant fixes it and retries, per call."
+    },
     "point_not_in_profile": {
       "surface": "inline",
       "why": "apply_generated_profile asked for a point the pending profile does not hold. The detail lists the points it does hold; the assistant picks the right point_id, per call."

@@ -63,7 +63,17 @@ from services.profile_gen.availability import (
     ForcedOutagesNotWrittenError,
     InvalidAvailabilityParamsError,
     MaintenanceYearError,
+    PocBoundError,
+    TwoWayFloorError,
     UnknownAvailabilityKindError,
+)
+from services.profile_gen.series import (
+    CopBusError,
+    InvalidSeriesParamsError,
+    MarketBundlesUnavailableError,
+    PartLoadNotASeriesError,
+    PocTariffError,
+    UnknownSeriesKindError,
 )
 from services.profile_gen.load_upload import (
     UploadCoverageError,
@@ -148,12 +158,26 @@ class LoadGenerateRequest(BaseModel):
 
 class AvailabilityGenerateRequest(BaseModel):
     # An availability kind (`services/profile_gen/availability.py`) for the
-    # named generators of the open network; one column per generator.
+    # named generators (or, with component_type "links", links) of the open
+    # network; one column per component. `components` names either kind;
+    # `generators` is kept for the generator case.
     kind: str
-    generators: list[str] = Field(min_length=1)
+    generators: list[str] | None = None
+    components: list[str] | None = None
+    component_type: Literal["generators", "links"] = "generators"
     params: dict[str, Any] | None = None
     # The source year. Unset: the network's (first period's) year, so dated
     # maintenance windows land where the user means them.
+    year: int | None = None
+
+
+class SeriesGenerateRequest(BaseModel):
+    # A series kind (`services/profile_gen/series.py`) for named components;
+    # the kind decides their type (tou: params.component_type, default
+    # generators; inflow: storage units; cop: links).
+    kind: str
+    components: list[str] = Field(min_length=1)
+    params: dict[str, Any] | None = None
     year: int | None = None
 
 
@@ -357,6 +381,10 @@ _APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (FamilyTargetMismatchError, {"error_kind": "family_target_mismatch"}),
     (InvalidSeriesUnitError, {"error_kind": "invalid_series_unit"}),
     (DcLoadOwnedError, {"error_kind": "dc_load_owned"}),
+    (PocTariffError, {"error_kind": "poc_tariff"}),
+    (CopBusError, {"error_kind": "cop_bus"}),
+    (TwoWayFloorError, {"error_kind": "two_way_floor"}),
+    (PocBoundError, {"error_kind": "poc_bound"}),
 )
 
 # Generation and upload refusals (load, availability), literal for the same
@@ -372,6 +400,10 @@ _GENERATE_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (UnknownAvailabilityKindError, {"error_kind": "unknown_availability_kind"}),
     (InvalidAvailabilityParamsError, {"error_kind": "invalid_availability_params"}),
     (MaintenanceYearError, {"error_kind": "maintenance_year"}),
+    (PartLoadNotASeriesError, {"error_kind": "part_load_not_a_series"}),
+    (UnknownSeriesKindError, {"error_kind": "unknown_series_kind"}),
+    (MarketBundlesUnavailableError, {"error_kind": "market_bundles_unavailable"}),
+    (InvalidSeriesParamsError, {"error_kind": "invalid_series_params"}),
 )
 
 
@@ -710,18 +742,32 @@ def generate_availability_profiles(
     archetypes; nothing touches the network here."""
     _check_lock(proj, db, user)
     ctx = _foreground_ctx(proj, "generate")
-    gens = ctx.network.generators
-    missing = [g for g in body.generators if g not in gens.index]
-    if missing:
+    names = body.components or body.generators or []
+    if not names:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "unknown_component",
+                    "message": "name the components (or generators) to generate for"})
+    table = getattr(ctx.network, body.component_type)
+    missing = [g for g in names if g not in table.index]
+    if missing and body.component_type == "generators":
         raise HTTPException(
             status_code=422,
             detail={"error_kind": "unknown_generator",
                     "message": f"no generator named {', '.join(map(repr, missing))} "
                                f"on the open network"},
         )
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "unknown_component",
+                    "message": f"no {body.component_type[:-1]} named "
+                               f"{', '.join(map(repr, missing))} on the open network"},
+        )
     from services.profile_gen.families import is_weather_carrier
 
-    weather = [g for g in body.generators if is_weather_carrier(gens.at[g, "carrier"])]
+    weather = ([g for g in names if is_weather_carrier(table.at[g, "carrier"])]
+               if body.component_type == "generators" else [])
     if weather:
         raise HTTPException(
             status_code=422,
@@ -741,9 +787,10 @@ def generate_availability_profiles(
             params["timezone"] = tz
     try:
         result = engine.generate_profile(
-            body.generators, body.kind, params=params,
+            names, body.kind, params=params,
             year=body.year or int(first.year), family="availability",
         )
+        result.meta["target"] = [body.component_type, result.meta["target"][1]]
         # A dated window that apply would refuse is refused before anything
         # reaches the pending store.
         from services.profile_gen.availability import check_dated_windows
@@ -771,6 +818,68 @@ def generate_availability_profiles(
             stats[col]["hours_reduced"] = int((v < 1.0 - 1e-9).sum())
         else:
             stats[col]["hours_floored"] = int((v > 1e-9).sum())
+    return {**record, "stats": stats}
+
+
+_SERIES_TYPES = {"inflow": "storage_units", "cop": "links"}
+
+
+@project_router.post("/{name}/profiles/series/generate")
+def generate_series_profiles(
+    body: SeriesGenerateRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Generate another model series (a time-of-use price, hydro inflow, a
+    heat-pump COP) for named components into the pending store;
+    `/profiles/apply` writes it to the target it states. Synchronous."""
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "generate")
+    params = dict(body.params or {})
+    ctype = _SERIES_TYPES.get(body.kind) or str(params.get("component_type") or "generators")
+    table = getattr(ctx.network, ctype, None)
+    missing = [c for c in body.components if table is None or c not in table.index]
+    if missing and body.kind in ("tou", *_SERIES_TYPES):
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "unknown_component",
+                    "message": f"no {ctype} named {', '.join(map(repr, missing))} "
+                               "on the open network"},
+        )
+    if "timezone" not in params and body.kind in ("tou", "cop"):
+        from services.profile_gen.apply import _commercial_timezone
+
+        tz = _commercial_timezone(ctx)
+        if tz:
+            params["timezone"] = tz
+    snaps = ctx.network.snapshots
+    first = (snaps.get_level_values(-1)[0] if isinstance(snaps, pd.MultiIndex)
+             else pd.DatetimeIndex(snaps)[0])
+    try:
+        result = engine.generate_profile(
+            body.components, body.kind, params=params,
+            year=body.year or int(first.year), family="series",
+        )
+    except ProfileGenError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc), "message": str(exc)},
+        ) from exc
+
+    job_id = str(uuid.uuid4())
+    record = dict(result.meta)
+    record["job_id"] = job_id
+    record["project_id"] = proj.name
+    record["points"] = list(result.series.columns)
+    write_pending(str(proj.directory), job_id, result.series, record)
+    scale = float(record.get("scale_mw") or 1.0)
+    stats = {}
+    for col in result.series.columns:
+        v = result.series[col] * scale
+        stats[col] = {"min": float(v.min()), "mean": float(v.mean()), "max": float(v.max())}
+        if body.kind == "inflow":
+            stats[col]["annual_mwh"] = float(v.sum())
     return {**record, "stats": stats}
 
 

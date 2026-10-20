@@ -350,3 +350,74 @@ def test_must_run_stats_count_the_floored_hours(client, plant_project):
                   params={"share": 0.2}).json()
     assert body["stats"]["chp"]["hours_floored"] == 8760
     assert "hours_reduced" not in body["stats"]["chp"]
+
+
+# ---------------------------------------------------------------------------
+# other series + link bounds (ticket 03)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def heat_project(client, install_network):
+    n = _load_network()
+    n.buses.loc["B1", "carrier"] = "AC"
+    n.add("Bus", "H", carrier="heat")
+    n.add("Link", "hp", bus0="B1", bus1="H", p_nom=5.0)
+    n.add("StorageUnit", "dam", bus="B1", p_nom=5.0, max_hours=100.0)
+    install_network(n)
+    resp = client.post("/api/projects/Heat Site",
+                       params={"force": True, "rebind": True})
+    assert resp.status_code == 200, resp.text
+    return "Heat Site"
+
+
+def _series(client, project, **body):
+    return client.post(f"/api/projects/{project}/profiles/series/generate", json=body)
+
+
+def test_a_cop_series_generates_and_applies_to_the_links_efficiency(
+    client, heat_project, session_ctx,
+):
+    gen = _series(client, heat_project, kind="cop", components=["hp"],
+                  params={"source": "ground", "source_c": 5.0, "sink_c": 35.0})
+    assert gen.status_code == 200, gen.text
+    body = gen.json()
+    assert body["target"] == ["links", "efficiency"]
+    applied = client.post(f"/api/projects/{heat_project}/profiles/apply",
+                          json={"job_id": body["job_id"], "component": "hp",
+                                "time_basis": "UTC"})
+    assert applied.status_code == 200, applied.text
+    eff = session_ctx(client).network.links_t.efficiency["hp"]
+    assert float(eff.iloc[0]) == pytest.approx(0.45 * 308.15 / 30.0)
+
+
+def test_an_inflow_series_reports_its_energy(client, heat_project):
+    body = _series(client, heat_project, kind="inflow", components=["dam"],
+                   params={"annual_mwh": 1000.0, "shape": "flat"}).json()
+    assert body["stats"]["dam"]["annual_mwh"] == pytest.approx(1000.0)
+
+
+@pytest.mark.parametrize("over, kind", [
+    ({"kind": "part_load", "components": ["hp"], "params": {}}, "part_load_not_a_series"),
+    ({"kind": "tides", "components": ["hp"], "params": {}}, "unknown_series_kind"),
+    ({"kind": "market", "components": ["hp"], "params": {}}, "market_bundles_unavailable"),
+    ({"kind": "cop", "components": ["hp"], "params": {"source": "water"}},
+     "invalid_series_params"),
+    ({"kind": "cop", "components": ["nope"], "params": {}}, "unknown_component"),
+])
+def test_series_refusals_are_typed(client, heat_project, over, kind):
+    resp = _series(client, heat_project, **over)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == kind
+
+
+def test_availability_on_a_link_through_the_route(client, heat_project, session_ctx):
+    gen = _avail(client, heat_project, generators=None, components=["hp"],
+                 component_type="links")
+    assert gen.status_code == 200, gen.text
+    body = gen.json()
+    applied = client.post(f"/api/projects/{heat_project}/profiles/apply",
+                          json={"job_id": body["job_id"], "component": "hp",
+                                "component_type": "links", "time_basis": "UTC"})
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["component_type"] == "links"
