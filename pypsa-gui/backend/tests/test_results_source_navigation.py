@@ -112,6 +112,35 @@ def test_read_projection_cannot_reuse_inherited_actor_without_http_auth(client, 
     assert client.get("/api/results/run-view", params={"run_id": "unknown"}).status_code == 401
 
 
+def test_a_project_switch_forgets_the_load_flow_just_read(monkeypatch):
+    """Showing means the data this turn read. A mid-turn project switch drops
+    that read, so the new project is not described as showing the old numbers.
+    A read that did not succeed never counts."""
+    from types import SimpleNamespace
+
+    from services.pypsa_service import PyPSAService
+
+    session = SimpleNamespace(owner_user_id="owner-nav", session_id="nav-session")
+    turn = navigation.OrdinaryTurn(session, SimpleNamespace(project_uuid="project-a"), 1)
+    shown = {"source": "lopf", "window_from": 0, "window_to": 3}
+    turn.note_read("get_loadflow_summary", {"status": "unavailable", "ui_reference": shown})
+    assert turn.reads == {}
+    turn.note_read("get_loadflow_summary", {"status": "ok", "ui_reference": shown})
+    ack = {"action_id": "act-1", "target": {"results_tab": "loadflow"}, "source_binding": shown}
+    monkeypatch.setattr(navigation.records, "load", lambda *_a, **_k: {
+        "outcome": "completed", "verification": "browser_displayed_data"})
+    assert navigation.display(turn, ack, wait=0) == {
+        "verification": "browser_displayed_data", "say": "showing"}
+
+    monkeypatch.setattr(PyPSAService, "get_active_context",
+                        lambda: SimpleNamespace(project_uuid="project-b"))
+    navigation.rebind(turn)
+    assert turn.project_id == "project-b" and turn.reads == {}
+    after = navigation.display(turn, ack, wait=0)
+    assert after["say"] == "opened" and after["verification"] == "browser_displayed_data"
+    assert after["differs_from_read"] == {"read": None, "shown": shown}
+
+
 def test_corrupt_retained_section_and_unknown_baseline_refuse(client, result_project):
     _ctx, project_id, root = result_project
     run_evidence.publish_run(root, project_id, run_id="old", kind="simulation", status="completed",
