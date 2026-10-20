@@ -125,6 +125,9 @@ def commercial_findings(n, commercial, *, solve_strategy: str = "full",
         _lp.validate_for_network(n, cfg)
         adders, _items, _nil, _notes = _lp._adders(n, cfg)
         price = _lp._export_price(n, cfg) if cfg.export_price_ref is not None else None
+        if cfg.import_price_ref is not None:
+            # As the solve prices it (IPP ticket 07): the arbitrage check sees it too.
+            adders["import"] = adders["import"] + _lp._import_price(n, cfg)
         demand, _ids, _missing, _dnotes = _lp._demand_spec(n, cfg)
         tier_spec, _tiered, _nonconvex = _lp._tier_spec(n, cfg)
         _lp.refuse_windowed_terms(demand, tier_spec, solve_strategy, multi_period,

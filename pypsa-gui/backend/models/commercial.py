@@ -29,7 +29,7 @@ ValueStreamKind = Literal[
     "demand_charge", "retail_fixed", "ancillary", "dr_availability",
     "dr_activation", "ppa_settlement", "cfd_settlement", "certificates",
     "lease", "eaas_fee", "fuel", "fom", "vom", "capex", "incentive", "tax",
-    "debt_service", "other",
+    "debt_service", "energy_wholesale", "other",
 ]
 
 TariffItemKind = Literal["energy", "demand", "capacity", "fixed", "certificate", "tax_levy"]
@@ -671,6 +671,10 @@ class CommercialConfig(BaseModel):
     # drift (preflight checks the inline copy hashes to it).
     import_tariff_ref: LibraryItemRef | None = None
     export_price_ref: TimeSeriesRef | None = None
+    # A wholesale import price (IPP ticket 07, G7): a Library series added to the import
+    # side of the LP on the import Link(s) (`links_t["ic_import_price"]`), booked as
+    # `energy_wholesale` apart from the tariff. An `lp_input`.
+    import_price_ref: TimeSeriesRef | None = None
     # The `poc→grid` Link that carries export (spec §5: export price = −price
     # on a second PoC Link). Required by an export price or an export item.
     export_link: str | None = None

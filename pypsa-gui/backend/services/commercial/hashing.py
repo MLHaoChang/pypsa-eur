@@ -49,6 +49,7 @@ FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {
     ("CommercialConfig", "value_flows"): None,           # P3 WP3.0
     ("CommercialConfig", "reference_purchases"): [],     # generic-site E2E H2e
     ("CommercialConfig", "co2_price"): None,             # generic-site E2E H2e
+    ("CommercialConfig", "import_price_ref"): None,      # IPP ticket 07 (G7)
 }
 
 

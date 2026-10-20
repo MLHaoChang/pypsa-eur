@@ -554,6 +554,8 @@ export interface CommercialConfig {
   site_party?: string
   import_tariff?: Tariff | null
   export_price_ref?: LibraryRef | null
+  /** IPP ticket 07: the wholesale import price, a Library series on the import Link(s). */
+  import_price_ref?: LibraryRef | null
   export_link?: string | null
   timezone?: string | null
   connection?: ConnectionAgreement | null
