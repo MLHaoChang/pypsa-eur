@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--storage", type=Path, required=True)
     parser.add_argument("--decisions", action="store_true")
     parser.add_argument("--no-model", action="store_true", help="configure no model profile (the no-key path)")
-    parser.add_argument("--journey", choices=["oj01"],
+    parser.add_argument("--journey", choices=["oj01", "oj05"],
                         help="script a finite owner journey on the loopback wire (LC-03 OJ-01)")
     args = parser.parse_args()
     storage = args.storage.resolve()
@@ -65,6 +65,17 @@ def main():
                         results.append({"unparsed": text[:200]})
             if "Run the simulation" in said:
                 steps = [("run_simulation", {})]
+            elif "this line: s_nom 400" in said:
+                # LC-04 OJ-05: "this line" from the selection, then one edit with its card.
+                target = (results[0].get("target") or {}) if results else {}
+                steps = [("resolve_reference", {"target": "component", "component_class": "Line"}),
+                         ("update_component", {"component_class": target.get("component_class"),
+                                               "name": target.get("name"), "attrs": {"s_nom": 400}})]
+            elif "Undo that change" in said:
+                steps = [("undo_last", {})]
+            elif "NH3 tank" in said:
+                steps = [("update_component", {"component_class": "Store", "name": "NH3 tank",
+                                               "attrs": {"e_nom": 80}})]
             elif "load flow results" in said:
                 steps = [("list_project_runs", {"limit": 1, "status": "completed"}),
                          ("get_loadflow_summary", {"run_id": ((results[0].get("items") or [{}])[0].get("run_id")
@@ -93,6 +104,12 @@ def main():
                 text = (f"OJ03_ANSWER {verb} {offered[0] if offered else 'nothing'}; "
                         f"also with data: {', '.join(offered[1:]) or 'none'}; "
                         f"already shown: {', '.join(listing.get('shown', []))}.")
+            elif steps[-1][0] in ("update_component", "undo_last"):
+                receipt = results[-1].get("_edit_receipt") or {}
+                text = (f"OJ05_ANSWER {receipt.get('says') or results[-1]}; "
+                        f"{'read back' if receipt.get('outcome') == 'verified' else 'not confirmed'}; "
+                        f"results stale: {receipt.get('results_stale')}; "
+                        f"undo: {(receipt.get('undo') or {}).get('available')}.")
             elif len(steps) == 1:
                 text = f"The solve was started (job {results[0].get('job_id')})."
             else:
@@ -236,7 +253,7 @@ with SessionLocal() as db:
             else:
                 raise RuntimeError("Backend readiness timeout")
             ready = {"base": f"http://127.0.0.1:{port}", "credentials_file": str(credentials)}
-            if args.journey == "oj01":
+            if args.journey in ("oj01", "oj05"):
                 # The same oj-grid the Tier A tests use (tests/oj_grid.py), as NetCDF.
                 network = storage / "oj-grid.nc"
                 subprocess.run([sys.executable, "-c", "import sys; from tests.oj_grid import build_oj_grid; "

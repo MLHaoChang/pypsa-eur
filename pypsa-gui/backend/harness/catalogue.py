@@ -509,7 +509,7 @@ TOOLS: list[dict[str, Any]] = [
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
             "name": {"type": "string"},
-            "attrs": {"type": "object"},
+            "attrs": {"type": "object", "description": "Field values in each field's STORED unit (get_component_schema unit_storage), e.g. EUR/MWh, never the display unit EUR/kWh."},
             "new_name": {"type": "string"},
         },
         ["component_class", "name"],
@@ -547,7 +547,7 @@ TOOLS: list[dict[str, Any]] = [
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
             "names": {"type": "array", "items": {"type": "string"}},
-            "updates": {"type": "object"},
+            "updates": {"type": "object", "description": "Field values in each field's STORED unit (get_component_schema unit_storage), e.g. EUR/MWh, never the display unit EUR/kWh."},
         },
         ["component_class", "names", "updates"],
     ),
@@ -1826,7 +1826,8 @@ TOOLS: list[dict[str, Any]] = [
         "campus built in three phases 2027/2030/2035, multi-period), "
         "eh_h2_hub (strong_grid), "
         "eh_microgrid (off_grid), eh_h2_hub_staged and eh_microgrid_staged "
-        "(those two planned over 2027/2030/2035, multi-period), eh_site (a generic site that is not a data "
+        "(those two planned over 2027/2030/2035, multi-period), eh_ammonia_staged "
+        "(the H2 hub making ammonia for a contracted delivery, with a Haber-Bosch loop; multi-period), eh_site (a generic site that is not a data "
         "center, parametrized by `params`: site_type industrial | commercial | "
         "hospital | campus | other fills every value from a preset; override "
         "stages [{year, peak_mw}], connection_mw, energization [{year, mw}], "
@@ -1842,7 +1843,8 @@ TOOLS: list[dict[str, Any]] = [
                             "enum": ["3bus", "ieee14", "belgium", "ieee39",
                                      "eh_datacenter", "eh_datacenter_staged",
                                      "eh_h2_hub", "eh_microgrid", "eh_site",
-                                     "eh_h2_hub_staged", "eh_microgrid_staged"]},
+                                     "eh_h2_hub_staged", "eh_microgrid_staged",
+                                     "eh_ammonia_staged"]},
             "new_name": {"type": "string"},
             "params": {"type": "object",
                        "description": "eh_site only: the site's parameters "

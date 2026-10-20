@@ -226,6 +226,48 @@ Personal read-only rules remain authoritative even for a field marked editable;
 the strict checked pilot continues to refuse this unmapped tool. Non-component
 service/domain schemas and exact target resolution remain LC-01 follow-ups.
 
+## Edit cards (LC-04)
+
+Owner decision Q3: every chat edit shows an old → new card before it applies,
+in Expert as in Guided, settings included. `harness/edit_card.py` is the one
+preview → confirm → receipt contract; the dispatcher (`loop.py`) calls it for
+every tool `edit_card.is_edit` names, and the browser renders it with one
+component (`frontend/src/components/EditCard.tsx`).
+
+- **What is an edit.** A tool that writes the live network
+  (`catalogue.tool_edits_network`) or a project setting (`SETTINGS_EDITS`).
+  Every other write-tier tool is in `NOT_EDITS` with its reason;
+  `tests/test_edit_card.py` fails on an unclassified new write tool. An edit
+  is gated as Guided gates a write, so Expert shows the card too.
+- **Preview.** `preview(tool, args)` returns `{version, kind, tool, rows,
+  says, complete, digest}`, or refuses before any card (`unknown_field`,
+  `derived_field`, `read_only_field`, `invalid_edit_value`,
+  `component_not_found`, `edit_refused`). Component rows come from running the
+  NATIVE handler on an isolated copy (`workflow_tools._isolated`, change log
+  suppressed), so derived columns are exactly what the native derive writes;
+  they appear as `role: 'derived'` rows. Values are in stored units; a field
+  with a display scale also carries `display` (e.g. EUR/MWh stored, EUR/kWh
+  shown). Nothing in the seam converts or annualises a value.
+- **Approval binding.** The card rides the ordinary
+  `tool_pending_confirmation` frame as `edit_card`. Just before the handler
+  runs, `require_current` re-previews; a different digest (the inputs moved)
+  refuses with `edit_preview_stale` and applies nothing.
+- **Receipt.** The tool result gains `_edit_receipt`: each row read back
+  natively, `outcome: verified` only when every value equals the card's `new`
+  (otherwise `uncertain`), `results_stale` (the last solve's input fingerprint
+  differs from now) and `undo: {tool: 'undo_last', available}`.
+- **Adding an edit kind** (TS-04's series refinement, a new settings tool):
+  `edit_card.register(tool, Adapter(kind, preview, readback))`, where
+  `preview(args)` returns rows `{component_class, name, field, label, old,
+  new, unit, role}` and `readback(args, rows)` the stored values in row order.
+  An edit without an adapter still gets a card of kind `arguments`
+  (`complete: false`): the requested values, no old value claimed, and its
+  receipt is never `verified`.
+- **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
+  component and app-described field with unit and basis; never a derived field.
+- **Not covered here.** Checked-assurance turns keep their own effect path
+  (`effects.py`) and do not get a card from this seam.
+
 ## Target and reference resolution (LC-01B, LC-10)
 
 Two read-tier controls name a target before anything reads or changes it.

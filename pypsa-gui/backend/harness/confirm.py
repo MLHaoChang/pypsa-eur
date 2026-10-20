@@ -158,6 +158,7 @@ def _confirm_destructive_tool(
     external: str | None = None,
     restriction_mode: str = 'standard',
     restriction_snapshot: dict | None = None,
+    edit_card: dict | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, bool]:
     """
     Gate a destructive tool on the user's confirmation. Returns whether to
@@ -234,6 +235,8 @@ def _confirm_destructive_tool(
     }
     if external:
         card["external"] = {"server": external}
+    if edit_card is not None:
+        card["edit_card"] = copy.deepcopy(edit_card)
     yield "tool_pending_confirmation", card
     decision = session.wait_for_decision(pc.token)
     if decision == 'approve' and confirmation_revision() != revision:

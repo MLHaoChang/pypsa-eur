@@ -59,7 +59,12 @@ def _verify_feasible(n: pypsa.Network, label: str, solver_config: dict | None = 
     from services.adequacy.energization import apply_energization
 
     apply_energization(test)
-    status, condition = test.optimize(solver_name="highs", multi_investment_periods=multi)
+    # A committable process unit is planned linearised, as the app does (process_uc auto): the
+    # binary MILP is the operational check's job and takes minutes on the staged plan.
+    from services.solver.process_uc import planning_uc_kwargs
+
+    uc = planning_uc_kwargs(test, None)
+    status, condition = test.optimize(solver_name="highs", multi_investment_periods=multi, **uc)
     if status != "ok" or condition != "optimal":
         raise SystemExit(
             f"[{label}] template is NOT feasible: status={status} condition={condition}"

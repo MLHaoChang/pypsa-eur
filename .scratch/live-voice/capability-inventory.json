@@ -851,7 +851,7 @@
         "name"
       ],
       "safety_tier": "write",
-      "schema_sha256": "fca6ea6c681833bf188c73ca455fb15c66d77c168938e3e411b2d17b2fa69c5d",
+      "schema_sha256": "620554ac6bc2ecc1d9abf2620676d5e050b7c0f5ad50d0c0d00c1de13f908734",
       "behavioral_fixture": "pending"
     },
     {
@@ -958,7 +958,7 @@
         "updates"
       ],
       "safety_tier": "write",
-      "schema_sha256": "b9d29d6a115f86582ef642db3006a34974a740d6ea90bd8e0d72620e916ea166",
+      "schema_sha256": "eed50b5ccfc78c67d97858ef0a5be66f8648c325b8bc2c738b3f4019bf85f087",
       "behavioral_fixture": "pending"
     },
     {
@@ -2885,7 +2885,7 @@
         "new_name"
       ],
       "safety_tier": "destructive",
-      "schema_sha256": "16a12f5f53640c0e97318c8bc84a8cec4f9ba18da2cf8b2afc3d5889cf2b61c7",
+      "schema_sha256": "7f6fa839e4b0c8795add790518d68197b05c7b9dcf927cb0a28456c6f10d6fba",
       "behavioral_fixture": "pending"
     },
     {

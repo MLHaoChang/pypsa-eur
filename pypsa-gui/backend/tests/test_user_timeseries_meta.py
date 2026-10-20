@@ -180,3 +180,27 @@ def test_unowned_store_touches_no_meta_store():
     # unowned dict.
     assert dict(_user_ts_meta) == {KEY: META}
     assert ("loads", "p_set", "L1") in orphan
+
+
+def test_upload_over_a_generated_profile_drops_its_meta():
+    # An upload replaces the series wholesale, so the engine provenance no
+    # longer describes it — left behind, the profile still reads "generated".
+    from routers.network_profiles import _apply_profile_upload
+
+    n = PyPSAService.get_network()
+    n.set_snapshots(SNAPS)
+    n.add("Bus", "B1")
+    n.add("Generator", "Solar", bus="B1", p_nom=10.0)
+    n.add("Generator", "Wind", bus="B1", p_nom=10.0)
+    _put()
+    other = ("generators", "p_max_pu", "Wind")
+    _user_ts[other] = _series().rename("Wind")
+    _user_ts_meta[other] = dict(META)
+
+    df = pd.DataFrame({"Solar": [0.5, 0.5, 0.5, 0.5]}, index=SNAPS)
+    _apply_profile_upload(n, "generators", "p_max_pu", "Generator", df)
+
+    assert KEY not in _user_ts_meta
+    assert _user_ts[KEY].tolist() == [0.5, 0.5, 0.5, 0.5]
+    # Only the uploaded column loses its provenance.
+    assert _user_ts_meta[other] == META
