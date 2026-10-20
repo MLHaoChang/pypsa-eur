@@ -6,7 +6,7 @@ import {
 import {
   Download, Upload, FileSpreadsheet, CheckCircle2, Circle, AlertCircle,
   BarChart3, Layers, Zap, Flame, Atom, Gauge, ArrowDownToLine, ChevronDown,
-  Coins, Trash2,
+  Coins, Trash2, SlidersHorizontal,
 } from 'lucide-react'
 import { networkApi } from '../api/network'
 import type {
@@ -20,6 +20,8 @@ import { nk } from '../utils/queryKeys'
 import { safeMax, safeMin } from '../utils/numeric'
 import toast from 'react-hot-toast'
 import { PageHeader } from '../components/PageKit'
+import { Dialog } from '../components/Dialog'
+import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -627,7 +629,7 @@ function AggregateChart({ component, attribute, names, unit, label, scaleByName 
 // ── List items ─────────────────────────────────────────────────────────────────
 
 function LoadItem({
-  load, meta, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete,
+  load, meta, selected, checked, onClick, onCheck, onDownload, onEdit, onDelete,
 }: {
   load: Load
   meta: LoadProfileMeta | undefined
@@ -636,14 +638,16 @@ function LoadItem({
   onClick: () => void
   onCheck: () => void
   onDownload: () => void
-  onUpload: (f: File) => void
+  // Opens the load's series editor (archetype or measured upload) in the
+  // drawer — the one editor for a load's p_set, the same component the
+  // Properties panel mounts.
+  onEdit: (tab: 'archetype' | 'upload') => void
   // Optional — only rendered when this component has an uploaded profile.
   // Clicking drops the (loads, p_set, <name>) entry from _user_ts via the
   // generic timeseries delete endpoint.
   onDelete?: () => void
 }) {
   const has = meta?.has_profile === true
-  const fileRef = useRef<HTMLInputElement>(null)
 
   return (
     <div
@@ -676,9 +680,19 @@ function LoadItem({
       </button>
       <button
         type="button"
-        onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
+        onClick={e => { e.stopPropagation(); onEdit('archetype') }}
         className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
-        title={`Upload profile for '${load.name}' (single-column file)`}
+        title={`Edit the profile of '${load.name}' (archetype or upload)`}
+        aria-label={`Edit the profile of ${load.name}`}
+      >
+        <SlidersHorizontal size={12} />
+      </button>
+      <button
+        type="button"
+        onClick={e => { e.stopPropagation(); onEdit('upload') }}
+        className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
+        title={`Upload a measured profile for '${load.name}'`}
+        aria-label={`Upload a measured profile for ${load.name}`}
       >
         <Upload size={12} />
       </button>
@@ -692,17 +706,6 @@ function LoadItem({
           <Trash2 size={12} />
         </button>
       )}
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".xlsx,.xls,.csv"
-        className="hidden"
-        onChange={e => {
-          const f = e.target.files?.[0]
-          if (f) onUpload(f)
-          e.target.value = ''
-        }}
-      />
     </div>
   )
 }
@@ -894,6 +897,10 @@ export default function TimeSeriesManager() {
   const currentProject = useUIStore(s => s.currentProject)
   const [activeTab, setActiveTab] = useState<TabId>('loads')
   const [selectedName, setSelectedName] = useState<string | null>(null)
+  const uiMode = useUIStore(s => s.uiMode)
+  // The series editor drawer: one load's archetype or measured upload, the
+  // same editor its Properties panel mounts (TS-01, UX review 2026-10-20).
+  const [seriesEditor, setSeriesEditor] = useState<{ load: string; tab: 'archetype' | 'upload' } | null>(null)
 
   // Section sub-tab (only used on Loads).
   const [loadSection, setLoadSection] = useState<LoadSection>('electricity')
@@ -1159,7 +1166,6 @@ export default function TimeSeriesManager() {
   // Set by per-row upload handlers so the global onSuccess can verify the
   // file actually contained the expected column. One ref per component type
   // since the three upload mutations are distinct.
-  const pendingSingleLoadRef = useRef<string | null>(null)
   const pendingSingleGenRef = useRef<string | null>(null)
   const pendingSingleLinkRef = useRef<string | null>(null)
 
@@ -1173,21 +1179,13 @@ export default function TimeSeriesManager() {
       // range — without this they keep showing the stale pre-upload count and
       // the user (wrongly) thinks the solve will run on the old horizon.
       qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'snapshots') })
-      const target = pendingSingleLoadRef.current
-      pendingSingleLoadRef.current = null
-      if (target && !result.matched.includes(target)) {
-        // Single-load upload that didn't actually contain the expected column.
-        toast.error(`File did not contain a column named '${target}'.`)
-        appLog('WARN', `Per-load upload skipped: file missing column '${target}'`)
-        return
-      }
       const n = result.matched.length, u = result.unmatched.length
       const msg = `Load profile uploaded: ${result.rows} rows for ${n} load${n !== 1 ? 's' : ''}${u ? ` (${u} unmatched ignored)` : ''} — model horizon: ${result.snapshot_count} snapshots`
       toast.success(msg); appLog('INFO', msg)
       if (u > 0) appLog('WARN', `Unmatched columns: ${result.unmatched.join(', ')}`)
       if (result.matched.length > 0 && !selectedName) setSelectedName(result.matched[0])
     },
-    onError: (e: Error) => { pendingSingleLoadRef.current = null; toast.error(e.message); appLog('ERROR', `Load profile upload failed: ${e.message}`) },
+    onError: (e: Error) => { toast.error(e.message); appLog('ERROR', `Load profile upload failed: ${e.message}`) },
   })
 
   const uploadGenMut = useMutation({
@@ -1378,15 +1376,6 @@ export default function TimeSeriesManager() {
     } catch {
       toast.error(`Template download failed for ${loadName}`)
     }
-  }
-
-  const handleSingleLoadUpload = (loadName: string, file: File) => {
-    // The backend endpoint matches columns by name; a single-column file with
-    // the load's name as the column header is the "individual" upload path.
-    // We DON'T pass an onSuccess override here — that would replace the global
-    // success handler and skip cache invalidation.
-    pendingSingleLoadRef.current = loadName
-    uploadLoadMut.mutate(file)
   }
 
   // Per-generator: download a single-column template using the active
@@ -1643,7 +1632,7 @@ export default function TimeSeriesManager() {
                     onClick={() => setSelectedName(l.name)}
                     onCheck={() => toggleCheck(l.name)}
                     onDownload={() => handleDownloadSingleLoadTemplate(l.name)}
-                    onUpload={f => handleSingleLoadUpload(l.name, f)}
+                    onEdit={tab => setSeriesEditor({ load: l.name, tab })}
                     onDelete={() => deleteTsMut.mutate({ component: 'loads', attribute: 'p_set', name: l.name })}
                   />
                 ))}
@@ -1659,7 +1648,7 @@ export default function TimeSeriesManager() {
                     onClick={() => setSelectedName(l.name)}
                     onCheck={() => toggleCheck(l.name)}
                     onDownload={() => handleDownloadSingleLoadTemplate(l.name)}
-                    onUpload={f => handleSingleLoadUpload(l.name, f)}
+                    onEdit={tab => setSeriesEditor({ load: l.name, tab })}
                   />
                 ))}
               </>
@@ -2059,6 +2048,22 @@ export default function TimeSeriesManager() {
         </div>
 
       </div>
+      {seriesEditor && currentProject && (
+        <Dialog
+          open
+          onClose={() => setSeriesEditor(null)}
+          title={`Profile of ${seriesEditor.load}`}
+          panelClassName="bg-bg rounded-xl shadow-2xl w-[560px] max-w-[95vw] max-h-[90vh] overflow-auto p-4"
+        >
+          <LoadSeriesEditor
+            key={`${seriesEditor.load}:${seriesEditor.tab}`}
+            project={currentProject}
+            component={seriesEditor.load}
+            mode={uiMode}
+            initialTab={seriesEditor.tab}
+          />
+        </Dialog>
+      )}
     </div>
   )
 }

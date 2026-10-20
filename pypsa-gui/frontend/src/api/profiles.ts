@@ -127,3 +127,99 @@ export const profilesApi = {
       { job_id: jobId, component, point_id: pointId ?? null },
     ).then(r => r.data),
 }
+
+// ── Generic time-series generators (TS 01–04) ─────────────────────────────
+// Every family writes a pending artifact; `seriesApi.apply` writes it to the
+// target its family (or meta) states, behind the same undo as the renewable
+// apply. A refinement turns one pending artifact into another.
+
+export interface LoadArchetype {
+  name: string
+  params: Record<string, unknown>
+}
+
+export interface LoadPreset {
+  name: string
+  archetype: string
+  params: Record<string, unknown>
+}
+
+export interface SeriesStats {
+  peak_mw?: number
+  annual_mwh?: number
+  // What this model's snapshots will count (Σ value × weighting) — a sampled
+  // template sees less than the year. null when apply could not align it.
+  modelled_mwh?: Record<string, number> | null
+  min?: number
+  mean?: number
+  max?: number
+}
+
+export interface PendingSeries {
+  job_id: string
+  family: string
+  points: string[]
+  provenance?: string
+  stats: Record<string, SeriesStats | Array<Record<string, number | string>>>
+  warnings?: string[]
+  unmatched?: string[]
+  qa_warnings?: Array<{ column: string; code: string; message: string }>
+  refinements?: Array<Record<string, unknown>>
+  [k: string]: unknown
+}
+
+export interface SeriesApplyResult {
+  component: string
+  component_type: string
+  attribute: string
+  peak: number
+  mean: number
+  min: number
+  profile_annual_mwh?: number
+  modelled_mwh?: Record<string, number>
+  warnings: string[]
+}
+
+export type RefineOp = Record<string, unknown> & { op: string }
+
+const projectPath = (project: string) => `/projects/${encodeURIComponent(project)}/profiles`
+
+export const seriesApi = {
+  loadArchetypes: () =>
+    client.get<{ archetypes: LoadArchetype[]; presets: LoadPreset[] }>(
+      '/profiles/load-archetypes').then(r => r.data),
+
+  generateLoad: (project: string, body: {
+    archetype: string; loads: string[]; params: Record<string, unknown>; year?: number
+  }) => client.post<PendingSeries>(`${projectPath(project)}/loads/generate`, body).then(r => r.data),
+
+  uploadLoad: (project: string, file: File, opts: {
+    unit?: string; timezone?: string; year?: number; annual_mwh?: number
+  }) => {
+    const form = new FormData()
+    form.append('file', file)
+    for (const [k, v] of Object.entries(opts)) {
+      if (v !== undefined && v !== '' && v !== null) form.append(k, String(v))
+    }
+    return client.post<PendingSeries>(`${projectPath(project)}/loads/upload`, form)
+      .then(r => r.data)
+  },
+
+  generateAvailability: (project: string, body: {
+    kind: string; components: string[]; component_type: 'generators' | 'links'
+    params: Record<string, unknown>; year?: number
+  }) => client.post<PendingSeries>(`${projectPath(project)}/availability/generate`, body)
+    .then(r => r.data),
+
+  generateSeries: (project: string, body: {
+    kind: string; components: string[]; params: Record<string, unknown>; year?: number
+  }) => client.post<PendingSeries>(`${projectPath(project)}/series/generate`, body).then(r => r.data),
+
+  refine: (project: string, jobId: string, ops: RefineOp[]) =>
+    client.post<PendingSeries>(`${projectPath(project)}/refine`, { job_id: jobId, ops })
+      .then(r => r.data),
+
+  apply: (project: string, body: {
+    job_id: string; component: string; component_type?: string; attribute?: string
+  }) => client.post<SeriesApplyResult>(`${projectPath(project)}/apply`, body).then(r => r.data),
+}

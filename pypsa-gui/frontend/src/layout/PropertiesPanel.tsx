@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { H2Icon } from '../components/AssetIcons'
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
+import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
 import { useUIStore } from '../store/uiStore'
 import { editScope, loadExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
@@ -1879,6 +1880,7 @@ function StorePanel({ name }: { name: string }) {
 function LoadPanel({ name }: { name: string }) {
   const { setSelectedComponent } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
+  const uiMode = useUIStore(s => s.uiMode)
   const { data: loads = [] } = useQuery({ queryKey: nk(currentProject, 'loads'), queryFn: networkApi.getLoads })
   const load = (loads as Load[]).find(l => l.name === name)
   const { data: schema } = useAssetSchema('Load')
@@ -1889,6 +1891,13 @@ function LoadPanel({ name }: { name: string }) {
         <Row label="Bus" value={load.bus} tip={fieldHelp(schema, 'bus')} />
       </Section>
       <LoadCard key={load.name} load={load} mode="detail" onRename={n => setSelectedComponent({ type: 'Load', name: n })} />
+      {currentProject && (
+        <Section title="Profile">
+          {/* The load's series editor: the same component the Time Series
+              drawer mounts, so a load's p_set has one editor (TS-01). */}
+          <LoadSeriesEditor key={load.name} project={currentProject} component={load.name} mode={uiMode} />
+        </Section>
+      )}
     </div>
   )
 }
