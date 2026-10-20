@@ -193,12 +193,12 @@ def test_a_row_with_its_own_target_is_filed_there():
     assert got["assumed_fault_level"] == (
         {"section": "connection", "panel": None, "component": "Bus", "entity": "poc",
          "field": "eh_sk_mva"},
-        "fault_level: 800 MVA (assumed) — confirm it or set your own.")    # no label: the id
+        "Fault level: 800 MVA (assumed) — confirm it or set your own.")    # no label: humanised
     assert len(items) == 6
     assert got["assumed_lole_goal"][0] == {"section": "scenarios", "panel": "simparams",
                                            "component": None, "entity": None,
                                            "field": "target_lole_h"}
-    assert got["assumed_import_efficiency"][1].startswith("import_efficiency: 0.99 (assumed)")
+    assert got["assumed_import_efficiency"][1].startswith("Import efficiency: 0.99 (assumed)")
     # An older row keeps today's behaviour.
     assert got["assumed_default"][0]["section"] == "commercial"
     assert got["assumed_default"][0]["entity"] == "discount rate"

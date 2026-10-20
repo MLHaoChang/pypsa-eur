@@ -541,6 +541,12 @@ def ledger_section(item: str) -> str | None:
     return next((s for words, s in _LEDGER_SECTIONS if any(w in low for w in words)), None)
 
 
+def _humanise(item: str) -> str:
+    """``fault_level`` → ``Fault level``; ``discount rate`` → ``Discount rate``."""
+    text = item.replace("_", " ").strip()
+    return text[:1].upper() + text[1:]
+
+
 def _assumed_items(template: dict) -> list[dict]:
     """The template's `assumed` ledger rows and energization: a default the user
     has not confirmed is a warning (design §3.2). A row may name its own
@@ -557,9 +563,9 @@ def _assumed_items(template: dict) -> list[dict]:
             else str(value or "")
         if unit:
             shown = f"{shown} {unit}"
-        # "<label>: <value> <unit> (assumed) — <hint>"; the item id only when
-        # the row has no label (checklist §6.9: no raw ids in the UI).
-        label = str(row.get("label") or item)
+        # "<label>: <value> <unit> (assumed) — <hint>"; without a label the
+        # item, humanised (checklist §6.9: no raw ids in the UI).
+        label = str(row.get("label") or _humanise(item))
         message = f"{label}: {shown} (assumed) — confirm it or set your own."
         section = row.get("section")
         if section in F.INPUT_SECTIONS:
