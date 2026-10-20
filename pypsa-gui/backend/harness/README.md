@@ -864,6 +864,20 @@ prove to conserve energy is `not_established`, with no rows. Current results
 only; `inputs_changed_since_solve` says when the inputs moved after the solve.
 The `flows` result view (`services/result_views.py`) goes live with this tool.
 
+### Current load shape
+
+`get_load_shape` (`services/load_shape_read.py`) reads the current solve's Load
+shape tab through the same `services/results/load_shape.py` payload the tab
+draws, one view per call (`summary`, `heatmap`, `week`, `monthly`, `annual`),
+trimmed under 3800 characters; `period`, `window_from` / `window_to` (the
+heatmaps), `week` and `series` pick what is returned. It computes nothing of
+its own. A group the network does not model, or the run cannot establish,
+keeps its `not_modelled` / `unavailable` state and reason, never a missing key
+that reads as zero. Before a solve it is `unavailable_kind=not_solved`; a run
+whose dispatch cannot be read as energy is `not_established`. Current results
+only. The `loadshape` result view (`services/result_views.py`) goes live with
+this tool.
+
 ### Experiment plans
 
 `start_experiment` writes `<project>/experiments/<uuid>.json` plus
