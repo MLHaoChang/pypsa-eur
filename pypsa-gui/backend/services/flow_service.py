@@ -522,17 +522,33 @@ def ledger_section(item: str) -> str | None:
 
 def _assumed_items(template: dict) -> list[dict]:
     """The template's `assumed` ledger rows and energization: a default the user
-    has not confirmed is a warning (design §3.2)."""
+    has not confirmed is a warning (design §3.2). A row may name its own
+    ``section`` (and ``component`` / ``entity`` / ``field`` / ``panel``); one
+    that does not is filed by ``ledger_section(item)``."""
     out: list[dict] = []
     for row in template.get("ledger") or []:
         if not isinstance(row, dict) or row.get("source") != "assumed":
             continue
         item = str(row.get("item") or "")
-        value = str(row.get("value") or "")
-        out.append(_item("assumed_default", "warning",
-                         f"{item}: {value} is a template assumption; confirm it or set "
-                         "your own.", "template", ledger_section(item) or "project",
-                         entity=item, value=value))
+        value = row.get("value")
+        unit = row.get("unit")
+        shown = f"{value:g}" if isinstance(value, (int, float)) and not isinstance(value, bool) \
+            else str(value or "")
+        if unit:
+            shown = f"{shown} {unit}"
+        message = f"{item}: {shown} is a template assumption; confirm it or set your own."
+        section = row.get("section")
+        if section in F.INPUT_SECTIONS:
+            # A row that names its own target (DC-02's rows): filed there, and
+            # coded per item so two rows on one entity keep separate acks.
+            out.append(_item(f"assumed_{item}", "warning", message, "template", section,
+                             component=str(row.get("component") or ""),
+                             entity=str(row.get("entity") or ""),
+                             fld=str(row.get("field") or ""),
+                             panel=row.get("panel"), value=shown))
+            continue
+        out.append(_item("assumed_default", "warning", message, "template",
+                         ledger_section(item) or "project", entity=item, value=shown))
     energ = [e for e in template.get("energization") or []
              if isinstance(e, dict) and e.get("source") == "assumed"]
     if energ:
