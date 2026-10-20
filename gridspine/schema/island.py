@@ -22,7 +22,8 @@ or a list is one tagged value. Enumerations (``control``, ``governor``,
 ``excitation``, ``neutral_earthing``, ``scenarios``, ``gfl_min_case``),
 flags (``critical``, ``spinning``, ``unit_transformer``,
 ``transfers_on_islanding``, ``linearised_uc``) and names (``it_load``,
-``ride_through_storage``) are definitions, so they are untagged.
+``ride_through_storage``, the control ``preset``) are definitions, so they
+are untagged.
 
 A validated block is ``{"kind", "values", "sources", ...untagged fields}``.
 ``values`` holds floats, or lists of floats for curves and lists.
@@ -221,7 +222,7 @@ FIELD_USERS = {
     "gfl_min_case": ("I5",),
     "i_max_sensitivity_pu": ("I5", "I6"),
     # control presets (data-centre grid readiness, ticket 04)
-    "preset": ("CP04",),            # offered_services, the campus draft; ticket 02 reads offered_services
+    "preset": ("CP04",),            # control presets: offered_services and the campus draft
 }
 
 ALL_FIELDS = frozenset(
@@ -339,7 +340,7 @@ def _expand_preset(where, kind, spec, project_preset):
         spec = {k: v for k, v in spec.items() if k != "preset"}
     if name is None:
         return spec, None
-    block = preset_block(name, kind) if kind in (*CONVERTER_KINDS, "ups") else None
+    block = preset_block(name, kind)
     if block is None:
         if own:
             why = ("the hub island LP credits a grid former and FFR on storage-backed units (bess) only"
@@ -714,7 +715,7 @@ def select_preset(raw, preset, ratings=None) -> tuple[dict, list[str]]:
     out["preset"] = preset
     for name, u in out.get("units", {}).items():
         kind = u.get("kind")
-        block = preset_block(preset, kind) if kind in (*CONVERTER_KINDS, "ups") else None
+        block = preset_block(preset, kind)
         if block is None:
             continue
         governed = _UPS_GOVERNED if kind == "ups" else _CONVERTER_GOVERNED

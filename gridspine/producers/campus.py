@@ -272,7 +272,7 @@ def _attach_island(n, spec, island, pypsa_ids, skipped):
     preset = island.get("preset")
     for uid, u in units.items():
         if "island" not in u and u["kind"] in DEFAULT_ISLAND:
-            block = _preset_default(u, preset, skipped, uid) if preset and u["kind"] != "genset" else None
+            block = _preset_default(u, preset, skipped, uid) if preset else None
             u["island"] = block if block is not None else _default_block(u["kind"])
     req = island["requirements"]
     out = _retag(req)
