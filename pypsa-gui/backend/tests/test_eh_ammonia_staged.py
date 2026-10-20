@@ -458,6 +458,9 @@ def test_on_the_analytic_basis_the_purchase_and_its_co2_match_the_buy_in_per_per
     period, so the CO2 is counted once on each side."""
     n, case = _case("no_electrolysers", _no_electrolysers, site_today=False)
     assert "counterfactual_buys:nh3_delivery" in case.flags
+    # The purchase replaces the plan's own buy-in and shortfall; neither is copied into the counterfactual.
+    assert "counterfactual_purchase_replaces:__buy_nh3,__lost_nh3" in case.flags
+    assert not [ln for c in case.counterfactual for ln in c.lines if "_nh3" in ln.key and ln.source == "asset"]
     for y in YEARS:
         cf = _line(case, "counterfactual:purchase:nh3_delivery", y, "counterfactual") \
             + _line(case, "co2:purchase:nh3_delivery", y, "counterfactual")
