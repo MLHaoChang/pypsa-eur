@@ -20,6 +20,7 @@ import {
 import { evidenceValue, plainWords } from '../plainWords'
 import { AskButton, CardShell, DelegateButton } from '../shared/CardShell'
 import { Term } from '../shared/Term'
+import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
 import { useHubReview, useHubStudy, useHubTemplate } from '../useHubData'
 
 export function openFmeaTab(): void {
@@ -129,6 +130,9 @@ export function ImproveCard() {
   })
   useStudyFinishedInvalidation(!following || modes === undefined ? undefined
     : (modes as { sweep_status?: string | null } | null)?.sweep_status ?? null)
+  const sweepRunning = following
+    && ((modes as { sweep_status?: string | null } | null | undefined)?.sweep_status ?? 'running') === 'running'
+  const sweepElapsed = formatElapsed(useElapsed(sweepRunning))
   const findings = (review?.findings ?? [])
     .filter(f => f.severity === 'high' || f.severity === 'medium')
   const context = `a ${ARCHETYPE_SHORT[archetype]} site`
@@ -164,6 +168,7 @@ export function ImproveCard() {
         {following && (
           <p data-testid="hub-improve-fmea-started" className="text-muted">
             Started — the check runs in the background; the risk table fills in as it goes.
+            {sweepRunning && ` Running for ${sweepElapsed}.`}
           </p>
         )}
         <div data-testid="hub-improve-stress-row" className="flex flex-wrap items-center gap-2">
