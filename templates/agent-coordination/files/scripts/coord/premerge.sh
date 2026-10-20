@@ -30,7 +30,7 @@ cd "$root"
 
 # --- Project settings ----------------------------------------------------
 # Overlap in these paths is harmless when the merge itself is clean.
-docs_only_re='^({{RELEASE_NOTES_DIR}}/.*|docs/.*\.md)$'
+docs_only_re='^({{RELEASE_NOTES_DIR}}/.*|docs/.*\.md|(.*/)?(CONTEXT|GLOSSARY)\.md|GLOSSARY-MAP\.md)$'
 # A PR touching a path matching semantic_re must pass semantic_cmd on a trial
 # merge with the base branch. Leave semantic_re empty to skip this check.
 # semantic_cmd runs from the trial-merge worktree root.

@@ -39,7 +39,7 @@ root=$(git rev-parse --show-toplevel)
 cd "$root"
 
 # Overlap in these paths is harmless when the merge itself is clean.
-docs_only_re='^(docs/superpowers/OPEN-ITEMS\.md|docs/superpowers/plans/.*|doc/release-notes\.d/.*|doc/release_notes\.md)$'
+docs_only_re='^(docs/superpowers/OPEN-ITEMS\.md|docs/superpowers/plans/.*|doc/release-notes\.d/.*|doc/release_notes\.md|(.*/)?(CONTEXT|GLOSSARY)\.md|GLOSSARY-MAP\.md)$'
 # A PR touching these must pass the semantic tests on the trial merge: backend
 # routes (project routes and routers/mcp among them), chat tools, the project
 # ACL services and the harness MCP server.

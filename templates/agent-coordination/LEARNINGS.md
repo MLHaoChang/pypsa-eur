@@ -116,3 +116,9 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **Features landed in whichever screen their PR touched.** Users had to jump away and back (16 places found in one audit).
   - Fix: a UX reviewer session writes one generic project workflow (sections, completion states, Run unlocks on complete-or-warning). Once the owner approves it, every UI PR needs the reviewer's OK on its exact head, next to the gatekeeper's.
   - Lives in: coordinator "Merging", steward "UX reviewer", `docs/agents/roles.md`.
+
+## 20 Oct 2026: glossary overlap counted as code
+
+- **Two PRs adding entries to the same `CONTEXT.md` showed as a `code` overlap.** That blocked the merge and forced a master merge plus a ~2 h CI cycle (two cycles lost on #421 and #422).
+  - Fix: `docs_only_re` also covers `CONTEXT.md` at any depth, `GLOSSARY.md` and `GLOSSARY-MAP.md`. A real git conflict still blocks, in its own check.
+  - Lives in: `scripts/coord/premerge.sh`, `docs_only_re`.
