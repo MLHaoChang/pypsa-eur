@@ -35,7 +35,7 @@ Builds on:
 
 The owner chose Q8 = A: users bring their own market data, and nothing is redistributed. Europe comes first.
 
-- **Where.** Section 7c (Markets & value streams) gets a **"Price data available"** panel. It reads the site's **bidding zone** and the project's **years**:
+- **Where.** Section 7c (Markets & value streams) gets a **"Price data available"** panel. The **bidding zone** has its home in 7c: it is derived from the section-1 pin and can be overridden only for multi-zone countries. It reads the site's **bidding zone** and the project's **years**:
   - the zone is derived from the section-1 pin's country; a multi-zone country (NO, SE, DK, IT) asks the user to pick its zone;
   - the years come from the horizon (section 1), or from the weather year where profiles use one.
 - **Two sources, both the user's own:**
@@ -111,7 +111,7 @@ The groups share one model. Every hand-over below already exists in code, and ea
 
 **Feedback never edits inputs silently.** A downstream finding (an overloaded transformer, a grid-code fail, a tuning recommendation) comes back as a flow item on its home section. Or it comes as a proposed change on the EditCard (old → new, section named). The user, or the copilot with confirmation, applies it, and the one Run reruns what is stale.
 
-**One Run reruns what is stale.** The flow endpoint's `results.freshness` (B1) grows to one freshness per run kind, `{optimisation, study, loadflow, control_checks, investment_case}`. Run then offers "Run (3 stale)" over the requested kinds whose results are stale. This is a B1 follow-up, and the gatekeeper is told.
+**One Run reruns what is stale.** The flow endpoint's `results.freshness` (B1) grows to one freshness per run kind, `{optimisation, study, loadflow, control_checks, investment_case}`. Run then offers "Run (3 stale)" over the requested kinds whose results are stale. Per-kind freshness **never feeds `run_ready`**: "Run (n stale)" is a convenience, and the gate stays R1. This is a B1 follow-up, and the gatekeeper is told.
 
 ### 3.1 One inconsistency to settle (gatekeeper)
 
@@ -165,6 +165,9 @@ W4a's done-when gains a round-trip test: on → set values → off → on keeps 
 **Copilot.** LC-17 (create and run) and LC-18 (compare) are the chat path over the same objects. Each chat-made change shows on the EditCard (old → new, section named).
 
 ### 5.3 Rules
+
+- **Declared changes stay true.** While a case is the active project, every write through the normal write path (asset writes, section editors, table edits, the EditCard, the copilot) appends to the case's declared changes (path, old → new). A path that can't append (for example an import that replaces the network) marks the case "edited outside its declared changes". Compare then shows that case's differences as "declared + other edits (see diff)" and links to a network diff against the base. S5's done-when includes a test: edit a case through a normal editor, and its declared changes include the edit.
+- **Never edit the wrong project.** While a case is active, a persistent banner shows in both modes: "Editing case <name> (base: <base>) · Back to base". The Duplicate-and-change form writes only to the new case, and its header names the case. Switching between the base and its cases keeps the section (`activeSection`, #444 §7).
 - **A case's results are stale when its own inputs change.** They are **not** stale when the base changes after the copy: a copy is a copy, and the row says "base changed since copy". Re-deriving a case from a changed base is an explicit action ("Re-apply changes to the current base").
 - A case may switch groups on or off. Compare then lists the group-specific KPIs as "outside scope" for the cases without it.
 
@@ -221,7 +224,7 @@ These join the W/P/K plan.
 | **S2 PPA defaults** | §2: one library item per form (EU, illustrative) in a pack version; swap and shaped-profile gaps as a gated model plan | gatekeeper (contract model); UX | K2, K7, Q11 |
 | **S3 Group on/off round-trip** | §4 in W4a's done-when (fill-empty-only; keep on off) | UX | W4a |
 | **S4 Freshness per kind** | §3: `results.freshness` per run kind; "Run (n stale)"; edge reasons in results | gatekeeper told (B1 follow-up); UX | W4b |
-| **S5 Cases** | §5.1–5.2: case changes recorded; section-8 rows (W7); Duplicate and change; grid helper; Run cases | gatekeeper (run and staleness semantics); UX | W7, W4a |
+| **S5 Cases** | §5.1–5.3: case changes recorded, and kept true on every later write (test: an edit through a normal editor appears in the declared changes; non-appending paths mark "edited outside"); the case banner and "Back to base"; section-8 rows (W7); Duplicate and change writing only to the new case; grid helper; Run cases | gatekeeper (run and staleness semantics); UX | W7, W4a |
 | **S6 Base + N compare** | §5.2: Compare for base + up to 8, KPI deltas, overlays, incomparable list | UX; gatekeeper on comparability | S5 |
 | **S7 Copilot** | LC-17 and LC-18 over S5/S6 | per LC-05 | S5, S6 |
 | **S8 Check-answers display** | §5.4's display contract on copilot statements, charts, Compare narratives and results-tab notes; the verification is the Check-answers package's | UX; aligned with session_01WZre2YpT3SyvNWHk48KsiN | that package's contract, S6, W10 |
