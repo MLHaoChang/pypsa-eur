@@ -4,15 +4,17 @@
 // asset's Properties panel and the Time Series drawer mount the same thing.
 //
 // Forced outages are not generated here. They are sampled in the reliability
-// study, never written into the dispatch, so this shows that read-only with
-// a way to the study (UX review 2026-10-20, gatekeeper rule).
+// study, never written into the dispatch, so this shows that read-only and
+// leads to the asset's own outage inputs (rate and repair time, in its
+// Properties form), with the study as a secondary link (UX review
+// 2026-10-20, gatekeeper rule).
 //
 // Guided shows the key parameters (a season and a number of weeks, one
 // share, one floor); dated windows, seasonal shares and the ambient model
 // sit under Advanced, open by default in Expert.
 import { useState, type ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { Play, Plus, ShieldCheck, Trash2 } from 'lucide-react'
+import { Pencil, Play, Plus, Trash2 } from 'lucide-react'
 import { Btn, Seg } from '../PageKit'
 import { errorText, seriesApi, type PendingSeries } from '../../api/profiles'
 import { useUIStore } from '../../store/uiStore'
@@ -38,6 +40,28 @@ interface Window { from: string; to: string; available: string }
 
 const pct = (s: string) => Number(s) / 100
 const num = (s: string) => (s === '' ? undefined : Number(s))
+
+/** Open the asset's edit form in Properties (leaving the Time Series panel,
+ *  if this editor sits in its drawer) and bring its forced-outage rate into
+ *  view, focused: the in-form scroll the outage note leads to. */
+export function revealOutageInputs(type: 'Generator' | 'Link', name: string) {
+  const ui = useUIStore.getState()
+  if (ui.activeSlidePanel === 'timeseries') ui.setSlidePanel(null)
+  ui.setSelectedComponent({ type, name })
+  ui.requestPropertiesEdit({ type, name })
+  let tries = 0
+  const find = () => {
+    const label = Array.from(document.querySelectorAll('label'))
+      .find(l => l.textContent?.startsWith('Forced-outage rate'))
+    if (label) {
+      label.scrollIntoView({ block: 'center' })
+      label.querySelector('input')?.focus()
+    } else if (++tries < 30) {
+      requestAnimationFrame(find)
+    }
+  }
+  requestAnimationFrame(find)
+}
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -72,6 +96,8 @@ export default function AvailabilityEditor({ project, component, componentType, 
     ui.setSlidePanel('results')
     ui.requestResultsTab('adequacy')
   }
+  const editOutageInputs = () =>
+    revealOutageInputs(componentType === 'links' ? 'Link' : 'Generator', component)
 
   function params(): Record<string, unknown> {
     switch (kind) {
@@ -117,7 +143,12 @@ export default function AvailabilityEditor({ project, component, componentType, 
           <p className="text-muted text-[11px] mt-1">
             The dispatch keeps planned availability only, so an outage is never counted twice.
           </p>
-          <Btn onClick={openReliability}><ShieldCheck size={12} /> Open the reliability study</Btn>
+          <div className="flex items-center gap-3 mt-1">
+            <Btn onClick={editOutageInputs}><Pencil size={12} /> Edit the outage rate and repair time</Btn>
+            <button type="button" className="text-[11px] text-accent underline" onClick={openReliability}>
+              Open the reliability study
+            </button>
+          </div>
         </div>
       ) : (
         <div className="mt-2 space-y-1">

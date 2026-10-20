@@ -100,11 +100,17 @@ describe('AvailabilityEditor', () => {
     })))
   })
 
-  it('shows forced outages read-only, with the way to the reliability study', async () => {
+  it('shows forced outages read-only, leading to the asset\'s outage inputs', async () => {
+    useUIStore.getState().setSlidePanel('timeseries')
     renderEditor('expert')
     await userEvent.click(screen.getByRole('button', { name: 'Forced outages' }))
     expect(screen.getByTestId('forced-outages-note').textContent).toContain('not in the dispatch')
     expect(screen.queryByRole('button', { name: /Preview/ })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /outage rate and repair time/ }))
+    const ui = useUIStore.getState()
+    expect(ui.activeSlidePanel).toBeNull()
+    expect(ui.selectedComponent).toEqual({ type: 'Generator', name: 'gt1' })
+    expect(ui.propertiesEditRequest).toEqual({ type: 'Generator', name: 'gt1' })
     await userEvent.click(screen.getByRole('button', { name: /reliability study/ }))
     expect(useUIStore.getState().activeSlidePanel).toBe('results')
     expect(useUIStore.getState().resultsTabRequest).toBe('adequacy')
