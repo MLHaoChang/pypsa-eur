@@ -1655,8 +1655,8 @@ def _ic_money_year_problem(assets: list, fin) -> str | None:
         # carries no free-form asset value)
         theirs = (f"{year} money (the campus asset library's price_year)"
                   if isinstance(year, int) and not isinstance(year, bool) else "another money year")
-        return (f"the campus assets are priced in {theirs}, the case in {fin.currency_year} money "
-                "(the finance inputs' currency_year); "
+        return (f"the campus assets are priced in {theirs}, the case's price data are "
+                f"{fin.currency_year} (the finance inputs' currency_year); "
                 + _IC_ONE_MONEY.format(conv="price index", what="money year", case=fin.currency_year))
     return None
 
@@ -2456,3 +2456,18 @@ def get_eh_dtc_planning():
     if table is None:
         return Response(status_code=204)
     return table
+
+
+@results_router.get("/process_uc_check")
+def get_process_uc_check():
+    """The binary operational check of the last plan with committable process units
+    (grid-to-process ticket 03, ``services.solver.process_uc.binary_check``): per period the
+    binary minus linearised operating cost, the extra shortfall, the flag, and the ledger rows.
+    204 when the last solve had no committable process unit or no linearised plan. Strict JSON:
+    a non-finite number is null and its path is in ``non_finite_paths``."""
+    from services.solver.process_uc import sanitize_check_payload
+
+    payload = _state.get("last_process_uc_check")
+    if not payload:
+        return Response(status_code=204)
+    return sanitize_check_payload(payload)

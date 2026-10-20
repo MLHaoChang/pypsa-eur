@@ -392,7 +392,7 @@ from harness.providers.wiring import (  # noqa: E402, F401 — moved (issue 08);
 
 
 from harness.compose import (  # noqa: E402, F401 — moved (issue 08); re-exported
-    _ADEQUACY_GUIDE, _ADEQUACY_GUIDE_CHAINING, _ADEQUACY_GUIDE_FACTS, _ASSISTANT_STANCE, _ASSISTANT_STANCE_CHAINING, _ASSISTANT_STANCE_FACTS, _BASE_IDENTITY, _BASE_IDENTITY_CHAINING, _BASE_IDENTITY_FACTS, _CONFIRMATION_CARD_CONTRACT_TEMPLATE, _DOMAIN_GUIDE, _DOMAIN_GUIDE_CHAINING, _DOMAIN_GUIDE_FACTS, _EH_GUIDE, _EH_GUIDE_CHAINING, _EH_GUIDE_FACTS, _GUIDED_STEPS, _NEXT_STEP_RUBRIC, _NEXT_STEP_RUBRIC_CHAINING, _NEXT_STEP_RUBRIC_FACTS, _PRICE_CONGESTION_GUIDE, _PRICE_CONGESTION_GUIDE_CHAINING, _PRICE_CONGESTION_GUIDE_FACTS, _PROJECT_OVERVIEW, _REFERENCE_LADDER, _SOLVER_ERROR_DECODER, _SOLVER_ERROR_DECODER_CHAINING, _SOLVER_ERROR_DECODER_FACTS, _STYLE_GUIDANCE, _UI_CONTEXT_MAX_VALUE_CHARS, _UNTRUSTED_DATA_CLAUSE, _WORKFLOW_STATE_TOOLS, _build_system_prompt, _format_live_network_meta, _format_ui_context, _guided_mode_addendum, _hub_design_workflow, _prompts, _sanitise_ui_value, _workflow_addendum, _workflow_state_payload,
+    _ADEQUACY_GUIDE, _ADEQUACY_GUIDE_CHAINING, _ADEQUACY_GUIDE_FACTS, _ASSISTANT_STANCE, _ASSISTANT_STANCE_CHAINING, _ASSISTANT_STANCE_FACTS, _BASE_IDENTITY, _BASE_IDENTITY_CHAINING, _BASE_IDENTITY_FACTS, _CONFIRMATION_CARD_CONTRACT_TEMPLATE, _DOMAIN_GUIDE, _DOMAIN_GUIDE_CHAINING, _DOMAIN_GUIDE_FACTS, _EH_GUIDE, _EH_GUIDE_CHAINING, _EH_GUIDE_FACTS, _GUIDED_STEPS, _NEXT_STEP_RUBRIC, _NEXT_STEP_RUBRIC_CHAINING, _NEXT_STEP_RUBRIC_FACTS, _PRICE_CONGESTION_GUIDE, _PRICE_CONGESTION_GUIDE_CHAINING, _PRICE_CONGESTION_GUIDE_FACTS, _PROJECT_OVERVIEW, _REFERENCE_LADDER, _RESULTS_WALK, _SOLVER_ERROR_DECODER, _SOLVER_ERROR_DECODER_CHAINING, _SOLVER_ERROR_DECODER_FACTS, _STYLE_GUIDANCE, _UI_CONTEXT_MAX_VALUE_CHARS, _UNTRUSTED_DATA_CLAUSE, _WORKFLOW_STATE_TOOLS, _build_system_prompt, _format_live_network_meta, _format_ui_context, _guided_mode_addendum, _hub_design_workflow, _prompts, _sanitise_ui_value, _workflow_addendum, _workflow_state_payload,
 )
 
 from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-exported
@@ -814,6 +814,9 @@ def _dispatch_tool_uses(
                     "via_tool": tu_name,
                 }
                 turn_project_holder[0] = new_bound
+                if session.navigation_turn is not None:
+                    from harness.navigation import rebind
+                    rebind(session.navigation_turn)
     return _ToolDispatchOutcome(
         tool_call_count=tool_call_count, switched_mid_turn=switched,
     )
@@ -1013,6 +1016,7 @@ def run_turn(
     checked_operation: dict | None = None,
     source_gap_ref: dict | None = None,
     binding_generation: int = 0,
+    ui_ack: bool = False,
     _held_lease: str | None = None,
     _held_generation: int | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
@@ -1235,6 +1239,12 @@ def run_turn(
             except Exception:
                 logger.exception("Shadow scope could not be prepared")
                 session.shadow_turn = None
+        if session.assurance_turn is None and ui_ack:
+            from harness.navigation import open_ordinary
+            try:
+                session.navigation_turn = open_ordinary(session, binding_generation)
+            except Exception:  # noqa: BLE001 — without a binding, navigation stays "opened"
+                logger.exception("Navigation binding could not be opened")
         # #20 / issue 13 — the turn is on disk HERE, before the body runs,
         # because the window a crash would land in opens the moment we start
         # talking to the model: `turn/start` in the session event log, fsynced
@@ -1313,6 +1323,7 @@ def run_turn(
                     session.assurance_context = None
             session.assurance_turn = None
             session.shadow_turn = None
+            session.navigation_turn = None
         if _admission_lease is not None and _admission_generation is not None:
             from services import utterance_admission as _ua
             # Promote pending into a new lease, then start that follow-up turn
@@ -1368,6 +1379,7 @@ def run_turn(
             checked_scope=None,
             checked_operation=None,
             binding_generation=binding_generation,
+            ui_ack=ui_ack,
             _held_lease=_drain_lease,
             _held_generation=_drain_utt.generation,
         )
@@ -1390,6 +1402,7 @@ def run_turn(
             utterance_id=f"goal-{uuid.uuid4().hex}",
             generation=session.goal["generation"],
             binding_generation=binding_generation,
+            ui_ack=ui_ack,
         )
         return
     if _held_done is not None:
@@ -2998,6 +3011,8 @@ def _dispatch_real_tool_call(
     # sentinel from the Anthropic-facing tool_result payload.
     ui_event_payload: dict[str, Any] | None = None
     result_for_model = result
+    if session.navigation_turn is not None:
+        session.navigation_turn.note_read(tool_name, result)
     if isinstance(result, dict) and result.get("_ui_event") \
             and result.get("kind") == "choice":
         # `ask_user` (chat harness issue 04): a Choice card, not navigation.
@@ -3051,7 +3066,22 @@ def _dispatch_real_tool_call(
         }
         if session.assurance_turn is not None:
             ui_event_payload["tool_use_id"] = tool_use_id
+        acknowledgement = None
+        if session.assurance_turn is None and session.navigation_turn is not None:
+            from harness.navigation import issue
+            acknowledgement = issue(session.navigation_turn, {
+                **{k: v for k, v in ui_event_payload.items() if v is not None},
+                "tool_use_id": tool_use_id})
+            if acknowledgement:
+                ui_event_payload.update(acknowledgement=acknowledgement, tool_use_id=tool_use_id)
         yield "ui_event", ui_event_payload
+        if ui_event_payload.get("kind") == "navigate":
+            from services.result_views import note_shown
+            if ui_event_payload.get("panel_id") == "results":
+                note_shown(session, ui_event_payload.get("results_tab"))
+        if session.assurance_turn is None and ui_event_payload.get("kind") == "navigate":
+            from harness.navigation import display
+            result_for_model["display"] = display(session.navigation_turn, acknowledgement)
 
     if session.assurance_turn is not None:
         projection = session.assurance_turn.result_projection(tool_name, result_for_model, tool_use_id)

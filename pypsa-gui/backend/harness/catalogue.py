@@ -211,6 +211,18 @@ TOOLS: list[dict[str, Any]] = [
         ["project_name"],
     ),
     _t(
+        "list_result_views",
+        "The results sections of the active project for a walk-through or \"show me something "
+        "else\": per Results tab its label in the current mode, data status (available | no_data | "
+        "unavailable | not_applicable | needs_entity, with a reason), whether this conversation "
+        "already showed it, the exact read to call before opening it, and how far the browser can "
+        "prove it is shown. Statuses only, never values: read a section with its listed read, then "
+        "open it with ui_open_panel, and quote numbers from that read. exclude_shown=true leaves out "
+        "tabs already shown in this project. Safety: read.",
+        {"exclude_shown": {"type": "boolean"}},
+        [],
+    ),
+    _t(
         "resolve_reference",
         "Resolve 'this', 'the' or 'latest' to exactly one component, run or snapshot of the active "
         "project, by one ladder: an explicit name or run_id; what is on screen now (the selection, the "
@@ -3683,6 +3695,7 @@ TOOL_ROUTES: dict[str, list] = {
     "get_component_schema": _SERVICE_CALL,
     "resolve_project_target": _SERVICE_CALL,
     "resolve_reference": _SERVICE_CALL,
+    "list_result_views": _SERVICE_CALL,
     "start_task": _SERVICE_CALL,
     "get_task": _SERVICE_CALL,
     "resume_task": _SERVICE_CALL,

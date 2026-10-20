@@ -27,7 +27,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 from sqlalchemy.orm import Session as DBSession
 from starlette.responses import StreamingResponse
 
@@ -98,6 +98,9 @@ class StreamRequest(BaseModel):
     checked_operation: Any = None
     source_gap_ref: Any = None
     binding_generation: StrictInt = Field(default=0, ge=0, le=2**31 - 1)
+    # LC-03: this client ACKs source-bound navigation in ordinary turns too.
+    # It only lets the server wait briefly for that ACK; it grants nothing.
+    ui_ack: StrictBool = False
 
 
 class ConfirmRequest(BaseModel):
@@ -1777,6 +1780,7 @@ async def chat_stream(
                     checked_operation=body.checked_operation,
                     source_gap_ref=body.source_gap_ref,
                     binding_generation=body.binding_generation,
+                    ui_ack=body.ui_ack,
                 )
             for event_name, payload in events:
                 yield chat_service.sse_frame(event_name, payload)

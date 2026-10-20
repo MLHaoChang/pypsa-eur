@@ -288,9 +288,16 @@ def main() -> None:
         n = builder()
         if n is None:
             continue
-        _verify_feasible(n, template_id,
-                         eh_templates.solver_config(template_id)
-                         if template_id in eh_templates.TEMPLATE_META else None)
+        cfg = (eh_templates.solver_config(template_id)
+               if template_id in eh_templates.TEMPLATE_META else None)
+        # The template validator's process rules (grid-to-process ticket 03):
+        # a refused template never ships.
+        from services.process_template_rules import refusals
+
+        refused = refusals(n, cfg)
+        if refused:
+            raise SystemExit(f"[{template_id}] template refused:\n  " + "\n  ".join(refused))
+        _verify_feasible(n, template_id, cfg)
         _export(n, template_id)
         if template_id in eh_templates.TEMPLATE_META:
             # P19: metadata, stress registry and solver settings the

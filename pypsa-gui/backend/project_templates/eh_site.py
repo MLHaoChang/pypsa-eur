@@ -826,7 +826,11 @@ def template_meta(p: dict, entered: list[str] | None = None) -> dict:
             {"item": "existing site", "value": ", ".join(existing_assets(p))
                                                + f": COD {years[0]}-01-01, overnight cost 0",
              "source": "assumed", "note": "in service at the first period and sunk"},
-            {"item": "finance inputs", "value": "nominal EUR (2020 money), escalation 2 %/yr, "
+            {"item": "money year", "value": "pack prices (2020 price data) are read as real base-year EUR",
+               "source": "assumed",
+               "note": "held flat to the base year, then escalated from it at the case's rates; "
+                       "nothing is converted with a price index"},
+            {"item": "finance inputs", "value": "nominal EUR, escalation 2 %/yr, "
                                                 f"all equity at 7 %, to {p['horizon_end']}",
              "source": "assumed", "note": "pre-tax; a later stage's capex is paid a year "
                                           "before its COD"},

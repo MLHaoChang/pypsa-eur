@@ -256,6 +256,11 @@ class FinanceInputs(BaseModel):
     # cash is nominal (escalated, the default) or real (constant money of
     # `currency_year`: escalation and inflation then 0 — a non-zero one is
     # flagged `real_basis_with_escalation:<class>`, IC plan C4).
+    # Money-year convention (owner, 2026-10): the engine never converts
+    # `currency_year` to the case's `base_year`. Typed costs are read as real prices
+    # in base-year money, held flat to the base year, then escalated from it at the
+    # case's rates (case.py, cashflow.py). So the pack's 2020 price data, in a case
+    # with base year 2027, are used as real 2027 money; reports say so.
     currency_year: int | None = Field(default=None, ge=1900, le=2200)
     price_basis: Literal["nominal", "real"] = "nominal"
     financial_close: date
