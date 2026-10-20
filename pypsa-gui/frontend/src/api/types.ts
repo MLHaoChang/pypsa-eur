@@ -491,7 +491,7 @@ export type ValueStreamKind =
   | 'energy_import' | 'energy_export' | 'network_capacity' | 'network_energy'
   | 'demand_charge' | 'retail_fixed' | 'ancillary' | 'dr_availability' | 'dr_activation'
   | 'ppa_settlement' | 'cfd_settlement' | 'certificates' | 'lease' | 'eaas_fee' | 'fuel'
-  | 'fom' | 'vom' | 'capex' | 'incentive' | 'tax' | 'debt_service' | 'other'
+  | 'fom' | 'vom' | 'capex' | 'incentive' | 'tax' | 'debt_service' | 'energy_wholesale' | 'other'
 export interface Participant {
   id: string; name: string; role: ParticipantRole; currency?: string
 }
