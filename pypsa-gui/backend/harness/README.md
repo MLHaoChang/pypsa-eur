@@ -338,7 +338,11 @@ shared harness. No new stream vocabulary or provider-specific guard path is used
 The actor-owned record store uses bounded cross-process transactions, but the live
 project runtime still supports one application worker. These checks do not certify
 all engineering domains, arbitrary request completeness or independent expert
-approval. Unmapped strict tools fail closed; deployment remains opt-in. Read the
+approval. Unmapped strict tools fail closed: a checked turn runs only
+`assurance.CHECKED_TOOLS`, and `tests/test_checked_results_dispositions.py` proves
+every other catalogue tool is refused before its handler runs. Each result view
+declares `checked_profiles` and a `checked_gap` (`services/result_views.py`; plan in
+`.scratch/checked-results/audit.md`). Deployment remains opt-in. Read the
 [implemented API and settings](../../../.scratch/assistant-assurance/harness-contracts.md),
 [implementation boundary](../../../.scratch/assistant-assurance/implementation-status.md)
 and [reliability design](../../../.scratch/assistant-assurance/reliability-contract.md)

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): with Check answers on, every Results view declares which checked profiles answer it and why the rest is withheld, and a catalogue-wide test proves a checked turn runs no results read, chart or export.
