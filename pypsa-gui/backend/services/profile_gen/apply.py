@@ -806,7 +806,8 @@ def _bus_sink_mw(n, bus: str, exclude: str) -> np.ndarray:
     total += (np.clip(-_dense(n, "Link", "p_min_pu", back.index), 0.0, None)
               * _capacity(back)).sum(axis=1)
     lines = n.lines[(n.lines.bus0 == bus) | (n.lines.bus1 == bus)]
-    total += float((lines.s_nom * lines.s_max_pu).sum())
+    total += (_dense(n, "Line", "s_max_pu", lines.index)
+              * lines.s_nom.to_numpy(dtype=float)).sum(axis=1)
     others = n.generators[(n.generators.bus == bus) & (n.generators.index != exclude)]
     total -= (np.clip(_dense(n, "Generator", "p_min_pu", others.index), 0.0, None)
               * _capacity(others)).sum(axis=1)
@@ -832,10 +833,11 @@ def _floor_warnings(n, component: str, vals: np.ndarray) -> tuple[str, list[str]
     return "must-run floor", [
         f"{MUST_RUN_SINK_WARNING}: {component!r}'s must-run floor of "
         f"{floor[i]:.0f} MW exceeds the {sink[i]:.0f} MW its bus can absorb "
-        f"(loads, storage charging, links and lines, less other floors) at "
-        f"{n.snapshots[i]} "
-        f"({over.size} snapshots); the dispatch and ENS solves must spill or "
-        "go infeasible"]
+        f"(loads, storage charging, links, less other floors; includes line "
+        f"export capacity (s_nom·s_max_pu, dense), whose far end must absorb "
+        f"it) at {n.snapshots[i]} ({over.size} snapshots); the dispatch and "
+        "ENS solves must spill or go infeasible. The sink is an upper bound: "
+        "no warning does not prove the solve can take the floor"]
 
 
 def _modelled_mwh(n, aligned: pd.Series, weighting: str) -> dict[str, float]:
