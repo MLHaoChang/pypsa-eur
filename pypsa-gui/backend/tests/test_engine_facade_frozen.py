@@ -279,7 +279,9 @@ MODEL_FIELDS: dict[str, tuple[str, ...]] = {
         "meter_history_energy_kwh", "meter_history_peaks_kw", "poc_link", "power_factor",
         "site_party", "timezone", "value_flows",
         # H2e (2026-10-15): the counterfactual's reference purchases and CO2 price.
-        "co2_price", "reference_purchases"),
+        "co2_price", "reference_purchases",
+        # IPP ticket 07 (G7): the wholesale import price series.
+        "import_price_ref"),
     "models.finance.FinanceInputs": (
         "acquisition_date", "analysis_years", "annualise", "capex_phasing", "cod_by_asset",
         "construction_months_by_asset", "construction_start", "contingency_share",
