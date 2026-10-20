@@ -152,11 +152,12 @@ CRUD factory: `docs/superpowers/specs/2026-09-13-network-crud-factory-lift-desig
 | `services/profile_gen/cutout_cache.py` | bbox+year cutout cache, `cds_preflight`/`CdsCredentialError` |
 | `services/profile_gen/presets.py` | preset catalogue, `resolve_params` override merge |
 | `services/profile_gen/apply.py` | `assign_profile` onto a generator's `p_max_pu` + user-TS meta |
-| `services/profile_gen/job.py` | the `profile_gen` queue job, pending artifacts under `<storage>/profiles_pending/` (last-10 eviction), traversal guard |
+| `services/profile_gen/job.py` | the `profile_gen` queue job, pending artifacts under `<storage>/profiles_pending/` (`write_pending`: staged `.nc` + `.json`, last-10 eviction), traversal guard |
+| `services/profile_gen/shape.py` | calibration ops (`apply_chain`: FLH/CF target, quantile map, tail damp, peak shift) on an hourly weather-year series; the `/profiles/shape` route writes the result as a new pending artifact, apply stays the writer |
 
 Generation runs as a `profile_gen` job in the ordinary solve queue (one
 FIFO). Routes live in `routers/profiles.py` (global presets/estimate +
-project-scoped generate/pending/apply, mounted before `projects.router`);
+project-scoped generate/pending/shape/apply, mounted before `projects.router`);
 the six chat tools are registered in `harness/catalogue.py` +
 `services/chat_tools.py`; the expert panel is
 `frontend/src/pages/ProfileStudioSection.tsx`.

@@ -188,7 +188,7 @@ def test_bundle_check_requires_the_pack_at_the_frozen_root(tmp_path):
     templates.mkdir()
     (templates / "eh_templates.py").write_text("")
     # The generic defaults pack is read `__file__`-relative too (IC U1 a).
-    for version in ("2026-10-05", "2026-10-07", "2026-10-13"):   # one manifest per version (IC G1, S3)
+    for version in ("2026-10-05", "2026-10-07", "2026-10-13", "2026-10-20"):   # one manifest per version (IC G1, S3)
         pack = root / "services" / "library" / "defaults_pack" / "versions" / version
         pack.mkdir(parents=True)
         (pack / "manifest.json").write_text("{}")

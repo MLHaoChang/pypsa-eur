@@ -1,0 +1,18 @@
+{
+  "base_sha": "fed26ad438d082c410e42a5c25a567cd738bc62b",
+  "publication_scope": "Design/specification package only; application branding and native implementation excluded",
+  "clean_package_browser_groups_passed": 15,
+  "screenshots": 18,
+  "portable_html_sha256": "3aa7b8024cf17a1fdeddb2d7e90dd6ad2187f4de40b51de3e0f8a61fd4eaabc0",
+  "package_uses_local_reference_assets": true,
+  "remote_ci": "Not yet run at local packaging checkpoint",
+  "native_application_e2e": "Not run for documentation publication",
+  "native_backend_separability": "Open gate; source reconnaissance requires current-master reassessment",
+  "paid_calls": 0,
+  "normalized_font_license_trailing_whitespace_only": true,
+  "latest_owner_additions": [
+    "Integrated planning years and direct normal/right-click example entry",
+    "Write/Dictate/Live chat menu with greeting/live animation previews"
+  ],
+  "application_implementation": "Separate PR; not included in this documentation branch"
+}

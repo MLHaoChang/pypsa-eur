@@ -103,6 +103,9 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "profile_gen/apply.py": (1, "_ONE_HOUR (Timedelta(hours=1)) verifies the generated axis "
                                 "is contiguous hourly before alignment — a shape check on the "
                                 "artifact, not an assumption about the network's resolution"),
+    "profile_gen/shape.py": (2, "FLH = mean CF x the WEATHER year's hours (8760 or 8784) and "
+                                "peak_shift's hourly-axis check — both about the generated "
+                                "artifact's own calendar, before alignment to any network"),
 }
 
 
@@ -128,6 +131,7 @@ def test_the_inventory_is_pinned():
     # U2 WP10: GS's `study/tariff.py` (3 sites) is deleted.
     # S1a: `asset_schema/fields.py` (1 site, MTTR help text) is added.
     # Profile generator: synthetic.py (3), atlite_source.py (1), apply.py (1) added.
-    assert sum(c for c, _ in ALLOWED.values()) == 78
-    assert len(ALLOWED) == 38
+    # RP-06: profile_gen/shape.py (2) added.
+    assert sum(c for c, _ in ALLOWED.values()) == 80
+    assert len(ALLOWED) == 39
     assert all(reason for _, reason in ALLOWED.values())
