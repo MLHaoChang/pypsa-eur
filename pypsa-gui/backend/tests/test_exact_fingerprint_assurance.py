@@ -43,3 +43,13 @@ def test_storage_profile_refuses_a_solve_the_exact_fingerprint_rejects(storage, 
                          checked_scope=scope(storage))
     receipt = approval(frames).get("receipt") or {}
     assert receipt.get("request_complete") is False
+
+
+def test_a_fresh_solve_after_the_edit_answers_again(solved, checked):
+    nudge(solved)
+    n = solved.network
+    assert n.optimize(solver_name="highs", include_objective_constant=False) == ("ok", "optimal")
+    workflow_tools._record_solve_inputs(n, solved.solver_state["solver_config"])
+    frames = run(checked, {"dispatch_energy": 17, "marginal_expenditure": 170, "peak_dispatch": 7})
+    assert approval(frames)["verdict"] == "passed"
+    assert "Generator energy: 17 MWh" in public_text(frames)
