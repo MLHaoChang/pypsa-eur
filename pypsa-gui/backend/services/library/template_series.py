@@ -30,7 +30,8 @@ from uuid import UUID
 
 import pandas as pd
 
-__all__ = ["DIR", "META", "TemplateSeries", "TemplateSeriesError", "apply_refs", "mint", "read"]
+__all__ = ["DIR", "META", "NOTE_KEYS", "TemplateSeries", "TemplateSeriesError", "apply_refs",
+           "basis_conflicts", "mint", "note_values", "read"]
 
 DIR = "price_series"
 META = "meta.json"
@@ -40,6 +41,13 @@ TARGETS = ("commercial.export_price_ref", "commercial.import_price_ref",
 _CONTRACT_PREFIX = "contract:"
 _CONTRACT_FIELD = ".reference_price"
 _META_KEYS = ("label", "source", "vintage_year", "provider", "description", "unit", "notes")
+#: The `key:value` notes that stand in for series fields until #448 S1 adds them to
+#: `SeriesMeta`; S1 migrates exactly these (gatekeeper). Disclosure only: nothing reads
+#: them as data except `basis_conflicts`, which checks them against the template's finance.
+NOTE_KEYS = ("currency", "price_basis", "currency_year", "region", "source_time_basis")
+#: Money notes a non-price series (a share) must not carry.
+_MONEY_KEYS = ("currency", "price_basis", "currency_year")
+_SHARE_TARGETS = ("commercial.grid_cfe_share_ref",)
 
 
 class TemplateSeriesError(ValueError):
@@ -54,6 +62,31 @@ class TemplateSeries:
     series: pd.Series
     meta: dict
     targets: tuple[str, ...]
+
+
+def note_values(meta: dict) -> dict[str, str]:
+    """The `key:value` notes of NOTE_KEYS in `meta` (the rest of the notes are free text)."""
+    out: dict[str, str] = {}
+    for note in meta.get("notes") or []:
+        key, sep, value = str(note).partition(":")
+        if sep and key in NOTE_KEYS:
+            out[key] = value
+    return out
+
+
+def basis_conflicts(series: list["TemplateSeries"], finance: dict | None) -> list[str]:
+    """Series whose price basis or currency year differs from the template's finance block
+    (`FinanceInputs.price_basis` / `currency_year`), as "name: note vs finance"."""
+    if not finance:
+        return []
+    out = []
+    for ts in series:
+        notes = note_values(ts.meta)
+        for key in ("price_basis", "currency_year"):
+            if key in notes and finance.get(key) is not None and \
+                    str(finance[key]) != notes[key]:
+                out.append(f"{ts.name}: {key} {notes[key]} vs finance {finance[key]}")
+    return out
 
 
 def _check_target(t: str) -> None:
@@ -95,8 +128,21 @@ def read(template_dir: Path) -> list[TemplateSeries]:
             raise TemplateSeriesError("template_series_file_invalid",
                                       f"{DIR}/{file} is unreadable: {exc}") from exc
         meta = {k: e[k] for k in _META_KEYS if k in e}
-        meta.setdefault("unit", "EUR/MWh")
+        share = any(t in _SHARE_TARGETS for t in targets)
+        meta.setdefault("unit", "share" if share else "EUR/MWh")
         notes = list(meta.get("notes") or [])
+        for note in notes:
+            key, sep, _v = str(note).partition(":")
+            if sep and " " not in key and key not in NOTE_KEYS:
+                raise TemplateSeriesError("template_series_meta_invalid",
+                                          f"series {name!r}: note key {key!r} is not one of "
+                                          f"{NOTE_KEYS}")
+        if share:
+            money = [k for k in note_values({"notes": notes}) if k in _MONEY_KEYS]
+            if meta["unit"] != "share" or money:
+                raise TemplateSeriesError("template_series_meta_invalid",
+                                          f"series {name!r} fills a share: unit 'share' and no "
+                                          f"money notes ({money})")
         if "illustrative" in str(meta.get("source", "")).lower() and "illustrative" not in notes:
             notes.append("illustrative")
         notes.append("source_time_basis:UTC")

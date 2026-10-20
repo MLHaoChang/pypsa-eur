@@ -153,3 +153,51 @@ def test_a_bad_template_series_refuses_the_create_and_leaves_no_project(
     assert r.status_code == 422, r.text
     assert r.json()["detail"]["error_kind"] == "template_series_target_missing"
     assert {row["name"] for row in client.get("/api/projects/").json()} == before
+
+
+# ── the notes (gatekeeper): exact keys, a share is not money, the basis agrees ──
+
+
+def test_the_note_keys_are_one_constant_and_parse():
+    assert TS.NOTE_KEYS == ("currency", "price_basis", "currency_year", "region",
+                            "source_time_basis")
+    assert TS.note_values({"notes": ["illustrative", "currency:EUR", "price_basis:real",
+                                     "Free text: kept"]}) == {"currency": "EUR",
+                                                              "price_basis": "real"}
+
+
+def test_an_unknown_note_key_is_refused(tmp_path):
+    with pytest.raises(TS.TemplateSeriesError) as exc:
+        TS.read(_write(tmp_path, [{**ENTRY, "notes": ["curency:EUR"]}], {"da.csv": _da()}))
+    assert exc.value.code == "template_series_meta_invalid"
+
+
+def test_a_share_series_carries_unit_share_and_no_money_notes(tmp_path):
+    share = {"name": "cfe", "file": "da.csv", "source": "illustrative",
+             "targets": ["commercial.grid_cfe_share_ref"]}
+    (ts,) = TS.read(_write(tmp_path / "a", [share], {"da.csv": _da() / 100.0}))
+    assert ts.meta["unit"] == "share"
+    with pytest.raises(TS.TemplateSeriesError):
+        TS.read(_write(tmp_path / "b", [{**share, "notes": ["currency:EUR"]}],
+                       {"da.csv": _da() / 100.0}))
+
+
+def test_a_series_basis_that_differs_from_the_finance_basis_is_named(tmp_path):
+    series = TS.read(_write(tmp_path, [ENTRY], {"da.csv": _da()}))      # real, 2030
+    assert TS.basis_conflicts(series, {"price_basis": "real", "currency_year": 2030}) == []
+    assert TS.basis_conflicts(series, {"price_basis": "nominal", "currency_year": 2030}) == \
+        ["tpl_da: price_basis real vs finance nominal"]
+
+
+def test_a_template_whose_series_and_finance_disagree_is_refused_before_the_project(
+        client, tmp_path, monkeypatch, tmp_projects_dir):
+    """The data-centre sidecar's finance is nominal, 2020; a `price_basis:real` series refuses."""
+    from routers import projects as projects_router
+
+    _template(tmp_path, [{**ENTRY, "file": "cfe.csv", "targets": ["commercial.export_price_ref"]}])
+    monkeypatch.setattr(projects_router, "_PROJECT_TEMPLATES_DIR", tmp_path)
+    before = {row["name"] for row in client.get("/api/projects/").json()}
+    r = client.post(f"/api/projects/from_template/{TID}", params={"name": "tpl_basis"})
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "template_series_basis_mismatch"
+    assert {row["name"] for row in client.get("/api/projects/").json()} == before

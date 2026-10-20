@@ -1818,8 +1818,13 @@ def _mint_template_series(db, user, template_key: str) -> tuple[list, dict]:
         # A ref the template names but does not ship is refused before minting.
         cfg_path = _PROJECT_TEMPLATES_DIR / template_key / "solver_config.json"
         if cfg_path.is_file():
-            TS.apply_refs(json.loads(cfg_path.read_text()), series,
-                          {ts.name: _PlaceholderRef() for ts in series})
+            tpl_cfg = json.loads(cfg_path.read_text())
+            TS.apply_refs(tpl_cfg, series, {ts.name: _PlaceholderRef() for ts in series})
+            # The illustrative series and the study's money basis must agree (gatekeeper).
+            clash = TS.basis_conflicts(series, tpl_cfg.get("finance"))
+            if clash:
+                raise TS.TemplateSeriesError("template_series_basis_mismatch",
+                                             "; ".join(clash))
         refs = TS.mint(db, org, series, created_by=getattr(user, "id", None))
     except TS.TemplateSeriesError as exc:
         raise HTTPException(422, {"error_kind": exc.code, "code": exc.code,
