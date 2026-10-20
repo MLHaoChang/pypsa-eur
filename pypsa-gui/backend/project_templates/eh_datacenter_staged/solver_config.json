@@ -137,7 +137,7 @@
           "owner": "site"
         }
       ],
-      "built_digest": "7c33dc4d09143b36",
+      "built_digest": "75b4d1e5879dddd4",
       "built_inputs_digest": "725176b631641943",
       "connection_fee_payee": null,
       "export_revenue_to": "site_party",
@@ -161,7 +161,7 @@
       ],
       "tariff_payees": [],
       "template": "single_owner",
-      "template_version": "single_owner@2"
+      "template_version": "single_owner@3"
     }
   },
   "discount_rate": 0.07,

@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from models.commercial import CommercialConfig, ValueFlowConfig
+from models.process_unit import product_roles
 from services.commercial import participants as P
 from services.commercial.lp_bindings import same_party
 
@@ -123,7 +124,7 @@ def config_digest(vf: ValueFlowConfig) -> str:
 def _site(n, commercial: CommercialConfig, dsr_buses=()) -> _Site:
     sides = P.classify_buses(n, commercial)
     assets = []
-    slacks = P.product_roles(n)
+    slacks = product_roles(n)
     for comp, frame in _FRAMES:
         for name in getattr(n, frame).index:
             if comp == "Generator" and str(name) in slacks:
@@ -356,21 +357,23 @@ def _energy_hub(commercial: CommercialConfig, site: _Site) -> TemplateResult:
 
 
 TEMPLATES: dict[str, Template] = {t.name: t for t in (
-    Template("single_owner", "2", _single_owner),
-    Template("btm_ppa", "3", _btm_ppa),
-    Template("landlord_tenant", "2", _landlord_tenant),
-    Template("dso_developer", "2", _dso_developer),
-    Template("energy_hub", "2", _energy_hub),
+    Template("single_owner", "3", _single_owner),
+    Template("btm_ppa", "4", _btm_ppa),
+    Template("landlord_tenant", "3", _landlord_tenant),
+    Template("dso_developer", "3", _dso_developer),
+    Template("energy_hub", "3", _energy_hub),
 )}
 
 
 def _with_parties(cfg: ValueFlowConfig, commercial: CommercialConfig,
-                  drafts: list[dict]) -> ValueFlowConfig:
+                  drafts: list[dict], also=()) -> ValueFlowConfig:
     """Every party the contracts (and drafts) name that is not a participant
-    becomes an external; no participant stays an external (review #1)."""
+    becomes an external; no participant stays an external (review #1). `also`:
+    parties the ledger names without a contract (a shortfall's `offtaker`)."""
     ids = [p.id for p in cfg.participants]
     externals = [e for e in cfg.externals if not any(same_party(e, i) for i in ids)]
     named = [p for c in commercial.contracts for _r, p in P._contract_parties(c) if p]
+    named += list(also)
     for d in drafts:
         named += [d.get(k) for k in _PARTY_KEYS if d.get(k)]
     for party in named:
@@ -388,7 +391,9 @@ def build(name: str, n, commercial: CommercialConfig, *, dsr_buses=()) -> Templa
         raise TemplateRefused("template_unknown",
                               f"unknown template {name!r}; one of {sorted(TEMPLATES)}")
     result = tpl.builder(commercial, _site(n, commercial, dsr_buses))
-    cfg = _with_parties(result.config, commercial, result.draft_contracts)
+    # A product shortfall is owed to the offtaker (the ledger's `lost_production`, ticket 06).
+    also = ("offtaker",) if any(r == "shortfall" for r in product_roles(n).values()) else ()
+    cfg = _with_parties(result.config, commercial, result.draft_contracts, also)
     cfg = cfg.model_copy(update={"template": name, "template_version": f"{name}@{tpl.version}",
                                  "built_inputs_digest": inputs_digest(
                                      n, commercial, result.draft_contracts)})

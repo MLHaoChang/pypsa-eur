@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 
 from services.commercial import lp_bindings as _lp
+from models.process_unit import product_roles
 from services.commercial import participants as P
 
 _log = logging.getLogger(__name__)
@@ -106,7 +107,7 @@ def _asset_costs(n, cfg, parsed, sides) -> list[P.AssetCost]:
         capex = _per_asset(n.statistics.capex(groupby=False, round=0), periods)
         fom = _per_asset(n.statistics.fom(groupby=False, round=0), periods)
         opex = _per_asset(n.statistics.opex(groupby=False, round=0), periods)
-    roles = P.product_roles(n)
+    roles = product_roles(n)
     out = []
     for key in sorted(set(capex) | set(fom) | set(opex)):
         comp, name = key

@@ -36,3 +36,9 @@ def product_role_generators(n, role: str):
     if role not in PROCESS_GENERATOR_ROLES or "process_role" not in gens.columns:
         return gens.index[:0]
     return gens.index[gens["process_role"].astype(str).str.strip() == role]
+
+
+def product_roles(n) -> dict[str, str]:
+    """{Generator: role} of every Generator with a `process_role`, from `product_role_generators` (column only).
+    A product slack is an LP term, not an asset: the value flows never make it ownable (ticket 06)."""
+    return {str(g): role for role in PROCESS_GENERATOR_ROLES for g in product_role_generators(n, role)}

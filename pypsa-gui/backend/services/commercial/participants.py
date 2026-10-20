@@ -98,14 +98,6 @@ def contract_payer_payee(contract, site_party: str) -> tuple[str | None, str | N
     return payer, payee
 
 
-def product_roles(n) -> dict[str, str]:
-    """{Generator: process role} of the product slacks (`buy_in`, `shortfall`): LP terms on a product bus, not
-    assets (grid-to-process ticket 06)."""
-    from models.process_unit import PROCESS_GENERATOR_ROLES, product_role_generators
-
-    return {str(g): r for r in PROCESS_GENERATOR_ROLES for g in product_role_generators(n, r)}
-
-
 def _in(name: str, pool) -> bool:
     return any(same_party(name, p) for p in pool)
 
@@ -575,6 +567,12 @@ def _sources(inputs: LedgerInputs, vf: ValueFlowConfig, p: str) -> list[_Source]
         owner = owners.get((a.component, a.name), site)
         extra = ["asset_side_unclassified"] if a.side == "unclassified" else []
         if "product_buy_in" in a.flags or "product_shortfall" in a.flags:
+            # Grid-to-process ticket 06 (gatekeeper): a product slack is an LP term, not an asset. The buy-in's
+            # opex (its dense marginal cost, CO2 included) is the purchase, `fuel` to the market. The
+            # shortfall's opex (its lost-production value, never VoLL) is `lost_production` to the offtaker:
+            # the IC books no product revenue, so this cost is the shortfall's one representation. An offtake
+            # revenue contract added later must replace it, not stand beside it; one with its own indexation
+            # sets the class (`fuel` here, so it moves with the buy-in it must stay above).
             buy = "product_buy_in" in a.flags
             if opex:
                 out.append(_Source("asset", f"opex:{tag}", "fuel" if buy else "lost_production",
@@ -777,6 +775,7 @@ def build_ledger(inputs: LedgerInputs, vf: ValueFlowConfig) -> Ledger:
     owned = {(o.component, o.asset_id) for o in vf.asset_owners}
     defaulted = sum(1 for a in inputs.assets if a.side != "grid"
                     and (a.component, a.name) not in owned
+                    and not {"product_buy_in", "product_shortfall"} & set(a.flags)
                     and any(a.capex.values()) | any(a.fom.values()) | any(a.opex.values()))
     if defaulted:
         notes.append(f"asset_owner_defaulted:{defaulted}")
