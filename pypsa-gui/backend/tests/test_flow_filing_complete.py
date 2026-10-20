@@ -163,9 +163,12 @@ def test_every_assumed_ledger_row_files_to_a_named_section(tid):
 # DC-02's rows name their own target (`{item, value, unit, source, note,
 # section, field, entity, component, panel}`).
 DC02_ROWS = [
-    {"item": "connection_ramp", "value": 5.0, "unit": "MW/min", "source": "assumed",
-     "note": "n", "section": "connection", "field": "ramp_limit_up", "entity": "grid_import",
-     "component": "Link", "panel": None},
+    {"item": "connection_ramp", "value": 4.0, "unit": "MW/min", "source": "assumed",
+     "note": "...", "section": "connection", "panel": None, "component": "Link",
+     "entity": "grid_import", "field": "connection_ramp"},
+    {"item": "fault_level", "value": 800.0, "unit": "MVA", "source": "assumed", "note": "...",
+     "section": "connection", "panel": None, "component": "Bus", "entity": "poc",
+     "field": "eh_sk_mva"},
     {"item": "oscillation", "value": 2.0, "unit": "% of connection", "source": "assumed",
      "note": "n", "section": "connection", "field": "oscillation_band", "entity": "grid_import",
      "component": "Link", "panel": None},
@@ -184,8 +187,13 @@ def test_a_row_with_its_own_target_is_filed_there():
     got = {i["code"]: (i["target"], i["message"]) for i in items}
     assert got["assumed_connection_ramp"] == (
         {"section": "connection", "panel": None, "component": "Link",
-         "entity": "grid_import", "field": "ramp_limit_up"},
-        "connection_ramp: 5 MW/min is a template assumption; confirm it or set your own.")
+         "entity": "grid_import", "field": "connection_ramp"},
+        "connection_ramp: 4 MW/min is a template assumption; confirm it or set your own.")
+    assert got["assumed_fault_level"] == (
+        {"section": "connection", "panel": None, "component": "Bus", "entity": "poc",
+         "field": "eh_sk_mva"},
+        "fault_level: 800 MVA is a template assumption; confirm it or set your own.")
+    assert len(items) == 6
     assert got["assumed_lole_goal"][0] == {"section": "scenarios", "panel": "simparams",
                                            "component": None, "entity": None,
                                            "field": "target_lole_h"}
