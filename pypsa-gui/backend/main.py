@@ -81,6 +81,7 @@ from routers import (
     durable_conversation,
     clustering,
     adequacy_worksheet,
+    flow,
     compare,
     gridspine,
     campus_electrical,
@@ -1309,6 +1310,12 @@ app.include_router(
 # `projects._BUNDLE_DIRS`, so it travels with save-as, copy and snapshots.
 app.include_router(
     reports.router, prefix="/api/projects", tags=["reports"],
+    dependencies=_projects_router_guard,
+)
+# The project flow (project-workflow B1): `/{name}/flow` and `/{name}/flow/ack`,
+# the section states over the existing checks. Same guard; before the catch-all.
+app.include_router(
+    flow.router, prefix="/api/projects", tags=["flow"],
     dependencies=_projects_router_guard,
 )
 # Report generation (WP3): `/{name}/reports/generate…` and the per-section
