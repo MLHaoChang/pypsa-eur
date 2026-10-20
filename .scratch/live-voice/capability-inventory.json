@@ -5763,13 +5763,12 @@
       ],
       "input_keys": [
         "goal",
-        "limit"
+        "limit",
+        "overview"
       ],
-      "required": [
-        "goal"
-      ],
+      "required": [],
       "safety_tier": "read",
-      "schema_sha256": "4cade8bec0b912c42d97bdb4df00b6889e3e29c2cd1b891da542afd30043f418",
+      "schema_sha256": "1b2d621facbc118e8eda7c3970378eea9eeefee4c87892a31ad67344666ca146",
       "behavioral_fixture": "pending"
     },
     {

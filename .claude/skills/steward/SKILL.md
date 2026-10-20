@@ -61,6 +61,16 @@ Before you ask the gatekeeper for an OK on a gated PR, run the `mp-code-review` 
 
 The gatekeeper advises; it does not write the code.
 
+## UX reviewer
+
+A PR that changes UI also needs the UX reviewer's OK on its exact head SHA (the id is in `docs/agents/coordinator.md`). The reviewer checks the PR against the approved project workflow, `.scratch/project-workflow/design.md`:
+- every input belongs to its workflow section;
+- the user never has to jump away and back;
+- the section's completion state is wired;
+- Guided and Expert agree.
+
+Before you build UI, tell the reviewer in a few lines where the change sits in the workflow. A clean master merge carries the OK.
+
 ## Helper agents
 
 Run read-only helper agents (log reading, file sweeps, summaries of saved tool output) with `model: haiku`. Give each one the exact question and the answer shape you expect back.

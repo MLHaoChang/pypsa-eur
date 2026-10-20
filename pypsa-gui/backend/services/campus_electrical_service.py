@@ -1035,13 +1035,66 @@ def _jsonable(value):
 
 
 def get_island(project) -> dict:
-    """``{config, study}``: the project's island sidecar as written (None when
-    it has none) and the last island study (None when none has run since the
-    sidecar was saved)."""
+    """``{config, study, presets, services, warnings}``: the project's island
+    sidecar as written (None when it has none), the last island study (None
+    when none has run since the sidecar was saved), the control presets a
+    project can select, the grid services its converters offer
+    (``offered_services``; None without a valid sidecar) and its typed
+    warnings (``island_warnings``)."""
+    from services.adequacy.island_config import (
+        PRESETS,
+        island_warnings,
+        offered_services,
+        validate,
+    )
+
     require_capacity_expansion(project)
     sidecar, study = _island_paths(project)
-    return {"config": json.loads(sidecar.read_text()) if sidecar.is_file() else None,
-            "study": json.loads(study.read_text()) if study.is_file() else None}
+    config = json.loads(sidecar.read_text()) if sidecar.is_file() else None
+    services, warnings = None, []
+    if config is not None:
+        try:
+            valid = validate(config)
+        except ContractError:
+            valid = None                          # the editor shows the 422 on save
+        if valid is not None:
+            services, warnings = offered_services(valid), island_warnings(valid)
+    return {"config": config,
+            "study": json.loads(study.read_text()) if study.is_file() else None,
+            "presets": {name: {"kinds": list(p["kinds"]), "converter": p["converter"], "ups": p["ups"]}
+                        for name, p in PRESETS.items()},
+            "services": services, "warnings": warnings}
+
+
+def _fixed_ratings(project) -> dict:
+    """``{storage unit: p_nom}`` of the project's fixed-size storage units: the
+    ratings ``fast_frequency_response`` sizes from. An extendable unit has no
+    rating before it is sized, so it is left out."""
+    import pypsa
+
+    with _netcdf_lock():
+        n = pypsa.Network(str(_network(project)))
+    su = n.storage_units
+    return {x: float(su.at[x, "p_nom"]) for x in su.index if not bool(su.at[x, "p_nom_extendable"])}
+
+
+def select_island_preset(project, preset: str | None) -> dict:
+    """Select the project's control preset (None clears it) in its island
+    sidecar, through gridspine's ``select_preset`` and ``save_island``.
+    Returns ``get_island`` plus ``skipped``: the units the preset left out
+    and why."""
+    from services.adequacy.island_config import select_preset
+
+    require_capacity_expansion(project)
+    sidecar, _ = _island_paths(project)
+    if not sidecar.is_file():
+        raise HTTPException(status_code=422, detail="the project has no island_config.json; "
+                                                    "save the island requirements first")
+    try:
+        raw, skipped = select_preset(json.loads(sidecar.read_text()), preset, _fixed_ratings(project))
+    except ContractError as exc:
+        raise _unprocessable(exc)
+    return {**save_island(project, raw), "skipped": skipped}
 
 
 def save_island(project, config: dict) -> dict:
