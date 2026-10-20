@@ -1441,6 +1441,8 @@ _TEMPLATE_DEFAULT_NAMES = {
     "eh_microgrid_staged": "Island Microgrid (staged growth)",
     # Grid-to-process ticket 05 (project_templates/eh_ammonia.py).
     "eh_ammonia_staged": "Green Ammonia Hub (staged growth)",
+    # IPP renewables + BESS ticket 03 (project_templates/eh_ipp.py).
+    "eh_ipp_hybrid": "Renewables IPP with battery",
 }
 
 # Sidecars a template directory may carry beside network.nc (P19): the EH

@@ -152,9 +152,229 @@ def _tag(n) -> None:
     """The energy-hub tags the meter, the readiness checks and the finance adapter read."""
     for col, default in (("eh_poc", False), ("eh_critical", False)):
         n.buses[col] = default
-    n.buses.at["poi", "eh_poc"] = True
+    # The point of connection is the grid-side bus (the energy-hub convention).
+    n.buses.at["grid", "eh_poc"] = True
     for frame in (n.generators, n.links, n.storage_units):
         frame["eh_role"] = ""
     n.generators.at["grid", "eh_role"] = "grid_supply"
     n.links.at["grid_import", "eh_role"] = "grid_import"
     n.links.at["grid_export", "eh_role"] = "grid_export"
+    # Outage data on the meter (a POI outage costs the export): the FMEA ranks it.
+    for link in ("grid_import", "grid_export"):
+        for col, default in (("outage_rate_value", float("nan")), ("mttr_hours", float("nan"))):
+            if col not in n.links.columns:
+                n.links[col] = default
+        n.links.at[link, "outage_rate_value"] = 0.002
+        n.links.at[link, "mttr_hours"] = 12.0
+
+
+# ── Commercial and finance (spec §6, §8.3a; every value lives in section 7) ─
+
+SITE_PARTY = "ipp"
+OFFTAKER = "offtaker"
+#: Illustrative EU pay-as-produced PPA prices (EUR/MWh, 2030 money), the share and the tenor.
+PPA = {"wind_farm": ("ppa_wind", 65.0), "pv_plant": ("ppa_pv", 50.0)}
+PPA_SHARE = 0.7
+PPA_TENOR = 10
+COD = f"{YEAR}-01-01"
+FINANCIAL_CLOSE = f"{YEAR - 2}-01-01"
+ANALYSIS_YEARS = 25
+DEGRADATION = {"wind_farm": 0.003, "pv_plant": 0.005, "bess": 0.0}
+
+
+def _placeholder(series: str) -> dict:
+    """A ref the create path replaces with the minted series (ticket 02's `apply_refs`); a
+    project never keeps it."""
+    return {"id": series, "version": 1, "hash": "template-placeholder", "source": "template"}
+
+
+def import_tariff() -> dict:
+    return {"id": "ipp_poi", "name": "POI network charges (illustrative)", "jurisdiction": "DE",
+            "valid_from": f"{YEAR}-01-01",
+            "items": [
+                {"id": "network_charges", "kind": "energy", "unit": "per_kwh",
+                 "measured_on": "import",
+                 "periods": [{"name": "all", "rate": NETWORK_CHARGE_EUR_PER_MWH / 1000.0}]},
+                {"id": "injection", "kind": "energy", "unit": "per_kwh", "measured_on": "export",
+                 "direction": "cost", "periods": [{"name": "all", "rate": 0.0}]}]}
+
+
+def contracts() -> list[dict]:
+    return [{"type": "ppa", "id": cid, "kind": "pay_as_produced", "price": price,
+             "tenor_years": PPA_TENOR, "seller": SITE_PARTY, "buyer": OFFTAKER,
+             "asset_ids": [asset], "share": PPA_SHARE, "settlement": "financial",
+             "suspend_on_negative_price": True, "base_year": YEAR,
+             "reference_price": _placeholder(SERIES["base"])}
+            for asset, (cid, price) in PPA.items()]
+
+
+def value_flows() -> dict:
+    from models.commercial import DEFAULT_EXTERNALS
+
+    return {"template": "custom",
+            "participants": [{"id": SITE_PARTY, "name": "IPP (developer)", "role": "developer"}],
+            "externals": [*DEFAULT_EXTERNALS, OFFTAKER],
+            "asset_owners": [{"asset_id": a, "component": c, "owner": SITE_PARTY}
+                             for a, c in (("wind_farm", "Generator"), ("pv_plant", "Generator"),
+                                          ("bess", "StorageUnit"))],
+            "export_revenue_to": "site_party"}
+
+
+FINANCE: dict = {
+    "currency": "EUR", "currency_year": YEAR, "price_basis": "nominal",
+    "financial_close": FINANCIAL_CLOSE,
+    "cod_by_asset": {a: COD for a in ("wind_farm", "pv_plant", "bess")},
+    "capex_phasing": [0.4, 0.6], "stage_capex_lead_years": 1, "contingency_share": 0.05,
+    "escalation": {c: 0.02 for c in ("opex", "fuel", "tariff", "ppa", "export", "capex")},
+    "degradation_by_asset": DEGRADATION,
+    "analysis_years": ANALYSIS_YEARS,
+    "annualise": False,                          # a full hourly year
+    "tax_losses": "offset_other_income", "financing_fee_tax": "not_deducted",
+    "replacement_rule": "part_lifetimes",
+    "terminal_value": {"method": "remaining_life_annuity"},
+    "wacc_nominal": 0.07, "cost_of_equity": 0.09, "inflation": 0.02,
+    "solve_ppa": {"contract_id": "ppa_wind", "target_irr": 0.08, "target_year": ANALYSIS_YEARS},
+}
+
+
+def commercial_and_finance() -> dict:
+    """The template's `commercial` and `finance` blocks, validated as the routes store them."""
+    from models.commercial import CommercialConfig
+    from models.finance import FinanceInputs
+
+    commercial = CommercialConfig.model_validate({
+        "poc_link": "grid_import", "export_link": "grid_export", "timezone": "UTC",
+        "site_party": SITE_PARTY, "import_tariff": import_tariff(),
+        "export_price_ref": _placeholder(SERIES["base"]),
+        "import_price_ref": _placeholder(SERIES["base"]),
+        "contracts": contracts(), "value_flows": value_flows()})
+    return {"commercial": commercial.model_dump(mode="json"),
+            "finance": FinanceInputs.model_validate(FINANCE).model_dump(mode="json")}
+
+
+# ── The shipped price series (ticket 02) ───────────────────────────────────
+
+SERIES_NOTES = ["currency:EUR", "price_basis:real", f"currency_year:{YEAR}", "region:DE-LU"]
+
+
+def series_meta() -> dict:
+    """`price_series/meta.json`: the base shape fills the export, import and PPA references;
+    the two case shapes are minted for the cases (§7) and fill nothing."""
+    base_targets = ["commercial.export_price_ref", "commercial.import_price_ref",
+                    *(f"contract:{cid}.reference_price" for cid, _p in PPA.values())]
+    out = []
+    for case, label in (("base", "base"), ("low", "low price level (× 0.8)"),
+                        ("cannibalised", "deeper solar cannibalisation")):
+        out.append({"name": SERIES[case], "file": f"{case}.csv",
+                    "label": f"Illustrative DE-LU day-ahead shape, {label} ({YEAR})",
+                    "source": "illustrative (assumed)", "vintage_year": YEAR,
+                    "description": "Generated by project_templates/eh_ipp.py; not market data. "
+                                   "Replace it with your own (upload, or ENTSO-E with your token).",
+                    "notes": list(SERIES_NOTES),
+                    "targets": base_targets if case == "base" else []})
+    return {"series": out}
+
+
+def write_price_series(out_dir) -> None:
+    import json
+    import pathlib
+
+    d = pathlib.Path(out_dir) / "price_series"
+    d.mkdir(parents=True, exist_ok=True)
+    for case in SERIES:
+        p = price_shape(case)
+        pd.DataFrame({"timestamp": p.index.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                      "value": p.to_numpy()}).to_csv(d / f"{case}.csv", index=False)
+    (d / "meta.json").write_text(json.dumps(series_meta(), indent=2, sort_keys=True) + "\n")
+
+
+# ── The ledger and the registration ────────────────────────────────────────
+
+def _ledger() -> list[dict]:
+    st = price_stats("base")
+    return [
+        {"item": "planning period", "value": f"{YEAR}, one hourly year (8760 h)",
+         "source": "assumed",
+         "note": "the example is built for 2030 (native horizon until free planning years, E1)"},
+        {"item": "site location", "value": "not set", "source": "assumed",
+         "note": f"the template invents no pin; profiles are generated at a DE-LU reference "
+                 f"point ({REF_LAT} N, {REF_LON} E) until you set it, and regenerated then"},
+        {"item": "bidding zone", "value": "DE-LU", "source": "assumed",
+         "note": "re-derived from the pin once it is set"},
+        {"item": "export limit", "value": f"{EXPORT_MW:g} MW (grid_export)", "source": "assumed",
+         "note": "from the connection offer; below the plants' 110 MW (overbuild 1.57)"},
+        {"item": "import limit", "value": f"{IMPORT_MW:g} MW (grid_import)", "source": "assumed",
+         "note": "auxiliaries and battery grid charging"},
+        {"item": "wind farm", "value": f"{WIND_MW:g} MW, fixed new build", "source": "pack",
+         "note": f"onwind costs from defaults pack {PACK_VERSION}; forced size (the IC counts "
+                 "the capex)"},
+        {"item": "PV plant", "value": f"{PV_MWP:g} MWp, fixed new build", "source": "pack",
+         "note": f"solar-utility costs from defaults pack {PACK_VERSION}"},
+        {"item": "battery", "value": f"candidate 0–{BESS_MAX_MW:g} MW at {BESS_HOURS:g} h, "
+                                     f"round trip {BESS_EFF ** 2:.2f}", "source": "pack",
+         "note": f"battery power and energy parts from defaults pack {PACK_VERSION}; throughput "
+                 f"cost {BESS_THROUGHPUT_EUR_PER_MWH:g} EUR per MWh discharged (illustrative)"},
+        {"item": "wind and PV profiles", "value": "synthetic, deterministic", "source": "generated",
+         "note": "services.profile_gen synthetic source; replace with ERA5 or measured data"},
+        {"item": "day-ahead price (base)",
+         "value": f"mean {st['mean']:.1f} EUR/MWh, {st['negative_hours']} negative hours, PV "
+                  f"capture rate {st['pv_capture_rate']:.2f}, wind {st['wind_capture_rate']:.2f}",
+         "source": "illustrative",
+         "note": "an assumed shape, not market data (owner Q8 = A). For scale: German day-ahead "
+                 "prices in 2024 averaged roughly 80 EUR/MWh with several hundred negative hours "
+                 "(SMARD, Bundesnetzagentur; check the current figures). Bring your own series"},
+        {"item": "network charges on import",
+         "value": f"{NETWORK_CHARGE_EUR_PER_MWH:g} EUR/MWh; injection 0 EUR/MWh",
+         "source": "assumed", "note": "the commodity on import is the day-ahead series"},
+        {"item": "PPAs", "value": f"financial pay-as-produced, {PPA_SHARE:.0%} of each plant, "
+                                  f"wind {PPA['wind_farm'][1]:g} / PV {PPA['pv_plant'][1]:g} "
+                                  f"EUR/MWh, {PPA_TENOR} years",
+         "source": "illustrative",
+         "note": "settled against the day-ahead series; suspended at negative prices (the offtaker "
+                 "accepts curtailment). Prices are an assumed illustration within the range of "
+                 "public European PPA price indices; replace with your term sheet"},
+        {"item": "finance", "value": "7 % WACC, 9 % cost of equity, 2 % escalation, 25 years",
+         "source": "assumed",
+         "note": "base-year money (2030), held flat to the base year then escalated (label only)"},
+        {"item": "degradation", "value": "PV 0.5 %/yr, wind 0.3 %/yr", "source": "assumed",
+         "note": "the faster-degradation case doubles them"},
+        {"item": "cases", "value": "8 planned cases (editable once sensitivities land; make any now "
+                                   "with Duplicate)", "source": "template",
+         "note": "cases.json beside the template"},
+    ]
+
+
+def register(T) -> None:
+    """Add the IPP template to ``eh_templates``' registries."""
+    T.BUILDERS[TID] = build_eh_ipp_hybrid
+    T.STRESS_SCENARIOS[TID] = []
+    T.SOLVER_CONFIG_EXTRA[TID] = {"discount_rate": 0.07}
+    T._SOLVER_CONFIG_BUILT[TID] = commercial_and_finance
+    T.PRICE_SERIES[TID] = write_price_series
+    T.TEMPLATE_META[TID] = {
+        "id": TID,
+        "name": "Renewables IPP with battery",
+        "description": (
+            "A 60 MW wind farm and a 50 MWp PV plant with an optional battery behind one 70 MW "
+            "grid connection. Size the battery and weigh PPA against merchant revenue on an "
+            "illustrative day-ahead price over a full hourly 2030. Generation-only; financial "
+            "PPAs and a 25-year investment case."),
+        "recommended_archetype": "strong_grid",
+        # No load: no bus is critical and no adequacy goal applies (spec §8.2).
+        "generation_only": True,
+        "pack_overrides": {},
+        "stages": None,
+        "dtc_attribution": None,
+        "groups": {"capacity": True, "commercial": True, "handoff": True,
+                   "grid": False, "control": False},
+        "not_needed": {"loads": "generation-only: export through the POI in section 3"},
+        "initial_results_tab": "commercial",
+        "ledger": _ledger(),
+        "study_notes": [
+            "One hourly year: the battery is sized against the day-ahead price and the curtailment "
+            "it can recover at the export limit.",
+            "The PPAs settle after the solve, so they never change the battery the plan picks.",
+            "Every price is illustrative: bring your own series before relying on a result.",
+        ],
+        "provenance": "synthetic illustrative data (IPP template); prices are assumed shapes",
+    }

@@ -1,0 +1,119 @@
+{
+  "description": "A 60 MW wind farm and a 50 MWp PV plant with an optional battery behind one 70 MW grid connection. Size the battery and weigh PPA against merchant revenue on an illustrative day-ahead price over a full hourly 2030. Generation-only; financial PPAs and a 25-year investment case.",
+  "dtc_attribution": null,
+  "generation_only": true,
+  "groups": {
+    "capacity": true,
+    "commercial": true,
+    "control": false,
+    "grid": false,
+    "handoff": true
+  },
+  "id": "eh_ipp_hybrid",
+  "initial_results_tab": "commercial",
+  "ledger": [
+    {
+      "item": "planning period",
+      "note": "the example is built for 2030 (native horizon until free planning years, E1)",
+      "source": "assumed",
+      "value": "2030, one hourly year (8760 h)"
+    },
+    {
+      "item": "site location",
+      "note": "the template invents no pin; profiles are generated at a DE-LU reference point (51.2 N, 10.4 E) until you set it, and regenerated then",
+      "source": "assumed",
+      "value": "not set"
+    },
+    {
+      "item": "bidding zone",
+      "note": "re-derived from the pin once it is set",
+      "source": "assumed",
+      "value": "DE-LU"
+    },
+    {
+      "item": "export limit",
+      "note": "from the connection offer; below the plants' 110 MW (overbuild 1.57)",
+      "source": "assumed",
+      "value": "70 MW (grid_export)"
+    },
+    {
+      "item": "import limit",
+      "note": "auxiliaries and battery grid charging",
+      "source": "assumed",
+      "value": "20 MW (grid_import)"
+    },
+    {
+      "item": "wind farm",
+      "note": "onwind costs from defaults pack 2026-10-20; forced size (the IC counts the capex)",
+      "source": "pack",
+      "value": "60 MW, fixed new build"
+    },
+    {
+      "item": "PV plant",
+      "note": "solar-utility costs from defaults pack 2026-10-20",
+      "source": "pack",
+      "value": "50 MWp, fixed new build"
+    },
+    {
+      "item": "battery",
+      "note": "battery power and energy parts from defaults pack 2026-10-20; throughput cost 2 EUR per MWh discharged (illustrative)",
+      "source": "pack",
+      "value": "candidate 0\u201350 MW at 2 h, round trip 0.88"
+    },
+    {
+      "item": "wind and PV profiles",
+      "note": "services.profile_gen synthetic source; replace with ERA5 or measured data",
+      "source": "generated",
+      "value": "synthetic, deterministic"
+    },
+    {
+      "item": "day-ahead price (base)",
+      "note": "an assumed shape, not market data (owner Q8 = A). For scale: German day-ahead prices in 2024 averaged roughly 80 EUR/MWh with several hundred negative hours (SMARD, Bundesnetzagentur; check the current figures). Bring your own series",
+      "source": "illustrative",
+      "value": "mean 75.8 EUR/MWh, 148 negative hours, PV capture rate 0.56, wind 0.89"
+    },
+    {
+      "item": "network charges on import",
+      "note": "the commodity on import is the day-ahead series",
+      "source": "assumed",
+      "value": "20 EUR/MWh; injection 0 EUR/MWh"
+    },
+    {
+      "item": "PPAs",
+      "note": "settled against the day-ahead series; suspended at negative prices (the offtaker accepts curtailment). Prices are an assumed illustration within the range of public European PPA price indices; replace with your term sheet",
+      "source": "illustrative",
+      "value": "financial pay-as-produced, 70% of each plant, wind 65 / PV 50 EUR/MWh, 10 years"
+    },
+    {
+      "item": "finance",
+      "note": "base-year money (2030), held flat to the base year then escalated (label only)",
+      "source": "assumed",
+      "value": "7 % WACC, 9 % cost of equity, 2 % escalation, 25 years"
+    },
+    {
+      "item": "degradation",
+      "note": "the faster-degradation case doubles them",
+      "source": "assumed",
+      "value": "PV 0.5 %/yr, wind 0.3 %/yr"
+    },
+    {
+      "item": "cases",
+      "note": "cases.json beside the template",
+      "source": "template",
+      "value": "8 planned cases (editable once sensitivities land; make any now with Duplicate)"
+    }
+  ],
+  "name": "Renewables IPP with battery",
+  "not_needed": {
+    "loads": "generation-only: export through the POI in section 3"
+  },
+  "pack_overrides": {},
+  "provenance": "synthetic illustrative data (IPP template); prices are assumed shapes",
+  "recommended_archetype": "strong_grid",
+  "stages": null,
+  "study_notes": [
+    "One hourly year: the battery is sized against the day-ahead price and the curtailment it can recover at the export limit.",
+    "The PPAs settle after the solve, so they never change the battery the plan picks.",
+    "Every price is illustrative: bring your own series before relying on a result."
+  ]
+}
