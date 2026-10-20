@@ -124,16 +124,6 @@
           "owner": "site"
         },
         {
-          "asset_id": "__buy_nh3",
-          "component": "Generator",
-          "owner": "site"
-        },
-        {
-          "asset_id": "__lost_nh3",
-          "component": "Generator",
-          "owner": "site"
-        },
-        {
           "asset_id": "site_battery",
           "component": "StorageUnit",
           "owner": "site"
@@ -194,8 +184,8 @@
           "owner": "site"
         }
       ],
-      "built_digest": "16ce78e413142a1e",
-      "built_inputs_digest": "33d38e03bd745650",
+      "built_digest": "5e9d15d4d5b3c1f4",
+      "built_inputs_digest": "ae2057211c845252",
       "connection_fee_payee": null,
       "export_revenue_to": "site_party",
       "externals": [
@@ -205,7 +195,8 @@
         "market",
         "tax_authority",
         "capex_supplier",
-        "om_contractor"
+        "om_contractor",
+        "offtaker"
       ],
       "hub_members": [],
       "participants": [
@@ -218,7 +209,7 @@
       ],
       "tariff_payees": [],
       "template": "single_owner",
-      "template_version": "single_owner@2"
+      "template_version": "single_owner@3"
     }
   },
   "discount_rate": 0.07,
