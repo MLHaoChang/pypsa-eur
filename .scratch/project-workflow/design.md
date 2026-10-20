@@ -368,6 +368,8 @@ The coordinator's proposed placement is **confirmed**: a series is parametrised 
 
 ## 5. Package B re-cut: the build plan
 
+> Superseded for B2–B6 by the W-slices in [workspace-reconciliation.md](workspace-reconciliation.md) §13, which puts #436's GridSpine workspace on this flow. B1 stands.
+
 The spec's package B (B1 scenario rows, B2 tiered picker, B3 asset form, B4 seven-step wizard) builds parts of the flow, but not the flow. Re-cut so that the backbone comes first and every later piece plugs into it:
 
 | New | What | Replaces | Files (expected) | Gate |
