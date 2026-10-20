@@ -312,6 +312,10 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         # Grid-to-process process view (ticket 04): per-product and per-unit
         # records; each inventory carries its own level list, not index/columns/data.
         "/process_view",
+        # Energy flows (site commercial UX A1): Source -> Via -> Destination
+        # rows and a CSV of them. The window is positional, per period, and
+        # narrows the rows; the payload is not index/columns/data.
+        "/energy_flows", "/energy_flows.csv",
         # AdequacyReport — a structured report, not a time series (adequacy
         # plan Phase 1 Task 3).
         "/adequacy",
