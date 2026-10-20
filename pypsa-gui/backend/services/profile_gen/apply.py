@@ -698,8 +698,20 @@ def _check_bound_pair(n, component_type: str, component: str, attribute: str,
     )
 
 
+_BOUND_DEFAULTS = {"p_max_pu": 1.0, "p_min_pu": 0.0}
+
+
+def _kind_of(meta: Mapping[str, Any]) -> str | None:
+    """What kind of profile within its family: an availability or series
+    kind, a load archetype, a renewable technology."""
+    for key in ("kind", "archetype", "technology"):
+        if meta.get(key):
+            return str(meta[key])
+    return None
+
+
 def _replaced_series(ctx, key: tuple[str, str, str], family: str,
-                     ) -> tuple[str | None, list[str]]:
+                     kind: str | None) -> tuple[str | None, list[str]]:
     """What series this write replaces — a profile of some family, a user
     upload, or the network's own — and a warning unless it is a profile of
     the same family (regeneration). The old series stays in the undo
@@ -710,11 +722,18 @@ def _replaced_series(ctx, key: tuple[str, str, str], family: str,
     if previous_meta is not None:
         prev_family = family_of(previous_meta)
         what = f"{prev_family} profile"
-        same = prev_family == family
+        # Regenerating the same kind replaces quietly; another kind of the
+        # same family (derating over maintenance) does not.
+        same = prev_family == family and _kind_of(previous_meta) == kind
     elif key in ctx.user_ts:
         what, same = "uploaded series", False
     elif component in getattr(ctx.network, f"{component_type}_t")[attribute].columns:
         what, same = "network series", False
+    elif attribute in _BOUND_DEFAULTS:
+        static = float(getattr(ctx.network, component_type).at[component, attribute])
+        if static == _BOUND_DEFAULTS[attribute]:
+            return None, []
+        what, same = f"static value {static:g}", False
     else:
         return None, []
     if same:
@@ -723,20 +742,47 @@ def _replaced_series(ctx, key: tuple[str, str, str], family: str,
                   f"{attribute} {what}; undo restores it"]
 
 
-def _bus_sink_mw(n, bus: str) -> np.ndarray:
-    """Per snapshot, what a bus can absorb: its loads, its storage units'
-    charging power and its outgoing links' capacity."""
+def _dense(n, component: str, attribute: str, names) -> np.ndarray:
+    """(snapshots × names) values of ``attribute``: the series where there
+    is one, the static value elsewhere."""
+    if not len(names):
+        return np.zeros((len(n.snapshots), 0))
+    return n.get_switchable_as_dense(component, attribute, inds=names).to_numpy(dtype=float)
+
+
+def _capacity(df: pd.DataFrame) -> np.ndarray:
+    """Nameplate per row; an extendable one at its largest allowed size."""
+    cap = df["p_nom"].to_numpy(dtype=float).copy()
+    if "p_nom_extendable" in df.columns:
+        ext = df["p_nom_extendable"].to_numpy(dtype=bool)
+        top = df["p_nom_max"].to_numpy(dtype=float)
+        use = ext & np.isfinite(top)
+        cap[use] = np.maximum(cap[use], top[use])
+    return cap
+
+
+def _bus_sink_mw(n, bus: str, exclude: str) -> np.ndarray:
+    """Per snapshot, what a bus can absorb beyond the other must-run floors
+    on it: its loads, its storage units' charging, its links' flow away
+    (bus0 forward, bus1 reverse) and its lines, less the other generators'
+    floors there."""
     total = np.zeros(len(n.snapshots))
-    for name in n.loads.index[n.loads.bus == bus]:
-        if name in n.loads_t.p_set.columns:
-            total += n.loads_t.p_set[name].reindex(n.snapshots).fillna(
-                float(n.loads.at[name, "p_set"])).to_numpy(dtype=float)
-        else:
-            total += float(n.loads.at[name, "p_set"])
+    loads = n.loads.index[n.loads.bus == bus]
+    total += _dense(n, "Load", "p_set", loads).sum(axis=1)
     su = n.storage_units[n.storage_units.bus == bus]
-    total += float(su.p_nom.sum())
-    links = n.links[n.links.bus0 == bus]
-    total += float((links.p_nom * links.p_max_pu).sum())
+    total += (np.clip(-_dense(n, "StorageUnit", "p_min_pu", su.index), 0.0, None)
+              * _capacity(su)).sum(axis=1)
+    out = n.links[n.links.bus0 == bus]
+    total += (np.clip(_dense(n, "Link", "p_max_pu", out.index), 0.0, None)
+              * _capacity(out)).sum(axis=1)
+    back = n.links[n.links.bus1 == bus]
+    total += (np.clip(-_dense(n, "Link", "p_min_pu", back.index), 0.0, None)
+              * _capacity(back)).sum(axis=1)
+    lines = n.lines[(n.lines.bus0 == bus) | (n.lines.bus1 == bus)]
+    total += float((lines.s_nom * lines.s_max_pu).sum())
+    others = n.generators[(n.generators.bus == bus) & (n.generators.index != exclude)]
+    total -= (np.clip(_dense(n, "Generator", "p_min_pu", others.index), 0.0, None)
+              * _capacity(others)).sum(axis=1)
     return total
 
 
@@ -750,8 +796,8 @@ def _floor_warnings(n, component: str, vals: np.ndarray) -> tuple[str, list[str]
         return "min stable level when committed", [
             f"{MIN_STABLE_WARNING}: {component!r} is committable, so this "
             "floor holds only while it is committed; it does not force it on"]
-    floor = vals * float(gens.at[component, "p_nom"])
-    sink = _bus_sink_mw(n, str(gens.at[component, "bus"]))
+    floor = vals * float(_capacity(gens.loc[[component]])[0])
+    sink = _bus_sink_mw(n, str(gens.at[component, "bus"]), component)
     over = np.flatnonzero(floor > sink + 1e-9)
     if not over.size:
         return "must-run floor", []
@@ -759,7 +805,8 @@ def _floor_warnings(n, component: str, vals: np.ndarray) -> tuple[str, list[str]
     return "must-run floor", [
         f"{MUST_RUN_SINK_WARNING}: {component!r}'s must-run floor of "
         f"{floor[i]:.0f} MW exceeds the {sink[i]:.0f} MW its bus can absorb "
-        f"(loads, storage charging, export links) at {n.snapshots[i]} "
+        f"(loads, storage charging, links and lines, less other floors) at "
+        f"{n.snapshots[i]} "
         f"({over.size} snapshots); the dispatch and ENS solves must spill or "
         "go infeasible"]
 
@@ -798,6 +845,18 @@ def _energy_record(n, series: pd.Series, aligned: pd.Series, scale: float,
     return {"profile_annual_mwh": profile_mwh, "modelled_mwh": modelled}, warnings
 
 
+def _profile_zone(ctx, meta: Mapping[str, Any], time_basis: str | None) -> str | None:
+    """The snapshots' basis when the caller states none: with the project's
+    commercial timezone unset the snapshots are the site clock, and a
+    profile drawn on a stated zone (``params.timezone``) says what that clock
+    is — so it lands back on that zone's wall clock, converted once."""
+    if time_basis is not None or _commercial_timezone(ctx):
+        return time_basis
+    params = meta.get("params")
+    zone = params.get("timezone") if isinstance(params, Mapping) else None
+    return str(zone) if zone else None
+
+
 def preview_energy(ctx, series: pd.Series, meta: Mapping[str, Any], *,
                    component_type: str, attribute: str,
                    time_basis: str | None = None) -> dict:
@@ -811,7 +870,8 @@ def preview_energy(ctx, series: pd.Series, meta: Mapping[str, Any], *,
         raise UnsupportedTargetError(
             f"{component_type}/{attribute} is not a power target; it has no energy")
     scale, _ = _scale_power(series, meta)
-    basis, _recorded, warnings = resolve_time_basis(time_basis, _commercial_timezone(ctx))
+    basis, _recorded, warnings = resolve_time_basis(
+        _profile_zone(ctx, meta, time_basis), _commercial_timezone(ctx))
     resolution = str(meta.get("resolution") or "hourly").strip().lower()
     aligned, align_meta = _align_to_snapshots(
         series, ctx.network.snapshots, resolution=resolution, time_basis=basis)
@@ -890,7 +950,7 @@ def assign_profile(
         unit_meta = _money(meta)
 
     time_basis, recorded_basis, warnings = resolve_time_basis(
-        time_basis, _commercial_timezone(ctx))
+        _profile_zone(ctx, meta, time_basis), _commercial_timezone(ctx))
     aligned, align_meta = _align_to_snapshots(
         series, n.snapshots, resolution=resolution, time_basis=time_basis,
     )
@@ -942,7 +1002,8 @@ def assign_profile(
         applied_at = now
 
     key = (component_type, attribute, component)
-    replaced, replace_warnings = _replaced_series(ctx, key, family_name)
+    replaced, replace_warnings = _replaced_series(ctx, key, family_name,
+                                                  _kind_of(meta))
     warnings = [*warnings, *replace_warnings]
     meaning = None
     if (component_type, attribute) == ("generators", "p_min_pu"):
@@ -972,6 +1033,8 @@ def assign_profile(
         full_meta["replaced_series"] = replaced
     if meaning:
         full_meta["meaning"] = meaning
+        if meaning.startswith("min stable") and full_meta.get("kind") == "must_run":
+            full_meta["kind"] = "min_stable_level"
 
     # Store write under the store lock, network write under the PyPSA lock —
     # the same two-lock dance as the upload path (`_apply_profile_upload`).
