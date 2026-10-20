@@ -1619,7 +1619,7 @@ def create_from_template(
 
         extra = sorted(set(params) - {"dc_load"})
         if extra:
-            raise HTTPException(422, {"code": "dc_load_invalid", "field": extra[0],
+            raise HTTPException(422, {"code": "template_params_invalid", "field": extra[0],
                                       "message": f"{extra[0]}: unknown parameter "
                                                  "(this template takes only dc_load)"})
         dc_mod = _eh_templates_module()
@@ -1680,7 +1680,9 @@ def create_from_template(
         # (`services.dc_load_profile.read_envelope`; get_eh_template serves it).
         meta_path = dest / "eh_template.json"
         meta = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
-        meta["dc_load"] = dc[1]
+        from services.dc_load_profile import META_KEY
+
+        meta[META_KEY] = dc[1]
         atomic_write_text(meta_path, json.dumps(meta, indent=2, sort_keys=True) + "\n")
 
     # Reset + load, mirroring import_bundle / load_project.

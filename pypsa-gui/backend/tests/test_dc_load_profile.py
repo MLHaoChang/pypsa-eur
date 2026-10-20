@@ -118,9 +118,17 @@ def test_envelope_units_and_conventions():
     assert osc["amplitude_mw"] == pytest.approx(4.0)                 # peak
     assert osc["peak_to_peak_mw"] == pytest.approx(8.0)
     assert osc["frequency_hz"] == pytest.approx(0.25)
+    assert osc["max_dp_dt_mw_per_s"] == pytest.approx(2 * np.pi * 4.0 / 4.0)
     assert ph["rack_count"] == 308                                   # ceil(40 000 / 130)
     assert env["source"] == "assumed" and "before any UPS/BESS" in env["basis"]
     assert env["units"]["amplitude_mw"] == "MW (peak)"
+
+
+def test_max_dp_dt_is_the_oscillation_slope_when_that_is_steeper():
+    w = AiWorkloadSpec(ramp_s=10.0, oscillation_amplitude_share=0.2, oscillation_period_s=1.0)
+    ph = P.dynamic_envelope(_spec(ai_workload=w))["phases"][0]
+    assert ph["max_dp_dt_mw_per_s"] == pytest.approx(2 * np.pi * 8.0)   # > 26 MW / 10 s
+    assert ph["checkpoint"]["dp_dt_mw_per_s"] == pytest.approx(2.6)
 
 
 def test_envelope_per_phase_and_its_maximum():
@@ -207,8 +215,21 @@ def test_staged_refusals_name_the_field(raw, field):
 def test_a_peak_above_import_plus_fleet_is_refused_naming_the_period():
     raw = {"phases": [{"cod": "2027-01-01", "it_mw": 60.0}, {"cod": "2030-01-01", "it_mw": 60.0},
                       {"cod": "2035-01-01", "it_mw": 60.0}]}
-    with pytest.raises(P.DcLoadError, match=r"the 2027 peak is .* above the 15 MW energized"):
+    with pytest.raises(P.DcLoadError, match=r"the 2027 peak is .* above the 15 MW energized "
+                                             r"import plus 30 MW of firm gensets \(genset N\+1"):
         T.dc_load_spec("eh_datacenter_staged", raw)
+
+
+def test_firm_gensets_read_the_fleet_and_its_redundancy(monkeypatch):
+    n = T.build_eh_datacenter()
+    assert T.firm_genset_mw(n, "eh_datacenter")[0] == 30.0           # 4 × 10 MW, N+1
+    n.generators.at["genset_1", "p_nom"] = 16.0                      # an edited fleet
+    assert T.firm_genset_mw(n, "eh_datacenter")[0] == 30.0           # less the 16 MW unit
+    cfg = json.loads(json.dumps(T.ISLAND_CONFIG["eh_datacenter"]))
+    cfg["requirements"]["genset_redundancy_n"]["value"] = 0
+    monkeypatch.setitem(T.ISLAND_CONFIG, "eh_datacenter", cfg)
+    firm, rule = T.firm_genset_mw(n, "eh_datacenter")
+    assert firm == 46.0 and "whole genset fleet" in rule
 
 
 def test_single_year_needs_a_phase_in_service():

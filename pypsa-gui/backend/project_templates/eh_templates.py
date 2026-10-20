@@ -304,9 +304,9 @@ def _staged_datacenter(n: pypsa.Network, phases, load_spec=None) -> pypsa.Networ
                 p_set.loc[y, load] = (p_set.loc[y, load] * scale).to_numpy()
     else:
         it_by_year = {p.cod.year: p.it_mw for p in load_spec.phases}
+        tz = _dc_timezone("eh_datacenter_staged")
         for y in years:
-            _apply_dc_profile(n, load_spec, SNAPSHOTS, it_by_year[y],
-                              timezone=_DC_TIMEZONE, period=y)
+            _apply_dc_profile(n, load_spec, SNAPSHOTS, it_by_year[y], timezone=tz, period=y)
     # The energization schedule in MW (`services.adequacy.energization`): a
     # solve turns it into p_max_pu = min(own, E / p_nom), so a lever or an
     # overlay that rewrites p_nom composes as min(E, cap) instead of
@@ -362,15 +362,12 @@ def build_eh_datacenter_staged(load_spec=None) -> pypsa.Network:
 # critical share on it_load (the critical it_bus), the rest on cooling.
 # Offices are kept. Without the body the template is unchanged.
 
-#: The staged template's commercial clock (`_staged_commercial_and_finance`):
-#: its naive snapshots are UTC, mapped on this zone's wall clock. The
-#: single-year template has no commercial block, so its snapshots are the
-#: site clock (assumed).
-_DC_TIMEZONE = "UTC"
-#: The existing firm genset fleet (4 × 10 MW): what serves a peak above the
-#: energized import before the plan builds anything.
-_DC_GENSET_FLEET_MW = 40.0
-_DC_SINGLE_POC_MW = 40.0
+def _dc_timezone(template_id: str) -> str | None:
+    """The template's ``commercial.timezone`` (the staged campus: UTC), so its
+    naive snapshots are UTC mapped on that zone's clock; None (the single-year
+    template has no commercial block) means the site clock, assumed."""
+    commercial = solver_config(template_id).get("commercial") or {}
+    return commercial.get("timezone") or None
 
 
 def dc_load_preset(template_id: str) -> dict:
@@ -440,26 +437,43 @@ def dc_load_spec(template_id: str, raw: dict | None):
     return spec
 
 
+def firm_genset_mw(n, template_id: str) -> tuple[float, str]:
+    """The committed genset fleet's firm MW and the rule that gave it: the
+    island requirements' genset N+k (``genset_redundancy_n``) takes out the
+    k largest units; without it the whole fleet counts."""
+    cfg = ISLAND_CONFIG.get(template_id, {})
+    names = [u for u, d in cfg.get("units", {}).items()
+             if d.get("kind") == "genset" and u in n.generators.index
+             and not bool(n.generators.at[u, "p_nom_extendable"])]
+    sizes = sorted((float(n.generators.at[u, "p_nom"]) for u in names), reverse=True)
+    k = int((cfg.get("requirements", {}).get("genset_redundancy_n") or {}).get("value", 0))
+    if k:
+        return sum(sizes[k:]), f"genset N+{k}: the fleet less its {k} largest unit(s)"
+    return sum(sizes), "the whole genset fleet (no genset redundancy required)"
+
+
 def _check_dc_peak(template_id: str, spec) -> None:
     """Each period's modelled peak must fit the energized import plus the
-    existing genset fleet; above that the plan could only shed."""
+    committed fleet's firm genset MW; above that the plan could only shed
+    (gatekeeper review of DC grid readiness 01)."""
     from services.dc_load_profile import DcLoadError
 
     n = BUILDERS[template_id](load_spec=spec)
+    firm, rule = firm_genset_mw(n, template_id)
     total = n.loads_t.p_set.sum(axis=1)
     if isinstance(n.snapshots, pd.MultiIndex):
         peaks = total.groupby(level=0).max()
         energized = {y: DC_ENERGIZATION_MW[y] for y in peaks.index}
     else:
         peaks = pd.Series({SNAPSHOTS[0].year: total.max()})
-        energized = {y: _DC_SINGLE_POC_MW for y in peaks.index}
+        energized = {y: float(n.links.at["grid_import", "p_nom"]) for y in peaks.index}
     for y, peak in peaks.items():
-        cap = energized[y] + _DC_GENSET_FLEET_MW
+        cap = energized[y] + firm
         if peak > cap + 1e-9:
             raise DcLoadError(
                 f"dc_load.phases: the {y} peak is {peak:.1f} MW, above the {energized[y]:g} MW "
-                f"energized import plus the {_DC_GENSET_FLEET_MW:g} MW genset fleet "
-                f"({cap:g} MW)", "dc_load.phases")
+                f"energized import plus {firm:g} MW of firm gensets ({rule}) = {cap:g} MW",
+                "dc_load.phases")
 
 
 def dc_load_meta(template_id: str, spec) -> dict:
@@ -467,7 +481,7 @@ def dc_load_meta(template_id: str, spec) -> dict:
     ``eh_template.json`` (spec, dynamic envelope, ledger)."""
     from services.dc_load_profile import meta_block
 
-    return meta_block(spec, _DC_TIMEZONE if template_id == "eh_datacenter_staged" else None)
+    return meta_block(spec, _dc_timezone(template_id))
 
 
 # ── Industrial Hydrogen Hub (strong_grid) ──────────────────────────────────

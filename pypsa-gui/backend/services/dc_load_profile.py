@@ -59,6 +59,8 @@ SOURCES: dict[str, str] = {
     "pue": "assumed; PUE at or below the design temperature, slope above it",
     "ambient": "assumed; temperate (Central European) site, no weather data",
     "rack_kw": "assumed or as entered; carried into the envelope only",
+    "load_split": ("as entered or assumed (75 % critical); the template has one critical "
+                   "and one non-critical DC load"),
 }
 
 
@@ -125,6 +127,10 @@ def _phase_envelope(w: AiWorkloadSpec, phase: DcPhase) -> dict:
     it = phase.it_mw
     swing = it * (w.full_share - w.idle_share)
     amp = it * w.oscillation_amplitude_share
+    step_dp_dt = swing / w.ramp_s
+    # A sinusoid's steepest slope is 2π·A/T; the max is the steeper of the two.
+    osc_dp_dt = 2.0 * np.pi * amp / w.oscillation_period_s
+    max_dp_dt = max(step_dp_dt, osc_dp_dt)
     return {
         "cod": phase.cod.isoformat(),
         "it_mw": it,
@@ -132,19 +138,20 @@ def _phase_envelope(w: AiWorkloadSpec, phase: DcPhase) -> dict:
         "rack_count": (None if phase.rack_kw is None
                        else int(np.ceil(it * 1000.0 / phase.rack_kw))),
         "swing_mw": swing,
-        "max_dp_dt_mw_per_s": swing / w.ramp_s,
-        "max_dp_dt_mw_per_min": swing / w.ramp_s * 60.0,
+        "max_dp_dt_mw_per_s": max_dp_dt,
+        "max_dp_dt_mw_per_min": max_dp_dt * 60.0,
         "checkpoint": {
             "interval_s": w.checkpoint_interval_s,
             "duration_s": w.checkpoint_duration_s,
             "depth_mw": swing if w.checkpoint_duration_s > 0 else 0.0,
-            "dp_dt_mw_per_s": (swing / w.ramp_s) if w.checkpoint_duration_s > 0 else 0.0,
+            "dp_dt_mw_per_s": step_dp_dt if w.checkpoint_duration_s > 0 else 0.0,
         },
         "oscillation": {
             "amplitude_mw": amp,
             "peak_to_peak_mw": 2.0 * amp,
             "period_s": w.oscillation_period_s,
             "frequency_hz": 1.0 / w.oscillation_period_s,
+            "max_dp_dt_mw_per_s": osc_dp_dt,
         },
     }
 
@@ -164,6 +171,8 @@ def dynamic_envelope(spec: DataCentreLoadSpec) -> dict:
                   "rack_kw": "kW per rack"},
         "source": "assumed",
         "phases": phases,
+        "peak_note": ("the template's peak check reads the hourly mean; within the hour the "
+                      "load sits at the full step, a few per cent above it"),
         "max": {
             "swing_mw": worst["swing_mw"],
             "max_dp_dt_mw_per_s": max(p["max_dp_dt_mw_per_s"] for p in phases),
@@ -195,6 +204,9 @@ def ledger(spec: DataCentreLoadSpec, timezone: str | None) -> list[dict]:
          f"{spec.pue_at_design:g} at or below {spec.pue_design_temp_c:g} °C, "
          f"+{spec.pue_temperature_slope_per_k:g} per K above; UPS and distribution losses "
          "inside PUE", "pue"),
+        ("UPS and distribution losses",
+         f"ups_distribution_loss_share {spec.ups_distribution_loss_share:g} is not added: the "
+         "losses are inside PUE", "pue"),
         ("ambient temperature",
          f"{spec.ambient_annual_mean_c:g} °C mean, ±{spec.ambient_seasonal_amplitude_k:g} K "
          f"seasonal (peak day 200), ±{spec.ambient_diurnal_amplitude_k:g} K diurnal (peak "
@@ -202,7 +214,7 @@ def ledger(spec: DataCentreLoadSpec, timezone: str | None) -> list[dict]:
         ("load split",
          f"critical share {spec.critical_share:g} of the facility load on it_load (critical "
          f"it_bus), the rest on cooling; curtailable share {spec.curtailable_share:g} recorded, "
-         "not modelled (no curtailable load in the template)", "pue"),
+         "not modelled (no curtailable load in the template)", "load_split"),
         ("rack density", ", ".join(
             f"{p.cod.year}: {p.rack_kw:g} kW/rack" if p.rack_kw else f"{p.cod.year}: not set"
             for p in spec.phases), "rack_kw"),
