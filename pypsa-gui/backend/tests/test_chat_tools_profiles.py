@@ -365,3 +365,35 @@ def test_apply_generated_profile_takes_a_time_basis_and_undoes(
     assert undo.status_code == 200, undo.text
     payload = client.get("/api/network/timeseries/generators/p_max_pu").json()
     assert "g_wind" not in payload["columns"]
+
+
+# ---------------------------------------------------------------------------
+# RP-01: a generator whose bus has no coordinates is a typed refusal the
+# copilot can relay with both remedies — never a profile for 0°E 0°N
+# ---------------------------------------------------------------------------
+
+
+def test_generate_for_a_bus_without_coordinates_is_a_typed_refusal(
+    client, install_network, bound_ctx,
+):
+    n = _wind_network()
+    n.add("Bus", "B0")  # x = y = 0, PyPSA's default
+    n.add("Generator", "g_nocoord", bus="B0", carrier="wind", p_nom=10.0)
+    install_network(n)
+    resp = client.post("/api/projects/Chat Coords",
+                       params={"force": True, "rebind": True})
+    assert resp.status_code == 200, resp.text
+
+    with bound_ctx(client):
+        with pytest.raises(HTTPException) as err:
+            chat_tools.DISPATCHERS["generate_renewable_profile"](
+                project_id="Chat Coords",
+                from_generators=["g_wind", "g_nocoord"],
+                technology="wind", year=2023,
+            )
+    assert err.value.status_code == 422
+    detail = err.value.detail
+    assert detail["error_kind"] == "missing_coordinates"
+    assert detail["generators"] == ["g_nocoord"]
+    assert "set coordinates on the bus" in detail["message"]
+    assert "upload a profile" in detail["message"]
