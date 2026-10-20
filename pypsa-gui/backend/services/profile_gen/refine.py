@@ -55,7 +55,7 @@ from services.profile_gen.apply import (
     TARGETS,
     ProfileApplyError,
     _align_to_snapshots,
-    _commercial_timezone,
+    commercial_timezone,
     _profile_zone,
     resolve_time_basis,
 )
@@ -114,7 +114,7 @@ class _Target:
         self.key = [component_type, attribute]
         self.power = spec.kind == "power"
         basis, _rec, _warn = resolve_time_basis(_profile_zone(ctx, meta, None),
-                                                _commercial_timezone(ctx))
+                                                commercial_timezone(ctx))
         self.basis = basis
         self.resolution = str(meta.get("resolution") or "hourly")
 
@@ -136,7 +136,7 @@ class _Target:
 
 
 def _site_clock(ctx, meta: Mapping[str, Any]) -> str:
-    zone = _commercial_timezone(ctx)
+    zone = commercial_timezone(ctx)
     if not zone:
         params = meta.get("params")
         zone = params.get("timezone") if isinstance(params, Mapping) else None
