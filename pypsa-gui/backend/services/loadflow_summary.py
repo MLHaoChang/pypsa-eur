@@ -22,9 +22,11 @@ says so in ``claims``. Missing or zero ratings, branches without flow data,
 unconverged AC snapshots and uncomputed voltage evidence are reported, never
 silently ranked as zero.
 
-Historical runs are not computed here: ``run_id`` is resolved through the run
-evidence store (issue 06) and answers a typed unavailable until a ``loadflow``
-section artifact exists for that run.
+Historical runs are not recomputed here: ``run_id`` is resolved through the
+run evidence store. The newest completed run whose inputs are still current
+answers with the current summary; any other run answers from the ``loadflow``
+section captured when it finished (``run_evidence._loadflow_section``), and a
+run without that section answers a typed unavailable.
 """
 from __future__ import annotations
 
@@ -120,9 +122,16 @@ def _historical(run_id: str) -> dict:
                 depends_on="issue-06 run evidence", scope="historical",
                 current_results_hint="Call get_loadflow_summary without run_id for the current results.")
         raise
-    return {"status": "ok", "scope": "historical", "run_id": run_id,
-            "section": HISTORICAL_SECTION, "run_status": record.get("status"),
-            "data": record.get("data")}
+    data = dict(record.get("data") or {})
+    # Captured at completion while that run's results were current. The Load
+    # flow tab shows the current results, so no UI or evidence pointer stays.
+    for key in ("ui_reference", "evidence_token", "freshness"):
+        data.pop(key, None)
+    return {**data, "status": "ok", "scope": "historical", "run_id": run_id,
+            "section": HISTORICAL_SECTION,
+            "run": {"run_id": run_id, "finished_at": record.get("finished_at"), "is_current": False},
+            "scope_note": "This run's load flow as captured when it finished; the Load flow tab "
+                          "shows the current results, not this run."}
 
 
 def _solve_state() -> dict:

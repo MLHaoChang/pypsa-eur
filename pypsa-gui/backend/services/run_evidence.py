@@ -588,6 +588,32 @@ def _input_fingerprint(ctx: Any) -> str | None:
         return None
 
 
+def _loadflow_section(ctx: Any, token: dict) -> dict | None:
+    """LC-03: the run's load flow, captured while its results are current.
+
+    The same oracle get_loadflow_summary reads, bound to the run's own project
+    context and actor (this runs on the solver monitor thread). Kept only when
+    it answers ok; any other outcome records no section, so the run refuses
+    past-run reads instead of storing a guess.
+    """
+    from services import chat_tools
+    from services.loadflow_summary import MAX_LIMIT, get_loadflow_summary
+    from services.pypsa_service import PyPSAService
+
+    binding = PyPSAService.bind_request_context(ctx)
+    previous = chat_tools.acting_user_id()
+    chat_tools.set_acting_user(token.get('actor_id'))
+    try:
+        source = 'ac_pf' if token.get('solver_kind') == 'ac_pf' else 'lopf'
+        out = get_loadflow_summary(source=source, limit=MAX_LIMIT)
+    except Exception:  # noqa: BLE001 — a capture failure never breaks a solve
+        return None
+    finally:
+        chat_tools.set_acting_user(previous)
+        PyPSAService.reset_request_context(binding)
+    return out if isinstance(out, dict) and out.get('status') == 'ok' else None
+
+
 def publish_foreground_run(token: dict | None, ctx: Any) -> dict | None:
     """Publish the terminal manifest once the solver state is terminal; else do nothing."""
     if not token:
@@ -618,6 +644,12 @@ def publish_foreground_run(token: dict | None, ctx: Any) -> dict | None:
     elif run_status == 'failed':
         error = {'error_kind': 'solver_failed',
                  'message': str(state.get('condition') or 'The solve failed.')[:500]}
+    sections = None
+    if run_status == 'completed':
+        sections = {'summary': summary}
+        loadflow = _loadflow_section(ctx, token)
+        if loadflow is not None:
+            sections['loadflow'] = loadflow
     try:
         return publish_run(
             token['root'], token['project_id'], run_id=token['run_id'], kind=token['kind'],
@@ -626,7 +658,7 @@ def publish_foreground_run(token: dict | None, ctx: Any) -> dict | None:
             fingerprint=_input_fingerprint(ctx) if run_status == 'completed' else None,
             job_id=token['job_id'], unsaved_inputs=token['unsaved_inputs'],
             actor_id=token['actor_id'], metrics=metrics, error=error,
-            sections={'summary': summary} if run_status == 'completed' else None)
+            sections=sections)
     except HTTPException:
         return None
 

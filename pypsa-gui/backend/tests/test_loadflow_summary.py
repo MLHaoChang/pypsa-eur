@@ -475,7 +475,10 @@ def test_historical_run_with_recorded_section_is_returned_as_historical(solved, 
                     mode='lopf', fingerprint='fp', sections={'loadflow': {'top': [{'name': 'X'}]}})
     out = lf.get_loadflow_summary(run_id='run-lf')
     assert out['status'] == 'ok' and out['scope'] == 'historical'
-    assert out['data'] == {'top': [{'name': 'X'}]}
+    # The retained summary is returned like a current read, bound to its run.
+    assert out['top'] == [{'name': 'X'}] and 'data' not in out
+    assert out['run'] == {'run_id': 'run-lf', 'finished_at': '2026-10-01T10:05:00+00:00',
+                          'is_current': False}
 
 
 def test_payload_is_bounded_with_many_branches(solved):
