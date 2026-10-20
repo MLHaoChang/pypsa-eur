@@ -122,3 +122,7 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **Two PRs adding entries to the same `CONTEXT.md` showed as a `code` overlap.** That blocked the merge and forced a master merge plus a ~2 h CI cycle (two cycles lost on #421 and #422).
   - Fix: `docs_only_re` also covers `CONTEXT.md` at any depth, `GLOSSARY.md` and `GLOSSARY-MAP.md`. A real git conflict still blocks, in its own check.
   - Lives in: `scripts/coord/premerge.sh`, `docs_only_re`.
+
+- **`Integration (macos)` never got a runner (from ~13:40Z), so every premerge said "blocked (checks: 1 failed)".** The job cancelled after ~15 min with no `runner_id` and no steps.
+  - Fix: premerge waives an `Integration (macos)` job that was cancelled with no runner and no steps, when `Integration (ubuntu)` succeeded on the same head, and prints a `waived` line. A macOS job that ran, failed, or was cancelled mid-run still blocks.
+  - Lives in: `scripts/coord/premerge.sh`, "checks" section.

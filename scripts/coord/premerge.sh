@@ -199,10 +199,24 @@ echo "== checks"
 # including a run still in progress, blocks; so does failing to read them.
 if runs=$(command -v gh >/dev/null &&
   gh api "repos/$gh_repo/commits/$head/check-runs" --paginate \
-    --jq '.check_runs[] | [.status, (.conclusion // "-"), .name] | @tsv'); then
+    --jq '.check_runs[] | [.status, (.conclusion // "-"), .name, .id] | @tsv'); then
   total=$(grep -c . <<<"$runs" || true)
   bad=$(awk -F'\t' 'NF && !($1 == "completed" && ($2 == "success" || $2 == "skipped"))' <<<"$runs")
+  # An Integration (macos) job cancelled without ever getting a runner (no
+  # runner_id, no steps) does not block when Integration (ubuntu) passed on
+  # this head. A macOS job that ran, failed or was cancelled mid-run still blocks.
+  waived=
+  if grep -qP '^completed\tsuccess\tIntegration \(ubuntu\)\t' <<<"$runs"; then
+    while IFS=$'\t' read -r st con name id; do
+      [[ $st == completed && $con == cancelled && $name == "Integration (macos)" ]] || continue
+      [[ $(gh api "repos/$gh_repo/actions/jobs/$id" \
+        --jq '(.runner_id == null) and ((.steps // []) | length == 0)' 2>/dev/null) == true ]] || continue
+      waived+="  waived      cancelled       Integration (macos): no runner assigned; ubuntu twin passed"$'\n'
+      bad=$(awk -F'\t' -v id="$id" '$4 != id' <<<"$bad")
+    done <<<"$bad"
+  fi
   echo "$total check run(s) on $head"
+  [[ -n $waived ]] && printf '%s' "$waived"
   if ((total == 0)); then
     echo "  none yet"
     fail=1
