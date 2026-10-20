@@ -137,7 +137,8 @@ class LoadGenerateRequest(BaseModel):
     loads: list[str] = Field(min_length=1)
     params: dict[str, Any] | None = None
     year: int | None = None
-    resolution: Literal["hourly", "daily", "weekly"] = "hourly"
+    # Archetypes are hourly shapes; the field stays for the shared engine call.
+    resolution: Literal["hourly"] = "hourly"
 
 
 class ShapeRequest(BaseModel):
@@ -527,9 +528,10 @@ def _foreground_ctx(proj: AuthorizedProject, verb: str):
     if ctx.loaded_project not in (None, proj.name):
         raise HTTPException(
             status_code=409,
-            detail=f"'{proj.name}' is not the open project "
-                   f"(the foreground holds {ctx.loaded_project!r}); "
-                   f"open it first, then {verb}",
+            detail={"error_kind": "project_not_open",
+                    "message": f"'{proj.name}' is not the open project "
+                               f"(the foreground holds {ctx.loaded_project!r}); "
+                               f"open it first, then {verb}"},
         )
     return ctx
 

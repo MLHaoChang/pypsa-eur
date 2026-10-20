@@ -839,6 +839,10 @@
       "surface": "inline",
       "why": "Load-profile generation named a load that is not on the open network, or a measured load upload has no column naming one. The detail lists the loads; the assistant asks which one, per call."
     },
+    "project_not_open": {
+      "surface": "inline",
+      "why": "A profile was generated or uploaded for a project that is not the open one (the foreground holds another). The detail names both; the assistant opens the project first or asks, per call."
+    },
     "unknown_archetype": {
       "surface": "inline",
       "why": "Load-profile generation named an archetype or preset that does not exist. The detail lists the available ones; the assistant picks one, per call."
