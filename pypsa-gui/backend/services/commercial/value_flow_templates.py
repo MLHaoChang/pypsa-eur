@@ -358,11 +358,11 @@ def _energy_hub(commercial: CommercialConfig, site: _Site) -> TemplateResult:
 
 
 TEMPLATES: dict[str, Template] = {t.name: t for t in (
-    Template("single_owner", "3", _single_owner),
-    Template("btm_ppa", "4", _btm_ppa),
-    Template("landlord_tenant", "3", _landlord_tenant),
-    Template("dso_developer", "3", _dso_developer),
-    Template("energy_hub", "3", _energy_hub),
+    Template("single_owner", "4", _single_owner),
+    Template("btm_ppa", "5", _btm_ppa),
+    Template("landlord_tenant", "4", _landlord_tenant),
+    Template("dso_developer", "4", _dso_developer),
+    Template("energy_hub", "4", _energy_hub),
 )}
 
 

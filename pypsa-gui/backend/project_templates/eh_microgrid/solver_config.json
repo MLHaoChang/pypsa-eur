@@ -75,7 +75,7 @@
           "owner": "site"
         }
       ],
-      "built_digest": "a5299a876b286612",
+      "built_digest": "4801f970a3ccabd1",
       "built_inputs_digest": "13a391e6ac067ebd",
       "connection_fee_payee": null,
       "export_revenue_to": "site_party",
@@ -99,7 +99,7 @@
       ],
       "tariff_payees": [],
       "template": "single_owner",
-      "template_version": "single_owner@3"
+      "template_version": "single_owner@4"
     }
   },
   "finance": {
