@@ -19,11 +19,12 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { safeMax, safeMin } from '../utils/numeric'
 import toast from 'react-hot-toast'
-import { PageHeader } from '../components/PageKit'
+import { Btn, PageHeader } from '../components/PageKit'
 import { Dialog } from '../components/Dialog'
 import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
 import AvailabilityEditor from '../components/series/AvailabilityEditor'
 import SeriesEditor from '../components/series/SeriesEditor'
+import DefaultsReview from '../components/series/DefaultsReview'
 
 const EDITOR_TITLE = { load: 'Profile', availability: 'Availability', price: 'Price' } as const
 
@@ -931,6 +932,7 @@ export default function TimeSeriesManager() {
   const uiMode = useUIStore(s => s.uiMode)
   // The series editor drawer: one load's archetype or measured upload, the
   // same editor its Properties panel mounts (TS-01, UX review 2026-10-20).
+  const [defaultsOpen, setDefaultsOpen] = useState(false)
   // The series editor drawer: one host for every family's editor (TS UI).
   const [seriesEditor, setSeriesEditor] = useState<
     | { family: 'load'; component: string; tab: 'archetype' | 'upload' }
@@ -1509,6 +1511,9 @@ export default function TimeSeriesManager() {
         eyebrow="TIME · TIME SERIES"
         title="Time series library"
         subtitle="Hourly profiles attached to network components, organized by category."
+        actions={currentProject ? (
+          <Btn onClick={() => setDefaultsOpen(true)}>Generate defaults for all</Btn>
+        ) : undefined}
       />
 
       {/* ── Tab bar ────────────────────────────────────────────────────── */}
@@ -2098,6 +2103,21 @@ export default function TimeSeriesManager() {
         </div>
 
       </div>
+      {defaultsOpen && currentProject && (
+        <Dialog
+          open
+          onClose={() => setDefaultsOpen(false)}
+          title="Generate defaults for all"
+          panelClassName="bg-bg rounded-xl shadow-2xl w-[760px] max-w-[95vw] max-h-[90vh] overflow-auto p-4"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-semibold">Generate defaults for all</h2>
+            <button type="button" aria-label="Close" className="text-muted hover:text-text"
+              onClick={() => setDefaultsOpen(false)}><X size={14} /></button>
+          </div>
+          <DefaultsReview project={currentProject} />
+        </Dialog>
+      )}
       {seriesEditor && currentProject && (
         <Dialog
           open

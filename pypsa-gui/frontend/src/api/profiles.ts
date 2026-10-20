@@ -166,6 +166,30 @@ export interface PreviewWeek {
   current: number[] | null
 }
 
+export interface DefaultRow {
+  family: string
+  component_type: string
+  attribute: string
+  component: string
+  skipped?: string
+  job_id?: string
+  kind?: string
+  reason?: string
+  assumed?: boolean
+  sizing?: 'mean' | 'peak'
+  static_p_set_mw?: number
+  stats?: { peak_mw: number; mean_mw: number }
+  warnings?: string[]
+  week?: PreviewWeek | null
+}
+
+export interface DefaultsApplyResult {
+  applied: number
+  undo: string
+  results: Array<{ job_id: string; component: string | null; applied: boolean;
+    error_kind?: string; message?: string; warnings?: string[] }>
+}
+
 export interface CurrentSeries {
   exists: boolean
   provenance?: string
@@ -251,6 +275,15 @@ export const seriesApi = {
     client.post<PendingSeries>(`${projectPath(project)}/from-current`, {
       component_type: componentType, attribute, component,
     }).then(r => r.data),
+
+  /** "Generate defaults for all": one row per component, a pending default or why not. */
+  previewDefaults: (project: string, body: { replace_generated?: boolean; peak_sized?: string[] }) =>
+    client.post<{ rows: DefaultRow[] }>(`${projectPath(project)}/defaults/preview`, body).then(r => r.data),
+
+  /** Apply the chosen defaults under one undo step; each row reported. */
+  applyDefaults: (project: string, jobIds: string[]) =>
+    client.post<DefaultsApplyResult>(`${projectPath(project)}/defaults/apply`, { job_ids: jobIds })
+      .then(r => r.data),
 
   refine: (project: string, jobId: string, ops: RefineOp[]) =>
     client.post<PendingSeries>(`${projectPath(project)}/refine`, { job_id: jobId, ops })
