@@ -159,3 +159,80 @@ def test_do_these_results_make_sense_runs_the_input_checks_only(oj_grid):
     text = ' '.join(compose._RESULTS_WALK.split())
     assert 'project_readiness, validate_network and diagnose_network' in text
     assert "result-plausibility rules don't exist yet" in text
+
+
+def _numbers(text):
+    import re
+    return {float(x) for x in re.findall(r'-?\d+(?:\.\d+)?', text)}
+
+
+def _leaf_numbers(value, out=None):
+    """Two numeric facts from a read, with their keys: what a model may quote."""
+    out = [] if out is None else out
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                out.append((k, v))
+            else:
+                _leaf_numbers(v, out)
+    elif isinstance(value, list):
+        for v in value[:20]:
+            _leaf_numbers(v, out)
+    return out
+
+
+def test_a_tab_the_user_opened_counts_as_shown_and_ends_the_walk(oj_grid):
+    """Manual navigation: the tab on screen is shown; the walk does not offer it again."""
+    session = chat_service.ChatSession()
+    calls, results, frames, _ = run_journey(
+        *PROVIDERS[1], [lambda r: ('list_result_views', {'exclude_shown': True}), lambda r: (None, {})],
+        'Next.', session=session, ui_context_extra={'panel': 'results', 'results_tab': 'prices'})
+    listing = results[0]
+    assert listing['shown'] == ['prices'] and listing['on_screen'] == 'prices'
+    assert 'prices' not in {v['id'] for v in listing['views']}
+
+
+def test_go_back_reopens_the_previous_section(oj_grid):
+    wire = PROVIDERS[1]
+    _, _, _, session = run_journey(*wire, _steps(), MESSAGE)
+    _, _, _, session = run_journey(*wire, _walk_step(lambda listing: _first_with_data(listing)),
+                                   'Next.', session=session)
+    before = list(list(session.shown_results.values())[0])
+    back = [lambda r: ('list_result_views', {}),
+            lambda r: ('get_loadflow_summary', {}),
+            lambda r: ('ui_open_panel', {'panel_id': 'results', 'results_tab': before[0]}),
+            lambda r: (None, {})]
+    calls, results, frames, _ = run_journey(*wire, back, 'Go back.', session=session)
+    assert before[0] == 'loadflow'
+    assert next(v for v in results[0]['views'] if v['id'] == 'loadflow')['shown'] is True
+    assert [d['results_tab'] for e, d in frames if e == 'ui_event'] == ['loadflow']
+    assert list(session.shown_results.values())[0] == before
+
+
+def test_each_walk_step_quotes_only_its_own_read(oj_grid):
+    """OJ-15: a step's numbers come from that step's read, never an earlier one."""
+    wire = PROVIDERS[1]
+    _, first, _, session = run_journey(*wire, _steps(), MESSAGE)
+
+    def words(results):
+        facts = _leaf_numbers(results[1])[:2]
+        return 'Key points: ' + '; '.join(f'{k} {v}' for k, v in facts) + '. Next section?'
+
+    calls, results, frames, _ = run_journey(*wire, _walk_step(lambda listing: _first_with_data(listing)),
+                                            'Next.', session=session, answer=words)
+    text = ''.join(d.get('delta', '') for e, d in frames if e == 'token')
+    assert text.startswith('Key points: ') and _numbers(text)
+    assert _numbers(text) <= _numbers(json.dumps(results[1]))   # this step's read
+    shown = [d for e, d in frames if e == 'ui_event'][0]
+    assert shown['results_tab'] != 'loadflow'
+
+
+def test_statuses_are_the_declared_ones_and_rewind_forgets_shown(oj_grid):
+    from services import result_views as rv
+
+    _, _, _, session = run_journey(*PROVIDERS[1], _steps(), MESSAGE)
+    listing = chat_tools.DISPATCHERS['list_result_views']()
+    assert {v['data'] for v in listing['views']} <= set(rv.DATA_STATUSES)
+    assert session.shown_results
+    session.reset_history()
+    assert session.shown_results == {}

@@ -13,7 +13,7 @@ from services import chat_service, chat_tools
 
 
 def run_journey(kind, model, base_url, auth, steps, message, *, mode='expert',
-                on_frame=None, session=None, answer='', **turn_kwargs):
+                on_frame=None, session=None, answer='', ui_context_extra=None, **turn_kwargs):
     import httpx
 
     from harness.providers.anthropic import AnthropicProvider
@@ -71,7 +71,8 @@ def run_journey(kind, model, base_url, auth, steps, message, *, mode='expert',
             provider = OpenAICompatProvider(base_url, api_key='synthetic' if auth == 'bearer' else None,
                                             http_client=http, token_param='max_tokens')
         for event, data in chat_service.run_turn(session, message, provider=provider,
-                                                 ui_context={'ui_mode': mode}, **turn_kwargs):
+                                                 ui_context={'ui_mode': mode, **(ui_context_extra or {})},
+                                                 **turn_kwargs):
             frames.append((event, data))
             if on_frame is not None:
                 on_frame(event, data)

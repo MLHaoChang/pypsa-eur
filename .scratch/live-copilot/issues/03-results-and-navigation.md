@@ -96,3 +96,29 @@ Kept, with reasons:
 - The registry has no production caller until PR-B's `list_result_views`.
 - Prompt-cache: `results_walk` is a new static tools-on part placed after the
   stance, as LC-10 placed its part; the cache refills once per deploy.
+
+### PR-B self-review (mp-code-review, 2026-10-20) and dispositions
+
+Fixed:
+- A tab the user opened themselves (the turn's `ui_context` results tab,
+  validated against the registry) now counts as shown and is returned as
+  `on_screen`, so the walk does not re-offer it (manual navigation ends it).
+- Tests added: go back; each walk step quotes only its own read (streamed
+  text); user-opened tab; declared statuses; reset forgets shown sections.
+- `shown_results` is cleared by `reset_history` and by a rewind that cuts a
+  turn; the panel/tab check moved into `note_shown`.
+
+Kept, with reasons:
+- "Never a tab with no data" is a listing fact plus the prompt rule, not a
+  refusal: a user may ask to open an empty tab, and ui_open_panel must still
+  open it. The probe counts any non-empty, non-refused read as data.
+- Per-tab reads differ from issue 11 item 1 where the issue's read needs an
+  argument the registry cannot fix: summary reads `get_results(statistics)`
+  and `cost_breakdown` (not `get_project_results_summary(name)`), investment
+  reads `get_investment_case` (not `explain_investment(class, name)`).
+- `shown_results` is not hydrated after a restart; a walk may then re-offer
+  a section, which errs on showing, never on hiding.
+- Guided lists Guided tabs first with their labels; other tabs are listed as
+  "(advanced)" and open without a mode switch (as the app already does).
+- Each listing runs one read per view (statuses only); acceptable for the
+  network sizes Tier A covers; revisit if a large network is slow.

@@ -220,9 +220,9 @@ def shown_key() -> str:
     return active_project_key()
 
 
-def note_shown(session, results_tab: str) -> None:
+def note_shown(session, results_tab: str | None) -> None:
     """Remember that this conversation showed a results tab in this project."""
-    if session is None or for_results_tab(results_tab) is None:
+    if session is None or not isinstance(results_tab, str) or for_results_tab(results_tab) is None:
         return
     shown = session.shown_results.setdefault(shown_key(), [])
     if results_tab not in shown:
@@ -240,6 +240,12 @@ def list_result_views(exclude_shown: bool = False) -> dict:
     session = chat_tools.chat_session()
     hints = getattr(session, "turn_ui_context", None) or {}
     mode = "guided" if hints.get("ui_mode") == "guided" else "expert"
+    # The tab the user has on screen counts as shown: a section they opened
+    # themselves ends the walk there. A hint, so only a registry tab is taken.
+    on_screen = hints.get("results_tab") if hints.get("panel") == "results" else None
+    on_screen = on_screen if isinstance(on_screen, str) and for_results_tab(on_screen) else None
+    if on_screen:
+        note_shown(session, on_screen)
     shown = list((getattr(session, "shown_results", None) or {}).get(shown_key(), []))
     views = [v for v in RESULT_VIEWS if v.panel == _RESULTS and v.live()]
     if mode == "guided":
@@ -260,6 +266,6 @@ def list_result_views(exclude_shown: bool = False) -> dict:
         if data == "available" and v.tab not in shown:
             row["shows"] = v.shows
         out.append(row)
-    return {"status": "ok", "mode": mode, "shown": shown, "views": out,
+    return {"status": "ok", "mode": mode, "shown": shown, "on_screen": on_screen, "views": out,
             "note": ("Statuses only, no values: call a view's read before you open its tab, "
                      "and quote numbers from that read.")}
