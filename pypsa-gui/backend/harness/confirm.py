@@ -158,6 +158,8 @@ def _confirm_destructive_tool(
     external: str | None = None,
     restriction_mode: str = 'standard',
     restriction_snapshot: dict | None = None,
+    named_rule: dict | None = None,
+    named_project_id: str | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, bool]:
     """
     Gate a destructive tool on the user's confirmation. Returns whether to
@@ -242,6 +244,7 @@ def _confirm_destructive_tool(
         from harness import restrictions
         try:
             restrictions.require_current(restriction_snapshot, session)
+            restrictions.require_named_unchanged(named_rule, session, named_project_id)
         except Exception:  # A failed required policy read cannot approve work.
             decision = 'revoked'
     outcome, by = _DECISION_OUTCOMES.get(decision, ("unavailable", "system"))
