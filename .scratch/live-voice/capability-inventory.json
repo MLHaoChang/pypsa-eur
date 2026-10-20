@@ -6070,6 +6070,10 @@
       "label": "Load Flow"
     },
     {
+      "id": "flows",
+      "label": "Energy flow"
+    },
+    {
       "id": "prices",
       "label": "Prices"
     },
@@ -6127,7 +6131,9 @@
     "adequacy",
     "fmea"
   ],
-  "result_tabs_not_in_tool_enum": [],
+  "result_tabs_not_in_tool_enum": [
+    "flows"
+  ],
   "slide_panels": [
     "timeseries",
     "simparams",

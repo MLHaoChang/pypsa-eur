@@ -55,7 +55,7 @@ import Results from './Results'
 // UX overhaul S3 (owner decision D1a): tabs sit under five groups, in this
 // order, and Asset detail stands apart on the right of the group row.
 const ALL_IDS = ['summary', 'overview', 'capex', 'economics', 'prices', 'investment', 'loadflow',
-  'adequacy', 'lostload', 'fmea', 'dispatch', 'storage', 'curtailment', 'emissions', 'asset']
+  'adequacy', 'lostload', 'fmea', 'dispatch', 'flows', 'storage', 'curtailment', 'emissions', 'asset']
 
 async function renderResults() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -99,16 +99,16 @@ beforeEach(() => {
 describe('Results in Guided mode', () => {
   beforeEach(() => useUIStore.setState({ uiMode: 'guided' }))
 
-  it('shows exactly the summary, adequacy and FMEA tabs (M3: Summary in Guided too)', async () => {
+  it('shows exactly the summary, adequacy, FMEA and energy-flow tabs (M3: Summary in Guided too)', async () => {
     await renderResults()
-    expect(groupIds()).toEqual(['summary', 'reliability'])
-    expect(tabIds()).toEqual(['summary', 'adequacy', 'fmea'])
+    expect(groupIds()).toEqual(['summary', 'reliability', 'operation'])
+    expect(tabIds()).toEqual(['summary', 'adequacy', 'fmea', 'flows'])
   })
 
-  it('shows exactly those three tabs on a multi-period run too', async () => {
+  it('shows exactly those four tabs on a multi-period run too', async () => {
     snapState.periods = [2030, 2040]
     await renderResults()
-    expect(tabIds()).toEqual(['summary', 'adequacy', 'fmea'])
+    expect(tabIds()).toEqual(['summary', 'adequacy', 'fmea', 'flows'])
   })
 
   it('a stored hidden tab renders adequacy and is not rewritten', async () => {
@@ -153,7 +153,7 @@ describe('Results in Expert mode', () => {
     expect(tabIds()).toEqual(ALL_IDS.filter(id => id !== 'overview'))
   })
 
-  it('multi-period: all fifteen tabs, in order', async () => {
+  it('multi-period: all sixteen tabs, in order', async () => {
     snapState.periods = [2030, 2040]
     await renderResults()
     await screen.findByTestId('results-subtabs')   // Summary + Overview: a sub-row appears
