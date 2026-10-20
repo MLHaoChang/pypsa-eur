@@ -607,6 +607,8 @@ def _loadflow_section(ctx: Any, token: dict) -> dict | None:
         source = 'ac_pf' if token.get('solver_kind') == 'ac_pf' else 'lopf'
         out = get_loadflow_summary(source=source, limit=MAX_LIMIT)
     except Exception:  # noqa: BLE001 — a capture failure never breaks a solve
+        import logging
+        logging.getLogger(__name__).exception('load-flow capture failed for %s', token.get('run_id'))
         return None
     finally:
         chat_tools.set_acting_user(previous)
@@ -645,17 +647,24 @@ def publish_foreground_run(token: dict | None, ctx: Any) -> dict | None:
         error = {'error_kind': 'solver_failed',
                  'message': str(state.get('condition') or 'The solve failed.')[:500]}
     sections = None
+    fingerprint = None
+    warnings: list[str] = []
     if run_status == 'completed':
         sections = {'summary': summary}
+        # The fingerprint is the solved inputs'; an edit landing during the
+        # capture would make the section describe other inputs, so drop it.
+        fingerprint = _input_fingerprint(ctx)
         loadflow = _loadflow_section(ctx, token)
-        if loadflow is not None:
+        if loadflow is not None and _input_fingerprint(ctx) == fingerprint:
             sections['loadflow'] = loadflow
+        else:
+            warnings.append('loadflow_not_captured')
     try:
         return publish_run(
             token['root'], token['project_id'], run_id=token['run_id'], kind=token['kind'],
             status=run_status, started_at=token['started_at'],
             mode=_solver_mode(ctx, token['solver_kind']),
-            fingerprint=_input_fingerprint(ctx) if run_status == 'completed' else None,
+            fingerprint=fingerprint, warnings=warnings or None,
             job_id=token['job_id'], unsaved_inputs=token['unsaved_inputs'],
             actor_id=token['actor_id'], metrics=metrics, error=error,
             sections=sections)

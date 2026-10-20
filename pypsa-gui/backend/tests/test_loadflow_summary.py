@@ -446,7 +446,7 @@ def test_no_active_project_is_refused(monkeypatch, solved):
     assert exc.value.detail['error_kind'] == 'run_project_required'
 
 
-def test_historical_run_without_artifacts_is_typed_unavailable_pointing_at_issue_06(solved, tmp_path, monkeypatch):
+def test_historical_run_without_a_loadflow_section_is_typed_unavailable(solved, tmp_path, monkeypatch):
     monkeypatch.setattr(re_, '_authority', lambda: (tmp_path, PROJECT, OWNER))
     re_.publish_run(tmp_path, PROJECT, run_id='run-old', kind='simulation', status='completed',
                     started_at='2026-10-01T10:00:00+00:00', finished_at='2026-10-01T10:05:00+00:00',
@@ -455,7 +455,9 @@ def test_historical_run_without_artifacts_is_typed_unavailable_pointing_at_issue
     out = lf.get_loadflow_summary(run_id='run-old')
     assert out['status'] == 'unavailable'
     assert out['unavailable_kind'] == 'historical_loadflow_unavailable'
-    assert out['depends_on'] == 'issue-06 run evidence' and out['run_id'] == 'run-old'
+    assert out['run_id'] == 'run-old' and out['run_is_current'] is False
+    # Issue 06 has landed; a past run never invites reading the current results instead.
+    assert 'depends_on' not in out and 'current_results_hint' not in out
     assert out['reason']
     assert 'top' not in out
 

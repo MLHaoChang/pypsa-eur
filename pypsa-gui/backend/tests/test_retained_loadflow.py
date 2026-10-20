@@ -78,3 +78,49 @@ def test_a_legacy_run_without_the_section_refuses_with_its_id(rerated):
 def test_the_registry_declares_the_retained_section():
     assert rv.view('loadflow').historical_section == 'loadflow'
     assert {v.view_id for v in rv.RESULT_VIEWS if v.historical_section} == {'loadflow'}
+
+
+def test_a_past_run_is_not_rewindowed_or_resourced(rerated):
+    """The section holds one source and window; another request refuses."""
+    run_id = rerated['older']['run_id']
+    windowed = chat_tools.get_loadflow_summary(run_id=run_id, window_from=0, window_to=5)
+    assert windowed['status'] == 'unavailable' and 'top' not in windowed
+    assert windowed['unavailable_kind'] == 'historical_scope_mismatch'
+    assert windowed['captured'] == {'source': 'lopf', 'window_from': 0, 'window_to': 23}
+    acpf = chat_tools.get_loadflow_summary(run_id=run_id, source='ac_pf')
+    assert acpf['unavailable_kind'] == 'historical_scope_mismatch'
+    one = chat_tools.get_loadflow_summary(run_id=run_id, limit=1)
+    assert [row['name'] for row in one['top']] == ['T1'] and one['top_truncated'] is True
+
+
+def test_corrupt_or_unfinished_sections_refuse_with_the_run_id(rerated):
+    root, project_id, owner = run_evidence._authority()
+    run_id = rerated['older']['run_id']
+    path = run_evidence._evidence_path(root, run_id, 'sections', 'loadflow.json')
+    path.write_text(path.read_text().replace('"T1"', '"TX"'))   # hash no longer matches
+    out = chat_tools.get_loadflow_summary(run_id=run_id)
+    assert out['status'] == 'unavailable' and out['run_id'] == run_id and 'top' not in out
+    assert out['reason'] == 'artifact_corrupt'
+    run_evidence.start_run(root, project_id, run_id='fg-running01', kind='simulation',
+                           actor_id=owner)
+    out = chat_tools.get_loadflow_summary(run_id='fg-running01')
+    assert out['status'] == 'unavailable' and out['run_id'] == 'fg-running01'
+    assert out['reason'] == 'run_not_finished'
+
+
+def test_a_failed_capture_is_recorded_not_silent(oj_grid, monkeypatch):  # noqa: F811
+    import harness.confirm as harness_confirm
+    from services import loadflow_summary
+
+    def boom(*a, **k):
+        raise RuntimeError('capture failed')
+
+    monkeypatch.setattr(loadflow_summary, 'get_loadflow_summary', boom)
+    with monkeypatch.context() as m:
+        m.setattr(harness_confirm, 'AUTO_APPROVE_TIERS', frozenset({'execution'}))
+        session = chat_service.ChatSession()
+        chat_tools.set_chat_session(session)
+        run = _solve_once(session)
+    detail = run_evidence.get_run_evidence(run['run_id'])
+    assert 'loadflow' not in {s['name'] for s in detail['sections']}
+    assert 'loadflow_not_captured' in detail['warnings']
