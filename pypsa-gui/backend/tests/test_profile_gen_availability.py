@@ -281,3 +281,102 @@ def test_wind_and_solar_are_refused(carrier):
     _net(carrier=carrier)
     with pytest.raises(CarrierMismatchError, match="weather profile"):
         _apply(_gen("maintenance", {"windows": [{"from": "07-03", "to": "07-04"}]}))
+
+
+# ── review round 1 ──────────────────────────────────────────────────────────
+
+def test_default_derating_derates_on_the_default_ambient():
+    s = _gen("derating").series["CHP"]
+    assert float(s.min()) < 1.0
+
+
+def test_an_explicit_target_cannot_turn_a_floor_into_a_cap():
+    from services.profile_gen.apply import UnsupportedTargetError
+
+    res = _gen("must_run", {"share": 0.3})
+    with pytest.raises(UnsupportedTargetError, match="p_min_pu"):
+        default_target(res.meta, "generators", "p_max_pu")
+
+
+def test_a_profile_timezone_is_the_snapshot_clock_when_the_project_states_none():
+    # Without commercial.timezone the snapshots are the site clock; a profile
+    # drawn on a stated zone lands back on that zone's wall clock, once.
+    n = _net()
+    res = _gen("maintenance", {"windows": [{"from": "07-03", "to": "07-03"}],
+                               "timezone": "Asia/Tokyo"})
+    out = assign_profile(_ctx(), "CHP", res.series["CHP"], res.meta,
+                         component_type="generators", attribute="p_max_pu", now=NOW)
+    p = n.generators_t.p_max_pu["CHP"]
+    assert _at(p, "2023-07-03T00:00") == 0.0 and _at(p, "2023-07-03T23:00") == 0.0
+    assert _at(p, "2023-07-02T23:00") == 1.0 and _at(p, "2023-07-04T00:00") == 1.0
+    assert out["time_basis"] == "Asia/Tokyo"
+    assert not any(w.startswith("time_basis_assumed_utc") for w in out["warnings"])
+
+
+def test_one_availability_kind_over_another_warns():
+    _net()
+    _apply(_gen("maintenance", {"windows": [{"from": "07-03", "to": "07-04"}]}))
+    out = _apply(_gen("derating"))
+    assert any(w.startswith(REPLACES_SERIES_WARNING) for w in out["warnings"])
+
+
+def test_a_static_bound_that_is_not_the_default_is_replaced_with_a_warning():
+    n = _net()
+    n.generators.loc["CHP", "p_max_pu"] = 0.5
+    out = _apply(_gen("maintenance", {"windows": [{"from": "07-03", "to": "07-04"}]}))
+    assert any(w.startswith(REPLACES_SERIES_WARNING) for w in out["warnings"])
+    assert _user_ts_meta[("generators", "p_max_pu", "CHP")]["replaced_series"] == "static value 0.5"
+
+
+def test_a_link_closed_by_a_series_absorbs_nothing():
+    n = _net(load_mw=50.0)
+    n.add("Bus", "B2")
+    n.add("Link", "export", bus0="B1", bus1="B2", p_nom=40.0)
+    n.links_t.p_max_pu["export"] = pd.Series(0.0, index=n.snapshots)
+    out = _apply(_gen("must_run", {"share": 0.8}))
+    assert any(w.startswith(MUST_RUN_SINK_WARNING) for w in out["warnings"])
+
+
+def test_a_two_way_link_into_the_bus_from_its_far_end_counts():
+    n = _net(load_mw=50.0)
+    n.add("Bus", "B2")
+    n.add("Link", "tie", bus0="B2", bus1="B1", p_nom=40.0, p_min_pu=-1.0)
+    out = _apply(_gen("must_run", {"share": 0.8}))
+    assert not any(w.startswith(MUST_RUN_SINK_WARNING) for w in out["warnings"])
+
+
+def test_other_floors_on_the_bus_add_up():
+    n = _net(load_mw=50.0)
+    n.add("Generator", "CHP2", bus="B1", carrier="gas", p_nom=100.0, p_min_pu=0.4)
+    out = _apply(_gen("must_run", {"share": 0.4}))
+    assert any(w.startswith(MUST_RUN_SINK_WARNING) for w in out["warnings"])
+
+
+def test_an_extendable_unit_is_checked_at_its_largest_size():
+    n = _net(load_mw=50.0)
+    n.generators.loc["CHP", ["p_nom", "p_nom_extendable", "p_nom_max"]] = [0.0, True, 100.0]
+    out = _apply(_gen("must_run", {"share": 0.8}))
+    assert any(w.startswith(MUST_RUN_SINK_WARNING) for w in out["warnings"])
+
+
+def test_lines_off_the_bus_count_as_sink():
+    n = _net(load_mw=50.0)
+    n.add("Bus", "B2")
+    n.add("Line", "ln", bus0="B1", bus1="B2", s_nom=40.0, x=0.1)
+    out = _apply(_gen("must_run", {"share": 0.8}))
+    assert not any(w.startswith(MUST_RUN_SINK_WARNING) for w in out["warnings"])
+
+
+def test_on_a_committable_unit_the_stored_kind_is_min_stable_level():
+    _net(committable=True)
+    _apply(_gen("must_run", {"share": 0.3}))
+    assert _user_ts_meta[("generators", "p_min_pu", "CHP")]["kind"] == "min_stable_level"
+
+
+@pytest.mark.parametrize("carrier, refused", [
+    ("offwind-ac", True), ("solar rooftop", True), ("PV", True),
+    ("pvc plant", False), ("gas", False)])
+def test_the_weather_carrier_rule(carrier, refused):
+    from services.profile_gen.families import is_weather_carrier
+
+    assert is_weather_carrier(carrier) is refused

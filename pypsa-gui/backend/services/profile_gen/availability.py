@@ -7,7 +7,9 @@ One column per generator over the source year's hours, for one bound:
     profile) or YYYY-MM-DD in the source year (applies only on a
     single-period network of that year — checked at apply — and is refused
     otherwise, never shifted). ``available`` is the share left during the
-    window (0 = fully out). A window may wrap the new year. Or ``rule``:
+    window (0 = fully out). An MM-DD window whose end comes before its start
+    wraps the new year, if that makes it shorter than half a year (longer,
+    it is read as a typo and refused). Or ``rule``:
     {"weeks": N, "season": "summer" | "winter"}, N consecutive weeks centred
     on mid-season (1 August / 15 January).
   * ``must_run`` → p_min_pu. ``share`` (constant), ``winter_share`` and
@@ -75,7 +77,8 @@ _DEFAULTS: dict[str, dict[str, Any]] = {
     "maintenance": {"windows": None, "rule": None},
     "must_run": {"share": None, "winter_share": None, "summer_share": None,
                  "monthly": None, "heating_base_c": 15.0, **_AMBIENT},
-    "derating": {"threshold_c": 25.0, "per_k": 0.007, "floor": 0.7, **_AMBIENT},
+    # 15 °C is the ISO rating temperature of a gas turbine's nameplate.
+    "derating": {"threshold_c": 15.0, "per_k": 0.007, "floor": 0.7, **_AMBIENT},
 }
 _COMMON = {"timezone": None}
 
@@ -209,8 +212,7 @@ def _must_run(local: pd.DatetimeIndex, p: Mapping[str, Any], idx, timezone,
     return summer + (winter - summer) * degrees / peak, {"mode": "seasonal", "ambient": amb}
 
 
-def _derating(local: pd.DatetimeIndex, p: Mapping[str, Any], idx, timezone,
-              ) -> tuple[np.ndarray, dict]:
+def _derating(p: Mapping[str, Any], idx, timezone) -> tuple[np.ndarray, dict]:
     from services.dc_load_profile import ambient_c
 
     amb = _ambient(p)
@@ -249,7 +251,7 @@ def generate_frame(ids: list[str], kind: str, params: Mapping[str, Any],
     elif kind == "must_run":
         values, extra = _must_run(local, p, idx, tz)
     else:
-        values, extra = _derating(local, p, idx, tz)
+        values, extra = _derating(p, idx, tz)
     frame = pd.DataFrame({i: values for i in ids}, index=idx)
     stored = {k: v for k, v in p.items() if v is not None}
     meta = {"kind": kind, "params": stored, "target": ["generators", _TARGET[kind]],
