@@ -1,0 +1,194 @@
+# Integration, historical prices, PPA defaults and sensitivities
+
+Status: draft for UX review. Owner choices Q11 and Q12 (§7) are drafted on the recommended option and marked *pending owner*.
+Date: 2026-10-20
+Author: workspace-reconciliation session
+Builds on:
+- [workspace-reconciliation.md](workspace-reconciliation.md) (#444): groups as a scope, one Run, W/P slices;
+- [commercial-finance.md](commercial-finance.md) (#447): section 7, K slices;
+- [design.md](design.md): the flow, R1–R4.
+
+## The owner's words
+
+2026-10-20, about 19:05 CEST (speech-to-text, lightly cleaned up by the coordinator):
+
+> "We should have, if possible, check for the prices, if historical prices are available, and also if PPA contracts can have some default parameter values of the PPA contract forms, or, you know, specific region. For example, Europe would be the target region on that. Ideally, Europe at the moment. Or you want something to default parameter, just for push off a model. And then the core idea is that the different parts, the capacity expansion, power flow, load flow, etc., they connect with each other, right? And so there's an integrated integration between the different sections. And you also allow to parameterize individually in expert mode and in guided mode if you have not checked one box, but then you want to check one box later within each group, then you can still add additional parameters. That's also very important. Also, consider how we can lay out ... different sensitivity analysis. We have a base case, then we have compare cases that should enable fast comparison of results between the sensitivities in terms of simulation results. So fast parametrization: we should be able to copy and duplicate existing base case or the sensitivity base. And then the fast parametrization of two parameters. And then you run the simulation, and then you have comparative results. It's very important in terms of the overall result."
+
+## What exists (master after #444; facts checked on the branch)
+
+| Piece | Where | State |
+|---|---|---|
+| Price series in the library | `services/library/series_store.py` (`SeriesMeta`: source, vintage year, provider, settlement, unit, label; timezone in the payload header) | upload only (CSV/XLSX); **no currency or region on a series**; `PriceSeriesRef` carries no unit, currency or region |
+| Historical price fetch | — | **not found** (no ENTSO-E or other feed) |
+| Market regions and packs | `MarketRegion` (DE, NL, GB, US_*, CA_ON, AU_NEM), `MarketPack` in `models/commercial.py` | defined, **no consumers** |
+| PPA and contract model | `PpaContract` (pay-as-produced, baseload, as-consumed BTM, sleeved), `CfdContract`, DR, lease, EaaS, retail | `price` has no default; **no swap and no shaped-profile contract type**; **no PPA defaults** in any pack |
+| Scenarios | `POST /{base}/scenarios` (`routers/projects.py`) | a scenario is a **full copy** of the base bundle with a parent link; switch with `activate` |
+| Experiments | `services/experiments.py`, `harness/experiment_*` | 1–8 explicit cases, up to 12 typed changes each (dotted path, typed value); per-case ledger with receipts; **chat-only, no REST route** |
+| Sensitivity sweep | `services/workflow_tools.py:run_sensitivity_sweep` | 1–4 cases; validates on isolated copies, creates child scenarios, enqueues each; needs a saved baseline |
+| Solve queue | `services/solve_queue.py`, `routers/solve_queue.py` | sequential, per project |
+| Compare | `pages/CompareView.tsx`, `services/compare/*`, `routers/compare.py` | **A/B pairwise only**; 10 tabs |
+| Copilot LC-17 / LC-18 | `.scratch/live-copilot/issues/17-…`, `18-…` | ready-for-agent, **not started** |
+
+---
+
+## 1. Historical prices: what is available, and checked
+
+The owner chose Q8 = A: users bring their own market data, and nothing is redistributed. Europe comes first.
+
+- **Where.** Section 7c (Markets & value streams) gets a **"Price data available"** panel. It reads the site's **bidding zone** and the project's **years**:
+  - the zone is derived from the section-1 pin's country; a multi-zone country (NO, SE, DK, IT) asks the user to pick its zone;
+  - the years come from the horizon (section 1), or from the weather year where profiles use one.
+- **Two sources, both the user's own:**
+  1. series the user or org has uploaded to the library;
+  2. **ENTSO-E Transparency day-ahead prices**, fetched with **the user's own API token**. The token is stored as a user or org secret, never in a project or bundle. The fetch writes an ordinary library series (`source: entsoe`, provider, vintage year, zone), so it is pinned like any other.
+- **The check, per zone and year:**
+  - coverage (hours present / expected);
+  - gaps;
+  - resolution (hourly, 15 min);
+  - timezone;
+  - unit and currency;
+  - negative-price hours.
+
+  The panel says, in words, "DE-LU day-ahead, 2019–2025, 100 % of hours" or "NO2 2021: 312 hours missing". A gap is never filled silently: a series with gaps is refused where a full year is needed (`_export_price` already refuses uncovered snapshots).
+- **What it feeds**, as library series picked in the usual editors:
+  - the export price (7a);
+  - a PPA or CfD reference price (7b);
+  - the market bundle (7c);
+  - the illustrative price shapes, which stay labelled `illustrative`.
+
+  Each of these is an `lp_input` when the LP reads it (#447 §2.0).
+- **Engine work (the gatekeeper):**
+  - a new external fetch service, with timeouts and its own error kinds;
+  - secret storage for the token;
+  - `SeriesMeta` and `PriceSeriesRef` gaining **currency, `price_basis`, `currency_year` and region**: the same rule #445 applies to price series, and K0 applies to tariffs.
+
+---
+
+## 2. PPA defaults by contract form, Europe first
+
+Defaults exist to "push off a model". They are **never market data**.
+
+- One **library item per contract form**, scope `common`, shipped in a defaults-pack version:
+  - pay-as-produced;
+  - baseload;
+  - as-consumed / shaped;
+  - sleeved;
+  - CfD;
+  - swap.
+- Each carries:
+  - `region: EU`;
+  - `source: illustrative`, `assumed`, with a cited public reference range;
+  - `currency: EUR`, `currency_year`, `price_basis`;
+  - the **key parameters** Guided shows (#444 §10a, #447 §4).
+
+| Form | Key parameters (Guided) | Expert adds | Model today |
+|---|---|---|---|
+| Pay-as-produced | price, tenor, asset | indexation, volume cap, floor/cap (market + premium), base year | `PpaContract` `pay_as_produced` |
+| Baseload | price, MW, tenor | indexation, volume cap | `PpaContract` `baseload` |
+| As-consumed / shaped | price, tenor, load | shape, volume cap | `as_consumed_btm` (behind the meter); **a shaped off-site profile is a gap** |
+| Sleeved | price, sleeving fee, tenor | sleeving party, indexation | `PpaContract` `sleeved` |
+| CfD (financial / virtual PPA) | strike, reference series, tenor | capture mode, negative-price suspension, indexation | `CfdContract` |
+| Swap (fixed for floating) | fixed price, volume, reference series, tenor | settlement | **gap: no contract type**; maps to a CfD without an asset only if the gatekeeper agrees (K0/K7) |
+
+**Numbers** (*pending owner, Q11*). Recommended: one illustrative EU-wide set authored by us, with each value's public reference range cited, and labelled so it can't be mistaken for data. Zone values (DE, NL, ES, Nordics) come only from an org pack (Q10 = A) or the owner's sourcing. The defaults never set `changes_dispatch`.
+
+---
+
+## 3. Integration: how the groups feed each other
+
+The groups share one model. Every hand-over below already exists in code, and each has its own staleness rule. The design makes them **visible**: each producer → consumer edge shows in the consumer's results as **fresh / stale (why) / not run / outside scope**, and "why" names the upstream change.
+
+| From | Data | To | Stale when (existing mechanism) |
+|---|---|---|---|
+| Sections 1–8 (inputs) | the network and its settings | Capacity: the optimisation (sizing, dispatch, economics) | the network revision moves (`dirty_state.revision`, study `edited_since`) |
+| 7 `lp_input` prices | tariff terms, export price, dispatch-changing PPAs, discount rate, CO₂ path | the optimisation | the same; a library pin moving (`LibraryRefStale`) |
+| The optimisation | **sized assets** (`p_nom_opt`, `s_nom_opt`) | Grid: the campus electrical draft (`gridspine/producers/campus.py:_rating` uses the optimum for extendable assets); the SCR gate in `eh_readiness` (prefers `p_nom_opt`) | campus `_stale` (network sha, campus file, library); `_milp_stale` |
+| The optimisation | **dispatch** | Grid: AC power flow (copies LP dispatch into `p_set`) | `dispatch_status` ≠ fresh → AC PF refused, load-flow summary `stale` |
+| The optimisation | dispatch | Control: the island study's hourly tables | the network revision; note: the island study **re-optimises** sizing (`services/solver/island.py`) instead of reading the optimum, see §3.1 |
+| The optimisation | dispatch, sizes | Commercial: bill, settlement, investment case | IC `assumptions_hash` (`investment_case_runner.staleness`, extended per #447 §8) |
+| Grid: AC PF, campus study, scorecard | loading, voltage, PCC compliance, verdicts | **back** to sections 3, 5 and 9 as flow items (warnings) | each item carries its source's freshness |
+| Control: GFM tuning | recommended droop, H, i_max | **back** to section 5 Controls through the EditCard; the hub then needs a re-solve (`_hub_solved_since`) | the applied record |
+
+**Feedback never edits inputs silently.** A downstream finding (an overloaded transformer, a grid-code fail, a tuning recommendation) comes back as a flow item on its home section. Or it comes as a proposed change on the EditCard (old → new, section named). The user, or the copilot with confirmation, applies it, and the one Run reruns what is stale.
+
+**One Run reruns what is stale.** The flow endpoint's `results.freshness` (B1) grows to one freshness per run kind, `{optimisation, study, loadflow, control_checks, investment_case}`. Run then offers "Run (3 stale)" over the requested kinds whose results are stale. This is a B1 follow-up, and the gatekeeper is told.
+
+### 3.1 One inconsistency to settle (gatekeeper)
+
+The campus draft and the SCR gate read the **optimised** sizes. The island study **re-optimises** its own. For integration, the island study should state which sizing it uses, and offer "use the capacity plan's sizes". Whether that's a mode of the island solver or a fixed-size run is engine semantics for the gatekeeper.
+
+---
+
+## 4. Turning a group on later
+
+A group or a sub-option can be switched on at any time, in Guided or Expert, from the Builder card or section 8's scope component (the same component, W4a). Turning it on:
+- **reveals** the group's blocks in their sections;
+- **fills only empty fields**, from the library default and the template's values, marked `assumed`, with the template's recheck flags. A value already set, including one set while the group was off, is kept;
+- moves its items to `in_scope: true`, so section states update live;
+- adds its kinds to `run_request`. Its results read **"not run"** until the next Run.
+
+Turning it off hides without deleting: values stay, items become `in_scope: false`, and results read "outside scope" but are kept.
+
+W4a's done-when gains a round-trip test: on → set values → off → on keeps every value and source; template defaults never overwrite a user value. The copilot may propose switching a group on, on the EditCard; it never switches one silently.
+
+---
+
+## 5. Sensitivities: a base case and compare cases
+
+### 5.1 Model
+- **The base case** is the project, or a scenario the user marks as base.
+- **A compare case** is a scenario child: today's full copy, with the parent link. It also records its **declared changes** in the experiment contract's shape: dotted path, typed value, old → new. "What differs" is therefore explicit, not inferred by diffing networks (LC-18's declared input differences).
+- **Limit:** a base plus up to 8 cases (*pending owner, Q12*; the experiment limit). Each case changes 1–2 parameters by default, and up to 12 in Expert.
+
+### 5.2 Screens
+
+**Section 8 › Scenarios & sensitivities** (W7, the old B5 rows):
+- one row per case: name, the changed parameters (old → new), which sections they override (Physical 2–6, Commercial 7, Optimisation 8), and the state (not run / queued / running / fresh / stale / failed);
+- **"Duplicate and change"** from the base or any case. It opens a small form:
+  - pick one or two parameters, through a search across sections that opens each field's **own editor**;
+  - set the new values;
+  - name the case (derived from the change, editable).
+
+  It creates the copy and records the change.
+- **Grid helper**: two parameters × a few values each, making at most 8 cases (e.g. 2 × 4).
+- **"Run cases"** queues one Run per case through the solve queue, using the existing sweep path:
+  - an unsaved base asks first, never saving silently (LC-17);
+  - a failed case doesn't block the others;
+  - one Run per case runs that case's requested kinds.
+
+**10 › Compare** (extends today's A/B Compare to base + N):
+- **KPI table**: total cost, capex, opex, NPV/IRR (when Commercial is on), LOLE/ENS, emissions, curtailment, peak import, max loading. Base and each case side by side, with deltas and delta % computed in software.
+- **Charts** overlaid per tab (capacity, dispatch, prices, loading, …), reusing `services/compare/*`.
+- **Incomparable cases** listed with the reason, e.g. a different horizon, a different currency, or a case not run.
+- **Export** through the existing path.
+
+**Copilot.** LC-17 (create and run) and LC-18 (compare) are the chat path over the same objects. Each chat-made change shows on the EditCard (old → new, section named).
+
+### 5.3 Rules
+- **A case's results are stale when its own inputs change.** They are **not** stale when the base changes after the copy: a copy is a copy, and the row says "base changed since copy". Re-deriving a case from a changed base is an explicit action ("Re-apply changes to the current base").
+- A case may switch groups on or off. Compare then lists the group-specific KPIs as "outside scope" for the cases without it.
+
+---
+
+## 6. Slices
+
+These join the W/P/K plan.
+
+| Slice | What | Gate | After |
+|---|---|---|---|
+| **S1 Historical prices** | §1: bidding zone from the pin; ENTSO-E fetch with the user's token (secret storage); the availability check; `SeriesMeta` / `PriceSeriesRef` currency, basis, year, region | **gatekeeper** (external fetch, series schema); UX | K2 |
+| **S2 PPA defaults** | §2: one library item per form (EU, illustrative) in a pack version; swap and shaped-profile gaps as a gated model plan | gatekeeper (contract model); UX | K2, K7, Q11 |
+| **S3 Group on/off round-trip** | §4 in W4a's done-when (fill-empty-only; keep on off) | UX | W4a |
+| **S4 Freshness per kind** | §3: `results.freshness` per run kind; "Run (n stale)"; edge reasons in results | gatekeeper told (B1 follow-up); UX | W4b |
+| **S5 Cases** | §5.1–5.2: case changes recorded; section-8 rows (W7); Duplicate and change; grid helper; Run cases | gatekeeper (run and staleness semantics); UX | W7, W4a |
+| **S6 Base + N compare** | §5.2: Compare for base + up to 8, KPI deltas, overlays, incomparable list | UX; gatekeeper on comparability | S5 |
+| **S7 Copilot** | LC-17 and LC-18 over S5/S6 | per LC-05 | S5, S6 |
+
+---
+
+## 7. Owner choices
+
+| | Choice | Recommended | Status |
+|---|---|---|---|
+| Q11 | PPA default values: our illustrative EU-wide set with cited ranges / owner-sourced zone values as a pack / no defaults | our illustrative set; zone values later from a pack | *pending owner* |
+| Q12 | Sensitivity size: base + up to 8 cases, 1–2 parameters each, grid helper / pairwise only / unlimited grids | base + 8 | *pending owner* |
