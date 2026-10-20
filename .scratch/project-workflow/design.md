@@ -22,7 +22,80 @@ Base: master `8119972c`, with the specs from #419 (`claude/dc-grid-readiness-spe
 
 ## 1. Audit: today's flow
 
-<!-- AUDIT -->
+Walked live on 2026-10-20 (master `8119972c`, API :8000, Vite :5173, Playwright). I created a blank project, the generic site ("Your own site") and the data-centre template, in Guided and then in Expert, through to Run, results and reports. Paths: `FE/` = `pypsa-gui/frontend/src/`, `BE/` = `pypsa-gui/backend/`. The screenshots stay in the reviewer session's scratchpad and aren't committed.
+
+### 1.1 Guided today
+
+The rail has five steps: **Start → Site → Goal → Results → Improve** (`FE/pages/hubDesign/StepRail.tsx`).
+- **Start** holds almost every input: site type, a load table per stage (peak MW, MW available from grid), load shape, must-stay-on share, connection limit, existing gensets / PV / battery / UPS, and what the study may add (`cards/GenericSiteForm.tsx`).
+- **Site** is read-only except for one select, the study archetype ("Strong / Weak or limited / None – island"). It shows four readiness rows: connection point, must stay on, grid strength, outage data. These come from `eh_readiness`, and each has "Fix with the assistant". To change a number, the user picks "Start a new project from these values" (`cards/SiteCard.tsx`).
+- **Goal**: the allowed shortfall, energy strictness, VOLL read-only, and Run study (`cards/GoalCard.tsx`).
+- **Results** and **Improve** are read-only, with buttons into the Expert results panel, FMEA and Campus electrical.
+
+### 1.2 Expert today
+
+The sidebar runs **MODEL** (Assets, Capacity Bounds, Profile Studio, Model Horizon, Time Series, Economics) → **RUN** (Solver Settings, Issues, Solve Queue) → **RESULTS** → **STUDIES** (Decision study; Campus electrical; Planning → dynamics) → **PROJECT** (Scenarios, Snapshots, Reports) (`FE/layout/sidebar/steps.tsx`). Run LOPF sits in the header. Per-component properties sit in the right panel and the tables in the bottom tabs.
+
+### 1.3 Where each thing is edited today
+
+| Thing | Guided | Expert |
+|---|---|---|
+| Site location | nowhere; the buses land at 0,0 | per bus, in Properties or the Buses table; flagged only as an advisory in Issues › Topology |
+| Connection limit | Start form; read-only afterwards | `grid_import` Link › Properties › Capacity |
+| Ramp, losses, connection outage data | not editable | Link properties, the attribute catalogue (`ramp_limit_*`), Solver settings › Network › Transmission losses |
+| Energization schedule | the Start load table, "Available from grid (MW)" | **no labelled editor**: it's a Links availability series |
+| Grid code | not shown | Studies › Campus electrical › Grid codes |
+| Connection tags and commercial PoC | not shown | bus/Link Properties › Energy Hub (PoC, critical, role); Economics › Basis › "Edit site connection" |
+| Loads | Start form | Properties, Time Series › Loads |
+| Asset sizes and bounds | Start form | Assets palette, Properties, **Capacity Bounds** (a separate panel) |
+| Island / ride-through controls | one checkbox, one archetype option | Studies › Campus electrical › Island |
+| Profiles | load shape only | Time Series, **Profile Studio** (generators must exist first) |
+| Tariffs, contracts, parties | not shown | Economics › Tariffs & contracts **and** Results › Investment › Investment case (Tariff, Contracts, Finance inputs, Participants) |
+| Discount rate, inflation | not shown | Economics › Basis › Rates **and** Solver settings › Dispatch › Economic assumptions (both write `solver_config.discount_rate`) |
+| VOLL, ENS / LOLE target | Goal (VOLL read-only) | Solver settings › Network; Results › Reliability › Adequacy › EH reference design |
+| Stress scenarios | assistant only | Results › Reliability › FMEA (`FE/pages/results/FmeaTab.tsx`) |
+| Readiness | four Site rows | RUN › Issues (the live preflight), badge on the sidebar row |
+| Run | Goal › Run study (the EH study) | header Run LOPF (one optimisation); it's never disabled by preflight |
+
+### 1.4 Every jump away and back
+
+| # | From → to → back | Why | Evidence |
+|---|---|---|---|
+| J1 | Guided Goal → Expert Solver settings › Network › VOLL → Goal | Run study is disabled when VOLL ≤ 0, the field is read-only in Guided, and the fix is assistant-only (disabled without an API key) | `GoalCard.tsx` (VOLL row, Run disabled, no title) |
+| J2 | Guided Results › Operation "Not run yet" → Expert header Run LOPF → back | The EH study doesn't run the LOPF the Operation tile needs, and Guided hides the idle Run | `hubDesign/chapters.ts`, `AppHeader.tsx` |
+| J3 | Guided Site "Connection point: none tagged" → assistant, or Expert Properties › Energy Hub role / PoC / critical → Site | Site rows are fixed only by the assistant or in Expert | `SiteCard.tsx`, `delegate.ts` |
+| J4 | Guided Site → "Start a new project from these values" → Start form → new project → Site | No input is editable after creation | `SiteCard.tsx` |
+| J5 | Guided Results › "Show the engineering detail" → Expert results ("Set ENS target in Solver Settings and re-solve") → Solver settings → back | The reliability target lives in solver settings, the message in results | `ResultsCard.tsx`, `BackToHubResults.tsx` |
+| J6 | Economics › Basis › Rates ↔ Solver settings › Dispatch | The same `discount_rate` has two editors | `pages/economics/RatesForm.tsx`, `pages/SolverSettings.tsx` |
+| J7 | Link Properties (capacity) → Properties › Energy Hub (tags) → Economics › Basis › Edit site connection (commercial PoC, timezone) | **One grid connection, three screens** | `SiteConnectionSection.tsx` |
+| J8 | Results › Investment case → "inputs also under Expert › Economics" → Economics → Results | Commercial inputs are edited inside Results | `pages/results/InvestmentTab.tsx` (`INPUT_SECTIONS`) |
+| J9 | Issues → "Open X in the editor" (Issues closes) → fix → reopen Issues (or wait for the 30 s poll) | No return path, and no live "cleared" state | `pages/IssuesPanel.tsx`, `layout/sidebar/RunSection.tsx` |
+| J10 | Results › Grid plan › Load Flow "Not modelled — turn on in Solver settings" → Solver settings › Network → re-run → Results | A modelling choice is surfaced in results | Load Flow tab |
+| J11 | Profile Studio → Assets (create the generators first) → Profile Studio | Point ids double as generator names | `pages/ProfileStudioSection.tsx` |
+| J12 | Issues › Topology "Bus has no location" → bus Properties › Coordinates → Issues | The site has no location field anywhere in the creation flow | `GenericSiteForm.tsx` |
+| J13 | Guided Improve "Add a stress scenario" → assistant only; by hand Expert Results › Reliability › FMEA | The stress-scenario editor lives in a results tab | `ImproveCard.tsx`, `FmeaTab.tsx` |
+| J14 | Header Run LOPF → fails → Issues opens → fix elsewhere → Run again | Expert Run isn't gated by preflight, so you find out after pressing Run | `AppHeader.tsx` (Run never disabled by preflight) |
+| J15 | Capacity Bounds panel ↔ asset Properties (Extendable) | An asset's sizing is split across two screens | `MODEL › Capacity Bounds` |
+| J16 | Campus electrical › Island (ride-through, UPS bridge) ↔ asset Properties | An asset's control behaviour lives in a study panel | `pages/CampusIslandSection.tsx` |
+
+**The pattern behind them:** Guided hides the panels its own cards point to (J1–J5, J13), Results hosts inputs (J5, J8, J10, J13), and one physical thing is split across screens by data structure, not by meaning (J6, J7, J15, J16).
+
+### 1.5 How completion shows today
+
+- **Guided rail ticks follow the study, not the inputs.** Start ticks when a template loads; Site ticks only once a study exists; Goal ticks after a finished study (`hubDesign/flow.ts`, `railState`). Nothing tells the user "your inputs are complete".
+- **The Site rows** read `eh_readiness` (`useHubData.ts`, `SiteCard.tsx`), but site gaps don't block Run. The readiness payload's `stages` and `warnings` aren't shown.
+- **Guided Run gating** (`GoalCard.tsx`): running, invalid number, VOLL ≤ 0, no project, unreadable template. Otherwise a backend 409/422 message appears after the press.
+- **Expert:** the Issues panel is "the same gate Run LOPF uses" (`POST /simulation/preflight`), with a sidebar badge, but Run is never disabled by it. Then there are the Investment-case completeness chips (bill, participants, value-flow balance) and the adequacy stage chips.
+- **No cross-panel checklist** of what is missing before Run exists in either mode.
+
+### 1.6 Guided versus Expert today
+
+They are two different flows. Guided runs the EH study; Expert runs LOPF. Both are called "Run". Guided is read-only after Start except for two inputs, so most corrections need the assistant or a switch to Expert. Expert's order (MODEL, RUN, RESULTS, STUDIES, PROJECT) is by kind of panel, so scenarios come after results, and grid code and island controls sit under Studies.
+
+### 1.7 Set-up gaps met during the walk (not product issues)
+
+- `~/.local/share/PyPSA Studio/` didn't exist on first boot, so SQLite couldn't open. The walker created it and ran `tools/bootstrap_super_admin.py`.
+- `admin@example.com` had **no personal workspace** (403 "not a member of any organization" on create-from-template), contrary to AGENTS.md. The walker ran `ensure_personal_org` once. Reported to the coordinator.
 
 ---
 
@@ -39,7 +112,7 @@ One sequence for every project and every template. Each row names what the secti
 | 3 | **Connection & grid** | each boundary where a carrier crosses the site fence: for electricity, the import/export limit, ramp-rate limit, loss factors, energization schedule (MW per period), fault level / SCR, the grid-code profile (generic assumed, EU RfG/DCC, or an uploaded TSO PDF); for other carriers, pipeline or delivery limits | *Everything the network operator or supplier sets at the fence.* If the operator would put it in a connection offer, it goes here. | the connection's limits (the LP, the readiness check), the grid-code limits (the grid-readiness scorecard) |
 | 4 | **Loads & demand** | every demand by carrier: electrical loads and their profile model (flat, uploaded, library shape, the GPU / AI-training model, PUE and its temperature slope), heat and H2 demand, product deliveries (t/d of NH3), criticality (critical share, tier), flexibility (curtailable, deferrable) | *What the site must serve, and how much it can give up.* A demand and its shape, criticality and flexibility are edited together on one row. | peaks per period (the connection check in §3), criticality (backup sizing, the reliability goal), flexibility (dispatch, the flexibility market) |
 | 5 | **Assets & sizing** | generation, storage, conversion and process units: existing vs candidate, sizing (manual or auto-sized: `p_nom_extendable`, `p_nom_min`, `p_nom_max`), unit commitment (min load, min up/down, ramp, restart), backup mode (genset / BESS / hybrid), control presets (grid following, grid forming support, fast frequency response, voltage support), the power architecture (AC, MV UPS, 800 VDC, SST), outage data | *What is built or could be built, and how it behaves.* An asset's sizing, its controls and its reliability data are one form (B3 pattern), never three panels. | the candidate set (the optimisation), presets (the grid-readiness scorecard), outage data (the reliability study) |
-| 6 | **Time series & profiles** | the status of every time-varying input from sections 4 and 5: renewable profiles (generated, uploaded, network-native, missing), load profiles, price series; the bulk action "Generate defaults for all"; Profile Studio (Expert only) | *One place to see that every row has a series, and to fill the gaps in bulk.* The **shape choice** stays on its row in sections 4 and 5 (rule: you choose a load's model where you define the load). This section shows the status and does the bulk work. It never holds a parameter that is not also reachable from its row. | complete series on every row the LP reads |
+| 6 | **Time series & profiles** | the overview and QA of every series from sections 3, 4, 5 and 7: load profiles, renewable profiles, availability (maintenance, forced outage, must-run, derating), price series, inflow, COP, process schedules, each with its provenance (`measured`, `generated`, `assumed`, `network_native`, missing) and the `timeseries_qa` result; the bulk action "Generate defaults for all"; Profile Studio (Expert only) | *Overview and QA, not a second place to create a series.* A series is **parametrised where its owner is edited**: a load's archetype or upload on the load (4), maintenance, must-run and outages in the asset's Availability block (5), an energization schedule on the connection (3), a price series on its tariff or market bundle (7). A row here opens that same editor in a drawer, so there is one editor per series. The bulk "Generate defaults for all" is the one action that starts here. | a series on every field the LP reads, each with a provenance |
 | 7 | **Commercial & parties** | tariffs, the market bundle per country, contracts (PPA, swap, demand response, offsite PPA), finance inputs (discount rate, money year, price basis, overnight costs, lifetimes), parties and who owns or earns what (the party board over `ValueFlowConfig`), reserve-market products and their prices | *Money: who pays whom, for what, at what price.* Every price and every money split is here. No price is edited in Results. | the investment case, the bill, the ledger |
 | 8 | **Scenarios & optimisation** | what the run should answer: the objective, foresight, solver, VOLL and CO₂ price, the reliability goal (LOLE / ENS cap), stress scenarios, variants and sweeps (multi-value chips from the asset forms), rolling operation | *The question asked of the model.* Settings that change the answer but not the site. | the run request |
 | 9 | **Readiness → run** | the preflight summary of sections 1–8, the grid-readiness scorecard, the EH readiness estimate, Run | *Nothing to edit.* Each line here links to the field in its own section. | a solve, a study |
@@ -106,6 +179,22 @@ The templates below: data centre (`eh_datacenter`, `eh_datacenter_staged`), ener
 | DC-06 flex-market revenue | any storage or flexible load with headroom | none |
 | DC-07 rolling operations | any project (section 8 "rolling operation") | none |
 
+### 2.4 How the flow removes today's jumps
+
+| Jump (§1.4) | Removed by |
+|---|---|
+| J1 VOLL, J5 ENS target | both are section-8 fields, editable on the Guided card. The disabled Run names them (§3.3). |
+| J2 Operation needs LOPF | one Run (§3.3): section 8 says what the run computes (optimisation, reliability study, or both); Guided can request the solve. |
+| J3 site gaps, J4 read-only Guided | every Guided card edits its own section at card depth. The assistant is a shortcut, never the only route. |
+| J6 discount rate twice | home in 7; read-only in 8. |
+| J7 one connection, three screens | section 3 holds capacity, tags, commercial PoC, timezone and energization together. |
+| J8 inputs in Results, J10, J13 | Results hold no inputs (§2.2). Load-flow modelling and stress scenarios move to 8. |
+| J9 Issues has no return path | items show on their own section; a fix updates the section state live (the flow query refreshes on every asset write). |
+| J11 Profile Studio needs generators | the series editor is mounted on the generator form (5). Studio stays an Expert view over existing rows. |
+| J12 no location | section 1's map pin. Buses inherit the site location until placed. |
+| J14 Run not gated | the Run gate (§3.3). |
+| J15 Capacity Bounds, J16 island controls | the B3 asset form (Sizing, Controls). |
+
 ---
 
 ## 3. Completion model
@@ -152,6 +241,8 @@ Rules:
 - **Required sections**: 1–5 and 8 always; 6 when any row has a time-varying input; 7 when the run requests an investment case, bill or ledger. The template table (§2.3) can turn a section `not_needed`, never `required`→optional by itself.
 
 ### 3.3 Run unlocks only when the required sections are complete
+
+There is **one Run**. It runs what section 8 asks for: the optimisation (LOPF), the reliability study (EH study), or both in sequence. Today Guided runs only the study and Expert only LOPF, and both are called Run (§1.6).
 
 Run is enabled when every required section is `complete` or `warning`. It is disabled when any is `incomplete`. The disabled Run says which, in words: "Connection & grid: the connection limit is not set." Its one action opens that field.
 
@@ -222,7 +313,7 @@ Each ticket gets one home section. The coherence note says what the ticket must 
 | RP-01 coordinates refusal | 6 (item), 1 (fix) | A missing-coordinates refusal becomes a section-6 "to do" item whose link opens the bus location. That's a field of section 1 (site pin) or 3/5 (bus placement) and is edited inline in a drawer. |
 | RP-02 readiness feed | 6 | A flow-endpoint source (§3.1). |
 | RP-03 horizon from snapshots | 1 → 6 | The weather year defaults from the section-1 horizon. Section 6 shows "from your snapshots" or "default". |
-| RP-04 Generate inside the Time Series Manager | 6 | The Renewables tab *is* section 6's Expert depth. The per-row badge also shows on the generator's asset form (5) and links to its row in 6. **"Generate defaults for all"** is section 6's bulk action, in Guided and Expert. |
+| RP-04 Generate inside the Time Series Manager | 6 (overview, bulk), 5 (one generator) | The Renewables tab is section 6's Expert depth. Its per-row Generate opens the same editor the generator's Availability block mounts (§4.6). **"Generate defaults for all"** is section 6's bulk action, in Guided and Expert. |
 | RP-05 tuning panel | 6 (Expert depth) | Collapsed by default; Guided never shows it. |
 | RP-06 shaping, RP-07 compare | 6 (Expert depth) | Inside the Renewables tab / Profile Studio; no new destination. |
 | RP-08 chat default-first | 6 via the assistant | The workflow's steps gain `flow_section: profiles` (§3.6). |
@@ -249,6 +340,17 @@ Each ticket gets one home section. The coherence note says what the ticket must 
 | LC-04 parameter edits | every section | Each chat edit's old→new card names the flow section and field. Edits resolve to the same `target {section, entity, field}` the flow items use, and the flow state refreshes after a verified write. |
 | LC-05 ordered workflows | 9 (verify), every section | The verify step reads the flow endpoint. A workflow step's "done" is a section state (§3.6). |
 
+### 4.6 Generic time-series generators (`.scratch/timeseries-generators/`, branch `claude/timeseries-generators-spec`)
+
+The coordinator's proposed placement is **confirmed**: a series is parametrised where its owner is edited, and section 6 is the overview and QA of every series. One editor component per family is mounted in its owner's form. The section-6 row opens that same component in a drawer.
+
+| Ticket | Where it is parametrised | Section 6 shows | Coherence note |
+|---|---|---|---|
+| TSG-01 load generator (archetype or upload) | 4 Loads, on the load row: archetype (data centre, industrial, commercial, residential, EV, heat), parameters, or upload | provenance (`measured` / `synthetic` / `assumed`), QA result, stale flag | DC-01's AI-training model is the data-centre archetype here, so there's one load-model list, not two. Templates pre-fill the archetype choice (spec D3). |
+| TSG-02 availability | 5 Assets, the asset form's **Availability** block: maintenance windows, must-run (`p_min_pu`), derating | the same, per asset | **Forced outages** use the rate and repair time from the asset's **Reliability** block (the adequacy outage data). The Availability block shows them read-only and generates from them, so the two can never disagree (spec, families §2). |
+| TSG-03 other series | prices → 7 (on the tariff or market bundle; C2); inflow, COP, efficiency curves → 5 (on the asset); process schedules → 4 (product deliveries) and 5 (unit shutdowns) | all of them | A price series isn't an asset series: its owner is the tariff, so it is edited in 7. |
+| "Generate defaults for all" (all families) | — | the bulk action, Guided and Expert | One job, one undo step (RP-09). It fills only rows with no series. It never overwrites `measured`. |
+
 ---
 
 ## 5. Package B re-cut: the build plan
@@ -258,8 +360,8 @@ The spec's package B (B1 scenario rows, B2 tiered picker, B3 asset form, B4 seve
 | New | What | Replaces | Files (expected) | Gate |
 |---|---|---|---|---|
 | **B1 Flow backbone** | `services/flow_sections.py` (the code → section table and its completeness test), `GET /api/projects/{name}/flow`, the acknowledgement store, the assistant read tool `get_project_flow`, `flow_section:` on harness workflow steps | new | backend `services/`, `routers/projects.py`, `harness/workflows/*.md`, `harness/catalogue.py` (coordinator's go) | not gated (read-only over existing checks); the gatekeeper is told, since it reads `eh_readiness` |
-| **B2 Flow shell** | the Guided rail grows to the 10 sections (`pages/hubDesign/`: `flow.ts` states become content-based); the Expert sidebar regrouped into the 10 sections with state dots (`layout/sidebar/steps.tsx`); the Issues panel grouped by section; the Run button's disabled reason. **Moves:** tariff / contracts / finance / participants editors out of Results › Investment into section 7, leaving Results read-only with links; the discount-rate editor out of Solver settings (read-only there); the grid-code profile choice out of Studies › Campus electrical into section 3; island controls out of the island panel into section 5 | spec B4's "Review" step, part of B1 | frontend `layout/`, `pages/hubDesign/`, `pages/results/investment/`, `pages/economics/` | UX gate |
-| **B3 Asset form and picker** | spec B2 + B3 merged: the tiered picker (Standard / Advanced), and one asset form: General → Sizing (manual / auto-sized, min/max) → Controls (DC-04 presets) → Reliability (outage data) → Commercial (party tag, link to 7) → Availability (profile badge, link to 6). Multi-value chips create section-8 variants | spec B2, B3 | `layout/CreationForm.tsx`, `layout/properties/` | UX gate |
+| **B2 Flow shell** | the Guided rail grows to the 10 sections (`pages/hubDesign/`: `flow.ts` states become content-based); the Expert sidebar regrouped into the 10 sections with state dots (`layout/sidebar/steps.tsx`); the Issues panel grouped by section; the Run button's disabled reason. **Moves:** tariff / contracts / finance / participants editors out of Results › Investment into section 7, leaving Results read-only with links; the discount-rate editor out of Solver settings (read-only there); the grid-code profile choice out of Studies › Campus electrical into section 3; island controls out of the island panel into section 5; an energization table in section 3 (there is no Expert editor today); every Guided card made editable at its depth (J4); the stress-scenario editor out of Results › FMEA into section 8 | spec B4's "Review" step, part of B1 | frontend `layout/`, `pages/hubDesign/`, `pages/results/investment/`, `pages/economics/` | UX gate |
+| **B3 Asset form and picker** | spec B2 + B3 merged: the tiered picker (Standard / Advanced), and one asset form: General → Sizing (manual / auto-sized, min/max) → Controls (DC-04 presets) → Reliability (outage data) → Commercial (party tag, link to 7) → Availability (the series editors: profile, maintenance, must-run, derating; forced outages read from Reliability). Multi-value chips create section-8 variants. **Capacity Bounds** folds into Sizing (J15) | spec B2, B3 | `layout/CreationForm.tsx`, `layout/properties/` | UX gate |
 | **B4 New project** | Details → Location (map pin → lat/lon, country, timezone) → Template, then the project opens **in the flow** at the first incomplete section. The spec's Load, Connection, Tariffs and Review steps are sections 4, 3, 7 and 9; the wizard no longer duplicates them. | spec B4 | `layout/NewProjectWizard.tsx`, `pages/hubDesign/cards/StartCard.tsx` | UX gate |
 | **B5 Scenario rows** | spec B1, placed in section 8: each scenario row shows which sections it overrides (Physical = 2–6, Commercial = 7, Optimisation = 8) | spec B1 | `pages/Scenarios*` | UX gate |
 | **B6 Carriers & processes card** | the section-2 card: the carrier list with units, and the recipe list. It reads GTP-02's schema; editing recipes lands with GTP-07 | new | `pages/hubDesign/cards/`, sidebar row | UX gate; after GTP-02 |
@@ -305,7 +407,8 @@ Changes I ask for in tickets already queued. I'll send each to its session or to
 | DC-05 | DC-only by site type, a section-5 site field. |
 | GTP-07 | split the recipe (section 2) from the unit form (section 5). |
 | GTP-08 | lost-production value has its home in section 8, beside VOLL. |
-| RP-04 | the per-row badge also shows on the generator's asset form (B3), linked to its row in 6. |
+| RP-04 | Generation of one generator's profile is mounted in the generator's Availability block (B3). The Renewables tab rows open that same component in a drawer, so there is one editor. "Generate defaults for all" stays in the tab. |
+| TSG-01–03 | each family's editor is a component mounted in its owner's form (§4.6). Forced outages read the asset's Reliability block. |
 | RP-10 | the offer reads the section-6 items. |
 | LC-04 | the edit card names the section; edits resolve to flow `target`s. |
 | LC-05 | verify reads the flow endpoint. |
@@ -316,4 +419,19 @@ Changes I ask for in tickets already queued. I'll send each to its session or to
 
 ## 8. Open choices for the owner
 
-<!-- CHOICES -->
+Sent to the coordinator as options, recommendation first. The owner approves the design.
+
+1. **Carriers & processes as its own section.**
+   - (a) Section 2, before the connection *(recommended: every later section picks a carrier, so declaring it first removes a jump in each of them)*;
+   - (b) folded into Assets (5): fewer sections, but then the connection and loads can't offer H2/NH3 until assets exist;
+   - (c) part of Project & site (1).
+2. **Where the model horizon lives.**
+   - (a) In Project & site (1) *(recommended: energization, stage peaks and candidates are all per period)*;
+   - (b) in Time series (6), as in the starting cut: sections 3–5 are then filled before the period list exists.
+3. **Do warnings block Run?**
+   - (a) No; warnings can be acknowledged, but Run unlocks without it *(recommended: "assumed" values are normal early on, the owner's "qualify early" goal)*;
+   - (b) every warning must be acknowledged before Run;
+   - (c) acknowledgement required in Guided only.
+4. **One Run.**
+   - (a) One Run, computing what section 8 asks (optimisation, reliability study, or both) *(recommended: removes J2 and the two meanings of "Run")*;
+   - (b) keep two buttons, renamed "Solve" and "Run reliability study".
