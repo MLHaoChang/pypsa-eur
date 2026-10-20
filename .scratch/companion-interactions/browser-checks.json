@@ -1,0 +1,12 @@
+{
+  "purpose": "Actual isolated CompanionLauncher React component and built CSS; not authenticated full application E2E",
+  "groupsPassed": 3,
+  "groups": [
+    "Pointer mode callbacks, stable launcher and explicit live-text input",
+    "Live/work/media distinctions, retained draft and reduced-motion change",
+    "Mobile bounds, keyboard/tap opening, Escape and outside dismissal"
+  ],
+  "externalRequests": [],
+  "pageErrors": [],
+  "apiModelMediaCalls": 0
+}

@@ -1,0 +1,65 @@
+// Isolated actual React component/CSS journeys; no backend or model connection.
+import {createRequire} from 'node:module';
+import {readFile,writeFile,readdir,mkdtemp,mkdir,rm} from 'node:fs/promises';
+import {createServer} from 'node:http';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import assert from 'node:assert/strict';
+const frontend=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const repo=path.resolve(frontend,'../..');
+const output=path.join(repo,'.scratch/companion-interactions/previews');await mkdir(output,{recursive:true});
+const require=createRequire(path.join(frontend,'package.json'));
+let chromium;try{({chromium}=require('playwright'));}catch{({chromium}=createRequire(process.env.GRIDSPINE_PLAYWRIGHT_MODULE??'/opt/codex/runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/package.json')('playwright'));}
+const temporary=await mkdtemp(path.join(tmpdir(),'gridspine-companion-'));
+require('esbuild').buildSync({stdin:{contents:`import React,{useState} from 'react';import{createRoot}from'react-dom/client';import CompanionLauncher from './src/components/CompanionLauncher';function Fixture(){const[live,setLive]=useState(false);const[work,setWork]=useState('idle');const[action,setAction]=useState('None');return <main style={{position:'relative',height:'100dvh',background:'var(--color-bg)',color:'var(--color-text)'}}><h1 style={{padding:24}}>GridSpine companion · isolated UI fixture</h1><p style={{padding:24}}>No backend, microphone or model is connected.</p><div style={{padding:24}}><button onClick={()=>setWork('running')}>Fixture response running</button><button onClick={()=>setWork('waiting_for_approval')}>Fixture approval pending</button><p id="action">{action}</p></div><CompanionLauncher profileLabel="UI fixture" liveOpen={live} workState={work} onCompose={()=>setAction('Write selected')} onSpeak={()=>setAction('Dictate selected')} onLive={()=>setLive(v=>!v)} onProfiles={()=>setAction('Profile selected')} onLiveSubmit={()=>setAction('Explicit text submit')}/></main>}createRoot(document.getElementById('root')).render(<Fixture/>);`,resolveDir:frontend,loader:'tsx'},bundle:true,jsx:'automatic',format:'iife',outfile:path.join(temporary,'native.js'),logLevel:'silent'});
+const assets=path.join(frontend,'dist/assets');let css;
+for(const name of await readdir(assets)){if(name.endsWith('.css')){const text=await readFile(path.join(assets,name),'utf8');if(text.includes('.companion-actions')){css=text;break;}}}
+assert.ok(css,'Run npm run build before this component smoke test');
+const html='<!doctype html><html class="dark"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><link rel="stylesheet" href="/native.css"></head><body><div id="root"></div><script src="/native.js"></script></body></html>';
+const resources=new Map([['/',html],['/native.css',css],['/native.js',await readFile(path.join(temporary,'native.js'))]]);
+const server=createServer((req,res)=>{if(!resources.has(req.url)){res.writeHead(404);res.end();return;}res.writeHead(200,{'Content-Type':req.url.endsWith('.js')?'text/javascript':req.url.endsWith('.css')?'text/css':'text/html'});res.end(resources.get(req.url));});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${server.address().port}`;
+const browser=await chromium.launch({headless:true,executablePath:process.env.GRIDSPINE_CHROMIUM_PATH??'/usr/bin/chromium',args:['--no-sandbox','--disable-dev-shm-usage']});
+const blocked=[],errors=[];
+try{
+ const context=await browser.newContext({viewport:{width:1100,height:900},reducedMotion:'no-preference'});
+ await context.route(/^https?:/,route=>{const url=route.request().url();if(url.startsWith(base)&&resources.has(url.slice(base.length)))return route.continue();blocked.push(url);return route.abort();});
+ const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));await page.goto(base);
+ const orb=page.getByRole('button',{name:'Choose how to chat with GridSpine'});
+ const actions=page.getByRole('group',{name:'GridSpine conversation options'});
+ assert.equal(await actions.isVisible(),false);const before=await orb.boundingBox();await orb.hover();assert.equal(await actions.isVisible(),true);
+ const after=await orb.boundingBox();assert.ok(Math.abs(before.y-after.y)<20,'Opening choices moved the launcher away from the pointer');
+ await page.screenshot({path:path.join(output,'hover.png')});
+ await page.getByRole('button',{name:'Compose a message'}).click();assert.equal(await page.locator('#action').textContent(),'Write selected');
+ await orb.hover();await page.getByRole('button',{name:'Open reviewed dictation'}).click();assert.equal(await page.locator('#action').textContent(),'Dictate selected');
+ await orb.hover();await page.getByRole('button',{name:'Live chat',exact:true}).click();
+ assert.equal(await page.getByRole('textbox',{name:'Message the assistant'}).evaluate(input=>input===document.activeElement),true);
+ assert.equal(await page.getByTestId('companion-launcher').getAttribute('data-media-state'),'off');
+ assert.equal(await page.getByTestId('companion-character').evaluate(node=>getComputedStyle(node).animationName),'companion-live-breathe');
+ await page.getByRole('textbox',{name:'Message the assistant'}).fill('Retained live-text draft');
+ await page.keyboard.press('Escape');assert.equal(await orb.evaluate(node=>node===document.activeElement),true);
+ await orb.hover();await page.getByRole('button',{name:'Live chat',exact:true}).click();
+ assert.equal(await page.getByRole('textbox',{name:'Message the assistant'}).inputValue(),'Retained live-text draft');
+ await page.getByRole('button',{name:'Fixture response running'}).click();assert.equal(await page.getByTestId('companion-work-status').textContent(),'Response in progress');
+ await page.getByRole('button',{name:'Fixture approval pending'}).click();assert.equal(await page.getByTestId('companion-work-status').textContent(),'Needs approval');
+ await page.screenshot({path:path.join(output,'live-text.png')});
+ await page.emulateMedia({reducedMotion:'reduce'});await page.waitForFunction(()=>document.querySelector('[data-testid="companion-launcher"]').dataset.motion==='off');
+ assert.equal(await page.getByTestId('companion-character').evaluate(node=>getComputedStyle(node).animationName),'none');
+ assert.equal(await page.locator('.companion-live-orbit').evaluate(node=>getComputedStyle(node).animationName),'none');
+ await page.setViewportSize({width:390,height:844});await orb.focus();await orb.click();assert.equal(await actions.isVisible(),true);
+ assert.equal(await actions.evaluate(node=>{const r=node.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight}),true);
+ await page.screenshot({path:path.join(output,'mobile-menu.png')});
+ await page.keyboard.press('Escape');assert.equal(await actions.isVisible(),false);await orb.press('Enter');assert.equal(await actions.isVisible(),true);
+ await page.getByRole('heading').click();assert.equal(await actions.isVisible(),false);
+ const touch=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true,reducedMotion:'reduce'});
+ await touch.route(/^https?:/,route=>{const url=route.request().url();if(url.startsWith(base)&&resources.has(url.slice(base.length)))return route.continue();blocked.push(url);return route.abort();});
+ const touchPage=await touch.newPage();touchPage.on('pageerror',error=>errors.push(error.message));await touchPage.goto(base);
+ await touchPage.getByRole('button',{name:'Choose how to chat with GridSpine'}).tap();
+ assert.equal(await touchPage.getByRole('group',{name:'GridSpine conversation options'}).isVisible(),true);
+ await touchPage.getByRole('button',{name:'Open reviewed dictation'}).tap();assert.equal(await touchPage.locator('#action').textContent(),'Dictate selected');
+ assert.equal(await touchPage.getByTestId('companion-launcher').getAttribute('data-media-state'),'off');await touch.close();
+ assert.deepEqual(blocked,[]);assert.deepEqual(errors,[]);
+ await writeFile(path.join(repo,'.scratch/companion-interactions/browser-checks.json'),JSON.stringify({purpose:'Actual isolated CompanionLauncher React component and built CSS; not authenticated full application E2E',groupsPassed:3,groups:['Pointer mode callbacks, stable launcher and explicit live-text input','Live/work/media distinctions, retained draft and reduced-motion change','Mobile bounds, keyboard/tap opening, Escape and outside dismissal'],externalRequests:blocked,pageErrors:errors,apiModelMediaCalls:0},null,2)+'\n');
+ process.stdout.write('3 native-component browser journey groups passed; no API/model/media calls.\n');
+}finally{await browser.close();await new Promise(resolve=>server.close(resolve));await rm(temporary,{recursive:true,force:true});}

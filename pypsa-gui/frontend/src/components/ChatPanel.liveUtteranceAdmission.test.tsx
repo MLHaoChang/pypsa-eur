@@ -176,7 +176,7 @@ it('non-live card queue omits utterance admission fields', async () => {
 it('Chat here uses the real typed admission path without claiming capture or playback', async () => {
   useUIStore.setState({ assistantDockOpen: false })
   renderPanel(true)
-  fireEvent.click(await screen.findByRole('button', { name: 'Chat here' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Live chat' }))
   expect(screen.getByRole('button', { name: 'Start voice' }).hasAttribute('disabled')).toBe(true)
   expect(screen.getByText(/Continuous voice is not connected/)).toBeTruthy()
   const launcher = screen.getByTestId('companion-launcher')
@@ -201,7 +201,7 @@ it('Chat here uses the real typed admission path without claiming capture or pla
 it('pending decisions remain distinct from media and closing in-page chat does not abort work', async () => {
   useUIStore.setState({ assistantDockOpen: false })
   renderPanel(true)
-  fireEvent.click(await screen.findByRole('button', { name: 'Chat here' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Live chat' }))
   fireEvent.change(screen.getByRole('textbox', { name: 'Message the assistant' }), {
     target: { value: 'Run a simulation' },
   })
@@ -215,7 +215,7 @@ it('pending decisions remain distinct from media and closing in-page chat does n
   expect(screen.getByTestId('companion-work-status').textContent).toBe('Needs approval')
   expect(screen.getByTestId('companion-launcher').getAttribute('data-media-state')).toBe('off')
   const cleanup = useChatStore.getState().streamCleanup
-  fireEvent.click(screen.getByRole('button', { name: 'Close chat here' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Close live chat' }))
   expect(useChatStore.getState().streamCleanup).toBe(cleanup)
   expect(useChatStore.getState().pending?.tool_use_id).toBe('solve-1')
   expect(screen.getByTestId('companion-confirmation')).toBeTruthy()

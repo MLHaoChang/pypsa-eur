@@ -1,0 +1,24 @@
+{
+  "base_sha": "fed26ad438d082c410e42a5c25a567cd738bc62b",
+  "scope": "Companion presentation and mode entry only; native integrated-planning adapters are not implemented by this patch",
+  "frontend_tests": {
+    "first_group": {
+      "files": 5,
+      "passed": 82
+    },
+    "additional_disjoint_group": {
+      "files": 3,
+      "passed": 23
+    }
+  },
+  "build": "TypeScript and Vite production build passed; large-chunk warning only",
+  "browser": "3 actual-component/CSS journey groups including actual touch context; not authenticated full application E2E",
+  "source_sha256": {
+    "pypsa-gui/frontend/src/components/CompanionLauncher.tsx": "d4f9833f3ed846d0c34d2402a118a31979e6c2f0aee2b926d20a99eb85787fda",
+    "pypsa-gui/frontend/src/components/Pearl.tsx": "9985c6dd58ac84c0aef34c2798135cd3ff0cbf7551ad1b27f6dcf70462a94907",
+    "pypsa-gui/frontend/src/index.css": "432f7bd3ce89283786d6df6bbed37645d03519ab53c3d42579f30cdf41b4fce6"
+  },
+  "ux_review": "Exact-head UX approval pending; no reviewer-session messaging capability available",
+  "remote_ci": "Pending publication",
+  "paid_api_model_media_calls": 0
+}

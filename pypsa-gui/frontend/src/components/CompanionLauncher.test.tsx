@@ -49,6 +49,28 @@ describe('CompanionLauncher', () => {
     expect(screen.getByTestId('companion-profile').textContent).toBe('Claude')
   })
 
+  it('shows named modes on focus and touch without starting capture or work, and Escape returns to the character', async () => {
+    mockMotion(false)
+    const props = { profileLabel: 'Model', onCompose: vi.fn(), onSpeak: vi.fn(), onLive: vi.fn(), onProfiles: vi.fn() }
+    const user = userEvent.setup()
+    render(<CompanionLauncher {...props} />)
+    const launcher = screen.getByRole('button', { name: 'Choose how to chat with GridSpine' })
+    expect(launcher.getAttribute('aria-expanded')).toBe('false')
+    await user.click(launcher)
+    expect(launcher.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('Write')).toBeTruthy()
+    expect(screen.getByText('Dictate')).toBeTruthy()
+    expect(screen.getByText('Live chat')).toBeTruthy()
+    expect(props.onCompose).not.toHaveBeenCalled()
+    expect(props.onSpeak).not.toHaveBeenCalled()
+    expect(props.onLive).not.toHaveBeenCalled()
+    await user.tab()
+    await user.keyboard('{Escape}')
+    expect(document.activeElement).toBe(launcher)
+    expect(launcher.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.getByTestId('companion-launcher').getAttribute('data-media-state')).toBe('off')
+  })
+
   it('drops decorative motion when the user prefers reduced motion', () => {
     mockMotion(true)
     render(
@@ -77,8 +99,8 @@ describe('CompanionLauncher', () => {
     )
     const root = screen.getByTestId('companion-launcher')
     const svg = screen.getByTestId('companion-character').querySelector('svg')
-    expect(svg?.getAttribute('width')).toBe('112')
-    expect(svg?.getAttribute('height')).toBe('112')
+    expect(svg?.getAttribute('width')).toBe('84')
+    expect(svg?.getAttribute('height')).toBe('84')
     expect(root.getAttribute('data-hovered')).toBe('false')
     expect(screen.getByTestId('companion-actions').className.split(/\s+/)).toContain('companion-actions')
     fireEvent.mouseEnter(root)
@@ -107,7 +129,7 @@ describe('CompanionLauncher', () => {
     expect(screen.getByTestId('companion-speak').getAttribute('aria-pressed')).toBeNull()
   })
 
-  it('shows the character while closed and a grid node while Live is open', () => {
+  it('keeps the dimensional character and marks live presentation separately from media', () => {
     mockMotion(false)
     const props = {
       profileLabel: 'Model',
@@ -117,11 +139,11 @@ describe('CompanionLauncher', () => {
       onProfiles: vi.fn(),
     }
     const { rerender } = render(<CompanionLauncher {...props} />)
-    expect(screen.getByTestId('companion-character').getAttribute('data-shape')).toBe('character')
+    expect(screen.getByTestId('companion-character').getAttribute('data-shape')).toBe('pearl')
     expect(screen.getByTestId('companion-live').getAttribute('aria-pressed')).toBe('false')
     rerender(<CompanionLauncher {...props} workState="running" liveOpen />)
-    expect(screen.getByTestId('companion-character').getAttribute('data-shape')).toBe('live-node')
-    expect(screen.getByTestId('companion-live-node')).toBeTruthy()
+    expect(screen.getByTestId('companion-character').getAttribute('data-shape')).toBe('pearl')
+    expect(screen.getByTestId('companion-pearl').querySelector('.companion-live-orbit')).toBeTruthy()
     expect(screen.getByTestId('companion-live').getAttribute('aria-pressed')).toBe('true')
   })
 
@@ -171,7 +193,7 @@ describe('CompanionLauncher', () => {
     const outside = block.slice(0, gate)
     expect(outside).not.toMatch(/animation\s*:/)
     expect(outside).not.toMatch(/transition\s*:/)
-    // Actions are discoverable without hover on every pointer/motion path.
+    // The disclosure stays opaque; focus/tap access is exercised by interaction/browser checks.
     expect(outside).toMatch(/\.companion-actions\s*\{[^}]*opacity:\s*1/)
     const gated = block.slice(gate)
     expect(gated).not.toMatch(/opacity:\s*0\s*;/)

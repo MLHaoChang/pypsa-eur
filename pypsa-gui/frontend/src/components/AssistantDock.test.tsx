@@ -183,7 +183,7 @@ describe('assistant dock prominence', () => {
     expect(useUIStore.getState().assistantEntry).toBeNull()
     expect(screen.getByTestId('companion-launcher').getAttribute('data-presence')).toBe('idle')
     expect(screen.getByTestId('companion-launcher').getAttribute('data-media-state')).toBe('off')
-    expect(screen.getByTestId('companion-live').textContent).toBe('Chat here')
+    expect(screen.getByTestId('companion-live').textContent).toBe('Close live chatText on this page')
     expect(screen.getByRole('button', { name: 'Start voice' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByText(/Continuous voice is not connected/)).toBeTruthy()
     expect(screen.getByTestId('companion-live-input')).toBeTruthy()
@@ -357,9 +357,9 @@ describe('assistant dock prominence', () => {
     ensureLiveDurableThread.mockImplementationOnce(() => new Promise((_, reject) => { rejectBind = reject }))
     const user = userEvent.setup()
     render(<AssistantDock />)
-    await user.click(screen.getByRole('button', { name: 'Chat here' }))
-    await user.click(screen.getByRole('button', { name: 'Close chat here' }))
-    await user.click(screen.getByRole('button', { name: 'Chat here' }))
+    await user.click(screen.getByRole('button', { name: 'Live chat' }))
+    await user.click(screen.getByRole('button', { name: 'Close live chat' }))
+    await user.click(screen.getByRole('button', { name: 'Live chat' }))
     await act(async () => rejectBind(new Error('late bind failure')))
     expect(screen.getByTestId('companion-live-caption').textContent).toBe(
       'Type a message here, or open reviewed dictation in the assistant.',
