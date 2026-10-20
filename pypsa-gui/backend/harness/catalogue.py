@@ -3072,6 +3072,27 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id"],
     ),
     _t(
+        "grid_readiness",
+        "The grid-readiness scorecard of a project (DC grid readiness 02): an "
+        "advisory red-flag screening against its connection limits and a "
+        "grid-code profile (default the campus study's last profile, else "
+        "eu_rfg_dcc_ce; generic_assumed or a published project profile also). "
+        "Returns {profile, rows, summary}: each row {id, requirement, limit, "
+        "unit, source, project_value, verdict pass|warn|fail|unknown, assumed, "
+        "note, section, target}. Rows: SCR, peak against the energized import "
+        "after losses plus firm gensets per period, ramp rate, oscillation and "
+        "rapid voltage change from the AI-training envelope (before UPS/BESS "
+        "smoothing), reactive range, frequency support and the profile's "
+        "dynamic requirements (always unknown: an EMT study is needed), grid "
+        "former, island ride-through per scenario, LOLE against the goal. "
+        "unknown means an input is missing, never a pass; say which. Say which "
+        "limits are assumed. It never blocks a run. 422 for an unknown "
+        "profile. Safety: read.",
+        {"project_id": {"type": "string"},
+         "profile": {"type": "string", "description": "a grid-code profile id"}},
+        ["project_id"],
+    ),
+    _t(
         "campus_set_island_config",
         "Save a hub project's island requirements: the whole island_config.json "
         "sidecar as a JSON object, which replaces the project's copy. It is "
@@ -4112,6 +4133,7 @@ TOOL_ROUTES: dict[str, list] = {
     # campus island (3, campus island plan I9a) — service calls; the two
     # write tools check the named project's lock in their dispatchers
     "campus_island_config": _SERVICE_CALL,
+    "grid_readiness": _SERVICE_CALL,
     "campus_set_island_config": _SERVICE_CALL,
     "campus_run_island_study": _SERVICE_CALL,
     "campus_island_cuts": _SERVICE_CALL,
