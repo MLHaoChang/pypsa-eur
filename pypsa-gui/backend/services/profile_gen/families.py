@@ -50,6 +50,10 @@ class Family:
     generate: _Generate | None = None
     # Where an artifact of this family goes when the caller names no target.
     default_target: Target | None = None
+    # (ctx, replace_generated) -> rows: the family's "Generate defaults for
+    # all" plugin (`profile_gen/defaults.py`) — per component a plan
+    # {"plan": {...}} or {"skipped": reason}. None: the family has no default.
+    defaults: Callable[[Any, bool], list[dict[str, Any]]] | None = None
 
 
 _FAMILIES: dict[str, Family] = {}
@@ -58,6 +62,10 @@ _FAMILIES: dict[str, Family] = {}
 def register_family(family: Family) -> None:
     """Register (or replace) a family."""
     _FAMILIES[family.name] = family
+
+
+def all_families() -> list[Family]:
+    return list(_FAMILIES.values())
 
 
 def family_of(meta: Mapping[str, Any]) -> str:
@@ -181,9 +189,15 @@ def _load_generate(ids, archetype, params, year):
     return generate_frame(ids, archetype, params, year)
 
 
+def _load_defaults(ctx, replace_generated: bool) -> list[dict[str, Any]]:
+    from services.profile_gen.defaults import load_defaults
+
+    return load_defaults(ctx, replace_generated)
+
+
 register_family(Family("load", frozenset({("loads", "p_set")}),
                        guard=_load_guard, generate=_load_generate,
-                       default_target=("loads", "p_set")))
+                       default_target=("loads", "p_set"), defaults=_load_defaults))
 _WEATHER = re.compile(r"wind|solar|(?<![a-z])pv(?![a-z])")
 
 

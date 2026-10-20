@@ -205,6 +205,17 @@ class CurrentSeriesRequest(BaseModel):
     component: str
 
 
+class DefaultsPreviewRequest(BaseModel):
+    # "Generate defaults for all" (services/profile_gen/defaults.py).
+    replace_generated: bool = False
+    # Components sized by their peak (= static p_set) instead of their mean.
+    peak_sized: list[str] = Field(default_factory=list)
+
+
+class DefaultsApplyRequest(BaseModel):
+    job_ids: list[str] = Field(min_length=1)
+
+
 class RefineRequest(BaseModel):
     # A pending artifact to refine by deterministic ops
     # (services/profile_gen/refine.py); the result is a new pending artifact.
@@ -1088,6 +1099,88 @@ def pending_from_current(
                                      annual_mwh=float(v.mean()) * hours)
     warnings, weeks = _dry_run(ctx, frame, record)
     return {**record, "stats": stats, "warnings": warnings, "weeks": weeks}
+
+
+@project_router.post("/{name}/profiles/defaults/preview")
+def preview_default_series(
+    body: DefaultsPreviewRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Every family's default series, one row per component: a generated
+    pending series (its reason, sizing, stats, warnings and preview week),
+    or why it is skipped. Nothing touches the network here."""
+    from services.profile_gen.defaults import preview_defaults
+
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "preview defaults")
+    rows = preview_defaults(ctx, str(proj.directory), proj.name,
+                            replace_generated=body.replace_generated,
+                            peak_sized=frozenset(body.peak_sized))
+    out = []
+    for row in rows:
+        record = row.pop("record", None)
+        if record is not None:
+            nc, _meta = _pending_artifact(proj, row["job_id"])
+            with xr.open_dataset(nc) as ds:
+                frame = ds.to_dataframe()
+            frame.index = pd.DatetimeIndex(frame.index)
+            dry, weeks = _dry_run(ctx, frame[[row["component"]]], record)
+            row["warnings"] = sorted({*row["warnings"], *dry})
+            row["week"] = weeks.get(row["component"])
+        out.append(row)
+    return {"rows": out}
+
+
+@project_router.post("/{name}/profiles/defaults/apply")
+def apply_default_series(
+    body: DefaultsApplyRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Apply the chosen default series under ONE undo step. Each row is
+    re-checked (a measured series is never replaced) and reported on its
+    own: a refusal does not roll the others back; undo reverts the batch."""
+    from services.network_undo import push_undo_snapshot
+
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "apply defaults")
+    push_undo_snapshot()
+    results = []
+    for job_id in body.job_ids:
+        try:
+            nc, meta = _pending_artifact(proj, job_id)
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+            results.append({"job_id": job_id, "component": None, "applied": False, **detail})
+            continue
+        component = (meta.get("points") or [None])[0]
+        try:
+            component_type, attribute = default_target(meta, None, None)
+            key = (component_type, attribute, component)
+            if key in ctx.user_ts and not ctx.user_ts_meta.get(key):
+                results.append({"job_id": job_id, "component": component, "applied": False,
+                                "error_kind": "measured_series_kept",
+                                "message": f"{component!r} carries a measured upload "
+                                           "now; a default never replaces it"})
+                continue
+            with xr.open_dataset(nc) as ds:
+                frame = ds.to_dataframe()
+            frame.index = pd.DatetimeIndex(frame.index)
+            summary = assign_profile(ctx, component, frame[component], meta,
+                                     component_type=component_type, attribute=attribute)
+        except ProfileApplyError as exc:
+            results.append({"job_id": job_id, "component": component, "applied": False,
+                            **_apply_refusal_kind(exc), "message": str(exc)})
+            continue
+        results.append({"job_id": job_id, "component": component, "applied": True,
+                        "warnings": summary.get("warnings", []),
+                        "peak": summary.get("peak")})
+    return {"results": results,
+            "applied": sum(r["applied"] for r in results),
+            "undo": "one undo reverts every series applied here"}
 
 
 @project_router.post("/{name}/profiles/refine")

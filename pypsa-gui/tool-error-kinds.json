@@ -947,6 +947,10 @@
       "surface": "inline",
       "why": "An annual energy target was asked for on a series read from a snapshot window, whose year outside the window is unknown. The detail asks for the window's MWh; the assistant restates it with basis window, per call."
     },
+    "measured_series_kept": {
+      "surface": "inline",
+      "why": "A default series was about to replace a component that carries a measured upload (one arrived after the preview). The row is skipped and says so; the others apply. The assistant reports the row, per call."
+    },
     "point_not_in_profile": {
       "surface": "inline",
       "why": "apply_generated_profile asked for a point the pending profile does not hold. The detail lists the points it does hold; the assistant picks the right point_id, per call."
