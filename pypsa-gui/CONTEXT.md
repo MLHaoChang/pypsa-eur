@@ -194,6 +194,25 @@ before any UPS/BESS smoothing; every value assumed. Stored under `dc_load` in
 the project's `eh_template.json`, read with `read_envelope`.
 _Avoid_: ramp profile, transient study
 
+**Control preset**:
+A named converter control and UPS behaviour for the island sidecar
+(`grid_following`, `grid_forming_support`, `fast_frequency_response`,
+`voltage_support`). It sets the converter mode, its droop and inertia, and
+the UPS ride-through. The presets are gridspine's
+(`gridspine/schema/island.py` `PRESETS`). A project selects one with
+`POST /api/campus-electrical/{name}/island/preset`, and a unit's own
+`preset` overrides the project's. Grid forming and FFR apply to a bess
+only, because that is what the island LP credits.
+_Avoid_: profile preset (that's the profile generator), mode, template
+
+**Grid service**:
+What a project's converters offer the grid, as `offered_services` derives it
+from each unit's effective control: `grid_forming`, `synthetic_inertia`,
+`frequency_containment`, `fast_frequency_response` and `voltage_control`. A
+mode the island study does not credit, such as a GFM on PV, is listed as
+`not_credited`, not offered. The grid-readiness check reads these.
+_Avoid_: ancillary service (that's a market product), capability
+
 ## Assistant language
 
 The in-app assistant's own vocabulary. The code lives in
