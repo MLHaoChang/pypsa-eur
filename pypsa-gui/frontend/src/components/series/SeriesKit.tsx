@@ -52,6 +52,9 @@ export function PendingCard({
   const modelled = sumModelled(stats.modelled_mwh)
   const warnings = [...(pending.warnings ?? []),
     ...(pending.qa_warnings ?? []).filter(w => w.column === component).map(w => w.message)]
+  // The preview ran apply's own alignment; when it could not, apply refuses
+  // the same way, so the button would only fail.
+  const blocked = warnings.find(w => w.startsWith('not_applicable:'))
 
   return (
     <div className="border border-border rounded p-2 mt-2" data-testid="pending-card">
@@ -83,7 +86,8 @@ export function PendingCard({
         </ul>
       )}
       <div className="flex items-center gap-2 mt-2">
-        <Btn variant="primary" onClick={() => apply.mutate()} disabled={apply.isPending}>
+        <Btn variant="primary" onClick={() => apply.mutate()} disabled={apply.isPending || !!blocked}
+          title={blocked ? 'This network cannot take the series yet; see the warning' : undefined}>
           <Check size={13} /> Apply to {component}
         </Btn>
         {apply.isError && <span className="text-[11px] text-red-600" data-testid="apply-error">{errorText(apply.error)}</span>}

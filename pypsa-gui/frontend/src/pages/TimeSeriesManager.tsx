@@ -6,7 +6,7 @@ import {
 import {
   Download, Upload, FileSpreadsheet, CheckCircle2, Circle, AlertCircle,
   BarChart3, Layers, Zap, Flame, Atom, Gauge, ArrowDownToLine, ChevronDown,
-  Coins, Trash2, SlidersHorizontal,
+  Coins, Trash2, SlidersHorizontal, X,
 } from 'lucide-react'
 import { networkApi } from '../api/network'
 import type {
@@ -2055,6 +2055,11 @@ export default function TimeSeriesManager() {
           title={`Profile of ${seriesEditor.load}`}
           panelClassName="bg-bg rounded-xl shadow-2xl w-[560px] max-w-[95vw] max-h-[90vh] overflow-auto p-4"
         >
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-semibold">Profile of {seriesEditor.load}</h2>
+            <button type="button" aria-label="Close" className="text-muted hover:text-text"
+              onClick={() => setSeriesEditor(null)}><X size={14} /></button>
+          </div>
           <LoadSeriesEditor
             key={`${seriesEditor.load}:${seriesEditor.tab}`}
             project={currentProject}

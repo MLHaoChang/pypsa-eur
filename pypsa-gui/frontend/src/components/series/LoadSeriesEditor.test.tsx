@@ -107,6 +107,19 @@ describe('LoadSeriesEditor', () => {
     expect((await screen.findByTestId('applied')).textContent).toContain('Undo reverts it')
   })
 
+  it('holds Apply when the preview says this network cannot take the series', async () => {
+    api.generateLoad.mockResolvedValue({ ...PENDING,
+      stats: { plant: { peak_mw: 80, annual_mwh: 400000, modelled_mwh: null } },
+      warnings: ['not_applicable: network snapshots: snapshots must span one full calendar year'] })
+    renderEditor()
+    await screen.findByRole('option', { name: 'industrial' })
+    await userEvent.type(screen.getByRole('textbox', { name: 'Peak MW' }), '80')
+    await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
+    const btn = await screen.findByRole('button', { name: /Apply to plant/ })
+    expect((btn as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('stat-modelled').textContent).toBe('—')
+  })
+
   it('reads a measured upload with its unit', async () => {
     api.uploadLoad.mockResolvedValue({ ...PENDING, provenance: 'measured', unmatched: ['shed'] })
     renderEditor('guided', 'upload')

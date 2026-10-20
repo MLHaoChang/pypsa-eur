@@ -94,21 +94,21 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
               </optgroup>
             </select>
           </label>
-          <label className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <span className="w-20 text-muted">Scale</span>
             <Seg value={scaleKind} onChange={setScaleKind}
               options={[{ value: 'peak', label: 'Peak MW' }, { value: 'energy', label: 'Annual MWh' }]} />
             <input aria-label={scaleKind === 'peak' ? 'Peak MW' : 'Annual MWh'} className={`${INPUT} w-24`}
               inputMode="decimal" value={scale} onChange={e => setScale(e.target.value)} />
-          </label>
-          <button type="button" className="text-[11px] text-accent" onClick={() => setAdvanced(!advanced)}>
+          </div>
+          <button type="button" className="block text-[11px] text-accent" onClick={() => setAdvanced(!advanced)}>
             {advanced ? 'Hide advanced' : 'Advanced'}
           </button>
           {advanced && (
-            <div className="grid grid-cols-2 gap-1" data-testid="archetype-params">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1" data-testid="archetype-params">
               {Object.entries(defaults).filter(([k]) => !SCALE_KEYS.has(k)).map(([k, v]) => (
                 <label key={k} className="flex items-center gap-1">
-                  <span className="text-muted truncate w-28" title={k}>{k}</span>
+                  <span className="text-muted flex-1 min-w-0 break-words" title={k}>{k.replace(/_/g, ' ')}</span>
                   <input aria-label={k} className={`${INPUT} w-24`}
                     placeholder={v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)}
                     value={overrides[k] ?? ''} onChange={e => setOverrides({ ...overrides, [k]: e.target.value })} />
