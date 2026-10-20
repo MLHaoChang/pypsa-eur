@@ -58,14 +58,14 @@ Today's editors are spread over Economics › Basis / Tariffs & contracts / Libr
 
 The optimisation already reads money values whose home is section 7. Switching the Commercial group off must never hide them (design §3.2: never hide a blocker; unknown is never complete). So every section-7 field belongs to one of two classes, and **each new money field is classified when it is added**:
 
-- **(a) Read by the optimisation: always shown while Capacity is on**, whatever the Commercial group's state:
+- **(a) `lp_input`, read by the optimisation: always shown while Capacity is on**, under the heading "Prices the optimisation uses", whatever the Commercial group's state:
   - every tariff item `lp_bindings` binds: energy and TOU periods, demand, capacity, tiers, group caps;
   - the connection capacity fee (`connection.add_fee_term`);
   - the export price series;
   - PPAs with `changes_dispatch`;
   - the LP discount rate;
   - any market series that feeds one of these.
-- **(b) Commercial and finance proper: follows the group**:
+- **(b) `commercial`, commercial and finance proper: follows the group**:
   - bill-only tariff items (fixed per month or day, per kVA-year), which the LP refuses by name;
   - contracts that settle after the solve;
   - parties and value flows;
@@ -75,6 +75,11 @@ The optimisation already reads money values whose home is section 7. Switching t
   - report variants.
 
 Section 7 is therefore **never `not_needed` while Capacity is on**. With the group off, only (b) collapses: its items are `in_scope: false` (#444 §5.2), and 10 › Commercial reads "Outside scope". A block below holds fields of both classes. Its (a) fields stay visible when (b) collapses.
+
+Rules that make it hold:
+- **The tag lives with the field definition**, in one place (the model or its field registry), not in the UI.
+- **A test asserts that every input `lp_bindings` reads is tagged `lp_input`**, so a new LP-bound field can't slip into the collapsible part.
+- **A dispatch-changing contract** (a PPA with `changes_dispatch`) stays listed with the group off, marked "changes dispatch", and **stays in effect**. Whether switching the group off should offer to exclude it from the LP is an engine question for K0 (§8). Until K0 answers, the default is: listed and in effect.
 
 
 Each value has one home. A value used elsewhere is shown read-only with a link (design §2.2). **Rule for per-asset values:** values the LP reads (overnight cost, lifetime) live on the asset in section 5 (#444 B1). Finance-only per-asset values (COD, degradation, depreciation class) live in 7d's per-asset table and show read-only in the asset form's Commercial block.
@@ -111,7 +116,7 @@ Each value has one home. A value used elsewhere is shown read-only with a link (
 - Per-asset COD, degradation and depreciation class.
 - The project-wide default lifetime.
 - The editor-less fields (`stage_capex_lead_years`, `construction_months_by_asset`) gain a field here.
-- **The LP's discount rate** (`solver_config.discount_rate`, used for annuitising capital in the optimisation) also lives here, beside WACC. They are two values with two meanings, and the existing finance gate checks they are consistent. Solver Settings shows the LP rate read-only (#444 §6.2, J6). Whether the LP rate should be derived from WACC is a semantics question for the gatekeeper (§8).
+- **The LP's discount rate** (`solver_config.discount_rate`, labelled **"Optimisation annuity rate"**: it annuitises capital in the optimisation; `lp_input`) also lives here, beside WACC (labelled **"Investment-case discount rate (WACC)"**: it discounts the investment case's cashflows; `commercial`). They are two values with two meanings, and the existing finance gate checks they are consistent. Solver Settings shows the LP rate read-only (#444 §6.2, J6). Whether the LP rate should be derived from WACC is a semantics question for the gatekeeper (§8).
 
 ### 7e Parties
 - The **party board** (C5) is the only editor of `ValueFlowConfig`: one column per party, income and expense cards, a % split per card, and an "unassigned" tray backed by the ledger's conservation check.
