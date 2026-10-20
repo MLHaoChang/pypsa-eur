@@ -58,8 +58,7 @@ export default function MarketPricesBlock({ cfg }: { cfg: CommercialConfig }) {
     <section className="space-y-1 border border-border rounded p-2" data-testid="ic-market-prices">
       <h4 className="text-[11px] font-semibold">Prices the optimisation uses</h4>
       <p className="text-[11px] text-muted">
-        Library price series (€/MWh). They are read by the optimisation, so they stay here when
-        the Commercial group is off.</p>
+        Library price series (€/MWh). Read by the optimisation (it prices import and export).</p>
       {series.isError && <p className="text-[11px] text-warn">The Library's series could not be listed.</p>}
       {cfg.export_link && (
         <label className="flex items-center gap-2 flex-wrap">
