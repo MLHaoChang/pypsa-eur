@@ -30,12 +30,14 @@ function sumModelled(m: Record<string, number> | null | undefined): number | nul
 
 /** One pending artifact for one component: its numbers, warnings and Apply. */
 export function PendingCard({
-  project, component, pending, power, onApplied,
+  project, component, pending, power, unit, onApplied,
 }: {
   project: string
   component: string
   pending: PendingSeries
   power: boolean
+  /** The unit of a non-power series' min/mean/max (MW for an inflow). */
+  unit?: string
   onApplied?: (r: SeriesApplyResult) => void
 }) {
   const qc = useQueryClient()
@@ -74,10 +76,13 @@ export function PendingCard({
           </div>
         </dl>
       ) : (
-        <dl className="grid grid-cols-3 gap-1 text-[11px]">
-          <div><dt className="text-muted">Min</dt><dd>{fmt(stats.min, 3)}</dd></div>
-          <div><dt className="text-muted">Mean</dt><dd>{fmt(stats.mean, 3)}</dd></div>
-          <div><dt className="text-muted">Max</dt><dd>{fmt(stats.max, 3)}</dd></div>
+        <dl className="grid grid-cols-4 gap-1 text-[11px]">
+          <div><dt className="text-muted">Min</dt><dd data-testid="stat-min">{fmt(stats.min, 3)}{unit ? ` ${unit}` : ''}</dd></div>
+          <div><dt className="text-muted">Mean</dt><dd>{fmt(stats.mean, 3)}{unit ? ` ${unit}` : ''}</dd></div>
+          <div><dt className="text-muted">Max</dt><dd data-testid="stat-max">{fmt(stats.max, 3)}{unit ? ` ${unit}` : ''}</dd></div>
+          {stats.annual_mwh != null && (
+            <div><dt className="text-muted">Year</dt><dd data-testid="stat-annual">{fmt(stats.annual_mwh, 0)} MWh</dd></div>
+          )}
         </dl>
       )}
       {warnings.length > 0 && (

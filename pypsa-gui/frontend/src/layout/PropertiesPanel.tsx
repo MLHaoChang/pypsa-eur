@@ -10,6 +10,7 @@ import { H2Icon } from '../components/AssetIcons'
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
 import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
 import AvailabilityEditor from '../components/series/AvailabilityEditor'
+import SeriesEditor from '../components/series/SeriesEditor'
 import { useUIStore } from '../store/uiStore'
 import { editScope, loadExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
@@ -1824,6 +1825,16 @@ function LinkPanel({ name }: { name: string }) {
           <AvailabilityEditor key={link.name} project={currentProject} component={link.name} componentType="links" mode={uiMode} />
         </Section>
       )}
+      {currentProject && /heat.?pump/i.test(`${link.carrier} ${link.name}`) && (
+        <Section title="COP">
+          <SeriesEditor key={link.name} project={currentProject} component={link.name} kind="cop" mode={uiMode} />
+        </Section>
+      )}
+      {currentProject && (
+        <Section title="Price series">
+          <SeriesEditor key={link.name} project={currentProject} component={link.name} kind="tou" componentType="links" mode={uiMode} />
+        </Section>
+      )}
     </div>
   )
 }
@@ -1849,6 +1860,11 @@ function GeneratorPanel({ name }: { name: string }) {
           <AvailabilityEditor key={gen.name} project={currentProject} component={gen.name} componentType="generators" mode={uiMode} />
         </Section>
       )}
+      {currentProject && (
+        <Section title="Price series">
+          <SeriesEditor key={gen.name} project={currentProject} component={gen.name} kind="tou" componentType="generators" mode={uiMode} />
+        </Section>
+      )}
     </div>
   )
 }
@@ -1856,6 +1872,7 @@ function GeneratorPanel({ name }: { name: string }) {
 function StorageUnitPanel({ name }: { name: string }) {
   const { setSelectedComponent } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
+  const uiMode = useUIStore(s => s.uiMode)
   const { data: sus = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
   const su = (sus as StorageUnit[]).find(s => s.name === name)
   const { data: schema } = useAssetSchema('StorageUnit')
@@ -1866,6 +1883,11 @@ function StorageUnitPanel({ name }: { name: string }) {
         <Row label="Bus" value={su.bus} tip={fieldHelp(schema, 'bus')} />
       </Section>
       <StorageUnitCard key={su.name} su={su} mode="detail" onRename={n => setSelectedComponent({ type: 'StorageUnit', name: n })} />
+      {currentProject && (
+        <Section title="Inflow">
+          <SeriesEditor key={su.name} project={currentProject} component={su.name} kind="inflow" mode={uiMode} />
+        </Section>
+      )}
     </div>
   )
 }
