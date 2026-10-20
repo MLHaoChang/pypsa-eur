@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { commercialApi } from '../../../api/commercial'
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
+import MarketPricesBlock from './MarketPricesBlock'
 import TariffBuilder from './TariffBuilder'
 import { blankTariff } from './tariffModel'
 
@@ -23,6 +24,7 @@ export default function TariffSection() {
   const ref = current.data?.import_tariff_ref
   return (
     <div className="space-y-2">
+      {current.data && <MarketPricesBlock cfg={current.data} />}
       <p className="text-[11px] text-muted">
         {tariff ? `Editing the project's import tariff ${tariff.id}.`
           : 'The project has no import tariff: build one.'}</p>

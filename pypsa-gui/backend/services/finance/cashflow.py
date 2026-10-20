@@ -34,6 +34,8 @@ STREAM_CLASS: dict[str, str] = {
     "demand_charge": "tariff", "retail_fixed": "tariff", "certificates": "tariff",
     "tax": "tariff",                       # levies (P3 pin: deductible opex)
     "energy_export": "export", "ancillary": "export",
+    # The wholesale import (IPP ticket 07) moves with the market, as the export does.
+    "energy_wholesale": "export",
     "ppa_settlement": CONTRACT_CLASS, "cfd_settlement": CONTRACT_CLASS, "lease": CONTRACT_CLASS,
     "eaas_fee": CONTRACT_CLASS, "dr_availability": CONTRACT_CLASS, "dr_activation": CONTRACT_CLASS,
     "fom": "opex", "vom": "opex", "other": "opex",
