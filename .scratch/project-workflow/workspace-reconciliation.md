@@ -141,6 +141,12 @@ Guided shows the ten sections in order, as the approved rail (design §3.4). Eac
 
 Group-only rows are tagged with the group that needs them. They appear only when that group is in scope.
 
+**Every example is editable in both modes** (owner rule, 2026-10-20, about 19:43 CEST: "all examples should enable user to change parameters in both guided and expert modes"):
+- Every value an example (template) pre-fills is editable in Guided, either as a key parameter on its card or under Advanced.
+- It is editable in Expert in its full editor, with **reset to the template value**.
+- A value is read-only only where the engine requires it (for example a value derived from another field, or a PyPSA standard type's r/x), and the field then shows the reason.
+- This holds for every template. The old read-only Guided Site card (J4) is gone.
+
 The lists below are the parameters a Guided user sets today (generic-site form, Site and Goal cards) plus what the templates and backend need. Sources: `pages/hubDesign/cards/*`, `genericSite.ts`, `project_templates/eh_site.py`, `eh_templates.py`, `models/energy_hub.py`, `pages/modelHorizon/*`.
 
 ### 1 Project & site

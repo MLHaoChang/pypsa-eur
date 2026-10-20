@@ -5729,6 +5729,23 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "get_energy_flows",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "period",
+        "window_from",
+        "window_to",
+        "limit"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "3914ac2afc6ecf565a667beb948839ec1af36bf8a8752d2c19760faf0d59226b",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "get_loadflow_summary",
       "toolsets": [
         "results"
