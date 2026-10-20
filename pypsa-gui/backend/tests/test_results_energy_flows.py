@@ -1,0 +1,246 @@
+"""
+Energy flows (site commercial UX A1): Source → Via → Destination MWh.
+
+The conservation test is the contract: generation = destinations (loads served,
+export, losses) + Δ storage, on the three Energy Hub templates the owner reads,
+on the multi-period golden network, and on a hand-built network where the
+proportional-pool rule can be worked by hand.
+"""
+from __future__ import annotations
+
+import csv
+import io
+import logging
+import pathlib
+import sys
+
+import numpy as np
+import pandas as pd
+import pypsa
+import pytest
+
+from services.results.energy_flows import (
+    CSV_HEADER, GRID_IMPORT, REL_TOL, csv_text, energy_flows,
+)
+from tests.golden import fixture as gf
+
+BACKEND = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BACKEND / "project_templates"))
+import eh_templates as T  # noqa: E402
+
+TEMPLATES = ["eh_datacenter", "eh_h2_hub", "eh_microgrid"]
+
+
+def _solve(n, multi=False):
+    logging.disable(logging.CRITICAL)
+    try:
+        if multi:
+            n.snapshots.name = "snapshot"
+        status, cond = n.optimize(solver_name="highs", multi_investment_periods=multi)
+    finally:
+        logging.disable(logging.NOTSET)
+    assert (status, cond) == ("ok", "optimal")
+    return n
+
+
+def _by(rows, *keys):
+    out: dict = {}
+    for r in rows:
+        k = tuple(r[x] for x in keys)
+        out[k] = out.get(k, 0.0) + r["mwh"]
+    return out
+
+
+def _assert_conserves(p):
+    c = p["conservation"]
+    assert p["status"] == "ok", (p.get("reason"), p.get("flags"), c)
+    assert abs(c["residual_mwh"]) <= c["tolerance_mwh"], c
+    # the stated tolerance is tight: a millionth of the energy moved, plus a kWh
+    assert c["tolerance_mwh"] <= REL_TOL * max(c["generation_mwh"], c["destinations_mwh"], 1.0) + 1e-3 + 1e-12
+    # the rows are the destinations the check summed
+    assert sum(r["mwh"] for r in p["rows"]) == pytest.approx(c["destinations_mwh"], rel=1e-9)
+    assert not c["checks"] and not p["flags"]
+
+
+@pytest.mark.parametrize("tid", TEMPLATES)
+def test_template_flows_conserve_energy(tid):
+    n = T.BUILDERS[tid]()
+    probe = n.copy()
+    from services.adequacy.energization import apply_energization
+    apply_energization(probe)
+    _solve(probe)
+    p = energy_flows(probe)
+    _assert_conserves(p)
+    assert p["rows"], "a solved site moves energy"
+    # every row says where it came from, what it passed and where it went
+    assert all(r["source"] and r["via"] and r["destination"] for r in p["rows"])
+    # served energy of each load is what the dispatch recorded
+    served = _by(p["rows"], "destination")
+    w = probe.snapshot_weightings["generators"]
+    for ld in probe.loads.index:
+        assert served[(ld,)] == pytest.approx(float((probe.loads_t.p[ld] * w).sum()), rel=1e-6)
+
+
+def test_h2_hub_energy_reaches_the_offtake_through_the_store():
+    n = T.BUILDERS["eh_h2_hub"]()
+    _solve(n)
+    p = energy_flows(n)
+    via_store = _by([r for r in p["rows"] if r["destination"] == "h2_offtake"], "via")
+    assert via_store.get(("h2_storage",), 0.0) > 0.0
+    assert via_store.get(("Direct",), 0.0) > 0.0
+
+
+def test_microgrid_battery_keeps_solar_and_wind_apart():
+    n = T.BUILDERS["eh_microgrid"]()
+    _solve(n)
+    p = energy_flows(n)
+    batt = _by([r for r in p["rows"] if r["via"] in ("island_battery", "bess_new")], "source")
+    assert batt.get(("solar",), 0) > 0 and batt.get(("wind",), 0) > 0
+
+
+def _battery_net():
+    """Solar (cheap, limited) and grid charge a battery that serves a load later."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.RangeIndex(4))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.add("Bus", "site")
+    n.add("Bus", "grid")
+    n.add("Carrier", ["solar", "grid"])
+    n.add("Generator", "pv", bus="site", carrier="solar", p_nom=10,
+          p_max_pu=[1.0, 1.0, 0.0, 0.0], marginal_cost=0.0)
+    n.add("Generator", "grid_supply", bus="grid", carrier="grid", p_nom=100, marginal_cost=[1, 1, 100, 100])
+    n.add("Link", "tie", bus0="grid", bus1="site", p_nom=100, efficiency=1.0)
+    n.add("StorageUnit", "bat", bus="site", p_nom=10, max_hours=10, efficiency_store=1.0,
+          efficiency_dispatch=1.0, cyclic_state_of_charge=True)
+    # snapshots 2 and 3 need power the battery must have stored in 0 and 1
+    n.add("Load", "demand", bus="site", p_set=[0.0, 0.0, 10.0, 10.0])
+    return n
+
+
+def test_the_battery_discharge_carries_the_mix_it_was_charged_with():
+    n = _solve(_battery_net())
+    p = energy_flows(n)
+    _assert_conserves(p)
+    got = _by(p["rows"], "source", "via", "destination")
+    # 20 MWh delivered in snapshots 2-3 is all battery; the battery is charged by
+    # pv (10 MW × 2 h) first and the rest by the grid — and the loss-free battery
+    # hands the mix back in exactly that proportion.
+    solar = got.get(("solar", "bat", "demand"), 0.0)
+    grid = got.get((GRID_IMPORT, "bat", "demand"), 0.0)
+    assert solar + grid == pytest.approx(20.0, abs=1e-6)
+    ch = n.storage_units_t.p_store
+    pv = n.generators_t.p["pv"]
+    assert solar == pytest.approx(min(float(pv.iloc[:2].sum()), float(ch.sum().iloc[0] if hasattr(ch.sum(), "iloc") else ch.sum())), abs=1e-6)
+    # nothing is "Direct" to the demand in the hours the battery serves it
+    assert got.get(("solar", "Direct", "demand"), 0.0) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_losses_are_booked_with_the_origin_of_the_energy_lost():
+    n = _battery_net()
+    n.storage_units.loc["bat", ["efficiency_store", "efficiency_dispatch"]] = 0.9
+    n = _solve(n)
+    p = energy_flows(n)
+    _assert_conserves(p)
+    lost = _by(p["rows"], "destination")[("Losses",)]
+    assert lost > 0
+    # round trip: what the battery lost is in the Losses rows, via the battery
+    assert sum(r["mwh"] for r in p["rows"] if r["destination"] == "Losses" and r["via"] == "bat") == \
+        pytest.approx(lost, rel=1e-9)
+
+
+def test_window_narrows_rows_and_series_but_not_the_storage_replay():
+    n = _solve(_battery_net())
+    full = energy_flows(n)
+    late = energy_flows(n, window=(2, 3))
+    _assert_conserves(late)
+    assert {k: late["window"][k] for k in ("from", "to", "snapshots")} == {"from": 2, "to": 3, "snapshots": 4}
+    # the battery fills in the first two snapshots: nothing is delivered yet, and
+    # the window still conserves because the stored energy is Δ storage
+    early = energy_flows(n, window=(0, 1))
+    _assert_conserves(early)
+    assert early["conservation"]["storage_delta_mwh"] == pytest.approx(20.0, abs=1e-6)
+    assert not [r for r in early["rows"] if r["destination"] == "demand"]
+    assert sum(r["mwh"] for r in late["rows"]) == pytest.approx(sum(r["mwh"] for r in full["rows"]))
+    # the battery was charged before the window and still delivers its mix in it
+    assert _by(late["rows"], "via").get(("bat",), 0.0) > 0.0
+    assert len(late["series"]["index"]) == 2
+
+
+def test_csv_is_the_rows_of_the_chart():
+    n = _solve(_battery_net())
+    p = energy_flows(n)
+    read = list(csv.reader(io.StringIO(csv_text(p))))
+    assert tuple(read[0]) == CSV_HEADER
+    assert len(read) - 1 == len(p["rows"])
+    for line, row in zip(read[1:], p["rows"]):
+        assert line[:3] == [row["source"], row["via"], row["destination"]]
+        assert float(line[3]) == pytest.approx(row["mwh"], abs=1e-6)
+
+
+def test_missing_dispatch_is_unavailable_not_zero():
+    n = _solve(_battery_net())
+    n.generators_t.p = n.generators_t.p.drop(columns=["pv"])
+    p = energy_flows(n)
+    assert p["status"] == "not_established" and p["rows"] == [] and p["reason"]
+
+
+def test_a_bus_that_does_not_balance_is_not_drawn():
+    n = _solve(_battery_net())
+    n.loads_t.p = n.loads_t.p * 1.5          # demand the generation never covered
+    p = energy_flows(n)
+    assert p["status"] == "not_established" and p["rows"] == []
+    assert "bus_balance" in p["conservation"]["checks"]
+
+
+def test_unserved_demand_is_removed_from_what_the_load_was_served():
+    n = _battery_net()
+    n.add("Load", "extra", bus="site", p_set=[0.0, 0.0, 500.0, 0.0])      # can't be met
+    capture = None
+    n.add("Generator", "__voll_extra", bus="site", carrier="load_shedding", p_nom=1000, marginal_cost=1e4)
+    _solve(n)
+    shed = n.generators_t.p[["__voll_extra"]].copy()
+    shed.columns = ["extra"]
+    capture = {"lost_load_t": shed}
+    n.remove("Generator", "__voll_extra")
+    p = energy_flows(n, lost_load=capture)
+    _assert_conserves(p)
+    served_extra = _by(p["rows"], "destination").get(("extra",), 0.0)
+    assert served_extra == pytest.approx(500.0 - float(shed["extra"].sum()), abs=1e-6)
+    assert p["unserved_mwh"] == pytest.approx(float(shed["extra"].sum()), abs=1e-6)
+    # without the capture the balance cannot be proved
+    assert energy_flows(n)["status"] == "not_established"
+
+
+def test_golden_multi_period_network_conserves_in_every_period():
+    n = gf.solve_golden_network()
+    periods = energy_flows(n)["periods"]
+    assert periods == list(gf.GOLDEN_PERIODS)
+    for per in periods:
+        _assert_conserves(energy_flows(n, per))
+
+
+# ---- the route ---------------------------------------------------------------------
+
+def test_route_204_before_a_solve(client):
+    assert client.get("/api/results/energy_flows").status_code == 204
+    assert client.get("/api/results/energy_flows.csv").status_code == 204
+
+
+def test_route_and_csv_agree(client, reset_backend):
+    gf.install_golden(gf.solve_golden_network())
+    r = client.get("/api/results/energy_flows", params={"period": gf.GOLDEN_PERIODS[1]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok" and body["period"] == gf.GOLDEN_PERIODS[1]
+    c = client.get("/api/results/energy_flows.csv", params={"period": gf.GOLDEN_PERIODS[1]})
+    assert c.status_code == 200 and c.headers["content-type"].startswith("text/csv")
+    rows = list(csv.reader(io.StringIO(c.text)))
+    assert len(rows) - 1 == len(body["rows"])
+    assert sum(float(x[3]) for x in rows[1:]) == pytest.approx(sum(x["mwh"] for x in body["rows"]), abs=1e-4)
+
+
+def test_route_window_is_positional_and_inclusive(client, reset_backend):
+    gf.install_golden(gf.solve_golden_network())
+    r = client.get("/api/results/energy_flows", params={"period": gf.GOLDEN_PERIODS[0], "from": 0, "to": 5}).json()
+    assert r["window"]["from"] == 0 and r["window"]["to"] == 5
+    assert r["window"]["snapshots"] == gf.SNAPSHOTS_PER_PERIOD
