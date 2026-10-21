@@ -10,7 +10,7 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { CampusState } from '../api/campusElectrical'
-import CampusElectricalPanel from './CampusElectricalPanel'
+import CampusElectricalPanel from './campusTestParts'
 
 const store = vi.hoisted(() => ({ currentProject: 'Hub A' as string | null }))
 vi.mock('../store/uiStore', () => ({

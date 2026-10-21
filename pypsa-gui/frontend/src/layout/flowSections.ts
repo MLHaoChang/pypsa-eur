@@ -44,6 +44,8 @@ export const BAND_SECTIONS: Record<BandId, FlowSectionId[]> = {
 export const PANEL_SECTION: Partial<Record<SlidePanel, FlowSectionId>> = {
   horizon: 'project',
   campusElectrical: 'connection',
+  campusStudy: 'scenarios',
+  campusResults: 'results',
   capacityBounds: 'assets',
   timeseries: 'profiles',
   profiles: 'profiles',

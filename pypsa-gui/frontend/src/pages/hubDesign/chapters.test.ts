@@ -29,7 +29,7 @@ describe('chapterTiles', () => {
     }
     expect(t.reliability.open).toEqual({ step: 'goal' })
     expect(t.investment.open).toEqual({ panel: 'results', tab: 'investment' })
-    expect(t.grid_plan.open).toEqual({ panel: 'campusElectrical' })
+    expect(t.grid_plan.open).toEqual({ panel: 'campusStudy' })
     expect(t.operation.open).toEqual({ panel: 'results', tab: 'dispatch' })
   })
 

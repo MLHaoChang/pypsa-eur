@@ -50,8 +50,8 @@ function TableRow({ label, tab, title, onCloseModal }: { label: string; tab: str
 function ConnectionRows({ onCloseModal }: Props) {
   const { activeSlidePanel, toggle } = usePanelToggle(onCloseModal)
   return (
-    <SItem icon={<Cable size={15} />} label="Campus electrical"
-      title="Take a solved hub to its electrical design: transformers, reactive compensation, short circuit and PCC grid-code compliance at the critical hours (AC load flow)."
+    <SItem icon={<Cable size={15} />} label="Grid connection"
+      title="The campus file, the grid code the PCC is held to, the connection power factor and the asset library the grid study works from."
       active={activeSlidePanel === 'campusElectrical'} onClick={() => toggle('campusElectrical')} />
   )
 }
@@ -104,6 +104,9 @@ function ScenarioRows({ onCloseModal }: Props) {
         active={activeSlidePanel === 'simparams'} onClick={() => toggle('simparams')} />
       <SItem icon={<GitBranch size={15} />} label="Scenarios"
         active={activeSlidePanel === 'scenarios'} onClick={() => toggle('scenarios')} />
+      <SItem icon={<Cable size={15} />} label="Grid study"
+        title="Settings and run of the electrical design study (transformers, reactive compensation, short circuit, PCC compliance by AC load flow) and the island requirements."
+        active={activeSlidePanel === 'campusStudy'} onClick={() => toggle('campusStudy')} />
     </>
   )
 }
@@ -170,6 +173,9 @@ function ResultRows({ onCloseModal }: Props) {
     <>
       <SItem icon={<TrendingUp size={15} />} label="Results"
         active={activeSlidePanel === 'results'} onClick={() => toggle('results')} />
+      <SItem icon={<Cable size={15} />} label="Grid study results"
+        title="What the electrical design study found: transformers, reactive compensation, short circuit and PCC compliance at the critical hours."
+        active={activeSlidePanel === 'campusResults'} onClick={() => toggle('campusResults')} />
       <SItem icon={<Scale size={15} />} label="Decision study"
         title="Answer an investment question (do I need a battery?) with a verdict, a size, a value and a report."
         active={activeSlidePanel === 'decision'} onClick={() => toggle('decision')} />

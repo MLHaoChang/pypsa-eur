@@ -47,6 +47,8 @@ function _normalizePanelId(raw: string): string {
     GridSpine: 'gridspine', gridspine: 'gridspine',
     Reports: 'reports', reports: 'reports',
     CampusElectrical: 'campusElectrical', campusElectrical: 'campusElectrical',
+    CampusStudy: 'campusStudy', campusStudy: 'campusStudy',
+    CampusResults: 'campusResults', campusResults: 'campusResults',
     // The guided investment study (decision study) slide panel.
     DecisionStudy: 'decision', decision: 'decision',
     // Economics in Expert: the inputs that decide what the model charges.
@@ -161,7 +163,7 @@ function apply(d: NavigationRequest) {
     || panel === 'scenarios' || panel === 'snapshots' || panel === 'horizon'
     || panel === 'solveQueue' || panel === 'hubDesign'
     || panel === 'workspace' || panel === 'settings' || panel === 'gridspine'
-    || panel === 'reports' || panel === 'campusElectrical' || panel === 'decision'
+    || panel === 'reports' || panel === 'campusElectrical' || panel === 'campusStudy' || panel === 'campusResults' || panel === 'decision'
     || panel === 'economics' || panel === 'profiles'
   ) {
     ui.setSlidePanel(panel as NonNullable<typeof ui.activeSlidePanel>)

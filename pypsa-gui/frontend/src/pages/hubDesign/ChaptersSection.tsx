@@ -16,7 +16,7 @@ import { useHubDesignStore } from './hubDesignStore'
 import RunGridChecks from './RunGridChecks'
 
 const OPEN_LABEL = (o: ChapterOpen) =>
-  'step' in o ? 'Go to Goal' : o.panel === 'campusElectrical' ? 'Open the grid checks' : 'Open the detail'
+  'step' in o ? 'Go to Goal' : o.panel === 'campusResults' || o.panel === 'campusStudy' ? 'Open the grid checks' : 'Open the detail'
 
 function is409(e: unknown): boolean {
   return (e as { response?: { status?: number } } | null)?.response?.status === 409
