@@ -10,6 +10,7 @@ import pandas as pd
 from services import workflow_tools
 from harness import branch_calculations as branch
 from harness import carrier_calculations as carrier
+from harness import lost_load_calculations as lost_load
 from harness import storage_calculations as storage
 from harness import storage_costs
 
@@ -70,7 +71,8 @@ COMPARISON_METRICS = {
     },
 }
 DEFINITIONS = {**METRICS, **COST_METRICS, **COMPARISON_METRICS, **storage.METRICS, **storage_costs.METRICS,
-               **carrier.METRICS, **branch.METRICS, **branch.NETWORK_METRICS}
+               **carrier.METRICS, **branch.METRICS, **branch.NETWORK_METRICS,
+               **lost_load.METRICS}
 COST_PROFILES = frozenset({"generator-cost/1", "network-linear-cost/1", storage_costs.PROFILE})
 STORAGE_PROFILES = frozenset({storage.PROFILE, storage_costs.PROFILE})
 PROFILES = {
@@ -82,10 +84,11 @@ PROFILES = {
     carrier.PROFILE: tuple(carrier.METRICS),
     branch.PROFILE: tuple(branch.METRICS),
     branch.NETWORK_PROFILE: tuple(branch.NETWORK_METRICS),
+    lost_load.PROFILE: tuple(lost_load.METRICS),
 }
 # Profiles added after the pilot's first five run only when listed explicitly
 # in PYPSA_GUI_ANSWER_ASSURANCE_PROFILES (`rollout.profile_enabled`).
-OPT_IN_PROFILES = frozenset({carrier.PROFILE, *branch.PROFILES})
+OPT_IN_PROFILES = frozenset({carrier.PROFILE, *branch.PROFILES, lost_load.PROFILE})
 DISCLOSURE = (
     "Energy uses generator snapshot weights; expenditure uses objective snapshot weights. "
     "Expenditure excludes fixed, startup, shutdown and quadratic costs; it is not total system cost. "
@@ -308,6 +311,8 @@ def scoped_source(ctx, scope, owner=None):
     """Capture complete raw populations under the existing project lock."""
     if scope["profile"] == carrier.PROFILE:
         return carrier.source(ctx, scope["entity_id"])
+    if scope["profile"] == lost_load.PROFILE:
+        return lost_load.source(ctx, scope["entity_id"])
     if scope["profile"] in branch.PROFILES:
         return branch.source(ctx, scope["entity_id"], scope["profile"] == branch.NETWORK_PROFILE,
                              scope.get("component_class"))
@@ -486,6 +491,8 @@ def scoped_calculate(raw, scope):
         return carrier.calculate(raw, scope)
     if scope["profile"] in branch.PROFILES:
         return branch.calculate(raw, scope)
+    if scope["profile"] == lost_load.PROFILE:
+        return lost_load.calculate(raw, scope)
     if scope["profile"] == storage.PROFILE:
         return storage.calculate(raw["storage_unit"], scope)
     if scope["profile"] == storage_costs.PROFILE:
@@ -638,6 +645,8 @@ def disclosure(scope):
         return carrier.DISCLOSURE
     if scope["profile"] in branch.PROFILES:
         return branch.DISCLOSURE
+    if scope["profile"] == lost_load.PROFILE:
+        return lost_load.DISCLOSURE
     if scope["profile"] == storage_costs.PROFILE:
         return storage_costs.disclosure(scope)
     if scope["profile"] == storage.PROFILE:

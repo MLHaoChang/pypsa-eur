@@ -1444,6 +1444,8 @@ _TEMPLATE_DEFAULT_NAMES = {
     "eh_microgrid_staged": "Island Microgrid (staged growth)",
     # Grid-to-process ticket 05 (project_templates/eh_ammonia.py).
     "eh_ammonia_staged": "Green Ammonia Hub (staged growth)",
+    # IPP renewables + BESS ticket 03 (project_templates/eh_ipp.py).
+    "eh_ipp_hybrid": "Renewables IPP with battery",
 }
 
 # Sidecars a template directory may carry beside network.nc (P19): the EH
@@ -1685,13 +1687,16 @@ def create_from_template(
             if src.is_file():
                 atomic_copy(src, dest / sidecar)
         if template_series:
+            from services.library import bundle_pins
             from services.library import template_series as TS
 
             cfg_path = dest / "solver_config.json"
-            cfg = json.loads(cfg_path.read_text()) if cfg_path.is_file() else {}
-            atomic_write_text(cfg_path, json.dumps(
-                TS.apply_refs(cfg, template_series, series_refs), indent=2, sort_keys=True)
-                + "\n")
+            cfg = TS.apply_refs(json.loads(cfg_path.read_text()) if cfg_path.is_file() else {},
+                                template_series, series_refs)
+            atomic_write_text(cfg_path, json.dumps(cfg, indent=2, sort_keys=True) + "\n")
+            # Pin what the config now names, as a save does (WP1.1c): an unpinned ref
+            # reads `library_ref_stale` on the first open.
+            bundle_pins.write_pins(dest, bundle_pins.collect_pins(cfg))
     if dc is not None:
         # The opt-in's spec, dynamic envelope and ledger, per project
         # (`services.dc_load_profile.read_envelope`; get_eh_template serves it).

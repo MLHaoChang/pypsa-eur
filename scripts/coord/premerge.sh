@@ -39,7 +39,7 @@ root=$(git rev-parse --show-toplevel)
 cd "$root"
 
 # Overlap in these paths is harmless when the merge itself is clean.
-docs_only_re='^(docs/superpowers/OPEN-ITEMS\.md|docs/superpowers/plans/.*|doc/release-notes\.d/.*|doc/release_notes\.md|(.*/)?(CONTEXT|GLOSSARY)\.md|GLOSSARY-MAP\.md)$'
+docs_only_re='^(docs/superpowers/OPEN-ITEMS\.md|docs/superpowers/plans/.*|doc/release-notes\.d/.*|doc/release_notes\.md|(.*/)?(CONTEXT|GLOSSARY)\.md|GLOSSARY-MAP\.md|pypsa-gui/backend/harness/README\.md)$'
 # A PR touching these must pass the semantic tests on the trial merge: backend
 # routes (project routes and routers/mcp among them), chat tools, the project
 # ACL services and the harness MCP server.
@@ -58,6 +58,10 @@ catalogue_re='(^|/)harness/catalogue'
 # Overlap only in these files does not block when the trial merge is clean and
 # the semantic tests and the assistant inventory check pass on it.
 inventory_overlap_re='^(pypsa-gui/backend/harness/catalogue\.py|\.scratch/live-voice/capability-inventory\.json)$'
+# Overlap only in this manifest does not block when both sides only add lines
+# to it, the trial merge is clean and the manifest test passes on it.
+kinds_overlap_re='^pypsa-gui/tool-error-kinds\.json$'
+kinds_test=tests/test_tool_error_kind_manifest.py
 # A PR touching these live coordination files must also update
 # templates/agent-coordination/ (or run with PREMERGE_TEMPLATE_SYNC=skip).
 template_live_re='^(\.claude/skills/(steward|coordinator|retro)/|scripts/coord/|docs/agents/session-brief\.md$)'
@@ -100,6 +104,7 @@ fi
 echo
 echo "== files changed on both sides since merge-base"
 inv_overlap=()  # overlap files that pass if the trial merge, tests and inventory do
+kinds_overlap=()  # tool-error-kinds.json overlap, waived if append-only (below)
 overlap=$(comm -12 \
   <(git diff --name-only "$mbase" "$master" | sort) \
   <(git diff --name-only "$mbase" "$head" | sort))
@@ -118,6 +123,9 @@ else
     elif [[ $f =~ $inventory_overlap_re ]]; then
       echo "  inventory  $f (decided on the trial merge, below)"
       inv_overlap+=("$f")
+    elif [[ $f =~ $kinds_overlap_re ]]; then
+      echo "  kinds      $f (decided on the trial merge, below)"
+      kinds_overlap+=("$f")
     else
       echo "  code       $f"
       fail=1
@@ -133,7 +141,10 @@ echo
 echo "== semantic tests"
 changed=$(git diff --name-only "$mbase" "$head")
 sem_ok=0 inv_ok=0
-if ! grep -Eq "$semantic_re" <<<"$changed" && ((${#inv_overlap[@]} == 0)); then
+tests_to_run=("${semantic_tests[@]}")
+((${#kinds_overlap[@]})) && tests_to_run+=("$kinds_test")
+if ! grep -Eq "$semantic_re" <<<"$changed" && ((${#inv_overlap[@]} == 0)) \
+  && ((${#kinds_overlap[@]} == 0)); then
   echo "not needed (no route, chat-tool, project-ACL or MCP-server change)"
 elif ((conflict)); then
   echo "skipped: no trial merge while the PR conflicts"
@@ -158,7 +169,7 @@ else
   # so every import resolves inside the trial merge.
   export PYTHONPATH="$wt/pypsa-gui/backend:$wt"
   echo "trial merge $trial, python $py"
-  if (cd "$wt/pypsa-gui/backend" && "$py" -m pytest -q -p no:cacheprovider --disable-warnings "${semantic_tests[@]}"); then
+  if (cd "$wt/pypsa-gui/backend" && "$py" -m pytest -q -p no:cacheprovider --disable-warnings "${tests_to_run[@]}"); then
     echo "semantic tests: pass"
     sem_ok=1
   else
@@ -190,6 +201,21 @@ if ((${#inv_overlap[@]})); then
     printf '  code        %s\n' "${inv_overlap[@]}"
     fail=1
     reasons+=("overlap: ${#inv_overlap[@]} code file$([[ ${#inv_overlap[@]} -eq 1 ]] || echo s)")
+  fi
+fi
+
+if ((${#kinds_overlap[@]})); then
+  echo
+  echo "== tool-error-kinds overlap"
+  kinds_file=${kinds_overlap[0]}
+  removed=$(( $(git diff -U0 "$mbase" "$master" -- "$kinds_file" | grep -c '^-[^-]' || true) \
+    + $(git diff -U0 "$mbase" "$head" -- "$kinds_file" | grep -c '^-[^-]' || true) ))
+  if ((!conflict && sem_ok && removed == 0)); then
+    echo "  waived      tool-error-kinds overlap: append-only, clean trial merge, manifest test pass"
+  else
+    echo "  code        $kinds_file (removed lines: $removed)"
+    fail=1
+    reasons+=("overlap: tool-error-kinds.json not append-only or not verified")
   fi
 fi
 

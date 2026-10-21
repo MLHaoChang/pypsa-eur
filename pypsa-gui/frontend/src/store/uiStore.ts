@@ -7,6 +7,8 @@ import type { SizingMode } from '../site3d/sizing'
 // live Results pane usable when the splitter is dragged to an extreme. Single
 // definition, shared with the rail's own width arithmetic: this store and
 // Results.tsx enforcing the same number independently is how they can drift.
+import type { FlowSectionId } from '../api/flow'
+import { PANEL_SECTION, sectionForComponent } from '../layout/flowSections'
 import { RAIL_MIN_W } from '../pages/results/railWidth'
 import { appLog } from './simulationStore'
 import type { ProjectMismatch } from '../utils/projectMismatch'
@@ -444,6 +446,12 @@ interface UIStore {
   canvasMode: CanvasMode
   canvasView: CanvasView
   activeSlidePanel: SlidePanel | null
+  // The flow section the user is working in, shared by Guided and Expert
+  // (workspace-reconciliation §7). Moved by opening a section's panel, by
+  // selecting a component, or by picking a section on the Guided rail; the
+  // mode switch keeps it. Null until one is chosen.
+  activeSection: FlowSectionId | null
+  setActiveSection: (s: FlowSectionId | null) => void
   // The assistant is NOT a SlidePanel. It has its own open/closed state so it
   // can stay on screen while it navigates you somewhere — see Task 3's
   // regression test and the 2026-08-05 presence spec.
@@ -689,6 +697,8 @@ export const useUIStore = create<UIStore>((set) => ({
   activeSiteId: readActiveSite(storedCurrentProject()),
   siteSizing: 'installed',
   activeSlidePanel: null,
+  activeSection: null,
+  setActiveSection: (activeSection) => set({ activeSection }),
   assistantDockOpen: storedAssistantDockOpen(),
   assistantDockPinned: storedAssistantDockPinned(),
   assistantDockWidth: storedAssistantDockWidth(),
@@ -816,6 +826,7 @@ export const useUIStore = create<UIStore>((set) => ({
   openRightPanel: () => set({ rightPanelOpen: true }),
   setSelectedComponent: (c) => { navigationChanged(); set(s => ({
     selectedComponent: c,
+    activeSection: sectionForComponent(c?.type) ?? s.activeSection,
     // P30 (B10): an edit request belongs to one component; moving the
     // selection anywhere else drops it.
     propertiesEditRequest: s.propertiesEditRequest && c
@@ -856,7 +867,11 @@ export const useUIStore = create<UIStore>((set) => ({
   setSiteDraft: (d) => set({ siteDraft: d }),
   setActiveSiteId: (id) => set({ activeSiteId: id }),
   setSiteSizing: (m) => set({ siteSizing: m }),
-  setSlidePanel: (p) => { navigationChanged(); set({ activeSlidePanel: p }) },
+  setSlidePanel: (p) => {
+    navigationChanged()
+    const section = p ? PANEL_SECTION[p] : undefined
+    set(section ? { activeSlidePanel: p, activeSection: section } : { activeSlidePanel: p })
+  },
   setAssistantDockOpen: (open) => {
     persistAssistantDockOpen(open)
     set({ assistantDockOpen: open })
@@ -982,6 +997,7 @@ export const useUIStore = create<UIStore>((set) => ({
       // same-named asset in project B.
       const patch: Partial<UIStore> = {
         currentProject: name,
+        activeSection: null,
         selectedComponent: null,
         highlightedComponent: null,
         assetDetailRequest: null,
