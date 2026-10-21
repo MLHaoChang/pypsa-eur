@@ -966,6 +966,28 @@ def preflight():
     (orphan vintages, slack-on-every-bus, …) that vanish the moment the
     worker exits.
     """
+    deferred, issues, _ = preflight_validate()
+    if deferred is not None:
+        return deferred
+    return {
+        "ok": not has_errors(issues),
+        "errors": sum(1 for i in issues if i.severity == "error"),
+        "warnings": sum(1 for i in issues if i.severity == "warning"),
+        "issues": [i.to_dict() for i in issues],
+    }
+
+
+def preflight_validate(under_lock=None):
+    """``(deferred, issues, extra)``: preflight's gates and its validation.
+
+    ``deferred`` is the payload `/preflight` answers while a solver worker or a
+    study is live (then ``issues`` is ``[]`` and ``extra`` None). Otherwise
+    ``issues`` is ``validate_for_run`` on the foreground network, taken under
+    the mutation lock, and ``extra`` is ``under_lock(n, config)`` run inside the
+    same lock span (the project flow reads its presence facts there, so they
+    describe the network the issues do). One copy of the gates for `/preflight`
+    and `GET /api/projects/{name}/flow`.
+    """
     def _deferred_payload() -> dict:
         """The answer this route gives when a solver worker is alive.
 
@@ -1013,7 +1035,7 @@ def preflight():
     # 1. A solver worker. The pre-existing guard, kept first because it is
     #    the one that can tell a stuck abort from a running solve.
     if _solver_in_flight():
-        return _deferred_payload()
+        return _deferred_payload(), [], None
     # 2. An adequacy study. The frontier, the sweep, the stress scenarios and
     #    the loops mutate the foreground network BETWEEN their own solves,
     #    with no lock held (`sweep.py`'s `c["mutate"](network)`), so neither
@@ -1028,7 +1050,7 @@ def preflight():
             "ok": True, "errors": 0, "warnings": 0, "issues": [],
             "deferred": True, "deferred_reason": _study,
             "deferred_stuck": False,
-        }
+        }, [], None
     # 3. The mutation lock, held for the validation span and taken WITHOUT
     #    blocking. This is what actually closes the check-then-act window:
     #    a solve that begins after gate 1 cannot mutate until we release,
@@ -1048,19 +1070,15 @@ def preflight():
     #    worker does not.
     lock = PyPSAService.get_lock()
     if not lock.acquire(blocking=False):
-        return _deferred_payload()
+        return _deferred_payload(), [], None
     try:
         n = PyPSAService.get_network()
         config = _state["solver_config"]
         issues = validate_for_run(n, config)
+        extra = under_lock(n, config) if under_lock is not None else None
     finally:
         lock.release()
-    return {
-        "ok": not has_errors(issues),
-        "errors": sum(1 for i in issues if i.severity == "error"),
-        "warnings": sum(1 for i in issues if i.severity == "warning"),
-        "issues": [i.to_dict() for i in issues],
-    }
+    return None, issues, extra
 
 
 # ── Run / Abort / Status ──────────────────────────────────────────────────────

@@ -440,40 +440,28 @@ def dc_load_spec(template_id: str, raw: dict | None):
 def firm_genset_mw(n, template_id: str) -> tuple[float, str]:
     """The committed genset fleet's firm MW and the rule that gave it: the
     island requirements' genset N+k (``genset_redundancy_n``) takes out the
-    k largest units; without it the whole fleet counts."""
-    cfg = ISLAND_CONFIG.get(template_id, {})
-    names = [u for u, d in cfg.get("units", {}).items()
-             if d.get("kind") == "genset" and u in n.generators.index
-             and not bool(n.generators.at[u, "p_nom_extendable"])]
-    sizes = sorted((float(n.generators.at[u, "p_nom"]) for u in names), reverse=True)
-    k = int((cfg.get("requirements", {}).get("genset_redundancy_n") or {}).get("value", 0))
-    if k:
-        return sum(sizes[k:]), f"genset N+{k}: the fleet less its {k} largest unit(s)"
-    return sum(sizes), "the whole genset fleet (no genset redundancy required)"
+    k largest units; without it the whole fleet counts
+    (``services.adequacy.site_peak.firm_genset_mw`` on the template's sidecar)."""
+    from services.adequacy.site_peak import firm_genset_mw as firm
+
+    return firm(n, ISLAND_CONFIG.get(template_id, {"units": {}}))
 
 
 def _check_dc_peak(template_id: str, spec) -> None:
-    """Each period's modelled peak must fit the energized import plus the
-    committed fleet's firm genset MW; above that the plan could only shed
-    (gatekeeper review of DC grid readiness 01)."""
+    """Each hour's modelled load must fit the energized import (after the
+    PoC Link's efficiency) plus the committed fleet's firm genset MW; above that
+    the plan could only shed (gatekeeper review of DC grid readiness 01).
+    The one check the grid-readiness scorecard also reports
+    (``services.adequacy.site_peak.peak_check``)."""
+    from services.adequacy.site_peak import describe, peak_check
     from services.dc_load_profile import DcLoadError
 
     n = BUILDERS[template_id](load_spec=spec)
-    firm, rule = firm_genset_mw(n, template_id)
-    total = n.loads_t.p_set.sum(axis=1)
-    if isinstance(n.snapshots, pd.MultiIndex):
-        peaks = total.groupby(level=0).max()
-        energized = {y: DC_ENERGIZATION_MW[y] for y in peaks.index}
-    else:
-        peaks = pd.Series({SNAPSHOTS[0].year: total.max()})
-        energized = {y: float(n.links.at["grid_import", "p_nom"]) for y in peaks.index}
-    for y, peak in peaks.items():
-        cap = energized[y] + firm
-        if peak > cap + 1e-9:
+    for row in peak_check(n, ISLAND_CONFIG.get(template_id, {"units": {}})):
+        if row["headroom_mw"] < -1e-9:
             raise DcLoadError(
-                f"dc_load.phases: the {y} peak is {peak:.1f} MW, above the {energized[y]:g} MW "
-                f"energized import plus {firm:g} MW of firm gensets ({rule}) = {cap:g} MW",
-                "dc_load.phases")
+                f"dc_load.phases: the {row['period']} peak is {row['load_mw']:.1f} MW (at "
+                f"{row['binding_snapshot']}), above {describe(row)}", "dc_load.phases")
 
 
 def dc_load_meta(template_id: str, spec) -> dict:
@@ -1195,6 +1183,122 @@ def _register_staged_hubs() -> None:
 
 _register_staged_hubs()
 
+
+def _register_ammonia() -> None:
+    """The ammonia hub (``eh_ammonia.py``, grid-to-process ticket 05) adds itself to the registries,
+    after the staged hubs it starts from."""
+    import importlib.util
+    import pathlib
+    import types
+
+    path = pathlib.Path(__file__).resolve().with_name("eh_ammonia.py")
+    if not path.is_file():           # this module copied on its own (a test's tmp dir)
+        return
+    spec = importlib.util.spec_from_file_location("_eh_ammonia", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.register(types.SimpleNamespace(**globals()))
+
+
+_register_ammonia()
+
+#: Templates that ship price series (`price_series/`, minted at create; IPP ticket 02): id →
+#: a writer of the directory, called by `write_sidecars`.
+PRICE_SERIES: dict = {}
+
+
+def _register_ipp() -> None:
+    """The renewables IPP (``eh_ipp.py``, IPP renewables + BESS ticket 03)."""
+    import importlib.util
+    import pathlib
+    import types
+
+    path = pathlib.Path(__file__).resolve().with_name("eh_ipp.py")
+    if not path.is_file():           # this module copied on its own (a test's tmp dir)
+        return
+    spec = importlib.util.spec_from_file_location("_eh_ipp", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.register(types.SimpleNamespace(**globals()))
+
+
+_register_ipp()
+
+# ── Grid-readiness markings (DC grid readiness 02, UX review) ───────────────
+#
+# The connection limits the grid-readiness scorecard checks against that no
+# grid code here states: the connection ramp limit, the oscillation limit,
+# the PoC Link's efficiency, the PoC fault level and the reliability goal.
+# They are ledger rows like every other template assumption, so the project
+# flow lists them "to check"; each names the flow section and field it
+# belongs to (``section``, ``panel``, ``component``, ``entity``, ``field``,
+# the flow's target shape). The scorecard reads its limits from these rows
+# and marks a row ``assumed`` while its source is not "code". All values are
+# placeholders until the network operator's connection offer arrives.
+
+#: A connection ramp limit of 10 % of the connection capacity per minute.
+RAMP_SHARE_PER_MIN = 0.10
+#: Peak-to-peak oscillation limit, % of the connection, in the band of concern.
+OSCILLATION_LIMIT_PCT = 1.0
+OSCILLATION_BAND_HZ = (0.1, 2.0)
+
+#: tid → (import Link, connection MW, PoC Link efficiency, PoC bus, PoC Sk MVA
+#: or None, LOLE goal h/yr or None). Pinned against the built networks by
+#: tests/test_grid_readiness.py.
+_GRID_READINESS_SITE = {
+    "eh_datacenter": ("grid_import", 40.0, 0.995, "grid", 250.0, 3.0),
+    "eh_datacenter_staged": ("grid_import", _DC_POC_MW, 1.0, "grid", 250.0, 3.0),
+    "eh_h2_hub": ("grid_import", 200.0, 0.995, "grid", 5000.0, None),
+    "eh_h2_hub_staged": ("grid_import", 200.0, 1.0, "grid", 5000.0, None),
+    "eh_microgrid": ("subsea_tie", 20.0, 0.97, "mainland", None, 3.0),
+    "eh_microgrid_staged": ("subsea_tie", 20.0, 0.97, "mainland", None, 3.0),
+}
+
+
+def _gr_row(item, label, value, unit, note, section, component=None, entity=None, field=None,
+            panel=None) -> dict:
+    return {"item": item, "label": label, "value": value, "unit": unit, "source": "assumed",
+            "note": note,
+            "section": section, "panel": panel, "component": component, "entity": entity,
+            "field": field or item}
+
+
+def grid_readiness_ledger(template_id: str) -> list[dict]:
+    """The template's grid-readiness ledger rows."""
+    link, mw, eff, bus, sk, lole = _GRID_READINESS_SITE[template_id]
+    rows = [
+        _gr_row("connection_ramp", "Connection ramp limit", round(RAMP_SHARE_PER_MIN * mw, 6), "MW/min",
+                f"assumed: {RAMP_SHARE_PER_MIN:.0%} of the {mw:g} MW connection per minute; RfG/DCC "
+                "set no ramp limit for a demand facility, so this is a placeholder of the order a "
+                "network operator writes into a connection offer for large loads", "connection",
+                "Link", link),
+        _gr_row("oscillation", "Power oscillation limit", OSCILLATION_LIMIT_PCT, "% of connection, peak-to-peak",
+                f"assumed: peak-to-peak power oscillation at most {OSCILLATION_LIMIT_PCT:g} % of the "
+                f"connection in the {OSCILLATION_BAND_HZ[0]:g}-{OSCILLATION_BAND_HZ[1]:g} Hz band "
+                "(forced-oscillation concern for large loads, NERC 2025 large-loads white paper); "
+                "no code value", "connection", "Link", link),
+        _gr_row("import_efficiency", "Import efficiency", eff, "p.u.",
+                f"assumed: the {link} Link's efficiency (losses = 1 - efficiency); what reaches the "
+                "site side of the PoC Link. Losses further in (transformers, UPS) are not in it",
+                "connection", "Link", link, "efficiency"),
+    ]
+    if sk is not None:
+        rows.append(_gr_row("fault_level", "Fault level at the PoC", sk, "MVA",
+                            f"assumed: short-circuit power at the PoC ({bus}); the SCR and "
+                            "rapid-voltage-change screenings read it", "connection", "Bus", bus,
+                            "eh_sk_mva"))
+    if lole is not None:
+        rows.append(_gr_row("lole_goal", "Reliability goal (LOLE)", lole, "h/yr",
+                            f"assumed: the recommended pack's target_lole_h ({lole:g} h/yr); the "
+                            "reliability study certifies the site against it", "scenarios",
+                            None, None, "target_lole_h", panel="simparams"))
+    return rows
+
+
+for _tid in _GRID_READINESS_SITE.keys() & TEMPLATE_META.keys():   # staged hubs: when registered
+    TEMPLATE_META[_tid]["ledger"] = [*(TEMPLATE_META[_tid].get("ledger") or []),
+                                     *grid_readiness_ledger(_tid)]
+
 # Sidecar file names copied by POST /api/projects/from_template/<id>.
 META_FILE = "eh_template.json"
 STRESS_FILE = "adequacy_stress_scenarios.json"
@@ -1222,6 +1326,8 @@ def write_sidecars(out_dir, template_id: str) -> None:
         indent=2, sort_keys=True) + "\n")
     (out_dir / SOLVER_FILE).write_text(
         json.dumps(solver_config(template_id), indent=2, sort_keys=True) + "\n")
+    if template_id in PRICE_SERIES:
+        PRICE_SERIES[template_id](out_dir)
     if template_id in ISLAND_CONFIG:
         (out_dir / ISLAND_FILE).write_text(
             json.dumps(ISLAND_CONFIG[template_id], indent=2, sort_keys=True) + "\n")

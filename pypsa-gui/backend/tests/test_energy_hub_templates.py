@@ -20,6 +20,9 @@ sys.path.insert(0, str(TPL_DIR))
 import eh_templates as T  # noqa: E402
 
 IDS = sorted(T.BUILDERS)
+#: The templates that carry the Energy Hub adequacy study: a generation-only site (the IPP) has
+#: no load to make adequate, so the study's boundary refuses it by design (typed, never a crash).
+STUDY_IDS = [t for t in IDS if not T.TEMPLATE_META.get(t, {}).get("generation_only")]
 
 
 def _multi(n):
@@ -36,8 +39,11 @@ def _optimize(n):
     from services.adequacy.energization import apply_energization
 
     apply_energization(probe)                     # as run_simulation does
-    status, cond = probe.optimize(solver_name="highs",
-                                  multi_investment_periods=_multi(n))
+    # A committable process unit is planned linearised, as the app does (process_uc auto).
+    from services.solver.process_uc import planning_uc_kwargs
+
+    status, cond = probe.optimize(solver_name="highs", multi_investment_periods=_multi(n),
+                                  **planning_uc_kwargs(probe, None))
     return probe, status, cond
 
 
@@ -54,14 +60,15 @@ def test_template_is_feasible_tagged_and_mttr_safe(tid):
     assert (status, cond) == ("ok", "optimal")
     assert all(abs(x - 8760.0) < 1e-6 for x in _year_sums(n, "generators"))
     assert n.buses["eh_poc"].dtype == bool and n.buses["eh_poc"].any()
-    assert n.buses["eh_critical"].any()
+    # A generation-only site (the IPP) has no load, so no critical bus (its meta says so).
+    assert n.buses["eh_critical"].any() or tid not in STUDY_IDS
     assert (n.links["eh_role"] == "grid_import").sum() >= 1
     for df in (n.generators, n.links):
         if "mttr_hours" in df.columns:
             assert float(df["mttr_hours"].max(skipna=True)) <= T.HOURS
 
 
-@pytest.mark.parametrize("tid", IDS)
+@pytest.mark.parametrize("tid", STUDY_IDS)
 def test_readiness_predicts_every_default_stage_runs(tid):
     from services.adequacy.eh_readiness import eh_readiness
     from services.adequacy.eh_study_runner import (

@@ -30,12 +30,22 @@ cd "$root"
 
 # --- Project settings ----------------------------------------------------
 # Overlap in these paths is harmless when the merge itself is clean.
-docs_only_re='^({{RELEASE_NOTES_DIR}}/.*|docs/.*\.md)$'
+docs_only_re='^({{RELEASE_NOTES_DIR}}/.*|docs/.*\.md|(.*/)?(CONTEXT|GLOSSARY)\.md|GLOSSARY-MAP\.md)$'
 # A PR touching a path matching semantic_re must pass semantic_cmd on a trial
 # merge with the base branch. Leave semantic_re empty to skip this check.
 # semantic_cmd runs from the trial-merge worktree root.
 semantic_re=''
 semantic_cmd=(python3 -m pytest -q -p no:cacheprovider)
+# Overlap only in paths matching waive_overlap_re does not block when the trial
+# merge is clean and semantic_cmd passes on it (e.g. a generated inventory that
+# many PRs touch). Leave empty to treat every non-docs overlap as code.
+waive_overlap_re=''
+# Overlap only in a manifest matching append_only_overlap_re does not block when
+# both sides only add lines to it, the trial merge is clean and
+# append_only_test_cmd (run from the trial-merge worktree root) passes on it.
+# Leave empty to treat such a manifest as code.
+append_only_overlap_re=''
+append_only_test_cmd=()
 # -------------------------------------------------------------------------
 
 base_ref="refs/remotes/$remote/$base_branch"
@@ -75,6 +85,8 @@ fi
 
 echo
 echo "== files changed on both sides since merge-base"
+waive_overlap=()  # overlap files that pass if the trial merge and semantic_cmd do
+append_overlap=()  # append-only manifest overlap, waived if only lines were added (below)
 overlap=$(comm -12 \
   <(git diff --name-only "$mbase" "$base_sha" | sort) \
   <(git diff --name-only "$mbase" "$head" | sort))
@@ -90,6 +102,12 @@ else
       echo "  identical  $f"
     elif [[ $f =~ $docs_only_re ]]; then
       echo "  docs-only  $f"
+    elif [[ -n $waive_overlap_re && $f =~ $waive_overlap_re ]]; then
+      echo "  waivable   $f (decided on the trial merge, below)"
+      waive_overlap+=("$f")
+    elif [[ -n $append_only_overlap_re && $f =~ $append_only_overlap_re ]]; then
+      echo "  append     $f (decided on the trial merge, below)"
+      append_overlap+=("$f")
     else
       echo "  code       $f"
       fail=1
@@ -104,7 +122,9 @@ fi
 echo
 echo "== semantic tests"
 changed=$(git diff --name-only "$mbase" "$head")
-if [[ -z $semantic_re ]] || ! grep -Eq "$semantic_re" <<<"$changed"; then
+sem_ok=0
+if { [[ -z $semantic_re ]] || ! grep -Eq "$semantic_re" <<<"$changed"; } && ((${#waive_overlap[@]} == 0)) \
+  && ((${#append_overlap[@]} == 0)); then
   echo "not needed (no path matches semantic_re)"
 elif ((conflict)); then
   echo "skipped: no trial merge while the PR conflicts"
@@ -119,10 +139,50 @@ else
   echo "trial merge $trial"
   if (cd "$wt" && "${semantic_cmd[@]}"); then
     echo "semantic tests: pass"
+    sem_ok=1
   else
     echo "semantic tests: FAIL"
     fail=1
     reasons+=("semantic tests failed")
+  fi
+  if ((${#append_overlap[@]})) && ((${#append_only_test_cmd[@]})); then
+    if (cd "$wt" && "${append_only_test_cmd[@]}"); then
+      echo "append-only manifest test: pass"
+    else
+      echo "append-only manifest test: FAIL"
+      sem_ok=0
+      fail=1
+      reasons+=("append-only manifest test failed")
+    fi
+  fi
+fi
+
+if ((${#waive_overlap[@]})); then
+  echo
+  echo "== waivable overlap"
+  if ((!conflict && sem_ok)); then
+    echo "  waived      overlap in waive_overlap_re: clean trial merge, semantic pass"
+  else
+    printf '  code        %s\n' "${waive_overlap[@]}"
+    fail=1
+    reasons+=("overlap: ${#waive_overlap[@]} code file$([[ ${#waive_overlap[@]} -eq 1 ]] || echo s)")
+  fi
+fi
+
+if ((${#append_overlap[@]})); then
+  echo
+  echo "== append-only overlap"
+  removed=0
+  for f in "${append_overlap[@]}"; do
+    removed=$(( removed + $(git diff -U0 "$mbase" "$base_sha" -- "$f" | grep -c '^-[^-]' || true) \
+      + $(git diff -U0 "$mbase" "$head" -- "$f" | grep -c '^-[^-]' || true) ))
+  done
+  if ((!conflict && sem_ok && removed == 0)); then
+    echo "  waived      append-only overlap: append-only, clean trial merge, manifest test pass"
+  else
+    printf '  code        %s\n' "${append_overlap[@]}"
+    fail=1
+    reasons+=("overlap: ${#append_overlap[@]} manifest file$([[ ${#append_overlap[@]} -eq 1 ]] || echo s) not append-only or not verified")
   fi
 fi
 
@@ -132,10 +192,24 @@ echo "== checks"
 # including a run still in progress, blocks; so does failing to read them.
 if runs=$(command -v gh >/dev/null &&
   gh api "repos/$gh_repo/commits/$head/check-runs" --paginate \
-    --jq '.check_runs[] | [.status, (.conclusion // "-"), .name] | @tsv'); then
+    --jq '.check_runs[] | [.status, (.conclusion // "-"), .name, .id] | @tsv'); then
   total=$(grep -c . <<<"$runs" || true)
   bad=$(awk -F'\t' 'NF && !($1 == "completed" && ($2 == "success" || $2 == "skipped"))' <<<"$runs")
+  # An Integration (macos) job cancelled without ever getting a runner (no
+  # runner_id, no steps) does not block when Integration (ubuntu) passed on
+  # this head. A macOS job that ran, failed or was cancelled mid-run still blocks.
+  waived=
+  if grep -qP '^completed\tsuccess\tIntegration \(ubuntu\)\t' <<<"$runs"; then
+    while IFS=$'\t' read -r st con name id; do
+      [[ $st == completed && $con == cancelled && $name == "Integration (macos)" ]] || continue
+      [[ $(gh api "repos/$gh_repo/actions/jobs/$id" \
+        --jq '((.runner_id // 0) == 0) and ((.steps // []) | length == 0)' 2>/dev/null) == true ]] || continue
+      waived+="  waived      cancelled       Integration (macos): no runner assigned; ubuntu twin passed"$'\n'
+      bad=$(awk -F'\t' -v id="$id" '$4 != id' <<<"$bad")
+    done <<<"$bad"
+  fi
   echo "$total check run(s) on $head"
+  [[ -n $waived ]] && printf '%s' "$waived"
   if ((total == 0)); then
     echo "  none yet"
     fail=1

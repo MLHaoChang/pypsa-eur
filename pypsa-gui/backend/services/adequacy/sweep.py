@@ -174,8 +174,10 @@ def freeze_capacities(n, lock=None) -> Callable[[], None]:
     Why bounds rather than flipping ``*_nom_extendable`` off: preflight
     rightly rejects a fixed asset with zero capacity
     (``generator_p_nom_invalid`` / ``link_p_nom_invalid``), and a
-    never-built option freezes at exactly 0, and preflight equally rejects
-    extendable bounds with min == max (generator_p_nom_bounds). So the pin
+    never-built option freezes at exactly 0, which preflight also rejects as
+    extendable bounds of min == max == 0 (generator_p_nom_bounds). Equal
+    positive bounds now pass (an explicit forced size, IPP ticket 03), but the
+    ε pin is kept deliberately, with no churn: the pin
     is ``min = size, max = size + ε`` (ε = 1e-6 MW): the LP may "build" at
     most a micro-MW above the solved size — orders of magnitude below every
     tolerance in the sweep — and the (near-)constant capital term is the

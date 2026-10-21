@@ -89,6 +89,7 @@ _REFERENCE_LADDER = _prompts.load("reference_ladder")["text"]
 _PROJECT_OVERVIEW = _prompts.load("project_overview")["text"]
 # LC-03: read a result before showing it. Tools-on only (it names tools).
 _RESULTS_WALK = _prompts.load("results_walk")["text"]
+_EDIT_CARD = _prompts.load("edit_card")["text"]
 
 # Deixis, data half.
 #
@@ -435,6 +436,9 @@ def _build_system_prompt(
         # displayed-data ACK. TOOLS-ON ONLY: it names tools. A NEW part, so no
         # pinned constant moves.
         *( [_RESULTS_WALK] if include_tools else [] ),
+        # LC-04 — edits show an old → new card; ambiguity asks one Choice.
+        # TOOLS-ON ONLY: it names tools. A NEW part, so no pinned constant moves.
+        *( [_EDIT_CARD] if include_tools else [] ),
         # Task 10 — profile awareness. TOOLS-ON ONLY, and that is the whole
         # placement rule: it names `set_active_profile`, and Task 8's
         # invariant is that the tools-off prompt names NO tool. A tools-less

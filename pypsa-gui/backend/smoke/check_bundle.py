@@ -201,6 +201,10 @@ ROOTED = (
     "services/library/defaults_pack/versions/2026-10-05/manifest.json",
     "services/library/defaults_pack/versions/2026-10-07/manifest.json",
     "services/library/defaults_pack/versions/2026-10-13/manifest.json",
+    "services/library/defaults_pack/versions/2026-10-20/manifest.json",
+    # A template's price series (IPP ticket 02): `routers.projects._mint_template_series` reads
+    # them by path under `_PROJECT_TEMPLATES_DIR`.
+    "project_templates/eh_ipp_hybrid/price_series/meta.json",
 )
 
 

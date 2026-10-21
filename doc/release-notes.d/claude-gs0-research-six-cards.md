@@ -1,0 +1,1 @@
+* Docs(project-workflow): map the GridSpine open-source research (#491) onto the six work cards with `GS-` ids, add the F1 fixed-size run and the ordered external-engine follow-up (BLAST-Lite first) to the slice plan.

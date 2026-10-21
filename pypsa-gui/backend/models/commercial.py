@@ -29,7 +29,7 @@ ValueStreamKind = Literal[
     "demand_charge", "retail_fixed", "ancillary", "dr_availability",
     "dr_activation", "ppa_settlement", "cfd_settlement", "certificates",
     "lease", "eaas_fee", "fuel", "fom", "vom", "capex", "incentive", "tax",
-    "debt_service", "other",
+    "debt_service", "energy_wholesale", "lost_production", "other",
 ]
 
 TariffItemKind = Literal["energy", "demand", "capacity", "fixed", "certificate", "tax_levy"]
@@ -453,6 +453,39 @@ class PpaContract(BaseModel):
     baseload_mw: float | None = Field(default=None, ge=0)
     sleeving_fee_eur_per_mwh: float | None = Field(default=None, ge=0)
     sleeving_party: str | None = None
+    # IPP ticket 01 (`.scratch/ipp-renewables-bess/spec.md` §10 G1, G2). The share of the
+    # contracted assets' output the contract covers, applied before the volume cap.
+    share: float = Field(default=1.0, gt=0, le=1)
+    # `financial`: a fixed-price pay-as-produced PPA settled as (price − ref) × share × gen
+    # through the CfD's difference code — for a site that sells it while its export earns
+    # the reference price on every MWh (no double count).
+    settlement: Literal["physical", "financial"] = "physical"
+    # The financial form's negative-price clause (as `CfdContract`): None = the form's
+    # default, True (no settlement where ref < 0, where the LP curtails).
+    suspend_on_negative_price: bool | None = None
+
+    @model_validator(mode="after")
+    def _settlement_rules(self) -> "PpaContract":
+        """The share and the financial settlement (IPP ticket 01); a financial PPA's
+        negative-price clause is set to its form's default (True) when unstated."""
+        if self.kind == "baseload" and self.share != 1.0:
+            raise ValueError("a baseload PPA's volume is baseload_mw; its share must be 1")
+        if self.settlement == "financial":
+            if self.kind != "pay_as_produced" or self.pricing != "fixed":
+                raise ValueError("financial settlement is for a fixed-price pay_as_produced PPA")
+            if self.reference_price is None:
+                raise ValueError("a financial PPA settles against a reference_price")
+            if self.floor is not None or self.cap is not None:
+                raise ValueError("floor and cap apply to market_plus_premium; a financial PPA "
+                                 "settles its fixed price against the reference")
+            if self.changes_dispatch:
+                raise ValueError("a financial PPA settles after the solve; changes_dispatch "
+                                 "is refused")
+            if self.suspend_on_negative_price is None:
+                self.suspend_on_negative_price = True
+        elif self.suspend_on_negative_price is not None:
+            raise ValueError("suspend_on_negative_price is the financial settlement's clause")
+        return self
 
     @model_validator(mode="after")
     def _floor_below_cap(self) -> "PpaContract":
@@ -488,6 +521,8 @@ class CfdContract(BaseModel):
     indexation_pct_per_year: float = 0.0
     reference: Literal["interval", "monthly_capture"] = "interval"
     suspend_on_negative_price: bool = False
+    # The share of the assets' output the CfD covers (IPP ticket 01, G1).
+    share: float = Field(default=1.0, gt=0, le=1)
 
 
 class DrContract(BaseModel):
@@ -671,6 +706,10 @@ class CommercialConfig(BaseModel):
     # drift (preflight checks the inline copy hashes to it).
     import_tariff_ref: LibraryItemRef | None = None
     export_price_ref: TimeSeriesRef | None = None
+    # A wholesale import price (IPP ticket 07, G7): a Library series added to the import
+    # side of the LP on the import Link(s) (`links_t["ic_import_price"]`), booked as
+    # `energy_wholesale` apart from the tariff. An `lp_input`.
+    import_price_ref: TimeSeriesRef | None = None
     # The `poc→grid` Link that carries export (spec §5: export price = −price
     # on a second PoC Link). Required by an export price or an export item.
     export_link: str | None = None

@@ -135,8 +135,10 @@ def test_chat_edit_tools_bump_and_execution_and_read_tools_do_not(
     from harness import confirm as harness_confirm
 
     # The tunable lives in `harness.confirm` since the chat harness (issue 08).
+    # `write` too: an edit shows its card in Expert (LC-04, owner Q3), and
+    # this test drives no browser to approve it.
     monkeypatch.setattr(harness_confirm, "AUTO_APPROVE_TIERS",
-                        frozenset({"destructive", "execution",
+                        frozenset({"write", "destructive", "execution",
                                    "execution_long_running"}))
     fake_done(monkeypatch)
     hub_project(client, install_network, "chat-bumps")
@@ -176,7 +178,12 @@ def test_a_chat_edit_tool_that_raises_or_times_out_still_bumps(
     from harness import budget as harness_budget
     from services import chat_tools
 
+    from harness import confirm as harness_confirm
+
+    # The edit's card is policy-approved (LC-04, owner Q3: Expert cards edits).
+    monkeypatch.setattr(harness_confirm, "AUTO_APPROVE_TIERS", frozenset({"write"}))
     hub_project(client, install_network, "chat-raise")
+    bus = _first_bus(client)["name"]
     r0 = _rev(client)
 
     def boom(**kw):
@@ -184,7 +191,7 @@ def test_a_chat_edit_tool_that_raises_or_times_out_still_bumps(
 
     monkeypatch.setitem(chat_tools.DISPATCHERS, "update_component", boom)
     ev = _chat(client, _auth_db, "update_component", {
-        "component_class": "Bus", "name": "x", "attrs": {"x": 1.0}})
+        "component_class": "Bus", "name": bus, "attrs": {"x": 1.0}})
     assert "tool_error" in ev, ev
     assert _rev(client) == r0 + 1
 
@@ -199,7 +206,7 @@ def test_a_chat_edit_tool_that_raises_or_times_out_still_bumps(
     try:
         with _as_session(client, _auth_db):
             frames, _ = _dispatch("update_component", {
-                "component_class": "Bus", "name": "x", "attrs": {"x": 1.0}})
+                "component_class": "Bus", "name": bus, "attrs": {"x": 1.0}})
     finally:
         release.set()
     kinds = [p.get("error_kind") for ev, p in frames if ev == "tool_error"]

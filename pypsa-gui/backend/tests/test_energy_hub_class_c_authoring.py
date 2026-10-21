@@ -187,8 +187,11 @@ def test_bundle_check_requires_the_pack_at_the_frozen_root(tmp_path):
     templates = root / "project_templates"
     templates.mkdir()
     (templates / "eh_templates.py").write_text("")
+    # A template's price series are minted by path at create (IPP ticket 02).
+    (templates / "eh_ipp_hybrid" / "price_series").mkdir(parents=True)
+    (templates / "eh_ipp_hybrid" / "price_series" / "meta.json").write_text("{}")
     # The generic defaults pack is read `__file__`-relative too (IC U1 a).
-    for version in ("2026-10-05", "2026-10-07", "2026-10-13"):   # one manifest per version (IC G1, S3)
+    for version in ("2026-10-05", "2026-10-07", "2026-10-13", "2026-10-20"):   # one manifest per version (IC G1, S3)
         pack = root / "services" / "library" / "defaults_pack" / "versions" / version
         pack.mkdir(parents=True)
         (pack / "manifest.json").write_text("{}")
