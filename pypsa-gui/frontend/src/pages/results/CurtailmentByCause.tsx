@@ -3,6 +3,7 @@
 // neither (IPP ticket 05). The split is the backend's; this view only lays it
 // out. When the split is not established the plant totals are still shown,
 // with one sentence saying why.
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { resultsApi, type CurtailmentByCausePayload, type CurtailmentCauses } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
@@ -22,6 +23,9 @@ export const NOT_ESTABLISHED_REASON: Record<string, string> = {
   export_price_changed_since_solve: 'The export price changed since the last run; run again to split curtailment by cause.',
 }
 
+/** For a reason this view has no sentence for: the code is logged, never shown (UX). */
+export const UNKNOWN_REASON = 'Curtailment isn’t split by cause for this run.'
+
 const fmtMwh = (v: number) => (Number.isFinite(v)
   ? v.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '—')
 const fmtShare = (v: number, total: number) => (total > 0 ? `${((v / total) * 100).toFixed(1)} %` : '—')
@@ -40,6 +44,12 @@ export function CurtailmentByCauseTable({ payload }: { payload: CurtailmentByCau
   const requestResultsTab = useUIStore(s => s.requestResultsTab)
   const split = payload.status === 'ok'
   const plants = Object.entries(payload.plants ?? {})
+  const reason = !split ? (payload as { reason?: string }).reason : undefined
+  useEffect(() => {
+    if (reason && !NOT_ESTABLISHED_REASON[reason]) {
+      console.warn('curtailment by cause not established:', reason)
+    }
+  }, [reason])
   return (
     <section className="rounded-[10px] border border-border bg-bg overflow-hidden"
              data-testid="curtailment-by-cause" data-status={payload.status}>
@@ -51,8 +61,7 @@ export function CurtailmentByCauseTable({ payload }: { payload: CurtailmentByCau
       <div className="p-3 space-y-2">
         {!split && (
           <p className="text-[11px] text-muted" data-testid="curtailment-by-cause-reason">
-            {NOT_ESTABLISHED_REASON[payload.reason]
-              ?? `Curtailment is not split by cause: ${payload.reason}.`}</p>
+            {NOT_ESTABLISHED_REASON[payload.reason] ?? UNKNOWN_REASON}</p>
         )}
         {plants.length > 0 ? (
           <table className="w-full text-[11.5px]">

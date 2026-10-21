@@ -149,3 +149,17 @@ def test_a_multi_period_run_is_split_per_period_too():
                                        "other": 4.0}
     assert {c: pv["by_period"]["2030"][c] + pv["by_period"]["2035"][c]
             for c in pv["by_cause_mwh"]} == pv["by_cause_mwh"]
+
+
+def test_an_energization_step_caps_the_export_as_the_solve_does():
+    """An energization schedule caps the export Link only during the solve (undone after it);
+    the split composes the same cap: h3's 4 MW export at a 4 MW step counts as the limit."""
+    from services.adequacy import energization as E
+
+    n = _network()
+    n.links_t[E.ATTR] = pd.DataFrame({"grid_export": [8.0, 8.0, 8.0, 4.0]}, index=n.snapshots)
+    n.links_t.p0.loc[3, "grid_export"] = 4.0
+    n.generators_t.p.loc[3, "pv"] = 4.0
+    pv = curtailment_by_cause(n, COMMERCIAL)["plants"]["pv"]
+    assert pv["by_cause_mwh"]["export_limit"] == pytest.approx(2.0 + 6.0)
+    assert pv["by_cause_mwh"]["other"] == 0.0

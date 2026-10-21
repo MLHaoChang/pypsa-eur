@@ -25,13 +25,14 @@ LABELS: dict[str, str] = {
     "ppa": "PPA sales (PPA price × contracted share × generation)",
     "merchant": "Market sales (market price × the rest)",
     "cfd": "CfD top-up or payback",
-    "grid_imports": "Grid imports",
+    "grid_imports": "Grid imports and network charges",
     "om": "Operation & maintenance",
     "other": "Other",
     "total": "Operating cash (revenue less operating costs)",
     "replacements": "Replacements",
 }
-#: The row of each ledger stream (`cashflow.STREAM_CLASS`'s streams); any other is "other".
+#: The row of each ledger stream (`cashflow.STREAM_CLASS`'s streams); any other is "other",
+#: named in `other_keys`: levies (`tax`) and certificates (bought or sold) included (GK).
 ROW_OF_STREAM: dict[str, str] = {
     "ppa_settlement": "ppa",
     "energy_export": "merchant",
@@ -39,7 +40,6 @@ ROW_OF_STREAM: dict[str, str] = {
     "energy_import": "grid_imports", "energy_wholesale": "grid_imports",
     "network_capacity": "grid_imports", "network_energy": "grid_imports",
     "demand_charge": "grid_imports", "retail_fixed": "grid_imports",
-    "certificates": "grid_imports", "tax": "grid_imports",
     "fom": "om", "vom": "om",
 }
 

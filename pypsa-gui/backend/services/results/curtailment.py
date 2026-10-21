@@ -177,7 +177,8 @@ def curtailment_by_cause(n, commercial):
     """
     Each curtailable plant's curtailed energy (MWh, snapshot-weighted) split by why
     (IPP renewables + BESS ticket 05, spec §5): the export Link at its effective limit
-    (`p_nom_opt`, or `p_nom` when not extendable, × `p_max_pu` per snapshot), a negative
+    (`p_nom_opt`, or `p_nom` when not extendable, × `p_max_pu` per snapshot, capped by an
+    energization schedule as the solve caps it), a negative
     export price, both, or neither. Splits `curtailment_frame` per snapshot, so the
     causes sum to the curtailment total exactly; a multi-period run is also split per
     period. The price is the one the dispatch was solved with: the solve's commercial
@@ -226,7 +227,11 @@ def curtailment_by_cause(n, commercial):
     pu = (pu_t[link].reindex(frame.index).fillna(float(n.links.at[link, "p_max_pu"]))
           if link in pu_t.columns else pd.Series(float(n.links.at[link, "p_max_pu"]),
                                                   index=frame.index)).to_numpy(dtype=float)
-    limit = cap * pu
+    # An energization schedule caps the Link only during the solve (`apply_energization`,
+    # undone after it), so its cap is composed here the same way, by the one helper.
+    from services.adequacy.energization import capped_mw
+
+    limit = capped_mw(n, link, cap * pu)
     flow = n.links_t.p0[link].reindex(frame.index).fillna(0.0).to_numpy(dtype=float)
     at_limit = flow >= limit * (1.0 - _AT_LIMIT_REL) - 1e-9
     negative = price < 0.0

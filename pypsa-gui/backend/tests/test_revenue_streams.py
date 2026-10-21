@@ -82,3 +82,17 @@ def test_replacements_are_shown_as_a_cost_below_the_total():
 def test_no_operating_cash_no_rows():
     none_line = TemplateLine("bill:x", "network_energy", None, "tariff")
     assert revenue_by_stream(_op(TL._case(TL._physical() + (none_line,)))) is None
+
+
+@pytest.mark.parametrize("stream,amount", [("certificates", 500.0), ("certificates", -500.0),
+                                           ("tax", -300.0)])
+def test_levies_and_certificates_are_not_grid_imports(stream, amount):
+    """GK: a certificate (bought or sold) or a levy is no grid import; it is named in Other,
+    and the rows still sum to the operating cash."""
+    ln = TemplateLine(f"bill:{stream}", stream, amount, "tariff")
+    op = _op(TL._case(TL._physical() + (ln,)))
+    out = revenue_by_stream(op)
+    rows = _rows(out)
+    assert out["other_keys"] == [f"bill:{stream}"]
+    assert not rows["grid_imports"].any()
+    np.testing.assert_allclose(sum(rows.values()), op.revenue - op.costs, rtol=1e-12, atol=1e-9)

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { useUIStore } from '../../store/uiStore'
 import type { CurtailmentByCausePayload } from '../../api/simulation'
-import { CAUSE_RULE, CurtailmentByCauseTable, NOT_ESTABLISHED_REASON } from './CurtailmentByCause'
+import { CAUSE_RULE, CurtailmentByCauseTable, NOT_ESTABLISHED_REASON, UNKNOWN_REASON } from './CurtailmentByCause'
 
 const OK: CurtailmentByCausePayload = {
   status: 'ok', export_link: 'export', export_capacity_mw: 50, negative_price_hours: 12,
@@ -39,6 +39,17 @@ describe('CurtailmentByCauseTable', () => {
     const cells = within(screen.getByTestId('curtailment-cause-Solar')).getAllByRole('cell').map(c => c.textContent)
     expect(cells).toEqual(['Solar', '200.020.0 %'])
     expect(screen.queryByTestId('curtailment-cause-rule')).toBeNull()
+  })
+
+  it('an unknown reason shows a fixed sentence and logs the code, never shows it', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    render(<CurtailmentByCauseTable payload={{ status: 'not_established', reason: 'some_new_code',
+      plants: { Solar: { total_mwh: 200, available_mwh: 1000 } } } as CurtailmentByCausePayload} />)
+    const text = screen.getByTestId('curtailment-by-cause-reason').textContent
+    expect(text).toBe(UNKNOWN_REASON)
+    expect(text).not.toContain('some_new_code')
+    expect(warn).toHaveBeenCalledWith('curtailment by cause not established:', 'some_new_code')
+    warn.mockRestore()
   })
 
   it('the return link asks for the investment tab, Investment case section', () => {
