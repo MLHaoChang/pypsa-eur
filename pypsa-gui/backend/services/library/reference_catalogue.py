@@ -1,0 +1,116 @@
+"""The shipped (`common`) cost references as Library entries: list them, and show one
+beside the pack value an asset would otherwise be priced from.
+
+Read-only. The references are `europe_reference`'s pinned, attributed benchmarks; the
+pack is chosen per asset and named in every answer. Nothing here writes a project,
+a pack or a Library item; applying a reference to an asset is a separate, previewed
+edit.
+"""
+from __future__ import annotations
+
+import re
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict
+
+from services.library import europe_reference as R
+from services.library.defaults_pack.loader import (
+    DefaultsPack,
+    DefaultsPackError,
+    DefaultsPackLookupError,
+    load_defaults_pack,
+)
+
+SCOPE = "common"
+
+# `price_from_pack` stamps `<pack id>@<version>#<hash16>` on what it wrote.
+_PACK_SOURCE_RE = re.compile(r"(?P<id>[^@#\s]+)@(?P<version>[^#\s]+)#(?P<hash>[0-9a-f]{16})")
+
+
+class ReferenceSummary(BaseModel):
+    """One list row: enough to pick a reference without loading its cells."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    scope: Literal["common"]
+    reference_id: str
+    technology: str
+    projection_year: int
+    currency: str
+    currency_year: int
+    capacity_basis: str
+    capacity_basis_code: str
+    includes_grid_connection: bool | Literal["unknown"]
+    applicability: str
+    publisher: str
+    licence: str
+    attribution: str
+    source_url: str
+
+
+class PackChoice(BaseModel):
+    """Which pack a comparison stands beside, and why that one."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    stamp: str
+    version: str
+    chosen_by: Literal["asset_provenance", "latest_generic"]
+    note: str | None = None
+
+
+class ReferenceDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    scope: Literal["common"]
+    reference: R.EuropeanTechnologyReference
+    pack: PackChoice
+    comparison: list[R.ReferenceComparison]
+
+
+def list_references() -> list[ReferenceSummary]:
+    """Every shipped reference, in the reader's selector order."""
+    rows = []
+    for technology, year in R.available_europe_technology_references():
+        ref = R.load_europe_technology_reference(technology, year)
+        rows.append(ReferenceSummary(
+            scope=SCOPE, reference_id=ref.reference_id, technology=ref.technology,
+            projection_year=ref.projection_year, currency=ref.currency,
+            currency_year=ref.currency_year, capacity_basis=ref.capacity_basis,
+            capacity_basis_code=ref.capacity_basis_code,
+            includes_grid_connection=ref.includes_grid_connection,
+            applicability=ref.applicability, publisher="Danish Energy Agency and Energinet",
+            licence=ref.licence, attribution=ref.attribution, source_url=ref.source_url))
+    return rows
+
+
+def pack_for_asset(provenance: dict[str, dict] | None) -> tuple[DefaultsPack, PackChoice]:
+    """The pack an asset would be priced from: the one its `overnight_cost` provenance
+    names, else the latest generic version. A named pack this build cannot load falls
+    back to the latest generic, and the note says so."""
+    source = ((provenance or {}).get("overnight_cost") or {}).get("source") or ""
+    m = _PACK_SOURCE_RE.fullmatch(source)
+    if m is not None:
+        try:
+            pack = load_defaults_pack(m["version"])
+        except (DefaultsPackError, DefaultsPackLookupError):
+            pack = None
+        if pack is not None and pack.pack_id == m["id"] and pack.hash.startswith(m["hash"]):
+            return pack, PackChoice(stamp=pack.stamp, version=pack.version,
+                                    chosen_by="asset_provenance")
+        note = f"the asset's pack {source!r} is not available here; compared with the latest generic pack"
+    else:
+        note = None
+    pack = load_defaults_pack()
+    return pack, PackChoice(stamp=pack.stamp, version=pack.version,
+                            chosen_by="latest_generic", note=note)
+
+
+def reference_detail(technology: str, projection_year: int,
+                     provenance: dict[str, dict] | None = None) -> ReferenceDetail:
+    """One reference beside the pack value it would otherwise be; raises `DefaultsPackError`
+    for a selector the reader does not hold."""
+    ref = R.load_europe_technology_reference(technology, projection_year)
+    pack, choice = pack_for_asset(provenance)
+    return ReferenceDetail(scope=SCOPE, reference=ref, pack=choice,
+                           comparison=R.compare_europe_reference_with_pack(ref, pack))

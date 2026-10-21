@@ -135,6 +135,8 @@ GET     /api/library/items/{kind}                                               
 GET     /api/library/items/{kind}/{name}                                           -> get_item_api_library_items__kind___name__get
 PUT     /api/library/items/{kind}/{name}                                           -> put_item_api_library_items__kind___name__put
 POST    /api/library/meter_data                                                    -> upload_meter_data_api_library_meter_data_post
+GET     /api/library/references                                                    -> list_references_api_library_references_get
+GET     /api/library/references/{technology}/{year}                                -> get_reference_api_library_references__technology___year__get
 GET     /api/library/series                                                        -> list_series_api_library_series_get
 POST    /api/library/series                                                        -> put_series_api_library_series_post
 POST    /api/library/series/upload                                                 -> upload_series_api_library_series_upload_post
