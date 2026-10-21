@@ -10,7 +10,8 @@
     "handoff": true
   },
   "id": "eh_ipp_hybrid",
-  "initial_results_tab": "commercial",
+  "initial_results_section": "case",
+  "initial_results_tab": "investment",
   "ledger": [
     {
       "item": "planning period",
