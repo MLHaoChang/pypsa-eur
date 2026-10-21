@@ -331,34 +331,45 @@
     "shared_edit_acceptance_cases": 20,
     "source_pins": "pass",
     "delivery_and_dependency_mapping": "pass",
-    "required_acceptance_cases_documented": 98,
+    "required_acceptance_cases_documented": 116,
     "chatbot_tool_references": "pass"
   },
   "authored_artifacts": {
     "01-MASTER-FEATURE-AUDIT.md": "129217825852d9a0fe0e8e0d73d1952dfc01f82b4c224f156a7c3499ac0de738",
     "02-SHARED-ASSUMPTIONS-SPEC.md": "085723e76df179b24ea13263051ad733247df58f9e973b8b3382b4371ae26349",
-    "03-CHATBOT-INTEGRATION-SPEC.md": "b7a8371800fdeaf8e853d863f8d6ca8e7e4ee82102e3e152564e18a8064895cb",
-    "04-IMPLEMENTATION-PLAN.md": "f8d4521443928fc336b482bec812dba907c9c461d002396224af13062f645e23",
+    "03-CHATBOT-INTEGRATION-SPEC.md": "c783aa0c3eb9f20cfe9de333962fb94e342eb94824ceca1f0cd74856e9036e78",
+    "04-IMPLEMENTATION-PLAN.md": "62e61f3b95589d38477ef169b0c2fb417d304507bfe958f0cf3c667f23962aec",
     "05-API-AND-UX-CONTRACTS.md": "110a79d67e46f507e25c29ecb57096ccf812868a768412a1ca0cb1a6b16b2765",
-    "HANDOFF.md": "66f03f9b663478743fcd1c2e210a991113bf703a8801cf3601d414da77034467",
-    "README.md": "4d15132ce51254109fff615a892f6453b00f7fab624553a022d3f4b1096d5cad",
+    "06-AI-PRIORITIES-AND-COST-SPEC.md": "b876829250062556e63d838b80bc2db18f14e1d469d03f544aeed6bd38e0a711",
+    "HANDOFF.md": "c080cb44565e7c9373f7bc6d98fe7806e1e36fea4f339839838fd6458733e9bc",
+    "README.md": "13cdbc8564c3a722a5ca7aa52b57eb3933147c97850d047fa67a1c8673effd89",
+    "ai-priorities.json": "817b815391aceb22fb88cc6abe502e54352cb3f5f87871433525219703aba74d",
+    "ai-priority-evidence.json": "941a019d8794053b3605f33f986030a49058026fe88f1dbad8cf15b0b7a7a956",
     "chatbot-integration.json": "95d2602611d340ad512f4562b11b5fbc8052d26919b6d657af71fe382571e14b",
     "findings.json": "520389f085cd9db638e91612739a59d9288cd48172aa7e254299565961300f4a",
-    "implementation-plan.json": "fca9f04d32dcbd528fae8db44d49aa34b851f8d38e6e9b43c8cee80e45caaacb",
+    "implementation-plan.json": "328fc79c4f0a7479a124cc81b74f37dd61de13aa3b6025a639e221fa87d27f91",
     "master-feature-audit.json": "8f551552f8413f6c6b1b96d0f7624f2b0235bdaaa1f991feacf7a376f6b10ece",
     "probes/audit_restore_probes.py": "d9bb0a191bbf258d7a38fb5aed07dcf5212430d67077f670d40ca013ea1f507e",
-    "validate_specs.py": "ccd1229143e85d4755162cc77feb41f94362fe7bac1e6af199906e7f784fe797"
+    "validate_specs.py": "d352da16cc6abb37b24d385269dd6956b9a866405952be9ad7d35fe56d2a002a"
   },
   "specification_publication": {
     "scope": "Entire project-management implementation including chatbot integration",
     "checked_at_utc": "2026-10-21T18:54:58.392348+00:00",
     "runtime_implementation": false,
     "delivery_packages": 15,
-    "required_acceptance_cases_documented": 98,
+    "required_acceptance_cases_documented": 116,
     "domain_contexts": 9,
     "chatbot_capabilities": 12,
     "new_runtime_tests_executed": false,
     "historical_test_results_not_repeated": true,
-    "remote_ci_status": "must be read on published head; no green/premerge claim"
+    "remote_ci_status": "must be read on published head; no green/premerge claim",
+    "focused_ai_assessment_baseline": "87546ef5d184a9b20c80a65e2164f7fac0930f15"
+  },
+  "focused_ai_assessment": {
+    "record": "ai-priority-evidence.json",
+    "baseline": "87546ef5d184a9b20c80a65e2164f7fac0930f15",
+    "existing_tests_passed": 120,
+    "new_feature_tests_executed": false,
+    "roi_or_paid_benchmark": false
   }
 }

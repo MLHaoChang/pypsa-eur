@@ -26,7 +26,7 @@ def main():
     assert plan['runtime_implementation'] is False and not plan['new_test_cases_executed']
     assert not chatbot['runtime_implementation'] and not validation['fixes_implemented']
     cases = {t['id']: t for t in plan['test_cases']}
-    assert len(cases) == len(plan['test_cases']) == 98
+    assert len(cases) == len(plan['test_cases']) == 116
     packages = {p['id']: p for p in plan['packages']}
     assert set(packages) == {f'PM{i:02}' for i in range(15)}
     visited, visiting = set(), set()
@@ -56,10 +56,10 @@ def main():
     assert set(plan['audit_feature_delivery_map']) == {f'PM{i:02}' for i in range(1,25)}
     for owners in plan['audit_feature_delivery_map'].values():
         assert owners and set(owners) <= packages.keys()
-    docs = ['02-SHARED-ASSUMPTIONS-SPEC.md', '03-CHATBOT-INTEGRATION-SPEC.md', '04-IMPLEMENTATION-PLAN.md']
+    docs = ['02-SHARED-ASSUMPTIONS-SPEC.md', '03-CHATBOT-INTEGRATION-SPEC.md', '04-IMPLEMENTATION-PLAN.md', '06-AI-PRIORITIES-AND-COST-SPEC.md']
     documented = set()
     for name in docs:
-        documented.update(re.findall(r'^\| ((?:SR|PD|UI|VM|LF|BV|AI)\d{2}) \|', (here / name).read_text(), re.M))
+        documented.update(re.findall(r'^\| ((?:SR|PD|UI|VM|LF|BV|AI|RI)\d{2}) \|', (here / name).read_text(), re.M))
     assert documented == cases.keys()
     assert set(chatbot['acceptance_ids']) == {f'AI{i:02}' for i in range(1,27)}
     assert len(chatbot['capabilities']) == 12 and len(plan['domain_journeys']) == 9
@@ -71,6 +71,17 @@ def main():
     for capability in chatbot['capabilities']:
         assert set(capability['source_confirmed_existing_tool_refs']) <= tools
         assert capability['full_new_journey_implemented'] is False
+    priorities = read('ai-priorities.json')
+    focused = read('ai-priority-evidence.json')
+    assert priorities['focused_assessment_baseline'] == focused['baseline']
+    assert [r['rank'] for r in priorities['roles']] == [1, 2, 3]
+    assert priorities['runtime_implementation'] is False and priorities['roi_measured'] is False
+    assert focused['existing_test_run']['passed'] == 120
+    assert focused['existing_test_run']['failures'] == focused['existing_test_run']['errors'] == 0
+    assert {i for r in priorities['roles'] for i in r['acceptance_ids']} == {f'RI{i:02}' for i in range(1,19)}
+    for entry in focused['files']:
+        data = subprocess.check_output(['git', 'show', focused['baseline'] + ':' + entry['path']], cwd=repo)
+        assert hashlib.sha256(data).hexdigest() == entry['sha256'], entry['path']
     assert [x['id'] for x in findings['findings'][:3]] == ['F01', 'F02', 'F03']
     assert validation['new_safe_restore_expectations']['failures'] == 3
     for entry in validation['offline_source_pins']:
@@ -85,7 +96,7 @@ def main():
     for name, digest in validation.get('authored_artifacts', {}).items():
         assert hashlib.sha256((here / name).read_bytes()).hexdigest() == digest, name
     print(json.dumps(dict(status='pass', scope='specification consistency only',
-                          delivery_packages=15, acceptance_cases_documented=98,
+                          delivery_packages=15, acceptance_cases_documented=116,
                           audited_features=24, domain_contexts=9,
                           chatbot_capabilities=12, restore_findings_still_open=3,
                           new_runtime_tests_executed=False), indent=2))

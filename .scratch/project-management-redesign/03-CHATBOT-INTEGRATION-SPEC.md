@@ -4,6 +4,10 @@ Status: proposed integration specification, not a runtime feature or approval of
 
 Read with the [feature audit](01-MASTER-FEATURE-AUDIT.md), [shared-assumptions design](02-SHARED-ASSUMPTIONS-SPEC.md) and the [harness contract](../../pypsa-gui/backend/harness/README.md). All projects, templates, supported study domains and Guided/Expert modes share this contract. Data-centre load flow is an example, not the assistant's capability boundary.
 
+## Cost/usefulness priority
+
+Start with [three bounded profiles](06-AI-PRIORITIES-AND-COST-SPEC.md): guided next-action help, source-bound result explanation and sensitivity drafts. They reuse the existing configured provider/companion; no mandatory multi-agent runtime or automatic second reviewer. The complete plan adds RI01–RI18 and early sub-increments inside PM10/PM12/PM07. Required strict review remains authoritative, with explicit additional budget or scoped refusal.
+
 ## Product objective
 
 The one GridSpine companion helps the user find and resume work, understand a design and its evidence, prepare parameter changes, organize variants, request runs and review the resulting decisions. It acts through the same native project/variant/version/job/report services as the UI, with the same access and approvals. It must not maintain another project list, parameter store, approval channel, job runner or numerical comparison engine.

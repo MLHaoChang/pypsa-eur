@@ -233,11 +233,15 @@
       "proposed_files": [
         "pypsa-gui/backend/services/variant_changes.py",
         "pypsa-gui/backend/routers/variant_changes.py",
-        "pypsa-gui/frontend/src/pages/projects/VariantAssumptionsDrawer.tsx"
+        "pypsa-gui/frontend/src/pages/projects/VariantAssumptionsDrawer.tsx",
+        "pypsa-gui/backend/services/sensitivity_preview.py"
       ],
       "new_test_targets": [
         "pypsa-gui/backend/tests/test_variant_change_preview.py",
-        "pypsa-gui/frontend/src/pages/projects/VariantAssumptionsDrawer.test.tsx"
+        "pypsa-gui/frontend/src/pages/projects/VariantAssumptionsDrawer.test.tsx",
+        "pypsa-gui/backend/tests/test_assistant_sensitivity_drafts.py",
+        "pypsa-gui/backend/tests/test_sensitivity_preview_no_effects.py",
+        "pypsa-gui/frontend/src/pages/projects/SensitivityDraft.test.tsx"
       ],
       "acceptance_ids": [
         "BV01",
@@ -248,7 +252,13 @@
         "BV06",
         "BV07",
         "BV08",
-        "BV18"
+        "BV18",
+        "RI13",
+        "RI14",
+        "RI15",
+        "RI16",
+        "RI17",
+        "RI18"
       ],
       "done_when": "Explicit bounded targets, canonical field/unit/effective-value mapping and preview digest; common-value vs explicit overwrite; unresolved differences stop Apply. No writes/solves in preview.",
       "status": "planned_not_implemented"
@@ -341,11 +351,16 @@
         "pypsa-gui/backend/harness/catalogue.py"
       ],
       "proposed_files": [
-        "pypsa-gui/frontend/src/components/ProjectChatContext.tsx"
+        "pypsa-gui/frontend/src/components/ProjectChatContext.tsx",
+        "pypsa-gui/backend/services/assistant_help_packets.py",
+        "pypsa-gui/backend/harness/task_profiles.py",
+        "pypsa-gui/frontend/src/components/ContextualAssistAction.tsx"
       ],
       "new_test_targets": [
         "pypsa-gui/backend/tests/test_project_management_chat_context.py",
-        "pypsa-gui/frontend/src/components/ProjectChatContext.test.tsx"
+        "pypsa-gui/frontend/src/components/ProjectChatContext.test.tsx",
+        "pypsa-gui/backend/tests/test_assistant_setup_help.py",
+        "pypsa-gui/frontend/src/components/ContextualAssistAction.setup.test.tsx"
       ],
       "acceptance_ids": [
         "AI01",
@@ -355,7 +370,13 @@
         "AI05",
         "AI18",
         "AI23",
-        "AI25"
+        "AI25",
+        "RI01",
+        "RI02",
+        "RI03",
+        "RI04",
+        "RI05",
+        "RI06"
       ],
       "done_when": "One visible project/variant/source context; preserve no-key generic shortcuts, exact resolution and owning-field navigation. Read only; no new authority from summaries or mount-only acknowledgements.",
       "status": "planned_not_implemented"
@@ -421,7 +442,9 @@
         "pypsa-gui/backend/tests/test_project_management_chat_continuation.py",
         "pypsa-gui/backend/tests/test_project_management_provider_parity.py",
         "pypsa-gui/frontend/src/components/AssistantDock.projectManagement.test.tsx",
-        "pypsa-gui/frontend/scripts/smoke-project-management-chat.mjs"
+        "pypsa-gui/frontend/scripts/smoke-project-management-chat.mjs",
+        "pypsa-gui/backend/tests/test_assistant_result_explanation.py",
+        "pypsa-gui/frontend/src/components/ContextualAssistAction.results.test.tsx"
       ],
       "acceptance_ids": [
         "AI13",
@@ -433,7 +456,13 @@
         "AI22",
         "AI24",
         "AI25",
-        "AI26"
+        "AI26",
+        "RI07",
+        "RI08",
+        "RI09",
+        "RI10",
+        "RI11",
+        "RI12"
       ],
       "done_when": "At-most-once eligible origin-bound completion without new approvals, native numerical evidence, explicit checked gaps and no active-project hijack. Type/dictate/live share the native gate; speech mocks do not claim hosted-voice validation.",
       "status": "planned_not_implemented"
@@ -593,7 +622,25 @@
         "AI23",
         "AI24",
         "AI25",
-        "AI26"
+        "AI26",
+        "RI01",
+        "RI02",
+        "RI03",
+        "RI04",
+        "RI05",
+        "RI06",
+        "RI07",
+        "RI08",
+        "RI09",
+        "RI10",
+        "RI11",
+        "RI12",
+        "RI13",
+        "RI14",
+        "RI15",
+        "RI16",
+        "RI17",
+        "RI18"
       ],
       "done_when": "Every delivered requirement has passing independent native/fixture/browser evidence on the current source; failures, unsupported families, external review and real-use limits explicitly reported. Full applicable CI/premerge and exact-head UX/engine review under then-current rules; no production activation in this package.",
       "status": "planned_not_implemented"
@@ -1285,6 +1332,132 @@
       "expected": "Exact supported source/export scope; same request returns same receipt; no duplicate effects or stronger checked claims in reports.",
       "status": "required_not_implemented",
       "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "RI01",
+      "scenario": "Setup explanation against real flow with error, advisory and unknown",
+      "expected": "Same native Run verdict/blocking order and owning targets; no invented blocker, acknowledgement or automatic edit.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI02",
+      "scenario": "Simple native answer, no key/budget or one repeated click",
+      "expected": "Native reason/link works with no generation; eligible explicit help is coalesced and bounded; no provider fallback.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI03",
+      "scenario": "Setup context changes between preparation and publication",
+      "expected": "Recheck exact project/section/revision; stale explanation withheld/recomputed only by explicit admitted request, wrong-target action refused.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI04",
+      "scenario": "User asks to detect new assumptions not established by native checks",
+      "expected": "Label a suggestion or request missing input; no fabricated engineering defect/calibration fact.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI05",
+      "scenario": "Setup cache read after role/policy/locale/question/source change",
+      "expected": "Reauthorize and invalidate/miss as appropriate; private cached output cannot become authority or leak across users/projects.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI06",
+      "scenario": "Model setup response attempts an edit/tool or malformed/oversized claim",
+      "expected": "Read-only profile refuses the attempt or withholds invalid output; no changed model, acknowledgement or job.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI07",
+      "scenario": "Explain current/retained/A-B source and window",
+      "expected": "Exact native units/basis/value/source; unavailable sections not zero, no current-result fallback or restore.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI08",
+      "scenario": "Model injects a number, unsupported delta, ranking or stronger qualitative conclusion",
+      "expected": "Appropriate publication/schema/claim checks withhold unsupported claims; independent fixtures, no model self-approval.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI09",
+      "scenario": "Strict checking requires unsupported profile or mandatory review exceeds cap",
+      "expected": "Explicit scoped refusal/incomplete state; no checking downgrade, omitted mandatory reviewer or unchecked compliance badge.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI10",
+      "scenario": "Focused master energy-balance totals versus attribution rows",
+      "expected": "Reuse actual registry/profile coverage; totals do not certify Source\u2192Via\u2192Destination rows or every Energy flow statement.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI11",
+      "scenario": "Usage/rate missing, cached-token categories or bounded retry",
+      "expected": "Correct disjoint accounting or unavailable, never zero; full request/retry/reviewer cost included and caps reserved.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI12",
+      "scenario": "Evidence explanation fails/times out or source moves during generation",
+      "expected": "No optimistic/certified prose; native facts/limits remain, no automatic rerun, extra reviewer or larger-model fallback.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI13",
+      "scenario": "Draft 2\u20133 sensitivities on an exact saved baseline",
+      "expected": "Small interpretable native-eligible parameter changes and sourced/user-selected bounds; no guessed \u00b120% or invented benefits.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI14",
+      "scenario": "Side-effect-free preview and concurrent baseline edit",
+      "expected": "No rows/files/checkpoints/jobs/active-state mutation; stale digest refuses later execution; isolated native validation genuine.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI15",
+      "scenario": "Prompt asks for eight cases, unsupported tariff/profile edit or existing-variant common update",
+      "expected": "Explain actual admitted cap/family; use correct shared-edit path or refuse, no silent four-case-cap bypass.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI16",
+      "scenario": "User revises a draft manually or denies execution",
+      "expected": "Same native typed preview; no new model call required, no project/solve effect without the ordinary concrete confirmation.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI17",
+      "scenario": "Draft key/range/units/series mapping invalid or malicious text embedded",
+      "expected": "Native schema/allowlist/unit/effective-value rejection; untrusted text cannot grant instructions or hidden writes.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
+    },
+    {
+      "id": "RI18",
+      "scenario": "Regenerate/double-click/reconnect or provider unavailable",
+      "expected": "Bounded idempotent request/presentation; no duplicate cases/jobs or hidden generation; approved native execution remains distinct and source-bound.",
+      "status": "required_not_implemented",
+      "origin": "06-AI-PRIORITIES-AND-COST-SPEC.md"
     }
   ],
   "audit_feature_delivery_map": {
@@ -1435,5 +1608,51 @@
   ],
   "shared_assumptions_reference": "02-SHARED-ASSUMPTIONS-SPEC.md",
   "chatbot_reference": "03-CHATBOT-INTEGRATION-SPEC.md",
-  "release_implementation_requires_fresh_checks": true
+  "release_implementation_requires_fresh_checks": true,
+  "ai_priority_reference": "ai-priorities.json",
+  "early_ai_increments": [
+    {
+      "id": "ROI-A0",
+      "owner_package": "PM10",
+      "scope": "Existing readiness/section UI plus source-bound help; does not require complete management shell or shared writes",
+      "dependencies": "Existing native supported source/context/approval/budget contracts plus new bounded adapter; no dependency on all management packages",
+      "acceptance_ids": [
+        "RI01",
+        "RI02",
+        "RI03",
+        "RI04",
+        "RI05",
+        "RI06"
+      ]
+    },
+    {
+      "id": "ROI-B0",
+      "owner_package": "PM12",
+      "scope": "Current supported result and native A/B readers; exact-version/base-plus-N/extra checked adapters remain gated",
+      "dependencies": "Existing native supported source/context/approval/budget contracts plus new bounded adapter; no dependency on all management packages",
+      "acceptance_ids": [
+        "RI07",
+        "RI08",
+        "RI09",
+        "RI10",
+        "RI11",
+        "RI12"
+      ]
+    },
+    {
+      "id": "ROI-C0",
+      "owner_package": "PM07",
+      "scope": "Side-effect-free preview extraction and draft card; execution through ordinary admitted native actions later",
+      "dependencies": "Existing native supported source/context/approval/budget contracts plus new bounded adapter; no dependency on all management packages",
+      "acceptance_ids": [
+        "RI13",
+        "RI14",
+        "RI15",
+        "RI16",
+        "RI17",
+        "RI18"
+      ]
+    }
+  ],
+  "focused_ai_assessment_baseline": "87546ef5d184a9b20c80a65e2164f7fac0930f15"
 }

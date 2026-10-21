@@ -6,7 +6,7 @@ Publication: draft specifications PR from `claude/project-management-review`, co
 
 Read in order:
 
-1. `04-IMPLEMENTATION-PLAN.md`, `implementation-plan.json` and `05-API-AND-UX-CONTRACTS.md`: complete scope, 15 dependency-bound packages, 98 required acceptance cases, proposed code/API/UI/test targets and 9 domain contexts. Every audited feature maps to implementation packages.
+1. `04-IMPLEMENTATION-PLAN.md`, `implementation-plan.json` and `05-API-AND-UX-CONTRACTS.md`: complete scope, 15 dependency-bound packages, 116 required acceptance cases, proposed code/API/UI/test targets and 9 domain contexts. Every audited feature maps to implementation packages.
 2. `03-CHATBOT-INTEGRATION-SPEC.md` and `chatbot-integration.json`: 12 capabilities, 6 chat slices and AI01–AI26; actual resolvers/edit cards/access/navigation/job tools reused.
 3. `01-MASTER-FEATURE-AUDIT.md`: 24 features, current/spec/desired distinctions, F01–F10 and revised priorities.
 4. `findings.json`, `master-feature-audit.json`: structured findings and per-feature baseline.
@@ -43,3 +43,5 @@ Revised product decisions:
 Next work: PM00 rebaseline/reconciliation, then a bounded approved implementation slice from the concrete plan. This specs publication is not implementation approval or a waiver of current review gates. Re-read actual master, instructions/specs/owner decisions and compare source pins. Reconcile W2/W7/S5/S6 and open PR #496; do not turn pending spec rows into shipped features. Existing exact-head engine/UX/steward review gates remain applicable before implementation. No reviewer contact or external approval was performed in this task.
 
 Chat integration additions are specification-only. Start with exact context/read-only adapters alongside the redesigned overview; shared edits, version actions and group continuations wait for native contracts. Each actor/target restriction and ordinary approval remains authoritative, strict unmapped tools refuse, and no history import revives authorization. Tests run in the preceding audit do not certify new AI journeys.
+
+Priority addition: read `06-AI-PRIORITIES-AND-COST-SPEC.md`, `ai-priorities.json` and `ai-priority-evidence.json`. Focused current-master source is 87546ef5d184a9b20c80a65e2164f7fac0930f15 with 120 existing targeted backend tests passed; no new feature tests or paid/ROI benchmark. Three early bounded profiles can precede full parent-package delivery under their own native prerequisites; they do not loosen later dependency/approval gates. Structured total is 116 acceptance cases (98 original + RI01–RI18).

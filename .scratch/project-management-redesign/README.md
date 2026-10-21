@@ -4,7 +4,7 @@ Status: concept for owner discussion; refined by the feature audit and shared-as
 Reviewed: 21 October 2026, master `a68db6cfcf254df17a5b0d96da7a4c995f26423f`.
 Initial method: read-only source review plus open-PR inventory. The follow-up audit adds targeted existing automated suites and three new HTTP restore probes; see VALIDATION.json for exact outcomes. No runtime implementation, deployment or live-browser usability study. Publication scope: one draft specifications PR for the entire project-management implementation including chatbot integration; no runtime features or fixes are implemented here.
 
-**Start with the [concrete implementation plan](04-IMPLEMENTATION-PLAN.md) and [API/UI contracts](05-API-AND-UX-CONTRACTS.md), then the [chatbot integration](03-CHATBOT-INTEGRATION-SPEC.md).** The structured plan maps 15 delivery packages, 98 proposed acceptance cases and all 24 audited features.
+**Start with the [concrete implementation plan](04-IMPLEMENTATION-PLAN.md) and [API/UI contracts](05-API-AND-UX-CONTRACTS.md), then the [chatbot integration](03-CHATBOT-INTEGRATION-SPEC.md).** The structured plan maps 15 delivery packages, 116 proposed acceptance cases and all 24 audited features.
 
 **Read the [master feature audit](01-MASTER-FEATURE-AUDIT.md) and [shared-assumptions specification](02-SHARED-ASSUMPTIONS-SPEC.md) first.** They refine the initial brainstorm: safe capture/revert precedes visual redesign; existing section resume, queue and scenario services are reused; shared editing belongs in section 8 with explicit variant targets and guarded rollback.
 

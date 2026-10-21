@@ -1,6 +1,14 @@
 # Concrete implementation plan and required tests
 
-Status: proposed; source baseline `a68db6cfcf254df17a5b0d96da7a4c995f26423f`. This PR specifies work and publishes audit evidence; it changes no application runtime. **15 bounded delivery packages, 98 required acceptance cases and 9 domain contexts.** These are design/test requirements, not a claim that 98 new tests already exist or have passed.
+Status: proposed; source baseline `a68db6cfcf254df17a5b0d96da7a4c995f26423f`. This PR specifies work and publishes audit evidence; it changes no application runtime. **15 bounded delivery packages, 116 required acceptance cases and 9 domain contexts.** These are design/test requirements, not a claim that 116 new tests already exist or have passed.
+
+## First three AI increments by cost/usefulness
+
+See [the focused priorities and cost specification](06-AI-PRIORITIES-AND-COST-SPEC.md) and `ai-priorities.json`: ROI-A Explain what to do next, ROI-B Explain these results, ROI-C Suggest useful variants. The focused assessment uses actual master `87546ef5d184a9b20c80a65e2164f7fac0930f15`; its native-reader change and separate 120-test evidence do not re-certify the original audit.
+
+Deliver ROI-A0 on the existing readiness/section context, ROI-B0 over supported current/retained/A-B readers, and ROI-C0 as a side-effect-free sensitivity draft before admitted execution. These are early sub-increments inside PM10, PM12 and PM07 respectively. Their limited read-only/preview scope does **not** require finishing every broader parent-package dependency; the later full management/effect/group features keep the parent dependency DAG. Each early increment must still implement normal context/auth, native source and task-budget validation. No extra model subscription or universal second reviewer is required.
+
+The plan now contains the original 98 cases plus RI01–RI18, for 116 total required cases. RI cases have explicit implementation owners and are not executed feature tests.
 
 ## Scope and fixed product decisions
 
@@ -127,6 +135,8 @@ Each package becomes one isolated implementation issue/PR, splitting further if 
 
 ### PM07 — Read-only common-assumption matrix and previews
 
+ROI-C0 early scope additionally proposes `services/sensitivity_preview.py`, sensitivity-draft native/component tests and side-effect-free preview tests RI13–RI18. It does not invoke the create-and-queue tool for preview.
+
 **Depends on:** PM03, PM05.
 
 **Existing seams:** `pypsa-gui/backend/services/workflow_tools.py`, `pypsa-gui/backend/services/project_acl.py`, `pypsa-gui/backend/services/project_locks.py`, `pypsa-gui/frontend/src/pages/ScenariosPanel.tsx`.
@@ -169,6 +179,8 @@ Each package becomes one isolated implementation issue/PR, splitting further if 
 
 ### PM10 — Companion management context, summaries and navigation
 
+ROI-A0 early scope additionally proposes `services/assistant_help_packets.py`, `harness/task_profiles.py`, `ContextualAssistAction.tsx` and new setup-help component/HTTP/budget tests. Required cases RI01–RI06. Full paths are in the structured plan.
+
 **Depends on:** PM03, PM04, PM05.
 
 **Existing seams:** `pypsa-gui/frontend/src/components/AssistantDock.tsx`, `pypsa-gui/frontend/src/components/ChatPanel.tsx`, `pypsa-gui/backend/harness/navigation.py`, `pypsa-gui/backend/harness/catalogue.py`.
@@ -196,6 +208,8 @@ Each package becomes one isolated implementation issue/PR, splitting further if 
 **Done when:** Thin adapters to native operation services, full previews/read-back and per-target restrictions; deny/uncertain stops dependent runs. Strict unmapped tools refuse until a separate validated adapter is admitted.
 
 ### PM12 — Companion group completion, evidence comparison and input-mode parity
+
+ROI-B0 early scope uses existing result readers before group orchestration and adds result-explanation native/component tests RI07–RI12. Full paths are in the structured plan.
 
 **Depends on:** PM09, PM10, PM11.
 
@@ -227,13 +241,13 @@ Each package becomes one isolated implementation issue/PR, splitting further if 
 
 **Existing seams:** `pypsa-gui/TESTING.md`, `scripts/coord/premerge.sh`.
 
-**Acceptance IDs:** all 98 cases and all supported domain journeys.
+**Acceptance IDs:** all 116 cases and all supported domain journeys.
 
 **Done when:** Every delivered requirement has passing independent native/fixture/browser evidence on the current source; failures, unsupported families, external review and real-use limits explicitly reported. Full applicable CI/premerge and exact-head UX/engine review under then-current rules; no production activation in this package.
 
 ## New acceptance cases beyond the shared-edit/companion matrices
 
-BV01–BV20 remain in [the shared-assumptions specification](02-SHARED-ASSUMPTIONS-SPEC.md); AI01–AI26 remain in [the chatbot integration specification](03-CHATBOT-INTEGRATION-SPEC.md). The structured plan contains all 98 cases and maps each to its implementation owner.
+RI01–RI18 are in [the AI priorities specification](06-AI-PRIORITIES-AND-COST-SPEC.md). BV01–BV20 remain in [the shared-assumptions specification](02-SHARED-ASSUMPTIONS-SPEC.md); AI01–AI26 remain in [the chatbot integration specification](03-CHATBOT-INTEGRATION-SPEC.md). The structured plan contains all 116 cases and maps each to its implementation owner.
 
 | ID | Scenario | Required independent evidence |
 | --- | --- | --- |
