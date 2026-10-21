@@ -130,3 +130,7 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **Two PRs touching the same generated inventory (`harness/catalogue.py`, `capability-inventory.json`) counted as a `code` overlap even when the merge was clean and every test passed.** Each one cost a master merge and a ~2 h CI cycle.
   - Fix: overlap only in those files does not block when the trial merge is clean and the semantic tests and the assistant inventory check pass on it; premerge prints a `waived` line. Any other code overlap, or any conflict, still blocks. The template has the same mechanism as `waive_overlap_re` (empty by default).
   - Lives in: `scripts/coord/premerge.sh`, `inventory_overlap_re` (template: `waive_overlap_re`).
+
+- **2026-10-21: a macOS job sat queued with no runner, and the waiver only fires once the job is cancelled.** The PR waited on GitHub's own runner timeout with every other check green.
+  - Fix: after 30 minutes queued with no runner and everything else green, the coordinator cancels that workflow run and reruns premerge, which then waives it.
+  - Lives in: `.claude/skills/coordinator/SKILL.md`, "Merging" → "A blocked PR".

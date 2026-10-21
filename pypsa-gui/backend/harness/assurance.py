@@ -139,6 +139,7 @@ class Turn:
         self.usage_before = dict(session.usage_acc)
         self.effect_pending = False
         self.reservation_nonce = None
+        self.scope_hint = None
 
     def review_interpretations(self, blocks, provider, model, ctx):
         if self.clarification is not None:
@@ -241,8 +242,15 @@ class Turn:
                 self.request_evidence = records.capture_scoped(
                     self.owner, self.request_scope
                 )
-            except (ValueError, KeyError, TypeError, HTTPException):
-                self.request_scope["reason"] = "unsupported_or_unavailable_source"
+            except (ValueError, KeyError, TypeError, HTTPException) as exc:
+                from harness.carrier_calculations import REFUSALS
+
+                named = isinstance(exc, ValueError) and exc.args and exc.args[0] in REFUSALS
+                self.request_scope["reason"] = (
+                    exc.args[0] if named else "unsupported_or_unavailable_source"
+                )
+                if named and len(exc.args) > 1 and isinstance(exc.args[1], str):
+                    self.scope_hint = exc.args[1]
             return
         # Deliberately narrow whole-message grammar. Additional instructions,
         # periods or another requested quantity never silently become this profile.
@@ -360,6 +368,13 @@ class Turn:
         if record is None:
             if draft.blocks:
                 raise ValueError("unavailable request")
+            if self.scope_hint is not None:
+                return (
+                    f"No carrier is named exactly {_label(self.request_scope['entity_id'])}; "
+                    f"did you mean {_label(self.scope_hint)}?",
+                    [],
+                    [],
+                )
             return (
                 "Select a generator or StorageUnit with verified current LP results and an exact supported scope to check its key results.",
                 [],
@@ -400,8 +415,10 @@ class Turn:
                 }
             )
         scoped = record["source_kind"] == "scoped_result"
+        carrier = self.request_scope["profile"] == assurance_metrics.carrier.PROFILE
         entity_kind = (
-            "StorageUnit" if self.request_scope["profile"] in assurance_metrics.STORAGE_PROFILES
+            "Carrier" if carrier
+            else "StorageUnit" if self.request_scope["profile"] in assurance_metrics.STORAGE_PROFILES
             else "Network" if self.request_scope["profile"] == "network-linear-cost/1" else "Generator"
         )
         lines = [
@@ -409,6 +426,8 @@ class Turn:
             f"{'retained run' if self.request_scope.get('retain') else 'requested snapshots' if scoped else 'all current snapshots'} "
             f"({record['scope']['start']} to {record['scope']['end']})."
         ]
+        if carrier:
+            lines.extend(assurance_metrics.carrier.notes(record["raw"], self.request_scope))
         for slot in record["slots"]:
             definition = assurance_metrics.definition(slot["metric"], self.request_scope["profile"])
             fact = next(
