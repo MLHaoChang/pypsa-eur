@@ -563,6 +563,10 @@
       "surface": "banner",
       "why": "The turn hit MAX_TOOL_CALLS_PER_TURN and stopped. Terminal, and the only per-turn bound there is."
     },
+    "task_step_limit": {
+      "surface": "inline",
+      "why": "A bounded task (the card explanation, budget.task_cap) reached its tool-call or round limit; the over-limit tools were not run and the turn stopped with the plain message. The user asks to continue in a new turn. Inline until the card explanation's header entry (H2b) gives it copy."
+    },
     "tool_error": {
       "surface": "inline",
       "why": "The forwarder's own fallback when a tool raises something with no structured error_kind. Generic by construction — there is no copy to write, which is exactly why the specific kinds beside it exist."
