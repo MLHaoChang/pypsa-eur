@@ -146,11 +146,12 @@ def _fingerprint():
 
 
 def _stale(task, current=None):
-    """SC-11: the brief is current only while the inputs are the last plan step's own."""
-    if not task.get("brief") or not task.get("fingerprint") or task["status"] in ("completed", "cancelled"):
+    """SC-11: the brief is current only while the inputs are the last plan
+    step's own. Inputs that cannot be read count as changed (fail closed)."""
+    if not task.get("brief") or task["status"] in ("completed", "cancelled"):
         return False
     current = current or _fingerprint()
-    return current is not None and current != task["fingerprint"]
+    return current is None or current != task.get("fingerprint")
 
 
 def _card_of(task, step_id):
@@ -171,15 +172,17 @@ def _effectful(tool):
     return safety_tier_for(tool) != "read"
 
 
-def _view(task, fresh=True, current=None):
+def _view(task, fresh=False, current=None):
     step = _next(task)
     state = task["status"]
     out = {"task_id": task["task_id"], "title": task["title"], "project_id": task["project_id"],
            "status": state, "completed_steps": sum(s["status"] == "completed" for s in task["steps"]),
            "total_steps": len(task["steps"]),
-           "steps": [{**{k: s[k] for k in ("id", "tool", "status")}, "limit": _limit(s["tool"])} for s in task["steps"]]}
+           "steps": [{k: s[k] for k in ("id", "tool", "status")} for s in task["steps"]]}
     brief = task.get("brief")
     if brief:
+        for entry in out["steps"]:
+            entry["limit"] = _limit(entry["tool"])
         # Condensed: the current phase's steps; the other phases as counts.
         phases = brief["phases"]
         index = next((i for i, p in enumerate(phases) if step and step["id"] in p["steps"]), len(phases) - 1)
@@ -282,7 +285,10 @@ def start_task(title: str, steps: list[dict], request_id: str, brief: dict | Non
                     "title": title.strip(), "status": "ready", "steps": checked}
             if brief is not None:
                 # The chain starts at the inputs the user approved the brief on.
-                task.update(version=2, brief=brief, fingerprint=_fingerprint())
+                fingerprint = _fingerprint()
+                if fingerprint is None:
+                    _refuse("brief_inputs_unreadable", "The project's inputs cannot be read, so the brief cannot be kept current.")
+                task.update(version=2, brief=brief, fingerprint=fingerprint)
             _save(path, task)
         session.task_id = task_id
         return _view(task)
@@ -291,7 +297,7 @@ def start_task(title: str, steps: list[dict], request_id: str, brief: dict | Non
 def get_task(task_id: str) -> dict:
     with _LOCK:
         _, task = _read(task_id)
-        return _view(task)
+        return _view(task, fresh=True)
 
 
 def resume_task(task_id: str) -> dict:
@@ -317,7 +323,7 @@ def resume_task(task_id: str) -> dict:
             task["status"] = "ready" if step["status"] == "failed" else "needs_review"
             _save(path, task)
         session.task_id = task_id
-        return _view(task)
+        return _view(task, fresh=True)
 
 
 def cancel_task(task_id: str) -> dict:
@@ -372,7 +378,7 @@ def resolve_task_step(task_id: str, outcome: str, result: dict | None = None) ->
         from harness.session import get_session
         origin = get_session(step.get("session_id"))
         worker = _WORKERS.get((task_id, step["id"], step.get("attempt_id")))
-        if (origin and origin._turn_in_flight) or (worker is not None and not worker.done()):
+        if (origin and origin._turn_in_flight) or worker is not None:  # its receipt is still landing
             _refuse("task_step_running", "Wait for the originating session to stop before reconciliation.")
         if outcome == "completed":
             found, evidence = _native_evidence(path, task, step)
@@ -415,7 +421,7 @@ def _native_evidence(path, task, step):
         from harness import edit_card
         try:
             receipt = edit_card.reread(step["tool"], _resolve(step["args"], task["steps"]), step["receipt"])
-        except HTTPException:
+        except Exception:  # noqa: BLE001 — an unreadable target is no evidence
             return False, None
         if receipt is not None:
             return True, {"_edit_receipt": receipt}
@@ -454,6 +460,8 @@ def admit(session, tool, args):
                                           f"Step {later['id']} ({tool}) cannot start before step {step['id']} "
                                           f"({step['tool']}) completes; it is {step['status']}."})
             _gate_brief(task, step)
+            if len(json.dumps(expected, default=str)) > ARGS_CHARS:
+                _refuse("task_reference_too_large", "Resolved arguments exceed the step's limit; use file IDs or smaller result references.")
             return
 
 
@@ -463,7 +471,8 @@ def _gate_brief(task, step):
         _refuse("task_paused_at_card", f"The plan is paused before the {task['pause']['card']} card; "
                 "the user continues from the plan card.")
     if _effectful(step["tool"]) and _stale(task):
-        _refuse("task_brief_stale", "The inputs changed outside this plan; draft a new brief for the user to review.")
+        _refuse("task_brief_stale", "The inputs changed outside this plan, or could not be read; "
+                "draft a new brief for the user to review.")
 
 
 def await_job(ticket, job_id, session_id):
@@ -708,7 +717,7 @@ def list_tasks(limit: int = 10) -> dict:
             task = json.loads(path.read_text())
             if task.get("owner_id") != owner or task.get("project_id") != project:
                 continue
-            items.append({k: _view(task, fresh=False)[k] for k in ("task_id", "title", "status", "completed_steps", "total_steps")})
+            items.append({k: _view(task)[k] for k in ("task_id", "title", "status", "completed_steps", "total_steps")})
             if len(items) == limit:
                 break
     out = {"items": items, "limit": limit, "note": "Most recently updated tasks in the active project, owned by you."}
@@ -737,7 +746,10 @@ def register_worker(ticket, future):
         with _LOCK:
             _WORKERS.pop(ticket, None)
             if path is not None and not done.cancelled() and done.exception() is None:
-                _late_receipt(path, ticket, done.result())
+                try:
+                    _late_receipt(path, ticket, done.result())
+                except Exception:  # noqa: BLE001 — no receipt: the step stays to review
+                    pass
     future.add_done_callback(finished)
 
 

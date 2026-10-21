@@ -170,9 +170,11 @@ def test_brief_view_names_server_limits_and_condenses(session):
     assert view['brief']['cards'] == ['capacity', 'grid']
     assert view['brief']['phase'] == {'card': 'capacity', 'index': 1, 'of': 2}
     assert all(step['limit'] == {'args_chars': 1800, 'result_chars': 4000, 'wait': None} for step in view['steps'])
-    solve = chat_tools.start_task(title='Solve', request_id='view-solve', steps=[
-        {'id': 'solve', 'tool': 'run_simulation', 'args': {}}])
+    run_step = [{'id': 'solve', 'tool': 'run_simulation', 'args': {}}]
+    solve = chat_tools.start_task(title='Solve', request_id='view-solve', steps=run_step, brief=brief(run_step))
     assert solve['steps'][0]['limit']['wait'] == 'job'
+    plain = chat_tools.start_task(title='Plain', request_id='view-plain', steps=reads(1))
+    assert 'limit' not in plain['steps'][0]  # plain views keep their size
 
 
 def test_same_request_with_a_different_brief_conflicts(session):
@@ -269,3 +271,25 @@ def test_cop1_turn_continue_for_a_plan_not_paused_is_refused(session):
     task = chat_tools.start_task(title='Study', request_id='turn-ready', steps=steps, brief=brief(steps))
     frames = list(chat_service.run_turn(session, '', continue_task_id=task['task_id']))
     assert frames[0][1]['error_kind'] == 'plan_continue_unavailable'
+
+
+def test_unreadable_inputs_fail_closed(session, monkeypatch):
+    task = edit_plan(session, 'unreadable')
+    monkeypatch.setattr(tasks, '_fingerprint', lambda: None)
+    assert chat_tools.get_task(task['task_id'])['brief_stale'] == 'inputs_changed_outside_plan'
+    refused('task_brief_stale', tasks.admit, session, 'update_component', edit(25.0))
+
+
+def test_activity_lists_a_long_paused_brief(session, baseline):
+    from services.assistant_activity import _tasks
+    steps = reads(14)
+    task = chat_tools.start_task(title='Long study', request_id='activity', steps=steps,
+                                 brief=brief(steps, cards=('capacity', 'grid')))
+    for tool in ('project_readiness', 'dispatch_status', 'validate_network') * 3:
+        if chat_tools.get_task(task['task_id'])['status'] == 'paused_at_card':
+            break
+        run(session, tool)
+    owner = json.loads((baseline[2] / 'assistant_tasks' / (task['task_id'] + '.json')).read_text())['owner_id']
+    rows, warnings = _tasks(baseline[2], baseline[1], owner)
+    assert not warnings
+    assert [(r['native_status'], r['status'], r['needs_you']) for r in rows] == [('paused_at_card', 'waiting_for_input', True)]
