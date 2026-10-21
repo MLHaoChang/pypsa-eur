@@ -19,13 +19,23 @@ card (`ask_user`, detail = the brief, one verdict). On "Approve plan" it calls
 companion (the existing task card, `AssistantResultCard`), and it is the only
 progress view. Each step runs as an ordinary offered tool call: a write or a
 run still needs its own edit card or Confirmation card click, and the plan
-stops at each card boundary for the user's "Continue" (see Q1). Each result is
+stops at each card boundary for the user's "Continue" (owner decision COP-1). Each result is
 read back natively before the next step. A failed step offers a correction
 draft. The brief ends with its Hand-off step(s).
 
 The card workspace **Next** row is unchanged: it shows the one next step per
 card from the flow (card-workspaces §2.1). It never shows the brief's progress.
 There is no second progress line, no new panel, no second Start button.
+
+**Owner decision COP-1 (2026-10-21, via the coordinator).** Every write or
+run step keeps its own card click; the plan also pauses at each card
+boundary with "Continue to <card>" on the plan card; read steps run without
+stopping; approving the brief grants nothing. Mechanism (slice 1): when the
+last step of a phase completes and the next phase belongs to another card,
+the task status becomes `checkpoint` and `admit` refuses the next phase's
+first step (`task_checkpoint`) until `resume_task` clears it. The plan card's
+"Continue to <card>" sends that ordinary resume request as a user message;
+it is not an approval and grants no card.
 
 ## The brief is a `start_task` plan (no second system)
 
@@ -139,7 +149,7 @@ UX gate conditions for slice 3 (UX reviewer, 2026-10-21, on `3889eafe`):
 ## Slices
 
 1. **Harness** (gatekeeper): `brief` argument + validation + version-2 file,
-   24-step limit under a brief, per-step limits, `resolve_task_step` native
+   24-step limit under a brief, COP-1 card-boundary checkpoint, per-step limits, `resolve_task_step` native
    read-back, freshness. Tests SC-01, SC-05, SC-06, SC-07, SC-11, SC-12.
 2. **Cases and waiting runs** (gatekeeper): queued-job waiting steps,
    `refresh_experiment` completion rule, correction draft, two-case brief.
