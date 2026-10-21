@@ -257,7 +257,7 @@ function SnapshotRow({
         <Btn
           onClick={onRestore}
           disabled={restoreDisabled}
-          title="Restore this snapshot (current state is auto-saved)"
+          title="Restore this snapshot (unsaved changes are saved, and the current state is kept as a snapshot first)"
         >
           <RotateCcw size={11} /> Restore
         </Btn>
@@ -457,7 +457,7 @@ function RestoreConfirmModal({
 
       <div className="bg-bg/60 border border-border rounded p-3 mb-4 text-xs text-muted">
         <div className="font-medium text-text mb-1">Safety net</div>
-        The current state will be auto-saved as a snapshot labelled
+        Unsaved changes are saved first. The current state is then kept as a snapshot labelled
         <strong> "before-restore"</strong> so you can roll back if this isn't what you wanted.
       </div>
       <div className="flex items-center justify-end gap-2">

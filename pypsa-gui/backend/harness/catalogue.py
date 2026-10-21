@@ -1863,9 +1863,9 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "restore_project_snapshot",
-        "Restore project from a saved snapshot. Overwrites project files + "
-        "reloads in-memory. Pre-restore auto-snapshot mitigates user error. "
-        "Safety: destructive.",
+        "Restore project from a saved snapshot. Saves unsaved edits, keeps the "
+        "current state as a 'before-restore' snapshot, then overwrites project "
+        "files + reloads in-memory. Safety: destructive.",
         {
             "name": {"type": "string"},
             "snapshot_id": {"type": "string"},

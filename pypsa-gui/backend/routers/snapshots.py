@@ -560,6 +560,36 @@ def list_snapshots(
     return [_to_info(d) for d in _list_snapshot_dirs(project_dir)]
 
 
+def _save_unsaved_live_state(project: AuthorizedProject, db, user) -> None:
+    """Save the project's unsaved in-memory edits before a restore (SR-1, F01).
+
+    The before-restore safety snapshot copies files on disk, and the restore
+    then reloads the snapshot and clears the undo stack — so an edit that was
+    never saved was lost, although the UI and the chat tool promise the current
+    state is kept. Saving first, through the normal save path, puts the live
+    state on disk for the safety snapshot to copy. A save refusal (a study or
+    solve in flight, the network bound elsewhere) propagates and refuses the
+    restore before anything has changed.
+
+    Only when the ACTIVE context is this project: another project's edits are
+    not what this restore replaces.
+    """
+    from services import dirty_state, undo_service
+    from routers.projects import _save_context
+
+    ctx = PyPSAService.get_active_context()
+    if ctx.loaded_project != project.name:
+        return
+    if ctx.project_uuid is not None and str(ctx.project_uuid) != str(project.uuid):
+        return
+    if not (dirty_state.is_dirty(ctx) or undo_service.depth() > 0):
+        return
+    _save_context(
+        ctx, project.name, expect=project.name,
+        storage_dir=project.directory, db=db, user=user,
+    )
+
+
 @router.post("/{name}/snapshots/{snapshot_id}/restore")
 def restore_snapshot(
     snapshot_id: str,
@@ -573,13 +603,15 @@ def restore_snapshot(
 
     Order of operations matters:
     1. Validate the snapshot exists and is complete (network.nc present)
-    2. Create a "pre-restore" auto-snapshot so the user can undo the restore
+    2. Save unsaved in-memory edits, then create a "pre-restore"
+       auto-snapshot so the user can undo the restore
     3. Copy snapshot's bundle files over the project's (atomic per-file)
     4. Reset + reload the in-memory PyPSA network from the restored files
     5. Clear the undo stack (the in-memory state is now the new baseline)
 
     Step 2 is the safety net: a careless restore can't lose work because the
-    pre-restore state is itself saved as a snapshot named "before-restore-...".
+    pre-restore state, unsaved edits included, is itself saved as a snapshot
+    labelled "before-restore".
 
     Files the snapshot does NOT carry are left as they are: a snapshot taken
     before the adequacy worksheet and stress-scenario sidecars joined
@@ -605,6 +637,8 @@ def restore_snapshot(
         raise HTTPException(404, f"Snapshot '{snapshot_id}' not found (or incomplete)")
 
     _enforce_project_lock(db, _lock_target(project), user)
+
+    _save_unsaved_live_state(project, db, user)
 
     # Safety net: create an auto-snapshot of the current state before we
     # overwrite it. Pass `protect={snapshot_id}` so the cap-driven prune that
