@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { FlowStateDot } from '../../components/FlowStateDot'
+import { ScopeChips } from '../../components/flowScope/ScopeChips'
 import { FLOW_STATE_WORDS, type FlowSectionId } from '../../api/flow'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
 import { sectionMeta } from '../flowSections'
@@ -23,6 +24,7 @@ export function FlowSectionBlock({ id, children }: { id: FlowSectionId; children
         <span className="flex-1 min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-ink-600">
           {meta.label}
         </span>
+        {!stateless && <ScopeChips section={id} />}
         {!stateless && <FlowStateDot state={state} testId={`flow-dot-${id}`} />}
       </div>
       {children}

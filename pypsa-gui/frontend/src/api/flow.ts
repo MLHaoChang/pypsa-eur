@@ -166,6 +166,10 @@ export interface ScopeCardDef {
   locked_reason: string | null
   /** What the project's example intends, including sub-options not yet available. */
   intended: string[]
+  /** The input sections whose blocks the card holds. */
+  sections: FlowSectionId[]
+  /** The section rows' chip ("Grid"), or null (Capacity, Hand-off). */
+  chip: string | null
 }
 
 export interface FlowScopeRegistry {
@@ -178,7 +182,10 @@ export interface FlowScopeRegistry {
 }
 
 export function getFlowScope(project: string): Promise<FlowScopeRegistry> {
-  return client.get<FlowScopeRegistry>(`${flowPath(project)}/scope`).then(r => r.data)
+  // A background read the sidebar chips and section 8 make: its readers show
+  // (or skip) their own state, so a failure never pops the global toast.
+  return client.get<FlowScopeRegistry>(`${flowPath(project)}/scope`, { skipErrorToast: true })
+    .then(r => r.data)
 }
 
 /** Store the scope. 422 with `flow_scope_unavailable` / `flow_scope_required` /

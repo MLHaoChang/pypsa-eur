@@ -61,6 +61,9 @@ class Card:
     locked_reason: str | None = None
     # The input sections whose blocks this card needs (§5.1).
     sections: tuple[str, ...] = ()
+    # The section rows' chip (W3a), or None: Capacity is in every section and
+    # Hand-off in none, so neither gets one.
+    chip: str | None = None
 
 
 # Reasons are UI text, shown under the option and in the 422s (UX gate on
@@ -82,20 +85,20 @@ CARDS: Final[tuple[Card, ...]] = (
     Card("grid", "AC power flow & grid",
          (("load_flow", "Load flow"), ("grid_code", "Grid code & electrical design"),
           ("n1_sclopf", "N-1 security (SCLOPF)")),
-         sections=("connection", "assets", "scenarios")),
+         sections=("connection", "assets", "scenarios"), chip="Grid"),
     Card("control", "Control",
          (("presets", "Converter control presets"),
           ("island_checks", "Island & ride-through checks"),
           ("dynamics", "Frequency & dynamics")),
-         sections=("assets", "scenarios")),
+         sections=("assets", "scenarios"), chip="Control"),
     Card("reliability", "Reliability",
          (("goal_study", "Reliability goal & study"), ("stress", "Stress conditions & FMEA"),
           ("outage_screening", "Outage-data screening")),
-         sections=("assets", "scenarios")),
+         sections=("assets", "scenarios"), chip="Reliability"),
     Card("commercial", "Commercial & finance",
          (("tariffs", "Tariffs & bill"), ("contracts", "Contracts & PPAs"),
           ("investment_case", "Investment case & parties")),
-         sections=("commercial",)),
+         sections=("commercial",), chip="Commercial"),
     Card("handoff", "Hand-off",
          (("reports", "Reports"), ("exports", "Data exports"),
           ("specialist_packet", "Specialist packet")),
@@ -405,7 +408,8 @@ def registry(template: dict | None, settings: dict | None = None, *,
                 settings.get(flag) for (c, _o), flag in SETTING_OPTIONS.items() if c == card.id):
             locked = "On while Solver settings switch on the load flow or N-1 security."
         cards.append({"id": card.id, "label": card.label, "options": opts,
-                      "locked_reason": locked,
+                      "locked_reason": locked, "sections": list(card.sections),
+                      "chip": card.chip,
                       "intended": list(preset.get(card.id, ()))})
     return {"cards": cards, "preset_id": preset_id, "preset_label": preset_label(template),
             "preset": effective_preset(preset, has_template=has_template, no_load=no_load)}

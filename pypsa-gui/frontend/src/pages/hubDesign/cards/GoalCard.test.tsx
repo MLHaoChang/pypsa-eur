@@ -324,6 +324,7 @@ describe('GoalCard scope (W4a)', () => {
         options: { capacity: ['sizing', 'dispatch'], grid: [], control: [],
           reliability: ['goal_study'], commercial: [], handoff: ['reports'] } },
       cards: [{ id: 'reliability', label: 'Reliability', locked_reason: null, intended: ['goal_study'],
+        sections: ['assets', 'scenarios'], chip: 'Reliability',
         options: [{ id: 'goal_study', label: 'Reliability goal & study', status: 'available', reason: null }] }],
       preset_id: 'eh_datacenter', preset_label: 'Data Center Energy Hub',
       preset: { version: 1, groups: [], options: {} },

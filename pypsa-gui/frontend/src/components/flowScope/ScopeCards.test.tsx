@@ -10,16 +10,20 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { FlowScopeRegistry, FlowScopeValue } from '../../api/flow'
 import { useUIStore } from '../../store/uiStore'
 import { AddToScope, ScopeCards, toggleCard, toggleOption } from './ScopeCards'
+import { ScopeChips } from './ScopeChips'
+import { NotInScopeGroup } from './NotInScopeGroup'
 import { useInScope } from './useFlowScope'
 
 const getFlowScope = vi.fn()
 const putFlowScope = vi.fn()
+const getProjectFlow = vi.fn()
 vi.mock('../../api/flow', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/flow')>()
   return {
     ...actual,
     getFlowScope: (...a: unknown[]) => getFlowScope(...a),
     putFlowScope: (...a: unknown[]) => putFlowScope(...a),
+    getProjectFlow: (...a: unknown[]) => getProjectFlow(...a),
   }
 })
 
@@ -45,22 +49,29 @@ function registry(scope: FlowScopeValue = PRESET): FlowScopeRegistry {
     preset: PRESET,
     cards: [
       { id: 'capacity', label: 'Capacity expansion', locked_reason: 'needs a dispatch source',
+        sections: ['project', 'carriers', 'connection', 'loads', 'assets', 'profiles', 'commercial',
+          'scenarios'], chip: null,
         intended: ['sizing', 'dispatch'],
         options: [opt('sizing', 'required'), opt('dispatch', 'required'),
           opt('process_detail', 'not_yet_available')] },
       { id: 'grid', label: 'AC power flow & grid', locked_reason: null,
+        sections: ['connection', 'assets', 'scenarios'], chip: 'Grid',
         intended: ['load_flow', 'grid_code'],
         options: [opt('load_flow'), opt('grid_code'), opt('n1_sclopf')] },
-      { id: 'control', label: 'Control', locked_reason: null, intended: ['presets', 'island_checks'],
+      { id: 'control', label: 'Control', locked_reason: null,
+        sections: ['assets', 'scenarios'], chip: 'Control', intended: ['presets', 'island_checks'],
         options: [opt('presets'), opt('island_checks', 'not_yet_available'),
           opt('dynamics', 'not_yet_available')] },
       { id: 'reliability', label: 'Reliability', locked_reason: null,
+        sections: ['assets', 'scenarios'], chip: 'Reliability',
         intended: ['goal_study', 'stress'],
         options: [opt('goal_study'), opt('stress'), opt('outage_screening')] },
       { id: 'commercial', label: 'Commercial & finance', locked_reason: null,
+        sections: ['commercial'], chip: 'Commercial',
         intended: ['tariffs', 'investment_case'],
         options: [opt('tariffs'), opt('contracts'), opt('investment_case', 'not_yet_available')] },
-      { id: 'handoff', label: 'Hand-off', locked_reason: 'always on', intended: ['reports'],
+      { id: 'handoff', label: 'Hand-off', locked_reason: 'always on', sections: [], chip: null,
+        intended: ['reports'],
         options: [opt('reports'), opt('exports'), opt('specialist_packet')] },
     ],
   }
@@ -234,5 +245,44 @@ describe('AddToScope', () => {
     mount(<AddToScope card="control" option="dynamics" testId="add" />)
     await waitFor(() => expect(getFlowScope).toHaveBeenCalled())
     expect(screen.queryByTestId('add')).toBeNull()
+  })
+})
+
+describe('ScopeChips', () => {
+  it('names the cards in scope whose blocks the section holds, from the registry', async () => {
+    mount(<><ScopeChips section="assets" /><ScopeChips section="commercial" /><ScopeChips section="loads" /></>)
+    expect((await screen.findByTestId('scope-chips-assets')).textContent).toBe('GridReliability')
+    expect(screen.getByTestId('scope-chips-commercial').textContent).toBe('Commercial')
+    expect(screen.queryByTestId('scope-chips-loads')).toBeNull()      // Capacity gets no chip
+  })
+
+  it('renders nothing while the scope is unread', () => {
+    getFlowScope.mockReturnValue(new Promise(() => {}))
+    mount(<ScopeChips section="assets" />)
+    expect(screen.queryByTestId('scope-chips-assets')).toBeNull()
+  })
+})
+
+describe('NotInScopeGroup', () => {
+  it('lists the out-of-scope items collapsed, with the card that brings each back', async () => {
+    getProjectFlow.mockResolvedValue({ sections: [{ section: 'scenarios', items: [
+      { code: 'eh_study_refused', severity: 'error', message: 'The study would not start', source: 'eh_study',
+        blocking: false, acknowledged: false, card: 'reliability', in_scope: false,
+        target: { section: 'scenarios', panel: null, component: null, entity: null, field: null } },
+      { code: 'snapshots_empty', severity: 'error', message: 'No snapshots', source: 'validation',
+        blocking: true, acknowledged: false, card: null, in_scope: true,
+        target: { section: 'scenarios', panel: null, component: null, entity: null, field: null } },
+    ] }] })
+    getFlowScope.mockResolvedValue(registry({ ...PRESET, groups: PRESET.groups.filter(g => g !== 'reliability') }))
+    const user = mount(<NotInScopeGroup />)
+    const toggle = await screen.findByTestId('issues-not-in-scope-toggle')
+    expect(toggle.textContent).toBe('Not in scope (1)')
+    expect(screen.queryByTestId('issues-not-in-scope-row')).toBeNull()
+    await user.click(toggle)
+    const row = screen.getByTestId('issues-not-in-scope-row')
+    expect(row.textContent).toContain('The study would not start')
+    expect(row.textContent).toContain('Comes back with Reliability.')
+    expect((await screen.findByTestId('issues-not-in-scope-add-reliability-add')).textContent)
+      .toBe('Add goal_study')
   })
 })

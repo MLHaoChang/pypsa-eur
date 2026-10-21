@@ -541,3 +541,16 @@ def test_a_load_less_generation_only_plant_is_not_offered_reliability(
     rel = next(c for c in client.get(f"/api/projects/{name}/flow/scope").json()["cards"]
                if c["id"] == "reliability")
     assert next(o for o in rel["options"] if o["id"] == "goal_study")["status"] == S.AVAILABLE
+
+
+def test_the_registry_names_each_cards_sections_and_chip():
+    """W3a's section rows read which card holds which section from here."""
+    reg = S.registry({"id": "eh_datacenter"})
+    by_id = {c["id"]: c for c in reg["cards"]}
+    for c in reg["cards"]:
+        assert set(c["sections"]) <= set(INPUTS), c["id"]
+    assert by_id["capacity"]["chip"] is None and by_id["handoff"]["chip"] is None
+    assert {k: c["chip"] for k, c in by_id.items() if c["chip"]} == {
+        "grid": "Grid", "control": "Control", "reliability": "Reliability",
+        "commercial": "Commercial"}
+    assert by_id["commercial"]["sections"] == ["commercial"]
