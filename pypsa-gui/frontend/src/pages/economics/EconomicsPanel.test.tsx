@@ -20,7 +20,6 @@ vi.mock('../results/investment/SiteConnectionSection', () => ({
 vi.mock('../results/investment/TariffSection', () => ({ default: () => <div data-testid="ic-tariff" /> }))
 vi.mock('../results/investment/ContractsEditor', () => ({ default: () => <div data-testid="ic-contracts" /> }))
 vi.mock('../results/investment/ParticipantsDesigner', () => ({ default: () => <div data-testid="ic-participants" /> }))
-vi.mock('../results/investment/LibraryBrowser', () => ({ default: () => <div data-testid="ic-library" /> }))
 const getCommercial = vi.hoisted(() => vi.fn())
 vi.mock('../../api/commercial', async (orig) => {
   const actual = await orig<typeof import('../../api/commercial')>()
@@ -183,9 +182,11 @@ describe('E2: the site connection and IC’s editors', () => {
     for (const id of ['ic-tariff', 'ic-contracts', 'ic-participants']) expect(screen.getByTestId(id)).toBeTruthy()
   })
 
-  it('the Library tab mounts the library browser', () => {
+  it('has no Library tab: the Library is one page, opened from a link', () => {
     renderPanel()
-    fireEvent.click(screen.getByRole('tab', { name: 'Library' }))
-    expect(screen.getByTestId('ic-library')).toBeTruthy()
+    expect(screen.queryByRole('tab', { name: 'Library' })).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: 'Tariffs & contracts' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open the Library' }))
+    expect(useUIStore.getState().activeSlidePanel).toBe('library')
   })
 })

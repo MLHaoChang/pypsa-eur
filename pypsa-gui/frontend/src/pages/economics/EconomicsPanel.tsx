@@ -10,7 +10,6 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import ContractsEditor from '../results/investment/ContractsEditor'
 import FinanceInputsEditor from '../results/investment/FinanceInputsEditor'
-import LibraryBrowser from '../results/investment/LibraryBrowser'
 import ParticipantsDesigner from '../results/investment/ParticipantsDesigner'
 import SiteConnectionSection from '../results/investment/SiteConnectionSection'
 import TariffSection from '../results/investment/TariffSection'
@@ -21,7 +20,6 @@ const TABS = [
   { id: 'basis', label: 'Basis' },
   { id: 'assets', label: 'Asset costs' },
   { id: 'tariffs', label: 'Tariffs & contracts' },
-  { id: 'library', label: 'Library' },
 ] as const
 type TabId = typeof TABS[number]['id']
 
@@ -47,6 +45,7 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
 
 export default function EconomicsPanel() {
   const [tab, setTab] = useState<TabId>('basis')
+  const setSlidePanel = useUIStore(s => s.setSlidePanel)
   return (
     <div className="h-full flex flex-col">
       <div role="tablist" aria-label="Economics" className="flex gap-1 px-3 pt-2 border-b border-border">
@@ -71,9 +70,14 @@ export default function EconomicsPanel() {
             <Block title="Import tariff"><TariffSection /></Block>
             <Block title="Contracts"><ContractsEditor /></Block>
             <Block title="Participants"><ParticipantsDesigner /></Block>
+            <p className="text-[11px] text-muted" data-testid="economics-open-library">
+              Tariffs and contracts can be taken from the Library.{' '}
+              <button type="button" className="underline" onClick={() => setSlidePanel('library')}>
+                Open the Library
+              </button>
+            </p>
           </div>
         )}
-        {tab === 'library' && <div className="p-3"><LibraryBrowser /></div>}
       </div>
     </div>
   )
