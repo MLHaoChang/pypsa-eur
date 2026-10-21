@@ -97,7 +97,15 @@ async function walk(browser, template, args) {
     const created = await context.request.post(
       `${WEB}/api/projects/from_template/${template}?name=${encodeURIComponent(name)}`,
       { headers: { 'X-CSRF-Token': csrf } })
-    assert.equal(created.status(), 200, `create ${template}: ${(await created.text()).slice(0, 200)}`)
+    const body = await created.text()
+    if (created.status() !== 200 && body.includes('network.nc is missing')) {
+      // belgium needs a PyPSA-Eur workflow output; the others come from
+      // project_templates/_build.py. Say so rather than pass silently.
+      console.log(`    SKIP ${template}: not built in this checkout (run project_templates/_build.py)`)
+      skipped.push(template)
+      return failures
+    }
+    assert.equal(created.status(), 200, `create ${template}: ${body.slice(0, 200)}`)
     await page.addInitScript(() => localStorage.setItem('network-diagram:ui-mode', 'guided'))
     await page.goto(`${WEB}/projects`)
     await page.locator('a[href^="/app?project="]').first().click()
@@ -260,6 +268,7 @@ const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_BIN || undefined, headless: true, args: ['--no-sandbox'],
 })
 const failed = {}
+const skipped = []
 for (const template of args.templates) {
   console.log(`\n== ${template}`)
   const f = await walk(browser, template, args)
@@ -271,4 +280,5 @@ if (Object.keys(failed).length) {
   for (const [t, f] of Object.entries(failed)) for (const m of f) console.log(`  ${t}: ${m}`)
   process.exit(1)
 }
-console.log(`\nflow shell journey: ${args.templates.length} template(s) ok`)
+console.log(`\nflow shell journey: ${args.templates.length - skipped.length} template(s) ok`
+  + (skipped.length ? `, skipped (not built): ${skipped.join(', ')}` : ''))
