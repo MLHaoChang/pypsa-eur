@@ -85,6 +85,31 @@ def _asset_period(n, frame, name: str) -> int | None:
     return years.pop() if len(years) == 1 else None
 
 
+def money_disclosure(price_year: int, currency: str, read_as: int) -> str:
+    """The one sentence for a value copied in another money year (the pack's wording)."""
+    return f"{price_year} {currency} price data, read as {read_as} money: not adjusted for inflation."
+
+
+# The investment-cost fields whose provenance carries a money year.
+COST_FIELDS = ("overnight_cost", "fom_cost", "inv_power_overnight", "inv_energy_overnight")
+
+
+def money_years_in_use(n) -> dict[int, list[tuple[str, str, str]]]:
+    """`{money year: [(class, asset, field), ...]}` over every recorded cost field of the
+    network. More than one key means the asset costs mix money years. Read-only; a field
+    without a recorded money year is left out (unknown is not a year)."""
+    meta = getattr(n, "meta", None)
+    root = meta.get("asset_params", {}) if isinstance(meta, dict) else {}
+    years: dict[int, list[tuple[str, str, str]]] = {}
+    for klass, assets in root.items():
+        for name, fields in assets.items():
+            for field in COST_FIELDS:
+                year = (fields.get(field) or {}).get("currency_year")
+                if isinstance(year, int):
+                    years.setdefault(year, []).append((klass, name, field))
+    return {year: sorted(years[year]) for year in sorted(years)}
+
+
 def case_base_year(n, config) -> int | None:
     """The investment case's base year, derived as the edit card's money basis is (the first
     investment period, else the first snapshot year); None when the project has no case."""
@@ -150,12 +175,13 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
     pack_year = pack_overnight.currency_year if pack_overnight is not None else None
     read_as = base_year if base_year is not None else pack_year
     if read_as is not None and read_as != ref.currency_year:
-        against = ("the investment case's base year" if base_year is not None
-                   else "the money year of the value it replaces")
+        against = (f"the investment case's base year ({read_as})" if base_year is not None
+                   else f"the default it replaces ({read_as} {pack_currency or ref.currency})")
         needs.append({"confirmation": "money_year", "reference_year": ref.currency_year,
-                      "read_as_year": read_as, "text":
-                      f"{ref.currency_year} {ref.currency} price data, read as {read_as} money ({against}): "
-                      "not adjusted for inflation. Unconfirmed, nothing is applied."})
+                      "read_as_year": read_as, "read_as_source": against,
+                      "disclosure": money_disclosure(ref.currency_year, ref.currency, read_as),
+                      "text": f"{money_disclosure(ref.currency_year, ref.currency, read_as)} "
+                              f"Compared with {against}. Unconfirmed, nothing is applied."})
 
     period = _asset_period(n, frame, name)
     notes = []

@@ -283,7 +283,8 @@ def test_onwind_2020_eur_on_a_case_with_base_year_2026_needs_money_year():
     p = A.plan(n, {}, "Generator", "wind", "onwind", 2030, base_year=base)
     need = next(x for x in p["needs"] if x["confirmation"] == "money_year")
     assert (need["reference_year"], need["read_as_year"]) == (2020, 2026)
-    assert "2020 EUR price data, read as 2026 money" in need["text"] and "not adjusted" in need["text"]
+    assert need["disclosure"] == "2020 EUR price data, read as 2026 money: not adjusted for inflation."
+    assert need["read_as_source"] == "the investment case's base year (2026)"
     with pytest.raises(HTTPException) as exc:
         A.require_confirmed(p)
     assert _codes(exc) == ("reference_confirmation_needed", ["money_year"])
@@ -293,3 +294,15 @@ def test_onwind_2020_eur_on_a_case_with_base_year_2026_needs_money_year():
     assert P.get(n, "Generator", "wind")["overnight_cost"]["currency_year"] == 2020
     # without a case, the same 2020 EUR beside the pack's 2020 EUR needs nothing
     assert "money_year" not in A.plan(_net(), {}, "Generator", "wind", "onwind", 2030)["missing"]
+
+
+def test_money_years_in_use_lists_each_recorded_cost_year():
+    n = _net()
+    assert A.money_years_in_use(n) == {}
+    price_from_pack(n, "generators", "wind", "onwind", version=load_defaults_pack().version)
+    p = A.plan(n, {}, "Generator", "pv", "solar-utility", 2030, confirm=["dc_ac", "money_year"])
+    _apply(n, p)
+    years = A.money_years_in_use(n)
+    assert sorted(years) == [2020, 2025]
+    assert ("Generator", "pv", "overnight_cost") in years[2025]
+    assert ("Generator", "wind", "overnight_cost") in years[2020]
