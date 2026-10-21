@@ -2,8 +2,14 @@
 
 The server owns this copy: ``Issue.to_dict`` and the project flow send the title
 beside the code, so the Issues list and the Run's blocker read the same words
-and no client keeps a table of its own. ``tests/test_issue_titles.py`` fails
-when ``validation_service`` gains a code that has no title here.
+and no client keeps a table of its own. This module is the one place a new
+check gets its title. ``tests/test_issue_titles.py`` fails when a code in
+``flow_sections.CODE_SECTION`` (the complete list of codes the flow files) or a
+literal code in ``validation_service`` has no title here.
+
+A code with no title is not an error: ``issue_title`` reads it as a sentence for
+the Issues list, and the flow leaves the item's ``title`` null so the Run's
+blocker falls back to ``<section>: <message>``.
 """
 from __future__ import annotations
 
@@ -127,6 +133,32 @@ ISSUE_TITLES: dict[str, str] = {
     # Island control presets (data-centre grid readiness, ticket 04)
     "preset_leaves_no_grid_former": "No unit forms the island (control preset leaves no grid former)",
     "preset_not_applied_to_unit": "Control preset not applied to a unit",
+    # Disconnected parts of the network
+    "network_islanded": "Network is split into disconnected parts",
+    "island_no_supply": "Disconnected part of the network has no supply",
+    "island_under_capacity": "Disconnected part of the network cannot meet its demand",
+
+    # Blank or non-numeric inputs (a series can cover only some time steps)
+    "nonfinite_bound": "A capacity limit is blank or not a number",
+    "nonfinite_bound_partial_coverage": "A capacity limit is missing for some time steps",
+    "nonfinite_cost": "A cost is blank or not a number",
+    "nonfinite_cost_partial_coverage": "A cost is missing for some time steps",
+    "nonfinite_efficiency": "An efficiency or loss value is blank or not a number",
+    "nonfinite_efficiency_partial_coverage": "An efficiency or loss value is missing for some time steps",
+    "nonfinite_input": "An input is blank or not a number",
+    "nonfinite_input_partial_coverage": "An input is missing for some time steps",
+    "nonfinite_storage_constant": "A storage or constraint constant is blank or not a number",
+    "nonfinite_storage_constant_partial_coverage": "A storage or constraint constant is missing for some time steps",
+
+    # Time-series quality
+    "timeseries_all_zero": "Time series is zero in every time step",
+    "timeseries_frozen": "Time series never changes",
+    "timeseries_negative": "Time series has negative values",
+    "timeseries_scale_outlier": "Demand is far from the other loads",
+    "timeseries_spike": "Time series has an extreme spike",
+
+    # Decision study
+    "study_network_tariff_in_links": "Study network from an earlier version prices its tariff on the meter links",
 }
 
 

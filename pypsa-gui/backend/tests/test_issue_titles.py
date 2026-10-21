@@ -5,6 +5,7 @@ instead of shipping as a raw identifier. Ported from the frontend's
 import pathlib
 import re
 
+from services import flow_sections as F
 from services.issue_titles import ISSUE_TITLES, issue_title
 from services.validation_service import Issue
 
@@ -20,7 +21,13 @@ def test_the_code_scan_finds_the_codes():
     assert len(_backend_codes()) > 50
 
 
-def test_every_code_has_a_title():
+def test_every_code_the_flow_files_has_a_title():
+    """``CODE_SECTION`` is the complete list of validator codes (the modules
+    that emit their own, such as the solver's fixed sizes, are in it too)."""
+    assert [c for c in sorted(F.CODE_SECTION) if c not in ISSUE_TITLES] == []
+
+
+def test_every_literal_validation_code_has_a_title():
     assert [c for c in _backend_codes() if c not in ISSUE_TITLES] == []
 
 
