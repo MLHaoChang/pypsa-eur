@@ -123,6 +123,19 @@ that was pending re-offers its card.
   card, through the same plan card, never a second line (coordinate with
   session_01Fujxj8VNHA8JxTdXWmuPTX).
 
+UX gate conditions for slice 3 (UX reviewer, 2026-10-21, on `3889eafe`):
+
+1. Step status copy uses existing words: done → "Complete", next → "Next",
+   waiting on job → "Waiting for the run", needs review → "To review",
+   stale → the existing "Out of date" pill. Raw ids stay internal; no "job"
+   or "stale" in copy.
+2. Card chips are the shared card-chip component (W3a / W10), same label and
+   behaviour (filter the rail/sidebar to the card, "Open here"); no new chip
+   style.
+3. The plan card's Next step carries its owning target ("Open here" to the
+   field or card). A blocked or uncertain step (SC-09) says why and what the
+   user can do, never a state word alone.
+
 ## Slices
 
 1. **Harness** (gatekeeper): `brief` argument + validation + version-2 file,
