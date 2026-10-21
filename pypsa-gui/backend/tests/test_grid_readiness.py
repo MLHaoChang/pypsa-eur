@@ -414,6 +414,18 @@ def test_a_battery_built_after_the_period_shaves_nothing_in_it():
     assert row["firm"][1]["mw"] == 0.0 and row["headroom_mw"] == pytest.approx(-10.0)
 
 
+@pytest.mark.parametrize("tid, product", [("eh_h2_hub", "h2_offtake"), ("eh_h2_hub_staged", "h2_offtake"),
+                                          ("eh_ammonia_staged", "nh3_delivery")])
+def test_a_product_offtake_is_not_electric_peak_load(tid, product):
+    """The H2 and NH3 offtakes sit on product buses: the electric peak check
+    counts the AC process load only."""
+    n = T.BUILDERS[tid]()
+    assert product in n.loads.index and SP.electric_loads(n) == ["process_load"]
+    for row in SP.peak_check(n, T.ISLAND_CONFIG.get(tid)):
+        mask = [str(s).startswith(row["period"]) or row["period"] in str(s) for s in n.snapshots]
+        assert row["peak_mw"] == pytest.approx(float(n.loads_t.p_set["process_load"][mask].max()))
+
+
 def test_the_h2_hubs_site_battery_and_the_data_centres_cap():
     """The H2 hub's 20 MW / 40 MWh site battery delivers 0.95 × 40 = 38 MWh;
     its critical process load, with no genset, needs its peak for the 1 h
@@ -690,6 +702,7 @@ def test_the_panel_text_is_in_plain_words(tmp_path, tid, dc_load):
     for r in G.grid_readiness(d, n, PROFILE)["rows"]:
         text = " ".join(str(r[k]) for k in ("requirement", "limit", "project_value", "source", "note")
                         if r[k] is not None)
+        text += " " + str((r.get("after_battery") or {}).get("note", ""))     # DC 03
         for word in RAW_IDS:
             assert word not in text, (r["id"], word, text)
         if r["verdict"] == "unknown":
@@ -761,3 +774,30 @@ def test_the_after_value_names_each_unit_its_kind_latency_and_asset(tmp_path):
                  "target": {"section": "assets", "panel": None, "component": "StorageUnit",
                             "entity": "ups_battery", "field": None}}
     assert "'ups_battery' responds in 0 s (UPS, assumed)" in rows["ramp_rate"]["after_battery"]["note"]
+
+
+def test_the_counts_read_the_row_verdict_never_the_after_value(tmp_path):
+    out, _ = _envelope_rows(tmp_path, dc_load={})
+    counts = {v: sum(r["verdict"] == v for r in out["rows"]) for v in G.VERDICTS}
+    assert {v: out["summary"][v] for v in G.VERDICTS} == counts
+    assert out["summary"]["red_flags"] == counts["fail"] + counts["warn"]
+
+
+def test_the_after_value_survives_every_consumer(tmp_path, monkeypatch):
+    """The key round-trips through JSON (the route and the assistant tool
+    return the dict as is), the assistant tool's dispatcher and the report
+    chapter, which reads the rows it lists and ignores the rest."""
+    from services import chat_tools
+    from services.reports import chapters as C
+
+    out, rows = _envelope_rows(tmp_path, dc_load={})
+    back = json.loads(json.dumps(out))
+    assert back["rows"] == out["rows"] and "after_battery" in _rows(back)["ramp_rate"]
+    monkeypatch.setattr(G, "grid_readiness_for", lambda p, prof: out)
+    monkeypatch.setattr(chat_tools, "_acting", lambda: __import__("contextlib").nullcontext((None, None)))
+    monkeypatch.setattr(chat_tools, "_gridspine_project", lambda db, user, pid: pid)
+    assert chat_tools.DISPATCHERS["campus_grid_readiness"](project_id="p") is out
+    payload = C.grid_readiness_payload(out)
+    assert [r["verdict"] for r in payload["rows"]] == [r["verdict"] for r in out["rows"]]
+    C.grid_readiness_table(payload, "/sections/grid_readiness/payload")
+    C.grid_readiness_disclosures(payload)

@@ -256,3 +256,19 @@ def test_several_units_are_listed_in_one_line():
     words = S.latency_words([{"unit": "bess_1", "latency_s": 0.02, "basis": "grid forming"},
                              {"unit": "ups_1", "latency_s": 0.0, "basis": "UPS"}])
     assert words == "'bess_1' 0.02 s (grid forming), 'ups_1' 0 s (UPS); all assumed"
+
+
+def test_after_battery_oscillation_is_energy_limited_after_the_step():
+    """Power to spare, but only 0.5 kWh left above the step's S²/R band: the
+    oscillation (10 MW at 2 s, A·T/π = 1.77 kWh) is covered for
+    0.0005·π·3600/2 = 2.83 MW of its amplitude, not by the power term."""
+    s, r = 10.0, 20.0
+    band = 2 * S.step_mwh(s, r)
+    ph = {"verdict": "covered", "step_mw": s, "step_mwh": S.step_mwh(s, r), "reserve_mw": 100.0,
+          "reserve_mwh": band + 0.0005, "amplitude_mw": 10.0, "period_s": 2.0, "leak_mw": 0.0}
+    after = S.after_mitigation(ph)
+    assert after["covered_step_mw"] == pytest.approx(s)
+    assert after["residual_amplitude_mw"] == pytest.approx(10.0 - 0.0005 * math.pi * 3600.0 / 2.0)
+    ph["reserve_mwh"] = band + 1.0                                   # energy no longer binds
+    ph["reserve_mw"] = 14.0                                          # the power term does: 14 − 10
+    assert S.after_mitigation(ph)["residual_amplitude_mw"] == pytest.approx(6.0)
