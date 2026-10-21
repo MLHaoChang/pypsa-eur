@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Check answers can verify LOPF loading for one line or transformer, or the whole network (`branch-loading/1`, `network-loading/1`, opt-in), with the Load flow tab's definition; it refuses when AC power-flow results exist.

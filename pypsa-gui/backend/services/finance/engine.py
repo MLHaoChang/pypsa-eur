@@ -548,6 +548,10 @@ def wacc_gate(case: FinanceCase) -> dict:
 def _scaled(case: FinanceCase, keys: set[str], s: float) -> FinanceCase:
     def scale(ln: TemplateLine) -> TemplateLine:
         if ln.key in keys and ln.amount is not None:
+            if ln.price_leg is not None:
+                # A difference line: only its price leg scales (IPP ticket 01).
+                return dataclasses.replace(ln, amount=ln.amount + (s - 1.0) * ln.price_leg,
+                                           price=ln.price * s)
             return dataclasses.replace(ln, amount=ln.amount * s,
                                        price=None if ln.price is None else ln.price * s)
         return ln
@@ -583,7 +587,10 @@ def solve_ppa(case: FinanceCase, pack: JurisdictionPack | None = None, *,
         if ln.stream != "ppa_settlement" or ln.esc_class != CONTRACT_CLASS:
             out["solve_ppa_status"] = "solve_ppa_not_linear"
             return out
-        if ln.amount is None or ln.amount <= 0:
+        # A difference line is owner-sold when its price leg is an inflow (its year-1
+        # difference may be negative); any other line when its amount is.
+        sold = ln.price_leg if ln.price_leg is not None else ln.amount
+        if ln.amount is None or sold is None or sold <= 0:
             out["solve_ppa_status"] = "solve_ppa_not_owner_sold"
             return out
         if ln.changes_dispatch:

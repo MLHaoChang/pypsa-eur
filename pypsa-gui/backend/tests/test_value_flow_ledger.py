@@ -541,3 +541,21 @@ def test_an_unsettled_contract_makes_its_parties_totals_null():
     assert tot["developer"]["received"] is None
     assert tot["developer"]["paid"] is not None           # its known side stays known (#7)
     assert P.check_conservation(led, inputs, VF).ok is None
+
+
+def test_a_product_buy_in_is_a_purchase_and_a_shortfall_is_lost_production():
+    """Grid-to-process ticket 06 (gatekeeper): the buy-in's opex is a fuel purchase from the market; the
+    shortfall's is lost production owed to the offtaker, never O&M; neither has an owner to default."""
+    assets = [*_inputs().assets,
+              P.AssetCost("Generator", "__buy_nh3", "site", ["product_buy_in"], {}, {}, {"_": 7.0}),
+              P.AssetCost("Generator", "__lost_nh3", "site", ["product_shortfall"], {}, {}, {"_": 3.0})]
+    inputs = _inputs(assets=assets, cost_breakdown_total={"_": 293.0})
+    vf = VF.model_copy(update={"externals": [*VF.externals, "offtaker"]})    # as the builders add it
+    led = P.build_ledger(inputs, vf)
+    (buy,) = _lines(led, asset="__buy_nh3")
+    assert (buy.payer, buy.payee, buy.value_stream, buy.amount) == ("site", "market", "fuel", 7.0)
+    (lost,) = _lines(led, asset="__lost_nh3")
+    assert (lost.payer, lost.payee, lost.value_stream, lost.amount) == \
+        ("site", "offtaker", "lost_production", 3.0)
+    assert led.notes == P.build_ledger(_inputs(), VF).notes      # no owner defaulted for them
+    assert P.check_conservation(led, inputs, vf).ok is True

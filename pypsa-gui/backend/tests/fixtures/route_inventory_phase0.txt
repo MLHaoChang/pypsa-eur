@@ -255,6 +255,8 @@ PUT     /api/projects/{name}/asset_health                                       
 GET     /api/projects/{name}/bundle                                                -> download_bundle_api_projects__name__bundle_get
 GET     /api/projects/{name}/compare-state                                         -> get_compare_state_api_projects__name__compare_state_get
 GET     /api/projects/{name}/eh_template                                           -> get_eh_template_api_projects__name__eh_template_get
+GET     /api/projects/{name}/flow                                                  -> get_project_flow_api_projects__name__flow_get
+POST    /api/projects/{name}/flow/ack                                              -> ack_flow_item_api_projects__name__flow_ack_post
 GET     /api/projects/{name}/layout                                                -> get_layout_api_projects__name__layout_get
 PUT     /api/projects/{name}/layout                                                -> put_layout_api_projects__name__layout_put
 GET     /api/projects/{name}/map_layout                                            -> get_map_layout_api_projects__name__map_layout_get

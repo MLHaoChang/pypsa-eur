@@ -38,6 +38,7 @@ import ProfileStudioSection from './pages/ProfileStudioSection'
 import { recoveryFor } from './utils/autoRecovery'
 import LocalSettings from './pages/LocalSettings'
 import HubDesignPanel from './pages/hubDesign/HubDesignPanel'
+import { FieldDrawer } from './components/FieldDrawer'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import RescaleDialogHost from './components/RescaleDialogHost'
@@ -228,7 +229,7 @@ export default function App() {
   const {
     activeSlidePanel, setSlidePanel, currentProject, canvasView,
     lastProjectId, lastSavedByProject, markProjectSaved, pruneRecents, recents, setLastProjectId,
-    theme, density, compareRailOpen, setCompareRailOpen, uiMode, guidedTourHolds,
+    theme, density, compareRailOpen, setCompareRailOpen, uiMode, guidedTourHolds, selectedComponent,
   } = useUIStore()
   // The 3D site sidecar: load per project, persist on unload (WP1, Task 1.5).
   useSitesLifecycle(currentProject)
@@ -710,6 +711,14 @@ export default function App() {
                 {/* Only view widgets share a local layer above the canvas
                     and below workbench overlays. Native canvas dialogs stay
                     outside this layer so they can cover the whole viewport. */}
+                {/* L2 (LC-04): the assistant's floating launcher lands here
+                    (AssistantDock portals it), over the canvas only: above the
+                    bottom panel and left of the Properties / slide panel. */}
+                <div id="companion-anchor" data-testid="companion-anchor"
+                  className={`absolute inset-x-0 top-0 z-40 pointer-events-none [&>*]:pointer-events-auto ${
+                    // Above the schematic's minimap (bottom-right); clear of
+                    // the snapshot bar (bottom-centre) on the other views.
+                    canvasView === 'blank' ? 'bottom-[176px]' : 'bottom-14'}`} />
                 <div className="absolute inset-0 z-10 pointer-events-none [&>*]:pointer-events-auto">
                   <MapModeSwitcher />
                   {/* Snapshot picker / playback bar for the results overlay —
@@ -752,7 +761,15 @@ export default function App() {
 
           {/* Zone 3 — Right properties panel. Only renders alongside the
               Topology Canvas — hidden while a tab panel occupies the right half. */}
+          {/* Beside the Issues list too (J9): an item opens its field here and
+              Issues stays, so the user fixes it and sees it clear without
+              going back. */}
           {!activeSlidePanel && <PropertiesPanel />}
+          {activeSlidePanel === 'issues' && selectedComponent && (
+            <div data-no-panel-close className="flex min-h-0 shrink-0">
+              <PropertiesPanel />
+            </div>
+          )}
 
           {/* Zone 5 — The assistant. Outside the panel container on purpose:
               it must stay on screen while a full-screen tab owns the main
@@ -762,6 +779,13 @@ export default function App() {
               dock and collapsed companion use this body as their positioned
               container while the chat stays mounted. */}
           <AssistantDock />
+          {uiMode === 'guided' && (
+            <FieldDrawer>
+              {t => t.component && t.entity
+                ? <PropertiesPanel />
+                : <FullPageTab panel={t.panel as SlidePanel} onClose={() => useUIStore.getState().setFieldDrawer(null)} />}
+            </FieldDrawer>
+          )}
         </div>
 
         <StatusBar />

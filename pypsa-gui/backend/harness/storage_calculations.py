@@ -53,7 +53,7 @@ DISCLOSURE = (
 
 def source(ctx, entity):
     """Capture complete raw trajectory under the harness network lock."""
-    from harness.calculations import MAX_SNAPSHOTS, _number, _series
+    from harness.calculations import MAX_SNAPSHOTS, _number, _series, solve_matches_inputs
 
     n, index = ctx.network, ctx.network.snapshots
     if (
@@ -121,9 +121,7 @@ def source(ctx, entity):
         "solved_fingerprint": n.meta.get("assistant_solve_input_fingerprint"),
         "status": state.get("status"),
         "condition": state.get("condition"),
-        "valid_solve": state.get("status") == "completed"
-        and state.get("condition") == "optimal"
-        and n.meta.get("assistant_solve_input_fingerprint") == fingerprint,
+        "valid_solve": solve_matches_inputs(ctx),
     }
 
 

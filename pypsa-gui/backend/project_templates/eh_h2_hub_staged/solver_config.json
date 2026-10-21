@@ -20,6 +20,7 @@
     "group_cap_mw": null,
     "group_contract": null,
     "group_members": [],
+    "import_price_ref": null,
     "import_tariff": {
       "dso_or_retailer": null,
       "id": "h2_hub_network_tariff_synthetic",
@@ -179,7 +180,7 @@
           "owner": "site"
         }
       ],
-      "built_digest": "6c3bfc244245ebc9",
+      "built_digest": "8a177b6d28feb44c",
       "built_inputs_digest": "94b4c274415f0d11",
       "connection_fee_payee": null,
       "export_revenue_to": "site_party",
@@ -203,7 +204,7 @@
       ],
       "tariff_payees": [],
       "template": "single_owner",
-      "template_version": "single_owner@2"
+      "template_version": "single_owner@4"
     }
   },
   "discount_rate": 0.07,

@@ -118,7 +118,10 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  # Edge Investment Case WP1.1c: the (id, version, hash) of every
                  # Library series the project references, re-checked on open.
                  # `test_library_bundle_pins` pins it equal to SIDECAR_NAME.
-                 "library_refs.json")
+                 "library_refs.json",
+                 # The project flow's acknowledged warnings (B1).
+                 # `test_project_flow` pins it equal to flow_service.ACKS_FILE.
+                 "flow_acks.json")
 
 # The campus electrical study's inputs and investment results (plan C9), under
 # `campus_electrical/`: the campus description, the asset library (the
@@ -1439,6 +1442,10 @@ _TEMPLATE_DEFAULT_NAMES = {
     # The staged H2 hub and microgrid (generic-site E2E, H1/M1).
     "eh_h2_hub_staged": "Industrial Hydrogen Hub (staged growth)",
     "eh_microgrid_staged": "Island Microgrid (staged growth)",
+    # Grid-to-process ticket 05 (project_templates/eh_ammonia.py).
+    "eh_ammonia_staged": "Green Ammonia Hub (staged growth)",
+    # IPP renewables + BESS ticket 03 (project_templates/eh_ipp.py).
+    "eh_ipp_hybrid": "Renewables IPP with battery",
 }
 
 # Sidecars a template directory may carry beside network.nc (P19): the EH
@@ -1447,7 +1454,9 @@ _TEMPLATE_DEFAULT_NAMES = {
 _TEMPLATE_SIDECARS = ("eh_template.json", "adequacy_stress_scenarios.json",
                       "solver_config.json",
                       # The island sidecar (plan 2026-10-07 campus island, I1).
-                      "island_config.json")
+                      "island_config.json",
+                      # Pre-built sensitivity cases, data only until S5 (IPP ticket 04).
+                      "cases.json")
 
 
 def _eh_templates_module():
@@ -1658,6 +1667,10 @@ def create_from_template(
     from services import project_registry
 
     project_registry.require_user(user)
+    # The template's price series (IPP ticket 02): read, checked and minted into the
+    # creating org's Library BEFORE the project row exists, so a bad series refuses the
+    # create and leaves nothing behind (minting is idempotent on content).
+    template_series, series_refs = _mint_template_series(db, user, template_key)
     _created_project = project_registry.create_root(db, user, requested)
     target_name = _created_project.name
     dest = project_registry.ensure_project_dir(_created_project)
@@ -1675,6 +1688,17 @@ def create_from_template(
             src = _PROJECT_TEMPLATES_DIR / template_key / sidecar
             if src.is_file():
                 atomic_copy(src, dest / sidecar)
+        if template_series:
+            from services.library import bundle_pins
+            from services.library import template_series as TS
+
+            cfg_path = dest / "solver_config.json"
+            cfg = TS.apply_refs(json.loads(cfg_path.read_text()) if cfg_path.is_file() else {},
+                                template_series, series_refs)
+            atomic_write_text(cfg_path, json.dumps(cfg, indent=2, sort_keys=True) + "\n")
+            # Pin what the config now names, as a save does (WP1.1c): an unpinned ref
+            # reads `library_ref_stale` on the first open.
+            bundle_pins.write_pins(dest, bundle_pins.collect_pins(cfg))
     if dc is not None:
         # The opt-in's spec, dynamic envelope and ledger, per project
         # (`services.dc_load_profile.read_envelope`; get_eh_template serves it).
@@ -1784,6 +1808,45 @@ def create_from_template(
         ),
         "solver_config_issues": solver_config_issues,
     }
+
+
+def _mint_template_series(db, user, template_key: str) -> tuple[list, dict]:
+    """(the template's price series, {name: Library ref}) minted in the user's org; ([], {})
+    when it ships none. A bad series or meta is a typed 422 before anything is created."""
+    from services import library_acl
+    from services.library import template_series as TS
+
+    try:
+        series = TS.read(_PROJECT_TEMPLATES_DIR / template_key)
+        if not series:
+            return [], {}
+        org = library_acl.org_of(db, user)
+        if org is None:
+            raise TS.TemplateSeriesError("library_org_unknown",
+                                         "the template ships price series and your account "
+                                         "has no organisation Library to store them in")
+        # A ref the template names but does not ship is refused before minting.
+        cfg_path = _PROJECT_TEMPLATES_DIR / template_key / "solver_config.json"
+        if cfg_path.is_file():
+            tpl_cfg = json.loads(cfg_path.read_text())
+            TS.apply_refs(tpl_cfg, series, {ts.name: _PlaceholderRef() for ts in series})
+            # The illustrative series and the study's money basis must agree (gatekeeper).
+            clash = TS.basis_conflicts(series, tpl_cfg.get("finance"))
+            if clash:
+                raise TS.TemplateSeriesError("template_series_basis_mismatch",
+                                             "; ".join(clash))
+        refs = TS.mint(db, org, series, created_by=getattr(user, "id", None))
+    except TS.TemplateSeriesError as exc:
+        raise HTTPException(422, {"error_kind": exc.code, "code": exc.code,
+                                  "message": str(exc)}) from exc
+    return series, refs
+
+
+class _PlaceholderRef:
+    """Stands in for a minted ref while the targets are checked (nothing is written)."""
+
+    def model_dump(self, mode: str = "json") -> dict:
+        return {}
 
 
 def _bind_template_solver_config(user, cfg_path: pathlib.Path) -> list[dict]:

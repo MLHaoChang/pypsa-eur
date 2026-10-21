@@ -49,7 +49,7 @@ def test_load_flow_is_the_only_view_that_proves_displayed_data_today():
 
 def test_guided_labels_follow_guided_tabs():
     guided = {v.tab for v in rv.RESULT_VIEWS if v.guided_label}
-    assert guided == {'summary', 'adequacy', 'fmea', 'flows'}
+    assert guided == {'summary', 'adequacy', 'fmea', 'flows', 'loadshape'}
 
 
 def test_gated_views_wait_for_their_tools():

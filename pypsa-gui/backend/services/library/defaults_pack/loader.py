@@ -63,6 +63,7 @@ __all__ = [
     "Derived", "FinanceDefaults", "LoadProfile", "PackRange", "PackTariff", "PackTariffMeta",
     "PackValue", "UnknownCostPart", "UnknownFormula", "UnknownLoadProfile", "UnknownPackTariff",
     "UnknownPackValue", "UnknownPackVersion", "UnknownTechnology",
+    "MissingRegionalRow", "RegionInfo", "UnknownPackRegion", "available_regions",
     "available_versions", "canonical_payload", "derive", "load_defaults_pack", "parse_pack_dir",
     "parse_pack_stamp",
     "version_dir",
@@ -71,7 +72,11 @@ __all__ = [
 PACK_ID = "generic_defaults"
 VERSIONS_DIR = Path(__file__).resolve().parent / "versions"
 _VERSION_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
-_STAMP_RE = re.compile(r"(?P<id>[a-z0-9_]+)@(?P<version>\d{4}-\d{2}-\d{2}):sha256:(?P<hash>[0-9a-f]{64})")
+_STAMP_RE = re.compile(r"(?P<id>[a-z0-9_]+)@(?P<version>\d{4}-\d{2}-\d{2}(\+[a-z0-9_]+)?)"
+                       r":sha256:(?P<hash>[0-9a-f]{64})")
+#: A regional version is `<YYYY-MM-DD>+<region>`; `available_versions` never lists it.
+_REGION_DIR_RE = re.compile(r"(?P<date>\d{4}-\d{2}-\d{2})\+(?P<region>[a-z][a-z0-9_]*)")
+_MONEY_UNIT_RE = re.compile(r"(?P<cur>[A-Z]{3})(/|$)")
 _NOTE_CODE_RE = re.compile(r"[a-z]+(_[a-z]+)*")
 _DAYTYPES = ("weekday", "weekend")
 
@@ -95,6 +100,22 @@ class DefaultsPackLookupError(LookupError):
 
 class UnknownPackVersion(DefaultsPackLookupError):
     code = "defaults_pack_version_unknown"
+
+
+class UnknownPackRegion(DefaultsPackLookupError):
+    code = "defaults_pack_region_unknown"
+
+
+class MissingRegionalRow(DefaultsPackLookupError):
+    """A regional pack was asked for a money row it does not carry. The EU row is never
+    substituted: it is in another currency, and the engine reads a row as the case's money."""
+
+    code = "defaults_pack_regional_row_missing"
+
+    def __init__(self, key: str, region: str, currency: str):
+        super().__init__(f"region {region!r} ({currency}) has no row {key!r}; the EU row is in "
+                         "another currency and is not substituted", ())
+        self.key, self.region, self.currency = key, region, currency
 
 
 class UnknownTechnology(DefaultsPackLookupError):
@@ -149,6 +170,8 @@ UNIT_CONVERSIONS: Mapping[tuple[str, str], float] = {
     ("EUR/kW", "EUR/MW"): 1000.0,            # 1 MW = 1000 kW
     ("EUR/kW_e", "EUR/MW"): 1000.0,          # technology-data's electric-kW unit
     ("EUR/kWh", "EUR/MWh"): 1000.0,
+    ("EUR/kW_NH3", "EUR/MW"): 1000.0,        # technology-data's ammonia-output kW (Haber-Bosch)
+    ("EUR/MWh_NH3", "EUR/MWh"): 1.0,         # technology-data's ammonia tank, per MWh_NH3 (LHV)
     ("%/year", "share/year"): 0.01,          # FOM in % of overnight cost -> S0 fom_share
     ("%/full cycle", "share/full cycle"): 0.01,
     ("years", "years"): 1.0,
@@ -159,7 +182,18 @@ UNIT_CONVERSIONS: Mapping[tuple[str, str], float] = {
     ("EUR/km", "EUR/km"): 1.0,
     ("EUR/bay", "EUR/bay"): 1.0,
     ("share/year", "share/year"): 1.0,
+    # Regional sources (GS-2) state money in their own currency; a conversion never changes it.
+    # Only the units the transcribed sources use are listed (per kW, to the pack's per MW).
+    ("USD/kW", "USD/MW"): 1000.0,
+    ("CAD/kW", "CAD/MW"): 1000.0,
+    ("GBP/kW", "GBP/MW"): 1000.0,
 }
+
+
+def _money_currency(unit: str) -> str | None:
+    """The ISO currency a money unit is in (`CAD/MW` -> `CAD`), None for a non-money unit."""
+    m = _MONEY_UNIT_RE.match(unit)
+    return m["cur"] if m else None
 
 # (seed tariff unit, IC TariffItem.unit) -> factor. IC rate = seed price x factor.
 TARIFF_CONVERSIONS: Mapping[tuple[str, str], float] = {
@@ -174,6 +208,8 @@ TARIFF_CONVERSIONS: Mapping[tuple[str, str], float] = {
 # campus equipment's bases (IC G1, plan G-2).
 _BASIS_UNIT = {"per_MW": "EUR/MW", "per_MWh": "EUR/MWh", "per_km": "EUR/km",
                "lump": "EUR/unit", "per_bay": "EUR/bay"}
+#: The same, minus the currency: a regional pack states it in the row's own currency.
+_BASIS_PER = {b: u.split("/", 1)[1] for b, u in _BASIS_UNIT.items()}
 Basis = Literal["per_MW", "per_MWh", "per_km", "lump", "per_bay"]
 
 
@@ -385,6 +421,22 @@ class AssumptionRow(BaseModel):
     pack_hash: str
 
 
+class RegionInfo(BaseModel):
+    """What makes a pack regional (GS-2): the region and its currency, the EU version it falls
+    back to, the sources it was transcribed from, where each of its rows came from, and the
+    money rows it does NOT carry (key -> the EU row's currency): asking for one raises
+    :class:`MissingRegionalRow`, the EU row is never substituted."""
+
+    model_config = _FROZEN
+    region: str
+    currency: str
+    base_version: str
+    base_hash: str
+    sources: tuple[dict[str, Any], ...]
+    row_source: dict[str, Literal["regional", "eu_fallback"]]
+    unpriced: dict[str, str]
+
+
 class DefaultsPack(BaseModel):
     """One parsed pack version. Every load returns an independent copy; `pack_tariff`
     returns an independent stamped copy of one tariff."""
@@ -402,6 +454,12 @@ class DefaultsPack(BaseModel):
     # The tariff payloads exactly as the file holds them (JSON text: immutable), so
     # `pack_tariff` copies from the pristine parse, never from the mutable model tree.
     _tariff_json: tuple[tuple[str, str], ...] = PrivateAttr(default=())
+    # Set only on a regional pack; private, so an EU pack's dump is what it always was.
+    _region: RegionInfo | None = PrivateAttr(default=None)
+
+    @property
+    def region_info(self) -> RegionInfo | None:
+        return self._region
 
     # -- identity ----------------------------------------------------------
 
@@ -420,6 +478,8 @@ class DefaultsPack(BaseModel):
         for v in self.values():
             if v.key == key:
                 return v
+        if self._region is not None and key in self._region.unpriced:
+            raise MissingRegionalRow(key, self._region.region, self._region.currency)
         raise UnknownPackValue(f"no pack value {key!r}", [v.key for v in self.values()])
 
     def technologies(self) -> list[str]:
@@ -770,6 +830,8 @@ def _parse_values(path: Path) -> list[PackValue]:
             raise DefaultsPackError(f"{where}: no conversion {conv[0]!r} -> {conv[1]!r} "
                                     f"(known: {sorted(UNIT_CONVERSIONS)})")
         factor = UNIT_CONVERSIONS[conv]
+        if _money_currency(conv[0]) != _money_currency(conv[1]):
+            raise DefaultsPackError(f"{where}: {conv[0]!r} -> {conv[1]!r} would change currency")
         original = _opt_float(r["original_value"], where)
         low, high = _opt_float(r["range_low"], where), _opt_float(r["range_high"], where)
         if (low is None) != (high is None):
@@ -808,8 +870,12 @@ def _parse_values(path: Path) -> list[PackValue]:
         except ValidationError as exc:
             raise DefaultsPackError(f"{where}: {exc.errors()[0]['loc']}: "
                                     f"{exc.errors()[0]['msg']}") from None
-        if v.unit.startswith("EUR") and (v.currency is None or v.currency_year is None):
-            raise DefaultsPackError(f"{where}: {v.key} is money and needs a currency and year")
+        if _money_currency(v.unit) is not None:
+            if v.currency is None or v.currency_year is None:
+                raise DefaultsPackError(f"{where}: {v.key} is money and needs a currency and year")
+            if v.currency != _money_currency(v.unit):
+                raise DefaultsPackError(f"{where}: {v.key} has currency {v.currency} but unit "
+                                        f"{v.unit}")
         _check_value(v, where)
         out.append(v)
     by_key = {v.key: v for v in out}
@@ -834,7 +900,8 @@ def _parse_values(path: Path) -> list[PackValue]:
     return out
 
 
-def _cost_parts(values: Sequence[PackValue], technology: str) -> list[CostPart]:
+def _cost_parts(values: Sequence[PackValue], technology: str, *,
+                strict_source: bool = True) -> list[CostPart]:
     by_part: dict[str, dict[str, PackValue]] = {}
     for v in values:
         if v.technology != technology or v.part is None or v.parameter not in _PART_PARAMETERS:
@@ -845,14 +912,18 @@ def _cost_parts(values: Sequence[PackValue], technology: str) -> list[CostPart]:
         if "overnight" not in fields:
             raise DefaultsPackError(f"{technology}.{part} has no overnight cost")
         overnight = fields["overnight"]
-        if {(f.basis, f.source_technology) for f in fields.values()} != \
-                {(overnight.basis, overnight.source_technology)}:
+        # A regional part may take a share, a life or an efficiency from the EU row (flagged
+        # `eu_fallback`), which names the EU catalogue's technology: only the basis must agree.
+        if {(f.basis, f.source_technology if strict_source else None)
+                for f in fields.values()} != \
+                {(overnight.basis, overnight.source_technology if strict_source else None)}:
             raise DefaultsPackError(f"{technology}.{part}: rows disagree on basis or "
                                     "source technology")
-        if overnight.basis is None or overnight.unit != _BASIS_UNIT[overnight.basis]:
+        if overnight.basis is None or \
+                overnight.unit != f"{overnight.currency}/{_BASIS_PER[overnight.basis]}":
             raise DefaultsPackError(f"{technology}.{part}: basis {overnight.basis} needs "
-                                    f"overnight in {_BASIS_UNIT.get(overnight.basis)}, got "
-                                    f"{overnight.unit}")
+                                    f"overnight in {overnight.currency}/"
+                                    f"{_BASIS_PER.get(overnight.basis)}, got {overnight.unit}")
         out.append(CostPart(technology=technology, part=part, basis=overnight.basis,
                             source_technology=overnight.source_technology or technology,
                             **fields))
@@ -1076,6 +1147,141 @@ def parse_pack_dir(directory: Path) -> DefaultsPack:
     return pack
 
 
+# ── regional packs (GS-2) ───────────────────────────────────────────────────
+
+_REGION_MANIFEST_KEYS = ("pack_id", "version", "region", "currency", "base_version", "base_hash",
+                         "sources", "source_cells")
+_SOURCE_KEYS = ("source_id", "title", "publisher", "url", "file", "sha256", "licence", "terms_url",
+                "redistribution_status", "owner_clearance")
+
+
+def _dimension(unit: str) -> str:
+    """A unit without its currency: `USD/MW` and `EUR/MW` are the same dimension."""
+    if _money_currency(unit) is None:
+        return unit
+    return unit.split("/", 1)[1] if "/" in unit else ""
+
+
+def _region_payload(directory: Path, base: DefaultsPack) -> dict[str, Any]:
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    files = manifest.get("files") or {}
+    with (directory / files.get("values", "values.csv")).open(encoding="utf-8", newline="") as fh:
+        rows = [list(r) for r in csv.reader(fh)]
+    return {"manifest": {k: v for k, v in manifest.items() if k != "files"}, "values": rows,
+            "base": {"version": base.version, "hash": base.hash}}
+
+
+def parse_regional_dir(directory: Path) -> DefaultsPack:
+    """Parse one `<date>+<region>` directory: an overlay of the EU base version's technology
+    rows in the region's own currency. Everything else (finance defaults, load shapes) is the
+    base's; tariffs are not carried. A money row the overlay lacks is `unpriced`; a row without
+    a currency falls back to the base's, for a (technology, part) the overlay prices."""
+    directory = Path(directory)
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    where = directory.name
+    m = _REGION_DIR_RE.fullmatch(where)
+    if m is None:
+        raise DefaultsPackError(f"{where}: not a <YYYY-MM-DD>+<region> directory")
+    missing = [k for k in _REGION_MANIFEST_KEYS if not manifest.get(k)]
+    if missing:
+        raise DefaultsPackError(f"{where}: manifest lacks {missing}")
+    if manifest["pack_id"] != PACK_ID:
+        raise DefaultsPackError(f"{where}: pack_id {manifest['pack_id']!r} != {PACK_ID!r}")
+    if (manifest["version"], manifest["region"]) != (m["date"], m["region"]):
+        raise DefaultsPackError(f"{where}: manifest says {manifest['version']}+"
+                                f"{manifest['region']}")
+    currency = str(manifest["currency"])
+    if not re.fullmatch(r"[A-Z]{3}", currency):
+        raise DefaultsPackError(f"{where}: currency {currency!r} is not an ISO code")
+    if currency == "EUR":
+        raise DefaultsPackError(f"{where}: a regional pack is not in EUR (the EU pack is)")
+    sources = {}
+    for src in manifest["sources"]:
+        absent = [k for k in _SOURCE_KEYS if not src.get(k)]
+        if absent:
+            raise DefaultsPackError(f"{where}: source {src.get('source_id')!r} lacks {absent}")
+        if not re.fullmatch(r"[0-9a-f]{64}", str(src["sha256"])):
+            raise DefaultsPackError(f"{where}: source {src['source_id']} sha256 is not a digest")
+        sources[src["source_id"]] = src
+    cells = manifest["source_cells"]                   # the source figures each row came from
+    cells_path = directory / str(cells.get("file") or "")
+    if not (cells.get("file") and cells_path.is_file()
+            and _file_sha256(cells_path) == cells.get("sha256")):
+        raise DefaultsPackError(f"{where}: source_cells file is missing or its sha256 differs")
+    base = _cached(str(manifest["base_version"]))      # UnknownPackVersion when not vendored
+    if base.hash != manifest["base_hash"]:
+        raise DefaultsPackError(f"{where}: base_hash {manifest['base_hash']} is not the hash "
+                                f"{base.hash} of base version {base.version}")
+    files = manifest.get("files") or {}
+    overlay = _parse_values(directory / files.get("values", "values.csv"))
+    base_rows = {v.key: v for v in base.cost_values}
+    for v in overlay:
+        ref = base_rows.get(v.key)
+        if ref is None:
+            raise DefaultsPackError(f"{where}: {v.key} is not a row of the base {base.version}")
+        if _money_currency(v.unit) is not None and v.currency != currency:
+            raise DefaultsPackError(f"{where}: {v.key} is in {v.currency}, the pack's "
+                                    f"currency is {currency}")
+        if _dimension(v.unit) != _dimension(ref.unit):
+            raise DefaultsPackError(f"{where}: {v.key} has dimension {_dimension(v.unit)!r}, "
+                                    f"the EU row has {_dimension(ref.unit)!r}")
+        if (v.technology, v.part, v.basis, v.parameter) != \
+                (ref.technology, ref.part, ref.basis, ref.parameter):
+            raise DefaultsPackError(f"{where}: {v.key} names another technology, part, basis "
+                                    "or parameter than the EU row")
+        if v.source.split(":", 1)[0] not in sources:
+            raise DefaultsPackError(f"{where}: {v.key} cites {v.source!r}, which is not a "
+                                    "manifest source (`<source_id>: <table>`)")
+    own = {v.key for v in overlay}
+    priced = {(v.technology, v.part) for v in overlay if v.parameter == "overnight"}
+    for v in overlay:
+        if (v.technology, v.part) not in priced:
+            raise DefaultsPackError(f"{where}: {v.key} has no overnight row beside it")
+    merged: list[PackValue] = list(overlay)
+    row_source: dict[str, Literal["regional", "eu_fallback"]] = {k: "regional" for k in own}
+    unpriced: dict[str, str] = {}
+    for ref in base.cost_values:
+        if ref.key in own:
+            continue
+        if ref.currency is None and (ref.technology, ref.part) in priced:
+            merged.append(ref)                       # a share, a life, an efficiency
+            row_source[ref.key] = "eu_fallback"
+        elif ref.currency is not None:
+            unpriced[ref.key] = ref.currency
+    # Rows a derived row names must be in the pack (a derived row whose input would cross
+    # currencies or regions was already refused by `_parse_values`).
+    for tech in {v.technology for v in merged if v.part}:
+        _cost_parts(merged, tech, strict_source=False)
+    digest = _canonical_hash(_region_payload(directory, base))
+    info = RegionInfo(region=m["region"], currency=currency, base_version=base.version,
+                      base_hash=base.hash, sources=tuple(manifest["sources"]),
+                      row_source=row_source, unpriced=unpriced)
+    pack = DefaultsPack(
+        pack_id=PACK_ID, version=where, title=str(manifest.get("title") or ""),
+        seeded_from={"region": m["region"], "currency": currency,
+                     "base_version": base.version, "sources": list(manifest["sources"])},
+        hash=digest, cost_values=merged, finance=base.finance, tariffs={},
+        load_profiles=base.load_profiles)
+    pack._region = info
+    return pack
+
+
+def available_regions() -> tuple[str, ...]:
+    """Every region that has a vendored regional version, sorted."""
+    return tuple(sorted({m["region"] for m in _region_dirs()}))
+
+
+def _region_dirs() -> list[re.Match]:
+    if not VERSIONS_DIR.is_dir():
+        return []
+    out = []
+    for p in VERSIONS_DIR.iterdir():
+        m = _REGION_DIR_RE.fullmatch(p.name)
+        if m and p.is_dir() and (p / "manifest.json").is_file():
+            out.append(m)
+    return sorted(out, key=lambda m: m.string)
+
+
 # ── versions ────────────────────────────────────────────────────────────────
 
 
@@ -1103,9 +1309,29 @@ def _cached(version: str) -> DefaultsPack:
     return pack
 
 
-def load_defaults_pack(version: str | None = None) -> DefaultsPack:
+@functools.lru_cache(maxsize=8)
+def _cached_region(directory_name: str) -> DefaultsPack:
+    return parse_regional_dir(VERSIONS_DIR / directory_name)
+
+
+def load_defaults_pack(version: str | None = None, *, region: str | None = None) -> DefaultsPack:
     """The vendored pack `version` (None: the latest). Each call returns an independent
-    deep copy, so a caller's edit never reaches the next caller."""
+    deep copy, so a caller's edit never reaches the next caller.
+
+    `region` selects a regional pack (GS-2; explicit, nothing infers it): `version` is then
+    the regional version's date (None: the newest for that region). Without `region` the
+    regional directories are invisible, so the latest stays the EU pack."""
+    if region is not None:
+        known = [m for m in _region_dirs() if m["region"] == region]
+        if not known:
+            raise UnknownPackRegion(f"no regional defaults pack for {region!r}",
+                                    available_regions())
+        dates = [m["date"] for m in known]
+        if version is None:
+            version = dates[-1]
+        elif version not in dates:
+            raise UnknownPackVersion(f"region {region!r} has no version {version!r}", dates)
+        return _cached_region(f"{version}+{region}").model_copy(deep=True)
     if version is None:
         versions = available_versions()
         if not versions:

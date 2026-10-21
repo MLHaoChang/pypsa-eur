@@ -13,7 +13,9 @@
 # test or catalogue inventory check on the trial merge, or any check run on the
 # head that is not success or skipped (or that it could not read), or a live
 # coordination-file change with no matching template change. Docs-only
-# overlap and files identical on both sides are reported, not fatal.
+# overlap and files identical on both sides are reported, not fatal. A code
+# overlap is waived when the trial merge is clean, the semantic tests pass and
+# the tests that exercise each overlapping file pass (see "code overlap tests").
 #
 # Environment:
 #   PREMERGE_REMOTE  remote to fetch from (default: origin)
@@ -22,6 +24,8 @@
 #                    (default: MLHaoChang/pypsa-eur)
 #   PREMERGE_TEMPLATE_SYNC  "skip" to pass a live coordination-file change
 #                    that is project-specific and needs no template change
+#   PREMERGE_VITEST  command that runs frontend tests, given test files
+#                    (default: npx vitest run)
 #   PREMERGE_PYTHON  Python that runs the semantic tests (default: the repo's
 #                    pixi `test` env, then `default`, then ~/.venv-pypsa-gui
 #                    from .claude/hooks/session-start.sh, then python3)
@@ -35,11 +39,12 @@ remote=${PREMERGE_REMOTE:-origin}
 base_branch=${PREMERGE_BASE:-master}
 gh_repo=${PREMERGE_REPO:-MLHaoChang/pypsa-eur}
 
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 
 # Overlap in these paths is harmless when the merge itself is clean.
-docs_only_re='^(docs/superpowers/OPEN-ITEMS\.md|docs/superpowers/plans/.*|doc/release-notes\.d/.*|doc/release_notes\.md)$'
+docs_only_re='^(docs/superpowers/OPEN-ITEMS\.md|docs/superpowers/plans/.*|doc/release-notes\.d/.*|doc/release_notes\.md|(.*/)?(CONTEXT|GLOSSARY)\.md|GLOSSARY-MAP\.md|pypsa-gui/backend/harness/README\.md)$'
 # A PR touching these must pass the semantic tests on the trial merge: backend
 # routes (project routes and routers/mcp among them), chat tools, the project
 # ACL services and the harness MCP server.
@@ -55,6 +60,13 @@ semantic_tests=(
 )
 # A PR touching these must also keep the assistant inventory current.
 catalogue_re='(^|/)harness/catalogue'
+# Overlap only in these files does not block when the trial merge is clean and
+# the semantic tests and the assistant inventory check pass on it.
+inventory_overlap_re='^(pypsa-gui/backend/harness/catalogue\.py|\.scratch/live-voice/capability-inventory\.json)$'
+# Overlap only in this manifest does not block when both sides only add lines
+# to it, the trial merge is clean and the manifest test passes on it.
+kinds_overlap_re='^pypsa-gui/tool-error-kinds\.json$'
+kinds_test=tests/test_tool_error_kind_manifest.py
 # A PR touching these live coordination files must also update
 # templates/agent-coordination/ (or run with PREMERGE_TEMPLATE_SYNC=skip).
 template_live_re='^(\.claude/skills/(steward|coordinator|retro)/|scripts/coord/|docs/agents/session-brief\.md$)'
@@ -96,13 +108,15 @@ fi
 
 echo
 echo "== files changed on both sides since merge-base"
+code_files=()  # code overlap, waived if its tests pass on the trial merge (below)
+inv_overlap=()  # overlap files that pass if the trial merge, tests and inventory do
+kinds_overlap=()  # tool-error-kinds.json overlap, waived if append-only (below)
 overlap=$(comm -12 \
   <(git diff --name-only "$mbase" "$master" | sort) \
   <(git diff --name-only "$mbase" "$head" | sort))
 if [[ -z $overlap ]]; then
   echo "none"
 else
-  code_overlap=0
   while IFS= read -r f; do
     # Same blob on both sides (e.g. a cherry-pick master already has), or
     # deleted on both: nothing to reconcile.
@@ -111,21 +125,29 @@ else
       echo "  identical  $f"
     elif [[ $f =~ $docs_only_re ]]; then
       echo "  docs-only  $f"
+    elif [[ $f =~ $inventory_overlap_re ]]; then
+      echo "  inventory  $f (decided on the trial merge, below)"
+      inv_overlap+=("$f")
+    elif [[ $f =~ $kinds_overlap_re ]]; then
+      echo "  kinds      $f (decided on the trial merge, below)"
+      kinds_overlap+=("$f")
     else
       echo "  code       $f"
-      fail=1
-      code_overlap=$((code_overlap + 1))
+      code_files+=("$f")
     fi
   done <<<"$overlap"
-  if ((code_overlap)); then
-    reasons+=("overlap: $code_overlap code file$([[ $code_overlap -eq 1 ]] || echo s)")
-  fi
 fi
 
 echo
 echo "== semantic tests"
 changed=$(git diff --name-only "$mbase" "$head")
-if ! grep -Eq "$semantic_re" <<<"$changed"; then
+sem_ok=0 inv_ok=0
+tests_to_run=("${semantic_tests[@]}")
+((${#kinds_overlap[@]})) && tests_to_run+=("$kinds_test")
+need_sem=0
+{ grep -Eq "$semantic_re" <<<"$changed" || ((${#inv_overlap[@]} || ${#kinds_overlap[@]})); } && need_sem=1
+unmapped=() pytest_files=() vitest_files=() tested=()
+if ((!need_sem && ${#code_files[@]} == 0)); then
   echo "not needed (no route, chat-tool, project-ACL or MCP-server change)"
 elif ((conflict)); then
   echo "skipped: no trial merge while the PR conflicts"
@@ -150,24 +172,104 @@ else
   # so every import resolves inside the trial merge.
   export PYTHONPATH="$wt/pypsa-gui/backend:$wt"
   echo "trial merge $trial, python $py"
-  if (cd "$wt/pypsa-gui/backend" && "$py" -m pytest -q -p no:cacheprovider --disable-warnings "${semantic_tests[@]}"); then
+
+  # The tests that exercise each code-overlap file; a file with none still blocks.
+  if ((${#code_files[@]})); then
+    while IFS=$'\t' read -r runner f t; do
+      case $runner in
+        none) unmapped+=("$f") ;;
+        pytest) pytest_files+=("$t"); tested+=("$t") ;;
+        vitest) vitest_files+=("$t"); tested+=("$t") ;;
+      esac
+    done < <(python3 "$script_dir/overlap_tests.py" "$wt" "${code_files[@]}")
+  fi
+  ((${#code_files[@]} && ${#unmapped[@]} == 0)) && need_sem=1
+
+  if ((!need_sem)); then
+    echo "not needed (no route, chat-tool, project-ACL or MCP-server change)"
+  elif (cd "$wt/pypsa-gui/backend" && "$py" -m pytest -q -p no:cacheprovider --disable-warnings "${tests_to_run[@]}"); then
     echo "semantic tests: pass"
+    sem_ok=1
   else
     echo "semantic tests: FAIL"
     fail=1
     reasons+=("semantic tests failed")
   fi
 
-  if grep -Eq "$catalogue_re" <<<"$changed"; then
+  if grep -Eq "$catalogue_re" <<<"$changed" || ((${#inv_overlap[@]})); then
     echo
     echo "== assistant inventory (harness/catalogue changed)"
     if "$py" "$wt/pypsa-gui/backend/smoke/assistant_inventory.py" --check; then
       echo "inventory: pass"
+      inv_ok=1
     else
       echo "inventory: FAIL"
       fail=1
       reasons+=("inventory check failed")
     fi
+  fi
+fi
+
+if ((${#code_files[@]})); then
+  echo
+  echo "== code overlap tests"
+  ok=0
+  if ((conflict)); then
+    echo "  no trial merge while the PR conflicts"
+  elif ((${#unmapped[@]})); then
+    printf '  no test     %s\n' "${unmapped[@]}"
+    echo "  these files have no test file (backend: tests/test_<mod>*.py; frontend: <Name>*.test.*), so the overlap blocks"
+  elif ((!sem_ok)); then
+    echo "  the semantic tests did not pass on the trial merge, so the overlap blocks"
+  else
+    ok=1
+    unique_py=$(printf '%s\n' "${pytest_files[@]}" | sort -u)
+    unique_vt=$(printf '%s\n' "${vitest_files[@]}" | sort -u)
+    if [[ -n $unique_py ]]; then
+      mapfile -t pyfiles <<<"$unique_py"
+      (cd "$wt/pypsa-gui/backend" && "$py" -m pytest -q -p no:cacheprovider --disable-warnings "${pyfiles[@]}") || ok=0
+    fi
+    if [[ -n $unique_vt ]]; then
+      mapfile -t vtfiles <<<"$unique_vt"
+      [[ -e $wt/pypsa-gui/frontend/node_modules ]] \
+        || ln -s "$root/pypsa-gui/frontend/node_modules" "$wt/pypsa-gui/frontend/node_modules" 2>/dev/null || true
+      read -r -a vt_cmd <<<"${PREMERGE_VITEST:-npx vitest run}"
+      (cd "$wt/pypsa-gui/frontend" && "${vt_cmd[@]}" "${vtfiles[@]}") || ok=0
+    fi
+  fi
+  if ((ok)); then
+    echo "  waived      code overlap (${#code_files[@]} file(s)): clean trial merge, semantic tests pass, ran: $(printf '%s\n' "${tested[@]}" | sort -u | paste -sd' ')"
+  else
+    ((conflict || ${#unmapped[@]} || !sem_ok)) || echo "  the overlap tests failed on the trial merge, so the overlap blocks"
+    fail=1
+    reasons+=("overlap: ${#code_files[@]} code file$([[ ${#code_files[@]} -eq 1 ]] || echo s)")
+  fi
+fi
+
+if ((${#inv_overlap[@]})); then
+  echo
+  echo "== catalogue/inventory overlap"
+  if ((!conflict && sem_ok && inv_ok)); then
+    echo "  waived      catalogue/inventory overlap: clean trial merge, inventory + semantic pass"
+  else
+    printf '  code        %s\n' "${inv_overlap[@]}"
+    fail=1
+    reasons+=("overlap: ${#inv_overlap[@]} code file$([[ ${#inv_overlap[@]} -eq 1 ]] || echo s)")
+  fi
+fi
+
+if ((${#kinds_overlap[@]})); then
+  echo
+  echo "== tool-error-kinds overlap"
+  kinds_file=${kinds_overlap[0]}
+  removed=$(( $(git diff -U0 "$mbase" "$master" -- "$kinds_file" | grep -c '^-[^-]' || true) \
+    + $(git diff -U0 "$mbase" "$head" -- "$kinds_file" | grep -c '^-[^-]' || true) ))
+  if ((!conflict && sem_ok && removed == 0)); then
+    echo "  waived      tool-error-kinds overlap: append-only, clean trial merge, manifest test pass"
+  else
+    echo "  code        $kinds_file (removed lines: $removed)"
+    fail=1
+    reasons+=("overlap: tool-error-kinds.json not append-only or not verified")
   fi
 fi
 
@@ -199,12 +301,29 @@ echo "== checks"
 # including a run still in progress, blocks; so does failing to read them.
 if runs=$(command -v gh >/dev/null &&
   gh api "repos/$gh_repo/commits/$head/check-runs" --paginate \
-    --jq '.check_runs[] | [.status, (.conclusion // "-"), .name] | @tsv'); then
+    --jq '.check_runs[] | [.status, (.conclusion // "-"), .name, .id] | @tsv'); then
   total=$(grep -c . <<<"$runs" || true)
   bad=$(awk -F'\t' 'NF && !($1 == "completed" && ($2 == "success" || $2 == "skipped"))' <<<"$runs")
+  # An Integration (macos) job cancelled without ever getting a runner (no
+  # runner_id, no steps) does not block when Integration (ubuntu) passed on
+  # this head. A macOS job that ran, failed or was cancelled mid-run still blocks.
+  waived=
+  if grep -qP '^completed\tsuccess\tIntegration \(ubuntu\)\t' <<<"$runs"; then
+    while IFS=$'\t' read -r st con name id; do
+      [[ $st == completed && $con == cancelled && $name == "Integration (macos)" ]] || continue
+      [[ $(gh api "repos/$gh_repo/actions/jobs/$id" \
+        --jq '((.runner_id // 0) == 0) and ((.steps // []) | length == 0)' 2>/dev/null) == true ]] || continue
+      waived+="  waived      cancelled       Integration (macos): no runner assigned; ubuntu twin passed"$'\n'
+      bad=$(awk -F'\t' -v id="$id" '$4 != id' <<<"$bad")
+    done <<<"$bad"
+  fi
   echo "$total check run(s) on $head"
+  [[ -n $waived ]] && printf '%s' "$waived"
   if ((total == 0)); then
     echo "  none yet"
+    if (($(date +%s) - $(git log -1 --format=%ct "$head") > 600)); then
+      echo "  no CI ran on this head (e.g. base retargeted after the push): merge $base_branch in, as a real merge commit, to trigger it"
+    fi
     fail=1
     reasons+=("checks: none yet")
   elif [[ -n $bad ]]; then

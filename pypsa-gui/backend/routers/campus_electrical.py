@@ -26,6 +26,9 @@ optimisation when it is fresh with a choice of its own, else least cost; owner
 decision 2026-10-12), and the needs that run could not meet (owner decision
 2026-10-13): ``{assets, source_hash, stale, study_method, unresolved}``. Read only.
 
+``GET /{name}/grid-readiness?profile=`` (DC grid readiness 02) is the
+advisory grid-readiness scorecard (``services/adequacy/grid_readiness.py``).
+
 The project's own grid codes (plan C10) are under ``/{name}/grid-codes``,
 wrapping ``services/campus_grid_code_service.py``:
 
@@ -228,6 +231,22 @@ def cancel_milp(
     """Ask the running job to stop; it keeps the best point found so far."""
     _check_lock(proj, db, user)
     return ce.cancel_milp_job(_row(proj, db))
+
+
+# ── the grid-readiness scorecard (DC grid readiness 02) ─────────────────────
+
+@router.get("/{name}/grid-readiness")
+async def get_grid_readiness(profile: str | None = None, proj: AuthorizedProject = ProjectAccessDep,
+                             db: DBSession = Depends(get_db)):
+    """The project's grid-readiness scorecard against grid-code ``profile``
+    (default: the campus study's last-run profile, else ``eu_rfg_dcc_ce``):
+    rows ``{id, requirement, limit, unit, source, project_value, verdict,
+    assumed, note, section, target}``. Advisory and read only; it reads the
+    saved network, so it parses a netCDF off the event loop. 422 for an
+    unknown profile."""
+    from services.adequacy.grid_readiness import grid_readiness_for
+
+    return await run_in_threadpool(grid_readiness_for, _row(proj, db), profile)
 
 
 # ── the island sidecar and study (campus island plan, I9a) ──────────────────
