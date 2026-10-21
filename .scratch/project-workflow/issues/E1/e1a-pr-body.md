@@ -22,6 +22,7 @@ The staged data-center example can be created for any planning years entered at 
 - Each placeholder gets an `assumed` ledger row with a section target, so the flow warns until it is confirmed. There is no flow code change.
 - `site_peak.peak_check(…, unset=)`, the DC-01 create check and the scorecard's `energization_peak:<period>` read unknown for those periods. They never refuse on a placeholder.
 - The investment case gets `growth_placeholder:<kind>_<year>` flags. A live-solve test checks the IC report lists each flag, with one plain-words sentence per placeholder in its notes.
+- The chat tool's `solve_ppa_price` builds its case with the same flags and lists them in its result's `flags`, as it lists the campus flags (`services/chat_tools.py`; a test pins it).
 - The run is allowed. A test creates the project, reads the flow warnings and the unknown scorecard rows, and solves.
 
 **Horizon (condition 4).** The case's `analysis_years = end − start`, `financial_close = start − 1` and every existing COD = start. A test checks that the operating years equal the periods' covered years. The pack's money year (2020) is not re-dated, and the ledger says so. The cost basis stays flat; per-period cost sourcing is the separate gated follow-up.
@@ -37,6 +38,8 @@ Files:
 - `services/adequacy/grid_readiness.py`.
 - `routers/results.py`: `_ic_growth_flags`.
 - `services/finance/baseline_text.py`.
+- `services/chat_tools.py`: `solve_ppa_price` passes and lists the growth flags.
+- The investment-case test fakes of `_ic_build_case` take the new `growth_flags` keyword.
 - Test: `tests/test_e1_planning_staged_dc.py`.
 
 **Review.**
@@ -45,7 +48,7 @@ Files:
 
 **Open items.**
 - The report's assumptions appendix doesn't read the template ledger today. Listing placeholders there is a new report seam, split out with the gatekeeper's OK: [.scratch/project-workflow/issues/E1-report-template-ledger.md](https://github.com/MLHaoChang/pypsa-eur/blob/claude/e1a-planning-years-staged-dc/.scratch/project-workflow/issues/E1-report-template-ledger.md) (`ready-for-agent`).
-- The chat tool's description doesn't mention `planning` yet (catalogue change; the inventory is untouched).
+- The chat tool's description doesn't mention `planning` yet: its own small PR after this one merges (coordinator, 2026-10-21).
 - The Builder's preview of the resulting periods is W2's.
 - E1b: H2 hub and microgrid staged. E1c: ammonia (with g2p). E1d: single-year templates and IPP (with the IPP session).
 
@@ -66,4 +69,4 @@ AI-generated: this description and the code were written by Claude Code.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
-https://claude.ai/code/session_01S7WJfjiHwyW6t83C5Pn37n
+https://claude.ai/code/session_01CCDKueCSjJ1M7W2uP254JF

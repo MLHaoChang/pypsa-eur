@@ -21,7 +21,7 @@ Read [workspace reconciliation](../workspace-reconciliation.md) §3.3, §12 (Q3 
   6. `planning_invalid` is a typed 422. `start_year == end_year` is refused on a staged example.
   7. E1c needs the g2p session's agreement and E1d the IPP session's, before building.
 
-## E1a: built, pushed, PR NOT yet opened (paused by the owner 2026-10-21 11:20 CEST)
+## E1a: PR opened 2026-10-21 (resumed under PACE-2), master 2ecd7733 merged in
 
 - Branch `claude/e1a-planning-years-staged-dc`, head 8d54220, on master 2354f8d2.
 - PR body drafted: [E1/e1a-pr-body.md](E1/e1a-pr-body.md). Open the PR from it, against master.

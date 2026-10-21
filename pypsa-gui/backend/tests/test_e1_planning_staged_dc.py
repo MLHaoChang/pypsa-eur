@@ -464,3 +464,32 @@ def test_the_ic_report_has_one_sentence_per_placeholder(reset_backend, monkeypat
     notes = payload["counterfactual"]["notes"]
     for f in growth:
         assert notes.count(flag_text(f)) == 1, notes
+
+
+def test_solve_ppa_price_carries_the_growth_placeholder_flags(install_network, monkeypatch):
+    """A PPA price the chat tool solves on placeholder growth values says so
+    in its own flags, as the investment case does (condition 3)."""
+    import routers.results as R
+    import routers.simulation as SIM
+    from services import chat_tools
+    from services.finance import engine as E
+    from services.results import finance_case as FC
+    from tests.fixtures.investment_case.sam import sam_case as S
+    from tests.conftest import build_network
+    from tests.test_investment_case_campus_route import _s2_inputs
+
+    growth = ("growth_placeholder:it_mw_2038",)
+    monkeypatch.setattr(R, "_ic_growth_flags", lambda: growth)
+    monkeypatch.setattr(FC, "build_finance_case",
+                        lambda n, cfg, fin, *, result_df, lost_load=None, owner=None,
+                        extra_assets=(), baseline=None: S.to_finance_case("s1b", solve=True))
+    monkeypatch.setattr(E, "solve_ppa", lambda case, pack=None, layers=None: {
+        "solved_ppa_price": 55.0, "solve_ppa_status": "ok", "solved_ppa_price_money_year": 2026})
+    install_network(build_network(solve=True))
+    SIM.put_finance(SIM.FinanceIn(finance=_s2_inputs()), if_match=None)
+    try:
+        out = chat_tools.DISPATCHERS["solve_ppa_price"](target_irr=0.1, target_year=10)
+    finally:
+        SIM.put_finance(SIM.FinanceIn(finance=None), if_match=None)
+    assert out["status"] == "ok"
+    assert out["flags"] == list(growth)
