@@ -129,12 +129,19 @@ def test_an_item_carries_its_target(client, site, edit):
     row = next(s for s in body["sections"] if s["section"] == "loads")
     item = next(i for i in row["items"] if i["severity"] == "error")
     assert set(item) == {"code", "severity", "message", "source", "target", "blocking",
-                         "acknowledged"}
+                         "acknowledged", "title"}
+    assert item["title"] and "_" not in item["title"]
     assert item["source"] == "validation" and item["blocking"] is True
     assert item["target"] == {"section": "loads", "panel": None, "component": "Load",
                               "entity": "it", "field": None}
     assert body["run_blocker"]["section"] == "loads"
-    assert body["run_blocker"]["message"].startswith("Loads & demand: ")
+    # The blocker reads in the plain title and the entity, not the validator's
+    # detail text ("p_set must be finite ...").
+    assert body["run_blocker"]["message"] == f"Loads & demand: {item['title']} (it)"
+    # The detail the user fixes from stays reachable, unchanged, on the pointer
+    # and on the item.
+    assert body["run_blocker"]["detail"] == item["message"]
+    assert item["message"] != item["title"]
     assert body["run_blocker"]["target"] == item["target"]
 
 
@@ -281,6 +288,9 @@ def test_a_warning_acknowledged_is_complete_until_its_value_changes(
     assert _states(body)["project"] == "complete"
     row = next(s for s in body["sections"] if s["section"] == "project")
     assert row["items"][0]["acknowledged"] is True               # still listed, as checked
+    # The title is added beside the message; the message (the acknowledged
+    # value) is the validator's own text, not the title.
+    assert row["items"][0]["title"] and row["items"][0]["message"] != row["items"][0]["title"]
 
     with edit() as n:
         n.snapshot_weightings.loc[:, ["objective", "generators", "stores"]] = 5.0
@@ -355,7 +365,8 @@ def _assert_equivalent(client, monkeypatch, name) -> dict:
 
 
 R4_TEMPLATES = ["eh_datacenter", "eh_datacenter_staged", "eh_h2_hub", "eh_h2_hub_staged",
-                "eh_microgrid", "eh_microgrid_staged", "eh_site", "eh_ammonia_staged"]
+                "eh_microgrid", "eh_microgrid_staged", "eh_site", "eh_ammonia_staged",
+                "eh_ipp_hybrid"]
 
 
 @pytest.mark.parametrize("tid", R4_TEMPLATES)
@@ -481,31 +492,42 @@ def test_r4_in_flight(client, site, monkeypatch):
 # The state of each section right after create. Where it differs from the
 # instantiation table, the comment says how (recorded in the PR, not papered
 # over): the table's **R** inputs (location, the data centre's limits, ramp
-# and LOLE goal) have no source that says "not yet confirmed" except the
-# template's `assumed` ledger rows, and the site location is a warning by the
-# brief's rule (the validator does not require it).
+# and LOLE goal) say "not yet confirmed" through the template's `assumed`
+# ledger rows (DC grid readiness 02 adds connection_ramp, oscillation,
+# import_efficiency, fault_level and lole_goal), and the site location is a
+# warning by the brief's rule (the validator does not require it).
 TEMPLATE_STATES = {
     # R location → warning (site_location_missing). R connection limits and
-    # ramp, R LOLE goal: no `assumed` row names them → complete.
+    # ramp, R LOLE goal: DC 02's assumed ledger rows → connection and
+    # scenarios warning ("to check").
     "eh_datacenter": {"project": "warning", "carriers": "complete",
-                      "connection": "complete", "loads": "complete",
+                      "connection": "warning", "loads": "complete",
                       "assets": "complete", "profiles": "complete",
-                      "commercial": "complete", "scenarios": "complete"},
+                      "commercial": "complete", "scenarios": "warning"},
     # Islanded: connection `not_needed`. Assumed island data → assets warning.
+    # DC 02's assumed LOLE goal → scenarios warning.
     "eh_microgrid": {"project": "warning", "carriers": "complete",
                      "connection": "not_needed", "loads": "complete",
                      "assets": "warning", "profiles": "complete",
-                     "commercial": "warning", "scenarios": "complete"},
+                     "commercial": "warning", "scenarios": "warning"},
     # Ammonia (#418): electricity, H2 and NH3 pre-filled. Its assumed rows
     # (energization; tanks, electrolyser, UC; finance and the NH3 value) read warning.
     "eh_ammonia_staged": {"project": "warning", "carriers": "complete",
                           "connection": "warning", "loads": "complete",
                           "assets": "warning", "profiles": "complete",
                           "commercial": "warning", "scenarios": "complete"},
+    # DC 02's assumed connection limits → connection warning; no LOLE goal
+    # (the strong-grid pack sets an ENS cap only) → scenarios complete.
     "eh_h2_hub": {"project": "warning", "carriers": "complete",
-                  "connection": "complete", "loads": "complete",
+                  "connection": "warning", "loads": "complete",
                   "assets": "warning", "profiles": "complete",
                   "commercial": "complete", "scenarios": "complete"},
+    # Generation-only (IPP ticket 03): no Load, so loads `not_needed` and no study.
+    # Assumed limits (connection) and finance, tax and charges (commercial) read warning.
+    "eh_ipp_hybrid": {"project": "warning", "carriers": "complete",
+                      "connection": "warning", "loads": "not_needed",
+                      "assets": "complete", "profiles": "complete",
+                      "commercial": "warning", "scenarios": "complete"},
 }
 
 
@@ -657,3 +679,42 @@ def test_a_held_network_lock_defers_the_flow_instead_of_waiting(client, tmp_proj
     assert body["deferred"] is True and body["run_ready"] is False
     assert {s: _states(body)[s] for s in INPUTS} == {s: "unknown" for s in INPUTS}
     assert body["verdicts"]["study"]["ready"] is False
+
+
+def test_section_for_component_uses_the_flows_connection(client, site, bound_ctx):
+    """LC-04's edit card names the section with the flow's own rule."""
+    from services.flow_service import section_for_component
+
+    site()
+    with bound_ctx(client):
+        n = PyPSAService.get_network()
+        cfg = PyPSAService.get_solver_state()["solver_config"]
+        assert section_for_component(n, cfg, None, "Link", "grid_import")["id"] == "connection"
+        assert section_for_component(n, cfg, None, "Generator", "gas") == {
+            "id": "assets", "label": "Assets & sizing", "panel": None}
+
+
+def test_a_generation_only_site_with_a_load_is_held_to_the_study(client, tmp_projects_dir,
+                                                                  edit, bound_ctx):
+    """The generation-only rule is keyed on the network too: a Load added to an IPP project
+    brings the loads rules, the VOLL rule and the study back, as on any EH template. The flag
+    is the PROJECT's stored template meta (`read_template`), so a created project carries it."""
+    from services import flow_service
+
+    name = _create(client, "eh_ipp_hybrid", "ipp")
+    from services import network_lengths
+
+    with bound_ctx(client):
+        project_dir = network_lengths.active_project_dir()
+    assert flow_service.read_template(project_dir)["generation_only"] is True
+    fresh = _flow(client, name)
+    assert _states(fresh)["loads"] == "not_needed"
+    assert fresh["run_request"]["study"] is False
+    with edit() as n:
+        n.add("Load", "aux", bus="poi", p_set=1.0)
+    body = _flow(client, name)
+    assert _states(body)["loads"] in ("incomplete", "warning", "complete")
+    assert "presence_loads" not in _codes(body, "loads")
+    assert body["run_request"]["study"] is True
+    assert "presence_voll" in _codes(body, "scenarios")      # the template ships VoLL 0
+

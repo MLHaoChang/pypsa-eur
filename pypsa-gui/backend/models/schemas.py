@@ -755,6 +755,9 @@ class SolverConfigSchema(BaseModel):
     mip_time_limit_s: float = 0
     # Process-unit commitment (grid-to-process ticket 03): auto | linearised | binary.
     process_uc: Literal["auto", "linearised", "binary"] = "auto"
+    # Capacity › sizing off (F1): dispatch on the last capacity run's sizes or
+    # on the nameplate; "off" sizes as usual.
+    fixed_sizes: Literal["off", "capacity_run", "nameplate"] = "off"
     # Edge Investment Case commercial layer (P1 WP1.3): typed here, a plain
     # dict on the `SolverConfig` dataclass (`update_solver_config` dumps it).
     # Explicit null clears it.

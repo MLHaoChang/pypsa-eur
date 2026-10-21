@@ -15,11 +15,13 @@ CRITICALITY_TIERS: tuple[str, ...] = ("safety", "process_critical", "process_fle
 
 # What a Generator on a product bus stands for, so results never infer it from a name (gatekeeper, ticket 04):
 # `buy_in` is a real purchase of the product (an expense), `shortfall` is product not delivered, priced at its
-# lost-production value (lost revenue, never an expense). The empty string is "an ordinary generator".
+# lost-production value (lost revenue, never an O&M or purchase expense: the case books it as its own
+# `lost_production` stream). The empty string is "an ordinary generator".
 PROCESS_GENERATOR_ROLES: tuple[str, ...] = ("buy_in", "shortfall")
 
 PROCESS_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
-    "Bus": {"mwh_per_t": "float_nonneg", "product_value": "float_nonneg"},
+    "Bus": {"mwh_per_t": "float_nonneg", "product_value": "float_nonneg",
+            "lost_production_value": "float_nonneg"},
     "Generator": {"process_role": "process_role"},
     "Link": {"eh_process": "bool", "criticality_tier": "tier", "throughput_unit": "text",
              "specific_energy_kwh_per_t": "float_nonneg"},
@@ -36,3 +38,21 @@ def product_role_generators(n, role: str):
     if role not in PROCESS_GENERATOR_ROLES or "process_role" not in gens.columns:
         return gens.index[:0]
     return gens.index[gens["process_role"].astype(str).str.strip() == role]
+
+
+def product_roles(n) -> dict[str, str]:
+    """{Generator: role} of every Generator with a `process_role`, from `product_role_generators` (column only).
+    A product slack is an LP term, not an asset: the value flows never make it ownable (ticket 06)."""
+    return {str(g): role for role in PROCESS_GENERATOR_ROLES for g in product_role_generators(n, role)}
+
+
+def bus_values(n) -> dict[str, float]:
+    """{bus: lost_production_value} for every bus with a finite value above 0 (ticket 08): the column alone."""
+    import math
+
+    import pandas as pd
+
+    if "lost_production_value" not in n.buses.columns:
+        return {}
+    v = pd.to_numeric(n.buses["lost_production_value"], errors="coerce")
+    return {str(b): float(x) for b, x in v.items() if math.isfinite(x) and x > 0}

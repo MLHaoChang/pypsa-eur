@@ -1,15 +1,14 @@
 import { useState, useEffect, useCallback, useId, useRef } from 'react'
 import {
   ChevronLeft, ChevronRight,
-  FolderOpen, Save, Copy, Upload, FileDown,
-  Download, X, Check, Clock,
+  FolderOpen, Copy, Upload, FileDown,
+  Download, X, Clock,
   MousePointer, ZoomIn, ZoomOut,
   LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
-  MessageSquare, LayoutGrid, Users, Compass, MoreHorizontal,
+  Users, Compass, MoreHorizontal,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
 import { useUIStore } from '../store/uiStore'
 import { networkApi } from '../api/network'
 import { ConfirmDialog } from '../components/ConfirmDialog'
@@ -313,14 +312,13 @@ function SaveNameModal({
 // carries the button that opens the project's actions (the Expert footer).
 function ProjectHeaderCard({
   currentProject, lastSavedIso, dirty, autosaveEnabled, onToggleAutosave,
-  onRename, menu,
+  menu,
 }: {
   currentProject: string | null
   lastSavedIso: string | null
   dirty: boolean
   autosaveEnabled: boolean
   onToggleAutosave: () => void
-  onRename: () => void
   menu?: { open: boolean; onToggle: () => void; controls: string }
 }) {
   // Tick once per minute so "Saved Xm ago" updates without polling the
@@ -350,22 +348,18 @@ function ProjectHeaderCard({
   const savedLine = relative
     ? (dirty ? `Unsaved · last save ${relative}` : `Saved ${relative}`)
     : (dirty ? 'Unsaved changes' : 'Saved')
+  // Plain text: the project is renamed in the header field only (UX-flow #11).
   const renameButton = (
-    <button
-      type="button"
-      onClick={onRename}
-      title="Rename project (header field)"
-      className="flex items-center gap-1.5 w-full text-left group"
-    >
+    <div className="flex items-center gap-1.5 w-full" title={currentProject}>
       <span
         aria-hidden
         className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
         style={{ background: dirty ? '#d97706' : '#16a34a' }}
       />
-      <span className="text-[13px] font-semibold text-text truncate min-w-0 group-hover:underline">
+      <span className="text-[13px] font-semibold text-text truncate min-w-0">
         {currentProject}
       </span>
-    </button>
+    </div>
   )
 
   // The footer card (with `menu`) is one line shorter: the save state and the
@@ -449,8 +443,7 @@ function ProjectSectionContent({
   // section, the icon strip's flyout). 'footer': the Expert sidebar's footer
   // card, its actions behind the card's menu (M2, plan 2026-10-05 §11).
   variant?: 'section' | 'footer'
-  // Guided mode (spec §3.5): only the header card, Save, Recent and Projects
-  // home. The hidden rows stay reachable via the palette and the assistant.
+  // Guided mode (spec §3.5): only the header card and Recent. The hidden rows stay reachable via the palette and the assistant.
   guided?: boolean
   projectName: string
   saveStatus: 'idle' | 'saved'
@@ -465,7 +458,6 @@ function ProjectSectionContent({
     activeSlidePanel, setSlidePanel, setProjectSwitchInProgress,
     readOnly, readOnlyReason, projectMismatch,
   } = useUIStore()
-  const [showNameModal, setShowNameModal] = useState(false)
   // Separate flag for the "Save a Copy" flow so its modal can pre-fill a
   // distinct default name and the confirm handler doesn't switch the active
   // project to the copy.
@@ -479,7 +471,6 @@ function ProjectSectionContent({
   const [pendingReload, setPendingReload] = useState<{ name: string; depthKnown: boolean } | null>(null)
   // Route back to the projects home (the workspace surface that now owns
   // create / import / duplicate).
-  const navigate = useNavigate()
 
   // The footer card's action menu (variant 'footer' only).
   const [menuOpen, setMenuOpen] = useState(false)
@@ -758,16 +749,6 @@ function ProjectSectionContent({
     return () => clearInterval(id)
   }, [autosaveEnabled, currentProject, networkHasBuses, saveAndExportBundle])
 
-  const handleSave = () => {
-    if (currentProject) saveAndExportBundle(currentProject)
-    else setShowNameModal(true)
-  }
-
-  const handleNameConfirm = (name: string) => {
-    setShowNameModal(false)
-    saveAndExportBundle(name)
-  }
-
   const handleSaveCopy = () => {
     // Always prompt — a "copy" needs a name distinct from the current project.
     // The modal pre-fills "<current>_copy" as a starting point.
@@ -929,13 +910,6 @@ function ProjectSectionContent({
             }}
           />
           )}
-          <SItem
-            icon={saveStatus === 'saved' ? <Check size={15} /> : <Save size={15} />}
-            label={saveStatus === 'saved' ? 'Saved ✓' : 'Save'}
-            hint={dirty ? '●' : undefined}
-            title={projectMismatch ? mismatchSentence(projectMismatch) : undefined}
-            onClick={handleSave}
-          />
           {!guided && (<>
           <SItem
             icon={<Copy size={15} />}
@@ -944,7 +918,8 @@ function ProjectSectionContent({
           />
           <SItem
             icon={<FileDown size={15} />}
-            label="Export bundle"
+            label="Export…"
+            title="Export the project: bundle (.pypsaproj.zip), NetCDF, CSV, Excel or MATPOWER."
             onClick={() => { openIo('export'); onCloseModal?.() }}
           />
           </>)}
@@ -970,23 +945,13 @@ function ProjectSectionContent({
         </>
       )}
 
-      {/* The old "Workspace" block (New project / Open from disk / Import /
-          From template) now lives on the projects home — creating a project
-          belongs to the workspace, not to whichever network is resident here.
-          All four are the tabs of the same NewProjectWizard, which that page
-          opens directly. What stays is the way BACK to the workspace. */}
-      <SubHdr title="Workspace" />
-      <SItem
-        icon={<LayoutGrid size={15} />}
-        label="Projects home"
-        title="Browse every project you can access, resume the last one, or create / import a new one."
-        onClick={() => { onCloseModal?.(); navigate('/projects') }}
-      />
+      {/* Creating, importing and duplicating a project live on the projects
+          home, reached from the header's breadcrumb (UX-flow #8). */}
       {!guided && (
       <SItem
         icon={<Users size={15} />}
         label="Workspace panel"
-        title="Ownership, edit lock, scenario tree, members, and recent projects for the open project."
+        title="Ownership, edit lock and members of the open project."
         active={activeSlidePanel === 'workspace'}
         onClick={() => {
           setSlidePanel(activeSlidePanel === 'workspace' ? null : 'workspace')
@@ -999,13 +964,6 @@ function ProjectSectionContent({
 
   const modals = (
     <>
-      {showNameModal && (
-        <SaveNameModal
-          initial={slugify(currentProject || pn)}
-          onSave={handleNameConfirm}
-          onClose={() => setShowNameModal(false)}
-        />
-      )}
       {showCopyModal && (
         <SaveNameModal
           initial={slugify(`${currentProject || pn}_copy`)}
@@ -1049,14 +1007,6 @@ function ProjectSectionContent({
       dirty={dirty}
       autosaveEnabled={autosaveEnabled}
       onToggleAutosave={() => setAutosaveEnabled(!autosaveEnabled)}
-      // Rename: focuses the header's project-name button. The button's
-      // onFocus handler (`startEditName`) flips to edit mode and schedules
-      // `nameRef.current?.focus().select()` on the new <input>, so a single
-      // .focus() here is enough — no DOM-selection juggling needed.
-      onRename={() => {
-        const el = document.querySelector<HTMLElement>('[data-project-name-editor]')
-        el?.focus()
-      }}
       menu={variant === 'footer'
         ? { open: menuOpen, onToggle: () => setMenuOpen(o => !o), controls: menuId }
         : undefined}
@@ -1090,66 +1040,6 @@ function ProjectSectionContent({
       {headerCard}
       {rows}
     </div>
-  )
-}
-
-/**
- * The Assistant's nav entry — top level in both sidebar modes, never inside a
- * collapsible section.
- *
- * It toggles `assistantDockOpen` rather than `activeSlidePanel`: the assistant
- * has its own dock precisely so it can stay on screen while it navigates you
- * somewhere (see AssistantDock.tsx), and routing it back through the panel
- * union would restore the self-eviction bug the dock exists to remove.
- */
-function AssistantNavButton({ compact = false, onCloseModal }: {
-  compact?: boolean
-  onCloseModal?: () => void
-}) {
-  const assistantDockOpen = useUIStore(s => s.assistantDockOpen)
-  const toggleAssistantDock = useUIStore(s => s.toggleAssistantDock)
-  const title = 'Assistant — ask about the open network, drive any tool, and it opens the view it is talking about.'
-  const onClick = () => { toggleAssistantDock(); onCloseModal?.() }
-
-  if (compact) {
-    return (
-      <button
-        onClick={onClick}
-        title={title}
-        aria-label="Assistant"
-        aria-pressed={assistantDockOpen}
-        data-testid="sidebar-assistant"
-        className="flex flex-col items-center justify-center gap-0.5 w-full py-2 transition-colors"
-        style={{
-          color: assistantDockOpen ? 'var(--color-accent)' : 'var(--color-muted)',
-          background: assistantDockOpen ? 'rgba(47,129,247,0.14)' : undefined,
-        }}
-      >
-        <MessageSquare size={18} />
-        <span className="text-[8px] font-mono font-bold uppercase tracking-[0.06em]">Ask</span>
-      </button>
-    )
-  }
-
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      aria-pressed={assistantDockOpen}
-      data-testid="sidebar-assistant"
-      className="flex items-center gap-2 w-full px-3 py-2 text-[12px] font-semibold rounded-md transition-colors"
-      style={{
-        color: assistantDockOpen ? 'var(--color-accent)' : 'var(--color-text)',
-        background: assistantDockOpen ? 'rgba(47,129,247,0.14)' : 'rgba(47,129,247,0.07)',
-        border: `1px solid ${assistantDockOpen ? 'rgba(47,129,247,0.5)' : 'rgba(47,129,247,0.22)'}`,
-      }}
-    >
-      <MessageSquare size={15} className="shrink-0" />
-      <span className="flex-1 text-left">Assistant</span>
-      <span className="font-mono text-[9px] font-bold uppercase tracking-[0.12em] text-muted">
-        {assistantDockOpen ? 'Open' : 'Ask'}
-      </span>
-    </button>
   )
 }
 
@@ -1479,7 +1369,7 @@ export default function Sidebar() {
   // Guided (spec §3.5) is a render condition only — `sections` below is untouched.
   const guided = uiMode === 'guided'
   const [sections, setSections] = useState<Record<FlyoutSection, boolean>>({
-    project: true, model: true, run: true, results: true, studies: true, reports: true,
+    project: true, setup: true, model: true, run: true, results: true, reports: true,
   })
   const [activeFlyout, setActiveFlyout] = useState<FlyoutSection | null>(null)
   const [ioOpen, setIoOpen] = useState(false)
@@ -1609,12 +1499,6 @@ export default function Sidebar() {
             </button>
           </div>
 
-          {/* Assistant first, and outside the section list — the three buttons
-              below open a flyout you then have to read; this one acts. */}
-          <div className="w-full border-b border-border shrink-0">
-            <AssistantNavButton compact onCloseModal={() => setActiveFlyout(null)} />
-          </div>
-
           {guided && (
             <div className="w-full border-b border-border shrink-0">
               <HubDesignNavButton compact onCloseModal={() => setActiveFlyout(null)} />
@@ -1687,13 +1571,6 @@ export default function Sidebar() {
           >
             <ChevronLeft size={14} />
           </button>
-        </div>
-
-        {/* Assistant — pinned ABOVE the scroll container, not inside it, so it
-            is on screen whatever the sections are doing and wherever the body
-            is scrolled to. */}
-        <div className="shrink-0 px-2 pt-2 pb-1">
-          <AssistantNavButton />
         </div>
 
         {/* Scrollable body */}

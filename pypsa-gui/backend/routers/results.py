@@ -439,7 +439,7 @@ def get_process_view():
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return {"available": False, "products": [], "process_units": []}
-    return {"available": True, **compute_process_view(n)}
+    return {"available": True, **compute_process_view(n, _state.get("last_lost_load"))}
 
 
 @results_router.get("/statistics")
@@ -901,6 +901,24 @@ def get_curtailment(
     if not _dispatch_ready(n):
         return _not_solved()
     payload = compute_curtailment(n, from_, to_)
+    return _not_solved() if payload is None else payload
+
+
+@results_router.get("/curtailment/by_cause")
+def get_curtailment_by_cause():
+    """Each plant's curtailed energy split by cause: the export limit, a negative export
+    price, both, or other (IPP ticket 05). The causes sum to the curtailment total."""
+    from services.results.curtailment import curtailment_by_cause
+
+    n = PyPSAService.get_network()
+    if not _dispatch_ready(n):
+        return _not_solved()
+    commercial = getattr(_state.get("solver_config"), "commercial", None)
+    try:
+        payload = curtailment_by_cause(n, commercial)
+    except Exception:                                   # noqa: BLE001 — as /curtailment does
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
+        payload = None
     return _not_solved() if payload is None else payload
 
 

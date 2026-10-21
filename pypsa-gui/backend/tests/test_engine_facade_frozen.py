@@ -148,7 +148,7 @@ SIGNATURES: dict[str, str] = {
         "solver_cfg=None) -> 'dict | None'",
     # The generic defaults pack (A, U1 follow-up a) and the flat export series (e).
     "services.library.defaults_pack.loader.load_defaults_pack":
-        "(version: 'str | None' = None) -> 'DefaultsPack'",
+        "(version: 'str | None' = None, *, region: 'str | None' = None) -> 'DefaultsPack'",
     "services.library.defaults_pack.loader.DefaultsPack.load_profile_series":
         "(self, profile_id: 'str', index, *, annual_mwh: 'float | None' = None, weights=None)"
         " -> 'pd.Series'",

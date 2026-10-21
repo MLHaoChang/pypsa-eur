@@ -57,13 +57,13 @@ async function renderSidebar() {
   return utils
 }
 
-const STEP_IDS = ['model', 'run', 'results', 'studies', 'reports']
+const STEP_IDS = ['setup', 'model', 'run', 'results', 'reports']
 
 // The six PROJECT rows Guided hides (§3.5) and the four it keeps. In Expert,
 // Snapshots and Scenarios are REPORTS rows and the rest sit behind the footer
 // card's menu (M2).
-const HIDDEN_PROJECT_ROWS = ['Project info', 'Snapshots', 'Scenarios', 'Duplicate project', 'Export bundle', 'Workspace panel']
-const KEPT_PROJECT_ROWS = ['Save', 'Other', 'Projects home']
+const HIDDEN_PROJECT_ROWS = ['Project info', 'Snapshots', 'Scenarios', 'Duplicate project', 'Export…', 'Workspace panel']
+const KEPT_PROJECT_ROWS = ['Other']
 
 beforeEach(() => {
   useUIStore.setState({
@@ -90,9 +90,9 @@ describe('Sidebar in Guided mode — expanded', () => {
     expect(screen.queryByText('Select / Pan')).toBeNull()
   })
 
-  it('keeps the Assistant and adds Hub design above PROJECT', async () => {
+  it('adds Hub design above PROJECT, with no Assistant button (the companion is the one entry)', async () => {
     const { container } = await renderSidebar()
-    expect(screen.getByTestId('sidebar-assistant')).toBeTruthy()
+    expect(screen.queryByTestId('sidebar-assistant')).toBeNull()
     const hub = screen.getByTestId('sidebar-hub-design')
     const project = screen.getByTestId('sidebar-section-project')
     // DOM order: Hub design comes before the PROJECT header.
@@ -107,12 +107,12 @@ describe('Sidebar in Guided mode — expanded', () => {
     expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
   })
 
-  it('PROJECT shows only the header card, Save, Recent and Projects home', async () => {
+  it('PROJECT shows only the header card and Recent', async () => {
     await renderSidebar()
     for (const label of KEPT_PROJECT_ROWS) expect(screen.getByText(label)).toBeTruthy()
     for (const label of HIDDEN_PROJECT_ROWS) expect(screen.queryByText(label)).toBeNull()
     // The header card (project name + autosave) is still there.
-    expect(screen.getByTitle('Rename project (header field)').textContent).toContain('Demo')
+    expect(screen.getByText('Demo').textContent).toContain('Demo')
     expect(screen.getByText(/Autosave/)).toBeTruthy()
   })
 
@@ -125,9 +125,9 @@ describe('Sidebar in Guided mode — expanded', () => {
 describe('Sidebar in Guided mode — icon strip', () => {
   beforeEach(() => useUIStore.setState({ uiMode: 'guided', sidebarMode: 'icon' }))
 
-  it('shows Assistant, Hub design and Project; hides the steps and the mode switcher', async () => {
+  it('shows Hub design and Project; hides the steps and the mode switcher', async () => {
     await renderSidebar()
-    expect(screen.getByTestId('sidebar-assistant')).toBeTruthy()
+    expect(screen.queryByTestId('sidebar-assistant')).toBeNull()
     expect(screen.getByTestId('sidebar-hub-design')).toBeTruthy()
     expect(screen.getByTestId('sidebar-section-project')).toBeTruthy()
     for (const id of STEP_IDS) expect(screen.queryByTestId(`sidebar-section-${id}`)).toBeNull()

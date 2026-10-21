@@ -946,6 +946,25 @@ export default function TimeSeriesManager() {
     queryFn: networkApi.getLinkProfiles,
   })
 
+  // An asset was just added (or a profile applied): open its tab with it
+  // selected once the profile classes are read.
+  const focus = useUIStore(s => s.timeSeriesFocus)
+  const clearFocus = useUIStore(s => s.clearTimeSeriesFocus)
+  useEffect(() => {
+    if (!focus) return
+    if (focus.type === 'Load') setActiveTab('loads')
+    else if (focus.type === 'Link') setActiveTab('links')
+    else if (focus.type === 'Generator') {
+      const cat = (genProfiles as Record<string, GeneratorProfileMeta>)[focus.name]?.category
+      // The class is read with the profiles; wait for it rather than guess.
+      if (cat == null) return
+      setActiveTab(cat === 'renewable' || cat === 'dr' ? cat : 'conventional')
+    }
+    setSelectedName(focus.name)
+    setSelectedNames(new Set())
+    clearFocus()
+  }, [focus, genProfiles, clearFocus])
+
   const handleTabChange = (tab: TabId) => {
     setActiveTab(tab)
     setSelectedName(null)
@@ -1491,6 +1510,13 @@ export default function TimeSeriesManager() {
             <span className="text-[9px] font-normal opacity-70">{tab.subtitle}</span>
           </button>
         ))}
+        {activeTab === 'renewable' && (
+          <button type="button" data-testid="ts-open-profile-studio"
+            onClick={() => useUIStore.getState().setSlidePanel('profiles')}
+            className="ml-auto self-center px-3 text-[11px] text-accent hover:underline">
+            Generate with Profile Studio →
+          </button>
+        )}
       </div>
 
       {/* ── Toolbar: load section sub-tabs (loads only) + conventional sub-attribute toggle + view-mode toggle ── */}

@@ -11,6 +11,8 @@ import { nk } from '../utils/queryKeys'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useUIStore, type UiMode } from '../store/uiStore'
 import { UI_MODE_TITLES, uiModeToast } from '../utils/uiMode'
+import { formatApiDetail } from '../api/client'
+import { mismatchSentence } from '../utils/projectMismatch'
 import { evaluateMutation, readOnlyMessage, READ_ONLY_MUTATION_MESSAGE } from '../utils/mutationGuard'
 import { useAuthMode } from '../auth/AuthModeProvider'
 import UserMenu from './UserMenu'
@@ -21,6 +23,9 @@ import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
 import DecisionRunWatcher from '../pages/decision/DecisionRunWatcher'
 import { flushPendingSitesToServer } from '../site3d/sitesStore'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
+import { useRunGate } from '../hooks/useRunGate'
+import { openFlowTarget, openSectionInExpert } from './flowNavigation'
+import { componentLabel } from '../utils/componentLabels'
 
 // ── Status indicators ──────────────────────────────────────────────────────────
 const STATUS_DOT: Record<string, string> = {
@@ -41,12 +46,10 @@ export function formatObjective(v: number | null | undefined): string | null {
   return `€${v.toFixed(0)}`
 }
 
-/** Open Results after a solve: on Economics in Expert (Guided has no
- *  Economics tab and keeps its own default). */
+/** Open Results after a solve, on its Summary (the answer first; the Summary
+ *  hands on to Reports and Export). */
 function openResultsAfterSolve() {
-  const ui = useUIStore.getState()
-  if (ui.uiMode !== 'guided') ui.requestResultsTab('economics')
-  ui.setSlidePanel('results')
+  useUIStore.getState().setSlidePanel('results')
 }
 
 // ── Search types ───────────────────────────────────────────────────────────────
@@ -56,10 +59,6 @@ interface SearchResult { type: ResultType; name: string; busName?: string }
 const TAB_FOR_TYPE: Record<ResultType, string> = {
   Bus: 'Buses', Line: 'Lines', Generator: 'Generators',
   StorageUnit: 'Storage', Load: 'Loads', Link: 'Links',
-}
-const TYPE_LABEL: Record<ResultType, string> = {
-  Bus: 'Bus', Line: 'Line', Generator: 'Generator',
-  StorageUnit: 'Storage', Load: 'Load', Link: 'Link',
 }
 
 function TypeIcon({ type }: { type: ResultType }) {
@@ -502,7 +501,22 @@ export default function AppHeader() {
     onError: (e: unknown) => {
       const status = (e as { response?: { status?: number } })?.response?.status
       if (status === 409) {
-        toast.error('Cannot save: network is empty. Load the project first.')
+        // The backend's own sentence where it gave one (a study in flight, or
+        // the network bound to another project); only a bare 409 means empty.
+        const raw = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+        const structured = typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+        const detail = structured ? formatApiDetail(raw) : String(raw ?? '')
+        if (/bound to project/i.test(detail)) {
+          const bound = /bound to project '([^']+)', not '([^']+)'/i.exec(detail)
+          if (bound && bound[2] === useUIStore.getState().currentProject) {
+            useUIStore.getState().setProjectMismatch({ tab: bound[2], backend: bound[1] })
+          }
+          toast.error(`Can't save '${bound?.[2] ?? 'the project'}': the backend is on a different project. Reload it to resync.`)
+        } else if (structured) {
+          toast.error(detail)
+        } else {
+          toast.error('Cannot save: network is empty. Load the project first.')
+        }
         return
       }
       toast.error('Save failed')
@@ -511,6 +525,13 @@ export default function AppHeader() {
   })
 
   const handleQuickSave = useCallback(() => {
+    // A2: while this tab and the backend disagree about the open project, a
+    // save would write the backend's network under this tab's name.
+    const mismatch = useUIStore.getState().projectMismatch
+    if (mismatch) {
+      toast.error(mismatchSentence(mismatch))
+      return
+    }
     // Read-only guard — the keyboard shortcut (Ctrl+S) bypasses the disabled
     // button, so block here too while another user holds the edit lock, or a
     // queue job is solving this project. Routed through evaluateMutation (not
@@ -597,6 +618,7 @@ export default function AppHeader() {
     pf:   'solve a non-linear (AC) Newton-Raphson power flow on the current dispatch',
   }
   const runLabel = `Run ${MODE_LABEL[mode] ?? mode.toUpperCase()}`
+  const runGate = useRunGate('optimisation')
 
   // SSE cleanup ref — close the stream on Abort / unmount so a long-lived
   // EventSource doesn't leak across re-renders.
@@ -983,7 +1005,7 @@ export default function AppHeader() {
                 <span className="flex-1 min-w-0">
                   <span className="text-[12px] font-semibold text-text block truncate">{r.name}</span>
                   <span className="text-[10px] text-muted">
-                    {TYPE_LABEL[r.type]}{r.busName ? ` · → ${r.busName}` : ''}
+                    {componentLabel(r.type)}{r.busName ? ` · → ${r.busName}` : ''}
                   </span>
                 </span>
               </button>
@@ -1060,13 +1082,39 @@ export default function AppHeader() {
         // the idle solve button is hidden; a queued / running solve still
         // shows here so it can be cancelled or aborted.
         if (uiMode === 'guided' && !amber) return null
+        // Disabled exactly when the server would refuse (design §3.3), saying
+        // why by section; display-only gaps ride beside an enabled Run.
+        const gated = runGate.blocked && !amber
         const queuedLabel = `Queued${myJob?.position != null ? ` #${myJob.position}` : ''}`
-        return (
+        return (<>
+          {gated && (
+            <button type="button" data-testid="run-blocker"
+              onClick={() => runGate.blocker ? openFlowTarget(runGate.blocker.target) : openSectionInExpert('readiness')}
+              title="Show the field to fix"
+              className="max-w-[18rem] truncate text-[11px] text-warn underline-offset-2 hover:underline">
+              {runGate.reason}
+            </button>
+          )}
+          {runGate.checking && !amber && (
+            <span data-testid="run-checking" className="text-[11px] text-muted">
+              Checking whether the project is ready…
+            </span>
+          )}
+          {!gated && !amber && runGate.notes.length > 0 && (
+            <button type="button" data-testid="run-notes"
+              onClick={() => openFlowTarget(runGate.notes[0].target)}
+              title={runGate.notes.map(n => n.message).join('\n')}
+              className="text-[11px] text-muted underline-offset-2 hover:underline">
+              {runGate.notes.length === 1 ? '1 note' : `${runGate.notes.length} notes`}
+            </button>
+          )}
           <button
             onClick={handleRunButton}
-            disabled={abort.isPending || enqueue.isPending || (readOnly && !amber)}
+            disabled={abort.isPending || enqueue.isPending || (readOnly && !amber) || gated}
             title={readOnly && !amber
               ? 'Read-only — another user is editing this project'
+              : gated
+              ? `Cannot run yet — ${runGate.reason}`
               : jobRunning || isRunning
               ? 'Abort the running simulation'
               : jobQueued
@@ -1098,7 +1146,7 @@ export default function AppHeader() {
                     {runLabel}
                   </>}
           </button>
-        )
+        </>)
       })()}
 
       <UiModeSwitch />

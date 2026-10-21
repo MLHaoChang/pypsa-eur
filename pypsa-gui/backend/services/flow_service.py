@@ -39,7 +39,8 @@ client driving one kind (Expert's Run LOPF) reads that kind's verdict alone.
 
 States (design §3.2): ``incomplete`` = an error item (blocking or display-only);
 ``warning`` = an unacknowledged warning; ``complete`` otherwise;
-``not_needed`` for the connection of an off-grid (islanded) template;
+``not_needed`` for the connection of an off-grid (islanded) template, and for
+the loads of a generation-only template with no Load (no study requested then);
 ``unknown`` while the preflight is deferred. Warnings never block Run (W3).
 
 Acknowledgements live in the project sidecar ``flow_acks.json`` as
@@ -63,6 +64,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from services import flow_sections as F
+from services.issue_titles import ISSUE_TITLES
 
 logger = logging.getLogger(__name__)
 
@@ -81,16 +83,17 @@ _PIPELINE_ORDER = ("apply_pack", "ens_solve", *_OPTIONAL_STAGES, "assemble")
 # project's) is never reached by a shipped template.
 _LEDGER_SECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("discount", "money year", "finance", "tariff", "escalation", "price",
-      "investment case", "depreciation", "product value"), "commercial"),
+      "investment case", "depreciation", "product value", "bidding zone", "charges",
+      "tax", "degradation"), "commercial"),
     # Island controls and their limits are asset behaviour (design §1.4 J16).
     (("island", "rocof", "frequency", "ride-through"), "assets"),
     (("poc", "connection", "fault level", "energization", "grid", "feeder",
-      "transformer", "power factor"), "connection"),
+      "transformer", "power factor", "export limit", "import limit"), "connection"),
     (("critical", "load", "pue", "offtake", "demand", "delivery"), "loads"),
     (("existing", "battery", "genset", "electrolyser", "inverter", "storage",
       "ups", "pv", "unit", "fuel cell", "tank", "dropped from"), "assets"),
     # The model horizon is section 1's (W2).
-    (("horizon", "dates", "year", "period"), "project"),
+    (("horizon", "dates", "year", "period", "site location"), "project"),
 )
 
 # eh_readiness's `warnings[]` carry no code. Each known sentence family is
@@ -173,9 +176,13 @@ def _hash(*parts: Any) -> str:
 
 def _item(code: str, severity: str, message: str, source: str, section: str, *,
           component: str = "", entity: str = "", fld: str = "",
-          panel: str | None = None, value: Any = None, blocking: bool = False) -> dict:
+          panel: str | None = None, value: Any = None, blocking: bool = False,
+          title: str | None = None) -> dict:
     return {
         "code": code, "severity": severity, "message": message, "source": source,
+        # Plain title of the check, where the server has one (validation
+        # codes); the other sources' messages are already plain.
+        "title": title,
         "target": {"section": section,
                    "panel": panel if panel is not None else F.SECTION_PANEL[section],
                    "component": component or None, "entity": entity or None,
@@ -255,10 +262,11 @@ def _pack_for(body: dict):
 
 # ── Facts under the lock ────────────────────────────────────────────────────
 
-def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
-    from services import dirty_state
+def _connection(n, config, template: dict | None) -> tuple[list[str], set[str]]:
+    """``(import Links, connection Links)``: the Links the archetype selector
+    picks as imports (with the template's pack, as the Site card's readiness
+    does), plus the commercial config's PoC and export Links."""
     from services.adequacy import archetypes as arch
-    from services.network_geometry import _bus_coord
 
     body = _request_for(template) if template is not None else {"archetype": "strong_grid"}
     try:
@@ -273,6 +281,26 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
         for key in ("poc_link", "export_link"):
             if commercial.get(key) and str(commercial[key]) in set(map(str, n.links.index)):
                 connection.add(str(commercial[key]))
+    return list(imports), connection
+
+
+def section_for_component(n, config, project_dir: pathlib.Path | None,
+                          component_class: str, entity: str) -> dict:
+    """``{id, label, panel}``: the flow section a component belongs to, by the
+    flow's own rule (`flow_sections.section_for`, with this project's
+    connection Links). For a caller outside the flow (the chat edit card) that
+    names the section an edit lands in. Read under the caller's lock."""
+    template = read_template(project_dir) if project_dir is not None else None
+    _imports, connection = _connection(n, config, template)
+    return F.section_for(component_class, entity, frozenset(connection))
+
+
+def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
+    from services import dirty_state
+    from services.network_geometry import _bus_coord
+
+    imports, connection = _connection(n, config, template)
+    commercial = getattr(config, "commercial", None)
     links = [str(i) for i in n.links.index]
     # The supply behind the fence (a market Generator on an import Link's grid
     # side) is the connection's, not an asset of the site.
@@ -332,7 +360,7 @@ def _validation_items(issues, connection_links: frozenset[str]) -> list[dict]:
         section = F.file_issue(i.code, i.component_class or "", i.name or "", connection_links)
         out.append(_item(i.code, i.severity, i.message, "validation", section,
                          component=i.component_class or "", entity=i.name or "",
-                         blocking=i.severity == "error"))
+                         blocking=i.severity == "error", title=ISSUE_TITLES.get(i.code)))
     return out
 
 
@@ -520,34 +548,66 @@ def ledger_section(item: str) -> str | None:
     return next((s for words, s in _LEDGER_SECTIONS if any(w in low for w in words)), None)
 
 
+def _humanise(item: str) -> str:
+    """``fault_level`` → ``Fault level``; ``discount rate`` → ``Discount rate``."""
+    text = item.replace("_", " ").strip()
+    return text[:1].upper() + text[1:]
+
+
+def _shown(value) -> str:
+    """A ledger value as the message shows it: a number at full precision and
+    never in exponent form for an integral MW figure (``1500000``, ``0.85``)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value if value is not None else "")
+    return str(int(value)) if float(value).is_integer() else repr(float(value))
+
+
 def _assumed_items(template: dict) -> list[dict]:
     """The template's `assumed` ledger rows and energization: a default the user
-    has not confirmed is a warning (design §3.2)."""
+    has not confirmed is a warning (design §3.2). A row may name its own
+    ``section`` (and ``component`` / ``entity`` / ``field`` / ``panel``); one
+    that does not is filed by ``ledger_section(item)``."""
     out: list[dict] = []
     for row in template.get("ledger") or []:
         if not isinstance(row, dict) or row.get("source") != "assumed":
             continue
         item = str(row.get("item") or "")
-        value = str(row.get("value") or "")
-        out.append(_item("assumed_default", "warning",
-                         f"{item}: {value} is a template assumption; confirm it or set "
-                         "your own.", "template", ledger_section(item) or "project",
-                         entity=item, value=value))
+        value = row.get("value")
+        unit = row.get("unit")
+        shown = f"{_shown(value)} {unit}" if unit else _shown(value)
+        # "<label>: <value> <unit> (assumed) — <hint>"; without a label the
+        # item, humanised (checklist §6.9: no raw ids in the UI).
+        label = str(row.get("label") or _humanise(item))
+        message = f"{label}: {shown} (assumed) — confirm it or set your own."
+        section = row.get("section")
+        if section in F.INPUT_SECTIONS:
+            # A row that names its own target (DC-02's rows): filed there, and
+            # coded per item so two rows on one entity keep separate acks.
+            out.append(_item(f"assumed_{item}", "warning", message, "template", section,
+                             component=str(row.get("component") or ""),
+                             entity=str(row.get("entity") or ""),
+                             fld=str(row.get("field") or ""),
+                             panel=row.get("panel"), value=str(value or "")))
+            continue
+        out.append(_item("assumed_default", "warning", message, "template",
+                         ledger_section(item) or "project", entity=item,
+                         value=str(value or "")))
     energ = [e for e in template.get("energization") or []
              if isinstance(e, dict) and e.get("source") == "assumed"]
     if energ:
         value = json.dumps([[e.get("year"), e.get("available_import_mw")] for e in energ])
-        steps = ", ".join(f"{e.get('year')}: {e.get('available_import_mw'):g} MW"
+        steps = ", ".join(f"{e.get('year')}: {_shown(e.get('available_import_mw'))} MW"
                           if isinstance(e.get("available_import_mw"), (int, float))
                           else str(e.get("year")) for e in energ)
         out.append(_item("assumed_default", "warning",
-                         f"energization schedule ({steps}) is a template assumption; "
-                         "confirm it with the network operator's offer.", "template",
+                         f"Energization schedule: {steps} (assumed) — confirm it with the "
+                         "network operator's offer.", "template",
                          "connection", entity="energization schedule", value=value))
     return out
 
 
-def _presence(facts: _Facts, *, islanded: bool, study_requested: bool) -> list[dict]:
+def _presence(facts: _Facts, *, islanded: bool, study_requested: bool,
+              loads_not_needed: bool = False) -> list[dict]:
     """The presence rules (`PRESENCE_RULES`), all display-only (kind c)."""
     out: list[dict] = []
 
@@ -562,7 +622,7 @@ def _presence(facts: _Facts, *, islanded: bool, study_requested: bool) -> list[d
             "No grid connection: add the import Link (an off-grid template marks the "
             "connection not needed).",
             component="Link", fld="eh_role")
-    if facts.loads == 0:
+    if facts.loads == 0 and not loads_not_needed:
         add("presence_loads", "error", "The site has no load or product demand.",
             component="Load")
     if facts.asset_count == 0:
@@ -677,8 +737,13 @@ def _strip(it: dict) -> dict:
 
 
 def _pointer(row_label: str, it: dict) -> dict:
-    return {"section": it["target"]["section"], "message": f"{row_label}: {it['message']}",
-            "target": it["target"]}
+    """The Run's blocker or a note: "<section>: <title> (<entity>)" when the
+    check has a plain title, else the section and the item's own message. The
+    item's message, the detail a user fixes from, rides along as ``detail``."""
+    title, entity = it.get("title"), it["target"].get("entity")
+    text = f"{title} ({entity})" if title and entity else title or it["message"]
+    return {"section": it["target"]["section"], "message": f"{row_label}: {text}",
+            "detail": it["message"], "target": it["target"]}
 
 
 def project_flow(project_dir: pathlib.Path, *, cache_key: str, db=None,
@@ -705,8 +770,20 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     islanded = body is not None and body["archetype"] == "off_grid"
     deferred, issues, facts = preflight_validate(
         lambda n, cfg: _gather(n, cfg, template=template, cache_key=cache_key))
+    # A generation-only template whose network has no Load (the IPP plant): nothing to make
+    # adequate, so loads are not needed and the Run requests no reliability study. Keyed on
+    # the network as well as the project's own template meta, so a Load added later brings
+    # the loads rules and the study back. B2's run-mode setting replaces this rule.
+    loads_not_needed = (template is not None and bool(template.get("generation_only"))
+                        and facts is not None and facts.loads == 0)
+    # What the one Run does (design §3.3, W4): the optimisation always; the
+    # reliability study too for a project made from an EH template (the
+    # hub-design Guided flow). Until section 8 has a run-mode setting (B2),
+    # that is the whole rule; its study refusal is checked and its VOLL noted
+    # for exactly those projects.
+    study_requested = template is not None and not loads_not_needed
     study_items: list[dict] = []
-    if deferred is None and body is not None:
+    if deferred is None and body is not None and study_requested:
         from services.adequacy.eh_study_runner import EhStudyLockBusy
 
         try:
@@ -719,12 +796,6 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     running = _solver_in_flight() or study_state.running_study() is not None
     freshness = _freshness(n, running=running)
 
-    # What the one Run does (design §3.3, W4): the optimisation always; the
-    # reliability study too for a project made from an EH template (the
-    # hub-design Guided flow). Until section 8 has a run-mode setting (B2),
-    # that is the whole rule; its study refusal is checked and its VOLL noted
-    # for exactly those projects.
-    study_requested = template is not None
     run_request = {"optimisation": True, "study": study_requested}
 
     if deferred is not None:
@@ -745,14 +816,16 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
                  "notes": [], "deferred": True, "deferred_reason": reason}, [])
 
     items: list[dict] = []
-    presence = _presence(facts, islanded=islanded, study_requested=study_requested)
+    presence = _presence(facts, islanded=islanded, study_requested=study_requested,
+                         loads_not_needed=loads_not_needed)
     items += presence
     items += _validation_items(issues, frozenset(facts.connection_links))
     if body is not None:
         items += study_items
-        r = _readiness(facts, template, cache_key)
-        items += _readiness_items(r, voll_noted=any(
-            i["code"] == "presence_voll" for i in presence))
+        if study_requested:
+            r = _readiness(facts, template, cache_key)
+            items += _readiness_items(r, voll_noted=any(
+                i["code"] == "presence_voll" for i in presence))
         items += _assumed_items(template)
     items += _bind_items(facts, db, org_id, project_dir, n)
     _apply_acks(items, read_acks(project_dir))
@@ -772,7 +845,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             blocking = any(it["blocking"] for it in mine)
             warnings = any(it["severity"] == "warning" and not it["acknowledged"]
                            for it in mine)
-            if s == "connection" and islanded and not blocking:
+            if (s == "connection" and islanded or s == "loads" and loads_not_needed) \
+                    and not blocking:
                 state = "not_needed"
             elif errors:
                 state = "incomplete"
@@ -782,7 +856,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
                 state = "complete"
             row.update(state=state, required=required[s] and state != "not_needed")
             if state == "not_needed":
-                row["summary"] = "Off-grid: no grid connection needed"
+                row["summary"] = ("Generation-only: export through the POI in section 3"
+                                  if s == "loads" else "Off-grid: no grid connection needed")
         else:
             row.update(state=None, required=False)
         rows.append(row)

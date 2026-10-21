@@ -637,6 +637,70 @@ const quiet = { skipErrorToast: true } as const
  *  fresh one exists. The client's 30 s default would abandon the request while
  *  the backend finishes and saves the run, so these calls override it, as the
  *  bundle download and import do (`projects.ts`). */
+// ── The grid-readiness scorecard (DC grid readiness 02) ─────────────────────
+
+export type GridReadinessVerdict = 'pass' | 'warn' | 'fail' | 'unknown'
+
+/** Where a row's input is edited: the project flow's target shape. */
+export interface GridReadinessTarget {
+  section: string
+  panel: string | null
+  component: string | null
+  entity: string | null
+  field: string | null
+}
+
+export interface GridReadinessRow {
+  id: string
+  requirement: string
+  limit: number | string | null
+  unit: string | null
+  source: string
+  project_value: number | string | Record<string, unknown> | null
+  verdict: GridReadinessVerdict
+  assumed: boolean
+  note: string | null
+  section: string
+  target: GridReadinessTarget
+  /** DC 03: the value at the PoC once the battery/UPS has smoothed, judged by
+   *  the row's own limit; present only with an AI-training load and a
+   *  committed battery/UPS. The row's `verdict` stays before mitigation. */
+  after_battery?: GridReadinessAfter
+}
+
+export interface GridReadinessAfter {
+  value: number | null
+  verdict: GridReadinessVerdict
+  rule: Record<string, unknown>
+  units: string[]
+  /** Each unit's kind and assumed response latency from its control preset,
+   *  and where the unit is (DC 03 slice 5). */
+  unit_detail?: GridReadinessAfterUnit[]
+  note: string
+}
+
+export interface GridReadinessAfterUnit {
+  unit: string
+  kind: string | null
+  latency_s: number | null
+  /** A UPS's walk-in (its share reaches the grid over it); null for a battery. */
+  walk_in_s?: number | null
+  basis: string
+  target: GridReadinessTarget
+}
+
+export interface GridReadiness {
+  schema: number
+  profile: { id: string; title: string | null; error: string | null }
+  template_id: string | null
+  envelope: boolean
+  rows: GridReadinessRow[]
+  summary: Record<GridReadinessVerdict, number> & { assumed: number; red_flags: number
+    /** Rows that fail or warn before mitigation and pass after the battery/UPS (DC 03). */
+    pass_after_mitigation?: number }
+  basis: string
+}
+
 export const CAMPUS_RUN_TIMEOUT_MS = 900_000
 /** Drafting loads the whole saved network, as a bundle download does: its 180 s. */
 export const CAMPUS_DRAFT_TIMEOUT_MS = 180_000
@@ -681,6 +745,12 @@ export const campusApi = {
   cancelMilp: (project: string) =>
     client.post<{ state: MilpJobState; cancelling: boolean }>(`${base(project)}/milp/cancel`, undefined, quiet)
       .then(r => r.data),
+
+  /** The advisory grid-readiness scorecard (DC 02) against `profile`
+   *  (default: the campus study's last profile). Reads the saved network. */
+  gridReadiness: (project: string, profile?: string) =>
+    client.get<GridReadiness>(`${base(project)}/grid-readiness`,
+      { ...quiet, params: profile ? { profile } : undefined }).then(r => r.data),
 
   /** The island sidecar as written and the last island study (null each when absent). */
   island: (project: string) =>

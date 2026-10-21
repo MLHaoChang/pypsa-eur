@@ -19,6 +19,10 @@ import eh_templates as T  # noqa: E402
 ALL_STAGES = ["apply_pack", "ens_solve", "frontier", "mc_certify", "fmea_top",
               "redundancy", "levers", "dtc_stress", "dtc_planning", "assemble"]
 BUDGET = 60
+# The adequacy study needs a site with load; a generation-only template (the
+# IPP plant) is covered by test_eh_ipp.py instead.
+STUDY_IDS = sorted(t for t in T.BUILDERS
+                   if not T.TEMPLATE_META.get(t, {}).get("generation_only"))
 
 
 def _poll(client, url, timeout=900.0):
@@ -54,7 +58,7 @@ def _network_fingerprint():
 
 
 @pytest.mark.live_solve
-@pytest.mark.parametrize("tid", sorted(T.BUILDERS))
+@pytest.mark.parametrize("tid", STUDY_IDS)
 def test_every_feature_on_the_template(tid, client, tmp_path, monkeypatch,
                                        tmp_projects_dir):
     name = _project_from_template(client, tmp_path, monkeypatch, tid)

@@ -320,6 +320,9 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         # annual energy in one structured payload; `from`/`to` narrow the
         # heatmaps by position, `week` picks the profile.
         "/load_shape",
+        # Curtailment by cause (IPP ticket 05): per-plant MWh by cause, with
+        # per-period sums; no per-snapshot series to slice.
+        "/curtailment/by_cause",
         # AdequacyReport — a structured report, not a time series (adequacy
         # plan Phase 1 Task 3).
         "/adequacy",

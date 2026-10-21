@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 268,
+  "tool_count": 275,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -2316,7 +2316,9 @@
         "job_id",
         "component",
         "point_id",
-        "time_basis"
+        "time_basis",
+        "component_type",
+        "attribute"
       ],
       "required": [
         "project_id",
@@ -2324,7 +2326,78 @@
         "component"
       ],
       "safety_tier": "write",
-      "schema_sha256": "2d1ca8a47aa130e9388f8cff4a688ee54fa1a64322fb2100afabfaac8dec1354",
+      "schema_sha256": "9c10de8b5841842b12f915e39dabefeeb4b00b349267f1076755589499c3e279",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_load_profile_archetypes",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/profiles/load-archetypes"
+        ]
+      ],
+      "input_keys": [],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "generate_load_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/loads/generate"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "archetype",
+        "loads",
+        "params",
+        "year"
+      ],
+      "required": [
+        "project_id",
+        "archetype",
+        "loads"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "7e4c6f8350d345f5d6c9908cc9f9944961f4b7ea0c7e540c60046c3b9ce33e97",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "generate_availability_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/availability/generate"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "kind",
+        "generators",
+        "params",
+        "year"
+      ],
+      "required": [
+        "project_id",
+        "kind",
+        "generators"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "f41a3cdcbb9086b9c62ce9d9d12a3804f4abaef4fb91c44d690776d2dde0d146",
       "behavioral_fixture": "pending"
     },
     {
@@ -2784,7 +2857,7 @@
         "new_name"
       ],
       "safety_tier": "destructive",
-      "schema_sha256": "7f6fa839e4b0c8795add790518d68197b05c7b9dcf927cb0a28456c6f10d6fba",
+      "schema_sha256": "e0a09e1749bbfc1dcba31d51fd1a0fe017b77abc2d81db5b7217a058fb0363a5",
       "behavioral_fixture": "pending"
     },
     {
@@ -4621,6 +4694,25 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "campus_grid_readiness",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "profile"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "b638f21159458f54ae0ee6a3d6916a963a83d51be4d58eb13da126e2f7368d09",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "campus_set_island_config",
       "toolsets": [
         "gridspine"
@@ -5031,6 +5123,77 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "743228dbe166990a2f0fad7a884cde9ec2e264b826a0ce7f163b03a5006611ac",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_library_references",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/library/references"
+        ]
+      ],
+      "input_keys": [
+        "offset",
+        "limit"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "dcaafa29211617afc9399243ad3712bb418e13ffacf92bd13be99085790db371",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_library_reference",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/network/asset_schema/{component}/provenance/{name}"
+        ],
+        [
+          "GET",
+          "/api/library/references/{technology}/{year}"
+        ]
+      ],
+      "input_keys": [
+        "technology",
+        "projection_year",
+        "component",
+        "asset"
+      ],
+      "required": [
+        "technology",
+        "projection_year"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "d0bb21532317ba1c4c749f14f1728a4d2bbc9a1fe3c8d786f7c82ad4dbd6fb60",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_library_reference",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/network/library_reference/apply"
+        ]
+      ],
+      "input_keys": [
+        "component_class",
+        "name",
+        "technology",
+        "projection_year",
+        "confirm"
+      ],
+      "required": [
+        "component_class",
+        "name",
+        "technology",
+        "projection_year"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "d66c30b50d2d1a901bb3645a22784cf4ebcbada49b826b9ea608a161c88d7231",
       "behavioral_fixture": "pending"
     },
     {
@@ -6139,7 +6302,7 @@
     },
     {
       "id": "economics",
-      "label": "Economics"
+      "label": "Asset economics"
     },
     {
       "id": "emissions",
