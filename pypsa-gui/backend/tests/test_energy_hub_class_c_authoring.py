@@ -191,7 +191,8 @@ def test_bundle_check_requires_the_pack_at_the_frozen_root(tmp_path):
     (templates / "eh_ipp_hybrid" / "price_series").mkdir(parents=True)
     (templates / "eh_ipp_hybrid" / "price_series" / "meta.json").write_text("{}")
     # The generic defaults pack is read `__file__`-relative too (IC U1 a).
-    for version in ("2026-10-05", "2026-10-07", "2026-10-13", "2026-10-20"):   # one manifest per version (IC G1, S3)
+    for version in ("2026-10-05", "2026-10-07", "2026-10-13", "2026-10-20",     # one manifest per version (IC G1, S3)
+                    "2026-10-21+ca_federal", "2026-10-21+uk", "2026-10-21+us_federal"):   # GS-2 regional
         pack = root / "services" / "library" / "defaults_pack" / "versions" / version
         pack.mkdir(parents=True)
         (pack / "manifest.json").write_text("{}")

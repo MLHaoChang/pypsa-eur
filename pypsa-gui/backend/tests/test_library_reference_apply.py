@@ -354,3 +354,23 @@ def test_a_regional_version_this_build_cannot_load_is_named_not_silently_eur():
         "source": "generic_defaults@2026-10-21+uk#0123456789abcdef"}})
     assert detail.pack.chosen_by == "latest_generic"
     assert "not available" in detail.pack.note
+
+
+def test_an_asset_priced_from_a_real_regional_pack_is_compared_with_it_and_refused():
+    """With #499's regional packs: a UK-priced onwind asset names its UK pack, and an EUR
+    reference is refused on the recorded GBP, nothing converted or written."""
+    from services.library.defaults_pack.loader import available_regions
+
+    if "uk" not in available_regions():
+        pytest.skip("no UK regional pack in this build")
+    n = _net()
+    price_from_pack(n, "generators", "wind", "onwind", version="2026-10-21", region="uk")
+    stamps = P.get(n, "Generator", "wind")
+    assert stamps["overnight_cost"]["currency"] == "GBP"
+    detail = A.C.reference_detail("onwind", 2030, stamps)
+    assert detail.pack.chosen_by == "asset_provenance" and detail.pack.version == "2026-10-21+uk"
+    before = n.generators.copy()
+    with pytest.raises(HTTPException) as exc:
+        A.plan(n, {}, "Generator", "wind", "onwind", 2030)
+    assert exc.value.detail["error_kind"] == "currency_mismatch"
+    assert n.generators.equals(before)
