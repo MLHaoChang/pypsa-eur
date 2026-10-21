@@ -154,7 +154,7 @@ ISSUE_TITLES: dict[str, str] = {
     "timeseries_all_zero": "Time series is zero in every time step",
     "timeseries_frozen": "Time series never changes",
     "timeseries_negative": "Time series has negative values",
-    "timeseries_scale_outlier": "Demand is far from the other loads",
+    "timeseries_scale_outlier": "Demand is much larger or smaller than the other loads",
     "timeseries_spike": "Time series has an extreme spike",
 
     # Decision study
