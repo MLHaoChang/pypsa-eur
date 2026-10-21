@@ -1,7 +1,7 @@
 // Results › FMEA reads the stress scenarios the sweep ran; they are authored
 // in Solver settings (section 8, design §2.2: Results hold no inputs).
 import { useQuery } from '@tanstack/react-query'
-import { resultsApi } from '../../api/simulation'
+import { resultsApi, type StressScenario } from '../../api/simulation'
 import { nk } from '../../utils/queryKeys'
 import { useUIStore } from '../../store/uiStore'
 
@@ -14,7 +14,7 @@ export default function StressScenariosPointer({ project }: { project: string | 
     enabled: !!project,
   })
   if (!project) return null
-  const list = reg?.scenarios ?? []
+  const list: StressScenario[] = reg?.scenarios ?? []
   return (
     <div className="border border-border rounded p-2 text-[10.5px]" data-testid="stress-pointer">
       <div className="font-semibold mb-1">Stress scenarios</div>
