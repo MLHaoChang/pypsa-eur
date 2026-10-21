@@ -289,7 +289,9 @@ def _solve(n, *, operational: bool) -> dict:
     sim_router._state["solver_config"] = cfg
     live = PyPSAService.get_network()
     if operational:
-        live._ic_operational = True
+        from services.adequacy.sweep import freeze_capacities
+
+        freeze_capacities(live)              # the sweep's operational re-solve
     state: dict = {}
     status, _ = run_simulation(cfg, live, PyPSAService.get_lock(), threading.Event(),
                                queue.SimpleQueue(), state_update=lambda **k: state.update(k))
@@ -300,8 +302,8 @@ def _solve(n, *, operational: bool) -> dict:
 @pytest.mark.live_solve
 def test_the_binary_check_runs_after_a_plan_and_not_on_an_operational_solve(reset_backend):
     """The optimisation's implicit sub-step: the UC check runs after a planning
-    solve and is skipped on an operational one (`_ic_operational`, set by the
-    sweep's freeze). F1 splits this flag (gatekeeper, 2026-10-21)."""
+    solve and is skipped on the sweep's operational re-solve
+    (`freeze_capacities`, which pins nothing here: no extendable asset)."""
     from tests.test_process_uc_solve_path import _process_net
 
     assert _solve(_process_net(load=1.0, store=False), operational=False)[
