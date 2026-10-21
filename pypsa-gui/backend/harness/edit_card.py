@@ -609,7 +609,8 @@ def _library_reference_preview(args: dict) -> list[dict]:
         if row["role"] == "typed" and row["name"] == name and row["field"] in beside:
             row.update({k: beside[row["field"]][k] for k in ("reference", "pack", "differs")})
     for need in p["needs"]:
-        rows.append({**_note(klass, name, need["confirmation"], need["text"]), "confirmed": True})
+        said = need.get("disclosure") or need["text"].replace(" Unconfirmed, nothing is applied.", "")
+        rows.append({**_note(klass, name, need["confirmation"], f"Confirmed: {said}"), "confirmed": True})
     rows += [_note(klass, name, "projection_year", text) for text in p["notes"]]
     rows.append(_note(klass, name, "licence", f"{p['attribution']} Licence {p['licence']}."))
     return rows

@@ -14,6 +14,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { formatApiDetail } from '../../../api/client'
 import { pinnedVersions, replacesInline, urdbRate, type RateChoice } from './libraryModel'
+import { LibraryReferences } from './LibraryReferences'
 
 const input = 'border border-border rounded px-1 py-0.5 text-[11px] bg-bg'
 const KINDS: Array<{ id: LibraryItemKind; label: string }> = [
@@ -352,6 +353,7 @@ export default function LibraryBrowser() {
         <UrdbImport onDone={() => { void qc.invalidateQueries({ queryKey: nk(project, 'library', 'items', 'tariff') }) }} />
       )}
       <SeriesPanel />
+      <LibraryReferences />
       <Dialog open={confirm !== null} onClose={() => setConfirm(null)}
               title="Replace the project's import tariff?"
               panelClassName="bg-bg rounded-xl shadow-2xl w-[440px] max-w-[95vw] p-4 space-y-3">
