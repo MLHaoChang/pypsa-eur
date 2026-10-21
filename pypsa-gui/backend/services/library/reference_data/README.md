@@ -6,6 +6,24 @@ The existing native `PackValue` and `CostPart` models are returned by `services.
 
 These are optional benchmarks. They are not registered as a new automatic defaults-pack version and do not create another database. The reader makes no network calls and writes no project or Library records. UI/chat discovery and approved apply wiring are subsequent work; the references are not yet selectable in the application's UI.
 
+Clearance: the owner cleared the DEA generation and renewable-fuels catalogues for the shared (`common`) library on 2026-10-21, with the in-file CC BY 4.0 governing over the ens.dk site disclaimer. The two August 2026 workbooks are recorded as `DEA-POWER` and `DEA-FUELS` in `.scratch/gridspine-library-research/terms/clearances.json`.
+
+## Reference or default: which is which
+
+| | Defaults pack (`defaults_pack/`, plus #499's regional versions) | This reference (`europe_reference.py`) |
+|---|---|---|
+| Role | The **seeded default**: what a new study's assumptions ledger starts from | An **explicit, opt-in benchmark** the user looks up and may choose to apply |
+| Selected | Automatically: the latest generic (EU) version, or the project's regional version | Only by an explicit technology and projection year |
+| Data | technology-data v0.14.0 (DEA), 2020 EUR, projection year 2030; regional packs in their own currency | DEA August 2026 workbooks: wind and fuels in 2020 EUR, PV in 2025 EUR, several projection years |
+| Writes | Seeds new studies; versions never change once shipped | Nothing: no pack, project or Library row |
+
+Some keys exist in both (`onwind.*`, `solar-utility.*`; the reference AEC stands beside the pack's `electrolysis.*`), and their values differ. They must never silently disagree. `compare_europe_reference_with_pack(reference, pack)` returns each parameter beside the pack value the project would otherwise get, with both sources and both money years, and a `differs` flag. It converts nothing, picks neither side and writes nothing. Any later apply step shows that comparison as its preview and writes only to the asset the user chose.
+
+Each entry also carries typed cost units, the same vocabulary as defaults-pack values:
+
+- `capacity_basis_code`: `output_electric` (wind), `output_electric_ac` (both PV archetypes) or `input_electric` (AEC/PEM; never scaled by efficiency). `output_electric_dc` is reserved for DC-rated rows; this reference ships none.
+- `includes_grid_connection`: `true` where the source says its investment includes grid connection (wind, utility PV), otherwise `"unknown"`.
+
 Important boundaries:
 
 - Wind is **2020 EUR**; updated PV sheets are **2025 EUR**; the fuel workbook is **2020 EUR**. Projection year is a separate coordinate. No inflation, FX or national calibration is performed.

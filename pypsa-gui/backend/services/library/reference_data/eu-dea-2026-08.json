@@ -35,6 +35,8 @@
       "currency_year": 2020,
       "price_basis": "real",
       "capacity_basis": "MW_e output",
+      "capacity_basis_code": "output_electric",
+      "includes_grid_connection": true,
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "Total nominal investment includes source-specific grid connection, land/neighbour settlements and decommissioning of existing turbines.",
       "unmapped_terms": [
@@ -77,6 +79,8 @@
       "currency_year": 2020,
       "price_basis": "real",
       "capacity_basis": "MW_e output",
+      "capacity_basis_code": "output_electric",
+      "includes_grid_connection": true,
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "Total nominal investment includes source-specific grid connection, land/neighbour settlements and decommissioning of existing turbines.",
       "unmapped_terms": [
@@ -119,6 +123,8 @@
       "currency_year": 2020,
       "price_basis": "real",
       "capacity_basis": "MW_e output",
+      "capacity_basis_code": "output_electric",
+      "includes_grid_connection": true,
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "Total nominal investment includes source-specific grid connection, land/neighbour settlements and decommissioning of existing turbines.",
       "unmapped_terms": [
@@ -161,6 +167,8 @@
       "currency_year": 2020,
       "price_basis": "real",
       "capacity_basis": "MW_e output",
+      "capacity_basis_code": "output_electric",
+      "includes_grid_connection": true,
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "Total nominal investment includes source-specific grid connection, land/neighbour settlements and decommissioning of existing turbines.",
       "unmapped_terms": [
@@ -203,6 +211,8 @@
       "currency_year": 2025,
       "price_basis": "real",
       "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": true,
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "Fixed-tilt total investment includes modules, inverter, balance of plant, installation, soft costs and grid connection; FOM includes land rent.",
       "unmapped_terms": [
@@ -245,6 +255,8 @@
       "currency_year": 2025,
       "price_basis": "real",
       "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": true,
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "Fixed-tilt total investment includes modules, inverter, balance of plant, installation, soft costs and grid connection; FOM includes land rent.",
       "unmapped_terms": [
@@ -287,6 +299,8 @@
       "currency_year": 2025,
       "price_basis": "real",
       "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": true,
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "Fixed-tilt total investment includes modules, inverter, balance of plant, installation, soft costs and grid connection; FOM includes land rent.",
       "unmapped_terms": [
@@ -329,6 +343,8 @@
       "currency_year": 2025,
       "price_basis": "real",
       "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": true,
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "Fixed-tilt total investment includes modules, inverter, balance of plant, installation, soft costs and grid connection; FOM includes land rent.",
       "unmapped_terms": [
@@ -371,6 +387,8 @@
       "currency_year": 2025,
       "price_basis": "real",
       "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": true,
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "Fixed-tilt total investment includes modules, inverter, balance of plant, installation, soft costs and grid connection; FOM includes land rent.",
       "unmapped_terms": [
@@ -413,6 +431,8 @@
       "currency_year": 2025,
       "price_basis": "real",
       "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": "unknown",
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "Commercial/industrial rooftop total system investment; separate from residential PV and from the historical 50/50 blend.",
       "unmapped_terms": [
@@ -455,6 +475,8 @@
       "currency_year": 2025,
       "price_basis": "real",
       "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": "unknown",
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "Commercial/industrial rooftop total system investment; separate from residential PV and from the historical 50/50 blend.",
       "unmapped_terms": [
@@ -497,6 +519,8 @@
       "currency_year": 2025,
       "price_basis": "real",
       "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": "unknown",
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "Commercial/industrial rooftop total system investment; separate from residential PV and from the historical 50/50 blend.",
       "unmapped_terms": [
@@ -539,6 +563,8 @@
       "currency_year": 2025,
       "price_basis": "real",
       "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": "unknown",
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "Commercial/industrial rooftop total system investment; separate from residential PV and from the historical 50/50 blend.",
       "unmapped_terms": [
@@ -581,6 +607,8 @@
       "currency_year": 2025,
       "price_basis": "real",
       "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": "unknown",
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "Commercial/industrial rooftop total system investment; separate from residential PV and from the historical 50/50 blend.",
       "unmapped_terms": [
@@ -623,6 +651,8 @@
       "currency_year": 2020,
       "price_basis": "real",
       "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "100 MW AEC system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
       "unmapped_terms": [
@@ -673,6 +703,8 @@
       "currency_year": 2020,
       "price_basis": "real",
       "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "100 MW AEC system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
       "unmapped_terms": [
@@ -723,6 +755,8 @@
       "currency_year": 2020,
       "price_basis": "real",
       "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "100 MW AEC system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
       "unmapped_terms": [
@@ -773,6 +807,8 @@
       "currency_year": 2020,
       "price_basis": "real",
       "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "100 MW AEC system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
       "unmapped_terms": [
@@ -823,6 +859,8 @@
       "currency_year": 2020,
       "price_basis": "real",
       "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "100 MW AEC system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
       "unmapped_terms": [
@@ -873,6 +911,8 @@
       "currency_year": 2020,
       "price_basis": "real",
       "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "100 MW PEM system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
       "unmapped_terms": [
@@ -923,6 +963,8 @@
       "currency_year": 2020,
       "price_basis": "real",
       "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "100 MW PEM system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
       "unmapped_terms": [
@@ -973,6 +1015,8 @@
       "currency_year": 2020,
       "price_basis": "real",
       "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "100 MW PEM system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
       "unmapped_terms": [
@@ -1023,6 +1067,8 @@
       "currency_year": 2020,
       "price_basis": "real",
       "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "100 MW PEM system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
       "unmapped_terms": [
@@ -1073,6 +1119,8 @@
       "currency_year": 2020,
       "price_basis": "real",
       "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
       "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
       "included_costs": "100 MW PEM system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
       "unmapped_terms": [

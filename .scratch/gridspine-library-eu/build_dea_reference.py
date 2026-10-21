@@ -45,24 +45,28 @@ def extract(power_path: Path, fuels_path: Path) -> dict:
 
     specs = [
         ("onwind", "power", "20 Onshore turbines", 2020, 17, 25, 10, None,
-         "MW_e output", "Total nominal investment includes source-specific grid connection, land/neighbour settlements and decommissioning of existing turbines.",
+         "MW_e output", "output_electric", True, "Total nominal investment includes source-specific grid connection, land/neighbour settlements and decommissioning of existing turbines.",
          ["Variable O&M must be priced separately", "Source forced/planned outage estimates are not a site-specific failure/repair law"]),
         ("solar-utility", "power", "22 Utility-scale PV", 2025, 17, 26, 10, None,
-         "MW_e AC output", "Fixed-tilt total investment includes modules, inverter, balance of plant, installation, soft costs and grid connection; FOM includes land rent.",
+         "MW_e AC output", "output_electric_ac", True, "Fixed-tilt total investment includes modules, inverter, balance of plant, installation, soft costs and grid connection; FOM includes land rent.",
          ["PV degradation is a separate profile/finance assumption", "Do not substitute DC module capacity for AC capacity"]),
         ("solar-rooftop-commercial", "power", "22 Rooftop PV comm.&industrial", 2025,
-         17, 26, 10, None, "MW_e AC output",
+         17, 26, 10, None, "MW_e AC output", "output_electric_ac", "unknown",
          "Commercial/industrial rooftop total system investment; separate from residential PV and from the historical 50/50 blend.",
          ["PV inverter replacement and degradation need separate project treatment", "Do not substitute DC module capacity for AC capacity"]),
         ("electrolysis-aec-100mw", "fuels", "80 AEC 100 MW", 2020, 27, 38, 23, 15,
-         "MW_e total electricity input", "100 MW AEC system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
+         "MW_e total electricity input", "input_electric", "unknown", "100 MW AEC system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
          ["Stack replacement is excluded from FOM (source note P)", "Water/electricity input prices are excluded", "Operating-hour degradation, heat and water flows need separate modelling"]),
         ("electrolysis-pem-100mw", "fuels", "80 PEMEC 100 MW", 2020, 27, 38, 23, 15,
-         "MW_e total electricity input", "100 MW PEM system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
+         "MW_e total electricity input", "input_electric", "unknown", "100 MW PEM system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
          ["Stack replacement is excluded from FOM (source note P)", "Water/electricity input prices are excluded", "Operating-hour degradation, heat and water flows need separate modelling"]),
     ]
+    # capacity_basis_code / includes_grid_connection use the typed cost-unit
+    # vocabulary shared with defaults-pack values; "unknown" where the source
+    # text does not say whether grid connection is in the investment.
     entries = []
-    for technology, source, sheet, money_year, cap, fom, life, eff, capacity, included, gaps in specs:
+    for (technology, source, sheet, money_year, cap, fom, life, eff, capacity, capacity_code,
+         grid_connection, included, gaps) in specs:
         ws = books[source][sheet]
         for col in range(3, 8):
             year = ws.cell(3, col).value
@@ -99,6 +103,8 @@ def extract(power_path: Path, fuels_path: Path) -> dict:
                 "estimate_label": ws.cell(4, col).value,
                 "currency": "EUR", "currency_year": money_year,
                 "price_basis": "real", "capacity_basis": capacity,
+                "capacity_basis_code": capacity_code,
+                "includes_grid_connection": grid_connection,
                 "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
                 "included_costs": included, "unmapped_terms": gaps,
                 "cells": cells,

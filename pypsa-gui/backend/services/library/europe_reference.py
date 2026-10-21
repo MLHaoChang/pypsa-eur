@@ -10,14 +10,20 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StrictBool
 
 from services.library.defaults_pack.loader import CostPart, DefaultsPackError, PackValue
 
 _DATA_FILE = Path(__file__).with_name("reference_data") / "eu-dea-2026-08.json"
-_EXPECTED_SHA256 = "e034aad727495a36fde12cb9035502b34fafc23e49dc7d04c1858fe32db70b57"
+_EXPECTED_SHA256 = "902258be6632a18bc050b604eae1275b3c181124e88af6a6e9bcd3f67a18a11c"
+
+# Typed cost units, the same vocabulary as defaults-pack values. A price per
+# `input_electric` MW is never scaled by efficiency; `output_electric_ac` PV is
+# not interchangeable with a DC-rated asset.
+CapacityBasisCode = Literal["output_electric", "output_electric_ac", "output_electric_dc", "input_electric"]
+GridConnection = StrictBool | Literal["unknown"]
 
 
 class EuropeanTechnologyReference(BaseModel):
@@ -31,6 +37,8 @@ class EuropeanTechnologyReference(BaseModel):
     currency_year: int
     price_basis: str
     capacity_basis: str
+    capacity_basis_code: CapacityBasisCode
+    includes_grid_connection: GridConnection
     applicability: str
     included_costs: str
     unmapped_terms: list[str]
@@ -115,7 +123,8 @@ def load_europe_technology_reference(technology: str, projection_year: int) -> E
     return EuropeanTechnologyReference(
         reference_id=data["reference_id"], reference_hash=_EXPECTED_SHA256,
         **{key: row[key] for key in ("technology", "projection_year", "currency", "currency_year",
-                                   "price_basis", "capacity_basis", "applicability", "included_costs",
+                                   "price_basis", "capacity_basis", "capacity_basis_code",
+                                   "includes_grid_connection", "applicability", "included_costs",
                                    "unmapped_terms")},
         source_url=source["url"], source_hash=source["sha256"],
         source_sheet=row["sheet"], source_cells=cells,
@@ -123,3 +132,48 @@ def load_europe_technology_reference(technology: str, projection_year: int) -> E
         cost_part=CostPart(technology=technology, part="investment", basis="per_MW",
                            source_technology=row["sheet"], **native),
     )
+
+
+# Pack technology a reference stands beside when it is not the same key. The pack's
+# `electrolysis` row is technology-data's AEC; PEM, commercial rooftop PV and the
+# rest have no pack counterpart and are compared against nothing.
+_PACK_COUNTERPART = {"electrolysis-aec-100mw": "electrolysis"}
+
+
+class ReferenceComparison(BaseModel):
+    """One parameter of a reference beside the value a pack would otherwise give.
+
+    Both sides keep their own source and money year. Nothing is converted, chosen
+    or written; `differs` only tells a preview to show both."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    parameter: str
+    reference: PackValue
+    pack_stamp: str
+    pack: PackValue | None
+    differs: bool
+
+
+def compare_europe_reference_with_pack(reference: EuropeanTechnologyReference,
+                                       pack) -> list[ReferenceComparison]:
+    """Show `reference` beside `pack` (a `DefaultsPack`, e.g. `load_defaults_pack()`).
+
+    Matching is by the pack's own key for the reference technology (or its listed
+    counterpart). The pack is only read. A pack value differs when its value, unit,
+    currency or money year is not the reference's."""
+    technology = _PACK_COUNTERPART.get(reference.technology, reference.technology)
+    by_key = {v.key: v for v in pack.cost_values}
+    rows = []
+    for parameter in ("overnight", "fom_share", "lifetime", "efficiency"):
+        ref_value = getattr(reference.cost_part, parameter)
+        if ref_value is None:
+            continue
+        pack_value = by_key.get(f"{technology}.investment.{parameter}")
+        differs = pack_value is not None and (
+            not math.isclose(pack_value.value, ref_value.value, rel_tol=1e-9)
+            or (pack_value.unit, pack_value.currency, pack_value.currency_year)
+            != (ref_value.unit, ref_value.currency, ref_value.currency_year))
+        rows.append(ReferenceComparison(parameter=parameter, reference=ref_value,
+                                        pack_stamp=pack.stamp, pack=pack_value, differs=differs))
+    return rows

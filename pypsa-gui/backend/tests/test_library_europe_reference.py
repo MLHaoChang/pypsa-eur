@@ -1,4 +1,5 @@
 """Source-cell oracles and boundary checks for optional European references."""
+import hashlib
 import json
 
 import pytest
@@ -101,3 +102,64 @@ def test_only_explicit_source_projection_years_are_available():
     assert len(selectors) == len(set(selectors)) == 24
     assert ("onwind", 2035) not in selectors
     assert ("solar-utility", 2035) in selectors
+
+
+# Typed cost units the apply step gates on: the PV DC/AC check, unscaled
+# input-priced electrolysers and the double-counted grid connection.
+TYPED_UNITS = {
+    "onwind": ("output_electric", True),
+    "solar-utility": ("output_electric_ac", True),
+    "solar-rooftop-commercial": ("output_electric_ac", "unknown"),
+    "electrolysis-aec-100mw": ("input_electric", "unknown"),
+    "electrolysis-pem-100mw": ("input_electric", "unknown"),
+}
+
+
+@pytest.mark.parametrize("technology,year", R.available_europe_technology_references())
+def test_every_reference_pins_its_typed_capacity_basis_and_grid_connection(technology, year):
+    ref = R.load_europe_technology_reference(technology, year)
+    assert (ref.capacity_basis_code, ref.includes_grid_connection) == TYPED_UNITS[technology]
+
+
+def test_grid_connection_flag_is_strict(tmp_path, monkeypatch):
+    raw = json.loads(R._DATA_FILE.read_text())
+    raw["entries"][0]["includes_grid_connection"] = "true"
+    replacement = tmp_path / "changed.json"
+    replacement.write_text(json.dumps(raw))
+    monkeypatch.setattr(R, "_DATA_FILE", replacement)
+    monkeypatch.setattr(R, "_EXPECTED_SHA256", hashlib.sha256(replacement.read_bytes()).hexdigest())
+    with pytest.raises(ValueError):
+        R.load_europe_technology_reference(raw["entries"][0]["technology"], raw["entries"][0]["projection_year"])
+
+
+def test_comparison_shows_reference_and_pack_with_their_own_money_years():
+    pack = load_defaults_pack()
+    ref = R.load_europe_technology_reference("solar-utility", 2030)
+    rows = {r.parameter: r for r in R.compare_europe_reference_with_pack(ref, pack)}
+    overnight = rows["overnight"]
+    assert overnight.differs
+    assert overnight.reference.currency_year == 2025 and overnight.pack.currency_year == 2020
+    assert overnight.reference.value == pytest.approx(556_220.8489115281)
+    assert overnight.pack.key == overnight.reference.key == "solar-utility.investment.overnight"
+    assert overnight.reference.source != overnight.pack.source
+    assert overnight.pack_stamp == pack.stamp
+    assert not rows["lifetime"].differs  # 40 years on both sides
+
+
+def test_comparison_maps_aec_to_the_pack_electrolyser_and_leaves_others_unpaired():
+    pack = load_defaults_pack()
+    aec = R.compare_europe_reference_with_pack(R.load_europe_technology_reference("electrolysis-aec-100mw", 2030), pack)
+    assert {r.parameter for r in aec} == {"overnight", "fom_share", "lifetime", "efficiency"}
+    assert all(r.pack is not None and r.pack.key.startswith("electrolysis.") for r in aec)
+    for technology in ("electrolysis-pem-100mw", "solar-rooftop-commercial"):
+        rows = R.compare_europe_reference_with_pack(R.load_europe_technology_reference(technology, 2030), pack)
+        assert rows and all(r.pack is None and not r.differs for r in rows)
+
+
+def test_comparison_never_changes_the_pack():
+    pack = load_defaults_pack()
+    before = pack.model_dump_json()
+    for technology, year in R.available_europe_technology_references():
+        R.compare_europe_reference_with_pack(R.load_europe_technology_reference(technology, year), pack)
+    assert pack.model_dump_json() == before
+    assert load_defaults_pack().hash == pack.hash
