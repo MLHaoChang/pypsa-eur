@@ -206,6 +206,10 @@ def test_an_import_outage_cuts_off_the_units_with_no_other_source():
     assert units_cut_off(_supplied(_net()), "elsewhere") == []
 
 
+def test_a_process_units_own_outage_stops_that_unit_however_well_its_bus_is_supplied():
+    assert units_cut_off(_supplied(_net(), local=True), "hb") == ["hb"]
+
+
 def _period_net(year, **kw):
     """`_net` as one investment period `year` (a MultiIndex), the dispatch carried over."""
     n = _net(**kw)
@@ -303,3 +307,46 @@ def test_the_class_b_sweep_reports_the_lost_production_of_an_import_outage(reset
     # No tank: the 12 h outage plus the 8 h restart leaves 20 h of the delivery undelivered, whatever the start.
     assert prod["undelivered_t_per_event"] == pytest.approx(20 * 0.5 * RATE_MWH / MWH_PER_T, rel=1e-6)
     assert prod["lost_eur_per_year"] == pytest.approx(occ * prod["undelivered_t_per_event"] * 800.0, rel=1e-6)
+
+
+@pytest.mark.live_solve
+def test_the_dtc_stress_row_carries_its_own_re_solves_lost_production(reset_backend):
+    """Islanding a site whose process unit needs more than the local generator gives: the stress re-solve curtails
+    the unit, and the row reports that solve's own lost tonnes and EUR (never a feed-forward on top)."""
+    import queue
+    import threading
+
+    from models.energy_hub import DtcConfig
+    from services.adequacy import dtc as D
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2035-01-01", periods=4, freq="h"))
+    for b in ("grid", "hub"):
+        n.add("Bus", b, carrier="AC")
+    n.add("Bus", "nh3", carrier="NH3", unit="MWh")
+    n.buses["mwh_per_t"] = [float("nan"), float("nan"), MWH_PER_T]
+    n.buses["eh_poc"] = n.buses.index == "grid"
+    n.buses["eh_critical"] = False
+    n.add("Generator", "remote", bus="grid", p_nom=100.0, marginal_cost=10.0)
+    n.add("Generator", "local", bus="hub", p_nom=4.0, marginal_cost=20.0)
+    n.add("Link", "import_poc", bus0="grid", bus1="hub", p_nom=100.0)
+    n.add("Link", "hb", bus0="hub", bus1="nh3", p_nom=10.0, efficiency=0.5)
+    n.links["eh_role"] = ["grid_import", ""]
+    n.links["eh_process"] = n.links.index == "hb"
+    n.links["criticality_tier"] = ["", "process_critical"]
+    n.add("Load", "delivery", bus="nh3", p_set=4.0)
+    n.add("Generator", "short", bus="nh3", p_nom=100.0, marginal_cost=800.0 / MWH_PER_T)
+    n.generators["process_role"] = ["", "", "shortfall"]
+    PyPSAService.set_network(n)
+    table = D.run_dtc_stress(
+        n, SolverConfig(voll=1000.0), lock=PyPSAService.get_lock(), stop_event=threading.Event(),
+        log_queue=queue.SimpleQueue(),
+        dtc=DtcConfig(critical_bus_ids=["hub"], islanding_contingencies=["import_poc"]))
+    (row,) = [r for r in table["contingencies"] if r["status"] in ("ok", "optimal")]
+    (lost,) = row["lost_production"]
+    # 4 MW local → at most 2 MW of NH3 out of the 4 MW delivered: 2 MW short for 4 h.
+    assert lost["product"] == "nh3" and lost["source"] == "generator"
+    assert lost["lost_t"] == pytest.approx(2.0 * 4 / MWH_PER_T, rel=1e-6)
+    assert lost["lost_eur"] == pytest.approx(lost["lost_t"] * 800.0, rel=1e-6)

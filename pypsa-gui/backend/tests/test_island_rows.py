@@ -1171,3 +1171,15 @@ def test_the_pickup_sequence_runs_by_tier_then_size_then_name_from_the_solved_dr
     assert "outside" not in {b["name"] for b in seq}
     n.links.loc["flex", "criticality_tier"] = "process_critical"
     assert [b["name"] for b in pickup_sequence(n)[:2]] == ["flex", "unit"]        # same tier: largest first
+
+
+def test_an_untiered_process_unit_is_picked_up_as_process_critical_and_flagged():
+    from services.solver.island import pickup_sequence
+
+    n = _process_hub()
+    n.links.loc["unit", "criticality_tier"] = "critcal"              # a typo is no tier
+    seq = pickup_sequence(n)
+    (unit,) = [b for b in seq if b["name"] == "unit"]
+    assert unit["flag"] == "tier_unset" and unit["tier"] == "critcal"
+    assert [b["name"] for b in seq][:2] == ["unit", "flex"]          # with process_critical, before flexible
+    assert all("flag" not in b for b in seq if b["name"] != "unit")

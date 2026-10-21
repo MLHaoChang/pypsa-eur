@@ -196,7 +196,8 @@ def _source_buses(n) -> set[str]:
 def units_cut_off(n, link: str) -> list[str]:
     """The process units a forced outage of `link` leaves with no supply, first order: no path to their bus0 from a
     source bus (`_source_buses`) over Lines, Transformers (both ways) and the remaining Links (bus0 → bus1, and back
-    when p_min_pu < 0), process units excluded. A path is not a capacity: a unit still reachable counts as supplied."""
+    when p_min_pu < 0), process units excluded; an outage of a process unit stops that unit too. A path is not a
+    capacity: a unit still reachable counts as supplied."""
     edges: dict[str, set[str]] = {}
 
     def edge(a, b):
@@ -223,7 +224,9 @@ def units_cut_off(n, link: str) -> list[str]:
             continue
         seen.add(b)
         todo.extend(edges.get(b, ()))
-    return [str(u) for u in n.links.index[process_mask(n.links)] if str(n.links.at[u, "bus0"]) not in seen]
+    # A process unit's own outage stops that unit, whatever still reaches its bus0.
+    return [str(u) for u in n.links.index[process_mask(n.links)]
+            if str(u) == link or str(n.links.at[u, "bus0"]) not in seen]
 
 
 def expected_outage_loss(n, link: str, mttr_hours: float, q: float, lost_load=None) -> dict:

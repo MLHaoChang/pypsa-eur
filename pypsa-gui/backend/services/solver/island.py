@@ -583,8 +583,10 @@ def island_study(n, island, *, scenarios=None, solve=None, tol=1e-6) -> dict:
             continue
         variants[sc] = {"status": "ok", "condition": cond, "objective": float(c.objective),
                         "binding": binding_rows(c, tol),
-                        "facts": getattr(c, "_island_facts", None),
-                        "pickup_sequence": pickup_sequence(c)}
+                        "facts": getattr(c, "_island_facts", None)}
+        # Ticket 08: the tiers set the order only where the sidecar gives no explicit blocks.
+        if "pickup_blocks" not in one["requirements"]["values"]:
+            variants[sc]["pickup_sequence"] = pickup_sequence(c)
 
     def obj(name):
         v = variants.get(name)
@@ -1051,7 +1053,8 @@ def _pcc_links(n) -> dict:
             "export": [str(x) for x in n.links.index[role.isin(_EXPORT_ROLES)]]}
 
 
-#: The pickup order by criticality tier (grid-to-process ticket 08): untiered Loads come last.
+#: The pickup order by criticality tier (grid-to-process ticket 08): untiered Loads come last; an untiered process
+#: unit is picked up as ``process_critical`` (as ``process_loss`` costs it), flagged ``tier_unset``.
 _TIER_ORDER = {"safety": 0, "process_critical": 1, "process_flexible": 2, "deferrable": 3}
 
 
@@ -1067,9 +1070,12 @@ def _island_process_units(n) -> list[str]:
 def pickup_sequence(n, period=None) -> list[dict]:
     """The island's pickup sequence when the sidecar has no ``pickup_blocks`` (ticket 08): every Load and every
     island process unit, a block each, ordered by criticality tier (safety, process_critical, process_flexible,
-    deferrable, then the untiered Loads), within a tier largest first, then by name. A Load's block is its largest
+    deferrable, then the untiered Loads), within a tier largest first, then by name. A process unit with no (or an
+    unknown) tier sits with ``process_critical``, flagged ``tier_unset``. A Load's block is its largest
     ``p_set`` in the period; a process unit's its largest SOLVED draw ``p0`` (None before a solve), never its p_nom.
     E2 steps on the largest block, so the order is reported, not optimised."""
+    from models.process_unit import CRITICALITY_TIERS
+
     sns = n.snapshots if period is None else n.snapshots[n.snapshots.get_level_values(0) == period]
     out = []
     for ld in n.loads.index:
@@ -1080,10 +1086,14 @@ def pickup_sequence(n, period=None) -> list[dict]:
     for u in _island_process_units(n):
         tier = str(tiers.get(u, "") or "").strip() if tiers is not None else ""
         solved = u in p0.columns and len(sns) and p0[u].reindex(sns).notna().all()
-        out.append({"name": u, "kind": "process_unit", "tier": tier or None,
-                    "basis": "solved_p0_max" if solved else "not_solved",
-                    "block_mw": float(p0[u].reindex(sns).max()) if solved else None})
-    return sorted(out, key=lambda b: (_TIER_ORDER.get(b["tier"] or "", 4),
+        block = {"name": u, "kind": "process_unit", "tier": tier or None,
+                 "basis": "solved_p0_max" if solved else "not_solved",
+                 "block_mw": float(p0[u].reindex(sns).max()) if solved else None}
+        if tier not in CRITICALITY_TIERS:
+            block["flag"] = "tier_unset"
+        out.append(block)
+    order = {"load": 4, "process_unit": _TIER_ORDER["process_critical"]}
+    return sorted(out, key=lambda b: (_TIER_ORDER.get(b["tier"] or "", order[b["kind"]]),
                                       -(b["block_mw"] if b["block_mw"] is not None else -math.inf), b["name"]))
 
 
