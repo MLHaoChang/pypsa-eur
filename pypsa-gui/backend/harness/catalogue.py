@@ -95,6 +95,7 @@ RESULTS_TAB_ENUM = [
     "investment",   # IC P3 WP3.4 (the Investment tab, WP3.5)
     "adequacy", "fmea",
     "flows",        # site commercial UX A1 (Energy flow)
+    "loadshape",    # site commercial UX A2 (Load shape)
 ]
 BOTTOM_TAB_ENUM = [
     "Log", "History", "Buses", "Lines", "Transformers", "Generators",
@@ -3075,6 +3076,27 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id"],
     ),
     _t(
+        "campus_grid_readiness",
+        "The grid-readiness scorecard of a project (DC grid readiness 02): an "
+        "advisory red-flag screening against its connection limits and a "
+        "grid-code profile (default the campus study's last profile, else "
+        "eu_rfg_dcc_ce; generic_assumed or a published project profile also). "
+        "Returns {profile, rows, summary}: each row {id, requirement, limit, "
+        "unit, source, project_value, verdict pass|warn|fail|unknown, assumed, "
+        "note, section, target}. Rows: SCR, peak against the energized import "
+        "after losses plus firm gensets per period, ramp rate, oscillation and "
+        "rapid voltage change from the AI-training envelope (before UPS/BESS "
+        "smoothing), reactive range, frequency support and the profile's "
+        "dynamic requirements (always unknown: an EMT study is needed), grid "
+        "former, island ride-through per scenario, LOLE against the goal. "
+        "unknown means an input is missing, never a pass; say which. Say which "
+        "limits are assumed. It never blocks a run. 422 for an unknown "
+        "profile. Safety: read.",
+        {"project_id": {"type": "string"},
+         "profile": {"type": "string", "description": "a grid-code profile id"}},
+        ["project_id"],
+    ),
+    _t(
         "campus_set_island_config",
         "Save a hub project's island requirements: the whole island_config.json "
         "sidecar as a JSON object, which replaces the project's copy. It is "
@@ -3697,6 +3719,7 @@ TOOLS.extend([
     _t("list_experiments", "List up to 20 most recently created experiments you own in the active project. Returns status, domain, baseline_run_id and case_count; use get_experiment for case detail. Does not execute plans. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
     _t("get_experiment", "Read one owned experiment in the active project. Returns typed cases, limits, preflight and any durable single-case execution receipt. Planned/queued is not completed; interrupted submissions have executed=null. Recorded objectives require matching completed job, exact solved inputs and intact evidence. No operation is started or replayed. Safety: read.", {"experiment_id": {"type": "string"}}, ["experiment_id"]),
     _t("get_energy_flows", "Read the CURRENT solve's Energy flow tab: where the site's energy came from (source), what it passed through (via: Direct, a storage, a conversion) and where it went (destination: loads, export, losses), in MWh per modelled year, exactly as the tab computes it (proportional mix at each bus, a proportional pool per storage). Returns the largest rows (default 12, max 40) with rows_total and rows_mwh_total, the conservation check (generation = destinations + storage change), flags, the period and snapshot window, inputs_changed_since_solve, and ui_reference for ui_open_panel(results_tab='flows'). not_delivered holds demand that was NOT delivered (process shortfall per load, shed load): missing energy, never supply; never add it to a source. Unsolved results, or flows the server cannot prove to conserve energy, return status unavailable with no rows; never invent values. period: an investment period (default the first); window_from/window_to: inclusive snapshot indexes. Safety: read.", {"period": {"type": "integer"}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 40}}, []),
+    _t("get_load_shape", "Read the CURRENT solve's Load shape tab: how the site's grid import, export, solar, wind, genset, EV, flexible load, battery state of charge and unserved load are shaped in time, exactly as the tab computes it. One view per call: summary (default: each heatmap's peak cell, the week and flag basis, whether monthly exists, annual energy per period), heatmap (mean MW by weekday and hour for import and export; null = no snapshot), week (one calendar week of one series, plus the flagged intervals: unserved load or import at the connection capacity), monthly (MWh per month and the daily-generation average, only for a full calendar year of snapshots), annual (MWh per period by solar, wind, genset, grid, export, excess, load served). Returns series_status (ok, not_modelled or unavailable, each with its reason), the period and snapshot window, inputs_changed_since_solve, claim_limits and ui_reference, the panel and tab to open with ui_open_panel. A group that is not_modelled or unavailable is NOT zero: say what its reason says; never invent values. Before a solve, or for a run whose dispatch cannot be read as energy, the status is unavailable. period: an investment period (default the first); window_from/window_to: inclusive snapshot indexes (heatmaps); week: index into the period's calendar weeks; series: which series the week view returns. Safety: read.", {"view": {"type": "string", "enum": ["summary", "heatmap", "week", "monthly", "annual"]}, "period": {"type": "integer"}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "week": {"type": "integer", "minimum": 0}, "series": {"type": "string", "enum": ["grid", "export", "solar", "wind", "genset", "ev", "flexible", "battery_soc", "unserved"]}}, []),
     _t("get_loadflow_summary", "Summarise the CURRENT load-flow results of the active project: lines and transformers ranked by peak utilisation = flow / (rating * s_max_pu), computed by software from the same results the Load flow tab reads. Per branch (default 5, max 25, trimmed to a bounded payload): both-terminal peak flow, rating (optimized s_nom_opt or configured s_nom), s_max_pu range, peak/mean utilisation, weighted hours at/over the limit. Returns the exact source, snapshot window, freshness, solve state, ranking convention, skipped branches (missing or zero rating, no flow data) and missing_evidence. LOPF results are an ACTIVE-POWER PROXY, not an AC apparent-power assessment; source='ac_pf' uses apparent power where reactive flows exist and excludes unconverged snapshots. Never proof of full AC thermal compliance (no N-1, no voltage limits). Unsolved, stale, running, infeasible or failed results return status unavailable with a typed unavailable_kind; never invent values. window_from/window_to are inclusive snapshot indexes for follow-ups. run_id: the newest completed run whose inputs are still current answers as the current results (run.is_current true); any other run answers from the load flow captured when it finished (scope historical, run.is_current false; the Load flow tab still shows the current results), or unavailable for a run without a captured section. Safety: read.", {"source": {"type": "string", "enum": ["lopf", "ac_pf"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "run_id": {"type": "string", "maxLength": 64}}, []),
     _t("list_tasks", "List up to 20 most recently updated durable tasks owned by you in the active project. Use a returned ID to resume in a new chat or provider. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
     _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. With overview=true (no goal) answers \"what can you do here?\": the core-feature families (projects, results, checks, edits, sensitivities, studies, reports), each available or not for this project, role, mode and personal rule, with the reason, an example sentence and its offered tools. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}, "overview": {"type": "boolean"}}, []),
@@ -3712,6 +3735,8 @@ TOOLS.extend([
     _t("apply_project_changes", "Apply a reviewed typed preview atomically to unchanged active-project inputs. Refuses stale, foreign, busy or interrupted previews. Normal execution confirmation, lock/study guards and undo capture apply. Repeated successful application returns reused. Leaves changes unsaved. Safety: execution.", {"preview_id": {"type": "string"}}, ["preview_id"]),
     _t("create_chart", "Generate a downloadable PNG from server-side numeric component data. Select 1–8 asset names and an input/output attribute; max 5000 rows. source=result requires fresh solved data. Returns file metadata and coverage/provenance; no arbitrary expression/code. Safety: write.", {"component": {"type": "string", "enum": ["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]}, "attribute": {"type": "string"}, "names": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string"}}, "source": {"type": "string", "enum": ["input", "result"]}}, ["component", "attribute", "names"]),
     _t("build_delivery", "Bundle 1–20 authorized upload IDs into a downloadable ZIP (25 MB max) with content hashes and a provenance manifest. Reuse existing exports, charts and reports; no file bytes in model context. Safety: write.", {"file_ids": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}}, "filename": {"type": "string"}}, ["file_ids"]),
+    # The project flow (B1, design §3.4): the same payload GET …/flow serves.
+    _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null), run_request and verdicts (each run kind's own verdict: optimisation, and study when the Run includes it), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
 ])
 
 TOOL_COUNT: int = len(TOOLS)
@@ -3802,6 +3827,7 @@ TOOL_ROUTES: dict[str, list] = {
     "get_experiment": _SERVICE_CALL,
     "get_loadflow_summary": _SERVICE_CALL,
     "get_energy_flows": _SERVICE_CALL,
+    "get_load_shape": _SERVICE_CALL,
     "list_tasks": _SERVICE_CALL,
     "find_capabilities": _SERVICE_CALL,
     "get_component_schema": _SERVICE_CALL,
@@ -4124,6 +4150,8 @@ TOOL_ROUTES: dict[str, list] = {
     "campus_island_gfm_settings": _SERVICE_CALL,
     "campus_recommend_gfm_settings": _SERVICE_CALL,
     "campus_apply_gfm_settings": _SERVICE_CALL,
+    # the grid-readiness scorecard (DC grid readiness 02) — a read service call
+    "campus_grid_readiness": _SERVICE_CALL,
     # campus grid codes (2) — service calls; no publish tool (plan C10)
     "campus_list_grid_codes": _SERVICE_CALL,
     "campus_extract_grid_code": _SERVICE_CALL,
@@ -4161,6 +4189,8 @@ TOOL_ROUTES: dict[str, list] = {
                               ("GET", "/api/projects/{name}/studies/{study_id}/report.docx"),
                               ("GET", "/api/projects/{name}/studies/{study_id}/report.xlsx"),
                               ("GET", "/api/projects/{name}/studies/{study_id}/report.html")],
+    # project flow (B1)
+    "get_project_flow": [("GET", "/api/projects/{name}/flow")],
 }
 
 

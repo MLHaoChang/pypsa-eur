@@ -109,6 +109,8 @@ Merge one PR at a time:
 - **Code overlap or a conflict.** Ask the PR's session to merge master in, as a merge commit, then wait for CI on the new head.
 - **The head moved** while the PR was green: a session pushed, even if the push was an unneeded master merge. The new head is the head, so wait for its CI. History stays as pushed: the coordinator asks sessions for merges and never asks for resets or force-pushes.
 - **Two PRs both touch `harness/catalogue.py`.** The second merges master and reruns `smoke/assistant_inventory.py --write`. `capability-inventory.json` is regenerated each time, never hand-merged.
+- **A runner-less macOS job** (owner decision 2026-10-21). When `Integration (macos)` has been queued for over 30 minutes with no runner and every other check is green, cancel that workflow run (`actions_run_trigger`, `cancel_workflow_run`). Then rerun premerge: it waives the cancelled job, and the PR merges under that waiver.
+- **A README or error-kinds overlap** (owner decisions 2026-10-21). Premerge itself treats `harness/README.md` as docs, and waives a `tool-error-kinds.json` overlap when both sides only add lines, the trial merge is clean and the manifest test passes. Don't ask for a master merge for these.
 - **An environment-only failure.** In cloud containers `test_harness_provider_parity` fails 4 tests, because `~/.venv-pypsa-gui` lacks `requests`. Master fails the same way, so it doesn't block a merge.
 
 ## Dashboard

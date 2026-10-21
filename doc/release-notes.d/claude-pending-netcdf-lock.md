@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Pending generated profiles are written and read under the app's one netCDF lock, so two profile writes at once, or a profile write beside a project save, can no longer fail or crash the API.

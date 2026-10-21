@@ -10,18 +10,23 @@ steps:
   - id: start
     title: Start
     done_when: A template or the user's own network is open and the user is on the Site card.
+    flow_section: project
   - id: site
     title: Site
     done_when: The grid connection, critical loads, grid strength and outage data are set or accepted as gaps.
+    flow_section: connection
   - id: goal
     title: Goal
     done_when: The study target (VOLL, archetype) is set and the study has been started.
+    flow_section: scenarios
   - id: results
     title: Results
     done_when: The user has heard the verdict in plain language.
+    flow_section: results
   - id: improve
     title: Improve
     done_when: The user has applied or declined each recommendation.
+    flow_section: results
 ---
 
 Guided mode is on. Rules for this turn: answer in plain language a

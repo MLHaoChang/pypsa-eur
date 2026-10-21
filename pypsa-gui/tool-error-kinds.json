@@ -43,6 +43,10 @@
     "Changing one is a UI decision. Write down why, as the entries do."
   ],
   "kinds": {
+    "flow_project_not_open": {
+      "surface": "inline",
+      "why": "get_project_flow was asked about a project that is not the open one: the flow is read from the loaded network. The detail names the project; the assistant opens it (activate_project) or says it must be opened first. There is no conversation-wide recovery action."
+    },
     "invalid_reference": {
       "surface": "inline",
       "why": "resolve_reference refused a malformed request (unknown target or component class, a blank or oversized name or run_id, or no class to resolve against). The per-call detail says which; the assistant asks for the missing piece instead of guessing. There is no conversation-wide recovery action."
@@ -811,6 +815,26 @@
       "surface": "inline",
       "why": "apply_generated_profile named a generator that is not on the open network (renamed or deleted since generation). The detail names it; the assistant lists the generators and asks which one, per call."
     },
+    "profile_bound_conflict": {
+      "surface": "inline",
+      "why": "apply_generated_profile would put a generator's p_max_pu below its p_min_pu at some snapshot, which makes the LP infeasible. The detail names the generator and the first such snapshot; the assistant tells the user which bound to change, per call."
+    },
+    "unsupported_target": {
+      "surface": "inline",
+      "why": "A profile apply named a (component type, attribute) the apply path cannot write. The detail lists the supported targets; the assistant picks one or says the series cannot be applied there, per call."
+    },
+    "unknown_family": {
+      "surface": "inline",
+      "why": "A profile apply carried a profile family nobody registered (a hand-made or corrupted artifact). The detail lists the families; the assistant regenerates the profile, per call."
+    },
+    "family_target_mismatch": {
+      "surface": "inline",
+      "why": "A profile apply would write a target its family may not (a renewable capacity factor onto a load, a load shape onto a generator bound). The detail names what the family applies to; the assistant picks a fitting component, per call."
+    },
+    "invalid_series_unit": {
+      "surface": "inline",
+      "why": "A profile apply's unit does not fit its target (a price not in currency/MWh, a per-unit shape whose peak or mean is not 1, a missing scale or price basis). The detail says which; the assistant fixes the parameters and retries, per call."
+    },
     "point_not_in_profile": {
       "surface": "inline",
       "why": "apply_generated_profile asked for a point the pending profile does not hold. The detail lists the points it does hold; the assistant picks the right point_id, per call."
@@ -834,6 +858,10 @@
     "malformed_job_id": {
       "surface": "inline",
       "why": "A pending-profile job id that would escape the project's pending folder. Only a mistyped or forged id reaches this; the assistant lists the pending profiles and uses one of their ids."
+    },
+    "unknown_grid_code_profile": {
+      "surface": "inline",
+      "why": "campus_grid_readiness was asked for a grid-code profile that is neither shipped nor published in the project. The detail lists the known ones; the assistant picks one of them or asks the user. There is no conversation-wide recovery action."
     }
   }
 }

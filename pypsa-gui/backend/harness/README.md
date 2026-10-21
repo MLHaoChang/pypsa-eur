@@ -263,6 +263,13 @@ component (`frontend/src/components/EditCard.tsx`).
   An edit without an adapter still gets a card of kind `arguments`
   (`complete: false`): the requested values, no old value claimed, and its
   receipt is never `verified`.
+- **Flow section (PR-2).** Each component row carries a FlowTarget
+  `{section, panel, component, entity, field}` from
+  `flow_service.section_for_component` (the flow's own class rule), and the
+  card names its `section`. The section's flow state before the write rides
+  the card outside the digest (`section_state`); the receipt adds `section`
+  with the state after the write and whether it `changed`. The browser's
+  "Show in Properties" selects the component in place; the chat stays open.
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
   component and app-described field with unit and basis; never a derived field.
 - **Not covered here.** Checked-assurance turns keep their own effect path
@@ -885,6 +892,20 @@ solve it is `unavailable_kind=not_solved`; an attribution the module cannot
 prove to conserve energy is `not_established`, with no rows. Current results
 only; `inputs_changed_since_solve` says when the inputs moved after the solve.
 The `flows` result view (`services/result_views.py`) goes live with this tool.
+
+### Current load shape
+
+`get_load_shape` (`services/load_shape_read.py`) reads the current solve's Load
+shape tab through the same `services/results/load_shape.py` payload the tab
+draws, one view per call (`summary`, `heatmap`, `week`, `monthly`, `annual`),
+trimmed under 3800 characters; `period`, `window_from` / `window_to` (the
+heatmaps), `week` and `series` pick what is returned. It computes nothing of
+its own. A group the network does not model, or the run cannot establish,
+keeps its `not_modelled` / `unavailable` state and reason, never a missing key
+that reads as zero. Before a solve it is `unavailable_kind=not_solved`; a run
+whose dispatch cannot be read as energy is `not_established`. Current results
+only. The `loadshape` result view (`services/result_views.py`) goes live with
+this tool.
 
 ### Experiment plans
 

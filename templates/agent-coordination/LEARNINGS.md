@@ -130,3 +130,17 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **Two PRs touching the same generated inventory (`harness/catalogue.py`, `capability-inventory.json`) counted as a `code` overlap even when the merge was clean and every test passed.** Each one cost a master merge and a ~2 h CI cycle.
   - Fix: overlap only in those files does not block when the trial merge is clean and the semantic tests and the assistant inventory check pass on it; premerge prints a `waived` line. Any other code overlap, or any conflict, still blocks. The template has the same mechanism as `waive_overlap_re` (empty by default).
   - Lives in: `scripts/coord/premerge.sh`, `inventory_overlap_re` (template: `waive_overlap_re`).
+
+- **2026-10-21: a macOS job sat queued with no runner, and the waiver only fires once the job is cancelled.** The PR waited on GitHub's own runner timeout with every other check green.
+  - Fix: after 30 minutes queued with no runner and everything else green, the coordinator cancels that workflow run and reruns premerge, which then waives it.
+  - Lives in: `.claude/skills/coordinator/SKILL.md`, "Merging" → "A blocked PR".
+
+## 21 Oct 2026: README and append-only manifest overlaps
+
+- **A clean overlap in `pypsa-gui/backend/harness/README.md` counted as code.** Every PR that added a section to the harness contract had to merge master and rerun ~2 h of CI, and could lose the race again to the next README PR (#479 merged master twice).
+  - Fix: `docs_only_re` covers `pypsa-gui/backend/harness/README.md`. A real git conflict still blocks, in its own check.
+  - Lives in: `scripts/coord/premerge.sh`, `docs_only_re`.
+- **Two PRs each adding an error kind to `pypsa-gui/tool-error-kinds.json` counted as a code overlap.**
+  - Fix: overlap only in that manifest is waived when neither side removes a line since the merge-base, the trial merge is clean and `tests/test_tool_error_kind_manifest.py` passes on it; premerge prints a `waived` line. A removed or edited line still blocks. The template has the same mechanism as `append_only_overlap_re` with `append_only_test_cmd` (empty by default).
+  - Lives in: `scripts/coord/premerge.sh`, `kinds_overlap_re` (template: `append_only_overlap_re`).
+

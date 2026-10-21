@@ -137,6 +137,7 @@ Merge one PR at a time:
 **A blocked PR:**
 - **Code overlap or a conflict.** Ask the PR's session to merge `{{BASE_BRANCH}}` in as a merge commit, then wait for CI on the new head.
 - **The head moved** while the PR was green, because a session pushed. The new head is now the head, so wait for its CI and, where needed, a fresh gatekeeper OK. History stays as pushed. Ask sessions for merges, never for resets or force-pushes.
+- **A runner-less job.** When a platform job (for example `Integration (macos)`) has been queued for over 30 minutes with no runner and every other check is green, cancel that workflow run. Then rerun premerge: it waives a job cancelled before it got a runner, and the PR merges under that waiver.
 - **Known environment failures.** <List failures that also happen on `{{BASE_BRANCH}}` in cloud containers and so don't block a merge.>
 
 ## Dashboard
