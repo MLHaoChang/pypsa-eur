@@ -33,6 +33,11 @@ def claim(session, job_id: str) -> str:
     return assistant_tasks.claim_continuation(session, job_id)
 
 
+def dismiss(session, job_id: str) -> bool:
+    """The user stopped waiting: no continuation for this job. The job runs on."""
+    return assistant_tasks.dismiss_continuation(session, job_id)
+
+
 # A plan's run step holds the turn this long for a quick solve, so the plan
 # goes on in the same turn; after it the turn is released and the
 # continuation takes over.

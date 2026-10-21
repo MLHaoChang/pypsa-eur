@@ -506,3 +506,24 @@ def test_a_failed_solve_continues_with_its_failure(oj_grid, monkeypatch):
     task = chat_tools.get_task(due[0]['task_id'])
     assert task['next_step']['id'] == 'run' and task['next_step']['status'] == 'failed'
     assert chat_tools.list_project_runs(status='completed')['total_count'] == runs_before
+
+
+def test_stop_waiting_withdraws_the_continuation_and_the_job_runs_on(oj_grid, client):
+    from harness import continuation, session as harness_session
+
+    calls, results, frames, session, cards, runs_before = _start(PROVIDERS[1], oj_grid)
+    job, task_id = results[3]['job_id'], results[0]['task_id']
+    session.owner_user_id = chat_tools.acting_user_id()
+    with harness_session._SESSIONS_LOCK:
+        harness_session._SESSIONS[session.session_id] = session
+    response = client.post(f'/api/chat/{session.session_id}/continuations/{job}/dismiss')
+    assert response.json() == {'ok': True}
+    assert PyPSAService.get_solver_state().get('status') == 'running'  # the solve is not cancelled
+    oj_grid.open.set()
+    _settle_solver()
+    time.sleep(0.5)
+    assert PyPSAService.get_solver_state().get('status') == 'completed'
+    assert continuation.due(session) == []
+    chat_tools.set_chat_session(session)
+    assert chat_tools.get_task(task_id)['next_step']['id'] == 'walk'  # the plan still settled
+    assert client.post(f'/api/chat/{session.session_id}/continuations/{job}/dismiss').json() == {'ok': False}
