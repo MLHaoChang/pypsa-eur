@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): Map North American public-data requirements to tariff, wholesale-price, PPA, technology-cost and finance sources, with source evidence, implementation priorities and a validation matrix. No new runtime feed or source is admitted.

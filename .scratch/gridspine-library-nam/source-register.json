@@ -1,0 +1,1037 @@
+{
+  "research_date": "2026-10-21",
+  "scope": [
+    "US",
+    "Canada",
+    "Mexico"
+  ],
+  "baseline": "151fdc934d739bb790d0bd1237d85e7ac40e3719",
+  "meaning": "A research shortlist, not a whitelist or approved default pack. Evidence IDs join fetch-observations.json. No data admitted by this package.",
+  "sources": [
+    {
+      "source_id": "us_urdb",
+      "title": "OpenEI Utility Rate Database",
+      "countries": [
+        "US"
+      ],
+      "topic": "tariff",
+      "evidence_ids": [
+        "urdb_docs",
+        "urdb_home",
+        "urdb_commercial",
+        "urdb_record",
+        "urdb_download",
+        "nrel_rate_api"
+      ],
+      "primary_url": "https://apps.openei.org/services/doc/rest/util_rates/",
+      "data_class": "structured tariff records",
+      "rights_assessment": "official portal CC0 unless otherwise noted; utility source documents have separate terms",
+      "priority": 1,
+      "recommended_use": "Reuse existing URDB importer for supported energy, TOU, demand and fixed-charge subsets; preserve original record and schedule.",
+      "remaining_gate": "API key/bulk retrieval not tested; recent SDG&E record has reactive charge and inconsistent apparent voltage metadata; reject unsupported charges instead of silently truncating.",
+      "existing_source_id": "na_urdb",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_pge",
+      "title": "PG&E electric tariff book / B-20",
+      "countries": [
+        "US"
+      ],
+      "topic": "tariff",
+      "evidence_ids": [
+        "pge_book",
+        "pge_b20"
+      ],
+      "primary_url": "https://www.pge.com/tariffs/en/rate-information/electric-rates.html",
+      "data_class": "official tariff PDF",
+      "rights_assessment": "resource-specific commercial reuse not established",
+      "priority": 1,
+      "recommended_use": "Industrial tariff clause inventory and source bill-oracle pilot; separate bundled/unbundled supply and riders.",
+      "remaining_gate": "Choose approved effective sheets and customer voltage; full minimum/standby/reactive/holiday treatment and bill tests.",
+      "existing_source_id": "na_pge_tariffs",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_sce",
+      "title": "Southern California Edison tariff book",
+      "countries": [
+        "US"
+      ],
+      "topic": "tariff",
+      "evidence_ids": [
+        "sce_rates"
+      ],
+      "primary_url": "https://www.sce.com/regulatory/tariff-books/rates-pricing-choices",
+      "data_class": "official tariff catalogue",
+      "rights_assessment": "resource-specific review",
+      "priority": 2,
+      "recommended_use": "Additional California industrial schedules and standby/export terms.",
+      "remaining_gate": "Catalogue retrieved; no selected current schedule extracted.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_dominion",
+      "title": "Dominion Virginia GS-3 / GS-4",
+      "countries": [
+        "US"
+      ],
+      "topic": "tariff",
+      "evidence_ids": [
+        "dominion_rates",
+        "dominion_gs3",
+        "dominion_gs4"
+      ],
+      "primary_url": "https://www.dominionenergy.com/virginia/rates-and-tariffs/business-rates",
+      "data_class": "official tariff PDFs",
+      "rights_assessment": "resource-specific commercial reuse not established",
+      "priority": 1,
+      "recommended_use": "Large industrial/data-centre tariff eligibility, demand, supply, riders and reactive clauses.",
+      "remaining_gate": "GS-4 effective usage 2026-01-01 includes rkVA charge and term commitments; no universal data-centre rate inferred.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_bpa",
+      "title": "Bonneville Power Administration rates",
+      "countries": [
+        "US"
+      ],
+      "topic": "tariff",
+      "evidence_ids": [
+        "bpa_rates"
+      ],
+      "primary_url": "https://www.bpa.gov/energy-and-services/rate-and-tariff-proceedings/power-rates",
+      "data_class": "federal wholesale rate proceedings",
+      "rights_assessment": "check exact rate document and federal/third-party scope",
+      "priority": 2,
+      "recommended_use": "Eligible utility/wholesale power and transmission products as contextual references.",
+      "remaining_gate": "Eligibility, vintage and product terms; not a corporate renewable PPA quote.",
+      "existing_source_id": "na_bpa",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_eia_retail",
+      "title": "EIA retail sales, revenue and average-price tables",
+      "countries": [
+        "US"
+      ],
+      "topic": "retail benchmark",
+      "evidence_ids": [
+        "eia_retail_data",
+        "eia_retail_xlsx",
+        "eia_price_monthly",
+        "eia_retail",
+        "eia_copyright"
+      ],
+      "primary_url": "https://www.eia.gov/electricity/data.php#sales",
+      "data_class": "sector/state statistical average",
+      "rights_assessment": "EIA-produced data generally public domain with acknowledgment; exceptions apply",
+      "priority": 1,
+      "recommended_use": "Commercial/industrial sanity ranges and historical trend, not executable tariffs.",
+      "remaining_gate": "Identify exact sheet/sector/year; retail averages cannot represent demand, TOU, tax and customer-specific bills.",
+      "existing_source_id": "na_eia_prices",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_eia_ice",
+      "title": "EIA-hosted ICE wholesale hub series",
+      "countries": [
+        "US"
+      ],
+      "topic": "wholesale",
+      "evidence_ids": [
+        "eia_wholesale",
+        "eia_ice2026",
+        "eia_copyright"
+      ],
+      "primary_url": "https://www.eia.gov/electricity/wholesale/",
+      "data_class": "third-party historical hub statistics",
+      "rights_assessment": "page states ICE permission; EIA public-domain policy does not automatically clear ICE data",
+      "priority": 2,
+      "recommended_use": "Daily hub weighted-average/high/low/volume comparisons where permitted.",
+      "remaining_gate": "Resource rights for intended commercial redistribution; not nodal hourly prices or forwards.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_nyiso",
+      "title": "NYISO zonal day-ahead LBMP",
+      "countries": [
+        "US"
+      ],
+      "topic": "wholesale",
+      "evidence_ids": [
+        "nyiso_portal",
+        "nyiso_sample",
+        "nyiso_legal"
+      ],
+      "primary_url": "https://www.nyiso.com/energy-market-operational-data",
+      "data_class": "actual market CSV sample",
+      "rights_assessment": "public access verified; exact commercial redistribution terms unresolved",
+      "priority": 1,
+      "recommended_use": "Bounded DA zonal market-series pilot, preserving LBMP and components as separate products.",
+      "remaining_gate": "Timezone/DST, congestion-sign convention, revision policy, and exact rights; enum/product support assessed separately.",
+      "existing_source_id": "na_nyiso",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_miso",
+      "title": "MISO day-ahead ex-post LMP report",
+      "countries": [
+        "US"
+      ],
+      "topic": "wholesale",
+      "evidence_ids": [
+        "miso_reports",
+        "miso_sample",
+        "miso_legal"
+      ],
+      "primary_url": "https://www.misoenergy.org/markets-and-operations/real-time--market-data/market-reports/",
+      "data_class": "actual market CSV sample",
+      "rights_assessment": "legal overview retrieved, resource-level reuse not established",
+      "priority": 1,
+      "recommended_use": "DA price, congestion and loss component series with fixed-EST hour-ending parser.",
+      "remaining_gate": "No inferred energy component; finality, node history and explicit fixed EST instead of DST timezone.",
+      "existing_source_id": "na_miso",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_caiso",
+      "title": "CAISO OASIS PRC_LMP DAM",
+      "countries": [
+        "US"
+      ],
+      "topic": "wholesale",
+      "evidence_ids": [
+        "caiso_portal",
+        "caiso_oasis_download",
+        "caiso_legal"
+      ],
+      "primary_url": "https://www.caiso.com/systems-applications/portals-applications/open-access-same-time-information-system-oasis",
+      "data_class": "actual market ZIP/CSV sample",
+      "rights_assessment": "public endpoint verified; resource-specific rights unresolved",
+      "priority": 1,
+      "recommended_use": "Native supported CAISO market region; reproducible bounded query and nodal/hub price selection.",
+      "remaining_gate": "PRC_LMP values appear in MW column; schema context and component identity required; validate DST/revisions.",
+      "existing_source_id": "na_caiso",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_pjm",
+      "title": "PJM Data Miner 2",
+      "countries": [
+        "US"
+      ],
+      "topic": "wholesale",
+      "evidence_ids": [
+        "pjm_dataminer",
+        "pjm_data_policy",
+        "pjm_terms",
+        "pjm_terms2"
+      ],
+      "primary_url": "https://dataminer2.pjm.com/",
+      "data_class": "market data portal / policy",
+      "rights_assessment": "current page: internal use; raw or derived redistribution prohibited without active membership, minimum Associate",
+      "priority": 2,
+      "recommended_use": "Potential PJM feed only under entitlement/rights verified for deployment.",
+      "remaining_gate": "No sample accessed; do not ship, proxy or export derived data using wrapper licence as permission.",
+      "existing_source_id": "na_pjm",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_ercot",
+      "title": "ERCOT DAM / real-time settlement point prices",
+      "countries": [
+        "US"
+      ],
+      "topic": "wholesale",
+      "evidence_ids": [
+        "ercot_portal",
+        "ercot_da",
+        "ercot_rt",
+        "ercot_legal",
+        "ercot_terms2"
+      ],
+      "primary_url": "https://www.ercot.com/services/mdt/data-portal",
+      "data_class": "official product pages",
+      "rights_assessment": "resource-specific terms unresolved; guessed legal URLs failed",
+      "priority": 1,
+      "recommended_use": "ERCOT supported region; select settlement-point rather than arbitrary nodal LMP product.",
+      "remaining_gate": "Product access/history/interval and ancillary adders must be verified with actual sample.",
+      "existing_source_id": "na_ercot",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_isone",
+      "title": "ISO New England web services",
+      "countries": [
+        "US"
+      ],
+      "topic": "wholesale",
+      "evidence_ids": [
+        "isone_webservices",
+        "iso_terms"
+      ],
+      "primary_url": "https://www.iso-ne.com/participate/support/web-services-data",
+      "data_class": "official service documentation",
+      "rights_assessment": "registration/authentication and exact terms require review",
+      "priority": 2,
+      "recommended_use": "DA/RT LMP and market-specific products after account-free documentation review.",
+      "remaining_gate": "No authenticated sample or current service schema tested.",
+      "existing_source_id": "na_isone",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_spp",
+      "title": "Southwest Power Pool Marketplace portal",
+      "countries": [
+        "US"
+      ],
+      "topic": "wholesale",
+      "evidence_ids": [
+        "spp_portal"
+      ],
+      "primary_url": "https://portal.spp.org/groups/day-ahead-market",
+      "data_class": "portal shell only",
+      "rights_assessment": "not established",
+      "priority": 2,
+      "recommended_use": "Candidate SPP LMP and reserve reports.",
+      "remaining_gate": "JS shell is not a retrieved dataset; discover exact product and validate sample/terms.",
+      "existing_source_id": "na_spp",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "wrapper_gridstatus",
+      "title": "gridstatus open-source market-data wrapper",
+      "countries": [
+        "US",
+        "Canada"
+      ],
+      "topic": "integration method",
+      "evidence_ids": [
+        "gridstatus_repo"
+      ],
+      "primary_url": "https://api.github.com/repos/gridstatus/gridstatus",
+      "data_class": "software repository",
+      "rights_assessment": "software licence does not grant upstream data rights",
+      "priority": 3,
+      "recommended_use": "Optional adapter implementation aid after exact feed admission.",
+      "remaining_gate": "Pin version and inspect dependencies/licence before install; never use wrapper to bypass upstream terms.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_lbl_solar",
+      "title": "Berkeley Lab Utility-Scale Solar 2025 workbook",
+      "countries": [
+        "US"
+      ],
+      "topic": "PPA/cost/maintenance",
+      "evidence_ids": [
+        "lbl_solar",
+        "lbl_solar2025",
+        "lbl_oedi",
+        "lbl_solar_xlsx",
+        "oedi_licence"
+      ],
+      "primary_url": "https://emp.lbl.gov/utility-scale-solar",
+      "data_class": "actual selected workbook cells inspected",
+      "rights_assessment": "OEDI record explicitly CC BY 4.0; segregate third-party LevelTen/Trio content and source exceptions",
+      "priority": 1,
+      "recommended_use": "Historical executed PV/hybrid PPA benchmarks and scoped empirical cost/O&M/performance references.",
+      "remaining_gate": "Executed sheet uses real 2023 levelized prices at 4% real; offered indices are first-year nominal; do not insert benchmark as contract strike.",
+      "existing_source_id": "na_lbl_solar",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_lbl_wind",
+      "title": "Berkeley Lab Land-Based Wind Update 2026",
+      "countries": [
+        "US"
+      ],
+      "topic": "PPA/cost/maintenance",
+      "evidence_ids": [
+        "lbl_wind",
+        "lbl_wind_pub",
+        "lbl_wind_xlsx"
+      ],
+      "primary_url": "https://emp.lbl.gov/wind-technologies-market-report",
+      "data_class": "actual selected workbook cells inspected",
+      "rights_assessment": "PUBLIC filename is not a licence; exact workbook/sheet terms require review; REC sheet credits Marex Spectron",
+      "priority": 1,
+      "recommended_use": "Historical wind PPA term/region/price benchmarks in real 2025 dollars; scoped O&M and performance evidence.",
+      "remaining_gate": "Preserve confidentiality suppression, cost boundary and third-party source exceptions; no current quote assumption.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_ferc_eqr",
+      "title": "FERC Electric Quarterly Reports",
+      "countries": [
+        "US"
+      ],
+      "topic": "contracts/transactions",
+      "evidence_ids": [
+        "ferc_eqr",
+        "ferc_viewer",
+        "ferc_dictionary_clean",
+        "ferc_917"
+      ],
+      "primary_url": "https://www.ferc.gov/power-sales-and-markets/electric-quarterly-reports-eqr",
+      "data_class": "regulatory contract and wholesale transaction reports",
+      "rights_assessment": "federal records candidate; document third-party exhibits and resource-specific constraints",
+      "priority": 2,
+      "recommended_use": "Actual reported wholesale contract/transaction observations; useful complement to PPA benchmark samples.",
+      "remaining_gate": "No quarter extracted here; reconcile current schema with Order 917 effective May 26 2026. XBRL-CSV implementation timeline not set; old dictionary alone insufficient.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_sec",
+      "title": "SEC EDGAR exhibits / APIs",
+      "countries": [
+        "US"
+      ],
+      "topic": "contract clauses",
+      "evidence_ids": [
+        "ppa_sec_api"
+      ],
+      "primary_url": "https://www.sec.gov/search-filings/edgar-application-programming-interfaces",
+      "data_class": "public filing discovery documentation",
+      "rights_assessment": "third-party exhibits not automatically public-domain legal text",
+      "priority": 3,
+      "recommended_use": "Selective contract-clause evidence with issuer/date/exhibit/redaction traceability.",
+      "remaining_gate": "No specific executed-price exhibit verified; missing/redacted prices stay unknown; fair-access and text rights apply.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_eei",
+      "title": "EEI wholesale power master contract",
+      "countries": [
+        "US",
+        "Canada"
+      ],
+      "topic": "contract structure",
+      "evidence_ids": [
+        "eei_master"
+      ],
+      "primary_url": "https://www.eei.org/resources-and-media/master-contract",
+      "data_class": "model legal agreement and optional provisions",
+      "rights_assessment": "public link is not permission to redistribute legal text",
+      "priority": 3,
+      "recommended_use": "Contract term taxonomy: price, quantity, delivery location, duration and credit.",
+      "remaining_gate": "No transaction price series; legal review and intended-use rights before incorporation.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_swaps",
+      "title": "CFTC SDR directory / DTCC public dissemination",
+      "countries": [
+        "US"
+      ],
+      "topic": "financial swaps",
+      "evidence_ids": [
+        "cftc_sdr",
+        "dtcc_public"
+      ],
+      "primary_url": "https://www.cftc.gov/IndustryOversight/DataRepositories/index.htm",
+      "data_class": "candidate public dissemination discovery",
+      "rights_assessment": "exact dataset, jurisdiction, terms and access not verified",
+      "priority": 3,
+      "recommended_use": "Investigate reported commodity/electricity swap observations only in separate bounded research.",
+      "remaining_gate": "No actual electricity swap sample parsed; masked notionals, corrections and taxonomy may prevent reconstruction; not physical PPA data.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_cme",
+      "title": "CME market data",
+      "countries": [
+        "US"
+      ],
+      "topic": "forwards",
+      "evidence_ids": [
+        "cme_market_data"
+      ],
+      "primary_url": "https://www.cmegroup.com/market-data.html",
+      "data_class": "commercial data service overview",
+      "rights_assessment": "licensed service; no unrestricted forward curve established",
+      "priority": 3,
+      "recommended_use": "Potential entitled forward-curve import; keep user-supplied curve path.",
+      "remaining_gate": "Do not treat public delayed webpage as redistributable complete commercial forward data.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_epa_attributes",
+      "title": "EPA green power / REC information",
+      "countries": [
+        "US"
+      ],
+      "topic": "environmental attributes",
+      "evidence_ids": [
+        "epa_recs"
+      ],
+      "primary_url": "https://www.epa.gov/green-power-markets/renewable-energy-certificates-recs",
+      "data_class": "methodology/reference page",
+      "rights_assessment": "check resource-specific terms; no actual certificate quote dataset inspected",
+      "priority": 2,
+      "recommended_use": "REC definition, bundling and claims taxonomy; distinguish energy and environmental rights.",
+      "remaining_gate": "Certificate registry prices and hourly matching not established.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_eia_fuel",
+      "title": "EIA natural-gas prices and EIA-923 / EIA-860",
+      "countries": [
+        "US"
+      ],
+      "topic": "fuel/asset context",
+      "evidence_ids": [
+        "eia_gas",
+        "eia_923",
+        "eia_860",
+        "eia_copyright"
+      ],
+      "primary_url": "https://www.eia.gov/dnav/ng/ng_pri_sum_dcu_nus_m.htm",
+      "data_class": "statistical prices / plant survey catalogues",
+      "rights_assessment": "EIA-produced data public-domain policy with acknowledgment; exceptions apply",
+      "priority": 2,
+      "recommended_use": "Delivered-vs-hub fuel assumptions, generation/fuel/plant context and applicability checks.",
+      "remaining_gate": "No survey row loaded; distinguish withheld fuel costs, heat value, sector/location and network delivery charges; not outage/event logs.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_eia_cost",
+      "title": "EIA AEO2025 capital-cost reference plants",
+      "countries": [
+        "US"
+      ],
+      "topic": "technical costs",
+      "evidence_ids": [
+        "eia_cost",
+        "eia_copyright"
+      ],
+      "primary_url": "https://www.eia.gov/analysis/studies/powerplants/capitalcost/",
+      "data_class": "reference engineering costs",
+      "rights_assessment": "already scoped owner clearance G2 in merged PR499; do not broaden to all EIA-hosted content",
+      "priority": 1,
+      "recommended_use": "Reuse shipped us_federal overlay rather than another cost table.",
+      "remaining_gate": "Baseline master reconciliation: three technology keys only; utility-scale plant boundary is not campus equipment quotation.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_atb",
+      "title": "NREL/NLR Annual Technology Baseline",
+      "countries": [
+        "US"
+      ],
+      "topic": "technical costs/projections",
+      "evidence_ids": [
+        "nrel_atb",
+        "energy_atb",
+        "nlr_atb_repo"
+      ],
+      "primary_url": "https://atb.nrel.gov/electricity/2025/data",
+      "data_class": "prior-research candidate, current retrieval blocked",
+      "rights_assessment": "not freshly verified in this pass",
+      "priority": 2,
+      "recommended_use": "Potential scenario-specific wind/PV/storage CapEx/FOM/performance projections.",
+      "remaining_gate": "Network denied official domain; guessed GitHub repo404. No mirror bypass, downloaded release or fresh numerical claims.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_h2a",
+      "title": "DOE H2A analysis",
+      "countries": [
+        "US"
+      ],
+      "topic": "hydrogen economics/technical assumptions",
+      "evidence_ids": [
+        "doe_h2a",
+        "doe_h2fast",
+        "doe_hyblend"
+      ],
+      "primary_url": "https://www.hydrogen.energy.gov/program-areas/systems-analysis/h2a-analysis",
+      "data_class": "official model methodology page",
+      "rights_assessment": "exact model file/code and third-party input rights require review",
+      "priority": 2,
+      "recommended_use": "H2 production/feedstock/technical/economic assumption taxonomy; optional reference cases.",
+      "remaining_gate": "No workbook executed or copied; page common assumptions are 2016 USD and legacy tax assumptions, not current finance defaults or green H2 sale quotes.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_macro",
+      "title": "Federal Reserve H.15 / H.10 and BLS CPI",
+      "countries": [
+        "US"
+      ],
+      "topic": "finance/FX/inflation",
+      "evidence_ids": [
+        "fed_h15",
+        "fed_h10",
+        "bls_cpi",
+        "ust_yields",
+        "ust_yields2"
+      ],
+      "primary_url": "https://www.federalreserve.gov/releases/h15/",
+      "data_class": "official statistical release pages",
+      "rights_assessment": "check release-specific reuse and third-party exceptions",
+      "priority": 1,
+      "recommended_use": "Risk-free yield/FX/CPI references for explicitly dated finance assumptions.",
+      "remaining_gate": "Fed pages retrieved, no numerical series parsed; Treasury/BLS requests failed. SOFR or Treasury yield is not project WACC.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "us_tax",
+      "title": "IRS clean electricity investment/production credits and current law updates",
+      "countries": [
+        "US"
+      ],
+      "topic": "tax/incentives",
+      "evidence_ids": [
+        "irs_itc",
+        "irs_ptc",
+        "irs_obbb"
+      ],
+      "primary_url": "https://www.irs.gov/credits-deductions/clean-electricity-investment-credit",
+      "data_class": "official legal/tax guidance",
+      "rights_assessment": "reference legal guidance; no automatic eligibility",
+      "priority": 2,
+      "recommended_use": "Dated eligibility evidence, commencement/service dates and incentive assumptions.",
+      "remaining_gate": "Current law changes require competent review; do not copy fixed credit/phaseout assumptions from older ATB/H2A files.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "ca_oeb",
+      "title": "Ontario Energy Board rate schedules / open data",
+      "countries": [
+        "Canada"
+      ],
+      "topic": "tariff",
+      "evidence_ids": [
+        "oeb_rates",
+        "oeb_ogl",
+        "oeb_catalog"
+      ],
+      "primary_url": "https://www.oeb.ca/open-data/electricity-distribution-rates-databases",
+      "data_class": "official pages unavailable; catalogue search non-specific",
+      "rights_assessment": "not verified for relevant dataset; no inferred licence from irrelevant catalogue hits",
+      "priority": 2,
+      "recommended_use": "Distributor-specific approved industrial tariff and effective-date source.",
+      "remaining_gate": "503 on official pages; earlier small-customer XML does not cover hyperscale industrial tariffs.",
+      "existing_source_id": "na_oeb",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "ca_hydroone",
+      "title": "Hydro One rate and bill components",
+      "countries": [
+        "Canada"
+      ],
+      "topic": "tariff",
+      "evidence_ids": [
+        "hydroone_rates"
+      ],
+      "primary_url": "https://www.hydroone.com/rates-and-billing/rates-and-charges/electricity-pricing-and-costs",
+      "data_class": "official rate explanation page",
+      "rights_assessment": "resource-specific terms review",
+      "priority": 2,
+      "recommended_use": "Retail/wholesale supply, GA and delivery-component taxonomy.",
+      "remaining_gate": "Current page prominently RPP/TOU/ULO; do not apply small-customer rate to industrial load without actual class schedule.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "ca_ieso",
+      "title": "IESO public renewed-market price reports",
+      "countries": [
+        "Canada"
+      ],
+      "topic": "wholesale",
+      "evidence_ids": [
+        "ieso_directory",
+        "ieso_reports",
+        "ieso_lmp",
+        "ieso_da_csv",
+        "ieso_ozp_xml",
+        "ieso_ozp_guide",
+        "ieso_lmp_guide",
+        "ieso_terms2",
+        "ieso_renewal"
+      ],
+      "primary_url": "https://www.ieso.ca/en/Power-Data/Data-Directory",
+      "data_class": "actual nodal CSV / zonal XML samples",
+      "rights_assessment": "limited non-exclusive non-sublicensable non-transferable use/reproduction licence with notices; supplemental terms may apply",
+      "priority": 1,
+      "recommended_use": "Ontario supported region: separate post-May-2025 DA nodal LMP and capped Ontario zonal product, from legacy HOEP.",
+      "remaining_gate": "No blanket resale/common-distribution clearance; delivery vs creation dates, zone/node identity, currency and time convention must be certified.",
+      "existing_source_id": "na_ieso",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "ca_ieso_ga",
+      "title": "IESO Global Adjustment / Industrial Conservation Initiative",
+      "countries": [
+        "Canada"
+      ],
+      "topic": "tariff/peak allocation",
+      "evidence_ids": [
+        "ieso_ga",
+        "ieso_ici"
+      ],
+      "primary_url": "https://www.ieso.ca/en/Power-Data/Price-Overview/Global-Adjustment",
+      "data_class": "official rules and methodology",
+      "rights_assessment": "same scoped IESO terms; exact report obligations require review",
+      "priority": 1,
+      "recommended_use": "Class A peak-demand-factor versus Class B energy-based GA taxonomy and forecast/historical evidence.",
+      "remaining_gate": "Class A top five system peaks in base period allocate next adjustment-period costs; unsupported until exact history and bill algorithm pass.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "ca_ieso_procurement",
+      "title": "IESO long-term resource procurement",
+      "countries": [
+        "Canada"
+      ],
+      "topic": "contracts/awards",
+      "evidence_ids": [
+        "canada_ppa_procurement"
+      ],
+      "primary_url": "https://www.ieso.ca/Sector-Participants/Resource-Acquisition-and-Contracts/Long-Term-RFP-and-Expedited-Process",
+      "data_class": "official procurement catalogue",
+      "rights_assessment": "document-specific terms; not private PPA quote coverage",
+      "priority": 2,
+      "recommended_use": "Procurement products, terms and any explicitly published award facts.",
+      "remaining_gate": "Capacity procurement consideration is not automatically energy CAD/MWh; actual price fields not extracted.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "ca_aeso",
+      "title": "AESO API and demand transmission tariff",
+      "countries": [
+        "Canada"
+      ],
+      "topic": "wholesale/tariff",
+      "evidence_ids": [
+        "aeso_api",
+        "aeso_tariff",
+        "aeso_dts",
+        "aeso_terms"
+      ],
+      "primary_url": "https://www.aeso.ca/market/market-and-system-reporting/aeso-application-programming-interface-api/",
+      "data_class": "official API docs / actual 2026 DTS PDF",
+      "rights_assessment": "site permits personal/noncommercial/educational use with notices; other use requires written permission",
+      "priority": 2,
+      "recommended_use": "Alberta pool-price candidate and regulated transmission tariff components once permitted.",
+      "remaining_gate": "No actual pool-price API response; DTS effective 2026-01-01 excludes other delivery/supply/customer costs; no common commercial seed.",
+      "existing_source_id": "na_aeso",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "ca_hq",
+      "title": "Hydro-Qu\u00e9bec business tariffs",
+      "countries": [
+        "Canada"
+      ],
+      "topic": "tariff",
+      "evidence_ids": [
+        "hq_rates",
+        "hq_book"
+      ],
+      "primary_url": "https://www.hydroquebec.com/business/customer-space/rates/",
+      "data_class": "candidate official schedules; access403",
+      "rights_assessment": "fresh numeric access/rights not verified",
+      "priority": 2,
+      "recommended_use": "Industrial and mining applicability, energy/demand and special conditions.",
+      "remaining_gate": "No fresh Rate L price extracted; require current official source document and complete bill test.",
+      "existing_source_id": "na_hydroquebec",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "ca_bc",
+      "title": "BC Hydro electric tariff / industrial supplements",
+      "countries": [
+        "Canada"
+      ],
+      "topic": "tariff",
+      "evidence_ids": [
+        "bchydro_tariff",
+        "bc_fulltariff",
+        "bc_legal"
+      ],
+      "primary_url": "https://www.bchydro.com/toolbar/about/strategies-plans-regulatory/tariffs-terms-conditions/electric-tariff.html",
+      "data_class": "actual full tariff PDF and catalogue",
+      "rights_assessment": "site content/graphics restrictive, case-by-case permission; document-specific determination needed",
+      "priority": 2,
+      "recommended_use": "Current industrial/transmission TOU/critical peak/standby and customer-specific supplement inventory.",
+      "remaining_gate": "Current contents list transmission schedule1830; legacy1823 references also exist. Do not reuse old two-tier mapping. kVA and customer contracts need support.",
+      "existing_source_id": "na_bchydro",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "ca_bc_ppa",
+      "title": "BC Hydro calls for power and EPA renewals",
+      "countries": [
+        "Canada"
+      ],
+      "topic": "contracts/awards",
+      "evidence_ids": [
+        "bc_call",
+        "bc_epa",
+        "bc_sample_epa",
+        "bc_legal"
+      ],
+      "primary_url": "https://www.bchydro.com/work-with-us/selling-clean-energy/2024-call-for-power.html",
+      "data_class": "official procurement and renewal-program rules",
+      "rights_assessment": "same restrictive site policy; exact document terms review",
+      "priority": 2,
+      "recommended_use": "Contract/product taxonomy and explicitly published procurement results.",
+      "remaining_gate": "Selected sample is EPA renewal PROGRAM RULES, not an executed PPA or standard full contract; no contract prices extracted.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "ca_brc",
+      "title": "Business Renewables Centre Canada deal tracker",
+      "countries": [
+        "Canada"
+      ],
+      "topic": "PPA activity",
+      "evidence_ids": [
+        "brc_canada",
+        "brc_deals"
+      ],
+      "primary_url": "https://businessrenewables.ca/",
+      "data_class": "public deal activity / membership service",
+      "rights_assessment": "public page does not establish commercial redistribution rights",
+      "priority": 2,
+      "recommended_use": "Project/offtaker/capacity deal context and disclosure coverage.",
+      "remaining_gate": "MW/deal announcements are not a transparent price tape; do not invent strike from project capacity.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "ca_cer",
+      "title": "Canada Energy Regulator Energy Future 2026",
+      "countries": [
+        "Canada"
+      ],
+      "topic": "technical cost projections",
+      "evidence_ids": [
+        "cer_energy",
+        "canada_ogl"
+      ],
+      "primary_url": "https://www.cer-rec.gc.ca/en/data-analysis/canada-energy-future/",
+      "data_class": "official scenario cost source; existing shipped selection",
+      "rights_assessment": "Open Government Licence - Canada; scoped owner clearance G2 in merged PR499",
+      "priority": 1,
+      "recommended_use": "Reuse ca_federal overlay for Ontario/CM/2030 selected wind/PV/gas costs.",
+      "remaining_gate": "Not a Canada-wide delivered equipment quote; missing technology money rows refuse EU currency fallback.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "ca_boc_fx",
+      "title": "Bank of Canada Valet daily FX",
+      "countries": [
+        "Canada"
+      ],
+      "topic": "FX",
+      "evidence_ids": [
+        "boc_fx",
+        "boc_terms"
+      ],
+      "primary_url": "https://www.bankofcanada.ca/valet/observations/FXUSDCAD/json?start_date=2026-10-19&end_date=2026-10-20",
+      "data_class": "actual JSON sample",
+      "rights_assessment": "use/copy/distribution terms with notices/attribution/no endorsement; third-party exceptions require checking",
+      "priority": 1,
+      "recommended_use": "Explicit CAD-per-USD historical FX reference with observation date and source terms.",
+      "remaining_gate": "No executable quote; weekends/missing dates and inverse direction policies must be explicit; no silent currency conversion.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "ca_boc_rates",
+      "title": "Bank of Canada CORRA",
+      "countries": [
+        "Canada"
+      ],
+      "topic": "finance",
+      "evidence_ids": [
+        "boc_corra",
+        "boc_terms"
+      ],
+      "primary_url": "https://www.bankofcanada.ca/rates/interest-rates/corra/",
+      "data_class": "official reference-rate methodology/page",
+      "rights_assessment": "resource-specific terms and third-party exceptions",
+      "priority": 2,
+      "recommended_use": "CAD overnight funding benchmark, separate from project debt spreads.",
+      "remaining_gate": "No actual CORRA series parsed; not project WACC or a long-tenor lending offer.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "ca_statcan",
+      "title": "Statistics Canada CPI table18-10-0004-01",
+      "countries": [
+        "Canada"
+      ],
+      "topic": "inflation",
+      "evidence_ids": [
+        "statcan_cpi",
+        "statcan_licence"
+      ],
+      "primary_url": "https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1810000401",
+      "data_class": "official table and open licence",
+      "rights_assessment": "Statistics Canada Open Licence with attribution and exceptions",
+      "priority": 1,
+      "recommended_use": "Canadian CPI-based explicitly specified monetary rebasing; monthly series.",
+      "remaining_gate": "No numerical table imported; national CPI is not industrial equipment/O&M-specific escalation.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "ca_itc",
+      "title": "CRA clean economy investment tax credits",
+      "countries": [
+        "Canada"
+      ],
+      "topic": "tax/incentives",
+      "evidence_ids": [
+        "canada_itc"
+      ],
+      "primary_url": "https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/corporations/business-tax-credits/clean-economy-itc.html",
+      "data_class": "official programme guidance",
+      "rights_assessment": "reference legal guidance; eligibility not inferred",
+      "priority": 2,
+      "recommended_use": "Hydrogen/clean technology/electricity programme distinctions for finance review.",
+      "remaining_gate": "Province, ownership, dates, carbon intensity and labour/recapture conditions require project review.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "mx_cfe",
+      "title": "CFE industrial GDMTH / GDMTO tariffs",
+      "countries": [
+        "Mexico"
+      ],
+      "topic": "tariff",
+      "evidence_ids": [
+        "cfe_gdmth",
+        "cfe_gdmto",
+        "cfe_business",
+        "cfe_industrial",
+        "cfe_legacy_industry",
+        "mx_cne",
+        "mx_data_catalog"
+      ],
+      "primary_url": "https://app.cfe.mx/Aplicaciones/CCFE/Tarifas/TarifasCRENegocio/Tarifas/GranDemandaMTH.aspx",
+      "data_class": "official endpoints unavailable",
+      "rights_assessment": "no fresh resource access/rights verification",
+      "priority": 2,
+      "recommended_use": "Required division/month/voltage-class energy, capacity, distribution and demand billing inputs.",
+      "remaining_gate": "503/403: no current numeric tariff verified; no substitute from US/EIA averages. Legacy CRE URL is not current-regulator evidence.",
+      "existing_source_id": "na_cfe",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "mx_cenace",
+      "title": "CENACE public PML reports and service manual",
+      "countries": [
+        "Mexico"
+      ],
+      "topic": "wholesale",
+      "evidence_ids": [
+        "cenace_prices",
+        "cenace_pml_manual",
+        "cenace_original_sample"
+      ],
+      "primary_url": "https://www.cenace.gob.mx/Paginas/SIM/Reportes/PreEnerServConMDA.aspx",
+      "data_class": "actual historical original-publication ZIP/CSV sample",
+      "rights_assessment": "manual describes service for general public; commercial cache/redistribution rights still need exact determination",
+      "priority": 2,
+      "recommended_use": "Nodal SIN MDA example proves file structure; scope later SIN/BCA/BCS and DA/RT.",
+      "remaining_gate": "Original March2024 ZIP contains two publication versions, not final/current data. Service port8082 documented, not invoked; corrections/time/currency gates remain.",
+      "existing_source_id": "na_cenace",
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "mx_auctions",
+      "title": "CENACE long-term auction archives",
+      "countries": [
+        "Mexico"
+      ],
+      "topic": "contracts/awards",
+      "evidence_ids": [
+        "cenace_auctions",
+        "cenace_auction17",
+        "cenace_fallo2017",
+        "cenace_award2017",
+        "cenace_gov"
+      ],
+      "primary_url": "https://www.cenace.gob.mx/Paginas/SIM/SubastasLP.aspx",
+      "data_class": "official historic catalogue; selected files failed/capped",
+      "rights_assessment": "document-specific terms unresolved",
+      "priority": 3,
+      "recommended_use": "Historical long-term award product/energy/capacity/CEL references.",
+      "remaining_gate": "2017 award ZIP exceeded15MB research cap; earlier selected link was buyer-registration result, not award. No current PPA quote or exact award numeric validation.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "mx_banxico",
+      "title": "Banco de M\u00e9xico SIE API",
+      "countries": [
+        "Mexico"
+      ],
+      "topic": "FX/finance",
+      "evidence_ids": [
+        "banxico_api",
+        "banxico_doc",
+        "banxico_docs2"
+      ],
+      "primary_url": "https://www.banxico.org.mx/SieAPIRest/service/v1/",
+      "data_class": "root reachable but empty response; documentation URLs failed",
+      "rights_assessment": "actual series rights/access unverified",
+      "priority": 2,
+      "recommended_use": "Candidate FIX USD/MXN and reference rates after official series/schema review.",
+      "remaining_gate": "No usable series observed, no key created; {} root is not successful FX retrieval.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    },
+    {
+      "source_id": "mx_inegi",
+      "title": "INEGI INPC and terms",
+      "countries": [
+        "Mexico"
+      ],
+      "topic": "inflation",
+      "evidence_ids": [
+        "inegi_inpc",
+        "inegi_terms"
+      ],
+      "primary_url": "https://www.inegi.org.mx/temas/inpc/",
+      "data_class": "official page / terms; no numerical sample",
+      "rights_assessment": "review exact INEGI free-use provisions and third-party exceptions",
+      "priority": 2,
+      "recommended_use": "Mexico-specific CPI/money-year context.",
+      "remaining_gate": "JS/table not extracted; source series key, monthly frequency and base changes need validation.",
+      "existing_source_id": null,
+      "admitted_by_this_research": false
+    }
+  ]
+}

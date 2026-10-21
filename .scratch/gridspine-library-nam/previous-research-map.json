@@ -1,0 +1,83 @@
+{
+  "previous_pr": 491,
+  "previous_path": ".scratch/gridspine-library-research/research/northamerica-commercial-sources.json",
+  "meaning": "Reconciles19 previous IDs; do not add these to current source-family count. PR491 remains draft at check time.",
+  "mapping": [
+    {
+      "previous_source_id": "na_urdb",
+      "current_source_id": "us_urdb"
+    },
+    {
+      "previous_source_id": "na_pge_tariffs",
+      "current_source_id": "us_pge"
+    },
+    {
+      "previous_source_id": "na_eia_prices",
+      "current_source_id": "us_eia_retail"
+    },
+    {
+      "previous_source_id": "na_pjm",
+      "current_source_id": "us_pjm"
+    },
+    {
+      "previous_source_id": "na_caiso",
+      "current_source_id": "us_caiso"
+    },
+    {
+      "previous_source_id": "na_ercot",
+      "current_source_id": "us_ercot"
+    },
+    {
+      "previous_source_id": "na_miso",
+      "current_source_id": "us_miso"
+    },
+    {
+      "previous_source_id": "na_nyiso",
+      "current_source_id": "us_nyiso"
+    },
+    {
+      "previous_source_id": "na_isone",
+      "current_source_id": "us_isone"
+    },
+    {
+      "previous_source_id": "na_spp",
+      "current_source_id": "us_spp"
+    },
+    {
+      "previous_source_id": "na_bpa",
+      "current_source_id": "us_bpa"
+    },
+    {
+      "previous_source_id": "na_lbl_solar",
+      "current_source_id": "us_lbl_solar"
+    },
+    {
+      "previous_source_id": "na_ieso",
+      "current_source_id": "ca_ieso"
+    },
+    {
+      "previous_source_id": "na_aeso",
+      "current_source_id": "ca_aeso"
+    },
+    {
+      "previous_source_id": "na_oeb",
+      "current_source_id": "ca_oeb"
+    },
+    {
+      "previous_source_id": "na_hydroquebec",
+      "current_source_id": "ca_hq"
+    },
+    {
+      "previous_source_id": "na_bchydro",
+      "current_source_id": "ca_bc"
+    },
+    {
+      "previous_source_id": "na_cenace",
+      "current_source_id": "mx_cenace"
+    },
+    {
+      "previous_source_id": "na_cfe",
+      "current_source_id": "mx_cfe"
+    }
+  ]
+}
