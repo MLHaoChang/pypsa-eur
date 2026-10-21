@@ -1,0 +1,1 @@
+* Fix(coord): The merge gate (`scripts/coord/premerge.sh`) treats `pypsa-gui/backend/harness/README.md` as documentation and waives an overlap in `pypsa-gui/tool-error-kinds.json` when both sides only add lines, the trial merge is clean and the manifest test passes; the agent-coordination template gains the same append-only waiver in generic form.
