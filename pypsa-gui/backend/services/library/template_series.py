@@ -75,17 +75,44 @@ def note_values(meta: dict) -> dict[str, str]:
 
 
 def basis_conflicts(series: list["TemplateSeries"], finance: dict | None) -> list[str]:
-    """Series whose price basis or currency year differs from the template's finance block
-    (`FinanceInputs.price_basis` / `currency_year`), as "name: note vs finance"."""
+    """Series whose money basis does not fit the template's finance block, one reason each
+    (gatekeeper's rule table, IPP ticket 03). With `price_basis` noted:
+
+    * the series `currency` must equal `FinanceInputs.currency`;
+    * real series, nominal case: OK when the series `currency_year` is the finance one (base-year
+      money, escalated from that year: the owner's convention);
+    * nominal series, nominal case: OK only for a single-year series whose year is the finance
+      `currency_year` (a multi-year nominal series would be escalated a second time);
+    * nominal series, real case: refused (it would need deflating, never done silently);
+    * real series, real case: the `currency_year`s must match.
+    A series with no money notes (a share) is not checked."""
     if not finance:
         return []
+    f_basis = str(finance.get("price_basis") or "nominal")
+    f_year = finance.get("currency_year")
+    f_cur = str(finance.get("currency") or "EUR")
     out = []
     for ts in series:
         notes = note_values(ts.meta)
-        for key in ("price_basis", "currency_year"):
-            if key in notes and finance.get(key) is not None and \
-                    str(finance[key]) != notes[key]:
-                out.append(f"{ts.name}: {key} {notes[key]} vs finance {finance[key]}")
+        basis = notes.get("price_basis")
+        if basis is None:
+            continue
+        if notes.get("currency", f_cur) != f_cur:
+            out.append(f"{ts.name}: currency {notes['currency']} vs finance {f_cur}")
+        year = notes.get("currency_year")
+        same_year = year is not None and f_year is not None and str(year) == str(f_year)
+        if basis == "real":
+            if not same_year:
+                out.append(f"{ts.name}: real in {year} money vs finance currency_year {f_year}")
+        elif basis == "nominal" and f_basis == "real":
+            out.append(f"{ts.name}: a nominal series in a real case would need deflating")
+        elif basis == "nominal":
+            years = sorted(set(pd.DatetimeIndex(ts.series.index).year))
+            if not (same_year and years == [int(f_year)]):
+                out.append(f"{ts.name}: a nominal series must be the single year "
+                           f"{f_year} (spans {years[0]}–{years[-1]}); it would be escalated twice")
+        else:
+            out.append(f"{ts.name}: price_basis {basis!r} is neither real nor nominal")
     return out
 
 
