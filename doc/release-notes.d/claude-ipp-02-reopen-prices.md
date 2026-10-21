@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A project created from a template that ships price series (the Renewables IPP example) now keeps its bound prices in `network.nc` from the start, so reopening it before its first save (after a restart or from another tab) no longer fails the preflight with "export price is not established".

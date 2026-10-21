@@ -87,7 +87,7 @@ const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip:
   { id: 'flows',      label: 'Energy flow',        Icon: Workflow,         tip: 'Where the site\'s energy came from, what it passed through and where it went — Source → Via → Destination in MWh, with a CSV export' },
   { id: 'loadshape',  label: 'Load shape',         Icon: CalendarClock,    tip: 'How the site\'s load and grid exchange are shaped in time — import and export heatmaps, a one-week profile, monthly and annual site energy' },
   { id: 'prices',     label: 'Prices',             Icon: DollarSign,       tip: 'Marginal prices, duration curve, drivers', expertOnly: true },
-  { id: 'economics',  label: 'Economics',          Icon: Wallet,           tip: 'Per-asset revenue, profit, LCOE/LCOS — by group or by individual asset', expertOnly: true },
+  { id: 'economics',  label: 'Asset economics',    Icon: Wallet,           tip: 'Per-asset revenue, profit, LCOE/LCOS — by group or by individual asset', expertOnly: true },
   { id: 'emissions',  label: 'Emissions',          Icon: Cloud,            tip: 'CO₂ totals, cap shadow price, per-carrier breakdown', expertOnly: true },
   { id: 'curtailment',label: 'Curtailment',        Icon: Scissors,         tip: 'Renewable energy rejected by the LP — total + per-carrier + time series', expertOnly: true },
   { id: 'lostload',   label: 'Lost load',          Icon: AlertTriangle,    tip: 'VOLL slack dispatch (unserved demand) — per-carrier and per-bus breakdown', expertOnly: true },

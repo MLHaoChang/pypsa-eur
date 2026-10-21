@@ -138,3 +138,14 @@ describe('the Summary tab follows the tile standard (UX overhaul S3b)', () => {
     expect(title.className).not.toMatch(/uppercase/)
   })
 })
+
+describe('the Summary hands on (UX-flow #25)', () => {
+  it('offers Reports and Export as the next step', async () => {
+    useUIStore.setState({ activeSlidePanel: 'results', ioModalRequest: null })
+    renderTab()
+    fireEvent.click(await screen.findByTestId('summary-open-export'))
+    expect(useUIStore.getState().ioModalRequest).toBe('export')
+    fireEvent.click(screen.getByTestId('summary-open-reports'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('reports')
+  })
+})
