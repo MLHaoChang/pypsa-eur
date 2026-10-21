@@ -857,7 +857,7 @@ export default function SolverSettings() {
       {/* ── Stress scenarios (the registry the B/C sweep reads) ─── */}
       <section className="border border-border rounded" data-testid="solver-stress">
         <div className="px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted">
-          Stress scenarios
+          Stress conditions
         </div>
         <div className="p-3"><StressScenarioEditor project={currentProject} /></div>
       </section>

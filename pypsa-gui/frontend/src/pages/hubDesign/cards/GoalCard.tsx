@@ -14,6 +14,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { blockerMessage } from '../../../utils/blockerMessage'
 import { nk } from '../../../utils/queryKeys'
 import { buildEhStudyBody, ehStudyQueryKeys } from '../../results/EhReferenceDesignPanel'
+import StressScenarioEditor from '../../results/StressScenarioEditor'
 import { useHubDesignStore } from '../hubDesignStore'
 import { VOLL_TEXT } from '../delegate'
 import { CardShell, DelegateButton } from '../shared/CardShell'
@@ -125,6 +126,14 @@ export function GoalCard() {
           </label>
         )}
       </div>
+
+      {/* The same editor Solver settings mounts: one editor for the stress conditions. */}
+      {advanced && (
+        <div data-testid="hub-goal-stress" className="flex flex-col gap-1">
+          <span className="text-[12px] font-semibold text-text">Stress conditions</span>
+          <StressScenarioEditor project={project} />
+        </div>
+      )}
 
       {/* A set price is a "More settings" item; one that is missing blocks the run, so it stays in view
           (UX review L3). */}

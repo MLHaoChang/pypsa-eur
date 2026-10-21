@@ -5,7 +5,7 @@
 // "", an expert row's edit that must rewrite that row instead, the add/delete
 // round-trip, and the sweep button's running/error states.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import FmeaTab from './FmeaTab'
@@ -308,13 +308,29 @@ it('warns, with the solver\'s word, when the plan was not put back', async () =>
   }
 })
 
-it('lists the stress scenarios read-only and links to Solver settings, where they are edited', async () => {
+it('lists the stress scenarios read-only and links to Scenarios & optimisation, where they are edited', async () => {
   vi.mocked(resultsApi.getStressProfilePacks).mockResolvedValue({ packs: [] })
   renderTab()
   const list = await screen.findByTestId('stress-pointer-list')
   await waitFor(() => expect(list.textContent).toMatch(/cold_snap/))
   expect(screen.queryByTestId('stress-editor')).toBeNull()
   expect(screen.queryByTestId('stress-add')).toBeNull()
+})
+
+it('the pointer follows the section: Expert opens Solver settings, Guided the section-8 card', async () => {
+  vi.mocked(resultsApi.getStressProfilePacks).mockResolvedValue({ packs: [] })
+  const { useUIStore: ui } = await import('../../store/uiStore')
+  ui.setState({ uiMode: 'guided', activeSlidePanel: 'results', currentProject: 'Demo' })
+  renderTab()
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit stress scenarios' }))
+  expect(ui.getState().activeSection).toBe('scenarios')
+  expect(ui.getState().activeSlidePanel).toBeNull()
+  cleanup()
+  ui.setState({ uiMode: 'expert', activeSlidePanel: 'results' })
+  renderTab()
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit in Scenarios & optimisation' }))
+  expect(ui.getState().activeSlidePanel).toBe('simparams')
+  expect(ui.getState().activeSection).toBe('scenarios')
 })
 
 it('refuses to sweep without a readable stress registry (E2E review m4)', async () => {
