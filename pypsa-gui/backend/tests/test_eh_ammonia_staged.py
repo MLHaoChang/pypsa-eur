@@ -246,10 +246,18 @@ def _runs(u: np.ndarray, value: float) -> list[int]:
     return out
 
 
+def _electrolysis_at_the_pre_gs2b_price(n):
+    """The candidates' electrolysers as priced before GS-2b (the row x the 0.68 efficiency). At the
+    row's own price per MW of electrical input no 2027 electrolyser is built and the loop never
+    runs in the 2027 week, so the restart-time rule needs this cheaper plan to be exercised."""
+    for c in [c for c in n.links.index if c.startswith("electrolyser_new_")]:
+        n.links.loc[c, ["overnight_cost", "fom_cost"]] *= 0.68
+
+
 @pytest.mark.live_solve
 def test_in_the_binary_window_every_stop_lasts_the_restart_time(reset_backend):
     # 2027 delivers 50 t/d, below the 64 t/d minimum load: the loop has to cycle.
-    n, _, _ = _plan("base")
+    n, _, _ = _plan("cheap_electrolysis", edit=_electrolysis_at_the_pre_gs2b_price)
     models, payload = _windows(n)
     assert payload["status"] == "ok", payload["message"]
     m, sns, _ = models[2027]["bin"]

@@ -515,3 +515,32 @@ def test_a_project_made_from_an_old_pin_still_resolves_its_pack():
         assert loader.parse_pack_stamp(pack.stamp) == (pack.pack_id, version, pack.hash)
         tid = next(iter(pack.tariffs))
         assert pack.tariff_is_unchanged(pack.pack_tariff(tid))
+
+
+def test_opening_a_saved_project_never_reprices_it_from_the_pack(client, api_project, monkeypatch):
+    """Saved projects keep the costs written on their networks: nothing reads the pack or prices an
+    asset while a project is activated, evicted and reloaded from disk (GS-2b gatekeeper, d)."""
+    from services.library.defaults_pack import pricing
+    from services.pypsa_service import PyPSAService
+
+    calls = []
+
+    def boom(*a, **k):
+        calls.append((a, k))
+        raise AssertionError("a pack read while opening a project")
+
+    name = api_project("alpha")
+    r = client.post("/api/network/generators",
+                    json={"name": "G1", "bus": "B1", "p_nom": 5.0, "capital_cost": 123.0})
+    assert r.status_code in (200, 201), r.text
+    monkeypatch.setattr(pricing, "price_from_pack", boom)
+    monkeypatch.setattr(pricing, "load_defaults_pack", boom)
+    monkeypatch.setattr(loader, "load_defaults_pack", boom)
+    assert client.post(f"/api/projects/{name}/activate").status_code == 200
+    assert client.post(f"/api/projects/{name}", params={"expect": name}).status_code == 200
+    monkeypatch.setattr(PyPSAService, "RESIDENT_CAP", 0)
+    PyPSAService._evict_if_over_cap()
+    assert client.get(f"/api/projects/{name}").status_code == 200        # reloaded from disk
+    gens = client.get("/api/network/generators").json()
+    assert [g["capital_cost"] for g in gens if g["name"] == "G1"] == [123.0]
+    assert calls == []
