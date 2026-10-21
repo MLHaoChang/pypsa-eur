@@ -437,3 +437,72 @@ def test_a_job_replaced_before_settlement_never_completes(oj_grid, monkeypatch):
     assert chat_tools.get_task(task_id)['completed_steps'] == 2
     assert [(d['job_id'], d['status']) for d in continuation.due(session)] == [(job, 'unknown')]
     assert len(oj_grid.starts) == 2
+
+
+def test_a_quick_solve_goes_on_in_the_same_turn_with_no_continuation(oj_grid):
+    from harness import continuation
+
+    oj_grid.open.set()  # nothing holds the solve: it settles within the grace
+    steps = _plan_steps(_plan())[:4] + [lambda r: ('get_loadflow_summary', r[3]['_task']['next_step']['args']),
+                                        lambda r: (None, {})]
+    runs_before = chat_tools.list_project_runs(status='completed')['total_count']
+    calls, results, frames, session = run_journey(*PROVIDERS[1], steps, MESSAGE, on_frame=_approve([]))
+    assert calls == ['start_task', 'update_component', 'update_component', 'run_simulation',
+                     'get_loadflow_summary', None]
+    assert results[3]['running'] is False and results[3]['_task']['next_step']['id'] == 'walk'
+    assert results[4]['run']['is_current'] is True
+    # The turn that held the job went on with the plan: no second walk follows.
+    assert continuation.due(session) == []
+    refused = list(chat_service.run_turn(session, '', continuation_job_id=results[3]['job_id']))
+    assert refused[0][1]['error_kind'] == 'continuation_unavailable'
+    assert chat_tools.list_project_runs(status='completed')['total_count'] == runs_before + 1
+    assert len(oj_grid.starts) == 1
+
+
+def test_a_process_restart_loses_the_job_and_continues_once_uncertain(oj_grid):
+    """The job registry dies with the process: the step settles uncertain, the
+    conversation is told once, and nothing runs again."""
+    from harness import continuation, job_adapters
+
+    calls, results, frames, session, cards, runs_before = _start(PROVIDERS[1], oj_grid)
+    job, task_id = results[3]['job_id'], results[0]['task_id']
+    with job_adapters._LOCK:
+        job_adapters._FOREGROUND.pop(job)  # what a restart leaves: the task file, no handle
+    due = continuation.due(session)
+    assert [(d['job_id'], d['status']) for d in due] == [(job, 'unknown')]
+    chat_tools.set_chat_session(session)
+    task = chat_tools.get_task(task_id)
+    assert task['status'] == 'needs_review' and task['next_step']['status'] == 'uncertain'
+    calls, results, frames, _ = run_journey(*PROVIDERS[1], [lambda r: ('get_task', {'task_id': task_id}),
+                                                            lambda r: (None, {})],
+                                            '', session=session, continuation_job_id=job)
+    assert calls == ['get_task', None]
+    assert continuation.due(session) == []
+    # Still waiting would be a second run; the run step needs explicit reconciliation.
+    calls, results, frames, _ = run_journey(*PROVIDERS[1], [lambda r: ('run_simulation', {}), lambda r: (None, {})],
+                                            'Run it again.', session=session, on_frame=_approve([]))
+    errors = [d for e, d in frames if e == 'tool_error']
+    assert errors and errors[0]['error_kind'] == 'task_step_uncertain'
+    assert len(oj_grid.starts) == 1
+
+
+def test_a_failed_solve_continues_with_its_failure(oj_grid, monkeypatch):
+    import routers.simulation as simulation
+
+    from harness import continuation
+
+    monkeypatch.setattr(continuation, 'GRACE_SECONDS', 0.2)
+    oj_grid.hold_seconds = 1.0  # past the grace, then HiGHS reports infeasible
+    monkeypatch.setattr(simulation, 'run_simulation', oj_grid.wrap(lambda *a, **k: ('failed', 'infeasible')))
+    calls, results, frames, session, cards, runs_before = _start(PROVIDERS[1], oj_grid)
+    due = _await_due(session)
+    assert [(d['status'], d['message'].split(' (')[0]) for d in due] == [
+        ('failed', f"job {results[3]['job_id']} finished: failed")]
+    calls, results, frames, _ = run_journey(
+        *PROVIDERS[1], [lambda r: ('get_simulation_log_history', {}), lambda r: (None, {})], '',
+        session=session, continuation_job_id=due[0]['job_id'])
+    assert calls == ['get_simulation_log_history', None]
+    chat_tools.set_chat_session(session)
+    task = chat_tools.get_task(due[0]['task_id'])
+    assert task['next_step']['id'] == 'run' and task['next_step']['status'] == 'failed'
+    assert chat_tools.list_project_runs(status='completed')['total_count'] == runs_before

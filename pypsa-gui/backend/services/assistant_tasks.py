@@ -280,17 +280,14 @@ def admit(session, tool, args):
             if not _same_args(tool, expected, args):
                 continue
             if later is step and step["status"] == "waiting":
-                _refuse("task_step_waiting",
-                        f"Step {step['id']} is waiting on job {step['job']['job_id']}; "
-                        "the conversation continues when it ends.")
+                raise HTTPException(409, {"error_kind": "task_step_waiting", "message":
+                                          f"Step {step['id']} is waiting on job {step['job']['job_id']}; "
+                                          "the conversation continues when it ends."})
             if later is not step:
-                _refuse("task_step_out_of_order",
-                        f"Step {later['id']} ({tool}) cannot start before step {step['id']} "
-                        f"({step['tool']}) completes; it is {step['status']}.")
+                raise HTTPException(409, {"error_kind": "task_step_out_of_order", "message":
+                                          f"Step {later['id']} ({tool}) cannot start before step {step['id']} "
+                                          f"({step['tool']}) completes; it is {step['status']}."})
             return
-
-
-_JOB_TOOLS = ("run_simulation", "run_ac_pf_stage")
 
 
 def await_job(ticket, job_id, session_id):
@@ -347,6 +344,18 @@ def _settle(task, step, native_status, step_status, result):
     if not cancelled:
         task["status"] = ("completed" if not _next(task) else
                           "needs_review" if step_status == "uncertain" else "ready")
+
+
+def continued_in_turn(path, ticket):
+    """The job settled while its turn still held it: that turn goes on with
+    the plan, so no separate continuation follows."""
+    with _LOCK:
+        task = json.loads(Path(path).read_text())
+        step = next((s for s in task["steps"] if s["id"] == ticket[1]), None)
+        if step is not None and step.get("attempt_id") == ticket[2] and \
+                (step.get("job") or {}).get("continuation") == "due":
+            step["job"]["continuation"] = "delivered"
+            _save(Path(path), task)
 
 
 def _owned_tasks():
@@ -435,6 +444,8 @@ def begin_step(session, tool, args):
                 if done["status"] == "completed" and done["tool"] == tool and _same_args(tool, _resolve(done["args"], task["steps"]), args):
                     _refuse("task_step_already_completed", "This task step already completed; resume the next step.")
             return None
+        if step["status"] == "waiting":
+            _refuse("task_step_waiting", "This step is waiting on its job; it never runs twice.")
         if step["status"] in ("running", "uncertain"):
             _refuse("task_step_uncertain", "Verify the previous effect and explicitly reconcile this step before repeating it.")
         step["status"], step["session_id"] = "running", session.session_id

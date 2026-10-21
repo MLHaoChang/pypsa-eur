@@ -2634,9 +2634,9 @@ def _dispatch_real_tool_call(
         if task_ticket is not None and tool_name in ("run_simulation", "run_ac_pf_stage"):
             # The worker before this call: a job bound to it is no new solve.
             from services.pypsa_service import PyPSAService
-            _ctx = turn_ctx or PyPSAService.get_active_context()
-            with _ctx.solver_state_lock:
-                prior_worker = _ctx.solver_state.get("thread")
+            solver_ctx = turn_ctx or PyPSAService.get_active_context()
+            with solver_ctx.solver_state_lock:
+                prior_worker = solver_ctx.solver_state.get("thread")
         yield "tool_running", {"tool_use_id": tool_use_id, "tool_name": tool_name}
         # Chat edits reach the same handlers as HTTP, but call them DIRECTLY —
         # so `undo_snapshot_middleware` never runs and, before this, NOTHING
@@ -2914,6 +2914,7 @@ def _dispatch_real_tool_call(
                 status = active_ctx.solver_state.get("status")
             base = result if isinstance(result, dict) else {"result": result}
             job_id = None
+            plan_settled = False
             if status == "running":
                 from services import chat_tools as _ct
                 owner = getattr(session, "owner_user_id", None) or _ct.acting_user_id()
@@ -2958,15 +2959,17 @@ def _dispatch_real_tool_call(
                             "tool_use_id": tool_use_id, "tool_name": tool_name, **progress,
                         }
                     if settled.is_set():
-                        status = "settled"  # the plan step carries the job's outcome
+                        # This turn goes on with the plan: the step carries the
+                        # job's outcome and no separate continuation follows.
+                        assistant_tasks.continued_in_turn(task_path, task_ticket)
+                        plan_settled = True
             result = {
                 **base,
                 "status": base.get("status") or "started",
-                "running": status == "running",
+                "running": status == "running" and not plan_settled,
                 "kind": kind,
                 "monitor": "get_simulation_status",
-                "detached_progress": task_ticket is None or status == "running",
-                **({"final_status": status} if task_ticket is not None and job_id is None else {}),
+                "detached_progress": task_ticket is None or (status == "running" and not plan_settled),
                 **({"job_id": job_id} if job_id else {}),
             }
         except Exception as exc:  # noqa: BLE001 — enrich is best-effort

@@ -332,7 +332,7 @@ def _check_value(component_class: str, key: str, value, field: dict) -> None:
 RATINGS = frozenset(f"{base}{suffix}" for base in ("s_nom", "p_nom", "e_nom") for suffix in ("", "_min", "_max"))
 
 
-def _check_rating(component_class: str, name: str, key: str, value, field: dict | None) -> None:
+def _check_rating(name: str, key: str, value, field: dict | None) -> None:
     if key in RATINGS and isinstance(value, (int, float)) and not isinstance(value, bool) and value < 0:
         unit = (field or {}).get("unit_storage") or ""
         _refuse("invalid_edit_value", f"{name} {key} cannot be negative ({value:g} {unit}".rstrip()
@@ -406,7 +406,7 @@ def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Ca
     for name, attrs in targets:
         for key, value in attrs.items():
             _check_value(component_class, key, value, fields.get(key))
-            _check_rating(component_class, name, key, value, fields.get(key))
+            _check_rating(name, key, value, fields.get(key))
     active = PyPSAService.get_active_context()
     attr = chat_tools._GENERIC_CRUD_ATTRS.get(component_class) or {
         "Bus": "buses", "Transformer": "transformers", "GlobalConstraint": "global_constraints"}[component_class]

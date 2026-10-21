@@ -52,7 +52,8 @@ def follow_job(ctx, run_token, task_path, ticket, job_id, *, prior_worker=None) 
     it (or to none) has no solve of its own, so its outcome is unknown."""
     settled = threading.Event()
     binding = job_adapters._ACTIVITY_BINDINGS.get(job_id)
-    no_origin = binding is None or binding[2] is None or binding[2] is prior_worker
+    # A foreground solve is bound to its worker thread (or, without one, its start time).
+    no_origin = binding is None or (binding[2] is prior_worker if binding[2] is not None else binding[3] is None)
 
     def run():
         try:

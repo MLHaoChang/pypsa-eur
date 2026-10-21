@@ -732,8 +732,8 @@ completes only when its `_edit_receipt` is `verified`, otherwise it is
 `uncertain`. An edit card refuses a negative rating (`s_nom`, `p_nom`,
 `e_nom` and their `_min`/`_max`) as `invalid_edit_value`.
 
-A `run_simulation`/`run_ac_pf_stage` step's step is `waiting` on its `fg:`
-job, the plan `waiting_job`, durably in the task file. Its own thread
+A `run_simulation`/`run_ac_pf_stage` step is `waiting` on its `fg:` job, the
+plan `waiting_job`, durably in the task file. Its own thread
 (`continuation.follow_job`, not the session's progress monitor, which stops
 when the chat closes) follows the job and settles the step from that job's own
 record, never from live state, and without the network lock: `completed` only
@@ -742,12 +742,12 @@ run manifest is published and the manifest carries its objective and input
 fingerprint (the step keeps `run_id`, `objective` and `fingerprint`, so a later
 step can reference `$run.run_id`); `failed` for failed, aborted or unknown
 (including a job bound to no new worker); `uncertain` when it completed but its
-record cannot be verified, or this process never registered it (a restart).
-The turn waits up to `continuation.GRACE_SECONDS` (10 s): a quick solve settles
-and the plan goes on in the same turn; a longer one releases the turn like an
-ordinary foreground solve. Nothing re-runs by itself; `resolve_task_step` stays
-the only reconciliation. A start or contradictory still-running receipt
-without a job still cannot complete a step.
+record cannot be verified, or this process never registered it (a restart). The
+turn waits up to `continuation.GRACE_SECONDS` (10 s): a quick solve settles and
+the plan goes on in the same turn, with no separate continuation; a longer one
+releases the turn like an ordinary foreground solve. Nothing re-runs by itself;
+`resolve_task_step` stays the only reconciliation. A start or contradictory
+still-running receipt without a job still cannot complete a step.
 
 When the job ends, one continuation is due to the session that started it
 (`continuation.py`). `GET /api/chat/{session_id}/continuations` lists them;

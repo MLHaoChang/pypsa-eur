@@ -870,6 +870,14 @@
     "invalid_continuation": {
       "surface": "inline",
       "why": "LC-12: /stream carried continuation_job_id together with typed words, attachments, a script or checked fields. A continuation is written by the harness, never by the user; the request is refused before any turn."
+    },
+    "task_step_out_of_order": {
+      "surface": "inline",
+      "why": "LC-05: a plan step was called before an earlier step completed (for example the run after a refused edit). Refused before any card or job; the detail names the step it waits on, and the assistant says which earlier step failed and why."
+    },
+    "task_step_waiting": {
+      "surface": "inline",
+      "why": "LC-12: the plan step is already waiting on its job, so it never runs twice. Refused before any card; the conversation continues when the job ends."
     }
   }
 }
