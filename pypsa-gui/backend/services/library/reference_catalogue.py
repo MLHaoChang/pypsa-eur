@@ -17,6 +17,7 @@ from services.library.defaults_pack.loader import (
     DefaultsPack,
     DefaultsPackError,
     DefaultsPackLookupError,
+    available_versions,
     load_defaults_pack,
 )
 
@@ -97,6 +98,19 @@ def list_references() -> list[ReferenceSummary]:
     return rows
 
 
+def _load_shipped_pack(version: str) -> DefaultsPack | None:
+    """The shipped pack `version`, or None. The version string handed to the loader is
+    the shipped one from `available_versions()`, never the caller's (which may come from
+    a request), so no request value reaches a file path."""
+    shipped = next((v for v in available_versions() if v == version), None)
+    if shipped is None:
+        return None
+    try:
+        return load_defaults_pack(shipped)
+    except (DefaultsPackError, DefaultsPackLookupError):
+        return None
+
+
 def pack_for_asset(provenance: dict[str, dict] | None) -> tuple[DefaultsPack, PackChoice]:
     """The pack an asset would be priced from: the one its `overnight_cost` provenance
     names, else the latest generic version. A named pack this build cannot load falls
@@ -105,10 +119,7 @@ def pack_for_asset(provenance: dict[str, dict] | None) -> tuple[DefaultsPack, Pa
     m = _parse_pack_source(source)
     if m is not None:
         pack_id, version, digest = m
-        try:
-            pack = load_defaults_pack(version)
-        except (DefaultsPackError, DefaultsPackLookupError):
-            pack = None
+        pack = _load_shipped_pack(version)
         if pack is not None and pack.pack_id == pack_id and pack.hash.startswith(digest):
             return pack, PackChoice(stamp=pack.stamp, version=pack.version,
                                     chosen_by="asset_provenance")
