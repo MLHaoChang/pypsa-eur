@@ -1747,7 +1747,9 @@ def _check_safety_tier_off_critical_bus(n) -> list[Issue]:
     links = n.links
     if links.empty or "criticality_tier" not in links.columns:
         return []
-    crit = set(n.buses.index[n.buses["eh_critical"].fillna(False).astype(bool)]) \
+    from services.adequacy.eh_columns import _as_bool
+
+    crit = {b for b in n.buses.index if _as_bool(n.buses.at[b, "eh_critical"])} \
         if "eh_critical" in n.buses.columns else set()
     safety = links.index[links["criticality_tier"].astype(str).str.strip() == "safety"]
     return [_warn("safety_tier_off_critical_bus", "Link", str(name),

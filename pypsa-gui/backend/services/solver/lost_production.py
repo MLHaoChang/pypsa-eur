@@ -13,21 +13,19 @@ is what every reader of the shortfall reads when no role Generator exists (``pro
     {"p_t": DataFrame (snapshots × bus, bus units per hour), "value": {bus: EUR per bus unit},
      "key": {bus: solve key}}
 
-The solve key (``capture_key``) holds the snapshots and the value the solve used. A network edited since then
-(other snapshots, another value, a hand-built shortfall added) reads the capture as stale, never as current.
+``stamp`` writes the key once the solve's transforms are restored (``process_products.capture_key``: the inputs the
+product's shortfall depends on). A network edited since then reads the capture as stale, never as current.
 
-A hand-built shortfall Generator wins: its bus gets no slack and no capture. A value at or below the bus's buy-in
-(the highest of its dense marginal cost: a grey purchase carries its CO2 in a series) is refused.
+A hand-built shortfall Generator wins: its bus gets no slack, no capture and no refusal. A value at or below the bus's
+buy-in (the highest of its dense marginal cost: a grey purchase carries its CO2 in a series) is refused.
 """
 from __future__ import annotations
-
-import hashlib
-import math
 
 import pandas as pd
 
 from models.process_unit import product_role_generators
 from services.adequacy.slack import lost_slack_name
+from services.process_products import bus_values, capture_key
 from services.pypsa_service import PyPSAService
 
 #: The carrier of the solve-time slack (added for the solve when the network has none).
@@ -38,33 +36,26 @@ class LostProductionRefused(ValueError):
     """A bus's lost-production value at or below what its buy-in costs: the LP would buy by shedding."""
 
 
-def bus_values(n) -> dict[str, float]:
-    """{bus: lost_production_value} for every bus with a finite value above 0."""
-    if "lost_production_value" not in n.buses.columns:
-        return {}
-    v = pd.to_numeric(n.buses["lost_production_value"], errors="coerce")
-    return {str(b): float(x) for b, x in v.items() if math.isfinite(x) and x > 0}
-
-
-def capture_key(n, bus: str, value: float) -> str:
-    """What the capture was solved on: the snapshots and the value."""
-    blob = f"{bus}|{value!r}|{len(n.snapshots)}|{n.snapshots[0]!r}|{n.snapshots[-1]!r}"
-    return hashlib.sha256(blob.encode()).hexdigest()[:16]
-
-
-def _delivery(n, bus: str) -> pd.Series:
+def _delivery_bound(n, bus: str) -> pd.Series:
+    """The most the bus can fall short of in each snapshot: its loads' p_set, never negative."""
     loads = n.loads.index[n.loads.bus.astype(str) == bus]
     if len(loads) == 0:
         return pd.Series(0.0, index=n.snapshots)
     return n.get_switchable_as_dense("Load", "p_set")[loads].sum(axis=1).clip(lower=0.0)
 
 
+def _slack_buses(n) -> dict[str, float]:
+    """{bus: value} of the buses that get a slack: a value and no hand-built shortfall Generator."""
+    hand_built = {str(n.generators.at[g, "bus"]) for g in product_role_generators(n, "shortfall")}
+    return {b: v for b, v in bus_values(n).items() if b not in hand_built and b in n.buses.index}
+
+
 def refusals(n) -> list[tuple[str, str]]:
-    """(bus, why) for every bus value that cannot be solved: a value at or below the buy-in on its bus."""
+    """(bus, why) for every slack that cannot be solved: a value at or below the buy-in on its bus."""
     out = []
     buy = product_role_generators(n, "buy_in")
     mc = n.get_switchable_as_dense("Generator", "marginal_cost") if len(buy) else None
-    for bus, value in bus_values(n).items():
+    for bus, value in _slack_buses(n).items():
         for g in (g for g in buy if str(n.generators.at[g, "bus"]) == bus):
             top = float(mc[g].max())
             if value <= top:
@@ -76,27 +67,23 @@ def refusals(n) -> list[tuple[str, str]]:
 
 def apply(n, phase, undo_actions: list, captured: dict) -> None:
     """Add the slacks (module docstring); the restore callback appended to `undo_actions` captures and removes."""
-    values = bus_values(n)
-    if not values:
+    buses = _slack_buses(n)
+    if not buses:
         return
     refused = refusals(n)
     if refused:
         raise LostProductionRefused(" ".join(why for _bus, why in refused))
-    hand_built = {str(n.generators.at[g, "bus"]) for g in product_role_generators(n, "shortfall")}
-    names, buses, p_noms, max_pu, costs = [], [], [], {}, []
-    for bus, value in sorted(values.items()):
+    rows = []                                   # (name, bus, value, p_nom, p_max_pu)
+    for bus, value in sorted(buses.items()):
         name = lost_slack_name(bus)
-        if bus in hand_built or bus not in n.buses.index or name in n.generators.index:
+        if name in n.generators.index:
             continue
-        demand = _delivery(n, bus)
+        demand = _delivery_bound(n, bus)
         p_nom = max(float(demand.max()), 1.0)
-        names.append(name)
-        buses.append(bus)
-        p_noms.append(p_nom)
-        costs.append(value)
-        max_pu[name] = (demand / p_nom).clip(upper=1.0)
-    if not names:
+        rows.append((name, bus, value, p_nom, (demand / p_nom).clip(upper=1.0)))
+    if not rows:
         return
+    names = [r[0] for r in rows]
     added_carrier = CARRIER not in n.carriers.index
     added_column = "process_role" not in n.generators.columns
     for name in names:
@@ -104,8 +91,9 @@ def apply(n, phase, undo_actions: list, captured: dict) -> None:
     try:
         if added_carrier:
             n.add("Carrier", CARRIER)
-        n.add("Generator", names, bus=buses, p_nom=p_noms, marginal_cost=costs, carrier=CARRIER,
-              p_max_pu=pd.DataFrame(max_pu, index=n.snapshots))
+        n.add("Generator", names, bus=[r[1] for r in rows], p_nom=[r[3] for r in rows],
+              marginal_cost=[r[2] for r in rows], carrier=CARRIER,
+              p_max_pu=pd.DataFrame({r[0]: r[4] for r in rows}, index=n.snapshots))
         if added_column:
             n.generators["process_role"] = ""
         n.generators.loc[names, "process_role"] = "shortfall"
@@ -113,30 +101,35 @@ def apply(n, phase, undo_actions: list, captured: dict) -> None:
         for name in names:
             PyPSAService.unmark_transient("Generator", name)
         raise
-    phase(f"Added {len(names)} lost-production slack(s) at the buses' lost-production value "
-          f"({', '.join(f'{b} {c:g}' for b, c in zip(buses, costs))}).")
+    phase(f"Added {len(rows)} lost-production slack(s) at the buses' lost-production value "
+          f"({', '.join(f'{r[1]} {r[2]:g}' for r in rows)}).")
 
-    def _capture_and_remove(names=tuple(names), buses=tuple(buses), costs=tuple(costs)):
+    def _capture_and_remove(rows=tuple(rows)):
         try:
             p = n.generators_t.p
-            live = [nm for nm in names if nm in p.columns]
+            live = [r for r in rows if r[0] in p.columns]
             if live:
-                frame = p[live].copy()
-                frame.columns = [buses[names.index(nm)] for nm in live]
-                captured["lost_production"] = {
-                    "p_t": frame,
-                    "value": {b: float(c) for b, c in zip(buses, costs)},
-                    "key": {b: capture_key(n, b, float(c)) for b, c in zip(buses, costs)},
-                }
+                frame = p[[r[0] for r in live]].copy()
+                frame.columns = [r[1] for r in live]
+                captured["lost_production"] = {"p_t": frame, "value": {r[1]: float(r[2]) for r in rows},
+                                               "key": {}}
         except Exception:
             pass
-        for nm in names:
-            if nm in n.generators.index:
-                n.remove("Generator", nm)
-            PyPSAService.unmark_transient("Generator", nm)
+        for r in rows:
+            if r[0] in n.generators.index:
+                n.remove("Generator", r[0])
+            PyPSAService.unmark_transient("Generator", r[0])
         if added_column and "process_role" in n.generators.columns:
             n.generators.drop(columns="process_role", inplace=True)
         if added_carrier and CARRIER in n.carriers.index:
             n.remove("Carrier", CARRIER)
 
     undo_actions.append(("call", _capture_and_remove))
+
+
+def stamp(n, captured: dict) -> None:
+    """Key the capture to the network as the solve leaves it (every transform restored), so a later edit of what
+    the shortfall depends on reads it as stale."""
+    cap = captured.get("lost_production")
+    if cap:
+        cap["key"] = {bus: capture_key(n, bus, value) for bus, value in cap["value"].items()}

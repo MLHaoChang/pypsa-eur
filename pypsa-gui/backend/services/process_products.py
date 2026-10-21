@@ -9,16 +9,18 @@ fallback: the value flows and the investment case take a role from the column al
 """
 from __future__ import annotations
 
+import hashlib
 import math
 from dataclasses import dataclass
 
 import pandas as pd
 
 from models.process_unit import PROCESS_GENERATOR_ROLES, product_role_generators
+from services.adequacy.slack import LOST_SLACK_PREFIX, lost_slack_name
 from services.carrier_catalog import CARRIER_CATALOG
 
 BUY_IN, SHORTFALL = PROCESS_GENERATOR_ROLES
-_NAME_PREFIX = {"__buy_": BUY_IN, "__lost_": SHORTFALL}
+_NAME_PREFIX = {"__buy_": BUY_IN, LOST_SLACK_PREFIX: SHORTFALL}
 
 
 def _cell(df, row: str, col: str):
@@ -89,10 +91,70 @@ class Shortfall:
     flag: str | None            # role_from_name | lost_production_capture_stale | lost_production_capture_missing
 
 
-def _capture_key(n, bus: str, value: float) -> str:
-    from services.solver.lost_production import capture_key
+def t_per_unit(n, bus: str) -> float | None:
+    """Tonnes per bus unit: 1 on a bus in t, 1 / mwh_per_t on a bus in MWh, None when not known."""
+    if bus_unit(n, bus) == "t":
+        return 1.0
+    f = _positive(_cell(n.buses, bus, "mwh_per_t"))
+    return None if f is None else 1.0 / f
 
-    return capture_key(n, bus, value)
+
+def bus_values(n) -> dict[str, float]:
+    """{bus: lost_production_value} for every bus with a finite value above 0 (ticket 08)."""
+    if "lost_production_value" not in n.buses.columns:
+        return {}
+    v = pd.to_numeric(n.buses["lost_production_value"], errors="coerce")
+    return {str(b): float(x) for b, x in v.items() if math.isfinite(x) and x > 0}
+
+
+_KEYED = ("Bus", "Carrier", "Generator", "Load", "Link", "Store", "StorageUnit", "Line", "Transformer",
+          "GlobalConstraint")
+
+
+def capture_key(n, bus: str, value: float) -> str:
+    """What a solve's lost-production capture was solved on: the bus, its value, the snapshots and their weights,
+    and every INPUT of the network (each component's non-output columns, custom ones included, and its input time
+    series). Any edit since the solve gives another key, so the capture reads stale, never current."""
+    h = hashlib.sha256(f"{bus}|{value!r}".encode())
+
+    def column(name, series, default):
+        """One column, normalised so a save and reload (or a rebuild) hashes the same: missing values read as the
+        attribute's default, numbers as floats, a column holding only its default is left out."""
+        num = pd.to_numeric(series, errors="coerce")
+        if num.notna().sum() == series.notna().sum():
+            d = pd.to_numeric(pd.Series([default]), errors="coerce").iloc[0]
+            vals = num.astype(float).fillna(d if pd.notna(d) else float("nan"))
+            if pd.notna(d) and (vals == d).all():
+                return
+            body = vals.round(12).to_numpy().tobytes()
+        else:
+            vals = series.astype(object).where(series.notna(), "" if default is None else default).astype(str)
+            if (vals == ("" if default is None else str(default))).all():
+                return
+            body = "\x1f".join(vals).encode()
+        h.update(f"{name}\x1e".encode())
+        h.update("\x1f".join(map(str, series.index)).encode())
+        h.update(body)
+
+    def frame(tag, df, defaults=None):
+        if df is None or df.empty:
+            return
+        for c in sorted(df.columns, key=str):
+            dflt = defaults.get(c) if isinstance(defaults, dict) else defaults
+            column(f"{tag}.{c}", df[c], dflt)
+
+    frame("weights", n.snapshot_weightings)
+    for name in _KEYED:
+        comp = n.components[name]
+        attrs = comp.defaults
+        outputs = set(attrs.index[attrs["status"] == "Output"])
+        static = comp.static
+        frame(name, static[[c for c in static.columns if c not in outputs]], attrs["default"].to_dict())
+        dynamic = comp.dynamic
+        for attr in sorted(a for a in attrs.index[attrs["varying"].astype(bool)] if a not in outputs):
+            if attr in dynamic:
+                frame(f"{name}_t.{attr}", dynamic[attr], None)
+    return h.hexdigest()[:16]
 
 
 def shortfalls(n, lost_load=None, *, gen_p=None) -> list[Shortfall]:
@@ -104,9 +166,6 @@ def shortfalls(n, lost_load=None, *, gen_p=None) -> list[Shortfall]:
     (`services.solver.lost_production`, the `lost_production` entry of the solve's `last_lost_load` record): stale
     when the network changed what that solve keyed (flagged, never
     current), and with no capture at all its dispatch is None (`lost_production_capture_missing`), never 0."""
-    from services.solver.lost_production import bus_values
-    from services.adequacy.slack import lost_slack_name
-
     gen_p = n.generators_t.p if gen_p is None else gen_p
     out: list[Shortfall] = []
     own: set[str] = set()
@@ -132,7 +191,7 @@ def shortfalls(n, lost_load=None, *, gen_p=None) -> list[Shortfall]:
             out.append(Shortfall(bus, lost_slack_name(bus), None, None, _positive(current.get(bus)), "capture",
                                  "lost_production_capture_missing"))
             continue
-        stale = bus not in current or keys.get(bus) != _capture_key(n, bus, current[bus])
+        stale = bus not in current or keys.get(bus) != capture_key(n, bus, current[bus])
         cost = pd.Series(float(value), index=n.snapshots)
         out.append(Shortfall(bus, lost_slack_name(bus), frame[bus].reindex(n.snapshots), cost, float(value),
                              "capture", "lost_production_capture_stale" if stale else None))

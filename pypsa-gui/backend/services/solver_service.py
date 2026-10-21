@@ -100,6 +100,7 @@ from services.solver.island import (  # noqa: F401  (re-exported)
     _wrap_with_island,
 )
 from services.solver.island import solve_uc as _island_solve_uc
+from services.solver import lost_production as _lost_production
 from services.solver import process_uc as _process_uc
 # Edge Investment Case commercial layer (spec §5.1): the PoC price writer and
 # the LP-terms wrapper, re-exported with the rest of the solver seams.
@@ -1367,6 +1368,8 @@ def run_simulation(
                 # handed to every reader with it.
                 if captured.get("lost_load_t") is not None or captured.get("lost_production"):
                     try:
+                        # Keyed to the network as restored, so a later edit reads it stale.
+                        _lost_production.stamp(network, captured)
                         _emit_state(last_lost_load=captured)
                         phase(
                             f"Lost load captured: {captured.get('lost_load_total_mwh', 0):.1f} MWh "

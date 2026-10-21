@@ -248,6 +248,8 @@ def _read(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
     # The shortfalls from the one accessor (ticket 08): a role Generator, else the solve's capture.
     lost_src = shortfalls(n, capture, gen_p=_frame(n, result_df, "generators_t", "p"))
     for s in lost_src:
+        if s.p is None and s.source == "generator":
+            _refuse(f"no solved dispatch for the shortfall {s.name}")
         if s.p is None:
             _refuse(f"the lost production of {s.bus} was not captured with this solve")
         if s.flag == "lost_production_capture_stale":

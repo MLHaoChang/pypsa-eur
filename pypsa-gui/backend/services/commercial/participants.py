@@ -576,7 +576,12 @@ def _sources(inputs: LedgerInputs, vf: ValueFlowConfig, p: str) -> list[_Source]
                 out.append(_Source("asset", f"fixed:{tag}", "other",
                                    legs=[(site, "market", capex + fom)], basis="model_only",
                                    meta=meta, flags=[*a.flags, "grid_side_asset_cost"]))
-            if opex:
+            if opex is None and _product_role(a) == "shortfall":
+                # A shortfall not captured with the solve (ticket 08): null, never dropped (ADR-0001).
+                out.append(_Source("asset", f"opex:{tag}", "lost_production",
+                                   legs=[(site, SHORTFALL_PAYEE, None)], basis="cash", meta=meta,
+                                   flags=[*a.flags, "grid_side_asset_cost"]))
+            elif opex:
                 gen = a.component == "Generator"
                 out.append(_Source(
                     "asset", f"opex:{tag}", "energy_import" if gen else "other",

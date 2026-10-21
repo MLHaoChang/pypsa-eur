@@ -42,6 +42,7 @@ from typing import Callable
 
 from models.commercial import CommercialConfig, ValueFlowConfig
 from models.process_unit import product_roles
+from services.process_products import bus_values
 from services.commercial import participants as P
 from services.commercial.lp_bindings import same_party
 
@@ -393,8 +394,6 @@ def build(name: str, n, commercial: CommercialConfig, *, dsr_buses=()) -> Templa
         raise TemplateRefused("template_unknown",
                               f"unknown template {name!r}; one of {sorted(TEMPLATES)}")
     result = tpl.builder(commercial, _site(n, commercial, dsr_buses))
-    from services.solver.lost_production import bus_values
-
     shortfall = any(r == "shortfall" for r in product_roles(n).values()) or bool(bus_values(n))
     cfg = _with_parties(result.config, commercial, result.draft_contracts,
                         (P.SHORTFALL_PAYEE,) if shortfall else ())

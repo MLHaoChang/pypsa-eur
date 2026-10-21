@@ -57,14 +57,6 @@ def _weights(n, sns) -> np.ndarray:
     return n.snapshot_weightings.stores.reindex(sns).to_numpy(dtype=float)
 
 
-def _t_per_unit(n, bus: str) -> float | None:
-    """Tonnes per bus unit: 1 on a bus in t, 1 / mwh_per_t on a bus in MWh, None when not known."""
-    if PP.bus_unit(n, bus) == "t":
-        return 1.0
-    f = PP._positive(PP._cell(n.buses, bus, "mwh_per_t"))
-    return None if f is None else 1.0 / f
-
-
 def _span(w: np.ndarray, start: int, hours: float) -> int:
     """How many snapshots from `start` (cyclic) cover `hours` of elapsed time."""
     k, acc = 0, 0.0
@@ -88,11 +80,12 @@ def _usable_inventory(n, bus: str, sns, start: int) -> float:
         e_nom = opt if bool(n.stores.at[s, "e_nom_extendable"]) and math.isfinite(opt) \
             else float(n.stores.at[s, "e_nom"])
         e_min = n.get_switchable_as_dense("Store", "e_min_pu")[s].reindex(sns).to_numpy(dtype=float)
-        total += max(0.0, float(e[(start - 1) % len(sns)]) - float(e_min[start]) * e_nom)
+        before = (start - 1) % len(sns)              # the level and its floor at the same snapshot
+        total += max(0.0, float(e[before]) - float(e_min[before]) * e_nom)
     return total
 
 
-def _delivery(n, bus: str, sns) -> np.ndarray:
+def _delivered(n, bus: str, sns) -> np.ndarray:
     loads = n.loads.index[n.loads.bus.astype(str) == bus]
     if len(loads) == 0:
         return np.zeros(len(sns))
@@ -124,7 +117,7 @@ def outage_loss(n, period, start: int, hours: float, units=None, lost_load=None)
         span = {"safety": 0, "deferrable": 0, "process_flexible": out_span}.get(tier, out_span + restart_sn)
         made = _output(n, u, sns)
         idx = [(start + i) % len(sns) for i in range(span)]
-        tpu = _t_per_unit(n, bus)
+        tpu = PP.t_per_unit(n, bus)
         gross = float((made[idx] * w[idx]).sum()) * tpu if tpu is not None else None
         unserved = None
         if tier == "safety":
@@ -140,10 +133,10 @@ def outage_loss(n, period, start: int, hours: float, units=None, lost_load=None)
             down[u] = (span, bus)
     products = []
     for bus in sorted({b for _s, b in down.values()}):
-        tpu = _t_per_unit(n, bus)
+        tpu = PP.t_per_unit(n, bus)
         span = max(s for s, b in down.values() if b == bus)
         idx = [(start + i) % len(sns) for i in range(span)]
-        delivery = float((_delivery(n, bus, sns)[idx] * w[idx]).sum())
+        delivery = float((_delivered(n, bus, sns)[idx] * w[idx]).sum())
         running = 0.0
         for u in (x for x in process if str(links.at[x, "bus1"]) == bus):
             made = _output(n, u, sns)

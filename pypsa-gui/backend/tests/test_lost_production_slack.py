@@ -14,9 +14,7 @@ each pinned here:
 """
 from __future__ import annotations
 
-import io
 import pathlib
-import pickle
 import queue
 import re
 import sys
@@ -72,7 +70,9 @@ def test_a_bus_value_adds_a_priced_bounded_slack_and_the_restore_captures_and_re
     assert name not in n.generators.index and LP.CARRIER not in n.carriers.index
     cap = captured["lost_production"]
     assert cap["p_t"]["nh3"].tolist() == [0.0, 5.0, 0.0, 1.0]
-    assert cap["value"] == {"nh3": 150.0} and cap["key"]["nh3"] == LP.capture_key(n, "nh3", 150.0)
+    assert cap["value"] == {"nh3": 150.0}
+    LP.stamp(n, captured)                       # once restored: keyed to what the solve leaves
+    assert cap["key"]["nh3"] == LP.capture_key(n, "nh3", 150.0)
 
 
 def test_a_hand_built_shortfall_wins_and_no_slack_is_added():
@@ -95,15 +95,43 @@ def test_a_value_at_or_below_the_buy_ins_dense_cost_is_refused():
     assert (issue.severity, issue.code, issue.name) == ("error", "lost_production_value_below_buy_in", "nh3")
 
 
-def test_the_accessor_reads_the_capture_and_marks_it_stale_after_an_edit_never_current():
+def test_a_bus_with_a_hand_built_shortfall_is_never_refused_for_its_value():
+    """No slack is added there, so its bus value prices nothing in the LP and blocks nothing."""
+    n = _toy(value=50.0, buy_cost=100.0, hand_built=True)
+    assert LP.refusals(n) == []
+
+
+def test_a_safety_unit_off_the_critical_bus_is_warned_and_a_string_false_is_not_critical():
+    from services.validation_service import _check_safety_tier_off_critical_bus
+
+    n = pypsa.Network()
+    n.add("Bus", ["grid", "nh3"])
+    n.add("Link", "unit", bus0="grid", bus1="nh3")
+    n.links["criticality_tier"] = "safety"
+    n.buses["eh_critical"] = ["False", "False"]
+    (issue,) = _check_safety_tier_off_critical_bus(n)
+    assert (issue.severity, issue.code, issue.name) == ("warning", "safety_tier_off_critical_bus", "unit")
+    n.buses.at["grid", "eh_critical"] = True
+    assert _check_safety_tier_off_critical_bus(n) == []
+    n.links["criticality_tier"] = "process_critical"
+    n.buses.at["grid", "eh_critical"] = False
+    assert _check_safety_tier_off_critical_bus(n) == []
+
+
+def test_the_accessor_reads_the_capture_and_marks_it_stale_after_any_input_edit_never_current():
     n = _toy()
-    cap = {"lost_production": {"p_t": pd.DataFrame({"nh3": [0.0, 5.0, 0.0, 1.0]}, index=n.snapshots),
-                               "value": {"nh3": 150.0}, "key": {"nh3": LP.capture_key(n, "nh3", 150.0)}}}
-    (s,) = shortfalls(n, cap)
+    captured = {"lost_production": {"p_t": pd.DataFrame({"nh3": [0.0, 5.0, 0.0, 1.0]}, index=n.snapshots),
+                                    "value": {"nh3": 150.0}, "key": {}}}
+    LP.stamp(n, captured)
+    (s,) = shortfalls(n, captured)
     assert (s.name, s.source, s.flag, s.value) == ("__lost_nh3", "capture", None, 150.0)
-    n.buses.at["nh3", "lost_production_value"] = 200.0            # an edit since the solve
-    (s,) = shortfalls(n, cap)
-    assert s.flag == "lost_production_capture_stale" and s.value == 150.0
+    for edit in (lambda m: m.buses.__setitem__("lost_production_value", 200.0),       # the value
+                 lambda m: m.loads_t.p_set.__setitem__("delivery", [1.0, 2.0, 3.0, 4.0]),  # a load
+                 lambda m: m.generators.__setitem__("p_nom", 90.0)):                   # an asset
+        m = n.copy()
+        edit(m)
+        (s,) = shortfalls(m, captured)
+        assert s.flag == "lost_production_capture_stale" and s.value == 150.0
 
 
 def test_with_no_capture_the_shortfall_is_unavailable_never_zero():
@@ -189,6 +217,14 @@ def _case_lines(n, state, cfg, key):
             for ln in t.lines if key in ln.key}
 
 
+def _ledger_lines(n, state, cfg, asset):
+    from services.results.value_flows import value_flow_ledger
+
+    _inputs, _vf, ledger, _check = value_flow_ledger(n, cfg, result_df=_live, lost_load=state.get("last_lost_load"))
+    return {(p, ln.payer, ln.payee, ln.value_stream, ln.basis): ln.amount
+            for p, lines in ledger.periods.items() for ln in lines if ln.asset == asset}
+
+
 def _lost(n, state):
     from services.results.process_view import compute_process_view
 
@@ -207,6 +243,11 @@ def test_the_capture_gives_the_same_ledger_lines_and_lost_tonnes_as_a_hand_built
     for k in hand:
         assert bus[k][0] == pytest.approx(hand[k][0], rel=1e-6)
         assert bus[k][1:] == hand[k][1:] == ("lost_production", "fuel")
+    lgh, lgb = _ledger_lines(n_h, s_h, cfg_h, "__lost_nh3"), _ledger_lines(n_b, s_b, cfg_b, "__lost_nh3")
+    assert lgh and lgh.keys() == lgb.keys()                 # payer, payee (offtaker), stream and cash basis
+    assert all(k[2:] == ("offtaker", "lost_production", "cash") for k in lgh)
+    for k in lgh:
+        assert lgb[k] == pytest.approx(lgh[k], rel=1e-6)
     lh, lb = _lost(n_h, s_h), _lost(n_b, s_b)
     assert lb["t"] == pytest.approx(lh["t"], rel=1e-6) and lb["eur"] == pytest.approx(lh["eur"], rel=1e-6)
     assert lb["eur_flag"] is None
@@ -240,22 +281,52 @@ def test_energy_flows_close_with_the_captured_shortfall_as_unserved_product(rese
 
 
 @pytest.mark.live_solve
-def test_the_capture_survives_save_and_reload_and_reads_stale_after_an_edit(reset_backend, tmp_path):
-    from routers.projects import _RESULTS_STATE_SCHEMA, _safe_unpickle_results, _unwrap_results_state
+def test_the_capture_survives_a_real_project_save_and_load_and_reads_stale_after_an_edit(
+        client, install_network, api_project):
+    """Solve through the app, save the project, load another one and this one back: the restored record gives the
+    same lost tonnes, EUR and IC line, keyed current; an edit after that reads it stale."""
+    import time
 
-    n, state, cfg = _solve("bus_value", _bus_value)
-    before_lost, before_ic = _lost(n, state), _case_lines(n, state, cfg, "__lost_nh3")
-    blob = pickle.dumps({"__schema__": _RESULTS_STATE_SCHEMA, "data": {"last_lost_load": state["last_lost_load"]}})
-    path = tmp_path / "network.nc"
-    n.export_to_netcdf(path)
-    n2 = pypsa.Network(str(path))
-    loaded = {"last_lost_load": _unwrap_results_state(_safe_unpickle_results(blob))["last_lost_load"]}
-    assert n2.buses.at["nh3", "lost_production_value"] == pytest.approx(A.LOST_EUR_PER_MWH)
-    after = _lost(n2, loaded)
-    assert (after["t"], after["eur"]) == (pytest.approx(before_lost["t"], rel=1e-12),
-                                          pytest.approx(before_lost["eur"], rel=1e-12))
-    after_ic = _case_lines(n2, loaded, cfg, "__lost_nh3")
+    import routers.simulation as sim_router
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig
+    from tests.test_eh_ammonia_staged import _ic_config
+
+    other = api_project("lp-other")
+    n = T.BUILDERS[TID]()
+    _bus_value(n)
+    install_network(n)
+    cfg = SolverConfig(**_ic_config(_half_buy_in))
+    sim_router._state["solver_config"] = cfg
+    name = "lp-capture"
+    assert client.post(f"/api/projects/{name}", params={"force": True, "rebind": True}).status_code == 200
+    assert client.post("/api/simulation/run").status_code == 200
+    deadline, st = time.monotonic() + 1800, {}
+    while time.monotonic() < deadline:
+        st = client.get("/api/simulation/status").json()
+        if st.get("status") not in ("running", "queued", "starting", None):
+            break
+        time.sleep(1.0)
+    assert st.get("status") == "completed", st
+
+    def lost():
+        body = client.get("/api/results/process_view").json()
+        return next(p for p in body["products"] if p["bus"] == "nh3")["lost"]
+
+    def ic():
+        return _case_lines(PyPSAService.get_network(), sim_router._state, sim_router._state["solver_config"],
+                           "__lost_nh3")
+
+    before_lost, before_ic = lost(), ic()
+    assert before_lost["t"] > 0 and before_lost["eur_flag"] is None and before_ic
+    assert client.post(f"/api/projects/{name}").status_code == 200
+    assert client.get(f"/api/projects/{other}").status_code == 200
+    assert client.get(f"/api/projects/{name}").status_code == 200
+    after_lost, after_ic = lost(), ic()
+    assert after_lost["eur_flag"] is None                     # keyed current after the reload
+    assert after_lost["t"] == pytest.approx(before_lost["t"], rel=1e-12)
+    assert after_lost["eur"] == pytest.approx(before_lost["eur"], rel=1e-12)
     assert after_ic.keys() == before_ic.keys()
     assert all(after_ic[k][0] == pytest.approx(before_ic[k][0], rel=1e-12) for k in before_ic)
-    n2.buses.at["nh3", "lost_production_value"] = 2 * A.LOST_EUR_PER_MWH       # an edit: never current
-    assert _lost(n2, loaded)["eur_flag"] == "lost_production_capture_stale"
+    PyPSAService.get_network().loads_t.p_set.iloc[0, 0] += 1.0          # an edit: never current
+    assert lost()["eur_flag"] == "lost_production_capture_stale"

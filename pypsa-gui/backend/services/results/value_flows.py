@@ -110,6 +110,8 @@ def _shortfall_costs(n, sides, lost_load) -> tuple[list[P.AssetCost], dict[str, 
     w = n.snapshot_weightings.objective
     out, removed = [], {}
     for s in shortfalls(n, lost_load):
+        if s.flag == "role_from_name":
+            continue        # ownership reads the column alone: a name-only "shortfall" stays an ordinary asset
         flags = [P.PRODUCT_SLACK_FLAGS["shortfall"], *([s.flag] if s.flag else [])]
         side = "site" if s.bus in sides.site else "grid" if s.bus in sides.grid else "unclassified"
         opex: dict = {}
