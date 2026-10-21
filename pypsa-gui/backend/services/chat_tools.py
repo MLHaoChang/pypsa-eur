@@ -3094,6 +3094,14 @@ def get_eh_template(name: str) -> dict:
     return out
 
 
+def get_project_flow(name: str) -> dict:
+    """The project flow (B1): the section states, run_ready, run_blocker and
+    notes, through the same handler as ``GET /api/projects/{name}/flow``."""
+    from routers.flow import get_project_flow as _h
+
+    return _route(_h, project=_authorized_project(name))
+
+
 def get_feature_guide(tour: str | None = None, field: str | None = None) -> dict:
     """The in-app guide (P21) the GUI's tours and hover tips show — the same
     wording, so explanations match the screen. ``tour`` returns one tour's
@@ -7524,6 +7532,7 @@ DISPATCHERS: dict[str, Any] = {
     "get_stress_scenarios": get_stress_scenarios,
     "put_stress_scenarios": put_stress_scenarios,
     "get_eh_template": get_eh_template,
+    "get_project_flow": get_project_flow,
     "get_feature_guide": get_feature_guide,
     "review_eh_study": review_eh_study,
     "suggest_eh_setup": suggest_eh_setup,
