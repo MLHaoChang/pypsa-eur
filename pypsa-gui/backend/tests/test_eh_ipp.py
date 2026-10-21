@@ -295,7 +295,7 @@ def test_the_network_charge_in_7a_reaches_the_solve(_module_backend):
 
 
 def test_from_template_mints_the_series_and_binds_every_block(
-        client, tmp_path, monkeypatch, tmp_projects_dir):
+        client, tmp_path, monkeypatch, tmp_projects_dir, bound_ctx):
     import shutil
 
     from routers import projects as projects_router
@@ -313,8 +313,38 @@ def test_from_template_mints_the_series_and_binds_every_block(
     assert client.get("/api/simulation/finance").json()["status"] == "ok"
     assert client.get("/api/simulation/commercial/value_flows").json()["status"] == "ok"
     # The minted refs are pinned at create, as a save pins them: none reads stale.
+    from services import network_lengths
+    from services.library import bundle_pins
+
+    with bound_ctx(client):
+        project_dir = network_lengths.active_project_dir()
+    pins, issues = bundle_pins.read_pins(project_dir)
+    cfg = json.loads((project_dir / T.SOLVER_FILE).read_text())
+    assert issues == [] and pins == bundle_pins.collect_pins(cfg) and pins
     flow = client.get("/api/projects/ipp/flow").json()
     assert "library_ref_stale" not in {i["code"] for s in flow["sections"] for i in s["items"]}
+
+
+def test_the_flow_states_at_create_hold_spec_8_2(client, tmp_path, monkeypatch, tmp_projects_dir):
+    """Issue 03's acceptance (spec §8.2), through GET /flow on the created project. `assumed`
+    rows read `warning` until confirmed, as on every template (B1's rule), where the table says
+    "complete, with assumed badges"."""
+    name = _created(client, tmp_path, monkeypatch)
+    body = client.get(f"/api/projects/{name}/flow").json()
+    states = {s["section"]: s["state"] for s in body["sections"]}
+    codes = {s["section"]: [i["code"] for i in s["items"]] for s in body["sections"]}
+    assert {s: states[s] for s in list(states)[:8]} == {
+        "project": "warning", "carriers": "complete", "connection": "warning",
+        "loads": "not_needed", "assets": "complete", "profiles": "complete",
+        "commercial": "warning", "scenarios": "complete"}, json.dumps(codes, indent=1)
+    loads = next(s for s in body["sections"] if s["section"] == "loads")
+    assert loads["summary"] == "Generation-only: export through the POI in section 3"
+    assert loads["required"] is False
+    # No reliability study for a generation-only site; the optimisation verdict is the server's.
+    assert body["run_request"] == {"optimisation": True, "study": False}
+    assert body["verdicts"]["study"] is None
+    assert body["run_ready"] is True
+    assert body["run_ready"] == client.post("/api/simulation/preflight").json()["ok"]
 
 
 @pytest.mark.live_solve
