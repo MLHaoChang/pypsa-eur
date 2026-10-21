@@ -109,7 +109,8 @@ def test_hand_cash_with_a_nonzero_first_year(project, checked):
     assert answered(checked, frames) == pytest.approx(values, rel=1e-12)
     text = public_text(frames)
     assert "cost of equity 10.0000%" in text and "WACC 7.0000%" in text
-    assert "(financial close) is undiscounted" in text and "Money basis:" in text
+    assert "(financial close) is undiscounted" in text
+    assert "Money basis, as the report states it: nominal basis" in text
     assert "LCOE is not checkable yet" in text
 
 
@@ -179,3 +180,18 @@ def test_a_report_made_stale_by_a_finance_change_is_refused(project, checked):
     project.solver_state["solver_config"].finance = {
         **(project.solver_state["solver_config"].finance or {}), "cost_of_equity": 0.2}
     assert set(reasons(ask(checked, project, {})).values()) == {"investment_case_not_current"}
+
+
+def test_the_money_basis_is_the_reports_own_and_a_free_text_currency_is_no_unit(project, checked):
+    def odd(payload):
+        hand(payload)
+        payload["currency"] = "<b>"
+        payload["basis_statement"] = "nominal basis, costs in real 2027 EUR (2020 price data)"
+    store(project, odd)
+    values = published(project, {"equity_npv": 4.132231404958677, "project_npv": PROJECT_NPV,
+                                 "equity_irr": 0.13066238629180748, "project_irr": metrics.irr(PROJECT)[0]})
+    frames = ask(checked, project, values)
+    text = public_text(frames)
+    assert "costs in real 2027 EUR (2020 price data)" in text and "<b>" not in text
+    answer = checked.client.get("/api/chat/answers/" + approval(frames)["answer_id"]).json()
+    assert {b["unit"] for b in answer["blocks"]} == {"report currency", "fraction/year"}

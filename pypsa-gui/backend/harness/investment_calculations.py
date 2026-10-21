@@ -11,6 +11,7 @@ cover ratios, the solved PPA price and the counterfactual are not checkable yet.
 """
 
 import math
+import re
 
 from harness import profile_common as common
 
@@ -103,6 +104,7 @@ def source(ctx, entity, state):
         "headlines": {h: _number(payload.get(h)) for _s, _r, h in SERIES.values()},
         "currency": str(payload.get("currency") or ""),
         "currency_year": payload.get("currency_year"),
+        "basis_statement": str(payload.get("basis_statement") or ""),
         "price_basis": str(payload.get("price_basis") or ""),
     }
 
@@ -186,7 +188,8 @@ def calculate(raw, scope):
             reasons[metric] = "headline_mismatch"
         else:
             available[metric] = value
-    currency = raw["currency"] or "currency"
+    # The currency is a user string: only an ISO-style code becomes a unit.
+    currency = raw["currency"] if re.fullmatch(r"[A-Z]{3}", raw["currency"]) else "report currency"
     definitions = {m: ({**d, "unit": currency} if m.endswith("_npv") else d) for m, d in METRICS.items()}
     return common.facts_and_slots(scope, definitions, available, reasons, len(raw["index"]))
 
@@ -197,12 +200,11 @@ def notes(raw, label):
     def pct(v):
         return "not recorded" if v is None else f"{v:.4%}"
 
-    year = raw["currency_year"]
     first = raw["index"][0] if raw["index"] else "the first year"
+    # The report's own statement of its money basis (nominal cash is in each
+    # year's money; costs may be real money of the base year).
     return [
-        f"Money basis: {label(raw['price_basis'] or 'not stated')}, "
-        f"{label(raw['currency'] or 'currency not stated')}"
-        + (f" of {label(str(year))}" if year is not None else "") + ".",
+        "Money basis, as the report states it: " + label(raw["basis_statement"] or "not stated") + ".",
         f"Equity at the cost of equity {pct(rates['cost_of_equity'])}; project at the WACC "
         f"{pct(rates['wacc_nominal'])}, as the report records them. End-of-year discounting; {first} "
         "(financial close) is undiscounted.",
