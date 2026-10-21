@@ -116,7 +116,7 @@ def dataset(record, requested):
 def caption(slots, window):
     lines = [f"Chart drawn from checked evidence · {sum(s['disposition'] == 'drawn' for s in slots)} series · "
              f"{window['start']} to {window['end']}"]
-    lines += [f"Not drawn: {s['series']} — {s['title']}" for s in slots if s["disposition"] != "drawn"]
+    lines += [f"Not drawn: {s['series'].replace('_', ' ')} — {s['title']}" for s in slots if s["disposition"] != "drawn"]
     return lines
 
 
@@ -191,11 +191,13 @@ def _draw(record, data, lines):
         for axis, unit in zip(axes, units):
             for name, values in zip(data["columns"], data["values"]):
                 if data["units"][name] == unit:
-                    axis.plot(x, values, label=name, drawstyle="steps-post")
+                    # Every stored value is a marker; the line only joins them.
+                    axis.plot(x, values, label=name.replace("_", " "), marker="o", markersize=3, linewidth=1)
                     label = data["axis_labels"][name]
             axis.set_ylabel(label, fontsize=8)
             axis.legend(fontsize=8)
         axes[-1].set_xlabel(f"Snapshot ({data['index'][0]} to {data['index'][-1]})", fontsize=8)
+        axes[-1].xaxis.get_major_locator().set_params(integer=True)
         scope = record["request_scope"]
         axes[0].set_title(f"{scope['entity_id']} · {scope['profile']}", fontsize=10)
         figure.text(0.01, 0.01, "\n".join(lines), fontsize=7, va="bottom", ha="left")
