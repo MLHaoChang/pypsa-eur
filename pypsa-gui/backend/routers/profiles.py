@@ -628,7 +628,8 @@ def _replay_refinements(ctx, result, refinements):
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
-            detail={**_apply_refusal_kind(exc), "message": str(exc)},
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="refine_replay")},
         ) from exc
     meta["replay_warnings"] = warnings
     return SimpleNamespace(series=frame, meta=meta)
@@ -991,7 +992,9 @@ def refine_profile(
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
-            detail={**_apply_refusal_kind(exc), "message": str(exc)},
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="refine",
+                                              job_id=body.job_id)},
         ) from exc
     job_id = str(uuid.uuid4())
     record = {k: v for k, v in new_meta.items() if k != "replay_warnings"}

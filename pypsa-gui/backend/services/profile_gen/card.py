@@ -26,8 +26,10 @@ def _refuse(exc: Exception):
     from fastapi import HTTPException
 
     from routers.profiles import _apply_refusal_kind
+    from services.profile_gen.refusals import public_message
 
-    raise HTTPException(422, {**_apply_refusal_kind(exc), "message": str(exc)}) from None
+    raise HTTPException(422, {**_apply_refusal_kind(exc),
+                              "message": public_message(exc, route="series_edit_card")}) from None
 
 
 def _artifact(args: dict) -> tuple[pd.Series, dict]:

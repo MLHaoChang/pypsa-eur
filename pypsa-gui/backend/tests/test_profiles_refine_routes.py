@@ -113,3 +113,28 @@ def test_undo_reverts_an_applied_refinement(client, project):
     assert client.post("/api/network/undo").status_code == 200
     payload = client.get("/api/network/timeseries/loads/p_set").json()
     assert "plant" not in payload["columns"]
+
+
+def test_refine_refusals_say_their_sentence_and_nothing_foreign(client, project,
+                                                                monkeypatch, bound_ctx):
+    # The sanitiser's rule (#508) on ticket 04's refine route and chat tool.
+    from fastapi import HTTPException
+
+    from services.profile_gen import refine
+
+    gen = _generate(client, project)
+    resp = client.post(f"/api/projects/{project}/profiles/refine",
+                       json={"job_id": gen["job_id"], "ops": [{"op": "teleport"}]})
+    message = resp.json()["detail"]["message"]   # the typed sentence, not the generic one
+    assert "teleport" in message and not message.startswith("unexpected error")
+
+    foreign = "CDSAPI_KEY=abc123 at /srv/secret/path"
+
+    def boom(*a, **k):
+        raise ValueError(foreign)
+
+    monkeypatch.setattr(refine, "refine_series", boom)
+    with bound_ctx(client), pytest.raises(HTTPException) as err:
+        chat_tools.DISPATCHERS["refine_generated_profile"](
+            project_id=project, job_id=gen["job_id"], ops=_OPS)
+    assert err.value.detail == "unexpected error (ValueError); see the server log"

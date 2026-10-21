@@ -3560,7 +3560,7 @@ def generate_availability_profile(project_id: str, kind: str, generators: list,
 def refine_generated_profile(project_id: str, job_id: str, ops: list) -> dict:
     from routers.profiles import RefineRequest, refine_profile as _h
     body = RefineRequest(job_id=job_id, ops=ops)
-    return _route(_h, body, proj=_authorized_project(project_id))
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
 def generate_series_profile(project_id: str, kind: str, components: list,
