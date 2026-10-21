@@ -18,7 +18,16 @@ def evaluation_project(baseline, request):
     ctx = baseline[0]
     n = ctx.network
     n.generators.at["G1", "capital_cost"] = 3
-    if case.profile.startswith("carrier-") and case.fault != "battery":
+    if case.profile.endswith("-loading/1"):
+        n.set_snapshots(pd.date_range("2026-01-01", periods=3, freq="h"))
+        n.loads_t.p_set = pd.DataFrame({"L1": [0, 0, 0]}, index=n.snapshots)
+        n.add("Bus", "B2", v_nom=110)
+        n.add("Load", "L2", bus="B2", p_set=[4, 9, 6])
+        n.add("Generator", "G2", bus="B2", p_nom=20, marginal_cost=100)
+        n.add("Line", "L12", bus0="B1", bus1="B2", s_nom=8, x=0.1, r=0.01)
+        n.lines_t.s_max_pu = pd.DataFrame({"L12": [1, 1, 0.5]}, index=n.snapshots)
+        n.snapshot_weightings.loc[:, "generators"] = [2, 1, 3]
+    elif case.profile.startswith("carrier-") and case.fault != "battery":
         n.set_snapshots(pd.date_range("2026-01-01", periods=3, freq="h"))
         n.generators.at["G1", "carrier"] = "wind"
         n.add("Generator", "G2", bus="B1", p_nom=10, marginal_cost=5, carrier="wind")
@@ -99,6 +108,8 @@ def test_pilot_case(case, evaluation_project, pilot_harness, request):
         su.p_store.iloc[1, 0], su.p_dispatch.iloc[1, 0], su.p.iloc[1, 0] = 5, 4, -1
     if case.fault == "stale":
         n.loads.at["L1", "p_set"] = 6
+    elif case.fault == "missing" and case.profile.endswith("-loading/1"):
+        n.lines_t.p0.loc[:, "L12"] = float("nan")
     elif case.fault == "missing":
         table = n.storage_units_t.p_dispatch if storage else n.generators_t.p
         table.loc[:, "Battery" if storage else "G1"] = float("nan")
