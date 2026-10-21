@@ -662,7 +662,20 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
       }
       setCreationItem(null)
       setSelectedComponent({ type: COMPONENT_TYPE[item.id] ?? item.id, name })
-      toast.success(`${item.label} "${name}" added`)
+      // Next step (UX-flow #24): a Load, Generator or Link takes a time series.
+      const cls = COMPONENT_TYPE[item.id] ?? item.id
+      if (cls === 'Load' || cls === 'Generator' || cls === 'Link') {
+        toast.success((t) => (
+          <span className="flex items-center gap-2" data-testid="asset-added-toast">
+            <span>{item.label} "{name}" added</span>
+            <button type="button" className="underline font-medium" data-testid="asset-give-time-series"
+              onClick={() => { toast.dismiss(t.id); useUIStore.getState().focusTimeSeries(cls, name) }}
+            >Give it a time series →</button>
+          </span>
+        ), { duration: 8000 })
+      } else {
+        toast.success(`${item.label} "${name}" added`)
+      }
     },
     onError: (e: Error) => {
       if (e.message !== 'validation') toast.error(e.message)

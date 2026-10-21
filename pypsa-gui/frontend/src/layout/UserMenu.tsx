@@ -1,24 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { ChevronDown, FolderOpen, LogOut, User as UserIcon, Users } from 'lucide-react'
+import { ChevronDown, LogOut, User as UserIcon } from 'lucide-react'
 import { useAuth } from '../auth/AuthProvider'
 import { redirectAfterLogout } from '../auth/logoutRedirect'
 import { useUIStore } from '../store/uiStore'
 import { releaseProjectLock } from '../utils/projectActions'
-import AssignMembersDialog from './AssignMembersDialog'
 
 // Workbench user menu (Task 14). Header dropdown carrying the signed-in
-// identity plus the three navigation exits the workbench previously lacked:
-// assign members, back to the projects home, and sign out. Both exits release
-// the active project's edit lock first so a teammate can pick it up immediately
-// rather than waiting out the TTL. Renders nothing when auth is disabled.
+// identity plus the sign-out. Assigning members is in Workspace › People and
+// the way back to the projects home is the header's breadcrumb (UX-flow #8,
+// #19: one entry point each). Sign-out releases the active project's edit lock
+// first so a teammate can pick it up immediately rather than waiting out the TTL. Renders nothing when auth is disabled.
 export default function UserMenu() {
-  const navigate = useNavigate()
   const { user, logout } = useAuth()
   const currentProject = useUIStore(s => s.currentProject)
 
   const [open, setOpen] = useState(false)
-  const [assignOpen, setAssignOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -30,12 +26,6 @@ export default function UserMenu() {
     document.addEventListener('mousedown', onDown, true)
     return () => document.removeEventListener('mousedown', onDown, true)
   }, [open])
-
-  const backToProjects = () => {
-    setOpen(false)
-    if (currentProject) void releaseProjectLock(currentProject)
-    navigate('/projects')
-  }
 
   const handleLogout = async () => {
     setOpen(false)
@@ -76,20 +66,6 @@ export default function UserMenu() {
             </div>
           </div>
 
-          <button
-            onClick={() => { setOpen(false); setAssignOpen(true) }}
-            disabled={!currentProject}
-            className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12px] text-text hover:bg-accent/5 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            title={currentProject ? 'Assign members to this project' : 'Open a project first'}
-          >
-            <Users size={13} className="text-muted shrink-0" /> Assign members…
-          </button>
-          <button
-            onClick={backToProjects}
-            className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12px] text-text hover:bg-accent/5 transition-colors"
-          >
-            <FolderOpen size={13} className="text-muted shrink-0" /> Back to projects
-          </button>
           <div className="my-1 border-t border-border" />
           <button
             onClick={handleLogout}
@@ -98,14 +74,6 @@ export default function UserMenu() {
             <LogOut size={13} className="shrink-0" /> Sign out
           </button>
         </div>
-      )}
-
-      {assignOpen && currentProject && (
-        <AssignMembersDialog
-          projectId={currentProject}
-          projectLabel={currentProject}
-          onClose={() => setAssignOpen(false)}
-        />
       )}
     </div>
   )

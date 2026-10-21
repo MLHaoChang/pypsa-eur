@@ -27,6 +27,10 @@ export const SECTION_META: SectionMeta[] = [
 export const sectionMeta = (id: FlowSectionId): SectionMeta =>
   SECTION_META.find(s => s.id === id) as SectionMeta
 
+/** The section after `id` in flow order, or null after the last. */
+export const nextSectionMeta = (id: FlowSectionId): SectionMeta | null =>
+  SECTION_META[SECTION_META.findIndex(s => s.id === id) + 1] ?? null
+
 /** The Expert sidebar's bands over the sections (§6.1). Section 10 sits below
  *  them; the project utilities at the foot. */
 export type BandId = 'setup' | 'model' | 'run' | 'results' | 'reports'
