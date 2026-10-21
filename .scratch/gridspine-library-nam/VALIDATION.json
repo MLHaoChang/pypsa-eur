@@ -1,6 +1,6 @@
 {
   "research_date": "2026-10-21",
-  "checked_at_utc": "2026-10-21T11:20:26.170709+00:00",
+  "checked_at_utc": "2026-10-21T11:45:28.321374+00:00",
   "scope": "research and source-schema validation only",
   "extraction_baseline": "151fdc934d739bb790d0bd1237d85e7ac40e3719",
   "reviewed_master": "14d8c1a9bc8c073757928eacea551b1374d5a107",
@@ -23,7 +23,8 @@
     "relative_document_links": "pass",
     "diff_whitespace": "pass",
     "python_compile": "pass",
-    "all_authored_json_parse": "pass"
+    "all_authored_json_parse": "pass",
+    "six_collection_sources_requirements_and_acceptance_ids": "pass"
   },
   "not_performed": [
     "new runtime connector implementation",
@@ -45,21 +46,24 @@
     "02-SOURCE-CATALOGUE.md": "bebf26931274f884a5583f30564dfa446e74d88a9f390f7e2214d5c7cc34c969",
     "03-COUNTRY-FINDINGS.md": "9e1efa68c2deb5a8760d278360c503c1cb6c673ca997331ddc3e8a91f3de3b9e",
     "04-CONTRACTS-COSTS.md": "772743127c147fec4793f4c2acfbb3506bf8691affb610d97f3018f9ae8683e9",
-    "05-INTEGRATION-VALIDATION.md": "224f77c5941b84423732d5bd9895049317e52e0d454b7c5519786935c99606f0",
-    "HANDOFF.md": "a313871b948b86385ac6c1718f9c6f16c78c2b34d01f991f19e5b6daa0e98ec6",
+    "05-INTEGRATION-VALIDATION.md": "cd6fb2f55942a30be351e0a96b27dbfedf7ba0fab94faf78257be1f43d71f12d",
+    "06-LIBRARY-ADDITIONS-PLAN.md": "99b4bdef1a1ddbf423bff911933db41c8ce8a888a0256c8fb8a6dae20eb7f99a",
+    "HANDOFF.md": "40cb207d9ce91b16e1fd82d4b0f79a33cb23e73495ae822295e8e67f7795505f",
     "MASTER-RECONCILIATION.md": "349817dd55d5cb544b2c6b1b4251a614cb0542e5fc33c9459e7cf195817b1f34",
-    "README.md": "71820a3c5ba753f4d6641bc09ebdb8f3635116672227932a101ff27d5165e3dc",
+    "README.md": "6216d34068ee2602c7af562cc4395f10ca5217197d733becdd587435e31bc638",
     "data-requirements.json": "6f0ab58c53a6450444e81b001b9fb6052ab4cde9d8d1252a836f19f734a6f444",
     "fetch-observations.json": "4ff1258207ab05324a7e90eed235235be88756827674d8fb10c95ad1c870ec6d",
     "inspect_samples.py": "b620a5b510144ec5a6a0515981a7d6745a448430d0f8c2e3159debf43381924d",
     "inspect_workbooks.py": "d5074b80cca60924901c4a79d3c91c1df7be10703a5df2155f5f7608c44f1f4d",
+    "library-additions-plan.json": "385a174aabb78f7d69d204458ffca7196e901a2e6759327db72de9c922a52754",
     "master-reconciliation.json": "a2ae1a438dc75c739c6a8a18881cfc57af2ffb278513c3d8f10d8792b90c17fe",
     "native-model-snapshot.json": "bdd09a8682f44085e7d5913f0ad68f945572ce3d127bb33a6f4098bc48254319",
     "previous-research-map.json": "e81bd58106ca160daf622e8fb11c3d7c9604fe3929fcf53656894b064b0eaaef",
     "sample-inspection.json": "6afbb3aae99a9647daedefa812b89c8c16a035c28180ecbe1b6b39af08b22f7d",
     "source-map.json": "ec102b9230bcad0916b76d8cd71941d689576c1c0dce5b8eeb652cf2da455ed1",
     "source-register.json": "10ad6a5f0ecab1af462fb9d7881748f798fce4479d220cf2f49af930e8eff25b",
-    "validate_research.py": "8b1e356bdab46f7030eab72813da7441ed2ec7d1cea9d1ceaa9c64eb3b6da592",
+    "validate_research.py": "8ca989e68733fe0d7f027312d396c02b0f2bf992a31fb574d884766e542fff43",
     "workbook-inspection.json": "a49e3743560d2f2929a6a83b32cdfdb681db17761bd306ae0075028b00ce7b5c"
-  }
+  },
+  "library_collections_planned": 6
 }

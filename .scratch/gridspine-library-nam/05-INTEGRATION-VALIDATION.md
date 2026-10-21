@@ -2,6 +2,8 @@
 
 This is a proposed implementation sequence, not an implementation claim. Do not start by adding every feed or engine. Use existing Library items/series, immutable references, regional packs, approvals and evidence exports. Reconcile current master and pending Library PRs before each session. Human/domain review and real-use calibration remain pending.
 
+The [six-collection additions plan](06-LIBRARY-ADDITIONS-PLAN.md) translates this matrix into bounded implementation deliverables; [structured backlog records](library-additions-plan.json) name source, requirement and acceptance-test IDs.
+
 ## Data contract and UX
 
 Keep five requested areas modular: **Energy/capacity**, **Electrical grid**, **Reliability**, **Commercial**, **Control strategy**. The data library is shared infrastructure, not a new workflow that forces every study to enable all modules. If the active frontend now presents additional/separate work cards, preserve its current card contract rather than reverting it to this research's labels.

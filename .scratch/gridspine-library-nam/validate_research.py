@@ -53,6 +53,20 @@ def validate():
     assert all(x['valid'] for x in comparison['requirement_bindings'])
     assert len(load('sample-inspection.json')['results']) == 7
     assert len(load('workbook-inspection.json')['results']) == 2
+    plan = load('library-additions-plan.json')
+    collections = plan['collections']
+    collection_ids = {c['id'] for c in collections}
+    assert len(collections) == len(collection_ids) == 6
+    test_ids = set(re.findall(r'^\| ([A-Z]\d{2}) \|',
+                             (here / '05-INTEGRATION-VALIDATION.md').read_text(), re.MULTILINE))
+    assert set(plan['first_release'] + plan['follow_up']) == collection_ids
+    for collection in collections:
+        assert collection['source_ids'] and set(collection['source_ids']) <= source_ids
+        assert collection['requirement_ids'] and set(collection['requirement_ids']) <= req_ids
+        assert collection['acceptance_test_ids'] and set(collection['acceptance_test_ids']) <= test_ids
+        assert collection['depends_on'] == ['NAM-0']
+        assert collection['status'] == 'planned_not_implemented'
+        assert collection['runtime_admission'] is False
     for file in list(here.glob('*.md')) + [repo / 'docs/research/gridspine-nam-commercial-overview.md']:
         for target in re.findall(r'\]\(([^)]+)\)', file.read_text()):
             if '://' in target or target.startswith('#'):
@@ -61,6 +75,7 @@ def validate():
     print(json.dumps({'status': 'pass', 'scope': 'offline authored research consistency only',
                       'requirements': len(req_ids), 'source_families': len(source_ids),
                       'retrieval_observations': len(ev_ids), 'prior_ids_reconciled': len(old),
+                      'library_collections_planned': len(collections),
                       'native_files_hash_checked': len(snapshot['files']),
                       'runtime_admission': False, 'domain_approval': False}, indent=2))
 

@@ -2,6 +2,8 @@
 
 **Start with the [overview](../../docs/research/gridspine-nam-commercial-overview.md).** NAM here means US, Canada and Mexico. Checked 21 October 2026.
 
+For the concrete implementation backlog, read [the six Library additions plan](06-LIBRARY-ADDITIONS-PLAN.md): tariffs, historical market prices, PPA benchmarks, reported contracts, finance references and technical/O&M references. The first release targets one complete tariff, one CAISO product and one benchmark collection after shared admission checks.
+
 The user requested extraction of the tool's requirements first, then deep public-data research, particularly tariffs, wholesale prices and PPA contract prices. The authored requirements predate source selection. This package extends the prior library research, reconciles its 19 NAM commercial IDs, and records changes already merged into master during research. It introduces no runtime connector, data seed or new calculation engine.
 
 | File | Purpose |
@@ -17,6 +19,7 @@ The user requested extraction of the tool's requirements first, then deep public
 | [sample-inspection.json](sample-inspection.json) / [inspect_samples.py](inspect_samples.py) | Seven bounded offline schema inspections; raw records not published |
 | [workbook-inspection.json](workbook-inspection.json) / [inspect_workbooks.py](inspect_workbooks.py) | Selected workbook metadata/cell evidence, cached values only |
 | [05-INTEGRATION-VALIDATION.md](05-INTEGRATION-VALIDATION.md) | Prioritized implementation sessions and numerical/admission test matrix |
+| [06-LIBRARY-ADDITIONS-PLAN.md](06-LIBRARY-ADDITIONS-PLAN.md) / [library-additions-plan.json](library-additions-plan.json) | Six prioritized collections, dependencies, bounded deliverables and acceptance-test IDs |
 | [MASTER-RECONCILIATION.md](MASTER-RECONCILIATION.md) | Baseline versus incoming regional cost/reference work |
 | [HANDOFF.md](HANDOFF.md) / [VALIDATION.json](VALIDATION.json) | Next actions, portable verification and limits of this research |
 

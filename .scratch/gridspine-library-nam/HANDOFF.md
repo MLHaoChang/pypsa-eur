@@ -12,6 +12,8 @@ Status: research package, no runtime source admitted. Date 21 October 2026. Star
 
 ## Recommended next session
 
+Use [the six-collection implementation backlog](06-LIBRARY-ADDITIONS-PLAN.md) and [its structured records](library-additions-plan.json) to choose a bounded PR. LIB-01/02/03 form the proposed first release; none is already implemented by this research package.
+
 Take **NAM-0**, then one bounded **NAM-1 tariff** or **NAM-2 price series** implementation. First read current `AGENTS.md`, steward instructions and relevant harness/Library contracts. Refresh master and current reference/common-library PRs. Do not rewrite another agent's branches or merge this research without applicable repo checks.
 
 1. Compare current native fields and money paths with `native-model-snapshot.json`, `master-reconciliation.json` and `source-map.json`.

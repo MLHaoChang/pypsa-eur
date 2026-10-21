@@ -6,6 +6,8 @@ The best next investment is a **small, traceable commercial library**: supported
 
 The tool was examined **before source selection**: [48 native data requirements](../../.scratch/gridspine-library-nam/01-DATA-REQUIREMENTS.md), covering tariffs, wholesale products, contracts, finance and provenance. All 48 have a [requirement-to-source assessment](../../.scratch/gridspine-library-nam/source-map.json); a mapping can explicitly conclude that public data or native calculation support is missing.
 
+**Implementation backlog:** [six additions to the existing Library](../../.scratch/gridspine-library-nam/06-LIBRARY-ADDITIONS-PLAN.md), with priorities, shared prerequisites, bounded deliverables and acceptance criteria. The proposed first release is one complete US tariff, one CAISO price product and one clearly labelled PPA benchmark collection.
+
 ## What is useful now
 
 | Priority | Recommended addition | Benefit and boundary |
