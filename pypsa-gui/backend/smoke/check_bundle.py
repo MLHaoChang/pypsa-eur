@@ -202,6 +202,9 @@ ROOTED = (
     "services/library/defaults_pack/versions/2026-10-07/manifest.json",
     "services/library/defaults_pack/versions/2026-10-13/manifest.json",
     "services/library/defaults_pack/versions/2026-10-20/manifest.json",
+    # The EU cost references (GS-EU): `europe_reference._DATA_FILE` = the module's
+    # sibling `reference_data/`; the reader refuses to run without its pinned bytes.
+    "services/library/reference_data/eu-dea-2026-08.json",
     # A template's price series (IPP ticket 02): `routers.projects._mint_template_series` reads
     # them by path under `_PROJECT_TEMPLATES_DIR`.
     "project_templates/eh_ipp_hybrid/price_series/meta.json",
