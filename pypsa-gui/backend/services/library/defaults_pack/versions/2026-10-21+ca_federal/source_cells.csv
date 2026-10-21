@@ -1,0 +1,13 @@
+key,source_file,locator,value,unit
+solar-utility.investment.overnight,ef2026-cost-data-electricity.csv,Technology=Solar PV Utility; Scenario=CM; Province/Territory=ON; Year=2030; Field=Overnight Capital Cost,2078.4,CAD/kW
+solar-utility.investment.fom_share,ef2026-cost-data-electricity.csv,Technology=Solar PV Utility; Scenario=CM; Province/Territory=ON; Year=2030; Field=Fixed O&M Cost,40.28,CAD/kW-year
+solar-utility.investment.fom_share,ef2026-cost-data-electricity.csv,Technology=Solar PV Utility; Scenario=CM; Province/Territory=ON; Year=2030; Field=Overnight Capital Cost,2078.4,CAD/kW
+solar-utility.investment.lifetime,ef2026-cost-data-electricity.csv,Technology=Solar PV Utility; Scenario=CM; Province/Territory=ON; Year=2030; Field=Lifetime,30.0,years
+onwind.investment.overnight,ef2026-cost-data-electricity.csv,Technology=Wind Onshore; Scenario=CM; Province/Territory=ON; Year=2030; Field=Overnight Capital Cost,1995.95,CAD/kW
+onwind.investment.fom_share,ef2026-cost-data-electricity.csv,Technology=Wind Onshore; Scenario=CM; Province/Territory=ON; Year=2030; Field=Fixed O&M Cost,63.68,CAD/kW-year
+onwind.investment.fom_share,ef2026-cost-data-electricity.csv,Technology=Wind Onshore; Scenario=CM; Province/Territory=ON; Year=2030; Field=Overnight Capital Cost,1995.95,CAD/kW
+onwind.investment.lifetime,ef2026-cost-data-electricity.csv,Technology=Wind Onshore; Scenario=CM; Province/Territory=ON; Year=2030; Field=Lifetime,30.0,years
+gas-genset.investment.overnight,ef2026-cost-data-electricity.csv,Technology=Natural Gas Simple Cycle; Scenario=CM; Province/Territory=ON; Year=2030; Field=Overnight Capital Cost,1563.46,CAD/kW
+gas-genset.investment.fom_share,ef2026-cost-data-electricity.csv,Technology=Natural Gas Simple Cycle; Scenario=CM; Province/Territory=ON; Year=2030; Field=Fixed O&M Cost,47.44,CAD/kW-year
+gas-genset.investment.fom_share,ef2026-cost-data-electricity.csv,Technology=Natural Gas Simple Cycle; Scenario=CM; Province/Territory=ON; Year=2030; Field=Overnight Capital Cost,1563.46,CAD/kW
+gas-genset.investment.lifetime,ef2026-cost-data-electricity.csv,Technology=Natural Gas Simple Cycle; Scenario=CM; Province/Territory=ON; Year=2030; Field=Lifetime,30.0,years

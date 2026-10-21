@@ -3398,13 +3398,28 @@ def solve_queue_clear_finished() -> dict:
 # Thin wrappers over `routers/profiles.py`, called in-process through `_route`
 # with the PATH project resolved by `_authorized_project` where a route takes
 # one. The routes own the guards (ProjectAccessDep, project lock, undo push);
-# the wrappers own nothing but argument shaping.
+# the wrappers own nothing but argument shaping, and `_profile_route`, which
+# gives an exception the routes did not type the same reply a route gives
+# (`profile_gen.refusals`): its type, never its text.
+
+
+def _profile_route(handler, *args, **kwargs):
+    from services.profile_gen.refusals import public_message
+
+    try:
+        return _route(handler, *args, **kwargs)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — the model sees the type, the log the rest
+        raise HTTPException(
+            status_code=500, detail=public_message(exc, route=handler.__name__),
+        ) from exc
 
 
 def list_profile_presets(technology: str | None = None) -> dict:
     from routers.profiles import list_profile_presets as _h
     kw = {"technology": technology} if technology else {}
-    return _route(_h, **kw)
+    return _profile_route(_h, **kw)
 
 
 def get_profile_parameters(preset: str, technology: str | None = None) -> dict:
@@ -3414,11 +3429,16 @@ def get_profile_parameters(preset: str, technology: str | None = None) -> dict:
 
     from services.profile_gen import presets as _presets
     from services.profile_gen.engine import ProfileGenError
+    from services.profile_gen.refusals import public_message
 
     try:
         p = _presets.get_preset(preset, technology)
     except ProfileGenError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=public_message(
+            exc, route="get_profile_parameters")) from exc
+    except Exception as exc:  # noqa: BLE001 — as `_profile_route`: the type, never the text
+        raise HTTPException(status_code=500, detail=public_message(
+            exc, route="get_profile_parameters")) from exc
     return {
         "name": p.name,
         "technology": p.technology,
@@ -3446,12 +3466,12 @@ def preview_renewable_profile(points: list | None = None, technology: str = "",
     if resolution is not None:
         kw["resolution"] = resolution
     body = EstimateRequest(**kw)
-    return _route(_h, body)
+    return _profile_route(_h, body)
 
 
 def list_pending_profiles(project_id: str) -> dict:
     from routers.profiles import list_pending_profiles as _h
-    return _route(_h, proj=_authorized_project(project_id))
+    return _profile_route(_h, proj=_authorized_project(project_id))
 
 
 def generate_renewable_profile(project_id: str, points: list | None = None,
@@ -3471,7 +3491,7 @@ def generate_renewable_profile(project_id: str, points: list | None = None,
     if resolution is not None:
         kw["resolution"] = resolution
     body = GenerateRequest(**kw)
-    return _route(_h, body, proj=_authorized_project(project_id))
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
 def apply_generated_profile(project_id: str, job_id: str, component: str,
@@ -3483,7 +3503,7 @@ def apply_generated_profile(project_id: str, job_id: str, component: str,
     body = ApplyRequest(job_id=job_id, component=component, point_id=point_id,
                         time_basis=time_basis, component_type=component_type,
                         attribute=attribute)
-    return _route(_h, body, proj=_authorized_project(project_id))
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
 # Load profiles (time-series generators ticket 01): the archetype catalogue and
@@ -3492,7 +3512,7 @@ def apply_generated_profile(project_id: str, job_id: str, component: str,
 
 def list_load_profile_archetypes() -> dict:
     from routers.profiles import list_load_archetypes as _h
-    return _route(_h)
+    return _profile_route(_h)
 
 
 def generate_load_profile(project_id: str, archetype: str, loads: list,
@@ -3501,7 +3521,7 @@ def generate_load_profile(project_id: str, archetype: str, loads: list,
     from routers.profiles import LoadGenerateRequest, generate_load_profiles as _h
     body = LoadGenerateRequest(archetype=archetype, loads=loads, params=params,
                                year=year)
-    return _route(_h, body, proj=_authorized_project(project_id))
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
 # ── Project management (21) ─────────────────────────────────────────────────
