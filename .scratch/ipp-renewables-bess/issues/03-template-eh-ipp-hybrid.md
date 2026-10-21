@@ -68,3 +68,15 @@ Q-IPP answers.
 ## Acceptance
 
 Spec §8.2's state column holds on a freshly created project (`GET /flow`).
+
+## Recorded at build (2026-10-21)
+
+- **Feasibility solve** (`_build.py` `_verify_feasible`, HiGHS, 8 760 h): 3.6 s locally.
+- **`da_base` targets** (spec §2.3), as ranges, never a forecast. The sources are approximate public figures for DE-LU; check the current ones:
+  - mean day-ahead price 60–100 EUR/MWh (SMARD, Bundesnetzagentur: the annual average was roughly 95 in 2023 and 80 in 2024). Shipped: 75.8;
+  - negative hours 100–500 a year (SMARD: roughly 300 in 2023 and 450 in 2024). Shipped: 148, at the conservative end, so the curtailment and battery value are not overstated;
+  - PV capture rate 0.5–0.8 (netztransparenz.de monthly market values, "Marktwert Solar" over the base price). Shipped: 0.56;
+  - wind capture rate 0.75–0.95 (the same source, "Marktwert Wind an Land"). Shipped: 0.89.
+- **PPA prices** (7b, `illustrative`): wind 65 and PV 50 EUR/MWh, inside the German ranges that the public PPA price indices (LevelTen, Pexapark) reported for 2024–25, roughly 60–80 for onshore wind and 45–60 for solar.
+- **Amended in the spec**: the `grid` bus carries `eh_poc` (the EH convention) and the export Link carries no role (`export_link` names it). The finance is nominal in 2030 money (gatekeeper). The pack's 7 % is real and pre-tax, so the WACC is `assumed`.
+

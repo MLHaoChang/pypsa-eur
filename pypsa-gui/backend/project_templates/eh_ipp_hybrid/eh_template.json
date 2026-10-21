@@ -68,7 +68,7 @@
     },
     {
       "item": "day-ahead price (base)",
-      "note": "an assumed shape, not market data (owner Q8 = A). For scale: German day-ahead prices in 2024 averaged roughly 80 EUR/MWh with several hundred negative hours (SMARD, Bundesnetzagentur; check the current figures). Bring your own series",
+      "note": "an assumed shape, not market data (owner Q8 = A). For scale: German day-ahead prices in 2024 averaged roughly 80 EUR/MWh with some 450 negative hours (SMARD, Bundesnetzagentur; check the current figures). This shape has fewer, so the curtailment and battery value are conservative. Bring your own series",
       "source": "illustrative",
       "value": "mean 75.8 EUR/MWh, 148 negative hours, PV capture rate 0.56, wind 0.89"
     },
@@ -80,13 +80,13 @@
     },
     {
       "item": "PPAs",
-      "note": "settled against the day-ahead series; suspended at negative prices (the offtaker accepts curtailment). Prices are an assumed illustration within the range of public European PPA price indices; replace with your term sheet",
+      "note": "settled against the day-ahead series; suspended at negative prices (the offtaker accepts curtailment). Prices are an assumed illustration: German PPA price indices (LevelTen, Pexapark) put onshore wind at roughly 60-80 and solar at 45-60 EUR/MWh in 2024-25 (check the current figures); replace with your term sheet",
       "source": "illustrative",
       "value": "financial pay-as-produced, 70% of each plant, wind 65 / PV 50 EUR/MWh, 10 years"
     },
     {
       "item": "finance",
-      "note": "base-year money (2030), held flat to the base year then escalated (label only)",
+      "note": "a nominal, post-tax case in base-year money (2030), escalated from that year. The defaults pack's 2026-10-20 discount rate (7 %) is real and pre-tax, so it is not this WACC; the optimisation's discount rate is the WACC (K0)",
       "source": "assumed",
       "value": "7 % WACC, 9 % cost of equity, 2 % escalation, 25 years"
     },

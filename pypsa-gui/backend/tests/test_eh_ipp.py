@@ -197,10 +197,16 @@ def test_the_plants_curtail_at_the_limit_and_at_negative_prices(solved):
     assert curt[at_limit & ~neg].sum() > 0, "no curtailment at the export limit"
     # Circulation (G5 trap 3): import (DA + 20) costs more than export (DA) earns every hour,
     # so the preflight finds no arbitrage loop.
+    from services.commercial import lp_bindings as LP
     from services.commercial.preflight import commercial_findings
 
     assert "commercial.arbitrage_loop" not in {c for _s, c, *_ in
                                                commercial_findings(n, _cfg.commercial)}
+    # The count the solve itself reports (`simultaneous_flow_risk_snapshots`), built as it is.
+    com = LP._parse(_cfg.commercial)
+    adders = LP._adders(n, com)[0]
+    adders["import"] = adders["import"] + LP._import_price(n, com)
+    assert LP.circulation_risk_snapshots(n, com, adders, LP._export_price(n, com)) == 0
 
 
 @pytest.mark.live_solve
@@ -233,11 +239,18 @@ def test_the_investment_case_is_the_developers_standalone_case(solved):
 @pytest.mark.live_solve
 def test_no_load_metric_divides_by_zero(solved):
     """G5 trap 4: a site with no load reports load metrics as None, never a crash."""
+    from services.results.cfe_score import compute_cfe_score
+
     n, cfg, _da = solved
     _case_, res = _case(n, cfg)
     for k, v in res.metrics.items():
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             assert np.isfinite(v), k
+    # The load-normalised figure (the 24/7 CFE score, matched / load) is None, with its reason.
+    cfe = compute_cfe_score(n, cfg)
+    assert cfe["per_period"] and all(p["score"] is None and p["load_mwh"] == 0.0
+                                     for p in cfe["per_period"].values())
+    assert any(f.startswith("no_site_load") for f in cfe["flags"])
 
 
 # ── section 7 is the one home (no shadow value) ────────────────────────────
@@ -299,6 +312,9 @@ def test_from_template_mints_the_series_and_binds_every_block(
     assert all(c["reference_price"] == com["export_price_ref"] for c in com["contracts"])
     assert client.get("/api/simulation/finance").json()["status"] == "ok"
     assert client.get("/api/simulation/commercial/value_flows").json()["status"] == "ok"
+    # The minted refs are pinned at create, as a save pins them: none reads stale.
+    flow = client.get("/api/projects/ipp/flow").json()
+    assert "library_ref_stale" not in {i["code"] for s in flow["sections"] for i in s["items"]}
 
 
 @pytest.mark.live_solve
@@ -349,3 +365,140 @@ def test_a_negative_price_hour_settles_nothing_and_the_plants_curtail(solved):
                                 references={"ppa_wind": (da.loc[one], [])})
     (line,) = K.settle(PpaContract.model_validate(wind_c), inputs)
     assert line.amount == 0.0 and line.quantity_mwh == 0.0
+
+
+# ── both modes: every pre-filled value is editable (spec §8.3) ─────────────
+
+
+def _created(client, tmp_path, monkeypatch, name="ipp"):
+    import shutil
+
+    from routers import projects as projects_router
+
+    shutil.copytree(TPL_DIR / TID, tmp_path / TID)
+    monkeypatch.setattr(projects_router, "_PROJECT_TEMPLATES_DIR", tmp_path)
+    r = client.post(f"/api/projects/from_template/{TID}", params={"name": name})
+    assert r.status_code == 200, r.text
+    return name
+
+
+def _row(client, path: str, name: str) -> dict:
+    return next(r for r in client.get(f"/api/network/{path}").json() if r["name"] == name)
+
+
+def _edit_component(path: str, name: str, field: str, value):
+    """The asset or Link form (section 3 or 5): the same editor in Guided and Expert."""
+    def edit(client):
+        body = {k: v for k, v in _row(client, path, name).items()
+                if not k.endswith("_opt")} | {field: value}
+        r = client.put(f"/api/network/{path}/{name}", json=body)
+        assert r.status_code == 200, r.text
+        return _row(client, path, name)[field]
+    return edit
+
+
+def _edit_commercial(change):
+    """A section 7a/7b/7e editor: the commercial block through the config route."""
+    def edit(client):
+        com = client.get("/api/simulation/solver_config").json()["commercial"]
+        want = change(com)
+        r = client.put("/api/simulation/solver_config", json={"commercial": com})
+        assert r.status_code == 200, r.text
+        return want(client.get("/api/simulation/solver_config").json()["commercial"])
+    return edit
+
+
+def _edit_finance(field: str, value):
+    """The 7d `FinanceInputs` editor."""
+    def edit(client):
+        fin = client.get("/api/simulation/finance").json()["finance"] | {field: value}
+        r = client.put("/api/simulation/finance", json={"finance": fin})
+        assert r.status_code == 200, r.text
+        return client.get("/api/simulation/finance").json()["finance"][field]
+    return edit
+
+
+def _ppa(field, value, **also):
+    def change(com):
+        com["contracts"][0].update({field: value, **also})
+        return lambda c: c["contracts"][0][field]
+    return _edit_commercial(change), value
+
+
+def _tariff_rate(com):
+    com["import_tariff"]["items"][0]["periods"][0]["rate"] = 0.035
+    return lambda c: c["import_tariff"]["items"][0]["periods"][0]["rate"]
+
+
+def _import_series(client):
+    """7a import price: another minted series, picked from the Library list."""
+    low = next(s for s in client.get("/api/library/series").json() if s["id"] == M.SERIES["low"])
+
+    def change(com):
+        com["import_price_ref"] = low
+        return lambda c: c["import_price_ref"]["id"]
+    return _edit_commercial(change)(client)
+
+
+def _parties(client):
+    """7e, the party board: its own route (it validates the parties)."""
+    got = client.get("/api/simulation/commercial/value_flows").json()
+    vf = got["value_flows"]
+    vf["participants"].append({"id": "investor", "name": "Co-investor", "role": "investor"})
+    r = client.put("/api/simulation/commercial/value_flows", json={"value_flows": vf},
+                   headers={"If-Match": got["digest"]})
+    assert r.status_code == 200, r.text
+    vf = client.get("/api/simulation/commercial/value_flows").json()["value_flows"]
+    return [p["id"] for p in vf["participants"]]
+
+
+#: (spec §8.3 row, editor, expected value read back).
+BOTH_MODES = [
+    ("export limit 70 MW", _edit_component("links", "grid_export", "p_nom", 80.0), 80.0),
+    ("import limit 20 MW", _edit_component("links", "grid_import", "p_nom", 10.0), 10.0),
+    ("wind 60 MW (forced size)", _edit_component("generators", "wind_farm", "p_nom_max", 90.0),
+     90.0),
+    ("PV 50 MWp (forced size)", _edit_component("generators", "pv_plant", "p_nom_min", 40.0),
+     40.0),
+    ("plant lifetime", _edit_component("generators", "wind_farm", "lifetime", 30.0), 30.0),
+    ("battery max 50 MW", _edit_component("storage_units", "bess", "p_nom_max", 30.0), 30.0),
+    ("battery duration 2 h", _edit_component("storage_units", "bess", "max_hours", 4.0), 4.0),
+    ("battery efficiency", _edit_component("storage_units", "bess", "efficiency_store", 0.95),
+     0.95),
+    ("battery throughput cost", _edit_component("storage_units", "bess", "marginal_cost", 3.0),
+     3.0),
+    ("battery power cost (pack)",
+     _edit_component("storage_units", "bess", "inv_power_overnight", 150_000.0), 150_000.0),
+    ("import price series (G7)", _import_series, M.SERIES["low"]),
+    ("import tariff network charge", _edit_commercial(_tariff_rate), 0.035),
+    ("PPA price", *_ppa("price", 70.0)),
+    ("PPA share 70 %", *_ppa("share", 0.5)),
+    ("PPA tenor 10 y", *_ppa("tenor_years", 15)),
+    # Physical has no negative-price clause (the model validator): the editor clears it.
+    ("PPA settlement financial",
+     *_ppa("settlement", "physical", suspend_on_negative_price=None)),
+    ("PPA negative-price clause", *_ppa("suspend_on_negative_price", False)),
+    ("PPA indexation", *_ppa("indexation_pct_per_year", 1.5)),
+    ("parties", _parties, ["ipp", "investor"]),
+    ("WACC", _edit_finance("wacc_nominal", 0.08), 0.08),
+    ("inflation", _edit_finance("inflation", 0.025), 0.025),
+    ("analysis years 25", _edit_finance("analysis_years", 20), 20),
+    ("COD", _edit_finance("cod_by_asset", {"bess": "2031-01-01", "pv_plant": "2030-01-01",
+                                           "wind_farm": "2030-01-01"}),
+     {"bess": "2031-01-01", "pv_plant": "2030-01-01", "wind_farm": "2030-01-01"}),
+    ("degradation", _edit_finance("degradation_by_asset", {"bess": 0.0, "pv_plant": 0.01,
+                                                           "wind_farm": 0.006}),
+     {"bess": 0.0, "pv_plant": 0.01, "wind_farm": 0.006}),
+    ("tax pack", _edit_finance("hebesatz_pct", 450.0), 450.0),
+]
+
+
+@pytest.mark.parametrize("label,edit,want", BOTH_MODES, ids=[r[0] for r in BOTH_MODES])
+def test_every_prefilled_value_is_editable(label, edit, want, client, tmp_path, monkeypatch,
+                                           tmp_projects_dir):
+    """Spec §8.3: each value is edited through the route its editor writes (one editor
+    component serves Guided and Expert, #444 §4) and reads back as set. The locks of §8.3
+    (the meter roles, the grid slack, a baseload share) are not in the table."""
+    _created(client, tmp_path, monkeypatch)
+    got = edit(client)
+    assert got == pytest.approx(want) if isinstance(want, float) else got == want, label

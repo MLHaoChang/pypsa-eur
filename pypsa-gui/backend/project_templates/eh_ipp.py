@@ -41,6 +41,7 @@ GRID_SLACK_MW = 500.0
 #: Where the synthetic profiles are generated until the user sets the pin: a reference point
 #: in the DE-LU bidding zone (assumed; the template sets no pin).
 REF_LAT, REF_LON = 51.2, 10.4
+CF_FLOOR = 1e-3        # a capacity factor below this is written as 0 (see `profiles`)
 
 # ── Prices (illustrative, assumed; spec §2.3) ──────────────────────────────
 #: Network charges and levies on import (EUR/MWh; the commodity is the DA series).
@@ -70,8 +71,11 @@ def profiles() -> tuple[pd.Series, pd.Series]:
     wind = generate_profile(point, "wind", year=YEAR).series["ref"]
     sun = generate_profile(point, "solar", year=YEAR).series["ref"]
     idx = snapshots()
-    return (pd.Series(wind.to_numpy(dtype=float), index=idx),
-            pd.Series(sun.to_numpy(dtype=float), index=idx))
+    # A dawn sliver below 0.1 % reads as zero: with half the year dark, a handful of such hours
+    # would set the PV median and trip the profile QA's spike rule (`timeseries_spike`).
+    pv = sun.to_numpy(dtype=float)
+    pv = np.where(pv < CF_FLOOR, 0.0, pv)
+    return (pd.Series(wind.to_numpy(dtype=float), index=idx), pd.Series(pv, index=idx))
 
 
 def price_shape(case: str = "base") -> pd.Series:
@@ -158,7 +162,8 @@ def _tag(n) -> None:
         frame["eh_role"] = ""
     n.generators.at["grid", "eh_role"] = "grid_supply"
     n.links.at["grid_import", "eh_role"] = "grid_import"
-    n.links.at["grid_export", "eh_role"] = "grid_export"
+    # The export meter carries no role: `export_link` names it (7a), and `grid_export` is no
+    # Energy Hub role, so the Link form would refuse every edit of a Link tagged with it.
     # Outage data on the meter (a POI outage costs the export): the FMEA ranks it.
     for link in ("grid_import", "grid_export"):
         for col, default in (("outage_rate_value", float("nan")), ("mttr_hours", float("nan"))):
@@ -179,6 +184,7 @@ PPA_TENOR = 10
 COD = f"{YEAR}-01-01"
 FINANCIAL_CLOSE = f"{YEAR - 2}-01-01"
 ANALYSIS_YEARS = 25
+ESCALATION = 0.02                                # every cash class, per year
 DEGRADATION = {"wind_farm": 0.003, "pv_plant": 0.005, "bess": 0.0}
 HEBESATZ_PCT = 400.0
 BESS_DEPRECIATION = "afa_10"
@@ -227,7 +233,7 @@ FINANCE: dict = {
     "financial_close": FINANCIAL_CLOSE,
     "cod_by_asset": {a: COD for a in ("wind_farm", "pv_plant", "bess")},
     "capex_phasing": [0.4, 0.6], "stage_capex_lead_years": 1, "contingency_share": 0.05,
-    "escalation": {c: 0.02 for c in ("opex", "fuel", "tariff", "ppa", "export", "capex")},
+    "escalation": {c: ESCALATION for c in ("opex", "fuel", "tariff", "ppa", "export", "capex")},
     "degradation_by_asset": DEGRADATION,
     "analysis_years": ANALYSIS_YEARS,
     "annualise": False,                          # a full hourly year
@@ -311,7 +317,8 @@ def _ledger() -> list[dict]:
         {"item": "bidding zone", "value": "DE-LU", "source": "assumed",
          "note": "re-derived from the pin once it is set"},
         {"item": "export limit", "value": f"{EXPORT_MW:g} MW (grid_export)", "source": "assumed",
-         "note": "from the connection offer; below the plants' 110 MW (overbuild 1.57)"},
+         "note": f"from the connection offer; below the plants' {WIND_MW + PV_MWP:g} MW "
+                 f"(overbuild {(WIND_MW + PV_MWP) / EXPORT_MW:.2f})"},
         {"item": "import limit", "value": f"{IMPORT_MW:g} MW (grid_import)", "source": "assumed",
          "note": "auxiliaries and battery grid charging"},
         {"item": "wind farm", "value": f"{WIND_MW:g} MW, fixed new build", "source": "pack",
@@ -330,8 +337,9 @@ def _ledger() -> list[dict]:
                   f"capture rate {st['pv_capture_rate']:.2f}, wind {st['wind_capture_rate']:.2f}",
          "source": "illustrative",
          "note": "an assumed shape, not market data (owner Q8 = A). For scale: German day-ahead "
-                 "prices in 2024 averaged roughly 80 EUR/MWh with several hundred negative hours "
-                 "(SMARD, Bundesnetzagentur; check the current figures). Bring your own series"},
+                 "prices in 2024 averaged roughly 80 EUR/MWh with some 450 negative hours "
+                 "(SMARD, Bundesnetzagentur; check the current figures). This shape has fewer, "
+                 "so the curtailment and battery value are conservative. Bring your own series"},
         {"item": "network charges on import",
          "value": f"{NETWORK_CHARGE_EUR_PER_MWH:g} EUR/MWh; injection 0 EUR/MWh",
          "source": "assumed", "note": "the commodity on import is the day-ahead series"},
@@ -340,17 +348,24 @@ def _ledger() -> list[dict]:
                                   f"EUR/MWh, {PPA_TENOR} years",
          "source": "illustrative",
          "note": "settled against the day-ahead series; suspended at negative prices (the offtaker "
-                 "accepts curtailment). Prices are an assumed illustration within the range of "
-                 "public European PPA price indices; replace with your term sheet"},
-        {"item": "finance", "value": "7 % WACC, 9 % cost of equity, 2 % escalation, 25 years",
+                 "accepts curtailment). Prices are an assumed illustration: German PPA price "
+                 "indices (LevelTen, Pexapark) put onshore wind at roughly 60-80 and solar at "
+                 "45-60 EUR/MWh in 2024-25 (check the current figures); replace with your term "
+                 "sheet"},
+        {"item": "finance",
+         "value": f"{FINANCE['wacc_nominal'] * 100:g} % WACC, {FINANCE['cost_of_equity'] * 100:g} % cost of "
+                  f"equity, {ESCALATION * 100:g} % escalation, {ANALYSIS_YEARS} years",
          "source": "assumed",
-         "note": "base-year money (2030), held flat to the base year then escalated (label only)"},
+         "note": f"a nominal, post-tax case in base-year money ({YEAR}), escalated from that year. "
+                 f"The defaults pack's {PACK_VERSION} discount rate (7 %) is real and pre-tax, "
+                 "so it is not this WACC; the optimisation's discount rate is the WACC (K0)"},
         {"item": "tax", "value": f"German corporate tax (pack eu_de), Hebesatz {HEBESATZ_PCT:g} %",
          "source": "assumed",
          "note": f"the Hebesatz depends on the municipality; the battery's depreciation class "
                  f"({BESS_DEPRECIATION}, 10-year straight line) is assumed because the BMF AfA "
                  "tables do not list battery storage"},
-        {"item": "degradation", "value": "PV 0.5 %/yr, wind 0.3 %/yr", "source": "assumed",
+        {"item": "degradation", "value": f"PV {DEGRADATION['pv_plant'] * 100:g} %/yr, wind "
+                                         f"{DEGRADATION['wind_farm'] * 100:g} %/yr", "source": "assumed",
          "note": "the faster-degradation case doubles them"},
         {"item": "cases", "value": "8 planned cases (editable once sensitivities land; make any now "
                                    "with Duplicate)", "source": "template",
@@ -364,7 +379,7 @@ def register(T) -> None:
     T.STRESS_SCENARIOS[TID] = []
     # No load, so nothing to shed: VoLL is not applicable (spec §8.2) and no shedding slacks
     # are added; a VoLL with no capture would leave the case's served load unknown.
-    T.SOLVER_CONFIG_EXTRA[TID] = {"discount_rate": 0.07, "voll": 0.0}
+    T.SOLVER_CONFIG_EXTRA[TID] = {"discount_rate": FINANCE["wacc_nominal"], "voll": 0.0}
     T._SOLVER_CONFIG_BUILT[TID] = commercial_and_finance
     T.PRICE_SERIES[TID] = write_price_series
     T.TEMPLATE_META[TID] = {
